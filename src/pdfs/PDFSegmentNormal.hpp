@@ -1,5 +1,5 @@
 /**
- * @file PDFNormal.hpp
+ * @file PDFSegmentNormal.hpp
  * @author Mark Krumholz
  * @brief Class to represent a normal segment of a PDF.
  * @details
@@ -10,8 +10,8 @@
  * @date 2024-06-12
  */
 
-#ifndef PDFNORMAL_HPP
-#define PDFNORMAL_HPP
+#ifndef PDFSEGMENTNORMAL_HPP
+#define PDFSEGMENTNORMAL_HPP
 
 #include <cmath>
 #include <random>
@@ -20,7 +20,7 @@
 namespace pdfs {
 
     /**
-     * @class PDFNormal
+     * @class PDFSegmentNormal
      * @brief Class representing a normal segment of a PDF.
      * @details
      * This class implements the PDFSegment interface for a normal distribution,
@@ -28,25 +28,25 @@ namespace pdfs {
      * given point and to sample a random value from the PDF segment according to
      * the normal distribution.
      */
-    class PDFNormal : public PDFSegment {
+    class PDFSegmentNormal : public PDFSegment {
     public:
 
         // Constructor and destructor
         /**
-         * @brief Constructor for PDFNormal.
+         * @brief Constructor for PDFSegmentNormal.
          * @param sMin The lower limit of the segment.
          * @param sMax The upper limit of the segment.
          * @param mean The mean of the normal distribution.
          * @param stddev The standard deviation of the normal distribution.
          * @param rng Reference to the random number generator to be used for sampling.
          */
-        PDFNormal(double sMin, double sMax, double mean, double stddev, rngType &rng) : 
+        PDFSegmentNormal(double sMin, double sMax, double mean, double stddev, rngType &rng) :
             PDFSegment(sMin, sMax, rng), mean_(mean), stddev_(stddev) {
                 norm_ = std::sqrt(2.0 / M_PI) / stddev_ /
-                    (std::erf((sMax_ - mean_) / (stddev_ * std::sqrt(2))) - 
+                    (std::erf((sMax_ - mean_) / (stddev_ * std::sqrt(2))) -
                      std::erf((sMin_ - mean_) / (stddev_ * std::sqrt(2))));
             }
-        ~PDFNormal() override = default;
+        ~PDFSegmentNormal() override = default;
 
         // Evaluation functions
         auto operator()(double x) const -> double override {
@@ -67,8 +67,8 @@ namespace pdfs {
             if (denom == 0.0) {
                 return 0.0; // Avoid division by zero if the PDF is negligible in the range
             }
-            return mean_ + stddev_ * std::sqrt(2 / M_PI) * 
-                    (std::exp(-std::pow(dxLoNorm, 2)) - 
+            return mean_ + stddev_ * std::sqrt(2 / M_PI) *
+                    (std::exp(-std::pow(dxLoNorm, 2)) -
                      std::exp(-std::pow(dxHiNorm, 2))) / denom;
         }
         auto expectationValue() const -> double override {
@@ -111,4 +111,4 @@ namespace pdfs {
 
 }
 
-#endif // PDFNORMAL_HPP
+#endif // PDFSEGMENTNORMAL_HPP

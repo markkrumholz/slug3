@@ -1,5 +1,5 @@
 /**
- * @file PDFPowerlaw.hpp
+ * @file PDFSegmentPowerlaw.hpp
  * @author Mark Krumholz
  * @brief Class to represent a power-law segment of a PDF.
  * @details
@@ -11,8 +11,8 @@
  * @date 2024-06-12
  */
 
-#ifndef PDFPOWERLAW_HPP
-#define PDFPOWERLAW_HPP
+#ifndef PDFSEGMENTPOWERLAW_HPP
+#define PDFSEGMENTPOWERLAW_HPP
 
 #include <cmath>
 #include <random>
@@ -21,7 +21,7 @@
 namespace pdfs {
 
     /**
-     * @class PDFPowerlaw
+     * @class PDFSegmentPowerlaw
      * @brief Class representing a power-law segment of a PDF.
      * @details
      * This class implements the PDFSegment interface for a power-law distribution,
@@ -29,18 +29,18 @@ namespace pdfs {
      * given point and to sample a random value from the PDF segment according to
      * the power-law distribution.
      */
-    class PDFPowerlaw : public PDFSegment {
+    class PDFSegmentPowerlaw : public PDFSegment {
     public:
 
         // Constructor and destructor
         /**
-         * @brief Constructor for PDFPowerlaw.
+         * @brief Constructor for PDFSegmentPowerlaw.
          * @param sMin The lower limit of the segment.
          * @param sMax The upper limit of the segment.
          * @param alpha The power-law index of the distribution.
          * @param rng Reference to the random number generator to be used for sampling.
          */
-        PDFPowerlaw(double sMin, double sMax, double alpha, rngType &rng) : 
+        PDFSegmentPowerlaw(double sMin, double sMax, double alpha, rngType &rng) :
             PDFSegment(sMin, sMax, rng), alpha_(alpha) {
                 // Calculate normalization constant for the PDF segment
                 if (alpha_ != -1) {
@@ -49,7 +49,7 @@ namespace pdfs {
                     norm_ = 1.0 / std::log(sMax_ / sMin_);
                 }
             }
-        ~PDFPowerlaw() override = default;
+        ~PDFSegmentPowerlaw() override = default;
 
         // Evaluation functions
         auto operator()(double x) const -> double override {
@@ -87,7 +87,7 @@ namespace pdfs {
             const double a_clamped = std::max(a, sMin_);
             const double b_clamped = std::min(b, sMax_);
             if (alpha_ != -1) {
-                return norm_ / (alpha_ + 1) * 
+                return norm_ / (alpha_ + 1) *
                     (std::pow(b_clamped, alpha_ + 1) - std::pow(a_clamped, alpha_ + 1));
             } else {
                 return norm_ * std::log(b_clamped / a_clamped);
@@ -100,12 +100,12 @@ namespace pdfs {
             const double b_clamped = std::min(b, sMax_);
             if (a_clamped >= b_clamped) {
                 return 0.0; // Invalid range for drawing
-            } 
+            }
             std::uniform_real_distribution<double> dist(0.0, 1.0);
             const double u = dist(rng_); // Uniform random number in [0, 1)
             if (alpha_ != -1) {
                 return std::pow(
-                    u * std::pow(b_clamped, alpha_ + 1) + 
+                    u * std::pow(b_clamped, alpha_ + 1) +
                     (1 - u) * std::pow(a_clamped, alpha_ + 1),
                     1.0 / (alpha_ + 1)
                 );
@@ -124,4 +124,4 @@ namespace pdfs {
 
 } // namespace pdfs
 
-#endif // PDFPOWERLAW_HPP
+#endif // PDFSEGMENTPOWERLAW_HPP

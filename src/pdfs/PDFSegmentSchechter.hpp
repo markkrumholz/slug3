@@ -1,5 +1,5 @@
 /**
- * @file PDFSchechter.hpp
+ * @file PDFSegmentSchechter.hpp
  * @author Mark Krumholz
  * @brief Class to represent a Schechter-function segment of a PDF.
  * @details
@@ -10,8 +10,8 @@
  * @date 2024-06-12
  */
 
-#ifndef PDFSCHECHTER_HPP
-#define PDFSCHECHTER_HPP
+#ifndef PDFSEGMENTSCHECHTER_HPP
+#define PDFSEGMENTSCHECHTER_HPP
 
 #include <cmath>
 #include <random>
@@ -21,25 +21,25 @@
 namespace pdfs {
 
     /**
-     * @class PDFSchechter
+     * @class PDFSegmentSchechter
      * @brief Class representing a Schechter-function segment of a PDF.
      * @details
      * This class implements the PDFSegment interface for a Schechter-function distribution,
      * defined by a characteristic scale and a power-law index. It provides methods to evaluate the PDF at a
      * given point and to sample a random value from the PDF segment according to the Schechter-function distribution.
      */
-    class PDFSchechter : public PDFSegment {
+    class PDFSegmentSchechter : public PDFSegment {
     public:
 
         /**
-         * @brief Constructor for PDFSchechter.
+         * @brief Constructor for PDFSegmentSchechter.
          * @param sMin The lower limit of the segment.
          * @param sMax The upper limit of the segment.
          * @param sStar The characteristic scale of the Schechter function.
          * @param alpha The power-law index of the Schechter function.
          * @param rng Reference to the random number generator to be used for sampling.
          */
-        PDFSchechter(double sMin, double sMax, double sStar, double alpha, rngType &rng) :
+        PDFSegmentSchechter(double sMin, double sMax, double sStar, double alpha, rngType &rng) :
             PDFSegment(sMin, sMax, rng), sStar_(sStar), alpha_(alpha) {
                 // Calculate normalization constant for the PDF segment
                 norm_ = 1.0 / (
@@ -49,7 +49,7 @@ namespace pdfs {
                     )
                 );
             }
-        ~PDFSchechter() override = default;
+        ~PDFSegmentSchechter() override = default;
 
         // Evaluation functions
         auto operator()(double x) const -> double override {
@@ -97,7 +97,7 @@ namespace pdfs {
             std::uniform_real_distribution<double> dist(0.0, 1.0);
             const double u = dist(rng_); // Uniform random number in [0, 1)
             // Find the value of the deviate y by numerically solving
-            // u = \int_a^y x^alpha exp(-x / sStar) dx / 
+            // u = \int_a^y x^alpha exp(-x / sStar) dx /
             //     \int_a^b x^alpha exp(-x / sStar) dx
             // using a simple bisection search.
             const double gamma_a = gsl_sf_gamma_inc(alpha_ + 1, a_clamped / sStar_);
@@ -133,4 +133,4 @@ namespace pdfs {
 
 }
 
-#endif // PDFSCHECHTER_HPP
+#endif // PDFSEGMENTSCHECHTER_HPP
