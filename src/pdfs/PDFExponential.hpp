@@ -64,6 +64,12 @@ namespace pdfs {
                 b_clamped * std::exp(-b_clamped / scale_)) / 
                 (std::exp(-a_clamped / scale_) - std::exp(-b_clamped / scale_));
         }
+        auto expectationValue() const -> double override {
+            return scale_ + 
+                (sMin_ * std::exp(-sMin_ / scale_) - 
+                sMax_ * std::exp(-sMax_ / scale_)) / 
+                (std::exp(-sMin_ / scale_) - std::exp(-sMax_ / scale_));
+        }
         auto integral(const double a, const double b) const -> double override {
             if (a >= b) {
                 return 0.0; // Invalid range for integral calculation
