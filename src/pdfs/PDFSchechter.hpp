@@ -42,10 +42,12 @@ namespace pdfs {
         PDFSchechter(double sMin, double sMax, double sStar, double alpha, rngType &rng) :
             PDFSegment(sMin, sMax, rng), sStar_(sStar), alpha_(alpha) {
                 // Calculate normalization constant for the PDF segment
-                norm_ = 1.0 / (sStar_ * (
-                    gsl_sf_gamma_inc(alpha_ + 1, sMin_ / sStar_) -
-                    gsl_sf_gamma_inc(alpha_ + 1, sMax_ / sStar_)
-                ));
+                norm_ = 1.0 / (
+                    std::pow(sStar_, alpha_ + 1) * (
+                        gsl_sf_gamma_inc(alpha_ + 1, sMin_ / sStar_) -
+                        gsl_sf_gamma_inc(alpha_ + 1, sMax_ / sStar_)
+                    )
+                );
             }
         ~PDFSchechter() override = default;
 
@@ -54,7 +56,7 @@ namespace pdfs {
             if (x < sMin_ || x > sMax_) {
                 return 0.0;
             }
-            return norm_ * std::pow(x / sStar_, alpha_) * std::exp(-x / sStar_);
+            return norm_ * std::pow(x, alpha_) * std::exp(-x / sStar_);
         }
         auto expectationValue(const double a, const double b) const -> double override {
             if (a >= b) {
@@ -70,13 +72,16 @@ namespace pdfs {
                 gsl_sf_gamma_inc(alpha_ + 1, b_clamped / sStar_)
             );
         }
+        auto expectationValue() const -> double override {
+            return expectationValue(sMin_, sMax_); // Expectation value over the full range of the segment
+        }
         auto integral(const double a, const double b) const -> double override {
             if (a >= b) {
                 return 0.0; // Invalid range for integral calculation
             }
             const double a_clamped = std::max(a, sMin_);
             const double b_clamped = std::min(b, sMax_);
-            return norm_ * sStar_ * (
+            return norm_ * std::pow(sStar_, alpha_ + 1) * (
                 gsl_sf_gamma_inc(alpha_ + 1, a_clamped / sStar_) -
                 gsl_sf_gamma_inc(alpha_ + 1, b_clamped / sStar_)
             );
@@ -91,22 +96,33 @@ namespace pdfs {
             }
             std::uniform_real_distribution<double> dist(0.0, 1.0);
             const double u = dist(rng_); // Uniform random number in [0, 1)
+            // Find the value of the deviate y by numerically solving
+            // u = \int_a^y x^alpha exp(-x / sStar) dx / 
+            //     \int_a^b x^alpha exp(-x / sStar) dx
+            // using a simple bisection search.
             const double gamma_a = gsl_sf_gamma_inc(alpha_ + 1, a_clamped / sStar_);
             const double gamma_b = gsl_sf_gamma_inc(alpha_ + 1, b_clamped / sStar_);
-            const double target = u * (gamma_b - gamma_a) + gamma_a;
-            // Inverse transform sampling using the incomplete gamma function
-            double x = a_clamped;
+            const double denom = gamma_a - gamma_b;
+            double y = a_clamped;
             double step = (b_clamped - a_clamped) / 2.0;
-            while (step > 1e-6) {
-                double gamma_x = gsl_sf_gamma_inc(alpha_ + 1, x / sStar_);
-                if (gamma_x < target) {
-                    x += step;
-                } else {
-                    x -= step;
+            while (true) {
+                y += step;
+                const double gamma_y = gsl_sf_gamma_inc(alpha_ + 1, y / sStar_);
+                const double resid = u - (gamma_a - gamma_y) / denom;
+                if (fabs(resid) < 1e-8) {
+                    break;
+                } else if (resid < 0) {
+                    y -= step;
+                    step /= 2.0;
+                    if (step < 1e-8) {
+                        break;
+                    }
                 }
-                step /= 2.0;
             }
-            return x;
+            return y;
+        }
+        auto draw() const -> double override {
+            return draw(sMin_, sMax_);
         }
 
     private:

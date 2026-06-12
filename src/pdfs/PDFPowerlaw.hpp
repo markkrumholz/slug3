@@ -94,7 +94,7 @@ namespace pdfs {
             }
         }
 
-        // Drawing function
+        // Drawing functions
         auto draw(const double a, const double b) const -> double override {
             const double a_clamped = std::max(a, sMin_);
             const double b_clamped = std::min(b, sMax_);
@@ -112,6 +112,9 @@ namespace pdfs {
             } else {
                 return a_clamped * std::pow(b_clamped / a_clamped, u);
             }
+        }
+        auto draw() const -> double override {
+            return draw(sMin_, sMax_);
         }
 
     private:

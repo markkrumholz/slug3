@@ -32,13 +32,15 @@
 auto test_PDFPowerlaw() -> int
 {
     rngType rng(42); // Create a random number generator with a fixed seed for reproducibility
+    double sMin = 1.0; // The lower limit of the segment
+    double sMax = 10.0; // The upper limit of the segment
 
     // Loop over three different alpha values to make sure we cover the different cases
     // for the expectation value and integral calculations
     std::vector<double> alphas = {-2.0, -1.0, 0.0};
     for (double alpha : alphas) {
 
-        pdfs::PDFPowerlaw pl(1.0, 10.0, alpha, rng); // Create a PDFPowerlaw with sMin=1, sMax=10, alpha=alpha
+        pdfs::PDFPowerlaw pl(sMin, sMax, alpha, rng); // Create a PDFPowerlaw with sMin=1, sMax=10, alpha=alpha
 
         // Test PDF evaluation at specific points
         double x1 = 1.0; // At the lower limit

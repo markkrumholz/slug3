@@ -11,6 +11,7 @@
 #include "test_PDFExponential.hpp"
 #include "test_PDFNormal.hpp"
 #include "test_PDFPowerlaw.hpp"
+#include "test_PDFSchechter.hpp"
 
 int main() {
     int result = 0;
@@ -18,5 +19,6 @@ int main() {
     result += test_PDFExponential();
     result += test_PDFNormal();
     result += test_PDFPowerlaw();
+    result += test_PDFSchechter();
     return result;
 }

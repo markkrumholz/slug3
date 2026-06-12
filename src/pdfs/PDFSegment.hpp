@@ -92,9 +92,8 @@ namespace pdfs {
          * @brief Sample a random value from the PDF segment.
          * @return A random value drawn from the PDF segment.
          */
-        virtual auto draw() const -> double {
-            return draw(sMin_, sMax_);
-        }
+        virtual auto draw() const -> double = 0;
+
 
     protected:
         double sMin_; /**< The lower limit of the segment */

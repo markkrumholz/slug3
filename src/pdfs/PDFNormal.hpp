@@ -86,7 +86,7 @@ namespace pdfs {
                 (std::erf(dxHiNorm) - std::erf(dxLoNorm));
         }
 
-        // Drawing function
+        // Drawing functions
         auto draw(const double a, const double b) const -> double override {
             const double a_clamped = std::max(a, sMin_);
             const double b_clamped = std::min(b, sMax_);
@@ -100,7 +100,9 @@ namespace pdfs {
             } while (sample < a_clamped || sample > b_clamped); // Rejection sampling to ensure the sample is within the specified range
             return sample;
         }
-
+        auto draw() const -> double override {
+            return draw(sMin_, sMax_);
+        }
     private:
         double mean_;   /**< Mean of the normal distribution */
         double stddev_; /**< Standard deviation of the normal distribution */

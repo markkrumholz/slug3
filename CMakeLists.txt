@@ -4,6 +4,9 @@ project(slug VERSION 0.1 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Find GSL
+find_package(GSL REQUIRED)
+
 # Main executable
 add_executable(slug src/main.cpp)
 
@@ -17,6 +20,8 @@ target_include_directories(slug_test_PDFs PRIVATE
     src
     src/pcg-cpp/include
 )
+
+target_link_libraries(slug_test_PDFs PRIVATE GSL::gsl)
 
 # Enable testing
 enable_testing()

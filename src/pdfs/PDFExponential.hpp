@@ -79,7 +79,7 @@ namespace pdfs {
             return norm_ * scale_ * (std::exp(-a_clamped / scale_) - std::exp(-b_clamped / scale_));
         }
 
-        // Drawing function
+        // Drawing functions
         auto draw(const double a, const double b) const -> double override {
             const double a_clamped = std::max(a, sMin_);
             const double b_clamped = std::min(b, sMax_);
@@ -87,6 +87,9 @@ namespace pdfs {
             const double exp_a = std::exp(-a_clamped / scale_);
             const double exp_b = std::exp(-b_clamped / scale_);
             return -scale_ * std::log(exp_a - u * (exp_a - exp_b)); // Inverse transform sampling for exponential distribution
+        }
+        auto draw() const -> double override {
+            return draw(sMin_, sMax_);
         }
 
     private:

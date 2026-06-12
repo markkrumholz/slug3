@@ -54,9 +54,12 @@ namespace pdfs {
             }
         }
 
-        // Drawing function
+        // Drawing functions
         auto draw(const double a, const double b) const -> double override {
             return sMin_; // Sampling from a delta function always returns the same value
+        }
+        auto draw() const -> double override {
+            return sMin_;  // Sampling from a delta function always returns the same value
         }
     };
 
