@@ -7,11 +7,12 @@
  * @date 2024-06-12
  */
 
+#include "test_PDFDelta.hpp"
 #include "test_PDFPowerlaw.hpp"
 
 int main() {
     int result = 0;
+    result += test_PDFDelta();
     result += test_PDFPowerlaw();
-    // Add calls to other test functions here as they are implemented
     return result;
 }

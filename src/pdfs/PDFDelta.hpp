@@ -11,6 +11,7 @@
 #ifndef PDFDELTA_HPP
 #define PDFDELTA_HPP
 
+#include <stdexcept>
 #include "PDFSegment.hpp"
 
 namespace pdfs {
@@ -36,9 +37,13 @@ namespace pdfs {
 
         // Evaluation functions
         auto operator()(double x) const -> double override {
-            std::throw_with_nested(std::runtime_error("PDFDelta: a delta function cannot be evaluated at a point."));
+            (void)x;
+            throw std::runtime_error("PDFDelta: a delta function cannot be evaluated at a point.");
         }
         auto expectationValue(const double a, const double b) const -> double override {
+            return sMin_; // The expectation value of a delta function is just the value at which it is centered
+        }
+        auto expectationValue() const -> double override {
             return sMin_; // The expectation value of a delta function is just the value at which it is centered
         }
         auto integral(const double a, const double b) const -> double override {
