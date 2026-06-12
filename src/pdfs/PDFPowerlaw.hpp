@@ -76,6 +76,10 @@ namespace pdfs {
             }
         }
 
+        auto expectationValue() const -> double override {
+            return expectationValue(sMin_, sMax_);
+        }
+
         auto integral(const double a, const double b) const -> double override {
             if (a >= b) {
                 return 0.0; // Invalid range for integral calculation

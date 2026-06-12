@@ -70,9 +70,8 @@ namespace pdfs {
          * @brief Calculate the expectation value of the PDF segment over its entire range.
          * @return The expectation value of the PDF segment.
          */
-        virtual auto expectationValue() const -> double {
-            return expectationValue(sMin_, sMax_);
-        }
+        virtual auto expectationValue() const -> double = 0;
+
         /**
          * @brief Calculate the integral of the PDF segment over a specified range.
          * @param a The lower limit of the range for integral calculation; if set to a value <= sMin, will be set to sMin_.
