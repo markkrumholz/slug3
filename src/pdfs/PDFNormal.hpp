@@ -61,14 +61,18 @@ namespace pdfs {
             }
             const double a_clamped = std::max(a, sMin_);
             const double b_clamped = std::min(b, sMax_);
-            const double Z = 0.5 * (std::erf((b_clamped - mean_) / (stddev_ * std::sqrt(2))) - 
-                                    std::erf((a_clamped - mean_) / (stddev_ * std::sqrt(2))));
-            if (Z == 0.0) {
+            const double dxLoNorm = (a_clamped - mean_) / (std::sqrt(2.0) *stddev_);
+            const double dxHiNorm = (b_clamped - mean_) / (std::sqrt(2.0) *stddev_);
+            const double denom = std::erf(dxHiNorm) - std::erf(dxLoNorm);
+            if (denom == 0.0) {
                 return 0.0; // Avoid division by zero if the PDF is negligible in the range
             }
-            return mean_ + (stddev_ * std::sqrt(2 / M_PI) * 
-                    (std::exp(-0.5 * std::pow((a_clamped - mean_) / stddev_, 2)) - 
-                     std::exp(-0.5 * std::pow((b_clamped - mean_) / stddev_, 2)))) / Z;
+            return mean_ + stddev_ * std::sqrt(2 / M_PI) * 
+                    (std::exp(-std::pow(dxLoNorm, 2)) - 
+                     std::exp(-std::pow(dxHiNorm, 2))) / denom;
+        }
+        auto expectationValue() const -> double override {
+            return expectationValue(sMin_, sMax_); // Expectation value over the full range of the segment
         }
         auto integral(const double a, const double b) const -> double override {
             if (a >= b) {
@@ -76,9 +80,10 @@ namespace pdfs {
             }
             const double a_clamped = std::max(a, sMin_);
             const double b_clamped = std::min(b, sMax_);
+            const double dxLoNorm = (a_clamped - mean_) / (std::sqrt(2.0) * stddev_);
+            const double dxHiNorm = (b_clamped - mean_) / (std::sqrt(2.0) * stddev_);
             return norm_ * std::sqrt(M_PI / 2) * stddev_ *
-                (std::erf((b_clamped - mean_) / (stddev_ * std::sqrt(2))) - 
-                 std::erf((a_clamped - mean_) / (stddev_ * std::sqrt(2))));
+                (std::erf(dxHiNorm) - std::erf(dxLoNorm));
         }
 
         // Drawing function

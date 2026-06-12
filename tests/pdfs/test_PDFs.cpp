@@ -9,12 +9,14 @@
 
 #include "test_PDFDelta.hpp"
 #include "test_PDFExponential.hpp"
+#include "test_PDFNormal.hpp"
 #include "test_PDFPowerlaw.hpp"
 
 int main() {
     int result = 0;
     result += test_PDFDelta();
     result += test_PDFExponential();
+    result += test_PDFNormal();
     result += test_PDFPowerlaw();
     return result;
 }
