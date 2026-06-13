@@ -50,19 +50,19 @@ auto test_PDFSegmentLognormal() -> int
     double x3 = 6.0; // At the upper limit
     double x4 = 0.5; // Below the lower limit
     double x5 = 15.0; // Above the upper limit
-    if (!testUtils::approxEqual(pln(x1), norm * std::exp(-0.5 * std::pow(std::log(x1 / mean) / stdDev, 2)))) {
+    if (!testUtils::approxEqual(pln(x1), norm / x1 * std::exp(-0.5 * std::pow(std::log(x1 / mean) / stdDev, 2)))) {
         std::cerr << "test_PDFSegmentLognormal: PDF evaluation at x=1.0 failed: expected "
                   << norm * std::exp(-0.5 * std::pow(std::log(x1 / mean) / stdDev, 2))
                   << ", got " << pln(x1) << std::endl;
         return 1;
     }
-    if (!testUtils::approxEqual(pln(x2), norm * std::exp(-0.5 * std::pow(std::log(x2 / mean) / stdDev, 2)))) {
+    if (!testUtils::approxEqual(pln(x2), norm / x2 * std::exp(-0.5 * std::pow(std::log(x2 / mean) / stdDev, 2)))) {
         std::cerr << "test_PDFSegmentLognormal: PDF evaluation at x=5.0 failed: expected "
                   << norm * std::exp(-0.5 * std::pow(std::log(x2 / mean) / stdDev, 2))
                   << ", got " << pln(x2) << std::endl;
         return 1;
     }
-    if (!testUtils::approxEqual(pln(x3), norm * std::exp(-0.5 * std::pow(std::log(x3 / mean) / stdDev, 2)))) {
+    if (!testUtils::approxEqual(pln(x3), norm / x3 * std::exp(-0.5 * std::pow(std::log(x3 / mean) / stdDev, 2)))) {
         std::cerr << "test_PDFSegmentLognormal: PDF evaluation at x=6.0 failed: expected "
                   << norm * std::exp(-0.5 * std::pow(std::log(x3 / mean) / stdDev, 2))
                   << ", got " << pln(x3) << std::endl;

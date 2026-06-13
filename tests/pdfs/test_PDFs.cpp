@@ -7,6 +7,7 @@
  * @date 2024-06-12
  */
 
+#include "test_PDF.hpp"
 #include "test_PDFSegmentDelta.hpp"
 #include "test_PDFSegmentExponential.hpp"
 #include "test_PDFSegmentNormal.hpp"
@@ -22,5 +23,6 @@ int main() {
     result += test_PDFSegmentLognormal();
     result += test_PDFSegmentPowerlaw();
     result += test_PDFSegmentSchechter();
+    result += test_PDF();
     return result;
 }

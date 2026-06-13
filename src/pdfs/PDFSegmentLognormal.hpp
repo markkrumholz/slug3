@@ -64,7 +64,7 @@ namespace pdfs {
                 return 0.0; // PDF is zero outside the segment
             }
             return norm_ * 
-                std::exp( -0.5 * std::pow( std::log(x / mean_) / stddev_, 2) );
+                std::exp( -0.5 * std::pow( std::log(x / mean_) / stddev_, 2) ) / x;
         }
         auto expectationValue(const double a, const double b) const -> double override {
             if (a >= b) {

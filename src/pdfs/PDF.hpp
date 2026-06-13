@@ -14,7 +14,9 @@
 #ifndef PDF_HPP
 #define PDF_HPP
 
+#include <array>
 #include <ranges>
+#include <valarray>
 #include <vector>
 #include "PDFSegment.hpp"
 
@@ -24,21 +26,29 @@
 namespace pdfs {
 
     /**
-     * @brief An enum of known sampling methods
+     * @brief Namespace to hold sampling methods
      */
-    typedef enum {
-        stopNearest,    /**< Stop-nearest sampling */
-        stopBefore,     /**< Stop-before sampling */
-        stopAfter,      /**< Stop-after sampling */
-        stop50,         /**< Stop-50/50 sampling */
-        number,         /**< Exact number sampling */
-        poisson,        /**< Poisson sampling */
-        sortedSampling  /**< Sorted sampling */
-    } samplingMethod;
+    namespace samplingMethods {
+
+        /**
+        * @brief An enum of known sampling methods
+        */
+        typedef enum {
+            stopNearest,    /**< Stop-nearest sampling */
+            stopBefore,     /**< Stop-before sampling */
+            stopAfter,      /**< Stop-after sampling */
+            stop50,         /**< Stop-50/50 sampling */
+            number,         /**< Exact number sampling */
+            poisson,        /**< Poisson sampling */
+            sorted          /**< Sorted sampling */
+        } method;
+
+    }
 
     /**
      * @class PDF
      * @brief A class representing a PDF composed of one or more segments
+     * @tparam N Number of segments in the PDF
      * @details
      * This class represents a PDF composed of one or more
      * segments. This PDF can be properly normalized (so that
@@ -46,37 +56,37 @@ namespace pdfs {
      * provides methods for sampling from the PDF and computing
      * various integrals and expectation values from it.
      */
-    class PDF {
+    template<unsigned int N> class PDF {
     public:
 
         // Constructors and destructor
         /**
          * @brief Construct from array of segments and weights
-         * @param seg Vector of segments
-         * @param wgt Vector of weights; must have same number of elements as seg
+         * @param seg Array of segments of segments
+         * @param wgt Array of weights; all elements must be positive
          * @param method Sampling method
          * @param normalize Normalize or not?
          */
-        PDF(std::vector<PDFSegment> seg, 
-            std::vector<double> wgt,
-            samplingMethod method = stopNearest,
+        PDF(std::array<PDFSegment*, N> seg, 
+            std::array<double, N> wgt,
+            samplingMethods::method meth = samplingMethods::stopNearest,
             bool normalize = true) : 
             seg_(seg),
-            wgt_(wgt),
-            method_(method),
+            wgt_(wgt.data(), wgt.size()),
+            method_(meth),
             normalized_(normalize)
         {
-            if (seg.size() < 1 || seg.size() != wgt.size()) {
-                throw std::runtime_error("PDF: seg and wgt must have equal size >= 1.");
+            if (wgt_.min() <= 0) { // Safety check
+                    throw std::runtime_error("PDF: elements of wgt must be non-negative");                    
             }
             if (normalize) {
                 normalizePDF();
             }
-            sMin_ = seg[0].getMin();
-            sMax_ = seg[0].getMax();
-            for (auto s : seg) {
-                sMin_ = std::min(sMin_, s.getMin());
-                sMax_ = std::max(sMax_, s.getMax());
+            sMin_ = seg[0]->getMin();
+            sMax_ = seg[0]->getMax();
+            for (auto s : seg_) {
+                sMin_ = std::min(sMin_, s->getMin());
+                sMax_ = std::max(sMax_, s->getMax());
             }
         }
         virtual ~PDF() = default;
@@ -97,22 +107,13 @@ namespace pdfs {
          */
         auto normalizePDF() -> void
         {
-            double sumWgt = 0;
-            for (auto w : wgt_) {
-                sumWgt += w;
-            }
-            for (auto w : wgt_) {
-                w /= sumWgt;
-            }
+            wgt_ /= wgt_.sum();
             normalized_ = true;
         }
         /**
          * @brief Return whether the PDF is normalized
          */
-        auto normalized() const -> bool\
-        {
-            return normalized_;
-        }
+        auto normalized() const -> bool { return normalized_; }
 
         // Evaluation functions
         /**
@@ -124,7 +125,7 @@ namespace pdfs {
         {
             double p = 0.0;
             for (auto const& [s,w] : std::views::zip(seg_,wgt_)) {
-                p += w * s(x);
+                p += w * (*s)(x);
             }
             return p;
         }
@@ -139,7 +140,7 @@ namespace pdfs {
             double e = 0.0;
             double wSum = 0.0;
             for (auto const& [s,w] : std::views::zip(seg_,wgt_)) {
-                e += w * s.expectationValue(a, b);
+                e += w * s->expectationValue(a, b);
                 wSum += w;
             }
             return e / wSum;
@@ -155,12 +156,12 @@ namespace pdfs {
 
     protected:
 
-        std::vector<PDFSegment> seg_; /**< Segments in the PDF */
-        std::vector<double> wgt_;     /**< Weights of segments */
-        double sMin_;                 /**< PDF lower limit */
-        double sMax_;                 /**< PDF upper limit */
-        samplingMethod method_;       /**< Sampling method for this PDF */
-        bool normalized_;             /**< Is this PDF properly normalized? */
+        std::array<PDFSegment*, N> seg_; /**< Segments in the PDF */
+        std::valarray<double> wgt_;     /**< Weights of segments */
+        double sMin_;                   /**< PDF lower limit */
+        double sMax_;                   /**< PDF upper limit */
+        samplingMethods::method method_; /**< Sampling method for this PDF */
+        bool normalized_;               /**< Is this PDF properly normalized? */
     };
 
 }
