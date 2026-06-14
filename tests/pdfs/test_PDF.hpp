@@ -102,6 +102,33 @@ auto test_PDF() -> int
             return 1;
     }
 
+    // Check the expectation value over the full range
+    double expectation_value_expected = 
+        wNorm[0] * pd.expectationValue() +
+        wNorm[1] * pln.expectationValue() +
+        wNorm[2] * ppl.expectationValue();
+    if (!testUtils::approxEqual(pdf.expectationValue(), expectation_value_expected)) {
+        std::cerr << "test_PDF: Expectation value calculation over full range failed; expected "
+            << expectation_value_expected << ", got "
+            << pdf.expectationValue() << std::endl;
+            return 1;
+    }
+
+    // Check expectation value over part of range
+    double a = 0.5;
+    double b = 50.0;
+    expectation_value_expected =
+        wNorm[1] * pln.expectationValue(a,lnMax) +
+        wNorm[2] * ppl.expectationValue(lnMax,b);
+    if (!testUtils::approxEqual(pdf.expectationValue(a,b), expectation_value_expected)) {
+        std::cerr << "test_PDF: Expectation value calculation over range ["
+            << a << ", " << b << "] failed; expected "
+            << expectation_value_expected << ", got "
+            << pdf.expectationValue(a,b) << std::endl;
+            return 1;
+    }
+    
+
     return 0; // If we have gotten here, tests have passed
 }
 

@@ -67,7 +67,7 @@ namespace pdfs {
                 std::exp( -0.5 * std::pow( std::log(x / mean_) / stddev_, 2) ) / x;
         }
         auto expectationValue(const double a, const double b) const -> double override {
-            if (a >= b) {
+            if (a >= b || a > sMax_ || b < sMin_) {
                 return 0.0; // Invalid range for expectation value calculation
             }
             const double a_clamped = std::max(a, sMin_);

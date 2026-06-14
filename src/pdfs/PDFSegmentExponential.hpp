@@ -71,7 +71,7 @@ namespace pdfs {
                 (std::exp(-sMin_ / scale_) - std::exp(-sMax_ / scale_));
         }
         auto integral(const double a, const double b) const -> double override {
-            if (a >= b) {
+            if (a >= b || a > sMax_ || b < sMin_) {
                 return 0.0; // Invalid range for integral calculation
             }
             const double a_clamped = std::max(a, sMin_);
