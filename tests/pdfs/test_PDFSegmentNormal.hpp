@@ -97,6 +97,12 @@ auto test_PDFSegmentNormal() -> int
         return 1;
     }
 
+    // Test integral calculation over full range
+    if (!testUtils::approxEqual(pn.integral(sMin, sMax), 1.0)) {
+        std::cerr << "test_PDFSegmentNormal: Integral calculation over full range failed: expected 1.0, got " << pn.integral(sMin, sMax) << std::endl;
+        return 1;
+    }
+    
     // Test integral calculation over a specified range
     double expected_integral = norm * stdDev * std::sqrt(M_PI / 2) *
         (std::erf(dxHiNorm) - std::erf(dxLoNorm));

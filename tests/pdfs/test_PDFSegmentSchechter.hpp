@@ -103,6 +103,12 @@ auto test_PDFSegmentSchechter() -> int
             return 1;
         }
 
+        // Test integral calculation over full range
+        if (!testUtils::approxEqual(ps.integral(sMin, sMax), 1.0)) {
+            std::cerr << "test_PDFSegmentSchechter: Integral calculation with alpha=" << alpha << " failed: expected 1.0, got " << ps.integral(sMin, sMax) << std::endl;
+            return 1;
+        }
+
         // Test integral calculation over a specified range
         double expected_integral =
             norm * std::pow(sStar, alpha + 1) * (

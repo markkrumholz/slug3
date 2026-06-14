@@ -85,6 +85,12 @@ auto test_PDFSegmentExponential() -> int
         return 1;
     }
 
+    // Test integral calculation over full range
+    if (!testUtils::approxEqual(pe.integral(sMin, sMax), 1.0)) {
+        std::cerr << "test_PDFSegmentExponential: Integral calculation over full range failed: expected 1.0, got " << pe.integral(sMin, sMax) << std::endl;
+        return 1;
+    }
+
     // Test integral calculation over a specified range
     double expected_integral = norm * scale * (std::exp(-std::max(a, sMin) / scale) - std::exp(-std::min(b, sMax) / scale));
     if (!testUtils::approxEqual(pe.integral(a, b), expected_integral)) {

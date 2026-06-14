@@ -105,6 +105,12 @@ auto test_PDFSegmentPowerlaw() -> int
             return 1;
         }
 
+        // Test integral calculation over full range
+        if (!testUtils::approxEqual(pl.integral(sMin, sMax), 1.0)) {
+            std::cerr << "test_PDFSegmentPowerlaw: Integral calculation with alpha=" << alpha << " failed: expected 1.0, got " << pl.integral(a, b) << std::endl;
+            return 1;
+        }
+    
         // Test integral calculation over a specified range
         double expected_integral;
         if (alpha == -2.0) {
