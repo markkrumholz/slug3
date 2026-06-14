@@ -31,9 +31,9 @@ auto test_PDF() -> int
 {
     rngType rng(42); // Create a random number generator with a fixed seed for reproducibility
 
-    // Create a properly normalized PDF consisting of a
-    // delta function plus a lognormal plus a powerlaw
-    // with weights of 0.2, 1.4, and 0.4
+    // Create properly normalized PDF and non-normalized PDFs
+    // consisting of a delta function plus a lognormal plus a
+    // powerlaw with weights of 0.2, 1.4, and 0.4
     double deltaMean = 0.01;
     double lnMin = 0.1;
     double lnMax = 1.0;
@@ -48,10 +48,10 @@ auto test_PDF() -> int
     std::vector<pdfs::PDFSegment*> seg = { &pd, &pln, &ppl };
     std::vector<double> wgt = { 0.2, 1.4, 0.4 };
     std::vector<double> wNorm = { 0.1, 0.7, 0.2 };
-    bool normalized = true;
-    pdfs::PDF pdf(seg, wgt, rng, pdfs::samplingMethods::stopNearest, normalized);
+    pdfs::PDF pdf(seg, wgt, rng, pdfs::samplingMethods::stopNearest, true);
+    pdfs::PDF pdfNN(seg, wgt, rng, pdfs::samplingMethods::stopNearest, false);
 
-    // Compute normalizations each segment should have
+    // Compute normalizations each segment should have after normalization
     std::array<double, 3> norm = {
         0.0, // Delta function has no meaningful normalization
         wNorm[1] * std::sqrt(2.0 / M_PI) / lnDisp / (
@@ -102,6 +102,13 @@ auto test_PDF() -> int
             return 1;
     }
 
+    // Check that non-normalized PDF is larger by the normalization factor
+    if (!testUtils::approxEqual(pdfNN(x4), 2*pdf(x4))) {
+        std::cerr << "test_PDF: non-normalized PDF evaluation at x=" << x4 << " failed: expected " << 2*pdf(x4) << ", got " << pdfNN(x4) << std::endl;
+        return 1;
+    }
+
+
     // Check the expectation value over the full range
     double expectation_value_expected = 
         wNorm[0] * pd.expectationValue() +
@@ -137,6 +144,15 @@ auto test_PDF() -> int
             << pdf.expectationValue(a,b) << std::endl;
             return 1;
     }
+
+    // Check that normalized and non-normalized versions of PDF have equal
+    // expectation value
+    if (!testUtils::approxEqual(pdf.expectationValue(a,b), pdfNN.expectationValue(a,b))) {
+        std::cerr << "test_PDF: Expectation values of normalized and non-normalized PDFs"
+            " differ; normalized = " << pdf.expectationValue(a,b) <<
+            " non-normalized = " << pdfNN.expectationValue(a,b) << std::endl;
+        return 1;
+    }
     
     // Check integral over full range
     if (!testUtils::approxEqual(pdf.integral(), 1.0)) {
@@ -158,6 +174,15 @@ auto test_PDF() -> int
             return 1;
     }
 
+    // Check integral of non-normalized PDF is related to integral of normalized PDF as expected
+    if (!testUtils::approxEqual(pdfNN.integral(a,b), 2*pdf.integral(a,b))) {
+        std::cerr << "test_PDF: Integral of non-normalized PDF does not match "
+            "expected multiple of normalized PDF; non-normalized = " <<
+            pdfNN.integral(a,b) << ", expected " <<
+            2*pdf.integral(a,b) << std::endl;
+        return 1;
+    }
+
     // Test sampling from the distribution
     const int num_samples = 10000; // Number of samples to draw
     double sample_sum = 0.0; // Sum of the drawn samples for calculating the sample mean
@@ -175,6 +200,17 @@ auto test_PDF() -> int
         return 1;
     }
 
+    // Test Poisson sampling; should produce mean matching expectation value
+    double target = 1.0e4;
+    pdf.setSampling(pdfs::samplingMethods::poisson);
+    auto sample = pdf.drawTarget(target, a, b);
+    sample_sum = 0.0;
+    for (auto s : sample) sample_sum += s;
+    sample_mean = sample_sum / sample.size();
+    if (!testUtils::approxEqual(sample_mean, expectation_value_expected, 0.01)) {
+        std::cerr << "test_PDF: Sample mean from Poisson sampling does not match expected expectation value: expected " << expectation_value_expected << ", got " << sample_mean << std::endl;
+        return 1;        
+    }
 
     return 0; // If we have gotten here, tests have passed
 }

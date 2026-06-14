@@ -107,6 +107,24 @@ namespace pdfs {
          */
         auto getMax() const -> double { return sMax_; }
 
+        // Sampling policy getter and setter
+        /**
+         * @brief Get sampling method
+         * @return The current sampling method
+         */
+        auto getSampling() const -> samplingMethods::method
+        {
+            return method_;
+        }
+        /**
+         * @brief Set sampling method
+         * @param method Method to set
+         */
+        void setSampling(samplingMethods::method method)
+        {
+            method_ = method;
+        }
+
         // Normalization method
         /**
          * @brief Normalize the PDF
@@ -187,52 +205,122 @@ namespace pdfs {
         // Drawing functions
         /**
          * @brief Sample a random value from the PDF within a specified range.
-         * @param a The lower limit of the sampling range (should be >= sMin_).
-         * @param b The upper limit of the sampling range (should be <= sMax_).
+         * @param a The lower limit of the sampling range (should be >= sMin_, equal to sMin_ if unspecified).
+         * @param b The upper limit of the sampling range (should be <= sMax_, equal to sMax_ if unspecified).
          * @return A random value drawn from the PDF within the specified range.
          */
-        auto draw(const double a, const double b) const -> double {
+        auto draw(const double a = std::numeric_limits<double>::lowest(),
+         const double b = std::numeric_limits<double>::max()) const -> double {
             std::vector<double> wLim(wgt_.size());
             for (auto const& [wL,s,w] : std::views::zip(wLim,seg_,wgt_)) {
                 wL = w * s->integral(a,b);
-                std::cout << "wL = " << wL << std::endl;
             }
             std::discrete_distribution<int> dist(wLim.begin(), wLim.end());
             return seg_[dist(rng_)]->draw(a,b);
         }
         /**
-         * @brief Sample a random value from the PDF.
-         * @return A random value drawn from the PDF within the specified range.
-         */
-        auto draw() const -> double { return draw(sMin_, sMax_); }
-        /**
-         * @brief Sample nDraw random values from the PDF.
-         * @param nDraw Number of samples to draw.
-         * @return A vector of random values drawn from the PDF within the specified range.
-         */
-        auto draw(unsigned int nDraw) const -> std::vector<double> 
-        { 
-            std::vector<double> result;
-            for (unsigned int i = 0; i < nDraw; i++) {
-                result.push_back(draw(sMin_, sMax_));
-            }
-            return result;
-        }
-        /**
          * @brief Sample nDraw random values from the PDF within the specified range.
          * @param nDraw Number of samples to draw.
-         * @param a The lower limit of the sampling range (should be >= sMin_).
-         * @param b The upper limit of the sampling range (should be <= sMax_).
+         * @param a The lower limit of the sampling range (should be >= sMin_, equal to sMin_ if not set).
+         * @param b The upper limit of the sampling range (should be <= sMax_, equal to sMax_ if not set).
          * @return A vector of nDraw random values drawn from the PDF within the specified range.
         */
-        auto draw(unsigned int nDraw, double a, double b) const -> std::vector<double>
+        auto draw(unsigned int nDraw, 
+            double a = std::numeric_limits<double>::lowest(),
+            double b = std::numeric_limits<double>::max())
+            const -> std::vector<double>
         {
             std::vector<double> result;
             for (unsigned int i = 0; i < nDraw; i++) {
                 result.push_back(draw(a, b));
             }
             return result;        
-        }  
+        }
+        /**
+         * @brief Draw a sample from the PDF targeting a fixed total value
+         * @param target Target total to draw
+         * @param a The lower limit of the sampling range (should be >= sMin_, equal to sMin_ if not set).
+         * @param b The upper limit of the sampling range (should be <= sMax_, equal to sMax_ if not set).
+         */
+        auto drawTarget(double target, 
+            double a = std::numeric_limits<double>::lowest(),
+            double b = std::numeric_limits<double>::max()) const 
+            -> std::vector<double>
+        {
+            std::vector<double> sample;
+            switch (method_)
+            {
+                case samplingMethods::stopNearest:
+                case samplingMethods::stopBefore:
+                case samplingMethods::stopAfter:
+                case samplingMethods::stop50:
+                {
+                    // Stop methods
+                    double sum = 0.0;
+                    while (true)
+                    {
+                        auto s = draw(a, b);
+                        if (sum + s <= target)
+                        {
+                            // Taget not yet reached; add to sample and continue
+                            sample.push_back(s);
+                            sum += s;
+                        } else {
+                            // Target reached; decide whether to keep last number based on policy
+                            std::uniform_real_distribution<double> dist(0.0, 1.0);
+                            bool keep =
+                                (
+                                    method_ == samplingMethods::stopNearest &&
+                                    s + sum - target < target - sum
+                                ) || (
+                                    method_ == samplingMethods::stopAfter
+                                ) || (
+                                    method_ == samplingMethods::stop50 &&
+                                    dist(rng_) > 0.5
+                                );
+                            if (keep) sample.push_back(s);
+                            break;
+                        }
+                    }
+                    return sample;
+                }
+                case samplingMethods::number:
+                {
+                    // Number method: compute number of samples, then draw
+                    unsigned int nSamp = std::round(target / expectationValue(a,b));
+                    return draw(nSamp, a, b);
+                }
+                case samplingMethods::poisson:
+                {
+                    // Poisson method: draw number of samples, then draw
+                    std::poisson_distribution<unsigned int> dist(target / expectationValue(a,b));
+                    unsigned int nSamp = dist(rng_);
+                    return draw(nSamp, a, b);
+                }
+                case samplingMethods::sorted:
+                {
+                    // Sorted sampling: first draw repeatedly using number
+                    // method, until target is exceeded, then sort list and
+                    // keep or discard last entry following stop nearest method.
+                    std::vector<double> samples;
+                    double sum = 0.0;
+                    while (sum < target) {
+                        unsigned int nSamp = std::round((target - sum) / expectationValue(a,b));
+                        auto s = draw(nSamp, a, b);
+                        samples.resize(samples.size() + nSamp);
+                        samples.insert(samples.end(), s.begin(), s.end());
+                        for (auto s_ : s) sum += s_;
+                    }
+                    std::sort(samples.begin(), samples.end());
+                    if (std::fabs(target - (sum - samples.back())) <
+                        std::fabs(target - sum))
+                    {
+                        samples.pop_back();
+                    }
+                    return samples;
+                }
+            }
+        }
 
     protected:
 
