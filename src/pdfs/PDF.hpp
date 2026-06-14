@@ -69,18 +69,21 @@ namespace pdfs {
          * @param rng Reference to the random number generator to be used for sampling.
          * @param method Sampling method
          * @param normalize Normalize or not?
+         * @param ownSegments True if this PDF owns the segments it contains
          */
         template <typename SC, typename WC>
         PDF(SC seg,
             WC wgt,
             rngType &rng,
             samplingMethods::method meth = samplingMethods::stopNearest,
-            bool normalize = true) :
+            bool normalize = true,
+            bool ownSegments = false) :
             seg_(std::begin(seg), std::end(seg)),
             wgt_(std::data(wgt), std::size(wgt)),
             rng_(rng),
             method_(meth),
-            normalized_(normalize)
+            normalized_(normalize),
+            ownSegments_(ownSegments)
         {
             if (wgt_.min() <= 0) { // Safety check
                     throw std::runtime_error("PDF: elements of wgt must be non-negative");                    
@@ -95,7 +98,14 @@ namespace pdfs {
                 sMax_ = std::max(sMax_, s->getMax());
             }
         }
-        virtual ~PDF() = default;
+        virtual ~PDF()
+        {
+            if (ownSegments_)
+            {
+                // We own the segments, so invoke delete each segment
+                for (auto s : seg_) { delete s; }
+            }
+        }
 
         // Getters for the lower and upper limits of the segment
         /** @brief Get the lower limit of the segment.
@@ -331,6 +341,7 @@ namespace pdfs {
         double sMax_;                   /**< PDF upper limit */
         samplingMethods::method method_; /**< Sampling method for this PDF */
         bool normalized_;               /**< Is this PDF properly normalized? */
+        bool ownSegments_;              /**< True if we own the segments */
     };
 
 }

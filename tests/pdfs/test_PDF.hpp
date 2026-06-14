@@ -13,7 +13,6 @@
 
 #include <cmath>
 #include <cstdio>
-#include <valarray>
 #include <vector>
 #include "../src/pdfs/PDF.hpp"
 #include "../src/pdfs/PDFSegmentDelta.hpp"

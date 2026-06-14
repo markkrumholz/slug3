@@ -46,6 +46,16 @@ namespace pdfs {
                     (std::erf((sMax_ - mean_) / (stddev_ * std::sqrt(2))) -
                      std::erf((sMin_ - mean_) / (stddev_ * std::sqrt(2))));
             }
+        /**
+         * @brief Construct PDFSegmentNormal from basic PDF file contents.
+         * @param file File stream from which to construct; expects lines
+         *   "mean MEAN" and "disp DISP" in any order.
+         * @param sMin The lower limit of the segment.
+         * @param sMax The upper limit of the segment.
+         * @param rng Reference to the random number generator to be used for sampling.
+         */
+        PDFSegmentNormal(std::ifstream& file,
+            double sMin, double sMax, rngType& rng);
         ~PDFSegmentNormal() override = default;
 
         // Evaluation functions

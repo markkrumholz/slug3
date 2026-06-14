@@ -56,6 +56,15 @@ namespace pdfs {
                     std::erf( -std::log(sMax_/mean_) / root2dev_ )
                 );
             }
+        /**
+         * @brief Construct PDFSegmentExponential from basic PDF file contents.
+         * @param file File stream from which to construct
+         * @param sMin The lower limit of the segment.
+         * @param sMax The upper limit of the segment.
+         * @param rng Reference to the random number generator to be used for sampling.
+         */
+        PDFSegmentLognormal(std::ifstream& file,
+            double sMin, double sMax, rngType& rng);
         ~PDFSegmentLognormal() override = default;
 
         // Evaluation functions

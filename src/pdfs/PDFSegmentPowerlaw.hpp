@@ -49,6 +49,16 @@ namespace pdfs {
                     norm_ = 1.0 / std::log(sMax_ / sMin_);
                 }
             }
+        /**
+         * @brief Construct PDFSegmentPowerlaw from basic PDF file contents.
+         * @param file File stream from which to construct; expects a line
+         *   "slope SLOPE".
+         * @param sMin The lower limit of the segment.
+         * @param sMax The upper limit of the segment.
+         * @param rng Reference to the random number generator to be used for sampling.
+         */
+        PDFSegmentPowerlaw(std::ifstream& file,
+            double sMin, double sMax, rngType& rng);
         ~PDFSegmentPowerlaw() override = default;
 
         // Evaluation functions

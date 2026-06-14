@@ -49,6 +49,16 @@ namespace pdfs {
                     )
                 );
             }
+        /**
+         * @brief Construct PDFSegmentSchechter from basic PDF file contents.
+         * @param file File stream from which to construct; expects lines
+         *   "xStar XSTAR" and "slope SLOPE" in any order.
+         * @param sMin The lower limit of the segment.
+         * @param sMax The upper limit of the segment.
+         * @param rng Reference to the random number generator to be used for sampling.
+         */
+        PDFSegmentSchechter(std::ifstream& file,
+            double sMin, double sMax, rngType& rng);
         ~PDFSegmentSchechter() override = default;
 
         // Evaluation functions

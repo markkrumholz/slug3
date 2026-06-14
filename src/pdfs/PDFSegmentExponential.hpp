@@ -33,7 +33,7 @@ namespace pdfs {
 
         // Constructor and destructor
         /**
-         * @brief Constructor for PDFSegmentExponential.
+         * @brief Explicit constructor for PDFSegmentExponential.
          * @param sMin The lower limit of the segment.
          * @param sMax The upper limit of the segment.
          * @param scale The exponential scale length of the distribution.
@@ -44,6 +44,24 @@ namespace pdfs {
                 // Calculate normalization constant for the PDF segment
                 norm_ = 1.0 / (scale_ * (std::exp(-sMin_ / scale_) - std::exp(-sMax_ / scale_)));
             }
+        /**
+         * @brief Construct PDFSegmentExponential from basic PDF file contents.
+         * @param file File stream from which to construct
+         * @param sMin The lower limit of the segment.
+         * @param sMax The upper limit of the segment.
+         * @param rng Reference to the random number generator to be used for sampling.
+         */
+        PDFSegmentExponential(std::ifstream& file,
+            double sMin, double sMax, rngType& rng);
+        /**
+         * @brief Construct PDFSegmentExponential from advanced PDF file contents.
+         * @param file File stream from which to construct
+         * @param rng Reference to the random number generator to be used for sampling.
+         * @param wgt The weight of the segment
+         */
+        //PDFSegmentExponential(std::ifstream& file, 
+        //   rngType& rng,
+        //   double &wgt);
         ~PDFSegmentExponential() override = default;
 
         // Evaluation functions
