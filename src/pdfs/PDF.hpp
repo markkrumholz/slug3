@@ -48,7 +48,6 @@ namespace pdfs {
     /**
      * @class PDF
      * @brief A class representing a PDF composed of one or more segments
-     * @tparam N Number of segments in the PDF
      * @details
      * This class represents a PDF composed of one or more
      * segments. This PDF can be properly normalized (so that
@@ -56,23 +55,26 @@ namespace pdfs {
      * provides methods for sampling from the PDF and computing
      * various integrals and expectation values from it.
      */
-    template<unsigned int N> class PDF {
+    class PDF {
     public:
 
         // Constructors and destructor
         /**
          * @brief Construct from array of segments and weights
-         * @param seg Array of segments of segments
-         * @param wgt Array of weights; all elements must be positive
+         * @tparam SC Any contiguous container of PDFSegment pointers
+         * @tparam WC Any contiguous container of doubles
+         * @param seg Container of pointers to segments
+         * @param wgt Container of weights; must have same size as seg, all elements must be positive
          * @param method Sampling method
          * @param normalize Normalize or not?
          */
-        PDF(std::array<PDFSegment*, N> seg, 
-            std::array<double, N> wgt,
+        template <typename SC, typename WC>
+        PDF(SC seg,
+            WC wgt,
             samplingMethods::method meth = samplingMethods::stopNearest,
-            bool normalize = true) : 
-            seg_(seg),
-            wgt_(wgt.data(), wgt.size()),
+            bool normalize = true) :
+            seg_(std::begin(seg), std::end(seg)),
+            wgt_(std::data(wgt), std::size(wgt)),
             method_(meth),
             normalized_(normalize)
         {
@@ -156,7 +158,7 @@ namespace pdfs {
 
     protected:
 
-        std::array<PDFSegment*, N> seg_; /**< Segments in the PDF */
+        std::vector<PDFSegment *> seg_; /**< Segments in the PDF */
         std::valarray<double> wgt_;     /**< Weights of segments */
         double sMin_;                   /**< PDF lower limit */
         double sMax_;                   /**< PDF upper limit */

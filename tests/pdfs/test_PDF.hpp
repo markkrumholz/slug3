@@ -14,6 +14,7 @@
 #include <cmath>
 #include <cstdio>
 #include <valarray>
+#include <vector>
 #include "../src/pdfs/PDF.hpp"
 #include "../src/pdfs/PDFSegmentLognormal.hpp"
 #include "../src/pdfs/PDFSegmentPowerlaw.hpp"
@@ -40,12 +41,11 @@ auto test_PDF() -> int
     double plAlpha = -2.3;
     pdfs::PDFSegmentLognormal pln(lnMin, lnMax, lnMean, lnDisp, rng);
     pdfs::PDFSegmentPowerlaw ppl(plMin, plMax, plAlpha, rng);
-    std::array<pdfs::PDFSegment*, 2> seg = { &pln, &ppl };
-    std::array<double, 2> wgt = { 1.6, 0.4 };
-    std::array<double, 2> wNorm = { 0.8, 0.2 };
+    std::vector<pdfs::PDFSegment*> seg = { &pln, &ppl };
+    std::vector<double> wgt = { 1.6, 0.4 };
+    std::vector<double> wNorm = { 0.8, 0.2 };
     bool normalized = true;
-    pdfs::PDF<2> pdf(seg, wgt, pdfs::samplingMethods::stopNearest, 
-        normalized);
+    pdfs::PDF pdf(seg, wgt, pdfs::samplingMethods::stopNearest, normalized);
 
     // Compute normalizations each segment should have
     std::array<double, 2> norm = {
