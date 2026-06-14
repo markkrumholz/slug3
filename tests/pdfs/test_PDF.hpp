@@ -16,6 +16,7 @@
 #include <valarray>
 #include <vector>
 #include "../src/pdfs/PDF.hpp"
+#include "../src/pdfs/PDFSegmentDelta.hpp"
 #include "../src/pdfs/PDFSegmentLognormal.hpp"
 #include "../src/pdfs/PDFSegmentPowerlaw.hpp"
 #include "../tests/testUtils.hpp"
@@ -31,7 +32,9 @@ auto test_PDF() -> int
     rngType rng(42); // Create a random number generator with a fixed seed for reproducibility
 
     // Create a properly normalized PDF consisting of a
-    // lognormal plus a powerlaw with weights of 1.6 and 0.4
+    // delta function plus a lognormal plus a powerlaw
+    // with weights of 0.2, 1.4, and 0.4
+    double deltaMean = 0.01;
     double lnMin = 0.1;
     double lnMax = 1.0;
     double lnMean = 0.5;
@@ -39,21 +42,23 @@ auto test_PDF() -> int
     double plMin = lnMax;
     double plMax = 100.0;
     double plAlpha = -2.3;
+    pdfs::PDFSegmentDelta pd(deltaMean, rng);
     pdfs::PDFSegmentLognormal pln(lnMin, lnMax, lnMean, lnDisp, rng);
     pdfs::PDFSegmentPowerlaw ppl(plMin, plMax, plAlpha, rng);
-    std::vector<pdfs::PDFSegment*> seg = { &pln, &ppl };
-    std::vector<double> wgt = { 1.6, 0.4 };
-    std::vector<double> wNorm = { 0.8, 0.2 };
+    std::vector<pdfs::PDFSegment*> seg = { &pd, &pln, &ppl };
+    std::vector<double> wgt = { 0.2, 1.4, 0.4 };
+    std::vector<double> wNorm = { 0.1, 0.7, 0.2 };
     bool normalized = true;
     pdfs::PDF pdf(seg, wgt, pdfs::samplingMethods::stopNearest, normalized);
 
     // Compute normalizations each segment should have
-    std::array<double, 2> norm = {
-        wNorm[0] * std::sqrt(2.0 / M_PI) / lnDisp / (
+    std::array<double, 3> norm = {
+        0.0, // Delta function has no meaningful normalization
+        wNorm[1] * std::sqrt(2.0 / M_PI) / lnDisp / (
             std::erf(-std::log(lnMin / lnMean) / (std::sqrt(2.0) * lnDisp)) -
             std::erf(-std::log(lnMax / lnMean) / (std::sqrt(2.0) * lnDisp))
         ),
-        wNorm[1] * (plAlpha + 1) / (
+        wNorm[2] * (plAlpha + 1) / (
             std::pow(plMax, plAlpha + 1) - 
             std::pow(plMin, plAlpha + 1)
         )
@@ -66,12 +71,12 @@ auto test_PDF() -> int
     double x4 = 100.0; // At the upper limit
     double x5 = 0.05; // Below the lower limit
     double x6 = 150.0; // Above the upper limit
-    double expect1 = norm[0] / x1 * 
+    double expect1 = norm[1] / x1 * 
         std::exp(-0.5 * std::pow(std::log(x1 / lnMean) / lnDisp, 2));
-    double expect2 = norm[0] / x2 * 
+    double expect2 = norm[1] / x2 * 
         std::exp(-0.5 * std::pow(std::log(x2 / lnMean) / lnDisp, 2));
-    double expect3 = norm[1] * std::pow(x3, plAlpha);
-    double expect4 = norm[1] * std::pow(x4, plAlpha);
+    double expect3 = norm[2] * std::pow(x3, plAlpha);
+    double expect4 = norm[2] * std::pow(x4, plAlpha);
     if (!testUtils::approxEqual(pdf(x1), expect1)) {
         std::cerr << "test_PDF: PDF evaluation at x=" << x1 << " failed: expected " << expect1 << ", got " << pdf(x1) << std::endl;
             return 1;

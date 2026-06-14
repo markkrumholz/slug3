@@ -127,7 +127,9 @@ namespace pdfs {
         {
             double p = 0.0;
             for (auto const& [s,w] : std::views::zip(seg_,wgt_)) {
-                p += w * (*s)(x);
+                if (s->getMin() < x && s->getMax() >= x) {
+                    p += w * (*s)(x);
+                }
             }
             return p;
         }
@@ -155,6 +157,33 @@ namespace pdfs {
         {
             return expectationValue(sMin_, sMax_);
         }
+        /**
+         * @brief Calculate the integral of the PDF over a specified range.
+         * @param a The lower limit of the range for integral calculation; if set to a value <= sMin, will be set to sMin_.
+         * @param b The upper limit of the range for integral calculation; if set to a value >= sMax, will be set to sMax_.
+         * @return The integral of the PDF over the specified range.
+         */
+        virtual auto integral(const double a, const double b) const -> double {
+            if (a >= b) {
+                return 0.0; // Interval is empty
+            }
+            double sum = 0.0;
+            for (auto const& [s,w] : std::views::zip(seg_,wgt_)) {
+                if (a <= s->getMin() && b >= s->getMax()) {
+                    sum += w;  // Full segment is in range --> add full wgt
+                } else if (a < s->getMax() && b > s->getMin()) {
+                    sum += w * s->integral(a,b);  // Segment overlaps range
+                }
+            }
+            return sum;
+        }
+        /**
+         * @brief Calculate the integral of the PDF over its full range.
+         * @return The integral of the PDF segment over the specified range.
+         */
+        virtual auto integral() const -> double { return wgt_.sum(); }
+
+
 
     protected:
 
