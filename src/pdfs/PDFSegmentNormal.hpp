@@ -58,6 +58,10 @@ namespace pdfs {
         auto expectationValue(const double a, const double b) const -> double override {
             if (a >= b || a > sMax_ || b < sMin_) {
                 return 0.0; // Invalid range for expectation value calculation
+            } else if (a == sMax_) {
+                return sMax_; // Handle edge cases
+            } else if (b == sMin_) {
+                return sMin_; // Handle edge cases
             }
             const double a_clamped = std::max(a, sMin_);
             const double b_clamped = std::min(b, sMax_);
@@ -75,7 +79,7 @@ namespace pdfs {
             return expectationValue(sMin_, sMax_); // Expectation value over the full range of the segment
         }
         auto integral(const double a, const double b) const -> double override {
-            if (a >= b) {
+            if (a >= b || a >= sMax_ || b <= sMin_) {
                 return 0.0; // Invalid range for integral calculation
             }
             const double a_clamped = std::max(a, sMin_);

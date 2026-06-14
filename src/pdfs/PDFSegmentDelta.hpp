@@ -59,6 +59,9 @@ namespace pdfs {
 
         // Drawing functions
         auto draw(const double a, const double b) const -> double override {
+            if (a >= b || a >= sMax_ || b <= sMin_) {
+                return 0.0; // Invalid range for expectation value calculation
+            }
             return sMin_; // Sampling from a delta function always returns the same value
         }
         auto draw() const -> double override {

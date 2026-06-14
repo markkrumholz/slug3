@@ -49,7 +49,7 @@ auto test_PDF() -> int
     std::vector<double> wgt = { 0.2, 1.4, 0.4 };
     std::vector<double> wNorm = { 0.1, 0.7, 0.2 };
     bool normalized = true;
-    pdfs::PDF pdf(seg, wgt, pdfs::samplingMethods::stopNearest, normalized);
+    pdfs::PDF pdf(seg, wgt, rng, pdfs::samplingMethods::stopNearest, normalized);
 
     // Compute normalizations each segment should have
     std::array<double, 3> norm = {
@@ -107,6 +107,10 @@ auto test_PDF() -> int
         wNorm[0] * pd.expectationValue() +
         wNorm[1] * pln.expectationValue() +
         wNorm[2] * ppl.expectationValue();
+    std::cout << "evs = " << pd.expectationValue()
+        << " " << pln.expectationValue() 
+        << " " << ppl.expectationValue()
+        << std::endl;
     if (!testUtils::approxEqual(pdf.expectationValue(), expectation_value_expected)) {
         std::cerr << "test_PDF: Expectation value calculation over full range failed; expected "
             << expectation_value_expected << ", got "
@@ -115,11 +119,17 @@ auto test_PDF() -> int
     }
 
     // Check expectation value over part of range
-    double a = 0.5;
-    double b = 50.0;
-    expectation_value_expected =
-        wNorm[1] * pln.expectationValue(a,lnMax) +
-        wNorm[2] * ppl.expectationValue(lnMax,b);
+    double a = 0.1;
+    double b = 1.0;
+    expectation_value_expected = (
+            wNorm[0] * pd.integral(a,b) * pd.expectationValue(a,b) +
+            wNorm[1] * pln.integral(a,b) * pln.expectationValue(a,b) +
+            wNorm[2] * ppl.integral(a,b) * ppl.expectationValue(a,b)
+        ) / (
+            wNorm[0] * pd.integral(a,b) +
+            wNorm[1] * pln.integral(a,b) +
+            wNorm[2] * ppl.integral(a,b)
+        );
     if (!testUtils::approxEqual(pdf.expectationValue(a,b), expectation_value_expected)) {
         std::cerr << "test_PDF: Expectation value calculation over range ["
             << a << ", " << b << "] failed; expected "
@@ -128,6 +138,43 @@ auto test_PDF() -> int
             return 1;
     }
     
+    // Check integral over full range
+    if (!testUtils::approxEqual(pdf.integral(), 1.0)) {
+        std::cerr << "test_PDF: Expectation value calculation over full range failed; expected "
+            << "1.0, got "
+            << pdf.integral() << std::endl;
+            return 1;
+    }
+
+    // Check integral over partial range
+    double integral_expected =
+        wNorm[1] * pln.integral(a,lnMax) +
+        wNorm[2] * ppl.integral(lnMax,b);
+    if (!testUtils::approxEqual(pdf.integral(a,b), integral_expected)) {
+        std::cerr << "test_PDF: Integral calculation over range ["
+            << a << ", " << b << "] failed; expected "
+            << integral_expected << ", got "
+            << pdf.integral(a,b) << std::endl;
+            return 1;
+    }
+
+    // Test sampling from the distribution
+    const int num_samples = 10000; // Number of samples to draw
+    double sample_sum = 0.0; // Sum of the drawn samples for calculating the sample mean
+    for (int i = 0; i < num_samples; ++i) {
+        double sample = pdf.draw(a, b); // Draw a sample from the PDFSegmentExponential over the range [2, 8]
+        if (sample < a || sample > b) {
+            std::cerr << "test_PDF: Sample drawn from PDFSegmentExponential is out of range: got " << sample << ", expected between " << a << " and " << b << std::endl;
+            return 1;
+        }
+        sample_sum += sample; // Add the sample to the sum for calculating the sample mean
+    }
+    double sample_mean = sample_sum / num_samples; // Calculate the sample mean
+    if (!testUtils::approxEqual(sample_mean, expectation_value_expected, 0.01)) {
+        std::cerr << "test_PDF: Sample mean from drawn samples does not match expected expectation value: expected " << expectation_value_expected << ", got " << sample_mean << std::endl;
+        return 1;
+    }
+
 
     return 0; // If we have gotten here, tests have passed
 }

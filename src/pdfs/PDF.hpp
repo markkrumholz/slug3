@@ -15,6 +15,7 @@
 #define PDF_HPP
 
 #include <array>
+#include <random>
 #include <ranges>
 #include <valarray>
 #include <vector>
@@ -65,16 +66,19 @@ namespace pdfs {
          * @tparam WC Any contiguous container of doubles
          * @param seg Container of pointers to segments
          * @param wgt Container of weights; must have same size as seg, all elements must be positive
+         * @param rng Reference to the random number generator to be used for sampling.
          * @param method Sampling method
          * @param normalize Normalize or not?
          */
         template <typename SC, typename WC>
         PDF(SC seg,
             WC wgt,
+            rngType &rng,
             samplingMethods::method meth = samplingMethods::stopNearest,
             bool normalize = true) :
             seg_(std::begin(seg), std::end(seg)),
             wgt_(std::data(wgt), std::size(wgt)),
+            rng_(rng),
             method_(meth),
             normalized_(normalize)
         {
@@ -144,8 +148,9 @@ namespace pdfs {
             double e = 0.0;
             double wSum = 0.0;
             for (auto const& [s,w] : std::views::zip(seg_,wgt_)) {
-                e += w * s->expectationValue(a, b);
-                wSum += w;
+                double wi = w * s->integral(a, b);
+                e += wi * s->expectationValue(a, b);
+                wSum += wi;
             }
             return e / wSum;
         }
@@ -153,7 +158,7 @@ namespace pdfs {
          * @brief Calculate the expectation value of the PDF segment over its entire range.
          * @return The expectation value of the PDF segment.
          */
-        virtual auto expectationValue() const -> double
+        auto expectationValue() const -> double
         {
             return expectationValue(sMin_, sMax_);
         }
@@ -163,17 +168,13 @@ namespace pdfs {
          * @param b The upper limit of the range for integral calculation; if set to a value >= sMax, will be set to sMax_.
          * @return The integral of the PDF over the specified range.
          */
-        virtual auto integral(const double a, const double b) const -> double {
+        auto integral(const double a, const double b) const -> double {
             if (a >= b) {
                 return 0.0; // Interval is empty
             }
             double sum = 0.0;
             for (auto const& [s,w] : std::views::zip(seg_,wgt_)) {
-                if (a <= s->getMin() && b >= s->getMax()) {
-                    sum += w;  // Full segment is in range --> add full wgt
-                } else if (a < s->getMax() && b > s->getMin()) {
-                    sum += w * s->integral(a,b);  // Segment overlaps range
-                }
+                sum += w * s->integral(a,b);  // Segment overlaps range
             }
             return sum;
         }
@@ -181,14 +182,63 @@ namespace pdfs {
          * @brief Calculate the integral of the PDF over its full range.
          * @return The integral of the PDF segment over the specified range.
          */
-        virtual auto integral() const -> double { return wgt_.sum(); }
+        auto integral() const -> double { return wgt_.sum(); }
 
-
+        // Drawing functions
+        /**
+         * @brief Sample a random value from the PDF within a specified range.
+         * @param a The lower limit of the sampling range (should be >= sMin_).
+         * @param b The upper limit of the sampling range (should be <= sMax_).
+         * @return A random value drawn from the PDF within the specified range.
+         */
+        auto draw(const double a, const double b) const -> double {
+            std::vector<double> wLim(wgt_.size());
+            for (auto const& [wL,s,w] : std::views::zip(wLim,seg_,wgt_)) {
+                wL = w * s->integral(a,b);
+                std::cout << "wL = " << wL << std::endl;
+            }
+            std::discrete_distribution<int> dist(wLim.begin(), wLim.end());
+            return seg_[dist(rng_)]->draw(a,b);
+        }
+        /**
+         * @brief Sample a random value from the PDF.
+         * @return A random value drawn from the PDF within the specified range.
+         */
+        auto draw() const -> double { return draw(sMin_, sMax_); }
+        /**
+         * @brief Sample nDraw random values from the PDF.
+         * @param nDraw Number of samples to draw.
+         * @return A vector of random values drawn from the PDF within the specified range.
+         */
+        auto draw(unsigned int nDraw) const -> std::vector<double> 
+        { 
+            std::vector<double> result;
+            for (unsigned int i = 0; i < nDraw; i++) {
+                result.push_back(draw(sMin_, sMax_));
+            }
+            return result;
+        }
+        /**
+         * @brief Sample nDraw random values from the PDF within the specified range.
+         * @param nDraw Number of samples to draw.
+         * @param a The lower limit of the sampling range (should be >= sMin_).
+         * @param b The upper limit of the sampling range (should be <= sMax_).
+         * @return A vector of nDraw random values drawn from the PDF within the specified range.
+        */
+        auto draw(unsigned int nDraw, double a, double b) const -> std::vector<double>
+        {
+            std::vector<double> result;
+            for (unsigned int i = 0; i < nDraw; i++) {
+                result.push_back(draw(a, b));
+            }
+            return result;        
+        }  
 
     protected:
 
         std::vector<PDFSegment *> seg_; /**< Segments in the PDF */
         std::valarray<double> wgt_;     /**< Weights of segments */
+        rngType& rng_;                  /**< Random engine */
         double sMin_;                   /**< PDF lower limit */
         double sMax_;                   /**< PDF upper limit */
         samplingMethods::method method_; /**< Sampling method for this PDF */
