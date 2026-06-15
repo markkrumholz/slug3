@@ -47,7 +47,11 @@ pdfs::PDFSegmentLognormal::PDFSegmentLognormal(
         {
             try
             {
-                stddev_ = utils::stod(tok[1]);
+                stddev_ = utils::stod(tok[1]) * std::log(10);
+                // Note multiplication by log(10) here because
+                // the input dispersion is in log base 10, but
+                // for internal purposes we want to use natural
+                // logarithms.
             } catch (const std::exception& error) {
                 throw std::runtime_error(line);
             }
