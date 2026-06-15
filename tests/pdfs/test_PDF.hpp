@@ -13,8 +13,10 @@
 
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
 #include <vector>
 #include "../src/pdfs/PDF.hpp"
+#include "../src/pdfs/PDFFileParser.hpp"
 #include "../src/pdfs/PDFSegmentDelta.hpp"
 #include "../src/pdfs/PDFSegmentLognormal.hpp"
 #include "../src/pdfs/PDFSegmentPowerlaw.hpp"
@@ -107,16 +109,11 @@ auto test_PDF() -> int
         return 1;
     }
 
-
     // Check the expectation value over the full range
     double expectation_value_expected = 
         wNorm[0] * pd.expectationValue() +
         wNorm[1] * pln.expectationValue() +
         wNorm[2] * ppl.expectationValue();
-    std::cout << "evs = " << pd.expectationValue()
-        << " " << pln.expectationValue() 
-        << " " << ppl.expectationValue()
-        << std::endl;
     if (!testUtils::approxEqual(pdf.expectationValue(), expectation_value_expected)) {
         std::cerr << "test_PDF: Expectation value calculation over full range failed; expected "
             << expectation_value_expected << ", got "
@@ -209,6 +206,20 @@ auto test_PDF() -> int
     if (!testUtils::approxEqual(sample_mean, expectation_value_expected, 0.01)) {
         std::cerr << "test_PDF: Sample mean from Poisson sampling does not match expected expectation value: expected " << expectation_value_expected << ", got " << sample_mean << std::endl;
         return 1;        
+    }
+
+    // Test construction of a PDF from a valid file in basic mode
+    std::filesystem::path testFile("chabrier_imf.txt");
+    auto fileName = (".." / ("tests" / ("pdfs" / ("assets" / testFile)))).string();
+    try
+    {
+        auto pdfBasic = pdfs::parsePDFDescriptor(fileName, rng);
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "test_PDF: Failed to parse valid basic-mode IMF:"
+        " file 'chabrier_imf.txt'" << std::endl;
+        return 1;
     }
 
     return 0; // If we have gotten here, tests have passed

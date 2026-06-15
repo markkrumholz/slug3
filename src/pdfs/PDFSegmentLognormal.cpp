@@ -33,7 +33,7 @@ pdfs::PDFSegmentLognormal::PDFSegmentLognormal(
         {
             throw std::runtime_error(line);
         }
-        else if (tok[1] == "mean")
+        else if (tok[0] == "mean")
         {
             try
             {
@@ -43,7 +43,7 @@ pdfs::PDFSegmentLognormal::PDFSegmentLognormal(
             }
             foundMean = true;
         }
-        else if (tok[1] == "disp")
+        else if (tok[0] == "disp")
         {
             try
             {

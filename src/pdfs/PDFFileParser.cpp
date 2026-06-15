@@ -83,12 +83,14 @@ namespace pdfs {
 
         // From the line we have been given, extract the breakpoints
         auto tokens = utils::tokenize(breakpointLine);
-        tokens.erase(tokens.begin());  // Remove the word "breakpoint"
-        if (tokens.size() < 2)
+        if (tokens[0] != "breakpoints" || tokens.size() < 3)
         {
-            parseError("PDF file must have at least two breakpoints",
-                breakpointLine, fileName); // Need two breakpoints
+            // If we are here, format is not as expected
+            parseError("basic mode PDF file start with 'breakpoints'"
+                " followed by at least two numerical values",
+                breakpointLine, fileName);
         }
+        tokens.erase(tokens.begin());  // Remove the word "breakpoints"
         std::vector<double> breakpoints;
         for (auto t : tokens)
         {
