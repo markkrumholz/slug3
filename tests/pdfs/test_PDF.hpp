@@ -208,6 +208,57 @@ auto test_PDF() -> int
         return 1;        
     }
 
+    // Test stop-before, stop-after, and stop-50 sampling; stop-before
+    // should always produce sums < target, stop-after > target, and
+    // stop-50 should be smaller and larger than target equally often
+    target = 100.0;
+    int n_test = 1000;
+    int count_less = 0;
+    for (int i = 0; i < n_test; i++)
+    {
+        // Stop before
+        pdf.setSampling(pdfs::samplingMethods::stopBefore);
+        auto sample_before = pdf.drawTarget(target);
+        sample_sum = 0.0;
+        for (auto s : sample_before) sample_sum += s;
+        if (sample_sum > target)
+        {
+            std::cerr << "test_PDF: stopBefore sampling test failed: "
+                << "target = " << target << ", got sum = " << sample_sum
+                << std::endl;
+            return 1;
+        }
+
+        // Stop after
+        pdf.setSampling(pdfs::samplingMethods::stopAfter);
+        auto sample_after = pdf.drawTarget(target);
+        sample_sum = 0.0;
+        for (auto s : sample_after) sample_sum += s;
+        if (sample_sum < target)
+        {
+            std::cerr << "test_PDF: stopAfter sampling test failed: "
+                << "target = " << target << ", got sum = " << sample_sum
+                << std::endl;
+            return 1;
+        }
+
+        // Stop 50
+        pdf.setSampling(pdfs::samplingMethods::stop50);
+        auto sample_50 = pdf.drawTarget(target);
+        sample_sum = 0.0;
+        for (auto s : sample_50) sample_sum += s;
+        if (sample_sum < target) count_less++;
+    }
+    double frac_less = static_cast<double>(count_less) / n_test;
+    double tol = 4 / std::sqrt(n_test);  // 4 sigma tolerance
+    if (!testUtils::approxEqual(frac_less, 0.5, tol))
+    {
+        std::cerr << "test_PDF: stop50 sampling test failed: "
+            << "expected 50% below target, got "
+            << 100 * frac_less << std::endl;
+        return 1;
+    }
+
     // Test construction of a PDF from a valid file in basic mode
     std::filesystem::path assetDir = "assets";
     std::string fileName = "chabrier_imf.txt";
