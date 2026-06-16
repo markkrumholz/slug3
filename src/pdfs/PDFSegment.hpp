@@ -14,6 +14,7 @@
 #define PDFSEGMENT_HPP
 
 #include <map>
+#include <vector>
 #include "PDFCommons.hpp"
 
 namespace pdfs {
