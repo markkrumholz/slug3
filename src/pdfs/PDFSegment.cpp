@@ -45,7 +45,7 @@ auto pdfs::PDFSegment::segmentParser(std::ifstream& file,
                 foundMatch = true;
                 try
                 {
-                    result[t[0]] = utils::stod(tok[1]);
+                    result[t[0]] = utils::stod(t[1]);
                 } catch (const std::exception& error) {
                     throw std::runtime_error(line);
                 }
