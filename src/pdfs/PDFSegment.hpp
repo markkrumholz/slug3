@@ -13,9 +13,8 @@
 #ifndef PDFSEGMENT_HPP
 #define PDFSEGMENT_HPP
 
-#include "../pcg-cpp/include/pcg_random.hpp"
-
-typedef pcg64 rngType;  /**< Alias for random number type */
+#include <map>
+#include "PDFCommons.hpp"
 
 namespace pdfs {
 
@@ -94,8 +93,18 @@ namespace pdfs {
          */
         virtual auto draw() const -> double = 0;
 
-
     protected:
+
+        /**
+         * @brief Parse a segment declaration in a PDF file
+         * @param file File stream to parse
+         * @param tok List of expected tokens for that segment
+         * @returns Map of token values
+         */
+        auto segmentParser(std::ifstream& file,
+            std::vector<std::string>& tok) 
+            -> std::map<std::string, double>;
+
         double sMin_; /**< The lower limit of the segment */
         double sMax_; /**< The upper limit of the segment */
         rngType &rng_; /**< Reference to the random number generator */

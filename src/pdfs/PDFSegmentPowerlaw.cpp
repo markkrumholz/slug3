@@ -11,43 +11,48 @@
 #include "PDFSegmentPowerlaw.hpp"
 #include "../utils/parseUtils.hpp"
 
-// Basic mode constructor
+// File-based constructor
 pdfs::PDFSegmentPowerlaw::PDFSegmentPowerlaw(
-    std::ifstream& file, double sMin, double sMax, rngType &rng) :
+    std::ifstream& file, rngType& rng, 
+    fileFormats::format fmt,
+    double& sMin, double& sMax, double& wgt) :
     PDFSegment(sMin, sMax, rng)
 {
-    // Process file; expect a single line "slope SLOPE"
-    bool foundAll = false;
-    std::string line;
-    while (std::getline(file, line))
+    // Action depends on format
+    if (fmt == fileFormats::basic)
     {
-        // Trim and tokenize the line
-        line = utils::trim(line);
-        if (line.empty()) continue; // Whitespace-only line; skip
-        auto tok = utils::tokenize(line);
+        // Basic format
 
-        // The line should be of the form "slope SLOPE"
-        if (tok[0] != "slope" || tok.size() != 2)
-        {
-            throw std::runtime_error(line);
-        }
-        try
-        {
-            alpha_ = utils::stod(tok[1]);
-        } catch (const std::exception& error) {
-            throw std::runtime_error(line);
-        }
-        foundAll = true;
-        break;
+        // Call segment parser to get the tokens we need
+        std::vector<std::string> tokens = { "slope" };
+        auto contents = segmentParser(file, tokens);
+
+        // Use the parsed results to set parameters
+        alpha_ = contents["slope"];
     }
-
-    // Throw error if something is missing
-    if (!foundAll)
+    else
     {
-        throw std::runtime_error("reached end of file while "
-            "parsing powerlaw segment");
-    }
+        // Advanced format
 
+        // Call segment parser to get the tokens we need
+        std::vector<std::string> tokens =
+            { "slope", "min", "max", "weight" };
+        auto contents = segmentParser(file, tokens);
+
+        // Use the parsed results to set parameters
+        alpha_ = contents["slope"];
+        sMin_ = contents["min"];
+        sMax_ = contents["max"];
+        wgt = contents["weight" ];
+
+        // Safety check
+        if (sMin_ >= sMax_)
+        {
+            throw std::runtime_error(
+                "powerlaw segments must have min < max");
+        }
+    }
+    
     // Compute normalization constant
     if (alpha_ != -1) {
         norm_ = (alpha_ + 1) / (std::pow(sMax_, alpha_ + 1) - std::pow(sMin_, alpha_ + 1));

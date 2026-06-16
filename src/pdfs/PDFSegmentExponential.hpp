@@ -15,6 +15,7 @@
 
 #include <cmath>
 #include <random>
+#include "PDFCommons.hpp"
 #include "PDFSegment.hpp"
 
 namespace pdfs {
@@ -40,28 +41,31 @@ namespace pdfs {
          * @param rng Reference to the random number generator to be used for sampling.
          */
         PDFSegmentExponential(double sMin, double sMax, double scale, rngType &rng) :
-            PDFSegment(sMin, sMax, rng), scale_(scale) {
-                // Calculate normalization constant for the PDF segment
-                norm_ = 1.0 / (scale_ * (std::exp(-sMin_ / scale_) - std::exp(-sMax_ / scale_)));
-            }
+            PDFSegment(sMin, sMax, rng), scale_(scale)
+        {
+            // Calculate normalization constant for the PDF segment
+            norm_ = 1.0 / (scale_ * (std::exp(-sMin_ / scale_) - std::exp(-sMax_ / scale_)));
+        }
         /**
-         * @brief Construct PDFSegmentExponential from basic PDF file contents.
-         * @param file File stream from which to construct
-         * @param sMin The lower limit of the segment.
-         * @param sMax The upper limit of the segment.
-         * @param rng Reference to the random number generator to be used for sampling.
-         */
-        PDFSegmentExponential(std::ifstream& file,
-            double sMin, double sMax, rngType& rng);
-        /**
-         * @brief Construct PDFSegmentExponential from advanced PDF file contents.
+         * @brief Construct PDFSegmentExponential from a PDF file contents.
          * @param file File stream from which to construct
          * @param rng Reference to the random number generator to be used for sampling.
+         * @param fmt Format of the file being read
+         * @param sMin The lower limit of the segment
+         * @param sMax The upper limit of the segment
          * @param wgt The weight of the segment
-         */
-        //PDFSegmentExponential(std::ifstream& file, 
-        //   rngType& rng,
-        //   double &wgt);
+         * @details
+         * How the arguments are interpreted depends on fmt; if fmt
+         * is basic, then sMin and sMax are inputs, and wgt
+         * is ignored, while if fmt is advanced, then 
+         * sMin and sMax are ignored and wgt is an output.
+        */        
+        PDFSegmentExponential(std::ifstream& file, 
+            rngType& rng,
+            fileFormats::format fmt,
+            double &sMin,
+            double &sMax,
+            double &wgt);
         ~PDFSegmentExponential() override = default;
 
         // Evaluation functions

@@ -15,6 +15,7 @@
 
 #include <cmath>
 #include <random>
+#include "PDFCommons.hpp"
 #include "PDFSegment.hpp"
 
 namespace pdfs {
@@ -47,15 +48,25 @@ namespace pdfs {
                      std::erf((sMin_ - mean_) / (stddev_ * std::sqrt(2))));
             }
         /**
-         * @brief Construct PDFSegmentNormal from basic PDF file contents.
-         * @param file File stream from which to construct; expects lines
-         *   "mean MEAN" and "disp DISP" in any order.
-         * @param sMin The lower limit of the segment.
-         * @param sMax The upper limit of the segment.
+         * @brief Construct PDFSegmentNormal from a PDF file contents.
+         * @param file File stream from which to construct
          * @param rng Reference to the random number generator to be used for sampling.
-         */
-        PDFSegmentNormal(std::ifstream& file,
-            double sMin, double sMax, rngType& rng);
+         * @param fmt Format of the file being read
+         * @param sMin The lower limit of the segment
+         * @param sMax The upper limit of the segment
+         * @param wgt The weight of the segment
+         * @details
+         * How the arguments are interpreted depends on fmt; if fmt
+         * is basic, then sMin and sMax are inputs, and wgt
+         * is ignored, while if fmt is advanced, then 
+         * sMin and sMax are ignored and wgt is an output.
+        */        
+        PDFSegmentNormal(std::ifstream& file, 
+            rngType& rng,
+            fileFormats::format fmt,
+            double &sMin,
+            double &sMax,
+            double &wgt);
         ~PDFSegmentNormal() override = default;
 
         // Evaluation functions

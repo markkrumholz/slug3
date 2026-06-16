@@ -28,7 +28,7 @@
  */
 auto test_PDFSegmentDelta() -> int
 {
-    rngType rng(42); // Create a random number generator with a fixed seed for reproducibility
+    pdfs::rngType rng(42); // Create a random number generator with a fixed seed for reproducibility
     double x = 5.0; // The value at which the delta function is centered
     pdfs::PDFSegmentDelta pd(x, rng); // Create a PDFSegmentDelta with sValue=5.0
 

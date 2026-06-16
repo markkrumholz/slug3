@@ -10,6 +10,8 @@ find_package(GSL REQUIRED)
 # Main executable
 add_executable(slug src/main.cpp
     src/pdfs/PDFFileParser.cpp
+    src/pdfs/PDFSegment.cpp
+    src/pdfs/PDFSegmentDelta.cpp
     src/pdfs/PDFSegmentExponential.cpp
     src/pdfs/PDFSegmentLognormal.cpp
     src/pdfs/PDFSegmentNormal.cpp
@@ -21,6 +23,8 @@ add_executable(slug src/main.cpp
 add_executable(slug_test_PDFs
     tests/pdfs/test_PDFs.cpp
     src/pdfs/PDFFileParser.cpp
+    src/pdfs/PDFSegment.cpp
+    src/pdfs/PDFSegmentDelta.cpp
     src/pdfs/PDFSegmentExponential.cpp
     src/pdfs/PDFSegmentLognormal.cpp
     src/pdfs/PDFSegmentNormal.cpp

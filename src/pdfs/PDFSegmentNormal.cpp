@@ -11,60 +11,48 @@
 #include "PDFSegmentNormal.hpp"
 #include "../utils/parseUtils.hpp"
 
-// Basic mode constructor
+// File-based constructor
 pdfs::PDFSegmentNormal::PDFSegmentNormal(
-    std::ifstream& file, double sMin, double sMax, rngType &rng) :
+    std::ifstream& file, rngType& rng, 
+    fileFormats::format fmt,
+    double& sMin, double& sMax, double& wgt) :
     PDFSegment(sMin, sMax, rng)
 {
-    // Process file; expect lines "mean MEAN" and "stddev STDDEV" in any order
-    bool foundMean = false;
-    bool foundStddev = false;
-    std::string line;
-    while (std::getline(file, line))
+    // Action depends on format
+    if (fmt == fileFormats::basic)
     {
-        // Trim and tokenize the line
-        line = utils::trim(line);
-        if (line.empty()) continue; // Whitespace-only line; skip
-        auto tok = utils::tokenize(line);
+        // Basic format
 
-        if (tok.size() != 2)
-        {
-            throw std::runtime_error(line);
-        }
-        else if (tok[0] == "mean")
-        {
-            try
-            {
-                mean_ = utils::stod(tok[1]);
-            } catch (const std::exception& error) {
-                throw std::runtime_error(line);
-            }
-            foundMean = true;
-        }
-        else if (tok[0] == "disp")
-        {
-            try
-            {
-                stddev_ = utils::stod(tok[1]);
-            } catch (const std::exception& error) {
-                throw std::runtime_error(line);
-            }
-            foundStddev = true;
-        }
-        else
-        {
-            throw std::runtime_error(line);
-        }
+        // Call segment parser to get the tokens we need
+        std::vector<std::string> tokens = { "mean", "disp" };
+        auto contents = segmentParser(file, tokens);
 
-        // Stop once we have both parameters
-        if (foundMean && foundStddev) break;
+        // Use the parsed results to set parameters
+        mean_ = contents["mean"];
+        stddev_ = contents["disp"];
     }
-
-    // Throw error if something is missing
-    if (!foundMean || !foundStddev)
+    else
     {
-        throw std::runtime_error("reached end of file while "
-            "parsing normal segment");
+        // Advanced format
+
+        // Call segment parser to get the tokens we need
+        std::vector<std::string> tokens =
+            { "mean", "disp", "min", "max", "weight" };
+        auto contents = segmentParser(file, tokens);
+
+        // Use the parsed results to set parameters
+        mean_ = contents["mean"];
+        stddev_ = contents["disp"];
+        sMin_ = contents["min"];
+        sMax_ = contents["max"];
+        wgt = contents["weight" ];
+
+        // Safety check
+        if (sMin_ >= sMax_)
+        {
+            throw std::runtime_error(
+                "normal segments must have min < max");
+        }
     }
 
     // Compute normalization constant

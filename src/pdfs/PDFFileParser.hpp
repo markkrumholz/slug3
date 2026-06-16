@@ -27,26 +27,6 @@ namespace pdfs
      */
     auto parsePDFDescriptor(const std::string& fileName, 
         rngType &rng) -> PDF;
-    /**
-     * @brief Construct a PDF object from a basic descriptor file
-     * @param fileName Name of the file
-     * @param rng The random number engine for the PDF object
-     * @param breakpointLine The line containing breakpoint information
-     * @param file Open file object to finish being read
-     */
-    auto parsePDFDescriptorBasic(const std::string& fileName, 
-        rngType &rng,
-        std::string& breakpointLine,
-        std::ifstream& file) -> PDF;
-    /**
-     * @brief Construct a PDF object from an advanced descriptor file
-     * @param fileName Name of the file
-     * @param rng The random number engine for the PDF object
-     * @param file Open file object to finish being read
-     */
-    //auto parsePDFDescriptorAdvanced(const std::string& fileName, 
-    //    rngType &rng,
-    //    std::ifstream& file) -> PDF;
 }
 
 #endif // PDFFILEPARSER_HPP

@@ -11,66 +11,48 @@
 #include "PDFSegmentLognormal.hpp"
 #include "../utils/parseUtils.hpp"
 
-// Basic mode constructor
+// File-based constructor
 pdfs::PDFSegmentLognormal::PDFSegmentLognormal(
-    std::ifstream& file, double sMin, double sMax, rngType &rng) :
+    std::ifstream& file, rngType& rng, 
+    fileFormats::format fmt,
+    double& sMin, double& sMax, double& wgt) :
     PDFSegment(sMin, sMax, rng)
 {
-    // Process file
-    bool foundMean = false;
-    bool foundDisp = false;
-    std::string line;
-    while (std::getline(file, line))
+    // Action depends on format
+    if (fmt == fileFormats::basic)
     {
-        // Trim and tokenize the line
-        line = utils::trim(line);
-        if (line.empty()) continue; // Whitespace-only line; skip
-        auto tok = utils::tokenize(line);
+        // Basic format
 
-        // The line should be of the form "mean MEAN" or
-        // "disp DISP"; make sure it is, and if so read
-        if (tok.size() != 2)
-        {
-            throw std::runtime_error(line);
-        }
-        else if (tok[0] == "mean")
-        {
-            try
-            {
-                mean_ = utils::stod(tok[1]);
-            } catch (const std::exception& error) {
-                throw std::runtime_error(line);
-            }
-            foundMean = true;
-        }
-        else if (tok[0] == "disp")
-        {
-            try
-            {
-                stddev_ = utils::stod(tok[1]) * std::log(10);
-                // Note multiplication by log(10) here because
-                // the input dispersion is in log base 10, but
-                // for internal purposes we want to use natural
-                // logarithms.
-            } catch (const std::exception& error) {
-                throw std::runtime_error(line);
-            }
-            foundDisp = true;
-        }
-        else
-        {
-            throw std::runtime_error(line);
-        }
+        // Call segment parser to get the tokens we need
+        std::vector<std::string> tokens = { "mean", "disp" };
+        auto contents = segmentParser(file, tokens);
 
-        // Stop if we found both
-        if (foundMean && foundDisp) break;
+        // Use the parsed results to set parameters
+        mean_ = contents["mean"];
+        stddev_ = std::log(10) * contents["disp"]; // Convert to base e
     }
-
-    // Throw error if something is missing
-    if (!foundMean || !foundDisp)
+    else
     {
-        throw std::runtime_error("reached end of file while "
-            "parsing lognormal segment");
+        // Advanced format
+
+        // Call segment parser to get the tokens we need
+        std::vector<std::string> tokens =
+            { "mean", "disp", "min", "max", "weight" };
+        auto contents = segmentParser(file, tokens);
+
+        // Use the parsed results to set parameters
+        mean_ = contents["mean"];
+        stddev_ = std::log(10) * contents["disp"]; // Convert to base e
+        sMin_ = contents["min"];
+        sMax_ = contents["max"];
+        wgt = contents["weight" ];
+
+        // Safety check
+        if (sMin_ >= sMax_)
+        {
+            throw std::runtime_error(
+                "lognormal segments must have min < max");
+        }
     }
 
     // Calculate normalization constant

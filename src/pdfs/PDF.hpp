@@ -19,32 +19,13 @@
 #include <ranges>
 #include <valarray>
 #include <vector>
+#include "PDFCommons.hpp"
 #include "PDFSegment.hpp"
 
 /**
  * @brief A namespace to hold PDFs and quantities related to them.
  */
 namespace pdfs {
-
-    /**
-     * @brief Namespace to hold sampling methods
-     */
-    namespace samplingMethods {
-
-        /**
-        * @brief An enum of known sampling methods
-        */
-        typedef enum {
-            stopNearest,    /**< Stop-nearest sampling */
-            stopBefore,     /**< Stop-before sampling */
-            stopAfter,      /**< Stop-after sampling */
-            stop50,         /**< Stop-50/50 sampling */
-            number,         /**< Exact number sampling */
-            poisson,        /**< Poisson sampling */
-            sorted          /**< Sorted sampling */
-        } method;
-
-    }
 
     /**
      * @class PDF

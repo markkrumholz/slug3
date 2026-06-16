@@ -29,7 +29,7 @@
  */
 auto test_PDFSegmentLognormal() -> int
 {
-    rngType rng(42); // Create a random number generator with a fixed seed for reproducibility
+    pdfs::rngType rng(42); // Create a random number generator with a fixed seed for reproducibility
     double mean = 5.0; // The mean of x (NOT the mean of log(x))
     double stdDev = 1.0; // The standard deviation of log(x)
     double sMin = 1.0; // The lower limit of the segment

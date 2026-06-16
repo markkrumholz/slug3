@@ -8,6 +8,7 @@
  * @date 2024-06-14
  */
 
+#include "PDFCommons.hpp"
 #include "PDFFileParser.hpp"
 #include "PDFSegmentDelta.hpp"
 #include "PDFSegmentExponential.hpp"
@@ -51,64 +52,57 @@ namespace pdfs {
             break;  // If we are here, line is non-empty
         }
 
-        // The first non-empty, non-comment line must be either
-        // "advanced" (to indicate an advanced mode file) or
-        // "breakpoints" (to indicate a basic mode file); check
-        // that it is indeed one of these two, and call the appropriate
-        // parser to finish parsing the descriptor file
-        if (line.starts_with("breakpoints"))
+        // Tokenize the line
+        auto tokens = utils::tokenize(line);
+ 
+        // The first token must be either "advanced" (to indicate an
+        // advanced mode file) or "breakpoints" followed by at least
+        // two numbers (to indicate a basic mode file); check
+        // that it is indeed one of these two
+        fileFormats::format fmt;
+        if (tokens[0] == "breakpoints" && tokens.size() > 2)
         {
-            return parsePDFDescriptorBasic(fileName, rng, line, file);
+            fmt = fileFormats::basic;
         } 
-        else if (line.starts_with("advanced")) 
+        else if (tokens[0] == "advanced") 
         {
-            //return parsePDFDescriptorAdvanced(fileName, rng, file);
+            fmt = fileFormats::advanced;
         } 
         else
         {
-            parseError("PDF file must start with 'breakpoints' or 'advanced'",
+            parseError("PDF file must start with "
+                "'breakpoints BP1 BP2 ...' or 'advanced'",
                 line, fileName);
         }
-    }
 
-    // Basic parser
-    auto parsePDFDescriptorBasic(const std::string& fileName, 
-        rngType &rng,
-        std::string& breakpointLine,
-        std::ifstream& file) -> PDF
-    {
-        // Create holder for segments and sampling method
-        std::vector<PDFSegment *> seg;
-        auto method = samplingMethods::stopNearest; // Default
-
-        // From the line we have been given, extract the breakpoints
-        auto tokens = utils::tokenize(breakpointLine);
-        if (tokens[0] != "breakpoints" || tokens.size() < 3)
-        {
-            // If we are here, format is not as expected
-            parseError("basic mode PDF file start with 'breakpoints'"
-                " followed by at least two numerical values",
-                breakpointLine, fileName);
-        }
-        tokens.erase(tokens.begin());  // Remove the word "breakpoints"
+        // If we are in basic mode, extract the breakpoints, which are
+        // stored in the rest of the line
         std::vector<double> breakpoints;
-        for (auto t : tokens)
+        if (fmt == fileFormats::basic)
         {
-            try
+            tokens.erase(tokens.begin());  // Remove the token "breakpoints"
+            for (auto t : tokens)
             {
-                breakpoints.push_back(utils::stod(t));
+                try
+                {
+                    breakpoints.push_back(utils::stod(t));
+                }
+                catch (const std::exception& error)
+                {
+                    parseError("could not convert string to float",
+                        line, fileName);
+                }
             }
-            catch (const std::exception& error)
+            if (!std::is_sorted(breakpoints.begin(), breakpoints.end()))
             {
-                parseError("could not convert string to float",
-                    breakpointLine, fileName);
+                parseError("breakpoints must be non-decreasing",
+                    line, fileName);
             }
         }
-        if (!std::is_sorted(breakpoints.begin(), breakpoints.end()))
-        {
-            parseError("breakpoints must be non-decreasing",
-                breakpointLine, fileName);
-        }
+
+        // Allocate holders for segments and weights
+        std::vector<PDFSegment *> seg;
+        std::vector<double> wgt;
 
         // Now parse the list of segments; segments are formatted
         // as follows:
@@ -120,8 +114,8 @@ namespace pdfs {
         // The number and type of variables in var1, var2, etc. depend
         // on the type of segment.
         bool inSegment = false;
-        std::string line;
         size_t breakpointPtr = 0;
+        samplingMethods::method method;
         while (std::getline(file, line))
         {
  
@@ -140,99 +134,81 @@ namespace pdfs {
                     parseError("expected 'type TYPE'", line, fileName);
                 }
 
-                // Extract lower and upper limits for this segment
-                double sMin, sMax;
-                if (breakpoints.size() < breakpointPtr + 2)
+                // If we are in basic mode, extract lower and upper limits
+                // for this segment
+                double sMin = 0.0, sMax = 0.0;
+                if (fmt == fileFormats::basic)
                 {
-                    parseError("too few breakpoints for number of segments",
-                        line, fileName);
+                    if (breakpoints.size() < breakpointPtr + 2)
+                    {
+                        parseError("too few breakpoints for number of segments",
+                            line, fileName);
+                    }
+                    sMin = breakpoints[breakpointPtr];
+                    sMax = breakpoints[breakpointPtr+1];
+                    breakpointPtr++;
                 }
-                sMin = breakpoints[breakpointPtr];
-                sMax = breakpoints[breakpointPtr+1];
-                breakpointPtr++;
 
-                // Next step depends on segment type
-                if (tok[1] == "delta")
+                // Now call the file-based constructor for the appropriate
+                // segment type
+                double w = 0.0;
+                try
                 {
-                    // No extra tokens expected, so just make sure
-                    // breakpoints are correct, then create
-                    if (sMin != sMax)
+                    if (tok[1] == "delta")
                     {
-                        parseError("min and max breakpoints must match for a delta "
-                            "function segment", line, fileName);
+                        seg.push_back(new PDFSegmentDelta(file, rng, fmt, sMin, sMax, w));
                     }
-                    seg.push_back(new PDFSegmentDelta(sMin, rng));
-                }
-                else if (tok[1] == "exponential")
-                {
-                    // Call the file-based constructor
-                    try {
-                        seg.push_back(
-                            new PDFSegmentExponential(file, sMin, sMax, rng)
-                        );
-                    } 
-                    catch (const std::exception& error)
+                    else if (tok[1] == "exponential")
                     {
-                        parseError("invalid exponential segment",
-                            error.what(), fileName);
-                    }
-                } 
-                else if (tok[1] == "lognormal")
-                {
-                    // Call the file-based constructor
-                    try {
                         seg.push_back(
-                            new PDFSegmentLognormal(file, sMin, sMax, rng)
+                            new PDFSegmentExponential(file, rng, fmt, sMin, sMax, w)
                         );
                     }
-                    catch (const std::exception& error)
+                    else if (tok[1] == "lognormal")
                     {
-                        parseError("invalid lognormal segment",
-                            error.what(), fileName);
-                    }
-                } 
-                else if (tok[1] == "normal")
-                {
-                    // Call the file-based constructor
-                    try {
                         seg.push_back(
-                            new PDFSegmentNormal(file, sMin, sMax, rng)
+                            new PDFSegmentLognormal(file, rng, fmt, sMin, sMax, w)
                         );
                     }
-                    catch (const std::exception& error)
+                    else if (tok[1] == "normal")
                     {
-                        parseError("invalid normal segment",
-                            error.what(), fileName);
-                    }
-                } 
-                else if (tok[1] == "powerlaw")
-                {
-                    // Call the file-based constructor
-                    try {
                         seg.push_back(
-                            new PDFSegmentPowerlaw(file, sMin, sMax, rng)
+                            new PDFSegmentNormal(file, rng, fmt, sMin, sMax, w)
                         );
                     }
-                    catch (const std::exception& error)
+                    else if (tok[1] == "powerlaw")
                     {
-                        parseError("invalid powerlaw segment",
-                            error.what(), fileName);
-                    }
-                } 
-                else if (tok[1] == "schechter")
-                {
-                    // Call the file-based constructor
-                    try {
                         seg.push_back(
-                            new PDFSegmentSchechter(file, sMin, sMax, rng)
+                            new PDFSegmentPowerlaw(file, rng, fmt, sMin, sMax, w)
                         );
                     }
-                    catch (const std::exception& error)
+                    else if (tok[1] == "schechter")
                     {
-                        parseError("invalid Schechter segment",
-                            error.what(), fileName);
+                        seg.push_back(
+                            new PDFSegmentSchechter(file, rng, fmt, sMin, sMax, w)
+                        );
+                    } else {
+                        parseError("unknown segment type " + tok[1],
+                            line, fileName);
                     }
                 }
+                catch (const std::exception& error)
+                {
+                    if (strlen(error.what()) == 0)
+                    {
+                        parseError("reached end of file before "
+                            "completing segment " + tok[1],
+                            line, fileName);
+                    }
+                    else
+                    {
+                        parseError("invalid options for segment type " + tok[1],
+                            line, fileName);                        
+                    }
+                }
+
+                // In advanced format mode, store weight
+                if (fmt == fileFormats::advanced) wgt.push_back(w);
 
                 // Done with segment
                 inSegment = false;
@@ -281,30 +257,36 @@ namespace pdfs {
         // Close file
         file.close();
 
-        // Consistency check: make sure number of segments found
-        // matches number expected from breakpoints
-        if (seg.size() != breakpoints.size() - 1)
+        // Final step depends on format
+        if (fmt == fileFormats::basic)
         {
-            parseError("mismatch between number of breakpoints "
-                "and number of segments", "", fileName);
-        }
+            // Basic format: calculate weights to make
+            // segments continuous
+            wgt.resize(seg.size());
+            wgt[0] = 1.0;
+            for (size_t i = 1; i < seg.size(); i++)
+            {
+                PDFSegment &s = *(seg[i]);
+                PDFSegment &sPrev = *(seg[i-1]);
+                wgt[i] = wgt[i-1] * sPrev(breakpoints[i]) /
+                    s(breakpoints[i]);
+            }
 
-        // Now figure out correct weight to assign to all segments
-        // to ensure that segments are continuous
-        std::vector<double> wgt(seg.size());
-        wgt[0] = 1.0;
-        for (size_t i = 1; i < seg.size(); i++)
+            // Create and return normalized PDF
+            bool normalize = true;
+            bool ownSegments = true;
+            return PDF(seg, wgt, rng, method, 
+                normalize, ownSegments);
+        }
+        else
         {
-            PDFSegment &s = *(seg[i]);
-            PDFSegment &sPrev = *(seg[i-1]);
-            wgt[i] = wgt[i-1] * sPrev(breakpoints[i]) /
-                s(breakpoints[i]);
+            // Advanced mode, so don't do any normalization,
+            // just return
+            bool normalize = false;
+            bool ownSegments = true;
+            return PDF(seg, wgt, rng, method, 
+                normalize, ownSegments);            
         }
-
-        // Construct the final PDF to return
-        bool normalize = true;
-        bool ownSegments = true;
-        return PDF(seg, wgt, rng, method, normalize, ownSegments);
-
     }
+
 }

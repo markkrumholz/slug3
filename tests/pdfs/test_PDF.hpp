@@ -30,7 +30,7 @@
   */
 auto test_PDF() -> int
 {
-    rngType rng(42); // Create a random number generator with a fixed seed for reproducibility
+    pdfs::rngType rng(42); // Create a random number generator with a fixed seed for reproducibility
 
     // Create properly normalized PDF and non-normalized PDFs
     // consisting of a delta function plus a lognormal plus a

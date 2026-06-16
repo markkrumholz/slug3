@@ -16,6 +16,7 @@
 #include <cmath>
 #include <random>
 #include <gsl/gsl_sf_gamma.h>
+#include "PDFCommons.hpp"
 #include "PDFSegment.hpp"
 
 namespace pdfs {
@@ -50,15 +51,25 @@ namespace pdfs {
                 );
             }
         /**
-         * @brief Construct PDFSegmentSchechter from basic PDF file contents.
-         * @param file File stream from which to construct; expects lines
-         *   "xStar XSTAR" and "slope SLOPE" in any order.
-         * @param sMin The lower limit of the segment.
-         * @param sMax The upper limit of the segment.
+         * @brief Construct PDFSegmentSchechter from a PDF file contents.
+         * @param file File stream from which to construct
          * @param rng Reference to the random number generator to be used for sampling.
-         */
-        PDFSegmentSchechter(std::ifstream& file,
-            double sMin, double sMax, rngType& rng);
+         * @param fmt Format of the file being read
+         * @param sMin The lower limit of the segment
+         * @param sMax The upper limit of the segment
+         * @param wgt The weight of the segment
+         * @details
+         * How the arguments are interpreted depends on fmt; if fmt
+         * is basic, then sMin and sMax are inputs, and wgt
+         * is ignored, while if fmt is advanced, then 
+         * sMin and sMax are ignored and wgt is an output.
+        */        
+        PDFSegmentSchechter(std::ifstream& file, 
+            rngType& rng,
+            fileFormats::format fmt,
+            double &sMin,
+            double &sMax,
+            double &wgt);
         ~PDFSegmentSchechter() override = default;
 
         // Evaluation functions

@@ -11,42 +11,46 @@
 #include "PDFSegmentExponential.hpp"
 #include "../utils/parseUtils.hpp"
 
-// Basic mode constructor
+// File-based constructor
 pdfs::PDFSegmentExponential::PDFSegmentExponential(
-    std::ifstream& file, double sMin, double sMax, rngType &rng) :
+    std::ifstream& file, rngType& rng, 
+    fileFormats::format fmt,
+    double& sMin, double& sMax, double& wgt) :
     PDFSegment(sMin, sMax, rng)
 {
-    // Process file
-    bool foundAll = false;
-    std::string line;
-    while (std::getline(file, line))
+    // Action depends on format
+    if (fmt == fileFormats::basic)
     {
-        // Trim and tokenize the line
-        line = utils::trim(line);
-        if (line.empty()) continue; // Whitespace-only line; skip
-        auto tok = utils::tokenize(line);
+        // Basic format
 
-        // The line should be of the form "scale SCALE";
-        // make sure it is, and if so read the scale
-        if (tok[0] != "scale" || tok.size() != 2)
-        {
-            throw std::runtime_error(line);
-        }
-        try
-        {
-            scale_ = utils::stod(tok[1]);
-        } catch (const std::exception& error) {
-            throw std::runtime_error(line);
-        }
-        foundAll = true;
-        break;
+        // Call segment parser to get the tokens we need
+        std::vector<std::string> tokens = { "scale" };
+        auto contents = segmentParser(file, tokens);
+
+        // Use the parsed results to set parameters
+        scale_ = contents["scale"];
     }
-
-    // Throw error if something is missing
-    if (!foundAll)
+    else
     {
-        throw std::runtime_error("reached end of file while "
-            "parsing exponential segment");
+        // Advanced format
+
+        // Call segment parser to get the tokens we need
+        std::vector<std::string> tokens =
+            { "scale", "min", "max", "weight" };
+        auto contents = segmentParser(file, tokens);
+
+        // Use the parsed results to set parameters
+        scale_ = contents["scale"];
+        sMin_ = contents["min"];
+        sMax_ = contents["max"];
+        wgt = contents["weight" ];
+
+        // Safety check
+        if (sMin_ >= sMax_)
+        {
+            throw std::runtime_error(
+                "exponential segments must have min < max");
+        }
     }
 
     // Calculate normalization constant for the PDF segment

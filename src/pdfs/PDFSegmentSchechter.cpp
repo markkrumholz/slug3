@@ -12,60 +12,48 @@
 #include "PDFSegmentSchechter.hpp"
 #include "../utils/parseUtils.hpp"
 
-// Basic mode constructor
+// File-based constructor
 pdfs::PDFSegmentSchechter::PDFSegmentSchechter(
-    std::ifstream& file, double sMin, double sMax, rngType &rng) :
+    std::ifstream& file, rngType& rng, 
+    fileFormats::format fmt,
+    double& sMin, double& sMax, double& wgt) :
     PDFSegment(sMin, sMax, rng)
 {
-    // Process file; expect lines "xStar XSTAR" and "slope SLOPE" in any order
-    bool foundSStar = false;
-    bool foundAlpha = false;
-    std::string line;
-    while (std::getline(file, line))
+    // Action depends on format
+    if (fmt == fileFormats::basic)
     {
-        // Trim and tokenize the line
-        line = utils::trim(line);
-        if (line.empty()) continue; // Whitespace-only line; skip
-        auto tok = utils::tokenize(line);
+        // Basic format
 
-        if (tok.size() != 2)
-        {
-            throw std::runtime_error(line);
-        }
-        else if (tok[0] == "xStar")
-        {
-            try
-            {
-                sStar_ = utils::stod(tok[1]);
-            } catch (const std::exception& error) {
-                throw std::runtime_error(line);
-            }
-            foundSStar = true;
-        }
-        else if (tok[0] == "slope")
-        {
-            try
-            {
-                alpha_ = utils::stod(tok[1]);
-            } catch (const std::exception& error) {
-                throw std::runtime_error(line);
-            }
-            foundAlpha = true;
-        }
-        else
-        {
-            throw std::runtime_error(line);
-        }
+        // Call segment parser to get the tokens we need
+        std::vector<std::string> tokens = { "slope", "xStar" };
+        auto contents = segmentParser(file, tokens);
 
-        // Stop once we have both parameters
-        if (foundSStar && foundAlpha) break;
+        // Use the parsed results to set parameters
+        alpha_ = contents["slope"];
+        sStar_ = contents["xStar"];
     }
-
-    // Throw error if something is missing
-    if (!foundSStar || !foundAlpha)
+    else
     {
-        throw std::runtime_error("reached end of file while "
-            "parsing Schechter segment");
+        // Advanced format
+
+        // Call segment parser to get the tokens we need
+        std::vector<std::string> tokens =
+            { "slope", "xStar", "min", "max", "weight" };
+        auto contents = segmentParser(file, tokens);
+
+        // Use the parsed results to set parameters
+        alpha_ = contents["slope"];
+        sStar_ = contents["xStar"];
+        sMin_ = contents["min"];
+        sMax_ = contents["max"];
+        wgt = contents["weight" ];
+
+        // Safety check
+        if (sMin_ >= sMax_)
+        {
+            throw std::runtime_error(
+                "schechter segments must have min < max");
+        }
     }
 
     // Compute normalization constant

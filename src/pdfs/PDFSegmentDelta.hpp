@@ -12,6 +12,7 @@
 #define PDFSEGMENTDELTA_HPP
 
 #include <stdexcept>
+#include "PDFCommons.hpp"
 #include "PDFSegment.hpp"
 
 namespace pdfs {
@@ -33,6 +34,26 @@ namespace pdfs {
          */
         PDFSegmentDelta(double sValue, rngType &rng) :
             PDFSegment(sValue, sValue, rng) {}
+        /**
+         * @brief Construct PDFSegmentDelta from a PDF file contents.
+         * @param file File stream from which to construct
+         * @param rng Reference to the random number generator to be used for sampling.
+         * @param fmt Format of the file being read
+         * @param sMin The lower limit of the segment
+         * @param sMax The upper limit of the segment
+         * @param wgt The weight of the segment
+         * @details
+         * How the arguments are interpreted depends on fmt; if fmt
+         * is basic, then sMin and sMax are inputs, and wgt
+         * is ignored, while if fmt is advanced, then 
+         * sMin and sMax are ignored and wgt is an output.
+        */        
+        PDFSegmentDelta(std::ifstream& file, 
+            rngType& rng,
+            fileFormats::format fmt,
+            double &sMin,
+            double &sMax,
+            double &wgt);
         ~PDFSegmentDelta() override = default;
 
         // Evaluation functions
