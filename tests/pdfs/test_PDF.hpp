@@ -304,6 +304,29 @@ auto test_PDF() -> int
         return 1;
     }
 
+    // Test construction of a PDF using a method setting
+    fileName = "wk06.txt";
+    try
+    {
+        // Read PDF
+        auto pdfWK = pdfs::parsePDFDescriptor(
+            (assetDir / fileName).string(), rng);
+
+        // Verify that sampling mode is set to sorted
+        if (pdfWK.getSampling() != pdfs::samplingMethods::sorted)
+        {
+            std::cerr << "test_PDF: failed to correctly set "
+                "sampling method from basic-mode PDF descriptor "
+                "file 'wk06.txt'" << std::endl;
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "test_PDF: Failed to parse valid basic-mode PDF:"
+        " file 'wk06.txt'" << std::endl;
+        return 1;
+    }
     // Test construction of a PDF from an advanced format file
     fileName = "sfh_burst.txt";
     try

@@ -241,7 +241,7 @@ namespace pdfs {
                     else if (tok[1] == "stop_50") method = samplingMethods::stop50;
                     else if (tok[1] == "number") method = samplingMethods::number;
                     else if (tok[1] == "poisson") method = samplingMethods::poisson;
-                    else if (tok[1] == "sorted") method = samplingMethods::sorted;
+                    else if (tok[1] == "sorted_sampling") method = samplingMethods::sorted;
                     else
                     {
                         parseError("unknown sampling method", line, fileName);
