@@ -304,6 +304,30 @@ auto test_PDF() -> int
         return 1;
     }
 
+    // Test construction of a PDF from an advanced format file
+    fileName = "sfh_burst.txt";
+    try
+    {
+        // Read PDF
+        auto pdfAdv = pdfs::parsePDFDescriptor(
+            (assetDir / fileName).string(), rng);
+
+        // Verify that integral is correct
+        if (pdfAdv.integral() != 1e3)
+        {
+            std::cerr << "test_PDF: advanced format PDF construction "
+                "failed; expected integral = 1e3, found "
+                << pdfAdv.integral() << std::endl;
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "test_PDF: Failed to parse valid advanced-mode PDF:"
+        " file 'sfh_burst.txt'" << std::endl;
+        return 1;
+    }
+
     return 0; // If we have gotten here, tests have passed
 }
 

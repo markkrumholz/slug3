@@ -1,0 +1,16 @@
+###############################################################
+# This is a SFH (star formation history) definition file 
+# for SLUG v2.
+# This file defines a burst of constant SFR = 0.001 between 0-1Myr
+###############################################################
+
+#Declare that this is an advanced mode file
+advanced
+
+#First exponential burst
+segment
+type powerlaw
+min      0.0     #min time 
+max      1e6     #max time 
+weight   1e3     #Form 1e3 Msun of stars in segment
+slope    0       #make it constant
