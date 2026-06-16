@@ -209,15 +209,46 @@ auto test_PDF() -> int
     }
 
     // Test construction of a PDF from a valid file in basic mode
-    std::filesystem::path testFile("chabrier_imf.txt");
-    auto fileName = (".." / ("tests" / ("pdfs" / ("assets" / testFile)))).string();
+    std::filesystem::path assetDir = "assets";
+    std::string fileName = "chabrier_imf.txt";
     try
     {
-        auto pdfBasic = pdfs::parsePDFDescriptor(fileName, rng);
+        // Read PDF
+        auto pdfBasic = pdfs::parsePDFDescriptor(
+            (assetDir / fileName).string(), rng);
+
+        // Construct a PDF by hand that should match the one we
+        // just read; parameters given here match those in chabrier_imf.txt
+        pdfs::PDFSegmentLognormal plnCompare(0.08, 1, 0.2, 0.55*std::log(10), rng);
+        pdfs::PDFSegmentPowerlaw pplCompare(1, 120, -2.35, rng);
+        std::vector<pdfs::PDFSegment *> segCompare = { &plnCompare, &pplCompare };
+        std::vector<double> wgtCompare = { 1.0, plnCompare(1.0) / pplCompare(1.0) };
+        pdfs::PDF pdfCompare(segCompare, wgtCompare, rng);
+
+        // Verify that the two PDFs agree on various quantities
+        if (pdfBasic.expectationValue() != pdfCompare.expectationValue())
+        {
+            std::cerr << "test_PDF: PDF constructed from basic-mode file "
+                << fileName << " does not match hand-constructed "
+                << "pdf; expectation value for file-based PDF = " 
+                << pdfBasic.expectationValue() << ", for hand-constructed = "
+                << pdfCompare.expectationValue() << std::endl;
+            return 1;
+        }
+        if (pdfBasic.integral(0.5,20) != pdfCompare.integral(0.5,20))
+        {
+            std::cerr << "test_PDF: PDF constructed from basic-mode file "
+                << fileName << " does not match hand-constructed "
+                << "pdf; integral from [0.5,20] for file-based PDF = " 
+                << pdfBasic.integral(0.5,20) << ", for hand-constructed = "
+                << pdfCompare.expectationValue(0.5,20) << std::endl;
+            return 1;
+        }        
+
     }
     catch (const std::exception& error)
     {
-        std::cerr << "test_PDF: Failed to parse valid basic-mode IMF:"
+        std::cerr << "test_PDF: Failed to parse valid basic-mode PDF:"
         " file 'chabrier_imf.txt'" << std::endl;
         return 1;
     }

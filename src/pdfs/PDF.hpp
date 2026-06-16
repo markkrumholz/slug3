@@ -107,7 +107,7 @@ namespace pdfs {
             }
         }
 
-        // Getters for the lower and upper limits of the segment
+        // Getters for internal state
         /** @brief Get the lower limit of the segment.
          *  @return The lower limit of the segment.
          */
@@ -116,6 +116,11 @@ namespace pdfs {
          *  @return The upper limit of the segment.
          */
         auto getMax() const -> double { return sMax_; }
+        /**
+         * @brief Get the weights of segments
+         * @return The weights of the segments
+         */
+        auto getWeights() const -> const std::valarray<double>& { return wgt_; }
 
         // Sampling policy getter and setter
         /**

@@ -43,3 +43,11 @@ enable_testing()
 
 # Define tests
 add_test(NAME test_PDFs COMMAND slug_test_PDFs)
+
+# Add command to copy assets to build dir
+add_custom_command(
+    TARGET slug_test_PDFs POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/pdfs/assets
+        ${CMAKE_CURRENT_BINARY_DIR}/assets   
+)
