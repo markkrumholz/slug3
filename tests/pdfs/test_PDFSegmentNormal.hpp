@@ -14,6 +14,7 @@
 #include <cmath>
 #include <cstdio>
 #include "../src/pdfs/PDFSegmentNormal.hpp"
+#include "../src/utils/RngThread.hpp"
 #include "../tests/testUtils.hpp"
 
 /**
@@ -29,12 +30,14 @@
  */
 auto test_PDFSegmentNormal() -> int
 {
-    pdfs::RngType rng(42); // Create a random number generator with a fixed seed for reproducibility
+    // Set the rng seed to a fixed value for reproducibility
+    utils::rng.seed(42);
+
     double mean = 5.0; // The mean of the normal distribution
     double stdDev = 1.0; // The standard deviation of the normal distribution
     double sMin = 1.0; // The lower limit of the segment
     double sMax = 6.0; // The upper limit of the segment
-    pdfs::PDFSegmentNormal pn(sMin, sMax, mean, stdDev, rng); // Create a PDFSegmentNormal with mean=5, stdDev=1, sMin=1, sMax=6
+    pdfs::PDFSegmentNormal pn(sMin, sMax, mean, stdDev); // Create a PDFSegmentNormal with mean=5, stdDev=1, sMin=1, sMax=6
 
     // Test PDF evaluation at specific points
     double x1 = 1.0; // At the lower limit

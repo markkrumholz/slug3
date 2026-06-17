@@ -18,6 +18,7 @@
 #include <gsl/gsl_sf_gamma.h>
 #include "PDFCommons.hpp"
 #include "PDFSegment.hpp"
+#include "../utils/RngThread.hpp"
 
 namespace pdfs {
 
@@ -38,10 +39,9 @@ namespace pdfs {
          * @param sMax The upper limit of the segment.
          * @param sStar The characteristic scale of the Schechter function.
          * @param alpha The power-law index of the Schechter function.
-         * @param rng Reference to the random number generator to be used for sampling.
          */
-        PDFSegmentSchechter(double sMin, double sMax, double sStar, double alpha, RngType &rng) :
-            PDFSegment(sMin, sMax, rng), sStar_(sStar), alpha_(alpha) {
+        PDFSegmentSchechter(double sMin, double sMax, double sStar, double alpha) :
+            PDFSegment(sMin, sMax), sStar_(sStar), alpha_(alpha) {
                 // Calculate normalization constant for the PDF segment
                 norm_ = 1.0 / (
                     std::pow(sStar_, alpha_ + 1) * (
@@ -53,7 +53,6 @@ namespace pdfs {
         /**
          * @brief Construct PDFSegmentSchechter from a PDF file contents.
          * @param file File stream from which to construct
-         * @param rng Reference to the random number generator to be used for sampling.
          * @param fmt Format of the file being read
          * @param sMin The lower limit of the segment
          * @param sMax The upper limit of the segment
@@ -65,7 +64,6 @@ namespace pdfs {
          * sMin and sMax are ignored and wgt is an output.
         */        
         PDFSegmentSchechter(std::ifstream& file, 
-            RngType& rng,
             FileFormats fmt,
             double &sMin,
             double &sMax,
@@ -120,7 +118,7 @@ namespace pdfs {
                 return 0.0; // Invalid range for drawing
             }
             std::uniform_real_distribution<double> dist(0.0, 1.0);
-            const double u = dist(rng_); // Uniform random number in [0, 1)
+            const double u = dist(utils::rng()); // Uniform random number in [0, 1)
             // Find the value of the deviate y by numerically solving
             // u = \int_a^y x^alpha exp(-x / sStar) dx /
             //     \int_a^b x^alpha exp(-x / sStar) dx

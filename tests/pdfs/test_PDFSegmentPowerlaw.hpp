@@ -17,6 +17,7 @@
 #include <cmath>
 #include <cstdio>
 #include "../src/pdfs/PDFSegmentPowerlaw.hpp"
+#include "../src/utils/RngThread.hpp"
 #include "../tests/testUtils.hpp"
 
 /**
@@ -31,7 +32,9 @@
  */
 auto test_PDFSegmentPowerlaw() -> int
 {
-    pdfs::RngType rng(42); // Create a random number generator with a fixed seed for reproducibility
+    // Set the rng seed to a fixed value for reproducibility
+    utils::rng.seed(42);
+
     double sMin = 1.0; // The lower limit of the segment
     double sMax = 10.0; // The upper limit of the segment
 
@@ -40,7 +43,7 @@ auto test_PDFSegmentPowerlaw() -> int
     std::vector<double> alphas = {-2.0, -1.0, 0.0};
     for (double alpha : alphas) {
 
-        pdfs::PDFSegmentPowerlaw pl(sMin, sMax, alpha, rng); // Create a PDFSegmentPowerlaw with sMin=1, sMax=10, alpha=alpha
+        pdfs::PDFSegmentPowerlaw pl(sMin, sMax, alpha); // Create a PDFSegmentPowerlaw with sMin=1, sMax=10, alpha=alpha
 
         // Test PDF evaluation at specific points
         double x1 = 1.0; // At the lower limit

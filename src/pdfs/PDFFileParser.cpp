@@ -33,8 +33,7 @@ void parseError(const std::string& err,
 namespace pdfs {
 
     // General parser to start and decide if file is basic or advanced
-    auto parsePDFDescriptor(const std::string& fileName,
-        RngType& rng) -> PDF
+    auto parsePDFDescriptor(const std::string& fileName) -> PDF
     {
         // First try to open file
         std::ifstream file(fileName);
@@ -101,7 +100,7 @@ namespace pdfs {
         }
 
         // Allocate holders for segments and weights
-        std::vector<PDFSegment *> seg;
+        std::vector<std::unique_ptr<PDFSegment> > seg;
         std::vector<double> wgt;
 
         // Now parse the list of segments; segments are formatted
@@ -156,36 +155,43 @@ namespace pdfs {
                 {
                     if (tok[1] == "delta")
                     {
-                        seg.push_back(new PDFSegmentDelta(file, rng, fmt, sMin, sMax, w));
+                        seg.emplace_back(
+                            std::make_unique<PDFSegmentDelta>
+                            (file, fmt, sMin, sMax, w));
                     }
                     else if (tok[1] == "exponential")
                     {
-                        seg.push_back(
-                            new PDFSegmentExponential(file, rng, fmt, sMin, sMax, w)
+                        seg.emplace_back(
+                            std::make_unique<PDFSegmentExponential>
+                            (file, fmt, sMin, sMax, w)
                         );
                     }
                     else if (tok[1] == "lognormal")
                     {
-                        seg.push_back(
-                            new PDFSegmentLognormal(file, rng, fmt, sMin, sMax, w)
+                        seg.emplace_back(
+                            std::make_unique<PDFSegmentLognormal>
+                            (file, fmt, sMin, sMax, w)
                         );
                     }
                     else if (tok[1] == "normal")
                     {
-                        seg.push_back(
-                            new PDFSegmentNormal(file, rng, fmt, sMin, sMax, w)
+                        seg.emplace_back(
+                            std::make_unique<PDFSegmentNormal>
+                            (file, fmt, sMin, sMax, w)
                         );
                     }
                     else if (tok[1] == "powerlaw")
                     {
-                        seg.push_back(
-                            new PDFSegmentPowerlaw(file, rng, fmt, sMin, sMax, w)
+                        seg.emplace_back(
+                            std::make_unique<PDFSegmentPowerlaw>
+                            (file, fmt, sMin, sMax, w)
                         );
                     }
                     else if (tok[1] == "schechter")
                     {
-                        seg.push_back(
-                            new PDFSegmentSchechter(file, rng, fmt, sMin, sMax, w)
+                        seg.emplace_back(
+                            std::make_unique<PDFSegmentSchechter>
+                            (file, fmt, sMin, sMax, w)
                         );
                     } else {
                         parseError("unknown segment type " + tok[1],
@@ -274,18 +280,14 @@ namespace pdfs {
 
             // Create and return normalized PDF
             bool normalize = true;
-            bool ownSegments = true;
-            return PDF(seg, wgt, rng, method, 
-                normalize, ownSegments);
+            return PDF(std::move(seg), wgt, method, normalize);
         }
         else
         {
             // Advanced mode, so don't do any normalization,
             // just return
             bool normalize = false;
-            bool ownSegments = true;
-            return PDF(seg, wgt, rng, method, 
-                normalize, ownSegments);            
+            return PDF(std::move(seg), wgt, method, normalize);            
         }
     }
 

@@ -14,6 +14,7 @@
 #include <cmath>
 #include <cstdio>
 #include "../src/pdfs/PDFSegmentLognormal.hpp"
+#include "../src/utils/RngThread.hpp"
 #include "../tests/testUtils.hpp"
 
 /**
@@ -29,12 +30,14 @@
  */
 auto test_PDFSegmentLognormal() -> int
 {
-    pdfs::RngType rng(42); // Create a random number generator with a fixed seed for reproducibility
+    // Set the rng seed to a fixed value for reproducibility
+    utils::rng.seed(42);
+
     double mean = 5.0; // The mean of x (NOT the mean of log(x))
     double stdDev = 1.0; // The standard deviation of log(x)
     double sMin = 1.0; // The lower limit of the segment
     double sMax = 6.0; // The upper limit of the segment
-    pdfs::PDFSegmentLognormal pln(sMin, sMax, mean, stdDev, rng); // Create a PDFSegmentLognormal with mean=5, stdDev=1, sMin=1, sMax=6
+    pdfs::PDFSegmentLognormal pln(sMin, sMax, mean, stdDev); // Create a PDFSegmentLognormal with mean=5, stdDev=1, sMin=1, sMax=6
 
     // Pre-compute cached quantities matching those in the constructor
     double log_mean = std::log(mean);

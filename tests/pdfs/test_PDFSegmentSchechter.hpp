@@ -15,6 +15,7 @@
 #include <cstdio>
 #include <gsl/gsl_sf_gamma.h>
 #include "../src/pdfs/PDFSegmentSchechter.hpp"
+#include "../src/utils/RngThread.hpp"
 #include "../tests/testUtils.hpp"
 
 /**
@@ -30,7 +31,9 @@
  */
 auto test_PDFSegmentSchechter() -> int
 {
-    pdfs::RngType rng(42); // Create a random number generator with a fixed seed for reproducibility
+    // Set the rng seed to a fixed value for reproducibility
+    utils::rng.seed(42);
+
     double sMin = 1.0; // The lower limit of the segment
     double sMax = 10.0; // The upper limit of the segment
     double sStar = 5.0; // The characteristic scale of the Schechter function
@@ -40,7 +43,7 @@ auto test_PDFSegmentSchechter() -> int
     std::vector<double> alphas = {-2.0, -1.0, 0.0}; // The power-law indices to test
     for (double alpha : alphas) {
 
-        pdfs::PDFSegmentSchechter ps(sMin, sMax, sStar, alpha, rng); // Create a PDFSegmentSchechter with sMin=1, sMax=10, sStar=5, alpha=alpha
+        pdfs::PDFSegmentSchechter ps(sMin, sMax, sStar, alpha); // Create a PDFSegmentSchechter with sMin=1, sMax=10, sStar=5, alpha=alpha
 
         // Test PDF evaluation at specific points
         double x1 = 1.0; // At the lower limit

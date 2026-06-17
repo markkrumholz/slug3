@@ -14,12 +14,14 @@
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
+#include <memory>
 #include <vector>
 #include "../src/pdfs/PDF.hpp"
 #include "../src/pdfs/PDFFileParser.hpp"
 #include "../src/pdfs/PDFSegmentDelta.hpp"
 #include "../src/pdfs/PDFSegmentLognormal.hpp"
 #include "../src/pdfs/PDFSegmentPowerlaw.hpp"
+#include "../src/utils/RngThread.hpp"
 #include "../tests/testUtils.hpp"
 
  /** 
@@ -30,7 +32,8 @@
   */
 auto test_PDF() -> int
 {
-    pdfs::RngType rng(42); // Create a random number generator with a fixed seed for reproducibility
+    // Set the rng seed to a fixed value for reproducibility
+    utils::rng.seed(42);
 
     // Create properly normalized PDF and non-normalized PDFs
     // consisting of a delta function plus a lognormal plus a
@@ -43,14 +46,24 @@ auto test_PDF() -> int
     double plMin = lnMax;
     double plMax = 100.0;
     double plAlpha = -2.3;
-    pdfs::PDFSegmentDelta pd(deltaMean, rng);
-    pdfs::PDFSegmentLognormal pln(lnMin, lnMax, lnMean, lnDisp, rng);
-    pdfs::PDFSegmentPowerlaw ppl(plMin, plMax, plAlpha, rng);
-    std::vector<pdfs::PDFSegment*> seg = { &pd, &pln, &ppl };
+    auto pd1 = std::make_unique<pdfs::PDFSegmentDelta>(deltaMean);
+    auto pln1 = std::make_unique<pdfs::PDFSegmentLognormal>(lnMin, lnMax, lnMean, lnDisp);
+    auto ppl1 = std::make_unique<pdfs::PDFSegmentPowerlaw>(plMin, plMax, plAlpha);
+    auto& pd = *pd1;
+    auto& pln = *pln1;
+    auto& ppl = *ppl1;
+    std::vector<std::unique_ptr<pdfs::PDFSegment>> seg1;
+    seg1.push_back(std::move(pd1));
+    seg1.push_back(std::move(pln1));
+    seg1.push_back(std::move(ppl1));
+    std::vector<std::unique_ptr<pdfs::PDFSegment>> seg2;
+    seg2.push_back(std::make_unique<pdfs::PDFSegmentDelta>(deltaMean));
+    seg2.push_back(std::make_unique<pdfs::PDFSegmentLognormal>(lnMin, lnMax, lnMean, lnDisp));
+    seg2.push_back(std::make_unique<pdfs::PDFSegmentPowerlaw>(plMin, plMax, plAlpha));
     std::vector<double> wgt = { 0.2, 1.4, 0.4 };
     std::vector<double> wNorm = { 0.1, 0.7, 0.2 };
-    pdfs::PDF pdf(seg, wgt, rng, pdfs::SamplingMethods::stopNearest, true);
-    pdfs::PDF pdfNN(seg, wgt, rng, pdfs::SamplingMethods::stopNearest, false);
+    pdfs::PDF pdf(std::move(seg1), wgt, pdfs::SamplingMethods::stopNearest, true);
+    pdfs::PDF pdfNN(std::move(seg2), wgt, pdfs::SamplingMethods::stopNearest, false);
 
     // Compute normalizations each segment should have after normalization
     std::array<double, 3> norm = {
@@ -266,15 +279,17 @@ auto test_PDF() -> int
     {
         // Read PDF
         auto pdfBasic = pdfs::parsePDFDescriptor(
-            (assetDir / fileName).string(), rng);
+            (assetDir / fileName).string());
 
         // Construct a PDF by hand that should match the one we
         // just read; parameters given here match those in chabrier_imf.txt
-        pdfs::PDFSegmentLognormal plnCompare(0.08, 1, 0.2, 0.55*std::log(10), rng);
-        pdfs::PDFSegmentPowerlaw pplCompare(1, 120, -2.35, rng);
-        std::vector<pdfs::PDFSegment *> segCompare = { &plnCompare, &pplCompare };
-        std::vector<double> wgtCompare = { 1.0, plnCompare(1.0) / pplCompare(1.0) };
-        pdfs::PDF pdfCompare(segCompare, wgtCompare, rng);
+        auto plnCmp = std::make_unique<pdfs::PDFSegmentLognormal>(0.08, 1, 0.2, 0.55*std::log(10));
+        auto pplCmp = std::make_unique<pdfs::PDFSegmentPowerlaw>(1, 120, -2.35);
+        std::vector<double> wgtCompare = { 1.0, (*plnCmp)(1.0) / (*pplCmp)(1.0) };
+        std::vector<std::unique_ptr<pdfs::PDFSegment>> segCompare;
+        segCompare.push_back(std::move(plnCmp));
+        segCompare.push_back(std::move(pplCmp));
+        pdfs::PDF pdfCompare(std::move(segCompare), wgtCompare);
 
         // Verify that the two PDFs agree on various quantities
         if (pdfBasic.expectationValue() != pdfCompare.expectationValue())
@@ -310,7 +325,7 @@ auto test_PDF() -> int
     {
         // Read PDF
         auto pdfWK = pdfs::parsePDFDescriptor(
-            (assetDir / fileName).string(), rng);
+            (assetDir / fileName).string());
 
         // Verify that sampling mode is set to sorted
         if (pdfWK.getSampling() != pdfs::SamplingMethods::sorted)
@@ -333,7 +348,7 @@ auto test_PDF() -> int
     {
         // Read PDF
         auto pdfAdv = pdfs::parsePDFDescriptor(
-            (assetDir / fileName).string(), rng);
+            (assetDir / fileName).string());
 
         // Verify that integral is correct
         if (pdfAdv.integral() != 1e3)

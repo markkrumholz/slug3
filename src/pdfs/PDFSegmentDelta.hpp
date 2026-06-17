@@ -30,14 +30,12 @@ namespace pdfs {
         /**
          * @brief Constructor for PDFSegmentDelta.
          * @param sValue The value at which the delta function is centered.
-         * @param rng Reference to the random number generator to be used for sampling.
          */
-        PDFSegmentDelta(double sValue, RngType &rng) :
-            PDFSegment(sValue, sValue, rng) {}
+        PDFSegmentDelta(double sValue) :
+            PDFSegment(sValue, sValue) {}
         /**
          * @brief Construct PDFSegmentDelta from a PDF file contents.
          * @param file File stream from which to construct
-         * @param rng Reference to the random number generator to be used for sampling.
          * @param fmt Format of the file being read
          * @param sMin The lower limit of the segment
          * @param sMax The upper limit of the segment
@@ -49,7 +47,6 @@ namespace pdfs {
          * sMin and sMax are ignored and wgt is an output.
         */        
         PDFSegmentDelta(std::ifstream& file, 
-            RngType& rng,
             FileFormats fmt,
             double &sMin,
             double &sMax,

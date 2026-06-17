@@ -8,11 +8,11 @@
  * @date 2024-06-12
  */
 
- #ifndef PDFCOMMONS_HPP
- #define PDFCOMMONS_HPP
+#ifndef PDFCOMMONS_HPP
+#define PDFCOMMONS_HPP
 
- #include <pcg_random.hpp>
- #include <cstdint>
+#include <pcg_random.hpp>
+#include <cstdint>
 
 /**
  * @brief A namespace to hold PDFs and quantities related to them.
@@ -39,8 +39,6 @@ namespace pdfs {
         basic,       /**< Basic format */
         advanced     /**< Advanced format */
     };
-
-    using RngType = pcg64;  /**< Alias for random number type */
 
 } // namespace pdfs
 

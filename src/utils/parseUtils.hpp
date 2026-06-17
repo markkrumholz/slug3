@@ -88,7 +88,7 @@ namespace utils {
             std::istream_iterator<std::string>()
         );
         return tokens;
-    }
+    } // namespace utils
 }
 
 #endif // PARSEUTILS_HPP

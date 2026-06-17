@@ -14,10 +14,12 @@
 #ifndef PDFSEGMENTLOGNORMAL_HPP
 #define PDFSEGMENTLOGNORMAL_HPP
 
+#include <algorithm>
 #include <cmath>
 #include <random>
 #include "PDFCommons.hpp"
 #include "PDFSegment.hpp"
+#include "../utils/RngThread.hpp"
 
 namespace pdfs {
 
@@ -41,15 +43,14 @@ namespace pdfs {
          * @param sMax The upper limit of the segment.
          * @param mean The mean of the x (NOT the mean of log(x)).
          * @param stddev The standard deviation of the normal distribution (i.e., stddev of log(x)).
-         * @param rng Reference to the random number generator to be used for sampling.
          * @details
          * This class represents a distribution that is normal in log(x), but note
          * that, for convenience, the value given by mean is the mean of *x*, not
          * the mean of *log(x)*. On the other hand, stddev is the standard deviation
          * of *log(x)*.
          */
-        PDFSegmentLognormal(double sMin, double sMax, double mean, double stddev, RngType &rng) :
-            PDFSegment(sMin, sMax, rng), mean_(mean), stddev_(stddev) {
+        PDFSegmentLognormal(double sMin, double sMax, double mean, double stddev) :
+            PDFSegment(sMin, sMax), mean_(mean), stddev_(stddev) {
                 log_mean_ = std::log(mean_);
                 root2dev_ = std::sqrt(2.0) * stddev_;
                 norm_ = std::sqrt(2.0 / M_PI) / stddev_ / (
@@ -60,7 +61,6 @@ namespace pdfs {
         /**
          * @brief Construct PDFSegmentLognormal from a PDF file contents.
          * @param file File stream from which to construct
-         * @param rng Reference to the random number generator to be used for sampling.
          * @param fmt Format of the file being read
          * @param sMin The lower limit of the segment
          * @param sMax The upper limit of the segment
@@ -72,7 +72,6 @@ namespace pdfs {
          * sMin and sMax are ignored and wgt is an output.
         */        
         PDFSegmentLognormal(std::ifstream& file, 
-            RngType& rng,
             FileFormats fmt,
             double &sMin,
             double &sMax,
@@ -135,7 +134,7 @@ namespace pdfs {
             std::lognormal_distribution<double> dist(log_mean_, stddev_);
             double sample;
             do {
-                sample = dist(rng_);
+                sample = dist(utils::rng());
             } while (sample < a_clamped || sample > b_clamped); // Rejection sampling
             return sample;
         }

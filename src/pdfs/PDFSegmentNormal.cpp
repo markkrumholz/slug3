@@ -13,10 +13,10 @@
 
 // File-based constructor
 pdfs::PDFSegmentNormal::PDFSegmentNormal(
-    std::ifstream& file, RngType& rng, 
+    std::ifstream& file,
     FileFormats fmt,
     double& sMin, double& sMax, double& wgt) :
-    PDFSegment(sMin, sMax, rng)
+    PDFSegment(sMin, sMax)
 {
     // Action depends on format
     if (fmt == FileFormats::basic)

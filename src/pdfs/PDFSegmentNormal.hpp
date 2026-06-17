@@ -17,6 +17,7 @@
 #include <random>
 #include "PDFCommons.hpp"
 #include "PDFSegment.hpp"
+#include "../utils/RngThread.hpp"
 
 namespace pdfs {
 
@@ -39,10 +40,9 @@ namespace pdfs {
          * @param sMax The upper limit of the segment.
          * @param mean The mean of the normal distribution.
          * @param stddev The standard deviation of the normal distribution.
-         * @param rng Reference to the random number generator to be used for sampling.
          */
-        PDFSegmentNormal(double sMin, double sMax, double mean, double stddev, RngType &rng) :
-            PDFSegment(sMin, sMax, rng), mean_(mean), stddev_(stddev) {
+        PDFSegmentNormal(double sMin, double sMax, double mean, double stddev) :
+            PDFSegment(sMin, sMax), mean_(mean), stddev_(stddev) {
                 norm_ = std::sqrt(2.0 / M_PI) / stddev_ /
                     (std::erf((sMax_ - mean_) / (stddev_ * std::sqrt(2))) -
                      std::erf((sMin_ - mean_) / (stddev_ * std::sqrt(2))));
@@ -50,7 +50,6 @@ namespace pdfs {
         /**
          * @brief Construct PDFSegmentNormal from a PDF file contents.
          * @param file File stream from which to construct
-         * @param rng Reference to the random number generator to be used for sampling.
          * @param fmt Format of the file being read
          * @param sMin The lower limit of the segment
          * @param sMax The upper limit of the segment
@@ -62,7 +61,6 @@ namespace pdfs {
          * sMin and sMax are ignored and wgt is an output.
         */        
         PDFSegmentNormal(std::ifstream& file, 
-            RngType& rng,
             FileFormats fmt,
             double &sMin,
             double &sMax,
@@ -121,7 +119,7 @@ namespace pdfs {
             std::normal_distribution<double> dist(mean_, stddev_);
             double sample;
             do {
-                sample = dist(rng_);
+                sample = dist(utils::rng());
             } while (sample < a_clamped || sample > b_clamped); // Rejection sampling to ensure the sample is within the specified range
             return sample;
         }

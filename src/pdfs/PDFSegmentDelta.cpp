@@ -13,10 +13,10 @@
 
 // File-based constructor
 pdfs::PDFSegmentDelta::PDFSegmentDelta(
-    std::ifstream& file, RngType& rng, 
+    std::ifstream& file,
     FileFormats fmt,
     double& sMin, double& sMax, double& wgt) :
-    PDFSegment(sMin, sMax, rng)
+    PDFSegment(sMin, sMax)
 {
     // Parameters expected only in advanced format
     if (fmt == FileFormats::advanced)

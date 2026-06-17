@@ -17,6 +17,7 @@
 #include <random>
 #include "PDFCommons.hpp"
 #include "PDFSegment.hpp"
+#include "../utils/RngThread.hpp"
 
 namespace pdfs {
 
@@ -38,10 +39,9 @@ namespace pdfs {
          * @param sMin The lower limit of the segment.
          * @param sMax The upper limit of the segment.
          * @param scale The exponential scale length of the distribution.
-         * @param rng Reference to the random number generator to be used for sampling.
          */
-        PDFSegmentExponential(double sMin, double sMax, double scale, RngType &rng) :
-            PDFSegment(sMin, sMax, rng), scale_(scale)
+        PDFSegmentExponential(double sMin, double sMax, double scale) :
+            PDFSegment(sMin, sMax), scale_(scale)
         {
             // Calculate normalization constant for the PDF segment
             norm_ = 1.0 / (scale_ * (std::exp(-sMin_ / scale_) - std::exp(-sMax_ / scale_)));
@@ -49,7 +49,6 @@ namespace pdfs {
         /**
          * @brief Construct PDFSegmentExponential from a PDF file contents.
          * @param file File stream from which to construct
-         * @param rng Reference to the random number generator to be used for sampling.
          * @param fmt Format of the file being read
          * @param sMin The lower limit of the segment
          * @param sMax The upper limit of the segment
@@ -61,7 +60,6 @@ namespace pdfs {
          * sMin and sMax are ignored and wgt is an output.
         */        
         PDFSegmentExponential(std::ifstream& file, 
-            RngType& rng,
             FileFormats fmt,
             double &sMin,
             double &sMax,
@@ -109,7 +107,7 @@ namespace pdfs {
         auto draw(const double a, const double b) const -> double override {
             const double a_clamped = std::max(a, sMin_);
             const double b_clamped = std::min(b, sMax_);
-            const double u = std::uniform_real_distribution<double>(0.0, 1.0)(rng_);
+            const double u = std::uniform_real_distribution<double>(0.0, 1.0)(utils::rng());
             const double exp_a = std::exp(-a_clamped / scale_);
             const double exp_b = std::exp(-b_clamped / scale_);
             return -scale_ * std::log(exp_a - u * (exp_a - exp_b)); // Inverse transform sampling for exponential distribution

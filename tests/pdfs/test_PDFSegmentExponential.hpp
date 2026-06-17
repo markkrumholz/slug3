@@ -17,6 +17,7 @@
 #include <cmath>
 #include <cstdio>
 #include "../src/pdfs/PDFSegmentExponential.hpp"
+#include "../src/utils/RngThread.hpp"
 #include "../tests/testUtils.hpp"
 
 /**
@@ -31,11 +32,14 @@
  */
 auto test_PDFSegmentExponential() -> int
 {
-    pdfs::RngType rng(42); // Create a random number generator with a fixed seed for reproducibility
+    // Set the rng seed to a fixed value for reproducibility
+    utils::rng.seed(42);
+
+    // Create a segment
     double sMin = 1.0; // The lower limit of the segment
     double sMax = 10.0; // The upper limit of the segment
     double scale = 2.0; // The exponential scale length
-    pdfs::PDFSegmentExponential pe(sMin, sMax, scale, rng); // Create a PDFSegmentExponential with sMin=1, sMax=10, scale=2
+    pdfs::PDFSegmentExponential pe(sMin, sMax, scale); // Create a PDFSegmentExponential with sMin=1, sMax=10, scale=2
 
     // Test PDF evaluation at specific points
     double x1 = 1.0; // At the lower limit

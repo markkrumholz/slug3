@@ -16,17 +16,16 @@
 #include <iostream>
 #include <string>
 #include "PDF.hpp"
+#include "../utils/RngThread.hpp"
 
 namespace pdfs 
 {
     /**
      * @brief Construct a PDF objects from a descriptor file
      * @param fileName Name of the file
-     * @param rng The random number engine for the PDF object
      * @returns A PDF objects constructed from the file
      */
-    auto parsePDFDescriptor(const std::string& fileName, 
-        RngType &rng) -> PDF;
+    auto parsePDFDescriptor(const std::string& fileName) -> PDF;
 }
 
 #endif // PDFFILEPARSER_HPP
