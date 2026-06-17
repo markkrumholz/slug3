@@ -27,6 +27,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -204,6 +205,88 @@ static void parseBreakpoints(const std::string& fileName,  // NOLINT misc-use-an
     }
 }
 
+// Method to parse main body
+static auto
+parseBody(const std::string& fileName,  // NOLINT misc-use-anonymous-namespace
+    const pdfs::FileFormats fmt,
+    std::ifstream& file,
+    std::vector<double>& breakpoints) ->
+    std::tuple<std::vector<std::unique_ptr<pdfs::PDFSegment> >,
+        std::vector<double>,
+        pdfs::SamplingMethods>
+{
+    // Allocate holders for segments and weights
+    std::vector<std::unique_ptr<pdfs::PDFSegment> > seg;
+    std::vector<double> wgt;
+
+    // Now parse the list of segments; segments are formatted
+    // as follows:
+    // segment
+    // type TYPE
+    // var1 VALUE
+    // var2 VALUE
+    // ...
+    // The number and type of variables in var1, var2, etc. depend
+    // on the type of segment.
+    std::string line;
+    bool inSegment = false;
+    size_t breakpointPtr = 0;
+    pdfs::SamplingMethods method = pdfs::SamplingMethods::stopNearest;
+    while (std::getline(file, line))
+    {
+
+        // Trim and tokenize the line
+        line = utils::trim(line);
+        if (line.empty()) { continue; } // Whitespace-only line; skip
+        auto tok = utils::tokenize(line);
+
+        // Check if we are currently a segment
+        if (inSegment)
+        {
+            // Call the segment parser
+            parseSegment(fileName, fmt, line, tok,
+                breakpoints, breakpointPtr, file, seg, wgt);
+
+            // Increment breakpoint counter
+            breakpointPtr++;
+
+            // Mark segment done
+            inSegment = false;
+        }
+        else
+        {
+
+            // If we're not in a segment, two types of line
+            // are acceptable: declaration of a new segment,
+            // taking the form
+            //    segment
+            // or a statement of what PDF policy we are using,
+            // of the form
+            //    method METHOD
+            // Check for one of these two.
+
+            if (tok.at(0) == "segment" && tok.size() == 1)
+            {
+                // Start of a new segment
+                inSegment = true;
+                continue;
+            }
+            
+            if (tok.at(0) == "method" && tok.size() == 2)
+            {
+                method = parseMethod(fileName, line, tok);
+                continue;
+            }
+
+            // Error if we reach here
+            parseError("unknown command", line, fileName);
+        }
+    }
+
+    // Return result
+    return { std::move(seg), wgt, method };
+}
+
 namespace pdfs {
 
     // General parser to start and decide if file is basic or advanced
@@ -256,72 +339,8 @@ namespace pdfs {
             parseBreakpoints(fileName, line, tokens, breakpoints);
         }
 
-        // Allocate holders for segments and weights
-        std::vector<std::unique_ptr<PDFSegment> > seg;
-        std::vector<double> wgt;
-
-        // Now parse the list of segments; segments are formatted
-        // as follows:
-        // segment
-        // type TYPE
-        // var1 VALUE
-        // var2 VALUE
-        // ...
-        // The number and type of variables in var1, var2, etc. depend
-        // on the type of segment.
-        bool inSegment = false;
-        size_t breakpointPtr = 0;
-        SamplingMethods method = SamplingMethods::stopNearest;
-        while (std::getline(file, line))
-        {
- 
-            // Trim and tokenize the line
-            line = utils::trim(line);
-            if (line.empty()) { continue; } // Whitespace-only line; skip
-            auto tok = utils::tokenize(line);
-
-            // Check if we are currently a segment
-            if (inSegment)
-            {
-                // Call the segment parser
-                parseSegment(fileName, fmt, line, tok,
-                    breakpoints, breakpointPtr, file, seg, wgt);
-
-                // Increment breakpoint counter
-                breakpointPtr++;
-
-                // Mark segment done
-                inSegment = false;
-            }
-            else
-            {
-
-                // If we're not in a segment, two types of line
-                // are acceptable: declaration of a new segment,
-                // taking the form
-                //    segment
-                // or a statement of what PDF policy we are using,
-                // of the form
-                //    method METHOD
-                // Check for one of these two.
-
-                if (tok.at(0) == "segment" && tok.size() == 1)
-                {
-                    // Start of a new segment
-                    inSegment = true;
-                    continue;
-                }
-                
-                if (tok.at(0) == "method" && tok.size() == 2)
-                {
-                    method = parseMethod(fileName, line, tok);
-                    continue;
-                }
-
-                // Error if we reach here
-                parseError("unknown command", line, fileName);
-            }
-        }
+        // Parse main body
+        auto [seg, wgt, method] = parseBody(fileName, fmt, file, breakpoints);
 
         // Close file
         file.close();
