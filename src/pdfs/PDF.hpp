@@ -14,6 +14,9 @@
 #ifndef PDF_HPP
 #define PDF_HPP
 
+#include "../utils/RngThread.hpp"
+#include "PDFCommons.hpp"
+#include "PDFSegment.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -21,11 +24,9 @@
 #include <memory>
 #include <random>
 #include <ranges>
+#include <stdexcept>
 #include <valarray>
 #include <vector>
-#include "PDFCommons.hpp"
-#include "PDFSegment.hpp"
-#include "../utils/RngThread.hpp"
 
 /**
  * @brief A namespace to hold PDFs and quantities related to them.
@@ -59,8 +60,7 @@ namespace pdfs {
         PDF(SC seg,
             WC wgt,
             SamplingMethods method = SamplingMethods::stopNearest,
-            bool normalize = true,
-            bool ownSegments = false) :
+            bool normalize = true) :
             seg_(std::move(seg)),
             wgt_(std::data(wgt), std::size(wgt)),
             method_(method),
@@ -72,15 +72,23 @@ namespace pdfs {
             if (normalize) {
                 normalizePDF();
             }
-            sMin_ = seg_[0]->getMin();
-            sMax_ = seg_[0]->getMax();
+            sMin_ = seg_.front()->getMin();
+            sMax_ = seg_.front()->getMax();
             for (auto& s : seg_) {
                 sMin_ = std::min(sMin_, s->getMin());
                 sMax_ = std::max(sMax_, s->getMax());
             }
         }
-        virtual ~PDF() = default;
+       virtual ~PDF() = default;
 
+        // Disallow copying, since we use unique_ptr
+        // objects to hold segments
+        PDF(const PDF&) = delete;
+        auto operator=(const PDF&) -> PDF& = delete;
+
+        // Default moves
+        PDF(PDF&&) = default; 
+        auto operator=(PDF&&) -> PDF& = default; 
 
         // Getters for internal state
         /** @brief Get the lower limit of the segment.
