@@ -8,26 +8,200 @@
  * @date 2024-06-14
  */
 
+#include "../utils/parseUtils.hpp"
+#include "PDF.hpp"
 #include "PDFCommons.hpp"
 #include "PDFFileParser.hpp"
+#include "PDFSegment.hpp"
 #include "PDFSegmentDelta.hpp"
 #include "PDFSegmentExponential.hpp"
 #include "PDFSegmentLognormal.hpp"
 #include "PDFSegmentNormal.hpp"
 #include "PDFSegmentPowerlaw.hpp"
 #include "PDFSegmentSchechter.hpp"
-#include "../utils/parseUtils.hpp"
+#include <algorithm>
+#include <cstdlib>
+#include <cstring>
+#include <exception>
+#include <fstream>
+#include <memory>
+#include <stdexcept>
+#include <string>
+#include <utility>
+#include <vector>
+
+
 
 // Little utility function to handle errors
 [[noreturn ]]
-void parseError(const std::string& err,
+static void parseError(const std::string& err,   // NOLINT misc-use-anonymous-namespace
     const std::string& line,
     const std::string& fileName)
 {
     std::string errMsg = "parsePDFDescriptor: " +
         err + "; file " + fileName;
-    if (!line.empty()) errMsg += ", line " + line;
+    if (!line.empty()) { errMsg += ", line " + line; }
     throw std::runtime_error(errMsg);
+}
+
+
+// Function to parse a single segment
+static void parseSegment(const std::string& fileName,  // NOLINT misc-use-anonymous-namespace
+    const pdfs::FileFormats fmt,
+    const std::string& line,
+    const std::vector<std::string>& tok, 
+    const std::vector<double>& breakpoints,
+    const size_t& breakpointPtr, 
+    std::ifstream& file,
+    std::vector<std::unique_ptr<pdfs::PDFSegment> >& seg,
+    std::vector<double>& wgt)
+{
+    if (tok.at(0) != "type" || tok.size() != 2)
+    {
+        parseError("expected 'type TYPE'", line, fileName);
+    }
+
+    // If we are in basic mode, extract lower and upper limits
+    // for this segment
+    double sMin = 0.0;
+    double sMax = 0.0;
+    if (fmt == pdfs::FileFormats::basic)
+    {
+        if (breakpoints.size() < breakpointPtr + 2)
+        {
+            parseError("too few breakpoints for number of segments",
+                line, fileName);
+        }
+        sMin = breakpoints.at(breakpointPtr);
+        sMax = breakpoints.at(breakpointPtr+1);
+    }
+
+    // Now call the file-based constructor for the appropriate
+    // segment type
+    double w = 0.0;
+    try
+    {
+        if (tok.at(1) == "delta")
+        {
+            seg.emplace_back(
+                std::make_unique<pdfs::PDFSegmentDelta>
+                (file, fmt, sMin, sMax, w));
+        }
+        else if (tok.at(1) == "exponential")
+        {
+            seg.emplace_back(
+                std::make_unique<pdfs::PDFSegmentExponential>
+                (file, fmt, sMin, sMax, w)
+            );
+        }
+        else if (tok.at(1) == "lognormal")
+        {
+            seg.emplace_back(
+                std::make_unique<pdfs::PDFSegmentLognormal>
+                (file, fmt, sMin, sMax, w)
+            );
+        }
+        else if (tok.at(1) == "normal")
+        {
+            seg.emplace_back(
+                std::make_unique<pdfs::PDFSegmentNormal>
+                (file, fmt, sMin, sMax, w)
+            );
+        }
+        else if (tok.at(1) == "powerlaw")
+        {
+            seg.emplace_back(
+                std::make_unique<pdfs::PDFSegmentPowerlaw>
+                (file, fmt, sMin, sMax, w)
+            );
+        }
+        else if (tok.at(1) == "schechter")
+        {
+            seg.emplace_back(
+                std::make_unique<pdfs::PDFSegmentSchechter>
+                (file, fmt, sMin, sMax, w)
+            );
+        } else {
+            parseError("unknown segment type " + tok.at(1),
+                line, fileName);
+        }
+    }
+    catch (const std::exception& error)
+    {
+        if (strlen(error.what()) == 0)
+        {
+            parseError("reached end of file before "
+                "completing segment " + tok.at(1),
+                line, fileName);
+        }
+        else
+        {
+            parseError("invalid options for segment type " + tok.at(1),
+                line, fileName);                        
+        }
+    }
+
+    // In advanced format mode, store weight
+    if (fmt == pdfs::FileFormats::advanced) { wgt.push_back(w); }
+
+}
+
+// Parse method
+static auto parseMethod(const std::string& fileName,  // NOLINT misc-use-anonymous-namespace
+    const std::string& line,
+    std::vector<std::string>& tok) -> pdfs::SamplingMethods
+{
+
+    if (tok.at(1) == "stop_nearest") { return pdfs::SamplingMethods::stopNearest; }
+    if (tok.at(1) == "stop_before") { return pdfs::SamplingMethods::stopBefore; }
+    if (tok.at(1) == "stop_after") { return pdfs::SamplingMethods::stopAfter; }
+    if (tok.at(1) == "stop_50") { return pdfs::SamplingMethods::stop50; }
+    if (tok.at(1) == "number") { return pdfs::SamplingMethods::number; }
+    if (tok.at(1) == "poisson") { return pdfs::SamplingMethods::poisson; }
+    if (tok.at(1) == "sorted_sampling") { return pdfs::SamplingMethods::sorted; }
+    // Error if we get here
+    parseError("unknown sampling method", line, fileName);
+}
+
+// Method to set weights in basic mode
+static void computeWgt(const std::vector<std::unique_ptr<pdfs::PDFSegment> >& seg,  // NOLINT misc-use-anonymous-namespace
+    std::vector<double>& breakpoints,
+    std::vector<double>& wgt)
+{
+    wgt.resize(seg.size());
+    wgt[0] = 1.0; // NOLINT cppcoreguidelines-pro-bounds-avoid-unchecked-container-access
+    for (size_t i = 1; i < seg.size(); i++)
+    {
+        pdfs::PDFSegment &s = *(seg[i]); // NOLINT cppcoreguidelines-pro-bounds-avoid-unchecked-container-access
+        pdfs::PDFSegment &sPrev = *(seg[i-1]); // NOLINT cppcoreguidelines-pro-bounds-avoid-unchecked-container-access
+        wgt[i] = wgt[i-1] * sPrev(breakpoints[i]) / s(breakpoints[i]); // NOLINT cppcoreguidelines-pro-bounds-avoid-unchecked-container-access
+    }
+}
+
+// Utility function to extract breakpoints
+static void parseBreakpoints(const std::string& fileName,  // NOLINT misc-use-anonymous-namespace
+    const std::string& line,
+    std::vector<std::string>& tokens,
+    std::vector<double>& breakpoints)
+{
+    tokens.erase(tokens.begin());  // Remove the token "breakpoints"
+    for (auto const& t : tokens)
+    {
+        try
+        {
+            breakpoints.push_back(utils::stod(t));
+        }
+        catch (const std::exception& error)
+        {
+            parseError("could not convert string to float",
+                line, fileName);
+        }
+    }
+    if (!std::ranges::is_sorted(breakpoints.begin(), breakpoints.end()))
+    {
+        parseError("breakpoints must be non-decreasing",
+            line, fileName);
+    }
 }
 
 namespace pdfs {
@@ -47,7 +221,7 @@ namespace pdfs {
         while (std::getline(file, line))
         {
             line = utils::trim(line);  // Trim whitespace
-            if (line.empty()) continue; // Whitespace-only line
+            if (line.empty()) { continue; } // Whitespace-only line
             break;  // If we are here, line is non-empty
         }
 
@@ -58,12 +232,12 @@ namespace pdfs {
         // advanced mode file) or "breakpoints" followed by at least
         // two numbers (to indicate a basic mode file); check
         // that it is indeed one of these two
-        FileFormats fmt;
-        if (tokens[0] == "breakpoints" && tokens.size() > 2)
+        FileFormats fmt = FileFormats::basic;
+        if (tokens.at(0) == "breakpoints" && tokens.size() > 2)
         {
             fmt = FileFormats::basic;
         } 
-        else if (tokens[0] == "advanced") 
+        else if (tokens.at(0) == "advanced") 
         {
             fmt = FileFormats::advanced;
         } 
@@ -78,25 +252,8 @@ namespace pdfs {
         // stored in the rest of the line
         std::vector<double> breakpoints;
         if (fmt == FileFormats::basic)
-        {
-            tokens.erase(tokens.begin());  // Remove the token "breakpoints"
-            for (auto t : tokens)
-            {
-                try
-                {
-                    breakpoints.push_back(utils::stod(t));
-                }
-                catch (const std::exception& error)
-                {
-                    parseError("could not convert string to float",
-                        line, fileName);
-                }
-            }
-            if (!std::is_sorted(breakpoints.begin(), breakpoints.end()))
-            {
-                parseError("breakpoints must be non-decreasing",
-                    line, fileName);
-            }
+        { 
+            parseBreakpoints(fileName, line, tokens, breakpoints);
         }
 
         // Allocate holders for segments and weights
@@ -114,111 +271,27 @@ namespace pdfs {
         // on the type of segment.
         bool inSegment = false;
         size_t breakpointPtr = 0;
-        SamplingMethods method;
+        SamplingMethods method = SamplingMethods::stopNearest;
         while (std::getline(file, line))
         {
  
             // Trim and tokenize the line
             line = utils::trim(line);
-            if (line.empty()) continue; // Whitespace-only line; skip
+            if (line.empty()) { continue; } // Whitespace-only line; skip
             auto tok = utils::tokenize(line);
 
             // Check if we are currently a segment
             if (inSegment)
             {
-                // We are in a segment, so check that the current line
-                // declares the type of segment
-                if (tok[0] != "type" || tok.size() != 2)
-                {
-                    parseError("expected 'type TYPE'", line, fileName);
-                }
+                // Call the segment parser
+                parseSegment(fileName, fmt, line, tok,
+                    breakpoints, breakpointPtr, file, seg, wgt);
 
-                // If we are in basic mode, extract lower and upper limits
-                // for this segment
-                double sMin = 0.0, sMax = 0.0;
-                if (fmt == FileFormats::basic)
-                {
-                    if (breakpoints.size() < breakpointPtr + 2)
-                    {
-                        parseError("too few breakpoints for number of segments",
-                            line, fileName);
-                    }
-                    sMin = breakpoints[breakpointPtr];
-                    sMax = breakpoints[breakpointPtr+1];
-                    breakpointPtr++;
-                }
+                // Increment breakpoint counter
+                breakpointPtr++;
 
-                // Now call the file-based constructor for the appropriate
-                // segment type
-                double w = 0.0;
-                try
-                {
-                    if (tok[1] == "delta")
-                    {
-                        seg.emplace_back(
-                            std::make_unique<PDFSegmentDelta>
-                            (file, fmt, sMin, sMax, w));
-                    }
-                    else if (tok[1] == "exponential")
-                    {
-                        seg.emplace_back(
-                            std::make_unique<PDFSegmentExponential>
-                            (file, fmt, sMin, sMax, w)
-                        );
-                    }
-                    else if (tok[1] == "lognormal")
-                    {
-                        seg.emplace_back(
-                            std::make_unique<PDFSegmentLognormal>
-                            (file, fmt, sMin, sMax, w)
-                        );
-                    }
-                    else if (tok[1] == "normal")
-                    {
-                        seg.emplace_back(
-                            std::make_unique<PDFSegmentNormal>
-                            (file, fmt, sMin, sMax, w)
-                        );
-                    }
-                    else if (tok[1] == "powerlaw")
-                    {
-                        seg.emplace_back(
-                            std::make_unique<PDFSegmentPowerlaw>
-                            (file, fmt, sMin, sMax, w)
-                        );
-                    }
-                    else if (tok[1] == "schechter")
-                    {
-                        seg.emplace_back(
-                            std::make_unique<PDFSegmentSchechter>
-                            (file, fmt, sMin, sMax, w)
-                        );
-                    } else {
-                        parseError("unknown segment type " + tok[1],
-                            line, fileName);
-                    }
-                }
-                catch (const std::exception& error)
-                {
-                    if (strlen(error.what()) == 0)
-                    {
-                        parseError("reached end of file before "
-                            "completing segment " + tok[1],
-                            line, fileName);
-                    }
-                    else
-                    {
-                        parseError("invalid options for segment type " + tok[1],
-                            line, fileName);                        
-                    }
-                }
-
-                // In advanced format mode, store weight
-                if (fmt == FileFormats::advanced) wgt.push_back(w);
-
-                // Done with segment
+                // Mark segment done
                 inSegment = false;
-
             }
             else
             {
@@ -232,63 +305,62 @@ namespace pdfs {
                 //    method METHOD
                 // Check for one of these two.
 
-                if (tok[0] == "segment" && tok.size() == 1)
+                if (tok.at(0) == "segment" && tok.size() == 1)
                 {
                     // Start of a new segment
                     inSegment = true;
                     continue;
                 }
-                else if (tok[0] == "method" && tok.size() == 2)
+                
+                if (tok.at(0) == "method" && tok.size() == 2)
                 {
-                    // Statement of drawing policy
-                    if (tok[1] == "stop_nearest") method = SamplingMethods::stopNearest;
-                    else if (tok[1] == "stop_before") method = SamplingMethods::stopBefore;
-                    else if (tok[1] == "stop_after") method = SamplingMethods::stopAfter;
-                    else if (tok[1] == "stop_50") method = SamplingMethods::stop50;
-                    else if (tok[1] == "number") method = SamplingMethods::number;
-                    else if (tok[1] == "poisson") method = SamplingMethods::poisson;
-                    else if (tok[1] == "sorted_sampling") method = SamplingMethods::sorted;
-                    else
-                    {
-                        parseError("unknown sampling method", line, fileName);
-                    }
+                    method = parseMethod(fileName, line, tok);
+                    continue;
                 }
-                else
-                {
-                    parseError("unknown command", line, fileName);
-                }
+
+                // Error if we reach here
+                parseError("unknown command", line, fileName);
             }
         }
 
         // Close file
         file.close();
 
+        // Check that we have the right number of segments
+        if (fmt == FileFormats::basic)
+        {
+            if (seg.size() + 1 != breakpoints.size())
+            {
+                parseError("found inconsistent number of segments "
+                    "and breakpoints", "", fileName);
+            }
+        }
+        else
+        {
+            if (seg.empty())
+            {
+                parseError("need at least one segment", "", fileName);
+            }
+        }
+
         // Final step depends on format
         if (fmt == FileFormats::basic)
         {
             // Basic format: calculate weights to make
             // segments continuous
-            wgt.resize(seg.size());
-            wgt[0] = 1.0;
-            for (size_t i = 1; i < seg.size(); i++)
-            {
-                PDFSegment &s = *(seg[i]);
-                PDFSegment &sPrev = *(seg[i-1]);
-                wgt[i] = wgt[i-1] * sPrev(breakpoints[i]) /
-                    s(breakpoints[i]);
-            }
+            computeWgt(seg, breakpoints, wgt);
 
             // Create and return normalized PDF
-            bool normalize = true;
-            return PDF(std::move(seg), wgt, method, normalize);
+            const bool normalize = true;
+            return { std::move(seg), wgt, method, normalize };
         }
-        else
+        else  // NOLINT readability-else-after-return
         {
             // Advanced mode, so don't do any normalization,
             // just return
-            bool normalize = false;
-            return PDF(std::move(seg), wgt, method, normalize);            
+            const bool normalize = false;
+            return { std::move(seg), wgt, method, normalize };            
         }
     }
 
-}
+} // namespace pdfs

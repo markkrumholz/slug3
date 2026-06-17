@@ -11,12 +11,8 @@
 #ifndef PDFFILEPARSER_HPP
 #define PDFFILEPARSER_HPP
 
-#include <cstdio>
-#include <fstream>
-#include <iostream>
-#include <string>
 #include "PDF.hpp"
-#include "../utils/RngThread.hpp"
+#include <string>
 
 namespace pdfs 
 {
@@ -26,6 +22,6 @@ namespace pdfs
      * @returns A PDF objects constructed from the file
      */
     auto parsePDFDescriptor(const std::string& fileName) -> PDF;
-}
+} // namespace pdfs
 
 #endif // PDFFILEPARSER_HPP
