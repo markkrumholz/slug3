@@ -55,14 +55,14 @@ namespace pdfs {
         template <typename SC, typename WC>
         PDF(SC seg,
             WC wgt,
-            rngType &rng,
-            samplingMethods::method meth = samplingMethods::stopNearest,
+            RngType &rng,
+            SamplingMethods method = SamplingMethods::stopNearest,
             bool normalize = true,
             bool ownSegments = false) :
             seg_(std::begin(seg), std::end(seg)),
             wgt_(std::data(wgt), std::size(wgt)),
             rng_(rng),
-            method_(meth),
+            method_(method),
             normalized_(normalize),
             ownSegments_(ownSegments)
         {
@@ -108,7 +108,7 @@ namespace pdfs {
          * @brief Get sampling method
          * @return The current sampling method
          */
-        auto getSampling() const -> samplingMethods::method
+        auto getSampling() const -> SamplingMethods
         {
             return method_;
         }
@@ -116,7 +116,7 @@ namespace pdfs {
          * @brief Set sampling method
          * @param method Method to set
          */
-        void setSampling(samplingMethods::method method)
+        void setSampling(SamplingMethods method)
         {
             method_ = method;
         }
@@ -246,10 +246,10 @@ namespace pdfs {
             std::vector<double> sample;
             switch (method_)
             {
-                case samplingMethods::stopNearest:
-                case samplingMethods::stopBefore:
-                case samplingMethods::stopAfter:
-                case samplingMethods::stop50:
+                case SamplingMethods::stopNearest:
+                case SamplingMethods::stopBefore:
+                case SamplingMethods::stopAfter:
+                case SamplingMethods::stop50:
                 {
                     // Stop methods
                     double sum = 0.0;
@@ -266,12 +266,12 @@ namespace pdfs {
                             std::uniform_real_distribution<double> dist(0.0, 1.0);
                             bool keep =
                                 (
-                                    method_ == samplingMethods::stopNearest &&
+                                    method_ == SamplingMethods::stopNearest &&
                                     s + sum - target < target - sum
                                 ) || (
-                                    method_ == samplingMethods::stopAfter
+                                    method_ == SamplingMethods::stopAfter
                                 ) || (
-                                    method_ == samplingMethods::stop50 &&
+                                    method_ == SamplingMethods::stop50 &&
                                     dist(rng_) > 0.5
                                 );
                             if (keep) sample.push_back(s);
@@ -280,20 +280,20 @@ namespace pdfs {
                     }
                     return sample;
                 }
-                case samplingMethods::number:
+                case SamplingMethods::number:
                 {
                     // Number method: compute number of samples, then draw
                     unsigned int nSamp = std::round(target / expectationValue(a,b));
                     return draw(nSamp, a, b);
                 }
-                case samplingMethods::poisson:
+                case SamplingMethods::poisson:
                 {
                     // Poisson method: draw number of samples, then draw
                     std::poisson_distribution<unsigned int> dist(target / expectationValue(a,b));
                     unsigned int nSamp = dist(rng_);
                     return draw(nSamp, a, b);
                 }
-                case samplingMethods::sorted:
+                case SamplingMethods::sorted:
                 {
                     // Sorted sampling: first draw repeatedly using number
                     // method, until target is exceeded, then sort list and
@@ -322,10 +322,10 @@ namespace pdfs {
 
         std::vector<PDFSegment *> seg_; /**< Segments in the PDF */
         std::valarray<double> wgt_;     /**< Weights of segments */
-        rngType& rng_;                  /**< Random engine */
+        RngType& rng_;                  /**< Random engine */
         double sMin_;                   /**< PDF lower limit */
         double sMax_;                   /**< PDF upper limit */
-        samplingMethods::method method_; /**< Sampling method for this PDF */
+        SamplingMethods method_;        /**< Sampling method for this PDF */
         bool normalized_;               /**< Is this PDF properly normalized? */
         bool ownSegments_;              /**< True if we own the segments */
     };

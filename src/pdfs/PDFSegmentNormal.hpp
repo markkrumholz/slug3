@@ -41,7 +41,7 @@ namespace pdfs {
          * @param stddev The standard deviation of the normal distribution.
          * @param rng Reference to the random number generator to be used for sampling.
          */
-        PDFSegmentNormal(double sMin, double sMax, double mean, double stddev, rngType &rng) :
+        PDFSegmentNormal(double sMin, double sMax, double mean, double stddev, RngType &rng) :
             PDFSegment(sMin, sMax, rng), mean_(mean), stddev_(stddev) {
                 norm_ = std::sqrt(2.0 / M_PI) / stddev_ /
                     (std::erf((sMax_ - mean_) / (stddev_ * std::sqrt(2))) -
@@ -62,8 +62,8 @@ namespace pdfs {
          * sMin and sMax are ignored and wgt is an output.
         */        
         PDFSegmentNormal(std::ifstream& file, 
-            rngType& rng,
-            fileFormats::format fmt,
+            RngType& rng,
+            FileFormats fmt,
             double &sMin,
             double &sMax,
             double &wgt);

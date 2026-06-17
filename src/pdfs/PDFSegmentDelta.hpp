@@ -32,7 +32,7 @@ namespace pdfs {
          * @param sValue The value at which the delta function is centered.
          * @param rng Reference to the random number generator to be used for sampling.
          */
-        PDFSegmentDelta(double sValue, rngType &rng) :
+        PDFSegmentDelta(double sValue, RngType &rng) :
             PDFSegment(sValue, sValue, rng) {}
         /**
          * @brief Construct PDFSegmentDelta from a PDF file contents.
@@ -49,8 +49,8 @@ namespace pdfs {
          * sMin and sMax are ignored and wgt is an output.
         */        
         PDFSegmentDelta(std::ifstream& file, 
-            rngType& rng,
-            fileFormats::format fmt,
+            RngType& rng,
+            FileFormats fmt,
             double &sMin,
             double &sMax,
             double &wgt);

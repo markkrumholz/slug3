@@ -41,7 +41,7 @@ namespace pdfs {
          * @param alpha The power-law index of the distribution.
          * @param rng Reference to the random number generator to be used for sampling.
          */
-        PDFSegmentPowerlaw(double sMin, double sMax, double alpha, rngType &rng) :
+        PDFSegmentPowerlaw(double sMin, double sMax, double alpha, RngType &rng) :
             PDFSegment(sMin, sMax, rng), alpha_(alpha) {
                 // Calculate normalization constant for the PDF segment
                 if (alpha_ != -1) {
@@ -65,8 +65,8 @@ namespace pdfs {
          * sMin and sMax are ignored and wgt is an output.
         */        
         PDFSegmentPowerlaw(std::ifstream& file, 
-            rngType& rng,
-            fileFormats::format fmt,
+            RngType& rng,
+            FileFormats fmt,
             double &sMin,
             double &sMax,
             double &wgt);

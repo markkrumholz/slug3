@@ -48,7 +48,7 @@ namespace pdfs {
          * the mean of *log(x)*. On the other hand, stddev is the standard deviation
          * of *log(x)*.
          */
-        PDFSegmentLognormal(double sMin, double sMax, double mean, double stddev, rngType &rng) :
+        PDFSegmentLognormal(double sMin, double sMax, double mean, double stddev, RngType &rng) :
             PDFSegment(sMin, sMax, rng), mean_(mean), stddev_(stddev) {
                 log_mean_ = std::log(mean_);
                 root2dev_ = std::sqrt(2.0) * stddev_;
@@ -72,8 +72,8 @@ namespace pdfs {
          * sMin and sMax are ignored and wgt is an output.
         */        
         PDFSegmentLognormal(std::ifstream& file, 
-            rngType& rng,
-            fileFormats::format fmt,
+            RngType& rng,
+            FileFormats fmt,
             double &sMin,
             double &sMax,
             double &wgt);

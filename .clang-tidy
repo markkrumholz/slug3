@@ -1,0 +1,81 @@
+---
+Checks: >-
+  bugprone-*,
+  cert-*,
+  clang-analyzer-*,
+  concurrency-*,
+  cppcoreguidelines-*,
+  llvm-*,
+  misc-*,
+  modernize-*,
+  performance-*,
+  portability-*,
+  readability-*,
+  -abseil-*,
+  -altera-*,
+  -android-*,
+  -boost-*,
+  -darwin-*,
+  -fuchsia-*,
+  -google-*,
+  -hicpp-*,
+  -linuxkernel-*,
+  -llvmlibc-*,
+  -mpi-*,
+  -objc-*,
+  -openmp-*,
+  -webkit-*,
+  -zircon-*,
+  -bugprone-easily-swappable-parameters,
+  -cppcoreguidelines-avoid-magic-numbers,
+  -cppcoreguidelines-non-private-member-variables-in-classes,
+  -llvm-header-guard,
+  -llvm-prefer-isa-or-dyn-cast-in-conditionals,
+  -llvm-prefer-register-over-unsigned,
+  -llvm-twine-local,
+  -llvm-use-new-mlir-op-builder,
+  -misc-no-recursion,
+  -misc-non-private-member-variables-in-classes,
+  -performance-enum-size,
+  -portability-restrict-system-includes,
+  -readability-identifier-length,
+  -readability-magic-numbers
+
+WarningsAsErrors: ''
+
+# Warn on project headers only; exclude the pcg-cpp submodule
+HeaderFilterRegex: '.*/src/(?!pcg-cpp)'
+
+FormatStyle: 'llvm'
+
+CheckOptions:
+  # Naming conventions matching project style (camelBack methods/members,
+  # trailing underscore on members, CamelCase types, lower_case namespaces)
+  - key: readability-identifier-naming.NamespaceCase
+    value: lower_case
+  - key: readability-identifier-naming.ClassCase
+    value: CamelCase
+  - key: readability-identifier-naming.StructCase
+    value: CamelCase
+  - key: readability-identifier-naming.FunctionCase
+    value: camelBack
+  - key: readability-identifier-naming.MethodCase
+    value: camelBack
+  - key: readability-identifier-naming.MemberCase
+    value: camelBack
+  - key: readability-identifier-naming.MemberSuffix
+    value: '_'
+  - key: readability-identifier-naming.VariableCase
+    value: camelBack
+  - key: readability-identifier-naming.ParameterCase
+    value: camelBack
+  - key: readability-identifier-naming.EnumCase
+    value: CamelCase
+  - key: readability-identifier-naming.EnumConstantCase
+    value: camelBack
+  - key: readability-identifier-naming.TypeAliasCase
+    value: CamelCase
+  - key: readability-identifier-naming.TypedefCase
+    value: camelBack
+  - key: readability-identifier-naming.TemplateParameterCase
+    value: CamelCase

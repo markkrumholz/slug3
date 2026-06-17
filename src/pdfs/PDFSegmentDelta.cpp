@@ -13,13 +13,13 @@
 
 // File-based constructor
 pdfs::PDFSegmentDelta::PDFSegmentDelta(
-    std::ifstream& file, rngType& rng, 
-    fileFormats::format fmt,
+    std::ifstream& file, RngType& rng, 
+    FileFormats fmt,
     double& sMin, double& sMax, double& wgt) :
     PDFSegment(sMin, sMax, rng)
 {
     // Parameters expected only in advanced format
-    if (fmt == fileFormats::advanced)
+    if (fmt == FileFormats::advanced)
     {
          // Call segment parser to get the tokens we need
         std::vector<std::string> tokens =

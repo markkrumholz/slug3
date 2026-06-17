@@ -30,7 +30,7 @@
  */
 auto test_PDFSegmentSchechter() -> int
 {
-    pdfs::rngType rng(42); // Create a random number generator with a fixed seed for reproducibility
+    pdfs::RngType rng(42); // Create a random number generator with a fixed seed for reproducibility
     double sMin = 1.0; // The lower limit of the segment
     double sMax = 10.0; // The upper limit of the segment
     double sStar = 5.0; // The characteristic scale of the Schechter function

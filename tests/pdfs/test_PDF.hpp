@@ -30,7 +30,7 @@
   */
 auto test_PDF() -> int
 {
-    pdfs::rngType rng(42); // Create a random number generator with a fixed seed for reproducibility
+    pdfs::RngType rng(42); // Create a random number generator with a fixed seed for reproducibility
 
     // Create properly normalized PDF and non-normalized PDFs
     // consisting of a delta function plus a lognormal plus a
@@ -49,8 +49,8 @@ auto test_PDF() -> int
     std::vector<pdfs::PDFSegment*> seg = { &pd, &pln, &ppl };
     std::vector<double> wgt = { 0.2, 1.4, 0.4 };
     std::vector<double> wNorm = { 0.1, 0.7, 0.2 };
-    pdfs::PDF pdf(seg, wgt, rng, pdfs::samplingMethods::stopNearest, true);
-    pdfs::PDF pdfNN(seg, wgt, rng, pdfs::samplingMethods::stopNearest, false);
+    pdfs::PDF pdf(seg, wgt, rng, pdfs::SamplingMethods::stopNearest, true);
+    pdfs::PDF pdfNN(seg, wgt, rng, pdfs::SamplingMethods::stopNearest, false);
 
     // Compute normalizations each segment should have after normalization
     std::array<double, 3> norm = {
@@ -198,7 +198,7 @@ auto test_PDF() -> int
 
     // Test Poisson sampling; should produce mean matching expectation value
     double target = 1.0e4;
-    pdf.setSampling(pdfs::samplingMethods::poisson);
+    pdf.setSampling(pdfs::SamplingMethods::poisson);
     auto sample = pdf.drawTarget(target, a, b);
     sample_sum = 0.0;
     for (auto s : sample) sample_sum += s;
@@ -217,7 +217,7 @@ auto test_PDF() -> int
     for (int i = 0; i < n_test; i++)
     {
         // Stop before
-        pdf.setSampling(pdfs::samplingMethods::stopBefore);
+        pdf.setSampling(pdfs::SamplingMethods::stopBefore);
         auto sample_before = pdf.drawTarget(target);
         sample_sum = 0.0;
         for (auto s : sample_before) sample_sum += s;
@@ -230,7 +230,7 @@ auto test_PDF() -> int
         }
 
         // Stop after
-        pdf.setSampling(pdfs::samplingMethods::stopAfter);
+        pdf.setSampling(pdfs::SamplingMethods::stopAfter);
         auto sample_after = pdf.drawTarget(target);
         sample_sum = 0.0;
         for (auto s : sample_after) sample_sum += s;
@@ -243,7 +243,7 @@ auto test_PDF() -> int
         }
 
         // Stop 50
-        pdf.setSampling(pdfs::samplingMethods::stop50);
+        pdf.setSampling(pdfs::SamplingMethods::stop50);
         auto sample_50 = pdf.drawTarget(target);
         sample_sum = 0.0;
         for (auto s : sample_50) sample_sum += s;
@@ -313,7 +313,7 @@ auto test_PDF() -> int
             (assetDir / fileName).string(), rng);
 
         // Verify that sampling mode is set to sorted
-        if (pdfWK.getSampling() != pdfs::samplingMethods::sorted)
+        if (pdfWK.getSampling() != pdfs::SamplingMethods::sorted)
         {
             std::cerr << "test_PDF: failed to correctly set "
                 "sampling method from basic-mode PDF descriptor "

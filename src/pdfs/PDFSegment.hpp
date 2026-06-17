@@ -38,7 +38,7 @@ namespace pdfs {
          * @param upper The upper limit of the segment.
          * @param rng Reference to the random number generator to be used for sampling.
          */
-        PDFSegment(double sMin, double sMax, rngType &rng) : 
+        PDFSegment(double sMin, double sMax, RngType &rng) : 
             sMin_(sMin), sMax_(sMax), rng_(rng) {}
         virtual ~PDFSegment() = default;
 
@@ -108,7 +108,7 @@ namespace pdfs {
 
         double sMin_; /**< The lower limit of the segment */
         double sMax_; /**< The upper limit of the segment */
-        rngType &rng_; /**< Reference to the random number generator */
+        RngType &rng_; /**< Reference to the random number generator */
     };
 
 }

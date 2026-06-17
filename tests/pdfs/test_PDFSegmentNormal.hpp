@@ -29,7 +29,7 @@
  */
 auto test_PDFSegmentNormal() -> int
 {
-    pdfs::rngType rng(42); // Create a random number generator with a fixed seed for reproducibility
+    pdfs::RngType rng(42); // Create a random number generator with a fixed seed for reproducibility
     double mean = 5.0; // The mean of the normal distribution
     double stdDev = 1.0; // The standard deviation of the normal distribution
     double sMin = 1.0; // The lower limit of the segment

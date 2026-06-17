@@ -13,13 +13,13 @@
 
 // File-based constructor
 pdfs::PDFSegmentPowerlaw::PDFSegmentPowerlaw(
-    std::ifstream& file, rngType& rng, 
-    fileFormats::format fmt,
+    std::ifstream& file, RngType& rng, 
+    FileFormats fmt,
     double& sMin, double& sMax, double& wgt) :
     PDFSegment(sMin, sMax, rng)
 {
     // Action depends on format
-    if (fmt == fileFormats::basic)
+    if (fmt == FileFormats::basic)
     {
         // Basic format
 

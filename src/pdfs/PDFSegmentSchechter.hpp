@@ -40,7 +40,7 @@ namespace pdfs {
          * @param alpha The power-law index of the Schechter function.
          * @param rng Reference to the random number generator to be used for sampling.
          */
-        PDFSegmentSchechter(double sMin, double sMax, double sStar, double alpha, rngType &rng) :
+        PDFSegmentSchechter(double sMin, double sMax, double sStar, double alpha, RngType &rng) :
             PDFSegment(sMin, sMax, rng), sStar_(sStar), alpha_(alpha) {
                 // Calculate normalization constant for the PDF segment
                 norm_ = 1.0 / (
@@ -65,8 +65,8 @@ namespace pdfs {
          * sMin and sMax are ignored and wgt is an output.
         */        
         PDFSegmentSchechter(std::ifstream& file, 
-            rngType& rng,
-            fileFormats::format fmt,
+            RngType& rng,
+            FileFormats fmt,
             double &sMin,
             double &sMax,
             double &wgt);

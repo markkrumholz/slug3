@@ -40,7 +40,7 @@ namespace pdfs {
          * @param scale The exponential scale length of the distribution.
          * @param rng Reference to the random number generator to be used for sampling.
          */
-        PDFSegmentExponential(double sMin, double sMax, double scale, rngType &rng) :
+        PDFSegmentExponential(double sMin, double sMax, double scale, RngType &rng) :
             PDFSegment(sMin, sMax, rng), scale_(scale)
         {
             // Calculate normalization constant for the PDF segment
@@ -61,8 +61,8 @@ namespace pdfs {
          * sMin and sMax are ignored and wgt is an output.
         */        
         PDFSegmentExponential(std::ifstream& file, 
-            rngType& rng,
-            fileFormats::format fmt,
+            RngType& rng,
+            FileFormats fmt,
             double &sMin,
             double &sMax,
             double &wgt);

@@ -34,7 +34,7 @@ namespace pdfs {
 
     // General parser to start and decide if file is basic or advanced
     auto parsePDFDescriptor(const std::string& fileName,
-        rngType& rng) -> PDF
+        RngType& rng) -> PDF
     {
         // First try to open file
         std::ifstream file(fileName);
@@ -59,14 +59,14 @@ namespace pdfs {
         // advanced mode file) or "breakpoints" followed by at least
         // two numbers (to indicate a basic mode file); check
         // that it is indeed one of these two
-        fileFormats::format fmt;
+        FileFormats fmt;
         if (tokens[0] == "breakpoints" && tokens.size() > 2)
         {
-            fmt = fileFormats::basic;
+            fmt = FileFormats::basic;
         } 
         else if (tokens[0] == "advanced") 
         {
-            fmt = fileFormats::advanced;
+            fmt = FileFormats::advanced;
         } 
         else
         {
@@ -78,7 +78,7 @@ namespace pdfs {
         // If we are in basic mode, extract the breakpoints, which are
         // stored in the rest of the line
         std::vector<double> breakpoints;
-        if (fmt == fileFormats::basic)
+        if (fmt == FileFormats::basic)
         {
             tokens.erase(tokens.begin());  // Remove the token "breakpoints"
             for (auto t : tokens)
@@ -115,7 +115,7 @@ namespace pdfs {
         // on the type of segment.
         bool inSegment = false;
         size_t breakpointPtr = 0;
-        samplingMethods::method method;
+        SamplingMethods method;
         while (std::getline(file, line))
         {
  
@@ -137,7 +137,7 @@ namespace pdfs {
                 // If we are in basic mode, extract lower and upper limits
                 // for this segment
                 double sMin = 0.0, sMax = 0.0;
-                if (fmt == fileFormats::basic)
+                if (fmt == FileFormats::basic)
                 {
                     if (breakpoints.size() < breakpointPtr + 2)
                     {
@@ -208,7 +208,7 @@ namespace pdfs {
                 }
 
                 // In advanced format mode, store weight
-                if (fmt == fileFormats::advanced) wgt.push_back(w);
+                if (fmt == FileFormats::advanced) wgt.push_back(w);
 
                 // Done with segment
                 inSegment = false;
@@ -235,13 +235,13 @@ namespace pdfs {
                 else if (tok[0] == "method" && tok.size() == 2)
                 {
                     // Statement of drawing policy
-                    if (tok[1] == "stop_nearest") method = samplingMethods::stopNearest;
-                    else if (tok[1] == "stop_before") method = samplingMethods::stopBefore;
-                    else if (tok[1] == "stop_after") method = samplingMethods::stopAfter;
-                    else if (tok[1] == "stop_50") method = samplingMethods::stop50;
-                    else if (tok[1] == "number") method = samplingMethods::number;
-                    else if (tok[1] == "poisson") method = samplingMethods::poisson;
-                    else if (tok[1] == "sorted_sampling") method = samplingMethods::sorted;
+                    if (tok[1] == "stop_nearest") method = SamplingMethods::stopNearest;
+                    else if (tok[1] == "stop_before") method = SamplingMethods::stopBefore;
+                    else if (tok[1] == "stop_after") method = SamplingMethods::stopAfter;
+                    else if (tok[1] == "stop_50") method = SamplingMethods::stop50;
+                    else if (tok[1] == "number") method = SamplingMethods::number;
+                    else if (tok[1] == "poisson") method = SamplingMethods::poisson;
+                    else if (tok[1] == "sorted_sampling") method = SamplingMethods::sorted;
                     else
                     {
                         parseError("unknown sampling method", line, fileName);
@@ -258,7 +258,7 @@ namespace pdfs {
         file.close();
 
         // Final step depends on format
-        if (fmt == fileFormats::basic)
+        if (fmt == FileFormats::basic)
         {
             // Basic format: calculate weights to make
             // segments continuous

@@ -26,7 +26,7 @@ namespace pdfs
      * @returns A PDF objects constructed from the file
      */
     auto parsePDFDescriptor(const std::string& fileName, 
-        rngType &rng) -> PDF;
+        RngType &rng) -> PDF;
 }
 
 #endif // PDFFILEPARSER_HPP
