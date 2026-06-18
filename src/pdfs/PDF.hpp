@@ -62,13 +62,15 @@ namespace pdfs {
             SamplingMethods method = SamplingMethods::stopNearest,
             bool normalize = true) :
             seg_(std::move(seg)),
-            wgt_(std::data(wgt), std::size(wgt)),
             method_(method),
             normalized_(normalize)
         {
-            if (wgt_.size() == 0) {
+            const auto n = std::size(wgt);
+            const auto* ptr = std::data(wgt);
+            if (n == 0 || ptr == nullptr) {
                 throw std::runtime_error("PDF: must have at least one segment");
             }
+            wgt_ = std::valarray<double>(ptr, n);
             if (wgt_.min() <= 0) { // Safety check
                 throw std::runtime_error("PDF: elements of wgt must be positive");
             }
