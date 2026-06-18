@@ -8,7 +8,7 @@
  * @date 2024-06-14
  */
 
-#include "../utils/parseUtils.hpp"
+#include "../utils/ParseUtils.hpp"
 #include "PDF.hpp"
 #include "PDFCommons.hpp"
 #include "PDFFileParser.hpp"
@@ -198,7 +198,7 @@ static void parseBreakpoints(const std::string& fileName,  // NOLINT misc-use-an
                 line, fileName);
         }
     }
-    if (!std::ranges::is_sorted(breakpoints.begin(), breakpoints.end()))
+    if (!std::ranges::is_sorted(breakpoints))
     {
         parseError("breakpoints must be non-decreasing",
             line, fileName);

@@ -9,7 +9,7 @@
 #include <fstream>
 #include <iostream>
 #include "PDFSegmentLognormal.hpp"
-#include "../utils/parseUtils.hpp"
+#include "../utils/ParseUtils.hpp"
 
 // File-based constructor
 pdfs::PDFSegmentLognormal::PDFSegmentLognormal(

@@ -106,7 +106,7 @@ namespace pdfs {
          * @param tok List of expected tokens for that segment
          * @returns Map of token values
          */
-        auto segmentParser(std::ifstream& file,
+        static auto segmentParser(std::ifstream& file,
             std::vector<std::string>& tok) 
             -> std::map<std::string, double>;
 

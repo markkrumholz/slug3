@@ -10,7 +10,7 @@
 #include <iostream>
 #include <gsl/gsl_sf_gamma.h>
 #include "PDFSegmentSchechter.hpp"
-#include "../utils/parseUtils.hpp"
+#include "../utils/ParseUtils.hpp"
 
 // File-based constructor
 pdfs::PDFSegmentSchechter::PDFSegmentSchechter(

@@ -5,9 +5,14 @@
  * @date 2024-06,014
  */
 
-#include <fstream>
+#include "../utils/ParseUtils.hpp"
 #include "PDFSegment.hpp"
-#include "../utils/parseUtils.hpp"
+#include <exception>
+#include <fstream>
+#include <map>
+#include <stdexcept>
+#include <string>
+#include <vector>
 
 auto pdfs::PDFSegment::segmentParser(std::ifstream& file,
     std::vector<std::string>& tok)
@@ -22,7 +27,7 @@ auto pdfs::PDFSegment::segmentParser(std::ifstream& file,
     {
         // Trim and tokenize the line
         line = utils::trim(line);
-        if (line.empty()) continue; // Whitespace-only line; skip
+        if (line.empty()) { continue; } // Whitespace-only line; skip
         auto t = utils::tokenize(line);
 
         // Valid lines consist of one of our expected tokens,
@@ -36,16 +41,16 @@ auto pdfs::PDFSegment::segmentParser(std::ifstream& file,
         // See if this line matches any of our expected tokens
         // that we have not yet recorded
         bool foundMatch = false;
-        for (auto tExpect : tok)
+        for (auto const& tExpect : tok)
         {
-            if (t[0] == tExpect && !result.contains(t[0]))
+            if (t.at(0) == tExpect && !result.contains(t.at(0)))
             {
                 // Found a match, so extract value and store
                 // in result map
                 foundMatch = true;
                 try
                 {
-                    result[t[0]] = utils::stod(t[1]);
+                    result.at(t.at(0)) = utils::stod(t.at(1));
                 } catch (const std::exception& error) {
                     throw std::runtime_error(line);
                 }
@@ -62,7 +67,7 @@ auto pdfs::PDFSegment::segmentParser(std::ifstream& file,
 
         // Check if we have now found all our expected tokens,
         // and return if we have
-        if (result.size() == tok.size()) return result;
+        if (result.size() == tok.size()) { return result; }
     }
 
     // If we get here, then we have reached the end of the file

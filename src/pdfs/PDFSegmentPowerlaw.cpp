@@ -9,7 +9,7 @@
 #include <fstream>
 #include <iostream>
 #include "PDFSegmentPowerlaw.hpp"
-#include "../utils/parseUtils.hpp"
+#include "../utils/ParseUtils.hpp"
 
 // File-based constructor
 pdfs::PDFSegmentPowerlaw::PDFSegmentPowerlaw(

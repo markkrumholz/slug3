@@ -1,5 +1,5 @@
 /**
- * @file parseUtils.hpp
+ * @file ParseUtils.hpp
  * @author Mark Krumholz
  * @brief Utility functions for file and string parsing
  * @date 2024-06-12
