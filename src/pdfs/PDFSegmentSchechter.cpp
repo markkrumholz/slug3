@@ -5,22 +5,25 @@
  * @date 2024-06-14
  */
 
+#include "PDFCommons.hpp"
+#include "PDFSegment.hpp"
+#include "PDFSegmentSchechter.hpp"
 #include <cmath>
 #include <fstream>
-#include <iostream>
 #include <gsl/gsl_sf_gamma.h>
-#include "PDFSegmentSchechter.hpp"
-#include "../utils/parseUtils.hpp"
+#include <stdexcept>
+#include <string>
+#include <vector>
 
 // File-based constructor
 pdfs::PDFSegmentSchechter::PDFSegmentSchechter(
-    std::ifstream& file, rngType& rng, 
-    fileFormats::format fmt,
+    std::ifstream& file,
+    FileFormats fmt,
     double& sMin, double& sMax, double& wgt) :
-    PDFSegment(sMin, sMax, rng)
+    PDFSegment(sMin, sMax)
 {
     // Action depends on format
-    if (fmt == fileFormats::basic)
+    if (fmt == FileFormats::basic)
     {
         // Basic format
 

@@ -13,9 +13,10 @@
 #ifndef PDFSEGMENT_HPP
 #define PDFSEGMENT_HPP
 
+#include <fstream>
 #include <map>
+#include <string>
 #include <vector>
-#include "PDFCommons.hpp"
 
 namespace pdfs {
 
@@ -36,21 +37,24 @@ namespace pdfs {
          * @brief Constructor for PDFSegment.
          * @param lower The lower limit of the segment.
          * @param upper The upper limit of the segment.
-         * @param rng Reference to the random number generator to be used for sampling.
          */
-        PDFSegment(double sMin, double sMax, rngType &rng) : 
-            sMin_(sMin), sMax_(sMax), rng_(rng) {}
+        PDFSegment(double sMin, double sMax) : 
+            sMin_(sMin), sMax_(sMax) {}
+        PDFSegment(const PDFSegment&) = default;
+        auto operator=(const PDFSegment&) -> PDFSegment& = default;
+        PDFSegment(PDFSegment&&) = default;
+        auto operator=(PDFSegment&&) -> PDFSegment& = default;
         virtual ~PDFSegment() = default;
 
         // Getters for the lower and upper limits of the segment
         /** @brief Get the lower limit of the segment.
          *  @return The lower limit of the segment.
          */
-        auto getMin() const -> double { return sMin_; }
+        [[nodiscard]] auto getMin() const -> double { return sMin_; }
         /** @brief Get the upper limit of the segment.
          *  @return The upper limit of the segment.
          */
-        auto getMax() const -> double { return sMax_; }
+        [[nodiscard]] auto getMax() const -> double { return sMax_; }
 
         // Evaluation functions
         /**
@@ -58,19 +62,19 @@ namespace pdfs {
          * @param x The point at which to evaluate the PDF segment.
          * @return The value of the PDF segment at the given point.
          */
-        virtual auto operator()(double x) const -> double = 0;
+        [[nodiscard]] virtual auto operator()(double x) const -> double = 0;
         /**
          * @brief Calculate the expectation value of the PDF segment.
          * @param a The lower limit of the range for expectation value calculation; if set to a value <= sMin, will be set to sMin_.
          * @param b The upper limit of the range for expectation value calculation; if set to a value >= sMax, will be set to sMax_.
          * @return The expectation value of the PDF segment.
          */
-        virtual auto expectationValue(const double a, const double b) const -> double = 0;
+        [[nodiscard]] virtual auto expectationValue(double a, double b) const -> double = 0;
         /**
          * @brief Calculate the expectation value of the PDF segment over its entire range.
          * @return The expectation value of the PDF segment.
          */
-        virtual auto expectationValue() const -> double = 0;
+        [[nodiscard]] virtual auto expectationValue() const -> double = 0;
 
         /**
          * @brief Calculate the integral of the PDF segment over a specified range.
@@ -78,7 +82,7 @@ namespace pdfs {
          * @param b The upper limit of the range for integral calculation; if set to a value >= sMax, will be set to sMax_.
          * @return The integral of the PDF segment over the specified range.
          */
-        virtual auto integral(const double a, const double b) const -> double = 0;
+        [[nodiscard]] virtual auto integral(double a, double b) const -> double = 0;
 
         // Drawing functions
         /**
@@ -87,12 +91,12 @@ namespace pdfs {
          * @param b The upper limit of the sampling range (should be <= sMax_).
          * @return A random value drawn from the PDF segment within the specified range.
          */
-        virtual auto draw(const double a, const double b) const -> double = 0;
+        [[nodiscard]] virtual auto draw(double a, double b) const -> double = 0;
         /**
          * @brief Sample a random value from the PDF segment.
          * @return A random value drawn from the PDF segment.
          */
-        virtual auto draw() const -> double = 0;
+        [[nodiscard]] virtual auto draw() const -> double = 0;
 
     protected:
 
@@ -102,15 +106,14 @@ namespace pdfs {
          * @param tok List of expected tokens for that segment
          * @returns Map of token values
          */
-        auto segmentParser(std::ifstream& file,
+        static auto segmentParser(std::ifstream& file,
             std::vector<std::string>& tok) 
             -> std::map<std::string, double>;
 
         double sMin_; /**< The lower limit of the segment */
         double sMax_; /**< The upper limit of the segment */
-        rngType &rng_; /**< Reference to the random number generator */
     };
 
-}
+} // namespace pdfs
 
 #endif // PDFSEGMENT_HPP

@@ -1,5 +1,5 @@
 /**
- * @file test_PDFs.cpp
+ * @file testPDFAll.cpp
  * @author Mark Krumholz
  * @brief Unit tests for the PDF classes.
  * @details
@@ -7,22 +7,22 @@
  * @date 2024-06-12
  */
 
-#include "test_PDF.hpp"
-#include "test_PDFSegmentDelta.hpp"
-#include "test_PDFSegmentExponential.hpp"
-#include "test_PDFSegmentNormal.hpp"
-#include "test_PDFSegmentLognormal.hpp"
-#include "test_PDFSegmentPowerlaw.hpp"
-#include "test_PDFSegmentSchechter.hpp"
+#include "testPDF.hpp"
+#include "testPDFSegmentDelta.hpp"
+#include "testPDFSegmentExponential.hpp"
+#include "testPDFSegmentLognormal.hpp"
+#include "testPDFSegmentNormal.hpp"
+#include "testPDFSegmentPowerlaw.hpp"
+#include "testPDFSegmentSchechter.hpp"
 
-int main() {
+auto main() -> int {
     int result = 0;
-    result += test_PDFSegmentDelta();
-    result += test_PDFSegmentExponential();
-    result += test_PDFSegmentNormal();
-    result += test_PDFSegmentLognormal();
-    result += test_PDFSegmentPowerlaw();
-    result += test_PDFSegmentSchechter();
-    result += test_PDF();
+    result += testPDFSegmentDelta();
+    result += testPDFSegmentExponential();
+    result += testPDFSegmentNormal();
+    result += testPDFSegmentLognormal();
+    result += testPDFSegmentPowerlaw();
+    result += testPDFSegmentSchechter();
+    result += testPDF();
     return result;
 }

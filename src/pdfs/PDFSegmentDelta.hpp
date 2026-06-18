@@ -11,9 +11,10 @@
 #ifndef PDFSEGMENTDELTA_HPP
 #define PDFSEGMENTDELTA_HPP
 
-#include <stdexcept>
 #include "PDFCommons.hpp"
 #include "PDFSegment.hpp"
+#include <fstream>
+#include <stdexcept>
 
 namespace pdfs {
 
@@ -30,14 +31,12 @@ namespace pdfs {
         /**
          * @brief Constructor for PDFSegmentDelta.
          * @param sValue The value at which the delta function is centered.
-         * @param rng Reference to the random number generator to be used for sampling.
          */
-        PDFSegmentDelta(double sValue, rngType &rng) :
-            PDFSegment(sValue, sValue, rng) {}
+        PDFSegmentDelta(double sValue) :
+            PDFSegment(sValue, sValue) {}
         /**
          * @brief Construct PDFSegmentDelta from a PDF file contents.
          * @param file File stream from which to construct
-         * @param rng Reference to the random number generator to be used for sampling.
          * @param fmt Format of the file being read
          * @param sMin The lower limit of the segment
          * @param sMax The upper limit of the segment
@@ -49,43 +48,45 @@ namespace pdfs {
          * sMin and sMax are ignored and wgt is an output.
         */        
         PDFSegmentDelta(std::ifstream& file, 
-            rngType& rng,
-            fileFormats::format fmt,
+            FileFormats fmt,
             double &sMin,
             double &sMax,
             double &wgt);
+        PDFSegmentDelta(const PDFSegmentDelta&) = default;
+        auto operator=(const PDFSegmentDelta&) -> PDFSegmentDelta& = default;
+        PDFSegmentDelta(PDFSegmentDelta&&) = default;
+        auto operator=(PDFSegmentDelta&&) -> PDFSegmentDelta& = default;
         ~PDFSegmentDelta() override = default;
 
         // Evaluation functions
-        auto operator()(double x) const -> double override {
+        [[nodiscard]] auto operator()(double x) const -> double override {
             (void)x;
             throw std::runtime_error("PDFSegmentDelta: a delta function cannot be evaluated at a point.");
         }
-        auto expectationValue(const double a, const double b) const -> double override {
+        [[nodiscard]] auto expectationValue(const double a, const double b) const -> double override {
             if (a >= b || a > sMax_ || b < sMin_) {
                 return 0.0; // Invalid range for expectation value calculation
             }
             return sMin_; // The expectation value of a delta function is just the value at which it is centered
         }
-        auto expectationValue() const -> double override {
+        [[nodiscard]] auto expectationValue() const -> double override {
             return sMin_; // The expectation value of a delta function is just the value at which it is centered
         }
-        auto integral(const double a, const double b) const -> double override {
+        [[nodiscard]] auto integral(const double a, const double b) const -> double override {
             if (a <= sMin_ && b >= sMin_) {
                 return 1.0; // The integral of a delta function over a range that includes its center is 1
-            } else {
-                return 0.0; // The integral of a delta function over a range that does not include its center is 0
             }
+            return 0.0; // The integral of a delta function over a range that does not include its center is 0
         }
 
         // Drawing functions
-        auto draw(const double a, const double b) const -> double override {
+        [[nodiscard]] auto draw(const double a, const double b) const -> double override {
             if (a >= b || a >= sMax_ || b <= sMin_) {
                 return 0.0; // Invalid range for expectation value calculation
             }
             return sMin_; // Sampling from a delta function always returns the same value
         }
-        auto draw() const -> double override {
+        [[nodiscard]] auto draw() const -> double override {
             return sMin_;  // Sampling from a delta function always returns the same value
         }
     };

@@ -5,21 +5,23 @@
  * @date 2024-06,014
  */
 
-#include <cstdio>
-#include <fstream>
-#include <iostream>
+#include "PDFCommons.hpp"
+#include "PDFSegment.hpp"
 #include "PDFSegmentDelta.hpp"
-#include "../utils/parseUtils.hpp"
+#include <fstream>
+#include <stdexcept>
+#include <string>
+#include <vector>
 
 // File-based constructor
 pdfs::PDFSegmentDelta::PDFSegmentDelta(
-    std::ifstream& file, rngType& rng, 
-    fileFormats::format fmt,
+    std::ifstream& file,
+    FileFormats fmt,
     double& sMin, double& sMax, double& wgt) :
-    PDFSegment(sMin, sMax, rng)
+    PDFSegment(sMin, sMax)
 {
     // Parameters expected only in advanced format
-    if (fmt == fileFormats::advanced)
+    if (fmt == FileFormats::advanced)
     {
          // Call segment parser to get the tokens we need
         std::vector<std::string> tokens =

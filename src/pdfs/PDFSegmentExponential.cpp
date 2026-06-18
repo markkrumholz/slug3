@@ -5,21 +5,24 @@
  * @date 2024-06,014
  */
 
-#include <cstdio>
-#include <fstream>
-#include <iostream>
+#include "PDFCommons.hpp"
+#include "PDFSegment.hpp"
 #include "PDFSegmentExponential.hpp"
-#include "../utils/parseUtils.hpp"
+#include <cmath>
+#include <fstream>
+#include <stdexcept>
+#include <string>
+#include <vector>
 
 // File-based constructor
 pdfs::PDFSegmentExponential::PDFSegmentExponential(
-    std::ifstream& file, rngType& rng, 
-    fileFormats::format fmt,
+    std::ifstream& file,
+    FileFormats fmt,
     double& sMin, double& sMax, double& wgt) :
-    PDFSegment(sMin, sMax, rng)
+    PDFSegment(sMin, sMax)
 {
     // Action depends on format
-    if (fmt == fileFormats::basic)
+    if (fmt == FileFormats::basic)
     {
         // Basic format
 
@@ -54,5 +57,7 @@ pdfs::PDFSegmentExponential::PDFSegmentExponential(
     }
 
     // Calculate normalization constant for the PDF segment
-    norm_ = 1.0 / (scale_ * (std::exp(-sMin_ / scale_) - std::exp(-sMax_ / scale_)));
+    const double exMin = std::exp(-sMin_ / scale_);
+    const double exMax = std::exp(-sMax_ / scale_);
+    norm_ = 1.0 / (scale_ * (exMin - exMax));
 }

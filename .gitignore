@@ -70,3 +70,6 @@ Testing/
 
 # VS Code settings
 .vscode/
+
+# Claude settings
+.claude/

@@ -14,10 +14,14 @@
 #ifndef PDFSEGMENTLOGNORMAL_HPP
 #define PDFSEGMENTLOGNORMAL_HPP
 
-#include <cmath>
-#include <random>
+#include "../utils/RngThread.hpp"
 #include "PDFCommons.hpp"
 #include "PDFSegment.hpp"
+#include <algorithm>
+#include <cmath>
+#include <fstream>
+#include <numbers>
+#include <random>
 
 namespace pdfs {
 
@@ -41,26 +45,28 @@ namespace pdfs {
          * @param sMax The upper limit of the segment.
          * @param mean The mean of the x (NOT the mean of log(x)).
          * @param stddev The standard deviation of the normal distribution (i.e., stddev of log(x)).
-         * @param rng Reference to the random number generator to be used for sampling.
          * @details
          * This class represents a distribution that is normal in log(x), but note
          * that, for convenience, the value given by mean is the mean of *x*, not
          * the mean of *log(x)*. On the other hand, stddev is the standard deviation
          * of *log(x)*.
          */
-        PDFSegmentLognormal(double sMin, double sMax, double mean, double stddev, rngType &rng) :
-            PDFSegment(sMin, sMax, rng), mean_(mean), stddev_(stddev) {
-                log_mean_ = std::log(mean_);
-                root2dev_ = std::sqrt(2.0) * stddev_;
-                norm_ = std::sqrt(2.0 / M_PI) / stddev_ / (
+        PDFSegmentLognormal(double sMin, double sMax, double mean, double stddev) :
+            PDFSegment(sMin, sMax), 
+            mean_(mean), 
+            stddev_(stddev),
+            logMean_(std::log(mean_)),
+            root2dev_(std::numbers::sqrt2 * stddev_)
+            {
+                norm_ = std::numbers::sqrt2 * std::numbers::inv_sqrtpi / 
+                    stddev_ / (
                     std::erf( -std::log(sMin_/mean_) / root2dev_ ) -
                     std::erf( -std::log(sMax_/mean_) / root2dev_ )
-                );
+                    );
             }
         /**
          * @brief Construct PDFSegmentLognormal from a PDF file contents.
          * @param file File stream from which to construct
-         * @param rng Reference to the random number generator to be used for sampling.
          * @param fmt Format of the file being read
          * @param sMin The lower limit of the segment
          * @param sMax The upper limit of the segment
@@ -72,85 +78,97 @@ namespace pdfs {
          * sMin and sMax are ignored and wgt is an output.
         */        
         PDFSegmentLognormal(std::ifstream& file, 
-            rngType& rng,
-            fileFormats::format fmt,
+            FileFormats fmt,
             double &sMin,
             double &sMax,
             double &wgt);
+        PDFSegmentLognormal(const PDFSegmentLognormal&) = default;
+        auto operator=(const PDFSegmentLognormal&) -> PDFSegmentLognormal& = default;
+        PDFSegmentLognormal(PDFSegmentLognormal&&) = default;
+        auto operator=(PDFSegmentLognormal&&) -> PDFSegmentLognormal& = default;
        ~PDFSegmentLognormal() override = default;
 
         // Evaluation functions
-        auto operator()(double x) const -> double override {
-            if (x < sMin_ || x > sMax_) {
+        [[nodiscard]] auto operator()(double x) const -> double override {
+            if (x < sMin_ || x > sMax_)
+            {
                 return 0.0; // PDF is zero outside the segment
             }
             return norm_ * 
                 std::exp( -0.5 * std::pow( std::log(x / mean_) / stddev_, 2) ) / x;
         }
-        auto expectationValue(const double a, const double b) const -> double override {
-            if (a >= b || a > sMax_ || b < sMin_) {
+        [[nodiscard]] auto expectationValue(const double a, const double b) const -> double override {
+            if (a >= b || a > sMax_ || b < sMin_)
+            {
                 return 0.0; // Invalid range for expectation value calculation
-            } else if (a == sMax_) {
+            }
+            if (a == sMax_)
+            {
                 return sMax_; // Handle edge cases
-            } else if (b == sMin_) {
+            }
+            if (b == sMin_)
+            {
                 return sMin_; // Handle edge cases
             }
-            const double a_clamped = std::max(a, sMin_);
-            const double b_clamped = std::min(b, sMax_);
-            const double log_a = std::log(a_clamped);
-            const double log_b = std::log(b_clamped);
+            const double aClamped = std::max(a, sMin_);
+            const double bClamped = std::min(b, sMax_);
+            const double logA = std::log(aClamped);
+            const double logB = std::log(bClamped);
             return mean_ * std::exp(std::pow(stddev_, 2) / 2) *
                 (
-                    std::erf( ((log_mean_ - log_a + std::pow(stddev_, 2) ) / root2dev_ ) ) -
-                    std::erf( ((log_mean_ - log_b + std::pow(stddev_, 2) ) / root2dev_ ) )
+                    std::erf( ((logMean_ - logA + std::pow(stddev_, 2) ) / root2dev_ ) ) -
+                    std::erf( ((logMean_ - logB + std::pow(stddev_, 2) ) / root2dev_ ) )
                 ) / (
-                    std::erf( (log_b - log_mean_) / root2dev_ ) -
-                    std::erf( (log_a - log_mean_) / root2dev_ )
+                    std::erf( (logB - logMean_) / root2dev_ ) -
+                    std::erf( (logA - logMean_) / root2dev_ )
                 );
         }
-        auto expectationValue() const -> double override {
+        [[nodiscard]] auto expectationValue() const -> double override {
             return expectationValue(sMin_, sMax_);
         }
-        auto integral(const double a, const double b) const -> double override {
+        [[nodiscard]] auto integral(const double a, const double b) const -> double override {
             if (a >= b || a >= sMax_ || b <= sMin_) {
                 return 0.0; // Invalid range for expectation value calculation
             }
-            const double a_clamped = std::max(a, sMin_);
-            const double b_clamped = std::min(b, sMax_);
-            const double log_a = std::log(a_clamped);
-            const double log_b = std::log(b_clamped);
-            return norm_ * std::sqrt( M_PI / 2.0 ) * stddev_ * (
-                std::erf( (log_mean_ - log_a) / root2dev_ ) -
-                std::erf( (log_mean_ - log_b) / root2dev_ )
-            );
+            const double aClamped = std::max(a, sMin_);
+            const double bClamped = std::min(b, sMax_);
+            const double logA = std::log(aClamped);
+            const double logB = std::log(bClamped);
+            return norm_ /
+                (std::numbers::inv_sqrtpi * std::numbers::sqrt2) *
+                stddev_ * (
+                std::erf( (logMean_ - logA) / root2dev_ ) -
+                std::erf( (logMean_ - logB) / root2dev_ )
+                );
         }
 
         // Drawing functions
-        auto draw(const double a, const double b) const -> double override {
-            const double a_clamped = std::max(a, sMin_);
-            const double b_clamped = std::min(b, sMax_);
-            if (a_clamped >= b_clamped) {
+        [[nodiscard]] auto draw(const double a, const double b) const -> double override {
+            const double aClamped = std::max(a, sMin_);
+            const double bClamped = std::min(b, sMax_);
+            if (aClamped >= bClamped) {
                 return 0.0; // Invalid range for drawing
             }
-            std::lognormal_distribution<double> dist(log_mean_, stddev_);
-            double sample;
-            do {
-                sample = dist(rng_);
-            } while (sample < a_clamped || sample > b_clamped); // Rejection sampling
+            std::lognormal_distribution<double> dist(logMean_, stddev_);
+            double sample = NAN;
+            while (true) {
+                sample = dist(utils::rng());
+                if (sample >= aClamped && sample <= bClamped) {break; } // Rejection sampling
+            } 
             return sample;
         }
-        auto draw() const -> double override {
+        [[nodiscard]] auto draw() const -> double override {
             return draw(sMin_, sMax_);
         }
 
     private:
-        double mean_;   /**< Mean of the underlying normal distribution */
-        double stddev_; /**< Standard deviation of the underlying normal distribution */
-        double norm_;   /**< Normalization constant for the PDF segment */
-        double log_mean_; /**< Log of the mean; cached for convenience */
+        double mean_;    /**< Mean of the underlying normal distribution */
+        double stddev_;  /**< Standard deviation of the underlying normal distribution */
+        double norm_;    /**< Normalization constant for the PDF segment */
+        double logMean_; /**< Log of the mean; cached for convenience */
         double root2dev_; /**< sqrt(2) * stddev_; cached for convenience */
     };
 
-}
+} // namespace pdfs
 
 #endif // PDFSEGMENTLOGNORMAL_HPP
