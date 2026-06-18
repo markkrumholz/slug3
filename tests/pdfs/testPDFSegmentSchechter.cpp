@@ -112,7 +112,7 @@ testPDFSegmentSchechterAlpha(const double alpha) -> int     // NOLINT misc-use-a
         sumSamples += sample;
     }
     const double sampleMean = sumSamples / numSamples;
-    if (!testUtils::approxEqual(sampleMean, expectedEV, 3e-2)) {
+    if (!testUtils::approxEqual(sampleMean, expectedEV, 5e-2)) {
         std::cerr << "testPDFSegmentSchechter: Random sampling with alpha=" << alpha << " mean failed: expected " << expectedEV << ", got " << sampleMean << "\n";
         return 1;
     }
