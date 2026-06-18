@@ -44,6 +44,8 @@ add_executable(slug_test_PDFs
     src/pdfs/PDFSegmentNormal.cpp
     src/pdfs/PDFSegmentPowerlaw.cpp
     src/pdfs/PDFSegmentSchechter.cpp
+    tests/pdfs/testPDFSegmentPowerlaw.cpp
+    tests/pdfs/testPDFSegmentSchechter.cpp
 )
 
 # Include directories: project headers as regular includes, pcg-cpp as a

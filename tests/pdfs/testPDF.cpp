@@ -26,7 +26,6 @@
 #include <utility>
 #include <vector>
 
-
 static auto testPDFParsing() -> int    // NOLINT misc-use-anonymous-namespace
 {
     // Test construction of a PDF from a valid file in basic mode
