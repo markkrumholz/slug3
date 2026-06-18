@@ -14,11 +14,13 @@
 #ifndef PDFSEGMENTPOWERLAW_HPP
 #define PDFSEGMENTPOWERLAW_HPP
 
-#include <cmath>
-#include <random>
+#include "../utils/RngThread.hpp"
 #include "PDFCommons.hpp"
 #include "PDFSegment.hpp"
-#include "../utils/RngThread.hpp"
+#include <algorithm>
+#include <cmath>
+#include <fstream>
+#include <random>
 
 namespace pdfs {
 
@@ -75,72 +77,77 @@ namespace pdfs {
         ~PDFSegmentPowerlaw() override = default;
 
         // Evaluation functions
-        auto operator()(double x) const -> double override {
+        [[nodiscard]] auto operator()(double x) const -> double override {
             if (x < sMin_ || x > sMax_) {
                 return 0.0; // PDF is zero outside the segment
             }
             return norm_ * std::pow(x, alpha_); // PDF value at x
         }
 
-        auto expectationValue(const double a, const double b) const -> double override {
+        [[nodiscard]] auto expectationValue(const double a, const double b) const -> double override {
             if (a >= b || a > sMax_ || b < sMin_) {
                 return 0.0; // Invalid range for expectation value calculation
-            } else if (a == sMax_) {
+            }
+            if (a == sMax_) {
                 return sMax_; // Handle edge cases
-            } else if (b == sMin_) {
+            }
+            if (b == sMin_) {
                 return sMin_; // Handle edge cases
             }
-            const double a_clamped = std::max(a, sMin_);
-            const double b_clamped = std::min(b, sMax_);
+            const double aClamped = std::max(a, sMin_);
+            const double bClamped = std::min(b, sMax_);
             if (alpha_ != -1 && alpha_ != -2) {
                 return (alpha_ + 1) / (alpha_ + 2) *
-                    (std::pow(b_clamped, alpha_ + 2) - std::pow(a_clamped, alpha_ + 2)) /
-                    (std::pow(b_clamped, alpha_ + 1) - std::pow(a_clamped, alpha_ + 1));
-            } else if (alpha_ == -1) {
-                return (b_clamped - a_clamped) / (std::log(b_clamped / a_clamped));
-            } else {
-                return a_clamped * b_clamped * std::log(b_clamped / a_clamped) / (b_clamped - a_clamped);
+                    (std::pow(bClamped, alpha_ + 2) - std::pow(aClamped, alpha_ + 2)) /
+                    (std::pow(bClamped, alpha_ + 1) - std::pow(aClamped, alpha_ + 1));
             }
+            if (alpha_ == -1) {
+                return (bClamped - aClamped) / (std::log(bClamped / aClamped));
+            }
+            return aClamped * bClamped * std::log(bClamped / aClamped) / (bClamped - aClamped);
         }
 
-        auto expectationValue() const -> double override {
+        [[nodiscard]] auto expectationValue() const -> double override {
             return expectationValue(sMin_, sMax_);
         }
 
-        auto integral(const double a, const double b) const -> double override {
+        [[nodiscard]] auto integral(const double a, const double b) const -> double override {
             if (a >= b || a >= sMax_ || b <= sMin_) {
                 return 0.0; // Invalid range for integral calculation
             }
-            const double a_clamped = std::max(a, sMin_);
-            const double b_clamped = std::min(b, sMax_);
+            const double aClamped = std::max(a, sMin_);
+            const double bClamped = std::min(b, sMax_);
             if (alpha_ != -1) {
+                // Special case
                 return norm_ / (alpha_ + 1) *
-                    (std::pow(b_clamped, alpha_ + 1) - std::pow(a_clamped, alpha_ + 1));
-            } else {
-                return norm_ * std::log(b_clamped / a_clamped);
+                    (std::pow(bClamped, alpha_ + 1) - std::pow(aClamped, alpha_ + 1));
             }
+            // General case
+            return norm_ * std::log(bClamped / aClamped);
         }
 
         // Drawing functions
-        auto draw(const double a, const double b) const -> double override {
-            const double a_clamped = std::max(a, sMin_);
-            const double b_clamped = std::min(b, sMax_);
-            if (a_clamped >= b_clamped) {
+        [[nodiscard]] auto draw(const double a, const double b) const -> double override {
+            const double aClamped = std::max(a, sMin_);
+            const double bClamped = std::min(b, sMax_);
+            if (aClamped >= bClamped) {
                 return 0.0; // Invalid range for drawing
             }
             std::uniform_real_distribution<double> dist(0.0, 1.0);
             const double u = dist(utils::rng()); // Uniform random number in [0, 1)
-            if (alpha_ != -1) {
+            if (alpha_ != -1)
+            {
+                // Special case
                 return std::pow(
-                    u * std::pow(b_clamped, alpha_ + 1) +
-                    (1 - u) * std::pow(a_clamped, alpha_ + 1),
+                    (u * std::pow(bClamped, alpha_ + 1)) +
+                    ((1 - u) * std::pow(aClamped, alpha_ + 1)),
                     1.0 / (alpha_ + 1)
                 );
-            } else {
-                return a_clamped * std::pow(b_clamped / a_clamped, u);
             }
+            // General case
+            return aClamped * std::pow(bClamped / aClamped, u);
         }
-        auto draw() const -> double override {
+        [[nodiscard]] auto draw() const -> double override {
             return draw(sMin_, sMax_);
         }
 

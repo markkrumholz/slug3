@@ -5,11 +5,14 @@
  * @date 2024-06-14
  */
 
+#include "PDFCommons.hpp"
+#include "PDFSegment.hpp"
+#include "PDFSegmentPowerlaw.hpp"
 #include <cmath>
 #include <fstream>
-#include <iostream>
-#include "PDFSegmentPowerlaw.hpp"
-#include "../utils/ParseUtils.hpp"
+#include <stdexcept>
+#include <string>
+#include <vector>
 
 // File-based constructor
 pdfs::PDFSegmentPowerlaw::PDFSegmentPowerlaw(

@@ -13,12 +13,14 @@
 #ifndef PDFSEGMENTSCHECHTER_HPP
 #define PDFSEGMENTSCHECHTER_HPP
 
-#include <cmath>
-#include <random>
-#include <gsl/gsl_sf_gamma.h>
+#include "../utils/RngThread.hpp"
 #include "PDFCommons.hpp"
 #include "PDFSegment.hpp"
-#include "../utils/RngThread.hpp"
+#include <algorithm>
+#include <cmath>
+#include <fstream>
+#include <gsl/gsl_sf_gamma.h>
+#include <random>
 
 namespace pdfs {
 
@@ -41,15 +43,16 @@ namespace pdfs {
          * @param alpha The power-law index of the Schechter function.
          */
         PDFSegmentSchechter(double sMin, double sMax, double sStar, double alpha) :
-            PDFSegment(sMin, sMax), sStar_(sStar), alpha_(alpha) {
-                // Calculate normalization constant for the PDF segment
-                norm_ = 1.0 / (
-                    std::pow(sStar_, alpha_ + 1) * (
-                        gsl_sf_gamma_inc(alpha_ + 1, sMin_ / sStar_) -
-                        gsl_sf_gamma_inc(alpha_ + 1, sMax_ / sStar_)
-                    )
-                );
-            }
+            PDFSegment(sMin, sMax), 
+            sStar_(sStar), 
+            alpha_(alpha),
+            norm_(1.0 / (
+                    std::pow(sStar_, alpha_ + 1) * 
+                    (gsl_sf_gamma_inc(alpha_ + 1, sMin_ / sStar_) -
+                    gsl_sf_gamma_inc(alpha_ + 1, sMax_ / sStar_)
+                    ))
+                )
+            { }
         /**
          * @brief Construct PDFSegmentSchechter from a PDF file contents.
          * @param file File stream from which to construct
@@ -75,50 +78,55 @@ namespace pdfs {
         ~PDFSegmentSchechter() override = default;
 
         // Evaluation functions
-        auto operator()(double x) const -> double override {
+        [[nodiscard]] auto operator()(double x) const -> double override {
             if (x < sMin_ || x > sMax_) {
                 return 0.0;
             }
             return norm_ * std::pow(x, alpha_) * std::exp(-x / sStar_);
         }
-        auto expectationValue(const double a, const double b) const -> double override {
-            if (a >= b || a > sMax_ || b < sMin_) {
+        [[nodiscard]] auto expectationValue(const double a, const double b) const -> double override {
+            if (a >= b || a > sMax_ || b < sMin_)
+            {
                 return 0.0; // Invalid range for expectation value calculation
-            } else if (a == sMax_) {
+            }
+            if (a == sMax_)
+            {
                 return sMax_; // Handle edge cases
-            } else if (b == sMin_) {
+            }
+            if (b == sMin_)
+            {
                 return sMin_; // Handle edge cases
             }
-            const double a_clamped = std::max(a, sMin_);
-            const double b_clamped = std::min(b, sMax_);
+            const double aClamped = std::max(a, sMin_);
+            const double bClamped = std::min(b, sMax_);
             return sStar_ * (
-                gsl_sf_gamma_inc(alpha_ + 2, a_clamped / sStar_) -
-                gsl_sf_gamma_inc(alpha_ + 2, b_clamped / sStar_)
+                gsl_sf_gamma_inc(alpha_ + 2, aClamped / sStar_) -
+                gsl_sf_gamma_inc(alpha_ + 2, bClamped / sStar_)
             ) / (
-                gsl_sf_gamma_inc(alpha_ + 1, a_clamped / sStar_) -
-                gsl_sf_gamma_inc(alpha_ + 1, b_clamped / sStar_)
+                gsl_sf_gamma_inc(alpha_ + 1, aClamped / sStar_) -
+                gsl_sf_gamma_inc(alpha_ + 1, bClamped / sStar_)
             );
         }
-        auto expectationValue() const -> double override {
+        [[nodiscard]] auto expectationValue() const -> double override {
             return expectationValue(sMin_, sMax_); // Expectation value over the full range of the segment
         }
-        auto integral(const double a, const double b) const -> double override {
+        [[nodiscard]] auto integral(const double a, const double b) const -> double override {
             if (a >= b || a >= sMax_ || b <= sMin_) {
                 return 0.0; // Invalid range for integral calculation
             }
-            const double a_clamped = std::max(a, sMin_);
-            const double b_clamped = std::min(b, sMax_);
+            const double aClamped = std::max(a, sMin_);
+            const double bClamped = std::min(b, sMax_);
             return norm_ * std::pow(sStar_, alpha_ + 1) * (
-                gsl_sf_gamma_inc(alpha_ + 1, a_clamped / sStar_) -
-                gsl_sf_gamma_inc(alpha_ + 1, b_clamped / sStar_)
+                gsl_sf_gamma_inc(alpha_ + 1, aClamped / sStar_) -
+                gsl_sf_gamma_inc(alpha_ + 1, bClamped / sStar_)
             );
         }
 
         // Drawing function
-        auto draw(const double a, const double b) const -> double override {
-            const double a_clamped = std::max(a, sMin_);
-            const double b_clamped = std::min(b, sMax_);
-            if (a_clamped >= b_clamped) {
+        [[nodiscard]] auto draw(const double a, const double b) const -> double override {
+            const double aClamped = std::max(a, sMin_);
+            const double bClamped = std::min(b, sMax_);
+            if (aClamped >= bClamped) {
                 return 0.0; // Invalid range for drawing
             }
             std::uniform_real_distribution<double> dist(0.0, 1.0);
@@ -127,18 +135,19 @@ namespace pdfs {
             // u = \int_a^y x^alpha exp(-x / sStar) dx /
             //     \int_a^b x^alpha exp(-x / sStar) dx
             // using a simple bisection search.
-            const double gamma_a = gsl_sf_gamma_inc(alpha_ + 1, a_clamped / sStar_);
-            const double gamma_b = gsl_sf_gamma_inc(alpha_ + 1, b_clamped / sStar_);
-            const double denom = gamma_a - gamma_b;
-            double y = a_clamped;
-            double step = (b_clamped - a_clamped) / 2.0;
+            const double gammaA = gsl_sf_gamma_inc(alpha_ + 1, aClamped / sStar_);
+            const double gammaB = gsl_sf_gamma_inc(alpha_ + 1, bClamped / sStar_);
+            const double denom = gammaA - gammaB;
+            double y = aClamped;
+            double step = (bClamped - aClamped) / 2.0;
             while (true) {
                 y += step;
-                const double gamma_y = gsl_sf_gamma_inc(alpha_ + 1, y / sStar_);
-                const double resid = u - (gamma_a - gamma_y) / denom;
+                const double gammaY = gsl_sf_gamma_inc(alpha_ + 1, y / sStar_);
+                const double resid = u - ((gammaA - gammaY) / denom);
                 if (fabs(resid) < 1e-8) {
-                    break;
-                } else if (resid < 0) {
+                    break;  // Converged
+                }
+                if (resid < 0) {
                     y -= step;
                     step /= 2.0;
                     if (step < 1e-8) {
@@ -148,7 +157,7 @@ namespace pdfs {
             }
             return y;
         }
-        auto draw() const -> double override {
+        [[nodiscard]] auto draw() const -> double override {
             return draw(sMin_, sMax_);
         }
 
