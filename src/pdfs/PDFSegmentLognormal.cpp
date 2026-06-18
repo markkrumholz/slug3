@@ -5,11 +5,15 @@
  * @date 2024-06,014
  */
 
-#include <cstdio>
-#include <fstream>
-#include <iostream>
+#include "PDFCommons.hpp"
+#include "PDFSegment.hpp"
 #include "PDFSegmentLognormal.hpp"
-#include "../utils/ParseUtils.hpp"
+#include <cmath>
+#include <fstream>
+#include <numbers>
+#include <stdexcept>
+#include <string>
+#include <vector>
 
 // File-based constructor
 pdfs::PDFSegmentLognormal::PDFSegmentLognormal(
@@ -29,7 +33,7 @@ pdfs::PDFSegmentLognormal::PDFSegmentLognormal(
 
         // Use the parsed results to set parameters
         mean_ = contents["mean"];
-        stddev_ = std::log(10) * contents["disp"]; // Convert to base e
+        stddev_ = std::numbers::ln10 * contents["disp"]; // Convert to base e
     }
     else
     {
@@ -42,7 +46,7 @@ pdfs::PDFSegmentLognormal::PDFSegmentLognormal(
 
         // Use the parsed results to set parameters
         mean_ = contents["mean"];
-        stddev_ = std::log(10) * contents["disp"]; // Convert to base e
+        stddev_ = std::numbers::ln10 * contents["disp"]; // Convert to base e
         sMin_ = contents["min"];
         sMax_ = contents["max"];
         wgt = contents["weight" ];
@@ -56,10 +60,11 @@ pdfs::PDFSegmentLognormal::PDFSegmentLognormal(
     }
 
     // Calculate normalization constant
-    log_mean_ = std::log(mean_);
-    root2dev_ = std::sqrt(2.0) * stddev_;
-    norm_ = std::sqrt(2.0 / M_PI) / stddev_ / (
+    logMean_ = std::log(mean_);
+    root2dev_ = std::numbers::sqrt2 * stddev_;
+    norm_ = std::numbers::sqrt2 * std::numbers::inv_sqrtpi / 
+        stddev_ / (
         std::erf( -std::log(sMin_/mean_) / root2dev_ ) -
         std::erf( -std::log(sMax_/mean_) / root2dev_ )
-    );
+        );
 }
