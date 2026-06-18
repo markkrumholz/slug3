@@ -201,7 +201,12 @@ static void parseBreakpoints(const std::string& fileName,  // NOLINT misc-use-an
     if (!std::ranges::is_sorted(breakpoints))
     {
         parseError("breakpoints must be non-decreasing",
-            line, fileName);
+            "", fileName);
+    }
+    if (breakpoints.size() < 2)
+    {
+        parseError("at least two breakpoints required",
+            "", fileName);
     }
 }
 

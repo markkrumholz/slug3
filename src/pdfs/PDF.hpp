@@ -66,8 +66,14 @@ namespace pdfs {
             method_(method),
             normalized_(normalize)
         {
+            if (wgt_.size() == 0) {
+                throw std::runtime_error("PDF: must have at least one segment");
+            }
             if (wgt_.min() <= 0) { // Safety check
-                    throw std::runtime_error("PDF: elements of wgt must be non-negative");                    
+                throw std::runtime_error("PDF: elements of wgt must be positive");
+            }
+            if (seg_.size() != wgt_.size()) {
+                throw std::runtime_error("PDF: seg and wgt must be of equal size");
             }
             if (normalize) {
                 normalizePDF();
