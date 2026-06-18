@@ -76,6 +76,10 @@ namespace pdfs {
             double &sMin,
             double &sMax,
             double &wgt);
+        PDFSegmentLognormal(const PDFSegmentLognormal&) = default;
+        auto operator=(const PDFSegmentLognormal&) -> PDFSegmentLognormal& = default;
+        PDFSegmentLognormal(PDFSegmentLognormal&&) = default;
+        auto operator=(PDFSegmentLognormal&&) -> PDFSegmentLognormal& = default;
        ~PDFSegmentLognormal() override = default;
 
         // Evaluation functions
@@ -150,6 +154,6 @@ namespace pdfs {
         double root2dev_; /**< sqrt(2) * stddev_; cached for convenience */
     };
 
-}
+} // namespace pdfs
 
 #endif // PDFSEGMENTLOGNORMAL_HPP

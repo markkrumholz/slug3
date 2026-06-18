@@ -51,6 +51,10 @@ namespace pdfs {
             double &sMin,
             double &sMax,
             double &wgt);
+        PDFSegmentDelta(const PDFSegmentDelta&) = default;
+        auto operator=(const PDFSegmentDelta&) -> PDFSegmentDelta& = default;
+        PDFSegmentDelta(PDFSegmentDelta&&) = default;
+        auto operator=(PDFSegmentDelta&&) -> PDFSegmentDelta& = default;
         ~PDFSegmentDelta() override = default;
 
         // Evaluation functions

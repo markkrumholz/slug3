@@ -64,6 +64,10 @@ namespace pdfs {
             double &sMin,
             double &sMax,
             double &wgt);
+        PDFSegmentExponential(const PDFSegmentExponential&) = default;
+        auto operator=(const PDFSegmentExponential&) -> PDFSegmentExponential& = default;
+        PDFSegmentExponential(PDFSegmentExponential&&) = default;
+        auto operator=(PDFSegmentExponential&&) -> PDFSegmentExponential& = default;
         ~PDFSegmentExponential() override = default;
 
         // Evaluation functions
@@ -120,6 +124,7 @@ namespace pdfs {
         double scale_; /**< Exponential scale length */
         double norm_;  /**< Normalization constant for the PDF segment */
     };
-}
+
+} // namespace pdfs
 
 #endif // PDFSEGMENTEXPONENTIAL_HPP

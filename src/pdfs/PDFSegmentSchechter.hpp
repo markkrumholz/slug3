@@ -68,6 +68,10 @@ namespace pdfs {
             double &sMin,
             double &sMax,
             double &wgt);
+        PDFSegmentSchechter(const PDFSegmentSchechter&) = default;
+        auto operator=(const PDFSegmentSchechter&) -> PDFSegmentSchechter& = default;
+        PDFSegmentSchechter(PDFSegmentSchechter&&) = default;
+        auto operator=(PDFSegmentSchechter&&) -> PDFSegmentSchechter& = default;
         ~PDFSegmentSchechter() override = default;
 
         // Evaluation functions
@@ -154,6 +158,6 @@ namespace pdfs {
         double norm_;   /**< Normalization constant for the PDF segment */
     };
 
-}
+} // namespace pdfs
 
 #endif // PDFSEGMENTSCHECHTER_HPP

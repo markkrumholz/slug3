@@ -65,6 +65,10 @@ namespace pdfs {
             double &sMin,
             double &sMax,
             double &wgt);
+        PDFSegmentNormal(const PDFSegmentNormal&) = default;
+        auto operator=(const PDFSegmentNormal&) -> PDFSegmentNormal& = default;
+        PDFSegmentNormal(PDFSegmentNormal&&) = default;
+        auto operator=(PDFSegmentNormal&&) -> PDFSegmentNormal& = default;
         ~PDFSegmentNormal() override = default;
 
         // Evaluation functions
@@ -132,6 +136,6 @@ namespace pdfs {
         double norm_;   /**< Normalization constant for the PDF segment */
     };
 
-}
+} // namespace pdfs
 
 #endif // PDFSEGMENTNORMAL_HPP

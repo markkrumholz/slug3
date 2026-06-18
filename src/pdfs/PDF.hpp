@@ -312,7 +312,7 @@ namespace pdfs {
                         samples.insert(samples.end(), sampleSet.begin(), sampleSet.end());
                         for (auto s : sampleSet) { sum += s; }
                     }
-                    std::ranges::sort(samples.begin(), samples.end());
+                    std::ranges::sort(samples);
                     if (std::fabs(target - (sum - samples.back())) <
                         std::fabs(target - sum))
                     {

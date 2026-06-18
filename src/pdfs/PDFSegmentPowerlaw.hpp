@@ -68,6 +68,10 @@ namespace pdfs {
             double &sMin,
             double &sMax,
             double &wgt);
+        PDFSegmentPowerlaw(const PDFSegmentPowerlaw&) = default;
+        auto operator=(const PDFSegmentPowerlaw&) -> PDFSegmentPowerlaw& = default;
+        PDFSegmentPowerlaw(PDFSegmentPowerlaw&&) = default;
+        auto operator=(PDFSegmentPowerlaw&&) -> PDFSegmentPowerlaw& = default;
         ~PDFSegmentPowerlaw() override = default;
 
         // Evaluation functions
