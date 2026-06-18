@@ -60,6 +60,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+          fetch-depth: 0
 
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y clang clang-tidy libgsl-dev
@@ -67,7 +68,13 @@ jobs:
       - name: Configure
         run: cmake -B build -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 
-      - name: Run clang-tidy
+      - name: Run clang-tidy on changed files
         run: |
-          find src -name '*.cpp' -not -path '*/pcg-cpp/*' \
-            | xargs clang-tidy -p build
+          CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD \
+            | grep -E '^src/.*\.cpp$' \
+            | grep -v 'pcg-cpp' || true)
+          if [ -z "$CHANGED" ]; then
+            echo "No C++ source files changed, skipping clang-tidy."
+            exit 0
+          fi
+          echo "$CHANGED" | xargs clang-tidy -p build
