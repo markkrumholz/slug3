@@ -1,5 +1,5 @@
 /**
- * @file test_PDFSegmentPowerlaw.hpp
+ * @file testPDFSegmentPowerlaw.hpp
  * @author Mark Krumholz
  * @brief Unit tests for the PDFSegmentPowerlaw class.
  * @details
@@ -11,8 +11,8 @@
  * @date 2024-06-12
  */
 
-#ifndef TEST_PDFSEGMENTPOWERLAW_HPP
-#define TEST_PDFSEGMENTPOWERLAW_HPP
+#ifndef TESTPDFSEGMENTPOWERLAW_HPP
+#define TESTPDFSEGMENTPOWERLAW_HPP
 
 #include <cmath>
 #include <cstdio>
@@ -30,7 +30,7 @@
  * It checks that the PDF evaluates to the expected values at the lower
  * and upper limits, as well as within the range.
  */
-auto test_PDFSegmentPowerlaw() -> int
+auto testPDFSegmentPowerlaw() -> int
 {
     // Set the rng seed to a fixed value for reproducibility
     utils::rng.seed(42);
@@ -150,4 +150,4 @@ auto test_PDFSegmentPowerlaw() -> int
     return 0;
 }
 
-#endif // TEST_PDFSEGMENTPOWERLAW_HPP
+#endif // TESTPDFSEGMENTPOWERLAW_HPP

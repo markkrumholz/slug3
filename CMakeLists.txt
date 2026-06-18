@@ -34,7 +34,8 @@ add_executable(slug src/main.cpp
 
 # Test executables
 add_executable(slug_test_PDFs
-    tests/pdfs/test_PDFs.cpp
+    tests/pdfs/testPDF.cpp
+    tests/pdfs/testPDFAll.cpp
     src/pdfs/PDFFileParser.cpp
     src/pdfs/PDFSegment.cpp
     src/pdfs/PDFSegmentDelta.cpp

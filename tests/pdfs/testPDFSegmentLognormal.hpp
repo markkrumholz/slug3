@@ -1,5 +1,5 @@
 /**
- * @file test_PDFSegmentLognormal.hpp
+ * @file testPDFSegmentLognormal.hpp
  * @author Mark Krumholz
  * @brief Unit tests for the PDFSegmentLognormal class.
  * @details
@@ -8,8 +8,8 @@
  * @date 2024-06-12
  */
 
-#ifndef TEST_PDFSEGMENTLOGNORMAL_HPP
-#define TEST_PDFSEGMENTLOGNORMAL_HPP
+#ifndef TESTPDFSEGMENTLOGNORMAL_HPP
+#define TESTPDFSEGMENTLOGNORMAL_HPP
 
 #include <cmath>
 #include <cstdio>
@@ -28,7 +28,7 @@
  * and at points one standard deviation away from the mean, as well as
  * outside the range of the distribution.
  */
-auto test_PDFSegmentLognormal() -> int
+auto testPDFSegmentLognormal() -> int
 {
     // Set the rng seed to a fixed value for reproducibility
     utils::rng.seed(42);
@@ -156,4 +156,4 @@ auto test_PDFSegmentLognormal() -> int
     return 0; // If we get here, the test passed
 
 }
-#endif // TEST_PDFSEGMENTLOGNORMAL_HPP
+#endif // TESTPDFSEGMENTLOGNORMAL_HPP

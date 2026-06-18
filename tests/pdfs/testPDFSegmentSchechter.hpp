@@ -1,5 +1,5 @@
 /**
- * @file test_PDFSegmentSchechter.hpp
+ * @file testPDFSegmentSchechter.hpp
  * @author Mark Krumholz
  * @brief Unit tests for the PDFSegmentSchechter class.
  * @details
@@ -8,8 +8,8 @@
  * @date 2024-06-12
  */
 
-#ifndef TEST_PDFSEGMENTSCHECHTER_HPP
-#define TEST_PDFSEGMENTSCHECHTER_HPP
+#ifndef TESTPDFSEGMENTSCHECHTER_HPP
+#define TESTPDFSEGMENTSCHECHTER_HPP
 
 #include <cmath>
 #include <cstdio>
@@ -29,7 +29,7 @@
  * and at points one standard deviation away from the mean, as well as
  * outside the range of the distribution.
  */
-auto test_PDFSegmentSchechter() -> int
+auto testPDFSegmentSchechter() -> int
 {
     // Set the rng seed to a fixed value for reproducibility
     utils::rng.seed(42);
@@ -145,4 +145,4 @@ auto test_PDFSegmentSchechter() -> int
 }
 
 
-#endif // TEST_PDFSEGMENTSCHECHTER_HPP
+#endif // TESTPDFSEGMENTSCHECHTER_HPP
