@@ -5,11 +5,13 @@
  * @date 2024-06,014
  */
 
-#include "../utils/ParseUtils.hpp"
+#include "PDFCommons.hpp"
+#include "PDFSegment.hpp"
 #include "PDFSegmentDelta.hpp"
-#include <cstdio>
 #include <fstream>
-#include <iostream>
+#include <stdexcept>
+#include <string>
+#include <vector>
 
 // File-based constructor
 pdfs::PDFSegmentDelta::PDFSegmentDelta(
