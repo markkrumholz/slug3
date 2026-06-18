@@ -5,11 +5,15 @@
  * @date 2024-06-14
  */
 
+#include "PDFCommons.hpp"
+#include "PDFSegment.hpp"
+#include "PDFSegmentNormal.hpp"
 #include <cmath>
 #include <fstream>
-#include <iostream>
-#include "PDFSegmentNormal.hpp"
-#include "../utils/ParseUtils.hpp"
+#include <numbers>
+#include <stdexcept>
+#include <string>
+#include <vector>
 
 // File-based constructor
 pdfs::PDFSegmentNormal::PDFSegmentNormal(
@@ -56,7 +60,7 @@ pdfs::PDFSegmentNormal::PDFSegmentNormal(
     }
 
     // Compute normalization constant
-    norm_ = std::sqrt(2.0 / M_PI) / stddev_ /
-        (std::erf((sMax_ - mean_) / (stddev_ * std::sqrt(2.0))) -
-         std::erf((sMin_ - mean_) / (stddev_ * std::sqrt(2.0))));
+    norm_ = std::numbers::sqrt2 * std::numbers::inv_sqrtpi / stddev_ /
+        (std::erf((sMax_ - mean_) / (stddev_ * std::numbers::sqrt2)) -
+         std::erf((sMin_ - mean_) / (stddev_ * std::numbers::sqrt2)));
 }

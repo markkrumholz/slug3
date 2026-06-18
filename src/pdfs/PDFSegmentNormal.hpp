@@ -13,11 +13,14 @@
 #ifndef PDFSEGMENTNORMAL_HPP
 #define PDFSEGMENTNORMAL_HPP
 
-#include <cmath>
-#include <random>
+#include "../utils/RngThread.hpp"
 #include "PDFCommons.hpp"
 #include "PDFSegment.hpp"
-#include "../utils/RngThread.hpp"
+#include <algorithm>
+#include <cmath>
+#include <fstream>
+#include <numbers>
+#include <random>
 
 namespace pdfs {
 
@@ -42,11 +45,15 @@ namespace pdfs {
          * @param stddev The standard deviation of the normal distribution.
          */
         PDFSegmentNormal(double sMin, double sMax, double mean, double stddev) :
-            PDFSegment(sMin, sMax), mean_(mean), stddev_(stddev) {
-                norm_ = std::sqrt(2.0 / M_PI) / stddev_ /
-                    (std::erf((sMax_ - mean_) / (stddev_ * std::sqrt(2))) -
-                     std::erf((sMin_ - mean_) / (stddev_ * std::sqrt(2))));
-            }
+            PDFSegment(sMin, sMax), 
+            mean_(mean), 
+            stddev_(stddev),
+            norm_(std::numbers::sqrt2 * std::numbers::inv_sqrtpi /
+                    stddev_ /
+                    (std::erf((sMax_ - mean_) / (stddev_ * std::numbers::sqrt2)) -
+                     std::erf((sMin_ - mean_) / (stddev_ * std::numbers::sqrt2)))
+                )
+            { }
         /**
          * @brief Construct PDFSegmentNormal from a PDF file contents.
          * @param file File stream from which to construct
@@ -72,62 +79,69 @@ namespace pdfs {
         ~PDFSegmentNormal() override = default;
 
         // Evaluation functions
-        auto operator()(double x) const -> double override {
+        [[nodiscard]] auto operator()(double x) const -> double override {
             if (x < sMin_ || x > sMax_) {
                 return 0.0; // PDF is zero outside the segment
             }
             return norm_ * std::exp(-0.5 * std::pow((x - mean_) / stddev_, 2)); // PDF value at x
         }
-        auto expectationValue(const double a, const double b) const -> double override {
+        [[nodiscard]] auto expectationValue(const double a, const double b) const -> double override {
             if (a >= b || a > sMax_ || b < sMin_) {
                 return 0.0; // Invalid range for expectation value calculation
-            } else if (a == sMax_) {
+            }
+            if (a == sMax_) {
                 return sMax_; // Handle edge cases
-            } else if (b == sMin_) {
+            }
+            if (b == sMin_) {
                 return sMin_; // Handle edge cases
             }
-            const double a_clamped = std::max(a, sMin_);
-            const double b_clamped = std::min(b, sMax_);
-            const double dxLoNorm = (a_clamped - mean_) / (std::sqrt(2.0) *stddev_);
-            const double dxHiNorm = (b_clamped - mean_) / (std::sqrt(2.0) *stddev_);
+            const double aClamped = std::max(a, sMin_);
+            const double bClamped = std::min(b, sMax_);
+            const double dxLoNorm = (aClamped - mean_) / (std::numbers::sqrt2 * stddev_);
+            const double dxHiNorm = (bClamped - mean_) / (std::numbers::sqrt2 * stddev_);
             const double denom = std::erf(dxHiNorm) - std::erf(dxLoNorm);
             if (denom == 0.0) {
                 return 0.0; // Avoid division by zero if the PDF is negligible in the range
             }
-            return mean_ + stddev_ * std::sqrt(2 / M_PI) *
-                    (std::exp(-std::pow(dxLoNorm, 2)) -
-                     std::exp(-std::pow(dxHiNorm, 2))) / denom;
+            const double numLo = std::exp(-std::pow(dxLoNorm, 2));
+            const double numHi = std::exp(-std::pow(dxHiNorm, 2));
+            return mean_ + 
+                (stddev_ * std::numbers::sqrt2 * std::numbers::inv_sqrtpi *
+                    (numLo - numHi) / denom);
         }
-        auto expectationValue() const -> double override {
+        [[nodiscard]] auto expectationValue() const -> double override {
             return expectationValue(sMin_, sMax_); // Expectation value over the full range of the segment
         }
-        auto integral(const double a, const double b) const -> double override {
+        [[nodiscard]] auto integral(const double a, const double b) const -> double override {
             if (a >= b || a >= sMax_ || b <= sMin_) {
                 return 0.0; // Invalid range for integral calculation
             }
-            const double a_clamped = std::max(a, sMin_);
-            const double b_clamped = std::min(b, sMax_);
-            const double dxLoNorm = (a_clamped - mean_) / (std::sqrt(2.0) * stddev_);
-            const double dxHiNorm = (b_clamped - mean_) / (std::sqrt(2.0) * stddev_);
-            return norm_ * std::sqrt(M_PI / 2) * stddev_ *
+            const double aClamped = std::max(a, sMin_);
+            const double bClamped = std::min(b, sMax_);
+            const double dxLoNorm = (aClamped - mean_) / (std::numbers::sqrt2 * stddev_);
+            const double dxHiNorm = (bClamped - mean_) / (std::numbers::sqrt2 * stddev_);
+            return norm_ /
+                (std::numbers::sqrt2 * std::numbers::inv_sqrtpi) *
+                stddev_ *
                 (std::erf(dxHiNorm) - std::erf(dxLoNorm));
         }
 
         // Drawing functions
-        auto draw(const double a, const double b) const -> double override {
-            const double a_clamped = std::max(a, sMin_);
-            const double b_clamped = std::min(b, sMax_);
-            if (a_clamped >= b_clamped) {
+        [[nodiscard]] auto draw(const double a, const double b) const -> double override {
+            const double aClamped = std::max(a, sMin_);
+            const double bClamped = std::min(b, sMax_);
+            if (aClamped >= bClamped) {
                 return 0.0; // Invalid range for drawing
             }
             std::normal_distribution<double> dist(mean_, stddev_);
-            double sample;
-            do {
+            double sample = NAN;
+            while (true) {
                 sample = dist(utils::rng());
-            } while (sample < a_clamped || sample > b_clamped); // Rejection sampling to ensure the sample is within the specified range
+                if (sample >= aClamped && sample <= bClamped) { break; } // Rejection sampling
+            }
             return sample;
         }
-        auto draw() const -> double override {
+        [[nodiscard]] auto draw() const -> double override {
             return draw(sMin_, sMax_);
         }
     private:
