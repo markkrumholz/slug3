@@ -41,7 +41,7 @@ Checks: >-
   -readability-identifier-length,
   -readability-magic-numbers
 
-WarningsAsErrors: ''
+WarningsAsErrors: '*'
 
 # Warn on project headers only; exclude the pcg-cpp submodule
 HeaderFilterRegex: '.*/src/(?!pcg-cpp)'

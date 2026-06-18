@@ -51,3 +51,23 @@ jobs:
       - name: Test
         working-directory: build
         run: ctest --output-on-failure
+
+  lint:
+    name: clang-tidy
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y clang clang-tidy libgsl-dev
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+
+      - name: Run clang-tidy
+        run: |
+          find src -name '*.cpp' -not -path '*/pcg-cpp/*' \
+            | xargs clang-tidy -p build
