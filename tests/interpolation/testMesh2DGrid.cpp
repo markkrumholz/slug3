@@ -85,6 +85,8 @@ auto testMesh2DGrid() -> int
             << m2d.xMax(yTest) << "\n";
         return 1;
     }
+
+    // Test containment and indexing
     const double xOut = 0.0;
     const double xIn = 2.5;
     if (m2d.contains(xOut, yTest)) {
@@ -99,6 +101,14 @@ auto testMesh2DGrid() -> int
             " as outside the mesh\n";
         return 1;
     }
+    const auto [iIdx,jIdx] = m2d.xyIdx(xIn, yTest);
+    if (iIdx != 2 || jIdx != 1) {
+        std::cerr << "testMesh2DGrid: for point (" << xIn 
+            << ", " << yTest << "), expected (i,j) = (2,1), "
+            "instead found (" << iIdx << ", " << jIdx << ")\n";
+        return 1;
+    }
+
     return 0; // Passed
 }
 
