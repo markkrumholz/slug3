@@ -6,8 +6,8 @@
  */
 
 #include "../src/pdfs/PDFSegmentPowerlaw.hpp"
+#include "../src/utils/MiscUtils.hpp"
 #include "../src/utils/RngThread.hpp"
-#include "../tests/testUtils.hpp"
 #include "testPDFSegmentPowerlaw.hpp"
 #include <cmath>
 #include <iostream>
@@ -33,23 +33,23 @@ testPDFSegmentPowerlawAlpha(const double alpha) -> int     // NOLINT misc-use-an
     } else {
         norm = 1.0 / std::numbers::ln10;
     }
-    if (!testUtils::approxEqual(pl(x1), norm)) {
+    if (!utils::approxEqual(pl(x1), norm)) {
         std::cerr << "testPDFSegmentPowerlaw: PDF evaluation with alpha=" << alpha << " at x=1.0 failed: expected " << norm << ", got " << pl(x1) << "\n";
         return 1;
     }
-    if (!testUtils::approxEqual(pl(x2), norm * std::pow(x2, alpha))) {
+    if (!utils::approxEqual(pl(x2), norm * std::pow(x2, alpha))) {
         std::cerr << "testPDFSegmentPowerlaw: PDF evaluation with alpha=" << alpha << " at x=5.0 failed: expected " << norm * std::pow(x2, alpha) << ", got " << pl(x2) << "\n";
         return 1;
     }
-    if (!testUtils::approxEqual(pl(x3), norm * std::pow(x3, alpha))) {
+    if (!utils::approxEqual(pl(x3), norm * std::pow(x3, alpha))) {
         std::cerr << "testPDFSegmentPowerlaw: PDF evaluation with alpha=" << alpha << " at x=10.0 failed: expected " << norm * std::pow(x3, alpha) << ", got " << pl(x3) << "\n";
         return 1;
     }
-    if (!testUtils::approxEqual(pl(x4), 0.0)) {
+    if (!utils::approxEqual(pl(x4), 0.0)) {
         std::cerr << "testPDFSegmentPowerlaw: PDF evaluation with alpha=" << alpha << " at x=0.5 failed: expected 0.0, got " << pl(x4) << "\n";
         return 1;
     }
-    if (!testUtils::approxEqual(pl(x5), 0.0)) {
+    if (!utils::approxEqual(pl(x5), 0.0)) {
         std::cerr << "testPDFSegmentPowerlaw: PDF evaluation with alpha=" << alpha << " at x=15.0 failed: expected 0.0, got " << pl(x5) << "\n";
         return 1;
     }
@@ -63,7 +63,7 @@ testPDFSegmentPowerlawAlpha(const double alpha) -> int     // NOLINT misc-use-an
     } else {
         expectedEVFull = (alpha + 1) / (alpha + 2) * (std::pow(10.0, alpha + 2) - std::pow(1.0, alpha + 2)) / (std::pow(10.0, alpha + 1) - std::pow(1.0, alpha + 1)); // Expected expectation value for alpha=0 over [1, 10]
     }
-    if (!testUtils::approxEqual(pl.expectationValue(), expectedEVFull)) {
+    if (!utils::approxEqual(pl.expectationValue(), expectedEVFull)) {
         std::cerr << "testPDFSegmentPowerlaw: Expectation value calculation with alpha=" << alpha << " failed: expected " << expectedEVFull << ", got " << pl.expectationValue() << "\n";
         return 1;
     }
@@ -79,13 +79,13 @@ testPDFSegmentPowerlawAlpha(const double alpha) -> int     // NOLINT misc-use-an
     } else {
         expectedEV = (alpha + 1) / (alpha + 2) * (std::pow(b, alpha + 2) - std::pow(a, alpha + 2)) / (std::pow(b, alpha + 1) - std::pow(a, alpha + 1)); // Expected expectation value for alpha=0 over [2, 8]
     }
-    if (!testUtils::approxEqual(pl.expectationValue(a, b), expectedEV)) {
+    if (!utils::approxEqual(pl.expectationValue(a, b), expectedEV)) {
         std::cerr << "testPDFSegmentPowerlaw: Expectation value calculation with alpha=" << alpha << " failed: expected " << expectedEV << ", got " << pl.expectationValue(a, b) << "\n";
         return 1;
     }
 
     // Test integral calculation over full range
-    if (!testUtils::approxEqual(pl.integral(sMin, sMax), 1.0)) {
+    if (!utils::approxEqual(pl.integral(sMin, sMax), 1.0)) {
         std::cerr << "testPDFSegmentPowerlaw: Integral calculation with alpha=" << alpha << " failed: expected 1.0, got " << pl.integral(a, b) << "\n";
         return 1;
     }
@@ -99,7 +99,7 @@ testPDFSegmentPowerlawAlpha(const double alpha) -> int     // NOLINT misc-use-an
     } else {
         expectedIntegral = norm / (alpha + 1) * (std::pow(b, alpha + 1) - std::pow(a, alpha + 1)); // Expected integral for alpha=0 over [2, 8]
     }
-    if (!testUtils::approxEqual(pl.integral(a, b), expectedIntegral)) {
+    if (!utils::approxEqual(pl.integral(a, b), expectedIntegral)) {
         std::cerr << "testPDFSegmentPowerlaw: Integral calculation with alpha=" << alpha << " failed: expected " << expectedIntegral << ", got " << pl.integral(a, b) << "\n";
         return 1;
     }
@@ -116,7 +116,7 @@ testPDFSegmentPowerlawAlpha(const double alpha) -> int     // NOLINT misc-use-an
         sumSamples += sample;
     }
     const double sampleMean = sumSamples / numSamples;
-    if (!testUtils::approxEqual(sampleMean, expectedEV, 2e-2)) {
+    if (!utils::approxEqual(sampleMean, expectedEV, 2e-2)) {
         std::cerr << "testPDFSegmentPowerlaw: Random sampling with alpha=" << alpha << " mean failed: expected " << expectedEV << ", got " << sampleMean << "\n";
         return 1;
     }

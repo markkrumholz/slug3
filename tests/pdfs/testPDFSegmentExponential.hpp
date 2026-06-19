@@ -15,8 +15,8 @@
 #define TESTPDFSEGMENTEXPONENTIAL_HPP
 
 #include "../src/pdfs/PDFSegmentExponential.hpp"
+#include "../src/utils/MiscUtils.hpp"
 #include "../src/utils/RngThread.hpp"
-#include "../tests/testUtils.hpp"
 #include <algorithm>
 #include <cmath>
 #include <iostream>
@@ -49,23 +49,23 @@ inline auto testPDFSegmentExponential() -> int
     const double x4 = 0.5; // Below the lower limit
     const double x5 = 15.0; // Above the upper limit
     const double norm = 1.0 / (scale * (std::exp(-sMin / scale) - std::exp(-sMax / scale))); // Normalization constant for the PDF
-    if (!testUtils::approxEqual(pe(x1), norm * std::exp(-x1 / scale))) {
+    if (!utils::approxEqual(pe(x1), norm * std::exp(-x1 / scale))) {
         std::cerr << "testPDFSegmentExponential: PDF evaluation at x=1.0 failed: expected " << norm * std::exp(-x1 / scale) << ", got " << pe(x1) << "\n";
         return 1;
     }
-    if (!testUtils::approxEqual(pe(x2), norm * std::exp(-x2 / scale))) {
+    if (!utils::approxEqual(pe(x2), norm * std::exp(-x2 / scale))) {
         std::cerr << "testPDFSegmentExponential: PDF evaluation at x=5.0 failed: expected " << norm * std::exp(-x2 / scale) << ", got " << pe(x2) << "\n";
         return 1;
     }
-    if (!testUtils::approxEqual(pe(x3), norm * std::exp(-x3 / scale))) {
+    if (!utils::approxEqual(pe(x3), norm * std::exp(-x3 / scale))) {
         std::cerr << "testPDFSegmentExponential: PDF evaluation at x=10.0 failed: expected " << norm * std::exp(-x3 / scale) << ", got " << pe(x3) << "\n";
         return 1;
     }
-    if (!testUtils::approxEqual(pe(x4), 0.0)) {
+    if (!utils::approxEqual(pe(x4), 0.0)) {
         std::cerr << "testPDFSegmentExponential: PDF evaluation at x=0.5 failed: expected 0.0, got " << pe(x4) << "\n";
         return 1;
     }
-    if (!testUtils::approxEqual(pe(x5), 0.0)) {
+    if (!utils::approxEqual(pe(x5), 0.0)) {
         std::cerr << "testPDFSegmentExponential: PDF evaluation at x=15.0 failed: expected 0.0, got " << pe(x5) << "\n";
         return 1;
     }
@@ -77,7 +77,7 @@ inline auto testPDFSegmentExponential() -> int
     const double denomMax = std::exp(-sMax / scale);
     const double expectedExpectationValue = scale +
         ((numMin - numMax) / (denomMin - denomMax));
-    if (!testUtils::approxEqual(pe.expectationValue(), expectedExpectationValue)) {
+    if (!utils::approxEqual(pe.expectationValue(), expectedExpectationValue)) {
         std::cerr << "testPDFSegmentExponential: Expectation value calculation over full range failed: expected " << expectedExpectationValue << ", got " << pe.expectationValue() << "\n";
         return 1;
     }
@@ -91,20 +91,20 @@ inline auto testPDFSegmentExponential() -> int
     const double denomMax1 = std::exp(-std::min(b, sMax) / scale);
     const double expectedExpectationValueRange = scale +
         ((numMin1 - numMax1) / (denomMin1 - denomMax1));
-    if (!testUtils::approxEqual(pe.expectationValue(a, b), expectedExpectationValueRange)) {
+    if (!utils::approxEqual(pe.expectationValue(a, b), expectedExpectationValueRange)) {
         std::cerr << "testPDFSegmentExponential: Expectation value calculation over range [2, 8] failed: expected " << expectedExpectationValueRange << ", got " << pe.expectationValue(a, b) << "\n";
         return 1;
     }
 
     // Test integral calculation over full range
-    if (!testUtils::approxEqual(pe.integral(sMin, sMax), 1.0)) {
+    if (!utils::approxEqual(pe.integral(sMin, sMax), 1.0)) {
         std::cerr << "testPDFSegmentExponential: Integral calculation over full range failed: expected 1.0, got " << pe.integral(sMin, sMax) << "\n";
         return 1;
     }
 
     // Test integral calculation over a specified range
     const double expectedIntegral = norm * scale * (std::exp(-std::max(a, sMin) / scale) - std::exp(-std::min(b, sMax) / scale));
-    if (!testUtils::approxEqual(pe.integral(a, b), expectedIntegral)) {
+    if (!utils::approxEqual(pe.integral(a, b), expectedIntegral)) {
         std::cerr << "testPDFSegmentExponential: Integral calculation over range [2, 8] failed: expected " << expectedIntegral << ", got " << pe.integral(a, b) << "\n";
         return 1;
     }
@@ -121,7 +121,7 @@ inline auto testPDFSegmentExponential() -> int
         sampleSum += sample; // Add the sample to the sum for calculating the sample mean
     }
     const double sampleMean = sampleSum / numSamples; // Calculate the sample mean
-    if (!testUtils::approxEqual(sampleMean, expectedExpectationValueRange, 0.01)) {
+    if (!utils::approxEqual(sampleMean, expectedExpectationValueRange, 0.01)) {
         std::cerr << "testPDFSegmentExponential: Sample mean from drawn samples does not match expected expectation value: expected " << expectedExpectationValueRange << ", got " << sampleMean << "\n";
         return 1;
     }

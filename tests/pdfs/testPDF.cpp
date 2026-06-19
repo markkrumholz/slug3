@@ -12,8 +12,8 @@
 #include "../src/pdfs/PDFSegmentDelta.hpp"
 #include "../src/pdfs/PDFSegmentLognormal.hpp"
 #include "../src/pdfs/PDFSegmentPowerlaw.hpp"
+#include "../src/utils/MiscUtils.hpp"
 #include "../src/utils/RngThread.hpp"
-#include "../tests/testUtils.hpp"
 #include "testPDF.hpp"
 #include <array>
 #include <cmath>
@@ -142,7 +142,7 @@ static auto testPDFSampling(    // NOLINT misc-use-anonymous-namespace
         sampleSum += sample; // Add the sample to the sum for calculating the sample mean
     }
     double sampleMean = sampleSum / static_cast<double>(numSamples); // Calculate the sample mean
-    if (!testUtils::approxEqual(sampleMean, expectationValueExpected, 0.01)) {
+    if (!utils::approxEqual(sampleMean, expectationValueExpected, 0.01)) {
         std::cerr << "testPDF: Sample mean from drawn samples does not match expected expectation value: expected " << expectationValueExpected << ", got " << sampleMean << "\n";
         return 1;
     }
@@ -154,7 +154,7 @@ static auto testPDFSampling(    // NOLINT misc-use-anonymous-namespace
     sampleSum = 0.0;
     for (auto s : sample) { sampleSum += s; }
     sampleMean = sampleSum / static_cast<double>(sample.size());
-    if (!testUtils::approxEqual(sampleMean, expectationValueExpected, 0.01)) {
+    if (!utils::approxEqual(sampleMean, expectationValueExpected, 0.01)) {
         std::cerr << "testPDF: Sample mean from Poisson sampling does not match expected expectation value: expected " << expectationValueExpected << ", got " << sampleMean << "\n";
         return 1;        
     }
@@ -202,7 +202,7 @@ static auto testPDFSampling(    // NOLINT misc-use-anonymous-namespace
     }
     const double fracLess = static_cast<double>(countLess) / nTest;
     const double tol = 4 / std::sqrt(nTest);  // 4 sigma tolerance
-    if (!testUtils::approxEqual(fracLess, 0.5, tol))
+    if (!utils::approxEqual(fracLess, 0.5, tol))
     {
         std::cerr << "testPDF: stop50 sampling test failed: "
             << "expected 50% below target, got "
@@ -275,19 +275,19 @@ auto testPDF() -> int
         std::exp(-0.5 * std::pow(std::log(x2 / lnMean) / lnDisp, 2));
     const double expect3 = norm.at(2) * std::pow(x3, plAlpha);
     const double expect4 = norm.at(2) * std::pow(x4, plAlpha);
-    if (!testUtils::approxEqual(pdf(x1), expect1)) {
+    if (!utils::approxEqual(pdf(x1), expect1)) {
         std::cerr << "testPDF: PDF evaluation at x=" << x1 << " failed: expected " << expect1 << ", got " << pdf(x1) << "\n";
             return 1;
     }
-    if (!testUtils::approxEqual(pdf(x2), expect2)) {
+    if (!utils::approxEqual(pdf(x2), expect2)) {
         std::cerr << "testPDF: PDF evaluation at x=" << x2 << " failed: expected " << expect2 << ", got " << pdf(x2) << "\n";
             return 1;
     }
-    if (!testUtils::approxEqual(pdf(x3), expect3)) {
+    if (!utils::approxEqual(pdf(x3), expect3)) {
         std::cerr << "testPDF: PDF evaluation at x=" << x3 << " failed: expected " << expect3 << ", got " << pdf(x3) << "\n";
             return 1;
     }
-    if (!testUtils::approxEqual(pdf(x4), expect4)) {
+    if (!utils::approxEqual(pdf(x4), expect4)) {
         std::cerr << "testPDF: PDF evaluation at x=" << x4 << " failed: expected " << expect4 << ", got " << pdf(x4) << "\n";
             return 1;
     }
@@ -301,7 +301,7 @@ auto testPDF() -> int
     }
 
     // Check that non-normalized PDF is larger by the normalization factor
-    if (!testUtils::approxEqual(pdfNN(x4), 2*pdf(x4))) {
+    if (!utils::approxEqual(pdfNN(x4), 2*pdf(x4))) {
         std::cerr << "testPDF: non-normalized PDF evaluation at x=" << x4 << " failed: expected " << 2*pdf(x4) << ", got " << pdfNN(x4) << "\n";
         return 1;
     }
@@ -311,7 +311,7 @@ auto testPDF() -> int
         (wNorm.at(0) * pd.expectationValue()) +
         (wNorm.at(1) * pln.expectationValue()) +
         (wNorm.at(2) * ppl.expectationValue());
-    if (!testUtils::approxEqual(pdf.expectationValue(), expectationValueExpected)) {
+    if (!utils::approxEqual(pdf.expectationValue(), expectationValueExpected)) {
         std::cerr << "testPDF: Expectation value calculation over full range failed; expected "
             << expectationValueExpected << ", got "
             << pdf.expectationValue() << "\n";
@@ -330,7 +330,7 @@ auto testPDF() -> int
             (wNorm.at(1) * pln.integral(a,b)) +
             (wNorm.at(2) * ppl.integral(a,b))
         );
-    if (!testUtils::approxEqual(pdf.expectationValue(a,b), expectationValueExpected)) {
+    if (!utils::approxEqual(pdf.expectationValue(a,b), expectationValueExpected)) {
         std::cerr << "testPDF: Expectation value calculation over range ["
             << a << ", " << b << "] failed; expected "
             << expectationValueExpected << ", got "
@@ -340,7 +340,7 @@ auto testPDF() -> int
 
     // Check that normalized and non-normalized versions of PDF have equal
     // expectation value
-    if (!testUtils::approxEqual(pdf.expectationValue(a,b), pdfNN.expectationValue(a,b))) {
+    if (!utils::approxEqual(pdf.expectationValue(a,b), pdfNN.expectationValue(a,b))) {
         std::cerr << "testPDF: Expectation values of normalized and non-normalized PDFs"
             " differ; normalized = " << pdf.expectationValue(a,b) <<
             " non-normalized = " << pdfNN.expectationValue(a,b) << "\n";
@@ -348,7 +348,7 @@ auto testPDF() -> int
     }
     
     // Check integral over full range
-    if (!testUtils::approxEqual(pdf.integral(), 1.0)) {
+    if (!utils::approxEqual(pdf.integral(), 1.0)) {
         std::cerr << "testPDF: Expectation value calculation over full range failed; expected "
             << "1.0, got "
             << pdf.integral() << "\n";
@@ -359,7 +359,7 @@ auto testPDF() -> int
     const double integralExpected =
         (wNorm.at(1) * pln.integral(a,lnMax)) +
         (wNorm.at(2) * ppl.integral(lnMax,b));
-    if (!testUtils::approxEqual(pdf.integral(a,b), integralExpected)) {
+    if (!utils::approxEqual(pdf.integral(a,b), integralExpected)) {
         std::cerr << "testPDF: Integral calculation over range ["
             << a << ", " << b << "] failed; expected "
             << integralExpected << ", got "
@@ -368,7 +368,7 @@ auto testPDF() -> int
     }
 
     // Check integral of non-normalized PDF is related to integral of normalized PDF as expected
-    if (!testUtils::approxEqual(pdfNN.integral(a,b), 2*pdf.integral(a,b))) {
+    if (!utils::approxEqual(pdfNN.integral(a,b), 2*pdf.integral(a,b))) {
         std::cerr << "testPDF: Integral of non-normalized PDF does not match "
             "expected multiple of normalized PDF; non-normalized = " <<
             pdfNN.integral(a,b) << ", expected " <<
