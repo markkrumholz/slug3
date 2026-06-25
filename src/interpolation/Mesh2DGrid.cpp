@@ -1062,6 +1062,7 @@ namespace interp
 	            x_[0,jSave_] == x_[1,jSave_] &&
 	            x_[0,jSave_+1] == x_[1,jSave_+1])
             {
+                d.meshExit = true;
                 return std::make_pair(false, d);
             }
     
@@ -1102,7 +1103,12 @@ namespace interp
             // Check if we have exited the mesh
             if (iSave_ == nx()-2)
             {
+                d.meshExit = true;
                 return std::make_pair(false, d);
+            }
+            else
+            {
+                d.meshExit = false;
             }
 
             // Update the index
@@ -1121,6 +1127,7 @@ namespace interp
             if (iSave_ == nx()-1)
             {
                 iSave_--;
+                d.meshExit = true;
                 return std::make_pair(false, d);
             }
     

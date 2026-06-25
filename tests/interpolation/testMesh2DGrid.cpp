@@ -19,6 +19,7 @@
 // Test basic mesh functions
 static auto
 testMeshBasics(const interp::Mesh2DGrid& m2d,
+    const interp::Mesh2DGrid& m2dNC,
     const size_t nx, const size_t ny, const double fac)
 {
     // Check dimensions, convexity, and limits
@@ -94,15 +95,35 @@ testMeshBasics(const interp::Mesh2DGrid& m2d,
         return 1;
     }
 
+    // Test that non-convex mesh is recorded correctly as non-convex,
+    // and that it gets the correct xMin and xMax assigned
+    if (m2dNC.convex()) {
+        std::cerr << "testMesh2DGrid: non-convex grid reported as convex\n";
+        return 1;
+    }
+    if (!utils::approxEqual(m2dNC.xMin(), 0.0)) {
+        std::cerr << "testMesh2DGrid: expected xMin = " << 0.0
+            << ", found xMin = " << m2dNC.xMin() << "\n";
+        return 1;
+    }
+    if (!utils::approxEqual(m2dNC.xMax(), nx - 1 + fac)) {
+        std::cerr << "testMesh2DGrid: expected xMax = " << nx - 1 + fac
+            << ", found xMax = " << m2dNC.xMax() << "\n";
+        return 1;        
+    }
+
+
     return 0; // Success
 }
 
 
 // Test ability to find intersections with mesh at fixed x
 static auto
-testXIntersect(const interp::Mesh2DGrid& m2d)
+testXIntersect(const interp::Mesh2DGrid& m2d,
+    const interp::Mesh2DGrid& m2dNC,
+    const size_t nx, const size_t ny, const double fac)
 {
-    // Shorten name
+    // Shorten names
     using xInt = interp::Mesh2DGrid::xIntersectionDescriptor;
     using xIntType = interp::Mesh2DGrid::IntersectionType;
 
@@ -113,20 +134,26 @@ testXIntersect(const interp::Mesh2DGrid& m2d)
     xIntersect[0] = std::vector<xInt>();  // No intersections
     yLim[0] = std::vector<std::pair<double, double>>();
     xIntersect[1] = {
-        { 0, 0.05, xIntType::rib, 0, false },
-        { 0.5, std::sqrt(0.5*0.5 + 0.05*0.05), xIntType::spine, 0, true }
+        { 0, xTest[1], xIntType::rib, 0, false },
+        { xTest[1]/fac, 
+            std::sqrt(std::pow(xTest[1]/fac,2) + 
+            std::pow(xTest[1],2)), 
+            xIntType::spine, 0, true }
     };
     yLim[1] = { { 0, 0.5 } };
     xIntersect[2] = {
-        { 0, 0.5, xIntType::rib, 0, false },
-        { 1, 0.5, xIntType::rib, 1, false },
-        { 2, 0.5, xIntType::rib, 2, true }
+        { 0, xTest[2], xIntType::rib, 0, false },
+        { 1, xTest[2], xIntType::rib, 1, false },
+        { 2, xTest[2], xIntType::rib, 2, true }
     };
     yLim[2] = { { 0, 2 }};
     xIntersect[3] = {
-        { 0.5, std::sqrt(0.05*0.05 + 0.5*0.5), xIntType::spine, 3, false },
-        { 1, 3.05, xIntType::rib, 1, false },
-        { 2, 3.05, xIntType::rib, 2, true }
+        { (xTest[3]-(nx-1))/fac, 
+            std::sqrt(std::pow(xTest[3]-(nx-1),2) + 
+            std::pow((xTest[3]-(nx-1))/fac,2)), 
+            xIntType::spine, 3, false },
+        { 1, xTest[3], xIntType::rib, 1, false },
+        { 2, xTest[3], xIntType::rib, 2, true }
     };
     yLim[3] = { { 0.5, 2 }};
     xIntersect[4] = {
@@ -142,14 +169,14 @@ testXIntersect(const interp::Mesh2DGrid& m2d)
         const auto xIntersectTest = m2d.xIntersect(x);
         if (yl.size() != yLimTest.size())
         {
-            std::cerr << "testMesh2DGrid: checked for y limits at x = "
+            std::cerr << "testMesh2DGrid: checked convex mesh for y limits at x = "
                 << x << "; expected to find " << yl.size()
                 << ", instead got " << yLimTest.size() << "\n";
             return 1;
         }
         if (xi.size() != xIntersectTest.size())
         {
-            std::cerr << "testMesh2DGrid: searched for intersections at "
+            std::cerr << "testMesh2DGrid: searched convex mesh for intersections at "
                 "x = " << x << ": expected to find " << xi.size()
                 << " intersection points, got " << xIntersectTest.size() << "\n";
             return 1;
@@ -159,7 +186,7 @@ testXIntersect(const interp::Mesh2DGrid& m2d)
             if (!utils::approxEqual(r.first, lim.first) || 
                 !utils::approxEqual(r.second, lim.second))
             {
-                std::cerr << "testMesh2DGrid: y limits not as expected at "
+                std::cerr << "testMesh2DGrid: convex mesh y limits not as expected at "
                     "x = " << x << ": expected " << lim.first << " - " << lim.second
                     << ", instead found " << r.first << " - " << r.second
                     << "\n";
@@ -174,7 +201,83 @@ testXIntersect(const interp::Mesh2DGrid& m2d)
                 r.idx != intersect.idx ||
                 r.meshExit != intersect.meshExit)
             {
-                std::cerr << "testMesh2DGrid: intersection points not as "
+                std::cerr << "testMesh2DGrid: convex mesh intersection points not as "
+                    "expected at x = " << x << ": expected (y, xs, t, idx, exit) = "
+                    << intersect.y << ", " << intersect.xs << ", " << static_cast<int>(intersect.t) 
+                    << ", " << intersect.idx << ", " << intersect.meshExit
+                    << ", instead found "
+                    << r.y << ", " << r.xs << ", " << static_cast<int>(r.t) 
+                    << ", " << r.idx << ", " << r.meshExit
+                    << "\n";
+                return 1;
+            }
+        }
+    }
+
+    // Do test for non-convex mesh, in locations where non-convexity matters
+    std::vector<double> xTestNC = { 0.05, 3.05 };
+    std::vector<std::vector<xInt>> xIntersectNC(xTestNC.size());
+    std::vector<std::vector<std::pair<double, double>>> yLimNC(xTestNC.size());
+    xIntersectNC[0] = {
+        { 0, 0.05, xIntType::rib, 0, false },
+        { 0.5, std::sqrt(0.5*0.5 + 0.05*0.05),
+            xIntType::spine, 0, true },
+        { 1.5,
+            std::sqrt(1 + 0.1*0.1) + std::sqrt(0.5*0.5 + 0.05*0.05),
+            xIntType::spine, 0, false },
+        { 2, 0.05, xIntType::rib, 2, true }
+    };
+    yLimNC[0] = { { 0, 0.5 }, { 1.5, 2 } };
+    xIntersectNC[1] = {
+        { 0.5, std::sqrt(0.5*0.5 + 0.05*0.05),
+            xIntType::spine, 3, false },
+        { 1, 3.05, xIntType::rib, 1, false },
+        { 1.5, std::sqrt(1 + 0.1*0.1) + 
+            std::sqrt(0.5*0.5 + 0.05*0.05),
+            xIntType::spine, 3, true }
+    };
+    yLimNC[1] = { { 0.5, 1.5 } };
+
+    // Check against expected results
+    for (const auto& [x, xi, yl] : std::views::zip(xTestNC, xIntersectNC, yLimNC))
+    {
+        const auto yLimTest = m2dNC.yLim(x);
+        const auto xIntersectTest = m2dNC.xIntersect(x);
+        if (yl.size() != yLimTest.size())
+        {
+            std::cerr << "testMesh2DGrid: checked non-convex mesh for y limits at x = "
+                << x << "; expected to find " << yl.size()
+                << ", instead got " << yLimTest.size() << "\n";
+            return 1;
+        }
+        if (xi.size() != xIntersectTest.size())
+        {
+            std::cerr << "testMesh2DGrid: searched non-convex mesh for intersections at "
+                "x = " << x << ": expected to find " << xi.size()
+                << " intersection points, got " << xIntersectTest.size() << "\n";
+            return 1;
+        }
+        for (const auto& [r, lim] : std::views::zip(yLimTest, yl))
+        {
+            if (!utils::approxEqual(r.first, lim.first) || 
+                !utils::approxEqual(r.second, lim.second))
+            {
+                std::cerr << "testMesh2DGrid: non-convex mesh y limits not as expected at "
+                    "x = " << x << ": expected " << lim.first << " - " << lim.second
+                    << ", instead found " << r.first << " - " << r.second
+                    << "\n";
+                return 1;
+            }
+        }
+        for (const auto& [r, intersect] : std::views::zip(xIntersectTest, xi))
+        {
+            if (!utils::approxEqual(r.y, intersect.y) ||
+                !utils::approxEqual(r.xs, intersect.xs) ||
+                r.t != intersect.t ||
+                r.idx != intersect.idx ||
+                r.meshExit != intersect.meshExit)
+            {
+                std::cerr << "testMesh2DGrid: non-convex mesh intersection points not as "
                     "expected at x = " << x << ": expected (y, xs, t, idx, exit) = "
                     << intersect.y << ", " << intersect.xs << ", " << static_cast<int>(intersect.t) 
                     << ", " << intersect.idx << ", " << intersect.meshExit
@@ -212,11 +315,34 @@ auto testMesh2DGrid() -> int
     }
     const interp::Mesh2DGrid m2d(x, y);
 
+    // Construct a non-convex mesh
+    std::array<double,nx*ny> xDataNC = { 0 };
+    std::array<double,ny> yDataNC = { 0 };
+    const std::mdspan<double, std::extents<size_t, nx, ny>> 
+        xNC(xDataNC.data());
+    const std::mdspan<double, std::extents<size_t, ny>> 
+        yNC(yDataNC.data());
+    for (size_t j = 0; j < ny; ++j) {
+        yNC[j] = static_cast<double>(j);
+        for (size_t i = 0; i < nx; ++i) {
+            if (j % 2)
+            {
+                xNC[i,j] = static_cast<double>(i) +
+                    (fac * static_cast<double>(j));
+            }
+            else
+            {
+                xNC[i,j] = static_cast<double>(i);
+            }
+        }
+    }
+    const interp::Mesh2DGrid m2dNC(xNC, yNC);
+
     // Do basic tests
-    if (testMeshBasics(m2d, nx, ny, fac)) { return 1; };
+    if (testMeshBasics(m2d, m2dNC, nx, ny, fac)) { return 1; };
     
     // Do intersection tests
-    if (testXIntersect(m2d)) { return 1; };
+    if (testXIntersect(m2d, m2dNC, nx, ny, fac)) { return 1; };
 
     return 0; // Return success
 }
