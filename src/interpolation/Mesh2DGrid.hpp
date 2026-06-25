@@ -160,8 +160,11 @@
 #define MESH2DGRID_HPP
 
 #include <cassert>
+#include <cstdint>
 #include <cstdlib>
+#include <limits>
 #include <mdspan>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -195,14 +198,15 @@ namespace interp
         using Array1D = std::mdspan<double, std::dextents<size_t, 1>>;
 
         // Shorthand for numeric limits
-        const double bigNum = std::numeric_limits<double>::max(); /**< Shorthand for big number */
+        static constexpr double bigNum = std::numeric_limits<double>::max(); /**< Shorthand for big number */
 
         /**
          * @brief An enum to hold intesection types
          */
         enum class IntersectionType : std::uint8_t {
             spine, /**< Intersection with a spine */
-            rib    /**< Intersection with a rib */
+            rib,   /**< Intersection with a rib */
+            none   /**< Dummy flag value */
         };
 
         /**
@@ -213,14 +217,15 @@ namespace interp
          * the information needed to describe a traversal
          * at constant y.
          */
+        // NOLINTBEGIN(readability-identifier-naming)
         struct xIntersectionDescriptor {
             double y;  /**< y coordinate of intersection */
             double xs; /**< x or s coordinate of intersection, depending on type */
             IntersectionType t; /**< Type of intersection -- spine or rib */
             size_t idx; /**< Index of spine or rib at intersection point */
             bool meshExit; /**< True if the line exits the mesh at this intersection point */
-            bool operator==(const xIntersectionDescriptor&) const = default; /**< Default equality operator */ 
         };
+        // NOLINTEND(readability-identifier-naming)
 
         // Constructors and destructor
         /**
@@ -316,8 +321,8 @@ namespace interp
          * for a non-convex mesh a line at fixed x can intersect the edge
          * an arbitrary number of times, so the vector can be longer. 
          */
-        auto yLim(const double x) const -> 
-            std::vector<std::pair<double, double>>;
+        auto yLim(double x)
+        const -> std::vector<std::pair<double, double>>;
         /**
          * @brief Check if a point is contained in the mesh
          * @param x x position
@@ -359,7 +364,8 @@ namespace interp
          * It is an error if the input y is < yMin_
          * or > yMax_.
          */
-        auto yIdx(const double y) const -> size_t {
+        auto yIdx(const double y) const -> size_t
+        {
             assert(y >= yMin_ && y <= yMax_);  // Safety check
             if (y < y_[jSave_]) { // Check if we need to update cached position
                 jSave_ = ySearch(y, 0, jSave_);   // Below cached position, search left
@@ -377,7 +383,8 @@ namespace interp
          * @details
          * It is an error if the input point is outside the mesh
          */
-        auto xyIdx(const double x, const double y) const {
+        auto xyIdx(const double x, const double y) const
+        {
             assert(contains(x,y));  // Safety assertion
             auto j = yIdx(y);       // Get y index
             const double dy = y - y_[j];  // Offset in y
@@ -408,8 +415,8 @@ namespace interp
          * rib or spine, the boolean is false and the
          * xIntersectionDescriptor is uninitialized and meaningless.
          */
-        auto onMesh(const double x, const double y) const ->
-            std::pair<bool, xIntersectionDescriptor>;
+        auto onMesh(double x, double y)
+        const -> std::pair<bool, xIntersectionDescriptor>;
 
         // Mesh traversal functions
         /**
@@ -424,10 +431,11 @@ namespace interp
          * intersects the mesh. The returned points are of type
          * xIntersectionDescriptor.
          */
-        auto xIntersect(const double x,
-            const double yLo = std::numeric_limits<double>::lowest(),
-            const double yHi = std::numeric_limits<double>::max()) const ->
-            std::vector<xIntersectionDescriptor>;
+        auto xIntersect(
+            double x,
+            double yLo = std::numeric_limits<double>::lowest(),
+            double yHi = std::numeric_limits<double>::max()
+        ) const -> std::vector<xIntersectionDescriptor>;
         
     private:
 
@@ -464,7 +472,8 @@ namespace interp
          */
         auto ySearch(const double y,
             const size_t idxLo,
-            const size_t idxHi) const -> size_t
+            const size_t idxHi
+        ) const -> size_t
         {
             auto jLo = idxLo;
             auto jHi = idxHi;
@@ -493,11 +502,13 @@ namespace interp
          * that y is in fact between these indices; the calling
          * routine is responsible for checking that.
          */
-        auto xSearch(const double x,
+        auto xSearch(
+            const double x,
             const double dy,
             const size_t j,
             const size_t idxLo,
-            const size_t idxHi) const -> size_t
+            const size_t idxHi
+        ) const -> size_t
         {
             size_t iLo = idxLo;
             size_t iHi = idxHi;
@@ -517,6 +528,14 @@ namespace interp
 
         // Search helpers
         /**
+         * @brief Traverse mesh to find limits on y at fixed x
+         * @param x x coordinate at which to traverse
+         * @param yL Limits on y being filled
+         * @returns True if traversal should continue, false if it should stop
+        */
+        auto yLimTraverse(double x, std::vector<double>& yL) const -> bool;
+
+        /**
          * @brief Find the list of points where a line of constant x intersects mesh ribs and spines
          * @param x x coordinate
          * @param yMin Minimum y of segment
@@ -530,12 +549,49 @@ namespace interp
          * starting points and ending points of a segment on at the edge of a
          * mesh or in its interior.
          */
-        auto xIntersectSeg(const double x, 
+        auto xIntersectSeg(
+            double x, 
+            double yMin,
+            double yMax,
+            bool startInterior,
+            bool endInterior
+        ) const -> std::vector<xIntersectionDescriptor>;
+
+        /**
+         * @brief Helper to xIntersectSeg to start traversals on mesh interior
+         * @param x x coordinate
+         * @param y y coordinate
+         * @param intList List of mesh intersections to populate
+         * @param lastIntersectLeft True if the last intersection point was on the left edge of a cell
+         * @param lastIntersectRight True if the last intersection point was on the right edge of a cell
+         */
+        void xIntersectSegStartInterior(
+            double x,
+            double& y,
+            std::vector<xIntersectionDescriptor>& intList,
+            bool& lastIntersectLeft,
+            bool& lastIntersectRight
+        ) const;
+
+        /**
+         * @brief Helper to xIntersectSeg to start traversals on mesh edge
+         * @param x x coordinate
+         * @param y y coordinate
+         * @param yMin Minimum y value of segment
+         * @param intList List of mesh intersections to populate
+         * @param lastIntersectLeft True if the last intersection point was on the left edge of a cell
+         * @param lastIntersectRight True if the last intersection point was on the right edge of a cell
+         * @returns True if starting point is tangent to mesh, and thus search should end immediately
+         */
+        auto xIntersectSegStartEdge(
+            double x,
+            double& y,
             const double yMin,
-            const double yMax,
-            const bool startInterior,
-            const bool endInterior) const 
-            -> std::vector<xIntersectionDescriptor>;
+            std::vector<xIntersectionDescriptor>& intList,
+            bool& lastIntersectLeft,
+            bool& lastIntersectRight
+        ) const -> bool;
+        
         /**
          * @brief Find the next intersection of a line of constant x with the mesh
          * @param x x coordinate
@@ -556,13 +612,14 @@ namespace interp
          * intersection type of the new intersection point that has been found.
          */
         auto findNextIntersect(
-            const double x,
+            double x,
             double& y,
-            const double yStop,
-            const bool endInterior,
+            double yStop,
+            bool endInterior,
             bool& lastIntersectLeft,
             bool& lastIntersectRight
         ) const -> std::pair<bool, xIntersectionDescriptor>;
+
         /**
          * @brief Get distances from given position to cell edges moving at constant x
          * @param x Current x position
@@ -576,14 +633,16 @@ namespace interp
          * The values of lastIntersectLeft and lastIntersectRight are used to
          * exclude certain directions from consideration, avoiding numerical issues.
          */
-        auto findIntersectDistance(const double x,
-            const double y,
-            const bool searchUp,
-            const bool lastIntersectLeft,
-            const bool lastIntersectRight) const ->
-            std::tuple<double, double, double>;
+        auto findIntersectDistance(
+            double x,
+            double y,
+            bool searchUp,
+            bool lastIntersectLeft,
+            bool lastIntersectRight
+        ) const -> std::tuple<double, double, double>;
+
         /**
-         * @brief Handle case where next intersection is on the rib of a cell
+         * @brief Handle case where next intersection is on the rib of a cell above starting position
          * @param y Starting y position
          * @param x x coordinate
          * @param yStop y Coordinate at which to stop
@@ -603,16 +662,47 @@ namespace interp
          * On return from this function, y, lastIntersectLeft and
          * lastIntersectRight will be modified to reflact the new position.
          */
-        auto handleNextIntersectRib(double& y,
-            const double x,
-            const double yStop,
-            const bool endInterior,
+        auto handleNextIntersectTopRib(
+            double& y,
+            double x,
+            double yStop,
+            bool endInterior,
             bool& lastIntersectLeft,
-            bool& lastIntersectRight)
-        const -> std::pair<bool, xIntersectionDescriptor>;
+            bool& lastIntersectRight
+        ) const -> std::pair<bool, xIntersectionDescriptor>;
+
         /**
-         * @brief Handle case where next intersection is on the spine of a cell
-         * @param left True if the intersection point is on the left spine, false if it is on the right
+         * @brief Handle case where next intersection is on the rib of a cell below starting position
+         * @param y Starting y position
+         * @param x x coordinate
+         * @param yStop y Coordinate at which to stop
+         * @param endInterior True if (x,yStop) is in the mesh interior and not on an edge
+         * @param lastIntersectLeft True if last intersection found was on left of cell
+         * @param lastIntersectRight True if last intersection found was on right of cell
+         * @returns A pair of a boolean and an xIntersectionDescriptor
+         * @details
+         * The return value is a pair consisting if a boolean and an xIntersectionDescriptor.
+         * The boolean is true if the search stopped because an intersection was found, and
+         * false if the search stopped because yStop was reached. The xIntersectionDescriptor
+         * contains the details of the intersection point found; if no valid intersection point
+         * was found because the search terminated, the returned point will have a y
+         * value of NAN. On return, the values of y, lastIntersectLeft, and
+         * lastIntersectRight are modified to contain the position and
+         * intersection type of the new intersection point that has been found.
+         * On return from this function, y, lastIntersectLeft and
+         * lastIntersectRight will be modified to reflact the new position.
+         */
+        auto handleNextIntersectBottomRib(
+            double& y,
+            double x,
+            double yStop,
+            bool endInterior,
+            bool& lastIntersectLeft,
+            bool& lastIntersectRight
+        ) const -> std::pair<bool, xIntersectionDescriptor>;
+
+        /**
+         * @brief Handle case where next intersection is on the left spine of a cell
          * @param y Starting y position
          * @param x x coordinate
          * @param yStop y coordinate at which to stop
@@ -633,16 +723,74 @@ namespace interp
          * On return from this function, y, lastIntersectLeft and
          * lastIntersectRight will be modified to reflact the new position.
          */
-        auto handleNextIntersectSpine(const bool left,
+        auto handleNextIntersectLeftSpine(
             double& y,
-            const double x,
-            const double yStop,
-            const double dy,
-            const bool endInterior,
+            double x,
+            double yStop,
+            double dy,
+            bool endInterior,
             bool& lastIntersectLeft,
-            bool& lastIntersectRight)
-        const -> std::pair<bool, xIntersectionDescriptor>;
+            bool& lastIntersectRight
+        ) const -> std::pair<bool, xIntersectionDescriptor>;
 
+        /**
+         * @brief Handle case where next intersection is on the left spine of a cell
+         * @param y Starting y position
+         * @param x x coordinate
+         * @param yStop y coordinate at which to stop
+         * @param dy y distance to the intersection point
+         * @param endInterior True if (x,yStop) is in the mesh interior and not on an edge
+         * @param lastIntersectLeft True if last intersection found was on left of cell
+         * @param lastIntersectRight True if last intersection found was on right of cell
+         * @returns A pair of a boolean and an xIntersectionDescriptor
+         * @details
+         * The return value is a pair consisting if a boolean and an xIntersectionDescriptor.
+         * The boolean is true if the search stopped because an intersection was found, and
+         * false if the search stopped because yStop was reached. The xIntersectionDescriptor
+         * contains the details of the intersection point found; if no valid intersection point
+         * was found because the search terminated, the returned point will have a y
+         * value of NAN. On return, the values of y, lastIntersectLeft, and
+         * lastIntersectRight are modified to contain the position and
+         * intersection type of the new intersection point that has been found.
+         * On return from this function, y, lastIntersectLeft and
+         * lastIntersectRight will be modified to reflact the new position.
+         */
+        auto handleNextIntersectRightSpine(
+            double& y,
+            double x,
+            double yStop,
+            double dy,
+            bool endInterior,
+            bool& lastIntersectLeft,
+            bool& lastIntersectRight
+        ) const -> std::pair<bool, xIntersectionDescriptor>;
+
+        /**
+         * @brief Handle corner cases for intersections with top ribs
+         * @param x x coorindate
+         * @param lastIntersectLeft True if last intersection found was on left of cell
+         * @param lastIntersectRight True if last intersection found was on right of cell
+         * @returns True if the corner case check found that we have exited the mesh
+         */
+        auto handleTopRibCornerCases(
+            double x,
+            bool& lastIntersectLeft,
+            bool& lastIntersectRight
+        ) const -> bool;
+ 
+        /**
+         * @brief Handle corner cases for intersections with bottom ribs
+         * @param x x coorindate
+         * @param lastIntersectLeft True if last intersection found was on left of cell
+         * @param lastIntersectRight True if last intersection found was on right of cell
+         * @returns True if the corner case check found that we have exited the mesh
+         */
+        auto handleBottomRibCornerCases(
+            double x,
+            bool& lastIntersectLeft,
+            bool& lastIntersectRight
+        ) const -> bool;
+        
         // Input data
         Array2D x_;                  /**< A 2d array giving the x coordinates of the mesh points */
         Array1D y_;                  /**< A 1d array giving the y coordinates of the mesh points */
