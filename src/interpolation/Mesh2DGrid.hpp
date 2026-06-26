@@ -634,7 +634,7 @@ namespace interp
         auto xIntersectSegStartEdge(
             double x,
             double& y,
-            const double yMin,
+            double yMin,
             std::vector<xIntersectionDescriptor>& intList,
             bool& lastIntersectLeft,
             bool& lastIntersectRight

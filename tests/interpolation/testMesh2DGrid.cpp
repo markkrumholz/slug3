@@ -9,10 +9,13 @@
 #include "../src/utils/MiscUtils.hpp"
 #include "testMesh2DGrid.hpp"
 #include <array>
+#include <cmath>
 #include <cstdlib>
 #include <iostream>
 #include <mdspan>
 #include <ranges>
+#include <utility>
+#include <vector>
 
 // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access, misc-use-anonymous-namespace)
 
@@ -23,6 +26,8 @@ testMeshBasics(const interp::Mesh2DGrid& m2d,
     const size_t nx, const size_t ny, const double fac)
 {
     // Check dimensions, convexity, and limits
+    const auto nxm1 = static_cast<double>(nx - 1);
+    const auto nym1 = static_cast<double>(ny - 1);
     if (m2d.nx() != nx) {
         std::cerr << "testMesh2DGrid: expected nx = " << nx
             << ", got nx = " << m2d.nx() << "\n";
@@ -42,8 +47,8 @@ testMeshBasics(const interp::Mesh2DGrid& m2d,
             << ", found xMin = " << m2d.xMin() << "\n";
         return 1;
     }
-    if (!utils::approxEqual(m2d.xMax(), nx - 1 + (fac * (ny-1)))) {
-        std::cerr << "testMesh2DGrid: expected xMax = " << nx - 1 + (fac * (ny-1))
+    if (!utils::approxEqual(m2d.xMax(), nxm1 + (fac * nym1))) {
+        std::cerr << "testMesh2DGrid: expected xMax = " << nxm1 + (fac * nym1)
             << ", found xMax = " << m2d.xMax() << "\n";
         return 1;        
     }
@@ -52,21 +57,25 @@ testMeshBasics(const interp::Mesh2DGrid& m2d,
             << ", found yMin = " << m2d.yMin() << "\n";
         return 1;        
     }
-    if (!utils::approxEqual(m2d.yMax(), ny-1))
+    if (!utils::approxEqual(m2d.yMax(), nym1))
     {
         std::cerr << "testMesh2DGrid: expected yMax = " << ny-1
             << ", found yMax = " << m2d.yMax() << "\n";
         return 1;
     }
     const double yTest = 1.5;
-    if (!utils::approxEqual(m2d.xMin(yTest), fac*yTest)) {
+    if (!utils::approxEqual(m2d.xMin(yTest), fac*yTest))
+    {
         std::cerr << "testMesh2DGrid: expected xMin = " << fac*yTest
             << " at y = " << yTest << " for test mesh; found "
             << m2d.xMin(yTest) << "\n";
         return 1;
     }
-    if (!utils::approxEqual(m2d.xMax(yTest), nx-1 + (fac*yTest))) {
-        std::cerr << "testMesh2DGrid: expected xMax = " << nx-1 + (fac*yTest)
+    if (!utils::approxEqual(m2d.xMax(yTest), 
+        static_cast<double>(nx)-1 + (fac*yTest)))
+    {
+        std::cerr << "testMesh2DGrid: expected xMax = " 
+            << static_cast<double>(nx)-1 + (fac*yTest)
             << " at y = " << yTest << " for test mesh; found "
             << m2d.xMax(yTest) << "\n";
         return 1;
@@ -75,20 +84,23 @@ testMeshBasics(const interp::Mesh2DGrid& m2d,
     // Test containment and indexing
     const double xOut = 0.0;
     const double xIn = 2.5;
-    if (m2d.contains(xOut, yTest)) {
+    if (m2d.contains(xOut, yTest))
+    {
         std::cerr << "testMesh2DGrid: point (" << xOut 
             << ", " << yTest << ") incorrectly reported"
             " as inside the mesh\n";
         return 1;
     }
-    if (!m2d.contains(xIn, yTest)) {
+    if (!m2d.contains(xIn, yTest))
+    {
         std::cerr << "testMesh2DGrid: point (" << xIn 
             << ", " << yTest << ") incorrectly reported"
             " as outside the mesh\n";
         return 1;
     }
     const auto [iIdx,jIdx] = m2d.xyIdx(xIn, yTest);
-    if (iIdx != 2 || jIdx != 1) {
+    if (iIdx != 2 || jIdx != 1)
+    {
         std::cerr << "testMesh2DGrid: for point (" << xIn 
             << ", " << yTest << "), expected (i,j) = (2,1), "
             "instead found (" << iIdx << ", " << jIdx << ")\n";
@@ -97,17 +109,22 @@ testMeshBasics(const interp::Mesh2DGrid& m2d,
 
     // Test that non-convex mesh is recorded correctly as non-convex,
     // and that it gets the correct xMin and xMax assigned
-    if (m2dNC.convex()) {
+    if (m2dNC.convex())
+    {
         std::cerr << "testMesh2DGrid: non-convex grid reported as convex\n";
         return 1;
     }
-    if (!utils::approxEqual(m2dNC.xMin(), 0.0)) {
+    if (!utils::approxEqual(m2dNC.xMin(), 0.0))
+    {
         std::cerr << "testMesh2DGrid: expected xMin = " << 0.0
             << ", found xMin = " << m2dNC.xMin() << "\n";
         return 1;
     }
-    if (!utils::approxEqual(m2dNC.xMax(), nx - 1 + fac)) {
-        std::cerr << "testMesh2DGrid: expected xMax = " << nx - 1 + fac
+    if (!utils::approxEqual(m2dNC.xMax(), 
+        static_cast<double>(nx) - 1 + fac))
+    {
+        std::cerr << "testMesh2DGrid: expected xMax = " 
+            << static_cast<double>(nx) - 1 + fac
             << ", found xMax = " << m2dNC.xMax() << "\n";
         return 1;        
     }
@@ -117,48 +134,58 @@ testMeshBasics(const interp::Mesh2DGrid& m2d,
 }
 
 
-// Test ability to find intersections with mesh at fixed x
+// Test ability to find intersections with convex mesh at fixed x
 static auto
-testXIntersect(const interp::Mesh2DGrid& m2d,
-    const interp::Mesh2DGrid& m2dNC,
-    const size_t nx, const size_t ny, const double fac)
+testXIntersectConvex(const interp::Mesh2DGrid& m2d,
+    const size_t nx, const double fac)
 {
     // Shorten names
-    using xInt = interp::Mesh2DGrid::xIntersectionDescriptor;
-    using xIntType = interp::Mesh2DGrid::IntersectionType;
+    using XInt = interp::Mesh2DGrid::xIntersectionDescriptor;
+    using XIntType = interp::Mesh2DGrid::IntersectionType;
 
     // Test points and expected results
     const std::vector<double> xTest = { -0.5, 0.05, 0.5, 3.05, 3.1 };
-    std::vector<std::vector<xInt>> xIntersect(xTest.size());
+    std::vector<std::vector<XInt>> xIntersect(xTest.size());
     std::vector<std::vector<std::pair<double, double>>> yLim(xTest.size());
-    xIntersect[0] = std::vector<xInt>();  // No intersections
+    xIntersect[0] = std::vector<XInt>();  // No intersections
     yLim[0] = std::vector<std::pair<double, double>>();
     xIntersect[1] = {
-        { 0, xTest[1], xIntType::rib, 0, false },
-        { xTest[1]/fac, 
-            std::sqrt(std::pow(xTest[1]/fac,2) + 
+        { .y = 0, .xs = xTest[1], .t = XIntType::rib, 
+            .idx = 0, .meshExit = false },
+        { .y = xTest[1]/fac, 
+            .xs = std::sqrt(std::pow(xTest[1]/fac,2) + 
             std::pow(xTest[1],2)), 
-            xIntType::spine, 0, true }
+            .t = XIntType::spine, .idx = 0, .meshExit = true }
     };
     yLim[1] = { { 0, 0.5 } };
     xIntersect[2] = {
-        { 0, xTest[2], xIntType::rib, 0, false },
-        { 1, xTest[2], xIntType::rib, 1, false },
-        { 2, xTest[2], xIntType::rib, 2, true }
+        { .y = 0, .xs = xTest[2], .t = XIntType::rib, 
+            .idx = 0, .meshExit = false },
+        { .y = 1, .xs = xTest[2], .t = XIntType::rib,
+            .idx = 1, .meshExit = false },
+        { .y = 2, .xs = xTest[2], .t= XIntType::rib, 
+            .idx = 2, .meshExit = true }
     };
     yLim[2] = { { 0, 2 }};
+    const double nxm1 = static_cast<double>(nx) - 1;
     xIntersect[3] = {
-        { (xTest[3]-(nx-1))/fac, 
-            std::sqrt(std::pow(xTest[3]-(nx-1),2) + 
-            std::pow((xTest[3]-(nx-1))/fac,2)), 
-            xIntType::spine, 3, false },
-        { 1, xTest[3], xIntType::rib, 1, false },
-        { 2, xTest[3], xIntType::rib, 2, true }
+        { .y = (xTest[3]-nxm1)/fac, 
+            .xs = 
+            std::sqrt(std::pow(xTest[3]-nxm1,2) + 
+            std::pow((xTest[3]-nxm1)/fac,2)), 
+            .t = XIntType::spine, .idx = 3, .meshExit = false },
+        { .y = 1, .xs = xTest[3], .t = XIntType::rib, 
+            .idx = 1, .meshExit = false },
+        { .y = 2, .xs = xTest[3], .t = XIntType::rib, 
+            .idx = 2, .meshExit = true }
     };
     yLim[3] = { { 0.5, 2 }};
     xIntersect[4] = {
-        { 1, std::sqrt(0.1*0.1 + 1*1), xIntType::spine, 3, false },
-        { 2, 3.1, xIntType::rib, 2, true }
+        { .y = 1, .xs = std::sqrt(1 + std::pow(0.1,2)), 
+            .t = XIntType::spine, .idx = 3, 
+            .meshExit = false },
+        { .y = 2, .xs = 3.1, .t = XIntType::rib, 
+            .idx = 2, .meshExit = true }
     };
     yLim[4] = { { 1, 2 } };
 
@@ -214,27 +241,41 @@ testXIntersect(const interp::Mesh2DGrid& m2d,
         }
     }
 
+    return 0;  // Success
+}
+
+// Test ability to find intersections with convex mesh at fixed x
+static auto
+testXIntersectNonConvex(const interp::Mesh2DGrid& m2dNC)
+{
+    // Shorten names
+    using XInt = interp::Mesh2DGrid::xIntersectionDescriptor;
+    using XIntType = interp::Mesh2DGrid::IntersectionType;
+
     // Do test for non-convex mesh, in locations where non-convexity matters
     std::vector<double> xTestNC = { 0.05, 3.05 };
-    std::vector<std::vector<xInt>> xIntersectNC(xTestNC.size());
+    std::vector<std::vector<XInt>> xIntersectNC(xTestNC.size());
     std::vector<std::vector<std::pair<double, double>>> yLimNC(xTestNC.size());
+    const double num = std::sqrt(std::pow(0.5,2) + std::pow(0.05,2)); // Convenience
     xIntersectNC[0] = {
-        { 0, 0.05, xIntType::rib, 0, false },
-        { 0.5, std::sqrt(0.5*0.5 + 0.05*0.05),
-            xIntType::spine, 0, true },
-        { 1.5,
-            std::sqrt(1 + 0.1*0.1) + std::sqrt(0.5*0.5 + 0.05*0.05),
-            xIntType::spine, 0, false },
-        { 2, 0.05, xIntType::rib, 2, true }
+        { .y = 0, .xs = 0.05, .t = XIntType::rib, 
+            .idx = 0, .meshExit = false },
+        { .y = 0.5, .xs = num, .t = XIntType::spine, 
+            .idx = 0, .meshExit = true },
+        { .y = 1.5,
+            .xs = std::sqrt(1 + std::pow(0.1,2)) + num,
+            .t = XIntType::spine, .idx = 0, .meshExit = false },
+        { .y = 2, .xs = 0.05, .t = XIntType::rib, 
+            .idx = 2, .meshExit = true }
     };
     yLimNC[0] = { { 0, 0.5 }, { 1.5, 2 } };
     xIntersectNC[1] = {
-        { 0.5, std::sqrt(0.5*0.5 + 0.05*0.05),
-            xIntType::spine, 3, false },
-        { 1, 3.05, xIntType::rib, 1, false },
-        { 1.5, std::sqrt(1 + 0.1*0.1) + 
-            std::sqrt(0.5*0.5 + 0.05*0.05),
-            xIntType::spine, 3, true }
+        { .y = 0.5, .xs = num, .t = XIntType::spine, 
+            .idx = 3, .meshExit = false },
+        { .y = 1, .xs = 3.05, .t = XIntType::rib, 
+            .idx = 1, .meshExit = false },
+        { .y = 1.5, .xs = std::sqrt(1 + std::pow(0.1,2)) + num,
+            .t = XIntType::spine, .idx = 3, .meshExit = true }
     };
     yLimNC[1] = { { 0.5, 1.5 } };
 
@@ -296,20 +337,20 @@ testXIntersect(const interp::Mesh2DGrid& m2d,
 // Test ability to find intersections with mesh at fixed y
 static auto
 testYIntersect(const interp::Mesh2DGrid& m2d,
-    const size_t nx, const size_t ny, const double fac)
+    const size_t nx, const double fac)
 {
     // Shorten name
-    using yInt = interp::Mesh2DGrid::yIntersectionDescriptor;
+    using YInt = interp::Mesh2DGrid::yIntersectionDescriptor;
 
     const std::vector<double> yTest = { -0.5, 0.5, 2 };
-    std::vector<std::vector<yInt>> expected(yTest.size());
-    for (size_t i = 1; i < 3; i++)
+    std::vector<std::vector<YInt>> expected(yTest.size());
+    for (size_t i = 1; i < yTest.size(); i++)
     {
         expected[i].resize(nx);
         for (size_t j = 0; j < nx; j++)
         {
             expected[i][j] = {
-                .x = j + yTest[i] * fac,
+                .x = static_cast<double>(j) + (yTest[i] * fac),
                 .s = yTest[i] * std::sqrt(1 + std::pow(fac,2)),
                 .idx = j
             };
@@ -381,7 +422,7 @@ auto testMesh2DGrid() -> int
     for (size_t j = 0; j < ny; ++j) {
         yNC[j] = static_cast<double>(j);
         for (size_t i = 0; i < nx; ++i) {
-            if (j % 2)
+            if (j % 2 == 1)
             {
                 xNC[i,j] = static_cast<double>(i) +
                     (fac * static_cast<double>(j));
@@ -394,14 +435,18 @@ auto testMesh2DGrid() -> int
     }
     const interp::Mesh2DGrid m2dNC(xNC, yNC);
 
-    // Do basic tests
-    if (testMeshBasics(m2d, m2dNC, nx, ny, fac)) { return 1; };
-    
-    // Do intersection tests
-    if (testXIntersect(m2d, m2dNC, nx, ny, fac)) { return 1; };
-    if (testYIntersect(m2d, nx, ny, fac)) { return 1; };
+    // Result accumulator
+    int test = 0;
 
-    return 0; // Return success
+    // Do basic tests
+    test += testMeshBasics(m2d, m2dNC, nx, ny, fac);
+
+    // Do intersection tests
+    test += testXIntersectConvex(m2d, nx, fac);
+    test += testXIntersectNonConvex(m2dNC);
+    test += testYIntersect(m2d, nx, fac);
+
+    return test; // Return success
 }
 
 // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access, misc-use-anonymous-namespace)
