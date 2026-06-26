@@ -128,7 +128,7 @@ testXIntersect(const interp::Mesh2DGrid& m2d,
     using xIntType = interp::Mesh2DGrid::IntersectionType;
 
     // Test points and expected results
-    std::vector<double> xTest = { -0.5, 0.05, 0.5, 3.05, 3.1 };
+    const std::vector<double> xTest = { -0.5, 0.05, 0.5, 3.05, 3.1 };
     std::vector<std::vector<xInt>> xIntersect(xTest.size());
     std::vector<std::vector<std::pair<double, double>>> yLim(xTest.size());
     xIntersect[0] = std::vector<xInt>();  // No intersections
@@ -293,6 +293,62 @@ testXIntersect(const interp::Mesh2DGrid& m2d,
     return 0;  // Success
 }
 
+// Test ability to find intersections with mesh at fixed y
+static auto
+testYIntersect(const interp::Mesh2DGrid& m2d,
+    const size_t nx, const size_t ny, const double fac)
+{
+    // Shorten name
+    using yInt = interp::Mesh2DGrid::yIntersectionDescriptor;
+
+    const std::vector<double> yTest = { -0.5, 0.5, 2 };
+    std::vector<std::vector<yInt>> expected(yTest.size());
+    for (size_t i = 1; i < 3; i++)
+    {
+        expected[i].resize(nx);
+        for (size_t j = 0; j < nx; j++)
+        {
+            expected[i][j] = {
+                .x = j + yTest[i] * fac,
+                .s = yTest[i] * std::sqrt(1 + std::pow(fac,2)),
+                .idx = j
+            };
+        }
+    }
+
+    // Check against expected results
+    for (const auto& [y, ex] : std::views::zip(yTest, expected))
+    {
+        const auto yIntersectTest = m2d.yIntersect(y);
+        if (ex.size() != yIntersectTest.size())
+        {
+            std::cerr << "testMesh2DGrid: searched convex mesh for intersections at "
+                "y = " << y << ": expected to find " << ex.size()
+                << " intersection points, got " << yIntersectTest.size() << "\n";
+            return 1;
+        }
+        for (const auto& [r, e] : std::views::zip(yIntersectTest, ex))
+        {
+            if (!utils::approxEqual(r.x, e.x) ||
+                !utils::approxEqual(r.s, e.s) ||
+                r.idx != e.idx)
+            {
+                std::cerr << "testMesh2DGrid: convex mesh intersection points not as "
+                    "expected at y = " << y 
+                    << ": expected (x, s, idx) = "
+                    << e.x << ", " << e.s << ", " 
+                    << e.idx
+                    << ", instead found "
+                    << r.x << ", " << r.s << ", "
+                    << r.idx << "\n";
+                return 1;
+            }
+        }
+    }
+
+    return 0; // Success
+}
+
 
 auto testMesh2DGrid() -> int
 {
@@ -343,6 +399,7 @@ auto testMesh2DGrid() -> int
     
     // Do intersection tests
     if (testXIntersect(m2d, m2dNC, nx, ny, fac)) { return 1; };
+    if (testYIntersect(m2d, nx, ny, fac)) { return 1; };
 
     return 0; // Return success
 }

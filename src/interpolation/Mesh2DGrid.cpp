@@ -303,7 +303,6 @@ namespace interp
 
     }
 
-
     // Traversal function used by yLim
     auto Mesh2DGrid::yLimTraverse(
         const double x, 
@@ -1248,6 +1247,96 @@ namespace interp
         // If we have gotten to here, we are still inside the mesh and not
         // at the end point
         return std::make_pair(true, d);
+
+    }
+
+
+    // Find mesh intersections at constant y
+    auto Mesh2DGrid::yIntersect(
+        const double y,
+        const double xLo,
+        const double xHi
+    ) const -> std::vector<yIntersectionDescriptor>
+    {
+        std::vector<yIntersectionDescriptor> intList; // Output holder
+
+        // Handle trivial case where inputs miss the mesh entirely
+        if (y < yMin_ || y > yMax_) { return intList; }
+        const double xMinY = xMin(y);
+        const double xMaxY = xMax(y);
+        if (xHi < xMinY || xLo > xMaxY) { return intList; }
+
+        // Get y index and offset of input y value
+        jSave_ = yIdx(y);
+        const double dy = y - y_[jSave_];
+
+        // Get starting point for traversal
+        double x = std::max(xLo, xMinY);
+
+        // Check if starting position is exactly on a vertical spine,
+        // and store the point if it is
+        if (x == xMinY) 
+        {
+            // Case where we start at mesh left edge
+            iSave_ = 0;
+            const double dx = x - x_[iSave_,jSave_];
+            intList.push_back({
+                .x = x, 
+                .s = s_[iSave_, jSave_] +
+                    std::sqrt(std::pow(dx, 2) + std::pow(dy, 2)),
+                .idx = 0
+            });
+        }
+        else
+        {
+            // Case where we start on mesh interior; note that
+            // the call to onMesh here automatically caches the
+            // i and j indices of the starting cell in iSave_
+            // and jSave_
+            auto [onSpine, d] = onMesh(x, y);
+            if (onSpine)
+            {
+                // If starting point is exactly on spine, store it
+                intList.push_back({
+                    .x = x,
+                    .s = d.xs,
+                    .idx = d.idx
+                });
+            }
+        }
+
+        // Now traverse mesh
+        while (iSave_ < nx() - 1)
+        {
+
+            // Move to right edge of cell
+            const double dx = dy / m_[iSave_+1, jSave_];
+            x = x_[iSave_+1, jSave_] + dx;
+
+            // Enforce maximum x
+            if (x > xHi) { return intList; }
+
+            // Save intersection point
+            intList.push_back({
+                .x = x,
+                .s = s_[iSave_+1, jSave_] +
+                    std::sqrt(std::pow(dx,2) + std::pow(dy,2)),
+                .idx = iSave_ + 1
+            });
+
+            // Move index, being careful to handle degenerate tracks
+            while (true)
+            {
+                iSave_++;
+                if (iSave_ == nx() - 1) { break; }
+                if (x_[iSave_,jSave_] != x_[iSave_+1,jSave_] ||
+                    x_[iSave_+1,jSave_] != x_[iSave_+1,jSave_]) { break; }
+            }
+
+        }
+
+        // Return final list
+        return intList;
 
     }
 

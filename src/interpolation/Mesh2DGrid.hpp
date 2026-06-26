@@ -227,6 +227,22 @@ namespace interp
         };
         // NOLINTEND(readability-identifier-naming)
 
+        /**
+         * @brief A struct to hold an intersection point
+         * @details
+         * This struct describes the results of traversing
+         * the mesh at constant y, which are distinct from
+         * the information needed to describe a traversal
+         * at constant x.
+         */
+        // NOLINTBEGIN(readability-identifier-naming)
+        struct yIntersectionDescriptor {
+            double x;  /**< x coordinate of intersection */
+            double s; /**< s coordinate of intersection */
+            size_t idx; /**< Index of spine at intersection point */
+        };
+        // NOLINTEND(readability-identifier-naming)
+        
         // Constructors and destructor
         /**
          * @brief Construct a Mesh2DGrid
@@ -249,26 +265,31 @@ namespace interp
          * @returns Size of mesh
          */
         auto size() const { return x_.size(); }
+
         /**
          * @brief Return x dimension of Mesh2DGrid
          * @returns Number of mesh points in x direction
          */
         auto nx() const { return x_.extent(0); }
+
         /**
          * @brief Return x dimension of Mesh2DGrid
          * @returns Number of mesh points in x direction
          */
         auto ny() const { return x_.extent(1); }
+
         /**
          * @brief Returns in the mesh is convex
          * @returns True if the mesh is convex
          */
         auto convex() const { return convex_; }
+
         /**
          * @brief Minimum x value in mesh
          * @returns Minimum x value in mesh
          */
         auto xMin() const { return xMin_; }
+
         /**
          * @brief Find minimum x value at given y
          * @returns Minimum x value at given y
@@ -281,11 +302,13 @@ namespace interp
             auto j = yIdx(y);
             return x_[0,j] + ((y - y_[j]) / m_[0,j]);
         }
+
         /**
          * @brief Maximum x value in mesh
          * @returns Maximum x value in mesh
          */
         auto xMax() const { return xMax_; }
+
         /**
          * @brief Find maximum x value at given y
          * @returns Maximum x value at given y
@@ -298,16 +321,19 @@ namespace interp
             auto j = yIdx(y);
             return x_[nx()-1,j] + ((y - y_[j]) / m_[nx()-1,j]);
         }
+
         /**
          * @brief Minimum y value in mesh
          * @returns Minimum y value in mesh
          */
         auto yMin() const { return yMin_; }
+
         /**
          * @brief Maximum y value in mesh
          * @returns Maximum y value in mesh
          */
         auto yMax() const { return yMax_; }
+
         /**
          * @brief Find minimum and maximum y position at a given x
          * @param x x position
@@ -323,6 +349,7 @@ namespace interp
          */
         auto yLim(double x)
         const -> std::vector<std::pair<double, double>>;
+
         /**
          * @brief Check if a point is contained in the mesh
          * @param x x position
@@ -357,6 +384,7 @@ namespace interp
             if (iSave_ == nx()-1) { --iSave_; } // Handle edge case
             return iSave_;
         }
+
         /**
          * @brief Find index of point in y direction
          * @returns Index of point in y direction
@@ -375,6 +403,7 @@ namespace interp
             if (jSave_ == ny()-1) { --jSave_; } // Handle edge case
             return jSave_;
         }
+
         /**
          * @brief Find index of a given point in the mesh
          * @param x The x position
@@ -401,6 +430,7 @@ namespace interp
             if (i == nx()-1) { --iSave_; } // Handle dge case
             return std::pair(i,j);
         }
+
         /**
          * @brief Check if a given point is exactly on the mesh
          * @param x x poistion
@@ -422,8 +452,8 @@ namespace interp
         /**
          * @brief Compute intersection of mesh with line of constant x
          * @param x The x coordinate
-         * @param yLo Lower limit of traversal
-         * @param yHi Upper limit of traversal
+         * @param yLo Lower y limit of traversal
+         * @param yHi Upper y limit of traversal
          * @returns List of points where line crosses mesh
          * @details
          * This routine returns the set of points at which a
@@ -436,6 +466,24 @@ namespace interp
             double yLo = std::numeric_limits<double>::lowest(),
             double yHi = std::numeric_limits<double>::max()
         ) const -> std::vector<xIntersectionDescriptor>;
+
+        /**
+         * @brief Compute intersection of mesh with line of constant y
+         * @param y The y coordinate
+         * @param xLo Lower x limit of traversal
+         * @param xHi Upper x limit of traversal
+         * @returns List of points where the line crosses mesh
+         * @details
+         * This routine returns the set of points at which a
+         * line of constant y starting at xLo and ending at xHi
+         * intersects the mesh. The returned points are of type
+         * yIntersectionDescriptor.
+         */
+        auto yIntersect(
+            double y,
+            double xLo = std::numeric_limits<double>::lowest(),
+            double xHi = std::numeric_limits<double>::max()
+        ) const -> std::vector<yIntersectionDescriptor>;
         
     private:
 
