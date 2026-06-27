@@ -7,10 +7,12 @@
  * @date 2024-06-19
  */
 
+#include "testInterpolator1D.hpp"
 #include "testMesh2DGrid.hpp"
 
 auto main() -> int {
     int result = 0;
+    result += testInterpolator1D();
     result += testMesh2DGrid();
     return result;
 }
