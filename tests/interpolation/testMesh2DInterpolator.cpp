@@ -48,6 +48,21 @@ auto testMesh2DInterpolator() -> int
     // Construct interpolator
     interp::Mesh2DInterpolator<3> m2d(x, y, f, gsl_interp_linear);
 
+    // Construct a data set with duplication of x, to verify that
+    // functions properly; this data set is identical to the standard test,
+    // except that the first row is changed to { 0, 2, 2, 3} instead of
+    // {0, 1, 2, 3}
+    auto xDataDup = xData;
+    const std::mdspan<double, std::extents<size_t, nx, ny>> 
+        xDup(xDataDup.data());
+    xDup[2,0] = 2.0;
+
+    // Construct interpolator with duplication
+    interp::Mesh2DInterpolator<3> m2dDup(xDup, y, f, gsl_interp_linear);
+
+    // Test making interpolators from the mesh
+    auto yInterp = m2d.interpConstY(0.5);
+
     return 0; // Success
 }
 

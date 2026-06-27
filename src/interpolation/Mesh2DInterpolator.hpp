@@ -14,6 +14,7 @@
 #include "Mesh2DGrid.hpp"
 #include <gsl/gsl_interp.h>
 #include <mdspan>
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -140,53 +141,194 @@ namespace interp
         { }
 
         virtual ~Mesh2DInterpolator() = default;
-        Mesh2DInterpolator(const Mesh2DInterpolator&) = default;
+
+        // Disallow copy constructor due to the unique_ptrs we use
+        // internally, but allow move constructor
+        Mesh2DInterpolator(const Mesh2DInterpolator&) = delete;
         Mesh2DInterpolator(Mesh2DInterpolator&&) = default;
         auto operator=(const Mesh2DInterpolator&) -> Mesh2DInterpolator& = delete;
-        auto operator=(Mesh2DInterpolator&&) -> Mesh2DInterpolator& = delete;
+        auto operator=(Mesh2DInterpolator&&) -> Mesh2DInterpolator& = default;
 
         // Observers
         /**
          * @brief Return size of Mesh2DInterpolator
          * @returns Size of mesh
          */
-        auto size() const { return mesh_.size(); }
+        [[nodiscard]] auto size() const { return mesh_.size(); }
 
         /**
          * @brief Return x dimension of Mesh2DInterpolator
          * @returns Number of mesh points in x direction
          */
-        auto nx() const { return mesh_.nx(); }
+        [[nodiscard]] auto nx() const { return mesh_.nx(); }
 
         /**
          * @brief Return x dimension of Mesh2DInterpolator
          * @returns Number of mesh points in x direction
          */
-        auto ny() const { return mesh_.ny(); }
+        [[nodiscard]] auto ny() const { return mesh_.ny(); }
 
         /**
          * @brief Return if the mesh is convex
          * @returns True if the mesh is convex
          */
-        auto convex() const { return mesh_.convex(); }
+        [[nodiscard]] auto convex() const { return mesh_.convex(); }
 
         /**
          * @brief Return a const reference to the x array
          * @returns A const reference to the x array
          */
-        const auto& x() const { return mesh_.xData(); }
+        [[nodiscard]] const auto& x() const { return mesh_.xData(); }
 
         /**
          * @brief Return a const reference to the y array
          * @returns A const reference to the y array
          */
-        const auto& y() const { return mesh_.yData(); }
+        [[nodiscard]] const auto& y() const { return mesh_.yData(); }
 
         /**
          * @brief Return a const reference to the s array
          * @returns A const reference to the s array
          */
-        const auto& s() const { return mesh_.sData(); }
+        [[nodiscard]] const auto& s() const { return mesh_.sData(); }
+
+        /**
+         * @brief Minimum x value in mesh
+         * @returns Minimum x value in mesh
+         */
+        [[nodiscard]] const auto xMin() const { return mesh_.xMin(); }
+
+        /**
+         * @brief Find minimum x value at given y
+         * @returns Minimum x value at given y
+         */
+        [[nodiscard]] const auto xMin(const double y) const { return mesh_.xMin(y); }
+
+        /**
+         * @brief Maximum x value in mesh
+         * @returns Maximum x value in mesh
+         */
+        [[nodiscard]] const auto xMax() const { return mesh_.xMax(); }
+
+        /**
+         * @brief Find maximum x value at given y
+         * @returns Maximum x value at given y
+         */
+        [[nodiscard]] const auto xMax(const double y) const { return mesh_.xMax(y); }
+
+        /**
+         * @brief Minimum y value in mesh
+         * @returns Minimum y value in mesh
+         */
+       [[nodiscard]] auto yMin() const { return mesh_.yMin(); }
+
+        /**
+         * @brief Maximum y value in mesh
+         * @returns Maximum y value in mesh
+         */
+        [[nodiscard]] auto yMax() const { return mesh_.yMax(); }
+
+        // Interpolators
+        /**
+         * @brief Function to create a 1D interpolator at constant x
+         * @param x x coordinate
+         * @returns A vector of Interpolator1D's that interpolates in y at the given x
+         * @details
+         * This function returns a vector of Interpolator1D objeects rather than a
+         * single one because, for a non-convex mesh, the intersection of a line of
+         * constant x with the mesh may consist of multiple disconnected sgments. In
+         * such cases, the vector will contain one Interpolator1D for each segment.
+         */
+        [[nodiscard]] auto interpConstX(double x) const -> 
+        std::vector<std::unique_ptr<Interpolator1D<nF>>>
+        {
+            // Grab list of intersection points
+            auto intersect = mesh_.xIntersect();
+
+            // Output holders
+            std::vector<std::unique_ptr<Interpolator1D<nF>>> result;
+            std::vector<double> y;
+            std::array<std::vector<double>, nF> f;
+
+            // Loop over intersection points
+            for (const auto& i : intersect)
+            {
+                // Add to accumulators
+                y.push_back(i.y);
+                if (i.t == Mesh2DGrid::IntersectionType::rib)
+                {
+                    // Interpolate on rib
+                    auto fi = (*(ribInterp[i.idx]))(i.xs);
+                    if constexpr (nF == 1) { f.push_back({fi}); }
+                    else { f.push_back(fi); }
+                }
+                else
+                {
+                    // Interpolate on spine
+                    const double s = monotonic_ ? i.y : i.xs;
+                    auto fi = (*(spineInterp[i.idx]))(s);
+                    if constexpr (nF == 1) { f.push_back({fi}); }
+                    else { f.push_back(fi); }
+                }
+
+                // If this point is a mesh exit, construct new
+                // interpolator here and push onto output list, then
+                // empty the accumulators
+                if (i.meshExit)
+                {
+                    auto newInterp = 
+                        std::make_unique<Interpolator1D<nF>>(y, f, interpType_);
+                    result.push_back(std::move(newInterp));
+                    y.clear();
+                    f.clear();
+                }
+            }
+            
+            // If any points remain in accumulator, create an interpolator from them
+            if (!y.empty())
+            {   
+                auto newInterp = 
+                    std::make_unique<Interpolator1D<nF>>(y, f, interpType_);
+                result.push_back(std::move(newInterp));
+            }
+
+            // Return result
+            return result;
+        }
+        
+        /**
+         * @brief Function to create a 1D interpolator at constant y
+         * @param y y coordinate
+         * @returns An Interpolator1D that interpolates in x and the given y
+         */
+        [[nodiscard]] auto interpConstY(double y) const -> 
+        std::unique_ptr<Interpolator1D<nF>>
+        {
+            // Grab list of intersection points
+            auto intersect = mesh_.yIntersect(y);
+
+            // Accumulators
+            std::vector<double> x(intersect.size());
+            std::array<std::vector<double>, nF> f;
+            for (auto& fi : f) { fi.resize(x.size()); }
+
+            // Loop over intersection points, evaluating function at each
+            for (size_t i = 0; i < x.size(); i++)
+            {
+                const auto& pt = intersect[i];
+                x[i] = pt.x;
+                auto fInterp = (*(spineInterp[pt.idx]))(pt.s);
+                if constexpr (nF == 1) { f[0][i] = fInterp; }
+                else
+                { 
+                    for (size_t k = 0; k < nF; k++) { f[k][i] = fInterp[k]; }
+                }                
+            }
+
+            // Build final interpolation object to return
+            return std::make_unique<Interpolator1D<nF>>(x, f, interpType_);
+        }
+
         
     
     private:
@@ -195,7 +337,11 @@ namespace interp
         const gsl_interp_type *interpType_; /**< Type of interpolation used */
         const bool monotonic_;        /**< True if interpolation is monotonicity-preserving */
 
-        // Internal storage
+        // Internal storage; note that we handle the rib and spine
+        // interpolators as vectors of unique_ptr rather than vectors
+        // of Interpolator1D because we need to be sure to invoke the
+        // destructor of Interpolator1D objects once only to avoid memory
+        // issue with gsl opaque objects
         Mesh2DGrid mesh_;            /**< Object to represent the (x,y) mesh */
         std::vector<
             std::unique_ptr<Interpolator1D<nF>>

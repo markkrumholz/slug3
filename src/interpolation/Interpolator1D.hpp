@@ -69,18 +69,30 @@ namespace interp
             gsl_interp_accel_free(acc_);
         }
 
-        // Standard move constructors
-        Interpolator1D(Interpolator1D&&) = default;
-        auto operator=(Interpolator1D&&) -> Interpolator1D& = default;
-
-        // Disallow copy constructors, since these would make
+        // Disallow move and copy constructors, since these would make
         // copies of gsl opaque objects that we can't manage with
         // smart pointers, resulting in potential memory corruption
         // when two Interpolator1D objects pointing to the same gsl
         // opaque objects pass out of scope and try to free the same
-        // memory
+        // memory. We manage this by only ever dealing with unique_ptr's
+        // to Interpolator1D objects elsewhere in the code, to ensure
+        // that the destructor is invoked once and only once.
         Interpolator1D(const Interpolator1D&) = delete;
         auto operator=(const Interpolator1D&) -> Interpolator1D& = delete;
+        Interpolator1D(Interpolator1D&&) = delete;
+        auto operator=(Interpolator1D&&) -> Interpolator1D& = delete;
+
+        /**
+         * @brief Get minimum allowed x
+         * @return Minimum allowed x
+         */
+        [[nodiscard]] auto xMin() const { return x_.front(); }
+
+        /**
+         * @brief Get maximum allowed x
+         * @return Maximum allowed x
+         */
+        [[nodiscard]] auto xMax() const { return x_.back(); }
 
         /**
          * @brief Interpolate to a given point
@@ -176,7 +188,14 @@ namespace interp
                 {
                     throw std::runtime_error("Interpolator1D: x and f must be of same length");
                 }
-                i = gsl_interp_alloc(interpType, x_.size());
+                if (x_.size() > gsl_interp_type_min_size(interpType))
+                {
+                    i = gsl_interp_alloc(interpType, x_.size());
+                }
+                else
+                {
+                    i = gsl_interp_alloc(gsl_interp_linear, x_.size());
+                }
                 gsl_interp_init(i, x_.data(), d.data(), x_.size());
             }
             acc_ = gsl_interp_accel_alloc();
