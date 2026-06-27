@@ -47,6 +47,7 @@ namespace interp
         acc_(nullptr)
         {
             safetyCheck(interpType);
+            cleanDuplicates();
             interpInit(interpType);
         }
 
@@ -54,15 +55,12 @@ namespace interp
             const std::vector<double>& x,
             const std::vector<double>& f,
             const gsl_interp_type* interpType = gsl_interp_steffen
-        ) requires (nF == 1): 
-        x_(x),
-        f_({f}),
-        interp_({nullptr}),
-        acc_(nullptr)
-        {
-            safetyCheck(interpType);
-            interpInit(interpType);
-        }
+        ) requires (nF == 1)
+        : 
+        Interpolator1D(x, 
+            std::array<std::vector<double>, 1>({f}),
+            interpType)
+        { }
 
         virtual ~Interpolator1D()
         {
@@ -71,12 +69,18 @@ namespace interp
             gsl_interp_accel_free(acc_);
         }
 
-        // Disallow copy and move constructors, since we cannot
-        // straightforwardly copy the opaque objects used by the gsl
+        // Standard move constructors
+        Interpolator1D(Interpolator1D&&) = default;
+        auto operator=(Interpolator1D&&) -> Interpolator1D& = default;
+
+        // Disallow copy constructors, since these would make
+        // copies of gsl opaque objects that we can't manage with
+        // smart pointers, resulting in potential memory corruption
+        // when two Interpolator1D objects pointing to the same gsl
+        // opaque objects pass out of scope and try to free the same
+        // memory
         Interpolator1D(const Interpolator1D&) = delete;
-        Interpolator1D(Interpolator1D&&) = delete;
         auto operator=(const Interpolator1D&) -> Interpolator1D& = delete;
-        auto operator=(Interpolator1D&&) -> Interpolator1D& = delete;
 
         /**
          * @brief Interpolate to a given point
@@ -134,6 +138,34 @@ namespace interp
         }
 
         /**
+         * @brief Remove duplicate values in x and f
+         */
+        void cleanDuplicates()
+        {
+            // Loop through x values
+            size_t i = 0;
+            while (i < x_.size() - 2)
+            {
+                // Find sequences of identical values
+                size_t count = 0;
+                while (x_[i] == x_[i+count+1]) { ++count; }
+
+                // Move values to remove duplicates
+                if (count > 0)
+                {
+                    for (size_t j = i; j < x_.size() - count; ++j)
+                    {
+                        x_[j] = x_[j+count];
+                        for (auto &fi : f_) { fi[j] = fi[j+count]; }
+                    }
+                }
+
+                // Move to next element
+                i += count + 1;
+            }
+        }
+
+        /**
          * @brief Initialize the gsl interpolation machinery
          */
         void interpInit(const gsl_interp_type *interpType)
@@ -159,4 +191,4 @@ namespace interp
 
 } // namespace interp
 
-#endif // RSINTERPOLATOR_HPP
+#endif // INTERPOLATOR1D_HPP

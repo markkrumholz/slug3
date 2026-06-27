@@ -14,13 +14,6 @@
 /**
  * @brief Unit test for the Mesh2DGrid class
  * @returns 0 if the test passes, 1 if it fails
- * @details
- * This function tests the Mesh2DGrid class. The specific
- * tests carried out are: (1) correct construction of a
- * mesh, including correct calculation of its slopes, spine
- * lengths, and convexity; (2) correct calculation of whether
- * a point is within the mesh, and identification of its
- * host cell if it is.
  */
 auto testMesh2DGrid() -> int;
 

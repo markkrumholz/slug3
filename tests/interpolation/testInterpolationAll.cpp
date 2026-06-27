@@ -9,10 +9,12 @@
 
 #include "testInterpolator1D.hpp"
 #include "testMesh2DGrid.hpp"
+#include "testMesh2DInterpolator.hpp"
 
 auto main() -> int {
     int result = 0;
     result += testInterpolator1D();
     result += testMesh2DGrid();
+    result += testMesh2DInterpolator();
     return result;
 }

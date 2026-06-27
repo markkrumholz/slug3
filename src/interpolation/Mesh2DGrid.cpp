@@ -127,7 +127,7 @@ namespace interp
         for (size_t i = 0; i < nx(); ++i) {
             s_[i,0] = 0.0;
             for (size_t j = 1; j < ny(); ++j) {
-                s_[i,j] = std::sqrt(
+                s_[i,j] = s_[i,j-1] + std::sqrt(
                     std::pow(x_[i,j] - x_[i,j-1], 2) +
                     std::pow(y_[j] - y_[j-1], 2)  
                 );

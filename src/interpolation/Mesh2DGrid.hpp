@@ -16,7 +16,9 @@
  * that the outer edge of the mesh need not be convex, and that edges
  * can be degenerate, i.e., (x_{ij}, y_j) = (x_{i+1,j}, y_j) =
  * (x_{i,j+1}, y_{j+1}), so the ij - i+1,j and ij - i,j+1 edges are
- * identical.
+ * identical. Nor is the degeneracy guaranteed to be the same in all
+ * rows, i.e., we may have x_{i,j} == x_{i+1,j} but 
+ * x_{i,j+1} != x_{i+1,j+1}.
  *
  * Given a set of function values f_{ij} defined at the grid points,
  * we wish to define an interpolating function f(x,y) that will give
@@ -52,6 +54,10 @@
  *      o------------------------------o
  *  (x_{ij}, y_j)              (x_{i+1,j}, y_j})
  *
+ * Note that "degenerate" quadrilaterals are allowed, whereby
+ * either the top or bottom edge has length zero, and thus the
+ * shape is actually a triangle.
+ * 
  * For convenience we will refer to the edges at constant y as
  * "ribs", and the edges that are not at constant y as
  * "spines". Let index (i,j) refer to the spine that lies
@@ -190,7 +196,8 @@ namespace interp
      * values of x can be different from one row of y values to
      * to the next).
      */
-    class Mesh2DGrid {
+    class Mesh2DGrid
+    {
     public:
 
         // Shorten array types
@@ -284,6 +291,24 @@ namespace interp
          */
         auto convex() const { return convex_; }
 
+        /**
+         * @brief Return a const reference to the x array
+         * @returns A const references to the x array
+         */
+        const auto& xData() const { return x_; }
+
+        /**
+         * @brief Return a const reference to the y array
+         * @returns A const references to the y array
+         */
+        const auto& yData() const { return y_; }
+        
+        /**
+         * @brief Return a const reference to the s array
+         * @returns A const references to the s array
+         */
+        const auto& sData() const { return s_; }
+        
         /**
          * @brief Minimum x value in mesh
          * @returns Minimum x value in mesh
