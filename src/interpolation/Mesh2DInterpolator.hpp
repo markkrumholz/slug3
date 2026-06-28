@@ -238,12 +238,14 @@ namespace interp
          * single one because, for a non-convex mesh, the intersection of a line of
          * constant x with the mesh may consist of multiple disconnected sgments. In
          * such cases, the vector will contain one Interpolator1D for each segment.
+         * If the value of x provided is outside the mesh entirely, so there are no
+         * intersections, the returned vector will be empty.
          */
         [[nodiscard]] auto interpConstX(double x) const -> 
         std::vector<std::unique_ptr<Interpolator1D<nF>>>
         {
             // Grab list of intersection points
-            auto intersect = mesh_.xIntersect();
+            const auto intersect = mesh_.xIntersect(x);
 
             // Output holders
             std::vector<std::unique_ptr<Interpolator1D<nF>>> result;
@@ -251,36 +253,38 @@ namespace interp
             std::array<std::vector<double>, nF> f;
 
             // Loop over intersection points
-            for (const auto& i : intersect)
+            for (size_t i = 0; i < intersect.size(); i++)
             {
-                // Add to accumulators
-                y.push_back(i.y);
-                if (i.t == Mesh2DGrid::IntersectionType::rib)
-                {
-                    // Interpolate on rib
-                    auto fi = (*(ribInterp[i.idx]))(i.xs);
-                    if constexpr (nF == 1) { f.push_back({fi}); }
-                    else { f.push_back(fi); }
-                }
+                const auto& pt = intersect[i];
+                
+                // Add y to accumulator
+                y.push_back(pt.y);
+
+                // Get point at which to evaluate spline
+                const double s = 
+                    (pt.t == Mesh2DGrid::IntersectionType::rib &&
+                    monotonic_) ? pt.xs : pt.y;
+
+                // Evaluate spline and save
+                const auto fInterp = pt.t == Mesh2DGrid::IntersectionType::rib ?
+                    (*(ribInterp[pt.idx]))(s) :
+                    (*(spineInterp[pt.idx]))(s);
+                if constexpr (nF == 1) { f[0].push_back(fInterp); }
                 else
-                {
-                    // Interpolate on spine
-                    const double s = monotonic_ ? i.y : i.xs;
-                    auto fi = (*(spineInterp[i.idx]))(s);
-                    if constexpr (nF == 1) { f.push_back({fi}); }
-                    else { f.push_back(fi); }
-                }
+                { 
+                    for (size_t k = 0; k < nF; k++) { f[k].push_back(fInterp[k]); }
+                }                
 
                 // If this point is a mesh exit, construct new
                 // interpolator here and push onto output list, then
                 // empty the accumulators
-                if (i.meshExit)
+                if (pt.meshExit)
                 {
                     auto newInterp = 
                         std::make_unique<Interpolator1D<nF>>(y, f, interpType_);
                     result.push_back(std::move(newInterp));
                     y.clear();
-                    f.clear();
+                    for (auto &fi : f) { fi.clear(); }
                 }
             }
             
@@ -300,12 +304,19 @@ namespace interp
          * @brief Function to create a 1D interpolator at constant y
          * @param y y coordinate
          * @returns An Interpolator1D that interpolates in x and the given y
+         * @details
+         * If the value of y provided is outside the mesh entirely (i.e., below
+         * yMin or above yMax), this routine returns a null pointer.
          */
         [[nodiscard]] auto interpConstY(double y) const -> 
         std::unique_ptr<Interpolator1D<nF>>
         {
             // Grab list of intersection points
             auto intersect = mesh_.yIntersect(y);
+
+            // Catch case where mesh is missed entirely, so we just return
+            // a null pointer
+            if (intersect.empty()) { return nullptr; }
 
             // Accumulators
             std::vector<double> x(intersect.size());

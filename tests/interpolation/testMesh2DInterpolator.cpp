@@ -19,7 +19,7 @@ auto testMesh2DInterpolator() -> int
 {
     // Construct a test data set of size (4, 3) where the data points are 
     // y_j = j
-    // x_ij = i + 0.1 * j
+    // x_ij = i + (-1)^(j % 2) (0.1 * j)
     // f_ij = { x_ij + y_j, sin(x_{ij} + y_j), cos(x_{ij} + y_j) }
     constexpr size_t nx = 4;
     constexpr size_t ny = 3;
@@ -36,9 +36,10 @@ auto testMesh2DInterpolator() -> int
         f(fData.data());
     for (size_t j = 0; j < ny; ++j) {
         y[j] = static_cast<double>(j);
+        const double sgn = j % 2 ? 1 : -1;
         for (size_t i = 0; i < nx; ++i) {
             x[i,j] = static_cast<double>(i) +
-                (fac * static_cast<double>(j));
+                (sgn * fac * static_cast<double>(j));
             f[i,j,0] = x[i,j] + y[j];
             f[i,j,1] = std::sin(f[i,j,0]);
             f[i,j,2] = std::cos(f[i,j,0]);
@@ -61,8 +62,17 @@ auto testMesh2DInterpolator() -> int
     interp::Mesh2DInterpolator<3> m2dDup(xDup, y, f, gsl_interp_linear);
 
     // Test making interpolators from the mesh
-    auto yInterp = m2d.interpConstY(0.5);
-
+    const std::vector<double> xTest = { -0.5, 0.05, 2, 4.05 };
+    const std::vector<double> yTest = { -0.5, 0.5 };
+    for (auto xt : xTest)
+    {
+        auto xInterp = m2d.interpConstX(xt);
+    }
+    for (auto yt : yTest)
+    {
+        auto yInterp = m2d.interpConstY(yt);
+    }
+    
     return 0; // Success
 }
 
