@@ -46,7 +46,7 @@ auto testMesh2DInterpolator() -> int
     }
 
     // Construct interpolator
-    interp::Mesh2DInterpolator<nF> m2d(x, y, f, gsl_interp_linear);
+    const interp::Mesh2DInterpolator<nF> m2d(x, y, f, gsl_interp_linear);
 
     // Construct a data set with duplication of x, to verify that
     // functions properly; this data set is identical to the standard test,
@@ -58,9 +58,10 @@ auto testMesh2DInterpolator() -> int
     xDup[2,0] = 2.0;
 
     // Construct interpolator with duplication
-    interp::Mesh2DInterpolator<nF> m2dDup(xDup, y, f, gsl_interp_linear);
+    const interp::Mesh2DInterpolator<nF> m2dDup(xDup, y, f, gsl_interp_linear);
 
-    // Test making x interpolators from the mesh
+    // Test that x interpolators produce the correct number of segments
+    // and limits on them, and that interpolation produces correct values
     const std::vector<double> xTest = { -0.5, 0.05, 2, 3.05 };
     const std::vector<std::vector<double>> yPtXTest = {  
         { }, // xTest = -0.5
@@ -74,7 +75,7 @@ auto testMesh2DInterpolator() -> int
         { { 0, 2} }, // xTest = 2
         { { 0.5, 1.5} } // xTest = 3.05
     };
-    const std::vector<std::vector<std::array<double,3>>> fXTest = {
+    const std::vector<std::vector<std::array<double,nF>>> fXTest = {
         { }, // xTest = -0.5
         { { 0.95 * f[0,0,0] + 0.05 * f[1,0,0],
             0.95 * f[0,0,1] + 0.05 * f[1,0,1] },
@@ -123,6 +124,9 @@ auto testMesh2DInterpolator() -> int
                 return 1;
             }
         }
+
+        // Check that interpolation produces correct values at the
+        // test points
         for (auto [yval, fval] : std::views::zip(ypt, fpt))
         {
             for (const auto& xi : xInterp)
@@ -145,11 +149,69 @@ auto testMesh2DInterpolator() -> int
         }
     }
 
-    // Test making y interpolators from mesh
+    // Test that y interpolators produce the correct number of segments
+    // and limits on them, and that interpolation produces correct values
     const std::vector<double> yTest = { -0.5, 0.5 };
-    for (auto yt : yTest)
+    const std::vector<std::vector<double>> xPtYTest = {  
+        { }, // yTest = -0.5
+        { 0.05, 0.55, 2.05 } // yTest = 0.5
+    };
+    const std::vector<std::vector<double>> yLim = {
+        { }, // yTest = -0.5
+        { { 0.05, 3.05 } } // yTest = 0.5
+    };
+    const std::vector<std::vector<std::array<double,nF>>> fYTest = {
+        { }, // yTest = -0.5
+        { { 0.5 * f[0,0,0] + 0.5 * f[0,1,0],
+            0.5 * f[0,0,1] + 0.5 * f[0,1,1] },
+            { 0.25 * f[0,0,0] + 0.25 * f[0,1,0] +
+            0.25 * f[1,0,0] + 0.25 * f[1,1,0],
+            0.25 * f[0,0,1] + 0.25 * f[0,1,1] +
+            0.25 * f[1,0,1] + 0.25 * f[1,1,1]},
+            { 0.5 * f[2,0,0] + 0.5 * f[2,1,0],
+            0.5 * f[2,0,1] + 0.5 * f[2,1,1]}
+        } // yTest = 0.5
+    };
+    
+    for (auto [yt, yl, xpt, fpt] : 
+        std::views::zip(yTest, yLim, xPtYTest, fYTest))
     {
+        // Construct interpolator
         auto yInterp = m2d.interpConstY(yt);
+
+        // Verify that it has the correct size and limits
+        if (yInterp == nullptr && yl.empty()) { continue; }
+        if (yInterp == nullptr && !yl.empty())  
+        {
+            std::cerr << "testMesh2DInterpolator: at y = " << yt
+                << " expected to find " << yl.size() 
+                << " segements, instead found 0\n";
+            return 1;
+        }
+        if (yInterp != nullptr && yInterp->xRange() != std::make_pair(yl[0], yl[1]))
+        {
+            std::cerr << "testMesh2DInterpolator: at y = " << yt
+                << " expected segment limits " << yl[0] << "-" << yl[1]
+                << ", instead found " << yInterp->xRange().first << "-" << yInterp->xRange().second << "\n";
+            return 1;
+        }
+
+        // Check that interpolation produces correct values at the
+        // test points
+        for (auto [xval, fval] : std::views::zip(xpt, fpt))
+        {
+            auto finterp = (*yInterp)(xval);
+            for (auto [fi, fv] : std::views::zip(finterp, fval))
+            {
+                if (!utils::approxEqual(fi,fv))
+                {
+                    std::cerr << "testMesh2DInterpolator: at y = " << yt
+                        << ", x = " << xval << ", expected f = "
+                        << fv << ", found " << fi << "\n";
+                    return 1;
+                }
+            }
+        }
     }
 
     return 0; // Success
