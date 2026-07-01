@@ -262,8 +262,8 @@ namespace interp
 
                 // Get point at which to evaluate spline
                 const double s = 
-                    (pt.t == Mesh2DGrid::IntersectionType::rib &&
-                    monotonic_) ? pt.xs : pt.y;
+                    (pt.t == Mesh2DGrid::IntersectionType::spine &&
+                    monotonic_) ? pt.y : pt.xs;
 
                 // Evaluate spline and save
                 const auto fInterp = pt.t == Mesh2DGrid::IntersectionType::rib ?

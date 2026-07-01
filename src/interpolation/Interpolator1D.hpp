@@ -14,6 +14,7 @@
 #include <gsl/gsl_interp.h>
 #include <ranges>
 #include <sstream>
+#include <utility>
 #include <vector>
 
 namespace interp
@@ -93,6 +94,12 @@ namespace interp
          * @return Maximum allowed x
          */
         [[nodiscard]] auto xMax() const { return x_.back(); }
+
+        /**
+         * @brief Get allowed range in x
+         * @return Allowed range in x
+         */
+        [[nodiscard]] auto xRange() const { return std::make_pair(xMin(), xMax()); }
 
         /**
          * @brief Interpolate to a given point
