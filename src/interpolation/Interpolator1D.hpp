@@ -5,27 +5,34 @@
  * @date 2024-06-27
 */
 
-#ifndef RSINTERPOLATOR_HPP
-#define RSINTERPOLATOR_HPP
+#ifndef INTERPOLATOR1D_HPP
+#define INTERPOLATOR1D_HPP
 
 #include <algorithm>
 #include <array>
 #include <cassert>
+#include <cstddef>
 #include <gsl/gsl_interp.h>
 #include <ranges>
 #include <sstream>
+#include <stdexcept>
 #include <utility>
 #include <vector>
+
+// Disable linting for array bounds checking in this
+// file, since the overhead associated with enforcing
+// such checks severely interferes with performance
+// NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
 
 namespace interp
 {
 
     /**
      * @class Interpolator1D
-     * @tparam nF Number of quantities to interpolate
+     * @tparam NF Number of quantities to interpolate
      * @brief A class to handle 1D interpolation
      */
-    template <size_t nF = 1>
+    template <size_t NF = 1>
     class Interpolator1D
     {
     public:
@@ -39,7 +46,7 @@ namespace interp
         */
         Interpolator1D(
             const std::vector<double>& x,
-            const std::array<std::vector<double>, nF>& f,
+            const std::array<std::vector<double>, NF>& f,
             const gsl_interp_type* interpType = gsl_interp_steffen
         ) : 
         x_(x),
@@ -56,7 +63,7 @@ namespace interp
             const std::vector<double>& x,
             const std::vector<double>& f,
             const gsl_interp_type* interpType = gsl_interp_steffen
-        ) requires (nF == 1)
+        ) requires (NF == 1)
         : 
         Interpolator1D(x, 
             std::array<std::vector<double>, 1>({f}),
@@ -106,31 +113,31 @@ namespace interp
          * @param x The point to which to interpolate
          * @return The interpolated value(s)
          * @details
-         * Return type is a double if nF = 1, and a std::array otherwise.
+         * Return type is a double if NF = 1, and a std::array otherwise.
          */
         [[nodiscard]] auto operator()(double x) const
         {
             assert(x >= x_.front() && x <= x_.back());
-            std::array<double, nF> result;
-            for (size_t i = 0; i < nF; ++i)
+            std::array<double, NF> result;
+            for (size_t i = 0; i < NF; ++i)
             {
                 result[i] = gsl_interp_eval(interp_[i], x_.data(), 
                     f_[i].data(), x, acc_);
             }
-            if constexpr(nF > 1) { return result; }
+            if constexpr(NF > 1) { return result; }
             else { return result[0]; }
         }
 
         /**
          * @brief Interpolate a single quantity to a given point
          * @param x The point to which to interpolate
-         * @param idx Quantity to interpolate; must be <= nF
+         * @param idx Quantity to interpolate; must be <= NF
          * @return The interpolated value
         */
         [[nodiscard]] auto operator()(double x, size_t idx) const
         {
             assert(x >= x_.front() && x <= x_.back());
-            assert(idx < nF);
+            assert(idx < NF);
             return gsl_interp_eval(interp_[idx], x_.data(), f_[idx].data(), x, acc_);
         }
 
@@ -141,7 +148,7 @@ namespace interp
          */
         void safetyCheck(const gsl_interp_type *interpType)
         {
-            static_assert(nF > 0, "Interpolator1D: number of quantities to interpolate must be >= 1");
+            static_assert(NF > 0, "Interpolator1D: number of quantities to interpolate must be >= 1");
             if (!std::ranges::is_sorted(x_))
             {
                 throw std::runtime_error("Interpolator1D: x must be strictly increasing");
@@ -210,11 +217,13 @@ namespace interp
 
         // Internal storage
         std::vector<double> x_;                 /**< Independent variables */
-        std::array<std::vector<double>, nF> f_; /**< Dependent variables */
-        std::array<gsl_interp *, nF> interp_;   /**< GSL interpolator */
+        std::array<std::vector<double>, NF> f_; /**< Dependent variables */
+        std::array<gsl_interp *, NF> interp_;   /**< GSL interpolator */
         gsl_interp_accel *acc_;                 /**< Interpolation accelerator */
     };
 
 } // namespace interp
+
+// NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
 
 #endif // INTERPOLATOR1D_HPP

@@ -24,7 +24,6 @@ find_package(GSL REQUIRED)
 add_executable(slug 
     src/main.cpp
     src/interpolation/Mesh2DGrid.cpp
-    src/interpolation/Mesh2DInterpolator.cpp
     src/pdfs/PDFFileParser.cpp
     src/pdfs/PDFSegment.cpp
     src/pdfs/PDFSegmentDelta.cpp
