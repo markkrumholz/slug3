@@ -9,7 +9,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
-#include <mdspan>
 #include <stdexcept>
 #include <tuple>
 #include <utility>

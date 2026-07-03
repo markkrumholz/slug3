@@ -865,10 +865,10 @@ namespace interp
         ) const -> bool;
         
         // Input data
-        Array2D x_;                  /**< A 2d array giving the x coordinates of the mesh points */
-        Array1D y_;                  /**< A 1d array giving the y coordinates of the mesh points */
-        std::vector<double> xData_;  /**< Data holder for x_ */
-        std::vector<double> yData_;  /**< Data holder for y_ */
+        Array2D x_{};                  /**< A 2d array giving the x coordinates of the mesh points */
+        Array1D y_{};                  /**< A 1d array giving the y coordinates of the mesh points */
+        std::vector<double> xData_{};  /**< Data holder for x_ */
+        std::vector<double> yData_{};  /**< Data holder for y_ */
 
         // Descriptors
         double xMin_;                 /**< Lower limit of mesh in x direction */
@@ -878,10 +878,10 @@ namespace interp
         bool convex_;                 /**< True if mesh is convex */
 
         // Derived data
-        Array2D m_;                   /**< Slopes of mesh spines */
-        Array2D s_;                   /**< Lengths of each spine segment */
-        std::vector<double> mData_;   /**< Data holder for m_ */
-        std::vector<double> sData_;   /**< Data holder for s_ */
+        Array2D m_{};                   /**< Slopes of mesh spines */
+        Array2D s_{};                   /**< Lengths of each spine segment */
+        std::vector<double> mData_{};   /**< Data holder for m_ */
+        std::vector<double> sData_{};   /**< Data holder for s_ */
 
         // Mutables
         mutable size_t iSave_;        /**< Cached x index for search acceleration */
