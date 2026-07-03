@@ -79,11 +79,7 @@ namespace interp
         interpType_(monotonic ? gsl_interp_linear : interpType),
         nx_(x.extent(0)),
         ny_(x.extent(1)),
-        nz_(x.extent(2)),
-        xData_(x.data_handle(), x.data_handle() + x.extent(0) * x.extent(1) * x.extent(2)),
-        yData_(y.data_handle(), y.data_handle() + y.extent(0)),
-        zData_(z.data_handle(), z.data_handle() + z.extent(0)),
-        fData_(f.data_handle(), f.data_handle() + f.extent(0) * f.extent(1) * f.extent(2) * f.extent(3))
+        nz_(x.extent(2))
         {
             if (x.extent(1) != y.extent(0) || x.extent(2) != z.extent(0))
             {
@@ -101,6 +97,7 @@ namespace interp
                     "three dimensions, and the fourth dimension of f must "
                     "match the number of interpolated quantities");
             }
+            copyMeshData(x, y, z, f);
             computeLengths();
             computeInterpolators();
         }
@@ -347,22 +344,19 @@ namespace interp
                 std::ranges::upper_bound(yData_, y0) - yData_.begin()) - 1;
             const double t = (y0 - yData_[j0]) / (yData_[j0 + 1] - yData_[j0]);
 
-            auto sy_ = sy();
-            auto yInterp_ = yInterp();
+            auto syView = sy();
+            auto yInterpView = yInterp();
             for (size_t i = 0; i < nx_; ++i)
             {
                 for (size_t k = 0; k < nz_; ++k)
                 {
-                    xSlice[i, k] = xv[i, j0, k] + t * (xv[i, j0 + 1, k] - xv[i, j0, k]);
+                    xSlice[i, k] = xv[i, j0, k] +
+                        (t * (xv[i, j0 + 1, k] - xv[i, j0, k]));
 
-                    const double syTarget = sy_[i, k, j0] +
-                        t * (sy_[i, k, j0 + 1] - sy_[i, k, j0]);
-                    const auto fInterp = (*(yInterp_[i, k]))(syTarget);
-                    if constexpr (NF == 1) { fSlice[i, k, 0] = fInterp; }
-                    else
-                    {
-                        for (size_t n = 0; n < NF; ++n) { fSlice[i, k, n] = fInterp[n]; }
-                    }
+                    const double syTarget = syView[i, k, j0] +
+                        (t * (syView[i, k, j0 + 1] - syView[i, k, j0]));
+                    const auto fInterp = (*(yInterpView[i, k]))(syTarget);
+                    storeSliceResult(fSlice, i, k, fInterp);
                 }
             }
 
@@ -423,22 +417,19 @@ namespace interp
                 std::ranges::upper_bound(zData_, z0) - zData_.begin()) - 1;
             const double t = (z0 - zData_[k0]) / (zData_[k0 + 1] - zData_[k0]);
 
-            auto sz_ = sz();
-            auto zInterp_ = zInterp();
+            auto szView = sz();
+            auto zInterpView = zInterp();
             for (size_t i = 0; i < nx_; ++i)
             {
                 for (size_t j = 0; j < ny_; ++j)
                 {
-                    xSlice[i, j] = xv[i, j, k0] + t * (xv[i, j, k0 + 1] - xv[i, j, k0]);
+                    xSlice[i, j] = xv[i, j, k0] +
+                        (t * (xv[i, j, k0 + 1] - xv[i, j, k0]));
 
-                    const double szTarget = sz_[i, j, k0] +
-                        t * (sz_[i, j, k0 + 1] - sz_[i, j, k0]);
-                    const auto fInterp = (*(zInterp_[i, j]))(szTarget);
-                    if constexpr (NF == 1) { fSlice[i, j, 0] = fInterp; }
-                    else
-                    {
-                        for (size_t n = 0; n < NF; ++n) { fSlice[i, j, n] = fInterp[n]; }
-                    }
+                    const double szTarget = szView[i, j, k0] +
+                        (t * (szView[i, j, k0 + 1] - szView[i, j, k0]));
+                    const auto fInterp = (*(zInterpView[i, j]))(szTarget);
+                    storeSliceResult(fSlice, i, j, fInterp);
                 }
             }
 
@@ -471,6 +462,48 @@ namespace interp
         > zInterpData_;                     /**< z-direction interpolators (Nx × Ny, row-major) */
 
         /**
+         * @brief Copy the input coordinate and function-value data
+         * @details
+         * Copies element-by-element via explicit indices, rather than
+         * copying a contiguous range of the underlying pointer, so that
+         * this works correctly even if the input mdspans are non-contiguous.
+         */
+        auto copyMeshData(const Array3D& x, const Array1D& y,
+            const Array1D& z, const Array4D& f) -> void
+        {
+            xData_.resize(nx_ * ny_ * nz_);
+            auto xView = Array3D(xData_.data(), nx_, ny_, nz_);
+            for (size_t i = 0; i < nx_; ++i)
+            {
+                for (size_t j = 0; j < ny_; ++j)
+                {
+                    for (size_t k = 0; k < nz_; ++k) { xView[i, j, k] = x[i, j, k]; }
+                }
+            }
+
+            yData_.resize(ny_);
+            auto yView = Array1D(yData_.data(), ny_);
+            for (size_t j = 0; j < ny_; ++j) { yView[j] = y[j]; }
+
+            zData_.resize(nz_);
+            auto zView = Array1D(zData_.data(), nz_);
+            for (size_t k = 0; k < nz_; ++k) { zView[k] = z[k]; }
+
+            fData_.resize(nx_ * ny_ * nz_ * NF);
+            auto fView = Array4D(fData_.data(), nx_, ny_, nz_, NF);
+            for (size_t i = 0; i < nx_; ++i)
+            {
+                for (size_t j = 0; j < ny_; ++j)
+                {
+                    for (size_t k = 0; k < nz_; ++k)
+                    {
+                        for (size_t n = 0; n < NF; ++n) { fView[i, j, k, n] = f[i, j, k, n]; }
+                    }
+                }
+            }
+        }
+
+        /**
          * @brief Compute cumulative arc-lengths along the y and z directions
          * @details
          * Fills syData_ with arc-lengths along y for each (i,k) pair,
@@ -481,43 +514,82 @@ namespace interp
          */
         auto computeLengths() -> void
         {
-            auto x_ = Array3D(xData_.data(), nx_, ny_, nz_);
-            auto y_ = Array1D(yData_.data(), ny_);
-            auto z_ = Array1D(zData_.data(), nz_);
+            auto xView = Array3D(xData_.data(), nx_, ny_, nz_);
+            auto yView = Array1D(yData_.data(), ny_);
+            auto zView = Array1D(zData_.data(), nz_);
 
             // sy: shape (Nx, Nz, Ny)
             syData_.resize(nx_ * nz_ * ny_);
-            auto sy_ = std::mdspan<double, std::dextents<size_t, 3>>(
+            auto syView = std::mdspan<double, std::dextents<size_t, 3>>(
                 syData_.data(), nx_, nz_, ny_);
             for (size_t i = 0; i < nx_; ++i)
             {
                 for (size_t k = 0; k < nz_; ++k)
                 {
-                    sy_[i, k, 0] = 0.0;
+                    syView[i, k, 0] = 0.0;
                     for (size_t j = 1; j < ny_; ++j)
                     {
-                        sy_[i, k, j] = sy_[i, k, j - 1] + std::sqrt(
-                            std::pow(x_[i, j, k] - x_[i, j - 1, k], 2) +
-                            std::pow(y_[j] - y_[j - 1], 2));
+                        syView[i, k, j] = syView[i, k, j - 1] + std::sqrt(
+                            std::pow(xView[i, j, k] - xView[i, j - 1, k], 2) +
+                            std::pow(yView[j] - yView[j - 1], 2));
                     }
                 }
             }
 
             // sz: shape (Nx, Ny, Nz)
             szData_.resize(nx_ * ny_ * nz_);
-            auto sz_ = std::mdspan<double, std::dextents<size_t, 3>>(
+            auto szView = std::mdspan<double, std::dextents<size_t, 3>>(
                 szData_.data(), nx_, ny_, nz_);
             for (size_t i = 0; i < nx_; ++i)
             {
                 for (size_t j = 0; j < ny_; ++j)
                 {
-                    sz_[i, j, 0] = 0.0;
+                    szView[i, j, 0] = 0.0;
                     for (size_t k = 1; k < nz_; ++k)
                     {
-                        sz_[i, j, k] = sz_[i, j, k - 1] + std::sqrt(
-                            std::pow(x_[i, j, k] - x_[i, j, k - 1], 2) +
-                            std::pow(z_[k] - z_[k - 1], 2));
+                        szView[i, j, k] = szView[i, j, k - 1] + std::sqrt(
+                            std::pow(xView[i, j, k] - xView[i, j, k - 1], 2) +
+                            std::pow(zView[k] - zView[k - 1], 2));
                     }
+                }
+            }
+        }
+
+        /**
+         * @brief Build one direction's per-column Interpolator1D objects
+         * @param n1 Size of the first (outer) index of the output array
+         * @param n2 Size of the second (outer) index of the output array
+         * @param nPrimary Number of points along the interpolated direction
+         * @param sView Arc-length mdspan of shape (n1, n2, nPrimary), giving
+         *              the interpolation variable for each (a, b, p) triple
+         * @param fAt Callable (a, b, p, n) -> double returning the n-th
+         *            function value at the mesh point corresponding to (a, b, p)
+         * @param out Output vector, resized to n1 * n2 and filled with one
+         *            Interpolator1D per (a, b) pair, indexed as out[a, b]
+         */
+        template <typename SView, typename FAt>
+        auto buildColumnInterpolators(size_t n1, size_t n2, size_t nPrimary,
+            SView sView, FAt fAt,
+            std::vector<std::unique_ptr<Interpolator1D<NF>>>& out) -> void
+        {
+            out.resize(n1 * n2);
+            auto outView = std::mdspan<std::unique_ptr<Interpolator1D<NF>>, std::dextents<size_t, 2>>(
+                out.data(), n1, n2);
+            for (size_t a = 0; a < n1; ++a)
+            {
+                for (size_t b = 0; b < n2; ++b)
+                {
+                    std::vector<double> col(nPrimary);
+                    std::array<std::vector<double>, NF> fCol;
+                    // NOLINTBEGIN(cppcoreguidelines-pro-bounds-constant-array-index)
+                    for (size_t n = 0; n < NF; ++n) { fCol[n].resize(nPrimary); }
+                    for (size_t p = 0; p < nPrimary; ++p)
+                    {
+                        col[p] = sView[a, b, p];
+                        for (size_t n = 0; n < NF; ++n) { fCol[n][p] = fAt(a, b, p, n); }
+                    }
+                    // NOLINTEND(cppcoreguidelines-pro-bounds-constant-array-index)
+                    outView[a, b] = std::make_unique<Interpolator1D<NF>>(col, fCol, interpType_);
                 }
             }
         }
@@ -536,48 +608,37 @@ namespace interp
          */
         auto computeInterpolators() -> void
         {
-            auto f_ = Array4D(fData_.data(), nx_, ny_, nz_, NF);
-            auto sy_ = sy();
-            auto sz_ = sz();
+            auto fView = Array4D(fData_.data(), nx_, ny_, nz_, NF);
 
-            // Build y-direction interpolators, one per (i, k) pair
-            yInterpData_.resize(nx_ * nz_);
-            auto yInterp_ = std::mdspan<std::unique_ptr<Interpolator1D<NF>>, std::dextents<size_t, 2>>(
-                yInterpData_.data(), nx_, nz_);
-            for (size_t i = 0; i < nx_; ++i)
-            {
-                for (size_t k = 0; k < nz_; ++k)
-                {
-                    std::vector<double> yCol(ny_);
-                    std::array<std::vector<double>, NF> fCol;
-                    for (size_t n = 0; n < NF; ++n) { fCol[n].resize(ny_); }
-                    for (size_t j = 0; j < ny_; ++j)
-                    {
-                        yCol[j] = sy_[i, k, j];
-                        for (size_t n = 0; n < NF; ++n) { fCol[n][j] = f_[i, j, k, n]; }
-                    }
-                    yInterp_[i, k] = std::make_unique<Interpolator1D<NF>>(yCol, fCol, interpType_);
-                }
-            }
+            // y-direction interpolators, one per (i, k) pair
+            buildColumnInterpolators(nx_, nz_, ny_, sy(),
+                [&fView](size_t i, size_t k, size_t j, size_t n) -> double { return fView[i, j, k, n]; },
+                yInterpData_);
 
-            // Build z-direction interpolators, one per (i, j) pair
-            zInterpData_.resize(nx_ * ny_);
-            auto zInterp_ = std::mdspan<std::unique_ptr<Interpolator1D<NF>>, std::dextents<size_t, 2>>(
-                zInterpData_.data(), nx_, ny_);
-            for (size_t i = 0; i < nx_; ++i)
+            // z-direction interpolators, one per (i, j) pair
+            buildColumnInterpolators(nx_, ny_, nz_, sz(),
+                [&fView](size_t i, size_t j, size_t k, size_t n) -> double { return fView[i, j, k, n]; },
+                zInterpData_);
+        }
+
+        /**
+         * @brief Store an evaluated interpolation result into a slice
+         * @param fSlice Function-value slice of shape (D0, D1, NF)
+         * @param d0 First index at which to store the result
+         * @param d1 Second index at which to store the result
+         * @param fInterp The evaluated result: a double if NF == 1, or an
+         *                array-like of NF doubles otherwise
+         */
+        static auto storeSliceResult(
+            std::mdspan<double, std::dextents<size_t, 3>> fSlice,
+            size_t d0, size_t d1, const auto& fInterp) -> void
+        {
+            if constexpr (NF == 1) { fSlice[d0, d1, 0] = fInterp; }
+            else
             {
-                for (size_t j = 0; j < ny_; ++j)
-                {
-                    std::vector<double> zCol(nz_);
-                    std::array<std::vector<double>, NF> fCol;
-                    for (size_t n = 0; n < NF; ++n) { fCol[n].resize(nz_); }
-                    for (size_t k = 0; k < nz_; ++k)
-                    {
-                        zCol[k] = sz_[i, j, k];
-                        for (size_t n = 0; n < NF; ++n) { fCol[n][k] = f_[i, j, k, n]; }
-                    }
-                    zInterp_[i, j] = std::make_unique<Interpolator1D<NF>>(zCol, fCol, interpType_);
-                }
+                // NOLINTBEGIN(cppcoreguidelines-pro-bounds-constant-array-index)
+                for (size_t n = 0; n < NF; ++n) { fSlice[d0, d1, n] = fInterp[n]; }
+                // NOLINTEND(cppcoreguidelines-pro-bounds-constant-array-index)
             }
         }
     };
