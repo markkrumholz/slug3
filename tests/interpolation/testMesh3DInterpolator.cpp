@@ -17,7 +17,6 @@
 #include <mdspan>
 #include <memory>
 #include <ranges>
-#include <utility>
 #include <vector>
 
 // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access, misc-use-anonymous-namespace)
@@ -67,7 +66,7 @@ testSliceXInterp(const interp::Mesh2DInterpolator<nF>& slice,
         return 1;
     }
 
-    for (double q : queryPts)
+    for (const auto& q : queryPts)
     {
         const auto fval = (*xInterp[0])(q);
         const auto expected = fixedIsY ?
@@ -119,7 +118,7 @@ auto testMesh3DInterpolator() -> int
                     (0.1 * static_cast<double>(j)) +
                     (0.01 * static_cast<double>(k));
                 const auto fv = fExpected(x[i,j,k], y[j], z[k]);
-                for (size_t n = 0; n < nF; ++n) { f[i,j,k,n] = fv[n]; }
+                for (size_t n = 0; n < nF; ++n) { f[i,j,k,n] = fv[n]; } //NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
             }
         }
     }
@@ -138,7 +137,7 @@ auto testMesh3DInterpolator() -> int
 
     // Test slices at constant y: an exact grid match at each end of the
     // mesh, and a value that falls strictly between two grid points
-    for (double y0 : { 0.0, 1.7, 3.0 })
+    for (const auto& y0 : { 0.0, 1.7, 3.0 })
     {
         auto slice = m3d.sliceConstY(y0);
         if (testSliceXInterp(slice, xTest, y0, true, zQuery, 0.0, 4.0) == 1)
@@ -149,7 +148,7 @@ auto testMesh3DInterpolator() -> int
 
     // Test slices at constant z: an exact grid match at each end of the
     // mesh, and a value that falls strictly between two grid points
-    for (double z0 : { 0.0, 2.3, 4.0 })
+    for (const auto& z0 : { 0.0, 2.3, 4.0 })
     {
         auto slice = m3d.sliceConstZ(z0);
         if (testSliceXInterp(slice, xTest, z0, false, yQuery, 0.0, 3.0) == 1)
