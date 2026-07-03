@@ -55,6 +55,9 @@ add_executable(slugTestPDFs
     tests/pdfs/testPDFSegmentPowerlaw.cpp
     tests/pdfs/testPDFSegmentSchechter.cpp
 )
+add_executable(slugTestUtils
+    tests/utils/testUtilsAll.cpp
+)
 
 # Include directories: project headers as regular includes, pcg-cpp as a
 # system include so clang-tidy and the compiler suppress warnings from it.
@@ -67,6 +70,10 @@ target_include_directories(slugTestInterpolation SYSTEM PRIVATE src/pcg-cpp/incl
 target_include_directories(slugTestPDFs PRIVATE src)
 target_include_directories(slugTestPDFs SYSTEM PRIVATE src/pcg-cpp/include)
 
+
+target_include_directories(slugTestUtils PRIVATE src)
+target_include_directories(slugTestUtils SYSTEM PRIVATE src/pcg-cpp/include)
+
 # Link to GSL
 target_link_libraries(slug PRIVATE GSL::gsl)
 target_link_libraries(slugTestInterpolation PRIVATE GSL::gsl)
@@ -78,6 +85,7 @@ enable_testing()
 # Define tests
 add_test(NAME test_Interpolation COMMAND slugTestInterpolation)
 add_test(NAME test_PDFs COMMAND slugTestPDFs)
+add_test(NAME test_Utils COMMAND slugTestUtils)
 
 # Add command to copy assets to build dir
 add_custom_command(

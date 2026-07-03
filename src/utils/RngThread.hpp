@@ -75,7 +75,7 @@ namespace utils {
         {
             for (size_t i = 0; auto& r : rngEngines)
             {
-                r->seed(seed);
+                r->seed(seed+i);
             }
         }
 
