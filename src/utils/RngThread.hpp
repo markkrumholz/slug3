@@ -55,9 +55,9 @@ namespace utils {
          */
         RngThread(const RngType::state_type seed)
         {
-            for (size_t i = 0; auto& r : rngEngines)
+            for (size_t i = 0; i < rngEngines.size(); ++i)
             {
-                r = std::make_unique<RngType>(seed + i);
+                rngEngines[i] = std::make_unique<RngType>(seed + i);
             }
         }
         ~RngThread() = default;
@@ -73,9 +73,9 @@ namespace utils {
          */
         void seed(const RngType::state_type seed)
         {
-            for (size_t i = 0; auto& r : rngEngines)
+            for (size_t i = 0; i < rngEngines.size(); ++i)
             {
-                r->seed(seed+i);
+                rngEngines[i]->seed(seed + i);
             }
         }
 

@@ -14,6 +14,9 @@
 #define TESTRNGTHREAD_HPP
 
 #include "../../src/utils/RngThread.hpp"
+#ifdef _OPENMP
+#   include <omp.h>
+#endif // _OPENMP
 #include <random>
 
 auto testRngThread() -> int
@@ -40,7 +43,28 @@ auto testRngThread() -> int
                   << "two calls with the same seed returned different values: "
                   << randSeeded1 << " and " << randSeeded2 << "\n";
         return 1;
-    }   
+    }
+
+#ifdef _OPENMP
+    // Test that different threads produce different random numbers
+    const int nThreads = 4;
+    std::vector<double> randThread(nThreads);
+    #pragma omp parallel num_threads(nThreads)
+    {
+        const int threadNum = omp_get_thread_num();
+        randThread[threadNum] = dist(utils::rng());
+    }
+    for (int i = 0; i < nThreads; ++i) {
+        for (int j = i + 1; j < nThreads; ++j) {
+            if (randThread[i] == randThread[j]) {
+                std::cerr << "testRngThread: Random number generation in threads failed: "
+                          << "threads " << i << " and " << j << " returned the same value: "
+                          << randThread[i] << "\n";
+                return 1;
+            }
+        }
+    }
+#endif // _OPENMP
 
     return 0; // Passed
 }

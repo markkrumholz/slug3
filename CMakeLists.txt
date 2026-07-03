@@ -20,6 +20,14 @@ endif()
 # Find GSL
 find_package(GSL REQUIRED)
 
+# Find OpenMP; threading is optional, so fall back to a single-threaded
+# build with a warning if no OpenMP implementation is available. Code that
+# depends on OpenMP must guard itself with #ifdef _OPENMP.
+find_package(OpenMP)
+if(NOT OpenMP_CXX_FOUND)
+    message(WARNING "OpenMP not found: building without threading support")
+endif()
+
 # Main executable
 add_executable(slug 
     src/main.cpp
@@ -78,6 +86,15 @@ target_include_directories(slugTestUtils SYSTEM PRIVATE src/pcg-cpp/include)
 target_link_libraries(slug PRIVATE GSL::gsl)
 target_link_libraries(slugTestInterpolation PRIVATE GSL::gsl)
 target_link_libraries(slugTestPDFs PRIVATE GSL::gsl)
+target_link_libraries(slugTestUtils PRIVATE GSL::gsl)
+
+# Link to OpenMP, if available
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(slug PRIVATE OpenMP::OpenMP_CXX)
+    target_link_libraries(slugTestInterpolation PRIVATE OpenMP::OpenMP_CXX)
+    target_link_libraries(slugTestPDFs PRIVATE OpenMP::OpenMP_CXX)
+    target_link_libraries(slugTestUtils PRIVATE OpenMP::OpenMP_CXX)
+endif()
 
 # Enable testing
 enable_testing()
