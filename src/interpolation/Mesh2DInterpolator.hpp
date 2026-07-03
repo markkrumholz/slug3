@@ -72,8 +72,8 @@ namespace interp
             const gsl_interp_type* interpType = gsl_interp_steffen,
             const bool monotonic = false
         ) :
-        monotonic_(monotonic),
         interpType_(monotonic ? gsl_interp_linear : interpType),
+        monotonic_(monotonic),
         mesh_(x, y, true)
         {
             // Safety check

@@ -39,7 +39,8 @@ add_executable(slugTestInterpolation
     src/interpolation/Mesh2DGrid.cpp
     tests/interpolation/testInterpolationAll.cpp
     tests/interpolation/testMesh2DGrid.cpp
-    tests/interpolation/testMesh2DInterpolator.cpp)
+    tests/interpolation/testMesh2DInterpolator.cpp
+    tests/interpolation/testMesh3DInterpolator.cpp)
 add_executable(slugTestPDFs
     src/pdfs/PDFFileParser.cpp
     src/pdfs/PDFSegment.cpp

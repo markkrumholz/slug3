@@ -95,7 +95,7 @@ namespace interp
         }
         // Safety check that x and y cover some non-zero range
         for (size_t j = 0; j < x.extent(1); ++j) {
-            if (x[0,j] == x[x.extent(1)-1,j]) {
+            if (x[0,j] == x[x.extent(0)-1,j]) {
                 throw std::runtime_error("Mesh2DGrid: each row of x must span non-zero size");
             }
         }
