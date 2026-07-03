@@ -136,7 +136,7 @@ namespace pdfs {
             std::normal_distribution<double> dist(mean_, stddev_);
             double sample = NAN;
             while (true) {
-                sample = dist(utils::rng());
+                sample = dist(utils::rng()());
                 if (sample >= aClamped && sample <= bClamped) { break; } // Rejection sampling
             }
             return sample;

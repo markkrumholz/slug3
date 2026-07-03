@@ -30,7 +30,7 @@
 inline auto testPDFSegmentDelta() -> int
 {
     // Set the rng seed to a fixed value for reproducibility
-    utils::rng.seed(42);
+    utils::rng().seed(42);
 
     const double x = 5.0; // The value at which the delta function is centered
     const pdfs::PDFSegmentDelta pd(x); // Create a PDFSegmentDelta with sValue=5.0

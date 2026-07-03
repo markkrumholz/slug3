@@ -217,7 +217,7 @@ static auto testPDFSampling(    // NOLINT misc-use-anonymous-namespace
 auto testPDF() -> int
 {
    // Set the rng seed to a fixed value for reproducibility
-    utils::rng.seed(42);
+    utils::rng().seed(42);
 
     // Create properly normalized PDF and non-normalized PDFs
     // consisting of a delta function plus a lognormal plus a

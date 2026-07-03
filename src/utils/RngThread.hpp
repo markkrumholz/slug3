@@ -8,13 +8,14 @@
 #ifndef RNGUTILS_HPP
 #define RNGUTILS_HPP
 
+#include "ThreadVec.hpp"
 #include <memory>
-#include <random>
 #ifdef _OPENMP
 #   include <omp.h>
 #endif
+#include <pcg_extras.hpp>
 #include <pcg_random.hpp>
-#include "ThreadVec.hpp"
+#include <random>
 
 namespace utils {
 
@@ -63,7 +64,7 @@ namespace utils {
         }
 
         ~RngThread() = default;
-        
+
         // Disable copy and move constructors and assignment operators
         RngThread(const RngThread&) = delete;
         RngThread(RngThread&&) = delete;
@@ -77,7 +78,7 @@ namespace utils {
          * The value seed will be used for the first thread, and
          * all subsequent threads will be seeded with values seed + 1,
          * seed + 2, etc. The result is equivalent to constructing
-         * a new RngThread using the 
+         * a new RngThread using the specified seed.
          */
         void seed(const RngType::state_type seed)
         {
@@ -99,10 +100,23 @@ namespace utils {
 
     };
 
-    // Create a static instance of an RngThread object,
-    // which will be usable from throughout the code. This ensures
-    // that all random numbers are handled in a thread-safe manner.
-    static RngThread rng; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+    /**
+     * @brief Return a reference to the global, thread-safe random engine
+     * @details
+     * The instance is a function-local static, so it is constructed on
+     * first use rather than before main() begins; this ensures that any
+     * exception thrown during construction (which in practice cannot
+     * happen, since the number of threads is always small) propagates as
+     * an ordinary, catchable exception rather than escaping before main()
+     * can run. Being a local static in an inline function also guarantees
+     * a single, program-wide instance, rather than one per translation
+     * unit.
+     */
+    inline auto rng() -> RngThread&
+    {
+        static RngThread instance;
+        return instance;
+    }
 
 } // namespace utils
 

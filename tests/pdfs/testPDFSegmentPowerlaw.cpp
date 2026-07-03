@@ -127,7 +127,7 @@ testPDFSegmentPowerlawAlpha(const double alpha) -> int     // NOLINT misc-use-an
 auto testPDFSegmentPowerlaw() -> int
 {
     // Set the rng seed to a fixed value for reproducibility
-    utils::rng.seed(42);
+    utils::rng().seed(42);
 
     // Loop over three different alpha values to make sure we cover the different cases
     // for the expectation value and integral calculations

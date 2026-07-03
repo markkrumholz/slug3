@@ -32,7 +32,7 @@
 inline auto testPDFSegmentNormal() -> int
 {
     // Set the rng seed to a fixed value for reproducibility
-    utils::rng.seed(42);
+    utils::rng().seed(42);
 
     const double mean = 5.0; // The mean of the normal distribution
     const double stdDev = 1.0; // The standard deviation of the normal distribution
