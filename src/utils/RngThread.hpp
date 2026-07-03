@@ -8,13 +8,14 @@
 #ifndef RNGUTILS_HPP
 #define RNGUTILS_HPP
 
+#include "ThreadVec.hpp"
 #include <memory>
-#include <random>
 #ifdef _OPENMP
 #   include <omp.h>
 #endif
+#include <pcg_extras.hpp>
 #include <pcg_random.hpp>
-#include "ThreadVec.hpp"
+#include <random>
 
 namespace utils {
 
@@ -39,12 +40,13 @@ namespace utils {
          */
         RngThread()
         {
-            for (auto& r : rngEngines)
+            for (auto& r : rngEngines_)
             {
-                pcg_extras::seed_seq_from<std::random_device> seed_source;
-                r = std::make_unique<RngType>(seed_source);
+                pcg_extras::seed_seq_from<std::random_device> seedSource;
+                r = std::make_unique<RngType>(seedSource);
             }
         }
+
         /**
          * @brief Construct an RngThread with a specified seed
          * @param seed The seed value to use
@@ -55,12 +57,19 @@ namespace utils {
          */
         RngThread(const RngType::state_type seed)
         {
-            for (size_t i = 0; auto& r : rngEngines)
+            for (int i = 0; i < rngEngines_.size(); ++i)
             {
-                r = std::make_unique<RngType>(seed + i);
+                rngEngines_[i] = std::make_unique<RngType>(seed + i); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
             }
         }
+
         ~RngThread() = default;
+
+        // Disable copy and move constructors and assignment operators
+        RngThread(const RngThread&) = delete;
+        RngThread(RngThread&&) = delete;
+        auto operator=(const RngThread&) -> RngThread& = delete;
+        auto operator=(RngThread&&) -> RngThread& = delete;
 
         /**
          * @brief Re-seed the random number generator
@@ -69,13 +78,13 @@ namespace utils {
          * The value seed will be used for the first thread, and
          * all subsequent threads will be seeded with values seed + 1,
          * seed + 2, etc. The result is equivalent to constructing
-         * a new RngThread using the 
+         * a new RngThread using the specified seed.
          */
         void seed(const RngType::state_type seed)
         {
-            for (size_t i = 0; auto& r : rngEngines)
+            for (int i = 0; i < rngEngines_.size(); ++i)
             {
-                r->seed(seed);
+                rngEngines_[i]->seed(seed+i); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
             }
         }
 
@@ -83,17 +92,31 @@ namespace utils {
          * @fn utils::RngThread::operator()() const
          * @brief Return the correct rng engine for the calling thread
          */
-        auto operator()() const -> RngType& { return *rngEngines(); }
+        auto operator()() const -> RngType& { return *rngEngines_(); }
 
     private:
 
-        ThreadVec<std::unique_ptr<pcg64> > rngEngines;  /**< Pointers to rng engines */
+        ThreadVec<std::unique_ptr<pcg64> > rngEngines_;  /**< Pointers to rng engines */
 
     };
 
-    // Create a static instance of an RngThread object,
-    // which will be usable from throughout the code
-    static RngThread rng;
+    /**
+     * @brief Return a reference to the global, thread-safe random engine
+     * @details
+     * The instance is a function-local static, so it is constructed on
+     * first use rather than before main() begins; this ensures that any
+     * exception thrown during construction (which in practice cannot
+     * happen, since the number of threads is always small) propagates as
+     * an ordinary, catchable exception rather than escaping before main()
+     * can run. Being a local static in an inline function also guarantees
+     * a single, program-wide instance, rather than one per translation
+     * unit.
+     */
+    inline auto rng() -> RngThread&
+    {
+        static RngThread instance;
+        return instance;
+    }
 
 } // namespace utils
 

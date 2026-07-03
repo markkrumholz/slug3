@@ -40,32 +40,38 @@ namespace utils {
         {
             const int nthreads = omp_get_num_threads();
 #pragma omp single
-	        obj.resize(nthreads);
+	        obj_.resize(nthreads);
         }
 #else
-            obj.resize(1);
+            obj_.resize(1);
 #endif
         }
         ~ThreadVec() = default;
+
+        // Disable copy and move constructors and assignment operators
+        ThreadVec(const ThreadVec&) = delete;
+        ThreadVec(ThreadVec&&) = delete;
+        auto operator=(const ThreadVec&) -> ThreadVec& = delete;
+        auto operator=(ThreadVec&&) -> ThreadVec& = delete;
 
         /**
          * @brief Return the number of distinct objects stored
          * @return The number of objects stored
          */
-        size_t size() const { return obj.size(); }
+        auto size() const { return obj_.size(); }
     
         /**
          * @fn utils::ThreadVec::operator()()
          * @brief Return the element private to this thread
          * @return Return the element of the ThreadVec private to this thread
          */
-        T& operator()() {
+        auto operator()() -> auto& {
 #ifdef _OPENMP
             const int ithread = omp_get_thread_num();
 #else
             const int ithread = 0;
 #endif
-            return obj[ithread];
+            return obj_[ithread];
         }
 
         /**
@@ -73,13 +79,13 @@ namespace utils {
          * @brief Return the element private to this thread
          * @return Return the element of the ThreadVec private to this thread
          */
-        const T& operator()() const {
+        auto operator()() const -> const auto& {
 #ifdef _OPENMP
             const int ithread = omp_get_thread_num();
 #else
             const int ithread = 0;
 #endif
-            return obj[ithread];
+            return obj_[ithread];
         }
 
         /**
@@ -88,8 +94,8 @@ namespace utils {
          * @param i The thread number whose object should be returned
          * @return The object belonging to thread i
          */
-        T& operator[] (const int i) {
-            return obj[i];
+        auto operator[] (const int i) -> auto& {
+            return obj_[i];
         }
 
         /**
@@ -98,23 +104,23 @@ namespace utils {
          * @param i The thread number whose object should be returned
          * @return The object belonging to thread i
          */
-        const T& operator[] (const int i) const {
-            return obj[i];
+        auto operator[] (const int i) const -> const auto& {
+            return obj_[i];
         }
 
         /**
          * @brief Return the beginning of the thread vector
          */
-        auto begin() { return obj.begin(); }
+        auto begin() { return obj_.begin(); }
 
         /**
          * @brief Return the end of the thread vector
          */
-        auto end() { return obj.end(); }
+        auto end() { return obj_.end(); }
          
     private:
 
-        std::vector<T> obj;  /**< The stored objects */
+        std::vector<T> obj_;  /**< The stored objects */
 
     };
 

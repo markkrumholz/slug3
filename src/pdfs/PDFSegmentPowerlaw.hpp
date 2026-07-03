@@ -134,7 +134,7 @@ namespace pdfs {
                 return 0.0; // Invalid range for drawing
             }
             std::uniform_real_distribution<double> dist(0.0, 1.0);
-            const double u = dist(utils::rng()); // Uniform random number in [0, 1)
+            const double u = dist(utils::rng()()); // Uniform random number in [0, 1)
             if (alpha_ != -1)
             {
                 // Special case

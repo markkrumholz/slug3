@@ -152,7 +152,7 @@ namespace pdfs {
             std::lognormal_distribution<double> dist(logMean_, stddev_);
             double sample = NAN;
             while (true) {
-                sample = dist(utils::rng());
+                sample = dist(utils::rng()());
                 if (sample >= aClamped && sample <= bClamped) {break; } // Rejection sampling
             } 
             return sample;

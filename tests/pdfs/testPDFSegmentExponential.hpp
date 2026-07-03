@@ -34,7 +34,7 @@
 inline auto testPDFSegmentExponential() -> int
 {
     // Set the rng seed to a fixed value for reproducibility
-    utils::rng.seed(42);
+    utils::rng().seed(42);
 
     // Create a segment
     const double sMin = 1.0; // The lower limit of the segment

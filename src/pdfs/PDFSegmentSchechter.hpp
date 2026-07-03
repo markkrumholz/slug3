@@ -130,7 +130,7 @@ namespace pdfs {
                 return 0.0; // Invalid range for drawing
             }
             std::uniform_real_distribution<double> dist(0.0, 1.0);
-            const double u = dist(utils::rng()); // Uniform random number in [0, 1)
+            const double u = dist(utils::rng()()); // Uniform random number in [0, 1)
             // Find the value of the deviate y by numerically solving
             // u = \int_a^y x^alpha exp(-x / sStar) dx /
             //     \int_a^b x^alpha exp(-x / sStar) dx

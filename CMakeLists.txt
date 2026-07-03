@@ -20,6 +20,14 @@ endif()
 # Find GSL
 find_package(GSL REQUIRED)
 
+# Find OpenMP; threading is optional, so fall back to a single-threaded
+# build with a warning if no OpenMP implementation is available. Code that
+# depends on OpenMP must guard itself with #ifdef _OPENMP.
+find_package(OpenMP)
+if(NOT OpenMP_CXX_FOUND)
+    message(WARNING "OpenMP not found: building without threading support")
+endif()
+
 # Main executable
 add_executable(slug 
     src/main.cpp
@@ -40,7 +48,8 @@ add_executable(slugTestInterpolation
     tests/interpolation/testInterpolationAll.cpp
     tests/interpolation/testMesh2DGrid.cpp
     tests/interpolation/testMesh2DInterpolator.cpp
-    tests/interpolation/testMesh3DInterpolator.cpp)
+    tests/interpolation/testMesh3DInterpolator.cpp
+)
 add_executable(slugTestPDFs
     src/pdfs/PDFFileParser.cpp
     src/pdfs/PDFSegment.cpp
@@ -55,6 +64,9 @@ add_executable(slugTestPDFs
     tests/pdfs/testPDFSegmentPowerlaw.cpp
     tests/pdfs/testPDFSegmentSchechter.cpp
 )
+add_executable(slugTestUtils
+    tests/utils/testUtilsAll.cpp
+)
 
 # Include directories: project headers as regular includes, pcg-cpp as a
 # system include so clang-tidy and the compiler suppress warnings from it.
@@ -67,10 +79,23 @@ target_include_directories(slugTestInterpolation SYSTEM PRIVATE src/pcg-cpp/incl
 target_include_directories(slugTestPDFs PRIVATE src)
 target_include_directories(slugTestPDFs SYSTEM PRIVATE src/pcg-cpp/include)
 
+
+target_include_directories(slugTestUtils PRIVATE src)
+target_include_directories(slugTestUtils SYSTEM PRIVATE src/pcg-cpp/include)
+
 # Link to GSL
 target_link_libraries(slug PRIVATE GSL::gsl)
 target_link_libraries(slugTestInterpolation PRIVATE GSL::gsl)
 target_link_libraries(slugTestPDFs PRIVATE GSL::gsl)
+target_link_libraries(slugTestUtils PRIVATE GSL::gsl)
+
+# Link to OpenMP, if available
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(slug PRIVATE OpenMP::OpenMP_CXX)
+    target_link_libraries(slugTestInterpolation PRIVATE OpenMP::OpenMP_CXX)
+    target_link_libraries(slugTestPDFs PRIVATE OpenMP::OpenMP_CXX)
+    target_link_libraries(slugTestUtils PRIVATE OpenMP::OpenMP_CXX)
+endif()
 
 # Enable testing
 enable_testing()
@@ -78,6 +103,7 @@ enable_testing()
 # Define tests
 add_test(NAME test_Interpolation COMMAND slugTestInterpolation)
 add_test(NAME test_PDFs COMMAND slugTestPDFs)
+add_test(NAME test_Utils COMMAND slugTestUtils)
 
 # Add command to copy assets to build dir
 add_custom_command(

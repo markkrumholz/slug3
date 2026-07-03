@@ -223,7 +223,7 @@ namespace pdfs {
                 wL = w * s->integral(a,b);
             }
             std::discrete_distribution<int> dist(wLim.begin(), wLim.end());
-            return seg_.at(dist(utils::rng()))->draw(a,b);
+            return seg_.at(dist(utils::rng()()))->draw(a,b);
         }
         /**
          * @brief Sample nDraw random values from the PDF within the specified range.
@@ -281,7 +281,7 @@ namespace pdfs {
                                     method_ == SamplingMethods::stopAfter
                                 ) || (
                                     method_ == SamplingMethods::stop50 &&
-                                    dist(utils::rng()) > 0.5
+                                    dist(utils::rng()()) > 0.5
                                 );
                             if (keep) { sample.push_back(s); }
                             break;
@@ -302,7 +302,7 @@ namespace pdfs {
                 {
                     // Poisson method: draw number of samples, then draw
                     std::poisson_distribution<unsigned int> dist(target / expectationValue(a,b));
-                    const auto nSamp = dist(utils::rng());
+                    const auto nSamp = dist(utils::rng()());
                     return draw(nSamp, a, b);
                 }
                 case SamplingMethods::sorted:
