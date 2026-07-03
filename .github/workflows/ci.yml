@@ -14,20 +14,24 @@ jobs:
         include:
           - os: ubuntu-latest
             compiler: gcc
-            cc: gcc
-            cxx: g++
+            cc: gcc-16
+            cxx: g++-16
+            cxxflags: ''
           - os: ubuntu-latest
             compiler: clang
-            cc: clang
-            cxx: clang++
+            cc: clang-18
+            cxx: clang++-18
+            cxxflags: '-stdlib=libc++'
           - os: macos-latest
             compiler: gcc
             cc: gcc
             cxx: g++
+            cxxflags: ''
           - os: macos-latest
             compiler: clang
             cc: clang
             cxx: clang++
+            cxxflags: ''
 
     steps:
       - uses: actions/checkout@v4
@@ -36,14 +40,30 @@ jobs:
 
       - name: Install dependencies (Ubuntu)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libgsl-dev
+        # No released libstdc++ (through GCC 16) ships <mdspan> yet, so the
+        # gcc leg needs GCC 16 from the toolchain-r PPA. The clang leg sidesteps
+        # libstdc++ entirely by linking against libc++ 18, which has had
+        # <mdspan> since LLVM 18; mixing a newer libstdc++ into Clang's
+        # autodetected search path instead (e.g. via gcc-16) breaks headers
+        # (verified locally: Clang 18 fails to parse libstdc++ 16's <span>).
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y software-properties-common
+          sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
+          sudo apt-get update
+          sudo apt-get install -y libgsl-dev gcc-16 g++-16 clang-18 libc++-18-dev libc++abi-18-dev
 
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
         run: brew install gsl
 
       - name: Configure
-        run: cmake -B build -DCMAKE_C_COMPILER=${{ matrix.cc }} -DCMAKE_CXX_COMPILER=${{ matrix.cxx }}
+        run: |
+          cmake -B build \
+            -DCMAKE_C_COMPILER=${{ matrix.cc }} \
+            -DCMAKE_CXX_COMPILER=${{ matrix.cxx }} \
+            -DCMAKE_CXX_FLAGS="${{ matrix.cxxflags }}" \
+            -DCMAKE_EXE_LINKER_FLAGS="${{ matrix.cxxflags }}"
 
       - name: Build
         run: cmake --build build
@@ -63,10 +83,21 @@ jobs:
           fetch-depth: 0
 
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y clang clang-tidy libgsl-dev
+        # See the "Install dependencies (Ubuntu)" step in the test job above:
+        # clang-tidy needs to parse the same libc++ 18 headers the clang build
+        # leg compiles against, since no libstdc++ yet ships <mdspan>.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-18 clang-tidy-18 libgsl-dev libc++-18-dev libc++abi-18-dev
 
       - name: Configure
-        run: cmake -B build -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+        run: |
+          cmake -B build \
+            -DCMAKE_C_COMPILER=clang-18 \
+            -DCMAKE_CXX_COMPILER=clang++-18 \
+            -DCMAKE_CXX_FLAGS=-stdlib=libc++ \
+            -DCMAKE_EXE_LINKER_FLAGS=-stdlib=libc++ \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 
       - name: Run clang-tidy on changed files
         run: |
@@ -77,4 +108,4 @@ jobs:
             echo "No C++ source files changed, skipping clang-tidy."
             exit 0
           fi
-          echo "$CHANGED" | xargs clang-tidy -p build
+          echo "$CHANGED" | xargs clang-tidy-18 -p build

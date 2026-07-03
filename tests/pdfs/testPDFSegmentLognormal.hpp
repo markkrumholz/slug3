@@ -12,8 +12,8 @@
 #define TESTPDFSEGMENTLOGNORMAL_HPP
 
 #include "../src/pdfs/PDFSegmentLognormal.hpp"
+#include "../src/utils/MiscUtils.hpp"
 #include "../src/utils/RngThread.hpp"
-#include "../tests/testUtils.hpp"
 #include <cmath>
 #include <iostream>
 #include <numbers>
@@ -55,29 +55,29 @@ inline auto testPDFSegmentLognormal() -> int
     const double x3 = 6.0; // At the upper limit
     const double x4 = 0.5; // Below the lower limit
     const double x5 = 15.0; // Above the upper limit
-    if (!testUtils::approxEqual(pln(x1), norm / x1 * std::exp(-0.5 * std::pow(std::log(x1 / mean) / stdDev, 2)))) {
+    if (!utils::approxEqual(pln(x1), norm / x1 * std::exp(-0.5 * std::pow(std::log(x1 / mean) / stdDev, 2)))) {
         std::cerr << "testPDFSegmentLognormal: PDF evaluation at x=1.0 failed: expected "
                   << norm * std::exp(-0.5 * std::pow(std::log(x1 / mean) / stdDev, 2))
                   << ", got " << pln(x1) << "\n";
         return 1;
     }
-    if (!testUtils::approxEqual(pln(x2), norm / x2 * std::exp(-0.5 * std::pow(std::log(x2 / mean) / stdDev, 2)))) {
+    if (!utils::approxEqual(pln(x2), norm / x2 * std::exp(-0.5 * std::pow(std::log(x2 / mean) / stdDev, 2)))) {
         std::cerr << "testPDFSegmentLognormal: PDF evaluation at x=5.0 failed: expected "
                   << norm * std::exp(-0.5 * std::pow(std::log(x2 / mean) / stdDev, 2))
                   << ", got " << pln(x2) << "\n";
         return 1;
     }
-    if (!testUtils::approxEqual(pln(x3), norm / x3 * std::exp(-0.5 * std::pow(std::log(x3 / mean) / stdDev, 2)))) {
+    if (!utils::approxEqual(pln(x3), norm / x3 * std::exp(-0.5 * std::pow(std::log(x3 / mean) / stdDev, 2)))) {
         std::cerr << "testPDFSegmentLognormal: PDF evaluation at x=6.0 failed: expected "
                   << norm * std::exp(-0.5 * std::pow(std::log(x3 / mean) / stdDev, 2))
                   << ", got " << pln(x3) << "\n";
         return 1;
     }
-    if (!testUtils::approxEqual(pln(x4), 0.0)) {
+    if (!utils::approxEqual(pln(x4), 0.0)) {
         std::cerr << "testPDFSegmentLognormal: PDF evaluation at x=0.5 failed: expected 0.0, got " << pln(x4) << "\n";
         return 1;
     }
-    if (!testUtils::approxEqual(pln(x5), 0.0)) {
+    if (!utils::approxEqual(pln(x5), 0.0)) {
         std::cerr << "testPDFSegmentLognormal: PDF evaluation at x=15.0 failed: expected 0.0, got " << pln(x5) << "\n";
         return 1;
     }
@@ -92,7 +92,7 @@ inline auto testPDFSegmentLognormal() -> int
             std::erf( (std::log(sMax) - logMean) / root2dev ) -
             std::erf( (std::log(sMin) - logMean) / root2dev )
         );
-    if (!testUtils::approxEqual(pln.expectationValue(), expectedExpectationValue)) {
+    if (!utils::approxEqual(pln.expectationValue(), expectedExpectationValue)) {
         std::cerr << "testPDFSegmentLognormal: Expectation value calculation over full range failed: expected "
                   << expectedExpectationValue << ", got " << pln.expectationValue() << "\n";
         return 1;
@@ -112,14 +112,14 @@ inline auto testPDFSegmentLognormal() -> int
             std::erf( (logB - logMean) / root2dev ) -
             std::erf( (logA - logMean) / root2dev )
         );
-    if (!testUtils::approxEqual(pln.expectationValue(a, b), expectedExpectationValueRange)) {
+    if (!utils::approxEqual(pln.expectationValue(a, b), expectedExpectationValueRange)) {
         std::cerr << "testPDFSegmentLognormal: Expectation value calculation over range [2.0, 5.0] failed: expected "
                   << expectedExpectationValueRange << ", got " << pln.expectationValue(a, b) << "\n";
         return 1;
     }
 
     // Test integral calculation over full range
-    if (!testUtils::approxEqual(pln.integral(sMin, sMax), 1.0)) {
+    if (!utils::approxEqual(pln.integral(sMin, sMax), 1.0)) {
         std::cerr << "testPDFSegmentLognormal: Integral calculation over full range failed: expected 1.0, got " << pln.integral(sMin, sMax) << "\n";
         return 1;
     }
@@ -131,7 +131,7 @@ inline auto testPDFSegmentLognormal() -> int
                 std::erf( (logMean - logA) / root2dev ) -
                 std::erf( (logMean - logB) / root2dev )
         );
-    if (!testUtils::approxEqual(pln.integral(a, b), expectedIntegral)) {
+    if (!utils::approxEqual(pln.integral(a, b), expectedIntegral)) {
         std::cerr << "testPDFSegmentLognormal: Integral calculation over range [2.0, 5.0] failed: expected "
                   << expectedIntegral << ", got " << pln.integral(a, b) << "\n";
         return 1;
@@ -150,7 +150,7 @@ inline auto testPDFSegmentLognormal() -> int
         sampleSum += sample; // Add the sample to the sum for calculating the sample mean
     }
     const double sampleMean = sampleSum / numSamples; // Calculate the sample mean
-    if (!testUtils::approxEqual(sampleMean, expectedExpectationValueRange, 0.01)) {
+    if (!utils::approxEqual(sampleMean, expectedExpectationValueRange, 0.01)) {
         std::cerr << "testPDFSegmentLognormal: Sample mean from drawn samples does not match expected expectation value: expected "
                   << expectedExpectationValueRange << ", got " << sampleMean << "\n";
         return 1;

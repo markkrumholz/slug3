@@ -19,7 +19,7 @@
 namespace pdfs {
 
     /**
-     * @brief Namespace to hold sampling methods
+     * @brief Enum to hold sampling methods
      */
     enum class SamplingMethods : std::uint8_t {
         stopNearest,    /**< Stop-nearest sampling */

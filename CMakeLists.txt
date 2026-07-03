@@ -21,7 +21,9 @@ endif()
 find_package(GSL REQUIRED)
 
 # Main executable
-add_executable(slug src/main.cpp
+add_executable(slug 
+    src/main.cpp
+    src/interpolation/Mesh2DGrid.cpp
     src/pdfs/PDFFileParser.cpp
     src/pdfs/PDFSegment.cpp
     src/pdfs/PDFSegmentDelta.cpp
@@ -33,9 +35,13 @@ add_executable(slug src/main.cpp
 )
 
 # Test executables
-add_executable(slug_test_PDFs
-    tests/pdfs/testPDF.cpp
-    tests/pdfs/testPDFAll.cpp
+add_executable(slugTestInterpolation
+    src/interpolation/Mesh2DGrid.cpp
+    tests/interpolation/testInterpolationAll.cpp
+    tests/interpolation/testMesh2DGrid.cpp
+    tests/interpolation/testMesh2DInterpolator.cpp
+    tests/interpolation/testMesh3DInterpolator.cpp)
+add_executable(slugTestPDFs
     src/pdfs/PDFFileParser.cpp
     src/pdfs/PDFSegment.cpp
     src/pdfs/PDFSegmentDelta.cpp
@@ -44,6 +50,8 @@ add_executable(slug_test_PDFs
     src/pdfs/PDFSegmentNormal.cpp
     src/pdfs/PDFSegmentPowerlaw.cpp
     src/pdfs/PDFSegmentSchechter.cpp
+    tests/pdfs/testPDF.cpp
+    tests/pdfs/testPDFAll.cpp
     tests/pdfs/testPDFSegmentPowerlaw.cpp
     tests/pdfs/testPDFSegmentSchechter.cpp
 )
@@ -53,22 +61,27 @@ add_executable(slug_test_PDFs
 target_include_directories(slug PRIVATE src)
 target_include_directories(slug SYSTEM PRIVATE src/pcg-cpp/include)
 
-target_include_directories(slug_test_PDFs PRIVATE src)
-target_include_directories(slug_test_PDFs SYSTEM PRIVATE src/pcg-cpp/include)
+target_include_directories(slugTestInterpolation PRIVATE src)
+target_include_directories(slugTestInterpolation SYSTEM PRIVATE src/pcg-cpp/include)
+
+target_include_directories(slugTestPDFs PRIVATE src)
+target_include_directories(slugTestPDFs SYSTEM PRIVATE src/pcg-cpp/include)
 
 # Link to GSL
 target_link_libraries(slug PRIVATE GSL::gsl)
-target_link_libraries(slug_test_PDFs PRIVATE GSL::gsl)
+target_link_libraries(slugTestInterpolation PRIVATE GSL::gsl)
+target_link_libraries(slugTestPDFs PRIVATE GSL::gsl)
 
 # Enable testing
 enable_testing()
 
 # Define tests
-add_test(NAME test_PDFs COMMAND slug_test_PDFs)
+add_test(NAME test_Interpolation COMMAND slugTestInterpolation)
+add_test(NAME test_PDFs COMMAND slugTestPDFs)
 
 # Add command to copy assets to build dir
 add_custom_command(
-    TARGET slug_test_PDFs POST_BUILD
+    TARGET slugTestPDFs POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/pdfs/assets
         ${CMAKE_CURRENT_BINARY_DIR}/assets   

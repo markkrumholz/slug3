@@ -12,8 +12,8 @@
 #define TESTPDFSEGMENTNORMAL_HPP
 
 #include "../src/pdfs/PDFSegmentNormal.hpp"
+#include "../src/utils/MiscUtils.hpp"
 #include "../src/utils/RngThread.hpp"
-#include "../tests/testUtils.hpp"
 #include <cmath>
 #include <iostream>
 #include <numbers>
@@ -49,26 +49,26 @@ inline auto testPDFSegmentNormal() -> int
     const double norm = std::numbers::sqrt2 * std::numbers::inv_sqrtpi / stdDev /
         (std::erf((sMax - mean) / (stdDev * std::numbers::sqrt2)) -
          std::erf((sMin - mean) / (stdDev * std::numbers::sqrt2))); // Normalization constant for the PDFSegmentNormal
-    if (!testUtils::approxEqual(pn(x1), norm * std::exp(-0.5 * std::pow((x1 - mean) / stdDev, 2)))) {
+    if (!utils::approxEqual(pn(x1), norm * std::exp(-0.5 * std::pow((x1 - mean) / stdDev, 2)))) {
         std::cerr << "testPDFSegmentNormal: PDF evaluation at x=1.0 failed: expected " << norm *
             std::exp(-0.5 * std::pow((x1 - mean) / stdDev, 2)) << ", got " << pn(x1) << "\n";
         return 1;
     }
-    if (!testUtils::approxEqual(pn(x2), norm * std::exp(-0.5 * std::pow((x2 - mean) / stdDev, 2)))) {
+    if (!utils::approxEqual(pn(x2), norm * std::exp(-0.5 * std::pow((x2 - mean) / stdDev, 2)))) {
         std::cerr << "testPDFSegmentNormal: PDF evaluation at x=5.0 failed: expected " << norm *
             std::exp(-0.5 * std::pow((x2 - mean) / stdDev, 2)) << ", got " << pn(x2) << "\n";
         return 1;
     }
-    if (!testUtils::approxEqual(pn(x3), norm * std::exp(-0.5 * std::pow((x3 - mean) / stdDev, 2)))) {
+    if (!utils::approxEqual(pn(x3), norm * std::exp(-0.5 * std::pow((x3 - mean) / stdDev, 2)))) {
         std::cerr << "testPDFSegmentNormal: PDF evaluation at x=10.0 failed: expected " << norm *
             std::exp(-0.5 * std::pow((x3 - mean) / stdDev, 2)) << ", got " << pn(x3) << "\n";
         return 1;
     }
-    if (!testUtils::approxEqual(pn(x4), 0.0)) {
+    if (!utils::approxEqual(pn(x4), 0.0)) {
         std::cerr << "testPDFSegmentNormal: PDF evaluation at x=0.5 failed: expected 0.0, got " << pn(x4) << "\n";
         return 1;
     }
-    if (!testUtils::approxEqual(pn(x5), 0.0)) {
+    if (!utils::approxEqual(pn(x5), 0.0)) {
         std::cerr << "testPDFSegmentNormal: PDF evaluation at x=15.0 failed: expected 0.0, got " << pn(x5) << "\n";
         return 1;
     }
@@ -83,7 +83,7 @@ inline auto testPDFSegmentNormal() -> int
      const double expectedExpectationValue = mean +
         (std::numbers::sqrt2 * std::numbers::inv_sqrtpi * stdDev *
         (numLo - numHi) / (denomHi - denomLo));
-    if (!testUtils::approxEqual(pn.expectationValue(), expectedExpectationValue)) {
+    if (!utils::approxEqual(pn.expectationValue(), expectedExpectationValue)) {
         std::cerr << "testPDFSegmentNormal: Expectation value calculation over full range failed: expected " << expectedExpectationValue << ", got " << pn.expectationValue() << "\n";
         return 1;
     }
@@ -100,13 +100,13 @@ inline auto testPDFSegmentNormal() -> int
     const double expectedExpectationValueRange = mean +
         (std::numbers::sqrt2 * std::numbers::inv_sqrtpi * stdDev *
         ((numLo - numHi) / (denomHi - denomLo)));
-    if (!testUtils::approxEqual(pn.expectationValue(a, b), expectedExpectationValueRange)) {
+    if (!utils::approxEqual(pn.expectationValue(a, b), expectedExpectationValueRange)) {
         std::cerr << "testPDFSegmentNormal: Expectation value calculation over range [2.0, 5.0] failed: expected " << expectedExpectationValueRange << ", got " << pn.expectationValue(a, b) << "\n";
         return 1;
     }
 
     // Test integral calculation over full range
-    if (!testUtils::approxEqual(pn.integral(sMin, sMax), 1.0)) {
+    if (!utils::approxEqual(pn.integral(sMin, sMax), 1.0)) {
         std::cerr << "testPDFSegmentNormal: Integral calculation over full range failed: expected 1.0, got " << pn.integral(sMin, sMax) << "\n";
         return 1;
     }
@@ -115,7 +115,7 @@ inline auto testPDFSegmentNormal() -> int
     const double expectedIntegral = norm * stdDev /
         (std::numbers::sqrt2 * std::numbers::inv_sqrtpi) *
         (std::erf(dxHiNorm) - std::erf(dxLoNorm));
-    if (!testUtils::approxEqual(pn.integral(a, b), expectedIntegral)) {
+    if (!utils::approxEqual(pn.integral(a, b), expectedIntegral)) {
         std::cerr << "testPDFSegmentNormal: Integral calculation over range [2.0, 5.0] failed: expected " << expectedIntegral << ", got " << pn.integral(a, b) << "\n";
         return 1;
     }
@@ -132,7 +132,7 @@ inline auto testPDFSegmentNormal() -> int
         sampleSum += sample; // Add the sample to the sum for calculating the sample mean
     }
     const double sampleMean = sampleSum / numSamples; // Calculate the sample mean
-    if (!testUtils::approxEqual(sampleMean, expectedExpectationValueRange, 0.01)) {
+    if (!utils::approxEqual(sampleMean, expectedExpectationValueRange, 0.01)) {
         std::cerr << "testPDFSegmentNormal: Sample mean from drawn samples does not match expected expectation value: expected " << expectedExpectationValueRange << ", got " << sampleMean << "\n";
         return 1;
     }

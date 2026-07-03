@@ -6,8 +6,8 @@
  */
 
 #include "../src/pdfs/PDFSegmentSchechter.hpp"
+#include "../src/utils/MiscUtils.hpp"
 #include "../src/utils/RngThread.hpp"
-#include "../tests/testUtils.hpp"
 #include "testPDFSegmentSchechter.hpp"
 #include <cmath>
 #include <gsl/gsl_sf_gamma.h>
@@ -32,23 +32,23 @@ testPDFSegmentSchechterAlpha(const double alpha) -> int     // NOLINT misc-use-a
         gsl_sf_gamma_inc(alpha + 1, sMin / sStar) -
         gsl_sf_gamma_inc(alpha + 1, sMax / sStar)
     ));
-    if (!testUtils::approxEqual(ps(x1), norm  * std::exp(-x1 / sStar))) {
+    if (!utils::approxEqual(ps(x1), norm  * std::exp(-x1 / sStar))) {
         std::cerr << "testPDFSegmentSchechter: PDF evaluation with alpha=" << alpha << " at x=1.0 failed: expected " << norm << ", got " << ps(x1) << "\n";
         return 1;
     }
-    if (!testUtils::approxEqual(ps(x2), norm * std::pow(x2, alpha) * std::exp(-x2 / sStar))) {
+    if (!utils::approxEqual(ps(x2), norm * std::pow(x2, alpha) * std::exp(-x2 / sStar))) {
         std::cerr << "testPDFSegmentSchechter: PDF evaluation with alpha=" << alpha << " at x=5.0 failed: expected " << norm * std::pow(x2, alpha) << ", got " << ps(x2) << "\n";
         return 1;
     }
-    if (!testUtils::approxEqual(ps(x3), norm * std::pow(x3, alpha) * std::exp(-x3 / sStar))) {
+    if (!utils::approxEqual(ps(x3), norm * std::pow(x3, alpha) * std::exp(-x3 / sStar))) {
         std::cerr << "testPDFSegmentSchechter: PDF evaluation with alpha=" << alpha << " at x=10.0 failed: expected " << norm * std::pow(x3, alpha) << ", got " << ps(x3) << "\n";
         return 1;
     }
-    if (!testUtils::approxEqual(ps(x4), 0.0)) {
+    if (!utils::approxEqual(ps(x4), 0.0)) {
         std::cerr << "testPDFSegmentSchechter: PDF evaluation with alpha=" << alpha << " at x=0.5 failed: expected 0.0, got " << ps(x4) << "\n";
         return 1;
     }
-    if (!testUtils::approxEqual(ps(x5), 0.0)) {
+    if (!utils::approxEqual(ps(x5), 0.0)) {
         std::cerr << "testPDFSegmentSchechter: PDF evaluation with alpha=" << alpha << " at x=15.0 failed: expected 0.0, got " << ps(x5) << "\n";
         return 1;
     }
@@ -62,7 +62,7 @@ testPDFSegmentSchechterAlpha(const double alpha) -> int     // NOLINT misc-use-a
             gsl_sf_gamma_inc(alpha + 1, sMin / sStar) -
             gsl_sf_gamma_inc(alpha + 1, sMax / sStar)
         );
-    if (!testUtils::approxEqual(ps.expectationValue(), expectedEVFull)) {
+    if (!utils::approxEqual(ps.expectationValue(), expectedEVFull)) {
         std::cerr << "testPDFSegmentSchechter: Expectation value calculation with alpha=" << alpha << " failed: expected " << expectedEVFull << ", got " << ps.expectationValue() << "\n";
         return 1;
     }
@@ -78,13 +78,13 @@ testPDFSegmentSchechterAlpha(const double alpha) -> int     // NOLINT misc-use-a
             gsl_sf_gamma_inc(alpha + 1, a / sStar) -
             gsl_sf_gamma_inc(alpha + 1, b / sStar)
         );
-    if (!testUtils::approxEqual(ps.expectationValue(a, b), expectedEV)) {
+    if (!utils::approxEqual(ps.expectationValue(a, b), expectedEV)) {
         std::cerr << "testPDFSegmentSchechter: Expectation value calculation with alpha=" << alpha << " failed: expected " << expectedEV << ", got " << ps.expectationValue(a, b) << "\n";
         return 1;
     }
 
     // Test integral calculation over full range
-    if (!testUtils::approxEqual(ps.integral(sMin, sMax), 1.0)) {
+    if (!utils::approxEqual(ps.integral(sMin, sMax), 1.0)) {
         std::cerr << "testPDFSegmentSchechter: Integral calculation with alpha=" << alpha << " failed: expected 1.0, got " << ps.integral(sMin, sMax) << "\n";
         return 1;
     }
@@ -95,7 +95,7 @@ testPDFSegmentSchechterAlpha(const double alpha) -> int     // NOLINT misc-use-a
             gsl_sf_gamma_inc(alpha + 1, a / sStar) -
             gsl_sf_gamma_inc(alpha + 1, b / sStar)
         );
-    if (!testUtils::approxEqual(ps.integral(a, b), expectedIntegral)) {
+    if (!utils::approxEqual(ps.integral(a, b), expectedIntegral)) {
         std::cerr << "testPDFSegmentSchechter: Integral calculation with alpha=" << alpha << " failed: expected " << expectedIntegral << ", got " << ps.integral(a, b) << "\n";
         return 1;
     }
@@ -112,7 +112,7 @@ testPDFSegmentSchechterAlpha(const double alpha) -> int     // NOLINT misc-use-a
         sumSamples += sample;
     }
     const double sampleMean = sumSamples / numSamples;
-    if (!testUtils::approxEqual(sampleMean, expectedEV, 5e-2)) {
+    if (!utils::approxEqual(sampleMean, expectedEV, 5e-2)) {
         std::cerr << "testPDFSegmentSchechter: Random sampling with alpha=" << alpha << " mean failed: expected " << expectedEV << ", got " << sampleMean << "\n";
         return 1;
     }
