@@ -86,7 +86,7 @@ if args.vvcrit:
     files_avail = [ f for f, vvcrit_ in zip(files_avail, vvcrit) 
                    if vvcrit_ in args.vvcrit ]
     vvcrit = [ vvcrit_ for vvcrit_ in vvcrit if vvcrit_ in args.vvcrit ]
-if args.verbose:
+if args.verbose and (args.feh or args.afe or args.vvcrit):
     print(f"Filtered track list: {len(files_avail)} files to fetch.")
 
 # If target file exists and overwrite is not specified, check if any of the
