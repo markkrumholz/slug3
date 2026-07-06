@@ -12,6 +12,7 @@ import re
 import shutil
 import tomlkit
 import urllib3
+import zipfile
 
 # Magic strings
 PARSEC_version = "v2.0"
@@ -145,7 +146,7 @@ for url, pattern in zip(args.url, PARSEC_FILE_PATTERNS):
         h5file.close()
 
     # Loop over files to fetch
-    for filename in files_avail:
+    for filename, feh_, vvcrit_ in zip(files_avail, feh, vvcrit):
 
         # Construct the full URL for the file
         file_url = url + filename
@@ -159,17 +160,107 @@ for url, pattern in zip(args.url, PARSEC_FILE_PATTERNS):
                 raise RuntimeError(f"Failed to fetch {file_url}: HTTP {response.status}")
             shutil.copyfileobj(response, out_file)
 
-        # Unpack the zip archive
-        shutil.unpack_archive(outname, temp_dir)
+        # Unpack the zip archive, keeping track of the names of the
+        # members it contains so we can find them (and clean them up)
+        # without picking up leftover files from a previously processed
+        # archive
+        with zipfile.ZipFile(outname) as zf:
+            member_names = zf.namelist()
+            zf.extractall(temp_dir)
 
         # Remove the zip archive after unpacking
         shutil.os.remove(outname)
 
-        # TODO: Loop through the unpacked track files, extract the data
-        # needed by slug (following the pattern used in fetch_mist.py),
-        # filter using args.feh / args.vvcrit / args.overwrite, and write
-        # the results out to the HDF5 file at args.output, including the
-        # PARSEC_references / PARSEC_reference_URLs metadata.
+        # Select the individual track files: those whose names end in
+        # M<mass>.TAB, where <mass> is the initial stellar mass
+        track_files = [ m for m in member_names if re.search(r'M[\d.]+\.TAB$', m) ]
+        track_files.sort()
+
+        # Loop through the available initial masses and extract the data needed by slug
+        track_data = []
+        track_metadata = []
+        for track_file in track_files:
+
+            # Extract initial mass, metallicity, and helium fraction from
+            # the file name; both the VMS (Z<z>_Y<y>_...) and ROT
+            # (Z<z>Y<y>...) naming conventions are handled by making the
+            # separating underscore optional
+            m_init = float(re.search(r'M([\d.]+)\.TAB$', track_file).group(1))
+            z_init, y_init = ( float(v) for v in
+                               re.search(r'Z([\d.]+(?:[eE][+-]?\d+)?)_?Y([\d.]+)',
+                                        track_file).groups() )
+
+            # Read the track data from the file
+            track_file_path = shutil.os.path.join(temp_dir, track_file)
+            with open(track_file_path, 'r') as fp:
+
+                # Skip any comment lines (VMS files have two, ROT files
+                # have none), then read the column header line
+                line = fp.readline()
+                while line.startswith('#'):
+                    line = fp.readline()
+                cols = line.split()
+
+                # Read remainder of file
+                fdat = np.loadtxt(fp)
+
+            # Helper to sum detailed isotopic surface abundances if
+            # present (ROT files), or fall back to a single already-summed
+            # column if not (VMS files)
+            def surf_abund(primary, fallback):
+                if all(c in cols for c in primary):
+                    return sum(fdat[:, cols.index(c)] for c in primary)
+                else:
+                    return fdat[:, cols.index(fallback)]
+
+            # Extract parts of data that we need to save
+            t = fdat[:, cols.index('AGE')]
+            m = fdat[:, cols.index('MASS')]
+            mdot = fdat[:, cols.index('RATE')]
+            log_L = fdat[:, cols.index('LOG_L')]
+            log_Teff = fdat[:, cols.index('LOG_TE')]
+            h_surf = surf_abund(['XH1_SURF', 'XD_SURF'], 'Xsup')
+            he_surf = surf_abund(['XHE3_SURF', 'XHE4_SURF'], 'Ysup')
+            c_surf = surf_abund(['XC12_SURF', 'XC13_SURF'], 'XCsup')
+            n_surf = surf_abund(['XN14_SURF', 'XN15_SURF'], 'XNsup')
+            o_surf = surf_abund(['XO16_SURF', 'XO17_SURF', 'XO18_SURF'], 'XOsup')
+
+            # Store file data
+            file_metadata = {
+                'm_init' : m_init,
+                'y_init' : y_init,
+                'z_init' : z_init,
+                'v_vcrit' : vvcrit_,
+                'fe_h' : feh_,
+                'n_pts' : fdat.shape[0]
+            }
+            file_data = {
+                'age' : t,
+                'mass' : m,
+                'mdot' : mdot,
+                'log_L' : log_L,
+                'log_Teff' : log_Teff,
+                'h_surf' : h_surf,
+                'he_surf' : he_surf,
+                'c_surf' : c_surf,
+                'n_surf' : n_surf,
+                'o_surf' : o_surf
+            }
+            track_data.append(file_data)
+            track_metadata.append(file_metadata)
+
+        # TODO: Write track_data / track_metadata out to the HDF5 file at
+        # args.output, following the pattern used in fetch_mist.py: create
+        # a group named by feh_/vvcrit_, write its metadata attrs, write a
+        # 'masses' dataset, and write one dataset per initial mass,
+        # including the PARSEC_references / PARSEC_reference_URLs
+        # metadata.
+
+        # Clean up the unpacked track files for this archive
+        for member in member_names:
+            member_path = shutil.os.path.join(temp_dir, member)
+            if shutil.os.path.exists(member_path):
+                shutil.os.remove(member_path)
 
 # Clean up all downloads
 #shutil.rmtree(temp_dir, ignore_errors=True)
