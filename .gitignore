@@ -75,3 +75,7 @@ Testing/
 
 # Claude settings
 .claude/
+
+# Data files too large to store in repo
+data/tracks/*.toml
+data/tracks/*.h5
