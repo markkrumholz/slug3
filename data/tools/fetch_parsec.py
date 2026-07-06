@@ -69,6 +69,13 @@ args = parser.parse_args()
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 http = urllib3.PoolManager(cert_reqs="CERT_NONE")
 
+# If target output file does not exist, create it and write the references
+if not shutil.os.path.exists(args.output):
+    h5file = h5py.File(args.output, 'w')
+    h5file.attrs['references'] = PARSEC_references
+    h5file.attrs['reference_urls'] = PARSEC_reference_URLs
+    h5file.close()
+
 # Create a temporary directory to store the downloaded files
 temp_dir = "parsec_temp"
 shutil.rmtree(temp_dir, ignore_errors=True)
@@ -249,12 +256,45 @@ for url, pattern in zip(args.url, PARSEC_FILE_PATTERNS):
             track_data.append(file_data)
             track_metadata.append(file_metadata)
 
-        # TODO: Write track_data / track_metadata out to the HDF5 file at
-        # args.output, following the pattern used in fetch_mist.py: create
-        # a group named by feh_/vvcrit_, write its metadata attrs, write a
-        # 'masses' dataset, and write one dataset per initial mass,
-        # including the PARSEC_references / PARSEC_reference_URLs
-        # metadata.
+        # Write the data to the HDF5 file
+        flds = ['age', 'mass', 'mdot', 'log_L', 'log_Teff',
+                'h_surf', 'he_surf', 'c_surf', 'n_surf', 'o_surf']
+        with h5py.File(args.output, 'a') as h5file:
+
+            # Create a group for this set of tracks; delete existing one if
+            # found, since if we're here it means we want to overwrite it
+            grp_name = f"feh_{feh_:.6g}_vvcrit_{vvcrit_:.2f}"
+            if grp_name in h5file:
+                del h5file[grp_name]
+            grp = h5file.create_group(grp_name)
+
+            # Write metadata for this set of tracks
+            grp.attrs['feh'] = track_metadata[0]['fe_h']
+            grp.attrs['vvcrit'] = track_metadata[0]['v_vcrit']
+            grp.attrs['y_init'] = track_metadata[0]['y_init']
+            grp.attrs['z_init'] = track_metadata[0]['z_init']
+            grp.attrs['ntime'] = track_metadata[0]['n_pts']
+            grp.attrs['nmass'] = len(track_data)
+            grp.attrs['m_min'] = min(md['m_init'] for md in track_metadata)
+            grp.attrs['m_max'] = max(md['m_init'] for md in track_metadata)
+
+            # Write the list of initial masses as a dataset in the group
+            grp.create_dataset('masses', data=[md['m_init'] for md in track_metadata])
+
+            # Write track for each initial mass to a separate group
+            for md, td in zip(track_metadata, track_data):
+                track_array = np.zeros((md["n_pts"], len(flds)))
+                for j, f in enumerate(flds):
+                    track_array[:,j] = td[f]
+                grp.create_dataset(f"track_m{md['m_init']:.3f}",
+                                   data=track_array, compression="gzip")
+
+            # Store the mapping from field names to indices in the last dimension of the track array
+            grp.attrs['field_names'] = flds
+
+            # Print verbose output if requested
+            if args.verbose:
+                print(f"Wrote {len(track_data)} tracks to group {grp_name} in {args.output}.")
 
         # Clean up the unpacked track files for this archive
         for member in member_names:
@@ -263,11 +303,42 @@ for url, pattern in zip(args.url, PARSEC_FILE_PATTERNS):
                 shutil.os.remove(member_path)
 
 # Clean up all downloads
-#shutil.rmtree(temp_dir, ignore_errors=True)
+shutil.rmtree(temp_dir, ignore_errors=True)
 
-# TODO: Update the registry file at args.registry with an entry for PARSEC,
-# following the pattern used in fetch_mist.py: read the existing registry
-# with tomlkit (or start a new one), add "PARSEC" to the "track_sets" list,
-# build a table with file/version/references/reference_urls and the
-# available Fe_H / v_vcrit grid values pulled from the HDF5 file, then
-# write the registry back out.
+# Read existing registry file if it exists, otherwise create a new one
+if shutil.os.path.exists(args.registry):
+    with open(args.registry, 'r') as f:
+        registry = tomlkit.parse(f.read())
+else:
+    registry = { "name" : "Registry of track sets" }
+
+# Add PARSEC to list of track sets
+if "track_sets" in registry.keys():
+    if "PARSEC" not in registry["track_sets"]:
+        registry["track_sets"].append("PARSEC")
+else:
+    registry["track_sets"] = [ "PARSEC" ]
+
+# Generate registry entry for PARSEC
+if "PARSEC" in registry.keys():
+    registry.pop("PARSEC")
+parsec_tab = tomlkit.table()
+parsec_tab["file"] = args.output
+parsec_tab["version"] = args.version
+parsec_tab["references"] = PARSEC_references
+parsec_tab["reference_urls"] = PARSEC_reference_URLs
+for qty, attr in zip(["Fe_H", "v_vcrit"],
+                     ["feh", "vvcrit"]):
+    val_in_file = []
+    with h5py.File(args.output, 'r') as h5file:
+        for grp in h5file.keys():
+            if h5file[grp].attrs[attr] not in val_in_file:
+                val_in_file.append(h5file[grp].attrs[attr])
+    val_in_file = np.array(val_in_file)
+    val_in_file.sort()
+    parsec_tab[qty] = [ v for v in val_in_file ]
+registry["PARSEC"] = parsec_tab
+
+# Write registry back to file
+with open(args.registry, 'w') as fp:
+    fp.write(tomlkit.dumps(registry))

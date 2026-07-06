@@ -291,7 +291,7 @@ else:
 # Add MIST to list of track sets
 if "track_sets" in registry.keys():
     if "MIST" not in registry["track_sets"]:
-        registry["track_sets"] += "MIST"
+        registry["track_sets"].append("MIST")
 else:
     registry["track_sets"] = [ "MIST" ]
     
