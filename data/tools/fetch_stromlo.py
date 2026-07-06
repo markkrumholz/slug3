@@ -26,9 +26,11 @@ STROMLO_URLS = [
 ]
 STROMLO_references = [
     "Grasha, K., Roy, A., Sutherland, R. S., Kewley, L. J. 2021, ApJ, 908, 241",
+    "Roy, A., Sutherland, R., Krumholz, M. R., Heger, A., Dopita, M. A. 2020, MNRAS, 494, 3861"
 ]
 STROMLO_reference_URLs = [
     "https://ui.adsabs.harvard.edu/abs/2021ApJ...908..241G/abstract",
+    "https://ui.adsabs.harvard.edu/abs/2020MNRAS.494.3861R/abstract"
 ]
 
 # Parse command line arguments
