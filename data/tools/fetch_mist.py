@@ -231,20 +231,9 @@ for f in files_avail:
         track_data.append(file_data)
         track_metadata.append(file_metadata)
 
-    # Find maximum number of points in any file, and pad shorter data
-    # to that length
-    npts_max = np.amax([md['n_pts'] for md in track_metadata])
+    # Write the data to the HDF5 file
     flds = ['age', 'mass', 'mdot', 'log_L', 'log_Teff',
             'h_surf', 'he_surf', 'c_surf', 'n_surf', 'o_surf', 'phase']
-    for d, md in zip(track_data, track_metadata):
-        if md['n_pts'] < npts_max:
-            for f in flds:
-                d[f] = np.concatenate(
-                    (d[f][:-1],
-                     np.ones(npts_max-md['n_pts']+1)*d[f][-1]))
-        d['n_pts'] = npts_max
-
-    # Write the data to the HDF5 file
     with h5py.File(args.output, 'a') as h5file:
 
         # Create a group for this set of tracks; delete existing one if
@@ -268,17 +257,13 @@ for f in files_avail:
         # Write the list of initial masses as a dataset in the group
         grp.create_dataset('masses', data=[md['m_init'] for md in track_metadata])
 
-        # Pack the track data into a 3d array for convenient storage and
-        # fast access. The array will have shape (nmass, ntime, nfields), where
-        # nfields is the number of fields we are storing for each track.
-        nfields = len(flds)
-        track_array = np.zeros((len(track_data), npts_max, nfields))
-        for i, d in enumerate(track_data):
+        # Write track for each initial mass to a separate group
+        for md, td in zip(track_metadata, track_data):
+            track_array = np.zeros((md["n_pts"], len(flds)))
             for j, f in enumerate(flds):
-                track_array[i,:,j] = d[f]
-
-        # Store the track array in the group
-        grp.create_dataset('tracks', data=track_array)
+                track_array[:,j] = td[f]
+            grp.create_dataset(f"track_m{md['m_init']:.3f}", 
+                               data=track_array, compression="gzip")
 
         # Store the mapping from field names to indices in the last dimension of the track array
         grp.attrs['field_names'] = flds
@@ -288,7 +273,10 @@ for f in files_avail:
             print(f"Wrote {len(track_data)} tracks to group {grp_name} in {args.output}.")
 
     # Clean up the unpacked files
-    shutil.rmtree(unpack_dir_name, ignore_errors=True)
+    cleanup_name = shutil.os.path.join(
+        temp_dir, 
+        re.findall('MIST_'+args.version+'_(.*?)_EEP', outname)[0])
+    shutil.rmtree(cleanup_name, ignore_errors=True)
 
 # Clean up all downloads
 shutil.rmtree(temp_dir, ignore_errors=True)
