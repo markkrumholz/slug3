@@ -23,6 +23,8 @@
 *.dll
 *.so.*
 
+# Python compiled files
+*.pyc
 
 # Fortran module files
 *.mod
