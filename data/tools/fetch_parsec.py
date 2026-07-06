@@ -36,6 +36,7 @@ PARSEC_reference_URLs = [
     "https://ui.adsabs.harvard.edu/abs/2019MNRAS.485.4641C/abstract",
     "https://ui.adsabs.harvard.edu/abs/2019A%26A...631A.128C/abstract",
 ]
+PARSEC_ZSUN = 0.01524    # PARSEC's preferred "Solar" metallicity
 
 # Parse command line arguments
 parser = argparse.ArgumentParser(description="Fetch PARSEC tracks")
@@ -214,7 +215,7 @@ for url, pattern in zip(args.url, PARSEC_FILE_PATTERNS):
             # Helper to sum detailed isotopic surface abundances if
             # present (ROT files), or fall back to a single already-summed
             # column if not (VMS files)
-            def surf_abund(primary, fallback):
+            def surf_abund(primary, fallback) -> np.ndarray:
                 if all(c in cols for c in primary):
                     return sum(fdat[:, cols.index(c)] for c in primary)
                 else:
@@ -261,15 +262,18 @@ for url, pattern in zip(args.url, PARSEC_FILE_PATTERNS):
                 'h_surf', 'he_surf', 'c_surf', 'n_surf', 'o_surf']
         with h5py.File(args.output, 'a') as h5file:
 
+            # Get metallicity on a Solar-normalized log scale
+            feh_solar = np.log10(feh_/PARSEC_ZSUN)
+
             # Create a group for this set of tracks; delete existing one if
             # found, since if we're here it means we want to overwrite it
-            grp_name = f"feh_{feh_:.6g}_vvcrit_{vvcrit_:.2f}"
+            grp_name = f"feh_{feh_solar:.6g}_vvcrit_{vvcrit_:.2f}"
             if grp_name in h5file:
                 del h5file[grp_name]
             grp = h5file.create_group(grp_name)
 
             # Write metadata for this set of tracks
-            grp.attrs['feh'] = track_metadata[0]['fe_h']
+            grp.attrs['feh'] = feh_solar
             grp.attrs['vvcrit'] = track_metadata[0]['v_vcrit']
             grp.attrs['y_init'] = track_metadata[0]['y_init']
             grp.attrs['z_init'] = track_metadata[0]['z_init']
