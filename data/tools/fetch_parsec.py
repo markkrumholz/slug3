@@ -224,14 +224,17 @@ for url, pattern in zip(args.url, PARSEC_FILE_PATTERNS):
             # Extract parts of data that we need to save
             t = fdat[:, cols.index('AGE')]
             m = fdat[:, cols.index('MASS')]
-            mdot = fdat[:, cols.index('RATE')]
+            if 'RATE' in cols:
+                mdot = fdat[:, cols.index('RATE')]
+            else:
+                mdot = np.zeros(fdat.shape[0])
             log_L = fdat[:, cols.index('LOG_L')]
             log_Teff = fdat[:, cols.index('LOG_TE')]
-            h_surf = surf_abund(['XH1_SURF', 'XD_SURF'], 'Xsup')
-            he_surf = surf_abund(['XHE3_SURF', 'XHE4_SURF'], 'Ysup')
-            c_surf = surf_abund(['XC12_SURF', 'XC13_SURF'], 'XCsup')
-            n_surf = surf_abund(['XN14_SURF', 'XN15_SURF'], 'XNsup')
-            o_surf = surf_abund(['XO16_SURF', 'XO17_SURF', 'XO18_SURF'], 'XOsup')
+            h_surf = surf_abund(['XH1_SURF', 'XD_SURF'], 'H_SUP')
+            he_surf = surf_abund(['XHE3_SURF', 'XHE4_SURF'], 'HE_SUP')
+            c_surf = surf_abund(['XC12_SURF', 'XC13_SURF'], 'C_SUP')
+            n_surf = surf_abund(['XN14_SURF', 'XN15_SURF'], 'N_SUP')
+            o_surf = surf_abund(['XO16_SURF', 'XO17_SURF', 'XO18_SURF'], 'O_SUP')
 
             # Store file data
             file_metadata = {
