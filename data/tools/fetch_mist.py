@@ -98,16 +98,15 @@ if shutil.os.path.exists(args.output) and not args.overwrite:
         existing_feh = h5file[grp].attrs['feh']
         existing_afe = h5file[grp].attrs['afe']
         existing_vvcrit = h5file[grp].attrs['vvcrit']
-        if (existing_feh in feh) and (existing_afe in afe) and \
-            (existing_vvcrit in vvcrit):
-            idx = feh.index(existing_feh)
-            if (idx == afe.index(existing_afe)) and \
-                (idx == vvcrit.index(existing_vvcrit)):
+        for i, feh_, afe_, vvcrit_ in zip(np.arange(len(feh)), feh, afe, vvcrit):
+            if (feh_ == existing_feh) and (afe_ == existing_afe) and \
+                (vvcrit_ == existing_vvcrit):
                 nduplicates += 1
-                files_avail.pop(idx)
-                feh.pop(idx)
-                afe.pop(idx)
-                vvcrit.pop(idx)
+                files_avail.pop(i)
+                feh.pop(i)
+                afe.pop(i)
+                vvcrit.pop(i)
+                break
     if args.verbose and nduplicates > 0:
         print(f"Found {nduplicates} existing tracks in {args.output}; skipping them.")
     h5file.close()

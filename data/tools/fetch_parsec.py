@@ -109,14 +109,12 @@ for url, pattern in zip(args.url, PARSEC_FILE_PATTERNS):
     # From the file names, extract the value of v/vcrit for each file,
     # encoded as VAR_ROT<value>_ in the filename; files that do not match
     # the VAR_ROT pattern (i.e. the VMS tracks) are non-rotating, so
-    # vvcrit = 0 for them, but since they carry no rotation grid at all,
-    # they are exempt from v/vcrit filtering below
+    # vvcrit = 0 for them
     vvcrit = []
     has_vvcrit = []
     for f in files_avail:
         match = re.findall(r'VAR_ROT([\d.]+)_', f)
         vvcrit.append(float(match[0]) if match else 0.0)
-        has_vvcrit.append(bool(match))
 
     # If we were given a list of v/vcrit values to fetch, filter the list of
     # files accordingly, but keep any files (like the VMS tracks) that do
@@ -127,28 +125,32 @@ for url, pattern in zip(args.url, PARSEC_FILE_PATTERNS):
         files_avail = [ f for f, k in zip(files_avail, keep) if k ]
         feh = [ feh_ for feh_, k in zip(feh, keep) if k ]
         vvcrit = [ vvcrit_ for vvcrit_, k in zip(vvcrit, keep) if k ]
-        has_vvcrit = [ h for h, k in zip(has_vvcrit, keep) if k ]
 
     # Print effects of filtering
     if args.verbose and (args.vvcrit or args.feh):
         print(f"Filtered track list: {len(files_avail)} files to fetch.")
 
     # If target file exists and overwrite is not specified, check if any of
-    # the requested tracks already exist in the file. If so, skip them.
+    # the requested tracks already exist in the file. If so, skip them. Note
+    # that we have to be a bit careful with the metallicity, because the
+    # metallicity stored in the PARSEC database is the absolute value of Z,
+    # but what we store in the slug database is log10(Z/ZSun), truncated to
+    # a finite number of decimal places
     if shutil.os.path.exists(args.output) and not args.overwrite:
         h5file = h5py.File(args.output, 'r')
         nduplicates = 0
+        feh_converted = np.log10(np.array(feh)/PARSEC_ZSUN)
         for grp in h5file.keys():
             existing_feh = h5file[grp].attrs['feh']
             existing_vvcrit = h5file[grp].attrs['vvcrit']
-            if (existing_feh in feh) and (existing_vvcrit in vvcrit):
-                idx = feh.index(existing_feh)
-                if idx == vvcrit.index(existing_vvcrit):
+            for i, feh_, vvcrit_ in zip(np.arange(len(feh)), feh, vvcrit):
+                if (np.abs(np.log10(feh_/PARSEC_ZSUN) - existing_feh) < 1e-4) \
+                    and (vvcrit_ == existing_vvcrit):
                     nduplicates += 1
-                    files_avail.pop(idx)
-                    feh.pop(idx)
-                    vvcrit.pop(idx)
-                    has_vvcrit.pop(idx)
+                    files_avail.pop(i)
+                    feh.pop(i)
+                    vvcrit.pop(i)
+                    break
         if args.verbose and nduplicates > 0:
             print(f"Found {nduplicates} existing tracks in {args.output}; skipping them.")
         h5file.close()
@@ -212,14 +214,14 @@ for url, pattern in zip(args.url, PARSEC_FILE_PATTERNS):
                 # Read remainder of file
                 fdat = np.loadtxt(fp)
 
-            # Helper to sum detailed isotopic surface abundances if
-            # present (ROT files), or fall back to a single already-summed
-            # column if not (VMS files)
-            def surf_abund(primary, fallback) -> np.ndarray:
-                if all(c in cols for c in primary):
-                    return sum(fdat[:, cols.index(c)] for c in primary)
-                else:
-                    return fdat[:, cols.index(fallback)]
+            # Helper to extract surface abundances; this function is needed
+            # because there are three different formats of PARSEC files, which
+            # have different column names
+            def surf_abund(colformat) -> np.ndarray:
+                for cf in colformat:
+                    if all(c in cols for c in cf):
+                        return sum(fdat[:, cols.index(c)] for c in cf)
+                raise ValueError("no matching column format")
 
             # Extract parts of data that we need to save
             t = fdat[:, cols.index('AGE')]
@@ -230,11 +232,11 @@ for url, pattern in zip(args.url, PARSEC_FILE_PATTERNS):
                 mdot = np.zeros(fdat.shape[0])
             log_L = fdat[:, cols.index('LOG_L')]
             log_Teff = fdat[:, cols.index('LOG_TE')]
-            h_surf = surf_abund(['XH1_SURF', 'XD_SURF'], 'H_SUP')
-            he_surf = surf_abund(['XHE3_SURF', 'XHE4_SURF'], 'HE_SUP')
-            c_surf = surf_abund(['XC12_SURF', 'XC13_SURF'], 'C_SUP')
-            n_surf = surf_abund(['XN14_SURF', 'XN15_SURF'], 'N_SUP')
-            o_surf = surf_abund(['XO16_SURF', 'XO17_SURF', 'XO18_SURF'], 'O_SUP')
+            h_surf = surf_abund([['XH1_SURF', 'XD_SURF'], ['H_SUP'], ['Xsup']])
+            he_surf = surf_abund([['XHE3_SURF', 'XHE4_SURF'], ['HE_SUP'], ['Ysup']])
+            c_surf = surf_abund([['XC12_SURF', 'XC13_SURF'], ['C_SUP'], ['XCsup', 'XC13sup']])
+            n_surf = surf_abund([['XN14_SURF', 'XN15_SURF'], ['N_SUP'], ['XNsup']])
+            o_surf = surf_abund([['XO16_SURF', 'XO17_SURF', 'XO18_SURF'], ['O_SUP'], ['XOsup', 'XO18sup']])
 
             # Store file data
             file_metadata = {
