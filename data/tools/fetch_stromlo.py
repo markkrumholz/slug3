@@ -202,13 +202,18 @@ for url in args.url:
                     line = fp.readline()
                 splt = line[1:].split()
                 m_init = float(splt[0])
-                n_pts = int(splt[1])
                 for i in range(4):
                     line = fp.readline()
                 cols = line[1:].split()
 
-                # Read remainder of file
+                # Read remainder of file; note that we get n_pts from the
+                # actual data rather than the header's stated N_pts, since
+                # at least one released file (M=50, feh=+0.0, vvcrit=0.4)
+                # has a header claiming more points than it actually
+                # contains (its evolution appears to have been truncated
+                # without the header being updated to match)
                 fdat = np.loadtxt(fp)
+                n_pts = fdat.shape[0]
 
             # Extract parts of data that we need to save
             t = fdat[:,cols.index('star_age')]
