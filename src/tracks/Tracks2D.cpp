@@ -24,6 +24,9 @@
 namespace tracks
 {
 
+    // FieldIdx::nTrackQty as a size_t
+    constexpr size_t nQty = static_cast<size_t>(FieldIdx::nTrackQty);
+
     // Suppress clang-tidy warnings iun this namespace caused by just including
     // hdf5.h, instead of the individual HDF5 headers, since this is the paradigm
     // that HDF5 wants
@@ -153,9 +156,9 @@ namespace tracks
     Tracks2D::Tracks2D(const hid_t grp,
         const size_t ntMin)
     {
-        using Array1D = interp::Mesh2DInterpolator<nTrackQty>::Array1D;
-        using Array2D = interp::Mesh2DInterpolator<nTrackQty>::Array2D;
-        using Array3D = interp::Mesh2DInterpolator<nTrackQty>::Array3D;
+        using Array1D = interp::Mesh2DInterpolator<nQty>::Array1D;
+        using Array2D = interp::Mesh2DInterpolator<nQty>::Array2D;
+        using Array3D = interp::Mesh2DInterpolator<nQty>::Array3D;
 
         // Read the masses of the tracks in this group; the masses
         // dataset is not guaranteed to be stored in ascending order
@@ -171,8 +174,8 @@ namespace tracks
 
         // Read the field_names attribute, and use it to identify which
         // column of each track dataset holds the age, and which columns
-        // hold the nTrackQty quantities to be stored as track data; any
-        // fields beyond the first nTrackQty non-age fields are ignored
+        // hold the nQty quantities to be stored as track data; any
+        // fields beyond the first nQty non-age fields are ignored
         const auto fieldNames = readFieldNames(grp);
         size_t ageIdx = fieldNames.size();
         for (size_t i = 0; i < fieldNames.size(); ++i)
@@ -187,15 +190,20 @@ namespace tracks
         std::vector<size_t> qtyIdx;
         for (size_t i = 0; i < fieldNames.size(); ++i)
         {
-            if (i == ageIdx) { continue; }
-            qtyIdx.push_back(i);
-            if (qtyIdx.size() == nTrackQty) { break; }
+            for (size_t j = 0; j < nQty; ++j)
+            {
+                if (fieldNames[i] == FieldStr[j])
+                {
+                    qtyIdx.push_back(j);
+                    break;
+                }
+            }
+            if (qtyIdx.size() == nQty) { break; }
         }
-        if (qtyIdx.size() != nTrackQty)
+        if (qtyIdx.size() != nQty)
         {
             throw std::runtime_error(
-                "Tracks2D: group does not have enough fields to fill "
-                "track data");
+                "Tracks2D: did not find all the expected fields in track file");
         }
 
         // First pass: scan every track dataset to find the number of
@@ -221,8 +229,8 @@ namespace tracks
         // padded to nt time points each
         std::vector<double> timesData(nmass * nt);
         const Array2D times(timesData.data(), nmass, nt);
-        std::vector<double> fieldDataVec(nmass * nt * nTrackQty);
-        const Array3D fieldData(fieldDataVec.data(), nmass, nt, nTrackQty);
+        std::vector<double> fieldDataVec(nmass * nt * nQty);
+        const Array3D fieldData(fieldDataVec.data(), nmass, nt, nQty);
 
         // Second pass: read each track in turn, from lowest mass to
         // highest, padding the end of any track with fewer than nt
@@ -238,7 +246,7 @@ namespace tracks
             {
                 const size_t src = std::min(j, nrow - 1);
                 times[i, j] = track[src, ageIdx];
-                for (size_t k = 0; k < nTrackQty; ++k)
+                for (size_t k = 0; k < nQty; ++k)
                 {
                     fieldData[i, j, k] = track[src, qtyIdx[k]];
                 }
@@ -246,20 +254,20 @@ namespace tracks
         }
 
         // Mesh2DInterpolator requires its x and f arrays to have shape
-        // (nt, nmass) and (nt, nmass, nTrackQty) respectively -- the
+        // (nt, nmass) and (nt, nmass, nQty) respectively -- the
         // transpose of times and fieldData -- because masses, not
         // times, form the tensor (shared) direction of the mesh; build
         // those transposed views here before constructing interp_
         std::vector<double> xData(nt * nmass);
         const Array2D x(xData.data(), nt, nmass);
-        std::vector<double> fData(nt * nmass * nTrackQty);
-        const Array3D f(fData.data(), nt, nmass, nTrackQty);
+        std::vector<double> fData(nt * nmass * nQty);
+        const Array3D f(fData.data(), nt, nmass, nQty);
         for (size_t i = 0; i < nmass; ++i)
         {
             for (size_t j = 0; j < nt; ++j)
             {
                 x[j, i] = times[i, j];
-                for (size_t k = 0; k < nTrackQty; ++k)
+                for (size_t k = 0; k < nQty; ++k)
                 {
                     f[j, i, k] = fieldData[i, j, k];
                 }
@@ -267,7 +275,7 @@ namespace tracks
         }
 
         // Build the interpolator
-        interp_ = std::make_unique<interp::Mesh2DInterpolator<nTrackQty>>(
+        interp_ = std::make_unique<interp::Mesh2DInterpolator<nQty>>(
             x, masses, f);
     }
 

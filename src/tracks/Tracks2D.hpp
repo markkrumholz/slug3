@@ -10,8 +10,11 @@
 
 #include "../interpolation/Mesh2DInterpolator.hpp"
 #include "H5Ipublic.h"
+#include <array>
 #include <cstddef>
+#include <cstdint>
 #include <memory>
+#include <string_view>
 
 /**
  * @brief A namespace to hold functions dealing with stellar tracks
@@ -19,7 +22,35 @@
 namespace tracks
 {
 
-    constexpr size_t nTrackQty = 9;  /**< Number of quantities at a given track point */
+    /**
+     * @brief enum of properties stored in the tracks
+     */
+    enum class FieldIdx : std::uint8_t
+    {
+        mass,   /**< Present-day mass in Msun */
+        mdot,   /**< Mass loss rate in Msun/yr */
+        logL,   /**< Log luminosity in Lsun */
+        logTe,  /**< Log effective temperature in K */
+        hSurf,  /**< Surface H mass fraction */
+        heSurf, /**< Surface He mass fraction */
+        cSurf,  /**< Surface C mass fraction */
+        nSurf,  /**< Surface N mass fraction */
+        oSurf,  /**< Surface O mass fraction */
+        nTrackQty /**< Number of quantities in the tracks */
+    };
+
+    constexpr std::array<std::string_view,
+        static_cast<size_t>(FieldIdx::nTrackQty)> FieldStr{
+        "mass",
+        "mdot",
+        "log_L",
+        "log_Teff",
+        "h_surf",
+        "he_surf",
+        "c_surf",
+        "n_surf",
+        "o_surf"
+    };  /**< Field names for each field quantity in the files */
 
     /**
      * @class Track2D
@@ -49,10 +80,69 @@ namespace tracks
         auto operator=(const Tracks2D&) -> Tracks2D& = delete;
         auto operator=(Tracks2D&&) -> Tracks2D& = delete;
 
+        // Observers
+
+        /**
+         * @brief Return the minimum mass in the tracks
+         * @return Minimum mass in the tracks
+         */
+        [[nodiscard]] auto mMin() const { return interp_->xMin(); }
+        /**
+         * @brief Return the maximum mass in the tracks
+         * @return Maximum mass in the tracks
+         */
+        [[nodiscard]] auto mMax() const { return interp_->xMax(); }
+
+        /**
+         * @brief Return the minimum time in the tracks
+         * @return Minimum time in the tracks
+         */
+        [[nodiscard]] auto tMin() const { return interp_->yMin(); }
+        /**
+         * @brief Return the minimum time in the tracks
+         * @return Minimum time in the tracks
+         */
+        [[nodiscard]] auto tMax() const { return interp_->yMax(); }
+
+        // Calculation methods
+
+        /** 
+         * @brief Return the lifetime of a star of specified mass 
+         * @param m Mass of the star whose lifetime should be returned
+         * @return The lifetime of a star of mass m
+         */
+       [[nodiscard]] auto starLifetime(const double m) { return interp_->xMax(m); }
+
+       /**
+        * @brief Return the range of stellar masses that are alive at a given time
+        * @param t Time at which to evaluate
+        * @return The range of stellar masses alive at the given time
+        */
+       [[nodiscard]] auto liveMassRange(const double t) { return interp_->yLim(t); }
+
+        /**
+         * @brief Return the track for a star of a given mass
+         * @param m Mass of the star whose track should be computed
+         * @return An unique_ptr to an Interpolator1D describing the track for a given mass
+         */
+        [[nodiscard]] auto getTrack(const double m) { return interp_->interpConstY(m); }
+
+        /**
+         * @brief Return the isochrone at a given time
+         * @param t The time of the isochrone
+         * @return A vector of unique_ptr to Interpolator1D's describing the isochrone
+         * @details
+         * Note that this method returns a vector of Interpolator1D objects
+         * rather than a single one because for non-monotonic tracks there
+         * may be multiple disjoint segments to the isochrone.
+         */
+        [[nodiscard]] auto getIsochrone(const double t) { return interp_->interpConstX(t); }
+
     private:
 
         // Track data
-        std::unique_ptr<interp::Mesh2DInterpolator<nTrackQty>> interp_;
+        std::unique_ptr<interp::Mesh2DInterpolator<
+            static_cast<size_t>(FieldIdx::nTrackQty)>> interp_; /**< Interpolator for the tracks */
 
     };
 
