@@ -14,11 +14,12 @@
 #define TESTTRACKS2D_HPP
 
 #include "../../src/tracks/Tracks2D.hpp"
-#include "hdf5.h"
+#include "hdf5.h"  // NOLINT(misc-include-cleaner)
 #include <array>
+#include <cstddef>
+#include <exception>
 #include <filesystem>
 #include <iostream>
-#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -31,6 +32,11 @@ enum class TestTracks2DOutcome
     failed,   /**< The file exists, but the test failed */
     passed    /**< The file exists, and the test passed */
 };
+
+// Suppress clang-tidy warnings iun this namespace caused by just including
+// hdf5.h, instead of the individual HDF5 headers, since this is the paradigm
+// that HDF5 wants
+// NOLINTBEGIN(misc-include-cleaner)
 
 /**
  * @brief Attempt to construct a Tracks2D object from one group of a track file
@@ -154,5 +160,7 @@ inline auto testTracks2D() -> int
 
     return anyFailed ? 1 : 0;
 }
+
+// NOLINTEND(misc-include-cleaner)
 
 #endif // TESTTRACKS2D_HPP

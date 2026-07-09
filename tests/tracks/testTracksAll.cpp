@@ -8,9 +8,20 @@
  */
 
 #include "testTracks2D.hpp"
+#include <exception>
+#include <iostream>
 
 auto main() -> int {
-    int result = 0;
-    result += testTracks2D();
-    return result;
+    try
+    {
+        int result = 0;
+        result += testTracks2D();
+        return result;
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testTracksAll: uncaught exception: "
+            << error.what() << "\n";
+        return 1;
+    }
 }

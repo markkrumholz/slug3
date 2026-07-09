@@ -130,7 +130,7 @@ namespace tracks
             const hid_t memtype = H5Aget_type(attr);
 
             std::vector<char*> buf(npoints);
-            H5Aread(attr, memtype, static_cast<void *>(buf.data())); 
+            H5Aread(attr, memtype, static_cast<void *>(buf.data())); // NOLINT(bugprone-multi-level-implicit-pointer-conversion)
             std::vector<std::string> names;
             names.reserve(npoints);
             for (const auto* s : buf) { names.emplace_back(s); }
@@ -139,7 +139,8 @@ namespace tracks
             // H5Treclaim, since the latter was only added in HDF5
             // 1.14 and isn't available in the older HDF5 that Ubuntu's
             // libhdf5-dev package ships
-            H5Dvlen_reclaim(memtype, aspace, H5P_DEFAULT, static_cast<void *>(buf.data()));
+            H5Dvlen_reclaim(memtype, aspace, H5P_DEFAULT, 
+                static_cast<void *>(buf.data())); // NOLINT(bugprone-multi-level-implicit-pointer-conversion)
             H5Tclose(memtype);
             H5Sclose(aspace);
             H5Aclose(attr);
