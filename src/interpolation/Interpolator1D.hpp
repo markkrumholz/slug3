@@ -165,30 +165,26 @@ namespace interp
 
         /**
          * @brief Remove duplicate values in x and f
+         * @details
+         * Since x_ is sorted, duplicates always appear in contiguous
+         * runs; this compacts each such run down to its first entry,
+         * carrying the corresponding f_ entries along, and shrinks x_
+         * and f_ to the resulting deduplicated size.
          */
         void cleanDuplicates()
         {
-            // Loop through x values
-            size_t i = 0;
-            while (i < x_.size() - 2)
+            if (x_.size() < 2) { return; }
+            size_t w = 0;
+            for (size_t r = 1; r < x_.size(); ++r)
             {
-                // Find sequences of identical values
-                size_t count = 0;
-                while (x_[i] == x_[i+count+1]) { ++count; }
-
-                // Move values to remove duplicates
-                if (count > 0)
-                {
-                    for (size_t j = i; j < x_.size() - count; ++j)
-                    {
-                        x_[j] = x_[j+count];
-                        for (auto &fi : f_) { fi[j] = fi[j+count]; }
-                    }
-                }
-
-                // Move to next element
-                i += count + 1;
+                if (x_[r] == x_[w]) { continue; }
+                ++w;
+                x_[w] = x_[r];
+                for (auto &fi : f_) { fi[w] = fi[r]; }
             }
+            const size_t newSize = w + 1;
+            x_.resize(newSize);
+            for (auto &fi : f_) { fi.resize(newSize); }
         }
 
         /**

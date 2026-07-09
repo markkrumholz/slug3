@@ -20,6 +20,9 @@ endif()
 # Find GSL
 find_package(GSL REQUIRED)
 
+# Find HDF5
+find_package(HDF5 REQUIRED COMPONENTS CXX)
+
 # Find OpenMP; threading is optional, so fall back to a single-threaded
 # build with a warning if no OpenMP implementation is available. Code that
 # depends on OpenMP must guard itself with #ifdef _OPENMP.
@@ -40,6 +43,7 @@ add_executable(slug
     src/pdfs/PDFSegmentNormal.cpp
     src/pdfs/PDFSegmentPowerlaw.cpp
     src/pdfs/PDFSegmentSchechter.cpp
+    src/tracks/Tracks2D.cpp
 )
 
 # Test executables
@@ -83,11 +87,22 @@ target_include_directories(slugTestPDFs SYSTEM PRIVATE src/pcg-cpp/include)
 target_include_directories(slugTestUtils PRIVATE src)
 target_include_directories(slugTestUtils SYSTEM PRIVATE src/pcg-cpp/include)
 
+target_include_directories(slug SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
+target_include_directories(slugTestInterpolation SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
+target_include_directories(slugTestPDFs SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
+target_include_directories(slugTestUtils SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
+
 # Link to GSL
 target_link_libraries(slug PRIVATE GSL::gsl)
 target_link_libraries(slugTestInterpolation PRIVATE GSL::gsl)
 target_link_libraries(slugTestPDFs PRIVATE GSL::gsl)
 target_link_libraries(slugTestUtils PRIVATE GSL::gsl)
+
+# Link to HDF5
+target_link_libraries(slug PRIVATE ${HDF5_CXX_LIBRARIES})
+target_link_libraries(slugTestInterpolation PRIVATE ${HDF5_CXX_LIBRARIES})
+target_link_libraries(slugTestPDFs PRIVATE ${HDF5_CXX_LIBRARIES})
+target_link_libraries(slugTestUtils PRIVATE ${HDF5_CXX_LIBRARIES})
 
 # Link to OpenMP, if available
 if(OpenMP_CXX_FOUND)
