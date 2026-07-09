@@ -7,6 +7,7 @@
 
 #include "Tracks2D.hpp"
 #include "../interpolation/Mesh2DInterpolator.hpp"
+#include "TrackCommons.hpp"
 #include "hdf5.h"  // NOLINT(misc-include-cleaner)
 #include <algorithm>
 #include <array>
@@ -188,11 +189,11 @@ namespace tracks
         std::vector<size_t> qtyIdx;
         for (const auto& fName : fieldNames)
         {
-            const auto* itf = std::ranges::find(FieldStr.begin(), FieldStr.end(), fName);
-            if (itf == FieldStr.end()) { continue; }
-            qtyIdx.push_back(std::distance(FieldStr.begin(), itf));
+            const auto* itf = std::ranges::find(fieldStr.begin(), fieldStr.end(), fName);
+            if (itf == fieldStr.end()) { continue; }
+            qtyIdx.push_back(std::distance(fieldStr.begin(), itf));
         }
-        if (qtyIdx.size() != FieldStr.size())
+        if (qtyIdx.size() != fieldStr.size())
         {
             throw std::runtime_error(
                 "Tracks2D: too few quantities found"

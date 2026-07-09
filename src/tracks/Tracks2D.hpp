@@ -5,16 +5,15 @@
  * @date 2024-07-09
  */
 
-#ifndef TRACK2D_HPP
-#define TRACK2D_HPP
+#ifndef TRACKS2D_HPP
+#define TRACKS2D_HPP
 
+#include "TrackCommons.hpp"
 #include "../interpolation/Mesh2DInterpolator.hpp"
 #include "H5Ipublic.h"
-#include <array>
 #include <cstddef>
-#include <cstdint>
 #include <memory>
-#include <string_view>
+#include <utility>
 
 /**
  * @brief A namespace to hold functions dealing with stellar tracks
@@ -22,35 +21,6 @@
 namespace tracks
 {
 
-    /**
-     * @brief enum of properties stored in the tracks
-     */
-    enum class FieldIdx : std::uint8_t
-    {
-        mass,   /**< Present-day mass in Msun */
-        mdot,   /**< Mass loss rate in Msun/yr */
-        logL,   /**< Log luminosity in Lsun */
-        logTe,  /**< Log effective temperature in K */
-        hSurf,  /**< Surface H mass fraction */
-        heSurf, /**< Surface He mass fraction */
-        cSurf,  /**< Surface C mass fraction */
-        nSurf,  /**< Surface N mass fraction */
-        oSurf,  /**< Surface O mass fraction */
-        nTrackQty /**< Number of quantities in the tracks */
-    };
-
-    constexpr std::array<std::string_view,
-        static_cast<size_t>(FieldIdx::nTrackQty)> FieldStr{
-        "mass",
-        "mdot",
-        "log_L",
-        "log_Teff",
-        "h_surf",
-        "he_surf",
-        "c_surf",
-        "n_surf",
-        "o_surf"
-    };  /**< Field names for each field quantity in the files */
 
     /**
      * @class Track2D
@@ -60,9 +30,14 @@ namespace tracks
     {
     public:
 
+        // Shorten type name
+        using M2DPtr = std::unique_ptr<
+            interp::Mesh2DInterpolator<
+            static_cast<size_t>(FieldIdx::nTrackQty)>>;
+
         // Constructors and destructors
         /**
-         * @brief Construct a Tracks2D object
+         * @brief Construct a Tracks2D object by reading from a track file
          * @param grp An HDF5 file handle to the group
          * @param ntMin If specified, minimum number of times in the tracks
          * @details
@@ -74,6 +49,11 @@ namespace tracks
          * the tracks, so tracks will be padded to at least this length.
         */
         Tracks2D(hid_t grp, size_t ntMin = 0);
+        /**
+         * @brief Construct a Tracks2D object from a supplied Mesh2DInterpolator
+         * @param m2d A unique_ptr to the interpolator from which to construct the track
+         */
+        Tracks2D(M2DPtr&& m2d) : interp_(std::move(m2d)) {};
         virtual ~Tracks2D() = default;
         Tracks2D(const Tracks2D&) = delete;
         Tracks2D(Tracks2D&&) = default;
@@ -141,11 +121,10 @@ namespace tracks
     private:
 
         // Track data
-        std::unique_ptr<interp::Mesh2DInterpolator<
-            static_cast<size_t>(FieldIdx::nTrackQty)>> interp_; /**< Interpolator for the tracks */
+        M2DPtr interp_; /**< Interpolator for the tracks */
 
     };
 
 } // namespace tracks
 
-#endif // TRACK2D
+#endif // TRACKS2D
