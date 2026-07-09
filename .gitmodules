@@ -1,3 +1,6 @@
 [submodule "src/pcg-cpp"]
 	path = src/pcg-cpp
 	url = https://github.com/imneme/pcg-cpp
+[submodule "src/tomlplusplus"]
+	path = src/tomlplusplus
+	url = https://github.com/marzer/tomlplusplus.git
