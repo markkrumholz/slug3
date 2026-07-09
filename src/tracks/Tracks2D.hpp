@@ -43,7 +43,7 @@ namespace tracks
         */
         Tracks2D(const hid_t grp, const size_t ntMin = 0);
         virtual ~Tracks2D() = default;
-        Tracks2D(const Tracks2D&) = default;
+        Tracks2D(const Tracks2D&) = delete;
         Tracks2D(Tracks2D&&) = default;
         auto operator=(const Tracks2D&) -> Tracks2D& = delete;
         auto operator=(Tracks2D&&) -> Tracks2D& = delete;

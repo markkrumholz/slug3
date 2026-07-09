@@ -71,6 +71,11 @@ add_executable(slugTestPDFs
 add_executable(slugTestUtils
     tests/utils/testUtilsAll.cpp
 )
+add_executable(slugTestTracks
+    src/interpolation/Mesh2DGrid.cpp
+    src/tracks/Tracks2D.cpp
+    tests/tracks/testTracksAll.cpp
+)
 
 # Include directories: project headers as regular includes, pcg-cpp as a
 # system include so clang-tidy and the compiler suppress warnings from it.
@@ -87,22 +92,28 @@ target_include_directories(slugTestPDFs SYSTEM PRIVATE src/pcg-cpp/include)
 target_include_directories(slugTestUtils PRIVATE src)
 target_include_directories(slugTestUtils SYSTEM PRIVATE src/pcg-cpp/include)
 
+target_include_directories(slugTestTracks PRIVATE src)
+target_include_directories(slugTestTracks SYSTEM PRIVATE src/pcg-cpp/include)
+
 target_include_directories(slug SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestInterpolation SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestPDFs SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestUtils SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
+target_include_directories(slugTestTracks SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 
 # Link to GSL
 target_link_libraries(slug PRIVATE GSL::gsl)
 target_link_libraries(slugTestInterpolation PRIVATE GSL::gsl)
 target_link_libraries(slugTestPDFs PRIVATE GSL::gsl)
 target_link_libraries(slugTestUtils PRIVATE GSL::gsl)
+target_link_libraries(slugTestTracks PRIVATE GSL::gsl)
 
 # Link to HDF5
 target_link_libraries(slug PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugTestInterpolation PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugTestPDFs PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugTestUtils PRIVATE ${HDF5_CXX_LIBRARIES})
+target_link_libraries(slugTestTracks PRIVATE ${HDF5_CXX_LIBRARIES})
 
 # Link to OpenMP, if available
 if(OpenMP_CXX_FOUND)
@@ -110,6 +121,7 @@ if(OpenMP_CXX_FOUND)
     target_link_libraries(slugTestInterpolation PRIVATE OpenMP::OpenMP_CXX)
     target_link_libraries(slugTestPDFs PRIVATE OpenMP::OpenMP_CXX)
     target_link_libraries(slugTestUtils PRIVATE OpenMP::OpenMP_CXX)
+    target_link_libraries(slugTestTracks PRIVATE OpenMP::OpenMP_CXX)
 endif()
 
 # Enable testing
@@ -119,6 +131,8 @@ enable_testing()
 add_test(NAME test_Interpolation COMMAND slugTestInterpolation)
 add_test(NAME test_PDFs COMMAND slugTestPDFs)
 add_test(NAME test_Utils COMMAND slugTestUtils)
+add_test(NAME test_Tracks COMMAND slugTestTracks
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 # Add command to copy assets to build dir
 add_custom_command(

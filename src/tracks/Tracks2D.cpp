@@ -145,8 +145,15 @@ namespace tracks
         using Array2D = interp::Mesh2DInterpolator<nTrackQty>::Array2D;
         using Array3D = interp::Mesh2DInterpolator<nTrackQty>::Array3D;
 
-        // Read the masses of the tracks in this group
+        // Read the masses of the tracks in this group; the masses
+        // dataset is not guaranteed to be stored in ascending order
+        // (e.g. some PARSEC files concatenate several mass ranges that
+        // were fetched separately), but Mesh2DInterpolator requires
+        // its y coordinate -- the masses, here -- to be non-decreasing,
+        // and we in any case want to process tracks from lowest mass
+        // to highest, so sort them here
         std::vector<double> massData = readDataset1D(grp, "masses");
+        std::sort(massData.begin(), massData.end());
         const size_t nmass = massData.size();
         Array1D masses(massData.data(), nmass);
 
