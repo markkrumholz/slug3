@@ -129,7 +129,11 @@ namespace tracks
             names.reserve(npoints);
             for (const auto* s : buf) { names.emplace_back(s); }
 
-            H5Treclaim(memtype, aspace, H5P_DEFAULT, buf.data());
+            // Use H5Dvlen_reclaim rather than its replacement,
+            // H5Treclaim, since the latter was only added in HDF5
+            // 1.14 and isn't available in the older HDF5 that Ubuntu's
+            // libhdf5-dev package ships
+            H5Dvlen_reclaim(memtype, aspace, H5P_DEFAULT, buf.data());
             H5Tclose(memtype);
             H5Sclose(aspace);
             H5Aclose(attr);
