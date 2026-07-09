@@ -12,6 +12,7 @@
 #include <array>
 #include <cstddef>
 #include <format>
+#include <iterator>
 #include <memory>
 #include <ranges>
 #include <stdexcept>
@@ -177,33 +178,25 @@ namespace tracks
         // hold the nQty quantities to be stored as track data; any
         // fields beyond the first nQty non-age fields are ignored
         const auto fieldNames = readFieldNames(grp);
-        size_t ageIdx = fieldNames.size();
-        for (size_t i = 0; i < fieldNames.size(); ++i)
-        {
-            if (fieldNames[i] == "age") { ageIdx = i; break; }
-        }
-        if (ageIdx == fieldNames.size())
+        auto it = std::ranges::find(fieldNames.begin(), fieldNames.end(), "age");
+        if (it == fieldNames.end())
         {
             throw std::runtime_error(
                 "Tracks2D: group has no 'age' field");
         }
+        auto ageIdx = std::distance(fieldNames.begin(), it);
         std::vector<size_t> qtyIdx;
-        for (size_t i = 0; i < fieldNames.size(); ++i)
+        for (const auto& fName : fieldNames)
         {
-            for (size_t j = 0; j < nQty; ++j)
-            {
-                if (fieldNames[i] == FieldStr[j])
-                {
-                    qtyIdx.push_back(j);
-                    break;
-                }
-            }
-            if (qtyIdx.size() == nQty) { break; }
+            const auto* itf = std::ranges::find(FieldStr.begin(), FieldStr.end(), fName);
+            if (itf == FieldStr.end()) { continue; }
+            qtyIdx.push_back(std::distance(FieldStr.begin(), itf));
         }
-        if (qtyIdx.size() != nQty)
+        if (qtyIdx.size() != FieldStr.size())
         {
             throw std::runtime_error(
-                "Tracks2D: did not find all the expected fields in track file");
+                "Tracks2D: too few quantities found"
+            );
         }
 
         // First pass: scan every track dataset to find the number of
