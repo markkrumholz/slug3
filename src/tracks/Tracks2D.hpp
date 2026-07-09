@@ -9,7 +9,8 @@
 #define TRACK2D_HPP
 
 #include "../interpolation/Mesh2DInterpolator.hpp"
-#include "hdf5.h"
+#include "H5Ipublic.h"
+#include <cstddef>
 #include <memory>
 
 /**
@@ -41,7 +42,7 @@ namespace tracks
          * ntMin is specified, this gives the minimum number of times in
          * the tracks, so tracks will be padded to at least this length.
         */
-        Tracks2D(const hid_t grp, const size_t ntMin = 0);
+        Tracks2D(hid_t grp, size_t ntMin = 0);
         virtual ~Tracks2D() = default;
         Tracks2D(const Tracks2D&) = delete;
         Tracks2D(Tracks2D&&) = default;
