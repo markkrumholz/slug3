@@ -17,6 +17,7 @@
 #include <mdspan>
 #include <memory>
 #include <ranges>
+#include <stdexcept>
 #include <vector>
 
 // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access, misc-use-anonymous-namespace)
@@ -139,7 +140,7 @@ auto testMesh3DInterpolator() -> int
     // mesh, and a value that falls strictly between two grid points
     for (const auto& y0 : { 0.0, 1.7, 3.0 })
     {
-        auto slice = m3d.sliceConstY(y0);
+        const auto& slice = m3d.sliceConstY(y0);
         if (testSliceXInterp(slice, xTest, y0, true, zQuery, 0.0, 4.0) == 1)
         {
             return 1;
@@ -150,7 +151,7 @@ auto testMesh3DInterpolator() -> int
     // mesh, and a value that falls strictly between two grid points
     for (const auto& z0 : { 0.0, 2.3, 4.0 })
     {
-        auto slice = m3d.sliceConstZ(z0);
+        const auto& slice = m3d.sliceConstZ(z0);
         if (testSliceXInterp(slice, xTest, z0, false, yQuery, 0.0, 3.0) == 1)
         {
             return 1;
@@ -158,12 +159,164 @@ auto testMesh3DInterpolator() -> int
     }
 
     // Test that values of x outside the mesh range produce no segments
-    auto sliceOut = m3d.sliceConstY(1.0);
+    const auto& sliceOut = m3d.sliceConstY(1.0);
     if (!sliceOut.interpConstX(-1.0).empty() || !sliceOut.interpConstX(3.0).empty())
     {
         std::cerr << "testMesh3DInterpolator: expected no segments for "
             "x outside mesh range\n";
         return 1;
+    }
+
+    // Test a y-degenerate mesh (ny = 1): sliceConstY should work
+    // trivially (no interpolation needed, since the mesh already lies
+    // entirely at the single y value), while sliceConstZ and
+    // sliceConstZCopy should throw, since there is no way to build a
+    // valid (x, y) slice when the y axis has only one point
+    {
+        constexpr size_t ny1 = 1;
+        std::array<double, nx*ny1*nz> xDataYDeg = { 0 };
+        std::array<double, ny1> yDataYDeg = { 0 };
+        std::array<double, nz> zDataYDeg = { 0 };
+        std::array<double, nx*ny1*nz*nF> fDataYDeg = { 0 };
+        const std::mdspan<double, std::extents<size_t, nx, ny1, nz>>
+            xYDeg(xDataYDeg.data());
+        const std::mdspan<double, std::extents<size_t, ny1>>
+            yYDeg(yDataYDeg.data());
+        const std::mdspan<double, std::extents<size_t, nz>>
+            zYDeg(zDataYDeg.data());
+        const std::mdspan<double, std::extents<size_t, nx, ny1, nz, nF>>
+            fYDeg(fDataYDeg.data());
+        yYDeg[0] = 7.0;
+        for (size_t k = 0; k < nz; ++k) { zYDeg[k] = static_cast<double>(k); }
+        for (size_t i = 0; i < nx; ++i) {
+            for (size_t k = 0; k < nz; ++k) {
+                xYDeg[i,0,k] = static_cast<double>(i) +
+                    (0.01 * static_cast<double>(k));
+                const auto fv = fExpected(xYDeg[i,0,k], yYDeg[0], zYDeg[k]);
+                for (size_t n = 0; n < nF; ++n) { fYDeg[i,0,k,n] = fv[n]; } //NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
+            }
+        }
+        const interp::Mesh3DInterpolator<nF> m3dYDeg(
+            xYDeg, yYDeg, zYDeg, fYDeg, gsl_interp_linear);
+
+        const auto& sliceYDeg = m3dYDeg.sliceConstY(7.0);
+        if (testSliceXInterp(sliceYDeg, xTest, 7.0, true, zQuery, 0.0, 4.0) == 1)
+        {
+            return 1;
+        }
+        const auto sliceYDegCopy = m3dYDeg.sliceConstYCopy(7.0);
+        if (testSliceXInterp(sliceYDegCopy, xTest, 7.0, true, zQuery, 0.0, 4.0) == 1)
+        {
+            return 1;
+        }
+
+        try
+        {
+            const auto& badSlice = m3dYDeg.sliceConstZ(2.0);
+            (void)badSlice;
+            std::cerr << "testMesh3DInterpolator: sliceConstZ on a "
+                "y-degenerate mesh should have thrown, but did not\n";
+            return 1;
+        }
+        catch (const std::runtime_error&) { /* this is the expected outcome */ }
+        try
+        {
+            auto badSlice = m3dYDeg.sliceConstZCopy(2.0);
+            (void)badSlice;
+            std::cerr << "testMesh3DInterpolator: sliceConstZCopy on a "
+                "y-degenerate mesh should have thrown, but did not\n";
+            return 1;
+        }
+        catch (const std::runtime_error&) { /* this is the expected outcome */ }
+    }
+
+    // Test a z-degenerate mesh (nz = 1): the mirror image of the
+    // y-degenerate case above
+    {
+        constexpr size_t nz1 = 1;
+        std::array<double, nx*ny*nz1> xDataZDeg = { 0 };
+        std::array<double, ny> yDataZDeg = { 0 };
+        std::array<double, nz1> zDataZDeg = { 0 };
+        std::array<double, nx*ny*nz1*nF> fDataZDeg = { 0 };
+        const std::mdspan<double, std::extents<size_t, nx, ny, nz1>>
+            xZDeg(xDataZDeg.data());
+        const std::mdspan<double, std::extents<size_t, ny>>
+            yZDeg(yDataZDeg.data());
+        const std::mdspan<double, std::extents<size_t, nz1>>
+            zZDeg(zDataZDeg.data());
+        const std::mdspan<double, std::extents<size_t, nx, ny, nz1, nF>>
+            fZDeg(fDataZDeg.data());
+        zZDeg[0] = 9.0;
+        for (size_t j = 0; j < ny; ++j) { yZDeg[j] = static_cast<double>(j); }
+        for (size_t i = 0; i < nx; ++i) {
+            for (size_t j = 0; j < ny; ++j) {
+                xZDeg[i,j,0] = static_cast<double>(i) +
+                    (0.1 * static_cast<double>(j));
+                const auto fv = fExpected(xZDeg[i,j,0], yZDeg[j], zZDeg[0]);
+                for (size_t n = 0; n < nF; ++n) { fZDeg[i,j,0,n] = fv[n]; } //NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
+            }
+        }
+        const interp::Mesh3DInterpolator<nF> m3dZDeg(
+            xZDeg, yZDeg, zZDeg, fZDeg, gsl_interp_linear);
+
+        const auto& sliceZDeg = m3dZDeg.sliceConstZ(9.0);
+        if (testSliceXInterp(sliceZDeg, xTest, 9.0, false, yQuery, 0.0, 3.0) == 1)
+        {
+            return 1;
+        }
+        const auto sliceZDegCopy = m3dZDeg.sliceConstZCopy(9.0);
+        if (testSliceXInterp(sliceZDegCopy, xTest, 9.0, false, yQuery, 0.0, 3.0) == 1)
+        {
+            return 1;
+        }
+
+        try
+        {
+            const auto& badSlice = m3dZDeg.sliceConstY(1.0);
+            (void)badSlice;
+            std::cerr << "testMesh3DInterpolator: sliceConstY on a "
+                "z-degenerate mesh should have thrown, but did not\n";
+            return 1;
+        }
+        catch (const std::runtime_error&) { /* this is the expected outcome */ }
+        try
+        {
+            auto badSlice = m3dZDeg.sliceConstYCopy(1.0);
+            (void)badSlice;
+            std::cerr << "testMesh3DInterpolator: sliceConstYCopy on a "
+                "z-degenerate mesh should have thrown, but did not\n";
+            return 1;
+        }
+        catch (const std::runtime_error&) { /* this is the expected outcome */ }
+    }
+
+    // Test that a mesh with both ny = 1 and nz = 1 is rejected outright
+    {
+        constexpr size_t ny1 = 1;
+        constexpr size_t nz1 = 1;
+        std::array<double, nx*ny1*nz1> xDataBoth = { 0 };
+        std::array<double, ny1> yDataBoth = { 0 };
+        std::array<double, nz1> zDataBoth = { 0 };
+        std::array<double, nx*ny1*nz1*nF> fDataBoth = { 0 };
+        const std::mdspan<double, std::extents<size_t, nx, ny1, nz1>>
+            xBoth(xDataBoth.data());
+        const std::mdspan<double, std::extents<size_t, ny1>>
+            yBoth(yDataBoth.data());
+        const std::mdspan<double, std::extents<size_t, nz1>>
+            zBoth(zDataBoth.data());
+        const std::mdspan<double, std::extents<size_t, nx, ny1, nz1, nF>>
+            fBoth(fDataBoth.data());
+
+        try
+        {
+            const interp::Mesh3DInterpolator<nF> m3dBoth(
+                xBoth, yBoth, zBoth, fBoth, gsl_interp_linear);
+            (void)m3dBoth;
+            std::cerr << "testMesh3DInterpolator: constructing a mesh "
+                "with ny = 1 and nz = 1 should have thrown, but did not\n";
+            return 1;
+        }
+        catch (const std::runtime_error&) { /* this is the expected outcome */ }
     }
 
     return 0; // Success

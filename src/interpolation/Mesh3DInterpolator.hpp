@@ -18,6 +18,7 @@
 #include <cmath>
 #include <cstddef>
 #include <gsl/gsl_interp.h>
+#include <limits>
 #include <mdspan>
 #include <memory>
 #include <stdexcept>
@@ -98,7 +99,7 @@ namespace interp
                     "match the number of interpolated quantities");
             }
             if (x.extent(0) < 2 ||
-                (x.extent(1) < 2 && x.extent(2) < 3))
+                (x.extent(1) < 2 && x.extent(2) < 2))
             {
                 throw std::runtime_error(
                     "Mesh3DInterpolator: mesh size nx x ny x nz must obey "
@@ -301,8 +302,8 @@ namespace interp
         /**
          * @brief Construct a 2D slice of the mesh at fixed y
          * @param y0 The y coordinate at which to slice
-         * @returns A Mesh2DInterpolator<NF> representing the (x, z) slice
-         *          of the mesh at y = y0
+         * @returns A const reference to a Mesh2DInterpolator<NF>
+         *          representing the (x, z) slice of the mesh at y = y0
          * @details
          * If y0 exactly matches one of the mesh y values, the slice is
          * built directly from the corresponding x and f mesh points.
@@ -311,71 +312,49 @@ namespace interp
          * function values are found using the y-direction interpolators
          * returned by yInterp(), evaluated at the sy arc-length coordinate
          * that corresponds to y0 in each (i,k) column.
+         *
+         * The constructed Mesh2DInterpolator is cached, along with the
+         * value of y0 used to build it; if this function is called again
+         * with the same y0, the cached object is returned directly rather
+         * than being rebuilt. The reference returned remains valid only
+         * until the next call to sliceConstY with a different y0, or
+         * until this Mesh3DInterpolator is destroyed. Use
+         * sliceConstYCopy() instead if you need an independent,
+         * caller-owned object.
          */
-        [[nodiscard]] auto sliceConstY(double y0) const -> Mesh2DInterpolator<NF>
+        [[nodiscard]] auto sliceConstY(double y0) const -> const Mesh2DInterpolator<NF>&
         {
-            assert(y0 >= yMin() && y0 <= yMax());
+            // Return the cached slice if it was built for this y0
+            if (ySliceCache_ && ySliceCacheVal_ == y0) { return *ySliceCache_; }
 
-            auto xv = x();
-            auto fv = f();
+            ySliceCache_ = std::make_unique<Mesh2DInterpolator<NF>>(buildSliceY(y0));
+            ySliceCacheVal_ = y0;
+            return *ySliceCache_;
+        }
 
-            // The Mesh2DInterpolator constructor takes mutable mdspan
-            // views, so the z coordinate array must be copied
-            std::vector<double> zCopy(zData_.begin(), zData_.end());
-            auto zSlice = std::mdspan<double, std::dextents<size_t, 1>>(zCopy.data(), nz_);
-
-            std::vector<double> xSliceData(nx_ * nz_);
-            std::vector<double> fSliceData(nx_ * nz_ * NF);
-            auto xSlice = std::mdspan<double, std::dextents<size_t, 2>>(xSliceData.data(), nx_, nz_);
-            auto fSlice = std::mdspan<double, std::dextents<size_t, 3>>(fSliceData.data(), nx_, nz_, NF);
-
-            // Check for an exact match with one of the mesh y values
-            for (size_t j = 0; j < ny_; ++j)
-            {
-                if (yData_[j] == y0)
-                {
-                    for (size_t i = 0; i < nx_; ++i)
-                    {
-                        for (size_t k = 0; k < nz_; ++k)
-                        {
-                            xSlice[i, k] = xv[i, j, k];
-                            for (size_t n = 0; n < NF; ++n) { fSlice[i, k, n] = fv[i, j, k, n]; }
-                        }
-                    }
-                    return Mesh2DInterpolator<NF>(xSlice, zSlice, fSlice, interpType_, monotonic_);
-                }
-            }
-
-            // No exact match; find the bracketing y planes via binary
-            // search and interpolate
-            const size_t j0 = static_cast<size_t>(
-                std::ranges::upper_bound(yData_, y0) - yData_.begin()) - 1;
-            const double t = (y0 - yData_[j0]) / (yData_[j0 + 1] - yData_[j0]);
-
-            auto syView = sy();
-            auto yInterpView = yInterp();
-            for (size_t i = 0; i < nx_; ++i)
-            {
-                for (size_t k = 0; k < nz_; ++k)
-                {
-                    xSlice[i, k] = xv[i, j0, k] +
-                        (t * (xv[i, j0 + 1, k] - xv[i, j0, k]));
-
-                    const double syTarget = syView[i, k, j0] +
-                        (t * (syView[i, k, j0 + 1] - syView[i, k, j0]));
-                    const auto fInterp = (*(yInterpView[i, k]))(syTarget);
-                    storeSliceResult(fSlice, i, k, fInterp);
-                }
-            }
-
-            return Mesh2DInterpolator<NF>(xSlice, zSlice, fSlice, interpType_, monotonic_);
+        /**
+         * @brief Construct a new, independent 2D slice of the mesh at fixed y
+         * @param y0 The y coordinate at which to slice
+         * @returns A newly-constructed Mesh2DInterpolator<NF> representing
+         *          the (x, z) slice of the mesh at y = y0
+         * @details
+         * Identical to sliceConstY() in every respect except that the
+         * result is not cached: a new Mesh2DInterpolator is built on
+         * every call and returned by value, for use in situations where
+         * the caller needs to own the slice independently of this
+         * Mesh3DInterpolator (e.g. to keep it alive after later calls
+         * to sliceConstY() with a different y0).
+         */
+        [[nodiscard]] auto sliceConstYCopy(double y0) const -> Mesh2DInterpolator<NF>
+        {
+            return buildSliceY(y0);
         }
 
         /**
          * @brief Construct a 2D slice of the mesh at fixed z
          * @param z0 The z coordinate at which to slice
-         * @returns A Mesh2DInterpolator<NF> representing the (x, y) slice
-         *          of the mesh at z = z0
+         * @returns A const reference to a Mesh2DInterpolator<NF>
+         *          representing the (x, y) slice of the mesh at z = z0
          * @details
          * If z0 exactly matches one of the mesh z values, the slice is
          * built directly from the corresponding x and f mesh points.
@@ -384,64 +363,42 @@ namespace interp
          * function values are found using the z-direction interpolators
          * returned by zInterp(), evaluated at the sz arc-length coordinate
          * that corresponds to z0 in each (i,j) column.
+         *
+         * The constructed Mesh2DInterpolator is cached, along with the
+         * value of z0 used to build it; if this function is called again
+         * with the same z0, the cached object is returned directly rather
+         * than being rebuilt. The reference returned remains valid only
+         * until the next call to sliceConstZ with a different z0, or
+         * until this Mesh3DInterpolator is destroyed. Use
+         * sliceConstZCopy() instead if you need an independent,
+         * caller-owned object.
          */
-        [[nodiscard]] auto sliceConstZ(double z0) const -> Mesh2DInterpolator<NF>
+        [[nodiscard]] auto sliceConstZ(double z0) const -> const Mesh2DInterpolator<NF>&
         {
-            assert(z0 >= zMin() && z0 <= zMax());
+            // Return the cached slice if it was built for this z0
+            if (zSliceCache_ && zSliceCacheVal_ == z0) { return *zSliceCache_; }
 
-            auto xv = x();
-            auto fv = f();
+            zSliceCache_ = std::make_unique<Mesh2DInterpolator<NF>>(buildSliceZ(z0));
+            zSliceCacheVal_ = z0;
+            return *zSliceCache_;
+        }
 
-            // The Mesh2DInterpolator constructor takes mutable mdspan
-            // views, so the y coordinate array must be copied
-            std::vector<double> yCopy(yData_.begin(), yData_.end());
-            auto ySlice = std::mdspan<double, std::dextents<size_t, 1>>(yCopy.data(), ny_);
-
-            std::vector<double> xSliceData(nx_ * ny_);
-            std::vector<double> fSliceData(nx_ * ny_ * NF);
-            auto xSlice = std::mdspan<double, std::dextents<size_t, 2>>(xSliceData.data(), nx_, ny_);
-            auto fSlice = std::mdspan<double, std::dextents<size_t, 3>>(fSliceData.data(), nx_, ny_, NF);
-
-            // Check for an exact match with one of the mesh z values
-            for (size_t k = 0; k < nz_; ++k)
-            {
-                if (zData_[k] == z0)
-                {
-                    for (size_t i = 0; i < nx_; ++i)
-                    {
-                        for (size_t j = 0; j < ny_; ++j)
-                        {
-                            xSlice[i, j] = xv[i, j, k];
-                            for (size_t n = 0; n < NF; ++n) { fSlice[i, j, n] = fv[i, j, k, n]; }
-                        }
-                    }
-                    return Mesh2DInterpolator<NF>(xSlice, ySlice, fSlice, interpType_, monotonic_);
-                }
-            }
-
-            // No exact match; find the bracketing z planes via binary
-            // search and interpolate
-            const size_t k0 = static_cast<size_t>(
-                std::ranges::upper_bound(zData_, z0) - zData_.begin()) - 1;
-            const double t = (z0 - zData_[k0]) / (zData_[k0 + 1] - zData_[k0]);
-
-            auto szView = sz();
-            auto zInterpView = zInterp();
-            for (size_t i = 0; i < nx_; ++i)
-            {
-                for (size_t j = 0; j < ny_; ++j)
-                {
-                    xSlice[i, j] = xv[i, j, k0] +
-                        (t * (xv[i, j, k0 + 1] - xv[i, j, k0]));
-
-                    const double szTarget = szView[i, j, k0] +
-                        (t * (szView[i, j, k0 + 1] - szView[i, j, k0]));
-                    const auto fInterp = (*(zInterpView[i, j]))(szTarget);
-                    storeSliceResult(fSlice, i, j, fInterp);
-                }
-            }
-
-            return Mesh2DInterpolator<NF>(xSlice, ySlice, fSlice, interpType_, monotonic_);
+        /**
+         * @brief Construct a new, independent 2D slice of the mesh at fixed z
+         * @param z0 The z coordinate at which to slice
+         * @returns A newly-constructed Mesh2DInterpolator<NF> representing
+         *          the (x, y) slice of the mesh at z = z0
+         * @details
+         * Identical to sliceConstZ() in every respect except that the
+         * result is not cached: a new Mesh2DInterpolator is built on
+         * every call and returned by value, for use in situations where
+         * the caller needs to own the slice independently of this
+         * Mesh3DInterpolator (e.g. to keep it alive after later calls
+         * to sliceConstZ() with a different z0).
+         */
+        [[nodiscard]] auto sliceConstZCopy(double z0) const -> Mesh2DInterpolator<NF>
+        {
+            return buildSliceZ(z0);
         }
 
     private:
@@ -468,6 +425,17 @@ namespace interp
         std::vector<
             std::unique_ptr<Interpolator1D<NF>>
         > zInterpData_;                     /**< z-direction interpolators (Nx × Ny, row-major) */
+
+        // Caches for the most recently constructed y and z slices, so
+        // that repeated calls to sliceConstY/sliceConstZ with the same
+        // y0/z0 do not need to rebuild the slice. Mutable because they
+        // are lazily populated from const observer methods.
+        mutable std::unique_ptr<Mesh2DInterpolator<NF>> ySliceCache_;  /**< Cached result of the last sliceConstY call */
+        mutable std::unique_ptr<Mesh2DInterpolator<NF>> zSliceCache_;  /**< Cached result of the last sliceConstZ call */
+        mutable double ySliceCacheVal_ =
+            std::numeric_limits<double>::quiet_NaN();                 /**< y0 value for which ySliceCache_ was built */
+        mutable double zSliceCacheVal_ =
+            std::numeric_limits<double>::quiet_NaN();                 /**< z0 value for which zSliceCache_ was built */
 
         /**
          * @brief Copy the input coordinate and function-value data
@@ -527,37 +495,43 @@ namespace interp
             auto zView = Array1D(zData_.data(), nz_);
 
             // sy: shape (Nx, Nz, Ny)
-            syData_.resize(nx_ * nz_ * ny_);
-            auto syView = std::mdspan<double, std::dextents<size_t, 3>>(
-                syData_.data(), nx_, nz_, ny_);
-            for (size_t i = 0; i < nx_; ++i)
+            if (ny_ > 1)
             {
-                for (size_t k = 0; k < nz_; ++k)
+                syData_.resize(nx_ * nz_ * ny_);
+                auto syView = std::mdspan<double, std::dextents<size_t, 3>>(
+                    syData_.data(), nx_, nz_, ny_);
+                for (size_t i = 0; i < nx_; ++i)
                 {
-                    syView[i, k, 0] = 0.0;
-                    for (size_t j = 1; j < ny_; ++j)
+                    for (size_t k = 0; k < nz_; ++k)
                     {
-                        syView[i, k, j] = syView[i, k, j - 1] + std::sqrt(
-                            std::pow(xView[i, j, k] - xView[i, j - 1, k], 2) +
-                            std::pow(yView[j] - yView[j - 1], 2));
+                        syView[i, k, 0] = 0.0;
+                        for (size_t j = 1; j < ny_; ++j)
+                        {
+                            syView[i, k, j] = syView[i, k, j - 1] + std::sqrt(
+                                std::pow(xView[i, j, k] - xView[i, j - 1, k], 2) +
+                                std::pow(yView[j] - yView[j - 1], 2));
+                        }
                     }
                 }
             }
 
             // sz: shape (Nx, Ny, Nz)
-            szData_.resize(nx_ * ny_ * nz_);
-            auto szView = std::mdspan<double, std::dextents<size_t, 3>>(
-                szData_.data(), nx_, ny_, nz_);
-            for (size_t i = 0; i < nx_; ++i)
+            if (nz_ > 1)
             {
-                for (size_t j = 0; j < ny_; ++j)
+                szData_.resize(nx_ * ny_ * nz_);
+                auto szView = std::mdspan<double, std::dextents<size_t, 3>>(
+                    szData_.data(), nx_, ny_, nz_);
+                for (size_t i = 0; i < nx_; ++i)
                 {
-                    szView[i, j, 0] = 0.0;
-                    for (size_t k = 1; k < nz_; ++k)
+                    for (size_t j = 0; j < ny_; ++j)
                     {
-                        szView[i, j, k] = szView[i, j, k - 1] + std::sqrt(
-                            std::pow(xView[i, j, k] - xView[i, j, k - 1], 2) +
-                            std::pow(zView[k] - zView[k - 1], 2));
+                        szView[i, j, 0] = 0.0;
+                        for (size_t k = 1; k < nz_; ++k)
+                        {
+                            szView[i, j, k] = szView[i, j, k - 1] + std::sqrt(
+                                std::pow(xView[i, j, k] - xView[i, j, k - 1], 2) +
+                                std::pow(zView[k] - zView[k - 1], 2));
+                        }
                     }
                 }
             }
@@ -633,6 +607,214 @@ namespace interp
                     [&fView](size_t i, size_t j, size_t k, size_t n) -> double { return fView[i, j, k, n]; },
                     zInterpData_);
             }
+        }
+
+        /**
+         * @brief Build a 2D slice of the mesh at fixed y
+         * @param y0 The y coordinate at which to slice
+         * @returns A newly-constructed Mesh2DInterpolator<NF> representing
+         *          the (x, z) slice of the mesh at y = y0
+         * @details
+         * This is the actual slice-construction logic shared by
+         * sliceConstY() and sliceConstYCopy(); see sliceConstY() for a
+         * full description of how the slice is built.
+         * @throws std::runtime_error if the mesh has only one point in
+         *         the z direction, since there is then no way to build a
+         *         valid (x, z) slice (a Mesh2DInterpolator needs at least
+         *         two points along each of its axes)
+         */
+        [[nodiscard]] auto buildSliceY(double y0) const -> Mesh2DInterpolator<NF>
+        {
+            assert(y0 >= yMin() && y0 <= yMax());
+
+            // If there is only one y-plane, the mesh is already entirely
+            // at y = y0 (the assert above guarantees y0 matches it), so
+            // the slice is just this mesh's (x, z, f) data with the
+            // degenerate y dimension dropped -- no interpolation needed.
+            // Since ny_ == 1 here, the constructor guard guarantees
+            // nz_ >= 2, so the resulting Mesh2DInterpolator is valid.
+            // Mesh2DInterpolator requires a mutable view even though it
+            // only reads from it to build its own internal copies, so
+            // casting away constness here is safe.
+            if (ny_ == 1)
+            {
+                auto* xPtr = const_cast<double*>(xData_.data());
+                auto* zPtr = const_cast<double*>(zData_.data());
+                auto* fPtr = const_cast<double*>(fData_.data());
+                auto xView = std::mdspan<double, std::dextents<size_t, 2>>(xPtr, nx_, nz_);
+                auto zView = std::mdspan<double, std::dextents<size_t, 1>>(zPtr, nz_);
+                auto fView = std::mdspan<double, std::dextents<size_t, 3>>(fPtr, nx_, nz_, NF);
+                return Mesh2DInterpolator<NF>(xView, zView, fView, interpType_, monotonic_);
+            }
+
+            // If there is only one z-plane, the (x, z) slice this
+            // function is meant to build would have a degenerate z axis
+            // of size 1, which Mesh2DInterpolator cannot represent
+            if (nz_ == 1)
+            {
+                throw std::runtime_error(
+                    "Mesh3DInterpolator::sliceConstY: cannot slice at "
+                    "fixed y because the mesh has only one point in the "
+                    "z direction");
+            }
+
+            auto xv = x();
+            auto fv = f();
+
+            // The Mesh2DInterpolator constructor takes mutable mdspan
+            // views, so the z coordinate array must be copied
+            std::vector<double> zCopy(zData_.begin(), zData_.end());
+            auto zSlice = std::mdspan<double, std::dextents<size_t, 1>>(zCopy.data(), nz_);
+
+            std::vector<double> xSliceData(nx_ * nz_);
+            std::vector<double> fSliceData(nx_ * nz_ * NF);
+            auto xSlice = std::mdspan<double, std::dextents<size_t, 2>>(xSliceData.data(), nx_, nz_);
+            auto fSlice = std::mdspan<double, std::dextents<size_t, 3>>(fSliceData.data(), nx_, nz_, NF);
+
+            // Check for an exact match with one of the mesh y values
+            for (size_t j = 0; j < ny_; ++j)
+            {
+                if (yData_[j] == y0)
+                {
+                    for (size_t i = 0; i < nx_; ++i)
+                    {
+                        for (size_t k = 0; k < nz_; ++k)
+                        {
+                            xSlice[i, k] = xv[i, j, k];
+                            for (size_t n = 0; n < NF; ++n) { fSlice[i, k, n] = fv[i, j, k, n]; }
+                        }
+                    }
+                    return Mesh2DInterpolator<NF>(xSlice, zSlice, fSlice, interpType_, monotonic_);
+                }
+            }
+
+            // No exact match; find the bracketing y planes via binary
+            // search and interpolate
+            const size_t j0 = static_cast<size_t>(
+                std::ranges::upper_bound(yData_, y0) - yData_.begin()) - 1;
+            const double t = (y0 - yData_[j0]) / (yData_[j0 + 1] - yData_[j0]);
+
+            auto syView = sy();
+            auto yInterpView = yInterp();
+            for (size_t i = 0; i < nx_; ++i)
+            {
+                for (size_t k = 0; k < nz_; ++k)
+                {
+                    xSlice[i, k] = xv[i, j0, k] +
+                        (t * (xv[i, j0 + 1, k] - xv[i, j0, k]));
+
+                    const double syTarget = syView[i, k, j0] +
+                        (t * (syView[i, k, j0 + 1] - syView[i, k, j0]));
+                    const auto fInterp = (*(yInterpView[i, k]))(syTarget);
+                    storeSliceResult(fSlice, i, k, fInterp);
+                }
+            }
+
+            return Mesh2DInterpolator<NF>(xSlice, zSlice, fSlice, interpType_, monotonic_);
+        }
+
+        /**
+         * @brief Build a 2D slice of the mesh at fixed z
+         * @param z0 The z coordinate at which to slice
+         * @returns A newly-constructed Mesh2DInterpolator<NF> representing
+         *          the (x, y) slice of the mesh at z = z0
+         * @details
+         * This is the actual slice-construction logic shared by
+         * sliceConstZ() and sliceConstZCopy(); see sliceConstZ() for a
+         * full description of how the slice is built.
+         * @throws std::runtime_error if the mesh has only one point in
+         *         the y direction, since there is then no way to build a
+         *         valid (x, y) slice (a Mesh2DInterpolator needs at least
+         *         two points along each of its axes)
+         */
+        [[nodiscard]] auto buildSliceZ(double z0) const -> Mesh2DInterpolator<NF>
+        {
+            assert(z0 >= zMin() && z0 <= zMax());
+
+            // If there is only one z-plane, the mesh is already entirely
+            // at z = z0 (the assert above guarantees z0 matches it), so
+            // the slice is just this mesh's (x, y, f) data with the
+            // degenerate z dimension dropped -- no interpolation needed.
+            // Since nz_ == 1 here, the constructor guard guarantees
+            // ny_ >= 2, so the resulting Mesh2DInterpolator is valid.
+            // Mesh2DInterpolator requires a mutable view even though it
+            // only reads from it to build its own internal copies, so
+            // casting away constness here is safe.
+            if (nz_ == 1)
+            {
+                auto* xPtr = const_cast<double*>(xData_.data());
+                auto* yPtr = const_cast<double*>(yData_.data());
+                auto* fPtr = const_cast<double*>(fData_.data());
+                auto xView = std::mdspan<double, std::dextents<size_t, 2>>(xPtr, nx_, ny_);
+                auto yView = std::mdspan<double, std::dextents<size_t, 1>>(yPtr, ny_);
+                auto fView = std::mdspan<double, std::dextents<size_t, 3>>(fPtr, nx_, ny_, NF);
+                return Mesh2DInterpolator<NF>(xView, yView, fView, interpType_, monotonic_);
+            }
+
+            // If there is only one y-plane, the (x, y) slice this
+            // function is meant to build would have a degenerate y axis
+            // of size 1, which Mesh2DInterpolator cannot represent
+            if (ny_ == 1)
+            {
+                throw std::runtime_error(
+                    "Mesh3DInterpolator::sliceConstZ: cannot slice at "
+                    "fixed z because the mesh has only one point in the "
+                    "y direction");
+            }
+
+            auto xv = x();
+            auto fv = f();
+
+            // The Mesh2DInterpolator constructor takes mutable mdspan
+            // views, so the y coordinate array must be copied
+            std::vector<double> yCopy(yData_.begin(), yData_.end());
+            auto ySlice = std::mdspan<double, std::dextents<size_t, 1>>(yCopy.data(), ny_);
+
+            std::vector<double> xSliceData(nx_ * ny_);
+            std::vector<double> fSliceData(nx_ * ny_ * NF);
+            auto xSlice = std::mdspan<double, std::dextents<size_t, 2>>(xSliceData.data(), nx_, ny_);
+            auto fSlice = std::mdspan<double, std::dextents<size_t, 3>>(fSliceData.data(), nx_, ny_, NF);
+
+            // Check for an exact match with one of the mesh z values
+            for (size_t k = 0; k < nz_; ++k)
+            {
+                if (zData_[k] == z0)
+                {
+                    for (size_t i = 0; i < nx_; ++i)
+                    {
+                        for (size_t j = 0; j < ny_; ++j)
+                        {
+                            xSlice[i, j] = xv[i, j, k];
+                            for (size_t n = 0; n < NF; ++n) { fSlice[i, j, n] = fv[i, j, k, n]; }
+                        }
+                    }
+                    return Mesh2DInterpolator<NF>(xSlice, ySlice, fSlice, interpType_, monotonic_);
+                }
+            }
+
+            // No exact match; find the bracketing z planes via binary
+            // search and interpolate
+            const size_t k0 = static_cast<size_t>(
+                std::ranges::upper_bound(zData_, z0) - zData_.begin()) - 1;
+            const double t = (z0 - zData_[k0]) / (zData_[k0 + 1] - zData_[k0]);
+
+            auto szView = sz();
+            auto zInterpView = zInterp();
+            for (size_t i = 0; i < nx_; ++i)
+            {
+                for (size_t j = 0; j < ny_; ++j)
+                {
+                    xSlice[i, j] = xv[i, j, k0] +
+                        (t * (xv[i, j, k0 + 1] - xv[i, j, k0]));
+
+                    const double szTarget = szView[i, j, k0] +
+                        (t * (szView[i, j, k0 + 1] - szView[i, j, k0]));
+                    const auto fInterp = (*(zInterpView[i, j]))(szTarget);
+                    storeSliceResult(fSlice, i, j, fInterp);
+                }
+            }
+
+            return Mesh2DInterpolator<NF>(xSlice, ySlice, fSlice, interpType_, monotonic_);
         }
 
         /**
