@@ -49,6 +49,18 @@ namespace tracks
         double afe = 0.0)
     -> std::pair<std::vector<double>, std::vector<std::string>>;
 
+    /**
+     * @brief Get the dimensions of a set of tracks
+     * @param h5Name Path to HDF5 file containing tracks
+     * @param groupName Name of the group within the HDF file
+     * @returns A pair containing the number of masses and number of times
+     *          in the track set
+     */
+    auto getTrackSize(
+        const std::filesystem::path& h5Name,
+        const std::string& groupName)
+    -> std::pair<size_t, size_t>;
+
 } // namespace tracks
 
 #endif // TRACKUTILS_HPP

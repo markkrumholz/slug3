@@ -160,6 +160,69 @@ inline auto testFindMatchingTracks() -> int
 }
 
 /**
+ * @brief Unit test for the getTrackSize function.
+ * @return 0 if the test passes, 1 if it fails.
+ * @details
+ * This function tests getTrackSize against tests/tracks/assets/MIST_test.h5,
+ * whose groups each contain 6 masses, with the tracks for those masses
+ * having differing numbers of time points, the largest of which is
+ * 1721. It checks that getTrackSize reports these values correctly for
+ * two different groups in the file, and that it throws exceptions for
+ * a nonexistent file and a nonexistent group.
+ */
+inline auto testGetTrackSize() -> int
+{
+    const std::filesystem::path h5Name = "tests/tracks/assets/MIST_test.h5";
+    const std::pair<size_t, size_t> expected = { 6, 1721 };
+
+    try
+    {
+        for (const auto& groupName :
+            { "feh_-0.25_afe_-0.2_vvcrit_0.00", "feh_0.50_afe_-0.2_vvcrit_0.00" })
+        {
+            const auto size = tracks::getTrackSize(h5Name, groupName);
+            if (size != expected)
+            {
+                std::cerr << "testGetTrackSize: for group " << groupName
+                    << " expected (nmass, ntime) = (" << expected.first
+                    << ", " << expected.second << "), got ("
+                    << size.first << ", " << size.second << ")\n";
+                return 1;
+            }
+        }
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "testGetTrackSize: unexpected exception: "
+            << e.what() << "\n";
+        return 1;
+    }
+
+    // A nonexistent file should cause getTrackSize to throw
+    try
+    {
+        tracks::getTrackSize("tests/tracks/assets/no_such_file.h5",
+            "feh_-0.25_afe_-0.2_vvcrit_0.00");
+        std::cerr << "testGetTrackSize: expected an exception for a "
+            "nonexistent file, but none was thrown\n";
+        return 1;
+    }
+    catch (const std::exception&) { /* this is the expected outcome */ }
+
+    // A nonexistent group should cause getTrackSize to throw
+    try
+    {
+        tracks::getTrackSize(h5Name, "no_such_group");
+        std::cerr << "testGetTrackSize: expected an exception for a "
+            "nonexistent group, but none was thrown\n";
+        return 1;
+    }
+    catch (const std::exception&) { /* this is the expected outcome */ }
+
+    return 0;
+}
+
+/**
  * @brief Unit test for the TrackUtils functions.
  * @return 0 if the test passes, 1 if it fails.
  */
@@ -168,6 +231,7 @@ inline auto testTrackUtils() -> int
     int result = 0;
     result += testParseRegistry();
     result += testFindMatchingTracks();
+    result += testGetTrackSize();
     return result;
 }
 

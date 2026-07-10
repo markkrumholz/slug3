@@ -10,8 +10,11 @@
 #include "../utils/MiscUtils.hpp"
 #include "hdf5.h"   // NOLINT(misc-include-cleaner)
 #include <algorithm>
+#include <array>
+#include <cstddef>
 #include <exception>
 #include <filesystem>
+#include <format>
 #include <optional>
 #include <ranges>
 #include <stdexcept>
@@ -58,6 +61,52 @@ namespace tracks
         H5Aread(attr, H5T_NATIVE_DOUBLE, &value);
         H5Aclose(attr);
         return value;
+    }
+
+    /**
+     * @brief Read a 1D double dataset from an HDF5 group
+     * @param grp Handle to the group containing the dataset
+     * @param name Name of the dataset
+     * @returns The dataset contents
+     */
+    static auto readDataset1D(const hid_t grp, const std::string& name) //NOLINT(misc-use-anonymous-namespace)
+        -> std::vector<double>
+    {
+        const hid_t dset = H5Dopen2(grp, name.c_str(), H5P_DEFAULT);
+        if (dset < 0)
+        {
+            throw std::runtime_error("getTrackSize: unable to open dataset " + name);
+        }
+        const hid_t space = H5Dget_space(dset);
+        hsize_t dims = 0;
+        H5Sget_simple_extent_dims(space, &dims, nullptr);
+        std::vector<double> data(dims);
+        H5Dread(dset, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, data.data());
+        H5Sclose(space);
+        H5Dclose(dset);
+        return data;
+    }
+
+    /**
+     * @brief Get the number of rows of a 2D dataset without reading its data
+     * @param grp Handle to the group containing the dataset
+     * @param name Name of the dataset
+     * @returns The number of rows (extent of the first dimension) of the dataset
+     */
+    static auto dataset2DRows(const hid_t grp, const std::string& name) //NOLINT(misc-use-anonymous-namespace)
+        -> size_t
+    {
+        const hid_t dset = H5Dopen2(grp, name.c_str(), H5P_DEFAULT);
+        if (dset < 0)
+        {
+            throw std::runtime_error("getTrackSize: unable to open dataset " + name);
+        }
+        const hid_t space = H5Dget_space(dset);
+        std::array<hsize_t, 2> dims = {0, 0};
+        H5Sget_simple_extent_dims(space, dims.data(), nullptr);
+        H5Sclose(space);
+        H5Dclose(dset);
+        return dims[0];
     }
 
     // NOLINTEND(misc-include-cleaner)
@@ -237,5 +286,53 @@ namespace tracks
         return { std::move(fehOut), std::move(nameOut) };
     }
 
+    auto getTrackSize(
+        const std::filesystem::path& h5Name,
+        const std::string& groupName)
+    -> std::pair<size_t, size_t>
+    {
+        // Suppress clang-tidy warnings iun this namespace caused by just
+        // including hdf5.h, instead of the individual HDF5 headers, since
+        // this is the paradigm that HDF5 wants
+        // NOLINTBEGIN(misc-include-cleaner)
+
+        const hid_t file = H5Fopen(h5Name.string().c_str(),
+            H5F_ACC_RDONLY, H5P_DEFAULT);
+        if (file < 0)
+        {
+            throw std::runtime_error(
+                "getTrackSize: unable to open HDF5 file " + h5Name.string());
+        }
+
+        const hid_t grp = H5Gopen2(file, groupName.c_str(), H5P_DEFAULT);
+        if (grp < 0)
+        {
+            H5Fclose(file);
+            throw std::runtime_error(
+                "getTrackSize: unable to open group " + groupName +
+                " in file " + h5Name.string());
+        }
+
+        // The number of masses is the length of the masses dataset
+        const auto massData = readDataset1D(grp, "masses");
+        const size_t nmass = massData.size();
+
+        // The number of times is the maximum number of time points
+        // among all the tracks in this group, since tracks for
+        // different masses need not have the same number of time points
+        size_t ntime = 0;
+        for (const double m : massData)
+        {
+            const auto name = std::format("track_m{:.3f}", m);
+            ntime = std::max(ntime, dataset2DRows(grp, name));
+        }
+
+        H5Gclose(grp);
+        H5Fclose(file);
+
+        // NOLINTEND(misc-include-cleaner)
+
+        return { nmass, ntime };
+    }
 
 } // namespace tracks
