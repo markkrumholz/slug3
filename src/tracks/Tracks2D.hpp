@@ -15,15 +15,11 @@
 #include <memory>
 #include <utility>
 
-/**
- * @brief A namespace to hold functions dealing with stellar tracks
-*/
 namespace tracks
 {
 
-
     /**
-     * @class Track2D
+     * @class Tracks2D
      * @brief A class representing a 2D set of stellar tracks
      */
     class Tracks2D
@@ -127,4 +123,4 @@ namespace tracks
 
 } // namespace tracks
 
-#endif // TRACKS2D
+#endif // TRACKS2D_HPP

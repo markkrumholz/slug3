@@ -7,6 +7,7 @@
  * @date 2024-07-09
  */
 
+#include "testTrackUtils.hpp"
 #include "testTracks2D.hpp"
 #include <exception>
 #include <iostream>
@@ -16,6 +17,7 @@ auto main() -> int {
     {
         int result = 0;
         result += testTracks2D();
+        result += testTrackUtils();
         return result;
     }
     catch (const std::exception& error)
