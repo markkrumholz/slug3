@@ -97,6 +97,14 @@ namespace interp
                     "three dimensions, and the fourth dimension of f must "
                     "match the number of interpolated quantities");
             }
+            if (x.extent(0) < 2 ||
+                (x.extent(1) < 2 && x.extent(2) < 3))
+            {
+                throw std::runtime_error(
+                    "Mesh3DInterpolator: mesh size nx x ny x nz must obey "
+                    "nx > 1 and either ny > 1 or nz > 1"
+                );
+            }
             copyMeshData(x, y, z, f);
             computeLengths();
             computeInterpolators();
@@ -611,14 +619,20 @@ namespace interp
             auto fView = Array4D(fData_.data(), nx_, ny_, nz_, NF);
 
             // y-direction interpolators, one per (i, k) pair
-            buildColumnInterpolators(nx_, nz_, ny_, sy(),
-                [&fView](size_t i, size_t k, size_t j, size_t n) -> double { return fView[i, j, k, n]; },
-                yInterpData_);
+            if (ny_ > 1)
+            {
+                buildColumnInterpolators(nx_, nz_, ny_, sy(),
+                    [&fView](size_t i, size_t k, size_t j, size_t n) -> double { return fView[i, j, k, n]; },
+                    yInterpData_);
+            }
 
             // z-direction interpolators, one per (i, j) pair
-            buildColumnInterpolators(nx_, ny_, nz_, sz(),
-                [&fView](size_t i, size_t j, size_t k, size_t n) -> double { return fView[i, j, k, n]; },
-                zInterpData_);
+            if (nz_ > 1)
+            {
+                buildColumnInterpolators(nx_, ny_, nz_, sz(),
+                    [&fView](size_t i, size_t j, size_t k, size_t n) -> double { return fView[i, j, k, n]; },
+                    zInterpData_);
+            }
         }
 
         /**
