@@ -10,6 +10,8 @@
 #include "../utils/MiscUtils.hpp"
 #include "hdf5.h"   // NOLINT(misc-include-cleaner)
 #include <algorithm>
+#include <exception>
+#include <filesystem>
 #include <optional>
 #include <ranges>
 #include <stdexcept>
@@ -19,12 +21,12 @@
 
 namespace tracks
 {
-    static auto getTrackSetsFromRegistry(toml::table& registry)
+    static auto getTrackSetsFromRegistry(toml::table& registry)  //NOLINT(misc-use-anonymous-namespace)
     {
         std::vector<std::string> trackSets;
-        if (toml::array* arr = registry["track_sets"].as_array())
+        if (toml::array* arr = registry.at_path("track_sets").as_array())
         {
-            arr->for_each([&trackSets](auto&& el) {
+            arr->for_each([&trackSets](auto&& el) -> void {
                 if constexpr (toml::is_string<decltype(el)>)
                 {
                     trackSets.push_back(std::string(el));
@@ -34,6 +36,11 @@ namespace tracks
         return std::move(trackSets);
     }
 
+    // Suppress clang-tidy warnings iun this namespace caused by just including
+    // hdf5.h, instead of the individual HDF5 headers, since this is the paradigm
+    // that HDF5 wants
+    // NOLINTBEGIN(misc-include-cleaner)
+        
     /**
      * @brief Read a scalar double attribute from an HDF5 group, if present
      * @param grp Handle to the group
@@ -41,7 +48,7 @@ namespace tracks
      * @returns The attribute's value, or an empty optional if the group
      *   has no attribute of that name
      */
-    static auto readScalarAttrIfPresent(const hid_t grp,
+    static auto readScalarAttrIfPresent(const hid_t grp, //NOLINT(misc-use-anonymous-namespace)
         const std::string& name) -> std::optional<double>
     {
         if (H5Aexists(grp, name.c_str()) <= 0) { return std::nullopt; }
@@ -52,6 +59,8 @@ namespace tracks
         H5Aclose(attr);
         return value;
     }
+
+    // NOLINTEND(misc-include-cleaner)
 
     auto parseRegistry(const std::string& registryName)
     -> std::pair<toml::table, std::filesystem::path>
@@ -99,8 +108,8 @@ namespace tracks
                     " is missing entry for tracks " + ts
                 );
             }
-            auto tsEntry = registry[ts];
-            if (!tsEntry["file"] || !tsEntry["Fe_H"])
+            auto tsEntry = registry.at_path(ts);
+            if (!tsEntry.at_path("file") || !tsEntry.at_path("Fe_H"))
             {
                 throw std::runtime_error(
                     "parseRegistry: registry " + registryPath.string() +
@@ -137,7 +146,7 @@ namespace tracks
 
         // Get the h5file name for this track set from the registry
         const auto h5name =
-            registry[trackName]["file"].value_or(std::string{});
+            registry.at_path(trackName).at_path("file").value_or(std::string{});
 
         // The h5 file name is given relative to the directory
         // containing the registry file itself
