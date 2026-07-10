@@ -37,16 +37,30 @@ namespace tracks
      * @param fehMin Minimum [Fe/H] value
      * @param fehMax Maximum [Fe/H] value
      * @param vvcrit Rotation rate v/vcrit
-     * @param afe Value of [alpha/Fe] 
+     * @param afe Value of [alpha/Fe]
+     * @param nExpand Number of extra tracks to include on each side of
+     *                the [fehMin, fehMax] range
      * @returns A pair consisting of a vector of [Fe/H] values and corresponding group names
+     * @details
+     * Among the tracks matching vvcrit and afe (see findMatchingTracks
+     * for how those are matched), this returns the minimal set of
+     * [Fe/H] values whose range encompasses [fehMin, fehMax] -- that
+     * is, the largest available [Fe/H] <= fehMin (or the smallest
+     * available value, if none is <= fehMin) through the smallest
+     * available [Fe/H] >= fehMax (or the largest available value, if
+     * none is >= fehMax), inclusive. If nExpand is nonzero, this range
+     * is further expanded by nExpand additional tracks on each side,
+     * silently limited to the available range if there are not enough
+     * tracks to expand by the full amount requested.
      */
     auto findMatchingTracks(
         const std::string& registryName,
         const std::string& trackName,
-        double fehMin, 
+        double fehMin,
         double fehMax,
         double vvcrit = 0.0,
-        double afe = 0.0)
+        double afe = 0.0,
+        unsigned int nExpand = 0)
     -> std::pair<std::vector<double>, std::vector<std::string>>;
 
     /**

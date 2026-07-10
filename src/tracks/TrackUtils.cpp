@@ -178,7 +178,8 @@ namespace tracks
         const double fehMin,
         const double fehMax,
         const double vvcrit,
-        const double afe)
+        const double afe,
+        const unsigned int nExpand)
     -> std::pair<std::vector<double>, std::vector<std::string>>
     {
         // First parse the registry
@@ -219,10 +220,14 @@ namespace tracks
         H5G_info_t ginfo{};
         H5Gget_info(file, &ginfo);
 
-        // Loop over every group in the file except "masses", checking
-        // each against the input feh/vvcrit/afe criteria; groups that
-        // don't have a vvcrit or afe attribute are treated as matching
-        // regardless of the input vvcrit and afe values
+        // Loop over every group in the file except "masses", collecting
+        // the feh value and name of each one that matches the input
+        // vvcrit and afe criteria; groups that don't have a vvcrit or
+        // afe attribute are treated as matching regardless of the input
+        // vvcrit and afe values. The feh range is deliberately not
+        // applied here -- every vvcrit/afe match is collected, and the
+        // feh range is instead used below to select a bracketing subset
+        // of them.
         std::vector<std::pair<double, std::string>> matches;
         for (hsize_t i = 0; i < ginfo.nlinks; ++i)
         {
@@ -240,8 +245,7 @@ namespace tracks
             if (grp < 0) { continue; }
 
             const auto fehVal = readScalarAttrIfPresent(grp, "feh");
-            bool isMatch = fehVal.has_value() &&
-                *fehVal >= fehMin && *fehVal <= fehMax;
+            bool isMatch = fehVal.has_value();
 
             if (isMatch)
             {
@@ -268,19 +272,47 @@ namespace tracks
         H5Fclose(file);
 
         // NOLINTEND(misc-include-cleaner)
-        
-        // Sort the matches by feh, from lowest to highest, then split
-        // them back out into separate vectors to return
+
+        // Sort all the vvcrit/afe-matching tracks by feh, from lowest
+        // to highest
         std::ranges::sort(matches, {},
             &std::pair<double, std::string>::first);
+
+        if (matches.empty())
+        {
+            return { {}, {} };
+        }
+
+        // Find the minimal bracketing range of indices into matches
+        // whose feh values encompass [fehMin, fehMax]: from the last
+        // index with feh <= fehMin (or index 0, if no feh is that low),
+        // through the first index with feh >= fehMax (or the last
+        // index, if no feh is that high)
+        const auto loBound = std::ranges::upper_bound(matches, fehMin,
+            {}, &std::pair<double, std::string>::first);
+        const size_t loIdx = (loBound == matches.begin()) ? 0 :
+            static_cast<size_t>(loBound - matches.begin()) - 1;
+        const auto hiBound = std::ranges::lower_bound(matches, fehMax,
+            {}, &std::pair<double, std::string>::first);
+        const size_t hiIdx = (hiBound == matches.end()) ?
+            matches.size() - 1 : static_cast<size_t>(hiBound - matches.begin());
+
+        // Expand the bracketing range by nExpand tracks on each side,
+        // silently limiting the expansion to the available range
+        const size_t nExpandSz = static_cast<size_t>(nExpand);
+        const size_t loIdxExpanded = (nExpandSz >= loIdx) ? 0 : loIdx - nExpandSz;
+        const size_t hiIdxExpanded = std::min(matches.size() - 1, hiIdx + nExpandSz);
+
+        // Extract the selected range of matches into the output vectors
         std::vector<double> fehOut;
         std::vector<std::string> nameOut;
-        fehOut.reserve(matches.size());
-        nameOut.reserve(matches.size());
-        for (auto& [feh, name] : matches)
+        const size_t nOut = hiIdxExpanded - loIdxExpanded + 1;
+        fehOut.reserve(nOut);
+        nameOut.reserve(nOut);
+        for (size_t idx = loIdxExpanded; idx <= hiIdxExpanded; ++idx)
         {
-            fehOut.push_back(feh);
-            nameOut.push_back(std::move(name));
+            fehOut.push_back(matches[idx].first);
+            nameOut.push_back(std::move(matches[idx].second));
         }
 
         return { std::move(fehOut), std::move(nameOut) };

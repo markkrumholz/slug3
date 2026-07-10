@@ -82,10 +82,14 @@ inline auto testParseRegistry() -> int
  * This function tests findMatchingTracks against the test track set
  * MIST_test in tests/tracks/assets/tracks.toml, which contains 5
  * groups at afe = -0.2, vvcrit = 0.0, and feh = -1.0, -0.5, -0.25,
- * 0.0, and 0.5. It checks that the full and restricted feh ranges
- * return the expected, feh-sorted sets of groups, that a mismatched
- * afe value returns no groups, and that requesting an unknown track
- * set throws an exception.
+ * 0.0, and 0.5. It checks that the full feh range returns all 5
+ * groups; that a bracketing feh range returns the minimal set of
+ * groups whose feh values encompass that range, rather than only the
+ * groups strictly inside it; that nExpand widens that bracketing range
+ * by the requested number of groups on each side; that nExpand is
+ * silently clamped when it would run off the edge of the available
+ * groups; that a mismatched afe value returns no groups; and that
+ * requesting an unknown track set throws an exception.
  */
 inline auto testFindMatchingTracks() -> int
 {
@@ -113,16 +117,47 @@ inline auto testFindMatchingTracks() -> int
             return 1;
         }
 
-        // A restricted feh range should return only the groups whose
-        // feh values fall inside it
-        auto [fehRestricted, namesRestricted] = tracks::findMatchingTracks(
-            registryName, trackName, -0.6, 0.1, 0.0, -0.2);
-        const std::vector<double> expectedRestricted = { -0.5, -0.25, 0.0 };
-        if (fehRestricted != expectedRestricted ||
-            namesRestricted.size() != expectedRestricted.size())
+        // A bracketing feh range should return the minimal set of
+        // groups whose feh values encompass it: [-0.4, -0.1] falls
+        // strictly between the -0.5/-0.25 and -0.25/0.0 grid points
+        // respectively, so the minimal enclosing set is -0.5, -0.25,
+        // and 0.0 (not just -0.25, which is the only value that would
+        // fall strictly inside [-0.4, -0.1])
+        auto [fehBracket, namesBracket] = tracks::findMatchingTracks(
+            registryName, trackName, -0.4, -0.1, 0.0, -0.2);
+        const std::vector<double> expectedBracket = { -0.5, -0.25, 0.0 };
+        if (fehBracket != expectedBracket ||
+            namesBracket.size() != expectedBracket.size())
         {
-            std::cerr << "testFindMatchingTracks: restricted feh range "
-                "did not return the expected subset of groups\n";
+            std::cerr << "testFindMatchingTracks: bracketing feh range "
+                "did not return the expected minimal enclosing set of "
+                "groups\n";
+            return 1;
+        }
+
+        // nExpand = 1 should widen the above bracketing range by one
+        // group on each side, to -1.0, -0.5, -0.25, 0.0, 0.5 (i.e. all
+        // 5 groups, since there is exactly one group beyond each edge
+        // of the unexpanded bracket)
+        auto [fehExpand1, namesExpand1] = tracks::findMatchingTracks(
+            registryName, trackName, -0.4, -0.1, 0.0, -0.2, 1);
+        if (fehExpand1 != expectedFeh ||
+            namesExpand1.size() != expectedFeh.size())
+        {
+            std::cerr << "testFindMatchingTracks: nExpand = 1 did not "
+                "widen the bracketing range by one group on each side\n";
+            return 1;
+        }
+
+        // A large nExpand should be silently clamped to the available
+        // range rather than erroring out
+        auto [fehExpandBig, namesExpandBig] = tracks::findMatchingTracks(
+            registryName, trackName, -0.4, -0.1, 0.0, -0.2, 100);
+        if (fehExpandBig != expectedFeh ||
+            namesExpandBig.size() != expectedFeh.size())
+        {
+            std::cerr << "testFindMatchingTracks: a large nExpand was "
+                "not silently clamped to the available range\n";
             return 1;
         }
 
