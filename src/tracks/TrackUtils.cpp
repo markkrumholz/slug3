@@ -8,7 +8,7 @@
 #include "TrackUtils.hpp"
 #include "../tomlplusplus/toml.hpp"
 #include "../utils/MiscUtils.hpp"
-#include "hdf5.h"
+#include "hdf5.h"   // NOLINT(misc-include-cleaner)
 #include <algorithm>
 #include <optional>
 #include <ranges>
@@ -143,6 +143,11 @@ namespace tracks
         // containing the registry file itself
         const auto h5path = registryPath.parent_path() / h5name;
 
+        // Suppress clang-tidy warnings iun this namespace caused by just including
+        // hdf5.h, instead of the individual HDF5 headers, since this is the paradigm
+        // that HDF5 wants
+        // NOLINTBEGIN(misc-include-cleaner)
+
         // Open the HDF5 file
         const hid_t file = H5Fopen(h5path.string().c_str(),
             H5F_ACC_RDONLY, H5P_DEFAULT);
@@ -204,6 +209,8 @@ namespace tracks
 
         H5Fclose(file);
 
+        // NOLINTEND(misc-include-cleaner)
+        
         // Sort the matches by feh, from lowest to highest, then split
         // them back out into separate vectors to return
         std::ranges::sort(matches, {},
