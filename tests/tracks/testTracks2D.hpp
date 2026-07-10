@@ -108,6 +108,64 @@ inline auto testTracks2DFile(const std::string& path) -> TestTracks2DOutcome
 }
 
 /**
+ * @brief Unit test for the Tracks2D feH(), aFe(), and vVcrit() getters.
+ * @return 0 if the test passes, 1 if it fails.
+ * @details
+ * This function constructs a Tracks2D object from the
+ * feh_-0.25_afe_-0.2_vvcrit_0.00 group of tests/tracks/assets/MIST_test.h5,
+ * whose [Fe/H], [alpha/Fe], and v/vcrit values are known exactly from
+ * the group name, and checks that feH(), aFe(), and vVcrit() report
+ * those values.
+ */
+inline auto testTracks2DGetters() -> int
+{
+    const std::string path = "tests/tracks/assets/MIST_test.h5";
+    const std::string groupName = "feh_-0.25_afe_-0.2_vvcrit_0.00";
+
+    const hid_t file = H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+    if (file < 0)
+    {
+        std::cerr << "testTracks2DGetters: unable to open file "
+            << path << "\n";
+        return 1;
+    }
+    const hid_t grp = H5Gopen2(file, groupName.c_str(), H5P_DEFAULT);
+    if (grp < 0)
+    {
+        std::cerr << "testTracks2DGetters: unable to open group "
+            << groupName << " in " << path << "\n";
+        H5Fclose(file);
+        return 1;
+    }
+
+    int result = 0;
+    try
+    {
+        const tracks::Tracks2D tracks2d(grp);
+        if (tracks2d.feH() != -0.25 || tracks2d.aFe() != -0.2 ||
+            tracks2d.vVcrit() != 0.0)
+        {
+            std::cerr << "testTracks2DGetters: expected feH=-0.25, "
+                "aFe=-0.2, vVcrit=0.0, got feH=" << tracks2d.feH()
+                << ", aFe=" << tracks2d.aFe() << ", vVcrit="
+                << tracks2d.vVcrit() << "\n";
+            result = 1;
+        }
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "testTracks2DGetters: failed to construct Tracks2D "
+            "from " << path << ", group " << groupName << ": "
+            << e.what() << "\n";
+        result = 1;
+    }
+
+    H5Gclose(grp);
+    H5Fclose(file);
+    return result;
+}
+
+/**
  * @brief Unit test for the Tracks2D class.
  * @return 0 if the test passes, 1 if it fails.
  * @details
@@ -122,6 +180,8 @@ inline auto testTracks2DFile(const std::string& path) -> TestTracks2DOutcome
  * repository and so should always be present. The test fails if none
  * of the files are found (since then nothing was actually tested), or
  * if any file that is found fails to produce a valid Tracks2D object.
+ * It also tests the feH(), aFe(), and vVcrit() getters against the
+ * known metadata of the MIST_test.h5 group.
  */
 inline auto testTracks2D() -> int
 {
@@ -158,7 +218,9 @@ inline auto testTracks2D() -> int
         return 1;
     }
 
-    return anyFailed ? 1 : 0;
+    int result = anyFailed ? 1 : 0;
+    if (testTracks2DGetters() != 0) { result = 1; }
+    return result;
 }
 
 // NOLINTEND(misc-include-cleaner)

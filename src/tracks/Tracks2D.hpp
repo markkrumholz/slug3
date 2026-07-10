@@ -12,6 +12,7 @@
 #include "../interpolation/Mesh2DInterpolator.hpp"
 #include "H5Ipublic.h"
 #include <cstddef>
+#include <limits>
 #include <memory>
 #include <utility>
 
@@ -48,8 +49,16 @@ namespace tracks
         /**
          * @brief Construct a Tracks2D object from a supplied Mesh2DInterpolator
          * @param m2d A unique_ptr to the interpolator from which to construct the track
+         * @param feH The [Fe/H] value of this set of tracks
+         * @param aFe The [alpha/Fe] value of this set of tracks, if any;
+         *            defaults to quiet_NaN if not specified
+         * @param vVcrit The v/vcrit value of this set of tracks, if any;
+         *               defaults to quiet_NaN if not specified
          */
-        Tracks2D(M2DPtr&& m2d) : interp_(std::move(m2d)) {};
+        Tracks2D(M2DPtr&& m2d, double feH,
+            double aFe = std::numeric_limits<double>::quiet_NaN(),
+            double vVcrit = std::numeric_limits<double>::quiet_NaN())
+        : interp_(std::move(m2d)), FeH_(feH), AFe_(aFe), vVcrit_(vVcrit) {};
         virtual ~Tracks2D() = default;
         Tracks2D(const Tracks2D&) = delete;
         Tracks2D(Tracks2D&&) = default;
@@ -79,6 +88,24 @@ namespace tracks
          * @return Minimum time in the tracks
          */
         [[nodiscard]] auto tMax() const { return interp_->yMax(); }
+
+        /**
+         * @brief Return the [Fe/H] value of this set of tracks
+         * @return [Fe/H] value of this set of tracks
+         */
+        [[nodiscard]] auto feH() const { return FeH_; }
+
+        /**
+         * @brief Return the [alpha/Fe] value of this set of tracks
+         * @return [alpha/Fe] value of this set of tracks, or quiet_NaN if not available
+         */
+        [[nodiscard]] auto aFe() const { return AFe_; }
+
+        /**
+         * @brief Return the v/vcrit value of this set of tracks
+         * @return v/vcrit value of this set of tracks, or quiet_NaN if not available
+         */
+        [[nodiscard]] auto vVcrit() const { return vVcrit_; }
 
         // Calculation methods
 
@@ -118,6 +145,9 @@ namespace tracks
 
         // Track data
         M2DPtr interp_; /**< Interpolator for the tracks */
+        double FeH_;    /**< [Fe/H] value of this set of tracks */
+        double AFe_;    /**< [alpha/Fe] value of this set of tracks, or quiet_NaN if not available */
+        double vVcrit_; /**< v/vcrit value of this set of tracks, or quiet_NaN if not available */
 
     };
 

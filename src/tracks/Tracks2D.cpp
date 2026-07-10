@@ -14,7 +14,9 @@
 #include <cstddef>
 #include <format>
 #include <iterator>
+#include <limits>
 #include <memory>
+#include <optional>
 #include <ranges>
 #include <stdexcept>
 #include <string>
@@ -152,6 +154,25 @@ namespace tracks
 
             return names;
         }
+
+        /**
+         * @brief Read a scalar double attribute from an HDF5 group, if present
+         * @param grp Handle to the group
+         * @param name Name of the attribute
+         * @returns The attribute's value, or an empty optional if the group
+         *   has no attribute of that name
+         */
+        auto readScalarAttrIfPresent(const hid_t grp,  //NOLINT(llvm-prefer-static-over-anonymous-namespace)
+            const std::string& name) -> std::optional<double>
+        {
+            if (H5Aexists(grp, name.c_str()) <= 0) { return std::nullopt; }
+            const hid_t attr = H5Aopen(grp, name.c_str(), H5P_DEFAULT);
+            if (attr < 0) { return std::nullopt; }
+            double value = 0.0;
+            H5Aread(attr, H5T_NATIVE_DOUBLE, &value);
+            H5Aclose(attr);
+            return value;
+        }
     } // namespace
     // NOLINTEND(misc-include-cleaner)
 
@@ -161,6 +182,14 @@ namespace tracks
         using Array1D = interp::Mesh2DInterpolator<nQty>::Array1D;
         using Array2D = interp::Mesh2DInterpolator<nQty>::Array2D;
         using Array3D = interp::Mesh2DInterpolator<nQty>::Array3D;
+
+        // Read the feh, afe, and vvcrit attributes of this group, if
+        // they are present; not all track sets specify afe or vvcrit,
+        // so those default to quiet_NaN when absent
+        constexpr double nanVal = std::numeric_limits<double>::quiet_NaN();
+        FeH_ = readScalarAttrIfPresent(grp, "feh").value_or(nanVal);
+        AFe_ = readScalarAttrIfPresent(grp, "afe").value_or(nanVal);
+        vVcrit_ = readScalarAttrIfPresent(grp, "vvcrit").value_or(nanVal);
 
         // Read the masses of the tracks in this group; the masses
         // dataset is not guaranteed to be stored in ascending order
