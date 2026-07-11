@@ -14,8 +14,11 @@
 #include "../extern/pybind11/include/pybind11/numpy.h"
 #include "../extern/pybind11/include/pybind11/pybind11.h"
 #include "../extern/pybind11/include/pybind11/stl.h"
+#include <algorithm>
 #include <array>
 #include <cstddef>
+#include <iterator>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -66,7 +69,25 @@ PYBIND11_MODULE(slug, m, py::mod_gil_not_used()) {
                 "elementwise over numpy arrays of points and/or indices "
                 "(which broadcast against each other, so e.g. an array of "
                 "x with idx=range(9) returns all quantities for every x)",
-                py::arg("x"), py::arg("idx"));
+                py::arg("x"), py::arg("idx"))
+        .def("__call__",
+                py::vectorize(
+                    [](const Interp1D* self, const double x, const std::string name) -> double
+                    {
+                        const auto it = std::ranges::find(tracks::fieldStr, name);
+                        if (it == tracks::fieldStr.end())
+                        {
+                            throw std::runtime_error(
+                                "Interpolator1D: unrecognized field name " + name);
+                        }
+                        const auto idx = static_cast<std::size_t>(
+                            std::distance(tracks::fieldStr.begin(), it));
+                        return (*self)(x, idx);
+                    }),
+                "Interpolate a named quantity (one of tracks::fieldStr) to "
+                "a given point, or elementwise over a numpy array of "
+                "points; raises RuntimeError if name is not recognized",
+                py::arg("x"), py::arg("name"));
 
     py::class_<tracks::Tracks3D, py::smart_holder>(m, "Tracks3D")
         .def(py::init<
