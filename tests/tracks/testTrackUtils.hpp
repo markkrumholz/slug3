@@ -101,7 +101,7 @@ inline auto testFindMatchingTracks() -> int
         // Full feh range, with vvcrit and afe matching every group:
         // expect all 5 groups, sorted from lowest to highest feh
         auto [feh, names] = tracks::findMatchingTracks(
-            registryName, trackName, -2.0, 2.0, 0.0, -0.2);
+            trackName, -2.0, 2.0, 0.0, -0.2, 0, registryName);
         const std::vector<double> expectedFeh =
             { -1.0, -0.5, -0.25, 0.0, 0.5 };
         if (feh != expectedFeh || names.size() != expectedFeh.size())
@@ -124,7 +124,7 @@ inline auto testFindMatchingTracks() -> int
         // and 0.0 (not just -0.25, which is the only value that would
         // fall strictly inside [-0.4, -0.1])
         auto [fehBracket, namesBracket] = tracks::findMatchingTracks(
-            registryName, trackName, -0.4, -0.1, 0.0, -0.2);
+            trackName, -0.4, -0.1, 0.0, -0.2, 0, registryName);
         const std::vector<double> expectedBracket = { -0.5, -0.25, 0.0 };
         if (fehBracket != expectedBracket ||
             namesBracket.size() != expectedBracket.size())
@@ -140,7 +140,7 @@ inline auto testFindMatchingTracks() -> int
         // 5 groups, since there is exactly one group beyond each edge
         // of the unexpanded bracket)
         auto [fehExpand1, namesExpand1] = tracks::findMatchingTracks(
-            registryName, trackName, -0.4, -0.1, 0.0, -0.2, 1);
+            trackName, -0.4, -0.1, 0.0, -0.2, 1, registryName);
         if (fehExpand1 != expectedFeh ||
             namesExpand1.size() != expectedFeh.size())
         {
@@ -152,7 +152,7 @@ inline auto testFindMatchingTracks() -> int
         // A large nExpand should be silently clamped to the available
         // range rather than erroring out
         auto [fehExpandBig, namesExpandBig] = tracks::findMatchingTracks(
-            registryName, trackName, -0.4, -0.1, 0.0, -0.2, 100);
+            trackName, -0.4, -0.1, 0.0, -0.2, 100, registryName);
         if (fehExpandBig != expectedFeh ||
             namesExpandBig.size() != expectedFeh.size())
         {
@@ -164,7 +164,7 @@ inline auto testFindMatchingTracks() -> int
         // Every group in this file has an afe attribute, so an afe
         // value that matches none of them should return no groups
         auto [fehNoMatch, namesNoMatch] = tracks::findMatchingTracks(
-            registryName, trackName, -2.0, 2.0, 0.0, 0.0);
+            trackName, -2.0, 2.0, 0.0, 0.0, 0, registryName);
         if (!namesNoMatch.empty() || !fehNoMatch.empty())
         {
             std::cerr << "testFindMatchingTracks: expected no matches "
@@ -184,8 +184,90 @@ inline auto testFindMatchingTracks() -> int
     try
     {
         tracks::findMatchingTracks(
-            registryName, "NoSuchTrackSet", -2.0, 2.0);
+            "NoSuchTrackSet", -2.0, 2.0, 0.0, 0.0, 0, registryName);
         std::cerr << "testFindMatchingTracks: expected an exception for "
+            "an unknown track set, but none was thrown\n";
+        return 1;
+    }
+    catch (const std::exception&) { /* this is the expected outcome */ }
+
+    return 0;
+}
+
+/**
+ * @brief Unit test for the findTrack function.
+ * @return 0 if the test passes, 1 if it fails.
+ * @details
+ * This function tests findTrack against the test track set MIST_test
+ * in tests/tracks/assets/tracks.toml, which contains 5 groups at
+ * afe = -0.2, vvcrit = 0.0, and feh = -1.0, -0.5, -0.25, 0.0, and 0.5.
+ * It checks that a feh/vvcrit/afe combination matching one of those
+ * groups returns that group's name; that a feh value not on the grid
+ * returns an empty string; that a mismatched afe value returns an
+ * empty string; and that requesting an unknown track set throws an
+ * exception.
+ */
+inline auto testFindTrack() -> int
+{
+    const std::string registryName = "tests/tracks/assets/tracks.toml";
+    const std::string trackName = "MIST_test";
+
+    try
+    {
+        // feh = 0.0, vvcrit = 0.0, afe = -0.2 matches one of the 5 groups
+        const auto name = tracks::findTrack(
+            trackName, 0.0, 0.0, -0.2, registryName);
+        if (name != "feh_0.00_afe_-0.2_vvcrit_0.00")
+        {
+            std::cerr << "testFindTrack: expected group "
+                "feh_0.00_afe_-0.2_vvcrit_0.00, got " << name << "\n";
+            return 1;
+        }
+
+        // feh = -0.25 matches a different one of the 5 groups
+        const auto nameNeg = tracks::findTrack(
+            trackName, -0.25, 0.0, -0.2, registryName);
+        if (nameNeg != "feh_-0.25_afe_-0.2_vvcrit_0.00")
+        {
+            std::cerr << "testFindTrack: expected group "
+                "feh_-0.25_afe_-0.2_vvcrit_0.00, got " << nameNeg << "\n";
+            return 1;
+        }
+
+        // No group in this file has feh = 0.25, so this should return
+        // an empty string
+        const auto noFehMatch = tracks::findTrack(
+            trackName, 0.25, 0.0, -0.2, registryName);
+        if (!noFehMatch.empty())
+        {
+            std::cerr << "testFindTrack: expected no match for a "
+                "nonexistent feh value, got " << noFehMatch << "\n";
+            return 1;
+        }
+
+        // Every group in this file has an afe attribute, so an afe
+        // value that matches none of them should return an empty string
+        const auto noAfeMatch = tracks::findTrack(
+            trackName, 0.0, 0.0, 0.0, registryName);
+        if (!noAfeMatch.empty())
+        {
+            std::cerr << "testFindTrack: expected no match for a "
+                "nonexistent afe value, got " << noAfeMatch << "\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "testFindTrack: unexpected exception: "
+            << e.what() << "\n";
+        return 1;
+    }
+
+    // Requesting an unknown track set should throw
+    try
+    {
+        tracks::findTrack("NoSuchTrackSet", 0.0, 0.0, 0.0, registryName);
+        std::cerr << "testFindTrack: expected an exception for "
             "an unknown track set, but none was thrown\n";
         return 1;
     }
@@ -266,6 +348,7 @@ inline auto testTrackUtils() -> int
     int result = 0;
     result += testParseRegistry();
     result += testFindMatchingTracks();
+    result += testFindTrack();
     result += testGetTrackSize();
     return result;
 }

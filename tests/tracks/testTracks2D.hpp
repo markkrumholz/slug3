@@ -34,6 +34,16 @@ enum class TestTracks2DOutcome
     passed    /**< The file exists, and the test passed */
 };
 
+/**
+ * @brief Identifies a track set to test, and the registry it lives in
+ */
+struct TestTracks2DCase
+{
+    std::string h5Path;       /**< Path to the HDF5 file, used only to check existence */
+    std::string trackName;    /**< Name of the track set within the registry */
+    std::string registryName; /**< Registry file containing trackName */
+};
+
 // Suppress clang-tidy warnings iun this namespace caused by just including
 // hdf5.h, instead of the individual HDF5 headers, since this is the paradigm
 // that HDF5 wants
@@ -41,29 +51,33 @@ enum class TestTracks2DOutcome
 
 /**
  * @brief Attempt to construct a Tracks2D object from one group of a track file
- * @param path Path to the HDF5 track file
+ * @param testCase Identifies the track file, track set, and registry to test
  * @return The outcome of the attempt
  * @details
  * If the file does not exist, this function returns notFound without
- * attempting to open it. Otherwise, it opens the file, finds the
- * first group at its root level (the choice of group does not matter
- * for this test), and attempts to use it to construct a Tracks2D
- * object with the default value of ntMin, returning passed or failed
- * depending on whether construction succeeds.
+ * attempting to open it. Otherwise, it opens the file directly
+ * (independently of Tracks2D) to find the first group at its root
+ * level and read that group's feh, vvcrit, and afe attributes (the
+ * choice of group does not matter for this test, and any attribute
+ * that is absent is read as 0.0, since findTrack does not use absent
+ * attributes to constrain the match anyway), then uses those values to
+ * construct a Tracks2D object via the trackName/registryName-based
+ * constructor, returning passed or failed depending on whether
+ * construction succeeds.
  */
-inline auto testTracks2DFile(const std::string& path) -> TestTracks2DOutcome
+inline auto testTracks2DFile(const TestTracks2DCase& testCase) -> TestTracks2DOutcome
 {
-    if (!std::filesystem::exists(path))
+    if (!std::filesystem::exists(testCase.h5Path))
     {
-        std::cerr << "testTracks2D: file " << path
+        std::cerr << "testTracks2D: file " << testCase.h5Path
             << " not found, skipping\n";
         return TestTracks2DOutcome::notFound;
     }
 
-    const hid_t file = H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+    const hid_t file = H5Fopen(testCase.h5Path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
     if (file < 0)
     {
-        std::cerr << "testTracks2D: unable to open file " << path << "\n";
+        std::cerr << "testTracks2D: unable to open file " << testCase.h5Path << "\n";
         return TestTracks2DOutcome::failed;
     }
 
@@ -73,7 +87,7 @@ inline auto testTracks2DFile(const std::string& path) -> TestTracks2DOutcome
     if (nameLen < 0)
     {
         std::cerr << "testTracks2D: unable to find a group in "
-            << path << "\n";
+            << testCase.h5Path << "\n";
         H5Fclose(file);
         return TestTracks2DOutcome::failed;
     }
@@ -86,25 +100,45 @@ inline auto testTracks2DFile(const std::string& path) -> TestTracks2DOutcome
     if (grp < 0)
     {
         std::cerr << "testTracks2D: unable to open group " << groupName
-            << " in " << path << "\n";
+            << " in " << testCase.h5Path << "\n";
         H5Fclose(file);
         return TestTracks2DOutcome::failed;
     }
 
+    // Read the group's feh, vvcrit, and afe attributes, defaulting
+    // absent ones to 0.0 (a value findTrack ignores when the
+    // corresponding attribute isn't present in the group it inspects)
+    const auto readAttr = [grp](const char* name) -> double
+    {
+        if (H5Aexists(grp, name) <= 0) { return 0.0; }
+        const hid_t attr = H5Aopen(grp, name, H5P_DEFAULT);
+        if (attr < 0) { return 0.0; }
+        double value = 0.0;
+        H5Aread(attr, H5T_NATIVE_DOUBLE, &value);
+        H5Aclose(attr);
+        return value;
+    };
+    const double feh = readAttr("feh");
+    const double vvcrit = readAttr("vvcrit");
+    const double afe = readAttr("afe");
+
+    H5Gclose(grp);
+    H5Fclose(file);
+
     auto outcome = TestTracks2DOutcome::passed;
     try
     {
-        const tracks::Tracks2D tracks2d(grp);
+        const tracks::Tracks2D tracks2d(
+            testCase.trackName, feh, vvcrit, afe, testCase.registryName);
     }
     catch (const std::exception& e)
     {
         std::cerr << "testTracks2D: failed to construct Tracks2D from "
-            << path << ", group " << groupName << ": " << e.what() << "\n";
+            << testCase.h5Path << ", group " << groupName << ": "
+            << e.what() << "\n";
         outcome = TestTracks2DOutcome::failed;
     }
 
-    H5Gclose(grp);
-    H5Fclose(file);
     return outcome;
 }
 
@@ -113,36 +147,20 @@ inline auto testTracks2DFile(const std::string& path) -> TestTracks2DOutcome
  * @return 0 if the test passes, 1 if it fails.
  * @details
  * This function constructs a Tracks2D object from the
- * feh_-0.25_afe_-0.2_vvcrit_0.00 group of tests/tracks/assets/MIST_test.h5,
- * whose [Fe/H], [alpha/Fe], and v/vcrit values are known exactly from
- * the group name, and checks that feH(), aFe(), and vVcrit() report
- * those values.
+ * feh_-0.25_afe_-0.2_vvcrit_0.00 group of the MIST_test track set in
+ * tests/tracks/assets/tracks.toml, whose [Fe/H], [alpha/Fe], and
+ * v/vcrit values are known exactly from the group name, and checks
+ * that feH(), aFe(), and vVcrit() report those values.
  */
 inline auto testTracks2DGetters() -> int
 {
-    const std::string path = "tests/tracks/assets/MIST_test.h5";
-    const std::string groupName = "feh_-0.25_afe_-0.2_vvcrit_0.00";
-
-    const hid_t file = H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
-    if (file < 0)
-    {
-        std::cerr << "testTracks2DGetters: unable to open file "
-            << path << "\n";
-        return 1;
-    }
-    const hid_t grp = H5Gopen2(file, groupName.c_str(), H5P_DEFAULT);
-    if (grp < 0)
-    {
-        std::cerr << "testTracks2DGetters: unable to open group "
-            << groupName << " in " << path << "\n";
-        H5Fclose(file);
-        return 1;
-    }
+    const std::string registryName = "tests/tracks/assets/tracks.toml";
+    const std::string trackName = "MIST_test";
 
     int result = 0;
     try
     {
-        const tracks::Tracks2D tracks2d(grp);
+        const tracks::Tracks2D tracks2d(trackName, -0.25, 0.0, -0.2, registryName);
         if (tracks2d.feH() != -0.25 || tracks2d.aFe() != -0.2 ||
             tracks2d.vVcrit() != 0.0)
         {
@@ -156,13 +174,10 @@ inline auto testTracks2DGetters() -> int
     catch (const std::exception& e)
     {
         std::cerr << "testTracks2DGetters: failed to construct Tracks2D "
-            "from " << path << ", group " << groupName << ": "
-            << e.what() << "\n";
+            "from track set " << trackName << ": " << e.what() << "\n";
         result = 1;
     }
 
-    H5Gclose(grp);
-    H5Fclose(file);
     return result;
 }
 
@@ -177,8 +192,8 @@ inline auto testTracks2DGetters() -> int
  * in every track dataset, but not one of the nQty tracked
  * quantities) was not properly accounted for when mapping canonical
  * field index to on-disk column. It constructs a Tracks2D object from
- * the feh_0.00_afe_-0.2_vvcrit_0.00 group of
- * tests/tracks/assets/MIST_test.h5, calls getTrack() for mass = 5.0
+ * the feh_0.00_afe_-0.2_vvcrit_0.00 group of the MIST_test track set
+ * in tests/tracks/assets/tracks.toml, calls getTrack() for mass = 5.0
  * (an exact point on that group's mass grid), and evaluates the
  * result at the exact age of an arbitrary interior row of the raw
  * track_m5.000 dataset. Since mass = 5.0 is on the mesh's mass grid
@@ -191,23 +206,28 @@ inline auto testTracks2DGetters() -> int
  */
 inline auto testTracks2DFieldOrder() -> int
 {
-    const std::string path = "tests/tracks/assets/MIST_test.h5";
+    const std::string registryName = "tests/tracks/assets/tracks.toml";
+    const std::string trackName = "MIST_test";
+    const std::string h5Path = "tests/tracks/assets/MIST_test.h5";
     const std::string groupName = "feh_0.00_afe_-0.2_vvcrit_0.00";
+    constexpr double feh = 0.0;
+    constexpr double vvcrit = 0.0;
+    constexpr double afe = -0.2;
     constexpr double mass = 5.0;
     constexpr size_t rowIdx = 500;
 
-    const hid_t file = H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+    const hid_t file = H5Fopen(h5Path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
     if (file < 0)
     {
         std::cerr << "testTracks2DFieldOrder: unable to open file "
-            << path << "\n";
+            << h5Path << "\n";
         return 1;
     }
     const hid_t grp = H5Gopen2(file, groupName.c_str(), H5P_DEFAULT);
     if (grp < 0)
     {
         std::cerr << "testTracks2DFieldOrder: unable to open group "
-            << groupName << " in " << path << "\n";
+            << groupName << " in " << h5Path << "\n";
         H5Fclose(file);
         return 1;
     }
@@ -217,7 +237,7 @@ inline auto testTracks2DFieldOrder() -> int
     {
         const auto [age, expected] = testutil::readRawFields(grp, mass, rowIdx);
 
-        const tracks::Tracks2D tracks2d(grp);
+        const tracks::Tracks2D tracks2d(trackName, feh, vvcrit, afe, registryName);
         const auto track = tracks2d.getTrack(mass);
         if (!track)
         {
@@ -274,19 +294,20 @@ inline auto testTracks2DFieldOrder() -> int
  */
 inline auto testTracks2D() -> int
 {
-    const std::array<std::string, 5> files = {
-        "tests/tracks/assets/MIST_test.h5",
-        "data/tracks/mist.h5",
-        "data/tracks/parsec_rot.h5",
-        "data/tracks/parsec_vms.h5",
-        "data/tracks/stromlo.h5"
-    };
+    const std::array<TestTracks2DCase, 5> files = {{
+        { "tests/tracks/assets/MIST_test.h5", "MIST_test",
+            "tests/tracks/assets/tracks.toml" },
+        { "data/tracks/mist.h5", "MIST", tracks::defaultRegistry },
+        { "data/tracks/parsec_rot.h5", "PARSEC_rot", tracks::defaultRegistry },
+        { "data/tracks/parsec_vms.h5", "PARSEC_vms", tracks::defaultRegistry },
+        { "data/tracks/stromlo.h5", "Stromlo", tracks::defaultRegistry }
+    }};
 
     bool anyFound = false;
     bool anyFailed = false;
-    for (const auto& f : files)
+    for (const auto& testCase : files)
     {
-        switch (testTracks2DFile(f))
+        switch (testTracks2DFile(testCase))
         {
             case TestTracks2DOutcome::notFound:
                 break;

@@ -36,20 +36,20 @@ namespace tracks
         // Constructors and destructors
         /**
          * @brief Construct a Tracks3D object from tracks on disk
-         * @param registryName Name of the track registry file
          * @param trackName Name of track set
          * @param fehMin Minimum [Fe/H] value
          * @param fehMax Maximum [Fe/H] value
          * @param vvcrit Rotation rate v/vcrit
-         * @param afe Value of [alpha/Fe] 
+         * @param afe Value of [alpha/Fe]
+         * @param registryName Name of the track registry file
         */
         Tracks3D(
-            const std::string& registryName,
             const std::string& trackName,
-            double fehMin, 
+            double fehMin,
             double fehMax,
             double vvcrit = 0.0,
-            double afe = 0.0);
+            double afe = 0.0,
+            const std::string& registryName = defaultRegistry);
         virtual ~Tracks3D() = default;
         Tracks3D(const Tracks3D&) = delete;
         Tracks3D(Tracks3D&&) = default;

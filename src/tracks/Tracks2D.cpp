@@ -8,6 +8,7 @@
 #include "Tracks2D.hpp"
 #include "../interpolation/Mesh2DInterpolator.hpp"
 #include "TrackCommons.hpp"
+#include "TrackUtils.hpp"
 #include "hdf5.h"  // NOLINT(misc-include-cleaner)
 #include <algorithm>
 #include <array>
@@ -176,12 +177,54 @@ namespace tracks
     } // namespace
     // NOLINTEND(misc-include-cleaner)
 
-    Tracks2D::Tracks2D(const hid_t grp,
-        const size_t ntMin)
+    Tracks2D::Tracks2D(
+        const std::string& trackName,
+        const double feh,
+        const double vvcrit,
+        const double afe,
+        const std::string& registryName)
     {
         using Array1D = interp::Mesh2DInterpolator<nQty>::Array1D;
         using Array2D = interp::Mesh2DInterpolator<nQty>::Array2D;
         using Array3D = interp::Mesh2DInterpolator<nQty>::Array3D;
+
+        // Locate the unique track matching the input criteria
+        const auto groupName = findTrack(trackName, feh, vvcrit, afe, registryName);
+        if (groupName.empty())
+        {
+            throw std::runtime_error(
+                "Tracks2D: no track found in track set " + trackName +
+                " matching the input criteria");
+        }
+
+        // Re-derive the path to the HDF5 file holding this track, the
+        // same way findTrack does internally
+        auto [registry, registryPath] = parseRegistry(registryName);
+        const auto h5name =
+            registry.at_path(trackName).at_path("file").value_or(std::string{});
+        const auto h5path = registryPath.parent_path() / h5name;
+
+        // Suppress clang-tidy warnings iun this namespace caused by just
+        // including hdf5.h, instead of the individual HDF5 headers,
+        // since this is the paradigm that HDF5 wants
+        // NOLINTBEGIN(misc-include-cleaner)
+
+        const hid_t file = H5Fopen(h5path.string().c_str(),
+            H5F_ACC_RDONLY, H5P_DEFAULT);
+        if (file < 0)
+        {
+            throw std::runtime_error(
+                "Tracks2D: unable to open HDF5 file " + h5path.string());
+        }
+        const hid_t grp = H5Gopen2(file, groupName.c_str(), H5P_DEFAULT);
+        if (grp < 0)
+        {
+            H5Fclose(file);
+            throw std::runtime_error(
+                "Tracks2D: unable to open group " + groupName);
+        }
+
+        // NOLINTEND(misc-include-cleaner)
 
         // Read the feh, afe, and vvcrit attributes of this group, if
         // they are present; not all track sets specify afe or vvcrit,
@@ -254,8 +297,7 @@ namespace tracks
             }
             ntime[i] = nrow;
         }
-        const size_t nt = std::max(ntMin,
-            *std::ranges::max_element(ntime.begin(), ntime.end()));
+        const size_t nt = *std::ranges::max_element(ntime.begin(), ntime.end());
 
         // Allocate storage for the times and track data of each mass,
         // padded to nt time points each
@@ -309,6 +351,11 @@ namespace tracks
         // Build the interpolator
         interp_ = std::make_unique<interp::Mesh2DInterpolator<nQty>>(
             x, masses, f);
+
+        // NOLINTBEGIN(misc-include-cleaner)
+        H5Gclose(grp);
+        H5Fclose(file);
+        // NOLINTEND(misc-include-cleaner)
     }
 
 } // namespace tracks

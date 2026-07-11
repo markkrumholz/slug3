@@ -273,12 +273,12 @@ namespace tracks
     } // namespace
 
     Tracks3D::Tracks3D(
-        const std::string& registryName,
         const std::string& trackName,
         const double fehMin,
         const double fehMax,
         const double vvcrit,
-        const double afe) :
+        const double afe,
+        const std::string& registryName) :
         AFe_(afe),
         vVcrit_(vvcrit)
     {
@@ -311,12 +311,12 @@ namespace tracks
         if (fehMin == fehMax)
         {
             matchResult = findMatchingTracks(
-                registryName, trackName, fehMin, fehMax, vvcrit, afe, 0);
+                trackName, fehMin, fehMax, vvcrit, afe, 0, registryName);
         }
         if (matchResult.first.size() != 1 || matchResult.first.front() != fehMin)
         {
             matchResult = findMatchingTracks(
-                registryName, trackName, fehMin, fehMax, vvcrit, afe, nExpand);
+                trackName, fehMin, fehMax, vvcrit, afe, nExpand, registryName);
         }
         auto [fehVals, groupNames] = std::move(matchResult);
         // fehVals can't be moved into the member initializer list for

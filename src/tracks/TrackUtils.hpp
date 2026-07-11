@@ -9,6 +9,7 @@
 #define TRACKUTILS_HPP
 
 #include "../extern/tomlplusplus/toml.hpp"
+#include "TrackCommons.hpp"
 #include <filesystem>
 #include <string>
 #include <utility>
@@ -27,12 +28,11 @@ namespace tracks
      * file, and contains the minimum set of required entries. It
      * throws a runtime error if any of these conditions are not met.
      */
-    auto parseRegistry(const std::string& registryName)
+    auto parseRegistry(const std::string& registryName = defaultRegistry)
     -> std::pair<toml::table, std::filesystem::path>;
 
     /**
      * @brief Get list of HDF5 groups containing tracks matching given inputs
-     * @param registryName Name of the track registry file
      * @param trackName Name of track set
      * @param fehMin Minimum [Fe/H] value
      * @param fehMax Maximum [Fe/H] value
@@ -40,6 +40,7 @@ namespace tracks
      * @param afe Value of [alpha/Fe]
      * @param nExpand Number of extra tracks to include on each side of
      *                the [fehMin, fehMax] range
+     * @param registryName Name of the track registry file
      * @returns A pair consisting of a vector of [Fe/H] values and corresponding group names
      * @details
      * Among the tracks matching vvcrit and afe (see findMatchingTracks
@@ -54,14 +55,40 @@ namespace tracks
      * tracks to expand by the full amount requested.
      */
     auto findMatchingTracks(
-        const std::string& registryName,
         const std::string& trackName,
         double fehMin,
         double fehMax,
         double vvcrit = 0.0,
         double afe = 0.0,
-        unsigned int nExpand = 0)
+        unsigned int nExpand = 0,
+        const std::string& registryName = defaultRegistry)
     -> std::pair<std::vector<double>, std::vector<std::string>>;
+
+    /**
+     * @brief Find the HDF5 group holding the unique track matching given inputs
+     * @param trackName Name of track set
+     * @param feh [Fe/H] value
+     * @param vvcrit Rotation rate v/vcrit
+     * @param afe Value of [alpha/Fe]
+     * @param registryName Name of the track registry file
+     * @returns The name of the matching group, or an empty string if no
+     *          group matches
+     * @details
+     * Among the groups in the track set's HDF5 file (excluding
+     * "masses"), this searches for the one whose feh, vvcrit, and afe
+     * attributes all match the input values; a group missing one of
+     * these attributes is treated as matching regardless of the
+     * corresponding input value. The registry and track set are still
+     * located and searched as in findMatchingTracks; only the absence
+     * of a matching group results in an empty string being returned.
+     */
+    auto findTrack(
+        const std::string& trackName,
+        double feh = 0.0,
+        double vvcrit = 0.0,
+        double afe = 0.0,
+        const std::string& registryName = defaultRegistry)
+    -> std::string;
 
     /**
      * @brief Get the dimensions of a set of tracks
