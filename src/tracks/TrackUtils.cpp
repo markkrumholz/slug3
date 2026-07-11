@@ -321,7 +321,7 @@ namespace tracks
         return { std::move(fehOut), std::move(nameOut) };
     }
 
-    auto findTrack(
+    auto findTrack( // NOLINT(readability-function-cognitive-complexity); complexity is 26, not refactoring to get rid of an over-by-one!
         const std::string& trackName,
         const double feh,
         const double vvcrit,
