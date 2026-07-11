@@ -1323,13 +1323,18 @@ namespace interp
                 .idx = iSave_ + 1
             });
 
-            // Move index, being careful to handle degenerate tracks
+            // Move index, being careful to handle degenerate tracks; a
+            // cell is degenerate only if it is collapsed on both the
+            // jSave_ and jSave_+1 ribs, so both must be checked (the
+            // second comparison here previously compared a cell to
+            // itself, which is always false and left degenerate cells
+            // on the jSave_+1 rib undetected)
             while (true)
             {
                 iSave_++;
                 if (iSave_ == nx() - 1) { break; }
                 if (x_[iSave_,jSave_] != x_[iSave_+1,jSave_] ||
-                    x_[iSave_+1,jSave_] != x_[iSave_+1,jSave_]) { break; }
+                    x_[iSave_,jSave_+1] != x_[iSave_+1,jSave_+1]) { break; }
             }
 
         }

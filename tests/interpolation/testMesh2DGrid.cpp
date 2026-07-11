@@ -391,6 +391,114 @@ testYIntersect(const interp::Mesh2DGrid& m2d,
 }
 
 
+// Test that querying yIntersect at a sequence of consecutive, exact
+// grid y values reproduces each column's raw x data exactly. This
+// exercises Mesh2DGrid's cached row-index search (yIdx): previously,
+// when a query landed exactly on the upper edge of the currently
+// cached row interval, yIdx failed to advance its cached index,
+// leaving the row-offset dy computed as the full interval width
+// instead of zero. Rather than reading the queried column directly,
+// yIntersect would then trace a spurious path interpolated between
+// the wrong pair of columns via floating-point division, introducing
+// rounding error that (among other things) could violate the strict
+// ordering required downstream by Interpolator1D. Querying the grid
+// rows in increasing order, one row at a time, reproduces exactly the
+// query pattern that surfaced this bug.
+static auto
+testYIntersectGridBoundary()
+{
+    constexpr size_t nx = 4;
+    constexpr size_t ny = 4;
+    std::array<double, nx*ny> xData = { 0 };
+    std::array<double, ny> yData = { 0 };
+    const std::mdspan<double, std::extents<size_t, nx, ny>> x(xData.data());
+    const std::mdspan<double, std::extents<size_t, ny>> y(yData.data());
+    for (size_t j = 0; j < ny; ++j) { y[j] = static_cast<double>(j); }
+
+    // Give each column a distinct set of x values, so that resolving
+    // a query against the wrong column produces detectably different
+    // results from resolving it against the right one
+    constexpr std::array<std::array<double, nx>, ny> xCol = {{
+        { 0.0, 1.0, 2.0, 3.0 },
+        { 0.0, 1.5, 2.5, 4.0 },
+        { 0.0, 2.0, 3.0, 5.0 },
+        { 0.0, 2.5, 4.0, 7.0 }
+    }};
+    for (size_t j = 0; j < ny; ++j) {
+        for (size_t i = 0; i < nx; ++i) { x[i,j] = xCol[j][i]; }
+    }
+    const interp::Mesh2DGrid m2d(x, y);
+
+    // Query each grid row in increasing order, one step at a time; a
+    // query landing exactly on row j should reproduce that column's
+    // raw x values exactly (no interpolation should occur)
+    for (size_t j = 0; j < ny; ++j)
+    {
+        const auto result = m2d.yIntersect(static_cast<double>(j));
+        if (result.size() != nx)
+        {
+            std::cerr << "testMesh2DGrid: querying yIntersect at grid "
+                "row j = " << j << " returned " << result.size()
+                << " points, expected " << nx << "\n";
+            return 1;
+        }
+        for (size_t i = 0; i < nx; ++i)
+        {
+            if (result[i].x != xCol[j][i] || result[i].idx != i)
+            {
+                std::cerr << "testMesh2DGrid: querying yIntersect at "
+                    "grid row j = " << j << ", point i = " << i
+                    << ": expected x = " << xCol[j][i] << ", idx = " << i
+                    << ", instead found x = " << result[i].x
+                    << ", idx = " << result[i].idx << "\n";
+                return 1;
+            }
+        }
+    }
+
+    return 0; // Success
+}
+
+// Test the x-direction analog of testYIntersectGridBoundary: querying
+// xIdx at a sequence of consecutive, exact grid x values along a
+// single row should return each point's own index, rather than
+// leaving the cached index stuck one step behind (the same class of
+// bug as in yIdx, fixed in the same way)
+static auto
+testXIdxGridBoundary()
+{
+    constexpr size_t nx = 5;
+    constexpr std::array<double, nx> xRow = { 0.0, 1.0, 2.5, 4.0, 8.0 };
+    std::array<double, nx*2> xData = { 0 };
+    std::array<double, 2> yData = { 0.0, 1.0 };
+    const std::mdspan<double, std::extents<size_t, nx, 2>> x(xData.data());
+    const std::mdspan<double, std::extents<size_t, 2>> y(yData.data());
+    for (size_t i = 0; i < nx; ++i) {
+        x[i,0] = xRow[i];
+        x[i,1] = xRow[i] + 0.5; // Second row just needs to be valid
+    }
+    const interp::Mesh2DGrid m2d(x, y);
+
+    // Query each grid point along row 0 in increasing order; each
+    // query should resolve to its own index, except the last point,
+    // which resolves to nx - 2 (the start of the final cell), matching
+    // the same top-of-range convention used by yIdx
+    for (size_t k = 0; k < nx; ++k)
+    {
+        const auto i = m2d.xIdx(xRow[k], 0);
+        const auto expected = (k == nx - 1) ? nx - 2 : k;
+        if (i != expected)
+        {
+            std::cerr << "testMesh2DGrid: querying xIdx at grid point "
+                "k = " << k << " (x = " << xRow[k] << ") returned i = "
+                << i << ", expected " << expected << "\n";
+            return 1;
+        }
+    }
+
+    return 0; // Success
+}
+
 auto testMesh2DGrid() -> int
 {
     // Construct a simple convex mesh
@@ -445,6 +553,10 @@ auto testMesh2DGrid() -> int
     test += testXIntersectConvex(m2d, nx, fac);
     test += testXIntersectNonConvex(m2dNC);
     test += testYIntersect(m2d, nx, fac);
+
+    // Regression tests for the cached-index boundary bug in yIdx/xIdx
+    test += testYIntersectGridBoundary();
+    test += testXIdxGridBoundary();
 
     return test; // Return success
 }
