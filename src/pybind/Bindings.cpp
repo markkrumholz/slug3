@@ -8,12 +8,11 @@
  * the functionality of slug.
  */
 
+#include "../extern/pybind11/include/pybind11/numpy.h"
+#include "../extern/pybind11/include/pybind11/pybind11.h"
 #include "../interpolation/Interpolator1D.hpp"
 #include "../tracks/TrackCommons.hpp"
 #include "../tracks/Tracks3D.hpp"
-#include "../extern/pybind11/include/pybind11/numpy.h"
-#include "../extern/pybind11/include/pybind11/pybind11.h"
-#include "../extern/pybind11/include/pybind11/stl.h"
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -38,7 +37,11 @@ constexpr std::size_t nQty = static_cast<std::size_t>(tracks::FieldIdx::nTrackQt
 template class interp::Interpolator1D<nQty>;
 using Interp1D = interp::Interpolator1D<nQty>;
 
-PYBIND11_MODULE(slug, m, py::mod_gil_not_used()) {
+// Disable linting for includes -- the pybind macro magic seems to confuse
+// the linter
+// NOLINTBEGIN(misc-include-cleaner)
+
+PYBIND11_MODULE(slug, m, py::mod_gil_not_used()) { 
     m.doc() = "slug Python frontend"; // optional module docstring
 
     py::class_<Interp1D, py::smart_holder>(m, "Interpolator1D")
@@ -72,9 +75,9 @@ PYBIND11_MODULE(slug, m, py::mod_gil_not_used()) {
                 py::arg("x"), py::arg("idx"))
         .def("__call__",
                 py::vectorize(
-                    [](const Interp1D* self, const double x, const std::string name) -> double
+                    [](const Interp1D* self, const double x, const std::string name) -> double // NOLINT(performance-unnecessary-value-param); this has to be a value rather than a reference due to pybind11 limitations
                     {
-                        const auto it = std::ranges::find(tracks::fieldStr, name);
+                        const auto *const it = std::ranges::find(tracks::fieldStr, name);
                         if (it == tracks::fieldStr.end())
                         {
                             throw std::runtime_error(
@@ -127,3 +130,5 @@ PYBIND11_MODULE(slug, m, py::mod_gil_not_used()) {
                 "Return the isochrone at a given time and [Fe/H]",
                 py::arg("t"), py::arg("feh"));
 }
+
+// NOLINTEND(misc-include-cleaner)
