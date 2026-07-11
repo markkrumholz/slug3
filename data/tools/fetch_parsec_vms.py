@@ -286,14 +286,14 @@ else:
 
 # Add parsec_vms to list of track sets
 if "track_sets" in registry.keys():
-    if "parsec_vms" not in registry["track_sets"]:
-        registry["track_sets"].append("parsec_vms")
+    if "PARSEC_vms" not in registry["track_sets"]:
+        registry["track_sets"].append("PARSEC_vms")
 else:
-    registry["track_sets"] = [ "parsec_vms" ]
+    registry["track_sets"] = [ "PARSEC_vms" ]
 
 # Generate registry entry for parsec_vms
-if "parsec_vms" in registry.keys():
-    registry.pop("parsec_vms")
+if "PARSEC_vms" in registry.keys():
+    registry.pop("PARSEC_vms")
 parsec_tab = tomlkit.table()
 parsec_tab["file"] = args.output
 parsec_tab["version"] = args.version
@@ -307,7 +307,7 @@ with h5py.File(args.output, 'r') as h5file:
 val_in_file = np.array(val_in_file)
 val_in_file.sort()
 parsec_tab["Fe_H"] = [ v for v in val_in_file ]
-registry["parsec_vms"] = parsec_tab
+registry["PARSEC_vms"] = parsec_tab
 
 # Write registry back to file
 with open(args.registry, 'w') as fp:

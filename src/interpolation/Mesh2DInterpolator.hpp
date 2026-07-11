@@ -231,6 +231,22 @@ namespace interp
          */
         [[nodiscard]] auto yMax() const { return mesh_.yMax(); }
 
+        /**
+         * @brief Find minimum and maximum y position at a given x in the mesh
+         * @param x x position
+         * @returns Minimum and maximum y values
+         * @details
+         * The return value for this function is a vectors of pairs;
+         * each pair contains the minimum and maximum y values where a line
+         * segment at a given x value intersects the mesh. For a convex
+         * mesh there is at most one minimum and one maximum, so this vector
+         * will be of length 0 (if the mesh is missed entirely) or 1, but
+         * for a non-convex mesh a line at fixed x can intersect the edge
+         * an arbitrary number of times, so the vector can be longer. 
+         */
+        [[nodiscard]] auto yLim(double x) const { return mesh_.yLim(x); }
+
+
         // Interpolators
         /**
          * @brief Function to create a 1D interpolator at constant x

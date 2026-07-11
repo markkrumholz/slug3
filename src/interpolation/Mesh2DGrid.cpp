@@ -79,6 +79,11 @@ namespace interp
         {
             throw std::runtime_error("Mesh2DGrid: y must match size of second dimension of x");
         }
+        // Safety check that both sizes are > 1
+        if (x.extent(0) < 2 || x.extent(1) < 2)
+        {
+            throw std::runtime_error("Mesh2DGrid: x and y sizes must be > 1");
+        }
         // Safety check that x and y are non-decreasing
         for (size_t j = 0; j < x.extent(1); ++j) {
             for (size_t i = 1; i < x.extent(0); ++i) {
