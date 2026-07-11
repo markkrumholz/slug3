@@ -84,20 +84,20 @@ add_executable(slugTestTracks
 # Include directories: project headers as regular includes, pcg-cpp as a
 # system include so clang-tidy and the compiler suppress warnings from it.
 target_include_directories(slug PRIVATE src)
-target_include_directories(slug SYSTEM PRIVATE src/pcg-cpp/include)
+target_include_directories(slug SYSTEM PRIVATE src/extern/pcg-cpp/include)
 
 target_include_directories(slugTestInterpolation PRIVATE src)
-target_include_directories(slugTestInterpolation SYSTEM PRIVATE src/pcg-cpp/include)
+target_include_directories(slugTestInterpolation SYSTEM PRIVATE src/extern/pcg-cpp/include)
 
 target_include_directories(slugTestPDFs PRIVATE src)
-target_include_directories(slugTestPDFs SYSTEM PRIVATE src/pcg-cpp/include)
+target_include_directories(slugTestPDFs SYSTEM PRIVATE src/extern/pcg-cpp/include)
 
 
 target_include_directories(slugTestUtils PRIVATE src)
-target_include_directories(slugTestUtils SYSTEM PRIVATE src/pcg-cpp/include)
+target_include_directories(slugTestUtils SYSTEM PRIVATE src/extern/pcg-cpp/include)
 
 target_include_directories(slugTestTracks PRIVATE src)
-target_include_directories(slugTestTracks SYSTEM PRIVATE src/pcg-cpp/include)
+target_include_directories(slugTestTracks SYSTEM PRIVATE src/extern/pcg-cpp/include)
 
 target_include_directories(slug SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestInterpolation SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})

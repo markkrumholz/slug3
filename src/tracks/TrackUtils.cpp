@@ -6,7 +6,7 @@
  */
 
 #include "TrackUtils.hpp"
-#include "../tomlplusplus/toml.hpp"
+#include "../extern/tomlplusplus/toml.hpp"
 #include "../utils/MiscUtils.hpp"
 #include "hdf5.h"   // NOLINT(misc-include-cleaner)
 #include <algorithm>
