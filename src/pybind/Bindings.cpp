@@ -10,7 +10,6 @@
 
 #include "../extern/pybind11/include/pybind11/numpy.h"
 #include "../extern/pybind11/include/pybind11/pybind11.h"
-#include "../extern/pybind11/include/pybind11/stl.h"
 #include "../interpolation/Interpolator1D.hpp"
 #include "../tracks/TrackCommons.hpp"
 #include "../tracks/Tracks2D.hpp"
