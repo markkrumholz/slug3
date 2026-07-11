@@ -132,8 +132,145 @@ namespace tracks
 
             return names;
         }
+
+        /**
+         * @brief Read and pad the track data for every matching feh group
+         * @param file Handle to the open HDF5 file containing the tracks
+         * @param groupNames Names of the matching groups, in ascending feh order
+         * @param massData Sorted masses shared by every group
+         * @param fieldNames Names of the fields in each track dataset
+         * @param ageIdx Index of the 'age' field within fieldNames
+         * @param qtyIdx Indices within fieldNames of the nQty quantities to read
+         * @param nt Number of time points to pad every track to
+         * @returns The times and field data, both laid out with shape
+         *   (nmass, nt, nfeh[, nQty]) -- i.e. mass varying slowest, time
+         *   next, then feh, and (for field data) quantity fastest
+         * @details
+         * Loops over every matching feh group in turn, and within each,
+         * over every mass from lowest to highest, padding the end of
+         * any track with fewer than nt time points by repeating its
+         * final value. On error, closes file (and, if already open,
+         * the current group) before throwing, since the caller opened
+         * file and is not expecting to have to close it itself if this
+         * function throws.
+         */
+        auto readAllTrackData(  //NOLINT(llvm-prefer-static-over-anonymous-namespace)
+            const hid_t file,
+            const std::vector<std::string>& groupNames,
+            const std::vector<double>& massData,
+            const std::vector<std::string>& fieldNames,
+            const std::ptrdiff_t ageIdx,
+            const std::vector<size_t>& qtyIdx,
+            const size_t nt)
+            -> std::pair<std::vector<double>, std::vector<double>>
+        {
+            using Array2D = std::mdspan<double, std::dextents<size_t, 2>>;
+            using Array3D = interp::Mesh3DInterpolator<nQty>::Array3D;
+            using Array4D = interp::Mesh3DInterpolator<nQty>::Array4D;
+
+            const size_t nmass = massData.size();
+            const size_t nfeh = groupNames.size();
+
+            std::vector<double> timesData(nmass * nt * nfeh);
+            const Array3D times(timesData.data(), nmass, nt, nfeh);
+            std::vector<double> fieldDataVec(nmass * nt * nfeh * nQty);
+            const Array4D fieldData(fieldDataVec.data(), nmass, nt, nfeh, nQty);
+
+            for (size_t f = 0; f < nfeh; ++f)
+            {
+                const hid_t grp = H5Gopen2(file, groupNames[f].c_str(), H5P_DEFAULT);
+                if (grp < 0)
+                {
+                    H5Fclose(file);
+                    throw std::runtime_error(
+                        "Tracks3D: unable to open group " + groupNames[f]);
+                }
+
+                for (size_t i = 0; i < nmass; ++i)
+                {
+                    const auto name = std::format("track_m{:.3f}", massData[i]);
+                    auto [data, shape] = readDataset2D(grp, name);
+                    const auto [nrow, ncol] = shape;
+                    if (ncol != fieldNames.size())
+                    {
+                        H5Gclose(grp);
+                        H5Fclose(file);
+                        throw std::runtime_error(
+                            "Tracks3D: dataset " + name +
+                            " has an unexpected number of fields");
+                    }
+                    const Array2D track(data.data(), nrow, ncol);
+
+                    for (size_t j = 0; j < nt; ++j)
+                    {
+                        const size_t src = std::min(j, nrow - 1);
+                        times[i, j, f] = track[src, ageIdx];
+                        for (size_t k = 0; k < nQty; ++k)
+                        {
+                            fieldData[i, j, f, k] = track[src, qtyIdx[k]];
+                        }
+                    }
+                }
+
+                H5Gclose(grp);
+            }
+
+            return { std::move(timesData), std::move(fieldDataVec) };
+        }
     } // namespace
     // NOLINTEND(misc-include-cleaner)
+
+    namespace
+    {
+        /**
+         * @brief Transpose track data into the layout Mesh3DInterpolator requires
+         * @param times Times, with shape (nmass, nt, nfeh)
+         * @param fieldData Field data, with shape (nmass, nt, nfeh, nQty)
+         * @param nmass Number of masses
+         * @param nt Number of time points
+         * @param nfeh Number of feh values
+         * @returns The transposed x and f arrays, with shape
+         *   (nt, nmass, nfeh) and (nt, nmass, nfeh, nQty) respectively
+         * @details
+         * Mesh3DInterpolator requires its x and f arrays to have shape
+         * (nt, nmass, nfeh) and (nt, nmass, nfeh, nQty) respectively --
+         * the transpose of times and fieldData in their first two
+         * dimensions -- because masses and feh, not times, form the
+         * tensor (shared) directions of the mesh.
+         */
+        auto transposeTrackData(  //NOLINT(llvm-prefer-static-over-anonymous-namespace)
+            const interp::Mesh3DInterpolator<nQty>::Array3D& times,
+            const interp::Mesh3DInterpolator<nQty>::Array4D& fieldData,
+            const size_t nmass,
+            const size_t nt,
+            const size_t nfeh)
+            -> std::pair<std::vector<double>, std::vector<double>>
+        {
+            using Array3D = interp::Mesh3DInterpolator<nQty>::Array3D;
+            using Array4D = interp::Mesh3DInterpolator<nQty>::Array4D;
+
+            std::vector<double> xData(nt * nmass * nfeh);
+            const Array3D x(xData.data(), nt, nmass, nfeh);
+            std::vector<double> fData(nt * nmass * nfeh * nQty);
+            const Array4D f(fData.data(), nt, nmass, nfeh, nQty);
+            for (size_t i = 0; i < nmass; ++i)
+            {
+                for (size_t j = 0; j < nt; ++j)
+                {
+                    for (size_t ff = 0; ff < nfeh; ++ff)
+                    {
+                        x[j, i, ff] = times[i, j, ff];
+                        for (size_t k = 0; k < nQty; ++k)
+                        {
+                            f[j, i, ff, k] = fieldData[i, j, ff, k];
+                        }
+                    }
+                }
+            }
+
+            return { std::move(xData), std::move(fData) };
+        }
+    } // namespace
 
     Tracks3D::Tracks3D(
         const std::string& registryName,
@@ -141,17 +278,13 @@ namespace tracks
         const double fehMin,
         const double fehMax,
         const double vvcrit,
-        const double afe)
+        const double afe) :
+        AFe_(afe),
+        vVcrit_(vvcrit)
     {
         using Array1D = interp::Mesh3DInterpolator<nQty>::Array1D;
         using Array3D = interp::Mesh3DInterpolator<nQty>::Array3D;
         using Array4D = interp::Mesh3DInterpolator<nQty>::Array4D;
-        using Array2D = std::mdspan<double, std::dextents<size_t, 2>>;
-
-        // Store the afe and vvcrit search criteria used to select this
-        // set of tracks
-        AFe_ = afe;
-        vVcrit_ = vvcrit;
 
         // Step 1: find the set of tracks matching the input criteria.
         // Building a valid 3D mesh in the feh direction requires enough
@@ -256,84 +389,22 @@ namespace tracks
         }
         H5Gclose(refGrp);
 
-        // Step 3: allocate storage for the times and track data of
-        // each (mass, time, feh) triple, padded to nt time points each
-        std::vector<double> timesData(nmass * nt * nfeh);
+        // Step 3: read and pad the times and track data of each
+        // (mass, time, feh) triple
+        auto [timesData, fieldDataVec] = readAllTrackData(
+            file, groupNames, massData, fieldNames, ageIdx, qtyIdx, nt);
         const Array3D times(timesData.data(), nmass, nt, nfeh);
-        std::vector<double> fieldDataVec(nmass * nt * nfeh * nQty);
         const Array4D fieldData(fieldDataVec.data(), nmass, nt, nfeh, nQty);
-
-        // Loop over every matching feh group in turn, and within each,
-        // over every mass from lowest to highest, padding the end of
-        // any track with fewer than nt time points by repeating its
-        // final value
-        for (size_t f = 0; f < nfeh; ++f)
-        {
-            const hid_t grp = H5Gopen2(file, groupNames[f].c_str(), H5P_DEFAULT);
-            if (grp < 0)
-            {
-                H5Fclose(file);
-                throw std::runtime_error(
-                    "Tracks3D: unable to open group " + groupNames[f]);
-            }
-
-            for (size_t i = 0; i < nmass; ++i)
-            {
-                const auto name = std::format("track_m{:.3f}", massData[i]);
-                auto [data, shape] = readDataset2D(grp, name);
-                const auto [nrow, ncol] = shape;
-                if (ncol != fieldNames.size())
-                {
-                    H5Gclose(grp);
-                    H5Fclose(file);
-                    throw std::runtime_error(
-                        "Tracks3D: dataset " + name +
-                        " has an unexpected number of fields");
-                }
-                const Array2D track(data.data(), nrow, ncol);
-
-                for (size_t j = 0; j < nt; ++j)
-                {
-                    const size_t src = std::min(j, nrow - 1);
-                    times[i, j, f] = track[src, ageIdx];
-                    for (size_t k = 0; k < nQty; ++k)
-                    {
-                        fieldData[i, j, f, k] = track[src, qtyIdx[k]];
-                    }
-                }
-            }
-
-            H5Gclose(grp);
-        }
 
         H5Fclose(file);
 
         // NOLINTEND(misc-include-cleaner)
 
-        // Step 4: Mesh3DInterpolator requires its x and f arrays to
-        // have shape (nt, nmass, nfeh) and (nt, nmass, nfeh, nQty)
-        // respectively -- the transpose of times and fieldData in
-        // their first two dimensions -- because masses and feh, not
-        // times, form the tensor (shared) directions of the mesh;
-        // build those transposed views here before constructing interp_
-        std::vector<double> xData(nt * nmass * nfeh);
+        // Step 4: transpose times and fieldData into the layout
+        // Mesh3DInterpolator requires
+        auto [xData, fData] = transposeTrackData(times, fieldData, nmass, nt, nfeh);
         const Array3D x(xData.data(), nt, nmass, nfeh);
-        std::vector<double> fData(nt * nmass * nfeh * nQty);
         const Array4D f(fData.data(), nt, nmass, nfeh, nQty);
-        for (size_t i = 0; i < nmass; ++i)
-        {
-            for (size_t j = 0; j < nt; ++j)
-            {
-                for (size_t ff = 0; ff < nfeh; ++ff)
-                {
-                    x[j, i, ff] = times[i, j, ff];
-                    for (size_t k = 0; k < nQty; ++k)
-                    {
-                        f[j, i, ff, k] = fieldData[i, j, ff, k];
-                    }
-                }
-            }
-        }
 
         // The feh values, sorted ascending by findMatchingTracks, form
         // the z coordinate of the mesh
