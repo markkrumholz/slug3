@@ -20,6 +20,7 @@
 #include <iterator>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace py = pybind11;
@@ -127,7 +128,21 @@ PYBIND11_MODULE(slug, m, py::mod_gil_not_used()) {
         .def("getTrack", &tracks::Tracks3D::getTrack,
                 "Return the track for a star of a given mass and [Fe/H]",
                 py::arg("m"), py::arg("feh"))
-        .def("getIsochrone", &tracks::Tracks3D::getIsochrone,
+        .def("getIsochrone",
+                [](const tracks::Tracks3D& self, const double logT, const double feh)
+                {
+                    // Built up by hand, casting each segment individually,
+                    // rather than binding tracks::Tracks3D::getIsochrone
+                    // directly: pybind11's generic std::vector<T> caster
+                    // can't move a std::unique_ptr<Interp1D> out of the
+                    // vector when Interp1D is bound with py::smart_holder,
+                    // even though casting a single std::unique_ptr<Interp1D>
+                    // (as getTrack does) works fine
+                    auto isochrone = self.getIsochrone(logT, feh);
+                    py::list result;
+                    for (auto& seg : isochrone) { result.append(py::cast(std::move(seg))); }
+                    return result;
+                },
                 "Return the isochrone at a given log10(time) and [Fe/H]",
                 py::arg("logT"), py::arg("feh"));
 
@@ -169,7 +184,17 @@ PYBIND11_MODULE(slug, m, py::mod_gil_not_used()) {
         .def("getTrack", &tracks::Tracks2D::getTrack,
                 "Return the track for a star of a given mass",
                 py::arg("m"))
-        .def("getIsochrone", &tracks::Tracks2D::getIsochrone,
+        .def("getIsochrone",
+                [](const tracks::Tracks2D& self, const double logT)
+                {
+                    // See the comment on the Tracks3D getIsochrone binding
+                    // above for why this can't just bind
+                    // tracks::Tracks2D::getIsochrone directly
+                    auto isochrone = self.getIsochrone(logT);
+                    py::list result;
+                    for (auto& seg : isochrone) { result.append(py::cast(std::move(seg))); }
+                    return result;
+                },
                 "Return the isochrone at a given log10(time)",
                 py::arg("logT"));
 }
