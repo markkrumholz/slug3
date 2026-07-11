@@ -12,6 +12,7 @@
 #include "hdf5.h"  // NOLINT(misc-include-cleaner)
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <format>
 #include <iterator>
@@ -283,7 +284,8 @@ namespace tracks
 
         // First pass: scan every track dataset to find the number of
         // time points it holds, so we can determine nt, the number of
-        // time points in the final, padded set of tracks
+        // time points in the final, padded set of tracks. One extra
+        // slot is added for a synthetic sentinel point (see below).
         std::vector<size_t> ntime(nmass);
         for (size_t i = 0; i < nmass; ++i)
         {
@@ -297,7 +299,7 @@ namespace tracks
             }
             ntime[i] = nrow;
         }
-        const size_t nt = *std::ranges::max_element(ntime.begin(), ntime.end());
+        const size_t nt = *std::ranges::max_element(ntime.begin(), ntime.end()) + 1;
 
         // Allocate storage for the times and track data of each mass,
         // padded to nt time points each
@@ -316,10 +318,27 @@ namespace tracks
             const auto [nrow, ncol] = shape;
             const Array2D track(data.data(), nrow, ncol);
 
-            for (size_t j = 0; j < nt; ++j)
+            // Prepend a synthetic sentinel point at the earliest
+            // representable log time, with properties equal to those
+            // at the earliest real time point, so that any finite
+            // query logT below the track's actual starting time still
+            // returns that starting point's properties instead of
+            // erroring
+            times[i, 0] = static_cast<double>(std::numeric_limits<float>::lowest());
+            for (size_t k = 0; k < nQty; ++k)
             {
-                const size_t src = std::min(j, nrow - 1);
-                times[i, j] = track[src, ageIdx];
+                fieldData[i, 0, k] = track[0, qtyIdx[k]];
+            }
+
+            for (size_t j = 1; j < nt; ++j)
+            {
+                const size_t src = std::min(j - 1, nrow - 1);
+                // Some tracks record their first point at age = 0 (the
+                // pre-main-sequence/ZAMS starting point); clamp to a
+                // 1 yr floor before taking log10 so that this maps to
+                // 0 instead of -inf, which would otherwise poison
+                // Mesh2DInterpolator's arc-length computation with NaN
+                times[i, j] = std::log10(std::max(track[src, ageIdx], 1.0));
                 for (size_t k = 0; k < nQty; ++k)
                 {
                     fieldData[i, j, k] = track[src, qtyIdx[k]];

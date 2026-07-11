@@ -114,10 +114,10 @@ PYBIND11_MODULE(slug, m, py::mod_gil_not_used()) {
                 "Return the minimum mass in the tracks")
         .def("mMax", &tracks::Tracks3D::mMax,
                 "Return the maximum mass in the tracks")
-        .def("tMin", &tracks::Tracks3D::tMin,
-                "Return the minimum time in the tracks")
-        .def("tMax", &tracks::Tracks3D::tMax,
-                "Return the maximum time in the tracks")
+        .def("logTMin", &tracks::Tracks3D::logTMin,
+                "Return the minimum log10(time) in the tracks")
+        .def("logTMax", &tracks::Tracks3D::logTMax,
+                "Return the maximum log10(time) in the tracks")
         .def("feH", &tracks::Tracks3D::feH,
                 "Return the [Fe/H] values spanned by this set of tracks")
         .def("aFe", &tracks::Tracks3D::aFe,
@@ -128,8 +128,8 @@ PYBIND11_MODULE(slug, m, py::mod_gil_not_used()) {
                 "Return the track for a star of a given mass and [Fe/H]",
                 py::arg("m"), py::arg("feh"))
         .def("getIsochrone", &tracks::Tracks3D::getIsochrone,
-                "Return the isochrone at a given time and [Fe/H]",
-                py::arg("t"), py::arg("feh"));
+                "Return the isochrone at a given log10(time) and [Fe/H]",
+                py::arg("logT"), py::arg("feh"));
 
     py::class_<tracks::Tracks2D, py::smart_holder>(m, "Tracks2D")
         .def(py::init<
@@ -150,10 +150,10 @@ PYBIND11_MODULE(slug, m, py::mod_gil_not_used()) {
                 "Return the minimum mass in the tracks")
         .def("mMax", &tracks::Tracks2D::mMax,
                 "Return the maximum mass in the tracks")
-        .def("tMin", &tracks::Tracks2D::tMin,
-                "Return the minimum time in the tracks")
-        .def("tMax", &tracks::Tracks2D::tMax,
-                "Return the maximum time in the tracks")
+        .def("logTMin", &tracks::Tracks2D::logTMin,
+                "Return the minimum log10(time) in the tracks")
+        .def("logTMax", &tracks::Tracks2D::logTMax,
+                "Return the maximum log10(time) in the tracks")
         .def("feH", &tracks::Tracks2D::feH,
                 "Return the [Fe/H] value of this set of tracks")
         .def("aFe", &tracks::Tracks2D::aFe,
@@ -170,8 +170,8 @@ PYBIND11_MODULE(slug, m, py::mod_gil_not_used()) {
                 "Return the track for a star of a given mass",
                 py::arg("m"))
         .def("getIsochrone", &tracks::Tracks2D::getIsochrone,
-                "Return the isochrone at a given time",
-                py::arg("t"));
+                "Return the isochrone at a given log10(time)",
+                py::arg("logT"));
 }
 
 // NOLINTEND(misc-include-cleaner)

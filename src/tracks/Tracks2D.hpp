@@ -88,15 +88,15 @@ namespace tracks
         [[nodiscard]] auto mMax() const { return interp_->yMax(); }
 
         /**
-         * @brief Return the minimum time in the tracks
-         * @return Minimum time in the tracks
+         * @brief Return the minimum log of time in the tracks
+         * @return Minimum log10(time) in the tracks
          */
-        [[nodiscard]] auto tMin() const { return interp_->xMin(); }
+        [[nodiscard]] auto logTMin() const { return interp_->xMin(); }
         /**
-         * @brief Return the maximum time in the tracks
-         * @return Maximum time in the tracks
+         * @brief Return the maximum log of time in the tracks
+         * @return Maximum log10(time) in the tracks
          */
-        [[nodiscard]] auto tMax() const { return interp_->xMax(); }
+        [[nodiscard]] auto logTMax() const { return interp_->xMax(); }
 
         /**
          * @brief Return the [Fe/H] value of this set of tracks
@@ -140,15 +140,15 @@ namespace tracks
         [[nodiscard]] auto getTrack(const double m) const { return interp_->interpConstY(m); }
 
         /**
-         * @brief Return the isochrone at a given time
-         * @param t The time of the isochrone
+         * @brief Return the isochrone at a given log time
+         * @param logT The log10(time) of the isochrone
          * @return A vector of unique_ptr to Interpolator1D's describing the isochrone
          * @details
          * Note that this method returns a vector of Interpolator1D objects
          * rather than a single one because for non-monotonic tracks there
          * may be multiple disjoint segments to the isochrone.
          */
-        [[nodiscard]] auto getIsochrone(const double t) const { return interp_->interpConstX(t); }
+        [[nodiscard]] auto getIsochrone(const double logT) const { return interp_->interpConstX(logT); }
 
     private:
 
