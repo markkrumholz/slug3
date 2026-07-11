@@ -182,8 +182,7 @@ namespace tracks
         const double feh,
         const double vvcrit,
         const double afe,
-        const std::string& registryName,
-        const size_t ntMin)
+        const std::string& registryName)
     {
         using Array1D = interp::Mesh2DInterpolator<nQty>::Array1D;
         using Array2D = interp::Mesh2DInterpolator<nQty>::Array2D;
@@ -298,8 +297,7 @@ namespace tracks
             }
             ntime[i] = nrow;
         }
-        const size_t nt = std::max(ntMin,
-            *std::ranges::max_element(ntime.begin(), ntime.end()));
+        const size_t nt = *std::ranges::max_element(ntime.begin(), ntime.end());
 
         // Allocate storage for the times and track data of each mass,
         // padded to nt time points each

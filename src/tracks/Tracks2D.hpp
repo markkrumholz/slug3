@@ -40,7 +40,6 @@ namespace tracks
          * @param vvcrit Rotation rate v/vcrit
          * @param afe Value of [alpha/Fe]
          * @param registryName Name of the track registry file
-         * @param ntMin If specified, minimum number of times in the tracks
          * @details
          * Uses findTrack to locate the unique track in track set
          * trackName matching feh, vvcrit, and afe, and throws a
@@ -48,17 +47,14 @@ namespace tracks
          * stored for each mass, and the number of time points may not
          * be the same for every mass. Tracks with fewer time points
          * will be padded at the end so that the final set of times and
-         * stellar properties are square arrays. If ntMin is specified,
-         * this gives the minimum number of times in the tracks, so
-         * tracks will be padded to at least this length.
+         * stellar properties are square arrays.
         */
         Tracks2D(
             const std::string& trackName,
             double feh = 0.0,
             double vvcrit = 0.0,
             double afe = 0.0,
-            const std::string& registryName = defaultRegistry,
-            size_t ntMin = 0);
+            const std::string& registryName = defaultRegistry);
         /**
          * @brief Construct a Tracks2D object from a supplied Mesh2DInterpolator
          * @param m2d A unique_ptr to the interpolator from which to construct the track

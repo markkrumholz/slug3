@@ -138,16 +138,14 @@ PYBIND11_MODULE(slug, m, py::mod_gil_not_used()) {
                 double,             // feh
                 double,             // vvcrit
                 double,             // afe
-                const std::string&, // registryName
-                std::size_t         // ntMin
+                const std::string&  // registryName
                 >(),
                 "Construct a Tracks2D object from tracks on disk",
                 py::arg("trackName"),
                 py::arg("feh") = 0,
                 py::arg("vvcrit") = 0,
                 py::arg("afe") = 0,
-                py::arg("registryName") = tracks::defaultRegistry,
-                py::arg("ntMin") = 0
+                py::arg("registryName") = tracks::defaultRegistry
         )
         .def("mMin", &tracks::Tracks2D::mMin,
                 "Return the minimum mass in the tracks")
