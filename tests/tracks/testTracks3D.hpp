@@ -18,6 +18,7 @@
 #include "../../src/tracks/Tracks3D.hpp"
 #include "trackFieldFixture.hpp"
 #include "hdf5.h" // NOLINT(misc-include-cleaner)
+#include <cmath>
 #include <exception>
 #include <iostream>
 #include <string>
@@ -124,7 +125,7 @@ inline auto testTracks3DFieldOrder() -> int
         }
         else
         {
-            const auto actual = (*track)(age);
+            const auto actual = (*track)(std::log10(age));
             for (size_t k = 0; k < testutil::nQty; ++k)
             {
                 if (!testutil::fieldsMatch(actual.at(k), expected.at(k)))

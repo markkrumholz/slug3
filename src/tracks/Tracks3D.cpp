@@ -12,10 +12,12 @@
 #include "hdf5.h"  // NOLINT(misc-include-cleaner)
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <format>
 #include <gsl/gsl_interp.h>
 #include <iterator>
+#include <limits>
 #include <mdspan>  // NOLINT(misc-include-cleaner)
 #include <memory>
 #include <ranges>
@@ -141,7 +143,8 @@ namespace tracks
          * @param fieldNames Names of the fields in each track dataset
          * @param ageIdx Index of the 'age' field within fieldNames
          * @param qtyIdx Indices within fieldNames of the nQty quantities to read
-         * @param nt Number of time points to pad every track to
+         * @param nt Number of time points to pad every track to, including
+         *           the synthetic sentinel point prepended at index 0
          * @returns The times and field data, both laid out with shape
          *   (nmass, nt, nfeh[, nQty]) -- i.e. mass varying slowest, time
          *   next, then feh, and (for field data) quantity fastest
@@ -149,7 +152,13 @@ namespace tracks
          * Loops over every matching feh group in turn, and within each,
          * over every mass from lowest to highest, padding the end of
          * any track with fewer than nt time points by repeating its
-         * final value. On error, closes file (and, if already open,
+         * final value. Index 0 along the time axis is always a
+         * synthetic sentinel point at the earliest representable log
+         * time, with properties equal to those at the earliest real
+         * time point, so that any finite query logT below a track's
+         * actual starting time still returns that starting point's
+         * properties instead of erroring; real (padded) data occupies
+         * indices 1..nt-1. On error, closes file (and, if already open,
          * the current group) before throwing, since the caller opened
          * file and is not expecting to have to close it itself if this
          * function throws.
@@ -201,10 +210,26 @@ namespace tracks
                     }
                     const Array2D track(data.data(), nrow, ncol);
 
-                    for (size_t j = 0; j < nt; ++j)
+                    // Prepend a synthetic sentinel point at the
+                    // earliest representable log time, with properties
+                    // equal to those at the earliest real time point
+                    times[i, 0, f] = static_cast<double>(std::numeric_limits<float>::lowest());
+                    for (size_t k = 0; k < nQty; ++k)
                     {
-                        const size_t src = std::min(j, nrow - 1);
-                        times[i, j, f] = track[src, ageIdx];
+                        fieldData[i, 0, f, k] = track[0, qtyIdx[k]];
+                    }
+
+                    for (size_t j = 1; j < nt; ++j)
+                    {
+                        const size_t src = std::min(j - 1, nrow - 1);
+                        // Some tracks record their first point at age = 0
+                        // (the pre-main-sequence/ZAMS starting point);
+                        // clamp to a 1 yr floor before taking log10 so
+                        // that this maps to 0 instead of -inf, which
+                        // would otherwise poison Mesh3DInterpolator's
+                        // (or the Mesh2DInterpolator slices it builds
+                        // on) arc-length computation with NaN
+                        times[i, j, f] = std::log10(std::max(track[src, ageIdx], 1.0));
                         for (size_t k = 0; k < nQty; ++k)
                         {
                             fieldData[i, j, f, k] = track[src, qtyIdx[k]];
@@ -358,6 +383,7 @@ namespace tracks
             }
             nt = std::max(nt, ntime);
         }
+        ++nt; // +1 for a synthetic sentinel point prepended in readAllTrackData
 
         // Suppress clang-tidy warnings iun this namespace caused by just
         // including hdf5.h, instead of the individual HDF5 headers,

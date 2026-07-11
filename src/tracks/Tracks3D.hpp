@@ -70,15 +70,15 @@ namespace tracks
         [[nodiscard]] auto mMax() const { return interp_->yMax(); }
 
         /**
-         * @brief Return the minimum time in the tracks
-         * @return Minimum time in the tracks
+         * @brief Return the minimum log of time in the tracks
+         * @return Minimum log10(time) in the tracks
          */
-        [[nodiscard]] auto tMin() const { return interp_->xMin(); }
+        [[nodiscard]] auto logTMin() const { return interp_->xMin(); }
         /**
-         * @brief Return the maximum time in the tracks
-         * @return Maximum time in the tracks
+         * @brief Return the maximum log of time in the tracks
+         * @return Maximum log10(time) in the tracks
          */
-        [[nodiscard]] auto tMax() const { return interp_->xMax(); }
+        [[nodiscard]] auto logTMax() const { return interp_->xMax(); }
 
         /**
          * @brief Return the [Fe/H] values spanned by this set of tracks
@@ -128,8 +128,8 @@ namespace tracks
         { return interp_->sliceConstZ(feh).interpConstY(m); }
 
         /**
-         * @brief Return the isochrone at a given time and [Fe/H]
-         * @param t The time of the isochrone
+         * @brief Return the isochrone at a given log time and [Fe/H]
+         * @param logT The log10(time) of the isochrone
          * @param feh [Fe/H] value of the tracks to use
          * @return A vector of unique_ptr to Interpolator1D's describing the isochrone
          * @details
@@ -137,8 +137,8 @@ namespace tracks
          * rather than a single one because for non-monotonic tracks there
          * may be multiple disjoint segments to the isochrone.
          */
-        [[nodiscard]] auto getIsochrone(const double t, const double feh) const
-        { return interp_->sliceConstZ(feh).interpConstX(t); }
+        [[nodiscard]] auto getIsochrone(const double logT, const double feh) const
+        { return interp_->sliceConstZ(feh).interpConstX(logT); }
 
         /**
          * @brief Construct a Tracks2D object for a slice at fixed [Fe/H]
