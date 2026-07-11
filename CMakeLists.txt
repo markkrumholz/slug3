@@ -161,6 +161,16 @@ add_test(NAME test_Utils COMMAND slugTestUtils)
 add_test(NAME test_Tracks COMMAND slugTestTracks
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+# Python binding tests: run via pytest, using the same Python interpreter
+# pybind11 built slugPython against, so that this always tests the module
+# that was just built rather than whatever "python" happens to be on PATH.
+# Requires pytest and numpy to be installed for that interpreter.
+add_test(NAME test_PythonBindings
+    COMMAND ${Python_EXECUTABLE} -m pytest ${CMAKE_SOURCE_DIR}/tests/pybind -v
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+set_tests_properties(test_PythonBindings PROPERTIES
+    ENVIRONMENT "PYTHONPATH=$<TARGET_FILE_DIR:slugPython>")
+
 # Add command to copy assets to build dir
 add_custom_command(
     TARGET slugTestPDFs POST_BUILD
