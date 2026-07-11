@@ -106,7 +106,7 @@ namespace tracks
         H5Sget_simple_extent_dims(space, dims.data(), nullptr);
         H5Sclose(space);
         H5Dclose(dset);
-        return dims[0];
+        return dims[0]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     }
 
     // NOLINTEND(misc-include-cleaner)
@@ -287,12 +287,15 @@ namespace tracks
         // whose feh values encompass [fehMin, fehMax]: from the last
         // index with feh <= fehMin (or index 0, if no feh is that low),
         // through the first index with feh >= fehMax (or the last
-        // index, if no feh is that high)
-        const auto loBound = std::ranges::upper_bound(matches, fehMin,
+        // index, if no feh is that high). std::ranges::upper_bound and
+        // lower_bound trip up misc-include-cleaner on some libc++
+        // versions (it can't find a header to attribute them to, even
+        // with <algorithm> already included), hence the NOLINTs below.
+        const auto loBound = std::ranges::upper_bound(matches, fehMin, //NOLINT(misc-include-cleaner)
             {}, &std::pair<double, std::string>::first);
         const size_t loIdx = (loBound == matches.begin()) ? 0 :
             static_cast<size_t>(loBound - matches.begin()) - 1;
-        const auto hiBound = std::ranges::lower_bound(matches, fehMax,
+        const auto hiBound = std::ranges::lower_bound(matches, fehMax, //NOLINT(misc-include-cleaner)
             {}, &std::pair<double, std::string>::first);
         const size_t hiIdx = (hiBound == matches.end()) ?
             matches.size() - 1 : static_cast<size_t>(hiBound - matches.begin());
@@ -311,8 +314,8 @@ namespace tracks
         nameOut.reserve(nOut);
         for (size_t idx = loIdxExpanded; idx <= hiIdxExpanded; ++idx)
         {
-            fehOut.push_back(matches[idx].first);
-            nameOut.push_back(std::move(matches[idx].second));
+            fehOut.push_back(matches.at(idx).first);
+            nameOut.push_back(std::move(matches.at(idx).second));
         }
 
         return { std::move(fehOut), std::move(nameOut) };

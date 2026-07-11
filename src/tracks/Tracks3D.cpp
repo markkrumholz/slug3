@@ -16,7 +16,7 @@
 #include <format>
 #include <gsl/gsl_interp.h>
 #include <iterator>
-#include <mdspan>
+#include <mdspan>  // NOLINT(misc-include-cleaner)
 #include <memory>
 #include <ranges>
 #include <stdexcept>
@@ -297,7 +297,11 @@ namespace tracks
             gsl_interp_type_min_size(gsl_interp_steffen) / 2);
         auto [fehVals, groupNames] = findMatchingTracks(
             registryName, trackName, fehMin, fehMax, vvcrit, afe, nExpand);
-        FeH_ = std::move(fehVals);
+        // fehVals can't be moved into the member initializer list for
+        // FeH_ because it's produced by the same findMatchingTracks call
+        // that also yields groupNames, which is needed throughout the
+        // rest of this constructor
+        FeH_ = std::move(fehVals); //NOLINT(cppcoreguidelines-prefer-member-initializer)
         const size_t nfeh = FeH_.size();
         if (nfeh == 0)
         {
