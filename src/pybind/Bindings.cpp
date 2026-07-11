@@ -89,7 +89,7 @@ PYBIND11_MODULE(slug, m, py::mod_gil_not_used()) {
                 "points; raises RuntimeError if name is not recognized",
                 py::arg("x"), py::arg("name"));
 
-    py::class_<tracks::Tracks3D, py::smart_holder>(m, "Tracks3D")
+    py::class_<tracks::Tracks3D, py::smart_holder>(m, "Tracks")
         .def(py::init<
                 const std::string&, // registryName
                 const std::string&, // trackName
@@ -98,7 +98,7 @@ PYBIND11_MODULE(slug, m, py::mod_gil_not_used()) {
                 double,             // vvcrit
                 double              // afe
                 >(),
-                "Construct a Tracks3D object from tracks on disk",
+                "Construct a Tracks object from tracks on disk",
                 py::arg("registryName"),
                 py::arg("trackName"),
                 py::arg("fehMin"),
