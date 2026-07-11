@@ -295,8 +295,30 @@ namespace tracks
         // GSL, so this can't be made constexpr.
         const auto nExpand = static_cast<unsigned int>(
             gsl_interp_type_min_size(gsl_interp_steffen) / 2);
-        auto [fehVals, groupNames] = findMatchingTracks(
-            registryName, trackName, fehMin, fehMax, vvcrit, afe, nExpand);
+
+        // Special case: if fehMin and fehMax are exactly equal, and a
+        // track set exists at exactly that [Fe/H] value, load only
+        // that single slice instead of expanding by nExpand
+        // neighboring tracks. This is intentionally an exact (not
+        // approximate) comparison, since the optimization only applies
+        // when the requested value lands precisely on a grid point.
+        // The resulting mesh is one element wide in the feh direction,
+        // which Mesh3DInterpolator handles as a degenerate case that
+        // needs no neighboring points to interpolate across, making
+        // the expansion needed elsewhere to support GSL's steffen
+        // interpolation unnecessary here.
+        auto matchResult = std::pair<std::vector<double>, std::vector<std::string>>{};
+        if (fehMin == fehMax)
+        {
+            matchResult = findMatchingTracks(
+                registryName, trackName, fehMin, fehMax, vvcrit, afe, 0);
+        }
+        if (matchResult.first.size() != 1 || matchResult.first.front() != fehMin)
+        {
+            matchResult = findMatchingTracks(
+                registryName, trackName, fehMin, fehMax, vvcrit, afe, nExpand);
+        }
+        auto [fehVals, groupNames] = std::move(matchResult);
         // fehVals can't be moved into the member initializer list for
         // FeH_ because it's produced by the same findMatchingTracks call
         // that also yields groupNames, which is needed throughout the
