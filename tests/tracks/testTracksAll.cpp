@@ -9,6 +9,7 @@
 
 #include "testTrackUtils.hpp"
 #include "testTracks2D.hpp"
+#include "testTracks3D.hpp"
 #include <exception>
 #include <iostream>
 
@@ -17,6 +18,7 @@ auto main() -> int {
     {
         int result = 0;
         result += testTracks2D();
+        result += testTracks3D();
         result += testTrackUtils();
         return result;
     }

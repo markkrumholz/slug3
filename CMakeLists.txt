@@ -44,6 +44,7 @@ add_executable(slug
     src/pdfs/PDFSegmentPowerlaw.cpp
     src/pdfs/PDFSegmentSchechter.cpp
     src/tracks/Tracks2D.cpp
+    src/tracks/Tracks3D.cpp
     src/tracks/TrackUtils.cpp
 )
 
@@ -76,6 +77,7 @@ add_executable(slugTestTracks
     src/interpolation/Mesh2DGrid.cpp
     src/tracks/TrackUtils.cpp
     src/tracks/Tracks2D.cpp
+    src/tracks/Tracks3D.cpp
     tests/tracks/testTracksAll.cpp
 )
 

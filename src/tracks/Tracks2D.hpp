@@ -71,23 +71,23 @@ namespace tracks
          * @brief Return the minimum mass in the tracks
          * @return Minimum mass in the tracks
          */
-        [[nodiscard]] auto mMin() const { return interp_->xMin(); }
+        [[nodiscard]] auto mMin() const { return interp_->yMin(); }
         /**
          * @brief Return the maximum mass in the tracks
          * @return Maximum mass in the tracks
          */
-        [[nodiscard]] auto mMax() const { return interp_->xMax(); }
+        [[nodiscard]] auto mMax() const { return interp_->yMax(); }
 
         /**
          * @brief Return the minimum time in the tracks
          * @return Minimum time in the tracks
          */
-        [[nodiscard]] auto tMin() const { return interp_->yMin(); }
+        [[nodiscard]] auto tMin() const { return interp_->xMin(); }
         /**
-         * @brief Return the minimum time in the tracks
-         * @return Minimum time in the tracks
+         * @brief Return the maximum time in the tracks
+         * @return Maximum time in the tracks
          */
-        [[nodiscard]] auto tMax() const { return interp_->yMax(); }
+        [[nodiscard]] auto tMax() const { return interp_->xMax(); }
 
         /**
          * @brief Return the [Fe/H] value of this set of tracks
