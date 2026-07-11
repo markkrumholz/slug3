@@ -172,7 +172,7 @@ namespace tracks
         return std::make_pair(registry, registryPath);
     }
 
-    auto findMatchingTracks(
+    auto findMatchingTracks( // NOLINT(readability-function-cognitive-complexity)
         const std::string& registryName,
         const std::string& trackName,
         const double fehMin,
@@ -299,7 +299,7 @@ namespace tracks
 
         // Expand the bracketing range by nExpand tracks on each side,
         // silently limiting the expansion to the available range
-        const size_t nExpandSz = static_cast<size_t>(nExpand);
+        const auto nExpandSz = static_cast<size_t>(nExpand);
         const size_t loIdxExpanded = (nExpandSz >= loIdx) ? 0 : loIdx - nExpandSz;
         const size_t hiIdxExpanded = std::min(matches.size() - 1, hiIdx + nExpandSz);
 
