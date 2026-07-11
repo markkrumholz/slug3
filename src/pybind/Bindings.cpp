@@ -10,6 +10,7 @@
 
 #include "../extern/pybind11/include/pybind11/numpy.h"
 #include "../extern/pybind11/include/pybind11/pybind11.h"
+#include "../extern/pybind11/include/pybind11/stl.h"
 #include "../interpolation/Interpolator1D.hpp"
 #include "../tracks/TrackCommons.hpp"
 #include "../tracks/Tracks2D.hpp"
@@ -62,14 +63,34 @@ PYBIND11_MODULE(slug, m, py::mod_gil_not_used()) {
         .def("xRange", &Interp1D::xRange,
                 "Get allowed range in x")
         .def("__call__",
-                static_cast<std::array<double, nQty> (Interp1D::*)(double) const>(
-                    &Interp1D::operator()),
+                [](const Interp1D& self, const double x) -> std::array<double, nQty>
+                {
+                    if (x < self.xMin() || x > self.xMax())
+                    {
+                        throw std::runtime_error(
+                            "Interpolator1D: x = " + std::to_string(x) +
+                            " is outside the allowed range [" +
+                            std::to_string(self.xMin()) + ", " +
+                            std::to_string(self.xMax()) + "]");
+                    }
+                    return self(x);
+                },
                 "Interpolate to a given point",
                 py::arg("x"))
         .def("__call__",
                 py::vectorize(
-                    static_cast<double (Interp1D::*)(double, std::size_t) const>(
-                        &Interp1D::operator())),
+                    [](const Interp1D* self, const double x, const std::size_t idx) -> double
+                    {
+                        if (x < self->xMin() || x > self->xMax())
+                        {
+                            throw std::runtime_error(
+                                "Interpolator1D: x = " + std::to_string(x) +
+                                " is outside the allowed range [" +
+                                std::to_string(self->xMin()) + ", " +
+                                std::to_string(self->xMax()) + "]");
+                        }
+                        return (*self)(x, idx);
+                    }),
                 "Interpolate a single quantity to a given point, or "
                 "elementwise over numpy arrays of points and/or indices "
                 "(which broadcast against each other, so e.g. an array of "
@@ -84,6 +105,14 @@ PYBIND11_MODULE(slug, m, py::mod_gil_not_used()) {
                         {
                             throw std::runtime_error(
                                 "Interpolator1D: unrecognized field name " + name);
+                        }
+                        if (x < self->xMin() || x > self->xMax())
+                        {
+                            throw std::runtime_error(
+                                "Interpolator1D: x = " + std::to_string(x) +
+                                " is outside the allowed range [" +
+                                std::to_string(self->xMin()) + ", " +
+                                std::to_string(self->xMax()) + "]");
                         }
                         const auto idx = static_cast<std::size_t>(
                             std::distance(tracks::fieldStr.begin(), it));
@@ -125,7 +154,19 @@ PYBIND11_MODULE(slug, m, py::mod_gil_not_used()) {
                 "Return the [alpha/Fe] value of this set of tracks")
         .def("vVcrit", &tracks::Tracks3D::vVcrit,
                 "Return the v/vcrit value of this set of tracks")
-        .def("getTrack", &tracks::Tracks3D::getTrack,
+        .def("getTrack",
+                [](const tracks::Tracks3D& self, const double m, const double feh)
+                {
+                    if (m < self.mMin() || m > self.mMax())
+                    {
+                        throw std::runtime_error(
+                            "Tracks3D: mass = " + std::to_string(m) +
+                            " is outside the allowed range [" +
+                            std::to_string(self.mMin()) + ", " +
+                            std::to_string(self.mMax()) + "]");
+                    }
+                    return self.getTrack(m, feh);
+                },
                 "Return the track for a star of a given mass and [Fe/H]",
                 py::arg("m"), py::arg("feh"))
         .def("getIsochrone",
@@ -181,7 +222,19 @@ PYBIND11_MODULE(slug, m, py::mod_gil_not_used()) {
         .def("liveMassRange", &tracks::Tracks2D::liveMassRange,
                 "Return the range of stellar masses alive at a given time",
                 py::arg("t"))
-        .def("getTrack", &tracks::Tracks2D::getTrack,
+        .def("getTrack",
+                [](const tracks::Tracks2D& self, const double m)
+                {
+                    if (m < self.mMin() || m > self.mMax())
+                    {
+                        throw std::runtime_error(
+                            "Tracks2D: mass = " + std::to_string(m) +
+                            " is outside the allowed range [" +
+                            std::to_string(self.mMin()) + ", " +
+                            std::to_string(self.mMax()) + "]");
+                    }
+                    return self.getTrack(m);
+                },
                 "Return the track for a star of a given mass",
                 py::arg("m"))
         .def("getIsochrone",
