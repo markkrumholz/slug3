@@ -8,15 +8,61 @@
  * the functionality of slug.
  */
 
+#include "../interpolation/Interpolator1D.hpp"
+#include "../tracks/TrackCommons.hpp"
 #include "../tracks/Tracks3D.hpp"
 #include "../extern/pybind11/include/pybind11/pybind11.h"
 #include "../extern/pybind11/include/pybind11/stl.h"
+#include <array>
+#include <cstddef>
 #include <string>
+#include <vector>
 
 namespace py = pybind11;
 
+// Number of quantities tabulated at each track point; this is the NF
+// value Tracks3D uses internally for both Mesh3DInterpolator and the
+// Interpolator1D objects its getTrack()/getIsochrone() methods return.
+constexpr std::size_t nQty = static_cast<std::size_t>(tracks::FieldIdx::nTrackQty);
+
+// pybind11 binds concrete types, not class templates, so
+// Interpolator1D can't be bound directly. Explicitly instantiating it
+// here, with the same NF value Tracks3D uses, forces the compiler to
+// generate the full class definition -- including every member
+// function referenced in the bindings below -- in this translation
+// unit for pybind11 to bind against.
+template class interp::Interpolator1D<nQty>;
+using Interp1D = interp::Interpolator1D<nQty>;
+
 PYBIND11_MODULE(slug, m, py::mod_gil_not_used()) {
     m.doc() = "slug Python frontend"; // optional module docstring
+
+    py::class_<Interp1D, py::smart_holder>(m, "Interpolator1D")
+        .def(py::init<
+                const std::vector<double>&,                   // x
+                const std::array<std::vector<double>, nQty>&  // f
+                >(),
+                "Construct an Interpolator1D",
+                py::arg("x"),
+                py::arg("f")
+        )
+        .def("xMin", &Interp1D::xMin,
+                "Get minimum allowed x")
+        .def("xMax", &Interp1D::xMax,
+                "Get maximum allowed x")
+        .def("xRange", &Interp1D::xRange,
+                "Get allowed range in x")
+        .def("__call__",
+                static_cast<std::array<double, nQty> (Interp1D::*)(double) const>(
+                    &Interp1D::operator()),
+                "Interpolate to a given point",
+                py::arg("x"))
+        .def("__call__",
+                static_cast<double (Interp1D::*)(double, std::size_t) const>(
+                    &Interp1D::operator()),
+                "Interpolate a single quantity to a given point",
+                py::arg("x"), py::arg("idx"));
+
     py::class_<tracks::Tracks3D, py::smart_holder>(m, "Tracks3D")
         .def(py::init<
                 const std::string&, // registryName
@@ -47,5 +93,11 @@ PYBIND11_MODULE(slug, m, py::mod_gil_not_used()) {
         .def("aFe", &tracks::Tracks3D::aFe,
                 "Return the [alpha/Fe] value of this set of tracks")
         .def("vVcrit", &tracks::Tracks3D::vVcrit,
-                "Return the v/vcrit value of this set of tracks");
+                "Return the v/vcrit value of this set of tracks")
+        .def("getTrack", &tracks::Tracks3D::getTrack,
+                "Return the track for a star of a given mass and [Fe/H]",
+                py::arg("m"), py::arg("feh"))
+        .def("getIsochrone", &tracks::Tracks3D::getIsochrone,
+                "Return the isochrone at a given time and [Fe/H]",
+                py::arg("t"), py::arg("feh"));
 }

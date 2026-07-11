@@ -215,14 +215,23 @@ namespace tracks
                 "Tracks2D: group has no 'age' field");
         }
         auto ageIdx = std::distance(fieldNames.begin(), it);
-        std::vector<size_t> qtyIdx;
-        for (const auto& fName : fieldNames)
+        // qtyIdx must be indexed by canonical FieldIdx position (i.e.
+        // qtyIdx[k] is the on-disk column holding quantity k), since
+        // the second pass below looks up track[src, qtyIdx[k]] for
+        // each canonical k. Building it by iterating fieldNames in
+        // on-disk order and assigning into the slot for each column's
+        // canonical index -- rather than appending canonical indices
+        // in on-disk order -- is what makes that true.
+        std::vector<size_t> qtyIdx(fieldStr.size());
+        size_t nQtyFound = 0;
+        for (size_t col = 0; col < fieldNames.size(); ++col)
         {
-            const auto* itf = std::ranges::find(fieldStr.begin(), fieldStr.end(), fName);
+            const auto* itf = std::ranges::find(fieldStr.begin(), fieldStr.end(), fieldNames[col]);
             if (itf == fieldStr.end()) { continue; }
-            qtyIdx.push_back(std::distance(fieldStr.begin(), itf));
+            qtyIdx[static_cast<size_t>(std::distance(fieldStr.begin(), itf))] = col;
+            ++nQtyFound;
         }
-        if (qtyIdx.size() != fieldStr.size())
+        if (nQtyFound != fieldStr.size())
         {
             throw std::runtime_error(
                 "Tracks2D: too few quantities found"
