@@ -11,6 +11,7 @@
 #include "../interpolation/Interpolator1D.hpp"
 #include "../tracks/TrackCommons.hpp"
 #include "../tracks/Tracks3D.hpp"
+#include "../extern/pybind11/include/pybind11/numpy.h"
 #include "../extern/pybind11/include/pybind11/pybind11.h"
 #include "../extern/pybind11/include/pybind11/stl.h"
 #include <array>
@@ -58,9 +59,13 @@ PYBIND11_MODULE(slug, m, py::mod_gil_not_used()) {
                 "Interpolate to a given point",
                 py::arg("x"))
         .def("__call__",
-                static_cast<double (Interp1D::*)(double, std::size_t) const>(
-                    &Interp1D::operator()),
-                "Interpolate a single quantity to a given point",
+                py::vectorize(
+                    static_cast<double (Interp1D::*)(double, std::size_t) const>(
+                        &Interp1D::operator())),
+                "Interpolate a single quantity to a given point, or "
+                "elementwise over numpy arrays of points and/or indices "
+                "(which broadcast against each other, so e.g. an array of "
+                "x with idx=range(9) returns all quantities for every x)",
                 py::arg("x"), py::arg("idx"));
 
     py::class_<tracks::Tracks3D, py::smart_holder>(m, "Tracks3D")
