@@ -10,10 +10,10 @@
 
 #include "TrackCommons.hpp"
 #include "../interpolation/Mesh2DInterpolator.hpp"
-#include "H5Ipublic.h"
 #include <cstddef>
 #include <limits>
 #include <memory>
+#include <string>
 #include <utility>
 
 namespace tracks
@@ -34,18 +34,31 @@ namespace tracks
 
         // Constructors and destructors
         /**
-         * @brief Construct a Tracks2D object by reading from a track file
-         * @param grp An HDF5 file handle to the group
+         * @brief Construct a Tracks2D object from tracks on disk
+         * @param trackName Name of track set
+         * @param feh [Fe/H] value
+         * @param vvcrit Rotation rate v/vcrit
+         * @param afe Value of [alpha/Fe]
+         * @param registryName Name of the track registry file
          * @param ntMin If specified, minimum number of times in the tracks
          * @details
-         * Tracks are stored for each mass, and the number of time
-         * points may not be the same for every mass. Tracks with fewer
-         * time points will be padded at the end so that the final
-         * set of times and stellar properties are square arrays. If
-         * ntMin is specified, this gives the minimum number of times in
-         * the tracks, so tracks will be padded to at least this length.
+         * Uses findTrack to locate the unique track in track set
+         * trackName matching feh, vvcrit, and afe, and throws a
+         * runtime error if no such track can be found. Tracks are
+         * stored for each mass, and the number of time points may not
+         * be the same for every mass. Tracks with fewer time points
+         * will be padded at the end so that the final set of times and
+         * stellar properties are square arrays. If ntMin is specified,
+         * this gives the minimum number of times in the tracks, so
+         * tracks will be padded to at least this length.
         */
-        Tracks2D(hid_t grp, size_t ntMin = 0);
+        Tracks2D(
+            const std::string& trackName,
+            double feh = 0.0,
+            double vvcrit = 0.0,
+            double afe = 0.0,
+            const std::string& registryName = defaultRegistry,
+            size_t ntMin = 0);
         /**
          * @brief Construct a Tracks2D object from a supplied Mesh2DInterpolator
          * @param m2d A unique_ptr to the interpolator from which to construct the track
