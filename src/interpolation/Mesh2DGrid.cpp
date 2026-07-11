@@ -1255,6 +1255,26 @@ namespace interp
     }
 
 
+    // Helper for yIntersect: handle the case where y is exactly at
+    // the mesh's lower or upper boundary
+    auto Mesh2DGrid::yIntersectBoundaryColumn(
+        const double y,
+        const double xLo,
+        const double xHi
+    ) const -> std::vector<yIntersectionDescriptor>
+    {
+        std::vector<yIntersectionDescriptor> intList; // Output holder
+
+        const size_t j = (y == yMin_) ? 0 : ny() - 1;
+        for (size_t i = 0; i < nx(); ++i)
+        {
+            const double xi = x_[i,j];
+            if (xi < xLo || xi > xHi) { continue; }
+            intList.push_back({ .x = xi, .s = s_[i,j], .idx = i });
+        }
+        return intList;
+    }
+
     // Find mesh intersections at constant y
     auto Mesh2DGrid::yIntersect(
         const double y,
@@ -1270,28 +1290,14 @@ namespace interp
         const double xMaxY = xMax(y);
         if (xHi < xMinY || xLo > xMaxY) { return intList; }
 
-        // Special case: at the exact top or bottom boundary, the line
-        // y = const lies exactly on a single mass column (j = 0 or
-        // ny()-1), so its intersections are just that column's own
-        // (x, s) values at every row. yIdx's boundary clamp (needed so
-        // it always returns a valid cell-start index) forces a
-        // nonzero offset from that column here, unlike every interior
-        // exact grid mass (where the offset is naturally zero), so
-        // computing intersections via the general dy/m_ traversal
-        // below is not just unnecessary but, when the boundary cell
-        // happens to be degenerate (collapsed), can corrupt the
-        // result; reading the column off directly sidesteps that
-        // entirely.
+        // Special case: at the exact top or bottom boundary, delegate
+        // to a helper that reads the boundary column's own (x, s)
+        // values directly, rather than the general cell-offset
+        // traversal below (see yIntersectBoundaryColumn's docstring
+        // for why that traversal is unsafe at this boundary)
         if (y == yMin_ || y == yMax_)
         {
-            const size_t j = (y == yMin_) ? 0 : ny() - 1;
-            for (size_t i = 0; i < nx(); ++i)
-            {
-                const double xi = x_[i,j];
-                if (xi < xLo || xi > xHi) { continue; }
-                intList.push_back({ .x = xi, .s = s_[i,j], .idx = i });
-            }
-            return intList;
+            return yIntersectBoundaryColumn(y, xLo, xHi);
         }
 
         // Get y index and offset of input y value
