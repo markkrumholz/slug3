@@ -39,7 +39,7 @@ inline auto testTracks3D() -> int
     try
     {
         const tracks::Tracks3D tracks3d(
-            registryName, trackName, -0.5, 0.0, 0.0, -0.2);
+            trackName, -0.5, 0.0, 0.0, -0.2, registryName);
     }
     catch (const std::exception& e)
     {
@@ -114,7 +114,7 @@ inline auto testTracks3DFieldOrder() -> int
         const auto [age, expected] = testutil::readRawFields(grp, mass, rowIdx);
 
         const tracks::Tracks3D tracks3d(
-            registryName, trackName, feh, feh, 0.0, -0.2);
+            trackName, feh, feh, 0.0, -0.2, registryName);
         const auto track = tracks3d.getTrack(mass, feh);
         if (!track)
         {

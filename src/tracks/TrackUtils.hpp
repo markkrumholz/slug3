@@ -9,6 +9,7 @@
 #define TRACKUTILS_HPP
 
 #include "../extern/tomlplusplus/toml.hpp"
+#include "TrackCommons.hpp"
 #include <filesystem>
 #include <string>
 #include <utility>
@@ -27,12 +28,11 @@ namespace tracks
      * file, and contains the minimum set of required entries. It
      * throws a runtime error if any of these conditions are not met.
      */
-    auto parseRegistry(const std::string& registryName)
+    auto parseRegistry(const std::string& registryName = defaultRegistry)
     -> std::pair<toml::table, std::filesystem::path>;
 
     /**
      * @brief Get list of HDF5 groups containing tracks matching given inputs
-     * @param registryName Name of the track registry file
      * @param trackName Name of track set
      * @param fehMin Minimum [Fe/H] value
      * @param fehMax Maximum [Fe/H] value
@@ -40,6 +40,7 @@ namespace tracks
      * @param afe Value of [alpha/Fe]
      * @param nExpand Number of extra tracks to include on each side of
      *                the [fehMin, fehMax] range
+     * @param registryName Name of the track registry file
      * @returns A pair consisting of a vector of [Fe/H] values and corresponding group names
      * @details
      * Among the tracks matching vvcrit and afe (see findMatchingTracks
@@ -54,13 +55,13 @@ namespace tracks
      * tracks to expand by the full amount requested.
      */
     auto findMatchingTracks(
-        const std::string& registryName,
         const std::string& trackName,
         double fehMin,
         double fehMax,
         double vvcrit = 0.0,
         double afe = 0.0,
-        unsigned int nExpand = 0)
+        unsigned int nExpand = 0,
+        const std::string& registryName = defaultRegistry)
     -> std::pair<std::vector<double>, std::vector<std::string>>;
 
     /**

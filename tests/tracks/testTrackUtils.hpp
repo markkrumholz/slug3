@@ -101,7 +101,7 @@ inline auto testFindMatchingTracks() -> int
         // Full feh range, with vvcrit and afe matching every group:
         // expect all 5 groups, sorted from lowest to highest feh
         auto [feh, names] = tracks::findMatchingTracks(
-            registryName, trackName, -2.0, 2.0, 0.0, -0.2);
+            trackName, -2.0, 2.0, 0.0, -0.2, 0, registryName);
         const std::vector<double> expectedFeh =
             { -1.0, -0.5, -0.25, 0.0, 0.5 };
         if (feh != expectedFeh || names.size() != expectedFeh.size())
@@ -124,7 +124,7 @@ inline auto testFindMatchingTracks() -> int
         // and 0.0 (not just -0.25, which is the only value that would
         // fall strictly inside [-0.4, -0.1])
         auto [fehBracket, namesBracket] = tracks::findMatchingTracks(
-            registryName, trackName, -0.4, -0.1, 0.0, -0.2);
+            trackName, -0.4, -0.1, 0.0, -0.2, 0, registryName);
         const std::vector<double> expectedBracket = { -0.5, -0.25, 0.0 };
         if (fehBracket != expectedBracket ||
             namesBracket.size() != expectedBracket.size())
@@ -140,7 +140,7 @@ inline auto testFindMatchingTracks() -> int
         // 5 groups, since there is exactly one group beyond each edge
         // of the unexpanded bracket)
         auto [fehExpand1, namesExpand1] = tracks::findMatchingTracks(
-            registryName, trackName, -0.4, -0.1, 0.0, -0.2, 1);
+            trackName, -0.4, -0.1, 0.0, -0.2, 1, registryName);
         if (fehExpand1 != expectedFeh ||
             namesExpand1.size() != expectedFeh.size())
         {
@@ -152,7 +152,7 @@ inline auto testFindMatchingTracks() -> int
         // A large nExpand should be silently clamped to the available
         // range rather than erroring out
         auto [fehExpandBig, namesExpandBig] = tracks::findMatchingTracks(
-            registryName, trackName, -0.4, -0.1, 0.0, -0.2, 100);
+            trackName, -0.4, -0.1, 0.0, -0.2, 100, registryName);
         if (fehExpandBig != expectedFeh ||
             namesExpandBig.size() != expectedFeh.size())
         {
@@ -164,7 +164,7 @@ inline auto testFindMatchingTracks() -> int
         // Every group in this file has an afe attribute, so an afe
         // value that matches none of them should return no groups
         auto [fehNoMatch, namesNoMatch] = tracks::findMatchingTracks(
-            registryName, trackName, -2.0, 2.0, 0.0, 0.0);
+            trackName, -2.0, 2.0, 0.0, 0.0, 0, registryName);
         if (!namesNoMatch.empty() || !fehNoMatch.empty())
         {
             std::cerr << "testFindMatchingTracks: expected no matches "
@@ -184,7 +184,7 @@ inline auto testFindMatchingTracks() -> int
     try
     {
         tracks::findMatchingTracks(
-            registryName, "NoSuchTrackSet", -2.0, 2.0);
+            "NoSuchTrackSet", -2.0, 2.0, 0.0, 0.0, 0, registryName);
         std::cerr << "testFindMatchingTracks: expected an exception for "
             "an unknown track set, but none was thrown\n";
         return 1;

@@ -173,13 +173,13 @@ namespace tracks
     }
 
     auto findMatchingTracks( // NOLINT(readability-function-cognitive-complexity)
-        const std::string& registryName,
         const std::string& trackName,
         const double fehMin,
         const double fehMax,
         const double vvcrit,
         const double afe,
-        const unsigned int nExpand)
+        const unsigned int nExpand,
+        const std::string& registryName)
     -> std::pair<std::vector<double>, std::vector<std::string>>
     {
         // First parse the registry

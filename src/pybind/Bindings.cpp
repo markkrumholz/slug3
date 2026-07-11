@@ -94,20 +94,20 @@ PYBIND11_MODULE(slug, m, py::mod_gil_not_used()) {
 
     py::class_<tracks::Tracks3D, py::smart_holder>(m, "Tracks")
         .def(py::init<
-                const std::string&, // registryName
                 const std::string&, // trackName
                 double,             // fehMin
                 double,             // fehMax
                 double,             // vvcrit
-                double              // afe
+                double,             // afe
+                const std::string&  // registryName
                 >(),
                 "Construct a Tracks object from tracks on disk",
-                py::arg("registryName"),
                 py::arg("trackName"),
                 py::arg("fehMin"),
                 py::arg("fehMax"),
                 py::arg("vvcrit") = 0,
-                py::arg("afe") = 0
+                py::arg("afe") = 0,
+                py::arg("registryName") = tracks::defaultRegistry
         )
         .def("mMin", &tracks::Tracks3D::mMin,
                 "Return the minimum mass in the tracks")
