@@ -14,6 +14,7 @@
 #define TESTTRACKS2D_HPP
 
 #include "../../src/tracks/Tracks2D.hpp"
+#include "trackFieldFixture.hpp"
 #include "hdf5.h"  // NOLINT(misc-include-cleaner)
 #include <array>
 #include <cstddef>
@@ -166,6 +167,93 @@ inline auto testTracks2DGetters() -> int
 }
 
 /**
+ * @brief Regression test that getTrack() returns fields in the
+ *   correct order.
+ * @return 0 if the test passes, 1 if it fails.
+ * @details
+ * This is a regression test for a bug in which the columns of field
+ * data read from an HDF5 track file were mismatched against their
+ * canonical tracks::FieldIdx order, because the age column (present
+ * in every track dataset, but not one of the nQty tracked
+ * quantities) was not properly accounted for when mapping canonical
+ * field index to on-disk column. It constructs a Tracks2D object from
+ * the feh_0.00_afe_-0.2_vvcrit_0.00 group of
+ * tests/tracks/assets/MIST_test.h5, calls getTrack() for mass = 5.0
+ * (an exact point on that group's mass grid), and evaluates the
+ * result at the exact age of an arbitrary interior row of the raw
+ * track_m5.000 dataset. Since mass = 5.0 is on the mesh's mass grid
+ * and the query age is on that mass's own age grid, the interpolated
+ * result should reproduce the raw row exactly (up to floating-point
+ * round-off); the raw row itself is read independently of the
+ * Tracks2D field-mapping logic via trackFieldFixture.hpp, so this
+ * test does not depend on that logic being correct to establish its
+ * expectations.
+ */
+inline auto testTracks2DFieldOrder() -> int
+{
+    const std::string path = "tests/tracks/assets/MIST_test.h5";
+    const std::string groupName = "feh_0.00_afe_-0.2_vvcrit_0.00";
+    constexpr double mass = 5.0;
+    constexpr size_t rowIdx = 500;
+
+    const hid_t file = H5Fopen(path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+    if (file < 0)
+    {
+        std::cerr << "testTracks2DFieldOrder: unable to open file "
+            << path << "\n";
+        return 1;
+    }
+    const hid_t grp = H5Gopen2(file, groupName.c_str(), H5P_DEFAULT);
+    if (grp < 0)
+    {
+        std::cerr << "testTracks2DFieldOrder: unable to open group "
+            << groupName << " in " << path << "\n";
+        H5Fclose(file);
+        return 1;
+    }
+
+    int result = 0;
+    try
+    {
+        const auto [age, expected] = testutil::readRawFields(grp, mass, rowIdx);
+
+        const tracks::Tracks2D tracks2d(grp);
+        const auto track = tracks2d.getTrack(mass);
+        if (!track)
+        {
+            std::cerr << "testTracks2DFieldOrder: getTrack(" << mass
+                << ") returned null\n";
+            result = 1;
+        }
+        else
+        {
+            const auto actual = (*track)(age);
+            for (size_t k = 0; k < testutil::nQty; ++k)
+            {
+                if (!testutil::fieldsMatch(actual.at(k), expected.at(k)))
+                {
+                    std::cerr << "testTracks2DFieldOrder: field "
+                        << tracks::fieldStr.at(k) << " (index " << k
+                        << ") mismatch: expected " << expected.at(k)
+                        << ", got " << actual.at(k) << "\n";
+                    result = 1;
+                }
+            }
+        }
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "testTracks2DFieldOrder: unexpected exception: "
+            << e.what() << "\n";
+        result = 1;
+    }
+
+    H5Gclose(grp);
+    H5Fclose(file);
+    return result;
+}
+
+/**
  * @brief Unit test for the Tracks2D class.
  * @return 0 if the test passes, 1 if it fails.
  * @details
@@ -181,7 +269,8 @@ inline auto testTracks2DGetters() -> int
  * of the files are found (since then nothing was actually tested), or
  * if any file that is found fails to produce a valid Tracks2D object.
  * It also tests the feH(), aFe(), and vVcrit() getters against the
- * known metadata of the MIST_test.h5 group.
+ * known metadata of the MIST_test.h5 group, and that getTrack()
+ * returns fields in the correct order (see testTracks2DFieldOrder()).
  */
 inline auto testTracks2D() -> int
 {
@@ -220,6 +309,7 @@ inline auto testTracks2D() -> int
 
     int result = anyFailed ? 1 : 0;
     if (testTracks2DGetters() != 0) { result = 1; }
+    if (testTracks2DFieldOrder() != 0) { result = 1; }
     return result;
 }
 

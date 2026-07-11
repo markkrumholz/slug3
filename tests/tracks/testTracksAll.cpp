@@ -19,6 +19,7 @@ auto main() -> int {
         int result = 0;
         result += testTracks2D();
         result += testTracks3D();
+        result += testTracks3DFieldOrder();
         result += testTrackUtils();
         return result;
     }

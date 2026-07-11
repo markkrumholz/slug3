@@ -31,6 +31,9 @@ if(NOT OpenMP_CXX_FOUND)
     message(WARNING "OpenMP not found: building without threading support")
 endif()
 
+# pybind11, for the Python frontend
+add_subdirectory(src/extern/pybind11)
+
 # Main executable
 add_executable(slug 
     src/main.cpp
@@ -81,29 +84,46 @@ add_executable(slugTestTracks
     tests/tracks/testTracksAll.cpp
 )
 
+# Python module, for testing the Python frontend. The CMake target is named
+# slugPython (the "slug" target name is already taken by the main
+# executable), but the output module file is named slug to match the
+# PYBIND11_MODULE name in Bindings.cpp.
+pybind11_add_module(slugPython
+    src/pybind/Bindings.cpp
+    src/interpolation/Mesh2DGrid.cpp
+    src/tracks/TrackUtils.cpp
+    src/tracks/Tracks2D.cpp
+    src/tracks/Tracks3D.cpp
+)
+set_target_properties(slugPython PROPERTIES OUTPUT_NAME slug)
+
 # Include directories: project headers as regular includes, pcg-cpp as a
 # system include so clang-tidy and the compiler suppress warnings from it.
 target_include_directories(slug PRIVATE src)
-target_include_directories(slug SYSTEM PRIVATE src/pcg-cpp/include)
+target_include_directories(slug SYSTEM PRIVATE src/extern/pcg-cpp/include)
 
 target_include_directories(slugTestInterpolation PRIVATE src)
-target_include_directories(slugTestInterpolation SYSTEM PRIVATE src/pcg-cpp/include)
+target_include_directories(slugTestInterpolation SYSTEM PRIVATE src/extern/pcg-cpp/include)
 
 target_include_directories(slugTestPDFs PRIVATE src)
-target_include_directories(slugTestPDFs SYSTEM PRIVATE src/pcg-cpp/include)
+target_include_directories(slugTestPDFs SYSTEM PRIVATE src/extern/pcg-cpp/include)
 
 
 target_include_directories(slugTestUtils PRIVATE src)
-target_include_directories(slugTestUtils SYSTEM PRIVATE src/pcg-cpp/include)
+target_include_directories(slugTestUtils SYSTEM PRIVATE src/extern/pcg-cpp/include)
 
 target_include_directories(slugTestTracks PRIVATE src)
-target_include_directories(slugTestTracks SYSTEM PRIVATE src/pcg-cpp/include)
+target_include_directories(slugTestTracks SYSTEM PRIVATE src/extern/pcg-cpp/include)
+
+target_include_directories(slugPython PRIVATE src)
+target_include_directories(slugPython SYSTEM PRIVATE src/extern/pcg-cpp/include)
 
 target_include_directories(slug SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestInterpolation SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestPDFs SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestUtils SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestTracks SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
+target_include_directories(slugPython SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 
 # Link to GSL
 target_link_libraries(slug PRIVATE GSL::gsl)
@@ -111,6 +131,7 @@ target_link_libraries(slugTestInterpolation PRIVATE GSL::gsl)
 target_link_libraries(slugTestPDFs PRIVATE GSL::gsl)
 target_link_libraries(slugTestUtils PRIVATE GSL::gsl)
 target_link_libraries(slugTestTracks PRIVATE GSL::gsl)
+target_link_libraries(slugPython PRIVATE GSL::gsl)
 
 # Link to HDF5
 target_link_libraries(slug PRIVATE ${HDF5_CXX_LIBRARIES})
@@ -118,6 +139,7 @@ target_link_libraries(slugTestInterpolation PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugTestPDFs PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugTestUtils PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugTestTracks PRIVATE ${HDF5_CXX_LIBRARIES})
+target_link_libraries(slugPython PRIVATE ${HDF5_CXX_LIBRARIES})
 
 # Link to OpenMP, if available
 if(OpenMP_CXX_FOUND)
@@ -126,6 +148,7 @@ if(OpenMP_CXX_FOUND)
     target_link_libraries(slugTestPDFs PRIVATE OpenMP::OpenMP_CXX)
     target_link_libraries(slugTestUtils PRIVATE OpenMP::OpenMP_CXX)
     target_link_libraries(slugTestTracks PRIVATE OpenMP::OpenMP_CXX)
+    target_link_libraries(slugPython PRIVATE OpenMP::OpenMP_CXX)
 endif()
 
 # Enable testing
