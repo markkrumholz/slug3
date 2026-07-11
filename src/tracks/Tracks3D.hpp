@@ -9,6 +9,7 @@
 #define TRACKS3D_HPP
 
 #include "TrackCommons.hpp"
+#include "Tracks2D.hpp"
 #include "../interpolation/Mesh3DInterpolator.hpp"
 #include "H5Ipublic.h"
 #include <cstddef>
@@ -54,6 +55,111 @@ namespace tracks
         Tracks3D(Tracks3D&&) = default;
         auto operator=(const Tracks3D&) -> Tracks3D& = delete;
         auto operator=(Tracks3D&&) -> Tracks3D& = delete;
+
+        // Observers
+
+        /**
+         * @brief Return the minimum mass in the tracks
+         * @return Minimum mass in the tracks
+         */
+        [[nodiscard]] auto mMin() const { return interp_->yMin(); }
+        /**
+         * @brief Return the maximum mass in the tracks
+         * @return Maximum mass in the tracks
+         */
+        [[nodiscard]] auto mMax() const { return interp_->yMax(); }
+
+        /**
+         * @brief Return the minimum time in the tracks
+         * @return Minimum time in the tracks
+         */
+        [[nodiscard]] auto tMin() const { return interp_->xMin(); }
+        /**
+         * @brief Return the maximum time in the tracks
+         * @return Maximum time in the tracks
+         */
+        [[nodiscard]] auto tMax() const { return interp_->xMax(); }
+
+        /**
+         * @brief Return the [Fe/H] values spanned by this set of tracks
+         * @return A const reference to the [Fe/H] values spanned by this set of tracks
+         */
+        [[nodiscard]] auto feH() const -> const std::vector<double>& { return FeH_; }
+
+        /**
+         * @brief Return the [alpha/Fe] value of this set of tracks
+         * @return [alpha/Fe] value of this set of tracks, or quiet_NaN if not available
+         */
+        [[nodiscard]] auto aFe() const { return AFe_; }
+
+        /**
+         * @brief Return the v/vcrit value of this set of tracks
+         * @return v/vcrit value of this set of tracks, or quiet_NaN if not available
+         */
+        [[nodiscard]] auto vVcrit() const { return vVcrit_; }
+
+        // Calculation methods
+
+        /**
+         * @brief Return the lifetime of a star of specified mass and [Fe/H]
+         * @param m Mass of the star whose lifetime should be returned
+         * @param feh [Fe/H] value of the tracks to use
+         * @return The lifetime of a star of mass m at the given [Fe/H]
+         */
+       [[nodiscard]] auto starLifetime(const double m, const double feh) const
+       { return interp_->sliceConstZ(feh).xMax(m); }
+
+       /**
+        * @brief Return the range of stellar masses that are alive at a given time and [Fe/H]
+        * @param t Time at which to evaluate
+        * @param feh [Fe/H] value of the tracks to use
+        * @return The range of stellar masses alive at the given time and [Fe/H]
+        */
+       [[nodiscard]] auto liveMassRange(const double t, const double feh) const
+       { return interp_->sliceConstZ(feh).yLim(t); }
+
+        /**
+         * @brief Return the track for a star of a given mass and [Fe/H]
+         * @param m Mass of the star whose track should be computed
+         * @param feh [Fe/H] value of the tracks to use
+         * @return An unique_ptr to an Interpolator1D describing the track for a given mass
+         */
+        [[nodiscard]] auto getTrack(const double m, const double feh) const
+        { return interp_->sliceConstZ(feh).interpConstY(m); }
+
+        /**
+         * @brief Return the isochrone at a given time and [Fe/H]
+         * @param t The time of the isochrone
+         * @param feh [Fe/H] value of the tracks to use
+         * @return A vector of unique_ptr to Interpolator1D's describing the isochrone
+         * @details
+         * Note that this method returns a vector of Interpolator1D objects
+         * rather than a single one because for non-monotonic tracks there
+         * may be multiple disjoint segments to the isochrone.
+         */
+        [[nodiscard]] auto getIsochrone(const double t, const double feh) const
+        { return interp_->sliceConstZ(feh).interpConstX(t); }
+
+        /**
+         * @brief Construct a Tracks2D object for a slice at fixed [Fe/H]
+         * @param feh [Fe/H] value at which to slice
+         * @return A Tracks2D object representing the (mass, time) slice at the given [Fe/H]
+         * @details
+         * Unlike getTrack() and getIsochrone(), which evaluate the cached
+         * slice owned by this Tracks3D object, this method builds a new,
+         * independent Mesh2DInterpolator (via Mesh3DInterpolator::sliceConstZCopy)
+         * and uses it to construct a Tracks2D object that owns its own
+         * memory, and so remains valid even after this Tracks3D object is
+         * destroyed or after later calls to getTrack()/getIsochrone() with
+         * a different [Fe/H] value.
+         */
+        [[nodiscard]] auto sliceConstFeH(const double feh) const -> Tracks2D
+        {
+            Tracks2D::M2DPtr m2d = std::make_unique<
+                interp::Mesh2DInterpolator<static_cast<size_t>(FieldIdx::nTrackQty)>>(
+                interp_->sliceConstZCopy(feh));
+            return { std::move(m2d), feh, AFe_, vVcrit_ };
+        }
 
     private:
 

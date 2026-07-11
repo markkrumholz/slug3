@@ -244,7 +244,7 @@ namespace interp
          * for a non-convex mesh a line at fixed x can intersect the edge
          * an arbitrary number of times, so the vector can be longer. 
          */
-        auto yLim(double x) { return mesh_.yLim(x); }
+        [[nodiscard]] auto yLim(double x) const { return mesh_.yLim(x); }
 
 
         // Interpolators

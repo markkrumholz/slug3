@@ -114,21 +114,21 @@ namespace tracks
          * @param m Mass of the star whose lifetime should be returned
          * @return The lifetime of a star of mass m
          */
-       [[nodiscard]] auto starLifetime(const double m) { return interp_->xMax(m); }
+       [[nodiscard]] auto starLifetime(const double m) const { return interp_->xMax(m); }
 
        /**
         * @brief Return the range of stellar masses that are alive at a given time
         * @param t Time at which to evaluate
         * @return The range of stellar masses alive at the given time
         */
-       [[nodiscard]] auto liveMassRange(const double t) { return interp_->yLim(t); }
+       [[nodiscard]] auto liveMassRange(const double t) const { return interp_->yLim(t); }
 
         /**
          * @brief Return the track for a star of a given mass
          * @param m Mass of the star whose track should be computed
          * @return An unique_ptr to an Interpolator1D describing the track for a given mass
          */
-        [[nodiscard]] auto getTrack(const double m) { return interp_->interpConstY(m); }
+        [[nodiscard]] auto getTrack(const double m) const { return interp_->interpConstY(m); }
 
         /**
          * @brief Return the isochrone at a given time
@@ -139,7 +139,7 @@ namespace tracks
          * rather than a single one because for non-monotonic tracks there
          * may be multiple disjoint segments to the isochrone.
          */
-        [[nodiscard]] auto getIsochrone(const double t) { return interp_->interpConstX(t); }
+        [[nodiscard]] auto getIsochrone(const double t) const { return interp_->interpConstX(t); }
 
     private:
 
