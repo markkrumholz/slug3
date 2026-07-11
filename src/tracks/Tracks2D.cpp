@@ -335,10 +335,16 @@ namespace tracks
                 const size_t src = std::min(j - 1, nrow - 1);
                 // Some tracks record their first point at age = 0 (the
                 // pre-main-sequence/ZAMS starting point); clamp to a
-                // 1 yr floor before taking log10 so that this maps to
-                // 0 instead of -inf, which would otherwise poison
-                // Mesh2DInterpolator's arc-length computation with NaN
-                times[i, j] = std::log10(std::max(track[src, ageIdx], 1.0));
+                // 1e-6 yr floor before taking log10 so that this maps
+                // to a large-but-finite negative value instead of
+                // -inf, which would otherwise poison
+                // Mesh2DInterpolator's arc-length computation with
+                // NaN. The floor is set far below any real recorded
+                // age -- including the youngest points in the
+                // highest-mass MIST tracks, down to ~7e-5 yr -- so it
+                // never collapses distinct real ages onto a single
+                // clamped value.
+                times[i, j] = std::log10(std::max(track[src, ageIdx], 1e-6));
                 for (size_t k = 0; k < nQty; ++k)
                 {
                     fieldData[i, j, k] = track[src, qtyIdx[k]];
