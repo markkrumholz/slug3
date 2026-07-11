@@ -10,8 +10,10 @@
 
 #include "../extern/pybind11/include/pybind11/numpy.h"
 #include "../extern/pybind11/include/pybind11/pybind11.h"
+#include "../extern/pybind11/include/pybind11/stl.h"
 #include "../interpolation/Interpolator1D.hpp"
 #include "../tracks/TrackCommons.hpp"
+#include "../tracks/Tracks2D.hpp"
 #include "../tracks/Tracks3D.hpp"
 #include <algorithm>
 #include <array>
@@ -92,7 +94,7 @@ PYBIND11_MODULE(slug, m, py::mod_gil_not_used()) {
                 "points; raises RuntimeError if name is not recognized",
                 py::arg("x"), py::arg("name"));
 
-    py::class_<tracks::Tracks3D, py::smart_holder>(m, "Tracks")
+    py::class_<tracks::Tracks3D, py::smart_holder>(m, "Tracks3D")
         .def(py::init<
                 const std::string&, // trackName
                 double,             // fehMin
@@ -101,7 +103,7 @@ PYBIND11_MODULE(slug, m, py::mod_gil_not_used()) {
                 double,             // afe
                 const std::string&  // registryName
                 >(),
-                "Construct a Tracks object from tracks on disk",
+                "Construct a Tracks3D object from tracks on disk",
                 py::arg("trackName"),
                 py::arg("fehMin"),
                 py::arg("fehMax"),
@@ -129,6 +131,50 @@ PYBIND11_MODULE(slug, m, py::mod_gil_not_used()) {
         .def("getIsochrone", &tracks::Tracks3D::getIsochrone,
                 "Return the isochrone at a given time and [Fe/H]",
                 py::arg("t"), py::arg("feh"));
+
+    py::class_<tracks::Tracks2D, py::smart_holder>(m, "Tracks2D")
+        .def(py::init<
+                const std::string&, // trackName
+                double,             // feh
+                double,             // vvcrit
+                double,             // afe
+                const std::string&, // registryName
+                std::size_t         // ntMin
+                >(),
+                "Construct a Tracks2D object from tracks on disk",
+                py::arg("trackName"),
+                py::arg("feh") = 0,
+                py::arg("vvcrit") = 0,
+                py::arg("afe") = 0,
+                py::arg("registryName") = tracks::defaultRegistry,
+                py::arg("ntMin") = 0
+        )
+        .def("mMin", &tracks::Tracks2D::mMin,
+                "Return the minimum mass in the tracks")
+        .def("mMax", &tracks::Tracks2D::mMax,
+                "Return the maximum mass in the tracks")
+        .def("tMin", &tracks::Tracks2D::tMin,
+                "Return the minimum time in the tracks")
+        .def("tMax", &tracks::Tracks2D::tMax,
+                "Return the maximum time in the tracks")
+        .def("feH", &tracks::Tracks2D::feH,
+                "Return the [Fe/H] value of this set of tracks")
+        .def("aFe", &tracks::Tracks2D::aFe,
+                "Return the [alpha/Fe] value of this set of tracks")
+        .def("vVcrit", &tracks::Tracks2D::vVcrit,
+                "Return the v/vcrit value of this set of tracks")
+        .def("starLifetime", &tracks::Tracks2D::starLifetime,
+                "Return the lifetime of a star of a given mass",
+                py::arg("m"))
+        .def("liveMassRange", &tracks::Tracks2D::liveMassRange,
+                "Return the range of stellar masses alive at a given time",
+                py::arg("t"))
+        .def("getTrack", &tracks::Tracks2D::getTrack,
+                "Return the track for a star of a given mass",
+                py::arg("m"))
+        .def("getIsochrone", &tracks::Tracks2D::getIsochrone,
+                "Return the isochrone at a given time",
+                py::arg("t"));
 }
 
 // NOLINTEND(misc-include-cleaner)
