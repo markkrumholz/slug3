@@ -11,6 +11,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <string_view>
 
 /**
@@ -47,6 +48,10 @@ namespace tracks
         "n_surf",
         "o_surf"
     };  /**< Names for each quantity in the files */
+
+    inline static const std::string defaultRegistry =
+        (std::filesystem::path("data") / std::filesystem::path("tracks")
+        / std::filesystem::path("tracks.toml")); /**< Default registry */
 
 } // namespace tracks
 
