@@ -65,6 +65,32 @@ namespace tracks
     -> std::pair<std::vector<double>, std::vector<std::string>>;
 
     /**
+     * @brief Find the HDF5 group holding the unique track matching given inputs
+     * @param trackName Name of track set
+     * @param feh [Fe/H] value
+     * @param vvcrit Rotation rate v/vcrit
+     * @param afe Value of [alpha/Fe]
+     * @param registryName Name of the track registry file
+     * @returns The name of the matching group, or an empty string if no
+     *          group matches
+     * @details
+     * Among the groups in the track set's HDF5 file (excluding
+     * "masses"), this searches for the one whose feh, vvcrit, and afe
+     * attributes all match the input values; a group missing one of
+     * these attributes is treated as matching regardless of the
+     * corresponding input value. The registry and track set are still
+     * located and searched as in findMatchingTracks; only the absence
+     * of a matching group results in an empty string being returned.
+     */
+    auto findTrack(
+        const std::string& trackName,
+        double feh = 0.0,
+        double vvcrit = 0.0,
+        double afe = 0.0,
+        const std::string& registryName = defaultRegistry)
+    -> std::string;
+
+    /**
      * @brief Get the dimensions of a set of tracks
      * @param h5Name Path to HDF5 file containing tracks
      * @param groupName Name of the group within the HDF file

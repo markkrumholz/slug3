@@ -321,6 +321,113 @@ namespace tracks
         return { std::move(fehOut), std::move(nameOut) };
     }
 
+    auto findTrack(
+        const std::string& trackName,
+        const double feh,
+        const double vvcrit,
+        const double afe,
+        const std::string& registryName)
+    -> std::string
+    {
+        // First parse the registry
+        auto [registry, registryPath] = parseRegistry(registryName);
+
+        // Now check the registry for tracks matching the given track name
+        auto trackSets = getTrackSetsFromRegistry(registry);
+        auto it = std::ranges::find(trackSets.begin(), trackSets.end(), trackName);
+        if (it == trackSets.end())
+        {
+            throw std::runtime_error("findTrack: no trackset named " +
+                trackName + " found in track registry " + trackName);
+        }
+
+        // Get the h5file name for this track set from the registry
+        const auto h5name =
+            registry.at_path(trackName).at_path("file").value_or(std::string{});
+
+        // The h5 file name is given relative to the directory
+        // containing the registry file itself
+        const auto h5path = registryPath.parent_path() / h5name;
+
+        // Suppress clang-tidy warnings iun this namespace caused by just including
+        // hdf5.h, instead of the individual HDF5 headers, since this is the paradigm
+        // that HDF5 wants
+        // NOLINTBEGIN(misc-include-cleaner)
+
+        // Open the HDF5 file
+        const hid_t file = H5Fopen(h5path.string().c_str(),
+            H5F_ACC_RDONLY, H5P_DEFAULT);
+        if (file < 0)
+        {
+            throw std::runtime_error("findTrack: unable to open "
+                "HDF5 file " + h5path.string());
+        }
+
+        // Find the number of top-level links (groups) in the file
+        H5G_info_t ginfo{};
+        H5Gget_info(file, &ginfo);
+
+        // Loop over every group in the file except "masses", looking
+        // for the (unique) one whose feh, vvcrit, and afe attributes
+        // all match the input values; a group missing one of these
+        // attributes is treated as matching regardless of the
+        // corresponding input value.
+        std::string result;
+        for (hsize_t i = 0; i < ginfo.nlinks; ++i)
+        {
+            const auto nameLen = H5Lget_name_by_idx(file, ".",
+                H5_INDEX_NAME, H5_ITER_INC, i, nullptr, 0, H5P_DEFAULT);
+            if (nameLen < 0) { continue; }
+            std::vector<char> nameBuf(static_cast<size_t>(nameLen) + 1);
+            H5Lget_name_by_idx(file, ".", H5_INDEX_NAME, H5_ITER_INC, i,
+                nameBuf.data(), nameBuf.size(), H5P_DEFAULT);
+            const std::string groupName(nameBuf.data());
+
+            if (groupName == "masses") { continue; }
+
+            const hid_t grp = H5Gopen2(file, groupName.c_str(), H5P_DEFAULT);
+            if (grp < 0) { continue; }
+
+            bool isMatch = true;
+
+            const auto fehVal = readScalarAttrIfPresent(grp, "feh");
+            if (fehVal && !utils::approxEqual(*fehVal, feh))
+            {
+                isMatch = false;
+            }
+            if (isMatch)
+            {
+                const auto vvcritVal = readScalarAttrIfPresent(grp, "vvcrit");
+                if (vvcritVal && !utils::approxEqual(*vvcritVal, vvcrit))
+                {
+                    isMatch = false;
+                }
+            }
+            if (isMatch)
+            {
+                const auto afeVal = readScalarAttrIfPresent(grp, "afe");
+                if (afeVal && !utils::approxEqual(*afeVal, afe))
+                {
+                    isMatch = false;
+                }
+            }
+
+            H5Gclose(grp);
+
+            if (isMatch)
+            {
+                result = groupName;
+                break;
+            }
+        }
+
+        H5Fclose(file);
+
+        // NOLINTEND(misc-include-cleaner)
+
+        return result;
+    }
+
     auto getTrackSize(
         const std::filesystem::path& h5Name,
         const std::string& groupName)
