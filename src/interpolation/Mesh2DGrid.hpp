@@ -403,8 +403,13 @@ namespace interp
             assert((x >= x_[0,j] && x <= x_[nx()-1,j]));  // Safety check
             if (x < x_[iSave_,j]) { // Check if we need to update cached index
                 iSave_ = xSearch(x, 0, j, 0, iSave_); // Below cached position
-            } else if (x > x_[iSave_+1,j]) {
-                iSave_ = xSearch(x, 0, j, iSave_, nx()-1); // Above cached position
+            } else if (x >= x_[iSave_+1,j]) {
+                // Above cached position, or exactly on its upper edge; in
+                // the latter case iSave_ must still advance, since leaving
+                // it unchanged would compute the offset within this cell
+                // as the full cell width instead of zero, which produces
+                // spurious floating-point error in downstream traversals
+                iSave_ = xSearch(x, 0, j, iSave_, nx()-1);
             }
             if (iSave_ == nx()-1) { --iSave_; } // Handle edge case
             return iSave_;
@@ -422,8 +427,13 @@ namespace interp
             assert(y >= yMin_ && y <= yMax_);  // Safety check
             if (y < y_[jSave_]) { // Check if we need to update cached position
                 jSave_ = ySearch(y, 0, jSave_);   // Below cached position, search left
-            } else if (y > y_[jSave_ + 1]) {
-                jSave_ = ySearch(y, jSave_, ny()-1); // Above cashed position, search right
+            } else if (y >= y_[jSave_ + 1]) {
+                // Above cached position, or exactly on its upper edge; in
+                // the latter case jSave_ must still advance, since leaving
+                // it unchanged would compute the offset within this cell
+                // as the full cell width instead of zero, which produces
+                // spurious floating-point error in downstream traversals
+                jSave_ = ySearch(y, jSave_, ny()-1);
             }
             if (jSave_ == ny()-1) { --jSave_; } // Handle edge case
             return jSave_;
