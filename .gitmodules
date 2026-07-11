@@ -4,3 +4,7 @@
 [submodule "src/tomlplusplus"]
 	path = src/extern/tomlplusplus
 	url = https://github.com/marzer/tomlplusplus.git
+[submodule "src/extern/pybind11"]
+	path = src/extern/pybind11
+	url = ../../pybind/pybind11
+	branch = stable
