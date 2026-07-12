@@ -52,16 +52,16 @@ PYBIND11_MODULE(slug, m, py::mod_gil_not_used()) {
                 const std::vector<double>&,                   // x
                 const std::array<std::vector<double>, nQty>&  // f
                 >(),
-                "Construct an Interpolator1D",
+                Interp1D::constructorDocstring.data(),
                 py::arg("x"),
                 py::arg("f")
         )
         .def("xMin", &Interp1D::xMin,
-                "Get minimum allowed x")
+                Interp1D::xMinDocstring.data())
         .def("xMax", &Interp1D::xMax,
-                "Get maximum allowed x")
+                Interp1D::xMaxDocstring.data())
         .def("xRange", &Interp1D::xRange,
-                "Get allowed range in x")
+                Interp1D::xRangeDocstring.data())
         .def("__call__",
                 [](const Interp1D& self, const double x) -> std::array<double, nQty>
                 {
@@ -75,7 +75,7 @@ PYBIND11_MODULE(slug, m, py::mod_gil_not_used()) {
                     }
                     return self(x);
                 },
-                "Interpolate to a given point",
+                Interp1D::callDocstring.data(),
                 py::arg("x"))
         .def("__call__",
                 py::vectorize(
@@ -91,10 +91,7 @@ PYBIND11_MODULE(slug, m, py::mod_gil_not_used()) {
                         }
                         return (*self)(x, idx);
                     }),
-                "Interpolate a single quantity to a given point, or "
-                "elementwise over numpy arrays of points and/or indices "
-                "(which broadcast against each other, so e.g. an array of "
-                "x with idx=range(9) returns all quantities for every x)",
+                Interp1D::callIdxDocstring.data(),
                 py::arg("x"), py::arg("idx"))
         .def("__call__",
                 py::vectorize(
@@ -118,9 +115,7 @@ PYBIND11_MODULE(slug, m, py::mod_gil_not_used()) {
                             std::distance(tracks::fieldStr.begin(), it));
                         return (*self)(x, idx);
                     }),
-                "Interpolate a named quantity (one of tracks::fieldStr) to "
-                "a given point, or elementwise over a numpy array of "
-                "points; raises RuntimeError if name is not recognized",
+                Interp1D::callNameDocstring.data(),
                 py::arg("x"), py::arg("name"));
 
     py::class_<tracks::Tracks3D, py::smart_holder>(m, "Tracks3D")
@@ -132,7 +127,7 @@ PYBIND11_MODULE(slug, m, py::mod_gil_not_used()) {
                 double,             // afe
                 const std::string&  // registryName
                 >(),
-                "Construct a Tracks3D object from tracks on disk",
+                tracks::Tracks3D::constructorDocstring.data(),
                 py::arg("trackName"),
                 py::arg("fehMin"),
                 py::arg("fehMax"),
@@ -141,19 +136,19 @@ PYBIND11_MODULE(slug, m, py::mod_gil_not_used()) {
                 py::arg("registryName") = tracks::defaultRegistry
         )
         .def("mMin", &tracks::Tracks3D::mMin,
-                "Return the minimum mass in the tracks")
+                tracks::Tracks3D::mMinDocstring.data())
         .def("mMax", &tracks::Tracks3D::mMax,
-                "Return the maximum mass in the tracks")
+                tracks::Tracks3D::mMaxDocstring.data())
         .def("logTMin", &tracks::Tracks3D::logTMin,
-                "Return the minimum log10(time) in the tracks")
+                tracks::Tracks3D::logTMinDocstring.data())
         .def("logTMax", &tracks::Tracks3D::logTMax,
-                "Return the maximum log10(time) in the tracks")
+                tracks::Tracks3D::logTMaxDocstring.data())
         .def("feH", &tracks::Tracks3D::feH,
-                "Return the [Fe/H] values spanned by this set of tracks")
+                tracks::Tracks3D::feHDocstring.data())
         .def("aFe", &tracks::Tracks3D::aFe,
-                "Return the [alpha/Fe] value of this set of tracks")
+                tracks::Tracks3D::aFeDocstring.data())
         .def("vVcrit", &tracks::Tracks3D::vVcrit,
-                "Return the v/vcrit value of this set of tracks")
+                tracks::Tracks3D::vVcritDocstring.data())
         .def("getTrack",
                 [](const tracks::Tracks3D& self, const double m, const double feh)
                 {
@@ -167,7 +162,7 @@ PYBIND11_MODULE(slug, m, py::mod_gil_not_used()) {
                     }
                     return self.getTrack(m, feh);
                 },
-                "Return the track for a star of a given mass and [Fe/H]",
+                tracks::Tracks3D::getTrackDocstring.data(),
                 py::arg("m"), py::arg("feh"))
         .def("getIsochrone",
                 [](const tracks::Tracks3D& self, const double logT, const double feh)
@@ -184,7 +179,7 @@ PYBIND11_MODULE(slug, m, py::mod_gil_not_used()) {
                     for (auto& seg : isochrone) { result.append(py::cast(std::move(seg))); }
                     return result;
                 },
-                "Return the isochrone at a given log10(time) and [Fe/H]",
+                tracks::Tracks3D::getIsochroneDocstring.data(),
                 py::arg("logT"), py::arg("feh"));
 
     py::class_<tracks::Tracks2D, py::smart_holder>(m, "Tracks2D")
@@ -195,7 +190,7 @@ PYBIND11_MODULE(slug, m, py::mod_gil_not_used()) {
                 double,             // afe
                 const std::string&  // registryName
                 >(),
-                "Construct a Tracks2D object from tracks on disk",
+                tracks::Tracks2D::constructorDocstring.data(),
                 py::arg("trackName"),
                 py::arg("feh") = 0,
                 py::arg("vvcrit") = 0,
@@ -203,24 +198,24 @@ PYBIND11_MODULE(slug, m, py::mod_gil_not_used()) {
                 py::arg("registryName") = tracks::defaultRegistry
         )
         .def("mMin", &tracks::Tracks2D::mMin,
-                "Return the minimum mass in the tracks")
+                tracks::Tracks2D::mMinDocstring.data())
         .def("mMax", &tracks::Tracks2D::mMax,
-                "Return the maximum mass in the tracks")
+                tracks::Tracks2D::mMaxDocstring.data())
         .def("logTMin", &tracks::Tracks2D::logTMin,
-                "Return the minimum log10(time) in the tracks")
+                tracks::Tracks2D::logTMinDocstring.data())
         .def("logTMax", &tracks::Tracks2D::logTMax,
-                "Return the maximum log10(time) in the tracks")
+                tracks::Tracks2D::logTMaxDocstring.data())
         .def("feH", &tracks::Tracks2D::feH,
-                "Return the [Fe/H] value of this set of tracks")
+                tracks::Tracks2D::feHDocstring.data())
         .def("aFe", &tracks::Tracks2D::aFe,
-                "Return the [alpha/Fe] value of this set of tracks")
+                tracks::Tracks2D::aFeDocstring.data())
         .def("vVcrit", &tracks::Tracks2D::vVcrit,
-                "Return the v/vcrit value of this set of tracks")
+                tracks::Tracks2D::vVcritDocstring.data())
         .def("starLifetime", &tracks::Tracks2D::starLifetime,
-                "Return the lifetime of a star of a given mass",
+                tracks::Tracks2D::starLifetimeDocstring.data(),
                 py::arg("m"))
         .def("liveMassRange", &tracks::Tracks2D::liveMassRange,
-                "Return the range of stellar masses alive at a given time",
+                tracks::Tracks2D::liveMassRangeDocstring.data(),
                 py::arg("t"))
         .def("getTrack",
                 [](const tracks::Tracks2D& self, const double m)
@@ -235,7 +230,7 @@ PYBIND11_MODULE(slug, m, py::mod_gil_not_used()) {
                     }
                     return self.getTrack(m);
                 },
-                "Return the track for a star of a given mass",
+                tracks::Tracks2D::getTrackDocstring.data(),
                 py::arg("m"))
         .def("getIsochrone",
                 [](const tracks::Tracks2D& self, const double logT)
@@ -248,7 +243,7 @@ PYBIND11_MODULE(slug, m, py::mod_gil_not_used()) {
                     for (auto& seg : isochrone) { result.append(py::cast(std::move(seg))); }
                     return result;
                 },
-                "Return the isochrone at a given log10(time)",
+                tracks::Tracks2D::getIsochroneDocstring.data(),
                 py::arg("logT"));
 }
 

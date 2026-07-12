@@ -14,6 +14,7 @@
 #include <limits>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace tracks
@@ -33,6 +34,31 @@ namespace tracks
             static_cast<size_t>(FieldIdx::nTrackQty)>>;
 
         // Constructors and destructors
+
+        /**
+         * @brief Numpy-style docstring for the Python constructor binding
+         */
+        static constexpr std::string_view constructorDocstring = R"doc(Construct a Tracks2D object from tracks on disk.
+
+Parameters
+----------
+trackName : str
+    Name of the track set within the registry.
+feh : float, optional
+    [Fe/H] value of the desired track. Default is 0.0.
+vvcrit : float, optional
+    Rotation rate v/vcrit of the desired track. Default is 0.0.
+afe : float, optional
+    [alpha/Fe] value of the desired track. Default is 0.0.
+registryName : str, optional
+    Path to the track registry file. Default is the package's default
+    registry (data/tracks/tracks.toml).
+
+Throws
+------
+RuntimeError
+    If no track in trackName matches feh, vvcrit, and afe exactly.)doc";
+
         /**
          * @brief Construct a Tracks2D object from tracks on disk
          * @param trackName Name of track set
@@ -77,10 +103,31 @@ namespace tracks
         // Observers
 
         /**
+         * @brief Numpy-style docstring for the Python mMin binding
+         */
+        static constexpr std::string_view mMinDocstring = R"doc(Return the minimum mass spanned by this set of tracks.
+
+Returns
+-------
+mmin : float
+    Minimum mass, in Msun.)doc";
+
+        /**
          * @brief Return the minimum mass in the tracks
          * @return Minimum mass in the tracks
          */
         [[nodiscard]] auto mMin() const { return interp_->yMin(); }
+
+        /**
+         * @brief Numpy-style docstring for the Python mMax binding
+         */
+        static constexpr std::string_view mMaxDocstring = R"doc(Return the maximum mass spanned by this set of tracks.
+
+Returns
+-------
+mmax : float
+    Maximum mass, in Msun.)doc";
+
         /**
          * @brief Return the maximum mass in the tracks
          * @return Maximum mass in the tracks
@@ -88,15 +135,46 @@ namespace tracks
         [[nodiscard]] auto mMax() const { return interp_->yMax(); }
 
         /**
+         * @brief Numpy-style docstring for the Python logTMin binding
+         */
+        static constexpr std::string_view logTMinDocstring = R"doc(Return the minimum log10(time) spanned by this set of tracks.
+
+Returns
+-------
+logtmin : float
+    Minimum log10(time / yr).)doc";
+
+        /**
          * @brief Return the minimum log of time in the tracks
          * @return Minimum log10(time) in the tracks
          */
         [[nodiscard]] auto logTMin() const { return interp_->xMin(); }
+
+        /**
+         * @brief Numpy-style docstring for the Python logTMax binding
+         */
+        static constexpr std::string_view logTMaxDocstring = R"doc(Return the maximum log10(time) spanned by this set of tracks.
+
+Returns
+-------
+logtmax : float
+    Maximum log10(time / yr).)doc";
+
         /**
          * @brief Return the maximum log of time in the tracks
          * @return Maximum log10(time) in the tracks
          */
         [[nodiscard]] auto logTMax() const { return interp_->xMax(); }
+
+        /**
+         * @brief Numpy-style docstring for the Python feH binding
+         */
+        static constexpr std::string_view feHDocstring = R"doc(Return the [Fe/H] value of this set of tracks.
+
+Returns
+-------
+feh : float
+    [Fe/H] value of this set of tracks.)doc";
 
         /**
          * @brief Return the [Fe/H] value of this set of tracks
@@ -105,10 +183,30 @@ namespace tracks
         [[nodiscard]] auto feH() const { return FeH_; }
 
         /**
+         * @brief Numpy-style docstring for the Python aFe binding
+         */
+        static constexpr std::string_view aFeDocstring = R"doc(Return the [alpha/Fe] value of this set of tracks.
+
+Returns
+-------
+afe : float
+    [alpha/Fe] value of this set of tracks, or NaN if not available.)doc";
+
+        /**
          * @brief Return the [alpha/Fe] value of this set of tracks
          * @return [alpha/Fe] value of this set of tracks, or quiet_NaN if not available
          */
         [[nodiscard]] auto aFe() const { return AFe_; }
+
+        /**
+         * @brief Numpy-style docstring for the Python vVcrit binding
+         */
+        static constexpr std::string_view vVcritDocstring = R"doc(Return the v/vcrit value of this set of tracks.
+
+Returns
+-------
+vvcrit : float
+    v/vcrit value of this set of tracks, or NaN if not available.)doc";
 
         /**
          * @brief Return the v/vcrit value of this set of tracks
@@ -118,12 +216,44 @@ namespace tracks
 
         // Calculation methods
 
-        /** 
-         * @brief Return the lifetime of a star of specified mass 
+        /**
+         * @brief Numpy-style docstring for the Python starLifetime binding
+         */
+        static constexpr std::string_view starLifetimeDocstring = R"doc(Return the lifetime of a star of a given mass.
+
+Parameters
+----------
+m : float
+    Stellar mass, in Msun.
+
+Returns
+-------
+logt : float
+    log10(time / yr) at which a star of mass m ends this track.)doc";
+
+        /**
+         * @brief Return the lifetime of a star of specified mass
          * @param m Mass of the star whose lifetime should be returned
          * @return The lifetime of a star of mass m
          */
        [[nodiscard]] auto starLifetime(const double m) const { return interp_->xMax(m); }
+
+       /**
+        * @brief Numpy-style docstring for the Python liveMassRange binding
+        */
+       static constexpr std::string_view liveMassRangeDocstring = R"doc(Return the range(s) of stellar mass alive at a given time.
+
+Parameters
+----------
+t : float
+    log10(time / yr) at which to evaluate.
+
+Returns
+-------
+ranges : list of tuple of float
+    A list of (mMin, mMax) pairs giving the mass ranges alive at time
+    t. Usually contains a single pair, but may contain more than one
+    for non-monotonic tracks.)doc";
 
        /**
         * @brief Return the range of stellar masses that are alive at a given time
@@ -133,11 +263,52 @@ namespace tracks
        [[nodiscard]] auto liveMassRange(const double t) const { return interp_->yLim(t); }
 
         /**
+         * @brief Numpy-style docstring for the Python getTrack binding
+         */
+        static constexpr std::string_view getTrackDocstring = R"doc(Return the track for a star of a given mass.
+
+Parameters
+----------
+m : float
+    Stellar mass, in Msun.
+
+Returns
+-------
+interp : Interpolator1D
+    An Interpolator1D object containing the interpolating track,
+    parameterized by log10(time / yr).
+
+Throws
+------
+RuntimeError
+    If m is less than mMin() or greater than mMax().)doc";
+
+        /**
          * @brief Return the track for a star of a given mass
          * @param m Mass of the star whose track should be computed
          * @return An unique_ptr to an Interpolator1D describing the track for a given mass
          */
         [[nodiscard]] auto getTrack(const double m) const { return interp_->interpConstY(m); }
+
+        /**
+         * @brief Numpy-style docstring for the Python getIsochrone binding
+         */
+        static constexpr std::string_view getIsochroneDocstring = R"doc(Return the isochrone at a given log time.
+
+Parameters
+----------
+logT : float
+    log10(time / yr) of the isochrone.
+
+Returns
+-------
+isochrone : list of Interpolator1D
+    A list of Interpolator1D objects, each parameterized by mass,
+    giving the isochrone. More than one entry indicates disjoint
+    segments, which can occur for non-monotonic tracks; an empty list
+    indicates that logT lies outside the tracks' time range, or that
+    it touches the tracks at only a single mass (too few points to
+    interpolate).)doc";
 
         /**
          * @brief Return the isochrone at a given log time
