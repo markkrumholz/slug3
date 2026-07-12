@@ -130,6 +130,25 @@ def test_tracks2d_isochrone_covers_mass_range(tracks2d):
     assert max(seg.xMax() for seg in isochrone) == pytest.approx(tracks2d.mMax())
 
 
+def test_tracks2d_isochrone_at_time_boundaries(tracks2d):
+    """Regression test: getIsochrone() at exactly logTMax() used to
+    crash (an uncaught GSL abort). Only the lowest mass (0.1 Msun,
+    with by far the longest lifetime in this fixture) actually reaches
+    logTMax(), so the line of constant time is tangent to the mesh at
+    a single point there; since an isochrone needs at least 2 points
+    to interpolate over, this should now cleanly report zero segments
+    rather than raising or crashing. logTMin() is the opposite
+    extreme: every mass shares that sentinel starting time, so the
+    isochrone there should span the full mass range in one segment."""
+    isochrone_max = tracks2d.getIsochrone(tracks2d.logTMax())
+    assert not isochrone_max
+
+    isochrone_min = tracks2d.getIsochrone(tracks2d.logTMin())
+    assert len(isochrone_min) == 1
+    assert isochrone_min[0].xMin() == pytest.approx(tracks2d.mMin())
+    assert isochrone_min[0].xMax() == pytest.approx(tracks2d.mMax())
+
+
 # ---------------------------------------------------------------------
 # Tracks3D
 # ---------------------------------------------------------------------
@@ -197,6 +216,18 @@ def test_tracks3d_isochrone_covers_mass_range(tracks3d):
     assert len(isochrone) >= 1
     assert min(seg.xMin() for seg in isochrone) == pytest.approx(tracks3d.mMin())
     assert max(seg.xMax() for seg in isochrone) == pytest.approx(tracks3d.mMax())
+
+
+def test_tracks3d_isochrone_at_time_boundaries(tracks3d):
+    """Same regression as test_tracks2d_isochrone_at_time_boundaries,
+    for Tracks3D."""
+    isochrone_max = tracks3d.getIsochrone(tracks3d.logTMax(), KNOWN_FEH)
+    assert not isochrone_max
+
+    isochrone_min = tracks3d.getIsochrone(tracks3d.logTMin(), KNOWN_FEH)
+    assert len(isochrone_min) == 1
+    assert isochrone_min[0].xMin() == pytest.approx(tracks3d.mMin())
+    assert isochrone_min[0].xMax() == pytest.approx(tracks3d.mMax())
 
 
 # ---------------------------------------------------------------------

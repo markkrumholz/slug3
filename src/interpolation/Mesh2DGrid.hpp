@@ -669,6 +669,45 @@ namespace interp
         ) const -> std::vector<yIntersectionDescriptor>;
 
         /**
+         * @brief Find intersections of a line of constant x with the mesh,
+         *   for the special case where x is exactly at the mesh boundary
+         * @param x The x coordinate, which must be exactly xMin_ or xMax_
+         * @param yLo Lower y limit of traversal
+         * @param yHi Upper y limit of traversal
+         * @returns List of points where the line crosses the mesh
+         * @details
+         * This is a helper function for xIntersect, handling the case
+         * where x is exactly xMin_ or xMax_. Since each column's own
+         * values are non-decreasing, the only rows that can equal
+         * xMin_/xMax_ are a column's own first/last row where that
+         * column achieves the mesh-wide extreme -- never an
+         * interpolated point between two columns -- so this walks the
+         * boundary row (0 or nx()-1) directly, emitting one rib point
+         * for every column j whose value there equals x, rather than
+         * routing through yLim/xIntersectSeg's general traversal, which
+         * (like yIntersect's analogous general traversal) can corrupt
+         * or under/over-report results at this boundary.
+         *
+         * meshExit for column j is set by looking at the next column
+         * with a distinct y value (skipping any that tie j's y value,
+         * e.g. from overlapping mass ranges in concatenated track
+         * files): if that column's boundary-row value is also exactly
+         * x, the mesh edge continues at this same x past j, so j's
+         * point does not end a segment (meshExit = false); otherwise
+         * j is the last point of a run that shares this x value, so it
+         * does (meshExit = true). This distinguishes an isolated
+         * tangent point (line touches the mesh at a single mass) from
+         * a stretch of the mesh boundary that runs along constant x
+         * for a finite distance (line lies along the mesh edge over a
+         * range of masses).
+         */
+        auto xIntersectBoundaryRow(
+            double x,
+            double yLo,
+            double yHi
+        ) const -> std::vector<xIntersectionDescriptor>;
+
+        /**
          * @brief Helper to xIntersectSeg to start traversals on mesh interior
          * @param x x coordinate
          * @param y y coordinate

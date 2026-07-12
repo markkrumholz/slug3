@@ -388,6 +388,41 @@ namespace interp
 
     }
 
+    // Helper for xIntersect: handle the case where x is exactly at
+    // the mesh's lower or upper boundary
+    auto Mesh2DGrid::xIntersectBoundaryRow(
+        const double x,
+        const double yLo,
+        const double yHi
+    ) const -> std::vector<xIntersectionDescriptor>
+    {
+        std::vector<xIntersectionDescriptor> intList; // Output holder
+
+        const size_t row = (x == xMin_) ? 0 : nx() - 1;
+        for (size_t j = 0; j < ny(); ++j)
+        {
+            if (x_[row,j] != x) { continue; }
+            if (y_[j] < yLo || y_[j] > yHi) { continue; }
+
+            // Find the next column with a distinct y value, skipping
+            // any that tie j's own y value, to determine whether the
+            // mesh boundary continues at this same x past j (see this
+            // function's docstring for why ties are skipped here)
+            size_t jNext = j + 1;
+            while (jNext < ny() && y_[jNext] == y_[j]) { ++jNext; }
+            const bool continues = (jNext < ny()) && (x_[row,jNext] == x);
+
+            intList.push_back({
+                .y = y_[j],
+                .xs = x,
+                .t = IntersectionType::rib,
+                .idx = j,
+                .meshExit = !continues
+            });
+        }
+        return intList;
+    }
+
     // Compute intersections in the x direction
     auto Mesh2DGrid::xIntersect(const double x,
         const double yLo,
@@ -395,6 +430,16 @@ namespace interp
         std::vector<xIntersectionDescriptor>
     {
         std::vector<xIntersectionDescriptor> intList; // Output holder
+
+        // Special case: at the exact left or right boundary, delegate
+        // to a helper that reads the boundary row's own rib points
+        // directly, rather than the general yLim/xIntersectSeg
+        // traversal below (see xIntersectBoundaryRow's docstring for
+        // why that traversal is unsafe at this boundary)
+        if (x == xMin_ || x == xMax_)
+        {
+            return xIntersectBoundaryRow(x, yLo, yHi);
+        }
 
         // First find where line crosses out edge of mesh
         auto yL = yLim(x);

@@ -54,8 +54,9 @@ namespace interp
         interp_({nullptr}),
         acc_(nullptr)
         {
-            safetyCheck(interpType);
+            checkSorted();
             cleanDuplicates();
+            checkMinSize(interpType);
             interpInit(interpType);
         }
 
@@ -144,15 +145,34 @@ namespace interp
     private:
 
         /**
-         * @brief Run safety check on inputs
+         * @brief Check that x is sorted
+         * @details
+         * Must run before cleanDuplicates(), on the raw, as-supplied
+         * x_, so that a genuine ordering violation (as opposed to a
+         * run of duplicate values, which cleanDuplicates() collapses)
+         * is always caught here.
          */
-        void safetyCheck(const gsl_interp_type *interpType)
+        void checkSorted()
         {
             static_assert(NF > 0, "Interpolator1D: number of quantities to interpolate must be >= 1");
             if (!std::ranges::is_sorted(x_))
             {
                 throw std::runtime_error("Interpolator1D: x must be strictly increasing");
             }
+        }
+
+        /**
+         * @brief Check that there are enough points left for interpType
+         * @details
+         * Must run after cleanDuplicates(), so that this reflects the
+         * true, final number of distinct points rather than the
+         * pre-deduplication count; checking beforehand can let a
+         * too-small post-deduplication array reach interpInit(),
+         * which hands it to GSL's own (uncatchable, abort-on-failure)
+         * size check instead of this catchable exception.
+         */
+        void checkMinSize(const gsl_interp_type *interpType)
+        {
             if (x_.size() < gsl_interp_type_min_size(interpType))
             {
                 std::stringstream ss;
