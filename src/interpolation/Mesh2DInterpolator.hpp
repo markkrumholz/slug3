@@ -258,7 +258,10 @@ namespace interp
          * constant x with the mesh may consist of multiple disconnected sgments. In
          * such cases, the vector will contain one Interpolator1D for each segment.
          * If the value of x provided is outside the mesh entirely, so there are no
-         * intersections, the returned vector will be empty.
+         * intersections, the returned vector will be empty. A segment consisting of
+         * a single point (e.g. a line of constant x that is tangent to the mesh,
+         * touching it at only one mass) carries no interpolable information and is
+         * likewise dropped, exactly as if that portion of the mesh had been missed.
          */
         [[nodiscard]] auto interpConstX(double x) const -> 
         std::vector<std::unique_ptr<Interpolator1D<NF>>>
@@ -271,15 +274,31 @@ namespace interp
             std::vector<double> y;
             std::array<std::vector<double>, NF> f;
 
+            // Build an interpolator from the accumulated segment and
+            // push it onto result, unless the segment has too few
+            // points to interpolate at all (e.g. a single isolated
+            // tangent point, where the line of constant x touches the
+            // mesh at only one mass); such a segment carries no
+            // interpolable information, so it is silently dropped
+            // rather than attempted, exactly as if that portion of
+            // the mesh had been missed entirely
+            const auto flushSegment = [&]() -> void
+            {
+                if (y.size() < 2) { return; }
+                auto newInterp =
+                    std::make_unique<Interpolator1D<NF>>(y, f, interpType_);
+                result.push_back(std::move(newInterp));
+            };
+
             // Loop over intersection points
             for (const auto& pt : intersect)
             {
-                
+
                 // Add y to accumulator
                 y.push_back(pt.y);
 
                 // Get point at which to evaluate spline
-                const double s = 
+                const double s =
                     (pt.t == Mesh2DGrid::IntersectionType::spine &&
                     monotonic_) ? pt.y : pt.xs;
 
@@ -289,29 +308,25 @@ namespace interp
                     (*(spineInterp_[pt.idx]))(s);
                 if constexpr (NF == 1) { f[0].push_back(fInterp); }
                 else
-                { 
+                {
                     for (size_t k = 0; k < NF; k++) { f[k].push_back(fInterp[k]); }
-                }                
+                }
 
                 // If this point is a mesh exit, construct new
                 // interpolator here and push onto output list, then
                 // empty the accumulators
                 if (pt.meshExit)
                 {
-                    auto newInterp = 
-                        std::make_unique<Interpolator1D<NF>>(y, f, interpType_);
-                    result.push_back(std::move(newInterp));
+                    flushSegment();
                     y.clear();
                     for (auto &fi : f) { fi.clear(); }
                 }
             }
-            
+
             // If any points remain in accumulator, create an interpolator from them
             if (!y.empty())
-            {   
-                auto newInterp = 
-                    std::make_unique<Interpolator1D<NF>>(y, f, interpType_);
-                result.push_back(std::move(newInterp));
+            {
+                flushSegment();
             }
 
             // Return result

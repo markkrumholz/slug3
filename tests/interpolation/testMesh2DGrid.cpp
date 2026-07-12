@@ -499,6 +499,156 @@ testXIdxGridBoundary()
     return 0; // Success
 }
 
+// Regression test for yIntersect at the exact yMin_/yMax_ boundary.
+// yIdx's cell-index clamp (needed so it always returns a valid
+// cell-start index) forces a nonzero mass offset from the boundary
+// column, unlike every interior exact grid mass (where the offset is
+// naturally zero); combined with a degenerate (collapsed) boundary
+// cell -- reproduced here by giving the last two columns the same
+// value at the last row -- this used to corrupt the traversal into
+// producing non-monotonic results (see getTrack(mMax()) in
+// testTracksAll.cpp for the practical regression this fixes). This
+// checks that yIntersect(yMin_) and yIntersect(yMax_) instead
+// reproduce the boundary column's own x data exactly.
+static auto
+testYIntersectBoundary()
+{
+    constexpr size_t nx = 3;
+    constexpr size_t ny = 4;
+    std::array<double, nx*ny> xData = { 0 };
+    std::array<double, ny> yData = { 0 };
+    const std::mdspan<double, std::extents<size_t, nx, ny>> x(xData.data());
+    const std::mdspan<double, std::extents<size_t, ny>> y(yData.data());
+    for (size_t j = 0; j < ny; ++j) { y[j] = static_cast<double>(j); }
+
+    // Column ny-2 and column ny-1 share the same value at the last
+    // row, making that boundary cell degenerate
+    constexpr std::array<std::array<double, nx>, ny> xCol = {{
+        { -10.0, -5.0, 1.0 },
+        { -9.0,  -4.0, 2.0 },
+        { -8.0,  -3.0, 3.0 },
+        { -7.0,  -2.0, 3.0 }
+    }};
+    for (size_t j = 0; j < ny; ++j) {
+        for (size_t i = 0; i < nx; ++i) { x[i,j] = xCol[j][i]; }
+    }
+    const interp::Mesh2DGrid m2d(x, y);
+
+    for (const size_t jBoundary : { size_t{0}, ny - 1 })
+    {
+        const auto result = m2d.yIntersect(static_cast<double>(jBoundary));
+        if (result.size() != nx)
+        {
+            std::cerr << "testMesh2DGrid: yIntersect at boundary row j = "
+                << jBoundary << " returned " << result.size()
+                << " points, expected " << nx << "\n";
+            return 1;
+        }
+        for (size_t i = 0; i < nx; ++i)
+        {
+            if (result[i].x != xCol[jBoundary][i] || result[i].idx != i)
+            {
+                std::cerr << "testMesh2DGrid: yIntersect at boundary row "
+                    "j = " << jBoundary << ", point i = " << i
+                    << ": expected x = " << xCol[jBoundary][i] << ", idx = " << i
+                    << ", instead found x = " << result[i].x
+                    << ", idx = " << result[i].idx << "\n";
+                return 1;
+            }
+        }
+    }
+
+    return 0; // Success
+}
+
+// Regression test for xIntersect at the exact xMin_/xMax_ boundary,
+// including the meshExit rule for columns whose boundary-row value
+// coincides with xMin_/xMax_: a column's point is marked meshExit =
+// false (does not end a segment) only if the next column with a
+// distinct y value (skipping any that tie its own y value, as can
+// happen with concatenated, overlapping mass ranges) also lies at
+// xMin_/xMax_, and meshExit = true otherwise. This mesh exercises all
+// three shapes at once: an isolated tangent point (column 0, alone at
+// xMax_), a contiguous multi-column run ending at the true edge
+// (columns 0-1, both at xMin_), and a mass tie that must be skipped
+// when checking for continuation (columns 2-3 share a y value, but
+// only column 2 is at xMax_; checking for continuation past column 2
+// must look past column 3 to column 4, not stop at column 3).
+static auto
+testXIntersectBoundary()
+{
+    constexpr size_t nx = 3;
+    constexpr size_t ny = 6;
+    std::array<double, nx*ny> xData = { 0 };
+    std::array<double, ny> yData = { 0.0, 1.0, 2.0, 2.0, 3.0, 4.0 };
+    const std::mdspan<double, std::extents<size_t, nx, ny>> x(xData.data());
+    const std::mdspan<double, std::extents<size_t, ny>> y(yData.data());
+
+    constexpr std::array<std::array<double, nx>, ny> xCol = {{
+        { -10.0, -5.0, 5.0 }, // touches xMin (-10, tied w/ col 1) and xMax (5)
+        { -10.0, -4.0, 3.0 }, // touches xMin (-10, tied w/ col 0); not xMax
+        { -8.0,  -3.0, 5.0 }, // touches xMax (5); mass tied with col 3
+        { -7.0,  -2.0, 3.0 }, // mass tied with col 2; touches neither bound
+        { -6.0,  -1.0, 5.0 }, // touches xMax (5)
+        { -5.0,   0.0, 2.0 }  // touches neither bound
+    }};
+    for (size_t j = 0; j < ny; ++j) {
+        for (size_t i = 0; i < nx; ++i) { x[i,j] = xCol[j][i]; }
+    }
+    const interp::Mesh2DGrid m2d(x, y);
+
+    using XInt = interp::Mesh2DGrid::xIntersectionDescriptor;
+    using XIntType = interp::Mesh2DGrid::IntersectionType;
+
+    const auto checkBoundary = [&](
+        const double xBoundary,
+        const std::vector<XInt>& expected)
+    {
+        const auto result = m2d.xIntersect(xBoundary);
+        if (result.size() != expected.size())
+        {
+            std::cerr << "testMesh2DGrid: xIntersect at x = " << xBoundary
+                << " returned " << result.size() << " points, expected "
+                << expected.size() << "\n";
+            return 1;
+        }
+        for (const auto& [r, e] : std::views::zip(result, expected))
+        {
+            if (!utils::approxEqual(r.y, e.y) || !utils::approxEqual(r.xs, e.xs) ||
+                r.t != e.t || r.idx != e.idx || r.meshExit != e.meshExit)
+            {
+                std::cerr << "testMesh2DGrid: xIntersect at x = " << xBoundary
+                    << ": expected (y, xs, t, idx, exit) = " << e.y << ", "
+                    << e.xs << ", " << static_cast<int>(e.t) << ", " << e.idx
+                    << ", " << e.meshExit << ", instead found " << r.y << ", "
+                    << r.xs << ", " << static_cast<int>(r.t) << ", " << r.idx
+                    << ", " << r.meshExit << "\n";
+                return 1;
+            }
+        }
+        return 0;
+    };
+
+    int result = 0;
+
+    // xMax_ = 5: an isolated tangent point (column 0), then a
+    // contiguous pair (columns 2, 4) whose continuation check must
+    // skip past the mass tie at column 3
+    result += checkBoundary(5.0, {
+        { .y = 0.0, .xs = 5.0, .t = XIntType::rib, .idx = 0, .meshExit = true },
+        { .y = 2.0, .xs = 5.0, .t = XIntType::rib, .idx = 2, .meshExit = false },
+        { .y = 3.0, .xs = 5.0, .t = XIntType::rib, .idx = 4, .meshExit = true }
+    });
+
+    // xMin_ = -10: a contiguous run spanning columns 0-1
+    result += checkBoundary(-10.0, {
+        { .y = 0.0, .xs = -10.0, .t = XIntType::rib, .idx = 0, .meshExit = false },
+        { .y = 1.0, .xs = -10.0, .t = XIntType::rib, .idx = 1, .meshExit = true }
+    });
+
+    return result;
+}
+
 auto testMesh2DGrid() -> int
 {
     // Construct a simple convex mesh
@@ -557,6 +707,11 @@ auto testMesh2DGrid() -> int
     // Regression tests for the cached-index boundary bug in yIdx/xIdx
     test += testYIntersectGridBoundary();
     test += testXIdxGridBoundary();
+
+    // Regression tests for yIntersect/xIntersect at the exact
+    // yMin_/yMax_ and xMin_/xMax_ boundaries
+    test += testYIntersectBoundary();
+    test += testXIntersectBoundary();
 
     return test; // Return success
 }
