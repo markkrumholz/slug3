@@ -1255,6 +1255,26 @@ namespace interp
     }
 
 
+    // Helper for yIntersect: handle the case where y is exactly at
+    // the mesh's lower or upper boundary
+    auto Mesh2DGrid::yIntersectBoundaryColumn(
+        const double y,
+        const double xLo,
+        const double xHi
+    ) const -> std::vector<yIntersectionDescriptor>
+    {
+        std::vector<yIntersectionDescriptor> intList; // Output holder
+
+        const size_t j = (y == yMin_) ? 0 : ny() - 1;
+        for (size_t i = 0; i < nx(); ++i)
+        {
+            const double xi = x_[i,j];
+            if (xi < xLo || xi > xHi) { continue; }
+            intList.push_back({ .x = xi, .s = s_[i,j], .idx = i });
+        }
+        return intList;
+    }
+
     // Find mesh intersections at constant y
     auto Mesh2DGrid::yIntersect(
         const double y,
@@ -1269,6 +1289,16 @@ namespace interp
         const double xMinY = xMin(y);
         const double xMaxY = xMax(y);
         if (xHi < xMinY || xLo > xMaxY) { return intList; }
+
+        // Special case: at the exact top or bottom boundary, delegate
+        // to a helper that reads the boundary column's own (x, s)
+        // values directly, rather than the general cell-offset
+        // traversal below (see yIntersectBoundaryColumn's docstring
+        // for why that traversal is unsafe at this boundary)
+        if (y == yMin_ || y == yMax_)
+        {
+            return yIntersectBoundaryColumn(y, xLo, xHi);
+        }
 
         // Get y index and offset of input y value
         jSave_ = yIdx(y);

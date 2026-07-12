@@ -633,12 +633,40 @@ namespace interp
          * mesh or in its interior.
          */
         auto xIntersectSeg(
-            double x, 
+            double x,
             double yMin,
             double yMax,
             bool startInterior,
             bool endInterior
         ) const -> std::vector<xIntersectionDescriptor>;
+
+        /**
+         * @brief Find intersections of a line of constant y with the mesh,
+         *   for the special case where y is exactly at the mesh boundary
+         * @param y The y coordinate, which must be exactly yMin_ or yMax_
+         * @param xLo Lower x limit of traversal
+         * @param xHi Upper x limit of traversal
+         * @returns List of points where the line crosses the mesh
+         * @details
+         * This is a helper function for yIntersect, handling the case
+         * where y is exactly yMin_ or yMax_. In that case the line lies
+         * exactly on a single mass column (j = 0 or ny()-1), so its
+         * intersections are just that column's own (x, s) values at
+         * every row; yIntersect delegates to this helper there rather
+         * than routing through its general cell-offset traversal, both
+         * because that traversal is unnecessary in this case and
+         * because, when the boundary cell happens to be degenerate
+         * (collapsed), it can corrupt the result (yIdx's boundary
+         * clamp, needed so it always returns a valid cell-start index,
+         * forces a nonzero offset from the column here, unlike every
+         * interior exact grid mass, where the offset is naturally
+         * zero).
+         */
+        auto yIntersectBoundaryColumn(
+            double y,
+            double xLo,
+            double xHi
+        ) const -> std::vector<yIntersectionDescriptor>;
 
         /**
          * @brief Helper to xIntersectSeg to start traversals on mesh interior

@@ -30,12 +30,9 @@ KNOWN_FEH = -0.25
 KNOWN_AFE = -0.2
 KNOWN_VVCRIT = 0.0
 
-# Masses that land exactly on the MIST_test mass grid (0.1, 1, 5, 20,
-# 100, 300 Msun), excluding the two boundary values: mMin() (0.1) is
-# fine, but mMax() (300) currently trips an unrelated bug in
-# Mesh2DGrid's handling of y == yMax_ that is out of scope for this
-# test file.
-GRID_MASSES = (1.0, 5.0, 20.0, 100.0)
+# Masses that land exactly on the MIST_test mass grid: 0.1 (== mMin()),
+# 1, 5, 20, 100, and 300 (== mMax()) Msun.
+GRID_MASSES = (0.1, 1.0, 5.0, 20.0, 100.0, 300.0)
 
 # logT values used for cross-checking getTrack() against getIsochrone();
 # kept low enough to stay within every grid mass's real (non-padded)
@@ -109,6 +106,21 @@ def test_tracks2d_gettrack_matches_isochrone(tracks2d, mass, logT):
     assert value_from_track == pytest.approx(value_from_isochrone, abs=1e-6)
 
 
+def test_tracks2d_gettrack_at_mass_boundaries(tracks2d):
+    """Regression test: getTrack() at exactly mMin() or mMax() used to
+    crash. yIdx()'s cell-search clamps its returned index at the upper
+    mass boundary so it always refers to a valid cell, which makes the
+    mass offset within that cell nonzero there (unlike every interior
+    grid mass, where the offset is naturally zero); combined with a
+    degenerate (collapsed) last cell -- which happens for real MIST
+    data, since different masses cross a given age at very different
+    rows -- this corrupted Mesh2DGrid's traversal and tripped
+    Interpolator1D's monotonicity check."""
+    for mass in (tracks2d.mMin(), tracks2d.mMax()):
+        track = tracks2d.getTrack(mass)
+        assert track(track.xMin(), "mass") == pytest.approx(mass, rel=1e-3)
+
+
 def test_tracks2d_isochrone_covers_mass_range(tracks2d):
     """The union of the isochrone's segments should span the track
     set's full mass range."""
@@ -168,6 +180,14 @@ def test_tracks3d_gettrack_matches_isochrone(tracks3d, mass, logT):
     value_from_isochrone = matching[0](mass, "log_L")
 
     assert value_from_track == pytest.approx(value_from_isochrone, abs=1e-6)
+
+
+def test_tracks3d_gettrack_at_mass_boundaries(tracks3d):
+    """Same regression as test_tracks2d_gettrack_at_mass_boundaries,
+    for Tracks3D."""
+    for mass in (tracks3d.mMin(), tracks3d.mMax()):
+        track = tracks3d.getTrack(mass, KNOWN_FEH)
+        assert track(track.xMin(), "mass") == pytest.approx(mass, rel=1e-3)
 
 
 def test_tracks3d_isochrone_covers_mass_range(tracks3d):
