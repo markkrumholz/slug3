@@ -74,7 +74,7 @@ static auto testSimPhysicsCluster() -> int    // NOLINT misc-use-anonymous-names
         if (checkChabrierIMF(sim.imf(), fileName) != 0) { return 1; }
 
         if (sim.cmf().getMin() != 1e3 || sim.cmf().getMax() != 1e3 ||
-            !sim.cmf().normalized())
+            sim.cmf().expectationValue() != 1e3 || !sim.cmf().normalized())
         {
             std::cerr << "testSimPhysics: " << fileName
                 << ": CMF does not match expected delta function at 1e3\n";
@@ -82,7 +82,7 @@ static auto testSimPhysicsCluster() -> int    // NOLINT misc-use-anonymous-names
         }
 
         if (sim.fehDist().getMin() != 0.0 || sim.fehDist().getMax() != 0.0 ||
-            !sim.fehDist().normalized())
+            sim.fehDist().expectationValue() != 0.0 || !sim.fehDist().normalized())
         {
             std::cerr << "testSimPhysics: " << fileName
                 << ": [Fe/H] distribution does not match expected delta function at 0.0\n";
@@ -125,7 +125,7 @@ static auto testSimPhysicsGalaxy() -> int    // NOLINT misc-use-anonymous-namesp
         if (checkChabrierIMF(sim.imf(), fileName) != 0) { return 1; }
 
         if (sim.cmf().getMin() != 1e3 || sim.cmf().getMax() != 1e3 ||
-            !sim.cmf().normalized())
+            sim.cmf().expectationValue() != 1e3 || !sim.cmf().normalized())
         {
             std::cerr << "testSimPhysics: " << fileName
                 << ": CMF does not match expected delta function at 1e3\n";
@@ -133,7 +133,7 @@ static auto testSimPhysicsGalaxy() -> int    // NOLINT misc-use-anonymous-namesp
         }
 
         if (sim.fehDist().getMin() != 0.0 || sim.fehDist().getMax() != 0.0 ||
-            !sim.fehDist().normalized())
+            sim.fehDist().expectationValue() != 0.0 || !sim.fehDist().normalized())
         {
             std::cerr << "testSimPhysics: " << fileName
                 << ": [Fe/H] distribution does not match expected delta function at 0.0\n";
@@ -141,7 +141,7 @@ static auto testSimPhysicsGalaxy() -> int    // NOLINT misc-use-anonymous-namesp
         }
 
         if (sim.clf().getMin() != 1e300 || sim.clf().getMax() != 1e300 ||
-            !sim.clf().normalized())
+            sim.clf().expectationValue() != 1e300 || !sim.clf().normalized())
         {
             std::cerr << "testSimPhysics: " << fileName
                 << ": CLF does not match expected delta function at 1e300\n";
