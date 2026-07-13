@@ -17,7 +17,7 @@
 #include <utility>
 #include <vector>
 
-// NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access, misc-use-anonymous-namespace)
+// NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
 
 // Test basic mesh functions
 static auto
@@ -716,4 +716,4 @@ auto testMesh2DGrid() -> int
     return test; // Return success
 }
 
-// NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access, misc-use-anonymous-namespace)
+// NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)

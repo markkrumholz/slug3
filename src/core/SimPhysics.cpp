@@ -7,64 +7,66 @@
 
 #include "SimPhysics.hpp"
 #include "../extern/tomlplusplus/toml.hpp"
+#include "../pdfs/PDF.hpp"
 #include "../pdfs/PDFFileParser.hpp"
 #include "../pdfs/PDFSegmentDelta.hpp"
 #include "../pdfs/PDFSegmentPowerlaw.hpp"
+#include "../tracks/TrackCommons.hpp"
 #include "../utils/MiscUtils.hpp"
+#include <algorithm>
 #include <filesystem>
 #include <limits>
 #include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
-namespace
+/**
+ * @brief Initialize a PDF from a toml key
+ * @param inputDeck Input deck for simulation
+ * @param key Name of key
+ * @param prefix Prefix to look for PDF file relative to SLUG_DIR
+ * @details
+ * If the key resolves to a numerical value, this is interpreted
+ * as specifying a delta function at that value. If it resolves
+ * to a string, this is interpreted as supplying the name of the
+ * PDF file descriptor, with the path to the file resolved by
+ * utils::getFilePath.
+*/
+static auto initPDFFromKey(const toml::table& inputDeck,
+    const std::string& key,
+    const std::string& prefix = "")
 {
-    /**
-     * @brief Initialize a PDF from a toml key
-     * @param inputDeck Input deck for simulation
-     * @param key Name of key
-     * @param prefix Prefix to look for PDF file relative to SLUG_DIR
-     * @details
-     * If the key resolves to a numerical value, this is interpreted
-     * as specifying a delta function at that value. If it resolves
-     * to a string, this is interpreted as supplying the name of the
-     * PDF file descriptor, with the path to the file resolved by
-     * utils::getFilePath.
-    */
-    auto initPDFFromKey(const toml::table& inputDeck, 
-        const std::string& key,
-        const std::string& prefix = "")
+    // First check for numerical value
+    const std::optional<double> num =
+        inputDeck.at_path(key).value<double>();
+    if (num.has_value())
     {
-        // First check for numerical value
-        const std::optional<double> num =
-            inputDeck.at_path(key).value<double>();
-        if (num.has_value())
-        {
-            auto delta = std::make_unique<pdfs::PDFSegmentDelta>(num.value());
-            auto pdf = pdfs::PDF(std::move(delta));
-            return std::move(pdf);
-        }
-
-        // Next check for string value
-        const std::optional<std::string> pdfFile =
-            inputDeck.at_path(key).value<std::string>();
-        if (pdfFile.has_value())
-        {
-            auto pdfFilePath = utils::getFilePath(pdfFile.value(), prefix).string();
-            if (pdfFilePath.empty())
-            {
-                throw std::runtime_error(
-                    "SimPhysics: pdf file " + pdfFile.value() + " not found");
-            }
-            auto pdf = pdfs::parsePDFDescriptor(pdfFilePath);
-            return std::move(pdf);
-        }
-
-        // If we get here, key does not exist or has invalid type
-        throw std::runtime_error(
-            "SimPhysics: invalid entry for " + key);
+        auto delta = std::make_unique<pdfs::PDFSegmentDelta>(num.value());
+        auto pdf = pdfs::PDF(std::move(delta));
+        return std::move(pdf);
     }
+
+    // Next check for string value
+    const std::optional<std::string> pdfFile =
+        inputDeck.at_path(key).value<std::string>();
+    if (pdfFile.has_value())
+    {
+        auto pdfFilePath = utils::getFilePath(pdfFile.value(), prefix).string();
+        if (pdfFilePath.empty())
+        {
+            throw std::runtime_error(
+                "SimPhysics: pdf file " + pdfFile.value() + " not found");
+        }
+        auto pdf = pdfs::parsePDFDescriptor(pdfFilePath);
+        return std::move(pdf);
+    }
+
+    // If we get here, key does not exist or has invalid type
+    throw std::runtime_error(
+        "SimPhysics: invalid entry for " + key);
+}
 
     /**
      * @brief Check for TOML key of type and return error if type is wrong
@@ -81,35 +83,35 @@ namespace
      * optional; (4) if the key does not exist and required is true, throw a
      * runtime error.
      */
-    template<class T> auto getTOMLKeyWithError(
-        const toml::table& inputDeck,
-        const std::string& key,
-        bool required = false) -> std::optional<T>
+template<class T> static auto getTOMLKeyWithError(
+    const toml::table& inputDeck,
+    const std::string& key,
+    bool required = false) -> std::optional<T>
+{
+    const auto node = inputDeck.at_path(key);
+    if (node)
     {
-        const auto node = inputDeck.at_path(key);
-        if (node)
-        {
-            auto ret = node.value<T>();
-            if (ret.has_value()) {
-                return ret;
-            }
-            else
-            {
-                throw std::runtime_error(
-                    "SimPhysics: cannot understand value for key " +
-                    key);
-            }
+        auto ret = node.value<T>();
+        if (ret.has_value()) {
+            // Key found, return value
+            return ret;
         }
-        if (required) 
-        { 
-            throw std::runtime_error(
-                "SimPhysics: required key " + key + 
-                " not found"); 
-        }
-        return std::nullopt;
-    }
 
-} // Namespace
+        // Key found, but doesn't match expected type
+        throw std::runtime_error(
+            "SimPhysics: cannot understand value for key " +
+            key);
+    }
+    if (required)
+    {
+        // Required key not found, throw error
+        throw std::runtime_error(
+            "SimPhysics: required key " + key +
+            " not found");
+    }
+    // Optional key not found, return nullopt
+    return std::nullopt;
+}
 
 // SimPhysics constructor
 core::SimPhysics::SimPhysics(const toml::table& inputDeck) :
@@ -118,8 +120,8 @@ core::SimPhysics::SimPhysics(const toml::table& inputDeck) :
     // First determine simulation type
     const auto simType = getTOMLKeyWithError<std::string>(
         inputDeck, "sim_type", true);
-    if (simType.value() == "galaxy") { simType_ = SimType::galaxy; }
-    else if (simType.value() == "cluster") { simType_ = SimType::cluster; }
+    if (simType.value() == "galaxy") { simType_ = SimType::galaxy; } // NOLINT(bugprone-unchecked-optional-access) -- check happens one line up
+    else if (simType.value() == "cluster") { simType_ = SimType::cluster; } // NOLINT(bugprone-unchecked-optional-access) -- check happens two lines up
     else { throw std::runtime_error("SimPhysics: sim_type must be 'galaxy' or 'cluster'"); }
 
     // Read IMF, CMF, and FeH
@@ -146,9 +148,9 @@ core::SimPhysics::SimPhysics(const toml::table& inputDeck) :
             // constant PDF from t = 0 to T for a big number T, with
             // the weight set to T / sfr so that the mass of stars
             // formed in any time interval dt comes out to sfr * dt.
-            double tMax = std::numeric_limits<double>::max() *
+            const double tMax = std::numeric_limits<double>::max() *
                 std::min(sfr.value(), 1.0);
-            double wgt = std::numeric_limits<double>::max() /
+            const double wgt = std::numeric_limits<double>::max() /
                 std::max(sfr.value(), 1.0);
             auto pl = std::make_unique<pdfs::PDFSegmentPowerlaw>(0.0, tMax, 0.0);
             sfr_ = pdfs::PDF(std::move(pl), wgt);
@@ -187,7 +189,7 @@ void core::SimPhysics::readTracks(const toml::table& inputDeck)
 
     // Construct tracks from input data
     tracks_ = tracks::Tracks3D(
-        trackName.value(),
+        trackName.value(), // NOLINT(bugprone-unchecked-optional-access) -- we verified this was valid a few lines ago
         fehDist_.getMin(),
         fehDist_.getMax(),
         vvcrit.value_or(tracks::defaultVVcrit),

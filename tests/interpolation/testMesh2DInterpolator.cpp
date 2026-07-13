@@ -20,7 +20,7 @@
 #include <utility>
 #include <vector>
 
-// NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access, misc-use-anonymous-namespace)
+// NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
 
 // Number of fields in test
 constexpr size_t nF = 2;
@@ -252,4 +252,4 @@ auto testMesh2DInterpolator() -> int
     return 0; // Success
 }
 
-// NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access, misc-use-anonymous-namespace)
+// NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)

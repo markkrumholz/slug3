@@ -97,7 +97,7 @@ namespace
 } // namespace
 
 // Test parsing of a cluster-type input deck
-static auto testSimPhysicsCluster() -> int    // NOLINT misc-use-anonymous-namespace
+static auto testSimPhysicsCluster() -> int
 {
     const std::string fileName = "tests/core/assets/testCluster.in";
     try
@@ -150,7 +150,7 @@ static auto testSimPhysicsCluster() -> int    // NOLINT misc-use-anonymous-names
 }
 
 // Test parsing of a galaxy-type input deck
-static auto testSimPhysicsGalaxy() -> int    // NOLINT misc-use-anonymous-namespace
+static auto testSimPhysicsGalaxy() -> int
 {
     const std::string fileName = "tests/core/assets/testGalaxy.in";
     try

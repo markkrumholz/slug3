@@ -24,7 +24,7 @@
 
 namespace tracks
 {
-    static auto getTrackSetsFromRegistry(toml::table& registry)  //NOLINT(misc-use-anonymous-namespace)
+    static auto getTrackSetsFromRegistry(toml::table& registry)
     {
         std::vector<std::string> trackSets;
         if (toml::array* arr = registry.at_path("track_sets").as_array())
@@ -51,7 +51,7 @@ namespace tracks
      * @returns The attribute's value, or an empty optional if the group
      *   has no attribute of that name
      */
-    static auto readScalarAttrIfPresent(const hid_t grp, //NOLINT(misc-use-anonymous-namespace)
+    static auto readScalarAttrIfPresent(const hid_t grp,
         const std::string& name) -> std::optional<double>
     {
         if (H5Aexists(grp, name.c_str()) <= 0) { return std::nullopt; }
@@ -69,7 +69,7 @@ namespace tracks
      * @param name Name of the dataset
      * @returns The dataset contents
      */
-    static auto readDataset1D(const hid_t grp, const std::string& name) //NOLINT(misc-use-anonymous-namespace)
+    static auto readDataset1D(const hid_t grp, const std::string& name)
         -> std::vector<double>
     {
         const hid_t dset = H5Dopen2(grp, name.c_str(), H5P_DEFAULT);
@@ -93,7 +93,7 @@ namespace tracks
      * @param name Name of the dataset
      * @returns The number of rows (extent of the first dimension) of the dataset
      */
-    static auto dataset2DRows(const hid_t grp, const std::string& name) //NOLINT(misc-use-anonymous-namespace)
+    static auto dataset2DRows(const hid_t grp, const std::string& name)
         -> size_t
     {
         const hid_t dset = H5Dopen2(grp, name.c_str(), H5P_DEFAULT);
