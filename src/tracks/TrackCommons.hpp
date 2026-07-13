@@ -53,6 +53,9 @@ namespace tracks
         (std::filesystem::path("data") / std::filesystem::path("tracks")
         / std::filesystem::path("tracks.toml")); /**< Default registry */
 
+    inline constexpr double defaultVVcrit = 0.0; /**< Default v/vcrit value */
+    inline constexpr double defaultAFe = 0.0;    /**< Default [alpha/Fe] value */
+
 } // namespace tracks
 
 #endif // TRACKCOMMONS_HPP

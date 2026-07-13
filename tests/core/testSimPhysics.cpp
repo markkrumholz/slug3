@@ -21,8 +21,8 @@
 
 namespace
 {
-    // Build the PDF that a correctly-parsed chabrier.toml /
-    // chabrier_imf.txt should produce, and check that imf agrees
+    // Build the PDF that a correctly-parsed chabrier.toml
+    // should produce, and check that imf agrees
     // with it. Both files describe the same Chabrier (2005) IMF, so
     // this comparison is shared by the cluster and galaxy test decks.
     auto checkChabrierIMF(const pdfs::PDF& imf, const std::string& label) -> int

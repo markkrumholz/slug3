@@ -78,8 +78,8 @@ RuntimeError
             const std::string& trackName,
             double fehMin,
             double fehMax,
-            double vvcrit = 0.0,
-            double afe = 0.0,
+            double vvcrit = defaultVVcrit,
+            double afe = defaultAFe,
             const std::string& registryName = defaultRegistry);
         /**
          * @brief Construct an empty, invalid Tracks3D object
@@ -92,7 +92,7 @@ RuntimeError
         Tracks3D(const Tracks3D&) = delete;
         Tracks3D(Tracks3D&&) = default;
         auto operator=(const Tracks3D&) -> Tracks3D& = delete;
-        auto operator=(Tracks3D&&) -> Tracks3D& = delete;
+        auto operator=(Tracks3D&&) -> Tracks3D& = default;
 
         // Observers
 

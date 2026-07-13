@@ -4,6 +4,9 @@ sim_type = "galaxy"
 
 [stars]
 IMF = "chabrier.toml"
+track_registry = "tests/tracks/assets/tracks.toml"
+tracks = "MIST_test"
+alphaFe = -0.2
 FeH = 0.0
 
 [clusters]

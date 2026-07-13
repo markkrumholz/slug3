@@ -191,7 +191,7 @@ namespace tracks
         if (it == trackSets.end())
         {
             throw std::runtime_error("findMatchingTracks: no trackset named " +
-                trackName + " found in track registry " + trackName);
+                trackName + " found in track registry " + registryName);
         }
 
         // Get the h5file name for this track set from the registry
@@ -338,7 +338,7 @@ namespace tracks
         if (it == trackSets.end())
         {
             throw std::runtime_error("findTrack: no trackset named " +
-                trackName + " found in track registry " + trackName);
+                trackName + " found in track registry " + registryName);
         }
 
         // Get the h5file name for this track set from the registry

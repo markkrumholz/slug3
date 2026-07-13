@@ -86,6 +86,13 @@ namespace core
 
     private:
 
+        /**
+         * @brief Load a set of tracks specified by input deck
+         * @param inputDeck Name of input deck
+         * @returns A Tracks3D object with the correct tracks loaded
+         */
+        void readTracks(const toml::table& inputDeck);
+
         // Physics settings
         SimType simType_;          /**< Simulation type */
         pdfs::PDF imf_;            /**< The IMF to use for the simulation */

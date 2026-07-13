@@ -3,8 +3,11 @@
 sim_type = "cluster"
 
 [stars]
-IMF = "tests/pdfs/assets/chabrier_imf.txt"
+IMF = "chabrier.toml"
+track_registry = "tests/tracks/assets/tracks.toml"
+tracks = "MIST_test"
 FeH = 0.0
+alphaFe = -0.2
 
 [clusters]
 CMF = 1e3

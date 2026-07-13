@@ -78,8 +78,8 @@ RuntimeError
         Tracks2D(
             const std::string& trackName,
             double feh = 0.0,
-            double vvcrit = 0.0,
-            double afe = 0.0,
+            double vvcrit = defaultVVcrit,
+            double afe = defaultAFe,
             const std::string& registryName = defaultRegistry);
         /**
          * @brief Construct a Tracks2D object from a supplied Mesh2DInterpolator
