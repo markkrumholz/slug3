@@ -27,6 +27,7 @@ namespace utils
     /**
      * @brief Look for a file both in the current working directory and in SLUG_DIR
      * @param fileName File name
+     * @param prefix Prefix within in SLUG_DIR to search
      * @returns Path to file
      * @details
      * This routine searches for files with the name fileName in both the current
@@ -37,18 +38,20 @@ namespace utils
      * (2) If a matching file is not found and fileName specifies an absolute path, return
      *     an empty path.
      * (3) If fileName is not an absolute path, and the environment variable SLUG_DIR
-     *     is set, search for a file named SLUG_DIR/fileName, and return a path to it
+     *     is set, search for a file named SLUG_DIR/prefix/fileName, and return a path to it
      *     if found.
      * (4) Otherwise, return an empty path.
      */
-    inline auto getFilePath(const std::string& fileName)
+    inline auto getFilePath(const std::string& fileName,
+        const std::string& prefix = "")
     {
         std::filesystem::path filePath(fileName);
         if (std::filesystem::exists(filePath)) { return filePath; }
         if (filePath.is_absolute()) { return std::filesystem::path(); }
         auto slugDir = std::getenv("SLUG_DIR");
         if (!slugDir) { return std::filesystem::path(); }
-        filePath = std::filesystem::path(slugDir) / filePath;
+        filePath = std::filesystem::path(slugDir) / 
+            std::filesystem::path(prefix) / filePath;
         if (std::filesystem::exists(filePath)) { return filePath; }
         return std::filesystem::path();
     }

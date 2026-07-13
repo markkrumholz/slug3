@@ -15,7 +15,7 @@
 #include <vector>
 
 static auto
-testPDFSegmentSchechterAlpha(const double alpha) -> int     // NOLINT misc-use-anonymous-namespace
+testPDFSegmentSchechterAlpha(const double alpha) -> int
 {
     const double sMin = 1.0; // The lower limit of the segment
     const double sMax = 10.0; // The upper limit of the segment

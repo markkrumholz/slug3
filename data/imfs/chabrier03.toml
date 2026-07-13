@@ -1,0 +1,21 @@
+###############################################################
+# This is an IMF definition file for SLUG v2.
+# This file defines the Chabrier (2003) IMF          
+###############################################################
+
+# Breakpoints: mass values where the functional form changes
+breakpoints 0.08 1 120
+
+# Definitions of segments between the breakpoints
+
+# This segment is a lognormal with mean 0.079 and dispersion 0.69 in log
+# base 10, corresponding to 1.589 in log base e
+segment
+type lognormal
+mean 0.079
+disp 1.589
+
+# This segment is a powerlaw of slope -2.35
+segment
+type powerlaw
+slope -2.35

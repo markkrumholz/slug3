@@ -64,7 +64,7 @@ namespace pdfs {
             throw std::runtime_error("PDFSegmentDelta: a delta function cannot be evaluated at a point.");
         }
         [[nodiscard]] auto expectationValue(const double a, const double b) const -> double override {
-            if (a >= b || a > sMax_ || b < sMin_) {
+            if (a > b || a > sMax_ || b < sMin_) {
                 return 0.0; // Invalid range for expectation value calculation
             }
             return sMin_; // The expectation value of a delta function is just the value at which it is centered
@@ -81,7 +81,7 @@ namespace pdfs {
 
         // Drawing functions
         [[nodiscard]] auto draw(const double a, const double b) const -> double override {
-            if (a >= b || a >= sMax_ || b <= sMin_) {
+            if (a >= b || a > sMax_ || b < sMin_) {
                 return 0.0; // Invalid range for expectation value calculation
             }
             return sMin_; // Sampling from a delta function always returns the same value

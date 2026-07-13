@@ -36,6 +36,7 @@ Checks: >-
   -llvm-use-new-mlir-op-builder,
   -misc-no-recursion,
   -misc-non-private-member-variables-in-classes,
+  -misc-use-anonymous-namespace,
   -performance-enum-size,
   -portability-restrict-system-includes,
   -readability-identifier-length,

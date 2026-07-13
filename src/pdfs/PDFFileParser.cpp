@@ -35,7 +35,7 @@
 
 // Little utility function to handle errors
 [[noreturn ]]
-static void parseError(const std::string& err,   // NOLINT misc-use-anonymous-namespace
+static void parseError(const std::string& err,
     const std::string& line,
     const std::string& fileName)
 {
@@ -47,7 +47,7 @@ static void parseError(const std::string& err,   // NOLINT misc-use-anonymous-na
 
 
 // Function to parse a single segment
-static void parseSegment(const std::string& fileName,  // NOLINT misc-use-anonymous-namespace
+static void parseSegment(const std::string& fileName,
     const pdfs::FileFormats fmt,
     const std::string& line,
     const std::vector<std::string>& tok, 
@@ -148,7 +148,7 @@ static void parseSegment(const std::string& fileName,  // NOLINT misc-use-anonym
 }
 
 // Parse method
-static auto parseMethod(const std::string& fileName,  // NOLINT misc-use-anonymous-namespace
+static auto parseMethod(const std::string& fileName,
     const std::string& line,
     std::vector<std::string>& tok) -> pdfs::SamplingMethods
 {
@@ -165,7 +165,7 @@ static auto parseMethod(const std::string& fileName,  // NOLINT misc-use-anonymo
 }
 
 // Method to set weights in basic mode
-static void computeWgt(const std::vector<std::unique_ptr<pdfs::PDFSegment> >& seg,  // NOLINT misc-use-anonymous-namespace
+static void computeWgt(const std::vector<std::unique_ptr<pdfs::PDFSegment> >& seg,
     std::vector<double>& breakpoints,
     std::vector<double>& wgt)
 {
@@ -180,7 +180,7 @@ static void computeWgt(const std::vector<std::unique_ptr<pdfs::PDFSegment> >& se
 }
 
 // Utility function to extract breakpoints
-static void parseBreakpoints(const std::string& fileName,  // NOLINT misc-use-anonymous-namespace
+static void parseBreakpoints(const std::string& fileName,
     const std::string& line,
     std::vector<std::string>& tokens,
     std::vector<double>& breakpoints)
@@ -212,7 +212,7 @@ static void parseBreakpoints(const std::string& fileName,  // NOLINT misc-use-an
 
 // Method to parse main body
 static auto
-parseBody(const std::string& fileName,  // NOLINT misc-use-anonymous-namespace
+parseBody(const std::string& fileName,
     const pdfs::FileFormats fmt,
     std::ifstream& file,
     std::vector<double>& breakpoints) ->

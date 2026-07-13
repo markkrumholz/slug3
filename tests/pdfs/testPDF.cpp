@@ -26,7 +26,7 @@
 #include <utility>
 #include <vector>
 
-static auto testPDFParsing() -> int    // NOLINT misc-use-anonymous-namespace
+static auto testPDFParsing() -> int
 {
     // Test construction of a PDF from a valid file in basic mode
     const std::filesystem::path assetDir = "assets";
@@ -125,7 +125,7 @@ static auto testPDFParsing() -> int    // NOLINT misc-use-anonymous-namespace
     return 0; // Passed
 }
 
-static auto testPDFSampling(    // NOLINT misc-use-anonymous-namespace
+static auto testPDFSampling(
     const double a, 
     const double b, 
     const double expectationValueExpected,
