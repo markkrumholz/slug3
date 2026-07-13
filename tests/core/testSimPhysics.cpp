@@ -53,6 +53,47 @@ namespace
         }
         return 0;
     }
+
+    // Verify that SimPhysics read and constructed usable stellar
+    // tracks. Both test decks specify the MIST_test track set with
+    // alphaFe = -0.2 and the default vvcrit = 0.0, at FeH = 0.0 (an
+    // exact point on that track set's own [Fe/H] grid), so this check
+    // is shared between them. This is deliberately far lighter than
+    // the Tracks3D unit tests in tests/tracks -- it only needs to
+    // confirm the tracks were read successfully and are usable, not
+    // exhaustively verify Tracks3D's own behavior.
+    auto checkTracks(const core::SimPhysics& sim, const std::string& label) -> int
+    {
+        const auto& tracks = sim.tracks();
+
+        if (tracks.aFe() != -0.2 || tracks.vVcrit() != 0.0)
+        {
+            std::cerr << "testSimPhysics: " << label << ": tracks do not have "
+                "expected aFe/vVcrit; aFe = " << tracks.aFe()
+                << ", vVcrit = " << tracks.vVcrit() << "\n";
+            return 1;
+        }
+
+        if (tracks.feH().size() != 1 || tracks.feH().front() != 0.0)
+        {
+            std::cerr << "testSimPhysics: " << label << ": tracks do not have "
+                "the expected single [Fe/H] = 0.0 slice\n";
+            return 1;
+        }
+
+        // Confirm the tracks are actually usable by requesting a
+        // track for a mass within their range
+        constexpr double mass = 1.0;
+        const auto track = tracks.getTrack(mass, 0.0);
+        if (!track || track->xMin() >= track->xMax())
+        {
+            std::cerr << "testSimPhysics: " << label << ": getTrack(" << mass
+                << ", 0.0) did not return a usable track\n";
+            return 1;
+        }
+
+        return 0;
+    }
 } // namespace
 
 // Test parsing of a cluster-type input deck
@@ -96,6 +137,8 @@ static auto testSimPhysicsCluster() -> int    // NOLINT misc-use-anonymous-names
                 << ": CLF and SFR should not be initialized for a cluster simulation\n";
             return 1;
         }
+
+        if (checkTracks(sim, fileName) != 0) { return 1; }
     }
     catch (const std::exception& error)
     {
@@ -159,6 +202,8 @@ static auto testSimPhysicsGalaxy() -> int    // NOLINT misc-use-anonymous-namesp
                 << ": SFR does not match expected non-normalized constant PDF\n";
             return 1;
         }
+
+        if (checkTracks(sim, fileName) != 0) { return 1; }
     }
     catch (const std::exception& error)
     {
