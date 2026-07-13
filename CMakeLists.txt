@@ -37,6 +37,7 @@ add_subdirectory(src/extern/pybind11)
 # Main executable
 add_executable(slug 
     src/main.cpp
+    src/core/SimPhysics.cpp
     src/interpolation/Mesh2DGrid.cpp
     src/pdfs/PDFFileParser.cpp
     src/pdfs/PDFSegment.cpp
@@ -83,6 +84,23 @@ add_executable(slugTestTracks
     src/tracks/Tracks3D.cpp
     tests/tracks/testTracksAll.cpp
 )
+add_executable(slugTestCore
+    src/core/SimPhysics.cpp
+    src/interpolation/Mesh2DGrid.cpp
+    src/pdfs/PDFFileParser.cpp
+    src/pdfs/PDFSegment.cpp
+    src/pdfs/PDFSegmentDelta.cpp
+    src/pdfs/PDFSegmentExponential.cpp
+    src/pdfs/PDFSegmentLognormal.cpp
+    src/pdfs/PDFSegmentNormal.cpp
+    src/pdfs/PDFSegmentPowerlaw.cpp
+    src/pdfs/PDFSegmentSchechter.cpp
+    src/tracks/TrackUtils.cpp
+    src/tracks/Tracks2D.cpp
+    src/tracks/Tracks3D.cpp
+    tests/core/testCoreAll.cpp
+    tests/core/testSimPhysics.cpp
+)
 
 # Python module, for testing the Python frontend. The CMake target is named
 # slugPython (the "slug" target name is already taken by the main
@@ -115,6 +133,9 @@ target_include_directories(slugTestUtils SYSTEM PRIVATE src/extern/pcg-cpp/inclu
 target_include_directories(slugTestTracks PRIVATE src)
 target_include_directories(slugTestTracks SYSTEM PRIVATE src/extern/pcg-cpp/include)
 
+target_include_directories(slugTestCore PRIVATE src)
+target_include_directories(slugTestCore SYSTEM PRIVATE src/extern/pcg-cpp/include)
+
 target_include_directories(slugPython PRIVATE src)
 target_include_directories(slugPython SYSTEM PRIVATE src/extern/pcg-cpp/include)
 
@@ -123,6 +144,7 @@ target_include_directories(slugTestInterpolation SYSTEM PRIVATE ${HDF5_INCLUDE_D
 target_include_directories(slugTestPDFs SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestUtils SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestTracks SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
+target_include_directories(slugTestCore SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugPython SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 
 # Link to GSL
@@ -131,6 +153,7 @@ target_link_libraries(slugTestInterpolation PRIVATE GSL::gsl)
 target_link_libraries(slugTestPDFs PRIVATE GSL::gsl)
 target_link_libraries(slugTestUtils PRIVATE GSL::gsl)
 target_link_libraries(slugTestTracks PRIVATE GSL::gsl)
+target_link_libraries(slugTestCore PRIVATE GSL::gsl)
 target_link_libraries(slugPython PRIVATE GSL::gsl)
 
 # Link to HDF5
@@ -139,6 +162,7 @@ target_link_libraries(slugTestInterpolation PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugTestPDFs PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugTestUtils PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugTestTracks PRIVATE ${HDF5_CXX_LIBRARIES})
+target_link_libraries(slugTestCore PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugPython PRIVATE ${HDF5_CXX_LIBRARIES})
 
 # Link to OpenMP, if available
@@ -148,6 +172,7 @@ if(OpenMP_CXX_FOUND)
     target_link_libraries(slugTestPDFs PRIVATE OpenMP::OpenMP_CXX)
     target_link_libraries(slugTestUtils PRIVATE OpenMP::OpenMP_CXX)
     target_link_libraries(slugTestTracks PRIVATE OpenMP::OpenMP_CXX)
+    target_link_libraries(slugTestCore PRIVATE OpenMP::OpenMP_CXX)
     target_link_libraries(slugPython PRIVATE OpenMP::OpenMP_CXX)
 endif()
 
@@ -160,6 +185,14 @@ add_test(NAME test_PDFs COMMAND slugTestPDFs)
 add_test(NAME test_Utils COMMAND slugTestUtils)
 add_test(NAME test_Tracks COMMAND slugTestTracks
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# test_Core exercises SimPhysics's file resolution via getFilePath's
+# SLUG_DIR + prefix rule (e.g. for stars.IMF = "chabrier.toml", which
+# resolves to data/imfs/chabrier.toml), so SLUG_DIR must be set here.
+add_test(NAME test_Core COMMAND slugTestCore
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+set_tests_properties(test_Core PROPERTIES
+    ENVIRONMENT "SLUG_DIR=${CMAKE_SOURCE_DIR}")
 
 # Python binding tests: run via pytest, using the same Python interpreter
 # pybind11 built slugPython against, so that this always tests the module

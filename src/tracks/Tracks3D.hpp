@@ -2,18 +2,20 @@
  * @file Tracks3D.hpp
  * @author Mark Krumholz
  * @brief A class to represent a 3D set of stellar tracks
- * @date 2024-07-10
+ * @date 2026-07-10
  */
 
 #ifndef TRACKS3D_HPP
 #define TRACKS3D_HPP
 
+#include "../interpolation/Mesh2DInterpolator.hpp"
+#include "../interpolation/Mesh3DInterpolator.hpp"
 #include "TrackCommons.hpp"
 #include "Tracks2D.hpp"
-#include "../interpolation/Mesh3DInterpolator.hpp"
-#include "H5Ipublic.h"
 #include <cstddef>
+#include <limits>
 #include <memory>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -79,6 +81,13 @@ RuntimeError
             double vvcrit = 0.0,
             double afe = 0.0,
             const std::string& registryName = defaultRegistry);
+        /**
+         * @brief Construct an empty, invalid Tracks3D object
+         */
+        Tracks3D() : 
+            AFe_(std::numeric_limits<double>::quiet_NaN()),
+            vVcrit_(std::numeric_limits<double>::quiet_NaN())
+        { }
         virtual ~Tracks3D() = default;
         Tracks3D(const Tracks3D&) = delete;
         Tracks3D(Tracks3D&&) = default;
@@ -311,9 +320,9 @@ isochrone : list of Interpolator1D
 
         // Track data
         M3DPtr interp_;           /**< Interpolator for the tracks */
-        std::vector<double> FeH_; /**< [Fe/H] values for all tracks */
-        double AFe_;              /**< [alpha/Fe] value of this set of tracks, or quiet_NaN if not available */
-        double vVcrit_;           /**< v/vcrit value of this set of tracks, or quiet_NaN if not available */
+        std::vector<double> FeH_; /**< [Fe/H] values for all tracks */  // NOLINT(readability-identifier-naming)
+        double AFe_;              /**< [alpha/Fe] value of this set of tracks, or quiet_NaN if not available */ // NOLINT(readability-identifier-naming)
+        double vVcrit_;           /**< v/vcrit value of this set of tracks, or quiet_NaN if not available */   
 
     };
 

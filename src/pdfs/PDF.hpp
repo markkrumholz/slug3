@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <concepts>
 #include <limits>
 #include <memory>
 #include <random>
@@ -87,7 +88,49 @@ namespace pdfs {
                 sMax_ = std::max(sMax_, s->getMax());
             }
         }
-       virtual ~PDF() = default;
+
+        /**
+         * @brief Construct a normalized PDF containing a single segment
+         * @tparam SegT The concrete segment type; must derive from PDFSegment
+         * @param seg A unique_ptr to the segment to use
+         * @param wgt Weight of the PDF
+         * @param method Sampling method
+         * @details
+         * Templated on the concrete segment type (rather than taking a
+         * unique_ptr<PDFSegment> directly), even though seg is
+         * immediately stored as a unique_ptr<PDFSegment>, so that
+         * passing a unique_ptr to some derived segment type (the
+         * normal way to call this) is an exact match here rather than
+         * needing an implicit derived-to-base unique_ptr conversion;
+         * without that, overload resolution would sometimes prefer
+         * the array-of-segments-and-weights constructor above instead,
+         * mistaking the sampling method argument for a weights
+         * container.
+         */
+        template <typename SegT>
+            requires std::derived_from<SegT, PDFSegment>
+        explicit PDF(std::unique_ptr<SegT> seg,
+            const double wgt = 1.0,
+            SamplingMethods method = SamplingMethods::stopNearest) :
+            wgt_(wgt, 1),
+            method_(method),
+            normalized_(wgt == 1.0)
+        {
+            sMin_ = seg->getMin();
+            sMax_ = seg->getMax();
+            seg_.push_back(std::move(seg));
+        }
+
+        /**
+         * @brief Construct an empty PDF with no segments
+         */
+        PDF() :
+            sMin_(std::numeric_limits<double>::quiet_NaN()),
+            sMax_(std::numeric_limits<double>::quiet_NaN()),
+            method_(pdfs::SamplingMethods::none),
+            normalized_(false)
+        { }
+        virtual ~PDF() = default;
 
         // Disallow copying, since we use unique_ptr
         // objects to hold segments
@@ -99,6 +142,10 @@ namespace pdfs {
         auto operator=(PDF&&) -> PDF& = default; 
 
         // Getters for internal state
+        /** @brief Report if PDF has been initialized
+         *  @return True if the PDF is initialized and usable, false if not
+         */
+        [[nodiscard]] auto valid() const { return !seg_.empty(); }
         /** @brief Get the lower limit of the segment.
          *  @return The lower limit of the segment.
          */
@@ -327,6 +374,10 @@ namespace pdfs {
                         samples.pop_back();
                     }
                     return samples;
+                }
+                case SamplingMethods::none:
+                {
+                    throw std::runtime_error("PDF: invalid sampling method");
                 }
             }
         }

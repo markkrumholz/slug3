@@ -1,0 +1,14 @@
+# This is a test criptic input deck for a galaxy simulation
+
+sim_type = "galaxy"
+
+[stars]
+IMF = "chabrier.toml"
+FeH = 0.0
+
+[clusters]
+CMF = 1e3
+CLF = 1e300
+
+[galaxy]
+sfr = 1.0

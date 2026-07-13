@@ -28,7 +28,8 @@ namespace pdfs {
         stop50,         /**< Stop-50/50 sampling */
         number,         /**< Exact number sampling */
         poisson,        /**< Poisson sampling */
-        sorted          /**< Sorted sampling */
+        sorted,         /**< Sorted sampling */
+        none            /**< Invalid dummy method */
     };
     
     /**
