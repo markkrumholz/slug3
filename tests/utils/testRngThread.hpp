@@ -66,6 +66,57 @@ auto testRngThread() -> int
     }
 #endif // _OPENMP
 
+    // Test that getState() changes after drawing a random number
+    utils::rng().seed(seed);
+    const utils::RngState stateBefore = utils::rng().getState();
+    dist(utils::rng()());
+    const utils::RngState stateAfter = utils::rng().getState();
+    if (stateBefore == stateAfter) {
+        std::cerr << "testRngThread: getState() did not change after "
+                  << "drawing a random number\n";
+        return 1;
+    }
+
+    // Test that getState()/setState() round-trip: saving the state,
+    // drawing some numbers, then restoring the saved state should
+    // reproduce exactly the same sequence of numbers
+    utils::rng().seed(seed);
+    const utils::RngState savedState = utils::rng().getState();
+    const double origDraw1 = dist(utils::rng()());
+    const double origDraw2 = dist(utils::rng()());
+    utils::rng().setState(savedState);
+    const double restoredDraw1 = dist(utils::rng()());
+    const double restoredDraw2 = dist(utils::rng()());
+    if (origDraw1 != restoredDraw1 || origDraw2 != restoredDraw2) {
+        std::cerr << "testRngThread: getState()/setState() round-trip failed: "
+                  << "restoring a saved state did not reproduce the same "
+                  << "sequence of random numbers (expected " << origDraw1
+                  << ", " << origDraw2 << ", got " << restoredDraw1 << ", "
+                  << restoredDraw2 << ")\n";
+        return 1;
+    }
+
+#ifdef _OPENMP
+    // Test that getState() is private to the calling thread, like the
+    // rng engine itself
+    std::vector<utils::RngState> stateThread(nThreads);
+    #pragma omp parallel num_threads(nThreads)
+    {
+        const int threadNum = omp_get_thread_num();
+        stateThread[threadNum] = utils::rng().getState();
+    }
+    for (int i = 0; i < nThreads; ++i) {
+        for (int j = i + 1; j < nThreads; ++j) {
+            if (stateThread[i] == stateThread[j]) {
+                std::cerr << "testRngThread: getState() in threads failed: "
+                          << "threads " << i << " and " << j
+                          << " returned the same state\n";
+                return 1;
+            }
+        }
+    }
+#endif // _OPENMP
+
     return 0; // Passed
 }
 

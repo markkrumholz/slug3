@@ -37,6 +37,7 @@ add_subdirectory(src/extern/pybind11)
 # Main executable
 add_executable(slug 
     src/main.cpp
+    src/core/Cluster.cpp
     src/core/SimPhysics.cpp
     src/interpolation/Mesh2DGrid.cpp
     src/pdfs/PDFFileParser.cpp
