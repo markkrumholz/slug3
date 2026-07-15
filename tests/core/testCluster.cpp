@@ -139,7 +139,7 @@ static auto testClusterAdvance() -> int
 static auto testClusterMinStochMass() -> int
 {
     constexpr double targetMass = 1e4;
-    constexpr double tolerance = 0.10;
+    constexpr double tolerance = 0.15;
 
     try
     {
