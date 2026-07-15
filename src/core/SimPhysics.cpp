@@ -115,7 +115,9 @@ template<class T> static auto getTOMLKeyWithError(
 
 // SimPhysics constructor
 core::SimPhysics::SimPhysics(const toml::table& inputDeck) :
-    simType_(SimType::none)
+    simType_(SimType::none),
+    minStochMass_(0.0),
+    fracStochMass_(1.0)
 {
     // First determine simulation type
     const auto simType = getTOMLKeyWithError<std::string>(
@@ -183,6 +185,14 @@ core::SimPhysics::SimPhysics(const toml::table& inputDeck) :
     if (constFeH())
     {
         constFeHTracks_ = tracks_.sliceConstFeH(fehDist_.getMin());
+    }
+
+    // Read minimum stochastic mass
+    auto minSM = getTOMLKeyWithError<double>(inputDeck, "stars.min_stoch_mass");
+    if (minSM.has_value()) 
+    { 
+        minStochMass_ = minSM.value();
+        fracStochMass_ = imf_.integral(minStochMass_, imf_.getMax());
     }
 }
 

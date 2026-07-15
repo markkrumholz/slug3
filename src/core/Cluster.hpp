@@ -98,6 +98,7 @@ namespace core
         // Masses
         std::vector<double> m_;     /**< Stellar masses */
         std::vector<double> mDead_; /**< Mass of dead stars */
+        double birthNonStochMass_;  /**< Mass in non-stochastic part of IMF at birth */
         double birthMass_;          /**< Actual mass at birth */
 
         // Times
