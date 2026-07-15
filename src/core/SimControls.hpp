@@ -54,8 +54,7 @@ namespace core
 #ifdef _OPENMP
 #pragma omp atomic
 #endif
-            const auto nRemain = nTrialRemain_;
-            return nRemain;
+           return nTrialRemain_;
         }
 
         // Setters
