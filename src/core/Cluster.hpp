@@ -45,11 +45,19 @@ namespace core
             double time,
             const SimPhysics& physics);
 
+        // Observers
+
         /**
-         * @brief Advance the cluster in time
-         * @param t The time to which to advance
+         * @brief Return the current list of living stellar masses
+         * @return Masses of currently alive stars
          */
-        void advance(double t);
+        auto starMasses() const -> const auto& { return m_; }
+
+        /**
+         * @brief Return the list of dead stellar masses
+         * @return Masses of dead stars
+         */
+        auto deadStarMasses() const -> const auto& { return mDead_; }
 
         /**
          * @brief Get the stellar tracks at this cluster's [Fe/H]
@@ -66,6 +74,12 @@ namespace core
          */
         [[nodiscard]] auto tracks() const -> const tracks::Tracks2D&;
 
+        /**
+         * @brief Advance the cluster in time
+         * @param t The time to which to advance
+         */
+        void advance(double t);
+        
     private:
 
         // Data set on creation
