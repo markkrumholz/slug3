@@ -108,6 +108,15 @@ namespace core
          */
         [[nodiscard]] auto minStochMass() const { return minStochMass_; }
 
+        /**
+         * @brief Get fraction of stellar mass being treated stochastically
+         * @return Fraction of stellar mass being treated stochastically
+         */
+        [[nodiscard]] auto fracStochMass() const
+        {
+            return imf_.integral(minStochMass_, imf_.getMax());
+        }
+
     private:
 
         /**

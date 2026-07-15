@@ -18,6 +18,8 @@
 #include <string_view>
 
 static constexpr std::string_view inputFile = "tests/core/assets/testCluster.in";
+static constexpr std::string_view inputFileMinStochMass =
+    "tests/core/assets/testClusterMinStochMass.in";
 static constexpr unsigned int rngSeed = 42;
 
 // Verify that Cluster::starMasses() sums to within 5% of the target mass.
@@ -131,10 +133,60 @@ static auto testClusterAdvance() -> int
     return 0;
 }
 
+// Verify min_stoch_mass behaviour: starMasses() should contain only stars at
+// or above min_stoch_mass, and their total mass should be within 10% of the
+// stochastic fraction of the target cluster mass.
+static auto testClusterMinStochMass() -> int
+{
+    constexpr double targetMass = 1e4;
+    constexpr double tolerance = 0.10;
+
+    try
+    {
+        const toml::table inputDeck = toml::parse_file(inputFileMinStochMass);
+        const core::SimPhysics sim(inputDeck);
+
+        utils::rng().seed(rngSeed);
+        const core::Cluster cluster(0, targetMass, 0.0, sim);
+
+        const double minStochMass = sim.minStochMass();
+        const auto& masses = cluster.starMasses();
+
+        // Every returned star must be at or above min_stoch_mass.
+        // The list is sorted, so checking the first element is sufficient.
+        if (!masses.empty() && masses.front() < minStochMass)
+        {
+            std::cerr << "testCluster: minStochMass: starMasses() contains mass "
+                << masses.front() << " < minStochMass " << minStochMass << "\n";
+            return 1;
+        }
+
+        // The total stochastic mass should be within tolerance of
+        // fracStochMass * targetMass.
+        const double stochTarget = sim.fracStochMass() * targetMass;
+        const double totalMass = std::reduce(masses.begin(), masses.end(), 0.0);
+        if (std::abs(totalMass - stochTarget) / stochTarget > tolerance)
+        {
+            std::cerr << "testCluster: minStochMass: stochastic mass " << totalMass
+                << " deviates from stochastic target " << stochTarget
+                << " by more than " << tolerance * 100 << "%\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testCluster: minStochMass test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
 auto testCluster() -> int
 {
     int result = 0;
     result += testClusterConstruction();
     result += testClusterAdvance();
+    result += testClusterMinStochMass();
     return result;
 }
