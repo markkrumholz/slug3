@@ -9,6 +9,9 @@
 #define RNGUTILS_HPP
 
 #include "ThreadVec.hpp"
+#include <algorithm>
+#include <array>
+#include <cstddef>
 #include <memory>
 #ifdef _OPENMP
 #   include <omp.h>
@@ -16,10 +19,27 @@
 #include <pcg_extras.hpp>
 #include <pcg_random.hpp>
 #include <random>
+#include <sstream>
+#include <stdexcept>
+#include <string>
 
 namespace utils {
 
     using RngType = pcg64;  /**< Alias for pcg generator */
+
+    /**
+     * @brief Fixed-width buffer type for a serialized rng state
+     * @details
+     * A pcg64 engine's stream insertion operator writes its full state
+     * as three 128-bit values -- multiplier, increment, and state --
+     * in decimal, separated by single spaces. Since 2^128 - 1 has 39
+     * decimal digits, that text is at most 3*39 + 2 = 119 characters;
+     * 128 bytes gives headroom for that plus a null terminator. Being
+     * a fixed-width POD type, RngState (unlike a std::string) can be
+     * written to disk or passed via MPI as a plain byte buffer.
+     */
+    inline constexpr size_t rngStateWidth = 128; /**< Width, in bytes, of RngState */
+    using RngState = std::array<char, rngStateWidth>;
 
     /**
      * @class RngThread
@@ -93,6 +113,47 @@ namespace utils {
          * @brief Return the correct rng engine for the calling thread
          */
         auto operator()() const -> RngType& { return *rngEngines_(); }
+
+        /**
+         * @brief Return the serialized state of the rng engine
+         * @return A fixed-width RngState buffer holding the serialized
+         *   state of the rng engine private to the calling thread
+         * @details
+         * As with operator(), which engine's state is returned depends
+         * on which thread calls this method. The returned buffer can
+         * later be passed to setState() to restore the engine to
+         * exactly this state. Bytes beyond the serialized text are
+         * zeroed, so the buffer is null-terminated and safe to treat
+         * as a C string.
+         */
+        [[nodiscard]] auto getState() const -> RngState
+        {
+            std::ostringstream stateStream;
+            stateStream << *rngEngines_();
+            const std::string state = stateStream.str();
+            if (state.size() >= rngStateWidth)
+            {
+                throw std::runtime_error(
+                    "RngThread: serialized state does not fit in the "
+                    "fixed-width RngState buffer");
+            }
+            RngState buf{};
+            std::ranges::copy(state, buf.begin());
+            return buf;
+        }
+
+        /**
+         * @brief Set the state of the rng engine
+         * @param state A serialized state, as returned by getState()
+         * @details
+         * As with operator(), which engine's state is set depends on
+         * which thread calls this method.
+         */
+        void setState(const RngState& state)
+        {
+            std::istringstream stateStream{std::string(state.data())};
+            stateStream >> *rngEngines_();
+        }
 
     private:
 

@@ -15,9 +15,7 @@
 
 namespace core
 {
-
-
-
+    
     /**
      * @class SimPhysics
      * @brief A class to hold physics settings for a simulation
@@ -35,7 +33,7 @@ namespace core
             none     /**< Dummy value */
         };
 
-            /**
+        /**
          * @brief Initialize the simulation physics settings
          * @param inputs A toml table holding the input deck
          */
@@ -67,6 +65,12 @@ namespace core
         [[nodiscard]] auto fehDist() const -> const auto& { return fehDist_; }
 
         /**
+         * @brief Check whether the simulation has a spread in [Fe/H]
+         * @return True if the simulation has a fixed value of [Fe/H]
+         */
+        [[nodiscard]] auto constFeH() const { return fehDist_.getMin() == fehDist_.getMax(); }
+
+        /**
          * @brief Get simulation star formation rate
          * @return Pointer to the simulation star formation rate
          */
@@ -83,6 +87,20 @@ namespace core
          * @return Pointer to the simulation stellar tracks
          */
         [[nodiscard]] auto tracks() const -> const auto& { return tracks_; }
+
+        /**
+         * @brief Get the tracks sliced to this simulation's fixed [Fe/H]
+         * @return A const reference to a Tracks2D object sliced at
+         *         fehDist_'s (single) value
+         * @details
+         * Only valid to call if constFeH() is true. This slice is
+         * computed once, in the constructor, and cached for the
+         * lifetime of this SimPhysics object, so that Cluster objects
+         * sharing a single [Fe/H] value across a simulation can all
+         * query it directly instead of each computing (or racing to
+         * compute) their own copy.
+         */
+        [[nodiscard]] auto tracks2D() const -> const auto& { return constFeHTracks_; }
 
     private:
 
@@ -101,6 +119,7 @@ namespace core
         pdfs::PDF sfr_;            /**< Star formation rate */
         pdfs::PDF clf_;            /**< Cluster lifetime function */
         tracks::Tracks3D tracks_;  /**< Stellar tracks */
+        tracks::Tracks2D constFeHTracks_; /**< Tracks sliced at fehDist_'s value, if constFeH() */
 
     };
 

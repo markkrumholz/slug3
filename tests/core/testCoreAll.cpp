@@ -7,6 +7,7 @@
  * @date 2026-07-13
  */
 
+#include "testCluster.hpp"
 #include "testSimPhysics.hpp"
 #include <exception>
 #include <iostream>
@@ -16,6 +17,7 @@ auto main() -> int {
     {
         int result = 0;
         result += testSimPhysics();
+        result += testCluster();
         return result;
     }
     catch (const std::exception& error)

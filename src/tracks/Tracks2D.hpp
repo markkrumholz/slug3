@@ -81,6 +81,7 @@ RuntimeError
             double vvcrit = defaultVVcrit,
             double afe = defaultAFe,
             const std::string& registryName = defaultRegistry);
+
         /**
          * @brief Construct a Tracks2D object from a supplied Mesh2DInterpolator
          * @param m2d A unique_ptr to the interpolator from which to construct the track
@@ -94,11 +95,20 @@ RuntimeError
             double aFe = std::numeric_limits<double>::quiet_NaN(),
             double vVcrit = std::numeric_limits<double>::quiet_NaN())
         : interp_(std::move(m2d)), FeH_(feH), AFe_(aFe), vVcrit_(vVcrit) {};
+
+        /**
+         * @brief Construct an empty, invalid Tracks2D object
+         */
+        Tracks2D() :
+            FeH_(std::numeric_limits<double>::quiet_NaN()),
+            AFe_(std::numeric_limits<double>::quiet_NaN()),
+            vVcrit_(std::numeric_limits<double>::quiet_NaN())
+        { }
         virtual ~Tracks2D() = default;
         Tracks2D(const Tracks2D&) = delete;
         Tracks2D(Tracks2D&&) = default;
         auto operator=(const Tracks2D&) -> Tracks2D& = delete;
-        auto operator=(Tracks2D&&) -> Tracks2D& = delete;
+        auto operator=(Tracks2D&&) -> Tracks2D& = default;
 
         // Observers
 
@@ -245,7 +255,7 @@ logt : float
 
 Parameters
 ----------
-t : float
+logT : float
     log10(time / yr) at which to evaluate.
 
 Returns
@@ -257,10 +267,10 @@ ranges : list of tuple of float
 
        /**
         * @brief Return the range of stellar masses that are alive at a given time
-        * @param t Time at which to evaluate
+        * @param logT log10(time / yr) at which to evaluate
         * @return The range of stellar masses alive at the given time
         */
-       [[nodiscard]] auto liveMassRange(const double t) const { return interp_->yLim(t); }
+       [[nodiscard]] auto liveMassRange(const double logT) const { return interp_->yLim(logT); }
 
         /**
          * @brief Numpy-style docstring for the Python getTrack binding

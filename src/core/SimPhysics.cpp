@@ -174,6 +174,16 @@ core::SimPhysics::SimPhysics(const toml::table& inputDeck) :
 
     // Read the tracks
     readTracks(inputDeck);
+
+    // If this simulation has a fixed [Fe/H], precompute the slice at
+    // that value once here, up front, so that Cluster objects can
+    // share it for the lifetime of the simulation instead of each
+    // computing their own copy or racing to populate Tracks3D's
+    // internal cache
+    if (constFeH())
+    {
+        constFeHTracks_ = tracks_.sliceConstFeH(fehDist_.getMin());
+    }
 }
 
 // Track reader
