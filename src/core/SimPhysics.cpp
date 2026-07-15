@@ -116,7 +116,7 @@ template<class T> static auto getTOMLKeyWithError(
 // SimPhysics constructor
 core::SimPhysics::SimPhysics(const toml::table& inputDeck) :
     simType_(SimType::none),
-    minStochMass_(std::numeric_limits<double>::max())
+    minStochMass_(0.0)
 {
     // First determine simulation type
     const auto simType = getTOMLKeyWithError<std::string>(
