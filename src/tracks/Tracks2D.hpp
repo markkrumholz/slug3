@@ -255,7 +255,7 @@ logt : float
 
 Parameters
 ----------
-t : float
+logT : float
     log10(time / yr) at which to evaluate.
 
 Returns
@@ -267,10 +267,10 @@ ranges : list of tuple of float
 
        /**
         * @brief Return the range of stellar masses that are alive at a given time
-        * @param t Time at which to evaluate
+        * @param logT log10(time / yr) at which to evaluate
         * @return The range of stellar masses alive at the given time
         */
-       [[nodiscard]] auto liveMassRange(const double t) const { return interp_->yLim(t); }
+       [[nodiscard]] auto liveMassRange(const double logT) const { return interp_->yLim(logT); }
 
         /**
          * @brief Numpy-style docstring for the Python getTrack binding

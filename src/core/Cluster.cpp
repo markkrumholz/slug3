@@ -80,29 +80,28 @@ void core::Cluster::advance(const double t)
     // If t == curTime_, do nothing
     if (t == curTime_) { return; }
 
-    // Update time
+    // Update time and cluster age
     curTime_ = t;
+    const auto logAge = std::log10(curTime_ - formTime_);
 
-    // Update list of alive and dead stars
-    updateLivingStars();
+    // Update list of alive and dead stars to new cluster age
+    updateLivingStars(logAge);
 
     // Get isochrone for new time
-    const auto age = curTime_ - formTime_;
-    isochrone_ = tracks().getIsochrone(age);
+    isochrone_ = tracks().getIsochrone(logAge);
 
     // Check for disruption
     if (curTime_ > disruptTime_) { isDisrupted_ = true; }
 }
 
 // Update lists of alive and dead stars to current age
-void core::Cluster::updateLivingStars()
+void core::Cluster::updateLivingStars(const double logAge)
 {
     // Clear the list of dead stars
     mDead_.clear();
 
     // Get the live mass range for this time
-    const auto age = curTime_ - formTime_;
-    const auto liveMassRange = tracks().liveMassRange(age);
+   const auto liveMassRange = tracks().liveMassRange(logAge);
 
     // Use live mass range to remove dead stars, being
     // careful to handle special case when liveMassRange is

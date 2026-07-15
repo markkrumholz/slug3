@@ -49,13 +49,13 @@ namespace core
 
         /**
          * @brief Return the current list of living stellar masses
-         * @return Masses of currently alive stars
+         * @return Masses of currently alive stars in Msun
          */
         auto starMasses() const -> const auto& { return m_; }
 
         /**
          * @brief Return the list of dead stellar masses
-         * @return Masses of dead stars
+         * @return Masses of dead stars in Msun
          */
         auto deadStarMasses() const -> const auto& { return mDead_; }
 
@@ -76,7 +76,7 @@ namespace core
 
         /**
          * @brief Advance the cluster in time
-         * @param t The time to which to advance
+         * @param t Time to which to advance, in yr
          */
         void advance(double t);
         
@@ -115,8 +115,9 @@ namespace core
 
         /**
          * @brief Update the lists of living and dead stars
+         * @param logAge log10 of the cluster age in yr
          */
-        void updateLivingStars();
+        void updateLivingStars(double logAge);
 
     };
 

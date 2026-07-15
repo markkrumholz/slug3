@@ -86,6 +86,7 @@ add_executable(slugTestTracks
     tests/tracks/testTracksAll.cpp
 )
 add_executable(slugTestCore
+    src/core/Cluster.cpp
     src/core/SimPhysics.cpp
     src/interpolation/Mesh2DGrid.cpp
     src/pdfs/PDFFileParser.cpp
@@ -99,6 +100,7 @@ add_executable(slugTestCore
     src/tracks/TrackUtils.cpp
     src/tracks/Tracks2D.cpp
     src/tracks/Tracks3D.cpp
+    tests/core/testCluster.cpp
     tests/core/testCoreAll.cpp
     tests/core/testSimPhysics.cpp
 )
