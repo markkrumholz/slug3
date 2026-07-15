@@ -112,10 +112,7 @@ namespace core
          * @brief Get fraction of stellar mass being treated stochastically
          * @return Fraction of stellar mass being treated stochastically
          */
-        [[nodiscard]] auto fracStochMass() const
-        {
-            return imf_.integral(minStochMass_, imf_.getMax());
-        }
+        [[nodiscard]] auto fracStochMass() const { return fracStochMass_; }
 
     private:
 
@@ -136,6 +133,7 @@ namespace core
         tracks::Tracks3D tracks_;  /**< Stellar tracks */
         tracks::Tracks2D constFeHTracks_; /**< Tracks sliced at fehDist_'s value, if constFeH() */
         double minStochMass_;      /**< Minimum mass for fully stochastic treatment */
+        double fracStochMass_;     /**< Fraction of mass being treated stochastically */
 
     };
 
