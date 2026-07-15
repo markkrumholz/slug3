@@ -51,6 +51,8 @@ add_executable(slug
     src/tracks/Tracks2D.cpp
     src/tracks/Tracks3D.cpp
     src/tracks/TrackUtils.cpp
+    src/core/SimControls.cpp
+    src/utils/ParseUtils.cpp
 )
 
 # Test executables
@@ -70,6 +72,7 @@ add_executable(slugTestPDFs
     src/pdfs/PDFSegmentNormal.cpp
     src/pdfs/PDFSegmentPowerlaw.cpp
     src/pdfs/PDFSegmentSchechter.cpp
+    src/utils/ParseUtils.cpp
     tests/pdfs/testPDF.cpp
     tests/pdfs/testPDFAll.cpp
     tests/pdfs/testPDFSegmentPowerlaw.cpp
@@ -100,6 +103,7 @@ add_executable(slugTestCore
     src/tracks/TrackUtils.cpp
     src/tracks/Tracks2D.cpp
     src/tracks/Tracks3D.cpp
+    src/utils/ParseUtils.cpp
     tests/core/testCluster.cpp
     tests/core/testCoreAll.cpp
     tests/core/testSimPhysics.cpp

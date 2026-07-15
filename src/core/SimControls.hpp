@@ -45,8 +45,33 @@ namespace core
         /**
          * @brief Return number of trials remaining in the simulation
          * @return Number of trials remaining
+         * @details
+         * This routine properly handles inter-thread synchronization
+         * when openMP is enabled.
          */
-        [[nodiscard]] auto nTrialRemain() const { return nTrialRemain_; }
+        [[nodiscard]] auto nTrialRemain() const
+        {
+#ifdef _OPENMP
+#pragma omp atomic
+#endif
+            const auto nRemain = nTrialRemain_;
+            return nRemain;
+        }
+
+        // Setters
+        /**
+         * @brief Update the remaining trials count
+         * @details
+         * This routine properly handles inter-thread synchronization
+         * when openMP is enabled.
+         */
+        [[nodiscard]] auto trialDone()
+        {
+#ifdef _OPENMP
+#pragma omp atomic
+#endif
+            --nTrialRemain_;
+        }
 
 
     private:
