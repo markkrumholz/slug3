@@ -35,9 +35,9 @@ namespace core
 
         /**
          * @brief Initialize the simulation physics settings
-         * @param inputs A toml table holding the input deck
+         * @param inputDeck A toml table holding the input deck
          */
-        SimPhysics(const toml::table& input);
+        SimPhysics(const toml::table& inputDeck);
 
         // Getters for the physics settings
         /**
