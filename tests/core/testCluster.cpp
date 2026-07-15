@@ -15,12 +15,9 @@
 #include <exception>
 #include <iostream>
 #include <numeric>
-#include <string>
+#include <string_view>
 
-static auto getInputFile() -> const std::string& {
-    static const std::string inputFile = "tests/core/assets/testCluster.in";
-    return inputFile;
-}
+static constexpr std::string_view inputFile = "tests/core/assets/testCluster.in";
 static constexpr unsigned int rngSeed = 42;
 
 // Verify that Cluster::starMasses() sums to within 5% of the target mass.
@@ -28,7 +25,7 @@ static auto testClusterConstruction() -> int
 {
     try
     {
-        const toml::table inputDeck = toml::parse_file(getInputFile());
+        const toml::table inputDeck = toml::parse_file(inputFile);
         const core::SimPhysics sim(inputDeck);
 
         utils::rng().seed(rngSeed);
@@ -66,7 +63,7 @@ static auto testClusterAdvance() -> int
 
     try
     {
-        const toml::table inputDeck = toml::parse_file(getInputFile());
+        const toml::table inputDeck = toml::parse_file(inputFile);
         const core::SimPhysics sim(inputDeck);
 
         utils::rng().seed(rngSeed);
