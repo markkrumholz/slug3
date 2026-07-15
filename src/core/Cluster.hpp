@@ -1,5 +1,5 @@
 /**
- * @file SimPhysics.hpp
+ * @file Cluster.hpp
  * @author Mark Krumholz
  * @brief A class to represent a mono-age star cluster
  * @date 2026-07-13
