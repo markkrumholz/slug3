@@ -9,9 +9,13 @@
 #define CLUSTER_HPP
 
 #include "SimPhysics.hpp"
+#include "../interpolation/Interpolator1D.hpp"
+#include "../tracks/TrackCommons.hpp"
 #include "../tracks/Tracks2D.hpp"
 #include "../utils/RngThread.hpp"
+#include <cstddef>
 #include <functional>
+#include <memory>
 #include <variant>
 #include <vector>
 
@@ -26,11 +30,11 @@ namespace core
     public:
 
         // Shorten type names
-        using interp1d = std::vector<
+        using Interp1dPtr = std::vector<
             std::unique_ptr<interp::Interpolator1D<
             static_cast<size_t>(tracks::FieldIdx::nTrackQty)
             >>>;
-        using tracks2d = std::variant<tracks::Tracks2D, 
+        using Track2DVar = std::variant<tracks::Tracks2D, 
             std::reference_wrapper<const tracks::Tracks2D>>;
 
         /**
@@ -51,13 +55,13 @@ namespace core
          * @brief Return the current list of living stellar masses
          * @return Masses of currently alive stars in Msun
          */
-        auto starMasses() const -> const auto& { return m_; }
+        [[nodiscard]] auto starMasses() const -> const auto& { return m_; }
 
         /**
          * @brief Return the list of dead stellar masses
          * @return Masses of dead stars in Msun
          */
-        auto deadStarMasses() const -> const auto& { return mDead_; }
+        [[nodiscard]] auto deadStarMasses() const -> const auto& { return mDead_; }
 
         /**
          * @brief Get the stellar tracks at this cluster's [Fe/H]
@@ -102,7 +106,7 @@ namespace core
 
         // Other state information
         bool isDisrupted_;          /**< Has this cluster disrupted */
-        interp1d isochrone_;        /**< Isochrone for the current time */
+        Interp1dPtr isochrone_;     /**< Isochrone for the current time */
 
         /**
          * Tracks for this cluster's [Fe/H]: either owned outright (when
@@ -111,7 +115,7 @@ namespace core
          * SimPhysics (when [Fe/H] is fixed for the whole simulation).
          * Use tracks() rather than this member directly.
          */
-        tracks2d tracks_;            /**< 2d track holder */
+        Track2DVar tracks_;         /**< 2d track holder */
 
         /**
          * @brief Update the lists of living and dead stars
