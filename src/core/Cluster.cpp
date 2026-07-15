@@ -101,6 +101,8 @@ void core::Cluster::advance(const double t)
 }
 
 // Update lists of alive and dead stars to current age
+// NOLINTBEGIN(misc-include-cleaner) -- clang-tidy < 19 lacks stdlib symbol
+// mappings for std::ranges::lower_bound / upper_bound; <algorithm> is correct.
 void core::Cluster::updateLivingStars(const double logAge)
 {
     // Clear the list of dead stars
@@ -152,3 +154,4 @@ void core::Cluster::updateLivingStars(const double logAge)
         m_.erase(it, m_.end());
     }
 }
+// NOLINTEND(misc-include-cleaner)
