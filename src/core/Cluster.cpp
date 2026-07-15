@@ -6,12 +6,18 @@
  */
 
 #include "Cluster.hpp"
-#include "SimPhysics.hpp"
+#include "../tracks/Tracks2D.hpp"
 #include "../utils/RngThread.hpp"
+#include "SimPhysics.hpp"
+#include <algorithm>
+#include <cmath>
+#include <cstddef>
+#include <functional>
+#include <limits>
 #include <numeric>
-#include <ranges>
 #include <sstream>
 #include <stdexcept>
+#include <variant>
 
 // Constructor
 core::Cluster::Cluster(const unsigned long uid,
@@ -26,7 +32,7 @@ core::Cluster::Cluster(const unsigned long uid,
     physics_(std::cref(physics)),
     m_(physics.imf().drawTarget(mass)),
     birthMass_(std::reduce(m_.begin(), m_.end(), 0.0)),
-    disruptTime_(std::numeric_limits<double>().quiet_NaN()),
+    disruptTime_(std::numeric_limits<double>::quiet_NaN()),
     curTime_(time),
     isDisrupted_(false)
 {
@@ -132,9 +138,9 @@ void core::Cluster::updateLivingStars(const double logAge)
         for (size_t i = 0; i < liveMassRange.size()-1; i++)
         {
             auto itStart = std::ranges::lower_bound(
-                m_, liveMassRange[i].second);
+                m_, liveMassRange[i].second); //NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
             auto itEnd = std::ranges::upper_bound(
-                m_, liveMassRange[i+1].first);
+                m_, liveMassRange[i+1].first); //NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
             mDead_.insert(mDead_.end(), itStart, itEnd);
             m_.erase(itStart, itEnd);
         }
