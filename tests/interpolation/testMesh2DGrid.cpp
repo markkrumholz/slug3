@@ -425,7 +425,7 @@ testYIntersectGridBoundary()
         { 0.0, 2.5, 4.0, 7.0 }
     }};
     for (size_t j = 0; j < ny; ++j) {
-        for (size_t i = 0; i < nx; ++i) { x[i,j] = xCol[j][i]; }
+        for (size_t i = 0; i < nx; ++i) { x[i,j] = xCol[j][i]; } // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i, j are loop indices bounded by constexpr nx/ny
     }
     const interp::Mesh2DGrid m2d(x, y);
 
@@ -444,11 +444,11 @@ testYIntersectGridBoundary()
         }
         for (size_t i = 0; i < nx; ++i)
         {
-            if (result[i].x != xCol[j][i] || result[i].idx != i)
+            if (result[i].x != xCol[j][i] || result[i].idx != i) // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i, j are loop indices bounded by constexpr nx/ny
             {
                 std::cerr << "testMesh2DGrid: querying yIntersect at "
                     "grid row j = " << j << ", point i = " << i
-                    << ": expected x = " << xCol[j][i] << ", idx = " << i
+                    << ": expected x = " << xCol[j][i] << ", idx = " << i // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i, j are loop indices bounded by constexpr nx/ny
                     << ", instead found x = " << result[i].x
                     << ", idx = " << result[i].idx << "\n";
                 return 1;
@@ -474,8 +474,8 @@ testXIdxGridBoundary()
     const std::mdspan<double, std::extents<size_t, nx, 2>> x(xData.data());
     const std::mdspan<double, std::extents<size_t, 2>> y(yData.data());
     for (size_t i = 0; i < nx; ++i) {
-        x[i,0] = xRow[i];
-        x[i,1] = xRow[i] + 0.5; // Second row just needs to be valid
+        x[i,0] = xRow[i]; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i is a loop index bounded by constexpr nx
+        x[i,1] = xRow[i] + 0.5; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- Second row just needs to be valid; i is a loop index bounded by constexpr nx
     }
     const interp::Mesh2DGrid m2d(x, y);
 
@@ -485,12 +485,12 @@ testXIdxGridBoundary()
     // the same top-of-range convention used by yIdx
     for (size_t k = 0; k < nx; ++k)
     {
-        const auto i = m2d.xIdx(xRow[k], 0);
+        const auto i = m2d.xIdx(xRow[k], 0); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- k is a loop index bounded by constexpr nx
         const auto expected = (k == nx - 1) ? nx - 2 : k;
         if (i != expected)
         {
             std::cerr << "testMesh2DGrid: querying xIdx at grid point "
-                "k = " << k << " (x = " << xRow[k] << ") returned i = "
+                "k = " << k << " (x = " << xRow[k] << ") returned i = " // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- k is a loop index bounded by constexpr nx
                 << i << ", expected " << expected << "\n";
             return 1;
         }
@@ -530,7 +530,7 @@ testYIntersectBoundary()
         { -7.0,  -2.0, 3.0 }
     }};
     for (size_t j = 0; j < ny; ++j) {
-        for (size_t i = 0; i < nx; ++i) { x[i,j] = xCol[j][i]; }
+        for (size_t i = 0; i < nx; ++i) { x[i,j] = xCol[j][i]; } // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i, j are loop indices bounded by constexpr nx/ny
     }
     const interp::Mesh2DGrid m2d(x, y);
 
@@ -546,11 +546,11 @@ testYIntersectBoundary()
         }
         for (size_t i = 0; i < nx; ++i)
         {
-            if (result[i].x != xCol[jBoundary][i] || result[i].idx != i)
+            if (result[i].x != xCol[jBoundary][i] || result[i].idx != i) // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- jBoundary, i are bounded by constexpr ny/nx
             {
                 std::cerr << "testMesh2DGrid: yIntersect at boundary row "
                     "j = " << jBoundary << ", point i = " << i
-                    << ": expected x = " << xCol[jBoundary][i] << ", idx = " << i
+                    << ": expected x = " << xCol[jBoundary][i] << ", idx = " << i // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- jBoundary, i are bounded by constexpr ny/nx
                     << ", instead found x = " << result[i].x
                     << ", idx = " << result[i].idx << "\n";
                 return 1;
@@ -593,7 +593,7 @@ testXIntersectBoundary()
         { -5.0,   0.0, 2.0 }  // touches neither bound
     }};
     for (size_t j = 0; j < ny; ++j) {
-        for (size_t i = 0; i < nx; ++i) { x[i,j] = xCol[j][i]; }
+        for (size_t i = 0; i < nx; ++i) { x[i,j] = xCol[j][i]; } // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i, j are loop indices bounded by constexpr nx/ny
     }
     const interp::Mesh2DGrid m2d(x, y);
 
@@ -602,7 +602,7 @@ testXIntersectBoundary()
 
     const auto checkBoundary = [&](
         const double xBoundary,
-        const std::vector<XInt>& expected)
+        const std::vector<XInt>& expected) -> int
     {
         const auto result = m2d.xIntersect(xBoundary);
         if (result.size() != expected.size())
