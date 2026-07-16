@@ -6,11 +6,14 @@
  */
 
 #include "io/OutputManager.hpp"
+#include "io/OutputManagerAscii.hpp"
+#include "io/OutputManagerH5.hpp"
 #include "io/SimControls.hpp"
 #include "io/SimPhysics.hpp"
 #include <cstdlib>
 #include <exception>
 #include <iostream>
+#include <memory>
 #include <span>
 #include <toml.hpp>
 
@@ -43,18 +46,19 @@ auto main(int argc, char *argv[]) -> int
     const io::SimPhysics simPhysics(inputDeck, simControls.simType());
 
     // Construct the output manager
+    std::unique_ptr<io::OutputManager> outputManager;
     if (simControls.outputMode() == io::SimControls::OutputMode::h5)
     {
-        const io::OutputManager<io::SimControls::OutputMode::h5> outputManager(simControls, inputDeck);
+        outputManager = std::make_unique<io::OutputManagerH5>(simControls, inputDeck);
     }
     else
     {
-        const io::OutputManager<io::SimControls::OutputMode::ascii> outputManager(simControls, inputDeck);
+        outputManager = std::make_unique<io::OutputManagerAscii>(simControls, inputDeck);
     }
 
     // Run the simulation
     if (simControls.simType() == io::SimControls::SimType::cluster)
-    {
+    { // NOLINT(bugprone-branch-clone)
     }
     else if (simControls.simType() == io::SimControls::SimType::galaxy)
     {
