@@ -119,12 +119,28 @@ static auto generateOutputTimesRange(const toml::table& inputDeck) -> std::vecto
 }
 
 core::SimControls::SimControls(const toml::table& inputDeck) :
+    simType_(SimType::none),
     verbosity_(0),
     nTrial_(1),
     nTrialRemain_(1),
     outputMode_(OutputMode::h5),
-    modelName_("slug_sim")
+    modelName_("slug_sim"),
+    outputClusters_(true)
 {
+    // Determine simulation type
+    const auto simTypeInput = utils::getTOMLKeyWithError<std::string>(
+        inputDeck, "sim_type", true);
+    if (!simTypeInput.has_value())
+    {
+        throw std::runtime_error("SimControls: sim_type not found");
+    }
+    if (simTypeInput.value() == "galaxy") { simType_ = SimType::galaxy; }
+    else if (simTypeInput.value() == "cluster") { simType_ = SimType::cluster; }
+    else
+    {
+        throw std::runtime_error("SimControls: sim_type must be 'galaxy' or 'cluster'");
+    }
+
     // Read verbosity
     const auto verbosityInput =
         utils::getTOMLKeyWithError<unsigned int>(inputDeck, "verbosity");
@@ -155,6 +171,16 @@ core::SimControls::SimControls(const toml::table& inputDeck) :
     const auto outDirInput =
         utils::getTOMLKeyWithError<std::string>(inputDeck, "outputs.out_dir");
     if (outDirInput.has_value()) { outDir_ = outDirInput.value(); }
+
+    // In a galaxy simulation, read whether outputs should include
+    // individual clusters or only the integrated properties of the
+    // whole galaxy
+    if (simType_ == SimType::galaxy)
+    {
+        const auto outputClustersInput = utils::getTOMLKeyWithError<bool>(
+            inputDeck, "outputs.output_clusters");
+        if (outputClustersInput.has_value()) { outputClusters_ = outputClustersInput.value(); }
+    }
 
     // Read number of trials
     const auto nTrialInput =

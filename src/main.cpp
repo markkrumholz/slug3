@@ -39,5 +39,5 @@ auto main(int argc, char *argv[]) -> int
     // Use the input deck to initialize simulation control flow
     // and physics
     const core::SimControls simControls(inputDeck);
-    const core::SimPhysics simPhysics(inputDeck);
+    const core::SimPhysics simPhysics(inputDeck, simControls.simType());
 }

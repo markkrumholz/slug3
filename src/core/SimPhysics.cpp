@@ -12,6 +12,7 @@
 #include "../pdfs/PDFSegmentPowerlaw.hpp"
 #include "../tracks/TrackCommons.hpp"
 #include "../utils/ParseUtils.hpp"
+#include "SimControls.hpp"
 #include <algorithm>
 #include <filesystem>
 #include <limits>
@@ -22,18 +23,10 @@
 #include <utility>
 
 // SimPhysics constructor
-core::SimPhysics::SimPhysics(const toml::table& inputDeck) :
-    simType_(SimType::none),
+core::SimPhysics::SimPhysics(const toml::table& inputDeck, SimControls::SimType simType) :
     minStochMass_(0.0),
     fracStochMass_(1.0)
 {
-    // First determine simulation type
-    const auto simType = utils::getTOMLKeyWithError<std::string>(
-        inputDeck, "sim_type", true);
-    if (simType.value() == "galaxy") { simType_ = SimType::galaxy; } // NOLINT(bugprone-unchecked-optional-access) -- check happens one line up
-    else if (simType.value() == "cluster") { simType_ = SimType::cluster; } // NOLINT(bugprone-unchecked-optional-access) -- check happens two lines up
-    else { throw std::runtime_error("SimPhysics: sim_type must be 'galaxy' or 'cluster'"); }
-
     // Read IMF, CMF, and FeH
     imf_ = utils::initPDFFromKey(inputDeck, "stars.IMF",
         (std::filesystem::path("data") / std::filesystem::path("imfs")).string());
@@ -41,7 +34,7 @@ core::SimPhysics::SimPhysics(const toml::table& inputDeck) :
     fehDist_ = utils::initPDFFromKey(inputDeck, "stars.FeH");
 
     // In a galaxy simulation, read CLF and SFR
-    if (simType_ == SimType::galaxy)
+    if (simType == SimControls::SimType::galaxy)
     {
         // CLF
         clf_ = utils::initPDFFromKey(inputDeck, "clusters.CLF");

@@ -24,3 +24,6 @@ end_time = 10.0
 ntime = 3
 output_mode = "ascii"
 out_dir = "my_test_outdir"
+# output_clusters is only meaningful (and only read) for a galaxy-type
+# simulation, so this should be ignored for this cluster-type deck.
+output_clusters = false

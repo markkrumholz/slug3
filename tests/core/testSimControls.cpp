@@ -45,10 +45,11 @@ static auto checkOutTimes(const std::vector<double>& actual,
     return 0;
 }
 
-// Verify that model_name, verbosity, output_mode, out_dir, and n_trial
-// fall back to their documented defaults when not specified in the
-// input deck, and that the start_time/end_time/ntime output option
-// (linear spacing) is correctly expanded.
+// Verify that simType is read correctly, that model_name, verbosity,
+// output_mode, out_dir, outputClusters, and n_trial fall back to their
+// documented defaults when not specified in the input deck, and that
+// the start_time/end_time/ntime output option (linear spacing) is
+// correctly expanded.
 static auto testSimControlsDefaults() -> int
 {
     const std::string fileName = "tests/core/assets/testCluster.in";
@@ -57,6 +58,12 @@ static auto testSimControlsDefaults() -> int
         const toml::table inputDeck = toml::parse_file(fileName);
         const core::SimControls controls(inputDeck);
 
+        if (controls.simType() != core::SimControls::SimType::cluster)
+        {
+            std::cerr << "testSimControls: " << fileName
+                << ": expected simType() == SimType::cluster\n";
+            return 1;
+        }
         if (controls.modelName() != "slug_sim")
         {
             std::cerr << "testSimControls: " << fileName
@@ -84,6 +91,12 @@ static auto testSimControlsDefaults() -> int
                 << controls.outDir() << "\n";
             return 1;
         }
+        if (!controls.outputClusters())
+        {
+            std::cerr << "testSimControls: " << fileName
+                << ": expected default outputClusters() == true\n";
+            return 1;
+        }
         if (controls.nTrial() != 1)
         {
             std::cerr << "testSimControls: " << fileName
@@ -103,7 +116,10 @@ static auto testSimControlsDefaults() -> int
 }
 
 // Verify that model_name, verbosity, output_mode, out_dir, and n_trial
-// are correctly read from the input deck when explicitly specified.
+// are correctly read from the input deck when explicitly specified,
+// and that outputs.output_clusters is ignored (outputClusters() stays
+// at its default of true) for a cluster-type simulation even though
+// this deck sets it to false.
 static auto testSimControlsExplicit() -> int
 {
     const std::string fileName = "tests/core/assets/testControlsExplicit.in";
@@ -112,6 +128,19 @@ static auto testSimControlsExplicit() -> int
         const toml::table inputDeck = toml::parse_file(fileName);
         const core::SimControls controls(inputDeck);
 
+        if (controls.simType() != core::SimControls::SimType::cluster)
+        {
+            std::cerr << "testSimControls: " << fileName
+                << ": expected simType() == SimType::cluster\n";
+            return 1;
+        }
+        if (!controls.outputClusters())
+        {
+            std::cerr << "testSimControls: " << fileName
+                << ": expected outputClusters() == true (output_clusters is "
+                   "only read for a galaxy-type simulation)\n";
+            return 1;
+        }
         if (controls.modelName() != "my_test_model")
         {
             std::cerr << "testSimControls: " << fileName
@@ -291,6 +320,90 @@ static auto testSimControlsInvalidOutputMode() -> int
     }
 }
 
+// Verify that constructing SimControls from a deck with an unrecognized
+// sim_type value throws.
+static auto testSimControlsInvalidSimType() -> int
+{
+    const std::string fileName = "tests/core/assets/testControlsInvalidSimType.in";
+    const toml::table inputDeck = toml::parse_file(fileName);
+    try
+    {
+        const core::SimControls controls(inputDeck);
+        std::cerr << "testSimControls: " << fileName
+            << ": expected construction to throw, but it succeeded\n";
+        return 1;
+    }
+    catch (const std::runtime_error&)
+    {
+        return 0;
+    }
+}
+
+// Verify that a galaxy-type simulation reports simType() == galaxy and,
+// with outputs.output_clusters unspecified, outputClusters() defaults
+// to true.
+static auto testSimControlsGalaxy() -> int
+{
+    const std::string fileName = "tests/core/assets/testControlsGalaxy.in";
+    try
+    {
+        const toml::table inputDeck = toml::parse_file(fileName);
+        const core::SimControls controls(inputDeck);
+
+        if (controls.simType() != core::SimControls::SimType::galaxy)
+        {
+            std::cerr << "testSimControls: " << fileName
+                << ": expected simType() == SimType::galaxy\n";
+            return 1;
+        }
+        if (!controls.outputClusters())
+        {
+            std::cerr << "testSimControls: " << fileName
+                << ": expected default outputClusters() == true\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: failed to parse valid input deck "
+            << fileName << ": " << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Verify that a galaxy-type simulation with outputs.output_clusters
+// explicitly set to false reports outputClusters() == false.
+static auto testSimControlsGalaxyNoClusters() -> int
+{
+    const std::string fileName = "tests/core/assets/testControlsGalaxyNoClusters.in";
+    try
+    {
+        const toml::table inputDeck = toml::parse_file(fileName);
+        const core::SimControls controls(inputDeck);
+
+        if (controls.simType() != core::SimControls::SimType::galaxy)
+        {
+            std::cerr << "testSimControls: " << fileName
+                << ": expected simType() == SimType::galaxy\n";
+            return 1;
+        }
+        if (controls.outputClusters())
+        {
+            std::cerr << "testSimControls: " << fileName
+                << ": expected outputClusters() == false\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: failed to parse valid input deck "
+            << fileName << ": " << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
 auto testSimControls() -> int
 {
     int result = 0;
@@ -303,5 +416,8 @@ auto testSimControls() -> int
     result += testSimControlsOutputTimesConflict();
     result += testSimControlsOutputTimesPartialRange();
     result += testSimControlsInvalidOutputMode();
+    result += testSimControlsInvalidSimType();
+    result += testSimControlsGalaxy();
+    result += testSimControlsGalaxyNoClusters();
     return result;
 }

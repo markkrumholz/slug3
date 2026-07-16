@@ -34,12 +34,27 @@ namespace core
         };
 
         /**
+         * @brief An enum to hold simulation types
+         */
+        enum class SimType : std::uint8_t {
+            cluster, /**< Cluster simulation */
+            galaxy,  /**< Galaxy simulation */
+            none     /**< Dummy value */
+        };
+
+        /**
          * @brief Initialize the simulation controls from the input deck
          * @param inputDeck A toml table holding the input deck
          */
         SimControls(const toml::table& inputDeck);
 
         // Getters for control flow
+
+        /**
+         * @brief Return simulation type
+         * @return Simulation type
+         */
+        [[nodiscard]] auto simType() const { return simType_; }
 
         /**
          * @brief Return output mode
@@ -108,6 +123,18 @@ namespace core
             return { outTimeDist_.draw() };
         }
 
+        /**
+         * @brief Return whether outputs include individual clusters
+         * @return True if outputs include individual clusters
+         * @details
+         * In a galaxy-type simulation, this controls whether the
+         * outputs include individual clusters, or only the integrated
+         * properties of the entire simulated galaxy. This is only read
+         * from the input deck for a galaxy-type simulation; it defaults
+         * to true otherwise.
+         */
+        [[nodiscard]] auto outputClusters() const { return outputClusters_; }
+
         // Setters
         /**
          * @brief Update the remaining trials count
@@ -127,6 +154,7 @@ namespace core
     private:
 
         // Simulation control parameters
+        SimType simType_;              /**< Simulation type */
         unsigned int verbosity_;       /**< Level of verbosity */
         unsigned long nTrial_;         /**< Number of trials */
         unsigned long nTrialRemain_;   /**< Number of trials remaining */
@@ -135,6 +163,7 @@ namespace core
         std::string outDir_;           /**< Directory into which output will be written */
         std::vector<double> outTimes_; /**< Times to write output */
         pdfs::PDF outTimeDist_;        /**< Distribution of output times */
+        bool outputClusters_;          /**< Whether outputs include individual clusters (galaxy sims only) */
 
         /**
          * @brief Compute output times

@@ -15,3 +15,8 @@ CLF = 1e300
 
 [galaxy]
 sfr = 1.0
+
+[outputs]
+start_time = 0.0
+end_time = 10.0
+ntime = 3
