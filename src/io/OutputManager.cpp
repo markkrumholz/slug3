@@ -7,6 +7,7 @@
 
 #include "OutputManager.hpp"
 #include "../utils/RngThread.hpp"
+#include "SimControls.hpp"
 #include <chrono>
 #include <ctime>
 #include <iomanip>

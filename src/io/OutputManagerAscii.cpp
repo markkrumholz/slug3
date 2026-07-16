@@ -7,6 +7,7 @@
 
 #include "OutputManagerAscii.hpp"
 #include "../core/Cluster.hpp"
+#include "OutputManager.hpp"
 #include "SimControls.hpp"
 #include "io/SlugVersion.hpp"
 #include <filesystem>
@@ -17,7 +18,6 @@
 #include <stdexcept>
 #include <string>
 #include <toml.hpp>
-#include <utility>
 
 // Column headings, and the field widths used to lay them out, for
 // the ascii cluster output file. uidWidth accommodates a 9-digit

@@ -7,6 +7,7 @@
 
 #include "OutputManagerH5.hpp"
 #include "../core/Cluster.hpp"
+#include "OutputManager.hpp"
 #include "SimControls.hpp"
 #include "hdf5.h" // NOLINT(misc-include-cleaner)
 #include "io/SlugVersion.hpp"
@@ -15,7 +16,6 @@
 #include <stdexcept>
 #include <string>
 #include <toml.hpp>
-#include <utility>
 
 // Suppress clang-tidy warnings in this namespace caused by just
 // including hdf5.h, instead of the individual HDF5 headers, since
