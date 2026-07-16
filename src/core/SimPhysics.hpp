@@ -11,11 +11,11 @@
 #include "../extern/tomlplusplus/toml.hpp"
 #include "../pdfs/PDF.hpp"
 #include "../tracks/Tracks3D.hpp"
-#include <cstdint>
+#include "SimControls.hpp"
 
 namespace core
 {
-    
+
     /**
      * @class SimPhysics
      * @brief A class to hold physics settings for a simulation
@@ -25,27 +25,15 @@ namespace core
     public:
 
         /**
-         * @brief An enum to hold simulation types types
-         */
-        enum class SimType : std::uint8_t {
-            cluster, /**< Cluster simulation */
-            galaxy,  /**< Galaxy simulation */
-            none     /**< Dummy value */
-        };
-
-        /**
          * @brief Initialize the simulation physics settings
-         * @param inputs A toml table holding the input deck
+         * @param inputDeck A toml table holding the input deck
+         * @param simType Simulation type (as determined by SimControls);
+         *   used to decide whether to read galaxy-specific quantities
+         *   such as the CLF and SFR
          */
-        SimPhysics(const toml::table& input);
+        SimPhysics(const toml::table& inputDeck, SimControls::SimType simType);
 
         // Getters for the physics settings
-        /**
-         * @brief Get simulation type
-         * @return Simulation type
-         */
-        [[nodiscard]] auto simType() const { return simType_; }
-
         /**
          * @brief Get simulation initial mass function
          * @return Pointer to the simulation initial mass function
@@ -124,7 +112,6 @@ namespace core
         void readTracks(const toml::table& inputDeck);
 
         // Physics settings
-        SimType simType_;          /**< Simulation type */
         pdfs::PDF imf_;            /**< The IMF to use for the simulation */
         pdfs::PDF cmf_;            /**< Cluster mass function */
         pdfs::PDF fehDist_;        /**< [Fe/H] distribution */

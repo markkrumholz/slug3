@@ -1,6 +1,6 @@
-# Test input deck for a cluster simulation with min_stoch_mass set
+# Test input deck for SimControls: an unrecognized sim_type value
 
-sim_type = "cluster"
+sim_type = "bogus"
 
 [stars]
 IMF = "chabrier.toml"
@@ -8,7 +8,6 @@ track_registry = "tests/tracks/assets/tracks.toml"
 tracks = "MIST_test"
 FeH = 0.0
 alphaFe = -0.2
-min_stoch_mass = 10.0
 
 [clusters]
 CMF = 1e3

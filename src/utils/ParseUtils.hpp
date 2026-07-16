@@ -8,7 +8,10 @@
 #ifndef PARSEUTILS_HPP
 #define PARSEUTILS_HPP
 
+#include "../extern/tomlplusplus/toml.hpp"
+#include "../pdfs/PDF.hpp"
 #include <iterator>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -48,31 +51,7 @@ namespace utils {
      * removed. It also has any trailing comments, starting with
      * the # character, removed.
      */
-    inline auto trim(const std::string& str) -> std::string
-    {
-        const std::string whitespace = " \t\n\r\f\v";
-    
-        // Find the first character that is not a whitespace
-        auto first = str.find_first_not_of(whitespace);
-        if (first == std::string::npos) {
-            return ""; // The entire string is whitespace
-        }
-    
-        // Find the last character that is not a whitespace
-        auto last = str.find_last_not_of(whitespace);
-    
-        // Extract the substring without whitespace
-        auto strNW = str.substr(first, (last - first + 1));
-
-        // Find the first instance of the comment delimiter
-        first = strNW.find_first_of("#");
-        if (first != std::string::npos) {
-            strNW = str.substr(0, first);
-        }
-
-        // Return
-        return strNW;
-    }
+    auto trim(const std::string& str) -> std::string;
 
     /**
      * @brief Split a string into tokens based on whitespace
@@ -88,7 +67,44 @@ namespace utils {
             std::istream_iterator<std::string>()
         );
         return tokens;
-    } // namespace utils
-}
+    }
+
+    /**
+     * @brief Initialize a PDF from a toml key
+     * @param inputDeck Input deck for simulation
+     * @param key Name of key
+     * @param prefix Prefix to look for PDF file relative to SLUG_DIR
+     * @details
+     * If the key resolves to a numerical value, this is interpreted
+     * as specifying a delta function at that value. If it resolves
+     * to a string, this is interpreted as supplying the name of the
+     * PDF file descriptor, with the path to the file resolved by
+     * utils::getFilePath.
+    */
+    auto initPDFFromKey(const toml::table& inputDeck,
+        const std::string& key,
+        const std::string& prefix = "") -> pdfs::PDF;
+
+    /**
+     * @brief Check for TOML key of type and return error if type is wrong
+     * @tparam T The type to check for
+     * @param inputDeck Input deck for simulation
+     * @param key Name of key
+     * @param required True if key is required
+     * @details
+     * This routine checks if the input key exists and can be retrieved
+     * as of type T. Behavior is as follows: (1) if the key exists and can
+     * be interpreted as type T, return a full optional<T>; (2) if the key
+     * exists and cannot be interpreted as T, throw a runtime error; (3) if
+     * the key does not exist and required is false, return ane empty
+     * optional; (4) if the key does not exist and required is true, throw a
+     * runtime error.
+     */
+    template<class T> auto getTOMLKeyWithError(
+        const toml::table& inputDeck,
+        const std::string& key,
+        bool required = false) -> std::optional<T>;
+
+} // namespace utils
 
 #endif // PARSEUTILS_HPP

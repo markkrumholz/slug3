@@ -9,10 +9,10 @@
 #include "../extern/tomlplusplus/toml.hpp"
 #include "../pdfs/PDF.hpp"
 #include "../pdfs/PDFFileParser.hpp"
-#include "../pdfs/PDFSegmentDelta.hpp"
 #include "../pdfs/PDFSegmentPowerlaw.hpp"
 #include "../tracks/TrackCommons.hpp"
-#include "../utils/MiscUtils.hpp"
+#include "../utils/ParseUtils.hpp"
+#include "SimControls.hpp"
 #include <algorithm>
 #include <filesystem>
 #include <limits>
@@ -22,121 +22,22 @@
 #include <string>
 #include <utility>
 
-/**
- * @brief Initialize a PDF from a toml key
- * @param inputDeck Input deck for simulation
- * @param key Name of key
- * @param prefix Prefix to look for PDF file relative to SLUG_DIR
- * @details
- * If the key resolves to a numerical value, this is interpreted
- * as specifying a delta function at that value. If it resolves
- * to a string, this is interpreted as supplying the name of the
- * PDF file descriptor, with the path to the file resolved by
- * utils::getFilePath.
-*/
-static auto initPDFFromKey(const toml::table& inputDeck,
-    const std::string& key,
-    const std::string& prefix = "")
-{
-    // First check for numerical value
-    const std::optional<double> num =
-        inputDeck.at_path(key).value<double>();
-    if (num.has_value())
-    {
-        auto delta = std::make_unique<pdfs::PDFSegmentDelta>(num.value());
-        auto pdf = pdfs::PDF(std::move(delta));
-        return std::move(pdf);
-    }
-
-    // Next check for string value
-    const std::optional<std::string> pdfFile =
-        inputDeck.at_path(key).value<std::string>();
-    if (pdfFile.has_value())
-    {
-        auto pdfFilePath = utils::getFilePath(pdfFile.value(), prefix).string();
-        if (pdfFilePath.empty())
-        {
-            throw std::runtime_error(
-                "SimPhysics: pdf file " + pdfFile.value() + " not found");
-        }
-        auto pdf = pdfs::parsePDFDescriptor(pdfFilePath);
-        return std::move(pdf);
-    }
-
-    // If we get here, key does not exist or has invalid type
-    throw std::runtime_error(
-        "SimPhysics: invalid entry for " + key);
-}
-
-    /**
-     * @brief Check for TOML key of type and return error if type is wrong
-     * @tparam T The type to check for
-     * @param inputDeck Input deck for simulation
-     * @param key Name of key
-     * @param required True if key is required
-     * @details
-     * This routine checks if the input key exists and can be retrieved
-     * as of type T. Behavior is as follows: (1) if the key exists and can
-     * be interpreted as type T, return a full optional<T>; (2) if the key
-     * exists and cannot be interpreted as T, throw a runtime error; (3) if
-     * the key does not exist and required is false, return ane empty
-     * optional; (4) if the key does not exist and required is true, throw a
-     * runtime error.
-     */
-template<class T> static auto getTOMLKeyWithError(
-    const toml::table& inputDeck,
-    const std::string& key,
-    bool required = false) -> std::optional<T>
-{
-    const auto node = inputDeck.at_path(key);
-    if (node)
-    {
-        auto ret = node.value<T>();
-        if (ret.has_value()) {
-            // Key found, return value
-            return ret;
-        }
-
-        // Key found, but doesn't match expected type
-        throw std::runtime_error(
-            "SimPhysics: cannot understand value for key " +
-            key);
-    }
-    if (required)
-    {
-        // Required key not found, throw error
-        throw std::runtime_error(
-            "SimPhysics: required key " + key +
-            " not found");
-    }
-    // Optional key not found, return nullopt
-    return std::nullopt;
-}
-
 // SimPhysics constructor
-core::SimPhysics::SimPhysics(const toml::table& inputDeck) :
-    simType_(SimType::none),
+core::SimPhysics::SimPhysics(const toml::table& inputDeck, SimControls::SimType simType) :
     minStochMass_(0.0),
     fracStochMass_(1.0)
 {
-    // First determine simulation type
-    const auto simType = getTOMLKeyWithError<std::string>(
-        inputDeck, "sim_type", true);
-    if (simType.value() == "galaxy") { simType_ = SimType::galaxy; } // NOLINT(bugprone-unchecked-optional-access) -- check happens one line up
-    else if (simType.value() == "cluster") { simType_ = SimType::cluster; } // NOLINT(bugprone-unchecked-optional-access) -- check happens two lines up
-    else { throw std::runtime_error("SimPhysics: sim_type must be 'galaxy' or 'cluster'"); }
-
     // Read IMF, CMF, and FeH
-    imf_ = initPDFFromKey(inputDeck, "stars.IMF",
+    imf_ = utils::initPDFFromKey(inputDeck, "stars.IMF",
         (std::filesystem::path("data") / std::filesystem::path("imfs")).string());
-    cmf_ = initPDFFromKey(inputDeck, "clusters.CMF");
-    fehDist_ = initPDFFromKey(inputDeck, "stars.FeH");
+    cmf_ = utils::initPDFFromKey(inputDeck, "clusters.CMF");
+    fehDist_ = utils::initPDFFromKey(inputDeck, "stars.FeH");
 
     // In a galaxy simulation, read CLF and SFR
-    if (simType_ == SimType::galaxy)
+    if (simType == SimControls::SimType::galaxy)
     {
         // CLF
-        clf_ = initPDFFromKey(inputDeck, "clusters.CLF");
+        clf_ = utils::initPDFFromKey(inputDeck, "clusters.CLF");
 
         // SFR -- this requires special handling because here
         // a numerical value is not interpreted as a delta function
@@ -188,7 +89,7 @@ core::SimPhysics::SimPhysics(const toml::table& inputDeck) :
     }
 
     // Read minimum stochastic mass
-    auto minSM = getTOMLKeyWithError<double>(inputDeck, "stars.min_stoch_mass");
+    auto minSM = utils::getTOMLKeyWithError<double>(inputDeck, "stars.min_stoch_mass");
     if (minSM.has_value()) 
     { 
         minStochMass_ = minSM.value();
@@ -200,12 +101,12 @@ core::SimPhysics::SimPhysics(const toml::table& inputDeck) :
 void core::SimPhysics::readTracks(const toml::table& inputDeck)
 {
     // Get required tracks key
-    auto trackName = getTOMLKeyWithError<std::string>(inputDeck, "stars.tracks", true);
+    auto trackName = utils::getTOMLKeyWithError<std::string>(inputDeck, "stars.tracks", true);
 
     // Check for optional parameters
-    auto registryName = getTOMLKeyWithError<std::string>(inputDeck, "stars.track_registry");
-    auto vvcrit = getTOMLKeyWithError<double>(inputDeck, "stars.v_vcrit");
-    auto afe = getTOMLKeyWithError<double>(inputDeck, "stars.alphaFe");
+    auto registryName = utils::getTOMLKeyWithError<std::string>(inputDeck, "stars.track_registry");
+    auto vvcrit = utils::getTOMLKeyWithError<double>(inputDeck, "stars.v_vcrit");
+    auto afe = utils::getTOMLKeyWithError<double>(inputDeck, "stars.alphaFe");
 
     // Construct tracks from input data
     tracks_ = tracks::Tracks3D(

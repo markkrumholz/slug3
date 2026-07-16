@@ -1,6 +1,7 @@
-# Test input deck for a cluster simulation with min_stoch_mass set
+# Test input deck for SimControls: a galaxy-type simulation with
+# output_clusters left at its default (true)
 
-sim_type = "cluster"
+sim_type = "galaxy"
 
 [stars]
 IMF = "chabrier.toml"
@@ -8,10 +9,13 @@ track_registry = "tests/tracks/assets/tracks.toml"
 tracks = "MIST_test"
 FeH = 0.0
 alphaFe = -0.2
-min_stoch_mass = 10.0
 
 [clusters]
 CMF = 1e3
+CLF = 1e300
+
+[galaxy]
+sfr = 1.0
 
 [outputs]
 start_time = 0.0

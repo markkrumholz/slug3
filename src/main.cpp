@@ -2,9 +2,11 @@
  * @file main.cpp
  * @author Mark Krumholz
  * @brief This is the main routine that drives slug.
+ * @date 14-07-2026
  */
 
 #include "extern/tomlplusplus/toml.hpp"
+#include "core/SimControls.hpp"
 #include "core/SimPhysics.hpp"
 #include <cstdlib>
 #include <exception>
@@ -22,10 +24,10 @@ auto main(int argc, char *argv[]) -> int
     auto args = std::span(argv, static_cast<size_t>(argc));
 
     // Parse input file
-    toml::table inputs;
+    toml::table inputDeck;
     try
     {
-        inputs = toml::parse_file(args.back());
+        inputDeck = toml::parse_file(args.back());
     }
     catch(const std::exception& e)
     {
@@ -33,7 +35,9 @@ auto main(int argc, char *argv[]) -> int
             << args.back() << ": " << e.what() << '\n';
         return 1;
     }
- 
-    // Use the input deck to initialize simulation physics
-    const core::SimPhysics simPhysics(inputs);
+
+    // Use the input deck to initialize simulation control flow
+    // and physics
+    const core::SimControls simControls(inputDeck);
+    const core::SimPhysics simPhysics(inputDeck, simControls.simType());
 }

@@ -1,0 +1,29 @@
+# Test input deck for SimControls: explicit model_name, verbosity, n_trial,
+# output_mode, and out_dir
+
+sim_type = "cluster"
+verbosity = 3
+n_trial = 7
+
+[stars]
+IMF = "chabrier.toml"
+track_registry = "tests/tracks/assets/tracks.toml"
+tracks = "MIST_test"
+FeH = 0.0
+alphaFe = -0.2
+
+[clusters]
+CMF = 1e3
+
+[output]
+model_name = "my_test_model"
+
+[outputs]
+start_time = 0.0
+end_time = 10.0
+ntime = 3
+output_mode = "ascii"
+out_dir = "my_test_outdir"
+# output_clusters is only meaningful (and only read) for a galaxy-type
+# simulation, so this should be ignored for this cluster-type deck.
+output_clusters = false

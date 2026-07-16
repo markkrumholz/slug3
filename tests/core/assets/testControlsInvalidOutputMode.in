@@ -1,4 +1,4 @@
-# Test input deck for a cluster simulation with min_stoch_mass set
+# Test input deck for SimControls: an unrecognized outputs.output_mode value
 
 sim_type = "cluster"
 
@@ -8,7 +8,6 @@ track_registry = "tests/tracks/assets/tracks.toml"
 tracks = "MIST_test"
 FeH = 0.0
 alphaFe = -0.2
-min_stoch_mass = 10.0
 
 [clusters]
 CMF = 1e3
@@ -17,3 +16,4 @@ CMF = 1e3
 start_time = 0.0
 end_time = 10.0
 ntime = 3
+output_mode = "bogus"

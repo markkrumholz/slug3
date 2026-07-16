@@ -8,6 +8,7 @@
  */
 
 #include "testCluster.hpp"
+#include "testSimControls.hpp"
 #include "testSimPhysics.hpp"
 #include <exception>
 #include <iostream>
@@ -17,6 +18,7 @@ auto main() -> int {
     {
         int result = 0;
         result += testSimPhysics();
+        result += testSimControls();
         result += testCluster();
         return result;
     }
