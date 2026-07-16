@@ -58,7 +58,7 @@ namespace utils {
          * @brief Return the number of distinct objects stored
          * @return The number of objects stored
          */
-        auto size() const { return obj_.size(); }
+        [[nodiscard]] auto size() const { return obj_.size(); }
     
         /**
          * @fn utils::ThreadVec::operator()()
@@ -71,7 +71,7 @@ namespace utils {
 #else
             const int ithread = 0;
 #endif
-            return obj_[ithread];
+            return obj_[ithread]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- hot path, must stay unchecked for performance
         }
 
         /**
@@ -85,7 +85,7 @@ namespace utils {
 #else
             const int ithread = 0;
 #endif
-            return obj_[ithread];
+            return obj_[ithread]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- hot path, must stay unchecked for performance
         }
 
         /**
@@ -95,7 +95,7 @@ namespace utils {
          * @return The object belonging to thread i
          */
         auto operator[] (const int i) -> auto& {
-            return obj_[i];
+            return obj_[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- hot path, must stay unchecked for performance
         }
 
         /**
@@ -105,7 +105,7 @@ namespace utils {
          * @return The object belonging to thread i
          */
         auto operator[] (const int i) const -> const auto& {
-            return obj_[i];
+            return obj_[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- hot path, must stay unchecked for performance
         }
 
         /**
