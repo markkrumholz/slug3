@@ -77,7 +77,8 @@ namespace core
 #ifdef _OPENMP
 #pragma omp atomic
 #endif
-           return nTrialRemain_;
+            const auto nRemain = nTrialRemain_;
+            return nRemain;
         }
 
         /**
