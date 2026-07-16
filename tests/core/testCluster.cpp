@@ -6,9 +6,9 @@
  */
 
 #include "../src/core/Cluster.hpp"
-#include "../src/core/SimControls.hpp"
-#include "../src/core/SimPhysics.hpp"
 #include "../src/extern/tomlplusplus/toml.hpp"
+#include "../src/io/SimControls.hpp"
+#include "../src/io/SimPhysics.hpp"
 #include "../src/utils/RngThread.hpp"
 #include "testCluster.hpp"
 #include <algorithm>
@@ -29,8 +29,8 @@ static auto testClusterConstruction() -> int
     try
     {
         const toml::table inputDeck = toml::parse_file(inputFile);
-        const core::SimControls controls(inputDeck);
-        const core::SimPhysics sim(inputDeck, controls.simType());
+        const io::SimControls controls(inputDeck);
+        const io::SimPhysics sim(inputDeck, controls.simType());
 
         utils::rng().seed(rngSeed);
         const core::Cluster cluster(0, 1e4, 0.0, sim);
@@ -68,8 +68,8 @@ static auto testClusterAdvance() -> int
     try
     {
         const toml::table inputDeck = toml::parse_file(inputFile);
-        const core::SimControls controls(inputDeck);
-        const core::SimPhysics sim(inputDeck, controls.simType());
+        const io::SimControls controls(inputDeck);
+        const io::SimPhysics sim(inputDeck, controls.simType());
 
         utils::rng().seed(rngSeed);
         core::Cluster cluster(0, 1e4, 0.0, sim);
@@ -147,8 +147,8 @@ static auto testClusterMinStochMass() -> int
     try
     {
         const toml::table inputDeck = toml::parse_file(inputFileMinStochMass);
-        const core::SimControls controls(inputDeck);
-        const core::SimPhysics sim(inputDeck, controls.simType());
+        const io::SimControls controls(inputDeck);
+        const io::SimPhysics sim(inputDeck, controls.simType());
 
         utils::rng().seed(rngSeed);
         const core::Cluster cluster(0, targetMass, 0.0, sim);

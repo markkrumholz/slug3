@@ -5,9 +5,9 @@
  * @date 2026-07-13
  */
 
-#include "../src/core/SimControls.hpp"
-#include "../src/core/SimPhysics.hpp"
 #include "../src/extern/tomlplusplus/toml.hpp"
+#include "../src/io/SimControls.hpp"
+#include "../src/io/SimPhysics.hpp"
 #include "../src/pdfs/PDF.hpp"
 #include "../src/pdfs/PDFSegment.hpp"
 #include "../src/pdfs/PDFSegmentLognormal.hpp"
@@ -63,7 +63,7 @@ static auto checkChabrierIMF(const pdfs::PDF& imf, const std::string& label) -> 
 // the Tracks3D unit tests in tests/tracks -- it only needs to
 // confirm the tracks were read successfully and are usable, not
 // exhaustively verify Tracks3D's own behavior.
-static auto checkTracks(const core::SimPhysics& sim, const std::string& label) -> int
+static auto checkTracks(const io::SimPhysics& sim, const std::string& label) -> int
 {
     const auto& tracks = sim.tracks();
 
@@ -103,10 +103,10 @@ static auto testSimPhysicsCluster() -> int
     try
     {
         const toml::table inputDeck = toml::parse_file(fileName);
-        const core::SimControls controls(inputDeck);
-        const core::SimPhysics sim(inputDeck, controls.simType());
+        const io::SimControls controls(inputDeck);
+        const io::SimPhysics sim(inputDeck, controls.simType());
 
-        if (controls.simType() != core::SimControls::SimType::cluster)
+        if (controls.simType() != io::SimControls::SimType::cluster)
         {
             std::cerr << "testSimPhysics: " << fileName
                 << ": expected simType() == cluster\n";
@@ -157,10 +157,10 @@ static auto testSimPhysicsGalaxy() -> int
     try
     {
         const toml::table inputDeck = toml::parse_file(fileName);
-        const core::SimControls controls(inputDeck);
-        const core::SimPhysics sim(inputDeck, controls.simType());
+        const io::SimControls controls(inputDeck);
+        const io::SimPhysics sim(inputDeck, controls.simType());
 
-        if (controls.simType() != core::SimControls::SimType::galaxy)
+        if (controls.simType() != io::SimControls::SimType::galaxy)
         {
             std::cerr << "testSimPhysics: " << fileName
                 << ": expected simType() == galaxy\n";

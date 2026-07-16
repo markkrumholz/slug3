@@ -6,8 +6,8 @@
  */
 
 #include "extern/tomlplusplus/toml.hpp"
-#include "core/SimControls.hpp"
-#include "core/SimPhysics.hpp"
+#include "io/SimControls.hpp"
+#include "io/SimPhysics.hpp"
 #include <cstdlib>
 #include <exception>
 #include <iostream>
@@ -38,6 +38,6 @@ auto main(int argc, char *argv[]) -> int
 
     // Use the input deck to initialize simulation control flow
     // and physics
-    const core::SimControls simControls(inputDeck);
-    const core::SimPhysics simPhysics(inputDeck, simControls.simType());
+    const io::SimControls simControls(inputDeck);
+    const io::SimPhysics simPhysics(inputDeck, simControls.simType());
 }

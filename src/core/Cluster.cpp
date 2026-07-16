@@ -6,9 +6,9 @@
  */
 
 #include "Cluster.hpp"
+#include "../io/SimPhysics.hpp"
 #include "../tracks/Tracks2D.hpp"
 #include "../utils/RngThread.hpp"
-#include "SimPhysics.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -23,7 +23,7 @@
 core::Cluster::Cluster(const unsigned long uid,
     const double mass,
     const double time,
-    const SimPhysics& physics) :
+    const io::SimPhysics& physics) :
     rngState_(utils::rng().getState()),
     uid_(uid),
     targetMass_(mass),

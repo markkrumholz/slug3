@@ -35,10 +35,10 @@ endif()
 add_subdirectory(src/extern/pybind11)
 
 # Main executable
-add_executable(slug 
+add_executable(slug
     src/main.cpp
     src/core/Cluster.cpp
-    src/core/SimPhysics.cpp
+    src/io/SimPhysics.cpp
     src/interpolation/Mesh2DGrid.cpp
     src/pdfs/PDFFileParser.cpp
     src/pdfs/PDFSegment.cpp
@@ -51,7 +51,7 @@ add_executable(slug
     src/tracks/Tracks2D.cpp
     src/tracks/Tracks3D.cpp
     src/tracks/TrackUtils.cpp
-    src/core/SimControls.cpp
+    src/io/SimControls.cpp
     src/utils/ParseUtils.cpp
 )
 
@@ -90,8 +90,8 @@ add_executable(slugTestTracks
 )
 add_executable(slugTestCore
     src/core/Cluster.cpp
-    src/core/SimControls.cpp
-    src/core/SimPhysics.cpp
+    src/io/SimControls.cpp
+    src/io/SimPhysics.cpp
     src/interpolation/Mesh2DGrid.cpp
     src/pdfs/PDFFileParser.cpp
     src/pdfs/PDFSegment.cpp
@@ -107,8 +107,26 @@ add_executable(slugTestCore
     src/utils/ParseUtils.cpp
     tests/core/testCluster.cpp
     tests/core/testCoreAll.cpp
-    tests/core/testSimControls.cpp
-    tests/core/testSimPhysics.cpp
+)
+add_executable(slugTestIo
+    src/io/SimControls.cpp
+    src/io/SimPhysics.cpp
+    src/interpolation/Mesh2DGrid.cpp
+    src/pdfs/PDFFileParser.cpp
+    src/pdfs/PDFSegment.cpp
+    src/pdfs/PDFSegmentDelta.cpp
+    src/pdfs/PDFSegmentExponential.cpp
+    src/pdfs/PDFSegmentLognormal.cpp
+    src/pdfs/PDFSegmentNormal.cpp
+    src/pdfs/PDFSegmentPowerlaw.cpp
+    src/pdfs/PDFSegmentSchechter.cpp
+    src/tracks/TrackUtils.cpp
+    src/tracks/Tracks2D.cpp
+    src/tracks/Tracks3D.cpp
+    src/utils/ParseUtils.cpp
+    tests/io/testIoAll.cpp
+    tests/io/testSimControls.cpp
+    tests/io/testSimPhysics.cpp
 )
 
 # Python module, for testing the Python frontend. The CMake target is named
@@ -145,6 +163,9 @@ target_include_directories(slugTestTracks SYSTEM PRIVATE src/extern/pcg-cpp/incl
 target_include_directories(slugTestCore PRIVATE src)
 target_include_directories(slugTestCore SYSTEM PRIVATE src/extern/pcg-cpp/include)
 
+target_include_directories(slugTestIo PRIVATE src)
+target_include_directories(slugTestIo SYSTEM PRIVATE src/extern/pcg-cpp/include)
+
 target_include_directories(slugPython PRIVATE src)
 target_include_directories(slugPython SYSTEM PRIVATE src/extern/pcg-cpp/include)
 
@@ -154,6 +175,7 @@ target_include_directories(slugTestPDFs SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestUtils SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestTracks SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestCore SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
+target_include_directories(slugTestIo SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugPython SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 
 # Link to GSL
@@ -163,6 +185,7 @@ target_link_libraries(slugTestPDFs PRIVATE GSL::gsl)
 target_link_libraries(slugTestUtils PRIVATE GSL::gsl)
 target_link_libraries(slugTestTracks PRIVATE GSL::gsl)
 target_link_libraries(slugTestCore PRIVATE GSL::gsl)
+target_link_libraries(slugTestIo PRIVATE GSL::gsl)
 target_link_libraries(slugPython PRIVATE GSL::gsl)
 
 # Link to HDF5
@@ -172,6 +195,7 @@ target_link_libraries(slugTestPDFs PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugTestUtils PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugTestTracks PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugTestCore PRIVATE ${HDF5_CXX_LIBRARIES})
+target_link_libraries(slugTestIo PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugPython PRIVATE ${HDF5_CXX_LIBRARIES})
 
 # Link to OpenMP, if available
@@ -182,6 +206,7 @@ if(OpenMP_CXX_FOUND)
     target_link_libraries(slugTestUtils PRIVATE OpenMP::OpenMP_CXX)
     target_link_libraries(slugTestTracks PRIVATE OpenMP::OpenMP_CXX)
     target_link_libraries(slugTestCore PRIVATE OpenMP::OpenMP_CXX)
+    target_link_libraries(slugTestIo PRIVATE OpenMP::OpenMP_CXX)
     target_link_libraries(slugPython PRIVATE OpenMP::OpenMP_CXX)
 endif()
 
@@ -201,6 +226,13 @@ add_test(NAME test_Tracks COMMAND slugTestTracks
 add_test(NAME test_Core COMMAND slugTestCore
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 set_tests_properties(test_Core PROPERTIES
+    ENVIRONMENT "SLUG_DIR=${CMAKE_SOURCE_DIR}")
+
+# test_Io exercises SimPhysics's file resolution via getFilePath's
+# SLUG_DIR + prefix rule, same as test_Core above.
+add_test(NAME test_Io COMMAND slugTestIo
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+set_tests_properties(test_Io PROPERTIES
     ENVIRONMENT "SLUG_DIR=${CMAKE_SOURCE_DIR}")
 
 # Python binding tests: run via pytest, using the same Python interpreter
