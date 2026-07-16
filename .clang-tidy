@@ -41,13 +41,22 @@ Checks: >-
   -portability-restrict-system-includes,
   -readability-identifier-length,
   -readability-magic-numbers,
-  -clang-analyzer-optin.cplusplus.UninitializedObject
+  -clang-analyzer-optin.cplusplus.UninitializedObject,
+  -clang-analyzer-optin.core.EnumCastOutOfRange
 
 # clang-analyzer-optin.cplusplus.UninitializedObject is disabled above:
 # it false-positives on toml++'s formatter classes, which deliberately
 # leave some fields uninitialized in the constructor and set them later
 # in attach(). The diagnostic is anchored inside the vendored header
 # itself, so it can't be suppressed with a NOLINT at the call site.
+#
+# clang-analyzer-optin.core.EnumCastOutOfRange is disabled above for the
+# same reason: it false-positives on toml++'s TOML_MAKE_FLAGS macro,
+# whose generated operator~ deliberately bitwise-inverts a flag enum's
+# underlying value, producing a result with no matching named
+# enumerator by design. The diagnostic is anchored inside the vendored
+# header itself (in the macro body), so it can't be suppressed with a
+# NOLINT at the call site.
 
 WarningsAsErrors: '*'
 
