@@ -117,7 +117,15 @@ template auto utils::getTOMLKeyWithError<double>(
     const toml::table& inputDeck,
     const std::string& key,
     bool required) -> std::optional<double>;
+template auto utils::getTOMLKeyWithError<unsigned int>(
+    const toml::table& inputDeck,
+    const std::string& key,
+    bool required) -> std::optional<unsigned int>;
 template auto utils::getTOMLKeyWithError<unsigned long>(
     const toml::table& inputDeck,
     const std::string& key,
     bool required) -> std::optional<unsigned long>;
+template auto utils::getTOMLKeyWithError<bool>(
+    const toml::table& inputDeck,
+    const std::string& key,
+    bool required) -> std::optional<bool>;

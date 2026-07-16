@@ -9,7 +9,10 @@
 #define SIMCONTROLS_HPP
 
 #include "../extern/tomlplusplus/toml.hpp"
+#include "../pdfs/PDF.hpp"
 #include <cstdint>
+#include <string>
+#include <vector>
 
 namespace core
 {
@@ -25,10 +28,10 @@ namespace core
         /**
          * @brief An enum to hold output modes
          */
-        enum class OutputMode : std::uint8_t {
-            h5,      /**< HDF5 output */
-            ascii   /**< ASCII output */
-        };
+        //enum class OutputMode : std::uint8_t {
+        //    h5,      /**< HDF5 output */
+        //    ascii   /**< ASCII output */
+        //};
 
         /**
          * @brief Initialize the simulation controls from the input deck
@@ -37,11 +40,25 @@ namespace core
         SimControls(const toml::table& inputDeck);
 
         // Getters for control flow
+
         /**
+         * @brief Return mdoel name
+         * @return Model name
+         */
+        [[nodiscard]] auto modelName() const { return modelName_; }
+
+        /**
+         * @brief Return verbosity level
+         * @return Verbosity level
+         */
+        [[nodiscard]] auto verbosity() const { return verbosity_; }
+
+         /**
          * @brief Return number of trials in the simulation
          * @return Number of trials
          */
         [[nodiscard]] auto nTrial() const { return nTrial_; }
+
         /**
          * @brief Return number of trials remaining in the simulation
          * @return Number of trials remaining
@@ -55,6 +72,22 @@ namespace core
 #pragma omp atomic
 #endif
            return nTrialRemain_;
+        }
+
+        /**
+         * @brief Return the times at which output should occur
+         * @return A vector of output times
+         * @details
+         * If explicit output times were specified in the input deck
+         * (either directly, or as a uniformly- or log-spaced grid),
+         * returns a copy of that array. If instead a distribution of
+         * output times was specified, returns a single-element vector
+         * containing one time drawn from that distribution.
+         */
+        [[nodiscard]] auto outTimes() const -> std::vector<double>
+        {
+            if (!outTimes_.empty()) { return outTimes_; }
+            return { outTimeDist_.draw() };
         }
 
         // Setters
@@ -76,9 +109,19 @@ namespace core
     private:
 
         // Simulation control parameters
-        OutputMode outputMode_;      /**< Output mode */
-        unsigned long nTrial_;       /**< Number of trials */
-        unsigned long nTrialRemain_; /**< Number of trials remaining */
+        //OutputMode outputMode_;        /**< Output mode */
+        std::string modelName_;        /**< Name of this model */
+        unsigned int verbosity_;       /**< Level of verbosity */
+        unsigned long nTrial_;         /**< Number of trials */
+        unsigned long nTrialRemain_;   /**< Number of trials remaining */
+        std::vector<double> outTimes_; /**< Times to write output */
+        pdfs::PDF outTimeDist_;        /**< Distribution of output times */
+
+        /**
+         * @brief Compute output times
+         * @param inputDeck A toml table holding the input deck
+         */
+        void setOutputTimes(const toml::table& inputDeck);
     };
 
 } // namespace core

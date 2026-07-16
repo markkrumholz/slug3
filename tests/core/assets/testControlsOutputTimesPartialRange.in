@@ -1,4 +1,5 @@
-# This is a test criptic input deck for a cluster simulation
+# Test input deck for SimControls: start_time/end_time given without ntime
+# (invalid -- all three of start_time, end_time, and ntime must be given together)
 
 sim_type = "cluster"
 
@@ -15,4 +16,3 @@ CMF = 1e3
 [outputs]
 start_time = 0.0
 end_time = 10.0
-ntime = 3

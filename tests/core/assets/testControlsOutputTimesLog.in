@@ -1,4 +1,4 @@
-# This is a test criptic input deck for a cluster simulation
+# Test input deck for SimControls: log-spaced start_time/end_time/ntime grid (option 3a)
 
 sim_type = "cluster"
 
@@ -13,6 +13,7 @@ alphaFe = -0.2
 CMF = 1e3
 
 [outputs]
-start_time = 0.0
-end_time = 10.0
+start_time = 1.0
+end_time = 100.0
 ntime = 3
+log_time = true

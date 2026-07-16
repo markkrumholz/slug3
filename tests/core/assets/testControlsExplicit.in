@@ -1,6 +1,9 @@
-# This is a test criptic input deck for a cluster simulation
+# Test input deck for SimControls: explicit model_name, verbosity, and n_trial
 
 sim_type = "cluster"
+model_name = "my_test_model"
+verbosity = 3
+n_trial = 7
 
 [stars]
 IMF = "chabrier.toml"

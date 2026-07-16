@@ -1,4 +1,4 @@
-# This is a test criptic input deck for a cluster simulation
+# Test input deck for SimControls: output_time_dist option (option 1)
 
 sim_type = "cluster"
 
@@ -13,6 +13,4 @@ alphaFe = -0.2
 CMF = 1e3
 
 [outputs]
-start_time = 0.0
-end_time = 10.0
-ntime = 3
+output_time_dist = 5.0

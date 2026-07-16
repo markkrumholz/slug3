@@ -90,6 +90,7 @@ add_executable(slugTestTracks
 )
 add_executable(slugTestCore
     src/core/Cluster.cpp
+    src/core/SimControls.cpp
     src/core/SimPhysics.cpp
     src/interpolation/Mesh2DGrid.cpp
     src/pdfs/PDFFileParser.cpp
@@ -106,6 +107,7 @@ add_executable(slugTestCore
     src/utils/ParseUtils.cpp
     tests/core/testCluster.cpp
     tests/core/testCoreAll.cpp
+    tests/core/testSimControls.cpp
     tests/core/testSimPhysics.cpp
 )
 
