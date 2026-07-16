@@ -5,6 +5,7 @@
  * @date 14-07-2026
  */
 
+#include "core/SimCluster.hpp"
 #include "io/OutputManager.hpp"
 #include "io/OutputManagerAscii.hpp"
 #include "io/OutputManagerH5.hpp"
@@ -16,6 +17,7 @@
 #include <memory>
 #include <span>
 #include <toml.hpp>
+#include <utility>
 
 auto main(int argc, char *argv[]) -> int 
 {
@@ -58,7 +60,9 @@ auto main(int argc, char *argv[]) -> int
 
     // Run the simulation
     if (simControls.simType() == io::SimControls::SimType::cluster)
-    { // NOLINT(bugprone-branch-clone)
+    {
+        core::SimCluster simCluster(simControls, simPhysics, std::move(outputManager));
+        simCluster.run();
     }
     else if (simControls.simType() == io::SimControls::SimType::galaxy)
     {

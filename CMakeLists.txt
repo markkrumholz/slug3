@@ -60,6 +60,7 @@ add_subdirectory(src/extern/pybind11)
 add_executable(slug
     src/main.cpp
     src/core/Cluster.cpp
+    src/core/SimCluster.cpp
     src/io/OutputManager.cpp
     src/io/OutputManagerAscii.cpp
     src/io/OutputManagerH5.cpp
