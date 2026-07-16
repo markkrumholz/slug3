@@ -8,8 +8,8 @@
 #ifndef CLUSTER_HPP
 #define CLUSTER_HPP
 
-#include "SimPhysics.hpp"
 #include "../interpolation/Interpolator1D.hpp"
+#include "../io/SimPhysics.hpp"
 #include "../tracks/TrackCommons.hpp"
 #include "../tracks/Tracks2D.hpp"
 #include "../utils/RngThread.hpp"
@@ -47,7 +47,7 @@ namespace core
         Cluster(unsigned long uid,
             double mass,
             double time,
-            const SimPhysics& physics);
+            const io::SimPhysics& physics);
 
         // Observers
 
@@ -92,7 +92,7 @@ namespace core
         double targetMass_;         /**< Target mass */
         double formTime_;           /**< Formation time */
         double feH_;                /**< [Fe/H] of cluster */
-        std::reference_wrapper<const SimPhysics> 
+        std::reference_wrapper<const io::SimPhysics>
             physics_;       /**< Simulation physics */
 
         // Masses

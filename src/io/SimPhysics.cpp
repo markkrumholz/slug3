@@ -23,7 +23,7 @@
 #include <utility>
 
 // SimPhysics constructor
-core::SimPhysics::SimPhysics(const toml::table& inputDeck, SimControls::SimType simType) :
+io::SimPhysics::SimPhysics(const toml::table& inputDeck, SimControls::SimType simType) :
     minStochMass_(0.0),
     fracStochMass_(1.0)
 {
@@ -98,7 +98,7 @@ core::SimPhysics::SimPhysics(const toml::table& inputDeck, SimControls::SimType 
 }
 
 // Track reader
-void core::SimPhysics::readTracks(const toml::table& inputDeck)
+void io::SimPhysics::readTracks(const toml::table& inputDeck)
 {
     // Get required tracks key
     auto trackName = utils::getTOMLKeyWithError<std::string>(inputDeck, "stars.tracks", true);

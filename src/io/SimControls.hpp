@@ -14,7 +14,7 @@
 #include <string>
 #include <vector>
 
-namespace core
+namespace io
 {
 
     /**
@@ -172,6 +172,6 @@ namespace core
         void setOutputTimes(const toml::table& inputDeck);
     };
 
-} // namespace core
+} // namespace io
 
 #endif // SIMCONTROLS_HPP

@@ -5,8 +5,8 @@
  * @date 2026-07-16
  */
 
-#include "../src/core/SimControls.hpp"
 #include "../src/extern/tomlplusplus/toml.hpp"
+#include "../src/io/SimControls.hpp"
 #include "testSimControls.hpp"
 #include <algorithm>
 #include <cmath>
@@ -56,9 +56,9 @@ static auto testSimControlsDefaults() -> int
     try
     {
         const toml::table inputDeck = toml::parse_file(fileName);
-        const core::SimControls controls(inputDeck);
+        const io::SimControls controls(inputDeck);
 
-        if (controls.simType() != core::SimControls::SimType::cluster)
+        if (controls.simType() != io::SimControls::SimType::cluster)
         {
             std::cerr << "testSimControls: " << fileName
                 << ": expected simType() == SimType::cluster\n";
@@ -78,7 +78,7 @@ static auto testSimControlsDefaults() -> int
                 << controls.verbosity() << "\n";
             return 1;
         }
-        if (controls.outputMode() != core::SimControls::OutputMode::h5)
+        if (controls.outputMode() != io::SimControls::OutputMode::h5)
         {
             std::cerr << "testSimControls: " << fileName
                 << ": expected default outputMode() == OutputMode::h5\n";
@@ -122,13 +122,13 @@ static auto testSimControlsDefaults() -> int
 // this deck sets it to false.
 static auto testSimControlsExplicit() -> int
 {
-    const std::string fileName = "tests/core/assets/testControlsExplicit.in";
+    const std::string fileName = "tests/io/assets/testControlsExplicit.in";
     try
     {
         const toml::table inputDeck = toml::parse_file(fileName);
-        const core::SimControls controls(inputDeck);
+        const io::SimControls controls(inputDeck);
 
-        if (controls.simType() != core::SimControls::SimType::cluster)
+        if (controls.simType() != io::SimControls::SimType::cluster)
         {
             std::cerr << "testSimControls: " << fileName
                 << ": expected simType() == SimType::cluster\n";
@@ -155,7 +155,7 @@ static auto testSimControlsExplicit() -> int
                 << controls.verbosity() << "\n";
             return 1;
         }
-        if (controls.outputMode() != core::SimControls::OutputMode::ascii)
+        if (controls.outputMode() != io::SimControls::OutputMode::ascii)
         {
             std::cerr << "testSimControls: " << fileName
                 << ": expected outputMode() == OutputMode::ascii\n";
@@ -191,11 +191,11 @@ static auto testSimControlsExplicit() -> int
 // 5.0, so the draw is deterministic.
 static auto testSimControlsOutputTimeDist() -> int
 {
-    const std::string fileName = "tests/core/assets/testControlsOutputTimeDist.in";
+    const std::string fileName = "tests/io/assets/testControlsOutputTimeDist.in";
     try
     {
         const toml::table inputDeck = toml::parse_file(fileName);
-        const core::SimControls controls(inputDeck);
+        const io::SimControls controls(inputDeck);
         return checkOutTimes(controls.outTimes(), { 5.0 }, fileName);
     }
     catch (const std::exception& error)
@@ -210,11 +210,11 @@ static auto testSimControlsOutputTimeDist() -> int
 // explicit array of output times.
 static auto testSimControlsOutputTimesArray() -> int
 {
-    const std::string fileName = "tests/core/assets/testControlsOutputTimesArray.in";
+    const std::string fileName = "tests/io/assets/testControlsOutputTimesArray.in";
     try
     {
         const toml::table inputDeck = toml::parse_file(fileName);
-        const core::SimControls controls(inputDeck);
+        const io::SimControls controls(inputDeck);
         return checkOutTimes(controls.outTimes(), { 1.0, 2.5, 9.0 }, fileName);
     }
     catch (const std::exception& error)
@@ -229,11 +229,11 @@ static auto testSimControlsOutputTimesArray() -> int
 // a geometric sequence of output times.
 static auto testSimControlsOutputTimesLog() -> int
 {
-    const std::string fileName = "tests/core/assets/testControlsOutputTimesLog.in";
+    const std::string fileName = "tests/io/assets/testControlsOutputTimesLog.in";
     try
     {
         const toml::table inputDeck = toml::parse_file(fileName);
-        const core::SimControls controls(inputDeck);
+        const io::SimControls controls(inputDeck);
         return checkOutTimes(controls.outTimes(), { 1.0, 10.0, 100.0 }, fileName);
     }
     catch (const std::exception& error)
@@ -248,11 +248,11 @@ static auto testSimControlsOutputTimesLog() -> int
 // option at all throws.
 static auto testSimControlsNoOutputs() -> int
 {
-    const std::string fileName = "tests/core/assets/testControlsNoOutputs.in";
+    const std::string fileName = "tests/io/assets/testControlsNoOutputs.in";
     const toml::table inputDeck = toml::parse_file(fileName);
     try
     {
-        const core::SimControls controls(inputDeck);
+        const io::SimControls controls(inputDeck);
         std::cerr << "testSimControls: " << fileName
             << ": expected construction to throw, but it succeeded\n";
         return 1;
@@ -267,11 +267,11 @@ static auto testSimControlsNoOutputs() -> int
 // outputs.output_time_dist and outputs.output_times throws.
 static auto testSimControlsOutputTimesConflict() -> int
 {
-    const std::string fileName = "tests/core/assets/testControlsOutputTimesConflict.in";
+    const std::string fileName = "tests/io/assets/testControlsOutputTimesConflict.in";
     const toml::table inputDeck = toml::parse_file(fileName);
     try
     {
-        const core::SimControls controls(inputDeck);
+        const io::SimControls controls(inputDeck);
         std::cerr << "testSimControls: " << fileName
             << ": expected construction to throw, but it succeeded\n";
         return 1;
@@ -286,11 +286,11 @@ static auto testSimControlsOutputTimesConflict() -> int
 // outputs.start_time and outputs.end_time, without outputs.ntime, throws.
 static auto testSimControlsOutputTimesPartialRange() -> int
 {
-    const std::string fileName = "tests/core/assets/testControlsOutputTimesPartialRange.in";
+    const std::string fileName = "tests/io/assets/testControlsOutputTimesPartialRange.in";
     const toml::table inputDeck = toml::parse_file(fileName);
     try
     {
-        const core::SimControls controls(inputDeck);
+        const io::SimControls controls(inputDeck);
         std::cerr << "testSimControls: " << fileName
             << ": expected construction to throw, but it succeeded\n";
         return 1;
@@ -305,11 +305,11 @@ static auto testSimControlsOutputTimesPartialRange() -> int
 // outputs.output_mode value throws.
 static auto testSimControlsInvalidOutputMode() -> int
 {
-    const std::string fileName = "tests/core/assets/testControlsInvalidOutputMode.in";
+    const std::string fileName = "tests/io/assets/testControlsInvalidOutputMode.in";
     const toml::table inputDeck = toml::parse_file(fileName);
     try
     {
-        const core::SimControls controls(inputDeck);
+        const io::SimControls controls(inputDeck);
         std::cerr << "testSimControls: " << fileName
             << ": expected construction to throw, but it succeeded\n";
         return 1;
@@ -324,11 +324,11 @@ static auto testSimControlsInvalidOutputMode() -> int
 // sim_type value throws.
 static auto testSimControlsInvalidSimType() -> int
 {
-    const std::string fileName = "tests/core/assets/testControlsInvalidSimType.in";
+    const std::string fileName = "tests/io/assets/testControlsInvalidSimType.in";
     const toml::table inputDeck = toml::parse_file(fileName);
     try
     {
-        const core::SimControls controls(inputDeck);
+        const io::SimControls controls(inputDeck);
         std::cerr << "testSimControls: " << fileName
             << ": expected construction to throw, but it succeeded\n";
         return 1;
@@ -344,13 +344,13 @@ static auto testSimControlsInvalidSimType() -> int
 // to true.
 static auto testSimControlsGalaxy() -> int
 {
-    const std::string fileName = "tests/core/assets/testControlsGalaxy.in";
+    const std::string fileName = "tests/io/assets/testControlsGalaxy.in";
     try
     {
         const toml::table inputDeck = toml::parse_file(fileName);
-        const core::SimControls controls(inputDeck);
+        const io::SimControls controls(inputDeck);
 
-        if (controls.simType() != core::SimControls::SimType::galaxy)
+        if (controls.simType() != io::SimControls::SimType::galaxy)
         {
             std::cerr << "testSimControls: " << fileName
                 << ": expected simType() == SimType::galaxy\n";
@@ -376,13 +376,13 @@ static auto testSimControlsGalaxy() -> int
 // explicitly set to false reports outputClusters() == false.
 static auto testSimControlsGalaxyNoClusters() -> int
 {
-    const std::string fileName = "tests/core/assets/testControlsGalaxyNoClusters.in";
+    const std::string fileName = "tests/io/assets/testControlsGalaxyNoClusters.in";
     try
     {
         const toml::table inputDeck = toml::parse_file(fileName);
-        const core::SimControls controls(inputDeck);
+        const io::SimControls controls(inputDeck);
 
-        if (controls.simType() != core::SimControls::SimType::galaxy)
+        if (controls.simType() != io::SimControls::SimType::galaxy)
         {
             std::cerr << "testSimControls: " << fileName
                 << ": expected simType() == SimType::galaxy\n";

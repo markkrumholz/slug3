@@ -118,7 +118,7 @@ static auto generateOutputTimesRange(const toml::table& inputDeck) -> std::vecto
     return times;
 }
 
-core::SimControls::SimControls(const toml::table& inputDeck) :
+io::SimControls::SimControls(const toml::table& inputDeck) :
     simType_(SimType::none),
     verbosity_(0),
     nTrial_(1),
@@ -200,7 +200,7 @@ core::SimControls::SimControls(const toml::table& inputDeck) :
     if (rngSeed.has_value()) { utils::rng().seed(rngSeed.value()); }
 }
 
-void core::SimControls::setOutputTimes(const toml::table& inputDeck)
+void io::SimControls::setOutputTimes(const toml::table& inputDeck)
 {
     // This routine computes the output times. These are set in a somewhat
     // complex way: a user can specify specify the times of outputs in three distinct

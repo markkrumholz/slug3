@@ -13,7 +13,7 @@
 #include "../tracks/Tracks3D.hpp"
 #include "SimControls.hpp"
 
-namespace core
+namespace io
 {
 
     /**
@@ -124,6 +124,6 @@ namespace core
 
     };
 
-} // namespace core
+} // namespace io
 
 #endif // SIMPHYSICS_HPP
