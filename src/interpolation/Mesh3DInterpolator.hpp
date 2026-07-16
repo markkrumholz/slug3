@@ -638,9 +638,9 @@ namespace interp
             // casting away constness here is safe.
             if (ny_ == 1)
             {
-                auto* xPtr = const_cast<double*>(xData_.data());
-                auto* zPtr = const_cast<double*>(zData_.data());
-                auto* fPtr = const_cast<double*>(fData_.data());
+                auto* xPtr = const_cast<double*>(xData_.data()); // NOLINT(cppcoreguidelines-pro-type-const-cast) -- see comment above: casting away constness here is safe
+                auto* zPtr = const_cast<double*>(zData_.data()); // NOLINT(cppcoreguidelines-pro-type-const-cast) -- see comment above: casting away constness here is safe
+                auto* fPtr = const_cast<double*>(fData_.data()); // NOLINT(cppcoreguidelines-pro-type-const-cast) -- see comment above: casting away constness here is safe
                 auto xView = std::mdspan<double, std::dextents<size_t, 2>>(xPtr, nx_, nz_);
                 auto zView = std::mdspan<double, std::dextents<size_t, 1>>(zPtr, nz_);
                 auto fView = std::mdspan<double, std::dextents<size_t, 3>>(fPtr, nx_, nz_, NF);
@@ -742,9 +742,9 @@ namespace interp
             // casting away constness here is safe.
             if (nz_ == 1)
             {
-                auto* xPtr = const_cast<double*>(xData_.data());
-                auto* yPtr = const_cast<double*>(yData_.data());
-                auto* fPtr = const_cast<double*>(fData_.data());
+                auto* xPtr = const_cast<double*>(xData_.data()); // NOLINT(cppcoreguidelines-pro-type-const-cast) -- see comment above: casting away constness here is safe
+                auto* yPtr = const_cast<double*>(yData_.data()); // NOLINT(cppcoreguidelines-pro-type-const-cast) -- see comment above: casting away constness here is safe
+                auto* fPtr = const_cast<double*>(fData_.data()); // NOLINT(cppcoreguidelines-pro-type-const-cast) -- see comment above: casting away constness here is safe
                 auto xView = std::mdspan<double, std::dextents<size_t, 2>>(xPtr, nx_, ny_);
                 auto yView = std::mdspan<double, std::dextents<size_t, 1>>(yPtr, ny_);
                 auto fView = std::mdspan<double, std::dextents<size_t, 3>>(fPtr, nx_, ny_, NF);
