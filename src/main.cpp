@@ -5,13 +5,13 @@
  * @date 14-07-2026
  */
 
-#include "extern/tomlplusplus/toml.hpp"
 #include "io/SimControls.hpp"
 #include "io/SimPhysics.hpp"
 #include <cstdlib>
 #include <exception>
 #include <iostream>
 #include <span>
+#include <toml.hpp>
 
 auto main(int argc, char *argv[]) -> int 
 {

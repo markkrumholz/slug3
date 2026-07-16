@@ -6,7 +6,6 @@
  */
 
 #include "SimPhysics.hpp"
-#include "../extern/tomlplusplus/toml.hpp"
 #include "../pdfs/PDF.hpp"
 #include "../pdfs/PDFFileParser.hpp"
 #include "../pdfs/PDFSegmentPowerlaw.hpp"
@@ -20,6 +19,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <toml.hpp>
 #include <utility>
 
 // SimPhysics constructor

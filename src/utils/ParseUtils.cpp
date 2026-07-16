@@ -6,7 +6,6 @@
  */
 
 #include "ParseUtils.hpp"
-#include "../extern/tomlplusplus/toml.hpp"
 #include "../pdfs/PDF.hpp"
 #include "../pdfs/PDFFileParser.hpp"
 #include "../pdfs/PDFSegmentDelta.hpp"
@@ -15,6 +14,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <toml.hpp>
 #include <utility>
 
 // Trim leading and trailing whitespace, and trailing comments

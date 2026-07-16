@@ -142,32 +142,41 @@ pybind11_add_module(slugPython
 )
 set_target_properties(slugPython PROPERTIES OUTPUT_NAME slug)
 
-# Include directories: project headers as regular includes, pcg-cpp as a
-# system include so clang-tidy and the compiler suppress warnings from it.
+# Include directories: project headers as regular includes; pcg-cpp and
+# tomlplusplus as system includes so clang-tidy and the compiler suppress
+# warnings from them. (pybind11's own include directory is already added
+# as SYSTEM automatically by pybind11_add_module below, for slugPython.)
+# This only takes effect for headers actually reached via this search
+# list (e.g. an angle-bracket include) -- a relative "../extern/..."
+# include resolves via the including file's own directory first and
+# never consults this list, so it would NOT be treated as a system
+# header despite living under a SYSTEM include path. This is why the
+# toml.hpp and pybind11 includes throughout the codebase are written in
+# angle-bracket form.
 target_include_directories(slug PRIVATE src)
-target_include_directories(slug SYSTEM PRIVATE src/extern/pcg-cpp/include)
+target_include_directories(slug SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
 
 target_include_directories(slugTestInterpolation PRIVATE src)
-target_include_directories(slugTestInterpolation SYSTEM PRIVATE src/extern/pcg-cpp/include)
+target_include_directories(slugTestInterpolation SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
 
 target_include_directories(slugTestPDFs PRIVATE src)
-target_include_directories(slugTestPDFs SYSTEM PRIVATE src/extern/pcg-cpp/include)
+target_include_directories(slugTestPDFs SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
 
 
 target_include_directories(slugTestUtils PRIVATE src)
-target_include_directories(slugTestUtils SYSTEM PRIVATE src/extern/pcg-cpp/include)
+target_include_directories(slugTestUtils SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
 
 target_include_directories(slugTestTracks PRIVATE src)
-target_include_directories(slugTestTracks SYSTEM PRIVATE src/extern/pcg-cpp/include)
+target_include_directories(slugTestTracks SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
 
 target_include_directories(slugTestCore PRIVATE src)
-target_include_directories(slugTestCore SYSTEM PRIVATE src/extern/pcg-cpp/include)
+target_include_directories(slugTestCore SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
 
 target_include_directories(slugTestIo PRIVATE src)
-target_include_directories(slugTestIo SYSTEM PRIVATE src/extern/pcg-cpp/include)
+target_include_directories(slugTestIo SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
 
 target_include_directories(slugPython PRIVATE src)
-target_include_directories(slugPython SYSTEM PRIVATE src/extern/pcg-cpp/include)
+target_include_directories(slugPython SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
 
 target_include_directories(slug SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestInterpolation SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})

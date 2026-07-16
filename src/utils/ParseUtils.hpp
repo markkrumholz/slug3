@@ -8,12 +8,12 @@
 #ifndef PARSEUTILS_HPP
 #define PARSEUTILS_HPP
 
-#include "../extern/tomlplusplus/toml.hpp"
 #include "../pdfs/PDF.hpp"
 #include <iterator>
 #include <optional>
 #include <sstream>
 #include <string>
+#include <toml.hpp>
 #include <vector>
 
 /**

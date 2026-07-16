@@ -6,12 +6,12 @@
  */
 
 #include "SimControls.hpp"
-#include "../extern/tomlplusplus/toml.hpp"
 #include "../utils/ParseUtils.hpp"
 #include "../utils/RngThread.hpp"
 #include <cmath>
 #include <stdexcept>
 #include <string>
+#include <toml.hpp>
 #include <vector>
 
 // Read an explicit array of output times from outputs.output_times

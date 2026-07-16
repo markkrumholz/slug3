@@ -8,9 +8,6 @@
  * the functionality of slug.
  */
 
-#include "../extern/pybind11/include/pybind11/numpy.h"
-#include "../extern/pybind11/include/pybind11/pybind11.h"
-#include "../extern/pybind11/include/pybind11/stl.h" // NOLINT(misc-include-cleaner); this is needed for correct Python binding, even if clang-tidy can't recognize it
 #include "../interpolation/Interpolator1D.hpp"
 #include "../tracks/TrackCommons.hpp"
 #include "../tracks/Tracks2D.hpp"
@@ -19,6 +16,9 @@
 #include <array>
 #include <cstddef>
 #include <iterator>
+#include <pybind11/numpy.h>
+#include <pybind11/pybind11.h>
+#include <pybind11/stl.h> // NOLINT(misc-include-cleaner); this is needed for correct Python binding, even if clang-tidy can't recognize it
 #include <stdexcept>
 #include <string>
 #include <utility>

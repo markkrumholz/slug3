@@ -8,10 +8,10 @@
 #ifndef SIMPHYSICS_HPP
 #define SIMPHYSICS_HPP
 
-#include "../extern/tomlplusplus/toml.hpp"
 #include "../pdfs/PDF.hpp"
 #include "../tracks/Tracks3D.hpp"
 #include "SimControls.hpp"
+#include <toml.hpp>
 
 namespace io
 {

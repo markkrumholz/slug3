@@ -8,10 +8,10 @@
 #ifndef SIMCONTROLS_HPP
 #define SIMCONTROLS_HPP
 
-#include "../extern/tomlplusplus/toml.hpp"
 #include "../pdfs/PDF.hpp"
 #include <cstdint>
 #include <string>
+#include <toml.hpp>
 #include <vector>
 
 namespace io
