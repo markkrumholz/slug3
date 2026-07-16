@@ -24,11 +24,7 @@ namespace interp
 
     Mesh2DGrid::Mesh2DGrid(const Array2D& x,
         const Array1D& y,
-        bool copyData) :
-        xMin_(0.0), xMax_(0.0),
-        yMin_(0.0), yMax_(0.0),
-        convex_(true),
-        iSave_(0), jSave_(0)
+        bool copyData)
     {
         // Run safety checks on inputs
         safetyCheckInputs(x, y);
