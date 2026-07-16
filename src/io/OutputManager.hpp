@@ -8,9 +8,9 @@
 #ifndef OUTPUTMANAGER_HPP
 #define OUTPUTMANAGER_HPP
 
-#include "../extern/tomlplusplus/toml.hpp"
 #include "SimControls.hpp"
 #include "hdf5.h" // NOLINT(misc-include-cleaner)
+#include <toml.hpp>
 
 namespace io
 {
@@ -102,7 +102,7 @@ namespace io
 
         const SimControls& simControls_; /**< Simulation control flow settings */
         const toml::table& inputDeck_;   /**< The simulation's toml input deck */
-        hid_t file_;                     /**< Handle to the open HDF5 output file */
+        hid_t file_ = -1;                /**< Handle to the open HDF5 output file */
     };
 
 } // namespace io

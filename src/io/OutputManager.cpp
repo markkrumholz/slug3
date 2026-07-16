@@ -6,7 +6,6 @@
  */
 
 #include "OutputManager.hpp"
-#include "../extern/tomlplusplus/toml.hpp"
 #include "SimControls.hpp"
 #include "hdf5.h" // NOLINT(misc-include-cleaner)
 #include "io/SlugVersion.hpp"
@@ -18,6 +17,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <toml.hpp>
 #include <utility>
 
 // Return the current local date (YYYY-MM-DD) and time (HH:MM:SS) as
@@ -138,8 +138,7 @@ io::OutputManager<io::SimControls::OutputMode::ascii>::OutputManager(
 io::OutputManager<io::SimControls::OutputMode::h5>::OutputManager(
     const SimControls& simControls, const toml::table& inputDeck) :
     simControls_(simControls),
-    inputDeck_(inputDeck),
-    file_(-1)
+    inputDeck_(inputDeck)
 {
     const auto path = std::filesystem::path(simControls_.outDir()) /
         (simControls_.modelName() + ".h5");

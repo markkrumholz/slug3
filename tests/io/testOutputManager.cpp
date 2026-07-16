@@ -5,7 +5,6 @@
  * @date 2026-07-16
  */
 
-#include "../src/extern/tomlplusplus/toml.hpp"
 #include "../src/io/OutputManager.hpp"
 #include "../src/io/SimControls.hpp"
 #include "hdf5.h" // NOLINT(misc-include-cleaner)
@@ -18,6 +17,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <toml.hpp>
 
 // Build a minimal, valid input deck for a cluster-type simulation
 // with model_name and out_dir set as given, and a single output
