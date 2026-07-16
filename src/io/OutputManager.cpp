@@ -14,6 +14,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <ios>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -97,11 +98,64 @@ static void writeStringDataset(const hid_t loc, const std::string& name,
     H5Tclose(strType);
 }
 
+// Chunk size (in elements) used for the extensible cluster datasets
+static constexpr hsize_t clustersChunkSize = 256;
+
+// Create a 1d, extensible dataset called name, of the given HDF5
+// datatype, in the HDF5 group loc, chunked with clustersChunkSize
+// elements per chunk
+static auto createExtensible1dDataset(const hid_t loc, const std::string& name,
+    const hid_t type) -> hid_t
+{
+    constexpr hsize_t initDims = 0;
+    constexpr hsize_t maxDims = H5S_UNLIMITED;
+    const hid_t space = H5Screate_simple(1, &initDims, &maxDims);
+
+    const hid_t propList = H5Pcreate(H5P_DATASET_CREATE);
+    H5Pset_chunk(propList, 1, &clustersChunkSize);
+
+    const hid_t dset = H5Dcreate2(loc, name.c_str(), type, space,
+        H5P_DEFAULT, propList, H5P_DEFAULT);
+    H5Pclose(propList);
+    H5Sclose(space);
+    if (dset < 0)
+    {
+        throw std::runtime_error(
+            "OutputManager: unable to create dataset " + name);
+    }
+    return dset;
+}
+
 // NOLINTEND(misc-include-cleaner)
+
+// Column headings, and the field widths used to lay them out, for
+// the ascii cluster output file. uidWidth accommodates a 9-digit
+// integer; numWidth accommodates a number in exponential notation
+// with six decimal places (e.g. "-1.234567e+01"). Both include a
+// couple of extra characters of padding so that columns are visibly
+// separated.
+static constexpr int uidWidth = 12;
+static constexpr int numWidth = 16;
+
+// Write the cluster-output ascii header (column names followed by a
+// dashed rule) to file
+static void writeClustersHeader(std::ofstream& file)
+{
+    file << std::right << std::setw(uidWidth) << "uid"
+         << std::setw(numWidth) << "target_mass"
+         << std::setw(numWidth) << "birth_mass"
+         << std::setw(numWidth) << "form_time"
+         << std::setw(numWidth) << "feh" << "\n";
+    constexpr auto numColumns = 4;
+    file << std::string(uidWidth, '-')
+         << std::string(static_cast<std::string::size_type>(numColumns) * numWidth, '-') << "\n";
+}
 
 // Ascii constructor: open the summary file, write the header
 // (slug-hash, date, time), then dump the toml input deck, and close
-// the file
+// the file. If the simulation outputs individual clusters, also
+// open the cluster output file, write its column-header rows, and
+// leave it open for later writing.
 io::OutputManager<io::SimControls::OutputMode::ascii>::OutputManager(
     const SimControls& simControls, const toml::table& inputDeck) :
     simControls_(simControls),
@@ -130,6 +184,31 @@ io::OutputManager<io::SimControls::OutputMode::ascii>::OutputManager(
     file << "input_deck\n" << inputDeck_ << "\n";
 
     file.close();
+
+    if (simControls_.simType() == SimControls::SimType::cluster ||
+        simControls_.outputClusters())
+    {
+        const auto clustersPath = std::filesystem::path(simControls_.outDir()) /
+            (simControls_.modelName() + "_clusters.txt");
+        if (std::filesystem::exists(clustersPath))
+        {
+            throw std::runtime_error(
+                "OutputManager: output file " + clustersPath.string() + " already exists");
+        }
+
+        clustersFile_.open(clustersPath);
+        if (!clustersFile_)
+        {
+            throw std::runtime_error(
+                "OutputManager: unable to open output file " + clustersPath.string());
+        }
+        writeClustersHeader(clustersFile_);
+    }
+}
+
+io::OutputManager<io::SimControls::OutputMode::ascii>::~OutputManager()
+{
+    if (clustersFile_.is_open()) { clustersFile_.close(); }
 }
 
 // H5 constructor: create the output file, write the header
@@ -174,9 +253,43 @@ io::OutputManager<io::SimControls::OutputMode::h5>::OutputManager(
     writeStringDataset(inputDeckGrp, "toml", tomlStream.str());
     H5Gclose(inputDeckGrp);
     // NOLINTEND(misc-include-cleaner)
+
+    if (simControls_.simType() == SimControls::SimType::cluster ||
+        simControls_.outputClusters())
+    {
+        // NOLINTBEGIN(misc-include-cleaner)
+        clustersGroup_ = H5Gcreate2(file_, "clusters",
+            H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+        if (clustersGroup_ < 0)
+        {
+            H5Fclose(file_);
+            throw std::runtime_error(
+                "OutputManager: unable to create clusters group");
+        }
+
+        const hid_t uidDset = createExtensible1dDataset(
+            clustersGroup_, "uid", H5T_NATIVE_ULONG);
+        H5Dclose(uidDset);
+        const hid_t targetMassDset = createExtensible1dDataset(
+            clustersGroup_, "target_mass", H5T_NATIVE_DOUBLE);
+        H5Dclose(targetMassDset);
+        const hid_t birthMassDset = createExtensible1dDataset(
+            clustersGroup_, "birth_mass", H5T_NATIVE_DOUBLE);
+        H5Dclose(birthMassDset);
+        const hid_t formTimeDset = createExtensible1dDataset(
+            clustersGroup_, "form_time", H5T_NATIVE_DOUBLE);
+        H5Dclose(formTimeDset);
+        const hid_t fehDset = createExtensible1dDataset(
+            clustersGroup_, "feh", H5T_NATIVE_DOUBLE);
+        H5Dclose(fehDset);
+        // NOLINTEND(misc-include-cleaner)
+    }
 }
 
 io::OutputManager<io::SimControls::OutputMode::h5>::~OutputManager()
 {
-    H5Fclose(file_); // NOLINT(misc-include-cleaner)
+    // NOLINTBEGIN(misc-include-cleaner)
+    if (clustersGroup_ >= 0) { H5Gclose(clustersGroup_); }
+    H5Fclose(file_);
+    // NOLINTEND(misc-include-cleaner)
 }

@@ -10,6 +10,7 @@
 
 #include "SimControls.hpp"
 #include "hdf5.h" // NOLINT(misc-include-cleaner)
+#include <fstream>
 #include <toml.hpp>
 
 namespace io
@@ -51,9 +52,9 @@ namespace io
         OutputManager(const SimControls& simControls, const toml::table& inputDeck);
 
         /**
-         * @brief No-op; the output file is already closed once construction completes
+         * @brief Close the cluster output file, if it was opened
          */
-        ~OutputManager() = default;
+        ~OutputManager();
 
         // Disallow copying and moving: this object represents exclusive
         // ownership of on-disk output, so duplicating it makes no sense
@@ -66,6 +67,7 @@ namespace io
 
         const SimControls& simControls_; /**< Simulation control flow settings */
         const toml::table& inputDeck_;   /**< The simulation's toml input deck */
+        std::ofstream clustersFile_;     /**< Handle to the open cluster output file */
     };
 
     /**
@@ -102,7 +104,8 @@ namespace io
 
         const SimControls& simControls_; /**< Simulation control flow settings */
         const toml::table& inputDeck_;   /**< The simulation's toml input deck */
-        hid_t file_ = -1;                /**< Handle to the open HDF5 output file */
+        hid_t file_ = -1; /**< Handle to the open HDF5 output file */ // NOLINT(misc-include-cleaner)
+        hid_t clustersGroup_ = -1; /**< Handle to the open clusters group, if any */ // NOLINT(misc-include-cleaner)
     };
 
 } // namespace io
