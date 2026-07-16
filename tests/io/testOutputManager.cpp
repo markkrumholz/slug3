@@ -6,7 +6,8 @@
  */
 
 #include "../src/core/Cluster.hpp"
-#include "../src/io/OutputManager.hpp"
+#include "../src/io/OutputManagerAscii.hpp"
+#include "../src/io/OutputManagerH5.hpp"
 #include "../src/io/SimControls.hpp"
 #include "../src/io/SimPhysics.hpp"
 #include "../src/utils/RngThread.hpp"
@@ -82,7 +83,7 @@ static auto testWriteClusterAscii() -> int
         constexpr unsigned long trial = 3;
 
         {
-            io::OutputManager<io::SimControls::OutputMode::ascii>
+            io::OutputManagerAscii
                 manager(controls, inputDeck);
             manager.writeCluster(trial, cluster);
         }
@@ -150,7 +151,7 @@ static auto testWriteClusterH5() -> int
         constexpr unsigned long trial = 5;
 
         {
-            const io::OutputManager<io::SimControls::OutputMode::h5>
+            io::OutputManagerH5
                 manager(controls, inputDeck);
             manager.writeCluster(trial, cluster);
         }
@@ -226,7 +227,7 @@ static auto testOutputManagerAscii() -> int
 
     try
     {
-        const io::OutputManager<io::SimControls::OutputMode::ascii>
+        const io::OutputManagerAscii
             manager(controls, inputDeck);
 
         if (!std::filesystem::exists(expectedPath))
@@ -273,7 +274,7 @@ static auto testOutputManagerAscii() -> int
     // refuse to overwrite it.
     try
     {
-        const io::OutputManager<io::SimControls::OutputMode::ascii>
+        const io::OutputManagerAscii
             manager2(controls, inputDeck);
         std::cerr << "testOutputManager: ascii: expected construction to "
             "throw on an existing output file, but it succeeded\n";
@@ -302,7 +303,7 @@ static auto testOutputManagerH5() -> int
     try
     {
         {
-            const io::OutputManager<io::SimControls::OutputMode::h5>
+            const io::OutputManagerH5
                 manager(controls, inputDeck);
         }
 
@@ -362,7 +363,7 @@ static auto testOutputManagerH5() -> int
     // refuse to overwrite it.
     try
     {
-        const io::OutputManager<io::SimControls::OutputMode::h5>
+        const io::OutputManagerH5
             manager2(controls, inputDeck);
         std::cerr << "testOutputManager: h5: expected construction to "
             "throw on an existing output file, but it succeeded\n";

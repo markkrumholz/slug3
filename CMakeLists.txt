@@ -61,6 +61,8 @@ add_executable(slug
     src/main.cpp
     src/core/Cluster.cpp
     src/io/OutputManager.cpp
+    src/io/OutputManagerAscii.cpp
+    src/io/OutputManagerH5.cpp
     src/io/SimPhysics.cpp
     src/interpolation/Mesh2DGrid.cpp
     src/pdfs/PDFFileParser.cpp
@@ -134,6 +136,8 @@ add_executable(slugTestCore
 add_executable(slugTestIo
     src/core/Cluster.cpp
     src/io/OutputManager.cpp
+    src/io/OutputManagerAscii.cpp
+    src/io/OutputManagerH5.cpp
     src/io/SimControls.cpp
     src/io/SimPhysics.cpp
     src/interpolation/Mesh2DGrid.cpp
