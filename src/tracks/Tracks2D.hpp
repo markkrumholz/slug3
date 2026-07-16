@@ -8,8 +8,8 @@
 #ifndef TRACKS2D_HPP
 #define TRACKS2D_HPP
 
-#include "TrackCommons.hpp"
 #include "../interpolation/Mesh2DInterpolator.hpp"
+#include "TrackCommons.hpp"
 #include <cstddef>
 #include <limits>
 #include <memory>
@@ -94,14 +94,14 @@ RuntimeError
         Tracks2D(M2DPtr&& m2d, double feH,
             double aFe = std::numeric_limits<double>::quiet_NaN(),
             double vVcrit = std::numeric_limits<double>::quiet_NaN())
-        : interp_(std::move(m2d)), FeH_(feH), AFe_(aFe), vVcrit_(vVcrit) {};
+        : interp_(std::move(m2d)), feH_(feH), aFe_(aFe), vVcrit_(vVcrit) {};
 
         /**
          * @brief Construct an empty, invalid Tracks2D object
          */
         Tracks2D() :
-            FeH_(std::numeric_limits<double>::quiet_NaN()),
-            AFe_(std::numeric_limits<double>::quiet_NaN()),
+            feH_(std::numeric_limits<double>::quiet_NaN()),
+            aFe_(std::numeric_limits<double>::quiet_NaN()),
             vVcrit_(std::numeric_limits<double>::quiet_NaN())
         { }
         virtual ~Tracks2D() = default;
@@ -190,7 +190,7 @@ feh : float
          * @brief Return the [Fe/H] value of this set of tracks
          * @return [Fe/H] value of this set of tracks
          */
-        [[nodiscard]] auto feH() const { return FeH_; }
+        [[nodiscard]] auto feH() const { return feH_; }
 
         /**
          * @brief Numpy-style docstring for the Python aFe binding
@@ -206,7 +206,7 @@ afe : float
          * @brief Return the [alpha/Fe] value of this set of tracks
          * @return [alpha/Fe] value of this set of tracks, or quiet_NaN if not available
          */
-        [[nodiscard]] auto aFe() const { return AFe_; }
+        [[nodiscard]] auto aFe() const { return aFe_; }
 
         /**
          * @brief Numpy-style docstring for the Python vVcrit binding
@@ -335,8 +335,8 @@ isochrone : list of Interpolator1D
 
         // Track data
         M2DPtr interp_; /**< Interpolator for the tracks */
-        double FeH_;    /**< [Fe/H] value of this set of tracks */
-        double AFe_;    /**< [alpha/Fe] value of this set of tracks, or quiet_NaN if not available */
+        double feH_;    /**< [Fe/H] value of this set of tracks */
+        double aFe_;    /**< [alpha/Fe] value of this set of tracks, or quiet_NaN if not available */
         double vVcrit_; /**< v/vcrit value of this set of tracks, or quiet_NaN if not available */
 
     };

@@ -37,8 +37,7 @@ core::Cluster::Cluster(const unsigned long uid,
     birthNonStochMass_(physics.fracStochMass() * mass),
     birthMass_(std::reduce(m_.begin(), m_.end(), 0.0)),
     disruptTime_(std::numeric_limits<double>::quiet_NaN()),
-    curTime_(time),
-    isDisrupted_(false)
+    curTime_(time)
 {
     // Sort the generated population by mass
     std::ranges::sort(m_);

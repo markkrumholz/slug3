@@ -154,16 +154,16 @@ namespace io
     private:
 
         // Simulation control parameters
-        SimType simType_;              /**< Simulation type */
-        unsigned int verbosity_;       /**< Level of verbosity */
-        unsigned long nTrial_;         /**< Number of trials */
-        unsigned long nTrialRemain_;   /**< Number of trials remaining */
-        OutputMode outputMode_;        /**< Output mode */
-        std::string modelName_;        /**< Name of this model */
-        std::string outDir_;           /**< Directory into which output will be written */
-        std::vector<double> outTimes_; /**< Times to write output */
-        pdfs::PDF outTimeDist_;        /**< Distribution of output times */
-        bool outputClusters_;          /**< Whether outputs include individual clusters (galaxy sims only) */
+        SimType simType_ = SimType::none;              /**< Simulation type */
+        unsigned int verbosity_ = 0;                   /**< Level of verbosity */
+        unsigned long nTrial_ = 1;                     /**< Number of trials */
+        unsigned long nTrialRemain_ = 1;               /**< Number of trials remaining */
+        OutputMode outputMode_ = OutputMode::h5;       /**< Output mode */
+        std::string modelName_ = "slug_sim";           /**< Name of this model */
+        std::string outDir_;                           /**< Directory into which output will be written */
+        std::vector<double> outTimes_;                 /**< Times to write output */
+        pdfs::PDF outTimeDist_;                        /**< Distribution of output times */
+        bool outputClusters_ = true;                   /**< Whether outputs include individual clusters (galaxy sims only) */
 
         /**
          * @brief Compute output times

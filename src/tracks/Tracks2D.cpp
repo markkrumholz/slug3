@@ -231,8 +231,8 @@ namespace tracks
         // they are present; not all track sets specify afe or vvcrit,
         // so those default to quiet_NaN when absent
         constexpr double nanVal = std::numeric_limits<double>::quiet_NaN();
-        FeH_ = readScalarAttrIfPresent(grp, "feh").value_or(nanVal);
-        AFe_ = readScalarAttrIfPresent(grp, "afe").value_or(nanVal);
+        feH_ = readScalarAttrIfPresent(grp, "feh").value_or(nanVal);
+        aFe_ = readScalarAttrIfPresent(grp, "afe").value_or(nanVal);
         vVcrit_ = readScalarAttrIfPresent(grp, "vvcrit").value_or(nanVal);
 
         // Read the masses of the tracks in this group; the masses

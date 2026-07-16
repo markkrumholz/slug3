@@ -16,6 +16,7 @@
 #include <array>
 #include <cstddef>
 #include <iterator>
+#include <memory>
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h> // NOLINT(misc-include-cleaner); this is needed for correct Python binding, even if clang-tidy can't recognize it
@@ -151,6 +152,7 @@ PYBIND11_MODULE(slug, m, py::mod_gil_not_used()) {
                 tracks::Tracks3D::vVcritDocstring.data())
         .def("getTrack",
                 [](const tracks::Tracks3D& self, const double m, const double feh)
+                    -> std::unique_ptr<Interp1D>
                 {
                     if (m < self.mMin() || m > self.mMax())
                     {
@@ -166,6 +168,7 @@ PYBIND11_MODULE(slug, m, py::mod_gil_not_used()) {
                 py::arg("m"), py::arg("feh"))
         .def("getIsochrone",
                 [](const tracks::Tracks3D& self, const double logT, const double feh)
+                    -> py::list
                 {
                     // Built up by hand, casting each segment individually,
                     // rather than binding tracks::Tracks3D::getIsochrone
@@ -219,6 +222,7 @@ PYBIND11_MODULE(slug, m, py::mod_gil_not_used()) {
                 py::arg("t"))
         .def("getTrack",
                 [](const tracks::Tracks2D& self, const double m)
+                    -> std::unique_ptr<Interp1D>
                 {
                     if (m < self.mMin() || m > self.mMax())
                     {
@@ -234,6 +238,7 @@ PYBIND11_MODULE(slug, m, py::mod_gil_not_used()) {
                 py::arg("m"))
         .def("getIsochrone",
                 [](const tracks::Tracks2D& self, const double logT)
+                    -> py::list
                 {
                     // See the comment on the Tracks3D getIsochrone binding
                     // above for why this can't just bind

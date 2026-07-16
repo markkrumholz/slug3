@@ -106,7 +106,7 @@ namespace core
         double curTime_;            /**< Current time */
 
         // Other state information
-        bool isDisrupted_;          /**< Has this cluster disrupted */
+        bool isDisrupted_ = false;  /**< Has this cluster disrupted */
         Interp1dPtr isochrone_;     /**< Isochrone for the current time */
 
         /**
