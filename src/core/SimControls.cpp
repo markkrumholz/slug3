@@ -15,36 +15,36 @@
 #include <vector>
 
 core::SimControls::SimControls(const toml::table& inputDeck) :
-    //outputMode_(OutputMode::h5),
-    modelName_("slug_sim"),
     verbosity_(0),
     nTrial_(1),
-    nTrialRemain_(1)
+    nTrialRemain_(1),
+    outputMode_(OutputMode::h5),
+    modelName_("slug_sim")
 {
-    // Read output mode
-    //const auto outputMode = utils::getTOMLKeyWithError<std::string>(
-    //    inputDeck, "outputs.output_mode");
-    //if (outputMode.has_value())
-    //{
-    //    if (outputMode.value() == "h5" || outputMode.value() == "hdf5")
-    //    { outputMode_ = OutputMode::h5; }
-    //    else if (outputMode.value() == "ascii" || outputMode.value() == "txt")
-    //    { outputMode_ = OutputMode::ascii; }
-    //    else
-    //    {
-    //        throw std::runtime_error("SimControls: unknown output_mode "
-    //             + outputMode.value());
-    //    }
-    //}
-
     // Read verbosity
     const auto verbosityInput =
         utils::getTOMLKeyWithError<unsigned int>(inputDeck, "verbosity");
     if (verbosityInput.has_value()) { verbosity_ = verbosityInput.value(); }
 
+    // Read output mode
+    const auto outputMode = utils::getTOMLKeyWithError<std::string>(
+        inputDeck, "outputs.output_mode");
+    if (outputMode.has_value())
+    {
+        if (outputMode.value() == "h5" || outputMode.value() == "hdf5")
+        { outputMode_ = OutputMode::h5; }
+        else if (outputMode.value() == "ascii" || outputMode.value() == "txt")
+        { outputMode_ = OutputMode::ascii; }
+        else
+        {
+            throw std::runtime_error("SimControls: unknown output_mode "
+                 + outputMode.value());
+        }
+    }
+
     // Read model name
     const auto modelNameInput =
-        utils::getTOMLKeyWithError<std::string>(inputDeck, "model_name");
+        utils::getTOMLKeyWithError<std::string>(inputDeck, "output.model_name");
     if (modelNameInput.has_value()) { modelName_ = modelNameInput.value(); }
 
     // Read number of trials

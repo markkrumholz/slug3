@@ -36,8 +36,8 @@ auto main(int argc, char *argv[]) -> int
         return 1;
     }
 
-    // Use the input deck to initialize simulation control flow,
-    // physics, and output controls
+    // Use the input deck to initialize simulation control flow
+    // and physics
     const core::SimControls simControls(inputDeck);
     const core::SimPhysics simPhysics(inputDeck);
 }

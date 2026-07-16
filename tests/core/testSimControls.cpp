@@ -45,10 +45,10 @@ namespace
     }
 } // namespace
 
-// Verify that model_name, verbosity, and n_trial fall back to their
-// documented defaults when not specified in the input deck, and that
-// the start_time/end_time/ntime output option (linear spacing) is
-// correctly expanded.
+// Verify that model_name, verbosity, output_mode, and n_trial fall back
+// to their documented defaults when not specified in the input deck,
+// and that the start_time/end_time/ntime output option (linear spacing)
+// is correctly expanded.
 static auto testSimControlsDefaults() -> int
 {
     const std::string fileName = "tests/core/assets/testCluster.in";
@@ -71,6 +71,12 @@ static auto testSimControlsDefaults() -> int
                 << controls.verbosity() << "\n";
             return 1;
         }
+        if (controls.outputMode() != core::SimControls::OutputMode::h5)
+        {
+            std::cerr << "testSimControls: " << fileName
+                << ": expected default outputMode() == OutputMode::h5\n";
+            return 1;
+        }
         if (controls.nTrial() != 1)
         {
             std::cerr << "testSimControls: " << fileName
@@ -89,8 +95,8 @@ static auto testSimControlsDefaults() -> int
     }
 }
 
-// Verify that model_name, verbosity, and n_trial are correctly read
-// from the input deck when explicitly specified.
+// Verify that model_name, verbosity, output_mode, and n_trial are
+// correctly read from the input deck when explicitly specified.
 static auto testSimControlsExplicit() -> int
 {
     const std::string fileName = "tests/core/assets/testControlsExplicit.in";
@@ -111,6 +117,12 @@ static auto testSimControlsExplicit() -> int
             std::cerr << "testSimControls: " << fileName
                 << ": expected verbosity() == 3, got "
                 << controls.verbosity() << "\n";
+            return 1;
+        }
+        if (controls.outputMode() != core::SimControls::OutputMode::ascii)
+        {
+            std::cerr << "testSimControls: " << fileName
+                << ": expected outputMode() == OutputMode::ascii\n";
             return 1;
         }
         if (controls.nTrial() != 7)
@@ -246,6 +258,25 @@ static auto testSimControlsOutputTimesPartialRange() -> int
     }
 }
 
+// Verify that constructing SimControls from a deck with an unrecognized
+// outputs.output_mode value throws.
+static auto testSimControlsInvalidOutputMode() -> int
+{
+    const std::string fileName = "tests/core/assets/testControlsInvalidOutputMode.in";
+    const toml::table inputDeck = toml::parse_file(fileName);
+    try
+    {
+        const core::SimControls controls(inputDeck);
+        std::cerr << "testSimControls: " << fileName
+            << ": expected construction to throw, but it succeeded\n";
+        return 1;
+    }
+    catch (const std::runtime_error&)
+    {
+        return 0;
+    }
+}
+
 auto testSimControls() -> int
 {
     int result = 0;
@@ -257,5 +288,6 @@ auto testSimControls() -> int
     result += testSimControlsNoOutputs();
     result += testSimControlsOutputTimesConflict();
     result += testSimControlsOutputTimesPartialRange();
+    result += testSimControlsInvalidOutputMode();
     return result;
 }

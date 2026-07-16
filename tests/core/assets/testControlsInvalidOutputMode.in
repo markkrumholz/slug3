@@ -1,9 +1,6 @@
-# Test input deck for SimControls: explicit model_name, verbosity, n_trial,
-# and output_mode
+# Test input deck for SimControls: an unrecognized outputs.output_mode value
 
 sim_type = "cluster"
-verbosity = 3
-n_trial = 7
 
 [stars]
 IMF = "chabrier.toml"
@@ -15,11 +12,8 @@ alphaFe = -0.2
 [clusters]
 CMF = 1e3
 
-[output]
-model_name = "my_test_model"
-
 [outputs]
 start_time = 0.0
 end_time = 10.0
 ntime = 3
-output_mode = "ascii"
+output_mode = "bogus"

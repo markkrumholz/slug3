@@ -28,10 +28,10 @@ namespace core
         /**
          * @brief An enum to hold output modes
          */
-        //enum class OutputMode : std::uint8_t {
-        //    h5,      /**< HDF5 output */
-        //    ascii   /**< ASCII output */
-        //};
+        enum class OutputMode : std::uint8_t {
+            h5,      /**< HDF5 output */
+            ascii   /**< ASCII output */
+        };
 
         /**
          * @brief Initialize the simulation controls from the input deck
@@ -42,7 +42,13 @@ namespace core
         // Getters for control flow
 
         /**
-         * @brief Return mdoel name
+         * @brief Return output mode
+         * @return Output mode
+         */
+        [[nodiscard]] auto outputMode() const { return outputMode_; }
+
+        /**
+         * @brief Return model name
          * @return Model name
          */
         [[nodiscard]] auto modelName() const { return modelName_; }
@@ -109,11 +115,11 @@ namespace core
     private:
 
         // Simulation control parameters
-        //OutputMode outputMode_;        /**< Output mode */
-        std::string modelName_;        /**< Name of this model */
         unsigned int verbosity_;       /**< Level of verbosity */
         unsigned long nTrial_;         /**< Number of trials */
         unsigned long nTrialRemain_;   /**< Number of trials remaining */
+        OutputMode outputMode_;        /**< Output mode */
+        std::string modelName_;        /**< Name of this model */
         std::vector<double> outTimes_; /**< Times to write output */
         pdfs::PDF outTimeDist_;        /**< Distribution of output times */
 
