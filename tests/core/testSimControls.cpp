@@ -45,10 +45,10 @@ namespace
     }
 } // namespace
 
-// Verify that model_name, verbosity, output_mode, and n_trial fall back
-// to their documented defaults when not specified in the input deck,
-// and that the start_time/end_time/ntime output option (linear spacing)
-// is correctly expanded.
+// Verify that model_name, verbosity, output_mode, out_dir, and n_trial
+// fall back to their documented defaults when not specified in the
+// input deck, and that the start_time/end_time/ntime output option
+// (linear spacing) is correctly expanded.
 static auto testSimControlsDefaults() -> int
 {
     const std::string fileName = "tests/core/assets/testCluster.in";
@@ -77,6 +77,13 @@ static auto testSimControlsDefaults() -> int
                 << ": expected default outputMode() == OutputMode::h5\n";
             return 1;
         }
+        if (!controls.outDir().empty())
+        {
+            std::cerr << "testSimControls: " << fileName
+                << ": expected default outDir() == \"\", got "
+                << controls.outDir() << "\n";
+            return 1;
+        }
         if (controls.nTrial() != 1)
         {
             std::cerr << "testSimControls: " << fileName
@@ -95,8 +102,8 @@ static auto testSimControlsDefaults() -> int
     }
 }
 
-// Verify that model_name, verbosity, output_mode, and n_trial are
-// correctly read from the input deck when explicitly specified.
+// Verify that model_name, verbosity, output_mode, out_dir, and n_trial
+// are correctly read from the input deck when explicitly specified.
 static auto testSimControlsExplicit() -> int
 {
     const std::string fileName = "tests/core/assets/testControlsExplicit.in";
@@ -123,6 +130,13 @@ static auto testSimControlsExplicit() -> int
         {
             std::cerr << "testSimControls: " << fileName
                 << ": expected outputMode() == OutputMode::ascii\n";
+            return 1;
+        }
+        if (controls.outDir() != "my_test_outdir")
+        {
+            std::cerr << "testSimControls: " << fileName
+                << ": expected outDir() == \"my_test_outdir\", got "
+                << controls.outDir() << "\n";
             return 1;
         }
         if (controls.nTrial() != 7)

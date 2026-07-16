@@ -54,6 +54,16 @@ namespace core
         [[nodiscard]] auto modelName() const { return modelName_; }
 
         /**
+         * @brief Return output directory
+         * @return Output directory
+         * @details
+         * This is the directory into which output will be written.
+         * An empty string (the default) means output will be written
+         * into the current working directory.
+         */
+        [[nodiscard]] auto outDir() const { return outDir_; }
+
+        /**
          * @brief Return verbosity level
          * @return Verbosity level
          */
@@ -122,6 +132,7 @@ namespace core
         unsigned long nTrialRemain_;   /**< Number of trials remaining */
         OutputMode outputMode_;        /**< Output mode */
         std::string modelName_;        /**< Name of this model */
+        std::string outDir_;           /**< Directory into which output will be written */
         std::vector<double> outTimes_; /**< Times to write output */
         pdfs::PDF outTimeDist_;        /**< Distribution of output times */
 

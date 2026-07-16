@@ -19,7 +19,8 @@ core::SimControls::SimControls(const toml::table& inputDeck) :
     nTrial_(1),
     nTrialRemain_(1),
     outputMode_(OutputMode::h5),
-    modelName_("slug_sim")
+    modelName_("slug_sim"),
+    outDir_("")
 {
     // Read verbosity
     const auto verbosityInput =
@@ -46,6 +47,11 @@ core::SimControls::SimControls(const toml::table& inputDeck) :
     const auto modelNameInput =
         utils::getTOMLKeyWithError<std::string>(inputDeck, "output.model_name");
     if (modelNameInput.has_value()) { modelName_ = modelNameInput.value(); }
+
+    // Read output directory
+    const auto outDirInput =
+        utils::getTOMLKeyWithError<std::string>(inputDeck, "outputs.out_dir");
+    if (outDirInput.has_value()) { outDir_ = outDirInput.value(); }
 
     // Read number of trials
     const auto nTrialInput = 
