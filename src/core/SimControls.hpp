@@ -74,10 +74,11 @@ namespace core
          */
         [[nodiscard]] auto nTrialRemain() const
         {
+            unsigned long nRemain{};
 #ifdef _OPENMP
-#pragma omp atomic
+#pragma omp atomic read
 #endif
-            const auto nRemain = nTrialRemain_;
+            nRemain = nTrialRemain_;
             return nRemain;
         }
 
