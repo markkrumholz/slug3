@@ -254,11 +254,11 @@ RuntimeError
         [[nodiscard]] auto operator()(double x) const
         {
             assert(x >= x_.front() && x <= x_.back());
-            std::array<double, NF> result;
+            std::array<double, NF> result = {};
             for (size_t i = 0; i < NF; ++i)
             {
-                result[i] = gsl_interp_eval(interp_[i], x_.data(),
-                    f_[i].data(), x, acc_);
+                result[i] = gsl_interp_eval(interp_[i], x_.data(), // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i is a loop index bounded by compile-time constant NF
+                    f_[i].data(), x, acc_); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i is a loop index bounded by compile-time constant NF
             }
             if constexpr(NF > 1) { return result; }
             else { return result[0]; }
