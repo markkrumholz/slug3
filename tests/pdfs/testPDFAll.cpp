@@ -14,15 +14,26 @@
 #include "testPDFSegmentNormal.hpp"
 #include "testPDFSegmentPowerlaw.hpp"
 #include "testPDFSegmentSchechter.hpp"
+#include <exception>
+#include <iostream>
 
 auto main() -> int {
-    int result = 0;
-    result += testPDFSegmentDelta();
-    result += testPDFSegmentExponential();
-    result += testPDFSegmentNormal();
-    result += testPDFSegmentLognormal();
-    result += testPDFSegmentPowerlaw();
-    result += testPDFSegmentSchechter();
-    result += testPDF();
-    return result;
+    try
+    {
+        int result = 0;
+        result += testPDFSegmentDelta();
+        result += testPDFSegmentExponential();
+        result += testPDFSegmentNormal();
+        result += testPDFSegmentLognormal();
+        result += testPDFSegmentPowerlaw();
+        result += testPDFSegmentSchechter();
+        result += testPDF();
+        return result;
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testPDFAll: uncaught exception: "
+            << error.what() << "\n";
+        return 1;
+    }
 }

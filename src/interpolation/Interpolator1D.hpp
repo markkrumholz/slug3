@@ -274,7 +274,7 @@ RuntimeError
         {
             assert(x >= x_.front() && x <= x_.back());
             assert(idx < NF);
-            return gsl_interp_eval(interp_[idx], x_.data(), f_[idx].data(), x, acc_);
+            return gsl_interp_eval(interp_[idx], x_.data(), f_[idx].data(), x, acc_); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- idx is asserted < NF just above
         }
 
     private:

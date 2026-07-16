@@ -12,6 +12,9 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstdlib>
+#include <exception>
+#include <iostream>
 #include <memory>
 #ifdef _OPENMP
 #   include <omp.h>
@@ -167,16 +170,29 @@ namespace utils {
      * The instance is a function-local static, so it is constructed on
      * first use rather than before main() begins; this ensures that any
      * exception thrown during construction (which in practice cannot
-     * happen, since the number of threads is always small) propagates as
-     * an ordinary, catchable exception rather than escaping before main()
-     * can run. Being a local static in an inline function also guarantees
-     * a single, program-wide instance, rather than one per translation
-     * unit.
+     * happen, since the number of threads is always small) is caught
+     * here rather than escaping before main() can run. There is no
+     * reasonable way for the program to continue without a working
+     * random number generator, so a construction failure is treated as
+     * fatal: it is reported and the program exits immediately, rather
+     * than letting the exception propagate to callers that have no
+     * better way to handle it either. Being a local static in an inline
+     * function also guarantees a single, program-wide instance, rather
+     * than one per translation unit.
      */
     inline auto rng() -> RngThread&
     {
-        static RngThread instance;
-        return instance;
+        try
+        {
+            static RngThread instance;
+            return instance;
+        }
+        catch (const std::exception& error)
+        {
+            std::cerr << "FATAL: random number generator initialization "
+                "failed: " << error.what() << "\n";
+            std::exit(1); // NOLINT(concurrency-mt-unsafe) -- the program is terminating regardless; thread-safety of the shutdown path doesn't matter
+        }
     }
 
 } // namespace utils
