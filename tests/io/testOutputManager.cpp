@@ -212,8 +212,8 @@ static auto testWriteClusterH5() -> int
 }
 
 // Verify the ascii OutputManager: opens <model>_summary.txt, writes the
-// slug-hash/date/time header followed by the toml input deck, and
-// refuses to overwrite an existing file.
+// slug-hash/date/time/rng_state header followed by the toml input
+// deck, and refuses to overwrite an existing file.
 static auto testOutputManagerAscii() -> int
 {
     const auto outDir = std::filesystem::temp_directory_path() / "slugTestOutputManagerAscii";
@@ -251,6 +251,11 @@ static auto testOutputManagerAscii() -> int
             std::cerr << "testOutputManager: ascii: missing expected date/time lines\n";
             return 1;
         }
+        if (!contents.contains("rng_state  "))
+        {
+            std::cerr << "testOutputManager: ascii: missing expected rng_state line\n";
+            return 1;
+        }
         if (!contents.contains("input_deck") || !contents.contains("sim_type"))
         {
             std::cerr << "testOutputManager: ascii: missing dumped input deck\n";
@@ -281,9 +286,9 @@ static auto testOutputManagerAscii() -> int
 }
 
 // Verify the HDF5 OutputManager: opens <model>.h5, writes the
-// slug-hash/date/time header as top-level attributes, dumps the toml
-// input deck into an input_deck group, and refuses to overwrite an
-// existing file.
+// slug-hash/date/time/rng_state header as top-level attributes,
+// dumps the toml input deck into an input_deck group, and refuses
+// to overwrite an existing file.
 static auto testOutputManagerH5() -> int
 {
     const auto outDir = std::filesystem::temp_directory_path() / "slugTestOutputManagerH5";
@@ -319,7 +324,8 @@ static auto testOutputManagerH5() -> int
         }
         if (H5Aexists(file, "slug-hash") <= 0 ||
             H5Aexists(file, "date") <= 0 ||
-            H5Aexists(file, "time") <= 0)
+            H5Aexists(file, "time") <= 0 ||
+            H5Aexists(file, "rng_state") <= 0)
         {
             std::cerr << "testOutputManager: h5: missing expected top-level "
                 "attributes\n";

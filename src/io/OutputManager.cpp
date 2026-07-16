@@ -7,6 +7,7 @@
 
 #include "OutputManager.hpp"
 #include "../core/Cluster.hpp"
+#include "../utils/RngThread.hpp"
 #include "SimControls.hpp"
 #include "hdf5.h" // NOLINT(misc-include-cleaner)
 #include "io/SlugVersion.hpp"
@@ -37,6 +38,14 @@ static auto currentDateAndTime() -> std::pair<std::string, std::string>
     timeStream << std::put_time(&tmBuf, "%H:%M:%S");
 
     return { dateStream.str(), timeStream.str() };
+}
+
+// Return the calling thread's current rng state as a string,
+// suitable for writing to disk so a run can later be reproduced
+static auto currentRngStateString() -> std::string
+{
+    const auto state = utils::rng().getState();
+    return { state.data() };
 }
 
 // Suppress clang-tidy warnings in this namespace caused by just
@@ -238,7 +247,8 @@ io::OutputManager<io::SimControls::OutputMode::ascii>::OutputManager(
     const auto [date, time] = currentDateAndTime();
     file << "slug-hash  " << slugGitHash << "\n"
          << "date  " << date << "\n"
-         << "time  " << time << "\n";
+         << "time  " << time << "\n"
+         << "rng_state  " << currentRngStateString() << "\n";
 
     file << "input_deck\n" << inputDeck_ << "\n";
 
@@ -315,6 +325,7 @@ io::OutputManager<io::SimControls::OutputMode::h5>::OutputManager(
     writeStringAttr(file_, "slug-hash", slugGitHash);
     writeStringAttr(file_, "date", date);
     writeStringAttr(file_, "time", time);
+    writeStringAttr(file_, "rng_state", currentRngStateString());
 
     const hid_t inputDeckGrp = H5Gcreate2(file_, "input_deck",
         H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
