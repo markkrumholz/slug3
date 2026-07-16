@@ -132,6 +132,7 @@ add_executable(slugTestCore
     tests/core/testCoreAll.cpp
 )
 add_executable(slugTestIo
+    src/core/Cluster.cpp
     src/io/OutputManager.cpp
     src/io/SimControls.cpp
     src/io/SimPhysics.cpp

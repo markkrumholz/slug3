@@ -52,6 +52,36 @@ namespace core
         // Observers
 
         /**
+         * @brief Return the cluster's unique identifier
+         * @return Unique ID of cluster
+         */
+        [[nodiscard]] auto uid() const { return uid_; }
+
+        /**
+         * @brief Return the cluster's target mass
+         * @return Target cluster mass in Msun
+         */
+        [[nodiscard]] auto targetMass() const { return targetMass_; }
+
+        /**
+         * @brief Return the cluster's actual mass at birth
+         * @return Actual cluster mass at birth in Msun
+         */
+        [[nodiscard]] auto birthMass() const { return birthMass_; }
+
+        /**
+         * @brief Return the cluster's formation time
+         * @return Cluster formation time
+         */
+        [[nodiscard]] auto formTime() const { return formTime_; }
+
+        /**
+         * @brief Return the cluster's [Fe/H]
+         * @return [Fe/H] of cluster
+         */
+        [[nodiscard]] auto feH() const { return feH_; }
+
+        /**
          * @brief Return the current list of living stellar masses
          * @return Masses of currently alive stars in Msun
          */

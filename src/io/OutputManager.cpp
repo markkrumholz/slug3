@@ -6,6 +6,7 @@
  */
 
 #include "OutputManager.hpp"
+#include "../core/Cluster.hpp"
 #include "SimControls.hpp"
 #include "hdf5.h" // NOLINT(misc-include-cleaner)
 #include "io/SlugVersion.hpp"
@@ -126,6 +127,40 @@ static auto createExtensible1dDataset(const hid_t loc, const std::string& name,
     return dset;
 }
 
+// Append a single element, of the given HDF5 memory datatype, to
+// the end of the extensible 1d dataset called name in the HDF5
+// group loc
+static void appendToDataset(const hid_t loc, const std::string& name,
+    const hid_t memType, const void* value)
+{
+    const hid_t dset = H5Dopen2(loc, name.c_str(), H5P_DEFAULT);
+    if (dset < 0)
+    {
+        throw std::runtime_error(
+            "OutputManager: unable to open dataset " + name);
+    }
+
+    hid_t fileSpace = H5Dget_space(dset);
+    hsize_t curLen = 0;
+    hsize_t maxLen = 0;
+    H5Sget_simple_extent_dims(fileSpace, &curLen, &maxLen);
+    H5Sclose(fileSpace);
+
+    const hsize_t newLen = curLen + 1;
+    H5Dset_extent(dset, &newLen);
+
+    fileSpace = H5Dget_space(dset);
+    constexpr hsize_t count = 1;
+    H5Sselect_hyperslab(fileSpace, H5S_SELECT_SET, &curLen, nullptr, &count, nullptr);
+
+    const hid_t memSpace = H5Screate_simple(1, &count, nullptr);
+    H5Dwrite(dset, memType, memSpace, fileSpace, H5P_DEFAULT, value);
+
+    H5Sclose(memSpace);
+    H5Sclose(fileSpace);
+    H5Dclose(dset);
+}
+
 // NOLINTEND(misc-include-cleaner)
 
 // Column headings, and the field widths used to lay them out, for
@@ -136,6 +171,29 @@ static auto createExtensible1dDataset(const hid_t loc, const std::string& name,
 // separated.
 static constexpr int uidWidth = 12;
 static constexpr int numWidth = 16;
+
+// Number of digits used to zero-pad the trial/uid columns, and the
+// number of digits after the decimal point used for the
+// exponential-notation columns
+static constexpr int uidDigits = 9;
+static constexpr int sciPrecision = 6;
+
+// Format value as a zero-padded, fixed-width unsigned integer
+static auto formatUid(const unsigned long value) -> std::string
+{
+    std::ostringstream stream;
+    stream << std::setfill('0') << std::setw(uidDigits) << value;
+    return stream.str();
+}
+
+// Format value in exponential notation with sciPrecision digits
+// after the decimal point
+static auto formatSci(const double value) -> std::string
+{
+    std::ostringstream stream;
+    stream << std::scientific << std::setprecision(sciPrecision) << value;
+    return stream.str();
+}
 
 // Write the cluster-output ascii header (column names followed by a
 // dashed rule) to file
@@ -210,6 +268,23 @@ io::OutputManager<io::SimControls::OutputMode::ascii>::OutputManager(
 io::OutputManager<io::SimControls::OutputMode::ascii>::~OutputManager()
 {
     if (clustersFile_.is_open()) { clustersFile_.close(); }
+}
+
+// Write one fixed-width row of cluster data to the cluster output
+// file. A no-op if cluster output was not enabled for this
+// simulation.
+void io::OutputManager<io::SimControls::OutputMode::ascii>::writeCluster(
+    const unsigned long trial, const core::Cluster& cluster)
+{
+    if (!clustersFile_.is_open()) { return; }
+
+    clustersFile_ << std::right
+                  << std::setw(uidWidth) << formatUid(trial)
+                  << std::setw(uidWidth) << formatUid(cluster.uid())
+                  << std::setw(numWidth) << formatSci(cluster.targetMass())
+                  << std::setw(numWidth) << formatSci(cluster.birthMass())
+                  << std::setw(numWidth) << formatSci(cluster.formTime())
+                  << std::setw(numWidth) << formatSci(cluster.feH()) << "\n";
 }
 
 // H5 constructor: create the output file, write the header
@@ -295,5 +370,28 @@ io::OutputManager<io::SimControls::OutputMode::h5>::~OutputManager()
     // NOLINTBEGIN(misc-include-cleaner)
     if (clustersGroup_ >= 0) { H5Gclose(clustersGroup_); }
     H5Fclose(file_);
+    // NOLINTEND(misc-include-cleaner)
+}
+
+// Append one element to each of the clusters datasets. A no-op if
+// cluster output was not enabled for this simulation.
+void io::OutputManager<io::SimControls::OutputMode::h5>::writeCluster(
+    const unsigned long trial, const core::Cluster& cluster) const
+{
+    if (clustersGroup_ < 0) { return; }
+
+    const unsigned long uid = cluster.uid();
+    const double targetMass = cluster.targetMass();
+    const double birthMass = cluster.birthMass();
+    const double formTime = cluster.formTime();
+    const double feH = cluster.feH();
+
+    // NOLINTBEGIN(misc-include-cleaner)
+    appendToDataset(clustersGroup_, "trial", H5T_NATIVE_ULONG, &trial);
+    appendToDataset(clustersGroup_, "uid", H5T_NATIVE_ULONG, &uid);
+    appendToDataset(clustersGroup_, "target_mass", H5T_NATIVE_DOUBLE, &targetMass);
+    appendToDataset(clustersGroup_, "birth_mass", H5T_NATIVE_DOUBLE, &birthMass);
+    appendToDataset(clustersGroup_, "form_time", H5T_NATIVE_DOUBLE, &formTime);
+    appendToDataset(clustersGroup_, "feh", H5T_NATIVE_DOUBLE, &feH);
     // NOLINTEND(misc-include-cleaner)
 }

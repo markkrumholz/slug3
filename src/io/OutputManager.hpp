@@ -13,6 +13,11 @@
 #include <fstream>
 #include <toml.hpp>
 
+namespace core
+{
+    class Cluster;
+} // namespace core
+
 namespace io
 {
 
@@ -63,6 +68,16 @@ namespace io
         OutputManager(OutputManager&&) = delete;
         auto operator=(OutputManager&&) -> OutputManager& = delete;
 
+        /**
+         * @brief Write a cluster's data as a row of the cluster output file
+         * @param trial Trial number to which this cluster belongs
+         * @param cluster The cluster whose data should be written
+         * @details
+         * If cluster output was not enabled for this simulation, this
+         * is a no-op.
+         */
+        void writeCluster(unsigned long trial, const core::Cluster& cluster);
+
     private:
 
         const SimControls& simControls_; /**< Simulation control flow settings */
@@ -99,6 +114,16 @@ namespace io
         auto operator=(const OutputManager&) -> OutputManager& = delete;
         OutputManager(OutputManager&&) = delete;
         auto operator=(OutputManager&&) -> OutputManager& = delete;
+
+        /**
+         * @brief Write a cluster's data as a row of the clusters datasets
+         * @param trial Trial number to which this cluster belongs
+         * @param cluster The cluster whose data should be written
+         * @details
+         * If cluster output was not enabled for this simulation, this
+         * is a no-op.
+         */
+        void writeCluster(unsigned long trial, const core::Cluster& cluster) const;
 
     private:
 
