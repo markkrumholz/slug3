@@ -31,6 +31,28 @@ if(NOT OpenMP_CXX_FOUND)
     message(WARNING "OpenMP not found: building without threading support")
 endif()
 
+# Determine the current git commit hash, so it can be embedded in output
+# files to record exactly which version of slug produced them. Falls back
+# to "unknown" if git isn't available or this isn't a git checkout (e.g.
+# a source tarball). This is captured at configure time, so re-run cmake
+# to refresh the embedded hash after committing.
+execute_process(
+    COMMAND git rev-parse HEAD
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    OUTPUT_VARIABLE SLUG_GIT_HASH
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+    RESULT_VARIABLE SLUG_GIT_HASH_RESULT
+)
+if(NOT SLUG_GIT_HASH_RESULT EQUAL 0 OR NOT SLUG_GIT_HASH)
+    set(SLUG_GIT_HASH "unknown")
+endif()
+configure_file(
+    ${CMAKE_SOURCE_DIR}/src/io/SlugVersion.hpp.in
+    ${CMAKE_BINARY_DIR}/generated/io/SlugVersion.hpp
+    @ONLY
+)
+
 # pybind11, for the Python frontend
 add_subdirectory(src/extern/pybind11)
 
@@ -38,6 +60,7 @@ add_subdirectory(src/extern/pybind11)
 add_executable(slug
     src/main.cpp
     src/core/Cluster.cpp
+    src/io/OutputManager.cpp
     src/io/SimPhysics.cpp
     src/interpolation/Mesh2DGrid.cpp
     src/pdfs/PDFFileParser.cpp
@@ -109,6 +132,8 @@ add_executable(slugTestCore
     tests/core/testCoreAll.cpp
 )
 add_executable(slugTestIo
+    src/core/Cluster.cpp
+    src/io/OutputManager.cpp
     src/io/SimControls.cpp
     src/io/SimPhysics.cpp
     src/interpolation/Mesh2DGrid.cpp
@@ -125,6 +150,7 @@ add_executable(slugTestIo
     src/tracks/Tracks3D.cpp
     src/utils/ParseUtils.cpp
     tests/io/testIoAll.cpp
+    tests/io/testOutputManager.cpp
     tests/io/testSimControls.cpp
     tests/io/testSimPhysics.cpp
 )
@@ -153,7 +179,7 @@ set_target_properties(slugPython PROPERTIES OUTPUT_NAME slug)
 # header despite living under a SYSTEM include path. This is why the
 # toml.hpp and pybind11 includes throughout the codebase are written in
 # angle-bracket form.
-target_include_directories(slug PRIVATE src)
+target_include_directories(slug PRIVATE src ${CMAKE_BINARY_DIR}/generated)
 target_include_directories(slug SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
 
 target_include_directories(slugTestInterpolation PRIVATE src)
@@ -172,7 +198,7 @@ target_include_directories(slugTestTracks SYSTEM PRIVATE src/extern/pcg-cpp/incl
 target_include_directories(slugTestCore PRIVATE src)
 target_include_directories(slugTestCore SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
 
-target_include_directories(slugTestIo PRIVATE src)
+target_include_directories(slugTestIo PRIVATE src ${CMAKE_BINARY_DIR}/generated)
 target_include_directories(slugTestIo SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
 
 target_include_directories(slugPython PRIVATE src)

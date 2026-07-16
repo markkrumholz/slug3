@@ -1,0 +1,20 @@
+/**
+ * @file SlugVersion.hpp.in
+ * @author Mark Krumholz
+ * @brief Generated at configure time; records the git commit slug was built from
+ */
+
+#ifndef SLUGVERSION_HPP
+#define SLUGVERSION_HPP
+
+namespace io
+{
+    /**
+     * @brief The git commit hash of the slug source tree this was built
+     *   from, or "unknown" if it could not be determined
+     */
+    constexpr auto slugGitHash = "@SLUG_GIT_HASH@";
+
+} // namespace io
+
+#endif // SLUGVERSION_HPP

@@ -7,6 +7,7 @@
  * @date 2026-07-16
  */
 
+#include "testOutputManager.hpp"
 #include "testSimControls.hpp"
 #include "testSimPhysics.hpp"
 #include <exception>
@@ -18,6 +19,7 @@ auto main() -> int {
         int result = 0;
         result += testSimPhysics();
         result += testSimControls();
+        result += testOutputManager();
         return result;
     }
     catch (const std::exception& error)
