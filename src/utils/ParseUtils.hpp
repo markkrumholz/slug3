@@ -9,9 +9,11 @@
 #define PARSEUTILS_HPP
 
 #include "../pdfs/PDF.hpp"
+#include <cstddef>
 #include <iterator>
 #include <optional>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <toml.hpp>
 #include <vector>
@@ -33,9 +35,9 @@ namespace utils {
      */
     inline auto stod(const std::string& str) -> double
     {
-        size_t processed_len;
-        auto result = std::stod(str, &processed_len);
-        if (processed_len != str.size())
+        size_t processedLen = 0;
+        auto result = std::stod(str, &processedLen);
+        if (processedLen != str.size())
         {
             throw std::invalid_argument("");
         }
