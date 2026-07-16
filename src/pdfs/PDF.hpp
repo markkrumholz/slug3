@@ -113,11 +113,11 @@ namespace pdfs {
             const double wgt = 1.0,
             SamplingMethods method = SamplingMethods::stopNearest) :
             wgt_(wgt, 1),
+            sMin_(seg->getMin()),
+            sMax_(seg->getMax()),
             method_(method),
             normalized_(wgt == 1.0)
         {
-            sMin_ = seg->getMin();
-            sMax_ = seg->getMax();
             seg_.push_back(std::move(seg));
         }
 
