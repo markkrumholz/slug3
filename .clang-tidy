@@ -40,7 +40,14 @@ Checks: >-
   -performance-enum-size,
   -portability-restrict-system-includes,
   -readability-identifier-length,
-  -readability-magic-numbers
+  -readability-magic-numbers,
+  -clang-analyzer-optin.cplusplus.UninitializedObject
+
+# clang-analyzer-optin.cplusplus.UninitializedObject is disabled above:
+# it false-positives on toml++'s formatter classes, which deliberately
+# leave some fields uninitialized in the constructor and set them later
+# in attach(). The diagnostic is anchored inside the vendored header
+# itself, so it can't be suppressed with a NOLINT at the call site.
 
 WarningsAsErrors: '*'
 
