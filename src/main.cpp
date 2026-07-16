@@ -5,6 +5,7 @@
  * @date 14-07-2026
  */
 
+#include "io/OutputManager.hpp"
 #include "io/SimControls.hpp"
 #include "io/SimPhysics.hpp"
 #include <cstdlib>
@@ -40,4 +41,20 @@ auto main(int argc, char *argv[]) -> int
     // and physics
     const io::SimControls simControls(inputDeck);
     const io::SimPhysics simPhysics(inputDeck, simControls.simType());
+
+    if (simControls.simType() == io::SimControls::SimType::cluster)
+    {
+        if (simControls.outputMode() == io::SimControls::OutputMode::h5)
+        {
+            const io::OutputManager<io::SimControls::OutputMode::h5> outputManager(simControls, inputDeck);
+        }
+        else
+        {
+            const io::OutputManager<io::SimControls::OutputMode::ascii> outputManager(simControls, inputDeck);
+        }
+    }
+    else if (simControls.simType() == io::SimControls::SimType::galaxy)
+    {
+        // Galaxy simulation support will be added in a future PR
+    }
 }
