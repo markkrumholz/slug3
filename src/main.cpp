@@ -42,16 +42,19 @@ auto main(int argc, char *argv[]) -> int
     const io::SimControls simControls(inputDeck);
     const io::SimPhysics simPhysics(inputDeck, simControls.simType());
 
+    // Construct the output manager
+    if (simControls.outputMode() == io::SimControls::OutputMode::h5)
+    {
+        const io::OutputManager<io::SimControls::OutputMode::h5> outputManager(simControls, inputDeck);
+    }
+    else
+    {
+        const io::OutputManager<io::SimControls::OutputMode::ascii> outputManager(simControls, inputDeck);
+    }
+
+    // Run the simulation
     if (simControls.simType() == io::SimControls::SimType::cluster)
     {
-        if (simControls.outputMode() == io::SimControls::OutputMode::h5)
-        {
-            const io::OutputManager<io::SimControls::OutputMode::h5> outputManager(simControls, inputDeck);
-        }
-        else
-        {
-            const io::OutputManager<io::SimControls::OutputMode::ascii> outputManager(simControls, inputDeck);
-        }
     }
     else if (simControls.simType() == io::SimControls::SimType::galaxy)
     {
