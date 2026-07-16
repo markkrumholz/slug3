@@ -141,13 +141,14 @@ static constexpr int numWidth = 16;
 // dashed rule) to file
 static void writeClustersHeader(std::ofstream& file)
 {
-    file << std::right << std::setw(uidWidth) << "uid"
+    file << std::right << std::setw(uidWidth) << "trial"
+         << std::setw(uidWidth) << "uid"
          << std::setw(numWidth) << "target_mass"
          << std::setw(numWidth) << "birth_mass"
          << std::setw(numWidth) << "form_time"
          << std::setw(numWidth) << "feh" << "\n";
     constexpr auto numColumns = 4;
-    file << std::string(uidWidth, '-')
+    file << std::string(static_cast<std::string::size_type>(2) * uidWidth, '-')
          << std::string(static_cast<std::string::size_type>(numColumns) * numWidth, '-') << "\n";
 }
 
@@ -267,6 +268,9 @@ io::OutputManager<io::SimControls::OutputMode::h5>::OutputManager(
                 "OutputManager: unable to create clusters group");
         }
 
+        const hid_t trialDset = createExtensible1dDataset(
+            clustersGroup_, "trial", H5T_NATIVE_ULONG);
+        H5Dclose(trialDset);
         const hid_t uidDset = createExtensible1dDataset(
             clustersGroup_, "uid", H5T_NATIVE_ULONG);
         H5Dclose(uidDset);
