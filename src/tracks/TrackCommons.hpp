@@ -49,7 +49,7 @@ namespace tracks
         "o_surf"
     };  /**< Names for each quantity in the files */
 
-    inline static const std::string defaultRegistry =
+    inline static const std::string defaultRegistry = // NOLINT(bugprone-throwing-static-initialization,cert-err58-cpp) -- built from fixed string literals, so the (theoretically throwing) path conversion can never actually throw here
         (std::filesystem::path("data") / std::filesystem::path("tracks")
         / std::filesystem::path("tracks.toml")); /**< Default registry */
 

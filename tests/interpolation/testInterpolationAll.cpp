@@ -11,12 +11,23 @@
 #include "testMesh2DGrid.hpp"
 #include "testMesh2DInterpolator.hpp"
 #include "testMesh3DInterpolator.hpp"
+#include <exception>
+#include <iostream>
 
 auto main() -> int {
-    int result = 0;
-    result += testInterpolator1D();
-    result += testMesh2DGrid();
-    result += testMesh2DInterpolator();
-    result += testMesh3DInterpolator();
-    return result;
+    try
+    {
+        int result = 0;
+        result += testInterpolator1D();
+        result += testMesh2DGrid();
+        result += testMesh2DInterpolator();
+        result += testMesh3DInterpolator();
+        return result;
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testInterpolationAll: uncaught exception: "
+            << error.what() << "\n";
+        return 1;
+    }
 }

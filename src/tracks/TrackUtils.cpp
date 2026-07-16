@@ -6,7 +6,6 @@
  */
 
 #include "TrackUtils.hpp"
-#include "../extern/tomlplusplus/toml.hpp"
 #include "../utils/MiscUtils.hpp"
 #include "hdf5.h"   // NOLINT(misc-include-cleaner)
 #include <algorithm>
@@ -19,6 +18,7 @@
 #include <ranges>
 #include <stdexcept>
 #include <string>
+#include <toml.hpp>
 #include <utility>
 #include <vector>
 

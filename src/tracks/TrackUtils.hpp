@@ -8,10 +8,10 @@
 #ifndef TRACKUTILS_HPP
 #define TRACKUTILS_HPP
 
-#include "../extern/tomlplusplus/toml.hpp"
 #include "TrackCommons.hpp"
 #include <filesystem>
 #include <string>
+#include <toml.hpp>
 #include <utility>
 #include <vector>
 

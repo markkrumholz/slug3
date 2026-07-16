@@ -6,7 +6,6 @@
  */
 
 #include "SimPhysics.hpp"
-#include "../extern/tomlplusplus/toml.hpp"
 #include "../pdfs/PDF.hpp"
 #include "../pdfs/PDFFileParser.hpp"
 #include "../pdfs/PDFSegmentPowerlaw.hpp"
@@ -20,12 +19,11 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <toml.hpp>
 #include <utility>
 
 // SimPhysics constructor
-io::SimPhysics::SimPhysics(const toml::table& inputDeck, SimControls::SimType simType) :
-    minStochMass_(0.0),
-    fracStochMass_(1.0)
+io::SimPhysics::SimPhysics(const toml::table& inputDeck, SimControls::SimType simType)
 {
     // Read IMF, CMF, and FeH
     imf_ = utils::initPDFFromKey(inputDeck, "stars.IMF",

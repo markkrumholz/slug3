@@ -48,8 +48,8 @@ namespace utils
         std::filesystem::path filePath(fileName);
         if (std::filesystem::exists(filePath)) { return filePath; }
         if (filePath.is_absolute()) { return std::filesystem::path(); }
-        auto slugDir = std::getenv("SLUG_DIR");
-        if (!slugDir) { return std::filesystem::path(); }
+        auto *slugDir = std::getenv("SLUG_DIR"); // NOLINT(concurrency-mt-unsafe) -- no thread-safe standard alternative; only ever called during single-threaded setup
+        if (slugDir == nullptr) { return std::filesystem::path(); }
         filePath = std::filesystem::path(slugDir) / 
             std::filesystem::path(prefix) / filePath;
         if (std::filesystem::exists(filePath)) { return filePath; }

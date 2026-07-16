@@ -92,11 +92,11 @@ namespace interp
             {
                 std::vector<double> xRib(nx());
                 std::array<std::vector<double>, NF> fRib;
-                for (size_t k = 0; k < NF; k++) { fRib[k].resize(nx()); }
+                for (size_t k = 0; k < NF; k++) { fRib[k].resize(nx()); } // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- k is a loop index bounded by compile-time constant NF
                 for (size_t i = 0; i < nx(); ++i)
                 {
                     xRib[i] = x[i,j];
-                    for (size_t k = 0; k < NF; ++k) { fRib[k][i] = f[i,j,k]; }
+                    for (size_t k = 0; k < NF; ++k) { fRib[k][i] = f[i,j,k]; } // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- k is a loop index bounded by compile-time constant NF
                 }
                 auto ri = std::make_unique<Interpolator1D<NF>>(xRib, fRib, interpType_);
                 ribInterp_.push_back(std::move(ri));
@@ -107,12 +107,12 @@ namespace interp
             {
                 std::vector<double> xSpine(ny());
                 std::array<std::vector<double>, NF> fSpine;
-                for (size_t k = 0; k < NF; k++) { fSpine[k].resize(ny()); }
+                for (size_t k = 0; k < NF; k++) { fSpine[k].resize(ny()); } // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- k is a loop index bounded by compile-time constant NF
                 for (size_t j = 0; j < ny(); ++j)
                 {
                     if (!monotonic_) { xSpine[j] = s()[i,j]; }
                     else { xSpine[j] = y[j]; }
-                    for (size_t k = 0; k < NF; ++k) { fSpine[k][j] = f[i,j,k]; }
+                    for (size_t k = 0; k < NF; ++k) { fSpine[k][j] = f[i,j,k]; } // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- k is a loop index bounded by compile-time constant NF
                 }
                 auto si = std::make_unique<Interpolator1D<NF>>(xSpine, fSpine, interpType_);
                 spineInterp_.push_back(std::move(si));
@@ -309,7 +309,7 @@ namespace interp
                 if constexpr (NF == 1) { f[0].push_back(fInterp); }
                 else
                 {
-                    for (size_t k = 0; k < NF; k++) { f[k].push_back(fInterp[k]); }
+                    for (size_t k = 0; k < NF; k++) { f[k].push_back(fInterp[k]); } // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- k is a loop index bounded by compile-time constant NF
                 }
 
                 // If this point is a mesh exit, construct new
@@ -365,8 +365,8 @@ namespace interp
                 if constexpr (NF == 1) { f[0][i] = fInterp; }
                 else
                 { 
-                    for (size_t k = 0; k < NF; k++) { f[k][i] = fInterp[k]; }
-                }                
+                    for (size_t k = 0; k < NF; k++) { f[k][i] = fInterp[k]; } // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- k is a loop index bounded by compile-time constant NF
+                }
             }
 
             // Build final interpolation object to return

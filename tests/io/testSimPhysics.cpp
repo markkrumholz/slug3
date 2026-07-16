@@ -5,7 +5,6 @@
  * @date 2026-07-13
  */
 
-#include "../src/extern/tomlplusplus/toml.hpp"
 #include "../src/io/SimControls.hpp"
 #include "../src/io/SimPhysics.hpp"
 #include "../src/pdfs/PDF.hpp"
@@ -19,6 +18,7 @@
 #include <memory>
 #include <numbers>
 #include <string>
+#include <toml.hpp>
 #include <utility>
 #include <vector>
 

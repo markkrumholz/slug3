@@ -6,7 +6,6 @@
  */
 
 #include "../src/core/Cluster.hpp"
-#include "../src/extern/tomlplusplus/toml.hpp"
 #include "../src/io/SimControls.hpp"
 #include "../src/io/SimPhysics.hpp"
 #include "../src/utils/RngThread.hpp"
@@ -17,6 +16,7 @@
 #include <iostream>
 #include <numeric>
 #include <string_view>
+#include <toml.hpp>
 
 static constexpr std::string_view inputFile = "tests/core/assets/testCluster.in";
 static constexpr std::string_view inputFileMinStochMass =

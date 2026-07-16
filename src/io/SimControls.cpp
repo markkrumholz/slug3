@@ -6,12 +6,12 @@
  */
 
 #include "SimControls.hpp"
-#include "../extern/tomlplusplus/toml.hpp"
 #include "../utils/ParseUtils.hpp"
 #include "../utils/RngThread.hpp"
 #include <cmath>
 #include <stdexcept>
 #include <string>
+#include <toml.hpp>
 #include <vector>
 
 // Read an explicit array of output times from outputs.output_times
@@ -118,14 +118,7 @@ static auto generateOutputTimesRange(const toml::table& inputDeck) -> std::vecto
     return times;
 }
 
-io::SimControls::SimControls(const toml::table& inputDeck) :
-    simType_(SimType::none),
-    verbosity_(0),
-    nTrial_(1),
-    nTrialRemain_(1),
-    outputMode_(OutputMode::h5),
-    modelName_("slug_sim"),
-    outputClusters_(true)
+io::SimControls::SimControls(const toml::table& inputDeck)
 {
     // Determine simulation type
     const auto simTypeInput = utils::getTOMLKeyWithError<std::string>(

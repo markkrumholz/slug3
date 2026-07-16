@@ -5,7 +5,6 @@
  * @date 2026-07-16
  */
 
-#include "../src/extern/tomlplusplus/toml.hpp"
 #include "../src/io/SimControls.hpp"
 #include "testSimControls.hpp"
 #include <algorithm>
@@ -15,6 +14,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <toml.hpp>
 #include <vector>
 
 // Compare two vectors of doubles for approximate equality, reporting

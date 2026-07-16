@@ -295,19 +295,19 @@ namespace interp
          * @brief Return a const reference to the x array
          * @returns A const references to the x array
          */
-        const auto& xData() const { return x_; }
+        auto xData() const -> const auto& { return x_; }
 
         /**
          * @brief Return a const reference to the y array
          * @returns A const references to the y array
          */
-        const auto& yData() const { return y_; }
-        
+        auto yData() const -> const auto& { return y_; }
+
         /**
          * @brief Return a const reference to the s array
          * @returns A const references to the s array
          */
-        const auto& sData() const { return s_; }
+        auto sData() const -> const auto& { return s_; }
         
         /**
          * @brief Minimum x value in mesh
@@ -942,27 +942,27 @@ namespace interp
         ) const -> bool;
         
         // Input data
-        Array2D x_{};                  /**< A 2d array giving the x coordinates of the mesh points */
-        Array1D y_{};                  /**< A 1d array giving the y coordinates of the mesh points */
-        std::vector<double> xData_{};  /**< Data holder for x_ */
-        std::vector<double> yData_{};  /**< Data holder for y_ */
+        Array2D x_;                  /**< A 2d array giving the x coordinates of the mesh points */
+        Array1D y_;                  /**< A 1d array giving the y coordinates of the mesh points */
+        std::vector<double> xData_;  /**< Data holder for x_ */
+        std::vector<double> yData_;  /**< Data holder for y_ */
 
         // Descriptors
-        double xMin_;                 /**< Lower limit of mesh in x direction */
-        double xMax_;                 /**< Upper limit of mesh in x direction */
-        double yMin_;                 /**< Lower limit of mesh in y direction */
-        double yMax_;                 /**< Upper limit of mesh in y direction */
-        bool convex_;                 /**< True if mesh is convex */
+        double xMin_ = 0.0;           /**< Lower limit of mesh in x direction */
+        double xMax_ = 0.0;           /**< Upper limit of mesh in x direction */
+        double yMin_ = 0.0;           /**< Lower limit of mesh in y direction */
+        double yMax_ = 0.0;           /**< Upper limit of mesh in y direction */
+        bool convex_ = true;          /**< True if mesh is convex */
 
         // Derived data
-        Array2D m_{};                   /**< Slopes of mesh spines */
-        Array2D s_{};                   /**< Lengths of each spine segment */
-        std::vector<double> mData_{};   /**< Data holder for m_ */
-        std::vector<double> sData_{};   /**< Data holder for s_ */
+        Array2D m_;                     /**< Slopes of mesh spines */
+        Array2D s_;                     /**< Lengths of each spine segment */
+        std::vector<double> mData_;     /**< Data holder for m_ */
+        std::vector<double> sData_;     /**< Data holder for s_ */
 
         // Mutables
-        mutable size_t iSave_;        /**< Cached x index for search acceleration */
-        mutable size_t jSave_;        /**< Cached y index for search acceleration */
+        mutable size_t iSave_ = 0;    /**< Cached x index for search acceleration */
+        mutable size_t jSave_ = 0;    /**< Cached y index for search acceleration */
     };
 
 } // namespace interp

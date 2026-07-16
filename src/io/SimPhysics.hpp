@@ -8,10 +8,10 @@
 #ifndef SIMPHYSICS_HPP
 #define SIMPHYSICS_HPP
 
-#include "../extern/tomlplusplus/toml.hpp"
 #include "../pdfs/PDF.hpp"
 #include "../tracks/Tracks3D.hpp"
 #include "SimControls.hpp"
+#include <toml.hpp>
 
 namespace io
 {
@@ -119,8 +119,8 @@ namespace io
         pdfs::PDF clf_;            /**< Cluster lifetime function */
         tracks::Tracks3D tracks_;  /**< Stellar tracks */
         tracks::Tracks2D constFeHTracks_; /**< Tracks sliced at fehDist_'s value, if constFeH() */
-        double minStochMass_;      /**< Minimum mass for fully stochastic treatment */
-        double fracStochMass_;     /**< Fraction of mass being treated stochastically */
+        double minStochMass_ = 0.0;   /**< Minimum mass for fully stochastic treatment */
+        double fracStochMass_ = 1.0;  /**< Fraction of mass being treated stochastically */
 
     };
 

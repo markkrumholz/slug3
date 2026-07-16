@@ -44,8 +44,15 @@ Checks: >-
 
 WarningsAsErrors: '*'
 
-# Warn on project headers only; exclude the pcg-cpp submodule
-HeaderFilterRegex: '.*/src/(?!pcg-cpp)'
+# Warn on the project's own headers only, via an explicit allowlist of
+# first-party subdirectories under src/. This must be an allowlist rather
+# than a "not extern/" exclusion because llvm::Regex (POSIX ERE, used to
+# evaluate this option) has no lookahead support, so a negative-lookahead
+# pattern (e.g. the previous '.*/src/(?!pcg-cpp)') silently fails to
+# exclude anything, and every header under src/ -- including vendored
+# third-party code in src/extern -- has effectively been unfiltered all
+# along.
+HeaderFilterRegex: '.*/src/(core|interpolation|io|pdfs|pybind|tracks|utils)/'
 
 FormatStyle: 'llvm'
 
