@@ -8,19 +8,122 @@
 #include "SimControls.hpp"
 #include "../extern/tomlplusplus/toml.hpp"
 #include "../utils/ParseUtils.hpp"
-#include "../utils/ThreadVec.hpp"
+#include "../utils/RngThread.hpp"
 #include <cmath>
 #include <stdexcept>
 #include <string>
 #include <vector>
+
+// Read an explicit array of output times from outputs.output_times
+static auto readOutputTimesArray(const toml::table& inputDeck) -> std::vector<double>
+{
+    const toml::array* arr = inputDeck.at_path("outputs.output_times").as_array();
+    if (arr == nullptr)
+    {
+        throw std::runtime_error(
+            "SimControls: outputs.output_times must be an array of numbers");
+    }
+    std::vector<double> times;
+    times.reserve(arr->size());
+    for (const auto& elem : *arr)
+    {
+        const auto val = elem.value<double>();
+        if (!val.has_value())
+        {
+            throw std::runtime_error(
+                "SimControls: outputs.output_times must be an array of numbers");
+        }
+        times.push_back(val.value());
+    }
+    return times;
+}
+
+// Generate a uniformly- or log-spaced grid of output times from
+// outputs.start_time, outputs.end_time, outputs.ntime, and the
+// optional outputs.log_time
+static auto generateOutputTimesRange(const toml::table& inputDeck) -> std::vector<double>
+{
+    const auto startTimeInput = utils::getTOMLKeyWithError<double>(
+        inputDeck, "outputs.start_time", true);
+    if (!startTimeInput.has_value())
+    {
+        throw std::runtime_error("SimControls: outputs.start_time not found");
+    }
+    const double startTime = startTimeInput.value();
+
+    const auto endTimeInput = utils::getTOMLKeyWithError<double>(
+        inputDeck, "outputs.end_time", true);
+    if (!endTimeInput.has_value())
+    {
+        throw std::runtime_error("SimControls: outputs.end_time not found");
+    }
+    const double endTime = endTimeInput.value();
+
+    const auto nTimeInput = utils::getTOMLKeyWithError<unsigned long>(
+        inputDeck, "outputs.ntime", true);
+    if (!nTimeInput.has_value())
+    {
+        throw std::runtime_error("SimControls: outputs.ntime not found");
+    }
+    const unsigned long nTime = nTimeInput.value();
+
+    const bool logTime = utils::getTOMLKeyWithError<bool>(
+        inputDeck, "outputs.log_time").value_or(false);
+
+    if (startTime < 0.0 || endTime < 0.0)
+    {
+        throw std::runtime_error(
+            "SimControls: outputs.start_time and outputs.end_time must be >= 0");
+    }
+    if (nTime == 0)
+    {
+        throw std::runtime_error("SimControls: outputs.ntime must be > 0");
+    }
+    if ((startTime == endTime) != (nTime == 1))
+    {
+        throw std::runtime_error(
+            "SimControls: outputs.start_time == outputs.end_time is allowed "
+            "only if outputs.ntime == 1, and outputs.ntime == 1 is allowed "
+            "only if outputs.start_time == outputs.end_time");
+    }
+    if (logTime && startTime <= 0.0)
+    {
+        throw std::runtime_error(
+            "SimControls: outputs.start_time must be > 0 when outputs.log_time is set");
+    }
+
+    std::vector<double> times(nTime, 0.0);
+    if (nTime == 1)
+    {
+        times.at(0) = startTime;
+    }
+    else if (logTime)
+    {
+        const double logStart = std::log(startTime);
+        const double logEnd = std::log(endTime);
+        const double dLog = (logEnd - logStart) / static_cast<double>(nTime - 1);
+        for (unsigned long i = 0; i < nTime; ++i)
+        {
+            times.at(i) = std::exp(logStart + (static_cast<double>(i) * dLog));
+        }
+    }
+    else
+    {
+        const double dt = (endTime - startTime) / static_cast<double>(nTime - 1);
+        for (unsigned long i = 0; i < nTime; ++i)
+        {
+            times.at(i) = startTime + (static_cast<double>(i) * dt);
+        }
+    }
+    return times;
+}
 
 core::SimControls::SimControls(const toml::table& inputDeck) :
     verbosity_(0),
     nTrial_(1),
     nTrialRemain_(1),
     outputMode_(OutputMode::h5),
-    modelName_("slug_sim"),
-    outDir_("")
+    modelName_("slug_sim")
 {
     // Read verbosity
     const auto verbosityInput =
@@ -54,12 +157,12 @@ core::SimControls::SimControls(const toml::table& inputDeck) :
     if (outDirInput.has_value()) { outDir_ = outDirInput.value(); }
 
     // Read number of trials
-    const auto nTrialInput = 
+    const auto nTrialInput =
         utils::getTOMLKeyWithError<unsigned long>(inputDeck, "n_trial");
     if (nTrialInput.has_value())
     {
         nTrial_ = nTrialInput.value();
-        nTrialRemain_ = nTrial_;    
+        nTrialRemain_ = nTrial_;
     }
 
     // Handle output time generation
@@ -134,24 +237,7 @@ void core::SimControls::setOutputTimes(const toml::table& inputDeck)
     // Option 2: an explicit array of output times
     if (hasTimes)
     {
-        const toml::array* arr = inputDeck.at_path("outputs.output_times").as_array();
-        if (arr == nullptr)
-        {
-            throw std::runtime_error(
-                "SimControls: outputs.output_times must be an array of numbers");
-        }
-        outTimes_.clear();
-        outTimes_.reserve(arr->size());
-        for (size_t i = 0; i < arr->size(); ++i)
-        {
-            const auto val = arr->at(i).value<double>();
-            if (!val.has_value())
-            {
-                throw std::runtime_error(
-                    "SimControls: outputs.output_times must be an array of numbers");
-            }
-            outTimes_.push_back(val.value());
-        }
+        outTimes_ = readOutputTimesArray(inputDeck);
         return;
     }
 
@@ -162,58 +248,5 @@ void core::SimControls::setOutputTimes(const toml::table& inputDeck)
             "SimControls: outputs.start_time, outputs.end_time, and "
             "outputs.ntime must all be specified together");
     }
-    const auto startTime = utils::getTOMLKeyWithError<double>(
-        inputDeck, "outputs.start_time", true).value(); // NOLINT(bugprone-unchecked-optional-access) -- required=true guarantees this
-    const auto endTime = utils::getTOMLKeyWithError<double>(
-        inputDeck, "outputs.end_time", true).value(); // NOLINT(bugprone-unchecked-optional-access) -- required=true guarantees this
-    const auto nTime = utils::getTOMLKeyWithError<unsigned long>(
-        inputDeck, "outputs.ntime", true).value(); // NOLINT(bugprone-unchecked-optional-access) -- required=true guarantees this
-    const auto logTime = utils::getTOMLKeyWithError<bool>(
-        inputDeck, "outputs.log_time").value_or(false);
-
-    if (startTime < 0.0 || endTime < 0.0)
-    {
-        throw std::runtime_error(
-            "SimControls: outputs.start_time and outputs.end_time must be >= 0");
-    }
-    if (nTime == 0)
-    {
-        throw std::runtime_error("SimControls: outputs.ntime must be > 0");
-    }
-    if ((startTime == endTime) != (nTime == 1))
-    {
-        throw std::runtime_error(
-            "SimControls: outputs.start_time == outputs.end_time is allowed "
-            "only if outputs.ntime == 1, and outputs.ntime == 1 is allowed "
-            "only if outputs.start_time == outputs.end_time");
-    }
-    if (logTime && startTime <= 0.0)
-    {
-        throw std::runtime_error(
-            "SimControls: outputs.start_time must be > 0 when outputs.log_time is set");
-    }
-
-    outTimes_.assign(nTime, 0.0);
-    if (nTime == 1)
-    {
-        outTimes_[0] = startTime;
-    }
-    else if (logTime)
-    {
-        const double logStart = std::log(startTime);
-        const double logEnd = std::log(endTime);
-        const double dLog = (logEnd - logStart) / static_cast<double>(nTime - 1);
-        for (unsigned long i = 0; i < nTime; ++i)
-        {
-            outTimes_[i] = std::exp(logStart + static_cast<double>(i) * dLog);
-        }
-    }
-    else
-    {
-        const double dt = (endTime - startTime) / static_cast<double>(nTime - 1);
-        for (unsigned long i = 0; i < nTime; ++i)
-        {
-            outTimes_[i] = startTime + static_cast<double>(i) * dt;
-        }
-    }
+    outTimes_ = generateOutputTimesRange(inputDeck);
 }

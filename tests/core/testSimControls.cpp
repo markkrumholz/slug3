@@ -8,42 +8,42 @@
 #include "../src/core/SimControls.hpp"
 #include "../src/extern/tomlplusplus/toml.hpp"
 #include "testSimControls.hpp"
+#include <algorithm>
 #include <cmath>
+#include <cstddef>
+#include <exception>
 #include <iostream>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
-namespace
+// Compare two vectors of doubles for approximate equality, reporting
+// a descriptive error through std::cerr if they don't match.
+static auto checkOutTimes(const std::vector<double>& actual,
+    const std::vector<double>& expected,
+    const std::string& label) -> int
 {
-    // Compare two vectors of doubles for approximate equality, reporting
-    // a descriptive error through std::cerr if they don't match.
-    auto checkOutTimes(const std::vector<double>& actual,
-        const std::vector<double>& expected,
-        const std::string& label) -> int
+    constexpr double tolerance = 1e-9;
+    if (actual.size() != expected.size())
     {
-        constexpr double tolerance = 1e-9;
-        if (actual.size() != expected.size())
+        std::cerr << "testSimControls: " << label
+            << ": outTimes() has size " << actual.size()
+            << ", expected " << expected.size() << "\n";
+        return 1;
+    }
+    for (std::size_t i = 0; i < actual.size(); ++i)
+    {
+        const double denom = std::max(std::abs(expected.at(i)), 1.0);
+        if (std::abs(actual.at(i) - expected.at(i)) / denom > tolerance)
         {
             std::cerr << "testSimControls: " << label
-                << ": outTimes() has size " << actual.size()
-                << ", expected " << expected.size() << "\n";
+                << ": outTimes()[" << i << "] = " << actual.at(i)
+                << ", expected " << expected.at(i) << "\n";
             return 1;
         }
-        for (size_t i = 0; i < actual.size(); ++i)
-        {
-            const double denom = std::max(std::abs(expected[i]), 1.0);
-            if (std::abs(actual[i] - expected[i]) / denom > tolerance)
-            {
-                std::cerr << "testSimControls: " << label
-                    << ": outTimes()[" << i << "] = " << actual[i]
-                    << ", expected " << expected[i] << "\n";
-                return 1;
-            }
-        }
-        return 0;
     }
-} // namespace
+    return 0;
+}
 
 // Verify that model_name, verbosity, output_mode, out_dir, and n_trial
 // fall back to their documented defaults when not specified in the

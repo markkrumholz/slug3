@@ -6,11 +6,15 @@
  */
 
 #include "ParseUtils.hpp"
-#include "MiscUtils.hpp"
+#include "../extern/tomlplusplus/toml.hpp"
+#include "../pdfs/PDF.hpp"
 #include "../pdfs/PDFFileParser.hpp"
 #include "../pdfs/PDFSegmentDelta.hpp"
+#include "MiscUtils.hpp"
 #include <memory>
+#include <optional>
 #include <stdexcept>
+#include <string>
 #include <utility>
 
 // Trim leading and trailing whitespace, and trailing comments
@@ -31,7 +35,7 @@ auto utils::trim(const std::string& str) -> std::string
     auto strNW = str.substr(first, (last - first + 1));
 
     // Find the first instance of the comment delimiter
-    first = strNW.find_first_of("#");
+    first = strNW.find_first_of('#');
     if (first != std::string::npos) {
         strNW = str.substr(0, first);
     }
