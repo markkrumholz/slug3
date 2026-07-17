@@ -91,23 +91,6 @@ namespace io
         [[nodiscard]] auto nTrial() const { return nTrial_; }
 
         /**
-         * @brief Return number of trials remaining in the simulation
-         * @return Number of trials remaining
-         * @details
-         * This routine properly handles inter-thread synchronization
-         * when openMP is enabled.
-         */
-        [[nodiscard]] auto nTrialRemain() const
-        {
-            unsigned long nRemain{};
-#ifdef _OPENMP
-#pragma omp atomic read
-#endif
-            nRemain = nTrialRemain_;
-            return nRemain;
-        }
-
-        /**
          * @brief Return the times at which output should occur
          * @return A vector of output times
          * @details
@@ -137,19 +120,33 @@ namespace io
 
         // Setters
         /**
-         * @brief Update the remaining trials count
+         * @brief Start the next trial
+         * @return The trial number of the trial being started, or 0 if
+         * no trials remain to be done
          * @details
          * This routine properly handles inter-thread synchronization
-         * when openMP is enabled.
+         * when openMP is enabled: nTrialRemain_ is read and decremented
+         * as a single atomic operation, so the value this call observed
+         * is guaranteed not to be observed by any other call. Since
+         * nTrialRemain_ is signed, once all trials have been claimed
+         * further calls keep decrementing it below zero rather than
+         * wrapping around, so they reliably keep returning 0.
+         *
+         * This is const (with nTrialRemain_ marked mutable) because the
+         * atomic capture makes it safe to call concurrently through a
+         * shared, const-qualified reference, the same way callers treat
+         * a mutex-guarded counter as logically read-only.
          */
-        [[nodiscard]] auto trialDone()
+        [[nodiscard]] auto startTrial() const -> unsigned long
         {
+            long remain{};
 #ifdef _OPENMP
-#pragma omp atomic
+#pragma omp atomic capture
 #endif
-            --nTrialRemain_;
+            { remain = nTrialRemain_; nTrialRemain_--; }
+            if (remain <= 0) { return 0; }
+            return static_cast<unsigned long>(static_cast<long>(nTrial_) - remain + 1);
         }
-
 
     private:
 
@@ -157,7 +154,7 @@ namespace io
         SimType simType_ = SimType::none;              /**< Simulation type */
         unsigned int verbosity_ = 0;                   /**< Level of verbosity */
         unsigned long nTrial_ = 1;                     /**< Number of trials */
-        unsigned long nTrialRemain_ = 1;               /**< Number of trials remaining */
+        mutable long nTrialRemain_ = 1;                 /**< Number of trials remaining */
         OutputMode outputMode_ = OutputMode::h5;       /**< Output mode */
         std::string modelName_ = "slug_sim";           /**< Name of this model */
         std::string outDir_;                           /**< Directory into which output will be written */
