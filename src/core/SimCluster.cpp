@@ -32,15 +32,20 @@ void core::SimCluster::run()
             << simControls_.nTrial() << " trials\n";
     }
 
-    while (true)
+#ifdef _OPENMP
+#pragma omp parallel for schedule(dynamic)
+#endif
+    for (unsigned long trialNum = 0; trialNum < simControls_.nTrial(); ++trialNum)
     {
-        const auto trialNum = simControls_.startTrial();
-        if (trialNum == 0) { break; }
-
         if (simControls_.verbosity() > 2)
         {
-            std::cout << "slug: starting trial " << trialNum << " / "
-                << simControls_.nTrial() << "\n";
+#ifdef _OPENMP
+#pragma omp critical
+#endif
+            {
+                std::cout << "slug: starting trial " << trialNum << " / "
+                    << simControls_.nTrial() << "\n";
+            }
         }
 
         Cluster cluster(utils::getID(), simPhysics_.cmf().draw(), 0, simPhysics_);
