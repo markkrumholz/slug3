@@ -240,12 +240,20 @@ void io::OutputManagerH5::writeCluster(
     const double formTime = cluster.formTime();
     const double feH = cluster.feH();
 
-    // NOLINTBEGIN(misc-include-cleaner)
-    appendToDataset(clustersGroup_, "trial", H5T_NATIVE_ULONG, &trial);
-    appendToDataset(clustersGroup_, "uid", H5T_NATIVE_ULONG, &uid);
-    appendToDataset(clustersGroup_, "target_mass", H5T_NATIVE_DOUBLE, &targetMass);
-    appendToDataset(clustersGroup_, "birth_mass", H5T_NATIVE_DOUBLE, &birthMass);
-    appendToDataset(clustersGroup_, "form_time", H5T_NATIVE_DOUBLE, &formTime);
-    appendToDataset(clustersGroup_, "feh", H5T_NATIVE_DOUBLE, &feH);
-    // NOLINTEND(misc-include-cleaner)
+    // Guard the actual writes against concurrent callers from other
+    // threads; unlike the constructor, this method is expected to be
+    // called from inside an openMP parallel region
+#ifdef _OPENMP
+#pragma omp critical(clusterOutputWrite)
+#endif
+    {
+        // NOLINTBEGIN(misc-include-cleaner)
+        appendToDataset(clustersGroup_, "trial", H5T_NATIVE_ULONG, &trial);
+        appendToDataset(clustersGroup_, "uid", H5T_NATIVE_ULONG, &uid);
+        appendToDataset(clustersGroup_, "target_mass", H5T_NATIVE_DOUBLE, &targetMass);
+        appendToDataset(clustersGroup_, "birth_mass", H5T_NATIVE_DOUBLE, &birthMass);
+        appendToDataset(clustersGroup_, "form_time", H5T_NATIVE_DOUBLE, &formTime);
+        appendToDataset(clustersGroup_, "feh", H5T_NATIVE_DOUBLE, &feH);
+        // NOLINTEND(misc-include-cleaner)
+    }
 }
