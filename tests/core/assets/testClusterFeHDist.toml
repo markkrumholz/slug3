@@ -1,0 +1,9 @@
+# A [Fe/H] distribution (uniform between -0.5 and 0.5) used by
+# testSimCluster to exercise the variable-[Fe/H] path, where
+# SimPhysics::constFeH() is false and every Cluster constructor calls
+# Tracks3D::sliceConstFeH from inside SimCluster::run's parallel loop
+breakpoints -0.5 0.5
+
+segment
+type powerlaw
+slope 0

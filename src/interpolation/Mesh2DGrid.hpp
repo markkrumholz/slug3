@@ -165,6 +165,7 @@
 #ifndef MESH2DGRID_HPP
 #define MESH2DGRID_HPP
 
+#include "../utils/ThreadVec.hpp"
 #include <cassert>
 #include <cstdint>
 #include <cstdlib>
@@ -261,10 +262,23 @@ namespace interp
             const Array1D& y,
             bool copyData = true);
         virtual ~Mesh2DGrid() = default;
-        Mesh2DGrid(const Mesh2DGrid&) = default;
-        Mesh2DGrid(Mesh2DGrid&&) = default; 
+
+        // Copy and move constructors are written out by hand (rather
+        // than defaulted) because iSave_ and jSave_ are ThreadVec's,
+        // which are themselves non-copyable and non-movable so that
+        // each thread's cached search index stays private to that
+        // thread; the copy/move constructed object therefore gets its
+        // own freshly-initialized search cache rather than one copied
+        // or moved from the source, which is correct since the cache
+        // is just a performance optimization, not semantic state.
+        // Assignment remains disallowed, as it always has been, since
+        // x_/y_/m_/s_ are non-owning views into xData_/yData_/mData_/
+        // sData_ and a blind member-wise assignment would not repoint
+        // them at the assigned-to object's own data.
+        Mesh2DGrid(const Mesh2DGrid& other);
+        Mesh2DGrid(Mesh2DGrid&& other) noexcept; // NOLINT(bugprone-exception-escape) -- see definition
         auto operator=(const Mesh2DGrid&) -> Mesh2DGrid& = delete;
-        auto operator=(Mesh2DGrid&&) -> Mesh2DGrid& = delete; 
+        auto operator=(Mesh2DGrid&&) -> Mesh2DGrid& = delete;
 
         // Observers
         /**
@@ -399,20 +413,22 @@ namespace interp
          */
         auto xIdx(const double x, const size_t j) const -> size_t
         {
-            jSave_ = j;  // Update cached position
+            auto& iSaveLoc = iSave_();
+            auto& jSaveLoc = jSave_();
+            jSaveLoc = j;  // Update cached position
             assert((x >= x_[0,j] && x <= x_[nx()-1,j]));  // Safety check
-            if (x < x_[iSave_,j]) { // Check if we need to update cached index
-                iSave_ = xSearch(x, 0, j, 0, iSave_); // Below cached position
-            } else if (x >= x_[iSave_+1,j]) {
+            if (x < x_[iSaveLoc,j]) { // Check if we need to update cached index
+                iSaveLoc = xSearch(x, 0, j, 0, iSaveLoc); // Below cached position
+            } else if (x >= x_[iSaveLoc+1,j]) {
                 // Above cached position, or exactly on its upper edge; in
-                // the latter case iSave_ must still advance, since leaving
+                // the latter case iSaveLoc must still advance, since leaving
                 // it unchanged would compute the offset within this cell
                 // as the full cell width instead of zero, which produces
                 // spurious floating-point error in downstream traversals
-                iSave_ = xSearch(x, 0, j, iSave_, nx()-1);
+                iSaveLoc = xSearch(x, 0, j, iSaveLoc, nx()-1);
             }
-            if (iSave_ == nx()-1) { --iSave_; } // Handle edge case
-            return iSave_;
+            if (iSaveLoc == nx()-1) { --iSaveLoc; } // Handle edge case
+            return iSaveLoc;
         }
 
         /**
@@ -424,19 +440,20 @@ namespace interp
          */
         auto yIdx(const double y) const -> size_t
         {
+            auto& jSaveLoc = jSave_();
             assert(y >= yMin_ && y <= yMax_);  // Safety check
-            if (y < y_[jSave_]) { // Check if we need to update cached position
-                jSave_ = ySearch(y, 0, jSave_);   // Below cached position, search left
-            } else if (y >= y_[jSave_ + 1]) {
+            if (y < y_[jSaveLoc]) { // Check if we need to update cached position
+                jSaveLoc = ySearch(y, 0, jSaveLoc);   // Below cached position, search left
+            } else if (y >= y_[jSaveLoc + 1]) {
                 // Above cached position, or exactly on its upper edge; in
-                // the latter case jSave_ must still advance, since leaving
+                // the latter case jSaveLoc must still advance, since leaving
                 // it unchanged would compute the offset within this cell
                 // as the full cell width instead of zero, which produces
                 // spurious floating-point error in downstream traversals
-                jSave_ = ySearch(y, jSave_, ny()-1);
+                jSaveLoc = ySearch(y, jSaveLoc, ny()-1);
             }
-            if (jSave_ == ny()-1) { --jSave_; } // Handle edge case
-            return jSave_;
+            if (jSaveLoc == ny()-1) { --jSaveLoc; } // Handle edge case
+            return jSaveLoc;
         }
 
         /**
@@ -449,20 +466,21 @@ namespace interp
          */
         auto xyIdx(const double x, const double y) const
         {
+            auto& iSaveLoc = iSave_();
             assert(contains(x,y));  // Safety assertion
             auto j = yIdx(y);       // Get y index
             const double dy = y - y_[j];  // Offset in y
             size_t i = 0;  // Output holder
-            if (x < x_[iSave_,j] + (dy/m_[iSave_,j])) { // Check if we need to update cached index
-                iSave_ = xSearch(x, dy, j, 0, iSave_);  // Too low
-                i = iSave_;
-            } else if (x >= x_[iSave_+1,j] + (dy/m_[iSave_+1,j])) {
-                iSave_ = xSearch(x, dy, j, iSave_, nx()-1); // Too high
-                i = iSave_;
+            if (x < x_[iSaveLoc,j] + (dy/m_[iSaveLoc,j])) { // Check if we need to update cached index
+                iSaveLoc = xSearch(x, dy, j, 0, iSaveLoc);  // Too low
+                i = iSaveLoc;
+            } else if (x >= x_[iSaveLoc+1,j] + (dy/m_[iSaveLoc+1,j])) {
+                iSaveLoc = xSearch(x, dy, j, iSaveLoc, nx()-1); // Too high
+                i = iSaveLoc;
             } else {
-                i = iSave_; // Cache hit
+                i = iSaveLoc; // Cache hit
             }
-            if (i == nx()-1) { --iSave_; } // Handle dge case
+            if (i == nx()-1) { --iSaveLoc; } // Handle dge case
             return std::pair(i,j);
         }
 
@@ -961,8 +979,18 @@ namespace interp
         std::vector<double> sData_;     /**< Data holder for s_ */
 
         // Mutables
-        mutable size_t iSave_ = 0;    /**< Cached x index for search acceleration */
-        mutable size_t jSave_ = 0;    /**< Cached y index for search acceleration */
+        //
+        // Cached x and y indices for search acceleration. These are
+        // ThreadVec's rather than plain size_t's so that each thread
+        // gets its own private cached index; without this, concurrent
+        // calls from different threads would race to update a single
+        // shared cache. Every method that uses these must start by
+        // binding a local reference to the element private to the
+        // calling thread, e.g. "auto& iSaveLoc = iSave_();", and use
+        // that local reference throughout rather than the member
+        // directly.
+        mutable utils::ThreadVec<size_t> iSave_;    /**< Cached x index for search acceleration */
+        mutable utils::ThreadVec<size_t> jSave_;    /**< Cached y index for search acceleration */
     };
 
 } // namespace interp

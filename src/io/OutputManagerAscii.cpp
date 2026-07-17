@@ -134,11 +134,19 @@ void io::OutputManagerAscii::writeCluster(
 {
     if (!clustersFile_.is_open()) { return; }
 
-    clustersFile_ << std::right
-                  << std::setw(uidWidth) << formatUid(trial)
-                  << std::setw(uidWidth) << formatUid(cluster.uid())
-                  << std::setw(numWidth) << formatSci(cluster.targetMass())
-                  << std::setw(numWidth) << formatSci(cluster.birthMass())
-                  << std::setw(numWidth) << formatSci(cluster.formTime())
-                  << std::setw(numWidth) << formatSci(cluster.feH()) << "\n";
+    // Guard the actual write against concurrent callers from other
+    // threads; unlike the constructor, this method is expected to be
+    // called from inside an openMP parallel region
+#ifdef _OPENMP
+#pragma omp critical(clusterOutputWrite)
+#endif
+    {
+        clustersFile_ << std::right
+                      << std::setw(uidWidth) << formatUid(trial)
+                      << std::setw(uidWidth) << formatUid(cluster.uid())
+                      << std::setw(numWidth) << formatSci(cluster.targetMass())
+                      << std::setw(numWidth) << formatSci(cluster.birthMass())
+                      << std::setw(numWidth) << formatSci(cluster.formTime())
+                      << std::setw(numWidth) << formatSci(cluster.feH()) << "\n";
+    }
 }

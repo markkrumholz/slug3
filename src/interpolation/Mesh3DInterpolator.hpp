@@ -23,6 +23,9 @@
 #include <memory>
 #include <stdexcept>
 #include <vector>
+#ifdef _OPENMP
+#   include <omp.h>
+#endif
 
 // Disable linting for array bounds checking in this
 // file, since the overhead associated with enforcing
@@ -321,9 +324,29 @@ namespace interp
          * until this Mesh3DInterpolator is destroyed. Use
          * sliceConstYCopy() instead if you need an independent,
          * caller-owned object.
+         *
+         * This method is NOT thread-safe and must never be called from
+         * inside an openMP parallel region: it writes to the shared
+         * ySliceCache_/ySliceCacheVal_ cache, and two threads racing to
+         * populate that cache could corrupt it or return a slice built
+         * for the wrong y0. In a build with openMP enabled, calling
+         * this from inside a parallel region trips an assertion in
+         * debug builds; in release builds it is simply undefined
+         * behavior. The standard usage pattern -- building the cache
+         * once at startup before any parallel region for single-[Fe/H]
+         * runs, and using sliceConstYCopy() instead whenever multiple
+         * [Fe/H] values are in play -- never needs this method inside a
+         * parallel region in the first place. The cache was not made
+         * thread-private (unlike Mesh2DGrid's iSave_/jSave_ or
+         * Interpolator1D's acc_) because each cached slice can be tens
+         * of megabytes, and giving every thread its own copy would be
+         * expensive on a many-core node.
          */
         [[nodiscard]] auto sliceConstY(double y0) const -> const Mesh2DInterpolator<NF>&
         {
+#ifdef _OPENMP
+            assert(!omp_in_parallel());
+#endif
             // Return the cached slice if it was built for this y0
             if (ySliceCache_ && ySliceCacheVal_ == y0) { return *ySliceCache_; }
 
@@ -372,9 +395,29 @@ namespace interp
          * until this Mesh3DInterpolator is destroyed. Use
          * sliceConstZCopy() instead if you need an independent,
          * caller-owned object.
+         *
+         * This method is NOT thread-safe and must never be called from
+         * inside an openMP parallel region: it writes to the shared
+         * zSliceCache_/zSliceCacheVal_ cache, and two threads racing to
+         * populate that cache could corrupt it or return a slice built
+         * for the wrong z0. In a build with openMP enabled, calling
+         * this from inside a parallel region trips an assertion in
+         * debug builds; in release builds it is simply undefined
+         * behavior. The standard usage pattern -- building the cache
+         * once at startup before any parallel region for single-[Fe/H]
+         * runs, and using sliceConstZCopy() instead whenever multiple
+         * [Fe/H] values are in play -- never needs this method inside a
+         * parallel region in the first place. The cache was not made
+         * thread-private (unlike Mesh2DGrid's iSave_/jSave_ or
+         * Interpolator1D's acc_) because each cached slice can be tens
+         * of megabytes, and giving every thread its own copy would be
+         * expensive on a many-core node.
          */
         [[nodiscard]] auto sliceConstZ(double z0) const -> const Mesh2DInterpolator<NF>&
         {
+#ifdef _OPENMP
+            assert(!omp_in_parallel());
+#endif
             // Return the cached slice if it was built for this z0
             if (zSliceCache_ && zSliceCacheVal_ == z0) { return *zSliceCache_; }
 

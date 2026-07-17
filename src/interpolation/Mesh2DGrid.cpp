@@ -65,6 +65,60 @@ namespace interp
         setConvexity();
     }
 
+    // Copy constructor. x_/y_/m_/s_ are non-owning views into
+    // xData_/yData_/mData_/sData_, so after copying the underlying
+    // vectors they must be re-pointed at this object's own copies
+    // rather than left pointing at other's. iSave_ and jSave_ are
+    // deliberately omitted here so they default-construct fresh
+    // (ThreadVec is non-copyable by design; see the declaration in
+    // Mesh2DGrid.hpp for why).
+    Mesh2DGrid::Mesh2DGrid(const Mesh2DGrid& other) :
+        xData_(other.xData_),
+        yData_(other.yData_),
+        xMin_(other.xMin_),
+        xMax_(other.xMax_),
+        yMin_(other.yMin_),
+        yMax_(other.yMax_),
+        convex_(other.convex_),
+        mData_(other.mData_),
+        sData_(other.sData_)
+    {
+        x_ = Array2D(xData_.data(), other.x_.extent(0), other.x_.extent(1));
+        y_ = Array1D(yData_.data(), other.y_.extent(0));
+        m_ = Array2D(mData_.data(), other.m_.extent(0), other.m_.extent(1));
+        s_ = Array2D(sData_.data(), other.s_.extent(0), other.s_.extent(1));
+    }
+
+    // Move constructor. Unlike the copy constructor, x_/y_/m_/s_ can
+    // simply be copied as-is here: std::vector's move constructor
+    // does not relocate the underlying storage, so once
+    // xData_/yData_/mData_/sData_ are move-constructed from other's,
+    // the views above -- copied from other's, and so still pointing
+    // at those same buffer addresses -- remain valid and now point
+    // into this object's own data. iSave_ and jSave_ are again
+    // deliberately omitted so they default-construct fresh; that
+    // freshly-constructed ThreadVec can in principle throw
+    // std::bad_alloc, so this constructor is not truly exception-free,
+    // but std::terminate is an acceptable outcome for an allocation
+    // failure this small (one size_t per thread), the same as it would
+    // be for any other allocation failure in this codebase
+    Mesh2DGrid::Mesh2DGrid(Mesh2DGrid&& other) noexcept : // NOLINT(bugprone-exception-escape)
+        x_(other.x_),
+        y_(other.y_),
+        xData_(std::move(other.xData_)),
+        yData_(std::move(other.yData_)),
+        xMin_(other.xMin_),
+        xMax_(other.xMax_),
+        yMin_(other.yMin_),
+        yMax_(other.yMax_),
+        convex_(other.convex_),
+        m_(other.m_),
+        s_(other.s_),
+        mData_(std::move(other.mData_)),
+        sData_(std::move(other.sData_))
+    {
+    }
+
 
     // Safety checking routine
     void Mesh2DGrid::safetyCheckInputs(const Array2D& x,
@@ -244,6 +298,9 @@ namespace interp
     // Compute limits on y at fixed x
     auto Mesh2DGrid::yLim(const double x) const -> std::vector<std::pair<double,double>>
     {
+        auto& iSaveLoc = iSave_();
+        auto& jSaveLoc = jSave_();
+
         if (x < xMin_ || x > xMax_)
         {
             // Case where line misses mesh entirely; return
@@ -262,30 +319,30 @@ namespace interp
             // Yes, this x is within the bottom rib, so first intersection
             // is y coordinate of this rib
             yL.push_back(yMin_);
-            jSave_ = 0; // Cached pointer
+            jSaveLoc = 0; // Cached pointer
         }
         else
         {
             // Point we have been given is outside the bottom rib, so the
             // line must hit the bottom of the mesh on one of the side
             // spines.
-            if (x < x_[0,0]) { iSave_ = 0; } // Left of bottom rib
-            else { iSave_ = nx() - 1; } // Right of bottom rib
-            jSave_ = 0; // Initial position
-            
+            if (x < x_[0,0]) { iSaveLoc = 0; } // Left of bottom rib
+            else { iSaveLoc = nx() - 1; } // Right of bottom rib
+            jSaveLoc = 0; // Initial position
+
             // Now march upward until we encounter the mesh edge
-            while ((x_[iSave_,jSave_] - x) * (x_[iSave_,jSave_+1] - x) > 0)
-            { ++jSave_; }
-            yL.push_back(y_[jSave_] + 
-                (m_[iSave_,jSave_] * (x - x_[iSave_,jSave_])));
-            ++jSave_;
+            while ((x_[iSaveLoc,jSaveLoc] - x) * (x_[iSaveLoc,jSaveLoc+1] - x) > 0)
+            { ++jSaveLoc; }
+            yL.push_back(y_[jSaveLoc] +
+                (m_[iSaveLoc,jSaveLoc] * (x - x_[iSaveLoc,jSaveLoc])));
+            ++jSaveLoc;
         }
 
         // Now march upward through the mesh, recording where we exit
         while (yLimTraverse(x, yL)) {}
 
-        // Make sure we don't have a bad iSave_
-        if (iSave_ == nx()-1) { --iSave_; }
+        // Make sure we don't have a bad iSaveLoc
+        if (iSaveLoc == nx()-1) { --iSaveLoc; }
     
         // If we've hit the top of the mesh and we're still inside it, add
         // the mesh top as the final point
@@ -305,55 +362,57 @@ namespace interp
 
     // Traversal function used by yLim
     auto Mesh2DGrid::yLimTraverse(
-        const double x, 
+        const double x,
         std::vector<double>& yL
     ) const -> bool
     {
+        auto& jSaveLoc = jSave_();
+
         // Check left edge; be careful with corner cases, where we need
         // to consider both the slope and whether we are currently
         // inside or outside the mesh to decide if we have a hit
-        double dx0 = x_[0,jSave_] - x;
-        double dx1 = x_[0,jSave_+1] - x;
+        double dx0 = x_[0,jSaveLoc] - x;
+        double dx1 = x_[0,jSaveLoc+1] - x;
         if (dx0 * dx1 < 0)
         {
             // This is the regular case
-            yL.push_back(y_[jSave_] + 
-                (m_[0,jSave_] * (x - x_[0,jSave_])));
+            yL.push_back(y_[jSaveLoc] +
+                (m_[0,jSaveLoc] * (x - x_[0,jSaveLoc])));
         }
-        else if (dx1 == 0 && jSave_ < ny()-2) 
+        else if (dx1 == 0 && jSaveLoc < ny()-2)
         {
-            if ((m_[0,jSave_+1] > 0 &&
+            if ((m_[0,jSaveLoc+1] > 0 &&
                 yL.size() % 2 == 1 &&
-                m_[0,jSave_+1] != bigNum) ||
-                (m_[0,jSave_+1] < 0 &&
+                m_[0,jSaveLoc+1] != bigNum) ||
+                (m_[0,jSaveLoc+1] < 0 &&
                 yL.size() % 2 == 0))
             {
                 // This is the corner case
-                yL.push_back(y_[jSave_] + 
-                    (m_[0,jSave_] * (x - x_[0,jSave_])));
+                yL.push_back(y_[jSaveLoc] +
+                    (m_[0,jSaveLoc] * (x - x_[0,jSaveLoc])));
             }
         }
 
         // Check right edge; again, be careful of corner cases
-        dx0 = x_[nx()-1,jSave_] - x;
-        dx1 = x_[nx()-1,jSave_+1] - x;
+        dx0 = x_[nx()-1,jSaveLoc] - x;
+        dx1 = x_[nx()-1,jSaveLoc+1] - x;
         if (dx0 * dx1 < 0)
         {
             // This is the regular case
-            yL.push_back(y_[jSave_] + 
-                (m_[nx()-1,jSave_] * (x - x_[nx()-1,jSave_])));
-        } 
-        else if (dx1 == 0 && jSave_ < ny()-2)
+            yL.push_back(y_[jSaveLoc] +
+                (m_[nx()-1,jSaveLoc] * (x - x_[nx()-1,jSaveLoc])));
+        }
+        else if (dx1 == 0 && jSaveLoc < ny()-2)
         {
-            if ((m_[nx()-1,jSave_+1] < 0 &&
+            if ((m_[nx()-1,jSaveLoc+1] < 0 &&
                 yL.size() % 2 == 1) ||
-                (m_[nx()-1,jSave_+1] > 0 &&
+                (m_[nx()-1,jSaveLoc+1] > 0 &&
                 yL.size() % 2 == 0 &&
-                m_[nx()-1,jSave_+1] != bigNum))
+                m_[nx()-1,jSaveLoc+1] != bigNum))
             {
                 // This is the corner case
-                yL.push_back(y_[jSave_] + 
-                    (m_[nx()-1,jSave_] * (x - x_[nx()-1,jSave_])));
+                yL.push_back(y_[jSaveLoc] +
+                    (m_[nx()-1,jSaveLoc] * (x - x_[nx()-1,jSaveLoc])));
             }
         }
 
@@ -370,14 +429,14 @@ namespace interp
                 std::swap(yL[yL.size()-2], yL[yL.size()-1]);
             }
         }
-    
+
         // If we're convex, there are only 2 limits to find; stop if
         // we've found both
         if (convex_ && yL.size() == 2) { return false; }
-    
+
         // Either increment j, or exit if we've reached the top
-        if (jSave_ == ny()-2) { return false; }
-        jSave_++;
+        if (jSaveLoc == ny()-2) { return false; }
+        jSaveLoc++;
 
         // If we reach here, continue traversal
         return true;
@@ -536,14 +595,17 @@ namespace interp
         bool& lastIntersectRight
     ) const
     {
+        auto& iSaveLoc = iSave_();
+        auto& jSaveLoc = jSave_();
+
         // Check if our starting point is exactly on a rib or spine; note that
         // this call also sets the i and j cache pointers
         const auto [startOnMesh, d] = onMesh(x, y);
-        if (startOnMesh) { 
-            
+        if (startOnMesh) {
+
             // Yes, starting point is exactly on a spine or rib
             intList.push_back(d);
-    
+
             // Are we on a spine or a rib?
             if (d.t == IntersectionType::rib)
             {
@@ -553,49 +615,49 @@ namespace interp
                 lastIntersectRight = false;
 
                 // Adjust index to handle degenerate tracks
-                while (y == y_[jSave_+1])
+                while (y == y_[jSaveLoc+1])
                 {
-                    ++jSave_;
-                    if (jSave_ == ny()-2) { break; }
+                    ++jSaveLoc;
+                    if (jSaveLoc == ny()-2) { break; }
                 }
 
                 // Handle the case where the intersection point is a cell corner
-                if (x == x_[iSave_,jSave_])
+                if (x == x_[iSaveLoc,jSaveLoc])
                 {
-                    if (m_[iSave_,0] > 0)
+                    if (m_[iSaveLoc,0] > 0)
                     {
                         lastIntersectLeft = true;
-                        iSave_--;
+                        iSaveLoc--;
                     }
-                    else 
+                    else
                     {
                         lastIntersectRight = true;
                     }
                 }
 
-            } 
+            }
             else
             {
 
                 // Spine
 
                 // Set intersection flags
-                if (m_[iSave_,jSave_] == bigNum ||
-                    m_[iSave_,jSave_] <= 0)
+                if (m_[iSaveLoc,jSaveLoc] == bigNum ||
+                    m_[iSaveLoc,jSaveLoc] <= 0)
                 {
                     lastIntersectLeft = false;
                     lastIntersectRight = true;
-                } 
+                }
                 else
                 {
                     lastIntersectLeft = true;
                     lastIntersectRight = false;
-                    iSave_--;
+                    iSaveLoc--;
                 }
 
             }
-    
-        } 
+
+        }
         else
         {
 
@@ -617,85 +679,88 @@ namespace interp
         bool& lastIntersectRight
     ) const -> bool
     {
+        auto& iSaveLoc = iSave_();
+        auto& jSaveLoc = jSave_();
+
         // Determine is starting point is on the bottom of the mesh
-        if (x >= x_[0,0] && x <= x_[nx()-1,0] && 
+        if (x >= x_[0,0] && x <= x_[nx()-1,0] &&
             yMin <= y_[0])
         {
 
             // Starting point is on the bottom rib
-            iSave_ = xIdx(x, 0);
-            jSave_ = 0;
+            iSaveLoc = xIdx(x, 0);
+            jSaveLoc = 0;
             lastIntersectLeft = false;
             lastIntersectRight = false;
 
             // Add intersection point to output holder
-            intList.push_back({ 
+            intList.push_back({
                 .y = y,
                 .xs = x,
                 .t = IntersectionType::rib,
                 .idx = 0,
                 .meshExit = false
             });
-    
+
             // Handle degenerate tracks
-            while (y_[jSave_] == y_[jSave_+1]) { ++jSave_; }
+            while (y_[jSaveLoc] == y_[jSaveLoc+1]) { ++jSaveLoc; }
 
             // Handle the case where the starting point is a cell corner
-            if (x == x_[iSave_,jSave_])
+            if (x == x_[iSaveLoc,jSaveLoc])
             {
-                if (m_[iSave_,jSave_] > 0)
+                if (m_[iSaveLoc,jSaveLoc] > 0)
                 {
                     lastIntersectLeft = true;
-                    if (iSave_ == 0) { return true; }
-                    iSave_--;
+                    if (iSaveLoc == 0) { return true; }
+                    iSaveLoc--;
                 }
                 else
                 {
                     lastIntersectRight = true;
                 }
             }
-    
-        } 
+
+        }
         else
         {
 
             // Starting point is not on the bottom rib, so it on one of the
             // side spines
-            jSave_ = ySearch(y, 0, ny()-1);
-            if (x <= x_[0,jSave_]) { iSave_ = 0; }
-            else { iSave_ = nx()-1; }
+            jSaveLoc = ySearch(y, 0, ny()-1);
+            if (x <= x_[0,jSaveLoc]) { iSaveLoc = 0; }
+            else { iSaveLoc = nx()-1; }
 
             // Add intersection point to output holder
-            const double s = s_[iSave_,jSave_] +
-                std::sqrt(std::pow(x - x_[iSave_,jSave_],2) +
-                    std::pow(y - y_[jSave_], 2));
-            intList.push_back({ 
-                .y = y, 
+            const double s = s_[iSaveLoc,jSaveLoc] +
+                std::sqrt(std::pow(x - x_[iSaveLoc,jSaveLoc],2) +
+                    std::pow(y - y_[jSaveLoc], 2));
+            intList.push_back({
+                .y = y,
                 .xs = s,
                 .t = IntersectionType::spine,
-                .idx = iSave_,
+                .idx = iSaveLoc,
                 .meshExit = false
             });
 
             // Set intersection flags, and adjust i index if necessary; be
             // careful to handle degenerate edge tracks correctly
-            if (iSave_ == 0)
+            if (iSaveLoc == 0)
             {
-                while (x_[iSave_,jSave_] == x_[iSave_+1,jSave_] &&
-                    x_[iSave_,jSave_+1] == x_[iSave_+1,jSave_+1] &&
-                    m_[iSave_,jSave_] < 0) { iSave_++; }
+                while (x_[iSaveLoc,jSaveLoc] == x_[iSaveLoc+1,jSaveLoc] &&
+                    x_[iSaveLoc,jSaveLoc+1] == x_[iSaveLoc+1,jSaveLoc+1] &&
+                    m_[iSaveLoc,jSaveLoc] < 0) { iSaveLoc++; }
                 lastIntersectLeft = false;
                 lastIntersectRight = true;
-            } 
+            }
             else
             {
-                iSave_--;
-                while (x_[iSave_,jSave_] == x_[iSave_+1,jSave_] &&
-                    x_[iSave_,jSave_+1] == x_[iSave_+1,jSave_+1] &&
-                    m_[iSave_,jSave_] > 0) { iSave_--; }
+                iSaveLoc--;
+                while (x_[iSaveLoc,jSaveLoc] == x_[iSaveLoc+1,jSaveLoc] &&
+                    x_[iSaveLoc,jSaveLoc+1] == x_[iSaveLoc+1,jSaveLoc+1] &&
+                    m_[iSaveLoc,jSaveLoc] > 0) { iSaveLoc--; }
                 lastIntersectLeft = true;
                 lastIntersectRight = false;
-            }      
+            }
 
         }
 
@@ -711,6 +776,9 @@ namespace interp
             const bool lastIntersectRight) const ->
             std::tuple<double, double, double>
     {
+        auto& iSaveLoc = iSave_();
+        auto& jSaveLoc = jSave_();
+
         // Output quantities
         double dyY = bigNum;
         double dyL = bigNum;
@@ -720,23 +788,23 @@ namespace interp
         const double dir = searchUp ? 1.0 : -1.0;
 
         // Distance to rib
-        dyY = dir * (y_[jSave_+1] - y);
+        dyY = dir * (y_[jSaveLoc+1] - y);
 
         // Distance to left spine
-        if (m_[iSave_,jSave_] != bigNum && !lastIntersectRight)
+        if (m_[iSaveLoc,jSaveLoc] != bigNum && !lastIntersectRight)
         {
-            dyL = dir * (y_[jSave_] +
-	            (m_[iSave_,jSave_] * (x - x_[iSave_,jSave_]))
+            dyL = dir * (y_[jSaveLoc] +
+	            (m_[iSaveLoc,jSaveLoc] * (x - x_[iSaveLoc,jSaveLoc]))
                 - y
             );
             if (dyL < 0.0) { dyL = bigNum; }
-        } 
+        }
 
         // Distance to right spine
-        if (m_[iSave_+1,jSave_] != bigNum && !lastIntersectLeft)
+        if (m_[iSaveLoc+1,jSaveLoc] != bigNum && !lastIntersectLeft)
         {
-            dyR = dir * (y_[jSave_] +
-	            (m_[iSave_+1,jSave_] * (x - x_[iSave_+1,jSave_])) 
+            dyR = dir * (y_[jSaveLoc] +
+	            (m_[iSaveLoc+1,jSaveLoc] * (x - x_[iSaveLoc+1,jSaveLoc]))
                 - y
             );
             if (dyR < 0.0) { dyR = bigNum; }
@@ -820,16 +888,18 @@ namespace interp
         bool& lastIntersectRight)
     const -> std::pair<bool, xIntersectionDescriptor>
     {
+        auto& jSaveLoc = jSave_();
+
         // Create empty intersection point object
         xIntersectionDescriptor d = {
-            .y = NAN, 
-            .xs = NAN, 
+            .y = NAN,
+            .xs = NAN,
             .t = IntersectionType::none,
             .idx = 0,
             .meshExit = false };
 
         // Update position
-        y = y_[jSave_+1];
+        y = y_[jSaveLoc+1];
 
         // Check termination condition
         if (y > yStop && endInterior) {
@@ -838,24 +908,24 @@ namespace interp
 
         // Update the index
         while (true) {
-            jSave_++;
-            if (jSave_ == ny()-1 || 
-                y_[jSave_+1] != y_[jSave_]) { break; }
+            jSaveLoc++;
+            if (jSaveLoc == ny()-1 ||
+                y_[jSaveLoc+1] != y_[jSaveLoc]) { break; }
         }
 
         // Record the hit
         d.y = y;
         d.xs = x;
         d.t = IntersectionType::rib;
-        d.idx = jSave_;
+        d.idx = jSaveLoc;
 
         // Check if we have hit the top of the mesh
-        if (jSave_ == ny()-1)
+        if (jSaveLoc == ny()-1)
         {
-            jSave_--;
+            jSaveLoc--;
             d.meshExit = true;
             return std::make_pair(false, d);
-        } 
+        }
         d.meshExit = false;
 
         // Set flags
@@ -888,16 +958,18 @@ namespace interp
         bool& lastIntersectRight)
     const -> std::pair<bool, xIntersectionDescriptor>
     {
+        auto& jSaveLoc = jSave_();
+
         // Create empty intersection point object
         xIntersectionDescriptor d = {
-            .y = NAN, 
-            .xs = NAN, 
+            .y = NAN,
+            .xs = NAN,
             .t = IntersectionType::none,
             .idx = 0,
             .meshExit = false };
 
         // Update position
-        y = y_[jSave_];
+        y = y_[jSaveLoc];
 
         // Check termination condition
         if (y < yStop && endInterior)
@@ -909,7 +981,7 @@ namespace interp
         d.y = y;
         d.xs = x;
         d.t = IntersectionType::rib;
-        d.idx = jSave_;
+        d.idx = jSaveLoc;
 
         // Stop if we have hit the bottom of the mesh
         if (y == y_[0])
@@ -921,9 +993,9 @@ namespace interp
         // Update the index
         while (true)
         {
-            jSave_--;
-            if (jSave_ == 0 || 
-                y_[jSave_-1] != y_[jSave_]) { break; }
+            jSaveLoc--;
+            if (jSaveLoc == 0 ||
+                y_[jSaveLoc-1] != y_[jSaveLoc]) { break; }
         }
 
         // Set flags
@@ -988,28 +1060,30 @@ namespace interp
         // index, and we may or may not need to flag that we have just
         // crossed a particular i track.
         //
-        if (x == x_[iSave_,jSave_])
+        auto& iSaveLoc = iSave_();
+        auto& jSaveLoc = jSave_();
+        if (x == x_[iSaveLoc,jSaveLoc])
         {
             // Case 1 or 2: hitting the upper left corner
-            if (m_[iSave_,jSave_] > 0 &&
-                !(m_[iSave_,jSave_] == bigNum))
+            if (m_[iSaveLoc,jSaveLoc] > 0 &&
+                !(m_[iSaveLoc,jSaveLoc] == bigNum))
             {
                 // Case 1: hitting upper left corner, crossing track; set
                 // intersection flag, and check for exiting grid
                 lastIntersectLeft = true;
-                if (iSave_ == 0)
+                if (iSaveLoc == 0)
                 {
                     return true;
                 }
-                while (x == x_[iSave_,jSave_])
+                while (x == x_[iSaveLoc,jSaveLoc])
                 {
-                    iSave_--;
-                    if (iSave_ == 0) { break; }
+                    iSaveLoc--;
+                    if (iSaveLoc == 0) { break; }
                 }
-                if (iSave_ == 0 && x == x_[iSave_,jSave_])
+                if (iSaveLoc == 0 && x == x_[iSaveLoc,jSaveLoc])
                 {
                     return true;
-                } 
+                }
             }
             else
             {
@@ -1017,27 +1091,27 @@ namespace interp
                 // crossing track; just set intersection flag
                 lastIntersectRight = true;
             }
-        } 
-        else if (x == x_[iSave_+1,jSave_])
+        }
+        else if (x == x_[iSaveLoc+1,jSaveLoc])
         {
             // Case 3 or 4: hitting upper right corner
-            if (m_[iSave_+1,jSave_] < 0)
+            if (m_[iSaveLoc+1,jSaveLoc] < 0)
             {
                 // Case 3: hitting upper right corner, crossing track
                 lastIntersectRight = true;
-                if (iSave_ == nx()-2)
+                if (iSaveLoc == nx()-2)
                 {
                     return true;
                 }
-                while (x == x_[iSave_+1,jSave_])
+                while (x == x_[iSaveLoc+1,jSaveLoc])
                 {
-                    if (iSave_ == nx()-2)
+                    if (iSaveLoc == nx()-2)
                     {
                         return true;
                     }
-                    iSave_++;
+                    iSaveLoc++;
                 }
-            } 
+            }
             else
             {
                 // Case 4: hitting upper right corner, but tangent, not
@@ -1060,54 +1134,56 @@ namespace interp
     {
         // Note that the cases here are exactly the same as in
         // handleTopRibCornerCases, just mirror-reversed
-        if (x == x_[iSave_,jSave_+1])
+        auto& iSaveLoc = iSave_();
+        auto& jSaveLoc = jSave_();
+        if (x == x_[iSaveLoc,jSaveLoc+1])
         {
             // Case 1 or 2: hitting the lower left corner
-            if (m_[iSave_,jSave_] < 0)
+            if (m_[iSaveLoc,jSaveLoc] < 0)
             {
                 // Case 1: hitting lower left corner, crossing track; set
                 // intersection flag, and check for exiting grid
                 lastIntersectLeft = true;
-                if (iSave_ == 0) {
+                if (iSaveLoc == 0) {
                     return true;
                 }
-                while (x == x_[iSave_,jSave_+1])
+                while (x == x_[iSaveLoc,jSaveLoc+1])
                 {
-                    iSave_--;
-                    if (iSave_ == 0) { break; }
+                    iSaveLoc--;
+                    if (iSaveLoc == 0) { break; }
                 }
-                if (iSave_ == 0 && x == x_[iSave_,jSave_+1])
+                if (iSaveLoc == 0 && x == x_[iSaveLoc,jSaveLoc+1])
                 {
                     return true;
                 }
-            } 
-            else 
+            }
+            else
             {
                 // Case 2: hitting lower left corner but tangent, so not
                 // crossing track; just set intersection flag
                 lastIntersectRight = true;
             }
-        } 
-        else if (x == x_[iSave_+1,jSave_+1])
+        }
+        else if (x == x_[iSaveLoc+1,jSaveLoc+1])
         {
             // Case 3 or 4: hitting lower right corner
-            if (m_[iSave_+1,jSave_] > 0 &&
-                !(m_[iSave_+1,jSave_] == bigNum))
+            if (m_[iSaveLoc+1,jSaveLoc] > 0 &&
+                !(m_[iSaveLoc+1,jSaveLoc] == bigNum))
             {
                 // Case 3: hitting lower right corner, crossing track
                 lastIntersectRight = true;
-                if (iSave_ == nx()-1) {
+                if (iSaveLoc == nx()-1) {
                     return true;
                 }
-                while (x == x_[iSave_+1,jSave_+1])
+                while (x == x_[iSaveLoc+1,jSaveLoc+1])
                 {
-                    if (iSave_ == nx()-2) {
+                    if (iSaveLoc == nx()-2) {
                         return true;
                     }
-                    iSave_++;
+                    iSaveLoc++;
                 }
-            } 
-            else 
+            }
+            else
             {
                 // Case 4: hitting lower right corner, but tangent, not
                 // crossing track
@@ -1133,10 +1209,13 @@ namespace interp
         bool& lastIntersectRight
     ) const -> std::pair<bool, xIntersectionDescriptor>
     {
+        auto& iSaveLoc = iSave_();
+        auto& jSaveLoc = jSave_();
+
         // Create empty intersection point object
         xIntersectionDescriptor d = {
-            .y = NAN, 
-            .xs = NAN, 
+            .y = NAN,
+            .xs = NAN,
             .t = IntersectionType::none,
             .idx = 0,
             .meshExit = false };
@@ -1145,8 +1224,8 @@ namespace interp
         const bool searchUp = yStop > y;
 
         // Update position
-        y = y_[jSave_] +
-            (m_[iSave_,jSave_] * (x - x_[iSave_,jSave_]));
+        y = y_[jSaveLoc] +
+            (m_[iSaveLoc,jSaveLoc] * (x - x_[iSaveLoc,jSaveLoc]));
 
         // Check termination condition
         if (endInterior) {
@@ -1158,17 +1237,17 @@ namespace interp
         }
 
         // Record the hit
-        const double s = s_[iSave_,jSave_] +
-            std::sqrt( 
-                std::pow(x - x_[iSave_,jSave_], 2) +
+        const double s = s_[iSaveLoc,jSaveLoc] +
+            std::sqrt(
+                std::pow(x - x_[iSaveLoc,jSaveLoc], 2) +
                 std::pow(dy, 2));
         d.y = y;
         d.xs = s;
         d.t = IntersectionType::spine;
-        d.idx = iSave_;
+        d.idx = iSaveLoc;
 
         // Stop if we are at mesh edge
-        if (iSave_ == 0)
+        if (iSaveLoc == 0)
         {
             d.meshExit = true;
             return std::make_pair(false, d);
@@ -1178,12 +1257,12 @@ namespace interp
         // Update index
         while (true)
         {
-            iSave_--;
-            if (iSave_ == 0 ||
-                (x_[iSave_,jSave_] != x_[iSave_+1,jSave_]) ||
-                (x_[iSave_,jSave_+1] != x_[iSave_+1,jSave_+1]))
-            { 
-                break; 
+            iSaveLoc--;
+            if (iSaveLoc == 0 ||
+                (x_[iSaveLoc,jSaveLoc] != x_[iSaveLoc+1,jSaveLoc]) ||
+                (x_[iSaveLoc,jSaveLoc+1] != x_[iSaveLoc+1,jSaveLoc+1]))
+            {
+                break;
             }
         }
 
@@ -1191,9 +1270,9 @@ namespace interp
         // handle the case where the mesh left edge is degenerate, so we
         // may have hit the edge even though our i index wasn't 0 to
         // start
-        if (iSave_ == 0 &&
-            x_[0,jSave_] == x_[1,jSave_] &&
-            x_[0,jSave_+1] == x_[1,jSave_+1])
+        if (iSaveLoc == 0 &&
+            x_[0,jSaveLoc] == x_[1,jSaveLoc] &&
+            x_[0,jSaveLoc+1] == x_[1,jSaveLoc+1])
         {
             d.meshExit = true;
             return std::make_pair(false, d);
@@ -1222,10 +1301,13 @@ namespace interp
         bool& lastIntersectRight
     ) const -> std::pair<bool, xIntersectionDescriptor>
     {
+        auto& iSaveLoc = iSave_();
+        auto& jSaveLoc = jSave_();
+
         // Create empty intersection point object
         xIntersectionDescriptor d = {
-            .y = NAN, 
-            .xs = NAN, 
+            .y = NAN,
+            .xs = NAN,
             .t = IntersectionType::none,
             .idx = 0,
             .meshExit = false };
@@ -1234,8 +1316,8 @@ namespace interp
         const bool searchUp = yStop > y;
 
         // Update position
-        y = y_[jSave_] +
-            (m_[iSave_+1,jSave_] * (x - x_[iSave_+1,jSave_]));
+        y = y_[jSaveLoc] +
+            (m_[iSaveLoc+1,jSaveLoc] * (x - x_[iSaveLoc+1,jSaveLoc]));
 
         // Check termination condition
         if (endInterior)
@@ -1246,19 +1328,19 @@ namespace interp
                 return std::make_pair(false, d);
             }
         }
-    
+
         // Record the hit
-        const double s = s_[iSave_+1,jSave_] +
-            std::sqrt( 
-                std::pow(x - x_[iSave_+1,jSave_], 2) +
+        const double s = s_[iSaveLoc+1,jSaveLoc] +
+            std::sqrt(
+                std::pow(x - x_[iSaveLoc+1,jSaveLoc], 2) +
                 std::pow(dy, 2));
         d.y = y;
         d.xs = s;
         d.t = IntersectionType::spine;
-        d.idx = iSave_ + 1;
+        d.idx = iSaveLoc + 1;
 
         // Check if we have exited the mesh
-        if (iSave_ == nx()-2)
+        if (iSaveLoc == nx()-2)
         {
             d.meshExit = true;
             return std::make_pair(false, d);
@@ -1267,10 +1349,10 @@ namespace interp
 
         // Update the index
         while (true) {
-            iSave_++;
-            if (iSave_ == nx()-1 ||
-                (x_[iSave_,jSave_] != x_[iSave_+1,jSave_]) ||
-                (x_[iSave_,jSave_+1] != x_[iSave_+1,jSave_+1]))
+            iSaveLoc++;
+            if (iSaveLoc == nx()-1 ||
+                (x_[iSaveLoc,jSaveLoc] != x_[iSaveLoc+1,jSaveLoc]) ||
+                (x_[iSaveLoc,jSaveLoc+1] != x_[iSaveLoc+1,jSaveLoc+1]))
             {
                 break;
             }
@@ -1278,9 +1360,9 @@ namespace interp
 
         // Second check to see if we have exited the mesh; needed in
         // case the right edge is degenerate
-        if (iSave_ == nx()-1)
+        if (iSaveLoc == nx()-1)
         {
-            iSave_--;
+            iSaveLoc--;
             d.meshExit = true;
             return std::make_pair(false, d);
         }
@@ -1323,6 +1405,9 @@ namespace interp
         const double xHi
     ) const -> std::vector<yIntersectionDescriptor>
     {
+        auto& iSaveLoc = iSave_();
+        auto& jSaveLoc = jSave_();
+
         std::vector<yIntersectionDescriptor> intList; // Output holder
 
         // Handle trivial case where inputs miss the mesh entirely
@@ -1342,22 +1427,22 @@ namespace interp
         }
 
         // Get y index and offset of input y value
-        jSave_ = yIdx(y);
-        const double dy = y - y_[jSave_];
+        jSaveLoc = yIdx(y);
+        const double dy = y - y_[jSaveLoc];
 
         // Get starting point for traversal
         double x = std::max(xLo, xMinY);
 
         // Check if starting position is exactly on a vertical spine,
         // and store the point if it is
-        if (x == xMinY) 
+        if (x == xMinY)
         {
             // Case where we start at mesh left edge
-            iSave_ = 0;
-            const double dx = x - x_[iSave_,jSave_];
+            iSaveLoc = 0;
+            const double dx = x - x_[iSaveLoc,jSaveLoc];
             intList.push_back({
-                .x = x, 
-                .s = s_[iSave_, jSave_] +
+                .x = x,
+                .s = s_[iSaveLoc, jSaveLoc] +
                     std::sqrt(std::pow(dx, 2) + std::pow(dy, 2)),
                 .idx = 0
             });
@@ -1366,8 +1451,8 @@ namespace interp
         {
             // Case where we start on mesh interior; note that
             // the call to onMesh here automatically caches the
-            // i and j indices of the starting cell in iSave_
-            // and jSave_
+            // i and j indices of the starting cell in iSaveLoc
+            // and jSaveLoc
             auto [onSpine, d] = onMesh(x, y);
             if (onSpine)
             {
@@ -1381,12 +1466,12 @@ namespace interp
         }
 
         // Now traverse mesh
-        while (iSave_ < nx() - 1)
+        while (iSaveLoc < nx() - 1)
         {
 
             // Move to right edge of cell
-            const double dx = dy / m_[iSave_+1, jSave_];
-            x = x_[iSave_+1, jSave_] + dx;
+            const double dx = dy / m_[iSaveLoc+1, jSaveLoc];
+            x = x_[iSaveLoc+1, jSaveLoc] + dx;
 
             // Enforce maximum x
             if (x > xHi) { return intList; }
@@ -1394,23 +1479,23 @@ namespace interp
             // Save intersection point
             intList.push_back({
                 .x = x,
-                .s = s_[iSave_+1, jSave_] +
+                .s = s_[iSaveLoc+1, jSaveLoc] +
                     std::sqrt(std::pow(dx,2) + std::pow(dy,2)),
-                .idx = iSave_ + 1
+                .idx = iSaveLoc + 1
             });
 
             // Move index, being careful to handle degenerate tracks; a
             // cell is degenerate only if it is collapsed on both the
-            // jSave_ and jSave_+1 ribs, so both must be checked (the
+            // jSaveLoc and jSaveLoc+1 ribs, so both must be checked (the
             // second comparison here previously compared a cell to
             // itself, which is always false and left degenerate cells
-            // on the jSave_+1 rib undetected)
+            // on the jSaveLoc+1 rib undetected)
             while (true)
             {
-                iSave_++;
-                if (iSave_ == nx() - 1) { break; }
-                if (x_[iSave_,jSave_] != x_[iSave_+1,jSave_] ||
-                    x_[iSave_,jSave_+1] != x_[iSave_+1,jSave_+1]) { break; }
+                iSaveLoc++;
+                if (iSaveLoc == nx() - 1) { break; }
+                if (x_[iSaveLoc,jSaveLoc] != x_[iSaveLoc+1,jSaveLoc] ||
+                    x_[iSaveLoc,jSaveLoc+1] != x_[iSaveLoc+1,jSaveLoc+1]) { break; }
             }
 
         }

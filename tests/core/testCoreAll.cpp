@@ -8,6 +8,7 @@
  */
 
 #include "testCluster.hpp"
+#include "testSimCluster.hpp"
 #include <exception>
 #include <iostream>
 
@@ -16,6 +17,7 @@ auto main() -> int {
     {
         int result = 0;
         result += testCluster();
+        result += testSimCluster();
         return result;
     }
     catch (const std::exception& error)
