@@ -181,7 +181,6 @@ io::SimControls::SimControls(const toml::table& inputDeck)
     if (nTrialInput.has_value())
     {
         nTrial_ = nTrialInput.value();
-        nTrialRemain_ = static_cast<long>(nTrial_);
     }
 
     // Handle output time generation
