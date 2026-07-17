@@ -380,6 +380,12 @@ namespace pdfs {
                     throw std::runtime_error("PDF: invalid sampling method");
                 }
             }
+            // Every enumerator of SamplingMethods is handled above, but
+            // method_'s underlying type can in principle hold a value
+            // outside the declared enumerators, so the compiler cannot
+            // prove the switch is exhaustive; make that explicit rather
+            // than falling off the end of a non-void function.
+            throw std::runtime_error("PDF: invalid sampling method");
         }
 
     protected:
