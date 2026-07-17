@@ -44,7 +44,7 @@ static constexpr int nThreads = 4;
 static constexpr size_t nTime = 3;
 
 // clusters.CMF in testCluster.in is a fixed value, so every cluster's
-// target mass should come out identical
+// target mass should come out identical regardless of [Fe/H]
 static constexpr double expectedTargetMass = 1e3;
 
 using TrialMap = std::map<unsigned long, std::vector<unsigned long>>;
@@ -52,14 +52,22 @@ using TrialMap = std::map<unsigned long, std::vector<unsigned long>>;
 // Build a cluster-simulation input deck with usable stellar physics
 // (IMF, tracks, CMF, [Fe/H]), reusing the deck already exercised by
 // testCluster/testSimPhysics, with model_name, out_dir, and n_trial
-// injected so it can drive a real end-to-end run
+// injected so it can drive a real end-to-end run. If fehDistPath is
+// non-empty, stars.FeH is overridden to point at it, replacing the
+// deck's default fixed [Fe/H] value with a distribution, so
+// SimPhysics::constFeH() comes out false.
 static auto makeInputDeck(const std::string& modelName,
-    const std::filesystem::path& outDir) -> toml::table
+    const std::filesystem::path& outDir,
+    const std::string& fehDistPath = "") -> toml::table
 {
     toml::table inputDeck = toml::parse_file("tests/core/assets/testCluster.in");
     inputDeck.insert("output", toml::table{ { "model_name", modelName } });
     inputDeck.at_path("outputs").as_table()->insert("out_dir", outDir.string());
     inputDeck.insert("n_trial", static_cast<int64_t>(nTrial));
+    if (!fehDistPath.empty())
+    {
+        inputDeck.at_path("stars").as_table()->insert_or_assign("FeH", fehDistPath);
+    }
     return inputDeck;
 }
 
@@ -85,8 +93,10 @@ static auto readDataset(const hid_t group, const char* name, const hid_t memType
 // Parse the deck, build SimControls/SimPhysics/OutputManager/
 // SimCluster (mirroring main.cpp's end-to-end setup), and run,
 // forcing real multi-threaded execution so SimCluster::run's parallel
-// for loop actually spans multiple threads
-static void runEndToEnd(const toml::table& inputDeck)
+// for loop actually spans multiple threads. Returns the resulting
+// SimPhysics::constFeH(), so callers can confirm the deck actually
+// exercised the code path they intended.
+static auto runEndToEnd(const toml::table& inputDeck) -> bool
 {
     const io::SimControls simControls(inputDeck);
     const io::SimPhysics simPhysics(inputDeck, simControls.simType());
@@ -103,8 +113,10 @@ static void runEndToEnd(const toml::table& inputDeck)
     omp_set_num_threads(nThreads);
 #endif // _OPENMP
 
+    const bool constFeH = simPhysics.constFeH();
     core::SimCluster simCluster(simControls, simPhysics, std::move(outputManager));
     simCluster.run();
+    return constFeH;
 }
 
 // Read back the trial/uid/target_mass/form_time columns written by
@@ -212,34 +224,43 @@ static auto checkTrialsAndUids(const TrialMap& rowsByTrial) -> int
     return 0;
 }
 
-auto testSimCluster() -> int
+// Run one end-to-end scenario (either the deck's default fixed [Fe/H],
+// or a variable-[Fe/H] distribution) and verify its output. scenario
+// names the case for error messages; expectConstFeH is what
+// SimPhysics::constFeH() should come out to for the given deck, which
+// this also verifies, so a mistake in deck construction can't
+// silently turn a scenario into a no-op duplicate of the other one.
+static auto runScenario(const std::string& scenario,
+    const toml::table& inputDeck,
+    const std::filesystem::path& h5Path,
+    const bool expectConstFeH) -> int
 {
-    const auto outDir = std::filesystem::temp_directory_path() / "slugTestSimCluster";
-    std::filesystem::remove_all(outDir);
-    std::filesystem::create_directories(outDir);
-    const std::string modelName = "test_sim_cluster";
-    const auto h5Path = outDir / (modelName + ".h5");
-    const toml::table inputDeck = makeInputDeck(modelName, outDir);
-
     OutputColumns cols;
     try
     {
-        runEndToEnd(inputDeck);
+        const bool constFeH = runEndToEnd(inputDeck);
+        if (constFeH != expectConstFeH)
+        {
+            std::cerr << "testSimCluster: " << scenario << ": expected "
+                "SimPhysics::constFeH() to be " << expectConstFeH
+                << ", got " << constFeH << "\n";
+            return 1;
+        }
         cols = readOutputColumns(h5Path);
     }
     catch (const std::exception& error)
     {
-        std::cerr << "testSimCluster: end-to-end run failed: "
-            << error.what() << "\n";
+        std::cerr << "testSimCluster: " << scenario
+            << ": end-to-end run failed: " << error.what() << "\n";
         return 1;
     }
 
     const size_t expectedRows = nTrial * nTime;
     if (cols.trial_.size() != expectedRows || cols.uid_.size() != expectedRows)
     {
-        std::cerr << "testSimCluster: expected " << expectedRows
-            << " output rows, got " << cols.trial_.size() << " trial "
-            << "entries and " << cols.uid_.size() << " uid entries\n";
+        std::cerr << "testSimCluster: " << scenario << ": expected "
+            << expectedRows << " output rows, got " << cols.trial_.size()
+            << " trial entries and " << cols.uid_.size() << " uid entries\n";
         return 1;
     }
 
@@ -248,10 +269,43 @@ auto testSimCluster() -> int
 
     if (rowsByTrial.size() != nTrial)
     {
-        std::cerr << "testSimCluster: expected " << nTrial
-            << " distinct trial numbers, got " << rowsByTrial.size() << "\n";
+        std::cerr << "testSimCluster: " << scenario << ": expected "
+            << nTrial << " distinct trial numbers, got "
+            << rowsByTrial.size() << "\n";
         return 1;
     }
 
     return checkTrialsAndUids(rowsByTrial);
+}
+
+auto testSimCluster() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() / "slugTestSimCluster";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+
+    // Fixed [Fe/H] (constFeH() == true): every cluster references the
+    // single Tracks2D/Mesh2DGrid/Interpolator1D set SimPhysics builds
+    // once, single-threaded, at construction time
+    const std::string constModelName = "test_sim_cluster_const_feh";
+    int result = runScenario("const [Fe/H]",
+        makeInputDeck(constModelName, outDir),
+        outDir / (constModelName + ".h5"),
+        true);
+
+    // Variable [Fe/H] (constFeH() == false): every cluster constructor
+    // calls Tracks3D::sliceConstFeH from inside SimCluster::run's
+    // parallel loop, building its own fresh Mesh2DGrid/Interpolator1D
+    // (and thus fresh ThreadVec's) from inside an active parallel
+    // region -- this is exactly the case that used to crash before
+    // ThreadVec was sized via omp_get_max_threads() instead of a
+    // nested parallel region
+    const std::string variableModelName = "test_sim_cluster_variable_feh";
+    result += runScenario("variable [Fe/H]",
+        makeInputDeck(variableModelName, outDir,
+            "tests/core/assets/testClusterFeHDist.toml"),
+        outDir / (variableModelName + ".h5"),
+        false);
+
+    return result;
 }

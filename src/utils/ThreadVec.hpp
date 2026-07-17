@@ -33,15 +33,26 @@ namespace utils {
 
         /**
          * @brief Construct an empty ThreadVec
+         * @details
+         * Sized via omp_get_max_threads() rather than by spawning a
+         * parallel region and reading omp_get_num_threads() from
+         * inside it: a ThreadVec can be constructed from inside an
+         * already-active parallel region (e.g. one built fresh by
+         * some per-thread work item), in which case that inner region
+         * would be nested and, since nested parallelism is inactive
+         * by default, would collapse to a team of one, sizing this
+         * ThreadVec for a single thread. Every later access is keyed
+         * by omp_get_thread_num() relative to the outer (real) team,
+         * so that undersized ThreadVec would then be indexed out of
+         * bounds. omp_get_max_threads() needs no parallel region of
+         * its own and reflects the team size any (non-nested)
+         * parallel region will actually use, so it stays correct
+         * regardless of whether construction happens inside or
+         * outside one.
          */
         ThreadVec() {
 #ifdef _OPENMP
-#pragma omp parallel
-        {
-            const int nthreads = omp_get_num_threads();
-#pragma omp single
-	        obj_.resize(nthreads);
-        }
+            obj_.resize(omp_get_max_threads());
 #else
             obj_.resize(1);
 #endif
