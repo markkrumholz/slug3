@@ -8,6 +8,7 @@
 #ifndef INTERPOLATOR1D_HPP
 #define INTERPOLATOR1D_HPP
 
+#include "../utils/ThreadVec.hpp"
 #include <algorithm>
 #include <array>
 #include <cassert>
@@ -75,11 +76,10 @@ RuntimeError
             const std::vector<double>& x,
             const std::array<std::vector<double>, NF>& f,
             const gsl_interp_type* interpType = gsl_interp_steffen
-        ) : 
+        ) :
         x_(x),
         f_(f),
-        interp_({nullptr}),
-        acc_(nullptr)
+        interp_({nullptr})
         {
             checkSorted();
             cleanDuplicates();
@@ -102,7 +102,7 @@ RuntimeError
         {
             // Free gsl data
             for (auto& i : interp_) { gsl_interp_free(i); }
-            gsl_interp_accel_free(acc_);
+            for (auto& a : acc_) { gsl_interp_accel_free(a); }
         }
 
         // Disallow move and copy constructors, since these would make
@@ -258,7 +258,7 @@ RuntimeError
             for (size_t i = 0; i < NF; ++i)
             {
                 result[i] = gsl_interp_eval(interp_[i], x_.data(), // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i is a loop index bounded by compile-time constant NF
-                    f_[i].data(), x, acc_); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i is a loop index bounded by compile-time constant NF
+                    f_[i].data(), x, acc_()); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i is a loop index bounded by compile-time constant NF
             }
             if constexpr(NF > 1) { return result; }
             else { return result[0]; }
@@ -274,7 +274,7 @@ RuntimeError
         {
             assert(x >= x_.front() && x <= x_.back());
             assert(idx < NF);
-            return gsl_interp_eval(interp_[idx], x_.data(), f_[idx].data(), x, acc_); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- idx is asserted < NF just above
+            return gsl_interp_eval(interp_[idx], x_.data(), f_[idx].data(), x, acc_()); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- idx is asserted < NF just above
         }
 
     private:
@@ -363,14 +363,14 @@ RuntimeError
                 }
                 gsl_interp_init(i, x_.data(), d.data(), x_.size());
             }
-            acc_ = gsl_interp_accel_alloc();
+            for (auto& a : acc_) { a = gsl_interp_accel_alloc(); }
         }
 
         // Internal storage
         std::vector<double> x_;                 /**< Independent variables */
         std::array<std::vector<double>, NF> f_; /**< Dependent variables */
         std::array<gsl_interp *, NF> interp_;   /**< GSL interpolator */
-        gsl_interp_accel *acc_;                 /**< Interpolation accelerator */
+        utils::ThreadVec<gsl_interp_accel *> acc_; /**< Interpolation accelerator, one per thread */
     };
 
 } // namespace interp
