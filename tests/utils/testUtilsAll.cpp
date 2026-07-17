@@ -8,6 +8,7 @@
  */
 
 #include "testRngThread.hpp"
+#include "testUniqueIDManager.hpp"
 #include <exception>
 #include <iostream>
 
@@ -16,6 +17,7 @@ auto main() -> int {
     {
         int result = 0;
         result += testRngThread();
+        result += testUniqueIDManager();
         return result;
     }
     catch (const std::exception& error)
