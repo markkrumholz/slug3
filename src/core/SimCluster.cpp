@@ -9,6 +9,7 @@
 #include "../io/OutputManager.hpp"
 #include "../io/SimControls.hpp"
 #include "../io/SimPhysics.hpp"
+#include "../utils/UniqueIDManager.hpp"
 #include "Cluster.hpp"
 #include <iostream>
 #include <memory>
@@ -42,7 +43,7 @@ void core::SimCluster::run()
                 << simControls_.nTrial() << "\n";
         }
 
-        Cluster cluster(0, simPhysics_.cmf().draw(), 0, simPhysics_);
+        Cluster cluster(utils::getID(), simPhysics_.cmf().draw(), 0, simPhysics_);
 
         const auto outTimes = simControls_.outTimes();
         for (const auto outTime : outTimes)
