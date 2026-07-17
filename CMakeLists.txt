@@ -17,6 +17,17 @@ if(APPLE)
     add_compile_options("--sysroot=${APPLE_SDK_PATH}")
 endif()
 
+# GCC's -Wpsabi fires at every call site of a function returning a small
+# struct/pair by value (e.g. Interpolator1D::xRange()), noting that GCC 9
+# and GCC >= 10 pass such types differently under the C++17 ABI. This is
+# purely an ABI-compatibility note between different GCC major versions;
+# since we always build from source with a single, consistent compiler,
+# it carries no actual risk here, so silence it rather than have it drown
+# out real warnings.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    add_compile_options(-Wno-psabi)
+endif()
+
 # Find GSL
 find_package(GSL REQUIRED)
 
