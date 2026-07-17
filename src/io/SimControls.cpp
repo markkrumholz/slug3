@@ -8,6 +8,7 @@
 #include "SimControls.hpp"
 #include "../utils/ParseUtils.hpp"
 #include "../utils/RngThread.hpp"
+#include <algorithm>
 #include <cmath>
 #include <stdexcept>
 #include <string>
@@ -35,6 +36,7 @@ static auto readOutputTimesArray(const toml::table& inputDeck) -> std::vector<do
         }
         times.push_back(val.value());
     }
+    std::ranges::sort(times); // Times must be sorted
     return times;
 }
 
