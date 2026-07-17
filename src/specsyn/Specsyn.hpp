@@ -8,7 +8,10 @@
 #ifndef SPECSYN_HPP
 #define SPECSYN_HPP
 
+#include "../tracks/TrackCommons.hpp"
 #include <algorithm>
+#include <array>
+#include <cstddef>
 #include <vector>
 
 namespace specsyn
@@ -56,6 +59,18 @@ namespace specsyn
                 [this](const double wl) -> double { return wl * (1.0 + z_); });
             return wlObs;
         }
+
+        /**
+         * @brief Compute the spectrum of a single star
+         * @param props Stellar properties, as produced by evaluating
+         *   the Interpolator1D returned by Tracks2D::getIsochrone at
+         *   this star's mass
+         * @return The star's spectrum, evaluated on the wavelength
+         *   grid returned by wl(), in units of erg/s/Angstrom
+         */
+        [[nodiscard]] virtual auto spec(
+            const std::array<double, static_cast<size_t>(tracks::FieldIdx::nTrackQty)>& props
+        ) const -> std::vector<double> = 0;
 
     protected:
 
