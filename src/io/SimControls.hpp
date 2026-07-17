@@ -131,8 +131,13 @@ namespace io
          * nTrialRemain_ is signed, once all trials have been claimed
          * further calls keep decrementing it below zero rather than
          * wrapping around, so they reliably keep returning 0.
+         *
+         * This is const (with nTrialRemain_ marked mutable) because the
+         * atomic capture makes it safe to call concurrently through a
+         * shared, const-qualified reference, the same way callers treat
+         * a mutex-guarded counter as logically read-only.
          */
-        [[nodiscard]] auto startTrial() -> unsigned long
+        [[nodiscard]] auto startTrial() const -> unsigned long
         {
             long remain{};
 #ifdef _OPENMP
@@ -149,7 +154,7 @@ namespace io
         SimType simType_ = SimType::none;              /**< Simulation type */
         unsigned int verbosity_ = 0;                   /**< Level of verbosity */
         unsigned long nTrial_ = 1;                     /**< Number of trials */
-        long nTrialRemain_ = 1;                        /**< Number of trials remaining */
+        mutable long nTrialRemain_ = 1;                 /**< Number of trials remaining */
         OutputMode outputMode_ = OutputMode::h5;       /**< Output mode */
         std::string modelName_ = "slug_sim";           /**< Name of this model */
         std::string outDir_;                           /**< Directory into which output will be written */
