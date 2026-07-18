@@ -6,9 +6,9 @@
  */
 
 #include "../src/specsyn/SpecsynBlackbody.hpp"
+#include "../src/specsyn/Specsyn.hpp"
 #include "../src/tracks/TrackCommons.hpp"
 #include "testSpecsynBlackbody.hpp"
-#include <array>
 #include <cmath>
 #include <cstddef>
 #include <gsl/gsl_const_cgsm.h> // NOLINT(misc-include-cleaner)
@@ -63,7 +63,7 @@ static auto testSpec(const specsyn::SpecsynBlackbody& synth) -> int
     // Bogus, made-up stellar data: T = 10^4 K, L = 100 Lsun
     constexpr double logTeff = 4.0;
     constexpr double logL = 2.0;
-    std::array<double, static_cast<std::size_t>(tracks::FieldIdx::nTrackQty)> props{};
+    specsyn::Specsyn::StarData props{};
     props.at(static_cast<std::size_t>(tracks::FieldIdx::logTe)) = logTeff;
     props.at(static_cast<std::size_t>(tracks::FieldIdx::logL)) = logL;
 

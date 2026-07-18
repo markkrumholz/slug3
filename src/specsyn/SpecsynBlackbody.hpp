@@ -9,7 +9,6 @@
 #define SPECSYNBLACKBODY_HPP
 
 #include "Specsyn.hpp"
-#include <array>
 #include <cstddef>
 #include <gsl/gsl_const_cgsm.h> // NOLINT(misc-include-cleaner)
 #include <numbers>
@@ -65,9 +64,7 @@ namespace specsyn
          * @return The star's spectrum, evaluated on the wavelength
          *   grid returned by wl(), in units of erg/s/Angstrom
          */
-        [[nodiscard]] auto spec(
-            const std::array<double, static_cast<std::size_t>(tracks::FieldIdx::nTrackQty)>& props
-        ) const -> std::vector<double> override;
+        [[nodiscard]] auto spec(const StarData& props) const -> std::vector<double> override;
     };
 
 } // namespace specsyn
