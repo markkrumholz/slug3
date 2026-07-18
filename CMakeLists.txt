@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.15)
-project(slug VERSION 0.1 LANGUAGES CXX)
+project(slug VERSION 0.1 LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -90,6 +90,7 @@ add_executable(slug
     src/tracks/TrackUtils.cpp
     src/io/SimControls.cpp
     src/utils/ParseUtils.cpp
+    src/extern/cubature/pcubature.c
 )
 
 # Test executables
@@ -117,6 +118,17 @@ add_executable(slugTestPDFs
 )
 add_executable(slugTestUtils
     tests/utils/testUtilsAll.cpp
+    tests/utils/testPDFIntegrator.cpp
+    src/pdfs/PDFFileParser.cpp
+    src/pdfs/PDFSegment.cpp
+    src/pdfs/PDFSegmentDelta.cpp
+    src/pdfs/PDFSegmentExponential.cpp
+    src/pdfs/PDFSegmentLognormal.cpp
+    src/pdfs/PDFSegmentNormal.cpp
+    src/pdfs/PDFSegmentPowerlaw.cpp
+    src/pdfs/PDFSegmentSchechter.cpp
+    src/utils/ParseUtils.cpp
+    src/extern/cubature/pcubature.c
 )
 add_executable(slugTestTracks
     src/interpolation/Mesh2DGrid.cpp
@@ -175,6 +187,21 @@ add_executable(slugTestIo
     tests/io/testSimControls.cpp
     tests/io/testSimPhysics.cpp
 )
+add_executable(slugTestSpecsyn
+    src/specsyn/SpecsynBlackbody.cpp
+    tests/specsyn/testSpecsynAll.cpp
+    tests/specsyn/testSpecsynBlackbody.cpp
+    src/extern/cubature/pcubature.c
+    src/pdfs/PDFFileParser.cpp
+    src/pdfs/PDFSegment.cpp
+    src/pdfs/PDFSegmentDelta.cpp
+    src/pdfs/PDFSegmentExponential.cpp
+    src/pdfs/PDFSegmentLognormal.cpp
+    src/pdfs/PDFSegmentNormal.cpp
+    src/pdfs/PDFSegmentPowerlaw.cpp
+    src/pdfs/PDFSegmentSchechter.cpp
+    src/utils/ParseUtils.cpp
+)
 
 # Python module, for testing the Python frontend. The CMake target is named
 # slugPython (the "slug" target name is already taken by the main
@@ -189,19 +216,19 @@ pybind11_add_module(slugPython
 )
 set_target_properties(slugPython PROPERTIES OUTPUT_NAME slug)
 
-# Include directories: project headers as regular includes; pcg-cpp and
-# tomlplusplus as system includes so clang-tidy and the compiler suppress
-# warnings from them. (pybind11's own include directory is already added
-# as SYSTEM automatically by pybind11_add_module below, for slugPython.)
-# This only takes effect for headers actually reached via this search
-# list (e.g. an angle-bracket include) -- a relative "../extern/..."
-# include resolves via the including file's own directory first and
-# never consults this list, so it would NOT be treated as a system
-# header despite living under a SYSTEM include path. This is why the
-# toml.hpp and pybind11 includes throughout the codebase are written in
-# angle-bracket form.
+# Include directories: project headers as regular includes; pcg-cpp,
+# tomlplusplus, and cubature as system includes so clang-tidy and the
+# compiler suppress warnings from them. (pybind11's own include directory
+# is already added as SYSTEM automatically by pybind11_add_module below,
+# for slugPython.) This only takes effect for headers actually reached
+# via this search list (e.g. an angle-bracket include) -- a relative
+# "../extern/..." include resolves via the including file's own
+# directory first and never consults this list, so it would NOT be
+# treated as a system header despite living under a SYSTEM include path.
+# This is why the toml.hpp, pybind11, and cubature.h includes throughout
+# the codebase are written in angle-bracket form.
 target_include_directories(slug PRIVATE src ${CMAKE_BINARY_DIR}/generated)
-target_include_directories(slug SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
+target_include_directories(slug SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus src/extern/cubature)
 
 target_include_directories(slugTestInterpolation PRIVATE src)
 target_include_directories(slugTestInterpolation SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
@@ -211,7 +238,7 @@ target_include_directories(slugTestPDFs SYSTEM PRIVATE src/extern/pcg-cpp/includ
 
 
 target_include_directories(slugTestUtils PRIVATE src)
-target_include_directories(slugTestUtils SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
+target_include_directories(slugTestUtils SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus src/extern/cubature)
 
 target_include_directories(slugTestTracks PRIVATE src)
 target_include_directories(slugTestTracks SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
@@ -221,6 +248,9 @@ target_include_directories(slugTestCore SYSTEM PRIVATE src/extern/pcg-cpp/includ
 
 target_include_directories(slugTestIo PRIVATE src ${CMAKE_BINARY_DIR}/generated)
 target_include_directories(slugTestIo SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
+
+target_include_directories(slugTestSpecsyn PRIVATE src)
+target_include_directories(slugTestSpecsyn SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus src/extern/cubature)
 
 target_include_directories(slugPython PRIVATE src)
 target_include_directories(slugPython SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
@@ -232,6 +262,7 @@ target_include_directories(slugTestUtils SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestTracks SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestCore SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestIo SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
+target_include_directories(slugTestSpecsyn SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugPython SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 
 # Link to GSL
@@ -242,6 +273,7 @@ target_link_libraries(slugTestUtils PRIVATE GSL::gsl)
 target_link_libraries(slugTestTracks PRIVATE GSL::gsl)
 target_link_libraries(slugTestCore PRIVATE GSL::gsl)
 target_link_libraries(slugTestIo PRIVATE GSL::gsl)
+target_link_libraries(slugTestSpecsyn PRIVATE GSL::gsl)
 target_link_libraries(slugPython PRIVATE GSL::gsl)
 
 # Link to HDF5
@@ -252,6 +284,7 @@ target_link_libraries(slugTestUtils PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugTestTracks PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugTestCore PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugTestIo PRIVATE ${HDF5_CXX_LIBRARIES})
+target_link_libraries(slugTestSpecsyn PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugPython PRIVATE ${HDF5_CXX_LIBRARIES})
 
 # Link to OpenMP, if available
@@ -263,6 +296,7 @@ if(OpenMP_CXX_FOUND)
     target_link_libraries(slugTestTracks PRIVATE OpenMP::OpenMP_CXX)
     target_link_libraries(slugTestCore PRIVATE OpenMP::OpenMP_CXX)
     target_link_libraries(slugTestIo PRIVATE OpenMP::OpenMP_CXX)
+    target_link_libraries(slugTestSpecsyn PRIVATE OpenMP::OpenMP_CXX)
     target_link_libraries(slugPython PRIVATE OpenMP::OpenMP_CXX)
 endif()
 
@@ -272,7 +306,16 @@ enable_testing()
 # Define tests
 add_test(NAME test_Interpolation COMMAND slugTestInterpolation)
 add_test(NAME test_PDFs COMMAND slugTestPDFs)
-add_test(NAME test_Utils COMMAND slugTestUtils)
+# test_Utils loads a real IMF file (data/imfs/chabrier.toml) directly
+# by relative path for testPDFIntegrator, so it needs to run from the
+# source tree root.
+add_test(NAME test_Utils COMMAND slugTestUtils
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+# test_Specsyn loads a real IMF file (data/imfs/chabrier.toml)
+# directly by relative path for testSpecCts, so it needs to run from
+# the source tree root.
+add_test(NAME test_Specsyn COMMAND slugTestSpecsyn
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 add_test(NAME test_Tracks COMMAND slugTestTracks
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 

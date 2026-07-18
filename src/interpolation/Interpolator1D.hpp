@@ -98,6 +98,7 @@ RuntimeError
             interpType)
         { }
 
+        // NOLINTNEXTLINE(portability-template-virtual-member-function) -- only reachable through unique_ptr<Interpolator1D<NF>> (e.g. specsyn::Specsyn::Isochrone), never a raw new/delete pair the compiler could implicitly instantiate differently; this project also always builds a given binary with a single, consistent compiler, so cross-compiler ABI divergence in the implicit-instantiation rules for this destructor is not a real risk here
         virtual ~Interpolator1D()
         {
             // Free gsl data
