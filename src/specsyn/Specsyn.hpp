@@ -33,10 +33,13 @@ namespace specsyn
     {
     public:
 
-        // Shorten type name: the isochrone type returned by
-        // Tracks2D::getIsochrone
+        // Shorten type names: the isochrone type returned by
+        // Tracks2D::getIsochrone, and the starData type returned
+        // by a call to Isochrone
         using Isochrone = std::vector<std::unique_ptr<
             interp::Interpolator1D<static_cast<size_t>(tracks::FieldIdx::nTrackQty)>>>;
+        using StarData = std::array<double, 
+            static_cast<size_t>(tracks::FieldIdx::nTrackQty)>;    
 
         /**
          * @brief Construct a Specsyn
@@ -76,9 +79,8 @@ namespace specsyn
          * @return The star's spectrum, evaluated on the wavelength
          *   grid returned by wl(), in units of erg/s/Angstrom
          */
-        [[nodiscard]] virtual auto spec(
-            const std::array<double, static_cast<size_t>(tracks::FieldIdx::nTrackQty)>& props
-        ) const -> std::vector<double> = 0;
+        [[nodiscard]] virtual auto spec(const StarData& props) const 
+        -> std::vector<double> = 0;
 
         /**
          * @brief Compute the spectrum of a continuously-sampled stellar population
