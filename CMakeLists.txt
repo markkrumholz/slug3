@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.15)
-project(slug VERSION 0.1 LANGUAGES CXX)
+project(slug VERSION 0.1 LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -90,6 +90,7 @@ add_executable(slug
     src/tracks/TrackUtils.cpp
     src/io/SimControls.cpp
     src/utils/ParseUtils.cpp
+    src/extern/cubature/pcubature.c
 )
 
 # Test executables
@@ -179,6 +180,7 @@ add_executable(slugTestSpecsyn
     src/specsyn/SpecsynBlackbody.cpp
     tests/specsyn/testSpecsynAll.cpp
     tests/specsyn/testSpecsynBlackbody.cpp
+    src/extern/cubature/pcubature.c
 )
 
 # Python module, for testing the Python frontend. The CMake target is named
@@ -194,19 +196,19 @@ pybind11_add_module(slugPython
 )
 set_target_properties(slugPython PROPERTIES OUTPUT_NAME slug)
 
-# Include directories: project headers as regular includes; pcg-cpp and
-# tomlplusplus as system includes so clang-tidy and the compiler suppress
-# warnings from them. (pybind11's own include directory is already added
-# as SYSTEM automatically by pybind11_add_module below, for slugPython.)
-# This only takes effect for headers actually reached via this search
-# list (e.g. an angle-bracket include) -- a relative "../extern/..."
-# include resolves via the including file's own directory first and
-# never consults this list, so it would NOT be treated as a system
-# header despite living under a SYSTEM include path. This is why the
-# toml.hpp and pybind11 includes throughout the codebase are written in
-# angle-bracket form.
+# Include directories: project headers as regular includes; pcg-cpp,
+# tomlplusplus, and cubature as system includes so clang-tidy and the
+# compiler suppress warnings from them. (pybind11's own include directory
+# is already added as SYSTEM automatically by pybind11_add_module below,
+# for slugPython.) This only takes effect for headers actually reached
+# via this search list (e.g. an angle-bracket include) -- a relative
+# "../extern/..." include resolves via the including file's own
+# directory first and never consults this list, so it would NOT be
+# treated as a system header despite living under a SYSTEM include path.
+# This is why the toml.hpp, pybind11, and cubature.h includes throughout
+# the codebase are written in angle-bracket form.
 target_include_directories(slug PRIVATE src ${CMAKE_BINARY_DIR}/generated)
-target_include_directories(slug SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
+target_include_directories(slug SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus src/extern/cubature)
 
 target_include_directories(slugTestInterpolation PRIVATE src)
 target_include_directories(slugTestInterpolation SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
@@ -228,7 +230,7 @@ target_include_directories(slugTestIo PRIVATE src ${CMAKE_BINARY_DIR}/generated)
 target_include_directories(slugTestIo SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
 
 target_include_directories(slugTestSpecsyn PRIVATE src)
-target_include_directories(slugTestSpecsyn SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
+target_include_directories(slugTestSpecsyn SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus src/extern/cubature)
 
 target_include_directories(slugPython PRIVATE src)
 target_include_directories(slugPython SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)

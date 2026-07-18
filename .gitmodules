@@ -8,3 +8,6 @@
 	path = src/extern/pybind11
 	url = ../../pybind/pybind11
 	branch = stable
+[submodule "src/extern/cubature"]
+	path = src/extern/cubature
+	url = https://github.com/stevengj/cubature

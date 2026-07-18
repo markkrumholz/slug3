@@ -68,7 +68,7 @@ WarningsAsErrors: '*'
 # exclude anything, and every header under src/ -- including vendored
 # third-party code in src/extern -- has effectively been unfiltered all
 # along.
-HeaderFilterRegex: '.*/src/(core|interpolation|io|pdfs|pybind|tracks|utils)/'
+HeaderFilterRegex: '.*/src/(core|interpolation|io|pdfs|pybind|specsyn|tracks|utils)/'
 
 FormatStyle: 'llvm'
 
