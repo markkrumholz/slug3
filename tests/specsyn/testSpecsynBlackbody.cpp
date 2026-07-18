@@ -1,0 +1,115 @@
+/**
+ * @file testSpecsynBlackbody.cpp
+ * @author Mark Krumholz
+ * @brief Unit tests for the SpecsynBlackbody class.
+ * @date 2026-07-18
+ */
+
+#include "../src/specsyn/SpecsynBlackbody.hpp"
+#include "../src/tracks/TrackCommons.hpp"
+#include "testSpecsynBlackbody.hpp"
+#include <array>
+#include <cmath>
+#include <cstddef>
+#include <gsl/gsl_const_cgsm.h> // NOLINT(misc-include-cleaner)
+#include <iostream>
+#include <numbers>
+#include <vector>
+
+namespace
+{
+    // Mirror the physical constants and formulas used internally by
+    // SpecsynBlackbody, so this test can independently recompute the
+    // expected blackbody spectrum for made-up stellar data and check
+    // it against the class's actual output, rather than just checking
+    // that spec() runs without crashing.
+    constexpr double planckH = GSL_CONST_CGSM_PLANCKS_CONSTANT_H;
+    constexpr double speedOfLight = GSL_CONST_CGSM_SPEED_OF_LIGHT;
+    constexpr double stefanBoltzmann = GSL_CONST_CGSM_STEFAN_BOLTZMANN_CONSTANT;
+    constexpr double boltzmannK = GSL_CONST_CGSM_BOLTZMANN;
+    constexpr double solarLuminosity = 3.828e33; // erg/s, IAU 2015 nominal value
+    constexpr double pi = std::numbers::pi_v<double>;
+    constexpr double angstromToCm = 1e-8;
+    constexpr double relTol = 1e-6;
+} // namespace
+
+// Check that the wavelength grid has the documented size and is
+// strictly increasing
+static auto testWlGrid(const std::vector<double>& wl) -> int
+{
+    constexpr std::size_t expectedSize = 1000;
+    if (wl.size() != expectedSize)
+    {
+        std::cerr << "testSpecsynBlackbody: expected a " << expectedSize
+            << "-point wavelength grid, got " << wl.size() << "\n";
+        return 1;
+    }
+    for (std::size_t i = 1; i < wl.size(); ++i)
+    {
+        if (wl.at(i) <= wl.at(i - 1))
+        {
+            std::cerr << "testSpecsynBlackbody: wavelength grid is not "
+                "strictly increasing at index " << i << "\n";
+            return 1;
+        }
+    }
+    return 0;
+}
+
+// Check spec()'s output, for some made-up (T, L), against an
+// independently-computed expected blackbody spectrum
+static auto testSpec(const specsyn::SpecsynBlackbody& synth) -> int
+{
+    // Bogus, made-up stellar data: T = 10^4 K, L = 100 Lsun
+    constexpr double logTeff = 4.0;
+    constexpr double logL = 2.0;
+    std::array<double, static_cast<std::size_t>(tracks::FieldIdx::nTrackQty)> props{};
+    props.at(static_cast<std::size_t>(tracks::FieldIdx::logTe)) = logTeff;
+    props.at(static_cast<std::size_t>(tracks::FieldIdx::logL)) = logL;
+
+    const auto result = synth.spec(props);
+    const auto& wl = synth.wl();
+    if (result.size() != wl.size())
+    {
+        std::cerr << "testSpecsynBlackbody: spec() returned " << result.size()
+            << " values, expected " << wl.size() << "\n";
+        return 1;
+    }
+
+    const double temperature = std::pow(10.0, logTeff);
+    const double luminosity = std::pow(10.0, logL) * solarLuminosity;
+    const double temperature4 = temperature * temperature * temperature * temperature;
+    const double radius = std::sqrt(luminosity / (4.0 * pi * stefanBoltzmann * temperature4));
+    const double area = 4.0 * pi * radius * radius;
+
+    for (std::size_t i = 0; i < wl.size(); ++i)
+    {
+        const double wlCm = wl.at(i) * angstromToCm;
+        const double x = planckH * speedOfLight / (wlCm * boltzmannK * temperature);
+        const double bLambda = (2.0 * planckH * speedOfLight * speedOfLight) /
+            ((wlCm * wlCm * wlCm * wlCm * wlCm) * (std::exp(x) - 1.0));
+        const double expected = area * bLambda * angstromToCm;
+
+        const bool ok = (expected == 0.0)
+            ? (result.at(i) == 0.0)
+            : (std::abs(result.at(i) - expected) <= relTol * std::abs(expected));
+        if (!ok)
+        {
+            std::cerr << "testSpecsynBlackbody: at wl = " << wl.at(i)
+                << " Angstrom, expected " << expected
+                << " erg/s/Angstrom, got " << result.at(i) << "\n";
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+auto testSpecsynBlackbody() -> int
+{
+    const specsyn::SpecsynBlackbody synth;
+    int result = 0;
+    result += testWlGrid(synth.wl());
+    result += testSpec(synth);
+    return result;
+}

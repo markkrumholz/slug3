@@ -175,6 +175,11 @@ add_executable(slugTestIo
     tests/io/testSimControls.cpp
     tests/io/testSimPhysics.cpp
 )
+add_executable(slugTestSpecsyn
+    src/specsyn/SpecsynBlackbody.cpp
+    tests/specsyn/testSpecsynAll.cpp
+    tests/specsyn/testSpecsynBlackbody.cpp
+)
 
 # Python module, for testing the Python frontend. The CMake target is named
 # slugPython (the "slug" target name is already taken by the main
@@ -222,6 +227,9 @@ target_include_directories(slugTestCore SYSTEM PRIVATE src/extern/pcg-cpp/includ
 target_include_directories(slugTestIo PRIVATE src ${CMAKE_BINARY_DIR}/generated)
 target_include_directories(slugTestIo SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
 
+target_include_directories(slugTestSpecsyn PRIVATE src)
+target_include_directories(slugTestSpecsyn SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
+
 target_include_directories(slugPython PRIVATE src)
 target_include_directories(slugPython SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
 
@@ -232,6 +240,7 @@ target_include_directories(slugTestUtils SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestTracks SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestCore SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestIo SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
+target_include_directories(slugTestSpecsyn SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugPython SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 
 # Link to GSL
@@ -242,6 +251,7 @@ target_link_libraries(slugTestUtils PRIVATE GSL::gsl)
 target_link_libraries(slugTestTracks PRIVATE GSL::gsl)
 target_link_libraries(slugTestCore PRIVATE GSL::gsl)
 target_link_libraries(slugTestIo PRIVATE GSL::gsl)
+target_link_libraries(slugTestSpecsyn PRIVATE GSL::gsl)
 target_link_libraries(slugPython PRIVATE GSL::gsl)
 
 # Link to HDF5
@@ -252,6 +262,7 @@ target_link_libraries(slugTestUtils PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugTestTracks PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugTestCore PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugTestIo PRIVATE ${HDF5_CXX_LIBRARIES})
+target_link_libraries(slugTestSpecsyn PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugPython PRIVATE ${HDF5_CXX_LIBRARIES})
 
 # Link to OpenMP, if available
@@ -263,6 +274,7 @@ if(OpenMP_CXX_FOUND)
     target_link_libraries(slugTestTracks PRIVATE OpenMP::OpenMP_CXX)
     target_link_libraries(slugTestCore PRIVATE OpenMP::OpenMP_CXX)
     target_link_libraries(slugTestIo PRIVATE OpenMP::OpenMP_CXX)
+    target_link_libraries(slugTestSpecsyn PRIVATE OpenMP::OpenMP_CXX)
     target_link_libraries(slugPython PRIVATE OpenMP::OpenMP_CXX)
 endif()
 
@@ -273,6 +285,7 @@ enable_testing()
 add_test(NAME test_Interpolation COMMAND slugTestInterpolation)
 add_test(NAME test_PDFs COMMAND slugTestPDFs)
 add_test(NAME test_Utils COMMAND slugTestUtils)
+add_test(NAME test_Specsyn COMMAND slugTestSpecsyn)
 add_test(NAME test_Tracks COMMAND slugTestTracks
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
