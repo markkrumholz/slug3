@@ -192,6 +192,15 @@ add_executable(slugTestSpecsyn
     tests/specsyn/testSpecsynAll.cpp
     tests/specsyn/testSpecsynBlackbody.cpp
     src/extern/cubature/pcubature.c
+    src/pdfs/PDFFileParser.cpp
+    src/pdfs/PDFSegment.cpp
+    src/pdfs/PDFSegmentDelta.cpp
+    src/pdfs/PDFSegmentExponential.cpp
+    src/pdfs/PDFSegmentLognormal.cpp
+    src/pdfs/PDFSegmentNormal.cpp
+    src/pdfs/PDFSegmentPowerlaw.cpp
+    src/pdfs/PDFSegmentSchechter.cpp
+    src/utils/ParseUtils.cpp
 )
 
 # Python module, for testing the Python frontend. The CMake target is named
@@ -302,7 +311,11 @@ add_test(NAME test_PDFs COMMAND slugTestPDFs)
 # source tree root.
 add_test(NAME test_Utils COMMAND slugTestUtils
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
-add_test(NAME test_Specsyn COMMAND slugTestSpecsyn)
+# test_Specsyn loads a real IMF file (data/imfs/chabrier.toml)
+# directly by relative path for testSpecCts, so it needs to run from
+# the source tree root.
+add_test(NAME test_Specsyn COMMAND slugTestSpecsyn
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 add_test(NAME test_Tracks COMMAND slugTestTracks
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 

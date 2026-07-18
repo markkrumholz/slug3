@@ -5,14 +5,19 @@
  * @date 2026-07-18
  */
 
-#include "../src/specsyn/SpecsynBlackbody.hpp"
+#include "../src/pdfs/PDF.hpp"
+#include "../src/pdfs/PDFFileParser.hpp"
 #include "../src/specsyn/Specsyn.hpp"
+#include "../src/specsyn/SpecsynBlackbody.hpp"
 #include "../src/tracks/TrackCommons.hpp"
 #include "testSpecsynBlackbody.hpp"
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <gsl/gsl_const_cgsm.h> // NOLINT(misc-include-cleaner)
+#include <gsl/gsl_interp.h> // NOLINT(misc-include-cleaner)
 #include <iostream>
+#include <memory>
 #include <numbers>
 #include <vector>
 
@@ -105,11 +110,83 @@ static auto testSpec(const specsyn::SpecsynBlackbody& synth) -> int
     return 0;
 }
 
+// Build a single-segment isochrone spanning [mLo, mHi] with constant
+// stellar properties (logTeff, logL) at every mass -- since spec()
+// then does not depend on mass at all, the population spectrum
+// specCts() computes reduces to a simple, independently verifiable
+// closed form (see testSpecCts)
+static auto makeConstPropsIsochrone(const double logTeff, const double logL,
+    const double mLo, const double mHi) -> specsyn::Specsyn::Isochrone
+{
+    constexpr auto nF = static_cast<std::size_t>(tracks::FieldIdx::nTrackQty);
+    const std::vector<double> masses = { mLo, mHi };
+    std::array<std::vector<double>, nF> props;
+    for (auto& p : props) { p = { 0.0, 0.0 }; }
+    props.at(static_cast<std::size_t>(tracks::FieldIdx::logL)) = { logL, logL };
+    props.at(static_cast<std::size_t>(tracks::FieldIdx::logTe)) = { logTeff, logTeff };
+
+    specsyn::Specsyn::Isochrone isochrone;
+    isochrone.push_back(std::make_unique<specsyn::Specsyn::Segment>(
+        masses, props, gsl_interp_linear));
+    return isochrone;
+}
+
+// Check specCts()'s output against an independently-computed expected
+// value, using a real IMF (data/imfs/chabrier.toml) and a made-up,
+// mass-independent isochrone (see makeConstPropsIsochrone): since
+// spec() does not depend on mass in this construction, it factors out
+// of the population integral entirely, so
+// specCts() == mTot * PDF::integral(mMin, mMax) * spec(props)
+static auto testSpecCts(const specsyn::SpecsynBlackbody& synth) -> int
+{
+    constexpr double logTeff = 4.0;
+    constexpr double logL = 2.0;
+    constexpr double mLo = 0.1;
+    constexpr double mHi = 100.0;
+    const auto isochrone = makeConstPropsIsochrone(logTeff, logL, mLo, mHi);
+
+    const pdfs::PDF imf = pdfs::parsePDFDescriptor("data/imfs/chabrier.toml");
+
+    constexpr double mTot = 1e5;
+    constexpr double mMin = 1.0;
+    constexpr double mMax = 50.0;
+    const auto result = synth.specCts(isochrone, imf, mTot, mMin, mMax);
+
+    specsyn::Specsyn::StarData props{};
+    props.at(static_cast<std::size_t>(tracks::FieldIdx::logL)) = logL;
+    props.at(static_cast<std::size_t>(tracks::FieldIdx::logTe)) = logTeff;
+    const auto starSpec = synth.spec(props);
+
+    if (result.size() != starSpec.size())
+    {
+        std::cerr << "testSpecsynBlackbody: specCts: expected " << starSpec.size()
+            << " wavelength points, got " << result.size() << "\n";
+        return 1;
+    }
+
+    const double weight = mTot * imf.integral(mMin, mMax);
+    for (std::size_t i = 0; i < result.size(); ++i)
+    {
+        const double expected = weight * starSpec.at(i);
+        const bool ok = (expected == 0.0)
+            ? (result.at(i) == 0.0)
+            : (std::abs(result.at(i) - expected) <= relTol * std::abs(expected));
+        if (!ok)
+        {
+            std::cerr << "testSpecsynBlackbody: specCts: at i = " << i
+                << " expected " << expected << ", got " << result.at(i) << "\n";
+            return 1;
+        }
+    }
+    return 0;
+}
+
 auto testSpecsynBlackbody() -> int
 {
     const specsyn::SpecsynBlackbody synth;
     int result = 0;
     result += testWlGrid(synth.wl());
     result += testSpec(synth);
+    result += testSpecCts(synth);
     return result;
 }

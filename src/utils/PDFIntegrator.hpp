@@ -143,14 +143,14 @@ namespace utils
             // to this call, this makes integrate() safe to call
             // concurrently on a single, shared PDFIntegrator instance
             // -- e.g. from different threads -- since no state is
-            // shared between calls. Args are stored decayed (by
-            // value) rather than as the forwarding references
-            // operator() and integrate() take, both to sidestep
-            // reference-collapsing subtleties in Context's definition
-            // and because there is no benefit to avoiding the copy
-            // here: integrate() blocks on pcubature, so ctx does not
-            // need to outlive the caller's own arguments regardless.
-            Context<Args...> ctx{ this, { std::forward<Args>(args)... } };
+            // shared between calls. Args are stored exactly as
+            // deduced (so an lvalue argument is stored as a
+            // reference, not copied) rather than decayed: integrate()
+            // blocks on pcubature, so ctx does not need to outlive
+            // the caller's own arguments, and some arguments (e.g. an
+            // Isochrone, a vector of unique_ptr's) are not copyable
+            // at all.
+            Context<Args...> ctx{ this, std::tuple<Args...>(std::forward<Args>(args)...) };
 
             Result result{};
             if constexpr (requires { result.resize(nInt_); })
@@ -185,7 +185,7 @@ namespace utils
         struct Context
         {
             const PDFIntegrator* self_;
-            std::tuple<std::decay_t<Args>...> args_;
+            std::tuple<Args...> args_;
         };
 
         // The pcubature-compatible trampoline: unpacks the Context
@@ -198,7 +198,7 @@ namespace utils
             const auto* ctx = static_cast<Context<Args...>*>(fdata);
             const double weight = ctx->self_->p_(*x);
             const auto val = std::apply(
-                [&](const std::decay_t<Args>&... args) -> auto { return (*ctx->self_)(*x, args...); },
+                [&](auto&&... args) -> auto { return (*ctx->self_)(*x, std::forward<decltype(args)>(args)...); },
                 ctx->args_);
             std::ranges::transform(val, fval,
                 [weight](const double v) -> double { return weight * v; });
