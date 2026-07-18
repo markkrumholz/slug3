@@ -118,6 +118,17 @@ add_executable(slugTestPDFs
 )
 add_executable(slugTestUtils
     tests/utils/testUtilsAll.cpp
+    tests/utils/testPDFIntegrator.cpp
+    src/pdfs/PDFFileParser.cpp
+    src/pdfs/PDFSegment.cpp
+    src/pdfs/PDFSegmentDelta.cpp
+    src/pdfs/PDFSegmentExponential.cpp
+    src/pdfs/PDFSegmentLognormal.cpp
+    src/pdfs/PDFSegmentNormal.cpp
+    src/pdfs/PDFSegmentPowerlaw.cpp
+    src/pdfs/PDFSegmentSchechter.cpp
+    src/utils/ParseUtils.cpp
+    src/extern/cubature/pcubature.c
 )
 add_executable(slugTestTracks
     src/interpolation/Mesh2DGrid.cpp
@@ -218,7 +229,7 @@ target_include_directories(slugTestPDFs SYSTEM PRIVATE src/extern/pcg-cpp/includ
 
 
 target_include_directories(slugTestUtils PRIVATE src)
-target_include_directories(slugTestUtils SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
+target_include_directories(slugTestUtils SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus src/extern/cubature)
 
 target_include_directories(slugTestTracks PRIVATE src)
 target_include_directories(slugTestTracks SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
@@ -286,7 +297,11 @@ enable_testing()
 # Define tests
 add_test(NAME test_Interpolation COMMAND slugTestInterpolation)
 add_test(NAME test_PDFs COMMAND slugTestPDFs)
-add_test(NAME test_Utils COMMAND slugTestUtils)
+# test_Utils loads a real IMF file (data/imfs/chabrier.toml) directly
+# by relative path for testPDFIntegrator, so it needs to run from the
+# source tree root.
+add_test(NAME test_Utils COMMAND slugTestUtils
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 add_test(NAME test_Specsyn COMMAND slugTestSpecsyn)
 add_test(NAME test_Tracks COMMAND slugTestTracks
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})

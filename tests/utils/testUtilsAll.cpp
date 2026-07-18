@@ -7,6 +7,7 @@
  * @date 2024-07-03
  */
 
+#include "testPDFIntegrator.hpp"
 #include "testRngThread.hpp"
 #include "testUniqueIDManager.hpp"
 #include <exception>
@@ -18,6 +19,7 @@ auto main() -> int {
         int result = 0;
         result += testRngThread();
         result += testUniqueIDManager();
+        result += testPDFIntegrator();
         return result;
     }
     catch (const std::exception& error)
