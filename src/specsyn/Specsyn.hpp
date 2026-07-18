@@ -8,10 +8,13 @@
 #ifndef SPECSYN_HPP
 #define SPECSYN_HPP
 
+#include "../interpolation/Interpolator1D.hpp"
+#include "../pdfs/PDF.hpp"
 #include "../tracks/TrackCommons.hpp"
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <memory>
 #include <vector>
 
 namespace specsyn
@@ -29,6 +32,11 @@ namespace specsyn
     class Specsyn
     {
     public:
+
+        // Shorten type name: the isochrone type returned by
+        // Tracks2D::getIsochrone
+        using Isochrone = std::vector<std::unique_ptr<
+            interp::Interpolator1D<static_cast<size_t>(tracks::FieldIdx::nTrackQty)>>>;
 
         /**
          * @brief Construct a Specsyn
@@ -71,6 +79,33 @@ namespace specsyn
         [[nodiscard]] virtual auto spec(
             const std::array<double, static_cast<size_t>(tracks::FieldIdx::nTrackQty)>& props
         ) const -> std::vector<double> = 0;
+
+        /**
+         * @brief Compute the spectrum of a continuously-sampled stellar population
+         * @param isochrone The isochrone for the population, as
+         *   returned by Tracks2D::getIsochrone
+         * @param imf The initial mass function of the population
+         * @param mTot Total mass of the population, in Msun
+         * @param mMin Minimum stellar mass in the population, in Msun
+         * @param mMax Maximum stellar mass in the population, in Msun
+         * @return The specific luminosity of the population, evaluated
+         *   on the wavelength grid returned by wl(), in units of
+         *   erg/s/Angstrom
+         * @details
+         * Combines the star-by-star spectral synthesis provided by
+         * spec() with the population's IMF, continuously sampled over
+         * [mMin, mMax] rather than drawn as a discrete set of stars.
+         */
+        [[nodiscard]] virtual auto specCts(
+            const Isochrone& /*isochrone*/,
+            const pdfs::PDF& /*imf*/,
+            double /*mTot*/,
+            double /*mMin*/,
+            double /*mMax*/
+        ) const -> std::vector<double>
+        {
+            return {};
+        }
 
     protected:
 
