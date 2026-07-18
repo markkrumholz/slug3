@@ -9,6 +9,9 @@ tracks = "MIST_test"
 alphaFe = -0.2
 FeH = 0.0
 
+[spectra]
+model = "blackbody"
+
 [clusters]
 CMF = 1e3
 CLF = 1e300

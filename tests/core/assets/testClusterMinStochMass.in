@@ -10,6 +10,9 @@ FeH = 0.0
 alphaFe = -0.2
 min_stoch_mass = 10.0
 
+[spectra]
+model = "blackbody"
+
 [clusters]
 CMF = 1e3
 
