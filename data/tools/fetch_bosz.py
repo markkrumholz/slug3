@@ -6,7 +6,9 @@ gzip'ed HDF5 file that slug can read.
 
 # Imports
 import argparse
+import re
 import shutil
+import urllib3
 
 # Magic strings
 BOSZ_version = "2024"
@@ -46,3 +48,82 @@ parser.add_argument("--micro", type=int, nargs="+", default=[],
 parser.add_argument("--verbose", action="store_true",
                     help="Print verbose output")
 args = parser.parse_args()
+
+# Little helper function to fetch a directory-listing page and return the
+# list of href values it links to -- subdirectory names ending in "/", or
+# plain file names
+def list_dir_entries(url) -> list:
+    response = urllib3.PoolManager().request('GET', url)
+    if response.status != 200:
+        raise RuntimeError(f"Failed to fetch BOSZ directory listing from {url}: HTTP {response.status}")
+    return re.findall('<a href="([^"]+)">', str(response.data))
+
+# Regex to parse a BOSZ spectrum filename into its component fields; see
+# https://archive.stsci.edu/hlsp/bosz for the naming convention, e.g.
+# bosz2024_mp_t5000_g+5.0_m+0.00_a+0.00_c+0.00_v0_r500_resam.txt.gz
+name_re = re.compile(
+    r'bosz' + re.escape(args.version) +
+    r'_(?P<atmos>[a-z]+)_t(?P<teff>[0-9]+)_g(?P<logg>[+-][0-9.]+)'
+    r'_m(?P<feh>[+-][0-9.]+)_a(?P<afe>[+-][0-9.]+)_c(?P<cfe>[+-][0-9.]+)'
+    r'_v(?P<micro>[0-9]+)_r(?P<r>[0-9]+)_(?P<prod>[a-z]+)\.txt\.gz')
+
+# BOSZ organizes spectra in a two-level directory hierarchy under args.url:
+# r<value>/ (instrumental broadening, our --r argument) then m<value>/
+# (metallicity, our --feh argument), with the actual spectrum files
+# living flat inside each m<value>/ directory. Rather than crawling the
+# whole tree and filtering afterward (as fetch_mist.py does for its
+# single flat directory), descend directly into the requested r/feh
+# subdirectories when given, since crawling every combination would mean
+# hundreds of HTTP requests just to build the candidate list; an omitted
+# --r or --feh falls back to discovering every subdirectory, matching
+# fetch_mist.py's "no filter means match everything" convention.
+if args.r:
+    r_dirs = [f"r{rv}" for rv in args.r]
+else:
+    r_dirs = sorted({e.rstrip('/') for e in list_dir_entries(args.url)
+                     if re.fullmatch(r'r[0-9]+/', e)})
+if args.verbose:
+    print(f"Searching resolution directories: {r_dirs}")
+
+# Walk the requested (or discovered) r/feh subdirectories, parse every
+# filename found in each, and keep only the "resam" products (resampled
+# onto a logarithmically-uniform wavelength grid, the ones we want)
+# matching any --afe/--cfe/--micro filters given; as with --r/--feh
+# above, an omitted filter matches everything.
+files_avail = []
+feh = []
+afe = []
+cfe = []
+r = []
+micro = []
+for r_dir in r_dirs:
+    r_url = f"{args.url}{r_dir}/"
+    if args.feh:
+        m_dirs = [f"m{fv:+.2f}" for fv in args.feh]
+    else:
+        m_dirs = sorted({e.rstrip('/') for e in list_dir_entries(r_url)
+                         if re.fullmatch(r'm[+-][0-9.]+/', e)})
+
+    for m_dir in m_dirs:
+        m_url = f"{r_url}{m_dir}/"
+        for fname in list_dir_entries(m_url):
+            match = name_re.fullmatch(fname)
+            if match is None or match.group('prod') != 'resam':
+                continue
+            afe_val = float(match.group('afe'))
+            cfe_val = float(match.group('cfe'))
+            micro_val = int(match.group('micro'))
+            if args.afe and afe_val not in args.afe:
+                continue
+            if args.cfe and cfe_val not in args.cfe:
+                continue
+            if args.micro and micro_val not in args.micro:
+                continue
+            files_avail.append(f"{r_dir}/{m_dir}/{fname}")
+            feh.append(float(match.group('feh')))
+            afe.append(afe_val)
+            cfe.append(cfe_val)
+            r.append(int(match.group('r')))
+            micro.append(micro_val)
+if args.verbose:
+    print(f"Filtered file list: {len(files_avail)} files to fetch.")
