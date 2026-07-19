@@ -22,5 +22,7 @@ PYBIND11_MODULE(slug, m, py::mod_gil_not_used()) {
     bindInterpolator1D(m);
     bindTracks3D(m);
     bindTracks2D(m);
+    bindSimPhysics(m);
+    bindCluster(m);
 }
 // NOLINTEND(misc-include-cleaner)

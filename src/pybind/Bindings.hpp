@@ -55,4 +55,14 @@ void bindTracks2D(py::module_& m);
  */
 void bindTracks3D(py::module_& m);
 
+/**
+ * @brief Bind io::SimPhysics as SimPhysics
+ */
+void bindSimPhysics(py::module_& m);
+
+/**
+ * @brief Bind core::Cluster as Cluster
+ */
+void bindCluster(py::module_& m);
+
 #endif // BINDINGS_HPP

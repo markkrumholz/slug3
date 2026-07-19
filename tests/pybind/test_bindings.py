@@ -8,11 +8,20 @@ access to the full-size track files under data/tracks. Interpolator1D
 has no exposed constructor (it is only ever returned by Tracks2D and
 Tracks3D methods), so it is exercised indirectly through the
 Interpolator1D objects returned by getTrack() and getIsochrone().
+SimPhysics and Cluster are exercised against
+tests/core/assets/testCluster.in, the same fixture the C++ tests in
+tests/core use, which also points at the MIST_test track set and
+requests spectra.model = "blackbody".
 
 This file is run via pytest, invoked as a CTest test from CMakeLists.txt
 (see the test_PythonBindings target), so `ctest` alone runs both the
-C++ and Python sides of the test suite.
+C++ and Python sides of the test suite. It requires the SLUG_DIR
+environment variable to be set to the repo root (see the
+test_PythonBindings target in CMakeLists.txt), since SimPhysics
+resolves stars.IMF = "chabrier.toml" via SLUG_DIR + "data/imfs".
 """
+
+import gc
 
 import numpy as np
 import pytest
@@ -39,6 +48,13 @@ GRID_MASSES = (0.1, 1.0, 5.0, 20.0, 100.0, 300.0)
 # time coverage.
 SAFE_LOG_TIMES = (0.0, 1.0, 2.0, 3.0)
 
+# Input deck used for the SimPhysics/Cluster tests below: a cluster-type
+# deck pointing at the MIST_test track set, with a fixed target mass
+# (clusters.CMF = 1e3) and [Fe/H] (stars.FeH = 0.0), and
+# spectra.model = "blackbody".
+CLUSTER_DECK = "tests/core/assets/testCluster.in"
+CLUSTER_TARGET_MASS = 1e3
+
 
 @pytest.fixture(scope="module")
 def tracks2d():
@@ -52,6 +68,12 @@ def tracks2d():
 def tracks3d():
     """A Tracks3D object spanning the full MIST_test feh range."""
     return slug.Tracks3D(TRACK_SET, -1.0, 0.5, KNOWN_VVCRIT, KNOWN_AFE, REGISTRY)
+
+
+@pytest.fixture(scope="module")
+def sim_physics():
+    """A SimPhysics object built from CLUSTER_DECK."""
+    return slug.SimPhysics(CLUSTER_DECK, "cluster")
 
 
 # ---------------------------------------------------------------------
@@ -284,3 +306,115 @@ def test_interpolator1d_vectorized_call(tracks2d):
     assert by_index == pytest.approx(by_name)
     for i, x in enumerate(xs):
         assert by_index[i] == pytest.approx(track(x, "mass"))
+
+
+# ---------------------------------------------------------------------
+# SimPhysics
+# ---------------------------------------------------------------------
+
+
+def test_simphysics_construction(sim_physics):
+    """Constructing from CLUSTER_DECK should succeed (the fixture
+    itself would already have failed the whole module if not); this
+    just documents the expectation explicitly."""
+    assert sim_physics is not None
+
+
+def test_simphysics_invalid_sim_type_raises():
+    """sim_type must be 'cluster' or 'galaxy'."""
+    with pytest.raises(RuntimeError):
+        slug.SimPhysics(CLUSTER_DECK, "not_a_sim_type")
+
+
+def test_simphysics_missing_file_raises():
+    """A nonexistent input deck path should raise, not crash."""
+    with pytest.raises(RuntimeError):
+        slug.SimPhysics("tests/core/assets/does_not_exist.in", "cluster")
+
+
+# ---------------------------------------------------------------------
+# Cluster
+# ---------------------------------------------------------------------
+
+
+def test_cluster_construction(sim_physics):
+    """A freshly constructed Cluster should report the uid, target
+    mass, and formation time it was given; birth mass should be
+    within 5% of the target (stochastic IMF sampling, same tolerance
+    used by the C++ testCluster.cpp); feh should match the deck's
+    fixed stars.FeH; it should not be disrupted, and should have no
+    spectrum yet (advance() has not been called)."""
+    cluster = slug.Cluster(1, CLUSTER_TARGET_MASS, 0.0, sim_physics)
+
+    assert cluster.uid() == 1
+    assert cluster.targetMass() == pytest.approx(CLUSTER_TARGET_MASS)
+    assert cluster.birthMass() == pytest.approx(CLUSTER_TARGET_MASS, rel=0.05)
+    assert cluster.formTime() == pytest.approx(0.0)
+    assert cluster.feH() == pytest.approx(0.0)
+    assert not cluster.isDisrupted()
+    assert len(cluster.starMasses()) > 0
+    assert len(cluster.deadStarMasses()) == 0
+    assert len(cluster.spec()) == 0
+
+
+def test_cluster_advance_populates_spec(sim_physics):
+    """advance() should populate spec() (empty beforehand, since
+    spectra.model = "blackbody" is set in CLUSTER_DECK) and can move
+    stars from starMasses() to deadStarMasses() as the population
+    ages."""
+    cluster = slug.Cluster(2, CLUSTER_TARGET_MASS, 0.0, sim_physics)
+    assert len(cluster.spec()) == 0
+
+    cluster.advance(5.0)
+
+    assert len(cluster.spec()) > 0
+    assert len(cluster.starMasses()) + len(cluster.deadStarMasses()) > 0
+
+
+def test_cluster_advance_backwards_raises(sim_physics):
+    """advance() to a time before the cluster's current time should
+    raise, not silently misbehave."""
+    cluster = slug.Cluster(3, CLUSTER_TARGET_MASS, 0.0, sim_physics)
+    cluster.advance(5.0)
+    with pytest.raises(RuntimeError):
+        cluster.advance(1.0)
+
+
+def test_cluster_tracks_returns_tracks2d(sim_physics):
+    """tracks() should return a usable Tracks2D spanning the
+    MIST_test mass grid."""
+    cluster = slug.Cluster(4, CLUSTER_TARGET_MASS, 0.0, sim_physics)
+    cluster_tracks = cluster.tracks()
+
+    assert cluster_tracks.mMin() == pytest.approx(0.1)
+    assert cluster_tracks.mMax() == pytest.approx(300.0)
+
+
+def test_cluster_tracks_reference_survives_cluster_deletion(sim_physics):
+    """tracks() returns a reference tied to the owning Cluster's
+    lifetime (py::return_value_policy::reference_internal); dropping
+    every other reference to the Cluster should not invalidate a
+    still-live Tracks2D object obtained from it."""
+    cluster = slug.Cluster(5, CLUSTER_TARGET_MASS, 0.0, sim_physics)
+    cluster_tracks = cluster.tracks()
+    del cluster
+    gc.collect()
+
+    assert cluster_tracks.mMin() == pytest.approx(0.1)
+
+
+def test_cluster_keeps_physics_alive():
+    """Cluster stores only a reference to the SimPhysics it was
+    constructed with, so the binding must keep_alive its physics
+    argument; dropping every other reference to the SimPhysics object
+    used to construct a Cluster should not leave that Cluster with a
+    dangling reference."""
+    physics = slug.SimPhysics(CLUSTER_DECK, "cluster")
+    cluster = slug.Cluster(6, CLUSTER_TARGET_MASS, 0.0, physics)
+    del physics
+    gc.collect()
+
+    # advance() reads physics_ internally; this would be a
+    # use-after-free (and likely crash) if keep_alive were missing
+    cluster.advance(5.0)
+    assert len(cluster.spec()) > 0
