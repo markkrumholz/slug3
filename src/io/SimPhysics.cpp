@@ -31,19 +31,17 @@ io::SimPhysics::SimPhysics(const toml::table& inputDeck, SimControls::SimType si
     cmf_ = utils::initPDFFromKey(inputDeck, "clusters.CMF");
     fehDist_ = utils::initPDFFromKey(inputDeck, "stars.FeH");
 
-    // Read the spectral synthesis model to use. For now "blackbody"
-    // is the only valid choice; it is a special value used for
-    // testing that does not require a spectral library, so it is
-    // checked directly rather than through a registry. A registry
-    // analogous to the one used for tracks will be added later to
-    // support real spectral libraries.
+    // Read the spectral synthesis model to use, if any -- spectra.model
+    // is optional, since not every simulation needs spectra computed.
+    // For now "blackbody" is the only valid choice when a model is
+    // requested; it is a special value used for testing that does not
+    // require a spectral library, so it is checked directly rather
+    // than through a registry. A registry analogous to the one used
+    // for tracks will be added later to support real spectral
+    // libraries.
     const auto spectraModelInput = utils::getTOMLKeyWithError<std::string>(
-        inputDeck, "spectra.model", true);
-    if (!spectraModelInput.has_value())
-    {
-        throw std::runtime_error("SimPhysics: spectra.model not found");
-    }
-    if (spectraModelInput.value() != "blackbody")
+        inputDeck, "spectra.model");
+    if (spectraModelInput.has_value() && spectraModelInput.value() != "blackbody")
     {
         throw std::runtime_error("SimPhysics: spectra.model must be 'blackbody'");
     }
