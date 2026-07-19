@@ -64,6 +64,15 @@ configure_file(
     @ONLY
 )
 
+# The directory the top-level CMakeLists.txt (this file) lives in, baked
+# in at compile time as a last-resort fallback for utils::getFilePath, so
+# data files under the repo (e.g. data/imfs/chabrier.toml) can still be
+# found even when SLUG_DIR isn't set and the working directory isn't the
+# repo root -- e.g. when slugPython is imported from an arbitrary
+# directory. Applies directory-wide, to every target below, since
+# getFilePath is reachable from most of them.
+add_compile_definitions(REPO_DIR="${CMAKE_SOURCE_DIR}")
+
 # pybind11, for the Python frontend
 add_subdirectory(src/extern/pybind11)
 
