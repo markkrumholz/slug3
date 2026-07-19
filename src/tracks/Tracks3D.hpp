@@ -16,7 +16,6 @@
 #include <limits>
 #include <memory>
 #include <string>
-#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -37,33 +36,6 @@ namespace tracks
             static_cast<size_t>(FieldIdx::nTrackQty)>>;
 
         // Constructors and destructors
-
-        /**
-         * @brief Numpy-style docstring for the Python constructor binding
-         */
-        static constexpr std::string_view constructorDocstring = R"doc(Construct a Tracks3D object from tracks on disk.
-
-Parameters
-----------
-trackName : str
-    Name of the track set within the registry.
-fehMin : float
-    Minimum [Fe/H] value to include.
-fehMax : float
-    Maximum [Fe/H] value to include.
-vvcrit : float, optional
-    Rotation rate v/vcrit of the desired tracks. Default is 0.0.
-afe : float, optional
-    [alpha/Fe] value of the desired tracks. Default is 0.0.
-registryName : str, optional
-    Path to the track registry file. Default is the package's default
-    registry (data/tracks/tracks.toml).
-
-Throws
-------
-RuntimeError
-    If no tracks in trackName match vvcrit and afe within the
-    requested [Fe/H] range.)doc";
 
         /**
          * @brief Construct a Tracks3D object from tracks on disk
@@ -97,30 +69,10 @@ RuntimeError
         // Observers
 
         /**
-         * @brief Numpy-style docstring for the Python mMin binding
-         */
-        static constexpr std::string_view mMinDocstring = R"doc(Return the minimum mass spanned by this set of tracks.
-
-Returns
--------
-mmin : float
-    Minimum mass, in Msun.)doc";
-
-        /**
          * @brief Return the minimum mass in the tracks
          * @return Minimum mass in the tracks
          */
         [[nodiscard]] auto mMin() const { return interp_->yMin(); }
-
-        /**
-         * @brief Numpy-style docstring for the Python mMax binding
-         */
-        static constexpr std::string_view mMaxDocstring = R"doc(Return the maximum mass spanned by this set of tracks.
-
-Returns
--------
-mmax : float
-    Maximum mass, in Msun.)doc";
 
         /**
          * @brief Return the maximum mass in the tracks
@@ -129,30 +81,10 @@ mmax : float
         [[nodiscard]] auto mMax() const { return interp_->yMax(); }
 
         /**
-         * @brief Numpy-style docstring for the Python logTMin binding
-         */
-        static constexpr std::string_view logTMinDocstring = R"doc(Return the minimum log10(time) spanned by this set of tracks.
-
-Returns
--------
-logtmin : float
-    Minimum log10(time / yr).)doc";
-
-        /**
          * @brief Return the minimum log of time in the tracks
          * @return Minimum log10(time) in the tracks
          */
         [[nodiscard]] auto logTMin() const { return interp_->xMin(); }
-
-        /**
-         * @brief Numpy-style docstring for the Python logTMax binding
-         */
-        static constexpr std::string_view logTMaxDocstring = R"doc(Return the maximum log10(time) spanned by this set of tracks.
-
-Returns
--------
-logtmax : float
-    Maximum log10(time / yr).)doc";
 
         /**
          * @brief Return the maximum log of time in the tracks
@@ -161,46 +93,16 @@ logtmax : float
         [[nodiscard]] auto logTMax() const { return interp_->xMax(); }
 
         /**
-         * @brief Numpy-style docstring for the Python feH binding
-         */
-        static constexpr std::string_view feHDocstring = R"doc(Return the [Fe/H] values spanned by this set of tracks.
-
-Returns
--------
-feh : list of float
-    [Fe/H] values spanned by this set of tracks.)doc";
-
-        /**
          * @brief Return the [Fe/H] values spanned by this set of tracks
          * @return A const reference to the [Fe/H] values spanned by this set of tracks
          */
         [[nodiscard]] auto feH() const -> const std::vector<double>& { return FeH_; }
 
         /**
-         * @brief Numpy-style docstring for the Python aFe binding
-         */
-        static constexpr std::string_view aFeDocstring = R"doc(Return the [alpha/Fe] value of this set of tracks.
-
-Returns
--------
-afe : float
-    [alpha/Fe] value of this set of tracks, or NaN if not available.)doc";
-
-        /**
          * @brief Return the [alpha/Fe] value of this set of tracks
          * @return [alpha/Fe] value of this set of tracks, or quiet_NaN if not available
          */
         [[nodiscard]] auto aFe() const { return AFe_; }
-
-        /**
-         * @brief Numpy-style docstring for the Python vVcrit binding
-         */
-        static constexpr std::string_view vVcritDocstring = R"doc(Return the v/vcrit value of this set of tracks.
-
-Returns
--------
-vvcrit : float
-    v/vcrit value of this set of tracks, or NaN if not available.)doc";
 
         /**
          * @brief Return the v/vcrit value of this set of tracks
@@ -229,29 +131,6 @@ vvcrit : float
        { return interp_->sliceConstZ(feh).yLim(t); }
 
         /**
-         * @brief Numpy-style docstring for the Python getTrack binding
-         */
-        static constexpr std::string_view getTrackDocstring = R"doc(Return the track for a star of a given mass and [Fe/H].
-
-Parameters
-----------
-m : float
-    Stellar mass, in Msun.
-feh : float
-    [Fe/H] value of the tracks to use.
-
-Returns
--------
-interp : Interpolator1D
-    An Interpolator1D object containing the interpolating track,
-    parameterized by log10(time / yr).
-
-Throws
-------
-RuntimeError
-    If m is less than mMin() or greater than mMax().)doc";
-
-        /**
          * @brief Return the track for a star of a given mass and [Fe/H]
          * @param m Mass of the star whose track should be computed
          * @param feh [Fe/H] value of the tracks to use
@@ -259,28 +138,6 @@ RuntimeError
          */
         [[nodiscard]] auto getTrack(const double m, const double feh) const
         { return interp_->sliceConstZ(feh).interpConstY(m); }
-
-        /**
-         * @brief Numpy-style docstring for the Python getIsochrone binding
-         */
-        static constexpr std::string_view getIsochroneDocstring = R"doc(Return the isochrone at a given log time and [Fe/H].
-
-Parameters
-----------
-logT : float
-    log10(time / yr) of the isochrone.
-feh : float
-    [Fe/H] value of the tracks to use.
-
-Returns
--------
-isochrone : list of Interpolator1D
-    A list of Interpolator1D objects, each parameterized by mass,
-    giving the isochrone. More than one entry indicates disjoint
-    segments, which can occur for non-monotonic tracks; an empty list
-    indicates that logT lies outside the tracks' time range, or that
-    it touches the tracks at only a single mass (too few points to
-    interpolate).)doc";
 
         /**
          * @brief Return the isochrone at a given log time and [Fe/H]
