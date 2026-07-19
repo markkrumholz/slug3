@@ -186,11 +186,97 @@ static auto testClusterMinStochMass() -> int
     return 0;
 }
 
+// Verify that Cluster::spec() is populated by advance() when a
+// spectral synthesizer is available, from the individually-sampled
+// stars alone (min_stoch_mass unset, so every star is drawn
+// stochastically and there is no continuously-sampled part of the
+// population to add).
+static auto testClusterSpecFullyStochastic() -> int
+{
+    constexpr double ageYr = 1e6;
+
+    try
+    {
+        const toml::table inputDeck = toml::parse_file(inputFile);
+        const io::SimControls controls(inputDeck);
+        const io::SimPhysics sim(inputDeck, controls.simType());
+
+        utils::rng().seed(rngSeed);
+        core::Cluster cluster(0, 1e4, 0.0, sim);
+        cluster.advance(ageYr);
+
+        const auto& spec = cluster.spec();
+        if (spec.size() != sim.specsyn()->wl().size())
+        {
+            std::cerr << "testCluster: specFullyStochastic: spec() size "
+                << spec.size() << " does not match wl() size "
+                << sim.specsyn()->wl().size() << "\n";
+            return 1;
+        }
+        if (std::reduce(spec.begin(), spec.end(), 0.0) <= 0.0)
+        {
+            std::cerr << "testCluster: specFullyStochastic: expected a "
+                "non-zero spectrum from the individually-sampled stars\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testCluster: specFullyStochastic test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Verify that Cluster::spec() is a non-trivial, correctly-sized
+// spectrum when there is a continuously-sampled (non-stochastic)
+// part of the population (min_stoch_mass set)
+static auto testClusterSpecContinuousPopulation() -> int
+{
+    constexpr double ageYr = 1e6;
+
+    try
+    {
+        const toml::table inputDeck = toml::parse_file(inputFileMinStochMass);
+        const io::SimControls controls(inputDeck);
+        const io::SimPhysics sim(inputDeck, controls.simType());
+
+        utils::rng().seed(rngSeed);
+        core::Cluster cluster(0, 1e4, 0.0, sim);
+        cluster.advance(ageYr);
+
+        const auto& spec = cluster.spec();
+        if (spec.size() != sim.specsyn()->wl().size())
+        {
+            std::cerr << "testCluster: specContinuousPopulation: spec() size "
+                << spec.size() << " does not match wl() size "
+                << sim.specsyn()->wl().size() << "\n";
+            return 1;
+        }
+        if (std::reduce(spec.begin(), spec.end(), 0.0) <= 0.0)
+        {
+            std::cerr << "testCluster: specContinuousPopulation: expected a "
+                "non-zero spectrum with a non-stochastic population present\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testCluster: specContinuousPopulation test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
 auto testCluster() -> int
 {
     int result = 0;
     result += testClusterConstruction();
     result += testClusterAdvance();
     result += testClusterMinStochMass();
+    result += testClusterSpecFullyStochastic();
+    result += testClusterSpecContinuousPopulation();
     return result;
 }

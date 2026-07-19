@@ -34,7 +34,7 @@ core::Cluster::Cluster(const unsigned long uid,
         physics.fracStochMass() * mass,
         physics.minStochMass(),
         physics.imf().getMax())),
-    birthNonStochMass_(physics.fracStochMass() * mass),
+    birthNonStochMass_((1.0 - physics.fracStochMass()) * mass),
     birthMass_(std::reduce(m_.begin(), m_.end(), 0.0)),
     disruptTime_(std::numeric_limits<double>::quiet_NaN()),
     curTime_(time)
@@ -99,6 +99,9 @@ void core::Cluster::advance(const double t)
     // Get isochrone for new time
     isochrone_ = tracks().getIsochrone(logAge);
 
+    // Update the population spectrum, if a spectral synthesizer was requested
+    computeSpec();
+
     // Check for disruption
     if (curTime_ > disruptTime_) { isDisrupted_ = true; }
 }
@@ -158,3 +161,40 @@ void core::Cluster::updateLivingStars(const double logAge)
     }
 }
 // NOLINTEND(misc-include-cleaner)
+
+// Compute the population spectrum at the current isochrone, if a
+// spectral synthesizer was requested
+void core::Cluster::computeSpec()
+{
+    const auto& ph = physics_.get();
+    const auto* synth = ph.specsyn();
+    if (synth == nullptr) { return; }
+
+    spec_.assign(synth->wl().size(), 0.0);
+
+    // Continuously-sampled (non-stochastic) part of the population
+    if (birthNonStochMass_ > 0.0)
+    {
+        spec_ = synth->specCts(isochrone_, ph.imf(),
+            birthNonStochMass_, ph.imf().getMin(), ph.minStochMass());
+    }
+
+    // Individually-sampled (stochastic) stars
+    for (const double m : m_)
+    {
+        // Stars below the tracks' minimum mass have no isochrone
+        // segment to evaluate spec() on (this can happen when the
+        // IMF extends below the tracks' mass range); skip them,
+        // treating their contribution as negligible
+        const auto seg = std::ranges::find_if(isochrone_,
+            [m](const auto& segment) -> bool
+            { return m >= segment->xMin() && m <= segment->xMax(); });
+        if (seg == isochrone_.end()) { continue; }
+
+        const auto starSpec = synth->spec(m, **seg);
+        for (std::size_t i = 0; i < spec_.size(); ++i)
+        {
+            spec_[i] += starSpec[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- spec_ and starSpec both have size wl().size() by construction
+        }
+    }
+}

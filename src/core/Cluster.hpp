@@ -109,6 +109,17 @@ namespace core
         [[nodiscard]] auto tracks() const -> const tracks::Tracks2D&;
 
         /**
+         * @brief Return the cluster's continuously-sampled spectrum
+         * @return A const reference to the spectrum of the
+         *   non-stochastically-sampled part of the population, on
+         *   the wavelength grid of the simulation's spectral
+         *   synthesizer, or an empty vector if no spectral
+         *   synthesizer was requested (SimPhysics::specsyn() is
+         *   null)
+         */
+        [[nodiscard]] auto spec() const -> const auto& { return spec_; }
+
+        /**
          * @brief Advance the cluster in time
          * @param t Time to which to advance, in yr
          */
@@ -138,6 +149,7 @@ namespace core
         // Other state information
         bool isDisrupted_ = false;  /**< Has this cluster disrupted */
         Interp1dPtr isochrone_;     /**< Isochrone for the current time */
+        std::vector<double> spec_;  /**< Spectrum of the continuously-sampled part of the population at the current time */
 
         /**
          * Tracks for this cluster's [Fe/H]: either owned outright (when
@@ -153,6 +165,17 @@ namespace core
          * @param logAge log10 of the cluster age in yr
          */
         void updateLivingStars(double logAge);
+
+        /**
+         * @brief Update spec_ from the current isochrone and star lists
+         * @details
+         * Does nothing if SimPhysics::specsyn() is null (no spectral
+         * synthesizer was requested). Otherwise sets spec_ to the sum
+         * of the continuously-sampled (non-stochastic) part of the
+         * population, if any, and each individually-sampled
+         * (stochastic) star in m_.
+         */
+        void computeSpec();
 
     };
 
