@@ -136,21 +136,37 @@ namespace utils
         {
             using Result = decltype((*this)(a, args...));
 
-            // Bundle a pointer back to this PDFIntegrator with the
-            // extra arguments into a context local to this call, so
+            // Restrict [a, b] to p's own support: a caller may
+            // legitimately ask for an integral over a range wider
+            // than where p is defined (e.g. integrating over
+            // [0, 2] when p is only defined on [1, 2]), and p itself
+            // is not guaranteed to be evaluable outside its own
+            // domain.
+            a = std::max(a, p_.getMin());
+            b = std::min(b, p_.getMax());
+
+            // Bundle a pointer back to this PDFIntegrator, the
+            // (already-clamped) integration bounds, and the extra
+            // arguments into a context local to this call, so
             // integrand() (which pcubature calls back with only a
-            // single void* to work with) can reach both. Being local
-            // to this call, this makes integrate() safe to call
-            // concurrently on a single, shared PDFIntegrator instance
-            // -- e.g. from different threads -- since no state is
-            // shared between calls. Args are stored exactly as
-            // deduced (so an lvalue argument is stored as a
+            // single void* to work with) can reach all of them.
+            // integrand() re-clamps each point pcubature hands it
+            // into [a, b], since pcubature computes its evaluation
+            // points via a floating-point affine map from its
+            // reference interval onto [a, b] that can land a point a
+            // few ULPs outside [a, b] at the very edge, which would
+            // otherwise reach f() with an out-of-domain argument.
+            // Being local to this call, this makes integrate() safe
+            // to call concurrently on a single, shared PDFIntegrator
+            // instance -- e.g. from different threads -- since no
+            // state is shared between calls. Args are stored exactly
+            // as deduced (so an lvalue argument is stored as a
             // reference, not copied) rather than decayed: integrate()
             // blocks on pcubature, so ctx does not need to outlive
             // the caller's own arguments, and some arguments (e.g. an
             // Isochrone, a vector of unique_ptr's) are not copyable
             // at all.
-            Context<Args...> ctx{ this, std::tuple<Args...>(std::forward<Args>(args)...) };
+            Context<Args...> ctx{ this, a, b, std::tuple<Args...>(std::forward<Args>(args)...) };
 
             Result result{};
             if constexpr (requires { result.resize(nInt_); })
@@ -178,27 +194,34 @@ namespace utils
             return std::invoke(f_, std::forward<Obj>(obj), x, std::forward<Rest>(rest)...);
         }
 
-        // Bundles a pointer back to this PDFIntegrator with the extra
+        // Bundles a pointer back to this PDFIntegrator, the
+        // (already-clamped) integration bounds, and the extra
         // arguments passed to integrate(), so integrand() can recover
-        // both from the single void* fdata pcubature hands it
+        // all of them from the single void* fdata pcubature hands it
         template <class... Args>
         struct Context
         {
             const PDFIntegrator* self_;
+            double a_;
+            double b_;
             std::tuple<Args...> args_;
         };
 
         // The pcubature-compatible trampoline: unpacks the Context
         // pointed to by fdata, evaluates p(x) * f(x, args...) at the
-        // single point *x, and writes the result into fval
+        // single point *x (clamped into [ctx->a_, ctx->b_], since
+        // pcubature's own evaluation points can land a few ULPs
+        // outside that range at the very edge due to floating-point
+        // roundoff), and writes the result into fval
         template <class... Args>
         static auto integrand(unsigned /*ndim*/, const double* x, void* fdata,
             unsigned /*fdim*/, double* fval) -> int
         {
             const auto* ctx = static_cast<Context<Args...>*>(fdata);
-            const double weight = ctx->self_->p_(*x);
+            const double xClamped = std::clamp(*x, ctx->a_, ctx->b_);
+            const double weight = ctx->self_->p_(xClamped);
             const auto val = std::apply(
-                [&](auto&&... args) -> auto { return (*ctx->self_)(*x, std::forward<decltype(args)>(args)...); },
+                [&](auto&&... args) -> auto { return (*ctx->self_)(xClamped, std::forward<decltype(args)>(args)...); },
                 ctx->args_);
             std::ranges::transform(val, fval,
                 [weight](const double v) -> double { return weight * v; });

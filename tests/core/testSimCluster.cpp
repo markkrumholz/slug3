@@ -7,21 +7,25 @@
 
 #include "../src/core/SimCluster.hpp"
 #include "../src/io/OutputManager.hpp"
+#include "../src/io/OutputManagerAscii.hpp"
 #include "../src/io/OutputManagerH5.hpp"
 #include "../src/io/SimControls.hpp"
 #include "../src/io/SimPhysics.hpp"
+#include "../src/specsyn/SpecsynBlackbody.hpp"
 #include "hdf5.h" // NOLINT(misc-include-cleaner)
 #include "testSimCluster.hpp"
-#include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <map>
 #include <memory>
 #include <set>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <toml.hpp>
@@ -39,9 +43,9 @@ static constexpr unsigned long nTrial = 23;
 static constexpr int nThreads = 4;
 
 // outTimes for tests/core/assets/testCluster.in is a 3-point grid
-// (start_time = 0, end_time = 10, ntime = 3), so each trial's single
-// cluster should be written out 3 times
-static constexpr size_t nTime = 3;
+// (start_time = 0, end_time = 10, ntime = 3), so each trial writes
+// exactly nTime spectra
+static constexpr std::size_t nTime = 3;
 
 // clusters.CMF in testCluster.in is a fixed value, so every cluster's
 // target mass should come out identical regardless of [Fe/H]
@@ -90,24 +94,42 @@ static auto readDataset(const hid_t group, const char* name, const hid_t memType
     return result;
 }
 
+// Read the (rows, cols) extent of a 2d dataset
+static auto readDataset2dShape(const hid_t group, const char* name) // NOLINT(misc-include-cleaner)
+    -> std::pair<hsize_t, hsize_t>
+{
+    // NOLINTBEGIN(misc-include-cleaner)
+    const hid_t dset = H5Dopen2(group, name, H5P_DEFAULT);
+    const hid_t space = H5Dget_space(dset);
+    std::array<hsize_t, 2> dims{};
+    H5Sget_simple_extent_dims(space, dims.data(), nullptr);
+    H5Sclose(space);
+    H5Dclose(dset);
+    // NOLINTEND(misc-include-cleaner)
+    return { dims.at(0), dims.at(1) };
+}
+
 // Parse the deck, build SimControls/SimPhysics/OutputManager/
 // SimCluster (mirroring main.cpp's end-to-end setup), and run,
 // forcing real multi-threaded execution so SimCluster::run's parallel
-// for loop actually spans multiple threads. Returns the resulting
-// SimPhysics::constFeH(), so callers can confirm the deck actually
-// exercised the code path they intended.
+// for loop actually spans multiple threads. The output manager type
+// (h5 or ascii) is chosen from the deck's own outputs.output_mode.
+// Returns the resulting SimPhysics::constFeH(), so callers can
+// confirm the deck actually exercised the code path they intended.
 static auto runEndToEnd(const toml::table& inputDeck) -> bool
 {
     const io::SimControls simControls(inputDeck);
     const io::SimPhysics simPhysics(inputDeck, simControls.simType());
 
-    if (simControls.outputMode() != io::SimControls::OutputMode::h5)
+    std::unique_ptr<io::OutputManager> outputManager;
+    if (simControls.outputMode() == io::SimControls::OutputMode::h5)
     {
-        throw std::runtime_error(
-            "testSimCluster: expected default output mode to be h5");
+        outputManager = std::make_unique<io::OutputManagerH5>(simControls, simPhysics, inputDeck);
     }
-    std::unique_ptr<io::OutputManager> outputManager =
-        std::make_unique<io::OutputManagerH5>(simControls, inputDeck);
+    else
+    {
+        outputManager = std::make_unique<io::OutputManagerAscii>(simControls, simPhysics, inputDeck);
+    }
 
 #ifdef _OPENMP
     omp_set_num_threads(nThreads);
@@ -181,12 +203,14 @@ static auto checkRowsAndGroupByTrial(const OutputColumns& cols, TrialMap& rowsBy
     return 0;
 }
 
-// Verify that every trial from 0 to nTrial - 1 appears exactly nTime
-// times with a single, consistent uid across its rows, and that no
-// uid is reused across trials -- this would fail if the dynamic
-// schedule dropped or duplicated a trial, if the omp critical guard
-// around the output writes let two threads' rows corrupt each other,
-// or if utils::getID() handed out a duplicate ID under concurrent use
+// Verify that every trial from 0 to nTrial - 1 appears exactly once
+// (writeCluster is called a single time per trial, regardless of the
+// number of output times, since it only writes properties fixed at
+// cluster formation), and that no uid is reused across trials -- this
+// would fail if the dynamic schedule dropped or duplicated a trial,
+// if the omp critical guard around the output writes let two
+// threads' rows corrupt each other, or if utils::getID() handed out
+// a duplicate ID under concurrent use
 static auto checkTrialsAndUids(const TrialMap& rowsByTrial) -> int
 {
     std::set<unsigned long> seenUids;
@@ -200,17 +224,10 @@ static auto checkTrialsAndUids(const TrialMap& rowsByTrial) -> int
             return 1;
         }
         const auto& uids = it->second;
-        if (uids.size() != nTime)
+        if (uids.size() != 1)
         {
             std::cerr << "testSimCluster: trial " << trial << " has "
-                << uids.size() << " rows, expected " << nTime << "\n";
-            return 1;
-        }
-        const auto isSameUid = [&](const unsigned long u) -> bool { return u == uids.front(); };
-        if (!std::ranges::all_of(uids, isSameUid))
-        {
-            std::cerr << "testSimCluster: trial " << trial
-                << " does not use a single, consistent uid across its rows\n";
+                << uids.size() << " rows, expected 1\n";
             return 1;
         }
         if (!seenUids.insert(uids.front()).second)
@@ -255,7 +272,7 @@ static auto runScenario(const std::string& scenario,
         return 1;
     }
 
-    const size_t expectedRows = nTrial * nTime;
+    const size_t expectedRows = nTrial;
     if (cols.trial_.size() != expectedRows || cols.uid_.size() != expectedRows)
     {
         std::cerr << "testSimCluster: " << scenario << ": expected "
@@ -276,6 +293,198 @@ static auto runScenario(const std::string& scenario,
     }
 
     return checkTrialsAndUids(rowsByTrial);
+}
+
+// The wavelength grid a default-constructed (z = 0) SpecsynBlackbody
+// produces, matching the one SimPhysics builds internally for
+// spectra.model = "blackbody", so tests can check the output's
+// wavelength grid without reaching into SimPhysics
+static auto referenceWlObs() -> std::vector<double>
+{
+    return specsyn::SpecsynBlackbody().wlObs();
+}
+
+// End-to-end check of HDF5 cluster-spectrum output: run with
+// spectra.model = "blackbody" (already set in testCluster.in) and
+// verify the cluster_spectra group's datasets have the expected
+// shapes, and that its wl dataset matches the wavelength grid a
+// SpecsynBlackbody produces. We have no independent way to know what
+// the spectra themselves should look like, so this checks the form
+// of the output rather than its numerical content.
+static auto testSimClusterSpectraH5() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() / "slugTestSimClusterSpectraH5";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+    const std::string modelName = "test_sim_cluster_spectra_h5";
+    const auto h5Path = outDir / (modelName + ".h5");
+
+    try
+    {
+        runEndToEnd(makeInputDeck(modelName, outDir));
+
+        const auto expectedWl = referenceWlObs();
+        const auto nWl = expectedWl.size();
+        const auto expectedRows = static_cast<hsize_t>(nTrial) * static_cast<hsize_t>(nTime);
+
+        // NOLINTBEGIN(misc-include-cleaner)
+        const hid_t file = H5Fopen(h5Path.string().c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+        if (file < 0)
+        {
+            std::cerr << "testSimCluster: spectraH5: unable to reopen "
+                << h5Path.string() << "\n";
+            return 1;
+        }
+        if (H5Lexists(file, "cluster_spectra", H5P_DEFAULT) <= 0)
+        {
+            std::cerr << "testSimCluster: spectraH5: missing cluster_spectra group\n";
+            H5Fclose(file);
+            return 1;
+        }
+        const hid_t grp = H5Gopen2(file, "cluster_spectra", H5P_DEFAULT);
+
+        const auto wl = readDataset<double>(grp, "wl", H5T_NATIVE_DOUBLE);
+        const auto trial = readDataset<unsigned long>(grp, "trial", H5T_NATIVE_ULONG);
+        const auto time = readDataset<double>(grp, "time", H5T_NATIVE_DOUBLE);
+        const auto uid = readDataset<unsigned long>(grp, "uid", H5T_NATIVE_ULONG);
+        const auto [specRows, specCols] = readDataset2dShape(grp, "spec");
+
+        H5Gclose(grp);
+        H5Fclose(file);
+        // NOLINTEND(misc-include-cleaner)
+
+        if (wl.size() != nWl)
+        {
+            std::cerr << "testSimCluster: spectraH5: wl dataset has size "
+                << wl.size() << ", expected " << nWl << "\n";
+            return 1;
+        }
+        for (std::size_t i = 0; i < nWl; ++i)
+        {
+            if (wl.at(i) != expectedWl.at(i))
+            {
+                std::cerr << "testSimCluster: spectraH5: wl[" << i << "] = "
+                    << wl.at(i) << ", expected " << expectedWl.at(i) << "\n";
+                return 1;
+            }
+        }
+
+        if (trial.size() != expectedRows || time.size() != expectedRows ||
+            uid.size() != expectedRows)
+        {
+            std::cerr << "testSimCluster: spectraH5: expected " << expectedRows
+                << " rows in trial/time/uid, got " << trial.size() << "/"
+                << time.size() << "/" << uid.size() << "\n";
+            return 1;
+        }
+
+        if (specRows != expectedRows || specCols != nWl)
+        {
+            std::cerr << "testSimCluster: spectraH5: spec dataset has shape ("
+                << specRows << ", " << specCols << "), expected ("
+                << expectedRows << ", " << nWl << ")\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimCluster: spectraH5 test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// End-to-end check of ascii cluster-spectrum output: run with
+// spectra.model = "blackbody" and outputs.output_mode = "ascii", and
+// verify the cluster_spectra.txt file has the expected number of
+// data lines (nTrial * nTime * nWl -- one line per wavelength, per
+// output time, per trial) and that every block of nWl consecutive
+// lines carries the expected wavelength grid, in order.
+static auto testSimClusterSpectraAscii() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() / "slugTestSimClusterSpectraAscii";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+    const std::string modelName = "test_sim_cluster_spectra_ascii";
+    const auto specPath = outDir / (modelName + "_cluster_spectra.txt");
+
+    try
+    {
+        toml::table inputDeck = makeInputDeck(modelName, outDir);
+        inputDeck.at_path("outputs").as_table()->insert_or_assign(
+            "output_mode", std::string("ascii"));
+
+        runEndToEnd(inputDeck);
+
+        const auto expectedWl = referenceWlObs();
+        const auto nWl = expectedWl.size();
+
+        std::ifstream file(specPath);
+        if (!file)
+        {
+            std::cerr << "testSimCluster: spectraAscii: unable to open "
+                << specPath.string() << "\n";
+            return 1;
+        }
+
+        std::string headerLine;
+        std::string ruleLine;
+        std::getline(file, headerLine);
+        std::getline(file, ruleLine);
+
+        std::vector<std::string> dataLines;
+        std::string line;
+        while (std::getline(file, line))
+        {
+            if (!line.empty()) { dataLines.push_back(line); }
+        }
+
+        const std::size_t expectedLines = nTrial * nTime * nWl;
+        if (dataLines.size() != expectedLines)
+        {
+            std::cerr << "testSimCluster: spectraAscii: expected " << expectedLines
+                << " data lines, got " << dataLines.size() << "\n";
+            return 1;
+        }
+
+        constexpr double wlTol = 1e-5;
+        for (std::size_t block = 0; block < dataLines.size() / nWl; ++block)
+        {
+            for (std::size_t i = 0; i < nWl; ++i)
+            {
+                std::istringstream lineStream(dataLines.at((block * nWl) + i));
+                unsigned long readTrial = 0;
+                double readTime = 0.0;
+                unsigned long readUid = 0;
+                double readWl = 0.0;
+                double readSpec = 0.0;
+                lineStream >> readTrial >> readTime >> readUid >> readWl >> readSpec;
+
+                if (readTrial >= nTrial)
+                {
+                    std::cerr << "testSimCluster: spectraAscii: block " << block
+                        << " line " << i << " has out-of-range trial "
+                        << readTrial << "\n";
+                    return 1;
+                }
+                if (std::abs(readWl - expectedWl.at(i)) > wlTol * expectedWl.at(i))
+                {
+                    std::cerr << "testSimCluster: spectraAscii: block " << block
+                        << " line " << i << " has wl " << readWl
+                        << ", expected " << expectedWl.at(i) << "\n";
+                    return 1;
+                }
+            }
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimCluster: spectraAscii test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
 }
 
 auto testSimCluster() -> int
@@ -306,6 +515,9 @@ auto testSimCluster() -> int
             "tests/core/assets/testClusterFeHDist.toml"),
         outDir / (variableModelName + ".h5"),
         false);
+
+    result += testSimClusterSpectraH5();
+    result += testSimClusterSpectraAscii();
 
     return result;
 }

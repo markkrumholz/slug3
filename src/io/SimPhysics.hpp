@@ -9,8 +9,10 @@
 #define SIMPHYSICS_HPP
 
 #include "../pdfs/PDF.hpp"
+#include "../specsyn/Specsyn.hpp"
 #include "../tracks/Tracks3D.hpp"
 #include "SimControls.hpp"
+#include <memory>
 #include <toml.hpp>
 
 namespace io
@@ -102,6 +104,13 @@ namespace io
          */
         [[nodiscard]] auto fracStochMass() const { return fracStochMass_; }
 
+        /**
+         * @brief Get the spectral synthesizer, if any
+         * @return A pointer to the spectral synthesizer requested via
+         *   spectra.model, or nullptr if spectra.model was not given
+         */
+        [[nodiscard]] auto specsyn() const -> const specsyn::Specsyn* { return specsyn_.get(); }
+
     private:
 
         /**
@@ -121,6 +130,7 @@ namespace io
         tracks::Tracks2D constFeHTracks_; /**< Tracks sliced at fehDist_'s value, if constFeH() */
         double minStochMass_ = 0.0;   /**< Minimum mass for fully stochastic treatment */
         double fracStochMass_ = 1.0;  /**< Fraction of mass being treated stochastically */
+        std::unique_ptr<specsyn::Specsyn> specsyn_; /**< Spectral synthesizer, or nullptr if spectra.model was not given */
 
     };
 

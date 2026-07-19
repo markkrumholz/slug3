@@ -17,6 +17,7 @@
 #include <limits>
 #include <memory>
 #include <numbers>
+#include <stdexcept>
 #include <string>
 #include <toml.hpp>
 #include <utility>
@@ -216,10 +217,55 @@ static auto testSimPhysicsGalaxy() -> int
     return 0;
 }
 
+// Verify that spectra.model is optional: a deck with no [spectra]
+// table at all should construct successfully rather than throwing.
+static auto testSimPhysicsNoSpectraModel() -> int
+{
+    const std::string fileName = "tests/core/assets/testCluster.in";
+    try
+    {
+        toml::table inputDeck = toml::parse_file(fileName);
+        inputDeck.erase("spectra");
+        const io::SimControls controls(inputDeck);
+        const io::SimPhysics sim(inputDeck, controls.simType());
+        (void)sim;
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimPhysics: " << fileName
+            << ": expected construction with no spectra.model to succeed, but it threw: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Verify that an unrecognized spectra.model value is rejected
+static auto testSimPhysicsInvalidSpectraModel() -> int
+{
+    const std::string fileName = "tests/core/assets/testCluster.in";
+    toml::table inputDeck = toml::parse_file(fileName);
+    inputDeck.at_path("spectra").as_table()->insert_or_assign("model", std::string("not_a_model"));
+    const io::SimControls controls(inputDeck);
+    try
+    {
+        const io::SimPhysics sim(inputDeck, controls.simType());
+        std::cerr << "testSimPhysics: " << fileName
+            << ": expected construction with invalid spectra.model to throw, but it succeeded\n";
+        return 1;
+    }
+    catch (const std::runtime_error&)
+    {
+        return 0;
+    }
+}
+
 auto testSimPhysics() -> int
 {
     int result = 0;
     result += testSimPhysicsCluster();
     result += testSimPhysicsGalaxy();
+    result += testSimPhysicsNoSpectraModel();
+    result += testSimPhysicsInvalidSpectraModel();
     return result;
 }

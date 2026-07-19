@@ -34,7 +34,7 @@ core::Cluster::Cluster(const unsigned long uid,
         physics.fracStochMass() * mass,
         physics.minStochMass(),
         physics.imf().getMax())),
-    birthNonStochMass_(physics.fracStochMass() * mass),
+    birthNonStochMass_((1.0 - physics.fracStochMass()) * mass),
     birthMass_(std::reduce(m_.begin(), m_.end(), 0.0)),
     disruptTime_(std::numeric_limits<double>::quiet_NaN()),
     curTime_(time)
@@ -86,12 +86,21 @@ void core::Cluster::advance(const double t)
         throw std::runtime_error(ss.str());
     }
 
-    // If t == curTime_, do nothing
-    if (t == curTime_) { return; }
+    // If t == curTime_ and this isn't the very first call, do
+    // nothing -- but the very first call must still run, even if
+    // t == curTime_ (== formTime_, the common case of an output time
+    // at t = 0), since isochrone_/spec_ have not yet been computed at
+    // all before that
+    if (t == curTime_ && advanced_) { return; }
 
-    // Update time and cluster age
+    // Update time and cluster age. logAge is floored at the tracks'
+    // own minimum representable log-age, since age = curTime_ -
+    // formTime_ can be exactly zero (at the first call, when
+    // t == formTime_), and log10(0) is -inf, which lies outside any
+    // finite tracks grid; ages at or below the tracks' youngest grid
+    // point are all treated as that youngest age.
     curTime_ = t;
-    const auto logAge = std::log10(curTime_ - formTime_);
+    const auto logAge = std::max(std::log10(curTime_ - formTime_), tracks().logTMin());
 
     // Update list of alive and dead stars to new cluster age
     updateLivingStars(logAge);
@@ -99,8 +108,13 @@ void core::Cluster::advance(const double t)
     // Get isochrone for new time
     isochrone_ = tracks().getIsochrone(logAge);
 
+    // Update the population spectrum, if a spectral synthesizer was requested
+    computeSpec();
+
     // Check for disruption
     if (curTime_ > disruptTime_) { isDisrupted_ = true; }
+
+    advanced_ = true;
 }
 
 // Update lists of alive and dead stars to current age
@@ -158,3 +172,40 @@ void core::Cluster::updateLivingStars(const double logAge)
     }
 }
 // NOLINTEND(misc-include-cleaner)
+
+// Compute the population spectrum at the current isochrone, if a
+// spectral synthesizer was requested
+void core::Cluster::computeSpec()
+{
+    const auto& ph = physics_.get();
+    const auto* synth = ph.specsyn();
+    if (synth == nullptr) { return; }
+
+    spec_.assign(synth->wl().size(), 0.0);
+
+    // Continuously-sampled (non-stochastic) part of the population
+    if (birthNonStochMass_ > 0.0)
+    {
+        spec_ = synth->specCts(isochrone_, ph.imf(),
+            birthNonStochMass_, ph.imf().getMin(), ph.minStochMass());
+    }
+
+    // Individually-sampled (stochastic) stars
+    for (const double m : m_)
+    {
+        // Stars below the tracks' minimum mass have no isochrone
+        // segment to evaluate spec() on (this can happen when the
+        // IMF extends below the tracks' mass range); skip them,
+        // treating their contribution as negligible
+        const auto seg = std::ranges::find_if(isochrone_,
+            [m](const auto& segment) -> bool
+            { return m >= segment->xMin() && m <= segment->xMax(); });
+        if (seg == isochrone_.end()) { continue; }
+
+        const auto starSpec = synth->spec(m, **seg);
+        for (std::size_t i = 0; i < spec_.size(); ++i)
+        {
+            spec_[i] += starSpec[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- spec_ and starSpec both have size wl().size() by construction
+        }
+    }
+}
