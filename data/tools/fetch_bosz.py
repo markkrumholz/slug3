@@ -6,6 +6,7 @@ gzip'ed HDF5 file that slug can read.
 
 # Imports
 import argparse
+import h5py
 import re
 import shutil
 import urllib3
@@ -127,3 +128,37 @@ for r_dir in r_dirs:
             micro.append(micro_val)
 if args.verbose:
     print(f"Filtered file list: {len(files_avail)} files to fetch.")
+
+# If target file exists and overwrite is not specified, check if any of the
+# requested spectra already exist in the file -- each (feh, afe, cfe, r,
+# micro) combination lives in its own group, named
+# spectra_feh<feh>_afe<afe>_cfe<cfe>_r<r>_micro<micro>, with those five
+# values stored as group attributes -- and drop any match from the
+# filtered list so we don't re-fetch it.
+if shutil.os.path.exists(args.output) and not args.overwrite:
+    existing = set()
+    with h5py.File(args.output, 'r') as h5file:
+        for grp in h5file.keys():
+            attrs = h5file[grp].attrs
+            existing.add((float(attrs['feh']), float(attrs['afe']), float(attrs['cfe']),
+                          int(attrs['r']), int(attrs['micro'])))
+
+    keep = [i for i in range(len(files_avail))
+            if (feh[i], afe[i], cfe[i], r[i], micro[i]) not in existing]
+    nduplicates = len(files_avail) - len(keep)
+    if nduplicates > 0:
+        files_avail = [files_avail[i] for i in keep]
+        feh = [feh[i] for i in keep]
+        afe = [afe[i] for i in keep]
+        cfe = [cfe[i] for i in keep]
+        r = [r[i] for i in keep]
+        micro = [micro[i] for i in keep]
+        if args.verbose:
+            print(f"Found {nduplicates} existing spectra in {args.output}; skipping them.")
+
+# If target output file does not exist, create it and write the references
+if not shutil.os.path.exists(args.output):
+    h5file = h5py.File(args.output, 'w')
+    h5file.attrs['references'] = BOSZ_references
+    h5file.attrs['reference_urls'] = BOSZ_refernce_URLS
+    h5file.close()
