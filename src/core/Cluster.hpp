@@ -120,6 +120,12 @@ namespace core
         [[nodiscard]] auto spec() const -> const auto& { return spec_; }
 
         /**
+         * @brief Return whether the cluster has disrupted
+         * @return True if the cluster has disrupted
+         */
+        [[nodiscard]] auto isDisrupted() const { return isDisrupted_; }
+
+        /**
          * @brief Advance the cluster in time
          * @param t Time to which to advance, in yr
          */
