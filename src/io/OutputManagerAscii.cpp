@@ -152,3 +152,10 @@ void io::OutputManagerAscii::writeCluster(
                       << std::setw(numWidth) << formatSci(cluster.feH()) << "\n";
     }
 }
+
+// Placeholder: ascii cluster-spectrum output will be implemented in
+// a future commit
+void io::OutputManagerAscii::writeClusterSpec(
+    unsigned long /*trial*/, double /*time*/, const core::Cluster& /*cluster*/)
+{
+}

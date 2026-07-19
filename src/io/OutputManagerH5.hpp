@@ -63,10 +63,34 @@ namespace io
          */
         void writeCluster(unsigned long trial, const core::Cluster& cluster) override;
 
+        /**
+         * @brief Write a cluster's spectrum as a row of the cluster-spectra datasets
+         * @param trial Trial number to which this cluster belongs
+         * @param time The output time at which the cluster's spectrum was computed, in yr
+         * @param cluster The cluster whose spectrum should be written
+         * @details
+         * If spectral synthesis was not enabled for this simulation
+         * (the cluster_spectra group does not exist), or the cluster
+         * has disrupted, this is a no-op.
+         */
+        void writeClusterSpec(unsigned long trial, double time,
+            const core::Cluster& cluster) override;
+
     private:
+
+        /**
+         * @brief Create the clusters group and its datasets, if cluster output is enabled
+         */
+        void openClustersGroup();
+
+        /**
+         * @brief Create the cluster_spectra group and its datasets, if a spectral synthesizer was requested
+         */
+        void openClusterSpectraGroup();
 
         hid_t file_ = -1; /**< Handle to the open HDF5 output file */ // NOLINT(misc-include-cleaner)
         hid_t clustersGroup_ = -1; /**< Handle to the open clusters group, if any */ // NOLINT(misc-include-cleaner)
+        hid_t clusterSpectraGroup_ = -1; /**< Handle to the open cluster_spectra group, if any */ // NOLINT(misc-include-cleaner)
     };
 
 } // namespace io

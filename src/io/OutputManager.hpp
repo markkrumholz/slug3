@@ -70,6 +70,18 @@ namespace io
          */
         virtual void writeCluster(unsigned long trial, const core::Cluster& cluster) = 0;
 
+        /**
+         * @brief Write a cluster's spectrum as a row of the cluster-spectra datasets
+         * @param trial Trial number to which this cluster belongs
+         * @param time The output time at which the cluster's spectrum was computed, in yr
+         * @param cluster The cluster whose spectrum should be written
+         * @details
+         * If spectral synthesis was not enabled for this simulation,
+         * or the cluster has disrupted, this is a no-op.
+         */
+        virtual void writeClusterSpec(unsigned long trial, double time,
+            const core::Cluster& cluster) = 0;
+
     protected:
 
         /**

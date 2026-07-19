@@ -63,6 +63,18 @@ namespace io
          */
         void writeCluster(unsigned long trial, const core::Cluster& cluster) override;
 
+        /**
+         * @brief Write a cluster's spectrum
+         * @param trial Trial number to which this cluster belongs
+         * @param time The output time at which the cluster's spectrum was computed, in yr
+         * @param cluster The cluster whose spectrum should be written
+         * @details
+         * Not yet implemented; ascii cluster-spectrum output will be
+         * added in a future commit.
+         */
+        void writeClusterSpec(unsigned long trial, double time,
+            const core::Cluster& cluster) override;
+
     private:
 
         std::ofstream clustersFile_; /**< Handle to the open cluster output file */

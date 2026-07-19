@@ -59,6 +59,7 @@ void core::SimCluster::run()
         for (const auto outTime : outTimes)
         {
             cluster.advance(outTime);
+            outputManager_->writeClusterSpec(trialNum, outTime, cluster);
         }
     }
 
