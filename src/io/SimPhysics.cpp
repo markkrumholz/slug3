@@ -15,6 +15,7 @@
 #include "SimControls.hpp"
 #include <algorithm>
 #include <filesystem>
+#include <iostream>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -95,6 +96,18 @@ io::SimPhysics::SimPhysics(const toml::table& inputDeck, SimControls::SimType si
 
     // Read the tracks
     readTracks(inputDeck);
+
+    // Warn if the tracks don't extend down to the IMF's minimum mass:
+    // stars in that gap have no track data, so they end up being
+    // treated as having zero luminosity when spectra are computed
+    // (see Cluster::computeSpec)
+    if (tracks_.mMin() > imf_.getMin())
+    {
+        std::cout << "slug: warning: minimum mass in selected tracks is "
+            << tracks_.mMin() << " but IMF minimum mass is " << imf_.getMin()
+            << "; stars with masses from " << imf_.getMin() << " to "
+            << tracks_.mMin() << " will be treated as having zero luminosity\n";
+    }
 
     // If this simulation has a fixed [Fe/H], precompute the slice at
     // that value once here, up front, so that Cluster objects can
