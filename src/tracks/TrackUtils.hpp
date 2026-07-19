@@ -9,6 +9,7 @@
 #define TRACKUTILS_HPP
 
 #include "TrackCommons.hpp"
+#include <cstddef>
 #include <filesystem>
 #include <string>
 #include <toml.hpp>
