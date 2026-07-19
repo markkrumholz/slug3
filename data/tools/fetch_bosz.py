@@ -245,5 +245,35 @@ for key, idxs in groups.items():
         if args.verbose:
             print(f"Wrote {len(spectra)} spectra to group {grp_name} in {args.output}.")
 
+# The set of (Teff, log g) combinations available is the same for every
+# spectra group, so rather than recovering it later by parsing dataset
+# names, extract it once from whichever spectra group we have on hand
+# and record it in a top-level "logg_Teff_grid" group, as two parallel
+# datasets "Teff" and "logg" (pairs, not a full outer product -- the
+# grid can be irregular at its edges).
+ds_name_re = re.compile(r't(?P<teff>[0-9]+)_g(?P<logg>[+-][0-9.]+)')
+with h5py.File(args.output, 'a') as h5file:
+    spectra_groups = [g for g in h5file.keys() if g.startswith('spectra_')]
+    if not spectra_groups:
+        if args.verbose:
+            print(f"No spectra groups found in {args.output}; skipping logg_Teff_grid.")
+    else:
+        sample_grp = h5file[spectra_groups[0]]
+        pairs = sorted(
+            (int(match.group('teff')), float(match.group('logg')))
+            for match in (ds_name_re.fullmatch(ds_name) for ds_name in sample_grp.keys())
+            if match is not None
+        )
+
+        if 'logg_Teff_grid' in h5file:
+            del h5file['logg_Teff_grid']
+        grid_grp = h5file.create_group('logg_Teff_grid')
+        grid_grp.create_dataset('Teff', data=[p[0] for p in pairs])
+        grid_grp.create_dataset('logg', data=[p[1] for p in pairs])
+
+        if args.verbose:
+            print(f"Wrote logg_Teff_grid ({len(pairs)} combinations, from group "
+                  f"{spectra_groups[0]}) to {args.output}.")
+
 # Clean up all downloads
 shutil.rmtree(temp_dir, ignore_errors=True)
