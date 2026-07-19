@@ -26,22 +26,26 @@ namespace utils
     }
 
     /**
-     * @brief Look for a file both in the current working directory and in SLUG_DIR
+     * @brief Look for a file in the current working directory, SLUG_DIR, or REPO_DIR
      * @param fileName File name
-     * @param prefix Prefix within in SLUG_DIR to search
+     * @param prefix Prefix within SLUG_DIR/REPO_DIR to search
      * @returns Path to file
      * @details
-     * This routine searches for files with the name fileName in both the current
-     * working directory and in the directory specified by the environment variable
-     * SLUG_DIR, with the following resolution rules: 
-     * (1) If a file matching fileName exists in the current working directory, return 
+     * This routine searches for files with the name fileName in the current
+     * working directory, the directory specified by the environment variable
+     * SLUG_DIR, and REPO_DIR (the directory containing the project's
+     * top-level CMakeLists.txt, baked in at compile time -- see
+     * CMakeLists.txt), with the following resolution rules:
+     * (1) If a file matching fileName exists in the current working directory, return
      *     the path to it.
      * (2) If a matching file is not found and fileName specifies an absolute path, return
      *     an empty path.
      * (3) If fileName is not an absolute path, and the environment variable SLUG_DIR
      *     is set, search for a file named SLUG_DIR/prefix/fileName, and return a path to it
      *     if found.
-     * (4) Otherwise, return an empty path.
+     * (4) If still not found, search for a file named REPO_DIR/prefix/fileName, and
+     *     return a path to it if found.
+     * (5) Otherwise, return an empty path.
      */
     inline auto getFilePath(const std::string& fileName,
         const std::string& prefix = "")
@@ -49,11 +53,19 @@ namespace utils
         std::filesystem::path filePath(fileName);
         if (std::filesystem::exists(filePath)) { return filePath; }
         if (filePath.is_absolute()) { return std::filesystem::path(); }
+
         auto *slugDir = std::getenv("SLUG_DIR"); // NOLINT(concurrency-mt-unsafe) -- no thread-safe standard alternative; only ever called during single-threaded setup
-        if (slugDir == nullptr) { return std::filesystem::path(); }
-        filePath = std::filesystem::path(slugDir) / 
+        if (slugDir != nullptr)
+        {
+            auto slugDirPath = std::filesystem::path(slugDir) /
+                std::filesystem::path(prefix) / filePath;
+            if (std::filesystem::exists(slugDirPath)) { return slugDirPath; }
+        }
+
+        auto repoDirPath = std::filesystem::path(REPO_DIR) /
             std::filesystem::path(prefix) / filePath;
-        if (std::filesystem::exists(filePath)) { return filePath; }
+        if (std::filesystem::exists(repoDirPath)) { return repoDirPath; }
+
         return std::filesystem::path();
     }
 
