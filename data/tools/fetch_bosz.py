@@ -10,6 +10,7 @@ import h5py
 import numpy as np
 import re
 import shutil
+import tomlkit
 import urllib3
 
 # Magic strings
@@ -311,3 +312,49 @@ with h5py.File(args.output, 'a') as h5file:
 
 # Clean up all downloads
 shutil.rmtree(temp_dir, ignore_errors=True)
+
+# Read existing registry file if it exists, otherwise create a new one
+if shutil.os.path.exists(args.registry):
+    with open(args.registry, 'r') as f:
+        registry = tomlkit.parse(f.read())
+else:
+    registry = { "name" : "Registry of spectra sets" }
+
+# Add BOSZ to list of spectra sets
+if "spectra_sets" in registry.keys():
+    if "BOSZ" not in registry["spectra_sets"]:
+        registry["spectra_sets"].append("BOSZ")
+else:
+    registry["spectra_sets"] = [ "BOSZ" ]
+
+# Generate registry entry for BOSZ
+if "BOSZ" in registry.keys():
+    registry.pop("BOSZ")
+bosz_tab = tomlkit.table()
+bosz_tab["file"] = args.output
+bosz_tab["version"] = args.version
+bosz_tab["references"] = BOSZ_references
+bosz_tab["reference_urls"] = BOSZ_refernce_URLS
+# r and micro are integer-valued; the rest are floats. tomlkit accepts
+# numpy.float64 (which happens to subclass Python's float) but not
+# numpy.int64 (which does not subclass int), so cast explicitly to the
+# right native Python type rather than handing it numpy scalars.
+int_qtys = {"r", "micro"}
+for qty, attr in zip(["Fe_H", "alpha_Fe", "C_Fe", "r", "micro"],
+                     ["feh", "afe", "cfe", "r", "micro"]):
+    val_in_file = []
+    with h5py.File(args.output, 'r') as h5file:
+        for grp in h5file.keys():
+            if not grp.startswith('spectra_'):
+                continue
+            if h5file[grp].attrs[attr] not in val_in_file:
+                val_in_file.append(h5file[grp].attrs[attr])
+    val_in_file = np.array(val_in_file)
+    val_in_file.sort()
+    cast = int if qty in int_qtys else float
+    bosz_tab[qty] = [ cast(v) for v in val_in_file ]
+registry["BOSZ"] = bosz_tab
+
+# Write registry back to file
+with open(args.registry, 'w') as fp:
+    fp.write(tomlkit.dumps(registry))
