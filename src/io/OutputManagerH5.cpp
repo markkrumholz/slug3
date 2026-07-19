@@ -9,6 +9,7 @@
 #include "../core/Cluster.hpp"
 #include "OutputManager.hpp"
 #include "SimControls.hpp"
+#include "SimPhysics.hpp"
 #include "hdf5.h" // NOLINT(misc-include-cleaner)
 #include "io/SlugVersion.hpp"
 #include <filesystem>
@@ -145,8 +146,9 @@ static void appendToDataset(const hid_t loc, const std::string& name,
 // (slug-hash, date, time) as top-level attributes, then dump the toml
 // input deck into an input_deck group, and leave the file open
 io::OutputManagerH5::OutputManagerH5(
-    const SimControls& simControls, const toml::table& inputDeck) :
-    OutputManager(simControls, inputDeck)
+    const SimControls& simControls, const SimPhysics& simPhysics,
+    const toml::table& inputDeck) :
+    OutputManager(simControls, simPhysics, inputDeck)
 {
     const auto path = std::filesystem::path(simControls_.outDir()) /
         (simControls_.modelName() + ".h5");

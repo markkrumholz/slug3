@@ -10,6 +10,7 @@
 
 #include "OutputManager.hpp"
 #include "SimControls.hpp"
+#include "SimPhysics.hpp"
 #include "hdf5.h" // NOLINT(misc-include-cleaner)
 #include <toml.hpp>
 
@@ -32,12 +33,15 @@ namespace io
         /**
          * @brief Open the output file and write its header
          * @param simControls Simulation control flow settings
+         * @param simPhysics Simulation physics settings
          * @param inputDeck The simulation's toml input deck
          * @details
-         * simControls and inputDeck are stored by reference, so the
-         * objects passed in must outlive this OutputManagerH5.
+         * simControls, simPhysics, and inputDeck are stored by
+         * reference, so the objects passed in must outlive this
+         * OutputManagerH5.
          */
-        OutputManagerH5(const SimControls& simControls, const toml::table& inputDeck);
+        OutputManagerH5(const SimControls& simControls, const SimPhysics& simPhysics,
+            const toml::table& inputDeck);
 
         /**
          * @brief Close the output file

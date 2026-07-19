@@ -9,6 +9,7 @@
 #include "../core/Cluster.hpp"
 #include "OutputManager.hpp"
 #include "SimControls.hpp"
+#include "SimPhysics.hpp"
 #include "io/SlugVersion.hpp"
 #include <filesystem>
 #include <fstream>
@@ -72,8 +73,9 @@ static void writeClustersHeader(std::ofstream& file)
 // open the cluster output file, write its column-header rows, and
 // leave it open for later writing.
 io::OutputManagerAscii::OutputManagerAscii(
-    const SimControls& simControls, const toml::table& inputDeck) :
-    OutputManager(simControls, inputDeck)
+    const SimControls& simControls, const SimPhysics& simPhysics,
+    const toml::table& inputDeck) :
+    OutputManager(simControls, simPhysics, inputDeck)
 {
     const auto path = std::filesystem::path(simControls_.outDir()) /
         (simControls_.modelName() + "_summary.txt");

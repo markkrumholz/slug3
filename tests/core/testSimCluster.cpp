@@ -101,7 +101,7 @@ static auto runEndToEnd(const toml::table& inputDeck) -> bool
             "testSimCluster: expected default output mode to be h5");
     }
     std::unique_ptr<io::OutputManager> outputManager =
-        std::make_unique<io::OutputManagerH5>(simControls, inputDeck);
+        std::make_unique<io::OutputManagerH5>(simControls, simPhysics, inputDeck);
 
 #ifdef _OPENMP
     omp_set_num_threads(nThreads);

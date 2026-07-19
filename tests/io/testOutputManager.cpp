@@ -24,27 +24,6 @@
 #include <string>
 #include <toml.hpp>
 
-// Build a minimal, valid input deck for a cluster-type simulation
-// with model_name and out_dir set as given, and a single output
-// time at t = 0 (the output-time details are irrelevant here;
-// OutputManager itself never looks at them).
-static auto makeInputDeck(const std::string& modelName,
-    const std::filesystem::path& outDir) -> toml::table
-{
-    const std::string deckText =
-        "sim_type = \"cluster\"\n"
-        "\n"
-        "[output]\n"
-        "model_name = \"" + modelName + "\"\n"
-        "\n"
-        "[outputs]\n"
-        "start_time = 0.0\n"
-        "end_time = 0.0\n"
-        "ntime = 1\n"
-        "out_dir = \"" + outDir.string() + "\"\n";
-    return toml::parse(deckText);
-}
-
 // Build a valid input deck for a cluster-type simulation that also
 // has usable stellar physics (IMF, tracks, CMF, etc.), by reusing
 // the deck already exercised by testSimPhysics/testCluster, and
@@ -84,7 +63,7 @@ static auto testWriteClusterAscii() -> int
 
         {
             io::OutputManagerAscii
-                manager(controls, inputDeck);
+                manager(controls, sim, inputDeck);
             manager.writeCluster(trial, cluster);
         }
 
@@ -152,7 +131,7 @@ static auto testWriteClusterH5() -> int
 
         {
             io::OutputManagerH5
-                manager(controls, inputDeck);
+                manager(controls, sim, inputDeck);
             manager.writeCluster(trial, cluster);
         }
 
@@ -222,13 +201,14 @@ static auto testOutputManagerAscii() -> int
     std::filesystem::create_directories(outDir);
     const std::string modelName = "test_model";
     const auto expectedPath = outDir / (modelName + "_summary.txt");
-    const toml::table inputDeck = makeInputDeck(modelName, outDir);
+    const toml::table inputDeck = makeClusterPhysicsInputDeck(modelName, outDir);
     const io::SimControls controls(inputDeck);
+    const io::SimPhysics sim(inputDeck, controls.simType());
 
     try
     {
         const io::OutputManagerAscii
-            manager(controls, inputDeck);
+            manager(controls, sim, inputDeck);
 
         if (!std::filesystem::exists(expectedPath))
         {
@@ -275,7 +255,7 @@ static auto testOutputManagerAscii() -> int
     try
     {
         const io::OutputManagerAscii
-            manager2(controls, inputDeck);
+            manager2(controls, sim, inputDeck);
         std::cerr << "testOutputManager: ascii: expected construction to "
             "throw on an existing output file, but it succeeded\n";
         return 1;
@@ -297,14 +277,15 @@ static auto testOutputManagerH5() -> int
     std::filesystem::create_directories(outDir);
     const std::string modelName = "test_model";
     const auto expectedPath = outDir / (modelName + ".h5");
-    const toml::table inputDeck = makeInputDeck(modelName, outDir);
+    const toml::table inputDeck = makeClusterPhysicsInputDeck(modelName, outDir);
     const io::SimControls controls(inputDeck);
+    const io::SimPhysics sim(inputDeck, controls.simType());
 
     try
     {
         {
             const io::OutputManagerH5
-                manager(controls, inputDeck);
+                manager(controls, sim, inputDeck);
         }
 
         if (!std::filesystem::exists(expectedPath))
@@ -364,7 +345,7 @@ static auto testOutputManagerH5() -> int
     try
     {
         const io::OutputManagerH5
-            manager2(controls, inputDeck);
+            manager2(controls, sim, inputDeck);
         std::cerr << "testOutputManager: h5: expected construction to "
             "throw on an existing output file, but it succeeded\n";
         return 1;

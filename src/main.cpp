@@ -51,11 +51,11 @@ auto main(int argc, char *argv[]) -> int
     std::unique_ptr<io::OutputManager> outputManager;
     if (simControls.outputMode() == io::SimControls::OutputMode::h5)
     {
-        outputManager = std::make_unique<io::OutputManagerH5>(simControls, inputDeck);
+        outputManager = std::make_unique<io::OutputManagerH5>(simControls, simPhysics, inputDeck);
     }
     else
     {
-        outputManager = std::make_unique<io::OutputManagerAscii>(simControls, inputDeck);
+        outputManager = std::make_unique<io::OutputManagerAscii>(simControls, simPhysics, inputDeck);
     }
 
     // Run the simulation
