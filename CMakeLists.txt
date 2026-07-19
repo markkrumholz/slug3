@@ -214,6 +214,9 @@ add_executable(slugTestSpecsyn
 # PYBIND11_MODULE name in Bindings.cpp.
 pybind11_add_module(slugPython
     src/pybind/Bindings.cpp
+    src/pybind/BindInterpolator1D.cpp
+    src/pybind/BindTracks2D.cpp
+    src/pybind/BindTracks3D.cpp
     src/interpolation/Mesh2DGrid.cpp
     src/tracks/TrackUtils.cpp
     src/tracks/Tracks2D.cpp

@@ -17,7 +17,6 @@
 #include <ranges>
 #include <sstream>
 #include <stdexcept>
-#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -40,31 +39,6 @@ namespace interp
     public:
 
         // Constructors and destructor
-
-        /**
-         * @brief Numpy-style docstring for the Python constructor binding
-         * @details
-         * Documents only the (x, f) overload exposed to Python; the
-         * interpType parameter is not exposed there (it always
-         * defaults to gsl_interp_steffen).
-         */
-        static constexpr std::string_view constructorDocstring = R"doc(Construct an Interpolator1D.
-
-Parameters
-----------
-x : list of float
-    Locations of the sample points, in strictly increasing order.
-f : list of list of float
-    Values of the sample points to interpolate: a sequence containing
-    exactly as many arrays as the number of quantities this
-    interpolator was built for, each the same length as x.
-
-Throws
-------
-RuntimeError
-    If x is not sorted in increasing order, if x and f are not the
-    same length, or if too few distinct points remain (after removing
-    duplicates) to build an interpolator.)doc";
 
         /**
          * @brief Construct an Interpolator1D
@@ -120,30 +94,10 @@ RuntimeError
         auto operator=(Interpolator1D&&) -> Interpolator1D& = delete;
 
         /**
-         * @brief Numpy-style docstring for the Python xMin binding
-         */
-        static constexpr std::string_view xMinDocstring = R"doc(Get the minimum allowed value of x.
-
-Returns
--------
-xmin : float
-    The minimum value of x for which interpolation is valid.)doc";
-
-        /**
          * @brief Get minimum allowed x
          * @return Minimum allowed x
          */
         [[nodiscard]] auto xMin() const { return x_.front(); }
-
-        /**
-         * @brief Numpy-style docstring for the Python xMax binding
-         */
-        static constexpr std::string_view xMaxDocstring = R"doc(Get the maximum allowed value of x.
-
-Returns
--------
-xmax : float
-    The maximum value of x for which interpolation is valid.)doc";
 
         /**
          * @brief Get maximum allowed x
@@ -152,98 +106,10 @@ xmax : float
         [[nodiscard]] auto xMax() const { return x_.back(); }
 
         /**
-         * @brief Numpy-style docstring for the Python xRange binding
-         */
-        static constexpr std::string_view xRangeDocstring = R"doc(Get the allowed range of x.
-
-Returns
--------
-xrange : tuple of float
-    A 2-element tuple (xmin, xmax) giving the allowed range of x.)doc";
-
-        /**
          * @brief Get allowed range in x
          * @return Allowed range in x
          */
         [[nodiscard]] auto xRange() const { return std::make_pair(xMin(), xMax()); }
-
-        /**
-         * @brief Numpy-style docstring for the Python __call__(x) binding
-         * (the single-point overload returning every quantity at once)
-         */
-        static constexpr std::string_view callDocstring = R"doc(Interpolate every quantity to a given point.
-
-Parameters
-----------
-x : float
-    The point at which to interpolate.
-
-Returns
--------
-values : list of float
-    The interpolated value of every quantity at x, in the same order
-    supplied to the constructor.
-
-Throws
-------
-RuntimeError
-    If x is outside the range [xMin(), xMax()].)doc";
-
-        /**
-         * @brief Numpy-style docstring for the Python __call__(x, idx)
-         * binding (the vectorized, index-selected-quantity overload)
-         */
-        static constexpr std::string_view callIdxDocstring = R"doc(Interpolate a single quantity, selected by index, to a given point.
-
-Parameters
-----------
-x : float or array_like of float
-    The point(s) at which to interpolate.
-idx : int or array_like of int
-    Index of the quantity to interpolate. x and idx are broadcast
-    against each other, so e.g. an array of x values together with
-    idx = range(n) returns every quantity at every x.
-
-Returns
--------
-value : float or numpy.ndarray of float
-    The interpolated value(s), with the shape resulting from
-    broadcasting x and idx together.
-
-Throws
-------
-RuntimeError
-    If any requested x is outside the range [xMin(), xMax()].)doc";
-
-        /**
-         * @brief Numpy-style docstring for the Python __call__(x, name)
-         * binding (the vectorized, name-selected-quantity overload;
-         * this overload has no corresponding C++ method of its own --
-         * it is implemented directly in the Python bindings as a
-         * name-to-index lookup wrapping operator()(x, idx) -- but is
-         * documented here since it is exposed as part of
-         * Interpolator1D's Python __call__ family)
-         */
-        static constexpr std::string_view callNameDocstring = R"doc(Interpolate a single quantity, selected by name, to a given point.
-
-Parameters
-----------
-x : float or array_like of float
-    The point(s) at which to interpolate.
-name : str
-    Name of the quantity to interpolate, as recognized by the field
-    names this interpolator was built to recognize.
-
-Returns
--------
-value : float or numpy.ndarray of float
-    The interpolated value(s), with the same shape as x.
-
-Throws
-------
-RuntimeError
-    If name is not a recognized field name, or if any requested x is
-    outside the range [xMin(), xMax()].)doc";
 
         /**
          * @brief Interpolate to a given point
