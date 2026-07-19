@@ -22,6 +22,7 @@ resolves stars.IMF = "chabrier.toml" via SLUG_DIR + "data/imfs".
 """
 
 import gc
+import pathlib
 
 import numpy as np
 import pytest
@@ -332,6 +333,34 @@ def test_simphysics_missing_file_raises():
         slug.SimPhysics("tests/core/assets/does_not_exist.in", "cluster")
 
 
+def test_simphysics_wl_and_wlobs(sim_physics):
+    """wl() and wlObs() should return equal-length, non-empty lists;
+    at z = 0 (the default SpecsynBlackbody redshift) they should be
+    identical, since wlObs() is just wl() redshifted by (1 + z)."""
+    wl = sim_physics.wl()
+    wl_obs = sim_physics.wlObs()
+
+    assert len(wl) > 0
+    assert len(wl_obs) == len(wl)
+    assert list(wl) == pytest.approx(list(wl_obs))
+
+
+def test_simphysics_wl_without_specsyn_raises(tmp_path):
+    """wl()/wlObs() should raise, not crash, if spectra.model was not
+    set in the input deck (so SimPhysics.specsyn() is null)."""
+    deck_text = pathlib.Path(CLUSTER_DECK).read_text()
+    stripped = deck_text.replace('[spectra]\nmodel = "blackbody"\n\n', "")
+    assert stripped != deck_text, "expected to find and strip a [spectra] section"
+    deck_path = tmp_path / "no_spectra.in"
+    deck_path.write_text(stripped)
+
+    physics = slug.SimPhysics(str(deck_path), "cluster")
+    with pytest.raises(RuntimeError):
+        physics.wl()
+    with pytest.raises(RuntimeError):
+        physics.wlObs()
+
+
 # ---------------------------------------------------------------------
 # Cluster
 # ---------------------------------------------------------------------
@@ -369,6 +398,16 @@ def test_cluster_advance_populates_spec(sim_physics):
 
     assert len(cluster.spec()) > 0
     assert len(cluster.starMasses()) + len(cluster.deadStarMasses()) > 0
+
+
+def test_cluster_spec_matches_wl_length(sim_physics):
+    """Cluster.spec() should be evaluated on the same wavelength grid
+    as SimPhysics.wl()/wlObs()."""
+    cluster = slug.Cluster(7, CLUSTER_TARGET_MASS, 0.0, sim_physics)
+    cluster.advance(5.0)
+
+    assert len(cluster.spec()) == len(sim_physics.wl())
+    assert len(cluster.spec()) == len(sim_physics.wlObs())
 
 
 def test_cluster_advance_backwards_raises(sim_physics):
