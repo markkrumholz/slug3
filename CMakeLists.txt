@@ -217,10 +217,25 @@ pybind11_add_module(slugPython
     src/pybind/BindInterpolator1D.cpp
     src/pybind/BindTracks2D.cpp
     src/pybind/BindTracks3D.cpp
+    src/pybind/BindSimPhysics.cpp
+    src/pybind/BindCluster.cpp
+    src/core/Cluster.cpp
+    src/io/SimPhysics.cpp
     src/interpolation/Mesh2DGrid.cpp
+    src/pdfs/PDFFileParser.cpp
+    src/pdfs/PDFSegment.cpp
+    src/pdfs/PDFSegmentDelta.cpp
+    src/pdfs/PDFSegmentExponential.cpp
+    src/pdfs/PDFSegmentLognormal.cpp
+    src/pdfs/PDFSegmentNormal.cpp
+    src/pdfs/PDFSegmentPowerlaw.cpp
+    src/pdfs/PDFSegmentSchechter.cpp
+    src/specsyn/SpecsynBlackbody.cpp
     src/tracks/TrackUtils.cpp
     src/tracks/Tracks2D.cpp
     src/tracks/Tracks3D.cpp
+    src/utils/ParseUtils.cpp
+    src/extern/cubature/pcubature.c
 )
 set_target_properties(slugPython PROPERTIES OUTPUT_NAME slug)
 
@@ -261,7 +276,7 @@ target_include_directories(slugTestSpecsyn PRIVATE src)
 target_include_directories(slugTestSpecsyn SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus src/extern/cubature)
 
 target_include_directories(slugPython PRIVATE src)
-target_include_directories(slugPython SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
+target_include_directories(slugPython SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus src/extern/cubature)
 
 target_include_directories(slug SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestInterpolation SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
@@ -345,12 +360,14 @@ set_tests_properties(test_Io PROPERTIES
 # Python binding tests: run via pytest, using the same Python interpreter
 # pybind11 built slugPython against, so that this always tests the module
 # that was just built rather than whatever "python" happens to be on PATH.
-# Requires pytest and numpy to be installed for that interpreter.
+# Requires pytest and numpy to be installed for that interpreter. Also
+# needs SLUG_DIR set, same as test_Core/test_Io above, since the
+# SimPhysics bindings exercise the same stars.IMF file-resolution path.
 add_test(NAME test_PythonBindings
     COMMAND ${Python_EXECUTABLE} -m pytest ${CMAKE_SOURCE_DIR}/tests/pybind -v
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 set_tests_properties(test_PythonBindings PROPERTIES
-    ENVIRONMENT "PYTHONPATH=$<TARGET_FILE_DIR:slugPython>")
+    ENVIRONMENT "PYTHONPATH=$<TARGET_FILE_DIR:slugPython>;SLUG_DIR=${CMAKE_SOURCE_DIR}")
 
 # Add command to copy assets to build dir
 add_custom_command(
