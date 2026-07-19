@@ -275,5 +275,39 @@ with h5py.File(args.output, 'a') as h5file:
             print(f"Wrote logg_Teff_grid ({len(pairs)} combinations, from group "
                   f"{spectra_groups[0]}) to {args.output}.")
 
+# Fetch the wavelength grid for each resolution ("r") value we ended up
+# with spectra for, and write it into a top-level "wavelengths" group as
+# a dataset named r<value> -- one shared grid per resolution, rather
+# than storing wavelengths with every individual spectrum. Skips a grid
+# already present unless --overwrite is set, same convention as the
+# spectra themselves.
+with h5py.File(args.output, 'a') as h5file:
+    wave_grp = h5file.require_group('wavelengths')
+    for r_val in sorted(set(r)):
+        ds_name = f"r{r_val}"
+        if ds_name in wave_grp and not args.overwrite:
+            if args.verbose:
+                print(f"Wavelength grid {ds_name} already present in {args.output}; skipping.")
+            continue
+
+        wave_filename = f"bosz{args.version}_wave_r{r_val}.txt"
+        wave_url = f"{args.url}wavelength_grids/{wave_filename}"
+        if args.verbose:
+            print(f"Fetching {wave_url}...")
+        outname = shutil.os.path.join(temp_dir, wave_filename)
+        with urllib3.PoolManager().request("GET", wave_url, preload_content=False) as response, open(outname, "wb") as out_file:
+            if response.status != 200:
+                raise RuntimeError(f"Failed to fetch {wave_url}: HTTP {response.status}")
+            shutil.copyfileobj(response, out_file)
+
+        wave = np.loadtxt(outname)
+        if ds_name in wave_grp:
+            del wave_grp[ds_name]
+        wave_grp.create_dataset(ds_name, data=wave, compression="gzip")
+        shutil.os.remove(outname)
+
+        if args.verbose:
+            print(f"Wrote wavelength grid {ds_name} ({len(wave)} points) to {args.output}.")
+
 # Clean up all downloads
 shutil.rmtree(temp_dir, ignore_errors=True)
