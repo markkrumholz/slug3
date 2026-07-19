@@ -85,6 +85,7 @@ add_executable(slug
     src/pdfs/PDFSegmentNormal.cpp
     src/pdfs/PDFSegmentPowerlaw.cpp
     src/pdfs/PDFSegmentSchechter.cpp
+    src/specsyn/SpecsynBlackbody.cpp
     src/tracks/Tracks2D.cpp
     src/tracks/Tracks3D.cpp
     src/tracks/TrackUtils.cpp
@@ -154,10 +155,12 @@ add_executable(slugTestCore
     src/pdfs/PDFSegmentNormal.cpp
     src/pdfs/PDFSegmentPowerlaw.cpp
     src/pdfs/PDFSegmentSchechter.cpp
+    src/specsyn/SpecsynBlackbody.cpp
     src/tracks/TrackUtils.cpp
     src/tracks/Tracks2D.cpp
     src/tracks/Tracks3D.cpp
     src/utils/ParseUtils.cpp
+    src/extern/cubature/pcubature.c
     tests/core/testCluster.cpp
     tests/core/testCoreAll.cpp
     tests/core/testSimCluster.cpp
@@ -178,10 +181,12 @@ add_executable(slugTestIo
     src/pdfs/PDFSegmentNormal.cpp
     src/pdfs/PDFSegmentPowerlaw.cpp
     src/pdfs/PDFSegmentSchechter.cpp
+    src/specsyn/SpecsynBlackbody.cpp
     src/tracks/TrackUtils.cpp
     src/tracks/Tracks2D.cpp
     src/tracks/Tracks3D.cpp
     src/utils/ParseUtils.cpp
+    src/extern/cubature/pcubature.c
     tests/io/testIoAll.cpp
     tests/io/testOutputManager.cpp
     tests/io/testSimControls.cpp
@@ -244,10 +249,10 @@ target_include_directories(slugTestTracks PRIVATE src)
 target_include_directories(slugTestTracks SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
 
 target_include_directories(slugTestCore PRIVATE src ${CMAKE_BINARY_DIR}/generated)
-target_include_directories(slugTestCore SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
+target_include_directories(slugTestCore SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus src/extern/cubature)
 
 target_include_directories(slugTestIo PRIVATE src ${CMAKE_BINARY_DIR}/generated)
-target_include_directories(slugTestIo SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
+target_include_directories(slugTestIo SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus src/extern/cubature)
 
 target_include_directories(slugTestSpecsyn PRIVATE src)
 target_include_directories(slugTestSpecsyn SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus src/extern/cubature)

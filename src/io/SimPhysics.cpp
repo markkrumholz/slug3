@@ -9,6 +9,7 @@
 #include "../pdfs/PDF.hpp"
 #include "../pdfs/PDFFileParser.hpp"
 #include "../pdfs/PDFSegmentPowerlaw.hpp"
+#include "../specsyn/SpecsynBlackbody.hpp"
 #include "../tracks/TrackCommons.hpp"
 #include "../utils/ParseUtils.hpp"
 #include "SimControls.hpp"
@@ -41,9 +42,13 @@ io::SimPhysics::SimPhysics(const toml::table& inputDeck, SimControls::SimType si
     // libraries.
     const auto spectraModelInput = utils::getTOMLKeyWithError<std::string>(
         inputDeck, "spectra.model");
-    if (spectraModelInput.has_value() && spectraModelInput.value() != "blackbody")
+    if (spectraModelInput.has_value())
     {
-        throw std::runtime_error("SimPhysics: spectra.model must be 'blackbody'");
+        if (spectraModelInput.value() != "blackbody")
+        {
+            throw std::runtime_error("SimPhysics: spectra.model must be 'blackbody'");
+        }
+        specsyn_ = std::make_unique<specsyn::SpecsynBlackbody>();
     }
 
     // In a galaxy simulation, read CLF and SFR
