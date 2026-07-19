@@ -7,6 +7,7 @@ gzip'ed HDF5 file that slug can read.
 # Imports
 import argparse
 import h5py
+import numpy as np
 import re
 import shutil
 import urllib3
@@ -162,3 +163,87 @@ if not shutil.os.path.exists(args.output):
     h5file.attrs['references'] = BOSZ_references
     h5file.attrs['reference_urls'] = BOSZ_refernce_URLS
     h5file.close()
+
+# Group the filtered candidates by (feh, afe, cfe, r, micro): each
+# combination becomes its own HDF5 group, holding every (teff, logg)
+# spectrum for that combination.
+groups = {}
+for i in range(len(files_avail)):
+    key = (feh[i], afe[i], cfe[i], r[i], micro[i])
+    groups.setdefault(key, []).append(i)
+if args.verbose:
+    print(f"Grouped {len(files_avail)} files into {len(groups)} HDF5 groups.")
+
+# When more than one atmosphere code covers the same (teff, logg) within
+# a group, prefer "ap" (ATLAS9) over "ms"/"mp" (MARCS); lower number
+# wins ties in the selection loop below
+ATMOS_PREFERENCE = {'ap': 0, 'mp': 1, 'ms': 1}
+
+# Create a temporary directory to store the downloaded files
+temp_dir = "bosz_temp"
+shutil.rmtree(temp_dir, ignore_errors=True)
+shutil.os.makedirs(temp_dir, exist_ok=True)
+
+# Loop over groups, downloading and processing the spectra in each
+for key, idxs in groups.items():
+    feh_val, afe_val, cfe_val, r_val, micro_val = key
+    grp_name = (f"spectra_feh{feh_val:.2f}_afe{afe_val:.2f}_cfe{cfe_val:.2f}"
+                f"_r{r_val}_micro{micro_val}")
+    if args.verbose:
+        print(f"Processing group {grp_name} ({len(idxs)} candidate files)...")
+
+    # For each (teff, logg) covered by this group, keep only the file
+    # from the preferred atmosphere code, in case more than one is
+    # available
+    best = {}
+    for i in idxs:
+        fname = shutil.os.path.basename(files_avail[i])
+        match = name_re.fullmatch(fname)
+        tl = (match.group('teff'), match.group('logg'))
+        pref = ATMOS_PREFERENCE.get(match.group('atmos'), len(ATMOS_PREFERENCE))
+        if tl not in best or pref < best[tl][0]:
+            best[tl] = (pref, i, fname)
+
+    # Download each selected file and extract the surface flux (4 pi
+    # times the surface Eddington H values in its first column)
+    spectra = {}
+    for tl, (_, i, fname) in best.items():
+        file_url = args.url + files_avail[i]
+        if args.verbose:
+            print(f"Fetching {file_url}...")
+        outname = shutil.os.path.join(temp_dir, fname)
+        with urllib3.PoolManager().request("GET", file_url, preload_content=False) as response, open(outname, "wb") as out_file:
+            if response.status != 200:
+                raise RuntimeError(f"Failed to fetch {file_url}: HTTP {response.status}")
+            shutil.copyfileobj(response, out_file)
+
+        # np.loadtxt transparently gunzips a .gz-named file
+        eddington_h = np.loadtxt(outname, usecols=0)
+        spectra[tl] = 4 * np.pi * eddington_h
+
+        # Clean up the downloaded file
+        shutil.os.remove(outname)
+
+    # Write this group's spectra to the HDF5 file
+    with h5py.File(args.output, 'a') as h5file:
+        # Delete an existing group of this name first; if we're here it
+        # means we want to overwrite it
+        if grp_name in h5file:
+            del h5file[grp_name]
+        grp = h5file.create_group(grp_name)
+        grp.attrs['feh'] = feh_val
+        grp.attrs['afe'] = afe_val
+        grp.attrs['cfe'] = cfe_val
+        grp.attrs['r'] = r_val
+        grp.attrs['micro'] = micro_val
+
+        # Name each dataset by its Teff and log(g), using the same
+        # naming convention as the original files (e.g. "t8000_g+3.0")
+        for (teff, logg), flux in spectra.items():
+            grp.create_dataset(f"t{teff}_g{logg}", data=flux, compression="gzip")
+
+        if args.verbose:
+            print(f"Wrote {len(spectra)} spectra to group {grp_name} in {args.output}.")
+
+# Clean up all downloads
+shutil.rmtree(temp_dir, ignore_errors=True)
