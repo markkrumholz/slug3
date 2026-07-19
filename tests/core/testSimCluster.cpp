@@ -12,7 +12,6 @@
 #include "../src/io/SimPhysics.hpp"
 #include "hdf5.h" // NOLINT(misc-include-cleaner)
 #include "testSimCluster.hpp"
-#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -37,11 +36,6 @@
 // some thread
 static constexpr unsigned long nTrial = 23;
 static constexpr int nThreads = 4;
-
-// outTimes for tests/core/assets/testCluster.in is a 3-point grid
-// (start_time = 0, end_time = 10, ntime = 3), so each trial's single
-// cluster should be written out 3 times
-static constexpr size_t nTime = 3;
 
 // clusters.CMF in testCluster.in is a fixed value, so every cluster's
 // target mass should come out identical regardless of [Fe/H]
@@ -181,12 +175,14 @@ static auto checkRowsAndGroupByTrial(const OutputColumns& cols, TrialMap& rowsBy
     return 0;
 }
 
-// Verify that every trial from 0 to nTrial - 1 appears exactly nTime
-// times with a single, consistent uid across its rows, and that no
-// uid is reused across trials -- this would fail if the dynamic
-// schedule dropped or duplicated a trial, if the omp critical guard
-// around the output writes let two threads' rows corrupt each other,
-// or if utils::getID() handed out a duplicate ID under concurrent use
+// Verify that every trial from 0 to nTrial - 1 appears exactly once
+// (writeCluster is called a single time per trial, regardless of the
+// number of output times, since it only writes properties fixed at
+// cluster formation), and that no uid is reused across trials -- this
+// would fail if the dynamic schedule dropped or duplicated a trial,
+// if the omp critical guard around the output writes let two
+// threads' rows corrupt each other, or if utils::getID() handed out
+// a duplicate ID under concurrent use
 static auto checkTrialsAndUids(const TrialMap& rowsByTrial) -> int
 {
     std::set<unsigned long> seenUids;
@@ -200,17 +196,10 @@ static auto checkTrialsAndUids(const TrialMap& rowsByTrial) -> int
             return 1;
         }
         const auto& uids = it->second;
-        if (uids.size() != nTime)
+        if (uids.size() != 1)
         {
             std::cerr << "testSimCluster: trial " << trial << " has "
-                << uids.size() << " rows, expected " << nTime << "\n";
-            return 1;
-        }
-        const auto isSameUid = [&](const unsigned long u) -> bool { return u == uids.front(); };
-        if (!std::ranges::all_of(uids, isSameUid))
-        {
-            std::cerr << "testSimCluster: trial " << trial
-                << " does not use a single, consistent uid across its rows\n";
+                << uids.size() << " rows, expected 1\n";
             return 1;
         }
         if (!seenUids.insert(uids.front()).second)
@@ -255,7 +244,7 @@ static auto runScenario(const std::string& scenario,
         return 1;
     }
 
-    const size_t expectedRows = nTrial * nTime;
+    const size_t expectedRows = nTrial;
     if (cols.trial_.size() != expectedRows || cols.uid_.size() != expectedRows)
     {
         std::cerr << "testSimCluster: " << scenario << ": expected "
