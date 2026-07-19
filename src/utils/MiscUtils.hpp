@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
+#include <string>
 namespace utils
 {
     /**

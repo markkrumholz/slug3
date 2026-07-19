@@ -10,6 +10,7 @@
 
 #include "../pdfs/PDF.hpp"
 #include "../specsyn/Specsyn.hpp"
+#include "../tracks/Tracks2D.hpp"
 #include "../tracks/Tracks3D.hpp"
 #include "SimControls.hpp"
 #include <memory>

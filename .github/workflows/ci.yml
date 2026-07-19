@@ -117,7 +117,7 @@ jobs:
       - name: Run clang-tidy on changed files
         run: |
           CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD \
-            | grep -E '^src/.*\.cpp$' \
+            | grep -E '^src/.*\.(cpp|hpp)$' \
             | grep -v 'pcg-cpp' || true)
           if [ -z "$CHANGED" ]; then
             echo "No C++ source files changed, skipping clang-tidy."
