@@ -13,6 +13,7 @@
 #include "SimPhysics.hpp"
 #include <fstream>
 #include <toml.hpp>
+#include <vector>
 
 namespace core
 {
@@ -69,8 +70,11 @@ namespace io
          * @param time The output time at which the cluster's spectrum was computed, in yr
          * @param cluster The cluster whose spectrum should be written
          * @details
-         * Not yet implemented; ascii cluster-spectrum output will be
-         * added in a future commit.
+         * If spectral synthesis was not enabled for this simulation
+         * (the cluster-spectra file was not opened), or the cluster
+         * has disrupted, this is a no-op. Otherwise writes one line
+         * per wavelength, each holding trial, time, uid, wavelength,
+         * and specific luminosity, to the cluster-spectra file.
          */
         void writeClusterSpec(unsigned long trial, double time,
             const core::Cluster& cluster) override;
@@ -78,6 +82,8 @@ namespace io
     private:
 
         std::ofstream clustersFile_; /**< Handle to the open cluster output file */
+        std::ofstream clusterSpectraFile_; /**< Handle to the open cluster-spectra output file, if any */
+        std::vector<double> wlObs_; /**< Observed-frame wavelength grid, if spectral synthesis is enabled */
     };
 
 } // namespace io
