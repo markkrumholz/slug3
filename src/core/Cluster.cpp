@@ -86,12 +86,21 @@ void core::Cluster::advance(const double t)
         throw std::runtime_error(ss.str());
     }
 
-    // If t == curTime_, do nothing
-    if (t == curTime_) { return; }
+    // If t == curTime_ and this isn't the very first call, do
+    // nothing -- but the very first call must still run, even if
+    // t == curTime_ (== formTime_, the common case of an output time
+    // at t = 0), since isochrone_/spec_ have not yet been computed at
+    // all before that
+    if (t == curTime_ && advanced_) { return; }
 
-    // Update time and cluster age
+    // Update time and cluster age. logAge is floored at the tracks'
+    // own minimum representable log-age, since age = curTime_ -
+    // formTime_ can be exactly zero (at the first call, when
+    // t == formTime_), and log10(0) is -inf, which lies outside any
+    // finite tracks grid; ages at or below the tracks' youngest grid
+    // point are all treated as that youngest age.
     curTime_ = t;
-    const auto logAge = std::log10(curTime_ - formTime_);
+    const auto logAge = std::max(std::log10(curTime_ - formTime_), tracks().logTMin());
 
     // Update list of alive and dead stars to new cluster age
     updateLivingStars(logAge);
@@ -104,6 +113,8 @@ void core::Cluster::advance(const double t)
 
     // Check for disruption
     if (curTime_ > disruptTime_) { isDisrupted_ = true; }
+
+    advanced_ = true;
 }
 
 // Update lists of alive and dead stars to current age
