@@ -84,10 +84,13 @@ namespace specsyn
          * @param props Stellar properties, as produced by evaluating
          *   the Interpolator1D returned by Tracks2D::getIsochrone at
          *   this star's mass
+         * @param feh [Fe/H] value of the star, needed because it is
+         *   not carried by props itself (e.g. by a SpecsynLib, to
+         *   locate props in its spectral library's [Fe/H] direction)
          * @return The star's spectrum, evaluated on the wavelength
          *   grid returned by wl(), in units of erg/s/Angstrom
          */
-        [[nodiscard]] virtual auto spec(const StarData& props) const
+        [[nodiscard]] virtual auto spec(const StarData& props, double feh) const
         -> std::vector<double> = 0;
 
         /**
@@ -97,6 +100,8 @@ namespace specsyn
          * @param segment A single isochrone segment (one element of
          *   the Isochrone returned by Tracks2D::getIsochrone) to
          *   evaluate at mass m
+         * @param feh [Fe/H] value of the segment's isochrone, passed
+         *   through to spec() unchanged
          * @return The star's spectrum, evaluated on the wavelength
          *   grid returned by wl(), in units of erg/s/Angstrom
          * @details
@@ -111,9 +116,9 @@ namespace specsyn
          * segment is defined, and pcubature has no way to know to
          * avoid evaluating there.
          */
-        [[nodiscard]] auto spec(double m, const Segment& segment) const -> std::vector<double>
+        [[nodiscard]] auto spec(double m, const Segment& segment, double feh) const -> std::vector<double>
         {
-            return spec(segment(m));
+            return spec(segment(m), feh);
         }
 
         /**
@@ -124,6 +129,8 @@ namespace specsyn
          * @param mTot Total mass of the population, in Msun
          * @param mMin Minimum stellar mass in the population, in Msun
          * @param mMax Maximum stellar mass in the population, in Msun
+         * @param feh [Fe/H] value of the population, passed through
+         *   to spec() unchanged
          * @return The specific luminosity of the population, evaluated
          *   on the wavelength grid returned by wl(), in units of
          *   erg/s/Angstrom
@@ -149,10 +156,11 @@ namespace specsyn
             const pdfs::PDF& imf,
             double mTot,
             double mMin,
-            double mMax
+            double mMax,
+            double feh
         ) const -> std::vector<double>
         {
-            using SpecSegFn = std::vector<double> (Specsyn::*)(double, const Segment&) const;
+            using SpecSegFn = std::vector<double> (Specsyn::*)(double, const Segment&, double) const;
             const utils::PDFIntegrator integrator(
                 imf, static_cast<SpecSegFn>(&Specsyn::spec), static_cast<unsigned>(wl_.size()));
 
@@ -163,7 +171,7 @@ namespace specsyn
                 const double b = std::min(mMax, seg->xMax());
                 if (a >= b) { continue; } // empty intersection with [mMin, mMax]
 
-                const auto segResult = integrator.integrate(a, b, this, *seg);
+                const auto segResult = integrator.integrate(a, b, this, *seg, feh);
                 for (std::size_t i = 0; i < result.size(); ++i)
                 {
                     result.at(i) += segResult.at(i);

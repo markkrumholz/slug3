@@ -54,10 +54,12 @@ namespace specsyn
          * @param props Stellar properties, as produced by evaluating
          *   the Interpolator1D returned by Tracks2D::getIsochrone at
          *   this star's mass
+         * @param feh [Fe/H] value of the star; unused, since a
+         *   blackbody spectrum depends only on temperature and radius
          * @return The star's spectrum, evaluated on the wavelength
          *   grid returned by wl(), in units of erg/s/Angstrom
          */
-        [[nodiscard]] auto spec(const StarData& props) const -> std::vector<double> override;
+        [[nodiscard]] auto spec(const StarData& props, double feh) const -> std::vector<double> override;
     };
 
 } // namespace specsyn

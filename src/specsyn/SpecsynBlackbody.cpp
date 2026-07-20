@@ -33,7 +33,7 @@ specsyn::SpecsynBlackbody::SpecsynBlackbody(const double z) : Specsyn(z)
     }
 }
 
-auto specsyn::SpecsynBlackbody::spec(const StarData& props) const -> std::vector<double>
+auto specsyn::SpecsynBlackbody::spec(const StarData& props, double /*feh*/) const -> std::vector<double>
 {
     const double logTeff = props.at(static_cast<std::size_t>(tracks::FieldIdx::logTe));
     const double temperature = std::pow(10.0, logTeff); // K
