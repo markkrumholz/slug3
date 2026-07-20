@@ -7,6 +7,8 @@
 
 #include "SpecsynLib.hpp"
 #include "../tracks/TrackCommons.hpp"
+#include "Specsyn.hpp"
+#include "SpecsynCommons.hpp"
 #include "SpecsynUtils.hpp"
 #include "hdf5.h" // NOLINT(misc-include-cleaner)
 #include <algorithm>
@@ -108,18 +110,18 @@ namespace specsyn
         /**
          * @brief A bracketing pair of grid indices, plus an interpolation weight
          * @details
-         * lo and hi are the indices of the grid points immediately
-         * below and above (or equal to) a query value, and t is the
+         * lo_ and hi_ are the indices of the grid points immediately
+         * below and above (or equal to) a query value, and t_ is the
          * fractional distance of the query value between them, so
-         * that (1 - t) * grid[lo] + t * grid[hi] recovers the query
-         * value. For a grid of size 1 (a degenerate axis with no
-         * actual extent), lo == hi == 0 and t == 0.
+         * that (1 - t_) * grid[lo_] + t_ * grid[hi_] recovers the
+         * query value. For a grid of size 1 (a degenerate axis with
+         * no actual extent), lo_ == hi_ == 0 and t_ == 0.
          */
         struct Bracket
         {
-            size_t lo;
-            size_t hi;
-            double t;
+            size_t lo_;
+            size_t hi_;
+            double t_;
         };
 
         /**
@@ -240,7 +242,7 @@ namespace specsyn
                 "SpecsynLib: unable to open group wavelengths in " +
                 h5path.string());
         }
-        const auto wlName = "r" + std::to_string(static_cast<long long>(std::llround(r)));
+        const auto wlName = "r" + std::to_string(std::llround(r));
         wl_ = readDataset1D(waveGrp, wlName);
         H5Gclose(waveGrp);
         if (wl_.empty())
@@ -341,7 +343,7 @@ namespace specsyn
     }
 
     template <OOBPolicy Policy>
-    auto SpecsynLib<Policy>::spec(const StarData& props, const double feh) const -> std::vector<double>
+    auto SpecsynLib<Policy>::spec(const StarData& props, const double feh) const -> std::vector<double> // NOLINT(readability-function-cognitive-complexity) -- six sequential bounds-check/lookup/interpolation steps, each simple on its own; splitting them into separate functions would only add indirection, not clarity
     {
         // Step 1: check feh and Teff against the grid's bounds before
         // paying for the surface-area/log(g) calculation below
@@ -382,11 +384,11 @@ namespace specsyn
         // actually have a spectrum -- interpolating across an
         // unpopulated point would be meaningless -- or this star
         // counts as out of bounds
-        for (const size_t fi : { fehB.lo, fehB.hi })
+        for (const size_t fi : { fehB.lo_, fehB.hi_ })
         {
-            for (const size_t li : { loggB.lo, loggB.hi })
+            for (const size_t li : { loggB.lo_, loggB.hi_ })
             {
-                for (const size_t ti : { teffB.lo, teffB.hi })
+                for (const size_t ti : { teffB.lo_, teffB.hi_ })
                 {
                     if (grid[fi, li, ti].empty())
                     {
@@ -407,16 +409,16 @@ namespace specsyn
         std::vector<double> result(wl_.size(), 0.0);
         for (int bf = 0; bf < 2; ++bf)
         {
-            const size_t fi = (bf == 0) ? fehB.lo : fehB.hi;
-            const double wFeh = (bf == 0) ? (1.0 - fehB.t) : fehB.t;
+            const size_t fi = (bf == 0) ? fehB.lo_ : fehB.hi_;
+            const double wFeh = (bf == 0) ? (1.0 - fehB.t_) : fehB.t_;
             for (int bl = 0; bl < 2; ++bl)
             {
-                const size_t li = (bl == 0) ? loggB.lo : loggB.hi;
-                const double wLogg = (bl == 0) ? (1.0 - loggB.t) : loggB.t;
+                const size_t li = (bl == 0) ? loggB.lo_ : loggB.hi_;
+                const double wLogg = (bl == 0) ? (1.0 - loggB.t_) : loggB.t_;
                 for (int bt = 0; bt < 2; ++bt)
                 {
-                    const size_t ti = (bt == 0) ? teffB.lo : teffB.hi;
-                    const double wTeff = (bt == 0) ? (1.0 - teffB.t) : teffB.t;
+                    const size_t ti = (bt == 0) ? teffB.lo_ : teffB.hi_;
+                    const double wTeff = (bt == 0) ? (1.0 - teffB.t_) : teffB.t_;
 
                     const double weight = wFeh * wLogg * wTeff * area; // step 6: fold in surface area
                     if (weight == 0.0) { continue; } // degenerate axis or exact grid hit: skip a zero-weight corner
@@ -438,6 +440,6 @@ namespace specsyn
     // as with every other class in src/specsyn, rather than forcing it
     // into the header just because it is now a template.
     template class SpecsynLib<OOBPolicy::Throw>;
-    template class SpecsynLib<OOBPolicy::Silent>;
+    template class SpecsynLib<OOBPolicy::silent>;
 
 } // namespace specsyn

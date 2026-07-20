@@ -5,7 +5,7 @@
  * @details
  * This file contains end-to-end unit tests for SpecsynLib::spec,
  * exercising all three of its possible outcomes: a successfully
- * interpolated spectrum, a silently empty spectrum (OOBPolicy::Silent),
+ * interpolated spectrum, a silently empty spectrum (OOBPolicy::silent),
  * and a thrown runtime error (OOBPolicy::Throw), against the small
  * BOSZ_test.h5/spectra.toml fixture stored under tests/specsyn/assets
  * (see SpecsynUtils' own tests for how that fixture is derived from
@@ -132,10 +132,10 @@ static auto testSpecOOBThrow() -> int
 }
 
 // Check that spec() silently returns an empty spectrum for the same
-// out-of-bounds star when instantiated with OOBPolicy::Silent instead
+// out-of-bounds star when instantiated with OOBPolicy::silent instead
 static auto testSpecOOBSilent() -> int
 {
-    const specsyn::SpecsynLib<specsyn::OOBPolicy::Silent> lib(
+    const specsyn::SpecsynLib<specsyn::OOBPolicy::silent> lib(
         spectraName, -3.0, 1.0, 0.0, 0.0, 0.0, 500, registryName);
 
     const double logTeff = std::log10(15000.0);
@@ -149,14 +149,14 @@ static auto testSpecOOBSilent() -> int
     catch (const std::exception& e)
     {
         std::cerr << "testSpecsynLib: unexpected exception from spec() "
-            "under OOBPolicy::Silent: " << e.what() << "\n";
+            "under OOBPolicy::silent: " << e.what() << "\n";
         return 1;
     }
 
     if (!result.empty())
     {
         std::cerr << "testSpecsynLib: expected spec() to return an empty "
-            "spectrum for an out-of-bounds star under OOBPolicy::Silent, "
+            "spectrum for an out-of-bounds star under OOBPolicy::silent, "
             "got " << result.size() << " values\n";
         return 1;
     }

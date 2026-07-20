@@ -70,7 +70,7 @@ namespace specsyn
          * @return The star's spectrum, evaluated on the wavelength
          *   grid returned by wl(), in units of erg/s/Angstrom; a
          *   size-0 vector if the star falls outside this library's
-         *   (FeH, logg, Teff) grid and Policy is OOBPolicy::Silent
+         *   (FeH, logg, Teff) grid and Policy is OOBPolicy::silent
          * @throws std::runtime_error if the star falls outside this
          *   library's grid and Policy is OOBPolicy::Throw
          * @details
@@ -92,7 +92,7 @@ namespace specsyn
         /**
          * @brief Handle a star that falls outside this library's grid
          * @param message Description of why the star is out of bounds
-         * @return A size-0 vector, if Policy is OOBPolicy::Silent
+         * @return A size-0 vector, if Policy is OOBPolicy::silent
          * @throws std::runtime_error with message, if Policy is OOBPolicy::Throw
          */
         [[nodiscard]] static auto outOfBoundsResult(const std::string& message) -> std::vector<double>;
