@@ -1,12 +1,12 @@
 /**
- * @file SpectraCommons.hpp
+ * @file SpecsynCommons.hpp
  * @author Mark Krumholz
  * @brief Common definitions used by spectral synthesis classes
  * @date 2026-07-20
  */
 
-#ifndef SPECTRACOMMONS_HPP
-#define SPECTRACOMMONS_HPP
+#ifndef SPECSYNCOMMONS_HPP
+#define SPECSYNCOMMONS_HPP
 
 #include <filesystem>
 #include <string>
@@ -26,4 +26,4 @@ namespace specsyn
 
 } // namespace specsyn
 
-#endif // SPECTRACOMMONS_HPP
+#endif // SPECSYNCOMMONS_HPP

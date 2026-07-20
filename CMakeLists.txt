@@ -95,7 +95,8 @@ add_executable(slug
     src/pdfs/PDFSegmentPowerlaw.cpp
     src/pdfs/PDFSegmentSchechter.cpp
     src/specsyn/SpecsynBlackbody.cpp
-    src/specsyn/SpectraUtils.cpp
+    src/specsyn/SpecsynUtils.cpp
+    src/specsyn/SpecsynLib.cpp
     src/tracks/Tracks2D.cpp
     src/tracks/Tracks3D.cpp
     src/tracks/TrackUtils.cpp
@@ -166,7 +167,8 @@ add_executable(slugTestCore
     src/pdfs/PDFSegmentPowerlaw.cpp
     src/pdfs/PDFSegmentSchechter.cpp
     src/specsyn/SpecsynBlackbody.cpp
-    src/specsyn/SpectraUtils.cpp
+    src/specsyn/SpecsynUtils.cpp
+    src/specsyn/SpecsynLib.cpp
     src/tracks/TrackUtils.cpp
     src/tracks/Tracks2D.cpp
     src/tracks/Tracks3D.cpp
@@ -193,7 +195,8 @@ add_executable(slugTestIo
     src/pdfs/PDFSegmentPowerlaw.cpp
     src/pdfs/PDFSegmentSchechter.cpp
     src/specsyn/SpecsynBlackbody.cpp
-    src/specsyn/SpectraUtils.cpp
+    src/specsyn/SpecsynUtils.cpp
+    src/specsyn/SpecsynLib.cpp
     src/tracks/TrackUtils.cpp
     src/tracks/Tracks2D.cpp
     src/tracks/Tracks3D.cpp
@@ -206,10 +209,11 @@ add_executable(slugTestIo
 )
 add_executable(slugTestSpecsyn
     src/specsyn/SpecsynBlackbody.cpp
-    src/specsyn/SpectraUtils.cpp
+    src/specsyn/SpecsynUtils.cpp
+    src/specsyn/SpecsynLib.cpp
     tests/specsyn/testSpecsynAll.cpp
     tests/specsyn/testSpecsynBlackbody.cpp
-    tests/specsyn/testSpectraUtils.cpp
+    tests/specsyn/testSpecsynUtils.cpp
     src/extern/cubature/pcubature.c
     src/pdfs/PDFFileParser.cpp
     src/pdfs/PDFSegment.cpp
@@ -245,7 +249,8 @@ pybind11_add_module(slugPython
     src/pdfs/PDFSegmentPowerlaw.cpp
     src/pdfs/PDFSegmentSchechter.cpp
     src/specsyn/SpecsynBlackbody.cpp
-    src/specsyn/SpectraUtils.cpp
+    src/specsyn/SpecsynUtils.cpp
+    src/specsyn/SpecsynLib.cpp
     src/tracks/TrackUtils.cpp
     src/tracks/Tracks2D.cpp
     src/tracks/Tracks3D.cpp

@@ -8,7 +8,7 @@
  */
 
 #include "testSpecsynBlackbody.hpp"
-#include "testSpectraUtils.hpp"
+#include "testSpecsynUtils.hpp"
 #include <exception>
 #include <iostream>
 
@@ -17,7 +17,7 @@ auto main() -> int {
     {
         int result = 0;
         result += testSpecsynBlackbody();
-        result += testSpectraUtils();
+        result += testSpecsynUtils();
         return result;
     }
     catch (const std::exception& error)

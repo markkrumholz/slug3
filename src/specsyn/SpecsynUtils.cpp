@@ -1,11 +1,11 @@
 /**
- * @file SpectraUtils.cpp
+ * @file SpecsynUtils.cpp
  * @author Mark Krumholz
- * @brief Implementations for SpectraUtils.hpp
+ * @brief Implementations for SpecsynUtils.hpp
  * @date 2026-07-20
  */
 
-#include "SpectraUtils.hpp"
+#include "SpecsynUtils.hpp"
 #include "../utils/MiscUtils.hpp"
 #include "hdf5.h"   // NOLINT(misc-include-cleaner)
 #include <algorithm>

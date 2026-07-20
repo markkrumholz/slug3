@@ -1,15 +1,15 @@
 /**
- * @file SpectraUtils.hpp
+ * @file SpecsynUtils.hpp
  * @author Mark Krumholz
  * @brief Utility methods for dealing with spectral library files
  * @date 2026-07-20
  */
 
-#ifndef SPECTRAUTILS_HPP
-#define SPECTRAUTILS_HPP
+#ifndef SPECSYNUTILS_HPP
+#define SPECSYNUTILS_HPP
 
 #include "../tracks/TrackCommons.hpp"
-#include "SpectraCommons.hpp"
+#include "SpecsynCommons.hpp"
 #include <filesystem>
 #include <string>
 #include <toml.hpp>
@@ -65,4 +65,4 @@ namespace specsyn
 
 } // namespace specsyn
 
-#endif // SPECTRAUTILS_HPP
+#endif // SPECSYNUTILS_HPP

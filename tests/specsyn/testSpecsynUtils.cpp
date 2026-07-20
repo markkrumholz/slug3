@@ -1,10 +1,10 @@
 /**
- * @file testSpectraUtils.cpp
+ * @file testSpecsynUtils.cpp
  * @author Mark Krumholz
- * @brief Unit tests for the SpectraUtils functions.
+ * @brief Unit tests for the SpecsynUtils functions.
  * @details
  * This file contains unit tests for the parseRegistry and
- * findMatchingSpectra functions declared in SpectraUtils.hpp. The
+ * findMatchingSpectra functions declared in SpecsynUtils.hpp. The
  * tests use a small spectra registry and HDF5 file stored under
  * tests/specsyn/assets so that they can run without access to the
  * full-size BOSZ library under data/spectra, which is too large to
@@ -12,8 +12,8 @@
  * @date 2026-07-20
  */
 
-#include "../../src/specsyn/SpectraUtils.hpp"
-#include "testSpectraUtils.hpp"
+#include "../../src/specsyn/SpecsynUtils.hpp"
+#include "testSpecsynUtils.hpp"
 #include <algorithm>
 #include <exception>
 #include <iostream>
@@ -198,7 +198,7 @@ static auto testFindMatchingSpectra() -> int
     return 0;
 }
 
-auto testSpectraUtils() -> int
+auto testSpecsynUtils() -> int
 {
     int result = 0;
     result += testParseRegistry();
