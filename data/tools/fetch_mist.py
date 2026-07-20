@@ -90,26 +90,27 @@ if args.verbose and (args.feh or args.afe or args.vvcrit):
     print(f"Filtered track list: {len(files_avail)} files to fetch.")
 
 # If target file exists and overwrite is not specified, check if any of the
-# requested tracks already exist in the file. If so, skip them.
+# requested tracks already exist in the file. If so, skip them. Builds a
+# set of existing (feh, afe, vvcrit) combinations and filters candidates
+# against it in one pass, rather than the O(existing groups * candidates)
+# nested loop this used to be.
 if shutil.os.path.exists(args.output) and not args.overwrite:
-    h5file = h5py.File(args.output, 'r')
-    nduplicates = 0
-    for grp in h5file.keys():
-        existing_feh = h5file[grp].attrs['feh']
-        existing_afe = h5file[grp].attrs['afe']
-        existing_vvcrit = h5file[grp].attrs['vvcrit']
-        for i, feh_, afe_, vvcrit_ in zip(np.arange(len(feh)), feh, afe, vvcrit):
-            if (feh_ == existing_feh) and (afe_ == existing_afe) and \
-                (vvcrit_ == existing_vvcrit):
-                nduplicates += 1
-                files_avail.pop(i)
-                feh.pop(i)
-                afe.pop(i)
-                vvcrit.pop(i)
-                break
-    if args.verbose and nduplicates > 0:
-        print(f"Found {nduplicates} existing tracks in {args.output}; skipping them.")
-    h5file.close()
+    existing = set()
+    with h5py.File(args.output, 'r') as h5file:
+        for grp in h5file.keys():
+            existing.add((h5file[grp].attrs['feh'], h5file[grp].attrs['afe'],
+                          h5file[grp].attrs['vvcrit']))
+
+    keep = [i for i in range(len(files_avail))
+            if (feh[i], afe[i], vvcrit[i]) not in existing]
+    nduplicates = len(files_avail) - len(keep)
+    if nduplicates > 0:
+        files_avail = [files_avail[i] for i in keep]
+        feh = [feh[i] for i in keep]
+        afe = [afe[i] for i in keep]
+        vvcrit = [vvcrit[i] for i in keep]
+        if args.verbose:
+            print(f"Found {nduplicates} existing tracks in {args.output}; skipping them.")
 
 # If target output file does not exist, create it and write the references
 if not shutil.os.path.exists(args.output):
