@@ -198,9 +198,9 @@ namespace specsyn
             constexpr double solarMass = GSL_CONST_CGSM_SOLAR_MASS;
             constexpr double solarLuminosity = 3.828e33; // erg/s, IAU 2015 nominal value
 
-            const double logL = props.at(static_cast<size_t>(tracks::FieldIdx::logL));
-            const double logTeff = props.at(static_cast<size_t>(tracks::FieldIdx::logTe));
-            const double mass = props.at(static_cast<size_t>(tracks::FieldIdx::mass)); // Msun
+            const double logL = props[static_cast<size_t>(tracks::FieldIdx::logL)]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- StarData is a fixed-size std::array, and logL is one of its compile-time-known indices
+            const double logTeff = props[static_cast<size_t>(tracks::FieldIdx::logTe)]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
+            const double mass = props[static_cast<size_t>(tracks::FieldIdx::mass)]; // Msun // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
 
             const double temperature = std::pow(10.0, logTeff);               // K
             const double luminosity = std::pow(10.0, logL) * solarLuminosity; // erg/s
