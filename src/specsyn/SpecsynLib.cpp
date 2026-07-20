@@ -102,7 +102,8 @@ namespace specsyn
     } // namespace
     // NOLINTEND(misc-include-cleaner)
 
-    SpecsynLib::SpecsynLib(
+    template <OOBPolicy Policy>
+    SpecsynLib<Policy>::SpecsynLib(
         const std::string& spectraName,
         const double fehMin,
         const double fehMax,
@@ -243,5 +244,12 @@ namespace specsyn
 
         // NOLINTEND(misc-include-cleaner)
     }
+
+    // Explicit instantiation for every OOBPolicy value actually used;
+    // this keeps the constructor's implementation in this .cpp file,
+    // as with every other class in src/specsyn, rather than forcing it
+    // into the header just because it is now a template.
+    template class SpecsynLib<OOBPolicy::Throw>;
+    template class SpecsynLib<OOBPolicy::Silent>;
 
 } // namespace specsyn

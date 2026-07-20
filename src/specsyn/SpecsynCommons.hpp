@@ -8,6 +8,7 @@
 #ifndef SPECSYNCOMMONS_HPP
 #define SPECSYNCOMMONS_HPP
 
+#include <cstdint>
 #include <filesystem>
 #include <string>
 
@@ -23,6 +24,23 @@ namespace specsyn
     inline constexpr double defaultCFe = 0.0;        /**< Default [C/Fe] value */
     inline constexpr double defaultMicroTurb = 0.0;  /**< Default microturbulent velocity, in km/s */
     inline constexpr double defaultR = 500;          /**< Default spectral resolution */
+
+    /**
+     * @brief Specifies how a Specsyn class handles out-of-bounds stars
+     * @details
+     * An out-of-bounds star is one whose properties (e.g. logg, Teff)
+     * place it outside the domain a given Specsyn class can compute a
+     * spectrum for -- for example, a star that falls outside a
+     * SpecsynLib's (FeH, logg, Teff) tensor grid. This is a template
+     * parameter, rather than a runtime flag, so that the choice of
+     * behavior can be compiled directly into the hot spec() path
+     * instead of requiring a runtime branch.
+     */
+    enum class OOBPolicy : std::uint8_t
+    {
+        Throw,  /**< Throw a runtime error for an out-of-bounds star */
+        Silent  /**< Silently return a spectrum of size 0 for an out-of-bounds star */
+    };
 
 } // namespace specsyn
 

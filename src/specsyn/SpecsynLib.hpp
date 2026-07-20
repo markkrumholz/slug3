@@ -20,12 +20,19 @@ namespace specsyn
     /**
      * @class SpecsynLib
      * @brief A Specsyn specialization that reads spectra from an HDF5 spectral library
+     * @tparam Policy How this SpecsynLib should handle a star whose
+     *   (logg, Teff) properties fall outside its tensor grid -- see
+     *   OOBPolicy. This is a template parameter, rather than a
+     *   constructor argument or runtime flag, so that spec() (to be
+     *   implemented) can compile the chosen behavior directly into
+     *   its hot path instead of branching on it at runtime.
      * @details
      * This class is the spectral equivalent of tracks::Tracks3D: rather
      * than computing spectra from a formula (as SpecsynBlackbody does),
      * it loads pre-computed spectra from an HDF5 spectral library on
      * disk, such as the BOSZ library fetched by data/tools/fetch_bosz.py.
      */
+    template <OOBPolicy Policy>
     class SpecsynLib : public Specsyn
     {
     public:
