@@ -157,6 +157,8 @@ if shutil.os.path.exists(args.output) and not args.overwrite:
     existing = set()
     with h5py.File(args.output, 'r') as h5file:
         for grp in h5file.keys():
+            if not grp.startswith('spectra_'):
+                continue
             attrs = h5file[grp].attrs
             existing.add((float(attrs['feh']), float(attrs['afe']), float(attrs['cfe']),
                           int(attrs['r']), int(attrs['micro'])))
