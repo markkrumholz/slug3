@@ -187,7 +187,7 @@ void core::Cluster::computeSpec()
     if (birthNonStochMass_ > 0.0)
     {
         spec_ = synth->specCts(isochrone_, ph.imf(),
-            birthNonStochMass_, ph.imf().getMin(), ph.minStochMass());
+            birthNonStochMass_, ph.imf().getMin(), ph.minStochMass(), feH_);
     }
 
     // Individually-sampled (stochastic) stars
@@ -202,7 +202,7 @@ void core::Cluster::computeSpec()
             { return m >= segment->xMin() && m <= segment->xMax(); });
         if (seg == isochrone_.end()) { continue; }
 
-        const auto starSpec = synth->spec(m, **seg);
+        const auto starSpec = synth->spec(m, **seg, feH_);
         for (std::size_t i = 0; i < spec_.size(); ++i)
         {
             spec_[i] += starSpec[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- spec_ and starSpec both have size wl().size() by construction

@@ -36,6 +36,11 @@ namespace
     constexpr double pi = std::numbers::pi_v<double>;
     constexpr double angstromToCm = 1e-8;
     constexpr double relTol = 1e-6;
+
+    // Arbitrary [Fe/H] value, used only because spec()/specCts() now
+    // require one; SpecsynBlackbody ignores it entirely, since a
+    // blackbody spectrum depends only on temperature and radius
+    constexpr double testFeh = -0.5;
 } // namespace
 
 // Check that the wavelength grid has the documented size and is
@@ -72,7 +77,7 @@ static auto testSpec(const specsyn::SpecsynBlackbody& synth) -> int
     props.at(static_cast<std::size_t>(tracks::FieldIdx::logTe)) = logTeff;
     props.at(static_cast<std::size_t>(tracks::FieldIdx::logL)) = logL;
 
-    const auto result = synth.spec(props);
+    const auto result = synth.spec(props, testFeh);
     const auto& wl = synth.wl();
     if (result.size() != wl.size())
     {
@@ -150,12 +155,12 @@ static auto testSpecCts(const specsyn::SpecsynBlackbody& synth) -> int
     constexpr double mTot = 1e5;
     constexpr double mMin = 1.0;
     constexpr double mMax = 50.0;
-    const auto result = synth.specCts(isochrone, imf, mTot, mMin, mMax);
+    const auto result = synth.specCts(isochrone, imf, mTot, mMin, mMax, testFeh);
 
     specsyn::Specsyn::StarData props{};
     props.at(static_cast<std::size_t>(tracks::FieldIdx::logL)) = logL;
     props.at(static_cast<std::size_t>(tracks::FieldIdx::logTe)) = logTeff;
-    const auto starSpec = synth.spec(props);
+    const auto starSpec = synth.spec(props, testFeh);
 
     if (result.size() != starSpec.size())
     {
