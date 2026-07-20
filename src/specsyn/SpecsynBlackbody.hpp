@@ -11,7 +11,6 @@
 #include "Specsyn.hpp"
 #include <cstddef>
 #include <gsl/gsl_const_cgsm.h> // NOLINT(misc-include-cleaner)
-#include <numbers>
 #include <vector>
 
 namespace specsyn
@@ -30,17 +29,11 @@ namespace specsyn
      */
     class SpecsynBlackbody : public Specsyn
     {
-        // Physical constants, in cgs units, used by this class. GSL's
-        // constants tables do not include the solar luminosity, so
-        // that one is given directly, using the IAU (2015) nominal
-        // value.
-        static constexpr double planckH = GSL_CONST_CGSM_PLANCKS_CONSTANT_H;             /**< Planck constant, erg s */
-        static constexpr double speedOfLight = GSL_CONST_CGSM_SPEED_OF_LIGHT;             /**< Speed of light, cm/s */
-        static constexpr double rydberg = GSL_CONST_CGSM_RYDBERG;                         /**< Rydberg energy, erg */
-        static constexpr double stefanBoltzmann = GSL_CONST_CGSM_STEFAN_BOLTZMANN_CONSTANT; /**< Stefan-Boltzmann constant, erg cm^-2 s^-1 K^-4 */
-        static constexpr double boltzmannK = GSL_CONST_CGSM_BOLTZMANN;                    /**< Boltzmann constant, erg/K */
-        static constexpr double solarLuminosity = 3.828e33;                               /**< Nominal solar luminosity (IAU 2015), erg/s */
-        static constexpr double pi = std::numbers::pi_v<double>;                          /**< Pi */
+        // Physical constants, in cgs units, used by this class
+        static constexpr double planckH = GSL_CONST_CGSM_PLANCKS_CONSTANT_H; /**< Planck constant, erg s */
+        static constexpr double speedOfLight = GSL_CONST_CGSM_SPEED_OF_LIGHT; /**< Speed of light, cm/s */
+        static constexpr double rydberg = GSL_CONST_CGSM_RYDBERG;            /**< Rydberg energy, erg */
+        static constexpr double boltzmannK = GSL_CONST_CGSM_BOLTZMANN;       /**< Boltzmann constant, erg/K */
 
         // Number of points in the wavelength grid
         static constexpr std::size_t nWl = 1000;

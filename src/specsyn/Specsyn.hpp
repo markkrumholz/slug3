@@ -14,8 +14,12 @@
 #include "../utils/PDFIntegrator.hpp"
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
+#include <gsl/gsl_const_cgsm.h> // NOLINT(misc-include-cleaner)
 #include <memory>
+#include <numbers>
+#include <utility>
 #include <vector>
 
 namespace specsyn
@@ -170,6 +174,45 @@ namespace specsyn
         }
 
     protected:
+
+        /**
+         * @brief Compute a star's surface area and log(g) from its stellar properties
+         * @param props Stellar properties, as produced by evaluating
+         *   the Interpolator1D returned by Tracks2D::getIsochrone at
+         *   this star's mass
+         * @return A pair containing the star's surface area, in cm^2,
+         *   and log10(g), with g in cgs units (cm/s^2)
+         * @details
+         * The stellar radius (and hence surface area) is derived from
+         * the star's luminosity and effective temperature via the
+         * Stefan-Boltzmann law, L = 4 pi R^2 sigma T^4. log(g) is then
+         * computed as log10(G M / R^2), with the stellar mass (given
+         * in Msun) converted to grams and G taken from GSL's cgs unit
+         * system, so that g comes out in cgs units.
+         */
+        [[nodiscard]] static auto getSAandLogg(const StarData& props) -> std::pair<double, double>
+        {
+            constexpr double pi = std::numbers::pi_v<double>;
+            constexpr double stefanBoltzmann = GSL_CONST_CGSM_STEFAN_BOLTZMANN_CONSTANT;
+            constexpr double gravConst = GSL_CONST_CGSM_GRAVITATIONAL_CONSTANT;
+            constexpr double solarMass = GSL_CONST_CGSM_SOLAR_MASS;
+            constexpr double solarLuminosity = 3.828e33; // erg/s, IAU 2015 nominal value
+
+            const double logL = props.at(static_cast<size_t>(tracks::FieldIdx::logL));
+            const double logTeff = props.at(static_cast<size_t>(tracks::FieldIdx::logTe));
+            const double mass = props.at(static_cast<size_t>(tracks::FieldIdx::mass)); // Msun
+
+            const double temperature = std::pow(10.0, logTeff);               // K
+            const double luminosity = std::pow(10.0, logL) * solarLuminosity; // erg/s
+            const double temperature4 = temperature * temperature * temperature * temperature;
+            const double radius = std::sqrt(luminosity / (4.0 * pi * stefanBoltzmann * temperature4)); // cm
+            const double area = 4.0 * pi * radius * radius; // cm^2
+
+            const double g = gravConst * mass * solarMass / (radius * radius); // cm/s^2
+            const double logg = std::log10(g);
+
+            return { area, logg };
+        }
 
         double z_;                   /**< Redshift */
         std::vector<double> wl_;     /**< Wavelength grid for the spectral synthesizer, in Angstrom */

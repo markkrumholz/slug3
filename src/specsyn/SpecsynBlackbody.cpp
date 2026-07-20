@@ -35,16 +35,10 @@ specsyn::SpecsynBlackbody::SpecsynBlackbody(const double z) : Specsyn(z)
 
 auto specsyn::SpecsynBlackbody::spec(const StarData& props) const -> std::vector<double>
 {
-    const double logL = props.at(static_cast<std::size_t>(tracks::FieldIdx::logL));
     const double logTeff = props.at(static_cast<std::size_t>(tracks::FieldIdx::logTe));
+    const double temperature = std::pow(10.0, logTeff); // K
 
-    const double temperature = std::pow(10.0, logTeff);           // K
-    const double luminosity = std::pow(10.0, logL) * solarLuminosity; // erg/s
-
-    // Stellar radius and surface area, from L = 4 pi R^2 sigma T^4
-    const double temperature4 = temperature * temperature * temperature * temperature;
-    const double radius = std::sqrt(luminosity / (4.0 * pi * stefanBoltzmann * temperature4)); // cm
-    const double area = 4.0 * pi * radius * radius; // cm^2
+    const double area = getSAandLogg(props).first; // cm^2
 
     std::vector<double> result(wl_.size());
     for (std::size_t i = 0; i < wl_.size(); ++i)
