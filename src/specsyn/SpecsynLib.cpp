@@ -82,25 +82,30 @@ namespace specsyn
         }
 
         /**
-         * @brief Parse the Teff and logg values encoded in a spectrum dataset's name
-         * @param name Dataset name, of the form "t<Teff>_g<logg>"
-         *   (e.g. "t10000_g+2.0"), the naming convention used throughout
-         *   the BOSZ library fetched by data/tools/fetch_bosz.py
-         * @returns The (Teff, logg) pair encoded in name
+         * @brief Read a required scalar double attribute from an HDF5 object
+         * @param obj Handle to the object (a group or a dataset)
+         * @param name Name of the attribute
+         * @returns The attribute's value
+         * @throws std::runtime_error if obj has no attribute of that name
          */
-        auto parseSpectrumName(const std::string& name) //NOLINT(llvm-prefer-static-over-anonymous-namespace)
-            -> std::pair<double, double>
+        auto readRequiredScalarAttr(const hid_t obj, const std::string& name) //NOLINT(llvm-prefer-static-over-anonymous-namespace)
+            -> double
         {
-            const auto gPos = name.find("_g");
-            if (name.empty() || name.front() != 't' || gPos == std::string::npos)
+            if (H5Aexists(obj, name.c_str()) <= 0)
             {
                 throw std::runtime_error(
-                    "SpecsynLib: dataset name " + name +
-                    " does not match the expected t<Teff>_g<logg> format");
+                    "SpecsynLib: missing required attribute " + name);
             }
-            const double teff = std::stod(name.substr(1, gPos - 1));
-            const double logg = std::stod(name.substr(gPos + 2));
-            return { teff, logg };
+            const hid_t attr = H5Aopen(obj, name.c_str(), H5P_DEFAULT);
+            if (attr < 0)
+            {
+                throw std::runtime_error(
+                    "SpecsynLib: unable to open attribute " + name);
+            }
+            double value = 0.0;
+            H5Aread(attr, H5T_NATIVE_DOUBLE, &value);
+            H5Aclose(attr);
+            return value;
         }
     } // namespace
     // NOLINTEND(misc-include-cleaner)
@@ -254,14 +259,20 @@ namespace specsyn
         }
 
         // Step 3: scan every matching group's datasets (without reading
-        // their data yet) to find the Teff and logg values encoded in
-        // their names, and thereby the unique sets of logg and Teff
-        // values that, together with FeH_, generate the tensor grid on
-        // which the library's spectra sit. Not every (FeH, logg, Teff)
-        // point in that grid need have a spectrum, so groupEntries also
-        // records the (name, Teff, logg) triples for each group, to
-        // avoid re-parsing dataset names when actually reading the
-        // spectra in step 5.
+        // their flux data yet) to read the Teff and logg attributes
+        // fetch_bosz.py (or any other spectral-library fetch script
+        // following the same convention) stores on each one, and
+        // thereby the unique sets of logg and Teff values that,
+        // together with FeH_, generate the tensor grid on which the
+        // library's spectra sit. Not every (FeH, logg, Teff) point in
+        // that grid need have a spectrum, so groupEntries also records
+        // the (name, Teff, logg) triples for each group, to avoid
+        // re-reading these attributes when actually reading the
+        // spectra in step 5. Deliberately reads Teff/logg from each
+        // dataset's own attributes rather than parsing them out of its
+        // name, since not every spectral library on disk can be
+        // assumed to encode them in the name at all, let alone in the
+        // same way.
         std::vector<std::vector<std::pair<std::string, std::pair<double, double>>>>
             groupEntries(nfeh);
         std::set<double> teffSet;
@@ -277,10 +288,21 @@ namespace specsyn
             }
             for (const auto& name : listGroupDatasetNames(grp))
             {
-                const auto teffLogg = parseSpectrumName(name);
-                groupEntries[f].emplace_back(name, teffLogg);
-                teffSet.insert(teffLogg.first);
-                loggSet.insert(teffLogg.second);
+                const hid_t dset = H5Dopen2(grp, name.c_str(), H5P_DEFAULT);
+                if (dset < 0)
+                {
+                    H5Gclose(grp);
+                    H5Fclose(file);
+                    throw std::runtime_error(
+                        "SpecsynLib: unable to open dataset " + name);
+                }
+                const double teff = readRequiredScalarAttr(dset, "teff");
+                const double logg = readRequiredScalarAttr(dset, "logg");
+                H5Dclose(dset);
+
+                groupEntries[f].emplace_back(name, std::make_pair(teff, logg));
+                teffSet.insert(teff);
+                loggSet.insert(logg);
             }
             H5Gclose(grp);
         }
