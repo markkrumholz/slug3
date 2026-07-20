@@ -60,7 +60,42 @@ namespace specsyn
             const std::string& registryName = defaultRegistry,
             double z = 0.0);
 
+        /**
+         * @brief Compute a star's spectrum by trilinear interpolation on the library grid
+         * @param props Stellar properties, as produced by evaluating
+         *   the Interpolator1D returned by Tracks2D::getIsochrone at
+         *   this star's mass
+         * @param feh [Fe/H] value of the star; needed because it is
+         *   not carried by props itself
+         * @return The star's spectrum, evaluated on the wavelength
+         *   grid returned by wl(), in units of erg/s/Angstrom; a
+         *   size-0 vector if the star falls outside this library's
+         *   (FeH, logg, Teff) grid and Policy is OOBPolicy::Silent
+         * @throws std::runtime_error if the star falls outside this
+         *   library's grid and Policy is OOBPolicy::Throw
+         * @details
+         * Derives the star's Teff and log(g) from props (via
+         * Specsyn::getSAandLogg for the latter), checks that
+         * (feh, logg, Teff) falls within the grid built by the
+         * constructor, and if so, trilinearly interpolates the 8
+         * neighboring grid points -- all of which must have an
+         * actual spectrum in the library, since interpolating across
+         * an unpopulated point would be meaningless -- to get the
+         * star's specific flux at the surface, then scales by the
+         * star's surface area to get specific luminosity.
+         */
+        [[nodiscard]] auto spec(const StarData& props, double feh) const
+        -> std::vector<double> override;
+
     private:
+
+        /**
+         * @brief Handle a star that falls outside this library's grid
+         * @param message Description of why the star is out of bounds
+         * @return A size-0 vector, if Policy is OOBPolicy::Silent
+         * @throws std::runtime_error with message, if Policy is OOBPolicy::Throw
+         */
+        [[nodiscard]] static auto outOfBoundsResult(const std::string& message) -> std::vector<double>;
 
         // Spectral library data
         std::vector<double> FeH_;  /**< [Fe/H] values spanned by the tensor grid */ // NOLINT(readability-identifier-naming)

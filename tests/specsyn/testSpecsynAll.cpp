@@ -8,6 +8,7 @@
  */
 
 #include "testSpecsynBlackbody.hpp"
+#include "testSpecsynLib.hpp"
 #include "testSpecsynUtils.hpp"
 #include <exception>
 #include <iostream>
@@ -18,6 +19,7 @@ auto main() -> int {
         int result = 0;
         result += testSpecsynBlackbody();
         result += testSpecsynUtils();
+        result += testSpecsynLib();
         return result;
     }
     catch (const std::exception& error)

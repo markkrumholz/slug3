@@ -214,6 +214,7 @@ add_executable(slugTestSpecsyn
     tests/specsyn/testSpecsynAll.cpp
     tests/specsyn/testSpecsynBlackbody.cpp
     tests/specsyn/testSpecsynUtils.cpp
+    tests/specsyn/testSpecsynLib.cpp
     src/extern/cubature/pcubature.c
     src/pdfs/PDFFileParser.cpp
     src/pdfs/PDFSegment.cpp

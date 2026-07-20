@@ -6,6 +6,7 @@
  */
 
 #include "SpecsynLib.hpp"
+#include "../tracks/TrackCommons.hpp"
 #include "SpecsynUtils.hpp"
 #include "hdf5.h" // NOLINT(misc-include-cleaner)
 #include <algorithm>
@@ -101,6 +102,84 @@ namespace specsyn
         }
     } // namespace
     // NOLINTEND(misc-include-cleaner)
+
+    namespace
+    {
+        /**
+         * @brief A bracketing pair of grid indices, plus an interpolation weight
+         * @details
+         * lo and hi are the indices of the grid points immediately
+         * below and above (or equal to) a query value, and t is the
+         * fractional distance of the query value between them, so
+         * that (1 - t) * grid[lo] + t * grid[hi] recovers the query
+         * value. For a grid of size 1 (a degenerate axis with no
+         * actual extent), lo == hi == 0 and t == 0.
+         */
+        struct Bracket
+        {
+            size_t lo;
+            size_t hi;
+            double t;
+        };
+
+        /**
+         * @brief Find the bracketing grid points of a sorted, irregularly-spaced grid
+         * @param grid A sorted (ascending), non-empty grid of values
+         * @param value The query value; assumed to already lie within
+         *   [grid.front(), grid.back()]
+         * @returns The bracketing Bracket for value
+         * @details
+         * Locates the bracket via std::ranges::upper_bound, an O(log n)
+         * binary search, appropriate for grid axes (like logg and Teff
+         * in SpecsynLib) that are not evenly spaced.
+         */
+        auto findBracket(const std::vector<double>& grid, const double value) //NOLINT(llvm-prefer-static-over-anonymous-namespace)
+            -> Bracket
+        {
+            const size_t n = grid.size();
+            if (n == 1) { return { 0, 0, 0.0 }; }
+
+            // std::ranges::upper_bound trips up misc-include-cleaner on
+            // some libc++ versions (it can't find a header to
+            // attribute it to, even with <algorithm> already
+            // included), hence the NOLINT below.
+            const auto it = std::ranges::upper_bound(grid, value); //NOLINT(misc-include-cleaner)
+            size_t hi = (it == grid.end()) ?
+                (n - 1) : static_cast<size_t>(it - grid.begin());
+            if (hi == 0) { hi = 1; } // value == grid.front(): use the first interval
+            const size_t lo = hi - 1;
+            const double t = std::clamp(
+                (value - grid[lo]) / (grid[hi] - grid[lo]), 0.0, 1.0); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- lo, hi < n by construction
+            return { lo, hi, t };
+        }
+
+        /**
+         * @brief Find the bracketing grid points of a sorted, evenly-spaced grid
+         * @param grid A sorted (ascending), non-empty, evenly-spaced grid of values
+         * @param value The query value; assumed to already lie within
+         *   [grid.front(), grid.back()]
+         * @returns The bracketing Bracket for value
+         * @details
+         * Locates the bracket via direct division by the grid
+         * spacing, an O(1) alternative to findBracket() appropriate
+         * for a regularly-spaced grid axis (like FeH in SpecsynLib).
+         */
+        auto findRegularBracket(const std::vector<double>& grid, const double value) //NOLINT(llvm-prefer-static-over-anonymous-namespace)
+            -> Bracket
+        {
+            const size_t n = grid.size();
+            if (n == 1) { return { 0, 0, 0.0 }; }
+
+            const double step = (grid.back() - grid.front()) / static_cast<double>(n - 1);
+            const auto rawIdx = static_cast<std::ptrdiff_t>((value - grid.front()) / step);
+            const auto maxLo = static_cast<std::ptrdiff_t>(n) - 2;
+            const size_t lo = static_cast<size_t>(std::clamp<std::ptrdiff_t>(rawIdx, 0, maxLo));
+            const size_t hi = lo + 1;
+            const double t = std::clamp(
+                (value - grid[lo]) / step, 0.0, 1.0); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- lo < n - 1 by construction
+            return { lo, hi, t };
+        }
+    } // namespace
 
     template <OOBPolicy Policy>
     SpecsynLib<Policy>::SpecsynLib(
@@ -243,6 +322,115 @@ namespace specsyn
         H5Fclose(file);
 
         // NOLINTEND(misc-include-cleaner)
+    }
+
+    template <OOBPolicy Policy>
+    auto SpecsynLib<Policy>::outOfBoundsResult(const std::string& message) -> std::vector<double>
+    {
+        // if constexpr, rather than a plain if, so that whichever
+        // branch does NOT apply to this Policy is discarded rather
+        // than compiled into spec()'s hot path
+        if constexpr (Policy == OOBPolicy::Throw)
+        {
+            throw std::runtime_error(message);
+        }
+        else
+        {
+            return {};
+        }
+    }
+
+    template <OOBPolicy Policy>
+    auto SpecsynLib<Policy>::spec(const StarData& props, const double feh) const -> std::vector<double>
+    {
+        // Step 1: check feh and Teff against the grid's bounds before
+        // paying for the surface-area/log(g) calculation below
+        const double logTeff = props[static_cast<size_t>(tracks::FieldIdx::logTe)]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- StarData is fixed-size, index is compile-time-known
+        const double teff = std::pow(10.0, logTeff);
+        if (feh < FeH_.front() || feh > FeH_.back() ||
+            teff < Teff_.front() || teff > Teff_.back())
+        {
+            return outOfBoundsResult(
+                "SpecsynLib: star with feh = " + std::to_string(feh) +
+                ", Teff = " + std::to_string(teff) +
+                " K is outside this library's grid");
+        }
+
+        // Step 2: surface area and log(g), then bounds-check log(g)
+        const auto [area, logg] = getSAandLogg(props);
+        if (logg < logg_.front() || logg > logg_.back())
+        {
+            return outOfBoundsResult(
+                "SpecsynLib: star with log(g) = " + std::to_string(logg) +
+                " is outside this library's grid");
+        }
+
+        // Step 3: locate the tensor-grid cell containing
+        // (feh, logg, teff), and the trilinear interpolation weights
+        // within it. FeH_ is regularly spaced, so its bracket comes
+        // from an O(1) division; logg_ and Teff_ are not (see the
+        // constructor), so theirs come from an O(log n) binary search.
+        const auto fehB = findRegularBracket(FeH_, feh);
+        const auto loggB = findBracket(logg_, logg);
+        const auto teffB = findBracket(Teff_, teff);
+
+        // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- fehB/loggB/teffB indices are all < the corresponding grid's size by construction, and the interpolation loop below is a hot path where the cost of bounds checking matters
+        using SpectraGrid = std::mdspan<const std::vector<double>, std::dextents<size_t, 3>>;
+        const SpectraGrid grid(spectra_.data(), FeH_.size(), logg_.size(), Teff_.size());
+
+        // Step 4: every one of the 8 neighboring grid points must
+        // actually have a spectrum -- interpolating across an
+        // unpopulated point would be meaningless -- or this star
+        // counts as out of bounds
+        for (const size_t fi : { fehB.lo, fehB.hi })
+        {
+            for (const size_t li : { loggB.lo, loggB.hi })
+            {
+                for (const size_t ti : { teffB.lo, teffB.hi })
+                {
+                    if (grid[fi, li, ti].empty())
+                    {
+                        return outOfBoundsResult(
+                            "SpecsynLib: star with feh = " + std::to_string(feh) +
+                            ", log(g) = " + std::to_string(logg) +
+                            ", Teff = " + std::to_string(teff) +
+                            " K falls in a gap in this library's grid");
+                    }
+                }
+            }
+        }
+
+        // Step 5: trilinear interpolation of specific flux over the 8
+        // neighboring grid points, folding the surface-area scaling
+        // (step 6) into each corner's weight so the wavelength loop
+        // only has to run once
+        std::vector<double> result(wl_.size(), 0.0);
+        for (int bf = 0; bf < 2; ++bf)
+        {
+            const size_t fi = (bf == 0) ? fehB.lo : fehB.hi;
+            const double wFeh = (bf == 0) ? (1.0 - fehB.t) : fehB.t;
+            for (int bl = 0; bl < 2; ++bl)
+            {
+                const size_t li = (bl == 0) ? loggB.lo : loggB.hi;
+                const double wLogg = (bl == 0) ? (1.0 - loggB.t) : loggB.t;
+                for (int bt = 0; bt < 2; ++bt)
+                {
+                    const size_t ti = (bt == 0) ? teffB.lo : teffB.hi;
+                    const double wTeff = (bt == 0) ? (1.0 - teffB.t) : teffB.t;
+
+                    const double weight = wFeh * wLogg * wTeff * area; // step 6: fold in surface area
+                    if (weight == 0.0) { continue; } // degenerate axis or exact grid hit: skip a zero-weight corner
+
+                    const auto& corner = grid[fi, li, ti];
+                    for (size_t w = 0; w < result.size(); ++w)
+                    {
+                        result[w] += weight * corner[w];
+                    }
+                }
+            }
+        }
+        return result;
+        // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     }
 
     // Explicit instantiation for every OOBPolicy value actually used;
