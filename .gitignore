@@ -79,3 +79,5 @@ Testing/
 # Data files too large to store in repo
 data/tracks/*.toml
 data/tracks/*.h5
+data/spectra/*.toml
+data/spectra/*.h5

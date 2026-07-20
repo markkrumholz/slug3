@@ -6,6 +6,7 @@ gzip'ed HDF5 file that slug can read.
 
 # Imports
 import argparse
+from collections.abc import Iterator
 import h5py
 import numpy as np
 import re
@@ -52,15 +53,6 @@ parser.add_argument("--verbose", action="store_true",
                     help="Print verbose output")
 args = parser.parse_args()
 
-# Little helper function to fetch a directory-listing page and return the
-# list of href values it links to -- subdirectory names ending in "/", or
-# plain file names
-def list_dir_entries(url) -> list:
-    response = urllib3.PoolManager().request('GET', url)
-    if response.status != 200:
-        raise RuntimeError(f"Failed to fetch BOSZ directory listing from {url}: HTTP {response.status}")
-    return re.findall('<a href="([^"]+)">', str(response.data))
-
 # Regex to parse a BOSZ spectrum filename into its component fields; see
 # https://archive.stsci.edu/hlsp/bosz for the naming convention, e.g.
 # bosz2024_mp_t5000_g+5.0_m+0.00_a+0.00_c+0.00_v0_r500_resam.txt.gz
@@ -70,66 +62,90 @@ name_re = re.compile(
     r'_m(?P<feh>[+-][0-9.]+)_a(?P<afe>[+-][0-9.]+)_c(?P<cfe>[+-][0-9.]+)'
     r'_v(?P<micro>[0-9]+)_r(?P<r>[0-9]+)_(?P<prod>[a-z]+)\.txt\.gz')
 
-# BOSZ organizes spectra in a two-level directory hierarchy under args.url:
-# r<value>/ (instrumental broadening, our --r argument) then m<value>/
-# (metallicity, our --feh argument), with the actual spectrum files
-# living flat inside each m<value>/ directory. Rather than crawling the
-# whole tree and filtering afterward (as fetch_mist.py does for its
-# single flat directory), descend directly into the requested r/feh
-# subdirectories when given, since crawling every combination would mean
-# hundreds of HTTP requests just to build the candidate list; an omitted
-# --r or --feh falls back to discovering every subdirectory, matching
-# fetch_mist.py's "no filter means match everything" convention.
-if args.r:
-    r_dirs = [f"r{rv}" for rv in args.r]
-else:
-    r_dirs = sorted({e.rstrip('/') for e in list_dir_entries(args.url)
-                     if re.fullmatch(r'r[0-9]+/', e)})
-if args.verbose:
-    print(f"Searching resolution directories: {r_dirs}")
+# BOSZ archive coverage (https://archive.stsci.edu/hlsp/bosz). Rather
+# than querying the server for directory listings -- which is painfully
+# slow because the archive keeps thousands of files in a single flat
+# directory -- generate candidate paths algorithmically from the
+# documented grid. Any combination the archive doesn't actually carry
+# will return a 404, which the download loop skips gracefully.
 
-# Walk the requested (or discovered) r/feh subdirectories, parse every
-# filename found in each, and keep only the "resam" products (resampled
-# onto a logarithmically-uniform wavelength grid, the ones we want)
-# matching any --afe/--cfe/--micro filters given; as with --r/--feh
-# above, an omitted filter matches everything.
+# All supported values for the filterable parameters
+_ALL_R_VALS    = [500, 1000, 2000, 5000, 10000, 20000, 50000]
+_ALL_FEH_VALS  = [round(-2.50 + 0.25 * i, 2) for i in range(14)]  # -2.50 to +0.75
+_ALL_AFE_VALS  = [round(-0.25 + 0.25 * i, 2) for i in range(4)]   # -0.25 to +0.50
+_ALL_CFE_VALS  = [round(-0.75 + 0.25 * i, 2) for i in range(6)]   # -0.75 to +0.50
+_ALL_MICRO_VALS = [0, 1, 2, 4]
+
+# MARCS (Teff, log g) sub-grids; each entry is (teff_values, logg_values)
+_MARCS_RANGES = [
+    (list(range(2800, 4001, 100)), [round(-0.5 + 0.5*k, 1) for k in range(13)]),
+    (list(range(4250, 4751, 250)), [round(-0.5 + 0.5*k, 1) for k in range(12)]),
+    (list(range(5000, 5751, 250)), [round( 0.0 + 0.5*k, 1) for k in range(12)]),
+    (list(range(6000, 7001, 250)), [round( 1.0 + 0.5*k, 1) for k in range(10)]),
+    (list(range(7250, 8001, 250)), [round( 2.0 + 0.5*k, 1) for k in range(9)]),
+]
+# ATLAS9 (Teff, log g) sub-grids
+_ATLAS9_RANGES = [
+    (list(range( 7500, 12001, 250)), [round(2.0 + 0.5*k, 1) for k in range(7)]),
+    (list(range(12500, 16001, 500)), [round(3.0 + 0.5*k, 1) for k in range(5)]),
+]
+
+def _teff_logg_candidates() -> Iterator[tuple[str, int, str]]:
+    """Yield (atmos, teff, logg_str) for every documented BOSZ (Teff, log g) pair.
+
+    ATLAS9 ('ap') covers Teff 7500-16000 K; MARCS covers 2800-8000 K. In
+    the 7500-8000 K overlap, ATLAS9 is preferred and the MARCS entry is
+    skipped. Within the MARCS range, 'ms' (spherical) is used for
+    log g <= 3.0 and 'mp' (plane-parallel) for log g > 3.0.
+    """
+    atlas9_covered = set()
+    for teff_list, logg_list in _ATLAS9_RANGES:
+        for teff in teff_list:
+            for logg in logg_list:
+                atlas9_covered.add((teff, logg))
+                yield 'ap', teff, f"{logg:+.1f}"
+    for teff_list, logg_list in _MARCS_RANGES:
+        for teff in teff_list:
+            for logg in logg_list:
+                if (teff, logg) in atlas9_covered:
+                    continue
+                atmos = 'ms' if logg <= 3.0 else 'mp'
+                yield atmos, teff, f"{logg:+.1f}"
+
+# Apply --r / --feh / --afe / --cfe / --micro filters (no filter = use all)
+r_vals     = args.r     if args.r     else _ALL_R_VALS
+feh_vals   = args.feh   if args.feh   else _ALL_FEH_VALS
+afe_vals   = args.afe   if args.afe   else _ALL_AFE_VALS
+cfe_vals   = args.cfe   if args.cfe   else _ALL_CFE_VALS
+micro_vals = args.micro if args.micro else _ALL_MICRO_VALS
+
 files_avail = []
 feh = []
 afe = []
 cfe = []
 r = []
 micro = []
-for r_dir in r_dirs:
-    r_url = f"{args.url}{r_dir}/"
-    if args.feh:
-        m_dirs = [f"m{fv:+.2f}" for fv in args.feh]
-    else:
-        m_dirs = sorted({e.rstrip('/') for e in list_dir_entries(r_url)
-                         if re.fullmatch(r'm[+-][0-9.]+/', e)})
-
-    for m_dir in m_dirs:
-        m_url = f"{r_url}{m_dir}/"
-        for fname in list_dir_entries(m_url):
-            match = name_re.fullmatch(fname)
-            if match is None or match.group('prod') != 'resam':
-                continue
-            afe_val = float(match.group('afe'))
-            cfe_val = float(match.group('cfe'))
-            micro_val = int(match.group('micro'))
-            if args.afe and afe_val not in args.afe:
-                continue
-            if args.cfe and cfe_val not in args.cfe:
-                continue
-            if args.micro and micro_val not in args.micro:
-                continue
-            files_avail.append(f"{r_dir}/{m_dir}/{fname}")
-            feh.append(float(match.group('feh')))
-            afe.append(afe_val)
-            cfe.append(cfe_val)
-            r.append(int(match.group('r')))
-            micro.append(micro_val)
+for r_val in r_vals:
+    r_dir = f"r{r_val}"
+    for feh_val in feh_vals:
+        m_dir = f"m{feh_val:+.2f}"
+        for afe_val in afe_vals:
+            for cfe_val in cfe_vals:
+                for micro_val in micro_vals:
+                    for atmos, teff, logg_str in _teff_logg_candidates():
+                        fname = (
+                            f"bosz{args.version}_{atmos}_t{teff}_g{logg_str}"
+                            f"_m{feh_val:+.2f}_a{afe_val:+.2f}_c{cfe_val:+.2f}"
+                            f"_v{micro_val}_r{r_val}_resam.txt.gz"
+                        )
+                        files_avail.append(f"{r_dir}/{m_dir}/{fname}")
+                        feh.append(feh_val)
+                        afe.append(afe_val)
+                        cfe.append(cfe_val)
+                        r.append(r_val)
+                        micro.append(micro_val)
 if args.verbose:
-    print(f"Filtered file list: {len(files_avail)} files to fetch.")
+    print(f"Generated {len(files_avail)} candidate file paths.")
 
 # If target file exists and overwrite is not specified, check if any of the
 # requested spectra already exist in the file -- each (feh, afe, cfe, r,
@@ -141,6 +157,8 @@ if shutil.os.path.exists(args.output) and not args.overwrite:
     existing = set()
     with h5py.File(args.output, 'r') as h5file:
         for grp in h5file.keys():
+            if not grp.startswith('spectra_'):
+                continue
             attrs = h5file[grp].attrs
             existing.add((float(attrs['feh']), float(attrs['afe']), float(attrs['cfe']),
                           int(attrs['r']), int(attrs['micro'])))
@@ -213,10 +231,19 @@ for key, idxs in groups.items():
         if args.verbose:
             print(f"Fetching {file_url}...")
         outname = shutil.os.path.join(temp_dir, fname)
-        with urllib3.PoolManager().request("GET", file_url, preload_content=False) as response, open(outname, "wb") as out_file:
-            if response.status != 200:
-                raise RuntimeError(f"Failed to fetch {file_url}: HTTP {response.status}")
-            shutil.copyfileobj(response, out_file)
+        http_status = 0
+        with urllib3.PoolManager().request("GET", file_url, preload_content=False) as response, \
+             open(outname, "wb") as out_file:
+            http_status = response.status
+            if http_status == 200:
+                shutil.copyfileobj(response, out_file)
+            elif http_status != 404:
+                raise RuntimeError(f"Failed to fetch {file_url}: HTTP {http_status}")
+        if http_status == 404:
+            if args.verbose:
+                print(f"  Not found (404), skipping.")
+            shutil.os.remove(outname)
+            continue
 
         # np.loadtxt transparently gunzips a .gz-named file
         eddington_h = np.loadtxt(outname, usecols=0)
