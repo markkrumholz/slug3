@@ -6,6 +6,7 @@
  */
 
 #include "SpecsynLib.hpp"
+#include "../interpolation/Interpolator1D.hpp"
 #include "../tracks/TrackCommons.hpp"
 #include "Specsyn.hpp"
 #include "SpecsynCommons.hpp"
@@ -446,6 +447,39 @@ namespace specsyn
         }
         return result;
         // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    }
+
+    template <OOBPolicy Policy>
+    void SpecsynLib<Policy>::resample(const std::vector<double>& wlNew)
+    {
+        using SpectraGrid = std::mdspan<std::vector<double>, std::dextents<size_t, 3>>;
+        const SpectraGrid grid(spectra_.data(), FeH_.size(), logg_.size(), Teff_.size());
+
+        for (size_t f = 0; f < FeH_.size(); ++f) // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- f, l, t are all < the corresponding grid's size by construction
+        {
+            for (size_t l = 0; l < logg_.size(); ++l)
+            {
+                for (size_t t = 0; t < Teff_.size(); ++t)
+                {
+                    auto& spectrum = grid[f, l, t];
+                    if (spectrum.empty()) { continue; } // unpopulated grid point: leave empty
+
+                    const interp::Interpolator1D<1> interpolator(wl_, spectrum);
+                    std::vector<double> resampled(wlNew.size(), 0.0);
+                    for (size_t w = 0; w < wlNew.size(); ++w)
+                    {
+                        if (wlNew[w] >= wl_.front() && wlNew[w] <= wl_.back())
+                        {
+                            resampled[w] = interpolator(wlNew[w]);
+                        }
+                        // else leave as the zero flux resampled was initialized with
+                    }
+                    spectrum = std::move(resampled);
+                }
+            }
+        }
+
+        wl_ = wlNew;
     }
 
     // Explicit instantiation for every OOBPolicy value actually used;

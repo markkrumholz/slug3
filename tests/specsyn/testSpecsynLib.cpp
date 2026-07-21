@@ -13,7 +13,8 @@
  * interpolation against TLUSTY_test.h5, a second library with a
  * genuinely irregular [Fe/H] grid and a single, non-"r"-named
  * wavelength grid, to cover both of those (BOSZ doesn't exercise
- * either one).
+ * either one). It also tests SpecsynLib::resample, which resamples
+ * every stored spectrum onto a new wavelength grid.
  * @date 2026-07-20
  */
 
@@ -21,11 +22,13 @@
 #include "../../src/tracks/TrackCommons.hpp"
 #include "testSpecsynLib.hpp"
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace
@@ -231,6 +234,164 @@ static auto testSpecTlustySuccess() -> int
     return 0;
 }
 
+// Check that resample() reproduces spec()'s pre-resample values
+// exactly at wavelengths carried over unchanged from the original
+// grid, and assigns exactly zero flux at wavelengths outside the
+// original grid's range. Since spec() sums each grid corner's own
+// flux at a given wavelength index with weights that depend only on
+// (feh, logg, Teff) -- never on wl_ or the flux values themselves --
+// resample()'s per-corner Interpolator1D reproducing each corner's
+// flux exactly at any wavelength that coincides with an original grid
+// point means spec()'s weighted sum at that same wavelength must also
+// be reproduced exactly, regardless of how many corners are actually
+// blended together for this particular star.
+static auto testResampleExactAndOOB() -> int
+{
+    specsyn::SpecsynLib<specsyn::OOBPolicy::Throw> lib(
+        spectraName, -3.0, 1.0, 0.0, 0.0, 0.0, 500, registryName);
+
+    const double logTeff = std::log10(5772.0);
+    const auto props = makeStarData(1.0, 0.0, logTeff);
+
+    const auto wlOrig = lib.wl();
+    std::vector<double> before;
+    try
+    {
+        before = lib.spec(props, 0.1);
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "testSpecsynLib: unexpected exception from spec() "
+            "before resample(): " << e.what() << "\n";
+        return 1;
+    }
+
+    // A new grid mixing: one wavelength below wlOrig's range, three
+    // wavelengths copied verbatim from early/middle/late in wlOrig
+    // (so resample() must reproduce their flux exactly), and one
+    // wavelength above wlOrig's range
+    const std::size_t iEarly = 10;
+    const std::size_t iMid = wlOrig.size() / 2;
+    const std::size_t iLate = wlOrig.size() - 10;
+    const std::vector<double> wlNew = {
+        wlOrig.front() - 100.0,
+        wlOrig.at(iEarly),
+        wlOrig.at(iMid),
+        wlOrig.at(iLate),
+        wlOrig.back() + 100.0
+    };
+
+    lib.resample(wlNew);
+
+    if (lib.wl() != wlNew)
+    {
+        std::cerr << "testSpecsynLib: resample() did not replace wl() with "
+            "the new grid\n";
+        return 1;
+    }
+
+    std::vector<double> after;
+    try
+    {
+        after = lib.spec(props, 0.1);
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "testSpecsynLib: unexpected exception from spec() "
+            "after resample(): " << e.what() << "\n";
+        return 1;
+    }
+
+    if (after.size() != wlNew.size())
+    {
+        std::cerr << "testSpecsynLib: spec() returned " << after.size()
+            << " values after resample(), expected " << wlNew.size() << "\n";
+        return 1;
+    }
+
+    // Index 0 (below wlOrig's range) and index 4 (above it) must be
+    // exactly zero
+    if (after.at(0) != 0.0 || after.at(4) != 0.0)
+    {
+        std::cerr << "testSpecsynLib: expected exactly zero flux outside "
+            "the original wavelength range after resample(), got "
+            << after.at(0) << " and " << after.at(4) << "\n";
+        return 1;
+    }
+
+    // Indices 1-3 (copied verbatim from wlOrig) must reproduce
+    // before's value at the corresponding original index
+    constexpr double relTol = 1e-8;
+    const std::array<std::pair<std::size_t, std::size_t>, 3> matches = {{
+        { 1, iEarly }, { 2, iMid }, { 3, iLate }
+    }};
+    for (const auto& [jNew, iOld] : matches)
+    {
+        const double expected = before.at(iOld);
+        const double got = after.at(jNew);
+        if (std::abs(got - expected) > relTol * std::abs(expected))
+        {
+            std::cerr << "testSpecsynLib: resample() did not reproduce the "
+                "original flux at wavelength " << wlNew.at(jNew) << " -- "
+                "expected " << expected << ", got " << got << "\n";
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+// Check that resampling onto a grid entirely outside the library's
+// original wavelength range leaves every populated grid point's
+// spectrum non-empty (still the right length -- OOBPolicy only
+// governs (feh, logg, Teff) bounds, never wavelength content), but
+// with every one of its fluxes set to zero
+static auto testResampleAllOutOfRange() -> int
+{
+    specsyn::SpecsynLib<specsyn::OOBPolicy::Throw> lib(
+        spectraName, -3.0, 1.0, 0.0, 0.0, 0.0, 500, registryName);
+
+    const double logTeff = std::log10(5772.0);
+    const auto props = makeStarData(1.0, 0.0, logTeff);
+
+    const auto wlOrig = lib.wl();
+    const std::vector<double> wlNew = {
+        wlOrig.back() + 100.0, wlOrig.back() + 200.0, wlOrig.back() + 300.0
+    };
+    lib.resample(wlNew);
+
+    std::vector<double> after;
+    try
+    {
+        after = lib.spec(props, 0.1);
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "testSpecsynLib: unexpected exception from spec() "
+            "after an all-out-of-range resample(): " << e.what() << "\n";
+        return 1;
+    }
+
+    if (after.size() != wlNew.size())
+    {
+        std::cerr << "testSpecsynLib: spec() returned " << after.size()
+            << " values after an all-out-of-range resample(), expected "
+            << wlNew.size() << "\n";
+        return 1;
+    }
+    for (const double v : after)
+    {
+        if (v != 0.0)
+        {
+            std::cerr << "testSpecsynLib: expected every flux to be zero "
+                "after an all-out-of-range resample(), got " << v << "\n";
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
 auto testSpecsynLib() -> int
 {
     int result = 0;
@@ -238,5 +399,7 @@ auto testSpecsynLib() -> int
     result += testSpecOOBThrow();
     result += testSpecOOBSilent();
     result += testSpecTlustySuccess();
+    result += testResampleExactAndOOB();
+    result += testResampleAllOutOfRange();
     return result;
 }

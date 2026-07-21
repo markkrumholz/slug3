@@ -87,6 +87,24 @@ namespace specsyn
         [[nodiscard]] auto spec(const StarData& props, double feh) const
         -> std::vector<double> override;
 
+        /**
+         * @brief Resample every spectrum in this library onto a new wavelength grid
+         * @param wlNew The new wavelength grid, in Angstrom
+         * @details
+         * For every populated (non-empty) point in the (FeH, logg,
+         * Teff) tensor grid, builds an Interpolator1D of that point's
+         * flux versus this library's existing wavelength grid (wl_),
+         * then evaluates it at every wavelength in wlNew to produce
+         * that point's resampled flux; wavelengths in wlNew that fall
+         * outside the range spanned by wl_ are assigned a flux of
+         * zero rather than extrapolated. Once every populated point
+         * has been resampled this way, wl_ itself is replaced with
+         * wlNew, so wl() and every subsequent spec() call reflect the
+         * new grid. Unpopulated grid points are left as empty vectors,
+         * exactly as before.
+         */
+        void resample(const std::vector<double>& wlNew);
+
     private:
 
         /**
