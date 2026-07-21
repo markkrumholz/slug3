@@ -237,8 +237,16 @@ namespace specsyn
         }
 
         // Step 2: read the wavelength grid shared by every matching
-        // spectrum, stored under wavelengths/r<r> (all matches share
-        // the same r, since it is one of the matching criteria)
+        // spectrum, normally stored under wavelengths/r<r> (all matches
+        // share the same r, since it is one of the matching criteria).
+        // If no such dataset exists but the library only has a single
+        // wavelength grid at all, fall back to that sole entry instead
+        // -- e.g. TLUSTY, whose downsampling means no "r" value is
+        // truly meaningful (see fetch_tlusty.py), stores its one grid
+        // under a non-numeric name instead. This mirrors
+        // findMatchingSpectra's treatment of a library with no r
+        // attribute on its spectra groups: absent a way to tell r
+        // values apart, anything the caller asks for matches.
         const hid_t waveGrp = H5Gopen2(file, "wavelengths", H5P_DEFAULT);
         if (waveGrp < 0)
         {
@@ -247,7 +255,15 @@ namespace specsyn
                 "SpecsynLib: unable to open group wavelengths in " +
                 h5path.string());
         }
-        const auto wlName = "r" + std::to_string(std::llround(r));
+        auto wlName = "r" + std::to_string(std::llround(r));
+        if (H5Lexists(waveGrp, wlName.c_str(), H5P_DEFAULT) <= 0)
+        {
+            const auto waveNames = listGroupDatasetNames(waveGrp);
+            if (waveNames.size() == 1)
+            {
+                wlName = waveNames.front();
+            }
+        }
         wl_ = readDataset1D(waveGrp, wlName);
         H5Gclose(waveGrp);
         if (wl_.empty())
