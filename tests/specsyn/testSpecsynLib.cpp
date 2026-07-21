@@ -9,7 +9,11 @@
  * and a thrown runtime error (OOBPolicy::Throw), against the small
  * BOSZ_test.h5/spectra.toml fixture stored under tests/specsyn/assets
  * (see SpecsynUtils' own tests for how that fixture is derived from
- * the full-size BOSZ library).
+ * the full-size BOSZ library). It also checks a successful
+ * interpolation against TLUSTY_test.h5, a second library with a
+ * genuinely irregular [Fe/H] grid and a single, non-"r"-named
+ * wavelength grid, to cover both of those (BOSZ doesn't exercise
+ * either one).
  * @date 2026-07-20
  */
 
@@ -164,11 +168,75 @@ static auto testSpecOOBSilent() -> int
     return 0;
 }
 
+// Check that spec() successfully interpolates a spectrum against
+// TLUSTY_test.h5, a second library whose [Fe/H] grid is genuinely
+// irregular (log10 of a fixed set of archival Z values, not evenly
+// spaced -- unlike BOSZ's) and whose sole wavelength grid is stored
+// under a non-"r"-named key ("native", since TLUSTY's downsampling
+// means no single r value is meaningful; see fetch_tlusty.py),
+// reached at the default r via SpecsynLib's single-entry fallback.
+// The test star (M = 15 Msun, Teff = 28750 K, giving log(g) = 3.125)
+// falls inside TLUSTY_test.h5's single populated grid cell: Teff in
+// [27500, 30000] K, logg in [3.0, 3.25]. feh = -1.2 lies strictly
+// between two of TLUSTY's irregularly-spaced grid points (-1.481 and
+// -1.0), so this exercises real interpolation across that irregular
+// axis -- the very case findRegularBracket used to get wrong.
+static auto testSpecTlustySuccess() -> int
+{
+    const specsyn::SpecsynLib<specsyn::OOBPolicy::Throw> lib(
+        "TLUSTY_test", -3.0, 1.0, 0.0, 0.0, 10.0, specsyn::defaultR, registryName);
+
+    const double logTeff = std::log10(28750.0);
+    const auto props = makeStarData(15.0, 5.278432762001573, logTeff);
+
+    std::vector<double> result;
+    try
+    {
+        result = lib.spec(props, -1.2);
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "testSpecsynLib: unexpected exception from spec() "
+            "for an in-bounds TLUSTY star: " << e.what() << "\n";
+        return 1;
+    }
+
+    if (result.size() != lib.wl().size())
+    {
+        std::cerr << "testSpecsynLib: TLUSTY spec() returned " << result.size()
+            << " values, expected " << lib.wl().size() << "\n";
+        return 1;
+    }
+
+    // As with testSpecSuccess, no independently-computed expected
+    // spectrum exists to check against, so this is a sanity check
+    // only: the peak of wl * spec(wl) should be within a few orders
+    // of magnitude of the test star's own bolometric luminosity
+    // (~1.9e5 Lsun for these parameters), not wildly off.
+    constexpr double solarLuminosity = 3.828e33; // erg/s, IAU 2015 nominal value
+    constexpr double starLuminosity = 189859.68762747623 * solarLuminosity;
+    double maxWlSpec = 0.0;
+    for (std::size_t i = 0; i < result.size(); ++i)
+    {
+        maxWlSpec = std::max(maxWlSpec, result.at(i) * lib.wl().at(i));
+    }
+    if (maxWlSpec < 1e-3 * starLuminosity || maxWlSpec > 1e3 * starLuminosity)
+    {
+        std::cerr << "testSpecsynLib: TLUSTY max(wl * spec) = " << maxWlSpec
+            << " erg/s is unreasonably far from the test star's own "
+            "luminosity = " << starLuminosity << " erg/s\n";
+        return 1;
+    }
+
+    return 0;
+}
+
 auto testSpecsynLib() -> int
 {
     int result = 0;
     result += testSpecSuccess();
     result += testSpecOOBThrow();
     result += testSpecOOBSilent();
+    result += testSpecTlustySuccess();
     return result;
 }
