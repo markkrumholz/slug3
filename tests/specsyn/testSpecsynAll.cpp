@@ -9,6 +9,7 @@
 
 #include "testSpecsynBlackbody.hpp"
 #include "testSpecsynLib.hpp"
+#include "testSpecsynLibChained.hpp"
 #include "testSpecsynUtils.hpp"
 #include <exception>
 #include <iostream>
@@ -20,6 +21,7 @@ auto main() -> int {
         result += testSpecsynBlackbody();
         result += testSpecsynUtils();
         result += testSpecsynLib();
+        result += testSpecsynLibChained();
         return result;
     }
     catch (const std::exception& error)
