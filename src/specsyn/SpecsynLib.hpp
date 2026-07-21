@@ -11,6 +11,7 @@
 #include "../tracks/TrackCommons.hpp"
 #include "Specsyn.hpp"
 #include "SpecsynCommons.hpp"
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -44,7 +45,13 @@ namespace specsyn
          * @param fehMax Maximum [Fe/H] value
          * @param afe Value of [alpha/Fe]
          * @param cfe Value of [C/Fe]
-         * @param microTurb Microturbulent velocity, in km/s
+         * @param microTurb Microturbulent velocity, in km/s; if NaN
+         *   (the default), uses this library's own micro_default value
+         *   from the registry instead, since a sensible default
+         *   microturbulence is library-specific (e.g. hot, massive OB
+         *   stars are conventionally modeled with substantially more
+         *   microturbulence than cooler, lower-mass stars) rather than
+         *   a single constant that fits every library equally well
          * @param r Spectral resolution
          * @param registryName Name of the spectral library registry file
          * @param z The redshift; defaults to zero
@@ -55,7 +62,7 @@ namespace specsyn
             double fehMax,
             double afe = tracks::defaultAFe,
             double cfe = defaultCFe,
-            double microTurb = defaultMicroTurb,
+            double microTurb = std::numeric_limits<double>::quiet_NaN(),
             double r = defaultR,
             const std::string& registryName = defaultRegistry,
             double z = 0.0);

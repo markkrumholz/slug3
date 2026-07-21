@@ -14,7 +14,10 @@
  * genuinely irregular [Fe/H] grid and a single, non-"r"-named
  * wavelength grid, to cover both of those (BOSZ doesn't exercise
  * either one). It also tests SpecsynLib::resample, which resamples
- * every stored spectrum onto a new wavelength grid.
+ * every stored spectrum onto a new wavelength grid, and the NaN-
+ * default handling of the microTurb constructor argument, which
+ * resolves to each library's own micro_default registry entry (0 for
+ * BOSZ_test, 10 for TLUSTY_test) rather than one shared constant.
  * @date 2026-07-20
  */
 
@@ -26,6 +29,7 @@
 #include <cmath>
 #include <cstddef>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -392,6 +396,75 @@ static auto testResampleAllOutOfRange() -> int
     return 0;
 }
 
+// Check that leaving microTurb at its default (NaN) resolves to each
+// library's own micro_default registry entry, rather than one shared
+// default: BOSZ_test's is 0 and TLUSTY_test's is 10, so a NaN-default
+// construction of each must produce the exact same spectrum as an
+// explicit construction at that library's own value, and (since the
+// two libraries' defaults really do differ) explicitly requesting the
+// wrong one for TLUSTY_test must fail to find any matching spectra.
+static auto testMicroTurbDefault() -> int
+{
+    constexpr double nan = std::numeric_limits<double>::quiet_NaN();
+
+    try
+    {
+        const specsyn::SpecsynLib<specsyn::OOBPolicy::Throw> boszDefault(
+            spectraName, -3.0, 1.0, 0.0, 0.0, nan, 500, registryName);
+        const specsyn::SpecsynLib<specsyn::OOBPolicy::Throw> boszExplicit(
+            spectraName, -3.0, 1.0, 0.0, 0.0, 0.0, 500, registryName);
+
+        const auto props = makeStarData(1.0, 0.0, std::log10(5772.0));
+        if (boszDefault.spec(props, 0.1) != boszExplicit.spec(props, 0.1))
+        {
+            std::cerr << "testSpecsynLib: leaving microTurb at its default did "
+                "not resolve to BOSZ_test's own micro_default (0)\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "testSpecsynLib: unexpected exception resolving "
+            "BOSZ_test's default microTurb: " << e.what() << "\n";
+        return 1;
+    }
+
+    try
+    {
+        const specsyn::SpecsynLib<specsyn::OOBPolicy::Throw> tlustyDefault(
+            "TLUSTY_test", -3.0, 1.0, 0.0, 0.0, nan, specsyn::defaultR, registryName);
+        const specsyn::SpecsynLib<specsyn::OOBPolicy::Throw> tlustyExplicit(
+            "TLUSTY_test", -3.0, 1.0, 0.0, 0.0, 10.0, specsyn::defaultR, registryName);
+
+        const auto props = makeStarData(15.0, 5.278432762001573, std::log10(28750.0));
+        if (tlustyDefault.spec(props, -1.2) != tlustyExplicit.spec(props, -1.2))
+        {
+            std::cerr << "testSpecsynLib: leaving microTurb at its default did "
+                "not resolve to TLUSTY_test's own micro_default (10)\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "testSpecsynLib: unexpected exception resolving "
+            "TLUSTY_test's default microTurb: " << e.what() << "\n";
+        return 1;
+    }
+
+    try
+    {
+        [[maybe_unused]] const specsyn::SpecsynLib<specsyn::OOBPolicy::Throw> tlustyWrongMicro(
+            "TLUSTY_test", -3.0, 1.0, 0.0, 0.0, 0.0, specsyn::defaultR, registryName);
+        std::cerr << "testSpecsynLib: expected constructing TLUSTY_test with "
+            "microTurb = 0 (BOSZ_test's default, not its own) to fail, but it "
+            "did not\n";
+        return 1;
+    }
+    catch (const std::runtime_error&) { /* expected */ }
+
+    return 0;
+}
+
 auto testSpecsynLib() -> int
 {
     int result = 0;
@@ -401,5 +474,6 @@ auto testSpecsynLib() -> int
     result += testSpecTlustySuccess();
     result += testResampleExactAndOOB();
     result += testResampleAllOutOfRange();
+    result += testMicroTurbDefault();
     return result;
 }

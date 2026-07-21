@@ -8,13 +8,18 @@
  * and TLUSTY_test.h5 fixtures used by testSpecsynLib.cpp together: one
  * covering a cool, solar-parameter star and the other a hot, massive
  * (OB-like) star. These fixtures require different microTurb values
- * (BOSZ_test was fetched at micro = 0, TLUSTY_test at micro = 10),
- * which is exactly the scenario the per-library microTurb vector is
- * for. The tests check that a star handled by the second library in
- * the chain falls through correctly after the first returns an empty
- * (out-of-bounds) result, that this holds regardless of which library
- * is listed first, and that a star outside every chained library's
- * grid still throws (since the last library in the chain always uses
+ * (BOSZ_test was fetched at micro = 0, TLUSTY_test at micro = 10), so
+ * these tests all construct the chain with its microTurb argument left
+ * at the default (an empty vector), relying on each library's own
+ * micro_default registry entry (also 0 and 10, respectively) to
+ * resolve the right value per library automatically -- rather than
+ * having to spell out {0.0, 10.0} explicitly, which was the only
+ * option before SpecsynLib gained per-library registry defaults. The
+ * tests check that a star handled by the second library in the chain
+ * falls through correctly after the first returns an empty (out-of-
+ * bounds) result, that this holds regardless of which library is
+ * listed first, and that a star outside every chained library's grid
+ * still throws (since the last library in the chain always uses
  * OOBPolicy::Throw).
  *
  * It also tests SpecsynLibChained::makeCommonWlGrid directly, both
@@ -154,7 +159,7 @@ static auto testChainTlustyFirst() -> int
 {
     const specsyn::SpecsynLibChained chain(
         { "TLUSTY_test", "BOSZ_test" }, -3.0, 1.0, 0.0, 0.0,
-        { 10.0, 0.0 }, specsyn::defaultR, registryName);
+        {}, specsyn::defaultR, registryName);
 
     int result = 0;
     try
@@ -194,7 +199,7 @@ static auto testChainBoszFirst() -> int
 {
     const specsyn::SpecsynLibChained chain(
         { "BOSZ_test", "TLUSTY_test" }, -3.0, 1.0, 0.0, 0.0,
-        { 0.0, 10.0 }, specsyn::defaultR, registryName);
+        {}, specsyn::defaultR, registryName);
 
     int result = 0;
     try
@@ -234,7 +239,7 @@ static auto testChainOOBThrows() -> int
 {
     const specsyn::SpecsynLibChained chain(
         { "TLUSTY_test", "BOSZ_test" }, -3.0, 1.0, 0.0, 0.0,
-        { 10.0, 0.0 }, specsyn::defaultR, registryName);
+        {}, specsyn::defaultR, registryName);
 
     try
     {
@@ -296,7 +301,7 @@ static auto testChainUsesCommonGrid() -> int
 
     const specsyn::SpecsynLibChained chain(
         { "BOSZ_test", "TLUSTY_test" }, -3.0, 1.0, 0.0, 0.0,
-        { 0.0, 10.0 }, specsyn::defaultR, registryName);
+        {}, specsyn::defaultR, registryName);
 
     if (chain.wl() != expected)
     {

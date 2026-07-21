@@ -198,10 +198,58 @@ static auto testFindMatchingSpectra() -> int
     return 0;
 }
 
+/**
+ * @brief Unit test for the getMicroDefault function.
+ * @return 0 if the test passes, 1 if it fails.
+ * @details
+ * Checks that getMicroDefault returns each test fixture's own
+ * micro_default value (0 for BOSZ_test, 10 for TLUSTY_test -- the same
+ * values SpecsynLib resolves to when its own microTurb argument is
+ * NaN), and that it throws for a spectra set not in the registry.
+ */
+static auto testGetMicroDefault() -> int
+{
+    try
+    {
+        const double boszMicroDefault = specsyn::getMicroDefault("BOSZ_test", registryName);
+        if (boszMicroDefault != 0.0)
+        {
+            std::cerr << "testGetMicroDefault: expected BOSZ_test's micro_default "
+                "to be 0, got " << boszMicroDefault << "\n";
+            return 1;
+        }
+
+        const double tlustyMicroDefault = specsyn::getMicroDefault("TLUSTY_test", registryName);
+        if (tlustyMicroDefault != 10.0)
+        {
+            std::cerr << "testGetMicroDefault: expected TLUSTY_test's micro_default "
+                "to be 10, got " << tlustyMicroDefault << "\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "testGetMicroDefault: unexpected exception: " << e.what() << "\n";
+        return 1;
+    }
+
+    try
+    {
+        specsyn::getMicroDefault("NoSuchSpectraSet", registryName);
+        std::cerr << "testGetMicroDefault: expected an exception for an "
+            "unknown spectra set, but none was thrown\n";
+        return 1;
+    }
+    catch (const std::exception&) { /* this is the expected outcome */ }
+
+    return 0;
+}
+
 auto testSpecsynUtils() -> int
 {
     int result = 0;
     result += testParseRegistry();
     result += testFindMatchingSpectra();
+    result += testGetMicroDefault();
     return result;
 }

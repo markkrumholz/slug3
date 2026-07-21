@@ -178,12 +178,18 @@ namespace specsyn
         Specsyn(z),
         AFe_(afe),
         CFe_(cfe),
-        microTurb_(microTurb),
+        // A NaN microTurb means "use this library's own default":
+        // resolved here, in the member initializer list, rather than
+        // in the constructor body, so that findMatchingSpectra below
+        // (which uses microTurb_ as a filter) sees the resolved value
+        // too, not the NaN sentinel
+        microTurb_(std::isnan(microTurb) ?
+            getMicroDefault(spectraName, registryName) : microTurb),
         r_(r)
     {
         // Step 1: find the set of spectra matching the input criteria
         auto [fehVals, groupNames] = findMatchingSpectra(
-            spectraName, fehMin, fehMax, afe, cfe, microTurb, r, registryName);
+            spectraName, fehMin, fehMax, afe, cfe, microTurb_, r, registryName);
         FeH_ = std::move(fehVals); //NOLINT(cppcoreguidelines-prefer-member-initializer)
         const size_t nfeh = FeH_.size();
         if (nfeh == 0)

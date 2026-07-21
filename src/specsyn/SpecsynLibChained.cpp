@@ -11,6 +11,7 @@
 #include "SpecsynLib.hpp"
 #include <algorithm>
 #include <cstddef>
+#include <limits>
 #include <memory>
 #include <set>
 #include <stdexcept>
@@ -55,16 +56,23 @@ namespace specsyn
         // type-erased libs_ vector, so that resample() (a SpecsynLib
         // method, not part of the polymorphic Specsyn interface) can
         // still be called on each of them below.
+        // An empty microTurb means "use each library's own default":
+        // pass NaN through to SpecsynLib for that entry, which resolves
+        // it from the library's own micro_default in the registry
+        // (see SpecsynLib's constructor), rather than forcing every
+        // library in the chain to share one hardcoded value
+        constexpr double useLibraryDefault = std::numeric_limits<double>::quiet_NaN();
+
         const size_t n = spectraName.size();
         std::vector<std::unique_ptr<SpecsynLib<OOBPolicy::silent>>> silentLibs;
         silentLibs.reserve(n - 1);
         for (size_t i = 0; i + 1 < n; ++i)
         {
-            const double mt = microTurb.empty() ? defaultMicroTurb : microTurb[i];
+            const double mt = microTurb.empty() ? useLibraryDefault : microTurb[i];
             silentLibs.push_back(std::make_unique<SpecsynLib<OOBPolicy::silent>>(
                 spectraName[i], fehMin, fehMax, afe, cfe, mt, r, registryName, z));
         }
-        const double lastMt = microTurb.empty() ? defaultMicroTurb : microTurb[n - 1];
+        const double lastMt = microTurb.empty() ? useLibraryDefault : microTurb[n - 1];
         auto throwLib = std::make_unique<SpecsynLib<OOBPolicy::Throw>>(
             spectraName[n - 1], fehMin, fehMax, afe, cfe, lastMt, r, registryName, z);
 

@@ -54,8 +54,10 @@ namespace specsyn
          *   per entry of spectraName (different libraries -- e.g. an
          *   OB-star library versus one covering cooler, lower-mass
          *   stars -- commonly assume different microturbulent
-         *   velocities). An empty vector (the default) uses
-         *   defaultMicroTurb for every library in the chain.
+         *   velocities). An empty vector (the default) uses each
+         *   library's own micro_default value from the registry
+         *   instead (see SpecsynLib's constructor), rather than
+         *   forcing every library in the chain to share one value.
          * @param r Spectral resolution
          * @param registryName Name of the spectral library registry file
          * @param z The redshift; defaults to zero
@@ -65,9 +67,10 @@ namespace specsyn
          * @details
          * Constructs one SpecsynLib per entry of spectraName, in
          * order, pairing each one with the corresponding entry of
-         * microTurb (or defaultMicroTurb, if microTurb is empty) and
-         * otherwise using the remaining arguments unchanged for each
-         * one. Every library but the last is constructed with
+         * microTurb (or that library's own registry default, if
+         * microTurb is empty) and otherwise using the remaining
+         * arguments unchanged for each one. Every library but the last
+         * is constructed with
          * OOBPolicy::silent, so that a star outside its grid simply
          * falls through to the next library in the chain; the last
          * library is constructed with OOBPolicy::Throw, so that a star

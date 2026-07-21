@@ -39,6 +39,11 @@ TLUSTY_reference_urls = [
     "https://ui.adsabs.harvard.edu/abs/2025AJ....169..178H/abstract"
 ]
 
+# Default microturbulent velocity (km/s) for TLUSTY, used by SpecsynLib
+# when no explicit value is requested; TLUSTY's hot, massive OB stars
+# are conventionally modeled with substantial microturbulence
+TLUSTY_MICRO_DEFAULT = 10
+
 # Number of original wavelength points per spectrum, and the downsample factor.
 # ceil(739791 / 100) = 7398 output points.
 TLUSTY_N_ORIG     = 739_791
@@ -430,6 +435,7 @@ with h5py.File(args.output, "r") as h5:
                 vals.append(v)
         vals.sort()
         tab[qty] = vals
+tab["micro_default"] = TLUSTY_MICRO_DEFAULT
 
 registry["TLUSTY"] = tab
 

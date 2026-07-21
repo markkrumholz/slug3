@@ -63,6 +63,27 @@ namespace specsyn
         const std::string& registryName = defaultRegistry)
     -> std::pair<std::vector<double>, std::vector<std::string>>;
 
+    /**
+     * @brief Get a spectral library's default microturbulent velocity
+     * @param spectraName Name of the spectral model
+     * @param registryName Name of the spectral library registry file
+     * @returns The library's micro_default value, in km/s, as recorded
+     *   in its registry entry
+     * @throws std::runtime_error if spectraName is not a spectra set in
+     *   the registry, or if its entry has no micro_default field
+     * @details
+     * Different libraries commonly warrant different default
+     * microturbulent velocities -- e.g. hot, massive OB stars are
+     * conventionally modeled with substantially more microturbulence
+     * than cooler, lower-mass stars -- so unlike the other filtering
+     * criteria (afe, cfe, r), this default is looked up per library
+     * from the registry rather than sharing a single constant across
+     * every library.
+     */
+    auto getMicroDefault(
+        const std::string& spectraName,
+        const std::string& registryName = defaultRegistry) -> double;
+
 } // namespace specsyn
 
 #endif // SPECSYNUTILS_HPP
