@@ -130,15 +130,17 @@ namespace specsyn
         };
 
         /**
-         * @brief Find the bracketing grid points of a sorted, irregularly-spaced grid
+         * @brief Find the bracketing grid points of a sorted grid
          * @param grid A sorted (ascending), non-empty grid of values
          * @param value The query value; assumed to already lie within
          *   [grid.front(), grid.back()]
          * @returns The bracketing Bracket for value
          * @details
          * Locates the bracket via std::ranges::upper_bound, an O(log n)
-         * binary search, appropriate for grid axes (like logg and Teff
-         * in SpecsynLib) that are not evenly spaced.
+         * binary search. Used for every axis of the tensor grid (FeH,
+         * logg, and Teff), since none of them can be assumed to be
+         * evenly spaced -- e.g. BOSZ's [Fe/H] grid is uniform, but
+         * TLUSTY's (log10 of a fixed set of archival Z values) is not.
          */
         auto findBracket(const std::vector<double>& grid, const double value) //NOLINT(llvm-prefer-static-over-anonymous-namespace)
             -> Bracket
@@ -157,33 +159,6 @@ namespace specsyn
             const size_t lo = hi - 1;
             const double t = std::clamp(
                 (value - grid[lo]) / (grid[hi] - grid[lo]), 0.0, 1.0); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- lo, hi < n by construction
-            return { lo, hi, t };
-        }
-
-        /**
-         * @brief Find the bracketing grid points of a sorted, evenly-spaced grid
-         * @param grid A sorted (ascending), non-empty, evenly-spaced grid of values
-         * @param value The query value; assumed to already lie within
-         *   [grid.front(), grid.back()]
-         * @returns The bracketing Bracket for value
-         * @details
-         * Locates the bracket via direct division by the grid
-         * spacing, an O(1) alternative to findBracket() appropriate
-         * for a regularly-spaced grid axis (like FeH in SpecsynLib).
-         */
-        auto findRegularBracket(const std::vector<double>& grid, const double value) //NOLINT(llvm-prefer-static-over-anonymous-namespace)
-            -> Bracket
-        {
-            const size_t n = grid.size();
-            if (n == 1) { return { 0, 0, 0.0 }; }
-
-            const double step = (grid.back() - grid.front()) / static_cast<double>(n - 1);
-            const auto rawIdx = static_cast<std::ptrdiff_t>((value - grid.front()) / step);
-            const auto maxLo = static_cast<std::ptrdiff_t>(n) - 2;
-            const size_t lo = static_cast<size_t>(std::clamp<std::ptrdiff_t>(rawIdx, 0, maxLo));
-            const size_t hi = lo + 1;
-            const double t = std::clamp(
-                (value - grid[lo]) / step, 0.0, 1.0); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- lo < n - 1 by construction
             return { lo, hi, t };
         }
     } // namespace
@@ -407,10 +382,10 @@ namespace specsyn
 
         // Step 3: locate the tensor-grid cell containing
         // (feh, logg, teff), and the trilinear interpolation weights
-        // within it. FeH_ is regularly spaced, so its bracket comes
-        // from an O(1) division; logg_ and Teff_ are not (see the
-        // constructor), so theirs come from an O(log n) binary search.
-        const auto fehB = findRegularBracket(FeH_, feh);
+        // within it, via an O(log n) binary search on each axis --
+        // none of FeH_, logg_, or Teff_ can be assumed evenly spaced
+        // (see findBracket).
+        const auto fehB = findBracket(FeH_, feh);
         const auto loggB = findBracket(logg_, logg);
         const auto teffB = findBracket(Teff_, teff);
 

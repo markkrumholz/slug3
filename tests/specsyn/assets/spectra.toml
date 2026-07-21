@@ -1,5 +1,5 @@
 name = "Registry of spectra sets (test fixture)"
-spectra_sets = ["BOSZ_test"]
+spectra_sets = ["BOSZ_test", "TLUSTY_test"]
 
 [BOSZ_test]
 file = "BOSZ_test.h5"
@@ -9,3 +9,9 @@ alpha_Fe = [0.0]
 C_Fe = [0.0]
 r = [500]
 micro = [0]
+
+[TLUSTY_test]
+file = "TLUSTY_test.h5"
+version = "test fixture"
+Fe_H = [-2.0, -1.6989700043360187, -1.4814860601221125, -1.0, -0.6989700043360187, -0.3010299956639812, 0.0, 0.3010299956639812]
+micro = [10]

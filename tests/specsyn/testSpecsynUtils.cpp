@@ -47,7 +47,7 @@ static auto testParseRegistry() -> int
         auto [registry, registryPath] = specsyn::parseRegistry(registryName);
 
         const toml::array* spectraSets = registry["spectra_sets"].as_array();
-        if (!spectraSets || spectraSets->size() != 1 ||
+        if (!spectraSets || spectraSets->empty() ||
             !registry.contains(spectraName))
         {
             std::cerr << "testParseRegistry: parsed registry "
