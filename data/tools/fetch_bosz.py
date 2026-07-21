@@ -17,6 +17,10 @@ import urllib3
 # Magic strings
 BOSZ_version = "2024"
 BOSZ_URL = "https://archive.stsci.edu/hlsps/bosz/bosz2024/"
+# Default microturbulent velocity (km/s) for BOSZ, used by SpecsynLib
+# when no explicit value is requested; BOSZ's cooler, lower-mass
+# stars are conventionally modeled with negligible microturbulence
+BOSZ_MICRO_DEFAULT = 0
 BOSZ_references = ["Mészáros, Sz., Allende Prieto, C., Edvardsson, B., et al. 2012, AJ, 144, 120",
                    "Bohlin, R., Mészáros, Sz., Fleming, S., et al. 2017, AJ, 153, 234",
                    "Mészáros, Sz., Bohlin, R., Allende Prieto, C., et al. 2024, A&A, 688, A197"]
@@ -356,6 +360,7 @@ for qty, attr in zip(["Fe_H", "alpha_Fe", "C_Fe", "r", "micro"],
     val_in_file.sort()
     cast = int if qty in int_qtys else float
     bosz_tab[qty] = [ cast(v) for v in val_in_file ]
+bosz_tab["micro_default"] = BOSZ_MICRO_DEFAULT
 registry["BOSZ"] = bosz_tab
 
 # Write registry back to file

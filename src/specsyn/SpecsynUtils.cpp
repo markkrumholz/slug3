@@ -258,4 +258,26 @@ namespace specsyn
         return { std::move(fehOut), std::move(nameOut) };
     }
 
+    auto getMicroDefault(
+        const std::string& spectraName, const std::string& registryName) -> double
+    {
+        auto [registry, registryPath] = parseRegistry(registryName);
+
+        auto spectraSets = getSpectraSetsFromRegistry(registry);
+        if (std::ranges::find(spectraSets, spectraName) == spectraSets.end())
+        {
+            throw std::runtime_error("getMicroDefault: no spectra set named " +
+                spectraName + " found in spectra registry " + registryName);
+        }
+
+        const auto microDefault =
+            registry.at_path(spectraName).at_path("micro_default").value<double>();
+        if (!microDefault)
+        {
+            throw std::runtime_error("getMicroDefault: spectra set " + spectraName +
+                " in registry " + registryPath.string() + " has no micro_default field");
+        }
+        return *microDefault;
+    }
+
 } // namespace specsyn
