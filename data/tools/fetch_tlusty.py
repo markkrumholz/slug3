@@ -61,7 +61,7 @@ parser.add_argument("--registry",
 parser.add_argument("--overwrite", action="store_true",
                     help="Overwrite spectra groups already in the output file")
 parser.add_argument("--feh", type=float, nargs="+", default=[],
-                    help="Metallicity Z values to fetch (e.g. 1.0 0.5); "
+                    help="[Fe/H] = log10(Z) values to fetch (e.g. 0.0 -0.3); "
                          "default: all available")
 parser.add_argument("--micro", type=int, nargs="+", default=[],
                     help="Microturbulence values in km/s to fetch; "
@@ -95,8 +95,9 @@ spec_re = re.compile(
     r'v(?P<micro>[0-9]+)\.spec\.gz$'
 )
 
-def zval_to_feh(zval_str: str) -> float:
-    """Convert the z-string from a TLUSTY filename to a metallicity Z value.
+def zval_to_z(zval_str: str) -> float:
+    """Convert the z-string from a TLUSTY filename to a linear, solar-scaled
+    metallicity Z value.
 
     Three-digit strings (e.g. '100') are divided by 100 to give Z.
     Four-digit strings (e.g. '0033') are divided by 1000, covering the
@@ -106,11 +107,21 @@ def zval_to_feh(zval_str: str) -> float:
     return zval / 1000.0 if len(zval_str) == 4 else zval / 100.0
 
 
+def zval_to_feh(zval_str: str) -> float:
+    """Convert the z-string from a TLUSTY filename to [Fe/H] = log10(Z),
+    so that TLUSTY's metallicity is on the same dex scale as the [Fe/H]
+    values used by other spectral libraries (e.g. BOSZ).
+    """
+    return math.log10(zval_to_z(zval_str))
+
+
 def feh_to_zval_str(feh: float) -> str:
-    """Inverse of zval_to_feh: reconstruct the filename z-string."""
-    if abs(feh - round(feh * 100) / 100) < 1e-6:
-        return f"{round(feh * 100):03d}"
-    return f"{round(feh * 1000):04d}"
+    """Inverse of zval_to_feh: reconstruct the filename z-string from
+    [Fe/H] = log10(Z)."""
+    z = 10 ** feh
+    if abs(z - round(z * 100) / 100) < 1e-6:
+        return f"{round(z * 100):03d}"
+    return f"{round(z * 1000):04d}"
 
 
 # ---------------------------------------------------------------------------
@@ -359,41 +370,25 @@ for (feh_val, micro_val), source in sorted(tar_sources.items()):
         shutil.os.remove(tar_path)
 
 # ---------------------------------------------------------------------------
-# Write the shared (Teff, log g) grid
-# ---------------------------------------------------------------------------
-
-ds_name_re = re.compile(r't(?P<teff>[0-9]+)_g(?P<logg>[+-][0-9.]+)')
-with h5py.File(args.output, "a") as h5:
-    spectra_groups = [g for g in h5.keys() if g.startswith("spectra_")]
-    if spectra_groups:
-        sample = h5[spectra_groups[0]]
-        pairs = sorted(
-            (int(m.group("teff")), float(m.group("logg")))
-            for m in (ds_name_re.fullmatch(ds) for ds in sample.keys())
-            if m is not None
-        )
-        if "logg_Teff_grid" in h5:
-            del h5["logg_Teff_grid"]
-        grid = h5.create_group("logg_Teff_grid")
-        grid.create_dataset("Teff", data=[p[0] for p in pairs])
-        grid.create_dataset("logg", data=[p[1] for p in pairs])
-        if args.verbose:
-            print(f"Wrote logg_Teff_grid ({len(pairs)} pairs) from "
-                  f"{spectra_groups[0]}.")
-
-# ---------------------------------------------------------------------------
 # Write the shared wavelength grid
 # ---------------------------------------------------------------------------
 
 if wave_ds is not None:
     with h5py.File(args.output, "a") as h5:
         wgrp = h5.require_group("wavelengths")
-        ds_name = "r100000"
+        # Not named after a resolution value (e.g. "r500", as BOSZ's
+        # wavelength grids are): downsampling by TLUSTY_DOWNSAMPLE means
+        # this grid isn't actually at the original spectra's resolution
+        # any more, and there's no meaningful single "r" value to
+        # attach to it, the same way there's no afe/cfe/r group
+        # attribute on these spectra -- treat this grid as matching
+        # any r a caller asks for, rather than claiming an r it isn't.
+        ds_name = "native"
         if ds_name in wgrp:
             del wgrp[ds_name]
         wgrp.create_dataset(ds_name, data=wave_ds, compression="gzip")
         if args.verbose:
-            print(f"Wrote wavelength grid r100000 ({len(wave_ds)} pts).")
+            print(f"Wrote wavelength grid '{ds_name}' ({len(wave_ds)} pts).")
 
 # ---------------------------------------------------------------------------
 # Clean up temp directory
@@ -427,7 +422,7 @@ tab["reference_urls"] = TLUSTY_reference_urls
 
 with h5py.File(args.output, "r") as h5:
     grps = [g for g in h5.keys() if g.startswith("spectra_")]
-    for qty, attr, cast in [("Z", "feh", float), ("micro", "micro", int)]:
+    for qty, attr, cast in [("Fe_H", "feh", float), ("micro", "micro", int)]:
         vals: list = []
         for g in grps:
             v = cast(h5[g].attrs[attr])
