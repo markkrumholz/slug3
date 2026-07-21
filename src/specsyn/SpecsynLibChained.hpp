@@ -29,6 +29,11 @@ namespace specsyn
      * be combined into a single Specsyn: each one is tried in turn, in
      * priority order, and the first one able to produce a spectrum for
      * a given star is used.
+     *
+     * Chained libraries need not share a single native wavelength
+     * grid, so the constructor builds a common grid spanning all of
+     * them (see makeCommonWlGrid) and resamples every library onto it
+     * (see SpecsynLib::resample) before storing them.
      */
     class SpecsynLibChained : public Specsyn
     {
@@ -68,6 +73,14 @@ namespace specsyn
          * library is constructed with OOBPolicy::Throw, so that a star
          * outside every library's grid still produces an error rather
          * than silently vanishing.
+         *
+         * Once every library has been loaded on its own native
+         * wavelength grid, makeCommonWlGrid is used to build a single
+         * grid spanning all of them, and each library is resampled
+         * (see SpecsynLib::resample) onto that common grid, so that
+         * every chained library's spec() output shares the same
+         * length and wavelength values -- and so that wl() correctly
+         * describes every one of them, not just the first.
          */
         SpecsynLibChained(
             const std::vector<std::string>& spectraName,
@@ -102,6 +115,46 @@ namespace specsyn
          */
         [[nodiscard]] auto spec(const StarData& props, double feh) const
         -> std::vector<double> override;
+
+        /**
+         * @brief Build a common wavelength grid spanning several libraries' own grids
+         * @param wlGrids One wavelength grid per library, each sorted
+         *   ascending and non-empty
+         * @return A single sorted, deduplicated wavelength grid
+         *   spanning the full range covered by wlGrids
+         * @throws std::runtime_error if wlGrids, or any grid in it, is empty
+         * @details
+         * Splits the full wavelength range into windows delineated by
+         * every grid's minimum and maximum wavelength -- e.g. grids
+         * covering [200, 2000] and [1500, 3000] Angstrom split the
+         * range into windows [200, 1500], [1500, 2000], and
+         * [2000, 3000]. Within each window, restricts to grids whose
+         * own range fully contains it, and adopts whichever of those
+         * has the most points there (ties favor the earlier grid in
+         * wlGrids); this "fully contains" restriction matters because
+         * a grid whose own range happens to end (or start) exactly at
+         * one edge of a window still has that one boundary point
+         * technically inside it, which could otherwise spuriously tie
+         * against (or even beat) another grid that actually spans the
+         * window. If no grid fully contains a window, falls back to
+         * whichever grid simply has the most points physically
+         * present there, so a grid's own trailing edge point is still
+         * kept when nothing else reaches anywhere near it; a window
+         * with no points from any grid at all (a genuine coverage gap)
+         * contributes nothing to the result, rather than inventing
+         * samples there. The result is these per-window selections
+         * concatenated in order, so it is itself sorted and spans the
+         * union of every input grid's range wherever that union has no
+         * gaps.
+         *
+         * This is a general-purpose grid-merging utility, not tied to
+         * SpecsynLibChained's own constructor use of it (which passes
+         * the wl() of each of its chained libraries), so it takes
+         * wavelength grids directly rather than Specsyn/SpecsynLib
+         * objects.
+         */
+        [[nodiscard]] static auto makeCommonWlGrid(
+            const std::vector<std::vector<double>>& wlGrids) -> std::vector<double>;
 
     private:
 

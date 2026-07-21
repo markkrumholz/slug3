@@ -17,13 +17,12 @@
  * grid still throws (since the last library in the chain always uses
  * OOBPolicy::Throw).
  *
- * BOSZ_test.h5 and TLUSTY_test.h5 have different wavelength grids
- * (different lengths and spacing), and SpecsynLibChained::wl()
- * currently just exposes its first chained library's grid without
- * resampling (a known limitation, to be addressed separately), so
- * these tests build standalone reference SpecsynLib instances of
- * their own purely to obtain each fixture's own wl() for the sanity
- * checks below, rather than relying on the chain's wl().
+ * It also tests SpecsynLibChained::makeCommonWlGrid directly, both
+ * against a fully controlled synthetic scenario (so the window-by-
+ * window point-count logic can be checked exactly) and against
+ * BOSZ_test/TLUSTY_test's own native grids (to confirm the
+ * constructor actually resamples every chained library onto a single
+ * common grid, rather than each keeping its own).
  * @date 2026-07-21
  */
 
@@ -34,6 +33,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <functional>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -96,22 +96,6 @@ namespace
     constexpr double oobFeh = 0.1;
 
     /**
-     * @brief Reference BOSZ_test library, used only to obtain its own wl() for sanity checks
-     */
-    auto boszRef() -> specsyn::SpecsynLib<specsyn::OOBPolicy::Throw>
-    {
-        return { "BOSZ_test", -3.0, 1.0, 0.0, 0.0, 0.0, specsyn::defaultR, registryName };
-    }
-
-    /**
-     * @brief Reference TLUSTY_test library, used only to obtain its own wl() for sanity checks
-     */
-    auto tlustyRef() -> specsyn::SpecsynLib<specsyn::OOBPolicy::Throw>
-    {
-        return { "TLUSTY_test", -3.0, 1.0, 0.0, 0.0, 10.0, specsyn::defaultR, registryName };
-    }
-
-    /**
      * @brief Check that result is non-empty and that peak(wl * result) is near expectedLuminosity
      * @return 0 on success, 1 (after printing a diagnostic) on failure
      */
@@ -148,24 +132,35 @@ namespace
         }
         return 0;
     }
+
+    /**
+     * @brief Build an evenly-spaced grid [lo, hi] with the given step
+     */
+    auto linspaceStep(const double lo, const double hi, const double step) -> std::vector<double>
+    {
+        std::vector<double> grid;
+        for (double x = lo; x <= hi + 1e-9; x += step) { grid.push_back(x); }
+        return grid;
+    }
 } // namespace
 
 // Check that, with TLUSTY_test listed first, an OB star is handled
 // immediately by TLUSTY_test, and a solar star -- out of bounds for
-// TLUSTY_test -- falls through to BOSZ_test
+// TLUSTY_test -- falls through to BOSZ_test. Since the chain's
+// constructor resamples every library onto a common grid, both
+// results must match the chain's own wl() -- regardless of which
+// underlying library actually produced them.
 static auto testChainTlustyFirst() -> int
 {
     const specsyn::SpecsynLibChained chain(
         { "TLUSTY_test", "BOSZ_test" }, -3.0, 1.0, 0.0, 0.0,
         { 10.0, 0.0 }, specsyn::defaultR, registryName);
-    const auto tlusty = tlustyRef();
-    const auto bosz = boszRef();
 
     int result = 0;
     try
     {
         const auto obResult = chain.spec(obStar(), obFeh);
-        result += checkSpectrum(obResult, tlusty.wl(), obLuminosity,
+        result += checkSpectrum(obResult, chain.wl(), obLuminosity,
             "an OB star with TLUSTY_test first");
     }
     catch (const std::exception& e)
@@ -178,7 +173,7 @@ static auto testChainTlustyFirst() -> int
     try
     {
         const auto solarResult = chain.spec(solarStar(), solarFeh);
-        result += checkSpectrum(solarResult, bosz.wl(), solarLuminosity,
+        result += checkSpectrum(solarResult, chain.wl(), solarLuminosity,
             "a solar star falling through to BOSZ_test");
     }
     catch (const std::exception& e)
@@ -200,14 +195,12 @@ static auto testChainBoszFirst() -> int
     const specsyn::SpecsynLibChained chain(
         { "BOSZ_test", "TLUSTY_test" }, -3.0, 1.0, 0.0, 0.0,
         { 0.0, 10.0 }, specsyn::defaultR, registryName);
-    const auto tlusty = tlustyRef();
-    const auto bosz = boszRef();
 
     int result = 0;
     try
     {
         const auto solarResult = chain.spec(solarStar(), solarFeh);
-        result += checkSpectrum(solarResult, bosz.wl(), solarLuminosity,
+        result += checkSpectrum(solarResult, chain.wl(), solarLuminosity,
             "a solar star with BOSZ_test first");
     }
     catch (const std::exception& e)
@@ -220,7 +213,7 @@ static auto testChainBoszFirst() -> int
     try
     {
         const auto obResult = chain.spec(obStar(), obFeh);
-        result += checkSpectrum(obResult, tlusty.wl(), obLuminosity,
+        result += checkSpectrum(obResult, chain.wl(), obLuminosity,
             "an OB star falling through to TLUSTY_test");
     }
     catch (const std::exception& e)
@@ -285,6 +278,138 @@ static auto testChainConstructorValidation() -> int
     return result;
 }
 
+// Check that SpecsynLibChained's constructor actually builds and uses
+// a single common grid spanning both BOSZ_test's and TLUSTY_test's own
+// native ranges, rather than just adopting one library's grid
+// verbatim: the chain's wl() must span the full union of both native
+// ranges, be strictly increasing, and have exactly as many points as
+// calling makeCommonWlGrid directly on the two native grids.
+static auto testChainUsesCommonGrid() -> int
+{
+    const specsyn::SpecsynLib<specsyn::OOBPolicy::Throw> boszRef(
+        "BOSZ_test", -3.0, 1.0, 0.0, 0.0, 0.0, specsyn::defaultR, registryName);
+    const specsyn::SpecsynLib<specsyn::OOBPolicy::Throw> tlustyRef(
+        "TLUSTY_test", -3.0, 1.0, 0.0, 0.0, 10.0, specsyn::defaultR, registryName);
+
+    const auto expected = specsyn::SpecsynLibChained::makeCommonWlGrid(
+        { boszRef.wl(), tlustyRef.wl() });
+
+    const specsyn::SpecsynLibChained chain(
+        { "BOSZ_test", "TLUSTY_test" }, -3.0, 1.0, 0.0, 0.0,
+        { 0.0, 10.0 }, specsyn::defaultR, registryName);
+
+    if (chain.wl() != expected)
+    {
+        std::cerr << "testSpecsynLibChained: chain.wl() (" << chain.wl().size()
+            << " points) does not match makeCommonWlGrid's own result ("
+            << expected.size() << " points) for the same two native grids\n";
+        return 1;
+    }
+
+    const double expectedMin = std::min(boszRef.wl().front(), tlustyRef.wl().front());
+    const double expectedMax = std::max(boszRef.wl().back(), tlustyRef.wl().back());
+    if (chain.wl().front() != expectedMin || chain.wl().back() != expectedMax)
+    {
+        std::cerr << "testSpecsynLibChained: chain.wl() does not span the full "
+            "union [" << expectedMin << ", " << expectedMax << "] of both "
+            "libraries' native ranges: got [" << chain.wl().front() << ", "
+            << chain.wl().back() << "]\n";
+        return 1;
+    }
+
+    if (!std::ranges::is_sorted(chain.wl(), std::less<>{}))
+    {
+        std::cerr << "testSpecsynLibChained: chain.wl() is not strictly "
+            "increasing\n";
+        return 1;
+    }
+
+    return 0;
+}
+
+// Check makeCommonWlGrid's window-selection logic against a fully
+// controlled synthetic scenario: a coarse grid spanning [200, 2000]
+// Angstrom every 10 Angstrom (181 points) and a fine grid spanning
+// [1500, 3000] Angstrom every 5 Angstrom (301 points). This splits
+// wavelength space into three windows -- [200, 1500), [1500, 2000),
+// and [2000, 3000] -- and the fine grid should win the overlap window
+// [1500, 2000) (100 of its points there vs. the coarse grid's 50), so
+// the merged grid should equal: the coarse grid's points below 1500,
+// followed by the fine grid's points from 1500 to 3000.
+static auto testMakeCommonWlGridWindows() -> int
+{
+    const auto coarse = linspaceStep(200.0, 2000.0, 10.0);
+    const auto fine = linspaceStep(1500.0, 3000.0, 5.0);
+
+    const auto merged = specsyn::SpecsynLibChained::makeCommonWlGrid({ coarse, fine });
+
+    std::vector<double> expected;
+    for (const double x : coarse) { if (x < 1500.0) { expected.push_back(x); } }
+    for (const double x : fine) { expected.push_back(x); }
+
+    if (merged != expected)
+    {
+        std::cerr << "testSpecsynLibChained: makeCommonWlGrid produced "
+            << merged.size() << " points, expected " << expected.size()
+            << " for the coarse/fine overlap scenario\n";
+        return 1;
+    }
+
+    return 0;
+}
+
+// Check that makeCommonWlGrid leaves a genuine coverage gap between
+// two non-overlapping, non-touching grids empty, rather than
+// inventing samples there
+static auto testMakeCommonWlGridGap() -> int
+{
+    const std::vector<double> low = { 100.0, 150.0, 200.0 };
+    const std::vector<double> high = { 500.0, 550.0, 600.0 };
+
+    const auto merged = specsyn::SpecsynLibChained::makeCommonWlGrid({ low, high });
+
+    std::vector<double> expected = low;
+    expected.insert(expected.end(), high.begin(), high.end());
+
+    if (merged != expected)
+    {
+        std::cerr << "testSpecsynLibChained: makeCommonWlGrid did not skip the "
+            "coverage gap between two disjoint grids as expected\n";
+        return 1;
+    }
+
+    return 0;
+}
+
+// Check that makeCommonWlGrid rejects an empty list of grids and a
+// list containing an empty grid
+static auto testMakeCommonWlGridErrors() -> int
+{
+    int result = 0;
+
+    try
+    {
+        [[maybe_unused]] const auto merged =
+            specsyn::SpecsynLibChained::makeCommonWlGrid({});
+        std::cerr << "testSpecsynLibChained: expected makeCommonWlGrid to throw "
+            "for an empty list of grids, but it did not\n";
+        result += 1;
+    }
+    catch (const std::runtime_error&) { /* expected */ }
+
+    try
+    {
+        [[maybe_unused]] const auto merged = specsyn::SpecsynLibChained::makeCommonWlGrid(
+            { { 100.0, 200.0 }, {} });
+        std::cerr << "testSpecsynLibChained: expected makeCommonWlGrid to throw "
+            "for a list containing an empty grid, but it did not\n";
+        result += 1;
+    }
+    catch (const std::runtime_error&) { /* expected */ }
+
+    return result;
+}
+
 auto testSpecsynLibChained() -> int
 {
     int result = 0;
@@ -292,5 +417,9 @@ auto testSpecsynLibChained() -> int
     result += testChainBoszFirst();
     result += testChainOOBThrows();
     result += testChainConstructorValidation();
+    result += testChainUsesCommonGrid();
+    result += testMakeCommonWlGridWindows();
+    result += testMakeCommonWlGridGap();
+    result += testMakeCommonWlGridErrors();
     return result;
 }
