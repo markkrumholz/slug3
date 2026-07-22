@@ -84,7 +84,7 @@ parser.add_argument("--version", default=POWR_version,
 parser.add_argument("--url", default=POWR_URL,
                     help="Base URL of the PoWR website (default: %(default)s)")
 parser.add_argument("--output-dir",
-                    default=shutil.os.path.join("..", "spectra", "powr_raw"),
+                    default="powr_temp",
                     help="Directory in which to save downloaded archives "
                          "(default: %(default)s)")
 parser.add_argument("--grids", nargs="+", default=[], metavar="GRIDNAME",
