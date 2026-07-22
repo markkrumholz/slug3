@@ -81,3 +81,6 @@ data/tracks/*.toml
 data/tracks/*.h5
 data/spectra/*.toml
 data/spectra/*.h5
+
+# Downloaded archive caches from data/tools fetch scripts
+data/tools/powr_temp/
