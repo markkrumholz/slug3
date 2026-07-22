@@ -98,6 +98,7 @@ add_executable(slug
     src/specsyn/SpecsynUtils.cpp
     src/specsyn/SpecsynLib.cpp
     src/specsyn/SpecsynLibNoWind.cpp
+    src/specsyn/SpecsynLibWR.cpp
     src/specsyn/SpecsynLibChained.cpp
     src/tracks/Tracks2D.cpp
     src/tracks/Tracks3D.cpp
@@ -172,6 +173,7 @@ add_executable(slugTestCore
     src/specsyn/SpecsynUtils.cpp
     src/specsyn/SpecsynLib.cpp
     src/specsyn/SpecsynLibNoWind.cpp
+    src/specsyn/SpecsynLibWR.cpp
     src/specsyn/SpecsynLibChained.cpp
     src/tracks/TrackUtils.cpp
     src/tracks/Tracks2D.cpp
@@ -202,6 +204,7 @@ add_executable(slugTestIo
     src/specsyn/SpecsynUtils.cpp
     src/specsyn/SpecsynLib.cpp
     src/specsyn/SpecsynLibNoWind.cpp
+    src/specsyn/SpecsynLibWR.cpp
     src/specsyn/SpecsynLibChained.cpp
     src/tracks/TrackUtils.cpp
     src/tracks/Tracks2D.cpp
@@ -218,6 +221,7 @@ add_executable(slugTestSpecsyn
     src/specsyn/SpecsynUtils.cpp
     src/specsyn/SpecsynLib.cpp
     src/specsyn/SpecsynLibNoWind.cpp
+    src/specsyn/SpecsynLibWR.cpp
     src/specsyn/SpecsynLibChained.cpp
     tests/specsyn/testSpecsynAll.cpp
     tests/specsyn/testSpecsynBlackbody.cpp
@@ -262,6 +266,7 @@ pybind11_add_module(slugPython
     src/specsyn/SpecsynUtils.cpp
     src/specsyn/SpecsynLib.cpp
     src/specsyn/SpecsynLibNoWind.cpp
+    src/specsyn/SpecsynLibWR.cpp
     src/specsyn/SpecsynLibChained.cpp
     src/tracks/TrackUtils.cpp
     src/tracks/Tracks2D.cpp

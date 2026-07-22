@@ -117,6 +117,21 @@ def powr_feh(star_type: str, metallicity: str) -> float:
                        POWR_XFE[(star_type, "mw")])
 
 
+# Wind clumping density contrast D_infinity of each (star_type, metallicity)
+# grid, taken from the same PoWR Wolf-Rayet grid overview table as
+# POWR_XFE. Constant across every model in a grid (i.e. across log_rt and
+# log_teff at fixed [Fe/H]) -- it is not a per-model quantity the way
+# T_eff, R_trans, etc. are -- so it is stored once as a group attribute
+# rather than per-dataset.
+POWR_DINF: dict[tuple[str, str], float] = {
+    ("wne", "mw"): 4.0,  ("wne", "lmc"): 10.0,
+    ("wne", "smc"): 4.0, ("wne", "z007"): 10.0,
+    ("wnl", "mw"): 4.0,  ("wnl", "lmc"): 10.0,
+    ("wnl", "smc"): 4.0, ("wnl", "z007"): 10.0,
+    ("wc",  "mw"): 10.0, ("wc",  "lmc"): 10.0,
+    ("wc",  "smc"): 10.0, ("wc",  "z007"): 10.0,
+}
+
 # 1 pc in cm (IAU definition), and the resulting factor of 4 pi (10 pc)^2
 # that converts a flux quoted at d = 10 pc into a luminosity
 POWR_PC_CM = 3.0856775814913673e18
@@ -375,6 +390,7 @@ for grid_name, star_type, h_frac, metallicity in POWR_GRIDS:
 
             grp = h5.create_group(grp_name)
             grp.attrs["feh"] = feh
+            grp.attrs["dinf"] = POWR_DINF[(star_type, metallicity)]
             if star_type == "wnl":
                 grp.attrs["xh"] = h_frac
 
