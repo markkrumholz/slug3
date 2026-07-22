@@ -154,6 +154,11 @@ parser.add_argument("--overwrite", action="store_true",
                     help="Re-download archives that already exist on disk, "
                          "and overwrite spectra groups already present in "
                          "the output HDF5 files")
+parser.add_argument("--keep-temp", action="store_true",
+                    help="Keep each downloaded archive in --output-dir "
+                         "after it has been processed, instead of the "
+                         "default behavior of deleting it once its grid "
+                         "has been written to the output HDF5 file")
 parser.add_argument("--verbose", action="store_true",
                     help="Print progress messages")
 args = parser.parse_args()
@@ -359,24 +364,33 @@ for grid_name, star_type, h_frac, metallicity in POWR_GRIDS:
 
     h5_path = shutil.os.path.join(args.spectra_dir, POWR_H5_FILES[star_type])
     with h5py.File(h5_path, "a") as h5:
-        if grp_name in h5:
-            if not args.overwrite:
-                if args.verbose:
-                    print(f"Group {grp_name} already in {h5_path}; "
-                          f"skipping {grid_name}.")
-                continue
-            del h5[grp_name]
+        already_done = grp_name in h5
+        if already_done and not args.overwrite:
+            if args.verbose:
+                print(f"Group {grp_name} already in {h5_path}; "
+                      f"skipping {grid_name}.")
+        else:
+            if already_done:
+                del h5[grp_name]
 
-        grp = h5.create_group(grp_name)
-        grp.attrs["feh"] = feh
-        if star_type == "wnl":
-            grp.attrs["xh"] = h_frac
+            grp = h5.create_group(grp_name)
+            grp.attrs["feh"] = feh
+            if star_type == "wnl":
+                grp.attrs["xh"] = h_frac
 
+            if args.verbose:
+                print(f"Processing {grid_name} -> {h5_path}:{grp_name} ...")
+            n_written = process_grid(archive_path, grid_name, grp)
+            if args.verbose:
+                print(f"  Wrote {n_written} spectra to {grp_name}.")
+
+    # This grid's spectra are now safely written to the output HDF5 file
+    # (whether just now or in an earlier run), so the downloaded archive
+    # is no longer needed -- delete it unless the user asked to keep it.
+    if not args.keep_temp:
+        shutil.os.remove(archive_path)
         if args.verbose:
-            print(f"Processing {grid_name} -> {h5_path}:{grp_name} ...")
-        n_written = process_grid(archive_path, grid_name, grp)
-        if args.verbose:
-            print(f"  Wrote {n_written} spectra to {grp_name}.")
+            print(f"  Removed {archive_path}.")
 
 # ---------------------------------------------------------------------------
 # Update the TOML registry
