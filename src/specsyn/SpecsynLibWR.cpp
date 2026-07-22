@@ -8,12 +8,14 @@
 #include "SpecsynLibWR.hpp"
 #include "../interpolation/Interpolator1D.hpp"
 #include "../tracks/TrackCommons.hpp"
+#include "Specsyn.hpp"
 #include "SpecsynCommons.hpp"
 #include "SpecsynLib.hpp"
 #include "SpecsynLibChained.hpp"
 #include "SpecsynUtils.hpp"
 #include "hdf5.h" // NOLINT(misc-include-cleaner)
 #include <algorithm> // NOLINT(misc-include-cleaner) -- see the identical NOLINT on SpecsynLib.cpp's findBracket for why std::ranges::lower_bound needs this
+#include <cctype>
 #include <cstddef>
 #include <limits>
 #include <mdspan> // NOLINT(misc-include-cleaner)
@@ -126,6 +128,24 @@ namespace specsyn
         logTeff_(this->dim3_)
     {
         this->z_ = z;
+
+        // Determine which WR subtype this library covers from
+        // spectraName (e.g. "POWR_WNE" -> WRType::WNE), checked
+        // case-insensitively since nothing guarantees a caller passes
+        // exactly the upper-case naming fetch_powr.py's registry
+        // entries use (POWR_WNE/POWR_WNL/POWR_WC).
+        std::string nameLower = spectraName;
+        std::ranges::transform(nameLower, nameLower.begin(), // NOLINT(misc-include-cleaner) -- see the identical NOLINT on SpecsynLib.cpp's findBracket for why std::ranges functions need this despite <algorithm> already being included
+            [](const unsigned char c) -> char { return static_cast<char>(std::tolower(c)); });
+        if (nameLower.contains("wnl")) { type_ = WRType::WNL; }
+        else if (nameLower.contains("wne")) { type_ = WRType::WNE; }
+        else if (nameLower.contains("wc")) { type_ = WRType::WC; }
+        else
+        {
+            throw std::runtime_error(
+                "SpecsynLibWR: could not determine WR subtype from spectraName "
+                + spectraName + " (expected it to contain wne, wnl, or wc)");
+        }
 
         // Step 1: find the set of spectra matching the input criteria.
         // afe/cfe/microTurb/r don't apply to PoWR's WR registry entries
@@ -309,6 +329,30 @@ namespace specsyn
 
         // Step 7: store the common grid as this library's wavelength grid
         this->wl_ = commonWl;
+    }
+
+    template <OOBPolicy Policy>
+    auto SpecsynLibWR<Policy>::getWRType(const Specsyn::StarData& props) -> WRType
+    {
+        // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- StarData is a fixed-size std::array, and every index used here is compile-time-known
+        const double logTeff = props[static_cast<size_t>(tracks::FieldIdx::logTe)];
+        const double hSurf = props[static_cast<size_t>(tracks::FieldIdx::hSurf)];
+        if (logTeff < 4.0 || hSurf > 0.3)
+        {
+            return WRType::None;
+        }
+        if (hSurf > 1e-5)
+        {
+            return WRType::WNL;
+        }
+        const double cSurf = props[static_cast<size_t>(tracks::FieldIdx::cSurf)];
+        const double nSurf = props[static_cast<size_t>(tracks::FieldIdx::nSurf)];
+        if (cSurf < nSurf)
+        {
+            return WRType::WNE;
+        }
+        return WRType::WC;
+        // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     }
 
     // Explicit instantiation for every OOBPolicy value actually used;
