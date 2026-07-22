@@ -66,6 +66,9 @@ parser.add_argument("--feh", type=float, nargs="+", default=[],
 parser.add_argument("--micro", type=int, nargs="+", default=[],
                     help="Microturbulence values in km/s to fetch; "
                          "default: all available")
+parser.add_argument("--downsample", type=int, default=TLUSTY_DOWNSAMPLE,
+                    help="Downsample factor (integer ≥ 1, default %(default)s); "
+                         "output has ceil(N_orig / factor) wavelength points")
 parser.add_argument("--box-token", default="",
                     help="Box OAuth developer token for downloading from Box")
 parser.add_argument("--local-dir", default="",
@@ -74,6 +77,9 @@ parser.add_argument("--local-dir", default="",
 parser.add_argument("--verbose", action="store_true",
                     help="Print progress messages")
 args = parser.parse_args()
+
+if args.downsample < 1:
+    parser.error("--downsample must be >= 1")
 
 if not args.box_token and not args.local_dir:
     parser.error(
@@ -333,7 +339,8 @@ for (feh_val, micro_val), source in sorted(tar_sources.items()):
             eddington_h      = data[:, 1]
             flux_orig        = 4.0 * np.pi * eddington_h
 
-            wave_block, flux_block = downsample(wavelengths_orig, flux_orig)
+            wave_block, flux_block = downsample(wavelengths_orig, flux_orig,
+                                                        n=args.downsample)
 
             # Capture the shared wavelength grid on the first spectrum seen
             if wave_ds is None:
