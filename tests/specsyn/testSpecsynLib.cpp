@@ -1,9 +1,9 @@
 /**
  * @file testSpecsynLib.cpp
  * @author Mark Krumholz
- * @brief Unit tests for the SpecsynLib class.
+ * @brief Unit tests for the SpecsynLibNoWind class.
  * @details
- * This file contains end-to-end unit tests for SpecsynLib::spec,
+ * This file contains end-to-end unit tests for SpecsynLibNoWind::spec,
  * exercising all three of its possible outcomes: a successfully
  * interpolated spectrum, a silently empty spectrum (OOBPolicy::silent),
  * and a thrown runtime error (OOBPolicy::Throw), against the small
@@ -21,7 +21,7 @@
  * @date 2026-07-20
  */
 
-#include "../../src/specsyn/SpecsynLib.hpp"
+#include "../../src/specsyn/SpecsynLibNoWind.hpp"
 #include "../../src/tracks/TrackCommons.hpp"
 #include "testSpecsynLib.hpp"
 #include <algorithm>
@@ -71,7 +71,7 @@ namespace
 // trilinear interpolation along all three axes at once.
 static auto testSpecSuccess() -> int
 {
-    const specsyn::SpecsynLib<specsyn::OOBPolicy::Throw> lib(
+    const specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::Throw> lib(
         spectraName, -3.0, 1.0, 0.0, 0.0, 0.0, 500, registryName);
 
     const double logTeff = std::log10(5772.0);
@@ -124,7 +124,7 @@ static auto testSpecSuccess() -> int
 // instantiated with OOBPolicy::Throw
 static auto testSpecOOBThrow() -> int
 {
-    const specsyn::SpecsynLib<specsyn::OOBPolicy::Throw> lib(
+    const specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::Throw> lib(
         spectraName, -3.0, 1.0, 0.0, 0.0, 0.0, 500, registryName);
 
     const double logTeff = std::log10(15000.0);
@@ -146,7 +146,7 @@ static auto testSpecOOBThrow() -> int
 // out-of-bounds star when instantiated with OOBPolicy::silent instead
 static auto testSpecOOBSilent() -> int
 {
-    const specsyn::SpecsynLib<specsyn::OOBPolicy::silent> lib(
+    const specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::silent> lib(
         spectraName, -3.0, 1.0, 0.0, 0.0, 0.0, 500, registryName);
 
     const double logTeff = std::log10(15000.0);
@@ -181,7 +181,7 @@ static auto testSpecOOBSilent() -> int
 // spaced -- unlike BOSZ's) and whose sole wavelength grid is stored
 // under a non-"r"-named key ("native", since TLUSTY's downsampling
 // means no single r value is meaningful; see fetch_tlusty.py),
-// reached at the default r via SpecsynLib's single-entry fallback.
+// reached at the default r via SpecsynLibNoWind's single-entry fallback.
 // The test star (M = 15 Msun, Teff = 28750 K, giving log(g) = 3.125)
 // falls inside TLUSTY_test.h5's single populated grid cell: Teff in
 // [27500, 30000] K, logg in [3.0, 3.25]. feh = -1.2 lies strictly
@@ -190,7 +190,7 @@ static auto testSpecOOBSilent() -> int
 // axis -- the very case findRegularBracket used to get wrong.
 static auto testSpecTlustySuccess() -> int
 {
-    const specsyn::SpecsynLib<specsyn::OOBPolicy::Throw> lib(
+    const specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::Throw> lib(
         "TLUSTY_test", -3.0, 1.0, 0.0, 0.0, 10.0, specsyn::defaultR, registryName);
 
     const double logTeff = std::log10(28750.0);
@@ -251,7 +251,7 @@ static auto testSpecTlustySuccess() -> int
 // blended together for this particular star.
 static auto testResampleExactAndOOB() -> int
 {
-    specsyn::SpecsynLib<specsyn::OOBPolicy::Throw> lib(
+    specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::Throw> lib(
         spectraName, -3.0, 1.0, 0.0, 0.0, 0.0, 500, registryName);
 
     const double logTeff = std::log10(5772.0);
@@ -352,7 +352,7 @@ static auto testResampleExactAndOOB() -> int
 // with every one of its fluxes set to zero
 static auto testResampleAllOutOfRange() -> int
 {
-    specsyn::SpecsynLib<specsyn::OOBPolicy::Throw> lib(
+    specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::Throw> lib(
         spectraName, -3.0, 1.0, 0.0, 0.0, 0.0, 500, registryName);
 
     const double logTeff = std::log10(5772.0);
@@ -409,9 +409,9 @@ static auto testMicroTurbDefault() -> int
 
     try
     {
-        const specsyn::SpecsynLib<specsyn::OOBPolicy::Throw> boszDefault(
+        const specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::Throw> boszDefault(
             spectraName, -3.0, 1.0, 0.0, 0.0, nan, 500, registryName);
-        const specsyn::SpecsynLib<specsyn::OOBPolicy::Throw> boszExplicit(
+        const specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::Throw> boszExplicit(
             spectraName, -3.0, 1.0, 0.0, 0.0, 0.0, 500, registryName);
 
         const auto props = makeStarData(1.0, 0.0, std::log10(5772.0));
@@ -431,9 +431,9 @@ static auto testMicroTurbDefault() -> int
 
     try
     {
-        const specsyn::SpecsynLib<specsyn::OOBPolicy::Throw> tlustyDefault(
+        const specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::Throw> tlustyDefault(
             "TLUSTY_test", -3.0, 1.0, 0.0, 0.0, nan, specsyn::defaultR, registryName);
-        const specsyn::SpecsynLib<specsyn::OOBPolicy::Throw> tlustyExplicit(
+        const specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::Throw> tlustyExplicit(
             "TLUSTY_test", -3.0, 1.0, 0.0, 0.0, 10.0, specsyn::defaultR, registryName);
 
         const auto props = makeStarData(15.0, 5.278432762001573, std::log10(28750.0));
@@ -453,7 +453,7 @@ static auto testMicroTurbDefault() -> int
 
     try
     {
-        [[maybe_unused]] const specsyn::SpecsynLib<specsyn::OOBPolicy::Throw> tlustyWrongMicro(
+        [[maybe_unused]] const specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::Throw> tlustyWrongMicro(
             "TLUSTY_test", -3.0, 1.0, 0.0, 0.0, 0.0, specsyn::defaultR, registryName);
         std::cerr << "testSpecsynLib: expected constructing TLUSTY_test with "
             "microTurb = 0 (BOSZ_test's default, not its own) to fail, but it "
