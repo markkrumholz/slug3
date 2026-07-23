@@ -51,6 +51,14 @@ namespace specsyn
      * This is the counterpart to SpecsynLibNoWind, which instead
      * covers stars without optically thick winds (BOSZ, TLUSTY).
      *
+     * PoWR's WNL grids carry an extra surface-hydrogen (xh) axis this
+     * class does not model as a tensor axis; the constructor instead
+     * keeps only the xh = 0.20 ("H20") group at each [Fe/H] for a WNL
+     * library, since getWRType's classification scheme never produces
+     * a WNL star with a surface H mass fraction above 0.3, making H20
+     * -- the lowest-xh grid PoWR provides -- always the relevant
+     * neighbor. See the constructor's own comments for details.
+     *
      * Besides the spectra themselves, the constructor also reads two
      * quantities spec() needs but that the parent SpecsynLib knows
      * nothing about: each populated grid
@@ -60,11 +68,6 @@ namespace specsyn
      * contrast D_infinity (into dInf_, one value per FeH_ entry, since
      * -- unlike log_teff, log_rt, and logl -- it does not vary within
      * a group at all).
-     *
-     * This constructor currently only supports the WNE and WC grids,
-     * which have no additional H-fraction axis; WNL support (an extra
-     * axis, handled outside this class -- see fetch_powr.py's xh group
-     * attribute) is not yet implemented.
      */
     template <OOBPolicy Policy>
     class SpecsynLibWR : public SpecsynLib<Policy>
@@ -89,11 +92,14 @@ namespace specsyn
          * registry entries (see fetch_powr.py), so they are passed to
          * findMatchingSpectra at their library-wide defaults, which
          * that function ignores anyway for any group missing those
-         * attributes -- reads every populated (log(R_t), log(Teff))
-         * point's own flux and wavelength grid within each matching
-         * [Fe/H] group, builds a single common wavelength grid
-         * spanning all of them, and resamples every point onto it
-         * before storing it in spectra_.
+         * attributes -- for a WNL library, further discards every
+         * matching group whose xh (surface H mass fraction) attribute
+         * isn't 0.20, keeping only the H20 models (see this class's
+         * own comment for why) -- reads every populated (log(R_t),
+         * log(Teff)) point's own flux and wavelength grid within each
+         * matching [Fe/H] group, builds a single common wavelength
+         * grid spanning all of them, and resamples every point onto
+         * it before storing it in spectra_.
          */
         SpecsynLibWR(
             const std::string& spectraName,
