@@ -9,6 +9,7 @@
 #include "Specsyn.hpp"
 #include "SpecsynCommons.hpp"
 #include "SpecsynLib.hpp"
+#include "SpecsynLibNoWind.hpp"
 // misc-include-cleaner can't attribute std::ranges::lower_bound/upper_bound
 // (used below) to this header on some libc++ versions -- see the identical
 // NOLINT on SpecsynLib.cpp's own findBracket -- so both the include itself
@@ -136,12 +137,20 @@ namespace specsyn
         // separate, concretely-typed containers rather than the
         // type-erased libs_ vector, so that resample() (a SpecsynLib
         // method, not part of the polymorphic Specsyn interface) can
-        // still be called on each of them below.
+        // still be called on each of them below. Each is constructed
+        // as a SpecsynLibNoWind -- the only SpecsynLib specialization
+        // that exists so far -- and immediately upcast to the
+        // SpecsynLib<Policy> it's stored as, since every function this
+        // class actually calls on them (resample(), wl(), spec()) lives
+        // on that parent. TODO: once SpecsynLibWR exists, let callers
+        // pick which specialization each chained library actually is,
+        // rather than hardcoding SpecsynLibNoWind for all of them.
         // An empty microTurb means "use each library's own default":
-        // pass NaN through to SpecsynLib for that entry, which resolves
-        // it from the library's own micro_default in the registry
-        // (see SpecsynLib's constructor), rather than forcing every
-        // library in the chain to share one hardcoded value
+        // pass NaN through to SpecsynLibNoWind for that entry, which
+        // resolves it from the library's own micro_default in the
+        // registry (see SpecsynLibNoWind's constructor), rather than
+        // forcing every library in the chain to share one hardcoded
+        // value
         constexpr double useLibraryDefault = std::numeric_limits<double>::quiet_NaN();
 
         const size_t n = spectraName.size();
@@ -150,12 +159,13 @@ namespace specsyn
         for (size_t i = 0; i + 1 < n; ++i)
         {
             const double mt = microTurb.empty() ? useLibraryDefault : microTurb[i];
-            silentLibs.push_back(std::make_unique<SpecsynLib<OOBPolicy::silent>>(
+            silentLibs.push_back(std::make_unique<SpecsynLibNoWind<OOBPolicy::silent>>(
                 spectraName[i], fehMin, fehMax, afe, cfe, mt, r, registryName, z));
         }
         const double lastMt = microTurb.empty() ? useLibraryDefault : microTurb[n - 1];
-        auto throwLib = std::make_unique<SpecsynLib<OOBPolicy::Throw>>(
-            spectraName[n - 1], fehMin, fehMax, afe, cfe, lastMt, r, registryName, z);
+        std::unique_ptr<SpecsynLib<OOBPolicy::Throw>> throwLib =
+            std::make_unique<SpecsynLibNoWind<OOBPolicy::Throw>>(
+                spectraName[n - 1], fehMin, fehMax, afe, cfe, lastMt, r, registryName, z);
 
         // Build a common wavelength grid spanning every library's own
         // native grid, and resample every library onto it, so that

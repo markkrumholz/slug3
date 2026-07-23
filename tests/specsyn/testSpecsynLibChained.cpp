@@ -31,7 +31,7 @@
  * @date 2026-07-21
  */
 
-#include "../../src/specsyn/SpecsynLib.hpp"
+#include "../../src/specsyn/SpecsynLibNoWind.hpp"
 #include "../../src/specsyn/SpecsynLibChained.hpp"
 #include "../../src/tracks/TrackCommons.hpp"
 #include "testSpecsynLibChained.hpp"
@@ -291,9 +291,9 @@ static auto testChainConstructorValidation() -> int
 // calling makeCommonWlGrid directly on the two native grids.
 static auto testChainUsesCommonGrid() -> int
 {
-    const specsyn::SpecsynLib<specsyn::OOBPolicy::Throw> boszRef(
+    const specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::Throw> boszRef(
         "BOSZ_test", -3.0, 1.0, 0.0, 0.0, 0.0, specsyn::defaultR, registryName);
-    const specsyn::SpecsynLib<specsyn::OOBPolicy::Throw> tlustyRef(
+    const specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::Throw> tlustyRef(
         "TLUSTY_test", -3.0, 1.0, 0.0, 0.0, 10.0, specsyn::defaultR, registryName);
 
     const auto expected = specsyn::SpecsynLibChained::makeCommonWlGrid(

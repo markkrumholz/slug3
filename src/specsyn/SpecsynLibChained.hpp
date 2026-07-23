@@ -65,17 +65,22 @@ namespace specsyn
          *   microTurb is non-empty and its size does not match
          *   spectraName's
          * @details
-         * Constructs one SpecsynLib per entry of spectraName, in
-         * order, pairing each one with the corresponding entry of
-         * microTurb (or that library's own registry default, if
-         * microTurb is empty) and otherwise using the remaining
-         * arguments unchanged for each one. Every library but the last
-         * is constructed with
-         * OOBPolicy::silent, so that a star outside its grid simply
-         * falls through to the next library in the chain; the last
-         * library is constructed with OOBPolicy::Throw, so that a star
-         * outside every library's grid still produces an error rather
-         * than silently vanishing.
+         * Constructs one SpecsynLibNoWind per entry of spectraName --
+         * currently the only SpecsynLib specialization that exists,
+         * hardcoded here until SpecsynLibWR (for Wolf-Rayet libraries)
+         * exists too -- in order, pairing each one with the
+         * corresponding entry of microTurb (or that library's own
+         * registry default, if microTurb is empty) and otherwise using
+         * the remaining arguments unchanged for each one. Every
+         * library but the last is constructed with OOBPolicy::silent,
+         * so that a star outside its grid simply falls through to the
+         * next library in the chain; the last library is constructed
+         * with OOBPolicy::Throw, so that a star outside every library's
+         * grid still produces an error rather than silently vanishing.
+         * Each is upcast to (and stored as) the SpecsynLib<Policy> it
+         * was constructed as a specialization of, since every function
+         * this class actually needs -- resample(), wl(), spec() --
+         * lives on that parent.
          *
          * Once every library has been loaded on its own native
          * wavelength grid, makeCommonWlGrid is used to build a single

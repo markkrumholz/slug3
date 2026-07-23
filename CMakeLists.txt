@@ -97,6 +97,8 @@ add_executable(slug
     src/specsyn/SpecsynBlackbody.cpp
     src/specsyn/SpecsynUtils.cpp
     src/specsyn/SpecsynLib.cpp
+    src/specsyn/SpecsynLibNoWind.cpp
+    src/specsyn/SpecsynLibWR.cpp
     src/specsyn/SpecsynLibChained.cpp
     src/tracks/Tracks2D.cpp
     src/tracks/Tracks3D.cpp
@@ -170,6 +172,8 @@ add_executable(slugTestCore
     src/specsyn/SpecsynBlackbody.cpp
     src/specsyn/SpecsynUtils.cpp
     src/specsyn/SpecsynLib.cpp
+    src/specsyn/SpecsynLibNoWind.cpp
+    src/specsyn/SpecsynLibWR.cpp
     src/specsyn/SpecsynLibChained.cpp
     src/tracks/TrackUtils.cpp
     src/tracks/Tracks2D.cpp
@@ -199,6 +203,8 @@ add_executable(slugTestIo
     src/specsyn/SpecsynBlackbody.cpp
     src/specsyn/SpecsynUtils.cpp
     src/specsyn/SpecsynLib.cpp
+    src/specsyn/SpecsynLibNoWind.cpp
+    src/specsyn/SpecsynLibWR.cpp
     src/specsyn/SpecsynLibChained.cpp
     src/tracks/TrackUtils.cpp
     src/tracks/Tracks2D.cpp
@@ -214,11 +220,14 @@ add_executable(slugTestSpecsyn
     src/specsyn/SpecsynBlackbody.cpp
     src/specsyn/SpecsynUtils.cpp
     src/specsyn/SpecsynLib.cpp
+    src/specsyn/SpecsynLibNoWind.cpp
+    src/specsyn/SpecsynLibWR.cpp
     src/specsyn/SpecsynLibChained.cpp
     tests/specsyn/testSpecsynAll.cpp
     tests/specsyn/testSpecsynBlackbody.cpp
     tests/specsyn/testSpecsynUtils.cpp
     tests/specsyn/testSpecsynLib.cpp
+    tests/specsyn/testSpecsynLibWR.cpp
     tests/specsyn/testSpecsynLibChained.cpp
     src/extern/cubature/pcubature.c
     src/pdfs/PDFFileParser.cpp
@@ -257,6 +266,8 @@ pybind11_add_module(slugPython
     src/specsyn/SpecsynBlackbody.cpp
     src/specsyn/SpecsynUtils.cpp
     src/specsyn/SpecsynLib.cpp
+    src/specsyn/SpecsynLibNoWind.cpp
+    src/specsyn/SpecsynLibWR.cpp
     src/specsyn/SpecsynLibChained.cpp
     src/tracks/TrackUtils.cpp
     src/tracks/Tracks2D.cpp
