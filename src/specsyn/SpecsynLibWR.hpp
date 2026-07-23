@@ -52,8 +52,8 @@ namespace specsyn
      * covers stars without optically thick winds (BOSZ, TLUSTY).
      *
      * Besides the spectra themselves, the constructor also reads two
-     * quantities spec() (once implemented) will need but that the
-     * parent SpecsynLib knows nothing about: each populated grid
+     * quantities spec() needs but that the parent SpecsynLib knows
+     * nothing about: each populated grid
      * point's log10(L/Lsun) (into logL_, a per-point scalar grid
      * analogous to spectra_ but holding a single number instead of a
      * whole spectrum), and each [Fe/H] group's wind clumping density
@@ -102,9 +102,39 @@ namespace specsyn
             const std::string& registryName = defaultRegistry,
             double z = 0.0);
 
-        // spec() is not yet implemented -- SpecsynLibWR remains
-        // abstract (inheriting SpecsynLib's pure virtual
-        // spec(const StarData&, double) unimplemented) until it is.
+        /**
+         * @brief Compute a star's spectrum by trilinear interpolation on the library grid
+         * @param props Stellar properties, as produced by evaluating
+         *   the Interpolator1D returned by Tracks2D::getIsochrone at
+         *   this star's mass
+         * @param feh [Fe/H] value of the star; needed because it is
+         *   not carried by props itself
+         * @return The star's spectrum, evaluated on the wavelength
+         *   grid returned by wl(), in units of erg/s/Angstrom; a
+         *   size-0 vector if the star falls outside this library's
+         *   domain and Policy is OOBPolicy::silent
+         * @throws std::runtime_error if the star falls outside this
+         *   library's domain and Policy is OOBPolicy::Throw
+         * @details
+         * First classifies props via getWRType: a mismatch against
+         * type_ means this library's spectra don't apply to this star
+         * at all, so that alone is grounds for the OOB policy. Then
+         * derives the (FeH, logRt, logTeff) point this star maps to --
+         * D_infinity by linear interpolation on dInf_, a wind velocity
+         * from the star's luminosity and mass-loss rate, and the
+         * transformed radius from that wind velocity, D_infinity, and
+         * the star's radius (Todt et al. 2015, eq. 2, one of the PoWR
+         * references) -- and checks that point against FeH_, logRt_,
+         * and logTeff_'s ranges before delegating the actual trilinear
+         * interpolation to SpecsynLib::spec(double, double, double).
+         * The result is finally scaled by 10^(logL_star - logLGrid),
+         * with logLGrid obtained by trilinear interpolation on
+         * logLGrid_ at the same point, since the model spectrum
+         * stored on the grid is normalized to that model's own
+         * luminosity rather than this particular star's.
+         */
+        [[nodiscard]] auto spec(const Specsyn::StarData& props, double feh) const
+        -> std::vector<double> override;
 
         /**
          * @brief A star's Wolf-Rayet spectral subtype

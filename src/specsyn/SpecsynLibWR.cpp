@@ -16,9 +16,12 @@
 #include "hdf5.h" // NOLINT(misc-include-cleaner)
 #include <algorithm> // NOLINT(misc-include-cleaner) -- see the identical NOLINT on SpecsynLib.cpp's findBracket for why std::ranges::lower_bound needs this
 #include <cctype>
+#include <cmath>
 #include <cstddef>
+#include <gsl/gsl_const_cgsm.h> // NOLINT(misc-include-cleaner)
 #include <limits>
 #include <mdspan> // NOLINT(misc-include-cleaner)
+#include <numbers>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -114,6 +117,95 @@ namespace specsyn
         }
     } // namespace
     // NOLINTEND(misc-include-cleaner)
+
+    namespace
+    {
+        /**
+         * @brief A bracketing pair of grid indices, plus an interpolation weight
+         * @details
+         * Identical in purpose to SpecsynLib.cpp's own (private, so not
+         * reusable from here) Bracket/findBracket -- lo_ and hi_ are the
+         * indices of the grid points immediately below and above (or
+         * equal to) a query value, and t_ is the fractional distance of
+         * the query value between them, so that
+         * (1 - t_) * grid[lo_] + t_ * grid[hi_] recovers the query
+         * value. For a grid of size 1, lo_ == hi_ == 0 and t_ == 0.
+         */
+        struct Bracket
+        {
+            size_t lo_;
+            size_t hi_;
+            double t_;
+        };
+
+        /**
+         * @brief Find the bracketing grid points of a sorted grid
+         * @param grid A sorted (ascending), non-empty grid of values
+         * @param value The query value; clamped to [grid.front(),
+         *   grid.back()] if it falls outside that range, rather than
+         *   extrapolated
+         * @returns The bracketing Bracket for value
+         */
+        auto findBracket(const std::vector<double>& grid, const double value) //NOLINT(llvm-prefer-static-over-anonymous-namespace)
+            -> Bracket
+        {
+            const size_t n = grid.size();
+            if (n == 1) { return { .lo_ = 0, .hi_ = 0, .t_ = 0.0 }; }
+
+            const auto it = std::ranges::upper_bound(grid, value); //NOLINT(misc-include-cleaner) -- see the identical NOLINT on SpecsynLib.cpp's findBracket
+            size_t hi = (it == grid.end()) ?
+                (n - 1) : static_cast<size_t>(it - grid.begin());
+            if (hi == 0) { hi = 1; } // value == grid.front(): use the first interval
+            const size_t lo = hi - 1;
+            const double t = std::clamp(
+                (value - grid[lo]) / (grid[hi] - grid[lo]), 0.0, 1.0); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- lo, hi < n by construction
+            return { .lo_ = lo, .hi_ = hi, .t_ = t };
+        }
+
+        /**
+         * @brief Trilinearly interpolate a scalar tensor grid at a bracketed point
+         * @param grid The scalar grid to interpolate on (e.g. logLGrid_)
+         * @param b1 Bracket along the grid's first axis
+         * @param b2 Bracket along the grid's second axis
+         * @param b3 Bracket along the grid's third axis
+         * @returns The interpolated scalar value
+         * @details
+         * Unlike SpecsynLib::spec(double, double, double), this has no
+         * populated/unpopulated notion of its own to check -- logLGrid_
+         * is only ever populated at exactly the same points as
+         * SpecsynLib::spectra_ (see SpecsynLibWR's constructor), so a
+         * caller that has already confirmed the spectrum interpolation
+         * succeeded at this same point knows every corner used here is
+         * meaningful too.
+         */
+        auto trilinearScalar( //NOLINT(llvm-prefer-static-over-anonymous-namespace, readability-function-cognitive-complexity) -- see the identical NOLINT on SpecsynLib.cpp's own spec(double, double, double), whose nested trilinear-interpolation loop this mirrors
+            const std::mdspan<double, std::dextents<std::size_t, 3>>& grid,
+            const Bracket& b1, const Bracket& b2, const Bracket& b3) -> double
+        {
+            double result = 0.0;
+            for (int b1i = 0; b1i < 2; ++b1i)
+            {
+                const size_t i1 = (b1i == 0) ? b1.lo_ : b1.hi_;
+                const double wgt1 = (b1i == 0) ? (1.0 - b1.t_) : b1.t_;
+                for (int b2i = 0; b2i < 2; ++b2i)
+                {
+                    const size_t i2 = (b2i == 0) ? b2.lo_ : b2.hi_;
+                    const double wgt2 = (b2i == 0) ? (1.0 - b2.t_) : b2.t_;
+                    for (int b3i = 0; b3i < 2; ++b3i)
+                    {
+                        const size_t i3 = (b3i == 0) ? b3.lo_ : b3.hi_;
+                        const double wgt3 = (b3i == 0) ? (1.0 - b3.t_) : b3.t_;
+
+                        const double weight = wgt1 * wgt2 * wgt3;
+                        if (weight == 0.0) { continue; } // degenerate axis or exact grid hit: skip a zero-weight corner
+
+                        result += weight * grid[i1, i2, i3]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i1, i2, i3 are all < the corresponding grid's size by construction
+                    }
+                }
+            }
+            return result;
+        }
+    } // namespace
 
     template <OOBPolicy Policy>
     SpecsynLibWR<Policy>::SpecsynLibWR( // NOLINT(readability-function-cognitive-complexity) -- seven sequential steps (find matching spectra, scan attributes, allocate the tensor grid, read flux/wavelength data, merge wavelength grids, regrid, store), each simple on its own; splitting them into separate functions would only add indirection, not clarity
@@ -355,12 +447,91 @@ namespace specsyn
         // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     }
 
+    template <OOBPolicy Policy>
+    auto SpecsynLibWR<Policy>::spec(const Specsyn::StarData& props, const double feh) const -> std::vector<double> // NOLINT(readability-function-cognitive-complexity) -- WRType check, dInf/vWind/Rt derivation, bounds check, and the final logL rescaling are each simple on their own; splitting them into separate functions would only add indirection, not clarity
+    {
+        // Step 1: a WRType mismatch means this library's spectra don't
+        // apply to this star at all
+        if (getWRType(props) != type_)
+        {
+            return SpecsynLib<Policy>::outOfBoundsResult(
+                "SpecsynLibWR: star's WRType does not match this library's type");
+        }
+
+        // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- StarData is a fixed-size std::array, and every index used here is compile-time-known
+        const double logL = props[static_cast<size_t>(tracks::FieldIdx::logL)];
+        const double logTeff = props[static_cast<size_t>(tracks::FieldIdx::logTe)];
+        const double mdot = props[static_cast<size_t>(tracks::FieldIdx::mdot)]; // Msun/yr
+        // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+
+        // Step 2: D_infinity by linear interpolation in [Fe/H] on dInf_
+        const auto bFeh = findBracket(FeH_, feh);
+        const double dInf = ((1.0 - bFeh.t_) * dInf_[bFeh.lo_]) + (bFeh.t_ * dInf_[bFeh.hi_]); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- bFeh.lo_/hi_ < dInf_.size() by construction (both sized nfeh)
+
+        // Step 3: wind velocity vWind = L / (mdot c), in cgs
+        constexpr double solarLuminosity = 3.828e33; // erg/s, IAU 2015 nominal value (matches Specsyn::getSAandLogg)
+        constexpr double solarMass = GSL_CONST_CGSM_SOLAR_MASS;
+        constexpr double speedOfLight = GSL_CONST_CGSM_SPEED_OF_LIGHT;
+        constexpr double secPerYear = 3.15576e7; // Julian year (365.25 d), s -- GSL's cgsm constants have no year unit of their own
+
+        const double lumCgs = std::pow(10.0, logL) * solarLuminosity; // erg/s
+        const double mdotCgs = mdot * solarMass / secPerYear;         // g/s
+        const double vWind = lumCgs / (mdotCgs * speedOfLight);       // cm/s
+
+        // Step 4: transformed radius Rt (Todt et al. 2015, eq. 2), via
+        // the star's own radius -- derived from its surface area,
+        // itself derived (by getSAandLogg) from L and Teff -- expressed
+        // in Rsun to match the grid's own log_rt units (see
+        // fetch_powr.py's R_TRANS [Rsun] -> log10(R_t) conversion)
+        constexpr double solarRadius = 6.957e10; // cm, IAU 2015 nominal value
+        constexpr double pi = std::numbers::pi_v<double>;
+        const double area = Specsyn::getSAandLogg(props).first; // cm^2
+        const double rStarRsun = std::sqrt(area / (4.0 * pi)) / solarRadius;
+
+        constexpr double vWindNorm = 2500.0e5; // 2500 km/s, in cm/s
+        constexpr double mdotNorm = 1.0e-4;    // Msun/yr
+        const double ratio = (vWind / vWindNorm) / (mdot * std::sqrt(dInf) / mdotNorm);
+        const double logRt = std::log10(rStarRsun * std::pow(ratio, 2.0 / 3.0));
+
+        // Bounds check: (feh, logRt, logTeff) must fall within this
+        // library's grid before delegating to the parent class's own
+        // spec(), which assumes its caller has already done so (it
+        // only checks that the 8 bracketing corners are populated, not
+        // that the query point itself is in range)
+        if (feh < FeH_.front() || feh > FeH_.back() ||
+            logRt < logRt_.front() || logRt > logRt_.back() ||
+            logTeff < logTeff_.front() || logTeff > logTeff_.back())
+        {
+            return SpecsynLib<Policy>::outOfBoundsResult(
+                "SpecsynLibWR: star with feh = " + std::to_string(feh) +
+                ", logRt = " + std::to_string(logRt) +
+                ", logTeff = " + std::to_string(logTeff) +
+                " is outside this library's grid");
+        }
+
+        // Step 5: the actual trilinear interpolation, handled entirely
+        // by the parent class -- also returns an OOB result if any of
+        // the 8 neighboring grid points is unpopulated
+        auto result = this->SpecsynLib<Policy>::spec(feh, logRt, logTeff);
+        if (result.empty()) { return result; }
+
+        // Step 6: rescale from the interpolated grid point's own
+        // luminosity to this star's actual luminosity -- the model
+        // spectra are each normalized to their own model's L, not
+        // necessarily this particular star's
+        const auto bRt = findBracket(logRt_, logRt);
+        const auto bTeff = findBracket(logTeff_, logTeff);
+        const double logLGrid = trilinearScalar(logLGrid_, bFeh, bRt, bTeff);
+        const double scale = std::pow(10.0, logL - logLGrid);
+        for (auto& v : result) { v *= scale; }
+
+        // Step 7
+        return result;
+    }
+
     // Explicit instantiation for every OOBPolicy value actually used;
     // this keeps the constructor's implementation in this .cpp file,
-    // as with every other class in src/specsyn. SpecsynLibWR remains
-    // abstract (spec() is not yet implemented) -- that only prevents
-    // constructing an actual instance, not instantiating the members
-    // (like this constructor) that this class does define.
+    // as with every other class in src/specsyn.
     template class SpecsynLibWR<OOBPolicy::Throw>;
     template class SpecsynLibWR<OOBPolicy::silent>;
 
