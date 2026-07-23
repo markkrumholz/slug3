@@ -179,7 +179,7 @@ namespace specsyn
     private:
 
         /** @brief The shape of logLGrid_, the mdspan view onto logL_ */
-        using ScalarGrid = std::mdspan<double, std::dextents<std::size_t, 3>>;
+        using ScalarGrid = std::mdspan<double, std::dextents<std::size_t, 3>>; // NOLINT(misc-include-cleaner) -- see the identical NOLINT on SpecsynLib.hpp's SpectraGrid alias
 
         // References into the parent class's dim1_/dim2_/dim3_, named
         // for what they actually hold in this (FeH, log_rt, log_teff)

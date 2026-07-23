@@ -117,7 +117,7 @@ namespace specsyn
     protected:
 
         /** @brief The shape of grid_, the mdspan view onto spectra_ */
-        using SpectraGrid = std::mdspan<std::vector<double>, std::dextents<std::size_t, 3>>;
+        using SpectraGrid = std::mdspan<std::vector<double>, std::dextents<std::size_t, 3>>; // NOLINT(misc-include-cleaner) -- <mdspan> is already included above; clang-tidy-18's libc++-18 header-mapping data doesn't yet recognize it as std::mdspan/std::dextents' canonical header
 
         /**
          * @brief Compute a spectrum by trilinear interpolation at a point in the tensor grid

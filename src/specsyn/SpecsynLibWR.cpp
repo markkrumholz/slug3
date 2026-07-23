@@ -179,7 +179,7 @@ namespace specsyn
          * meaningful too.
          */
         auto trilinearScalar( //NOLINT(llvm-prefer-static-over-anonymous-namespace, readability-function-cognitive-complexity) -- see the identical NOLINT on SpecsynLib.cpp's own spec(double, double, double), whose nested trilinear-interpolation loop this mirrors
-            const std::mdspan<double, std::dextents<std::size_t, 3>>& grid,
+            const std::mdspan<double, std::dextents<std::size_t, 3>>& grid, // NOLINT(misc-include-cleaner) -- see the identical NOLINT on SpecsynLib.hpp's SpectraGrid alias
             const Bracket& b1, const Bracket& b2, const Bracket& b3) -> double
         {
             double result = 0.0;
