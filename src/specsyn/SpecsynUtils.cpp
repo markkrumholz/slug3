@@ -7,6 +7,7 @@
 
 #include "SpecsynUtils.hpp"
 #include "../utils/MiscUtils.hpp"
+#include "SpecsynCommons.hpp"
 #include "hdf5.h"   // NOLINT(misc-include-cleaner)
 #include <algorithm>
 #include <exception>
@@ -261,7 +262,7 @@ namespace specsyn
     auto getMicroDefault(
         const std::string& spectraName, const std::string& registryName) -> double
     {
-        auto [registry, registryPath] = parseRegistry(registryName);
+        auto registry = parseRegistry(registryName).first;
 
         auto spectraSets = getSpectraSetsFromRegistry(registry);
         if (std::ranges::find(spectraSets, spectraName) == spectraSets.end())
@@ -270,14 +271,16 @@ namespace specsyn
                 spectraName + " found in spectra registry " + registryName);
         }
 
-        const auto microDefault =
-            registry.at_path(spectraName).at_path("micro_default").value<double>();
-        if (!microDefault)
-        {
-            throw std::runtime_error("getMicroDefault: spectra set " + spectraName +
-                " in registry " + registryPath.string() + " has no micro_default field");
-        }
-        return *microDefault;
+        // A missing micro_default means this library has no
+        // microturbulence axis at all (e.g. CK04), rather than a
+        // caller error -- unlike the missing-spectraName case above,
+        // which is always a mistake. defaultMicroTurb is a harmless
+        // placeholder in that case: a library with no microturbulence
+        // axis also has no "micro" attribute on any of its groups, so
+        // findMatchingSpectra ignores this value entirely rather than
+        // ever actually filtering on it.
+        return registry.at_path(spectraName).at_path("micro_default")
+            .value<double>().value_or(defaultMicroTurb);
     }
 
 } // namespace specsyn
