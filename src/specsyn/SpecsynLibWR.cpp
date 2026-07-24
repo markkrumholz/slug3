@@ -153,7 +153,7 @@ namespace specsyn
             const size_t n = grid.size();
             if (n == 1) { return { .lo_ = 0, .hi_ = 0, .t_ = 0.0 }; }
 
-            const auto it = std::ranges::upper_bound(grid, value); //NOLINT(misc-include-cleaner) -- see the identical NOLINT on SpecsynLib.cpp's findBracket
+            const auto it = std::ranges::upper_bound(grid, value); //NOLINT(misc-include-cleaner) -- some libc++ versions can't find a header to attribute std::ranges::upper_bound to, even with <algorithm> already included
             size_t hi = (it == grid.end()) ?
                 (n - 1) : static_cast<size_t>(it - grid.begin());
             if (hi == 0) { hi = 1; } // value == grid.front(): use the first interval
