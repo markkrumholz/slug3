@@ -215,9 +215,6 @@ void io::SimPhysics::readSpectra(const toml::table& inputDeck)
             "SimPhysics: spectra.model array must contain at least one string entry");
     }
 
-    // Note: SpecsynLibChained does not yet support WR-type libraries
-    // in its priority chain (see its own TODO); that support is
-    // planned as a follow-up.
     specsyn_ = std::make_unique<specsyn::SpecsynLibChained>(
         models, fehDist_.getMin(), fehDist_.getMax(),
         tracks::defaultAFe, specsyn::defaultCFe, std::vector<double>{},

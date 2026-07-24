@@ -183,6 +183,7 @@ add_executable(slugTestCore
     tests/core/testCluster.cpp
     tests/core/testCoreAll.cpp
     tests/core/testSimCluster.cpp
+    tests/core/testSpecsynChain.cpp
 )
 add_executable(slugTestIo
     src/core/Cluster.cpp

@@ -10,6 +10,8 @@
 #include "SpecsynCommons.hpp"
 #include "SpecsynLib.hpp"
 #include "SpecsynLibNoWind.hpp"
+#include "SpecsynLibWR.hpp"
+#include "SpecsynUtils.hpp"
 // misc-include-cleaner can't attribute std::ranges::lower_bound/upper_bound
 // (used below) to this header on some libc++ versions -- see the identical
 // NOLINT on SpecsynLib.cpp's own findBracket -- so both the include itself
@@ -22,6 +24,7 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <toml.hpp>
 #include <utility>
 #include <vector>
 
@@ -101,6 +104,45 @@ namespace specsyn
             }
             return found ? std::optional<size_t>(bestLib) : std::nullopt;
         }
+
+        /**
+         * @brief Construct one chained library, dispatching on WR_grid
+         * @tparam Policy OOBPolicy for the constructed library
+         * @param name Spectral model name
+         * @param isWR Whether this model's registry entry has
+         *   WR_grid = true
+         * @param fehMin Minimum [Fe/H] value
+         * @param fehMax Maximum [Fe/H] value
+         * @param afe Value of [alpha/Fe]; ignored for a WR library, which
+         *   has no afe axis (see SpecsynLibWR)
+         * @param cfe Value of [C/Fe]; ignored for a WR library
+         * @param microTurb Microturbulent velocity, in km/s; ignored
+         *   for a WR library
+         * @param r Spectral resolution; ignored for a WR library
+         * @param registryName Name of the spectral library registry file
+         * @param z The redshift
+         * @returns The constructed library, upcast to SpecsynLib<Policy>
+         * @details
+         * Wolf-Rayet libraries -- parameterized by transformed radius
+         * and stellar temperature rather than logg and Teff -- need
+         * SpecsynLibWR; every other library needs SpecsynLibNoWind.
+         */
+        template <OOBPolicy Policy>
+        auto makeChainedLib( //NOLINT(llvm-prefer-static-over-anonymous-namespace)
+            const std::string& name, const bool isWR,
+            const double fehMin, const double fehMax,
+            const double afe, const double cfe, const double microTurb,
+            const double r, const std::string& registryName, const double z)
+        -> std::unique_ptr<SpecsynLib<Policy>>
+        {
+            if (isWR)
+            {
+                return std::make_unique<SpecsynLibWR<Policy>>(
+                    name, fehMin, fehMax, registryName, z);
+            }
+            return std::make_unique<SpecsynLibNoWind<Policy>>(
+                name, fehMin, fehMax, afe, cfe, microTurb, r, registryName, z);
+        }
     } // namespace
 
     SpecsynLibChained::SpecsynLibChained(
@@ -138,20 +180,29 @@ namespace specsyn
         // type-erased libs_ vector, so that resample() (a SpecsynLib
         // method, not part of the polymorphic Specsyn interface) can
         // still be called on each of them below. Each is constructed
-        // as a SpecsynLibNoWind -- the only SpecsynLib specialization
-        // that exists so far -- and immediately upcast to the
-        // SpecsynLib<Policy> it's stored as, since every function this
-        // class actually calls on them (resample(), wl(), spec()) lives
-        // on that parent. TODO: once SpecsynLibWR exists, let callers
-        // pick which specialization each chained library actually is,
-        // rather than hardcoding SpecsynLibNoWind for all of them.
-        // An empty microTurb means "use each library's own default":
-        // pass NaN through to SpecsynLibNoWind for that entry, which
-        // resolves it from the library's own micro_default in the
-        // registry (see SpecsynLibNoWind's constructor), rather than
-        // forcing every library in the chain to share one hardcoded
-        // value
+        // by makeChainedLib, which picks SpecsynLibWR or
+        // SpecsynLibNoWind per entry of spectraName (see its own
+        // comment), and immediately upcast to the SpecsynLib<Policy>
+        // it's stored as, since every function this class actually
+        // calls on them (resample(), wl(), spec()) lives on that
+        // parent. An empty microTurb means "use each library's own
+        // default": pass NaN through to SpecsynLibNoWind for that
+        // entry (ignored for a WR entry, which has no microTurb axis
+        // at all), which resolves it from the library's own
+        // micro_default in the registry (see SpecsynLibNoWind's
+        // constructor), rather than forcing every library in the
+        // chain to share one hardcoded value
         constexpr double useLibraryDefault = std::numeric_limits<double>::quiet_NaN();
+
+        // Mirrors SimPhysics::readSpectra's own WR_grid check: a
+        // single parse of the registry tells us, for each entry of
+        // spectraName, whether it needs SpecsynLibWR (WR_grid = true)
+        // or SpecsynLibNoWind (WR_grid absent or false).
+        const auto registry = parseRegistry(registryName).first;
+        auto isWRGrid = [&registry](const std::string& name) -> bool
+        {
+            return registry.at_path(name).at_path("WR_grid").value<bool>().value_or(false);
+        };
 
         const size_t n = spectraName.size();
         std::vector<std::unique_ptr<SpecsynLib<OOBPolicy::silent>>> silentLibs;
@@ -159,13 +210,14 @@ namespace specsyn
         for (size_t i = 0; i + 1 < n; ++i)
         {
             const double mt = microTurb.empty() ? useLibraryDefault : microTurb[i];
-            silentLibs.push_back(std::make_unique<SpecsynLibNoWind<OOBPolicy::silent>>(
-                spectraName[i], fehMin, fehMax, afe, cfe, mt, r, registryName, z));
+            silentLibs.push_back(makeChainedLib<OOBPolicy::silent>(
+                spectraName[i], isWRGrid(spectraName[i]),
+                fehMin, fehMax, afe, cfe, mt, r, registryName, z));
         }
         const double lastMt = microTurb.empty() ? useLibraryDefault : microTurb[n - 1];
-        std::unique_ptr<SpecsynLib<OOBPolicy::Throw>> throwLib =
-            std::make_unique<SpecsynLibNoWind<OOBPolicy::Throw>>(
-                spectraName[n - 1], fehMin, fehMax, afe, cfe, lastMt, r, registryName, z);
+        std::unique_ptr<SpecsynLib<OOBPolicy::Throw>> throwLib = makeChainedLib<OOBPolicy::Throw>(
+            spectraName[n - 1], isWRGrid(spectraName[n - 1]),
+            fehMin, fehMax, afe, cfe, lastMt, r, registryName, z);
 
         // Build a common wavelength grid spanning every library's own
         // native grid, and resample every library onto it, so that
