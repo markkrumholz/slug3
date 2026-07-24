@@ -6,10 +6,13 @@
  * Exercises the spectra.model wiring most real applications will
  * actually use: an array of several library names, in priority order,
  * mixing Wolf-Rayet (WR_grid = true) and non-WR-grid libraries --
- * ["POWR_WC", "POWR_WNE", "POWR_WNL", "TLUSTY", "BOSZ"] in production,
- * test-fixture versions of each here. Builds a SimPhysics from a real
- * input deck (tests/core/assets/testCluster.in, with spectra.registry
- * and spectra.model overridden) and calls spec() directly on a small,
+ * ["POWR_WC", "POWR_WNE", "POWR_WNL", "TLUSTY_O", "BOSZ"] in production
+ * (TLUSTY's B-star grid, TLUSTY_B, would typically also be chained in,
+ * but is omitted here since this test's fixture registry only has a
+ * single TLUSTY_test entry) -- test-fixture versions of each here.
+ * Builds a SimPhysics from a real input deck
+ * (tests/core/assets/testCluster.in, with spectra.registry and
+ * spectra.model overridden) and calls spec() directly on a small,
  * deliberately-chosen set of stars -- one per WRType, plus one landing
  * in TLUSTY_test's grid and one in BOSZ_test's -- rather than drawing
  * a full stochastic Cluster population.
@@ -85,7 +88,7 @@ namespace
      * query) and overrides spectra.registry/spectra.model to chain
      * POWR_WC_test, POWR_WNE_test, POWR_WNL_test, TLUSTY_test, and
      * BOSZ_test together, in priority order -- the test-fixture
-     * counterpart of the ["POWR_WC", "POWR_WNE", "POWR_WNL", "TLUSTY",
+     * counterpart of the ["POWR_WC", "POWR_WNE", "POWR_WNL", "TLUSTY_O",
      * "BOSZ"] combination most real applications will actually use.
      */
     auto buildChainedSim() -> io::SimPhysics
