@@ -72,13 +72,16 @@ def feh_to_dirname(feh: float) -> str:
     return f"ck{sign}{yy:02d}"
 
 
-# The standard CK04 grid: 12 [Fe/H] values, and Teff from 3500-13000 K in
-# 250 K steps, then 14000-50000 K in 1000 K steps (log g is not filtered
-# here at all -- every log g present in a given (feh, Teff) file's own
-# binary table is read directly from its column names, rather than
-# enumerated as a separate candidate axis the way BOSZ's file-per-point
-# layout requires)
-_ALL_FEH_VALS = [-2.5, -2.0, -1.5, -1.0, -0.5, -0.3, -0.2, -0.1, 0.0, 0.2, 0.5, 1.0]
+# This archive's actual [Fe/H] grid (verified directly against its own
+# top-level directory listing -- some [Fe/H] values quoted for "the"
+# CK04 grid elsewhere, e.g. -0.3/-0.2/-0.1 and +1.0, are not present
+# in this particular STScI mirror), and Teff from 3500-13000 K in
+# 250 K steps, then 14000-50000 K in 1000 K steps (log g is not
+# filtered here at all -- every log g present in a given (feh, Teff)
+# file's own binary table is read directly from its column names,
+# rather than enumerated as a separate candidate axis the way BOSZ's
+# file-per-point layout requires)
+_ALL_FEH_VALS = [-2.5, -2.0, -1.5, -1.0, -0.5, 0.0, 0.2, 0.5]
 _ALL_TEFF_VALS = list(range(3500, 13001, 250)) + list(range(14000, 50001, 1000))
 
 feh_vals = args.feh if args.feh else _ALL_FEH_VALS
