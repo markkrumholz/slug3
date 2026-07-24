@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Generate the synthetic PoWR test fixtures under tests/specsyn/assets/
 used to exercise SpecsynLibWR::spec(): POWR_test.h5 (for the WNE-type
-registry entry POWR_WNE_test) and POWR_WNL_test.h5 (for the WNL-type
-registry entry POWR_WNL_test). Not real PoWR data -- follows the schema
+registry entry POWR_WNE_test), POWR_WNL_test.h5 (for the WNL-type
+registry entry POWR_WNL_test), and POWR_WC_test.h5 (for the WC-type
+registry entry POWR_WC_test). Not real PoWR data -- follows the schema
 fetch_powr.py writes (per-[Fe/H] groups with "feh"/"dinf" attributes,
 containing one dataset per (log_teff, log_rt) model with
 "log_teff"/"log_rt"/"logl" attributes and a "<name>_wave" companion
@@ -10,6 +11,13 @@ dataset), but with a synthetic Gaussian SED shared by every model at a
 given (feh, xh) so that the interpolated result is exactly the same
 shape at every grid point, and only the overall normalization (via
 logl) changes.
+
+POWR_WC_test.h5 shares POWR_test.h5's exact (feh, log_teff, log_rt,
+logl, dinf) grid and SED, so that the same (mass, logL, logTeff, mdot)
+combination used to test a WNE star (see tests/specsyn's own
+testSpecsynLibWR.cpp) lands inside its grid too -- only the star's
+hSurf/cSurf/nSurf need to change to get a different WRType out of
+getWRType.
 
 POWR_WNL_test.h5 additionally carries the "xh" (surface H mass
 fraction) group attribute real WNL groups have, and -- unlike real PoWR
@@ -48,28 +56,40 @@ def make_flux(wave, wl0, logl):
     return amplitude * np.exp(-0.5 * ((wave - wl0) / SIGMA) ** 2)
 
 
+def write_simple_powr_fixture(path, wave, flux):
+    """Write a WNE/WC-shaped PoWR test fixture: one group per FEH_VALS
+    entry (no xh axis), each holding one dataset per (log_teff, log_rt)
+    pair in LOG_TEFF_VALS x LOG_RT_VALS, all sharing flux/wave and LOGL.
+    """
+    with h5py.File(path, "w") as h5:
+        for feh in FEH_VALS:
+            grp = h5.create_group(f"feh_{feh:+.2f}")
+            grp.attrs["feh"] = feh
+            grp.attrs["dinf"] = DINF
+            for log_teff in LOG_TEFF_VALS:
+                for log_rt in LOG_RT_VALS:
+                    name = f"logt{log_teff:.2f}_logrt{log_rt:.2f}"
+                    ds = grp.create_dataset(name, data=flux, compression="gzip")
+                    ds.attrs["log_teff"] = log_teff
+                    ds.attrs["log_rt"] = log_rt
+                    ds.attrs["logl"] = LOGL
+                    grp.create_dataset(f"{name}_wave", data=wave, compression="gzip")
+    print(f"wrote {path}")
+
+
 wave = np.geomspace(1000.0, 20000.0, 200)
+flux = make_flux(wave, WL0, LOGL)
 
 # POWR_test.h5: the WNE-type fixture (POWR_WNE_test), unchanged from its
 # original form -- one group per [Fe/H], no xh axis
-flux = make_flux(wave, WL0, LOGL)
-with h5py.File("tests/specsyn/assets/POWR_test.h5", "w") as h5:
-    for feh in FEH_VALS:
-        grp = h5.create_group(f"feh_{feh:+.2f}")
-        grp.attrs["feh"] = feh
-        grp.attrs["dinf"] = DINF
-        for log_teff in LOG_TEFF_VALS:
-            for log_rt in LOG_RT_VALS:
-                name = f"logt{log_teff:.2f}_logrt{log_rt:.2f}"
-                ds = grp.create_dataset(name, data=flux, compression="gzip")
-                ds.attrs["log_teff"] = log_teff
-                ds.attrs["log_rt"] = log_rt
-                ds.attrs["logl"] = LOGL
-                grp.create_dataset(f"{name}_wave", data=wave, compression="gzip")
-
-print("wrote tests/specsyn/assets/POWR_test.h5")
+write_simple_powr_fixture("tests/specsyn/assets/POWR_test.h5", wave, flux)
 print(f"amplitude = {(10.0 ** LOGL) * SOLAR_LUM / WL0:.6e} erg/s/Angstrom at "
       f"wl0 = {WL0} Angstrom")
+
+# POWR_WC_test.h5: the WC-type fixture (POWR_WC_test) -- identical grid
+# and SED to POWR_test.h5, just a separate file/registry entry, since
+# real WC grids (like WNE's) have no xh axis either
+write_simple_powr_fixture("tests/specsyn/assets/POWR_WC_test.h5", wave, flux)
 
 # POWR_WNL_test.h5: the WNL-type fixture (POWR_WNL_test) -- each [Fe/H]
 # gets both an H20 (xh = 0.20) group and a decoy (xh = 0.50) group

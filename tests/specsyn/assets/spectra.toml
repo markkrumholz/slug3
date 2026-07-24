@@ -1,5 +1,5 @@
 name = "Registry of spectra sets (test fixture)"
-spectra_sets = ["BOSZ_test", "TLUSTY_test", "POWR_WNE_test", "POWR_WNL_test"]
+spectra_sets = ["BOSZ_test", "TLUSTY_test", "POWR_WNE_test", "POWR_WNL_test", "POWR_WC_test"]
 
 [BOSZ_test]
 file = "BOSZ_test.h5"
@@ -22,8 +22,16 @@ micro_default = 10
 file = "POWR_test.h5"
 version = "test fixture"
 Fe_H = [-1.0, 0.0]
+WR_grid = true
 
 [POWR_WNL_test]
 file = "POWR_WNL_test.h5"
 version = "test fixture"
 Fe_H = [-1.0, 0.0]
+WR_grid = true
+
+[POWR_WC_test]
+file = "POWR_WC_test.h5"
+version = "test fixture"
+Fe_H = [-1.0, 0.0]
+WR_grid = true

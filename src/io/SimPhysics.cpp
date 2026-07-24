@@ -10,6 +10,11 @@
 #include "../pdfs/PDFFileParser.hpp"
 #include "../pdfs/PDFSegmentPowerlaw.hpp"
 #include "../specsyn/SpecsynBlackbody.hpp"
+#include "../specsyn/SpecsynCommons.hpp"
+#include "../specsyn/SpecsynLibChained.hpp"
+#include "../specsyn/SpecsynLibNoWind.hpp"
+#include "../specsyn/SpecsynLibWR.hpp"
+#include "../specsyn/SpecsynUtils.hpp"
 #include "../tracks/TrackCommons.hpp"
 #include "../utils/ParseUtils.hpp"
 #include "SimControls.hpp"
@@ -23,6 +28,7 @@
 #include <string>
 #include <toml.hpp>
 #include <utility>
+#include <vector>
 
 // SimPhysics constructor
 io::SimPhysics::SimPhysics(const toml::table& inputDeck, SimControls::SimType simType)
@@ -35,22 +41,9 @@ io::SimPhysics::SimPhysics(const toml::table& inputDeck, SimControls::SimType si
 
     // Read the spectral synthesis model to use, if any -- spectra.model
     // is optional, since not every simulation needs spectra computed.
-    // For now "blackbody" is the only valid choice when a model is
-    // requested; it is a special value used for testing that does not
-    // require a spectral library, so it is checked directly rather
-    // than through a registry. A registry analogous to the one used
-    // for tracks will be added later to support real spectral
-    // libraries.
-    const auto spectraModelInput = utils::getTOMLKeyWithError<std::string>(
-        inputDeck, "spectra.model");
-    if (spectraModelInput.has_value())
-    {
-        if (spectraModelInput.value() != "blackbody")
-        {
-            throw std::runtime_error("SimPhysics: spectra.model must be 'blackbody'");
-        }
-        specsyn_ = std::make_unique<specsyn::SpecsynBlackbody>();
-    }
+    // Needs fehDist_ (just set above) to pick the [Fe/H] range a
+    // library-based model is loaded over.
+    readSpectra(inputDeck);
 
     // In a galaxy simulation, read CLF and SFR
     if (simType == SimControls::SimType::galaxy)
@@ -149,3 +142,81 @@ void io::SimPhysics::readTracks(const toml::table& inputDeck)
         registryName.value_or(tracks::defaultRegistry));
 }
 
+// Spectral synthesizer reader
+void io::SimPhysics::readSpectra(const toml::table& inputDeck)
+{
+    // Check for an optional alternative registry
+    auto registryNameInput = utils::getTOMLKeyWithError<std::string>(
+        inputDeck, "spectra.registry");
+    const std::string registryName = registryNameInput.value_or(specsyn::defaultRegistry);
+
+    // spectra.model is optional -- if it is absent, this simulation
+    // computes no spectra, and specsyn_ stays null
+    const auto modelNode = inputDeck.at_path("spectra.model");
+    if (!modelNode) { return; }
+
+    // A single string names one model directly; anything else must be
+    // an array of strings, chained together via SpecsynLibChained
+    if (const auto model = modelNode.value<std::string>(); model.has_value())
+    {
+        // "blackbody" is a special value, used for testing, that does
+        // not require a spectral library at all
+        if (model.value() == "blackbody")
+        {
+            specsyn_ = std::make_unique<specsyn::SpecsynBlackbody>();
+            return;
+        }
+
+        // Look the model up in the registry, and use its WR_grid
+        // entry (if any) to decide which SpecsynLib specialization
+        // applies: Wolf-Rayet libraries -- parameterized by
+        // transformed radius and stellar temperature rather than
+        // logg and Teff -- need SpecsynLibWR, every other library
+        // needs SpecsynLibNoWind
+        auto [registry, registryPath] = specsyn::parseRegistry(registryName);
+        const auto modelEntry = registry.at_path(model.value());
+        if (!modelEntry)
+        {
+            throw std::runtime_error(
+                "SimPhysics: spectra.model '" + model.value() +
+                "' not found in spectra registry " + registryPath.string());
+        }
+        const bool wrGrid = modelEntry.at_path("WR_grid").value<bool>().value_or(false);
+
+        if (wrGrid)
+        {
+            specsyn_ = std::make_unique<specsyn::SpecsynLibWR<specsyn::OOBPolicy::Throw>>(
+                model.value(), fehDist_.getMin(), fehDist_.getMax(), registryName);
+        }
+        else
+        {
+            specsyn_ = std::make_unique<specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::Throw>>(
+                model.value(), fehDist_.getMin(), fehDist_.getMax(),
+                tracks::defaultAFe, specsyn::defaultCFe,
+                std::numeric_limits<double>::quiet_NaN(), specsyn::defaultR,
+                registryName);
+        }
+        return;
+    }
+
+    const toml::array* modelArr = modelNode.as_array();
+    if (modelArr == nullptr)
+    {
+        throw std::runtime_error(
+            "SimPhysics: spectra.model must be a string or an array of strings");
+    }
+    std::vector<std::string> models;
+    modelArr->for_each([&models](auto&& el) -> void {
+        if constexpr (toml::is_string<decltype(el)>) { models.push_back(std::string(el)); }
+    });
+    if (models.empty())
+    {
+        throw std::runtime_error(
+            "SimPhysics: spectra.model array must contain at least one string entry");
+    }
+
+    specsyn_ = std::make_unique<specsyn::SpecsynLibChained>(
+        models, fehDist_.getMin(), fehDist_.getMax(),
+        tracks::defaultAFe, specsyn::defaultCFe, std::vector<double>{},
+        specsyn::defaultR, registryName);
+}

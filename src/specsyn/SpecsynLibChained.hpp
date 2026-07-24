@@ -65,14 +65,15 @@ namespace specsyn
          *   microTurb is non-empty and its size does not match
          *   spectraName's
          * @details
-         * Constructs one SpecsynLibNoWind per entry of spectraName --
-         * currently the only SpecsynLib specialization that exists,
-         * hardcoded here until SpecsynLibWR (for Wolf-Rayet libraries)
-         * exists too -- in order, pairing each one with the
-         * corresponding entry of microTurb (or that library's own
-         * registry default, if microTurb is empty) and otherwise using
-         * the remaining arguments unchanged for each one. Every
-         * library but the last is constructed with OOBPolicy::silent,
+         * Constructs one library per entry of spectraName, in order --
+         * a SpecsynLibWR for an entry whose registry entry has
+         * WR_grid = true, a SpecsynLibNoWind for every other entry --
+         * pairing each one with the corresponding entry of microTurb
+         * (or that library's own registry default, if microTurb is
+         * empty; ignored entirely for a SpecsynLibWR entry, which has
+         * no microTurb axis) and otherwise using the remaining
+         * arguments unchanged for each one. Every library but the last
+         * is constructed with OOBPolicy::silent,
          * so that a star outside its grid simply falls through to the
          * next library in the chain; the last library is constructed
          * with OOBPolicy::Throw, so that a star outside every library's

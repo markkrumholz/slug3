@@ -9,6 +9,7 @@
 
 #include "testCluster.hpp"
 #include "testSimCluster.hpp"
+#include "testSpecsynChain.hpp"
 #include <exception>
 #include <iostream>
 
@@ -18,6 +19,7 @@ auto main() -> int {
         int result = 0;
         result += testCluster();
         result += testSimCluster();
+        result += testSpecsynChain();
         return result;
     }
     catch (const std::exception& error)
