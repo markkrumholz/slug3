@@ -23,7 +23,7 @@
  * built for -- see tests/specsyn's own fixtures), nowhere near broad
  * enough to cover the full range of Teff/logg a real IMF draw over
  * MIST_test's mass range would produce; with BOSZ_test as the chain's
- * final (OOBPolicy::Throw) fallback, most such stars would simply
+ * final (OOBPolicy::raise) fallback, most such stars would simply
  * throw. Hand-picking each star's (mass, logL, logTeff, ...) instead
  * -- the same approach tests/specsyn/testSpecsynLibWR.cpp already uses
  * for its own WNE/WNL stars -- keeps this test exercising the real
@@ -154,7 +154,7 @@ namespace
 // SpecsynLibNoWind for every entry); a hot, unstripped OB star outside
 // every WR grid lands on TLUSTY_test; and a solar-type star outside
 // every other library's grid reaches BOSZ_test, the chain's final
-// (OOBPolicy::Throw) fallback.
+// (OOBPolicy::raise) fallback.
 static auto testSpecsynChainDispatch() -> int
 {
     int result = 0;

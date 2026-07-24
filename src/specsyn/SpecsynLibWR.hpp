@@ -120,7 +120,7 @@ namespace specsyn
          *   size-0 vector if the star falls outside this library's
          *   domain and Policy is OOBPolicy::silent
          * @throws std::runtime_error if the star falls outside this
-         *   library's domain and Policy is OOBPolicy::Throw
+         *   library's domain and Policy is OOBPolicy::raise
          * @details
          * First classifies props via getWRType: a mismatch against
          * type_ means this library's spectra don't apply to this star

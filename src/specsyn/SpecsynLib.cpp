@@ -76,7 +76,7 @@ namespace specsyn
         // if constexpr, rather than a plain if, so that whichever
         // branch does NOT apply to this Policy is discarded rather
         // than compiled into spec()'s hot path
-        if constexpr (Policy == OOBPolicy::Throw)
+        if constexpr (Policy == OOBPolicy::raise)
         {
             throw std::runtime_error(message);
         }
@@ -101,28 +101,61 @@ namespace specsyn
         // Every one of the 8 neighboring grid points must actually
         // have a spectrum -- interpolating across an unpopulated
         // point would be meaningless -- or this query point counts
-        // as out of bounds
+        // as out of bounds. Under OOBPolicy::coerce, a query point is
+        // only out of bounds if none of its 8 neighbors has a
+        // spectrum; if at least one does, spec() instead interpolates
+        // using only the valid neighbors (see below), rather than
+        // requiring every corner to be populated.
+        bool hasValidNeighbor = false; // NOLINT(misc-const-correctness) -- only ever reassigned inside the OOBPolicy::coerce branch of the if constexpr below; clang-tidy's const-correctness check doesn't see that write when checking a non-coerce instantiation, and wrongly concludes the variable could be const for every Policy
         for (const size_t i1 : { b1.lo_, b1.hi_ })
         {
             for (const size_t i2 : { b2.lo_, b2.hi_ })
             {
                 for (const size_t i3 : { b3.lo_, b3.hi_ })
                 {
-                    if (grid_[i1, i2, i3].empty())
+                    if constexpr (Policy == OOBPolicy::coerce)
                     {
-                        return outOfBoundsResult(
-                            "SpecsynLib: point (" + std::to_string(d1) + ", " +
-                            std::to_string(d2) + ", " + std::to_string(d3) +
-                            ") falls in a gap in this library's grid");
+                        if (!grid_[i1, i2, i3].empty())
+                        {
+                            hasValidNeighbor = true;
+                            break;
+                        }
+                    }
+                    else
+                    {
+                        if (grid_[i1, i2, i3].empty())
+                        {
+                            return outOfBoundsResult(
+                                "SpecsynLib: point (" + std::to_string(d1) + ", " +
+                                std::to_string(d2) + ", " + std::to_string(d3) +
+                                ") falls in a gap in this library's grid");
+                        }
                     }
                 }
+            }
+        }
+        if constexpr (Policy == OOBPolicy::coerce)
+        {
+            if (!hasValidNeighbor)
+            {
+                return outOfBoundsResult(
+                    "SpecsynLib: point (" + std::to_string(d1) + ", " +
+                    std::to_string(d2) + ", " + std::to_string(d3) +
+                    ") has no valid neighboring grid points to coerce to");
             }
         }
 
         // Trilinear interpolation of the stored quantity over the 8
         // neighboring grid points; no scaling (e.g. by surface area)
-        // is applied here -- that is left entirely to the caller
+        // is applied here -- that is left entirely to the caller.
+        // Under OOBPolicy::coerce, an unpopulated corner simply
+        // contributes nothing, and wSum (the total weight of the
+        // valid corners actually used, guaranteed to be 1 if every
+        // corner is populated) renormalizes the result at the end so
+        // it still represents a properly weighted average rather than
+        // an artificially dimmed spectrum.
         std::vector<double> result(wl_.size(), 0.0);
+        double wSum = 0.0; // NOLINT(misc-const-correctness) -- see the identical NOLINT on hasValidNeighbor above; only ever incremented inside the OOBPolicy::coerce branch of the if constexpr below
         for (int b1i = 0; b1i < 2; ++b1i)
         {
             const size_t i1 = (b1i == 0) ? b1.lo_ : b1.hi_;
@@ -140,12 +173,21 @@ namespace specsyn
                     if (weight == 0.0) { continue; } // degenerate axis or exact grid hit: skip a zero-weight corner
 
                     const auto& corner = grid_[i1, i2, i3];
+                    if constexpr (Policy == OOBPolicy::coerce)
+                    {
+                        if (corner.empty()) { continue; }
+                        wSum += weight;
+                    }
                     for (size_t w = 0; w < result.size(); ++w)
                     {
                         result[w] += weight * corner[w];
                     }
                 }
             }
+        }
+        if constexpr (Policy == OOBPolicy::coerce)
+        {
+            for (auto& v : result) { v /= wSum; }
         }
         return result;
         // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
@@ -185,7 +227,8 @@ namespace specsyn
     // this keeps the class's implementation in this .cpp file, as with
     // every other class in src/specsyn, rather than forcing it into
     // the header just because it is a template.
-    template class SpecsynLib<OOBPolicy::Throw>;
+    template class SpecsynLib<OOBPolicy::raise>;
     template class SpecsynLib<OOBPolicy::silent>;
+    template class SpecsynLib<OOBPolicy::coerce>;
 
 } // namespace specsyn

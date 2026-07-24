@@ -78,7 +78,7 @@ namespace
 // degenerate) trilinear interpolation along all three axes at once.
 static auto testSpecWNESuccess() -> int
 {
-    const specsyn::SpecsynLibWR<specsyn::OOBPolicy::Throw> lib(
+    const specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise> lib(
         spectraName, -3.0, 1.0, registryName);
 
     const auto props = makeWRStarData(20.0, 5.7, 4.7, 3e-5);
@@ -130,7 +130,7 @@ static auto testSpecWNESuccess() -> int
 // own WRType::WNE, regardless of any other property
 static auto testSpecTypeMismatchThrow() -> int
 {
-    const specsyn::SpecsynLibWR<specsyn::OOBPolicy::Throw> lib(
+    const specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise> lib(
         spectraName, -3.0, 1.0, registryName);
 
     const auto props = makeWRStarData(20.0, 5.7, 4.7, 3e-5, 0.5);
@@ -139,7 +139,7 @@ static auto testSpecTypeMismatchThrow() -> int
     {
         [[maybe_unused]] const auto result = lib.spec(props, -0.5);
         std::cerr << "testSpecsynLibWR: expected spec() to throw for a "
-            "WRType-mismatched star under OOBPolicy::Throw, but it did not\n";
+            "WRType-mismatched star under OOBPolicy::raise, but it did not\n";
         return 1;
     }
     catch (const std::runtime_error&) { /* this is the expected outcome */ }
@@ -187,7 +187,7 @@ static auto testSpecTypeMismatchSilent() -> int
 // outside POWR_WNE_test's [0.5, 1.0] log_rt range.
 static auto testSpecGridBoundsThrow() -> int
 {
-    const specsyn::SpecsynLibWR<specsyn::OOBPolicy::Throw> lib(
+    const specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise> lib(
         spectraName, -3.0, 1.0, registryName);
 
     const auto props = makeWRStarData(20.0, 5.0, 4.7, 1e-4);
@@ -196,7 +196,7 @@ static auto testSpecGridBoundsThrow() -> int
     {
         [[maybe_unused]] const auto result = lib.spec(props, -0.5);
         std::cerr << "testSpecsynLibWR: expected spec() to throw for a star "
-            "whose logRt falls outside the grid under OOBPolicy::Throw, "
+            "whose logRt falls outside the grid under OOBPolicy::raise, "
             "but it did not\n";
         return 1;
     }
@@ -258,7 +258,7 @@ static auto testSpecGridBoundsSilent() -> int
 // check would fail loudly rather than by a hard-to-notice margin.
 static auto testSpecWNLSuccess() -> int
 {
-    const specsyn::SpecsynLibWR<specsyn::OOBPolicy::Throw> lib(
+    const specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise> lib(
         wnlSpectraName, -3.0, 1.0, registryName);
 
     const auto props = makeWRStarData(20.0, 5.7, 4.7, 3e-5, 0.1);
@@ -325,7 +325,7 @@ static auto testSpecWNLSuccess() -> int
 // POWR_WNL_test's own WRType::WNL, regardless of any other property
 static auto testSpecWNLTypeMismatchThrow() -> int
 {
-    const specsyn::SpecsynLibWR<specsyn::OOBPolicy::Throw> lib(
+    const specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise> lib(
         wnlSpectraName, -3.0, 1.0, registryName);
 
     const auto props = makeWRStarData(20.0, 5.7, 4.7, 3e-5, 0.5);
@@ -334,7 +334,7 @@ static auto testSpecWNLTypeMismatchThrow() -> int
     {
         [[maybe_unused]] const auto result = lib.spec(props, -0.5);
         std::cerr << "testSpecsynLibWR: expected spec() to throw for a "
-            "WRType-mismatched star under OOBPolicy::Throw, but it did not\n";
+            "WRType-mismatched star under OOBPolicy::raise, but it did not\n";
         return 1;
     }
     catch (const std::runtime_error&) { /* this is the expected outcome */ }

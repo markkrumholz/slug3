@@ -20,7 +20,7 @@
  * bounds) result, that this holds regardless of which library is
  * listed first, and that a star outside every chained library's grid
  * still throws (since the last library in the chain always uses
- * OOBPolicy::Throw).
+ * OOBPolicy::raise).
  *
  * It also tests SpecsynLibChained::makeCommonWlGrid directly, both
  * against a fully controlled synthetic scenario (so the window-by-
@@ -234,7 +234,7 @@ static auto testChainBoszFirst() -> int
 
 // Check that a star outside every chained library's grid throws,
 // since the last library in the chain is always constructed with
-// OOBPolicy::Throw regardless of chain order
+// OOBPolicy::raise regardless of chain order
 static auto testChainOOBThrows() -> int
 {
     const specsyn::SpecsynLibChained chain(
@@ -291,9 +291,9 @@ static auto testChainConstructorValidation() -> int
 // calling makeCommonWlGrid directly on the two native grids.
 static auto testChainUsesCommonGrid() -> int
 {
-    const specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::Throw> boszRef(
+    const specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::raise> boszRef(
         "BOSZ_test", -3.0, 1.0, 0.0, 0.0, 0.0, specsyn::defaultR, registryName);
-    const specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::Throw> tlustyRef(
+    const specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::raise> tlustyRef(
         "TLUSTY_test", -3.0, 1.0, 0.0, 0.0, 10.0, specsyn::defaultR, registryName);
 
     const auto expected = specsyn::SpecsynLibChained::makeCommonWlGrid(

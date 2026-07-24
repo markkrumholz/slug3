@@ -583,7 +583,8 @@ namespace specsyn
     // Explicit instantiation for every OOBPolicy value actually used;
     // this keeps the constructor's implementation in this .cpp file,
     // as with every other class in src/specsyn.
-    template class SpecsynLibWR<OOBPolicy::Throw>;
+    template class SpecsynLibWR<OOBPolicy::raise>;
     template class SpecsynLibWR<OOBPolicy::silent>;
+    template class SpecsynLibWR<OOBPolicy::coerce>;
 
 } // namespace specsyn

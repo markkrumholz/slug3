@@ -170,12 +170,17 @@ namespace specsyn
         }
 
         // Load every library on its own native wavelength grid first.
-        // All but the last use OOBPolicy::silent (so a star outside
-        // their grid simply falls through to the next library); the
-        // last uses OOBPolicy::Throw. Since OOBPolicy is a compile-time
-        // template parameter, the silent libraries and the throw
-        // library are genuinely different types -- there are only ever
-        // two such types in play here, so they are kept in two
+        // All but the last use OOBPolicy::coerce, so a star outside a
+        // library's grid (or in one of its gaps) is still handled by
+        // that same library if it has at least one valid neighboring
+        // grid point, and falls through to the next library in the
+        // chain only if it truly has none; the last uses
+        // OOBPolicy::raise, so a star nothing in the chain can cover at
+        // all -- not even by coercion -- still produces an error
+        // rather than silently vanishing. Since OOBPolicy is a
+        // compile-time template parameter, the coerce libraries and the
+        // raise library are genuinely different types -- there are only
+        // ever two such types in play here, so they are kept in two
         // separate, concretely-typed containers rather than the
         // type-erased libs_ vector, so that resample() (a SpecsynLib
         // method, not part of the polymorphic Specsyn interface) can
@@ -205,17 +210,17 @@ namespace specsyn
         };
 
         const size_t n = spectraName.size();
-        std::vector<std::unique_ptr<SpecsynLib<OOBPolicy::silent>>> silentLibs;
-        silentLibs.reserve(n - 1);
+        std::vector<std::unique_ptr<SpecsynLib<OOBPolicy::coerce>>> coerceLibs;
+        coerceLibs.reserve(n - 1);
         for (size_t i = 0; i + 1 < n; ++i)
         {
             const double mt = microTurb.empty() ? useLibraryDefault : microTurb[i];
-            silentLibs.push_back(makeChainedLib<OOBPolicy::silent>(
+            coerceLibs.push_back(makeChainedLib<OOBPolicy::coerce>(
                 spectraName[i], isWRGrid(spectraName[i]),
                 fehMin, fehMax, afe, cfe, mt, r, registryName, z));
         }
         const double lastMt = microTurb.empty() ? useLibraryDefault : microTurb[n - 1];
-        std::unique_ptr<SpecsynLib<OOBPolicy::Throw>> throwLib = makeChainedLib<OOBPolicy::Throw>(
+        std::unique_ptr<SpecsynLib<OOBPolicy::raise>> raiseLib = makeChainedLib<OOBPolicy::raise>(
             spectraName[n - 1], isWRGrid(spectraName[n - 1]),
             fehMin, fehMax, afe, cfe, lastMt, r, registryName, z);
 
@@ -224,17 +229,17 @@ namespace specsyn
         // every chained library shares the same wl()
         std::vector<std::vector<double>> wlGrids;
         wlGrids.reserve(n);
-        for (const auto& lib : silentLibs) { wlGrids.push_back(lib->wl()); }
-        wlGrids.push_back(throwLib->wl());
+        for (const auto& lib : coerceLibs) { wlGrids.push_back(lib->wl()); }
+        wlGrids.push_back(raiseLib->wl());
 
         const auto commonWl = makeCommonWlGrid(wlGrids);
-        for (auto& lib : silentLibs) { lib->resample(commonWl); }
-        throwLib->resample(commonWl);
+        for (auto& lib : coerceLibs) { lib->resample(commonWl); }
+        raiseLib->resample(commonWl);
 
         // Move every library, still in priority order, into libs_
         libs_.reserve(n);
-        for (auto& lib : silentLibs) { libs_.push_back(std::move(lib)); }
-        libs_.push_back(std::move(throwLib));
+        for (auto& lib : coerceLibs) { libs_.push_back(std::move(lib)); }
+        libs_.push_back(std::move(raiseLib));
 
         wl_ = commonWl;
     }
