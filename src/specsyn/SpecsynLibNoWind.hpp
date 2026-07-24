@@ -31,8 +31,11 @@ namespace specsyn
      * named spectra_feh<feh>... holding one dataset per (Teff, logg)
      * pair actually present, plus a top-level wavelengths group.
      * dim1_, dim2_, dim3_ (inherited from SpecsynLib) hold FeH, logg,
-     * and Teff respectively, aliased here as FeH_, logg_, and Teff_
-     * for readability.
+     * and log(Teff) respectively, aliased here as FeH_, logg_, and
+     * logTeff_ for readability. Interpolating in log(Teff) rather than
+     * Teff itself matches SpecsynLibWR, even though the archives this
+     * class reads from (e.g. BOSZ, TLUSTY) store Teff directly -- see
+     * the constructor's own log10 conversion.
      *
      * This is the counterpart to SpecsynLibWR, which instead covers
      * Wolf-Rayet spectral libraries -- stars with optically thick
@@ -88,9 +91,9 @@ namespace specsyn
          * @throws std::runtime_error if the star falls outside this
          *   library's grid and Policy is OOBPolicy::raise
          * @details
-         * Derives the star's Teff and log(g) from props (via
+         * Derives the star's log(Teff) and log(g) from props (via
          * Specsyn::getSAandLogg for the latter) and checks that
-         * (feh, logg, Teff) falls within the grid built by the
+         * (feh, logg, log(Teff)) falls within the grid built by the
          * constructor, then delegates the actual trilinear
          * interpolation to SpecsynLib::spec(double, double, double)
          * -- which also confirms every one of the 8 neighboring grid
@@ -116,9 +119,9 @@ namespace specsyn
         // practice: this class is only ever used through the same
         // non-copyable, non-movable ownership pattern (unique_ptr in
         // SpecsynLibChained) as every other Specsyn.
-        std::vector<double>& FeH_;  /**< [Fe/H] values spanned by the tensor grid (alias for SpecsynLib::dim1_) */ // NOLINT(readability-identifier-naming, cppcoreguidelines-avoid-const-or-ref-data-members)
-        std::vector<double>& logg_; /**< log(g) values spanned by the tensor grid (alias for SpecsynLib::dim2_) */ // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
-        std::vector<double>& Teff_; /**< Effective temperature values spanned by the tensor grid (alias for SpecsynLib::dim3_) */ // NOLINT(readability-identifier-naming, cppcoreguidelines-avoid-const-or-ref-data-members)
+        std::vector<double>& FeH_;     /**< [Fe/H] values spanned by the tensor grid (alias for SpecsynLib::dim1_) */ // NOLINT(readability-identifier-naming, cppcoreguidelines-avoid-const-or-ref-data-members)
+        std::vector<double>& logg_;    /**< log(g) values spanned by the tensor grid (alias for SpecsynLib::dim2_) */ // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
+        std::vector<double>& logTeff_; /**< log10(effective temperature) values spanned by the tensor grid (alias for SpecsynLib::dim3_) */ // NOLINT(readability-identifier-naming, cppcoreguidelines-avoid-const-or-ref-data-members)
 
         double AFe_;       /**< [alpha/Fe] value of this spectral library */ // NOLINT(readability-identifier-naming)
         double CFe_;       /**< [C/Fe] value of this spectral library */     // NOLINT(readability-identifier-naming)

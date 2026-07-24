@@ -407,9 +407,13 @@ static auto testResampleAllOutOfRange() -> int
 // (Teff, logg) cell is missing exactly one of its four corners
 // (Teff = 6000 K, logg = 4.5), each holding a constant (wavelength-
 // independent) flux: 1.0, 2.0, and 3.0 at the three populated corners.
-// A query at the cell's exact center (Teff = 5500 K, logg = 4.25) sits
-// at equal (0.25) weight from all four corners, so under coerce the
-// missing corner's weight is simply dropped and the remaining three
+// SpecsynLibNoWind interpolates in log(Teff) rather than Teff itself,
+// so the query needs to sit at the cell's exact center in log(Teff)
+// space -- log10(Teff) = (log10(5000) + log10(6000)) / 2, i.e.
+// Teff = sqrt(5000 * 6000) =~ 5477.2256 K, the geometric (not
+// arithmetic) mean of the two grid points -- to land at equal (0.25)
+// weight from all four corners. There, under coerce the missing
+// corner's weight is simply dropped and the remaining three
 // renormalized, working out to the plain average of their flux values
 // -- (1.0 + 2.0 + 3.0) / 3 = 2.0 -- scaled by the star's own surface
 // area, giving an exact expected result to check against rather than
@@ -419,19 +423,20 @@ static auto testSpecCoerce() -> int
     const std::string coerceRegistryName = "tests/specsyn/assets/spectra.toml";
     const std::string coerceSpectraName = "COERCE_test";
 
-    // mass = 0.7866094058795904 Msun and area = 7.3774697762410635e+22
-    // cm^2 are the two quantities getSAandLogg derives from
-    // (mass, logL, Teff) below; mass was chosen (see
-    // data/tools/make_coerce_test_fixture.py's own derivation notes)
-    // so that log(g) works out to exactly 4.25 -- the center of the
-    // fixture's populated cell -- and area follows from L and Teff
-    // alone via the Stefan-Boltzmann law, independent of mass.
-    constexpr double mass = 0.7866094058795904; // Msun
+    // logTeff is the exact log-space midpoint between the fixture's
+    // two Teff grid points (see above). mass = 0.7997741882974353
+    // Msun and area = 7.500939930135089e+22 cm^2 are the two
+    // quantities getSAandLogg derives from (mass, logL, logTeff)
+    // below; mass was chosen so that log(g) works out to exactly 4.25
+    // -- the center of the fixture's populated cell on the logg axis
+    // -- and area follows from L and Teff alone via the
+    // Stefan-Boltzmann law, independent of mass.
+    const double logTeff = (std::log10(5000.0) + std::log10(6000.0)) / 2.0;
+    constexpr double mass = 0.7997741882974353; // Msun
     constexpr double logL = 0.0;                // log10(L / Lsun)
-    constexpr double area = 7.3774697762410635e+22; // cm^2
+    constexpr double area = 7.500939930135089e+22; // cm^2
     constexpr double expectedFlux = ((1.0 + 2.0 + 3.0) / 3.0) * area;
     constexpr double feh = 0.0;
-    const double logTeff = std::log10(5500.0);
     const auto props = makeStarData(mass, logL, logTeff);
 
     // Under coerce: spec() succeeds, interpolating from only the

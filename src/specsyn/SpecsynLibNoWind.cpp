@@ -125,7 +125,7 @@ namespace specsyn
         SpecsynLib<Policy>(),
         FeH_(this->dim1_),
         logg_(this->dim2_),
-        Teff_(this->dim3_),
+        logTeff_(this->dim3_),
         AFe_(afe),
         CFe_(cfe),
         // A NaN microTurb means "use this library's own default":
@@ -212,20 +212,22 @@ namespace specsyn
         // their flux data yet) to read the Teff and logg attributes
         // fetch_bosz.py (or any other spectral-library fetch script
         // following the same convention) stores on each one, and
-        // thereby the unique sets of logg and Teff values that,
+        // thereby the unique sets of logg and log(Teff) values that,
         // together with FeH_, generate the tensor grid on which the
-        // library's spectra sit. Not every (FeH, logg, Teff) point in
-        // that grid need have a spectrum, so groupEntries also records
-        // the (name, Teff, logg) triples for each group, to avoid
-        // re-reading these attributes when actually reading the
-        // spectra in step 5. Deliberately reads Teff/logg from each
-        // dataset's own attributes rather than parsing them out of its
-        // name, since not every spectral library on disk can be
-        // assumed to encode them in the name at all, let alone in the
-        // same way.
+        // library's spectra sit. Interpolation is done in log(Teff)
+        // rather than Teff itself (matching SpecsynLibWR), even though
+        // the archive stores Teff directly, hence the log10 below. Not
+        // every (FeH, logg, Teff) point in that grid need have a
+        // spectrum, so groupEntries also records the (name, Teff,
+        // logg) triples for each group, to avoid re-reading these
+        // attributes when actually reading the spectra in step 5.
+        // Deliberately reads Teff/logg from each dataset's own
+        // attributes rather than parsing them out of its name, since
+        // not every spectral library on disk can be assumed to encode
+        // them in the name at all, let alone in the same way.
         std::vector<std::vector<std::pair<std::string, std::pair<double, double>>>>
             groupEntries(nfeh);
-        std::set<double> teffSet;
+        std::set<double> logTeffSet;
         std::set<double> loggSet;
         for (size_t f = 0; f < nfeh; ++f)
         {
@@ -246,22 +248,22 @@ namespace specsyn
                     throw std::runtime_error(
                         "SpecsynLibNoWind: unable to open dataset " + name);
                 }
-                const double teff = readRequiredScalarAttr(dset, "teff");
+                const double logTeff = std::log10(readRequiredScalarAttr(dset, "teff"));
                 const double logg = readRequiredScalarAttr(dset, "logg");
                 H5Dclose(dset);
 
-                groupEntries[f].emplace_back(name, std::make_pair(teff, logg));
-                teffSet.insert(teff);
+                groupEntries[f].emplace_back(name, std::make_pair(logTeff, logg));
+                logTeffSet.insert(logTeff);
                 loggSet.insert(logg);
             }
             H5Gclose(grp);
         }
-        Teff_.assign(teffSet.begin(), teffSet.end());
+        logTeff_.assign(logTeffSet.begin(), logTeffSet.end());
         logg_.assign(loggSet.begin(), loggSet.end());
-        const size_t nteff = Teff_.size();
+        const size_t nteff = logTeff_.size();
         const size_t nlogg = logg_.size();
 
-        // Step 4: allocate storage for the (FeH, logg, Teff) tensor
+        // Step 4: allocate storage for the (FeH, logg, log(Teff)) tensor
         // grid of spectra, and point grid_ at it for convenient
         // indexing. Every entry starts out as an empty vector, which
         // is how unpopulated grid points are represented once step 5
@@ -283,9 +285,9 @@ namespace specsyn
             }
             for (const auto& [name, teffLogg] : groupEntries[f])
             {
-                const auto [teff, logg] = teffLogg;
+                const auto [logTeff, logg] = teffLogg;
                 const auto iTeff = static_cast<size_t>(
-                    std::ranges::lower_bound(Teff_, teff) - Teff_.begin());
+                    std::ranges::lower_bound(logTeff_, logTeff) - logTeff_.begin());
                 const auto iLogg = static_cast<size_t>(
                     std::ranges::lower_bound(logg_, logg) - logg_.begin());
                 this->grid_[f, iLogg, iTeff] = readDataset1D(grp, name);
@@ -301,17 +303,16 @@ namespace specsyn
     template <OOBPolicy Policy>
     auto SpecsynLibNoWind<Policy>::spec(const Specsyn::StarData& props, const double feh) const -> std::vector<double>
     {
-        // Step 1: check feh and Teff against the grid's bounds before
-        // paying for the surface-area/log(g) calculation below
+        // Step 1: check feh and log(Teff) against the grid's bounds
+        // before paying for the surface-area/log(g) calculation below
         const double logTeff = props[static_cast<size_t>(tracks::FieldIdx::logTe)]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- StarData is fixed-size, index is compile-time-known
-        const double teff = std::pow(10.0, logTeff);
         if (feh < FeH_.front() || feh > FeH_.back() ||
-            teff < Teff_.front() || teff > Teff_.back())
+            logTeff < logTeff_.front() || logTeff > logTeff_.back())
         {
             return SpecsynLib<Policy>::outOfBoundsResult(
                 "SpecsynLibNoWind: star with feh = " + std::to_string(feh) +
-                ", Teff = " + std::to_string(teff) +
-                " K is outside this library's grid");
+                ", log(Teff) = " + std::to_string(logTeff) +
+                " is outside this library's grid");
         }
 
         // Step 2: surface area and log(g), then bounds-check log(g)
@@ -328,7 +329,7 @@ namespace specsyn
         // which knows nothing about surface area -- scale its result
         // (step 6) to convert specific flux at the surface into
         // specific luminosity
-        auto result = this->SpecsynLib<Policy>::spec(feh, logg, teff);
+        auto result = this->SpecsynLib<Policy>::spec(feh, logg, logTeff);
         for (auto& v : result) { v *= area; }
         return result;
     }
