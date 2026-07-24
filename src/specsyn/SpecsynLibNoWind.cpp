@@ -339,5 +339,6 @@ namespace specsyn
     // into the header just because it is now a template.
     template class SpecsynLibNoWind<OOBPolicy::raise>;
     template class SpecsynLibNoWind<OOBPolicy::silent>;
+    template class SpecsynLibNoWind<OOBPolicy::coerce>;
 
 } // namespace specsyn

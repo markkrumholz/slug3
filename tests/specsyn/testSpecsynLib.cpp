@@ -396,6 +396,123 @@ static auto testResampleAllOutOfRange() -> int
     return 0;
 }
 
+// Check that OOBPolicy::coerce interpolates a query point that falls
+// in a gap (one of its 8 bracketing corners is unpopulated) using only
+// its valid neighbors, renormalized by their combined weight, rather
+// than treating it as out of bounds -- and that the very same query
+// still fails under OOBPolicy::raise/::silent, confirming this really
+// is a gap under the old semantics rather than something coerce merely
+// papers over regardless of policy. Uses COERCE_test.h5 (see
+// data/tools/make_coerce_test_fixture.py), whose only populated
+// (Teff, logg) cell is missing exactly one of its four corners
+// (Teff = 6000 K, logg = 4.5), each holding a constant (wavelength-
+// independent) flux: 1.0, 2.0, and 3.0 at the three populated corners.
+// A query at the cell's exact center (Teff = 5500 K, logg = 4.25) sits
+// at equal (0.25) weight from all four corners, so under coerce the
+// missing corner's weight is simply dropped and the remaining three
+// renormalized, working out to the plain average of their flux values
+// -- (1.0 + 2.0 + 3.0) / 3 = 2.0 -- scaled by the star's own surface
+// area, giving an exact expected result to check against rather than
+// only a sanity range.
+static auto testSpecCoerce() -> int
+{
+    const std::string coerceRegistryName = "tests/specsyn/assets/spectra.toml";
+    const std::string coerceSpectraName = "COERCE_test";
+
+    // mass = 0.7866094058795904 Msun and area = 7.3774697762410635e+22
+    // cm^2 are the two quantities getSAandLogg derives from
+    // (mass, logL, Teff) below; mass was chosen (see
+    // data/tools/make_coerce_test_fixture.py's own derivation notes)
+    // so that log(g) works out to exactly 4.25 -- the center of the
+    // fixture's populated cell -- and area follows from L and Teff
+    // alone via the Stefan-Boltzmann law, independent of mass.
+    constexpr double mass = 0.7866094058795904; // Msun
+    constexpr double logL = 0.0;                // log10(L / Lsun)
+    constexpr double area = 7.3774697762410635e+22; // cm^2
+    constexpr double expectedFlux = ((1.0 + 2.0 + 3.0) / 3.0) * area;
+    constexpr double feh = 0.0;
+    const double logTeff = std::log10(5500.0);
+    const auto props = makeStarData(mass, logL, logTeff);
+
+    // Under coerce: spec() succeeds, interpolating from only the
+    // three populated corners
+    {
+        const specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::coerce> lib(
+            coerceSpectraName, 0.0, 0.0, 0.0, 0.0, 0.0, specsyn::defaultR, coerceRegistryName);
+
+        std::vector<double> result;
+        try
+        {
+            result = lib.spec(props, feh);
+        }
+        catch (const std::exception& e)
+        {
+            std::cerr << "testSpecsynLib: coerce: unexpected exception from "
+                "spec(): " << e.what() << "\n";
+            return 1;
+        }
+
+        if (result.size() != lib.wl().size())
+        {
+            std::cerr << "testSpecsynLib: coerce: spec() returned "
+                << result.size() << " values, expected " << lib.wl().size() << "\n";
+            return 1;
+        }
+
+        constexpr double relTol = 1e-8;
+        for (std::size_t i = 0; i < result.size(); ++i)
+        {
+            if (std::abs(result.at(i) - expectedFlux) > relTol * expectedFlux)
+            {
+                std::cerr << "testSpecsynLib: coerce: spec()[" << i << "] = "
+                    << result.at(i) << ", expected " << expectedFlux << "\n";
+                return 1;
+            }
+        }
+    }
+
+    // Under raise: the same query still throws, confirming this is a
+    // genuine gap
+    {
+        const specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::raise> lib(
+            coerceSpectraName, 0.0, 0.0, 0.0, 0.0, 0.0, specsyn::defaultR, coerceRegistryName);
+        try
+        {
+            [[maybe_unused]] const auto result = lib.spec(props, feh);
+            std::cerr << "testSpecsynLib: coerce: expected spec() to throw "
+                "under OOBPolicy::raise for the same gap query, but it did not\n";
+            return 1;
+        }
+        catch (const std::runtime_error&) { /* expected */ }
+    }
+
+    // Under silent: the same query returns an empty spectrum
+    {
+        const specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::silent> lib(
+            coerceSpectraName, 0.0, 0.0, 0.0, 0.0, 0.0, specsyn::defaultR, coerceRegistryName);
+        std::vector<double> result;
+        try
+        {
+            result = lib.spec(props, feh);
+        }
+        catch (const std::exception& e)
+        {
+            std::cerr << "testSpecsynLib: coerce: unexpected exception from "
+                "spec() under OOBPolicy::silent: " << e.what() << "\n";
+            return 1;
+        }
+        if (!result.empty())
+        {
+            std::cerr << "testSpecsynLib: coerce: expected an empty spectrum "
+                "under OOBPolicy::silent for the same gap query, got "
+                << result.size() << " values\n";
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
 // Check that leaving microTurb at its default (NaN) resolves to each
 // library's own micro_default registry entry, rather than one shared
 // default: BOSZ_test's is 0 and TLUSTY_test's is 10, so a NaN-default
@@ -475,5 +592,6 @@ auto testSpecsynLib() -> int
     result += testResampleExactAndOOB();
     result += testResampleAllOutOfRange();
     result += testMicroTurbDefault();
+    result += testSpecCoerce();
     return result;
 }
