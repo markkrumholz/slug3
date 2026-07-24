@@ -36,6 +36,15 @@
 # maintainers confirm whether a corrected tarball is coming.
 
 sim_type = "cluster"
+# n_trial must appear here, before any [table] header -- TOML has no
+# way to return to the root table once a header opens one, so a bare
+# key placed after e.g. [outputs] below would silently become
+# outputs.n_trial instead of the top-level key SimControls actually
+# reads. (Exactly this mistake previously left every run of this test
+# at the n_trial=1 default without erroring, since every earlier run
+# failed on a spectral-synthesis gap before the trial count ever
+# mattered.)
+n_trial = 10
 
 [stars]
 IMF = "chabrier.toml"
@@ -52,5 +61,3 @@ CMF = 1e4
 
 [outputs]
 output_times = [2e6, 3e6, 4e6, 1e7]
-
-n_trial = 10
