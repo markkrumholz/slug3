@@ -68,9 +68,10 @@ namespace specsyn
      * @param spectraName Name of the spectral model
      * @param registryName Name of the spectral library registry file
      * @returns The library's micro_default value, in km/s, as recorded
-     *   in its registry entry
+     *   in its registry entry, or defaultMicroTurb if its entry has no
+     *   micro_default field at all
      * @throws std::runtime_error if spectraName is not a spectra set in
-     *   the registry, or if its entry has no micro_default field
+     *   the registry
      * @details
      * Different libraries commonly warrant different default
      * microturbulent velocities -- e.g. hot, massive OB stars are
@@ -78,7 +79,13 @@ namespace specsyn
      * than cooler, lower-mass stars -- so unlike the other filtering
      * criteria (afe, cfe, r), this default is looked up per library
      * from the registry rather than sharing a single constant across
-     * every library.
+     * every library. A library with no microturbulence axis at all
+     * (e.g. CK04) has no micro_default entry to look up in the first
+     * place, rather than this being a mistake on the caller's part, so
+     * that case falls back to defaultMicroTurb instead of throwing --
+     * a harmless placeholder, since such a library's groups also carry
+     * no "micro" attribute for findMatchingSpectra to ever actually
+     * filter on.
      */
     auto getMicroDefault(
         const std::string& spectraName,
