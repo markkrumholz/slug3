@@ -260,6 +260,87 @@ static auto testSimPhysicsInvalidSpectraModel() -> int
     }
 }
 
+// Verify that a single-string spectra.model resolves to a working
+// SpecsynLibNoWind, using a custom spectra.registry (the same test
+// fixture tests/specsyn's own SpecsynLib tests use) and its BOSZ_test
+// entry -- a non-WR-grid library, so this exercises readSpectra's
+// SpecsynLibNoWind branch
+static auto testSimPhysicsSpectraLibrary() -> int
+{
+    const std::string fileName = "tests/core/assets/testCluster.in";
+    toml::table inputDeck = toml::parse_file(fileName);
+    auto* spectraTable = inputDeck.at_path("spectra").as_table();
+    spectraTable->insert_or_assign("registry", std::string("tests/specsyn/assets/spectra.toml"));
+    spectraTable->insert_or_assign("model", std::string("BOSZ_test"));
+
+    try
+    {
+        const io::SimControls controls(inputDeck);
+        const io::SimPhysics sim(inputDeck, controls.simType());
+
+        if (sim.specsyn() == nullptr)
+        {
+            std::cerr << "testSimPhysics: " << fileName
+                << ": expected specsyn() to be populated for spectra.model = BOSZ_test\n";
+            return 1;
+        }
+        if (sim.specsyn()->wl().empty())
+        {
+            std::cerr << "testSimPhysics: " << fileName
+                << ": expected a non-empty wavelength grid for spectra.model = BOSZ_test\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimPhysics: " << fileName
+            << ": expected spectra.model = BOSZ_test (via a custom spectra.registry) "
+            "to construct successfully, but it threw: " << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Verify that an array-valued spectra.model resolves to a working
+// SpecsynLibChained -- chaining TLUSTY_test and BOSZ_test, the same
+// two non-WR-grid libraries used above, just as a priority-ordered
+// list instead of a single name
+static auto testSimPhysicsSpectraChained() -> int
+{
+    const std::string fileName = "tests/core/assets/testCluster.in";
+    toml::table inputDeck = toml::parse_file(fileName);
+    auto* spectraTable = inputDeck.at_path("spectra").as_table();
+    spectraTable->insert_or_assign("registry", std::string("tests/specsyn/assets/spectra.toml"));
+    spectraTable->insert_or_assign("model", toml::array{ "TLUSTY_test", "BOSZ_test" });
+
+    try
+    {
+        const io::SimControls controls(inputDeck);
+        const io::SimPhysics sim(inputDeck, controls.simType());
+
+        if (sim.specsyn() == nullptr)
+        {
+            std::cerr << "testSimPhysics: " << fileName
+                << ": expected specsyn() to be populated for a chained spectra.model\n";
+            return 1;
+        }
+        if (sim.specsyn()->wl().empty())
+        {
+            std::cerr << "testSimPhysics: " << fileName
+                << ": expected a non-empty wavelength grid for a chained spectra.model\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimPhysics: " << fileName
+            << ": expected an array-valued spectra.model to construct successfully, "
+            "but it threw: " << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
 auto testSimPhysics() -> int
 {
     int result = 0;
@@ -267,5 +348,7 @@ auto testSimPhysics() -> int
     result += testSimPhysicsGalaxy();
     result += testSimPhysicsNoSpectraModel();
     result += testSimPhysicsInvalidSpectraModel();
+    result += testSimPhysicsSpectraLibrary();
+    result += testSimPhysicsSpectraChained();
     return result;
 }

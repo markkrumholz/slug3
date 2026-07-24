@@ -121,6 +121,17 @@ namespace io
          */
         void readTracks(const toml::table& inputDeck);
 
+        /**
+         * @brief Load the spectral synthesizer specified by input deck
+         * @param inputDeck Name of input deck
+         * @details
+         * Reads spectra.model (and, if present, spectra.registry) and
+         * sets specsyn_ accordingly; see the .cpp file for the exact
+         * rules. spectra.model is optional, so specsyn_ is left null
+         * if it is absent.
+         */
+        void readSpectra(const toml::table& inputDeck);
+
         // Physics settings
         pdfs::PDF imf_;            /**< The IMF to use for the simulation */
         pdfs::PDF cmf_;            /**< Cluster mass function */
