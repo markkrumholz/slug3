@@ -185,12 +185,12 @@ void io::SimPhysics::readSpectra(const toml::table& inputDeck)
 
         if (wrGrid)
         {
-            specsyn_ = std::make_unique<specsyn::SpecsynLibWR<specsyn::OOBPolicy::Throw>>(
+            specsyn_ = std::make_unique<specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise>>(
                 model.value(), fehDist_.getMin(), fehDist_.getMax(), registryName);
         }
         else
         {
-            specsyn_ = std::make_unique<specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::Throw>>(
+            specsyn_ = std::make_unique<specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::raise>>(
                 model.value(), fehDist_.getMin(), fehDist_.getMax(),
                 tracks::defaultAFe, specsyn::defaultCFe,
                 std::numeric_limits<double>::quiet_NaN(), specsyn::defaultR,

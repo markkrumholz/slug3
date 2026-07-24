@@ -86,7 +86,7 @@ namespace specsyn
          *   size-0 vector if the star falls outside this library's
          *   (FeH, logg, Teff) grid and Policy is OOBPolicy::silent
          * @throws std::runtime_error if the star falls outside this
-         *   library's grid and Policy is OOBPolicy::Throw
+         *   library's grid and Policy is OOBPolicy::raise
          * @details
          * Derives the star's Teff and log(g) from props (via
          * Specsyn::getSAandLogg for the latter) and checks that

@@ -78,7 +78,7 @@ namespace specsyn
          *   size-0 vector if the star falls outside this library's
          *   grid and Policy is OOBPolicy::silent
          * @throws std::runtime_error if the star falls outside this
-         *   library's grid and Policy is OOBPolicy::Throw
+         *   library's grid and Policy is OOBPolicy::raise
          * @details
          * Still pure virtual here (re-declared, rather than simply
          * inherited unimplemented from Specsyn, purely so this
@@ -133,7 +133,7 @@ namespace specsyn
          *   if any of the 8 tensor-grid corners bracketing
          *   (d1, d2, d3) is unpopulated and Policy is OOBPolicy::silent
          * @throws std::runtime_error if any of those 8 corners is
-         *   unpopulated and Policy is OOBPolicy::Throw
+         *   unpopulated and Policy is OOBPolicy::raise
          * @details
          * Callers (i.e. derived classes) are responsible for having
          * already checked that d1, d2, d3 each lie within
@@ -151,7 +151,7 @@ namespace specsyn
          * @brief Handle a query point that falls outside this library's grid
          * @param message Description of why the point is out of bounds
          * @return A size-0 vector, if Policy is OOBPolicy::silent
-         * @throws std::runtime_error with message, if Policy is OOBPolicy::Throw
+         * @throws std::runtime_error with message, if Policy is OOBPolicy::raise
          * @details
          * protected, rather than private, so that a derived class's
          * own spec() override can use it too for the bounds checks

@@ -76,7 +76,7 @@ namespace specsyn
         // if constexpr, rather than a plain if, so that whichever
         // branch does NOT apply to this Policy is discarded rather
         // than compiled into spec()'s hot path
-        if constexpr (Policy == OOBPolicy::Throw)
+        if constexpr (Policy == OOBPolicy::raise)
         {
             throw std::runtime_error(message);
         }
@@ -185,7 +185,7 @@ namespace specsyn
     // this keeps the class's implementation in this .cpp file, as with
     // every other class in src/specsyn, rather than forcing it into
     // the header just because it is a template.
-    template class SpecsynLib<OOBPolicy::Throw>;
+    template class SpecsynLib<OOBPolicy::raise>;
     template class SpecsynLib<OOBPolicy::silent>;
 
 } // namespace specsyn

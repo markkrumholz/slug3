@@ -337,7 +337,7 @@ namespace specsyn
     // this keeps the constructor's implementation in this .cpp file,
     // as with every other class in src/specsyn, rather than forcing it
     // into the header just because it is now a template.
-    template class SpecsynLibNoWind<OOBPolicy::Throw>;
+    template class SpecsynLibNoWind<OOBPolicy::raise>;
     template class SpecsynLibNoWind<OOBPolicy::silent>;
 
 } // namespace specsyn

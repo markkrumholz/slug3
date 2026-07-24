@@ -76,7 +76,7 @@ namespace specsyn
          * is constructed with OOBPolicy::silent,
          * so that a star outside its grid simply falls through to the
          * next library in the chain; the last library is constructed
-         * with OOBPolicy::Throw, so that a star outside every library's
+         * with OOBPolicy::raise, so that a star outside every library's
          * grid still produces an error rather than silently vanishing.
          * Each is upcast to (and stored as) the SpecsynLib<Policy> it
          * was constructed as a specialization of, since every function
@@ -118,7 +118,7 @@ namespace specsyn
          * Calls spec() on each library in the chain in priority order,
          * stopping at and returning the first non-empty result. The
          * last library in the chain is constructed with
-         * OOBPolicy::Throw, so if every earlier library returns an
+         * OOBPolicy::raise, so if every earlier library returns an
          * empty (out-of-bounds) result, this call throws rather than
          * returning silently.
          */

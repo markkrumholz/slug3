@@ -172,7 +172,7 @@ namespace specsyn
         // Load every library on its own native wavelength grid first.
         // All but the last use OOBPolicy::silent (so a star outside
         // their grid simply falls through to the next library); the
-        // last uses OOBPolicy::Throw. Since OOBPolicy is a compile-time
+        // last uses OOBPolicy::raise. Since OOBPolicy is a compile-time
         // template parameter, the silent libraries and the throw
         // library are genuinely different types -- there are only ever
         // two such types in play here, so they are kept in two
@@ -215,7 +215,7 @@ namespace specsyn
                 fehMin, fehMax, afe, cfe, mt, r, registryName, z));
         }
         const double lastMt = microTurb.empty() ? useLibraryDefault : microTurb[n - 1];
-        std::unique_ptr<SpecsynLib<OOBPolicy::Throw>> throwLib = makeChainedLib<OOBPolicy::Throw>(
+        std::unique_ptr<SpecsynLib<OOBPolicy::raise>> throwLib = makeChainedLib<OOBPolicy::raise>(
             spectraName[n - 1], isWRGrid(spectraName[n - 1]),
             fehMin, fehMax, afe, cfe, lastMt, r, registryName, z);
 

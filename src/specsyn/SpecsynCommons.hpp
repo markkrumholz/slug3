@@ -38,8 +38,9 @@ namespace specsyn
      */
     enum class OOBPolicy : std::uint8_t
     {
-        Throw,  /**< Throw a runtime error for an out-of-bounds star */ // NOLINT(readability-identifier-naming) -- can't be lowercased to match the project's camelBack enum-constant convention, since "throw" is a reserved keyword
-        silent  /**< Silently return a spectrum of size 0 for an out-of-bounds star */
+        raise,  /**< Throw a runtime error for an out-of-bounds star */
+        silent, /**< Silently return a spectrum of size 0 for an out-of-bounds star */
+        coerce  /**< Coerce an out-of-bounds star with at least one valid neighboring grid point to the nearest point it can be interpolated from, rather than treating it as out of bounds */
     };
 
 } // namespace specsyn
