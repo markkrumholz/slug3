@@ -16,9 +16,10 @@
  * on the interpolation weights themselves from the expected result,
  * isolating what these tests actually care about: that spec() derives
  * a (FeH, logRt, logTeff) point that lands inside this small grid for
- * a plausible WNE star, classifies WRType and grid-range mismatches as
- * out of bounds, and rescales the result to the star's own luminosity
- * rather than the grid point's.
+ * a plausible WNE star, classifies WRType and out-of-range feh/logTeff
+ * as out of bounds, clamps an out-of-range logRt into the grid rather
+ * than rejecting it, and rescales the result to the star's own
+ * luminosity rather than the grid point's.
  * @date 2026-07-23
  */
 
@@ -179,24 +180,77 @@ static auto testSpecTypeMismatchSilent() -> int
     return 0;
 }
 
-// Check that spec() treats a derived (FeH, logRt, logTeff) point
-// outside the grid as out of bounds, even though the star's own
-// WRType matches this library's. M = 20 Msun, L = 10^5.0 Lsun,
-// Teff = 10^4.7 K, Mdot = 1e-4 Msun/yr works out to logRt ~= -0.77 (see
-// data/tools/make_powr_test_fixture.py's own derivation notes), well
-// outside POWR_WNE_test's [0.5, 1.0] log_rt range.
-static auto testSpecGridBoundsThrow() -> int
+// Check that spec() clamps a derived logRt outside the grid to the
+// grid's own edge, rather than treating it as out of bounds. M = 20
+// Msun, L = 10^5.0 Lsun, Teff = 10^4.7 K, Mdot = 1e-4 Msun/yr works out
+// to logRt ~= -0.77 (see data/tools/make_powr_test_fixture.py's own
+// derivation notes), well outside POWR_WNE_test's [0.5, 1.0] log_rt
+// range -- logRt is a single-scattering (mdot * vWind = L / c)
+// estimate that a handful of real high-mdot/L Wolf-Rayet points push
+// out of range this way (see SpecsynLibWR::spec()'s own comment on
+// this), so this case is expected to occur for genuine stars and
+// should still produce a spectrum rather than an out-of-bounds result.
+static auto testSpecLogRtClamped() -> int
 {
     const specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise> lib(
         spectraName, -3.0, 1.0, registryName);
 
     const auto props = makeWRStarData(20.0, 5.0, 4.7, 1e-4);
 
+    std::vector<double> result;
+    try
+    {
+        result = lib.spec(props, -0.5);
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "testSpecsynLibWR: unexpected exception from spec() "
+            "for a star whose logRt should be clamped into range: " <<
+            e.what() << "\n";
+        return 1;
+    }
+
+    if (result.size() != lib.wl().size())
+    {
+        std::cerr << "testSpecsynLibWR: spec() returned " << result.size()
+            << " values, expected " << lib.wl().size() << "\n";
+        return 1;
+    }
+
+    constexpr double starLuminosity = 1e5 * solarLuminosity; // 10^5.0 Lsun
+    double maxWlSpec = 0.0;
+    for (std::size_t i = 0; i < result.size(); ++i)
+    {
+        maxWlSpec = std::max(maxWlSpec, result.at(i) * lib.wl().at(i));
+    }
+    if (maxWlSpec < 1e-3 * starLuminosity || maxWlSpec > 1e3 * starLuminosity)
+    {
+        std::cerr << "testSpecsynLibWR: max(wl * spec) = " << maxWlSpec
+            << " erg/s is unreasonably far from the test star's own "
+            "luminosity = " << starLuminosity << " erg/s\n";
+        return 1;
+    }
+
+    return 0;
+}
+
+// Check that spec() still treats a derived logTeff outside the grid as
+// out of bounds -- unlike logRt, logTeff is not clamped, since the
+// crude-wind-velocity issue that motivates clamping logRt does not
+// apply to it. Teff = 10^6.0 K falls well outside POWR_WNE_test's
+// {4.6, 4.8} log_teff grid.
+static auto testSpecTeffGridBoundsThrow() -> int
+{
+    const specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise> lib(
+        spectraName, -3.0, 1.0, registryName);
+
+    const auto props = makeWRStarData(20.0, 5.0, 6.0, 1e-4);
+
     try
     {
         [[maybe_unused]] const auto result = lib.spec(props, -0.5);
         std::cerr << "testSpecsynLibWR: expected spec() to throw for a star "
-            "whose logRt falls outside the grid under OOBPolicy::raise, "
+            "whose logTeff falls outside the grid under OOBPolicy::raise, "
             "but it did not\n";
         return 1;
     }
@@ -207,12 +261,12 @@ static auto testSpecGridBoundsThrow() -> int
 
 // Check that spec() silently returns an empty spectrum for the same
 // out-of-grid-range star when instantiated with OOBPolicy::silent instead
-static auto testSpecGridBoundsSilent() -> int
+static auto testSpecTeffGridBoundsSilent() -> int
 {
     const specsyn::SpecsynLibWR<specsyn::OOBPolicy::silent> lib(
         spectraName, -3.0, 1.0, registryName);
 
-    const auto props = makeWRStarData(20.0, 5.0, 4.7, 1e-4);
+    const auto props = makeWRStarData(20.0, 5.0, 6.0, 1e-4);
 
     std::vector<double> result;
     try
@@ -348,8 +402,9 @@ auto testSpecsynLibWR() -> int
     result += testSpecWNESuccess();
     result += testSpecTypeMismatchThrow();
     result += testSpecTypeMismatchSilent();
-    result += testSpecGridBoundsThrow();
-    result += testSpecGridBoundsSilent();
+    result += testSpecLogRtClamped();
+    result += testSpecTeffGridBoundsThrow();
+    result += testSpecTeffGridBoundsSilent();
     result += testSpecWNLSuccess();
     result += testSpecWNLTypeMismatchThrow();
     return result;

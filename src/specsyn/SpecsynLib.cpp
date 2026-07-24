@@ -187,6 +187,26 @@ namespace specsyn
         }
         if constexpr (Policy == OOBPolicy::coerce)
         {
+            // wSum can still be exactly 0 here despite hasValidNeighbor
+            // being true above: hasValidNeighbor only checks whether
+            // any of the 8 corners is populated, regardless of weight,
+            // while the loop just above skips zero-weight corners (an
+            // exact grid hit on some axis) before ever checking
+            // whether they're populated. So a populated corner that
+            // happens to carry zero weight contributes nothing to
+            // wSum, and if every nonzero-weight corner is unpopulated,
+            // wSum ends up 0 even though hasValidNeighbor was true.
+            // Dividing by 0 there would silently produce a NaN/Inf
+            // "result" instead of a clean out-of-bounds one, so treat
+            // it the same as having no valid neighbor at all.
+            if (wSum == 0.0)
+            {
+                return outOfBoundsResult(
+                    "SpecsynLib: point (" + std::to_string(d1) + ", " +
+                    std::to_string(d2) + ", " + std::to_string(d3) +
+                    ") has no valid neighboring grid points with nonzero "
+                    "weight to coerce to");
+            }
             for (auto& v : result) { v /= wSum; }
         }
         return result;

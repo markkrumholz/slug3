@@ -171,19 +171,31 @@ namespace specsyn
          * @param b3 Bracket along the grid's third axis
          * @returns The interpolated scalar value
          * @details
-         * Unlike SpecsynLib::spec(double, double, double), this has no
-         * populated/unpopulated notion of its own to check -- logLGrid_
-         * is only ever populated at exactly the same points as
-         * SpecsynLib::spectra_ (see SpecsynLibWR's constructor), so a
-         * caller that has already confirmed the spectrum interpolation
-         * succeeded at this same point knows every corner used here is
-         * meaningful too.
+         * logLGrid_ is only ever populated at exactly the same points
+         * as SpecsynLib::spectra_ (see SpecsynLibWR's constructor), and
+         * unpopulated points hold quiet_NaN() (see logL_'s own
+         * initialization), so an unpopulated corner is detected here
+         * directly via std::isnan rather than needing its own
+         * populated/unpopulated tracking. Under OOBPolicy::raise or
+         * ::silent this never actually matters -- a caller only
+         * reaches this function after confirming the spectrum
+         * interpolation at this same point already succeeded, which
+         * for those policies means every corner is populated -- but
+         * under ::coerce, spec() can succeed using only a subset of
+         * the 8 corners (see SpecsynLib::spec()'s own coerce handling),
+         * so this mirrors that same skip-and-renormalize logic: an
+         * earlier version of this function assumed every corner used
+         * here was always populated, which was true before ::coerce
+         * could actually succeed on a genuinely incomplete cell, but
+         * silently blended in an unpopulated corner's NaN (via a
+         * nonzero weight) into the result once it could.
          */
         auto trilinearScalar( //NOLINT(llvm-prefer-static-over-anonymous-namespace, readability-function-cognitive-complexity) -- see the identical NOLINT on SpecsynLib.cpp's own spec(double, double, double), whose nested trilinear-interpolation loop this mirrors
             const std::mdspan<double, std::dextents<std::size_t, 3>>& grid, // NOLINT(misc-include-cleaner) -- see the identical NOLINT on SpecsynLib.hpp's SpectraGrid alias
             const Bracket& b1, const Bracket& b2, const Bracket& b3) -> double
         {
             double result = 0.0;
+            double wSum = 0.0;
             for (int b1i = 0; b1i < 2; ++b1i)
             {
                 const size_t i1 = (b1i == 0) ? b1.lo_ : b1.hi_;
@@ -200,11 +212,15 @@ namespace specsyn
                         const double weight = wgt1 * wgt2 * wgt3;
                         if (weight == 0.0) { continue; } // degenerate axis or exact grid hit: skip a zero-weight corner
 
-                        result += weight * grid[i1, i2, i3]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i1, i2, i3 are all < the corresponding grid's size by construction
+                        const double value = grid[i1, i2, i3]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i1, i2, i3 are all < the corresponding grid's size by construction
+                        if (std::isnan(value)) { continue; } // unpopulated corner
+
+                        wSum += weight;
+                        result += weight * value;
                     }
                 }
             }
-            return result;
+            return result / wSum;
         }
     } // namespace
 
@@ -484,7 +500,19 @@ namespace specsyn
         {
             return WRType::None;
         }
-        if (hSurf > 1e-5)
+        // PoWR's own WNL grid stops at Teff = 1e5 K (log(Teff) = 5) at
+        // every [Fe/H] -- verified directly against
+        // data/spectra/powr_wnl.h5 -- so a star hotter than that with
+        // some residual surface hydrogen still needs a spectrum,
+        // falling through to the hydrogen-free C/N check below instead
+        // of being (unhelpfully) classified WNL. This is a fixed
+        // constant rather than any one library's own logTeff_ range:
+        // getWRType runs identically for every library in a chain (see
+        // SpecsynLibChained), so sizing the cutoff to whichever
+        // library happens to be asking would size it to the wrong
+        // grid for every caller except WNL itself.
+        constexpr double wnlMaxLogTeff = 5.0; // log10(1e5 K)
+        if (hSurf > 1e-5 && logTeff < wnlMaxLogTeff)
         {
             return WRType::WNL;
         }
@@ -542,23 +570,70 @@ namespace specsyn
         constexpr double vWindNorm = 2500.0e5; // 2500 km/s, in cm/s
         constexpr double mdotNorm = 1.0e-4;    // Msun/yr
         const double ratio = (vWind / vWindNorm) / (mdot * std::sqrt(dInf) / mdotNorm);
-        const double logRt = std::log10(rStarRsun * std::pow(ratio, 2.0 / 3.0));
+        const double rawLogRt = std::log10(rStarRsun * std::pow(ratio, 2.0 / 3.0));
 
-        // Bounds check: (feh, logRt, logTeff) must fall within this
-        // library's grid before delegating to the parent class's own
-        // spec(), which assumes its caller has already done so (it
-        // only checks that the 8 bracketing corners are populated, not
-        // that the query point itself is in range)
+        // Bounds check: (feh, logTeff) must fall within this library's
+        // grid before delegating to the parent class's own spec(),
+        // which assumes its caller has already done so (it only checks
+        // that the 8 bracketing corners are populated, not that the
+        // query point itself is in range). logRt is exempt from this
+        // check -- see the comment on its own clamping below.
         if (feh < FeH_.front() || feh > FeH_.back() ||
-            logRt < logRt_.front() || logRt > logRt_.back() ||
             logTeff < logTeff_.front() || logTeff > logTeff_.back())
         {
             return SpecsynLib<Policy>::outOfBoundsResult(
                 "SpecsynLibWR: star with feh = " + std::to_string(feh) +
-                ", logRt = " + std::to_string(logRt) +
+                ", logRt = " + std::to_string(rawLogRt) +
                 ", logTeff = " + std::to_string(logTeff) +
                 " is outside this library's grid");
         }
+        const auto bTeff = findBracket(logTeff_, logTeff);
+
+        // vWind above is a single-scattering estimate (wind momentum
+        // mdot * vWind = L / c) rather than a true wind speed: fits
+        // like Nugis & Lamers (2000) -- the actual source of MIST's WR
+        // mass loss rates -- give a more direct estimate, but
+        // extrapolating them outside the limited [Fe/H] range they
+        // were fit over produces nonsense (wind speeds approaching c).
+        // Single scattering is a cruder but non-crazy stand-in that
+        // holds up over most of parameter space; the tradeoff is that
+        // a handful of high-mdot/L points (like this one) push logRt
+        // below any real WR grid's coverage, since real WR winds are
+        // multiply scattered and so faster (and hence a larger
+        // transformed radius) than this estimate implies. There is no
+        // well-established correction for this, so rather than reject
+        // these stars outright, clamp logRt into range and let them
+        // fall back on the nearest edge. PoWR's own (feh, logRt,
+        // logTeff) grids are ragged, not rectangular, so clamping to
+        // this library's *global* logRt_ range can still land on an
+        // entirely unpopulated (feh, logTeff) column; instead, clamp
+        // to the range of logRt values actually populated among the
+        // (up to 4) feh/logTeff columns bracketing this star's own feh
+        // and logTeff, so the clamped point lands on real data
+        // whenever any exists nearby. Falls back to the library's
+        // global logRt_ range if none of those columns has any
+        // populated point at all, which SpecsynLib::spec()'s own
+        // coerce/bounds handling then reports as out of bounds exactly
+        // as it would have before this clamp existed.
+        double populatedRtMin = std::numeric_limits<double>::infinity();
+        double populatedRtMax = -std::numeric_limits<double>::infinity();
+        for (const size_t f : { bFeh.lo_, bFeh.hi_ })
+        {
+            for (const size_t t : { bTeff.lo_, bTeff.hi_ })
+            {
+                for (size_t r = 0; r < logRt_.size(); ++r)
+                {
+                    if (!this->grid_[f, r, t].empty())
+                    {
+                        populatedRtMin = std::min(populatedRtMin, logRt_[r]); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- r < logRt_.size() by construction
+                        populatedRtMax = std::max(populatedRtMax, logRt_[r]); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
+                    }
+                }
+            }
+        }
+        const double logRt = std::isfinite(populatedRtMin) ?
+            std::clamp(rawLogRt, populatedRtMin, populatedRtMax) :
+            std::clamp(rawLogRt, logRt_.front(), logRt_.back());
 
         // Step 5: the actual trilinear interpolation, handled entirely
         // by the parent class -- also returns an OOB result if any of
@@ -571,7 +646,6 @@ namespace specsyn
         // spectra are each normalized to their own model's L, not
         // necessarily this particular star's
         const auto bRt = findBracket(logRt_, logRt);
-        const auto bTeff = findBracket(logTeff_, logTeff);
         const double logLGrid = trilinearScalar(logLGrid_, bFeh, bRt, bTeff);
         const double scale = std::pow(10.0, logL - logLGrid);
         for (auto& v : result) { v *= scale; }
