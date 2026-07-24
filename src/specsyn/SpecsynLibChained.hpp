@@ -73,11 +73,14 @@ namespace specsyn
          * empty; ignored entirely for a SpecsynLibWR entry, which has
          * no microTurb axis) and otherwise using the remaining
          * arguments unchanged for each one. Every library but the last
-         * is constructed with OOBPolicy::silent,
-         * so that a star outside its grid simply falls through to the
-         * next library in the chain; the last library is constructed
-         * with OOBPolicy::raise, so that a star outside every library's
-         * grid still produces an error rather than silently vanishing.
+         * is constructed with OOBPolicy::coerce, so a star outside its
+         * grid (or in one of its gaps) is still handled by that same
+         * library if it has at least one valid neighboring grid point,
+         * and falls through to the next library in the chain only if
+         * it truly has none; the last library is constructed with
+         * OOBPolicy::raise, so a star nothing in the chain can cover at
+         * all -- not even by coercion -- still produces an error rather
+         * than silently vanishing.
          * Each is upcast to (and stored as) the SpecsynLib<Policy> it
          * was constructed as a specialization of, since every function
          * this class actually needs -- resample(), wl(), spec() --
@@ -173,8 +176,8 @@ namespace specsyn
          * Stored as pointers to the polymorphic Specsyn base, rather
          * than as SpecsynLib values directly, because each library's
          * OOBPolicy is a compile-time template parameter -- the
-         * silent-policy libraries earlier in the chain and the
-         * throw-policy library at its end are genuinely different
+         * coerce-policy libraries earlier in the chain and the
+         * raise-policy library at its end are genuinely different
          * types, and only differ in which OOBPolicy they were built
          * with.
          */

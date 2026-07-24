@@ -585,5 +585,6 @@ namespace specsyn
     // as with every other class in src/specsyn.
     template class SpecsynLibWR<OOBPolicy::raise>;
     template class SpecsynLibWR<OOBPolicy::silent>;
+    template class SpecsynLibWR<OOBPolicy::coerce>;
 
 } // namespace specsyn
