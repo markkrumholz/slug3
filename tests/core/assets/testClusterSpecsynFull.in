@@ -1,18 +1,23 @@
 # Full end-to-end test input deck for
 # tests/core/testClusterSpecsynFull.cpp: drives a complete run through
 # SimCluster using the real MIST tracks and the real POWR_WC/POWR_WNE/
-# POWR_WNL/TLUSTY_O/TLUSTY_B/BOSZ spectral libraries (not the small
-# test fixtures used elsewhere), so this only runs if that data -- too
-# large to store in the repository -- has been fetched locally (see
-# data/tools/fetch_mist.py, fetch_powr.py, fetch_tlusty.py,
-# fetch_bosz.py). spectra.model lists TLUSTY_O and TLUSTY_B separately,
-# rather than a single combined TLUSTY entry, since fetch_tlusty.py
-# now fetches PoWR's O-star and B-star grids (different recommended
-# default microturbulent velocities) into separate registry entries;
-# together they span 15000-55000 K, closing the 16000-27500 K gap this
-# test originally found between BOSZ and the old single TLUSTY grid.
-# Output times span 2-10 Myr to capture stellar evolution before,
-# during, and after the Wolf-Rayet phase.
+# POWR_WNL/TLUSTY_O/TLUSTY_B/BOSZ/CK04 spectral libraries (not the
+# small test fixtures used elsewhere), so this only runs if that data
+# -- too large to store in the repository -- has been fetched locally
+# (see data/tools/fetch_mist.py, fetch_powr.py, fetch_tlusty.py,
+# fetch_bosz.py, fetch_ck04.py). spectra.model lists TLUSTY_O and
+# TLUSTY_B separately, rather than a single combined TLUSTY entry,
+# since fetch_tlusty.py now fetches PoWR's O-star and B-star grids
+# (different recommended default microturbulent velocities) into
+# separate registry entries; together they span 15000-55000 K, closing
+# the 16000-27500 K gap this test originally found between BOSZ and
+# the old single TLUSTY grid. CK04 is listed last, after BOSZ, since
+# it exists specifically to catch stars in BOSZ's own gaps -- BOSZ has
+# essentially no models for Teff >~ 8000 K combined with log g <~ 1.5,
+# a real hole this test also found, which CK04 (a fully rectangular
+# grid through that same region) fills. Output times span 2-10 Myr to
+# capture stellar evolution before, during, and after the Wolf-Rayet
+# phase.
 #
 # FeH is pinned to a delta function at exactly 0.0 for now, rather
 # than a flat distribution over a range, because MIST's real feh=-0.50
@@ -40,7 +45,7 @@ alphaFe = 0.0
 FeH = 0.0
 
 [spectra]
-model = ["POWR_WC", "POWR_WNE", "POWR_WNL", "TLUSTY_O", "TLUSTY_B", "BOSZ"]
+model = ["POWR_WC", "POWR_WNE", "POWR_WNL", "TLUSTY_O", "TLUSTY_B", "BOSZ", "CK04"]
 
 [clusters]
 CMF = 1e4
