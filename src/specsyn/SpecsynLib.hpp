@@ -8,6 +8,7 @@
 #ifndef SPECSYNLIB_HPP
 #define SPECSYNLIB_HPP
 
+#include "../utils/ThreadVec.hpp"
 #include "Specsyn.hpp"
 #include "SpecsynCommons.hpp"
 #include <cstddef>
@@ -140,7 +141,8 @@ namespace specsyn
          * [dim1_.front(), dim1_.back()], etc. -- this method only
          * locates the bracketing grid cell along each axis (via an
          * O(log n) binary search, since none of the three axes can be
-         * assumed evenly spaced), confirms every one of the 8
+         * assumed evenly spaced, accelerated by a per-axis cached
+         * index -- see dim1Cache_), confirms every one of the 8
          * neighboring corners actually has a spectrum (interpolating
          * across an unpopulated point would be meaningless), and
          * trilinearly interpolates across them.
@@ -189,6 +191,30 @@ namespace specsyn
          * grid_ dangling.
          */
         SpectraGrid grid_;
+
+    private:
+
+        // Cached bracket indices for search acceleration, one per
+        // tensor-grid axis, exactly as interp::Mesh2DGrid caches
+        // iSave_/jSave_: the common calling pattern is a long series
+        // of spec() queries at (d1, d2, d3) points that are sorted or
+        // nearly sorted along each axis (e.g. a series of stars fed
+        // through in Teff/logg order), so the bracket found for one
+        // query is usually still correct, or nearly so, for the next
+        // one. Caching it lets findBracket (SpecsynLib.cpp) skip the
+        // binary search entirely on a cache hit, and narrow its
+        // search range on a miss, rather than always searching the
+        // full axis from scratch. ThreadVec's, rather than plain
+        // size_t's, so that each OpenMP thread gets its own private
+        // cached index -- without this, concurrent calls from
+        // different threads would race to update a single shared
+        // cache. spec(double, double, double) must bind a local
+        // reference to the element private to the calling thread
+        // (e.g. "dim1Cache_()") before passing it to findBracket,
+        // exactly as Mesh2DGrid's own methods do with iSave_/jSave_.
+        mutable utils::ThreadVec<size_t> dim1Cache_; /**< Cached bracket index for dim1_ */
+        mutable utils::ThreadVec<size_t> dim2Cache_; /**< Cached bracket index for dim2_ */
+        mutable utils::ThreadVec<size_t> dim3Cache_; /**< Cached bracket index for dim3_ */
     };
 
 } // namespace specsyn
