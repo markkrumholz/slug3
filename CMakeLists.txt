@@ -181,6 +181,7 @@ add_executable(slugTestCore
     src/utils/ParseUtils.cpp
     src/extern/cubature/pcubature.c
     tests/core/testCluster.cpp
+    tests/core/testClusterSpecsynFull.cpp
     tests/core/testCoreAll.cpp
     tests/core/testSimCluster.cpp
     tests/core/testSpecsynChain.cpp

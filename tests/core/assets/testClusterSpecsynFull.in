@@ -1,0 +1,45 @@
+# Full end-to-end test input deck for
+# tests/core/testClusterSpecsynFull.cpp: drives a complete run through
+# SimCluster using the real MIST tracks and the real POWR_WC/POWR_WNE/
+# POWR_WNL/TLUSTY/BOSZ spectral libraries (not the small test fixtures
+# used elsewhere), so this only runs if that data -- too large to
+# store in the repository -- has been fetched locally (see
+# data/tools/fetch_mist.py, fetch_powr.py, fetch_tlusty.py,
+# fetch_bosz.py). Output times span 2-10 Myr to capture stellar
+# evolution before, during, and after the Wolf-Rayet phase.
+#
+# FeH is pinned to a delta function at exactly 0.0 for now, rather
+# than a flat distribution over a range, because MIST's real feh=-0.50
+# (afe=0.0, v_vcrit=0.4) track group is short two masses (1.95 and
+# 2.00 Msun) relative to its neighbors -- confirmed present in the
+# published MIST tracks themselves, not an artifact of our own
+# packaging -- and Tracks3D requires every bracketed [Fe/H] group to
+# share an identical mass grid. Tracks3D also always expands whatever
+# [Fe/H] range it's given by one extra grid point on each side (to
+# support GSL's Steffen interpolation along that axis), so -- given
+# the 0.25 dex grid spacing near solar metallicity -- any range with
+# fehMin < 0, however close to 0, still pulls in feh=-0.50 as either
+# its lower bracket or that bracket's expansion neighbor; only an
+# exact fehMin == fehMax on a single grid point (here, 0.0) skips that
+# expansion entirely. Revert this to a flat range once the MIST
+# maintainers confirm whether a corrected tarball is coming.
+
+sim_type = "cluster"
+
+[stars]
+IMF = "chabrier.toml"
+tracks = "MIST"
+v_vcrit = 0.4
+alphaFe = 0.0
+FeH = 0.0
+
+[spectra]
+model = ["POWR_WC", "POWR_WNE", "POWR_WNL", "TLUSTY", "BOSZ"]
+
+[clusters]
+CMF = 1e4
+
+[outputs]
+output_times = [2e6, 3e6, 4e6, 1e7]
+
+n_trial = 10
