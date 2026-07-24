@@ -8,6 +8,7 @@
 #include "SpecsynLibWR.hpp"
 #include "../interpolation/Interpolator1D.hpp"
 #include "../tracks/TrackCommons.hpp"
+#include "../utils/MiscUtils.hpp"
 #include "Specsyn.hpp"
 #include "SpecsynCommons.hpp"
 #include "SpecsynLib.hpp"
@@ -250,8 +251,7 @@ namespace specsyn
             spectraName, fehMin, fehMax, tracks::defaultAFe, defaultCFe,
             defaultMicroTurb, defaultR, registryName);
         FeH_ = std::move(fehVals); //NOLINT(cppcoreguidelines-prefer-member-initializer)
-        const size_t nfeh = FeH_.size();
-        if (nfeh == 0)
+        if (FeH_.empty())
         {
             throw std::runtime_error(
                 "SpecsynLibWR: no spectra found matching the input criteria");
@@ -272,6 +272,57 @@ namespace specsyn
             throw std::runtime_error(
                 "SpecsynLibWR: unable to open HDF5 file " + h5path.string());
         }
+
+        // WNL hack: PoWR's WNL grids carry an extra surface-hydrogen
+        // (xh) axis this class does not model (see fetch_powr.py), so
+        // each [Fe/H] can have several WNL groups here, one per xh.
+        // The Georgy et al. classification scheme getWRType uses,
+        // however, never classifies a star as WNL once its surface H
+        // mass fraction exceeds 0.3, so the xh = 0.20 ("H20") grids --
+        // the lowest-xh grids PoWR provides -- are always the nearest
+        // (indeed, the only relevant) neighbor for any WNL star this
+        // code will ever query. Rather than adding a fourth tensor
+        // axis just to handle that, keep only each [Fe/H]'s H20 group
+        // here, which reduces WNL to the same single-model-per-(FeH,
+        // log_rt, log_teff) shape WNE and WC already have, so the rest
+        // of this constructor can stay unchanged. This is a known,
+        // deliberate physical inconsistency with PoWR (not a bug), and
+        // would need revisiting only if a different WR classification
+        // scheme were adopted in the future.
+        if (type_ == WRType::WNL)
+        {
+            std::vector<double> fehFiltered;
+            std::vector<std::string> groupsFiltered;
+            fehFiltered.reserve(FeH_.size());
+            groupsFiltered.reserve(groupNames.size());
+            for (size_t f = 0; f < groupNames.size(); ++f)
+            {
+                const hid_t grp = H5Gopen2(file, groupNames[f].c_str(), H5P_DEFAULT);
+                if (grp < 0)
+                {
+                    H5Fclose(file);
+                    throw std::runtime_error(
+                        "SpecsynLibWR: unable to open group " + groupNames[f]);
+                }
+                const double xh = readRequiredScalarAttr(grp, "xh");
+                H5Gclose(grp);
+                if (utils::approxEqual(xh, 0.20))
+                {
+                    fehFiltered.push_back(FeH_[f]); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- f < FeH_.size() by construction (both sized groupNames.size())
+                    groupsFiltered.push_back(groupNames[f]);
+                }
+            }
+            FeH_ = std::move(fehFiltered); //NOLINT(cppcoreguidelines-prefer-member-initializer)
+            groupNames = std::move(groupsFiltered);
+            if (FeH_.empty())
+            {
+                H5Fclose(file);
+                throw std::runtime_error(
+                    "SpecsynLibWR: no H20 (xh = 0.20) spectra found among "
+                    "the groups matching the input criteria");
+            }
+        }
+        const size_t nfeh = FeH_.size();
 
         // Step 2: scan every matching group's datasets (without reading
         // their flux or wavelength data yet) to read the log_teff,

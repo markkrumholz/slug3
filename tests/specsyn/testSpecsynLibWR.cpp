@@ -28,6 +28,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -36,6 +37,7 @@ namespace
 {
     const std::string registryName = "tests/specsyn/assets/spectra.toml";
     const std::string spectraName = "POWR_WNE_test";
+    const std::string wnlSpectraName = "POWR_WNL_test";
     constexpr double solarLuminosity = 3.828e33; // erg/s, IAU 2015 nominal value
 
     /**
@@ -235,6 +237,111 @@ static auto testSpecGridBoundsSilent() -> int
     return 0;
 }
 
+// Check that spec() successfully interpolates a spectrum for a
+// plausible WNL star (same mass/L/Teff/Mdot as testSpecWNESuccess,
+// just with hSurf = 0.1 so it classifies as WRType::WNL instead of
+// WRType::WNE), loading from POWR_WNL_test -- a fixture whose
+// constructor comments (see make_powr_test_fixture.py) describe two
+// groups per [Fe/H]: an H20 (xh = 0.20) group with a Gaussian SED
+// peaked at 5000 Angstrom (width 500 Angstrom, so utterly negligible
+// by 15000 Angstrom -- 20 sigma out), and a decoy (xh = 0.50) group
+// with an equally tall Gaussian peaked at 15000 Angstrom instead.
+// Beyond the same in-range/luminosity sanity checks as
+// testSpecWNESuccess, this also checks that flux near 15000 Angstrom
+// is negligible relative to the peak: if SpecsynLibWR's WNL H20-only
+// filter (see its constructor) failed to discard the decoy group, the
+// decoy's own grid point would sit exactly at this star's feh = -0.5
+// query bracket alongside the H20 one (verified against this exact
+// fixture by hand: without the filter, spec() blends the two 50/50,
+// making the decoy's peak at 15000 Angstrom come out about as tall as
+// the real H20 peak at 5000 -- not just "present but small"), so this
+// check would fail loudly rather than by a hard-to-notice margin.
+static auto testSpecWNLSuccess() -> int
+{
+    const specsyn::SpecsynLibWR<specsyn::OOBPolicy::Throw> lib(
+        wnlSpectraName, -3.0, 1.0, registryName);
+
+    const auto props = makeWRStarData(20.0, 5.7, 4.7, 3e-5, 0.1);
+
+    std::vector<double> result;
+    try
+    {
+        result = lib.spec(props, -0.5);
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "testSpecsynLibWR: unexpected exception from spec() "
+            "for an in-bounds WNL star: " << e.what() << "\n";
+        return 1;
+    }
+
+    if (result.size() != lib.wl().size())
+    {
+        std::cerr << "testSpecsynLibWR: spec() returned " << result.size()
+            << " values, expected " << lib.wl().size() << "\n";
+        return 1;
+    }
+
+    constexpr double starLuminosity = 501187.23362727246 * solarLuminosity; // 10^5.7 Lsun
+    double maxWlSpec = 0.0;
+    double decoyWlSpec = 0.0; // wl * spec() nearest 15000 Angstrom, the decoy group's own peak
+    double bestDecoyDist = std::numeric_limits<double>::max();
+    for (std::size_t i = 0; i < result.size(); ++i)
+    {
+        const double wl = lib.wl().at(i);
+        const double wlSpec = result.at(i) * wl;
+        maxWlSpec = std::max(maxWlSpec, wlSpec);
+
+        const double decoyDist = std::abs(wl - 15000.0);
+        if (decoyDist < bestDecoyDist)
+        {
+            bestDecoyDist = decoyDist;
+            decoyWlSpec = wlSpec;
+        }
+    }
+    if (maxWlSpec < 1e-3 * starLuminosity || maxWlSpec > 1e3 * starLuminosity)
+    {
+        std::cerr << "testSpecsynLibWR: max(wl * spec) = " << maxWlSpec
+            << " erg/s is unreasonably far from the test star's own "
+            "luminosity = " << starLuminosity << " erg/s\n";
+        return 1;
+    }
+    if (decoyWlSpec > 1e-6 * maxWlSpec)
+    {
+        std::cerr << "testSpecsynLibWR: wl * spec() near 15000 Angstrom = " <<
+            decoyWlSpec << " erg/s is a non-negligible fraction of the peak "
+            "(" << maxWlSpec << " erg/s) -- consistent with POWR_WNL_test's "
+            "decoy (xh = 0.50) group leaking into the result, meaning the "
+            "WNL H20-only filter does not appear to have excluded it\n";
+        return 1;
+    }
+
+    return 0;
+}
+
+// Check that spec() treats a WRType mismatch as out of bounds for a
+// WNL library too: a star with hSurf = 0.5 (above the 0.3 threshold in
+// getWRType) classifies as WRType::None, which can never match
+// POWR_WNL_test's own WRType::WNL, regardless of any other property
+static auto testSpecWNLTypeMismatchThrow() -> int
+{
+    const specsyn::SpecsynLibWR<specsyn::OOBPolicy::Throw> lib(
+        wnlSpectraName, -3.0, 1.0, registryName);
+
+    const auto props = makeWRStarData(20.0, 5.7, 4.7, 3e-5, 0.5);
+
+    try
+    {
+        [[maybe_unused]] const auto result = lib.spec(props, -0.5);
+        std::cerr << "testSpecsynLibWR: expected spec() to throw for a "
+            "WRType-mismatched star under OOBPolicy::Throw, but it did not\n";
+        return 1;
+    }
+    catch (const std::runtime_error&) { /* this is the expected outcome */ }
+
+    return 0;
+}
+
 auto testSpecsynLibWR() -> int
 {
     int result = 0;
@@ -243,5 +350,7 @@ auto testSpecsynLibWR() -> int
     result += testSpecTypeMismatchSilent();
     result += testSpecGridBoundsThrow();
     result += testSpecGridBoundsSilent();
+    result += testSpecWNLSuccess();
+    result += testSpecWNLTypeMismatchThrow();
     return result;
 }
