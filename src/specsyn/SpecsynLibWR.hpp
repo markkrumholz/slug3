@@ -170,9 +170,23 @@ namespace specsyn
          * sequentially:
          *   1) log(Teff) < 4 or surface H mass fraction > 0.3: not a
          *      Wolf-Rayet star at all (WRType::None).
-         *   2) Surface H mass fraction > 1e-5: WRType::WNL (hydrogen
-         *      still present at the surface, even if only at a trace
-         *      level).
+         *   2) Surface H mass fraction > 1e-5 and log(Teff) below
+         *      wnlMaxLogTeff: WRType::WNL (hydrogen still present at
+         *      the surface, even if only at a trace level). The
+         *      log(Teff) cap matches PoWR's own WNL grid, which simply
+         *      stops at Teff = 1e5 K (log(Teff) = 5) at every [Fe/H]
+         *      (verified directly against data/spectra/powr_wnl.h5);
+         *      a star this hot with some residual surface hydrogen
+         *      still needs a spectrum, so above this cap it instead
+         *      falls through to the C/N check below, exactly as if it
+         *      had no hydrogen at all. This cap is a fixed constant,
+         *      not any one library's own logTeff_ range, since
+         *      getWRType is evaluated identically by every library in
+         *      a chain (see SpecsynLibChained) -- using a library's
+         *      own range here would size the cutoff to whichever
+         *      library happens to be asking rather than to WNL's own
+         *      grid specifically, which is the one that actually
+         *      matters for this decision.
          *   3) Surface C mass fraction < surface N mass fraction:
          *      WRType::WNE (nitrogen-sequence, hydrogen-free).
          *   4) Otherwise: WRType::WC. Georgy et al. further split this

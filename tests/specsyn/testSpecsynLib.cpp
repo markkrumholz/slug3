@@ -513,6 +513,67 @@ static auto testSpecCoerce() -> int
     return 0;
 }
 
+// Check that OOBPolicy::coerce reports a query as out of bounds rather
+// than dividing by zero when a query lands exactly on a grid line
+// along one axis, so that every corner with nonzero interpolation
+// weight is unpopulated even though some (zero-weight) corner is
+// populated. Uses COERCE_ZERO_test.h5 (see
+// data/tools/make_coerce_zero_weight_test_fixture.py), whose Teff axis
+// is {1000, 10000} K and whose only populated points are (1000, 4.0),
+// (1000, 4.5), and (10000, 5.0). A query at exactly Teff = 10000 K
+// (which -- unlike an arbitrary Teff -- round-trips exactly through
+// spec()'s log10()/pow(10, .) conversion, since 10000 is a power of
+// ten) with logg strictly between 4.0 and 4.5 sits at this library's
+// upper Teff edge: the Teff = 1000 corners get exactly zero weight
+// (skipped before spec() ever checks whether they're populated), while
+// the Teff = 10000, logg in {4.0, 4.5} corners -- the only ones
+// actually used -- are both unpopulated. hasValidNeighbor is still
+// true (the zero-weight Teff = 1000 corners are populated), so before
+// the wSum <= 0 guard was added to SpecsynLib::spec(), this divided by
+// zero and returned a NaN/Inf "spectrum" instead of a clean out-of-
+// bounds result -- exactly what testClusterSpecsynFull's full-scale
+// run against real data turned up. mass = 0.07197967694676924 Msun and
+// logL = 0 are chosen (mirroring testSpecCoerce's own derivation) so
+// that log(g) works out to 4.25 -- strictly between this fixture's two
+// populated logg values -- at Teff = 10000 K.
+static auto testSpecCoerceZeroWeight() -> int
+{
+    const std::string coerceRegistryName = "tests/specsyn/assets/spectra.toml";
+    const std::string coerceSpectraName = "COERCE_ZERO_test";
+
+    constexpr double mass = 0.07197967694676924; // Msun
+    constexpr double logL = 0.0;                 // log10(L / Lsun)
+    constexpr double feh = 0.0;
+    const double logTeff = std::log10(10000.0);
+    const auto props = makeStarData(mass, logL, logTeff);
+
+    const specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::coerce> lib(
+        coerceSpectraName, 0.0, 0.0, 0.0, 0.0, 0.0, specsyn::defaultR, coerceRegistryName);
+
+    std::vector<double> result;
+    try
+    {
+        result = lib.spec(props, feh);
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "testSpecsynLib: coerceZeroWeight: unexpected "
+            "exception from spec(): " << e.what() << "\n";
+        return 1;
+    }
+
+    if (!result.empty())
+    {
+        std::cerr << "testSpecsynLib: coerceZeroWeight: expected an empty "
+            "(out-of-bounds) spectrum for a query landing exactly on the "
+            "grid's missing corner, got " << result.size() <<
+            " values -- possibly a NaN/Inf divide-by-zero regression\n";
+        return 1;
+    }
+
+    return 0;
+}
+
 // Check that leaving microTurb at its default (NaN) resolves to each
 // library's own micro_default registry entry, rather than one shared
 // default: BOSZ_test's is 0 and TLUSTY_test's is 10, so a NaN-default
@@ -593,5 +654,6 @@ auto testSpecsynLib() -> int
     result += testResampleAllOutOfRange();
     result += testMicroTurbDefault();
     result += testSpecCoerce();
+    result += testSpecCoerceZeroWeight();
     return result;
 }
