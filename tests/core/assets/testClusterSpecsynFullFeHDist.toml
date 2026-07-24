@@ -1,0 +1,17 @@
+# A [Fe/H] distribution, flat from -1 to 0, for
+# tests/core/testClusterSpecsynFull.cpp's full end-to-end run through
+# the real MIST tracks and PoWR/TLUSTY/BOSZ spectral libraries.
+#
+# Not currently referenced by testClusterSpecsynFull.in, which pins
+# stars.FeH to a delta function at exactly 0.0 instead -- see that
+# file's own comments -- because MIST's real feh=-0.50 (afe=0.0,
+# v_vcrit=0.4) track group is short two masses relative to its
+# neighbors, and any range with fehMin < 0 ends up pulling that group
+# in regardless of how close to 0 fehMin is. Kept here to switch back
+# to once the MIST maintainers confirm whether a corrected tarball is
+# coming.
+breakpoints -1 0
+
+segment
+type powerlaw
+slope 0
