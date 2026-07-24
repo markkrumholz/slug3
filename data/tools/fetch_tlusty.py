@@ -3,6 +3,19 @@ Script to fetch the TLUSTY OB star spectra (Hubeny et al. 2025) from the
 STScI Box repository, downsample them, and write them into an HDF5 file
 in the same format slug uses for BOSZ.
 
+TLUSTY's O star (OSTAR) and B star (BSTAR) grids are fetched and stored
+separately -- tlusty_o.h5/TLUSTY_O and tlusty_b.h5/TLUSTY_B respectively
+-- rather than combined into one file, even though their native
+wavelength grids are identical and their tar/member naming schemes only
+differ by the OSTAR_/BSTAR_ prefix. Hubeny et al. 2025 recommend
+different default microturbulent velocities for the two star types
+(10 km/s for O stars, 2 km/s for B stars), and a single shared registry
+entry can only carry one micro_default. Their Teff coverage overlaps
+at 30000 K and leaves no gap otherwise, so a spectra.model chain
+listing both (in whichever priority order is wanted) covers the full
+OB range with no code changes needed elsewhere. Run this script once
+per --star-type to fetch each grid.
+
 Box.com requires OAuth for its API -- even for publicly shared folders.
 Provide a Box developer token via --box-token, or pre-download the tar
 files yourself and point the script at them with --local-dir.
@@ -28,7 +41,7 @@ import tarfile
 import tomlkit
 import urllib3
 
-# Magic strings
+# Magic strings shared by both star types
 TLUSTY_version = "2025"
 TLUSTY_URL = "https://stsci.app.box.com/v/tlustyOB2025"
 TLUSTY_BOX_API = "https://api.box.com/2.0"
@@ -39,27 +52,51 @@ TLUSTY_reference_urls = [
     "https://ui.adsabs.harvard.edu/abs/2025AJ....169..178H/abstract"
 ]
 
-# Default microturbulent velocity (km/s) for TLUSTY, used by SpecsynLib
-# when no explicit value is requested; TLUSTY's hot, massive OB stars
-# are conventionally modeled with substantial microturbulence
-TLUSTY_MICRO_DEFAULT = 10
+# Per-star-type settings: which Box tar-file prefix identifies this
+# star type, the default output HDF5 file, the registry entry name,
+# and the default microturbulent velocity (km/s) SpecsynLib falls back
+# to when no explicit value is requested -- verified against the
+# actual OSTAR_z010v2.tar/BSTAR_z010v2.tar archives that their member
+# files, internal wavelength grid, and (feh, micro) naming conventions
+# are otherwise identical, so everything else in this script (spec_re,
+# downsample, HDF5 schema) is shared between the two.
+TLUSTY_STAR_TYPES = {
+    "o": {
+        "prefix": "OSTAR",
+        "output": shutil.os.path.join("..", "spectra", "tlusty_o.h5"),
+        "registry_name": "TLUSTY_O",
+        "micro_default": 10,
+    },
+    "b": {
+        "prefix": "BSTAR",
+        "output": shutil.os.path.join("..", "spectra", "tlusty_b.h5"),
+        "registry_name": "TLUSTY_B",
+        "micro_default": 2,
+    },
+}
 
-# Number of original wavelength points per spectrum, and the downsample factor.
-# ceil(739791 / 100) = 7398 output points.
-TLUSTY_N_ORIG     = 739_791
+# Number of original wavelength points per spectrum, and the downsample
+# factor. Verified directly against the raw *.spec.gz files (both
+# OSTAR and BSTAR): 736791 points, not the frequently-quoted 739791.
+# ceil(736791 / 100) = 7368 output points.
+TLUSTY_N_ORIG     = 736_791
 TLUSTY_DOWNSAMPLE = 100
-TLUSTY_N_OUT      = math.ceil(TLUSTY_N_ORIG / TLUSTY_DOWNSAMPLE)   # 7398
+TLUSTY_N_OUT      = math.ceil(TLUSTY_N_ORIG / TLUSTY_DOWNSAMPLE)   # 7368
 
 # Parse command line arguments
 parser = argparse.ArgumentParser(
     description="Fetch and process TLUSTY OB star spectral library")
+parser.add_argument("--star-type", choices=sorted(TLUSTY_STAR_TYPES), required=True,
+                    help="Which TLUSTY grid to fetch: 'o' for OSTAR (hot O "
+                         "stars, -> tlusty_o.h5/TLUSTY_O) or 'b' for BSTAR "
+                         "(cooler B stars, -> tlusty_b.h5/TLUSTY_B)")
 parser.add_argument("--version", default=TLUSTY_version,
                     help="TLUSTY version string (default: %(default)s)")
 parser.add_argument("--url", default=TLUSTY_URL,
                     help="Box shared-folder URL for TLUSTY data")
-parser.add_argument("--output",
-                    default=shutil.os.path.join("..", "spectra", "tlusty.h5"),
-                    help="Output HDF5 file (default: %(default)s)")
+parser.add_argument("--output", default="",
+                    help="Output HDF5 file (default: tlusty_o.h5 or "
+                         "tlusty_b.h5, chosen by --star-type)")
 parser.add_argument("--registry",
                     default=shutil.os.path.join("..", "spectra", "spectra.toml"),
                     help="Spectra registry TOML file (default: %(default)s)")
@@ -78,10 +115,15 @@ parser.add_argument("--box-token", default="",
                     help="Box OAuth developer token for downloading from Box")
 parser.add_argument("--local-dir", default="",
                     help="Directory containing pre-downloaded OSTAR_z*v*.tar "
-                         "files; skips Box download")
+                         "or BSTAR_z*v*.tar files (matching --star-type); "
+                         "skips Box download")
 parser.add_argument("--verbose", action="store_true",
                     help="Print progress messages")
 args = parser.parse_args()
+
+star_cfg = TLUSTY_STAR_TYPES[args.star_type]
+if not args.output:
+    args.output = star_cfg["output"]
 
 if args.downsample < 1:
     parser.error("--downsample must be >= 1")
@@ -95,9 +137,10 @@ if not args.box_token and not args.local_dir:
 # Filename parsing
 # ---------------------------------------------------------------------------
 
-# Tar filename: OSTAR_z<zval>v<micro>.tar
-# zval is 3 or 4 digits; micro is the microturbulence in km/s.
-tar_re = re.compile(r'OSTAR_z(?P<zval>[0-9]{3,4})v(?P<micro>[0-9]+)\.tar')
+# Tar filename: OSTAR_z<zval>v<micro>.tar or BSTAR_z<zval>v<micro>.tar,
+# depending on --star-type. zval is 3 or 4 digits; micro is the
+# microturbulence in km/s.
+tar_re = re.compile(rf'{star_cfg["prefix"]}_z(?P<zval>[0-9]{{3,4}})v(?P<micro>[0-9]+)\.tar')
 
 # Spec filename inside each tar: z<zval>t<teff>g<gval>v<micro>.spec.gz
 # gval is log(g_cgs) × 100 (e.g. 400 → log g = 4.00).
@@ -225,7 +268,8 @@ def downsample(wave: np.ndarray, flux: np.ndarray,
 tar_sources: dict[tuple[float, int], str] = {}
 
 if args.local_dir:
-    # Scan the local directory for OSTAR_z*v*.tar files
+    # Scan the local directory for tar_re-matching files (OSTAR_z*v*.tar
+    # or BSTAR_z*v*.tar, per --star-type)
     for fname in shutil.os.listdir(args.local_dir):
         m = tar_re.fullmatch(fname)
         if m is None:
@@ -316,7 +360,7 @@ for (feh_val, micro_val), source in sorted(tar_sources.items()):
     if args.local_dir:
         tar_path = source
     else:
-        tar_fname = (f"OSTAR_z{feh_to_zval_str(feh_val)}v{micro_val}.tar")
+        tar_fname = (f"{star_cfg['prefix']}_z{feh_to_zval_str(feh_val)}v{micro_val}.tar")
         tar_path  = shutil.os.path.join(temp_dir, tar_fname)
         if args.verbose:
             print(f"  Downloading {tar_fname} from Box...")
@@ -418,14 +462,16 @@ if shutil.os.path.exists(args.registry):
 else:
     registry = {"name": "Registry of spectra sets"}
 
-if "spectra_sets" in registry:
-    if "TLUSTY" not in registry["spectra_sets"]:
-        registry["spectra_sets"].append("TLUSTY")
-else:
-    registry["spectra_sets"] = ["TLUSTY"]
+registry_name = star_cfg["registry_name"]
 
-if "TLUSTY" in registry:
-    registry.pop("TLUSTY")
+if "spectra_sets" in registry:
+    if registry_name not in registry["spectra_sets"]:
+        registry["spectra_sets"].append(registry_name)
+else:
+    registry["spectra_sets"] = [registry_name]
+
+if registry_name in registry:
+    registry.pop(registry_name)
 tab = tomlkit.table()
 tab["file"]           = args.output
 tab["version"]        = args.version
@@ -442,9 +488,9 @@ with h5py.File(args.output, "r") as h5:
                 vals.append(v)
         vals.sort()
         tab[qty] = vals
-tab["micro_default"] = TLUSTY_MICRO_DEFAULT
+tab["micro_default"] = star_cfg["micro_default"]
 
-registry["TLUSTY"] = tab
+registry[registry_name] = tab
 
 with open(args.registry, "w") as f:
     f.write(tomlkit.dumps(registry))
