@@ -288,22 +288,29 @@ namespace specsyn
                     auto& spectrum = grid_[i1, i2, i3];
                     if (spectrum.empty()) { continue; } // unpopulated grid point: leave empty
 
-                    const interp::Interpolator1D<1> interpolator(wl_, spectrum);
-                    std::vector<double> resampled(wlNew.size(), 0.0);
-                    for (size_t w = 0; w < wlNew.size(); ++w)
-                    {
-                        if (wlNew[w] >= wl_.front() && wlNew[w] <= wl_.back())
-                        {
-                            resampled[w] = interpolator(wlNew[w]);
-                        }
-                        // else leave as the zero flux resampled was initialized with
-                    }
-                    spectrum = std::move(resampled);
+                    spectrum = resample(wl_, wlNew, spectrum);
                 }
             }
         }
 
         wl_ = wlNew;
+    }
+
+    template <OOBPolicy Policy>
+    auto SpecsynLib<Policy>::resample(const std::vector<double>& wl,
+        const std::vector<double>& wlNew, const std::vector<double>& spectrum) -> std::vector<double>
+    {
+        const interp::Interpolator1D<1> interpolator(wl, spectrum);
+        std::vector<double> resampled(wlNew.size(), 0.0);
+        for (size_t w = 0; w < wlNew.size(); ++w)
+        {
+            if (wlNew[w] >= wl.front() && wlNew[w] <= wl.back())
+            {
+                resampled[w] = interpolator(wlNew[w]);
+            }
+            // else leave as the zero flux resampled was initialized with
+        }
+        return resampled;
     }
 
     // Explicit instantiation for every OOBPolicy value actually used;

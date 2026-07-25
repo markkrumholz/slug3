@@ -115,6 +115,31 @@ namespace specsyn
          */
         void resample(const std::vector<double>& wlNew);
 
+        /**
+         * @brief Resample a single spectrum from one wavelength grid onto another
+         * @param wl The wavelength grid spectrum is currently defined on
+         * @param wlNew The wavelength grid to resample onto
+         * @param spectrum The spectrum to resample, evaluated at wl
+         * @return spectrum, resampled onto wlNew
+         * @details
+         * Builds an Interpolator1D of spectrum versus wl, then
+         * evaluates it at every wavelength in wlNew; wavelengths in
+         * wlNew that fall outside the range spanned by wl are
+         * assigned a flux of zero rather than extrapolated. This is
+         * the single-spectrum core of the member resample() above
+         * (which calls this once per populated tensor-grid point),
+         * factored out as its own static function -- rather than kept
+         * private to resample()'s own loop -- so that a derived class
+         * needing to resample spectra some other way (e.g.
+         * SpecsynLibWR, whose spectra aren't stored on this class's
+         * own wl_ at all until after they've each been resampled from
+         * their own distinct native grid) can reuse the exact same
+         * interpolation logic instead of reimplementing it.
+         */
+        [[nodiscard]] static auto resample(const std::vector<double>& wl,
+            const std::vector<double>& wlNew, const std::vector<double>& spectrum)
+        -> std::vector<double>;
+
     protected:
 
         /** @brief The shape of grid_, the mdspan view onto spectra_ */

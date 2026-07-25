@@ -6,7 +6,6 @@
  */
 
 #include "SpecsynLibWR.hpp"
-#include "../interpolation/Interpolator1D.hpp"
 #include "../tracks/TrackCommons.hpp"
 #include "../utils/MiscUtils.hpp"
 #include "Specsyn.hpp"
@@ -476,12 +475,9 @@ namespace specsyn
             commonWl = utils::logspace(wlMin, wlMax, nWl);
         }
 
-        // Step 6: regrid every populated spectrum onto the common
-        // wavelength grid, exactly as SpecsynLib::resample does --
-        // an Interpolator1D of the point's own flux versus its own
-        // wavelength grid, evaluated at every wavelength in commonWl,
-        // with wavelengths outside the point's native range assigned
-        // zero flux rather than extrapolated
+        // Step 6: regrid every populated spectrum from its own native
+        // wavelength grid onto the common one, via the same
+        // single-spectrum resampling SpecsynLib::resample uses
         for (size_t f = 0; f < nfeh; ++f) // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- f, rt, t are all < the corresponding grid's size by construction
         {
             for (size_t rt = 0; rt < nrt; ++rt)
@@ -492,17 +488,7 @@ namespace specsyn
                     if (spectrum.empty()) { continue; } // unpopulated grid point: leave empty
                     const auto& wave = waveGrid[f, rt, t];
 
-                    const interp::Interpolator1D<1> interpolator(wave, spectrum);
-                    std::vector<double> resampled(commonWl.size(), 0.0);
-                    for (size_t w = 0; w < commonWl.size(); ++w)
-                    {
-                        if (commonWl[w] >= wave.front() && commonWl[w] <= wave.back())
-                        {
-                            resampled[w] = interpolator(commonWl[w]);
-                        }
-                        // else leave as the zero flux resampled was initialized with
-                    }
-                    spectrum = std::move(resampled);
+                    spectrum = SpecsynLib<Policy>::resample(wave, commonWl, spectrum);
                 }
             }
         }
