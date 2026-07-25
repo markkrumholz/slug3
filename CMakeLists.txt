@@ -181,10 +181,46 @@ add_executable(slugTestCore
     src/utils/ParseUtils.cpp
     src/extern/cubature/pcubature.c
     tests/core/testCluster.cpp
-    tests/core/testClusterSpecsynFull.cpp
     tests/core/testCoreAll.cpp
     tests/core/testSimCluster.cpp
     tests/core/testSpecsynChain.cpp
+)
+# slugTestCoreFull: the slow, full-scale end-to-end counterpart to
+# slugTestCore above -- same core-area sources, but built and run as
+# its own executable/CTest entry (LABELS "slow" below) specifically so
+# it can be skipped independently of slugTestCore's fast tests. See
+# testCoreFullAll.cpp's own comment for why, and for how to add more
+# tests here as this grows.
+add_executable(slugTestCoreFull
+    src/core/Cluster.cpp
+    src/core/SimCluster.cpp
+    src/io/OutputManager.cpp
+    src/io/OutputManagerAscii.cpp
+    src/io/OutputManagerH5.cpp
+    src/io/SimControls.cpp
+    src/io/SimPhysics.cpp
+    src/interpolation/Mesh2DGrid.cpp
+    src/pdfs/PDFFileParser.cpp
+    src/pdfs/PDFSegment.cpp
+    src/pdfs/PDFSegmentDelta.cpp
+    src/pdfs/PDFSegmentExponential.cpp
+    src/pdfs/PDFSegmentLognormal.cpp
+    src/pdfs/PDFSegmentNormal.cpp
+    src/pdfs/PDFSegmentPowerlaw.cpp
+    src/pdfs/PDFSegmentSchechter.cpp
+    src/specsyn/SpecsynBlackbody.cpp
+    src/specsyn/SpecsynUtils.cpp
+    src/specsyn/SpecsynLib.cpp
+    src/specsyn/SpecsynLibNoWind.cpp
+    src/specsyn/SpecsynLibWR.cpp
+    src/specsyn/SpecsynLibChained.cpp
+    src/tracks/TrackUtils.cpp
+    src/tracks/Tracks2D.cpp
+    src/tracks/Tracks3D.cpp
+    src/utils/ParseUtils.cpp
+    src/extern/cubature/pcubature.c
+    tests/core/testClusterSpecsynFull.cpp
+    tests/core/testCoreFullAll.cpp
 )
 add_executable(slugTestIo
     src/core/Cluster.cpp
@@ -309,6 +345,9 @@ target_include_directories(slugTestTracks SYSTEM PRIVATE src/extern/pcg-cpp/incl
 target_include_directories(slugTestCore PRIVATE src ${CMAKE_BINARY_DIR}/generated)
 target_include_directories(slugTestCore SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus src/extern/cubature)
 
+target_include_directories(slugTestCoreFull PRIVATE src ${CMAKE_BINARY_DIR}/generated)
+target_include_directories(slugTestCoreFull SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus src/extern/cubature)
+
 target_include_directories(slugTestIo PRIVATE src ${CMAKE_BINARY_DIR}/generated)
 target_include_directories(slugTestIo SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus src/extern/cubature)
 
@@ -324,6 +363,7 @@ target_include_directories(slugTestPDFs SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestUtils SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestTracks SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestCore SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
+target_include_directories(slugTestCoreFull SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestIo SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestSpecsyn SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugPython SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
@@ -335,6 +375,7 @@ target_link_libraries(slugTestPDFs PRIVATE GSL::gsl)
 target_link_libraries(slugTestUtils PRIVATE GSL::gsl)
 target_link_libraries(slugTestTracks PRIVATE GSL::gsl)
 target_link_libraries(slugTestCore PRIVATE GSL::gsl)
+target_link_libraries(slugTestCoreFull PRIVATE GSL::gsl)
 target_link_libraries(slugTestIo PRIVATE GSL::gsl)
 target_link_libraries(slugTestSpecsyn PRIVATE GSL::gsl)
 target_link_libraries(slugPython PRIVATE GSL::gsl)
@@ -346,6 +387,7 @@ target_link_libraries(slugTestPDFs PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugTestUtils PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugTestTracks PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugTestCore PRIVATE ${HDF5_CXX_LIBRARIES})
+target_link_libraries(slugTestCoreFull PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugTestIo PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugTestSpecsyn PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugPython PRIVATE ${HDF5_CXX_LIBRARIES})
@@ -358,6 +400,7 @@ if(OpenMP_CXX_FOUND)
     target_link_libraries(slugTestUtils PRIVATE OpenMP::OpenMP_CXX)
     target_link_libraries(slugTestTracks PRIVATE OpenMP::OpenMP_CXX)
     target_link_libraries(slugTestCore PRIVATE OpenMP::OpenMP_CXX)
+    target_link_libraries(slugTestCoreFull PRIVATE OpenMP::OpenMP_CXX)
     target_link_libraries(slugTestIo PRIVATE OpenMP::OpenMP_CXX)
     target_link_libraries(slugTestSpecsyn PRIVATE OpenMP::OpenMP_CXX)
     target_link_libraries(slugPython PRIVATE OpenMP::OpenMP_CXX)
@@ -397,6 +440,16 @@ add_test(NAME test_Io COMMAND slugTestIo
 set_tests_properties(test_Io PROPERTIES
     ENVIRONMENT "SLUG_DIR=${CMAKE_SOURCE_DIR}")
 
+# test_CoreFull is the slow, full-scale end-to-end counterpart to
+# test_Core -- see testCoreFullAll.cpp and slugTestCoreFull's own
+# comments above for why it's built and run as a separate executable/
+# CTest entry rather than folded into test_Core. Needs the same
+# SLUG_DIR as test_Core, for the same reason.
+add_test(NAME test_CoreFull COMMAND slugTestCoreFull
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+set_tests_properties(test_CoreFull PROPERTIES
+    ENVIRONMENT "SLUG_DIR=${CMAKE_SOURCE_DIR}")
+
 # Python binding tests: run via pytest, using the same Python interpreter
 # pybind11 built slugPython against, so that this always tests the module
 # that was just built rather than whatever "python" happens to be on PATH.
@@ -408,6 +461,25 @@ add_test(NAME test_PythonBindings
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 set_tests_properties(test_PythonBindings PROPERTIES
     ENVIRONMENT "PYTHONPATH=$<TARGET_FILE_DIR:slugPython>;SLUG_DIR=${CMAKE_SOURCE_DIR}")
+
+# Tag every test "quick" or "slow", so `ctest -L quick` (or `ctest -LE
+# slow`) runs only the fast suite, skipping anything that takes
+# upwards of a minute to run -- currently just test_CoreFull, but
+# expected to grow as more full-scale end-to-end tests are added (see
+# testCoreFullAll.cpp). Plain `ctest`, with no -L/-LE filter, still
+# runs everything, quick and slow alike. A new slow test belongs in
+# its own executable (or an existing "*Full" one, if its own area
+# already has one), tagged "slow" here the same way, precisely so
+# CTest can select it independently of the fast tests living
+# alongside it in the same source directory -- CTest's label filter
+# operates per add_test entry, not per individual test function
+# inside one, so bundling a slow test into an otherwise-fast
+# executable would make it impossible to skip on its own.
+set_tests_properties(
+    test_Interpolation test_PDFs test_Utils test_Specsyn test_Tracks
+    test_Core test_Io test_PythonBindings
+    PROPERTIES LABELS "quick")
+set_tests_properties(test_CoreFull PROPERTIES LABELS "slow")
 
 # Add command to copy assets to build dir
 add_custom_command(
