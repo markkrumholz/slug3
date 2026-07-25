@@ -84,3 +84,4 @@ data/spectra/*.h5
 
 # Downloaded archive caches from data/tools fetch scripts
 data/tools/powr_temp/
+data/tools/marcs_temp/
