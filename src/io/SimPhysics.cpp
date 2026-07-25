@@ -181,6 +181,11 @@ void io::SimPhysics::readSpectra(const toml::table& inputDeck)
     wlMax_ = wlMaxInput.value_or(0.0);
     nWl_ = nWlInput.value_or(0);
 
+    // Optional redshift, applied by every Specsyn's own wlObs(); 0
+    // (no redshift) if not supplied
+    const auto zInput = utils::getTOMLKeyWithError<double>(inputDeck, "spectra.z");
+    const double z = zInput.value_or(0.0);
+
     // A single string names one model directly; anything else must be
     // an array of strings, chained together via SpecsynLibChained
     if (const auto model = modelNode.value<std::string>(); model.has_value())
@@ -189,7 +194,7 @@ void io::SimPhysics::readSpectra(const toml::table& inputDeck)
         // not require a spectral library at all
         if (model.value() == "blackbody")
         {
-            specsyn_ = std::make_unique<specsyn::SpecsynBlackbody>(wlMin_, wlMax_, nWl_);
+            specsyn_ = std::make_unique<specsyn::SpecsynBlackbody>(wlMin_, wlMax_, nWl_, z);
             return;
         }
 
@@ -213,7 +218,7 @@ void io::SimPhysics::readSpectra(const toml::table& inputDeck)
         {
             specsyn_ = std::make_unique<specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise>>(
                 model.value(), fehDist_.getMin(), fehDist_.getMax(), registryName,
-                wlMin_, wlMax_, nWl_);
+                wlMin_, wlMax_, nWl_, z);
         }
         else
         {
@@ -221,7 +226,7 @@ void io::SimPhysics::readSpectra(const toml::table& inputDeck)
                 model.value(), fehDist_.getMin(), fehDist_.getMax(),
                 tracks::defaultAFe, specsyn::defaultCFe,
                 std::numeric_limits<double>::quiet_NaN(), specsyn::defaultR,
-                registryName, wlMin_, wlMax_, nWl_);
+                registryName, wlMin_, wlMax_, nWl_, z);
         }
         return;
     }
@@ -245,5 +250,5 @@ void io::SimPhysics::readSpectra(const toml::table& inputDeck)
     specsyn_ = std::make_unique<specsyn::SpecsynLibChained>(
         models, fehDist_.getMin(), fehDist_.getMax(),
         tracks::defaultAFe, specsyn::defaultCFe, std::vector<double>{},
-        specsyn::defaultR, registryName, wlMin_, wlMax_, nWl_);
+        specsyn::defaultR, registryName, wlMin_, wlMax_, nWl_, z);
 }
