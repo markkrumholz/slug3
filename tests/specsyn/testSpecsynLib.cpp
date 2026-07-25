@@ -23,7 +23,6 @@
 
 #include "../../src/specsyn/SpecsynLibNoWind.hpp"
 #include "../../src/tracks/TrackCommons.hpp"
-#include "../../src/utils/MiscUtils.hpp"
 #include "testSpecsynLib.hpp"
 #include <algorithm>
 #include <array>
@@ -763,8 +762,7 @@ static auto testResampleNWlOnly() -> int
             << nWlRequested << " wavelength points, got " << wlNWlOnly.size() << "\n";
         return 1;
     }
-    if (!utils::approxEqual(wlNWlOnly.front(), wlNative.front()) ||
-        !utils::approxEqual(wlNWlOnly.back(), wlNative.back()))
+    if (wlNWlOnly.front() != wlNative.front() || wlNWlOnly.back() != wlNative.back())
     {
         std::cerr << "testSpecsynLib: nWl-only resample expected the native "
             "wavelength range [" << wlNative.front() << ", " << wlNative.back()

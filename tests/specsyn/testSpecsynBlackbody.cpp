@@ -10,7 +10,6 @@
 #include "../src/specsyn/Specsyn.hpp"
 #include "../src/specsyn/SpecsynBlackbody.hpp"
 #include "../src/tracks/TrackCommons.hpp"
-#include "../src/utils/MiscUtils.hpp"
 #include "testSpecsynBlackbody.hpp"
 #include <array>
 #include <cmath>
@@ -206,8 +205,7 @@ static auto testNWlOnly() -> int
             << nWlRequested << " wavelength points, got " << nWlOnlyWl.size() << "\n";
         return 1;
     }
-    if (!utils::approxEqual(nWlOnlyWl.front(), defaultWl.front()) ||
-        !utils::approxEqual(nWlOnlyWl.back(), defaultWl.back()))
+    if (nWlOnlyWl.front() != defaultWl.front() || nWlOnlyWl.back() != defaultWl.back())
     {
         std::cerr << "testSpecsynBlackbody: nWl-only construction expected the "
             "same default wavelength range [" << defaultWl.front() << ", "

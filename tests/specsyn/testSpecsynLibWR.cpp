@@ -25,7 +25,6 @@
 
 #include "../../src/specsyn/SpecsynLibWR.hpp"
 #include "../../src/tracks/TrackCommons.hpp"
-#include "../../src/utils/MiscUtils.hpp"
 #include "testSpecsynLibWR.hpp"
 #include <algorithm>
 #include <cstddef>
@@ -422,8 +421,7 @@ static auto testNWlOnly() -> int
             << nWlRequested << " wavelength points, got " << wlNWlOnly.size() << "\n";
         return 1;
     }
-    if (!utils::approxEqual(wlNWlOnly.front(), wlNative.front()) ||
-        !utils::approxEqual(wlNWlOnly.back(), wlNative.back()))
+    if (wlNWlOnly.front() != wlNative.front() || wlNWlOnly.back() != wlNative.back())
     {
         std::cerr << "testSpecsynLibWR: nWl-only construction expected the "
             "native-derived wavelength range [" << wlNative.front() << ", "
