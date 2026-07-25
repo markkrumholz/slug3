@@ -137,8 +137,13 @@ namespace specsyn
         {
             if (isWR)
             {
+                // wlMin/wlMax/nWl are not yet threaded through
+                // makeChainedLib's own parameters, so pass their
+                // "not supplied" sentinels explicitly here rather than
+                // let z (the next positional parameter after
+                // registryName) silently bind to wlMin instead
                 return std::make_unique<SpecsynLibWR<Policy>>(
-                    name, fehMin, fehMax, registryName, z);
+                    name, fehMin, fehMax, registryName, 0.0, 0.0, 0, z);
             }
             return std::make_unique<SpecsynLibNoWind<Policy>>(
                 name, fehMin, fehMax, afe, cfe, microTurb, r, registryName, z);

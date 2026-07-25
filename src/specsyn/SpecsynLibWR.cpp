@@ -230,6 +230,9 @@ namespace specsyn
         const double fehMin,
         const double fehMax,
         const std::string& registryName,
+        const double wlMin,
+        const double wlMax,
+        const std::size_t nWl,
         const double z) :
         SpecsynLib<Policy>(),
         FeH_(this->dim1_),
@@ -403,7 +406,13 @@ namespace specsyn
         // wavelength grid -- unlike SpecsynLibNoWind's single shared
         // grid, every PoWR model has its own distinct wavelength
         // sampling (see fetch_powr.py), so there is no single grid to
-        // read once here.
+        // read once here. Read unconditionally regardless of nWl:
+        // even when the caller has requested an explicit output grid
+        // (nWl != 0), step 6 below still needs each populated point's
+        // own native wavelength grid to interpolate its flux from,
+        // just onto the caller's commonWl instead of a native-derived
+        // one -- only step 5's own derivation of commonWl actually
+        // differs on nWl.
         using SpectraGrid = typename SpecsynLib<Policy>::SpectraGrid;
         this->spectra_.assign(nfeh * nrt * nteff, std::vector<double>{});
         this->grid_ = SpectraGrid(this->spectra_.data(), nfeh, nrt, nteff);
@@ -441,19 +450,31 @@ namespace specsyn
         // NOLINTEND(misc-include-cleaner)
 
         // Step 5: build a single common wavelength grid spanning every
-        // populated point's own native grid
-        std::vector<std::vector<double>> wlGrids;
-        wlGrids.reserve(nfeh * nrt * nteff);
-        for (const auto& wave : waveTemp)
+        // populated point's own native grid -- unless the caller
+        // requested an explicit output grid (nWl != 0), in which case
+        // commonWl is simply nWl points log-spaced from wlMin to
+        // wlMax instead, and step 6 below resamples every populated
+        // point onto it exactly as it would onto a native-derived grid
+        std::vector<double> commonWl;
+        if (nWl == 0)
         {
-            if (!wave.empty()) { wlGrids.push_back(wave); }
+            std::vector<std::vector<double>> wlGrids;
+            wlGrids.reserve(nfeh * nrt * nteff);
+            for (const auto& wave : waveTemp)
+            {
+                if (!wave.empty()) { wlGrids.push_back(wave); }
+            }
+            if (wlGrids.empty())
+            {
+                throw std::runtime_error(
+                    "SpecsynLibWR: no populated grid points found for " + spectraName);
+            }
+            commonWl = SpecsynLibChained::makeCommonWlGrid(wlGrids);
         }
-        if (wlGrids.empty())
+        else
         {
-            throw std::runtime_error(
-                "SpecsynLibWR: no populated grid points found for " + spectraName);
+            commonWl = utils::logspace(wlMin, wlMax, nWl);
         }
-        const auto commonWl = SpecsynLibChained::makeCommonWlGrid(wlGrids);
 
         // Step 6: regrid every populated spectrum onto the common
         // wavelength grid, exactly as SpecsynLib::resample does --

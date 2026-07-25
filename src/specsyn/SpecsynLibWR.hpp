@@ -81,6 +81,15 @@ namespace specsyn
          * @param fehMin Minimum [Fe/H] value
          * @param fehMax Maximum [Fe/H] value
          * @param registryName Name of the spectral library registry file
+         * @param wlMin Minimum wavelength of the output grid, in
+         *   Angstrom; if 0 (the default), used together with wlMax
+         *   and nWl below (see @details) as a flag to fall back on
+         *   the library's own native wavelength coverage
+         * @param wlMax Maximum wavelength of the output grid, in
+         *   Angstrom; see wlMin
+         * @param nWl Number of points in the output grid; if 0 (the
+         *   default), used as a flag to fall back on the library's
+         *   own native wavelength grid -- see @details
          * @param z The redshift; defaults to zero
          * @throws std::runtime_error if spectraName does not contain
          *   "wne", "wnl", or "wc" (case-insensitively), since type_
@@ -97,15 +106,21 @@ namespace specsyn
          * isn't 0.20, keeping only the H20 models (see this class's
          * own comment for why) -- reads every populated (log(R_t),
          * log(Teff)) point's own flux and wavelength grid within each
-         * matching [Fe/H] group, builds a single common wavelength
-         * grid spanning all of them, and resamples every point onto
-         * it before storing it in spectra_.
+         * matching [Fe/H] group. If nWl is 0, builds a single common
+         * wavelength grid spanning every populated point's own native
+         * grid; otherwise uses nWl points log-spaced from wlMin to
+         * wlMax instead. Either way, every populated point's own flux
+         * is then resampled from its native wavelength grid onto that
+         * common grid before being stored in spectra_.
          */
         SpecsynLibWR(
             const std::string& spectraName,
             double fehMin,
             double fehMax,
             const std::string& registryName = defaultRegistry,
+            double wlMin = 0.0,
+            double wlMax = 0.0,
+            std::size_t nWl = 0,
             double z = 0.0);
 
         /**
