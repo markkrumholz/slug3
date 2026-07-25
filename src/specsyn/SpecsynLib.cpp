@@ -9,10 +9,10 @@
 #include "../interpolation/Interpolator1D.hpp"
 #include "SpecsynCommons.hpp"
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <stdexcept>
 #include <string>
-#include <utility>
 #include <vector>
 
 namespace specsyn
@@ -288,22 +288,64 @@ namespace specsyn
                     auto& spectrum = grid_[i1, i2, i3];
                     if (spectrum.empty()) { continue; } // unpopulated grid point: leave empty
 
-                    const interp::Interpolator1D<1> interpolator(wl_, spectrum);
-                    std::vector<double> resampled(wlNew.size(), 0.0);
-                    for (size_t w = 0; w < wlNew.size(); ++w)
-                    {
-                        if (wlNew[w] >= wl_.front() && wlNew[w] <= wl_.back())
-                        {
-                            resampled[w] = interpolator(wlNew[w]);
-                        }
-                        // else leave as the zero flux resampled was initialized with
-                    }
-                    spectrum = std::move(resampled);
+                    spectrum = resample(wl_, wlNew, spectrum);
                 }
             }
         }
 
         wl_ = wlNew;
+    }
+
+    template <OOBPolicy Policy>
+    auto SpecsynLib<Policy>::resample(const std::vector<double>& wl,
+        const std::vector<double>& wlNew, const std::vector<double>& spectrum) -> std::vector<double>
+    {
+        const interp::Interpolator1D<1> interpolator(wl, spectrum);
+        std::vector<double> resampled(wlNew.size(), 0.0);
+        for (size_t w = 0; w < wlNew.size(); ++w)
+        {
+            // Bin edges around wlNew[w], geometric (i.e. log-space)
+            // midpoints of wlNew[w] and its neighbors, so that
+            // resampled[w] represents the flux averaged over the bin
+            // actually surrounding wlNew[w] rather than just its
+            // value there -- point-sampling like that (the previous
+            // approach) is fine when upsampling, but can badly
+            // misrepresent narrow spectral features when downsampling
+            // onto a coarser grid, since the new grid can simply miss
+            // them. At the two ends of wlNew, where there is no
+            // neighbor on one side, the missing edge is instead placed
+            // symmetrically in log space around wlNew[w] itself, using
+            // the spacing to the one neighbor that does exist.
+            const double wl0 = (w == 0) ?
+                std::sqrt(wlNew[w] * wlNew[w] * wlNew[w] / wlNew[w + 1]) :
+                std::sqrt(wlNew[w - 1] * wlNew[w]);
+            const double wl1 = (w == wlNew.size() - 1) ?
+                std::sqrt(wlNew[w] * wlNew[w] * wlNew[w] / wlNew[w - 1]) :
+                std::sqrt(wlNew[w] * wlNew[w + 1]);
+
+            // Truncate to wl's own range, since the interpolant is
+            // only valid there, then integrate over whatever of the
+            // bin survives truncation, dividing by its width to
+            // recover a flux density rather than a bin-integrated
+            // flux; a bin that truncates to nothing (entirely outside
+            // wl's range) leaves resampled[w] at the zero it was
+            // initialized with. This is not strictly flux-conserving,
+            // since the interpolant is itself built by treating wl/
+            // spectrum as sample points rather than bin averages
+            // (nothing conservative like PPM), but it is much closer
+            // than point-sampling, and the library data being
+            // resampled here are themselves sample points rather than
+            // bin averages, so a conservative interpolation scheme
+            // would not actually gain anything.
+            const double wl0Trunc = std::max(wl0, wl.front());
+            const double wl1Trunc = std::min(wl1, wl.back());
+            if (wl1Trunc > wl0Trunc)
+            {
+                resampled[w] = interpolator.integ(wl0Trunc, wl1Trunc) / (wl1Trunc - wl0Trunc);
+            }
+            // else leave as the zero flux resampled was initialized with
+        }
+        return resampled;
     }
 
     // Explicit instantiation for every OOBPolicy value actually used;

@@ -155,6 +155,37 @@ void io::SimPhysics::readSpectra(const toml::table& inputDeck)
     const auto modelNode = inputDeck.at_path("spectra.model");
     if (!modelNode) { return; }
 
+    // Optional user-requested output wavelength grid: spectra.wl_min
+    // and spectra.wl_max (in Angstrom), and spectra.nwl (the number
+    // of output wavelengths). All three are individually optional,
+    // but wl_min and wl_max only make sense together with an nwl to
+    // say how finely to sample between them, so if either endpoint is
+    // given, all three must be; nwl alone (a request to rebin onto a
+    // library's own native wavelength range at a different
+    // resolution) is fine on its own. Left at their default of 0 --
+    // not a valid value for any of the three -- when not supplied, a
+    // sentinel passed through to whichever spectral synthesizer
+    // constructor is used below, telling it to fall back on its own
+    // native wavelength grid instead.
+    const auto wlMinInput = utils::getTOMLKeyWithError<double>(inputDeck, "spectra.wl_min");
+    const auto wlMaxInput = utils::getTOMLKeyWithError<double>(inputDeck, "spectra.wl_max");
+    const auto nWlInput = utils::getTOMLKeyWithError<unsigned long>(inputDeck, "spectra.nwl");
+    if ((wlMinInput.has_value() || wlMaxInput.has_value()) &&
+        !(wlMinInput.has_value() && wlMaxInput.has_value() && nWlInput.has_value()))
+    {
+        throw std::runtime_error(
+            "SimPhysics: spectra.wl_min and spectra.wl_max must be "
+            "given together with each other and with spectra.nwl");
+    }
+    wlMin_ = wlMinInput.value_or(0.0);
+    wlMax_ = wlMaxInput.value_or(0.0);
+    nWl_ = nWlInput.value_or(0);
+
+    // Optional redshift, applied by every Specsyn's own wlObs(); 0
+    // (no redshift) if not supplied
+    const auto zInput = utils::getTOMLKeyWithError<double>(inputDeck, "spectra.z");
+    const double z = zInput.value_or(0.0);
+
     // A single string names one model directly; anything else must be
     // an array of strings, chained together via SpecsynLibChained
     if (const auto model = modelNode.value<std::string>(); model.has_value())
@@ -163,7 +194,7 @@ void io::SimPhysics::readSpectra(const toml::table& inputDeck)
         // not require a spectral library at all
         if (model.value() == "blackbody")
         {
-            specsyn_ = std::make_unique<specsyn::SpecsynBlackbody>();
+            specsyn_ = std::make_unique<specsyn::SpecsynBlackbody>(wlMin_, wlMax_, nWl_, z);
             return;
         }
 
@@ -186,7 +217,8 @@ void io::SimPhysics::readSpectra(const toml::table& inputDeck)
         if (wrGrid)
         {
             specsyn_ = std::make_unique<specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise>>(
-                model.value(), fehDist_.getMin(), fehDist_.getMax(), registryName);
+                model.value(), fehDist_.getMin(), fehDist_.getMax(), registryName,
+                wlMin_, wlMax_, nWl_, z);
         }
         else
         {
@@ -194,7 +226,7 @@ void io::SimPhysics::readSpectra(const toml::table& inputDeck)
                 model.value(), fehDist_.getMin(), fehDist_.getMax(),
                 tracks::defaultAFe, specsyn::defaultCFe,
                 std::numeric_limits<double>::quiet_NaN(), specsyn::defaultR,
-                registryName);
+                registryName, wlMin_, wlMax_, nWl_, z);
         }
         return;
     }
@@ -218,5 +250,5 @@ void io::SimPhysics::readSpectra(const toml::table& inputDeck)
     specsyn_ = std::make_unique<specsyn::SpecsynLibChained>(
         models, fehDist_.getMin(), fehDist_.getMax(),
         tracks::defaultAFe, specsyn::defaultCFe, std::vector<double>{},
-        specsyn::defaultR, registryName);
+        specsyn::defaultR, registryName, wlMin_, wlMax_, nWl_, z);
 }

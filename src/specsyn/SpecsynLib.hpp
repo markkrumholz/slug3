@@ -101,19 +101,61 @@ namespace specsyn
          * @brief Resample every spectrum in this library onto a new wavelength grid
          * @param wlNew The new wavelength grid, in Angstrom
          * @details
-         * For every populated (non-empty) point in the tensor grid,
-         * builds an Interpolator1D of that point's flux versus this
-         * library's existing wavelength grid (wl_), then evaluates it
-         * at every wavelength in wlNew to produce that point's
-         * resampled flux; wavelengths in wlNew that fall outside the
-         * range spanned by wl_ are assigned a flux of zero rather than
-         * extrapolated. Once every populated point has been resampled
-         * this way, wl_ itself is replaced with wlNew, so wl() and
-         * every subsequent spec() call reflect the new grid.
-         * Unpopulated grid points are left as empty vectors, exactly
-         * as before.
+         * Resamples every populated (non-empty) point in the tensor
+         * grid from this library's existing wavelength grid (wl_)
+         * onto wlNew, via the static resample() overload below (see
+         * its own comment for exactly how) -- once every populated
+         * point has been resampled this way, wl_ itself is replaced
+         * with wlNew, so wl() and every subsequent spec() call reflect
+         * the new grid. Unpopulated grid points are left as empty
+         * vectors, exactly as before.
          */
         void resample(const std::vector<double>& wlNew);
+
+        /**
+         * @brief Resample a single spectrum from one wavelength grid onto another
+         * @param wl The wavelength grid spectrum is currently defined on
+         * @param wlNew The wavelength grid to resample onto
+         * @param spectrum The spectrum to resample, evaluated at wl
+         * @return spectrum, resampled onto wlNew
+         * @details
+         * Builds an Interpolator1D of spectrum versus wl, then for
+         * each wlNew[w] integrates it (via Interpolator1D::integ)
+         * over the bin surrounding wlNew[w] -- bounded by the
+         * geometric (log-space) midpoints of wlNew[w] and its
+         * neighbors, truncated to wl's own range -- and divides by
+         * that bin's (truncated) width to give resampled[w] as a flux
+         * density averaged over the bin, rather than just spectrum's
+         * value at wlNew[w] itself. Point-sampling like that (an
+         * earlier version of this function) is fine when upsampling,
+         * but can badly misrepresent narrow spectral features when
+         * downsampling onto a coarser grid, since the new grid can
+         * simply miss them; integrating over each new bin instead
+         * only misses a feature if the feature itself falls entirely
+         * outside every bin, i.e. in a gap in wlNew's own coverage. A
+         * wlNew[w] whose bin truncates to zero width (entirely outside
+         * wl's range) gets a flux of zero rather than extrapolated.
+         * This is not strictly flux-conserving, since spectrum's own
+         * points are treated as samples rather than bin averages to
+         * begin with (nothing conservative like PPM interpolation),
+         * but it is much closer than point-sampling -- and since the
+         * spectral libraries this resamples are themselves tabulated
+         * as sample points rather than bin averages, a conservative
+         * interpolation scheme would not actually gain anything here.
+         * This is the single-spectrum core of the member resample()
+         * above (which calls this once per populated tensor-grid
+         * point), factored out as its own static function -- rather
+         * than kept private to resample()'s own loop -- so that a
+         * derived class needing to resample spectra some other way
+         * (e.g. SpecsynLibWR, whose spectra aren't stored on this
+         * class's own wl_ at all until after they've each been
+         * resampled from their own distinct native grid) can reuse
+         * the exact same interpolation logic instead of reimplementing
+         * it.
+         */
+        [[nodiscard]] static auto resample(const std::vector<double>& wl,
+            const std::vector<double>& wlNew, const std::vector<double>& spectrum)
+        -> std::vector<double>;
 
     protected:
 

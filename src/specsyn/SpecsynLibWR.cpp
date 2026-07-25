@@ -6,7 +6,6 @@
  */
 
 #include "SpecsynLibWR.hpp"
-#include "../interpolation/Interpolator1D.hpp"
 #include "../tracks/TrackCommons.hpp"
 #include "../utils/MiscUtils.hpp"
 #include "Specsyn.hpp"
@@ -230,6 +229,9 @@ namespace specsyn
         const double fehMin,
         const double fehMax,
         const std::string& registryName,
+        double wlMin,
+        double wlMax,
+        const std::size_t nWl,
         const double z) :
         SpecsynLib<Policy>(),
         FeH_(this->dim1_),
@@ -403,7 +405,13 @@ namespace specsyn
         // wavelength grid -- unlike SpecsynLibNoWind's single shared
         // grid, every PoWR model has its own distinct wavelength
         // sampling (see fetch_powr.py), so there is no single grid to
-        // read once here.
+        // read once here. Read unconditionally regardless of nWl:
+        // even when the caller has requested an explicit output grid
+        // (nWl != 0), step 6 below still needs each populated point's
+        // own native wavelength grid to interpolate its flux from,
+        // just onto the caller's commonWl instead of a native-derived
+        // one -- only step 5's own derivation of commonWl actually
+        // differs on nWl.
         using SpectraGrid = typename SpecsynLib<Policy>::SpectraGrid;
         this->spectra_.assign(nfeh * nrt * nteff, std::vector<double>{});
         this->grid_ = SpectraGrid(this->spectra_.data(), nfeh, nrt, nteff);
@@ -441,26 +449,60 @@ namespace specsyn
         // NOLINTEND(misc-include-cleaner)
 
         // Step 5: build a single common wavelength grid spanning every
-        // populated point's own native grid
-        std::vector<std::vector<double>> wlGrids;
-        wlGrids.reserve(nfeh * nrt * nteff);
-        for (const auto& wave : waveTemp)
+        // populated point's own native grid -- unless the caller
+        // requested an explicit output grid (nWl != 0), in which case
+        // commonWl is simply nWl points log-spaced from wlMin to
+        // wlMax instead, and step 6 below resamples every populated
+        // point onto it exactly as it would onto a native-derived grid
+        std::vector<double> commonWl;
+        if (nWl == 0)
         {
-            if (!wave.empty()) { wlGrids.push_back(wave); }
+            std::vector<std::vector<double>> wlGrids;
+            wlGrids.reserve(nfeh * nrt * nteff);
+            for (const auto& wave : waveTemp)
+            {
+                if (!wave.empty()) { wlGrids.push_back(wave); }
+            }
+            if (wlGrids.empty())
+            {
+                throw std::runtime_error(
+                    "SpecsynLibWR: no populated grid points found for " + spectraName);
+            }
+            commonWl = SpecsynLibChained::makeCommonWlGrid(wlGrids);
         }
-        if (wlGrids.empty())
+        else
         {
-            throw std::runtime_error(
-                "SpecsynLibWR: no populated grid points found for " + spectraName);
+            // wlMin == 0 here means only nWl was actually requested
+            // (wlMin/wlMax are still at SimPhysics::readSpectra's
+            // "not supplied" sentinel), so fall back to the global
+            // range spanned by every populated point's own native
+            // wavelength grid -- the same grids the nWl == 0 branch
+            // above would otherwise have merged via makeCommonWlGrid
+            // -- keeping the caller's requested point count.
+            if (wlMin == 0.0)
+            {
+                double globalMin = std::numeric_limits<double>::infinity();
+                double globalMax = -std::numeric_limits<double>::infinity();
+                for (const auto& wave : waveTemp)
+                {
+                    if (wave.empty()) { continue; }
+                    globalMin = std::min(globalMin, wave.front());
+                    globalMax = std::max(globalMax, wave.back());
+                }
+                if (!std::isfinite(globalMin))
+                {
+                    throw std::runtime_error(
+                        "SpecsynLibWR: no populated grid points found for " + spectraName);
+                }
+                wlMin = globalMin;
+                wlMax = globalMax;
+            }
+            commonWl = utils::logspace(wlMin, wlMax, nWl);
         }
-        const auto commonWl = SpecsynLibChained::makeCommonWlGrid(wlGrids);
 
-        // Step 6: regrid every populated spectrum onto the common
-        // wavelength grid, exactly as SpecsynLib::resample does --
-        // an Interpolator1D of the point's own flux versus its own
-        // wavelength grid, evaluated at every wavelength in commonWl,
-        // with wavelengths outside the point's native range assigned
-        // zero flux rather than extrapolated
+        // Step 6: regrid every populated spectrum from its own native
+        // wavelength grid onto the common one, via the same
+        // single-spectrum resampling SpecsynLib::resample uses
         for (size_t f = 0; f < nfeh; ++f) // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- f, rt, t are all < the corresponding grid's size by construction
         {
             for (size_t rt = 0; rt < nrt; ++rt)
@@ -471,17 +513,7 @@ namespace specsyn
                     if (spectrum.empty()) { continue; } // unpopulated grid point: leave empty
                     const auto& wave = waveGrid[f, rt, t];
 
-                    const interp::Interpolator1D<1> interpolator(wave, spectrum);
-                    std::vector<double> resampled(commonWl.size(), 0.0);
-                    for (size_t w = 0; w < commonWl.size(); ++w)
-                    {
-                        if (commonWl[w] >= wave.front() && commonWl[w] <= wave.back())
-                        {
-                            resampled[w] = interpolator(commonWl[w]);
-                        }
-                        // else leave as the zero flux resampled was initialized with
-                    }
-                    spectrum = std::move(resampled);
+                    spectrum = SpecsynLib<Policy>::resample(wave, commonWl, spectrum);
                 }
             }
         }

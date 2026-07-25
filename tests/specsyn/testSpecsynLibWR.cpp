@@ -396,6 +396,43 @@ static auto testSpecWNLTypeMismatchThrow() -> int
     return 0;
 }
 
+// Check that requesting nWl alone (wlMin = wlMax = 0, the "not
+// supplied" sentinel) falls back to the global wavelength range
+// spanned by every populated grid point's own native grid, at the
+// requested point count. makeCommonWlGrid's own result spans the full
+// union of its input grids' ranges (see its own doc), so a default
+// (nWl = 0) construction's wl() front/back already is that same
+// global range, giving an independent value to check against without
+// duplicating the sweep this test is meant to exercise.
+static auto testNWlOnly() -> int
+{
+    const specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise> libNative(
+        spectraName, -3.0, 1.0, registryName);
+    const auto& wlNative = libNative.wl();
+
+    constexpr std::size_t nWlRequested = 37;
+    const specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise> libNWlOnly(
+        spectraName, -3.0, 1.0, registryName, 0.0, 0.0, nWlRequested);
+    const auto& wlNWlOnly = libNWlOnly.wl();
+
+    if (wlNWlOnly.size() != nWlRequested)
+    {
+        std::cerr << "testSpecsynLibWR: nWl-only construction expected "
+            << nWlRequested << " wavelength points, got " << wlNWlOnly.size() << "\n";
+        return 1;
+    }
+    if (wlNWlOnly.front() != wlNative.front() || wlNWlOnly.back() != wlNative.back())
+    {
+        std::cerr << "testSpecsynLibWR: nWl-only construction expected the "
+            "native-derived wavelength range [" << wlNative.front() << ", "
+            << wlNative.back() << "], got [" << wlNWlOnly.front() << ", "
+            << wlNWlOnly.back() << "]\n";
+        return 1;
+    }
+
+    return 0;
+}
+
 auto testSpecsynLibWR() -> int
 {
     int result = 0;
@@ -407,5 +444,6 @@ auto testSpecsynLibWR() -> int
     result += testSpecTeffGridBoundsSilent();
     result += testSpecWNLSuccess();
     result += testSpecWNLTypeMismatchThrow();
+    result += testNWlOnly();
     return result;
 }

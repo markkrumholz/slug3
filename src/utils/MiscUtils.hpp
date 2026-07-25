@@ -9,9 +9,11 @@
 #define MISCUTILS_HPP
 
 #include <cmath>
+#include <cstddef>
 #include <cstdlib>
 #include <filesystem>
 #include <string>
+#include <vector>
 namespace utils
 {
     /**
@@ -67,6 +69,45 @@ namespace utils
         if (std::filesystem::exists(repoDirPath)) { return repoDirPath; }
 
         return std::filesystem::path();
+    }
+
+    /**
+     * @brief Generate a logarithmically spaced grid of points
+     * @param xMin The minimum value of the grid
+     * @param xMax The maximum value of the grid
+     * @param n The number of points in the grid
+     * @returns A vector of n points, logarithmically spaced from xMin
+     *   to xMax inclusive; result.front() == xMin and
+     *   result.back() == xMax exactly (see @details)
+     * @details
+     * Equivalent to numpy's logspace function (with base = e, i.e.
+     * numpy's logspace(log(xMin), log(xMax), n, base=e)). xMin and
+     * xMax must both be strictly positive, and n must be >= 2, since
+     * the spacing between points is (log(xMax) - log(xMin)) / (n - 1);
+     * neither is checked here. Every interior point is computed as
+     * exp(log(xMin) + i * dLogX); the first and last points would be
+     * exp(log(xMin)) and exp(log(xMax)) respectively if computed the
+     * same way, neither of which is guaranteed to be bit-identical to
+     * xMin/xMax (exp and log are not exact inverses at the level of
+     * individual floating-point rounding), so both are instead set
+     * directly to xMin/xMax. This matters because a caller may rely
+     * on the returned grid never straying outside [xMin, xMax] -- e.g.
+     * to stay within some other interpolant's valid range -- which a
+     * few ULPs of round-off on either end could otherwise violate.
+     */
+    inline auto logspace(const double xMin, const double xMax, const std::size_t n) -> std::vector<double>
+    {
+        std::vector<double> result(n);
+        result[0] = xMin; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- n >= 2 by this function's own (unchecked) precondition, so result is non-empty
+        result[n - 1] = xMax; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- n >= 2 by this function's own (unchecked) precondition, so n - 1 < result.size()
+        const double logXMin = std::log(xMin);
+        const double logXMax = std::log(xMax);
+        const double dLogX = (logXMax - logXMin) / static_cast<double>(n - 1);
+        for (std::size_t i = 1; i < n - 1; ++i)
+        {
+            result[i] = std::exp(logXMin + (static_cast<double>(i) * dLogX)); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i < n - 1 < n == result.size() by the loop bound
+        }
+        return result;
     }
 
 } // namespace utils

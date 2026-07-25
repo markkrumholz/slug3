@@ -7,6 +7,7 @@
 
 #include "SpecsynLibNoWind.hpp"
 #include "../tracks/TrackCommons.hpp"
+#include "../utils/MiscUtils.hpp"
 #include "Specsyn.hpp"
 #include "SpecsynCommons.hpp"
 #include "SpecsynLib.hpp"
@@ -121,6 +122,9 @@ namespace specsyn
         const double microTurb,
         const double r,
         const std::string& registryName,
+        double wlMin,
+        double wlMax,
+        const std::size_t nWl,
         const double z) :
         SpecsynLib<Policy>(),
         FeH_(this->dim1_),
@@ -298,6 +302,23 @@ namespace specsyn
         H5Fclose(file);
 
         // NOLINTEND(misc-include-cleaner)
+
+        // If the caller requested an explicit output grid rather than
+        // this library's own native one, resample onto it now. wlMin
+        // == 0 here means only nWl was actually requested (wlMin/
+        // wlMax are still at SimPhysics::readSpectra's "not supplied"
+        // sentinel), so fall back to this library's own just-read
+        // native range in that case, keeping the caller's requested
+        // point count.
+        if (nWl != 0)
+        {
+            if (wlMin == 0.0)
+            {
+                wlMin = this->wl_.front();
+                wlMax = this->wl_.back();
+            }
+            this->resample(utils::logspace(wlMin, wlMax, nWl));
+        }
     }
 
     template <OOBPolicy Policy>

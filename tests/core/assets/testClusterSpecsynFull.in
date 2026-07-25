@@ -55,6 +55,14 @@ FeH = 0.0
 
 [spectra]
 model = ["POWR_WC", "POWR_WNE", "POWR_WNL", "TLUSTY_O", "TLUSTY_B", "BOSZ", "CK04"]
+# Rebins every chained library from its own native wavelength grid
+# down to 2048 points, spanning the same native range (wl_min/wl_max
+# are left unsupplied, so each library falls back to its own native
+# range -- see SpecsynLibNoWind/SpecsynLibWR's own "nWl alone"
+# handling), cutting this test's spectral resolution -- and so its
+# runtime -- by roughly a factor of 4 without changing what physical
+# regime it actually exercises.
+nwl = 2048
 
 [clusters]
 CMF = 1e4
