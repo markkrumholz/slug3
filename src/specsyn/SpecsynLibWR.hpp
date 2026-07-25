@@ -109,7 +109,11 @@ namespace specsyn
          * matching [Fe/H] group. If nWl is 0, builds a single common
          * wavelength grid spanning every populated point's own native
          * grid; otherwise uses nWl points log-spaced from wlMin to
-         * wlMax instead. Either way, every populated point's own flux
+         * wlMax instead -- or, if wlMin is 0 there too (nWl alone was
+         * requested, without an explicit range), from the global
+         * minimum to the global maximum spanned by every populated
+         * point's own native grid, keeping the caller's requested
+         * point count. Either way, every populated point's own flux
          * is then resampled from its native wavelength grid onto that
          * common grid before being stored in spectra_.
          */

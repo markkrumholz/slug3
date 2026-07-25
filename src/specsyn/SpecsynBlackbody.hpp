@@ -45,9 +45,8 @@ namespace specsyn
         /**
          * @brief Construct a SpecsynBlackbody
          * @param wlMin Minimum wavelength of the output grid, in
-         *   Angstrom; if 0 (the default), used together with wlMax
-         *   and nWl below (see @details) as a flag to fall back on
-         *   this class's own default range
+         *   Angstrom; if 0 (the default), used as a flag to fall back
+         *   on this class's own default range -- see @details
          * @param wlMax Maximum wavelength of the output grid, in
          *   Angstrom; see wlMin
          * @param nWl Number of points in the output grid; if 0 (the
@@ -58,7 +57,10 @@ namespace specsyn
          * If nWl is 0, wlMin and wlMax are ignored (whatever they
          * were passed as) and wl_ is instead set to a grid of
          * nWlDefault points, logarithmically spaced from hc / (10 Ry)
-         * to hc / (0.01 Ry); otherwise wl_ is a grid of nWl points,
+         * to hc / (0.01 Ry). If nWl is nonzero but wlMin is 0 (nWl
+         * alone was requested, without an explicit range), wl_ is a
+         * grid of nWl points spanning that same default range
+         * instead. Otherwise wl_ is a grid of nWl points,
          * logarithmically spaced from wlMin to wlMax.
          */
         explicit SpecsynBlackbody(double wlMin = 0.0, double wlMax = 0.0,

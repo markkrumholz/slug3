@@ -20,13 +20,20 @@ static constexpr double cmToAngstrom = 1e8;
 specsyn::SpecsynBlackbody::SpecsynBlackbody(
     double wlMin, double wlMax, std::size_t nWl, const double z) : Specsyn(z)
 {
-    if (nWl == 0)
+    // nWl == 0 means neither a grid nor a point count was requested
+    // at all; nWl != 0 with wlMin == 0 means only nWl was requested
+    // (wlMin/wlMax are still at SimPhysics::readSpectra's "not
+    // supplied" sentinel) -- either way, wlMin/wlMax fall back to
+    // this class's own default range (photon energies from 10 Ry
+    // down to 0.01 Ry, converted from cm to Angstrom); nWl only falls
+    // back to nWlDefault in the former case, since supplying nWl
+    // alone is a valid, meaningful request (this class's own default
+    // range, but at a caller-chosen resolution) in its own right.
+    if (nWl == 0 || wlMin == 0.0)
     {
-        // Wavelength range corresponding to photon energies from 10 Ry
-        // down to 0.01 Ry, converted from cm to Angstrom
         wlMin = (planckH * speedOfLight / (10.0 * rydberg)) * cmToAngstrom;
         wlMax = (planckH * speedOfLight / (0.01 * rydberg)) * cmToAngstrom;
-        nWl = nWlDefault;
+        if (nWl == 0) { nWl = nWlDefault; }
     }
 
     wl_ = utils::logspace(wlMin, wlMax, nWl);

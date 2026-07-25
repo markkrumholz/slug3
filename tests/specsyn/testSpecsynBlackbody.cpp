@@ -10,6 +10,7 @@
 #include "../src/specsyn/Specsyn.hpp"
 #include "../src/specsyn/SpecsynBlackbody.hpp"
 #include "../src/tracks/TrackCommons.hpp"
+#include "../src/utils/MiscUtils.hpp"
 #include "testSpecsynBlackbody.hpp"
 #include <array>
 #include <cmath>
@@ -186,6 +187,38 @@ static auto testSpecCts(const specsyn::SpecsynBlackbody& synth) -> int
     return 0;
 }
 
+// Check that requesting nWl alone (wlMin = wlMax = 0, the "not
+// supplied" sentinel) falls back to this class's own default
+// wavelength range -- the same one a fully-default construction
+// uses -- at the requested point count, rather than at nWlDefault
+static auto testNWlOnly() -> int
+{
+    const specsyn::SpecsynBlackbody defaultSynth;
+    constexpr std::size_t nWlRequested = 37;
+    const specsyn::SpecsynBlackbody nWlOnlySynth(0.0, 0.0, nWlRequested);
+
+    const auto& defaultWl = defaultSynth.wl();
+    const auto& nWlOnlyWl = nWlOnlySynth.wl();
+
+    if (nWlOnlyWl.size() != nWlRequested)
+    {
+        std::cerr << "testSpecsynBlackbody: nWl-only construction expected "
+            << nWlRequested << " wavelength points, got " << nWlOnlyWl.size() << "\n";
+        return 1;
+    }
+    if (!utils::approxEqual(nWlOnlyWl.front(), defaultWl.front()) ||
+        !utils::approxEqual(nWlOnlyWl.back(), defaultWl.back()))
+    {
+        std::cerr << "testSpecsynBlackbody: nWl-only construction expected the "
+            "same default wavelength range [" << defaultWl.front() << ", "
+            << defaultWl.back() << "], got [" << nWlOnlyWl.front() << ", "
+            << nWlOnlyWl.back() << "]\n";
+        return 1;
+    }
+
+    return 0;
+}
+
 auto testSpecsynBlackbody() -> int
 {
     const specsyn::SpecsynBlackbody synth;
@@ -193,5 +226,6 @@ auto testSpecsynBlackbody() -> int
     result += testWlGrid(synth.wl());
     result += testSpec(synth);
     result += testSpecCts(synth);
+    result += testNWlOnly();
     return result;
 }

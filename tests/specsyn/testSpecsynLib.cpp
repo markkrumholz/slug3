@@ -23,6 +23,7 @@
 
 #include "../../src/specsyn/SpecsynLibNoWind.hpp"
 #include "../../src/tracks/TrackCommons.hpp"
+#include "../../src/utils/MiscUtils.hpp"
 #include "testSpecsynLib.hpp"
 #include <algorithm>
 #include <array>
@@ -740,6 +741,40 @@ static auto testResampleFluxConservation() -> int
     return 0;
 }
 
+// Check that requesting nWl alone (wlMin = wlMax = 0, the "not
+// supplied" sentinel) falls back to this library's own native
+// wavelength range -- the same range a default (nWl = 0) construction
+// reads from disk -- at the requested point count
+static auto testResampleNWlOnly() -> int
+{
+    const specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::raise> libNative(
+        spectraName, -3.0, 1.0, 0.0, 0.0, 0.0, 500, registryName);
+    const auto& wlNative = libNative.wl();
+
+    constexpr std::size_t nWlRequested = 37;
+    const specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::raise> libNWlOnly(
+        spectraName, -3.0, 1.0, 0.0, 0.0, 0.0, 500, registryName,
+        0.0, 0.0, nWlRequested);
+    const auto& wlNWlOnly = libNWlOnly.wl();
+
+    if (wlNWlOnly.size() != nWlRequested)
+    {
+        std::cerr << "testSpecsynLib: nWl-only resample expected "
+            << nWlRequested << " wavelength points, got " << wlNWlOnly.size() << "\n";
+        return 1;
+    }
+    if (!utils::approxEqual(wlNWlOnly.front(), wlNative.front()) ||
+        !utils::approxEqual(wlNWlOnly.back(), wlNative.back()))
+    {
+        std::cerr << "testSpecsynLib: nWl-only resample expected the native "
+            "wavelength range [" << wlNative.front() << ", " << wlNative.back()
+            << "], got [" << wlNWlOnly.front() << ", " << wlNWlOnly.back() << "]\n";
+        return 1;
+    }
+
+    return 0;
+}
+
 auto testSpecsynLib() -> int
 {
     int result = 0;
@@ -750,6 +785,7 @@ auto testSpecsynLib() -> int
     result += testResampleExactAndOOB();
     result += testResampleAllOutOfRange();
     result += testResampleFluxConservation();
+    result += testResampleNWlOnly();
     result += testMicroTurbDefault();
     result += testSpecCoerce();
     result += testSpecCoerceZeroWeight();

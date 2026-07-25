@@ -78,8 +78,12 @@ namespace specsyn
          * @details
          * If nWl is nonzero, resamples onto nWl points log-spaced
          * from wlMin to wlMax (via SpecsynLib::resample) after
-         * reading the library's own native wavelength grid; otherwise
-         * wl() simply returns that native grid as read from disk.
+         * reading the library's own native wavelength grid; if wlMin
+         * is 0 there (nWl alone was requested, without an explicit
+         * range), wlMin/wlMax instead fall back to the front/back of
+         * that just-read native grid, keeping the caller's requested
+         * point count. If nWl is 0, wl() simply returns the native
+         * grid as read from disk, unresampled.
          */
         SpecsynLibNoWind(
             const std::string& spectraName,

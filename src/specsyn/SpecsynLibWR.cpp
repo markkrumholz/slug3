@@ -229,8 +229,8 @@ namespace specsyn
         const double fehMin,
         const double fehMax,
         const std::string& registryName,
-        const double wlMin,
-        const double wlMax,
+        double wlMin,
+        double wlMax,
         const std::size_t nWl,
         const double z) :
         SpecsynLib<Policy>(),
@@ -472,6 +472,31 @@ namespace specsyn
         }
         else
         {
+            // wlMin == 0 here means only nWl was actually requested
+            // (wlMin/wlMax are still at SimPhysics::readSpectra's
+            // "not supplied" sentinel), so fall back to the global
+            // range spanned by every populated point's own native
+            // wavelength grid -- the same grids the nWl == 0 branch
+            // above would otherwise have merged via makeCommonWlGrid
+            // -- keeping the caller's requested point count.
+            if (wlMin == 0.0)
+            {
+                double globalMin = std::numeric_limits<double>::infinity();
+                double globalMax = -std::numeric_limits<double>::infinity();
+                for (const auto& wave : waveTemp)
+                {
+                    if (wave.empty()) { continue; }
+                    globalMin = std::min(globalMin, wave.front());
+                    globalMax = std::max(globalMax, wave.back());
+                }
+                if (!std::isfinite(globalMin))
+                {
+                    throw std::runtime_error(
+                        "SpecsynLibWR: no populated grid points found for " + spectraName);
+                }
+                wlMin = globalMin;
+                wlMax = globalMax;
+            }
             commonWl = utils::logspace(wlMin, wlMax, nWl);
         }
 
