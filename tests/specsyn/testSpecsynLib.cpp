@@ -270,20 +270,28 @@ static auto testResampleExactAndOOB() -> int
         return 1;
     }
 
-    // A new grid mixing: one wavelength below wlOrig's range, three
-    // wavelengths copied verbatim from early/middle/late in wlOrig
-    // (so resample() must reproduce their flux exactly), and one
-    // wavelength above wlOrig's range
-    const std::size_t iEarly = 10;
-    const std::size_t iMid = wlOrig.size() / 2;
-    const std::size_t iLate = wlOrig.size() - 10;
-    const std::vector<double> wlNew = {
-        wlOrig.front() - 100.0,
-        wlOrig.at(iEarly),
-        wlOrig.at(iMid),
-        wlOrig.at(iLate),
-        wlOrig.back() + 100.0
-    };
+    // A new grid consisting of wlOrig's own points verbatim, plus one
+    // wavelength an order of magnitude below wlOrig's range and one
+    // an order of magnitude above it. resample() now integrates each
+    // new grid point's flux over a bin bounded by the geometric
+    // (log-space) midpoints to its own neighbors in the new grid (see
+    // SpecsynLib::resample's own comment), rather than point-sampling,
+    // so reproducing the original flux exactly is no longer expected
+    // -- but keeping wlOrig's own points (rather than some coarser
+    // grid) means each interior bin is only as wide as wlOrig's own
+    // native spacing, which the library's own resolution should
+    // already adequately resolve, so the result should still stay
+    // close to the original point value. The two added endpoints, by
+    // contrast, sit far enough outside wlOrig's range that even their
+    // own (much wider, since their only neighbor in the new grid is
+    // wlOrig's own first/last point) bins cannot reach back into it,
+    // so they still exercise the "genuinely outside the library's
+    // range" case cleanly.
+    std::vector<double> wlNew;
+    wlNew.reserve(wlOrig.size() + 2);
+    wlNew.push_back(wlOrig.front() / 10.0);
+    wlNew.insert(wlNew.end(), wlOrig.begin(), wlOrig.end());
+    wlNew.push_back(wlOrig.back() * 10.0);
 
     lib.resample(wlNew);
 
@@ -313,31 +321,44 @@ static auto testResampleExactAndOOB() -> int
         return 1;
     }
 
-    // Index 0 (below wlOrig's range) and index 4 (above it) must be
-    // exactly zero
-    if (after.at(0) != 0.0 || after.at(4) != 0.0)
+    // The two added endpoints (genuinely outside wlOrig's range) must
+    // be exactly zero
+    if (after.front() != 0.0 || after.back() != 0.0)
     {
         std::cerr << "testSpecsynLib: expected exactly zero flux outside "
             "the original wavelength range after resample(), got "
-            << after.at(0) << " and " << after.at(4) << "\n";
+            << after.front() << " and " << after.back() << "\n";
         return 1;
     }
 
-    // Indices 1-3 (copied verbatim from wlOrig) must reproduce
-    // before's value at the corresponding original index
-    constexpr double relTol = 1e-8;
-    const std::array<std::pair<std::size_t, std::size_t>, 3> matches = {{
-        { 1, iEarly }, { 2, iMid }, { 3, iLate }
-    }};
-    for (const auto& [jNew, iOld] : matches)
+    // Every point copied verbatim from wlOrig should closely -- though,
+    // per the comment above, no longer exactly -- reproduce before's
+    // value at the corresponding original index (relative error stays
+    // under 5% everywhere, in practice, and well under that for all
+    // but a handful of points right at the steepest edges of an
+    // absorption line, where even wlOrig's own native resolution
+    // doesn't quite make the interpolant featureless across one bin).
+    // Points where the original flux is a tiny fraction of the
+    // spectrum's peak (e.g. deep in a strong absorption line, or off
+    // the Wien tail) are skipped: relative error is not a meaningful
+    // measure there, and a bin average that pulls in a neighboring,
+    // much brighter point can legitimately move such a tiny value by
+    // a large relative amount without indicating anything actually
+    // wrong.
+    const double peak = *std::ranges::max_element(before);
+    constexpr double relTol = 0.05;
+    constexpr double peakFrac = 1e-3;
+    for (std::size_t i = 0; i < wlOrig.size(); ++i)
     {
-        const double expected = before.at(iOld);
-        const double got = after.at(jNew);
+        const double expected = before.at(i);
+        if (std::abs(expected) < peakFrac * peak) { continue; }
+        const double got = after.at(i + 1); // +1 for the leading below-range endpoint
         if (std::abs(got - expected) > relTol * std::abs(expected))
         {
-            std::cerr << "testSpecsynLib: resample() did not reproduce the "
-                "original flux at wavelength " << wlNew.at(jNew) << " -- "
-                "expected " << expected << ", got " << got << "\n";
+            std::cerr << "testSpecsynLib: resample() did not approximately "
+                "reproduce the original flux at wavelength "
+                << wlNew.at(i + 1) << " -- expected " << expected
+                << ", got " << got << "\n";
             return 1;
         }
     }
@@ -648,6 +669,77 @@ static auto testMicroTurbDefault() -> int
     return 0;
 }
 
+// Check that resample()'s bin-integration approach (see
+// SpecsynLib::resample's own comment) is approximately
+// flux-conserving when heavily downsampling a library's native
+// wavelength grid onto a much coarser one -- unlike simple
+// point-sampling, which can badly misrepresent this comparison
+// whenever downsampling happens to skip over a narrow spectral
+// feature entirely. Builds two copies of the same library: one at
+// its native resolution, and one resampled (via the wlMin/wlMax/nWl
+// constructor arguments) onto just 64 points spanning that same
+// wavelength range. Computes the same star's spectrum from both, and
+// compares their own (trapezoidal-rule) integrated flux -- which
+// should stay close between the two despite the 64-point grid having
+// far too few points to resolve any of the native spectrum's actual
+// narrow features.
+static auto testResampleFluxConservation() -> int
+{
+    specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::raise> libNative(
+        spectraName, -3.0, 1.0, 0.0, 0.0, 0.0, 500, registryName);
+    const auto wlNative = libNative.wl();
+
+    constexpr std::size_t nWlCoarse = 64;
+    specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::raise> libCoarse(
+        spectraName, -3.0, 1.0, 0.0, 0.0, 0.0, 500, registryName,
+        wlNative.front(), wlNative.back(), nWlCoarse);
+
+    const double logTeff = std::log10(5772.0);
+    const auto props = makeStarData(1.0, 0.0, logTeff);
+
+    std::vector<double> specNative;
+    std::vector<double> specCoarse;
+    try
+    {
+        specNative = libNative.spec(props, 0.1);
+        specCoarse = libCoarse.spec(props, 0.1);
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "testSpecsynLib: unexpected exception from spec() in "
+            "the flux conservation test: " << e.what() << "\n";
+        return 1;
+    }
+
+    // Trapezoidal-rule integral of a spectrum over its own wavelength grid
+    auto trapzIntegral = [](const std::vector<double>& wl, const std::vector<double>& flux) -> double
+    {
+        double total = 0.0;
+        for (std::size_t i = 0; i + 1 < wl.size(); ++i)
+        {
+            total += 0.5 * (flux.at(i) + flux.at(i + 1)) * (wl.at(i + 1) - wl.at(i));
+        }
+        return total;
+    };
+
+    const double integralNative = trapzIntegral(wlNative, specNative);
+    const double integralCoarse = trapzIntegral(libCoarse.wl(), specCoarse);
+
+    constexpr double relTol = 0.01;
+    const double relErr = std::abs(integralCoarse - integralNative) / std::abs(integralNative);
+    if (relErr > relTol)
+    {
+        std::cerr << "testSpecsynLib: flux conservation check failed -- "
+            "native integral = " << integralNative << ", coarse (nWl = "
+            << nWlCoarse << ") integral = " << integralCoarse
+            << ", relative difference = " << relErr << ", tolerance = "
+            << relTol << "\n";
+        return 1;
+    }
+
+    return 0;
+}
+
 auto testSpecsynLib() -> int
 {
     int result = 0;
@@ -657,6 +749,7 @@ auto testSpecsynLib() -> int
     result += testSpecTlustySuccess();
     result += testResampleExactAndOOB();
     result += testResampleAllOutOfRange();
+    result += testResampleFluxConservation();
     result += testMicroTurbDefault();
     result += testSpecCoerce();
     result += testSpecCoerceZeroWeight();
