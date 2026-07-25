@@ -155,6 +155,32 @@ void io::SimPhysics::readSpectra(const toml::table& inputDeck)
     const auto modelNode = inputDeck.at_path("spectra.model");
     if (!modelNode) { return; }
 
+    // Optional user-requested output wavelength grid: spectra.wl_min
+    // and spectra.wl_max (in Angstrom), and spectra.nwl (the number
+    // of output wavelengths). All three are individually optional,
+    // but wl_min and wl_max only make sense together with an nwl to
+    // say how finely to sample between them, so if either endpoint is
+    // given, all three must be; nwl alone (a request to rebin onto a
+    // library's own native wavelength range at a different
+    // resolution) is fine on its own. Left at their default of 0 --
+    // not a valid value for any of the three -- when not supplied, as
+    // a sentinel a later commit will pass through to the spectral
+    // synthesizer constructors; this commit only parses and validates
+    // the input.
+    const auto wlMinInput = utils::getTOMLKeyWithError<double>(inputDeck, "spectra.wl_min");
+    const auto wlMaxInput = utils::getTOMLKeyWithError<double>(inputDeck, "spectra.wl_max");
+    const auto nWlInput = utils::getTOMLKeyWithError<unsigned long>(inputDeck, "spectra.nwl");
+    if ((wlMinInput.has_value() || wlMaxInput.has_value()) &&
+        !(wlMinInput.has_value() && wlMaxInput.has_value() && nWlInput.has_value()))
+    {
+        throw std::runtime_error(
+            "SimPhysics: spectra.wl_min and spectra.wl_max must be "
+            "given together with each other and with spectra.nwl");
+    }
+    wlMin_ = wlMinInput.value_or(0.0);
+    wlMax_ = wlMaxInput.value_or(0.0);
+    nWl_ = nWlInput.value_or(0);
+
     // A single string names one model directly; anything else must be
     // an array of strings, chained together via SpecsynLibChained
     if (const auto model = modelNode.value<std::string>(); model.has_value())
