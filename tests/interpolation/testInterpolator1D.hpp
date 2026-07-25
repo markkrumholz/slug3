@@ -93,4 +93,105 @@ auto testInterpolator1D() -> int
     return 0; // Success
 }
 
+/**
+ * @brief Unit test for Interpolator1D::integ
+ * @returns 0 if the test passes, 1 if it fails
+ * @details
+ * Reuses testInterpolator1D's own (x, f) setup: x = {1, 2, 3, 4} and,
+ * for quantity i, f = x^i. For i = 0 (constant) and i = 1 (linear),
+ * linear interpolation reproduces f exactly, so the integral of the
+ * interpolant over any [x0, x1] equals the exact analytic integral of
+ * f itself. For i = 2 (quadratic), linear interpolation between grid
+ * points does not reproduce f exactly, so the expected values instead
+ * come from the trapezoid-rule area under the piecewise-linear
+ * interpolant directly -- computed by hand from the same (x, f) grid
+ * points integ() itself interpolates between, rather than from x^2.
+ */
+auto testInterpolator1DInteg() -> int
+{
+    // Make the same test data as testInterpolator1D
+    constexpr size_t nF = 3;
+    std::vector<double> x = { 1, 2, 3, 4 };
+    std::array<std::vector<double>, nF> f;
+    for (size_t i = 0; i < nF; i++)
+    {
+        f[i].resize(x.size());
+        for (auto && [xi, fi] : std::views::zip(x, f[i]))
+        {
+            fi = std::pow(xi, i);
+        }
+    }
+
+    interp::Interpolator1D<> interp1(x, f[1], gsl_interp_linear);
+    interp::Interpolator1D<nF> interpN(x, f, gsl_interp_linear);
+
+    // Three test ranges: a single grid interval ([1, 2]), two full
+    // grid intervals ([2, 4]), and a sub-interval of a single grid
+    // interval that doesn't land on grid points at either end
+    // ([1.2, 1.8], entirely within [1, 2]) -- exercising both the
+    // full-segment and partial-segment cases of the underlying
+    // piecewise-linear integration.
+    struct Range { double x0; double x1; std::array<double, nF> expected; };
+    const std::vector<Range> ranges = {
+        // [1, 2]: i = 0 -> 1 * (2 - 1); i = 1 -> 0.5 * (2^2 - 1^2);
+        // i = 2 -> trapezoid on (1, f=1)-(2, f=4)
+        { 1.0, 2.0, { 1.0 * (2.0 - 1.0), 0.5 * (4.0 - 1.0), 0.5 * (1.0 + 4.0) * (2.0 - 1.0) } },
+        // [2, 4]: i = 0 -> 1 * (4 - 2); i = 1 -> 0.5 * (4^2 - 2^2);
+        // i = 2 -> trapezoid on (2, f=4)-(3, f=9) plus (3, f=9)-(4, f=16)
+        { 2.0, 4.0, { 1.0 * (4.0 - 2.0), 0.5 * (16.0 - 4.0),
+            (0.5 * (4.0 + 9.0) * (3.0 - 2.0)) + (0.5 * (9.0 + 16.0) * (4.0 - 3.0)) } },
+        // [1.2, 1.8], within [1, 2]: the interpolant there is
+        // 1 + 3 * (x - 1) (slope from f(1) = 1 to f(2) = 4), so
+        // i = 2's expected value is the trapezoid of that line's own
+        // endpoint values at 1.2 and 1.8
+        { 1.2, 1.8, { 1.0 * (1.8 - 1.2), 0.5 * ((1.8 * 1.8) - (1.2 * 1.2)),
+            0.5 * ((1.0 + (3.0 * 0.2)) + (1.0 + (3.0 * 0.8))) * (1.8 - 1.2) } },
+    };
+
+    for (const auto& r : ranges)
+    {
+        const auto integ1 = interp1.integ(r.x0, r.x1); // Single quantity
+        const auto integN = interpN.integ(r.x0, r.x1); // Vector of quantities
+        const auto integN1 = interpN.integ(r.x0, r.x1, 1); // Single quantity from vector
+
+        if (!utils::approxEqual(integ1, r.expected[1])) {
+            std::cerr << "testInterpolator1DInteg: integrating over ["
+                << r.x0 << ", " << r.x1 << "] expected single-quantity "
+                "interpolator to return " << r.expected[1]
+                << ", instead got " << integ1 << "\n";
+            return 1;
+        }
+        if (!utils::approxEqual(integN1, r.expected[1])) {
+            std::cerr << "testInterpolator1DInteg: integrating over ["
+                << r.x0 << ", " << r.x1 << "] expected single-quantity "
+                "from vector interpolator to return " << r.expected[1]
+                << ", instead got " << integN1 << "\n";
+            return 1;
+        }
+        if (integN.size() != nF)
+        {
+            std::cerr << "testInterpolator1DInteg: integrating over ["
+                << r.x0 << ", " << r.x1 << "] expected vector interpolator "
+                "to return " << nF << " quantities, instead got "
+                << integN.size() << "\n";
+            return 1;
+        }
+        for (const auto& [integNElem, exElem] : std::views::zip(integN, r.expected))
+        {
+            if (!utils::approxEqual(integNElem, exElem))
+            {
+                std::cerr << "testInterpolator1DInteg: integrating over ["
+                    << r.x0 << ", " << r.x1 << "] expected vector "
+                    "interpolator to return " << r.expected[0] << " "
+                    << r.expected[1] << " " << r.expected[2]
+                    << ", instead got " << integN[0] << " " << integN[1]
+                    << " " << integN[2] << "\n";
+                return 1;
+            }
+        }
+    }
+
+    return 0; // Success
+}
+
 #endif // TESTINTERPOLATION1D_HPP

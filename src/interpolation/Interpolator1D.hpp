@@ -144,6 +144,49 @@ namespace interp
             return gsl_interp_eval(interp_[idx], x_.data(), f_[idx].data(), x, acc_()); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- idx is asserted < NF just above
         }
 
+        /**
+         * @brief Integrate the interpolant over [x0, x1]
+         * @param x0 Lower limit of integration
+         * @param x1 Upper limit of integration
+         * @return The integral value(s)
+         * @details
+         * Return type is a double if NF = 1, and a std::array
+         * otherwise -- mirrors operator()(double) exactly, except
+         * that each quantity's interpolant is integrated over
+         * [x0, x1] (via gsl_interp_eval_integ) rather than evaluated
+         * at a single point.
+         */
+        [[nodiscard]] auto integ(double x0, double x1) const
+        {
+            assert(x0 >= x_.front() && x0 <= x_.back());
+            assert(x1 >= x_.front() && x1 <= x_.back());
+            assert(x0 <= x1);
+            std::array<double, NF> result = {};
+            for (size_t i = 0; i < NF; ++i)
+            {
+                result[i] = gsl_interp_eval_integ(interp_[i], x_.data(), // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i is a loop index bounded by compile-time constant NF
+                    f_[i].data(), x0, x1, acc_()); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i is a loop index bounded by compile-time constant NF
+            }
+            if constexpr(NF > 1) { return result; }
+            else { return result[0]; }
+        }
+
+        /**
+         * @brief Integrate a single quantity's interpolant over [x0, x1]
+         * @param x0 Lower limit of integration
+         * @param x1 Upper limit of integration
+         * @param idx Quantity to integrate; must be <= NF
+         * @return The integral value
+        */
+        [[nodiscard]] auto integ(double x0, double x1, size_t idx) const
+        {
+            assert(x0 >= x_.front() && x0 <= x_.back());
+            assert(x1 >= x_.front() && x1 <= x_.back());
+            assert(x0 <= x1);
+            assert(idx < NF);
+            return gsl_interp_eval_integ(interp_[idx], x_.data(), f_[idx].data(), x0, x1, acc_()); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- idx is asserted < NF just above
+        }
+
     private:
 
         /**
