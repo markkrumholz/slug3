@@ -163,10 +163,10 @@ void io::SimPhysics::readSpectra(const toml::table& inputDeck)
     // given, all three must be; nwl alone (a request to rebin onto a
     // library's own native wavelength range at a different
     // resolution) is fine on its own. Left at their default of 0 --
-    // not a valid value for any of the three -- when not supplied, as
-    // a sentinel a later commit will pass through to the spectral
-    // synthesizer constructors; this commit only parses and validates
-    // the input.
+    // not a valid value for any of the three -- when not supplied, a
+    // sentinel passed through to whichever spectral synthesizer
+    // constructor is used below, telling it to fall back on its own
+    // native wavelength grid instead.
     const auto wlMinInput = utils::getTOMLKeyWithError<double>(inputDeck, "spectra.wl_min");
     const auto wlMaxInput = utils::getTOMLKeyWithError<double>(inputDeck, "spectra.wl_max");
     const auto nWlInput = utils::getTOMLKeyWithError<unsigned long>(inputDeck, "spectra.nwl");
@@ -189,7 +189,7 @@ void io::SimPhysics::readSpectra(const toml::table& inputDeck)
         // not require a spectral library at all
         if (model.value() == "blackbody")
         {
-            specsyn_ = std::make_unique<specsyn::SpecsynBlackbody>();
+            specsyn_ = std::make_unique<specsyn::SpecsynBlackbody>(wlMin_, wlMax_, nWl_);
             return;
         }
 
@@ -212,7 +212,8 @@ void io::SimPhysics::readSpectra(const toml::table& inputDeck)
         if (wrGrid)
         {
             specsyn_ = std::make_unique<specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise>>(
-                model.value(), fehDist_.getMin(), fehDist_.getMax(), registryName);
+                model.value(), fehDist_.getMin(), fehDist_.getMax(), registryName,
+                wlMin_, wlMax_, nWl_);
         }
         else
         {
@@ -220,7 +221,7 @@ void io::SimPhysics::readSpectra(const toml::table& inputDeck)
                 model.value(), fehDist_.getMin(), fehDist_.getMax(),
                 tracks::defaultAFe, specsyn::defaultCFe,
                 std::numeric_limits<double>::quiet_NaN(), specsyn::defaultR,
-                registryName);
+                registryName, wlMin_, wlMax_, nWl_);
         }
         return;
     }
@@ -244,5 +245,5 @@ void io::SimPhysics::readSpectra(const toml::table& inputDeck)
     specsyn_ = std::make_unique<specsyn::SpecsynLibChained>(
         models, fehDist_.getMin(), fehDist_.getMax(),
         tracks::defaultAFe, specsyn::defaultCFe, std::vector<double>{},
-        specsyn::defaultR, registryName);
+        specsyn::defaultR, registryName, wlMin_, wlMax_, nWl_);
 }

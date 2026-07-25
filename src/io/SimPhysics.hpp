@@ -145,15 +145,14 @@ namespace io
         std::unique_ptr<specsyn::Specsyn> specsyn_; /**< Spectral synthesizer, or nullptr if spectra.model was not given */
 
         // User-specified output wavelength grid (spectra.wl_min,
-        // spectra.wl_max, spectra.nwl), read by readSpectra but not
-        // yet consumed anywhere -- a later commit will pass these
-        // through to the spectral synthesizer constructors so a
-        // caller can request a coarser output grid than a library's
-        // own native one. 0 (readSpectra's default when a key is
-        // absent) is reserved as a "not supplied" flag for that
-        // future use, since none of the three is a valid value in
-        // its own right (a wavelength grid can't have zero extent or
-        // zero points).
+        // spectra.wl_max, spectra.nwl), read by readSpectra and passed
+        // through to whichever spectral synthesizer constructor it
+        // builds, so a caller can request a coarser output grid than
+        // a library's own native one (e.g. for cheaper
+        // photometry-oriented output). 0 (readSpectra's default when
+        // a key is absent) is a "not supplied" flag for that purpose,
+        // since none of the three is a valid value in its own right
+        // (a wavelength grid can't have zero extent or zero points).
         double wlMin_ = 0.0;      /**< User-requested minimum output wavelength, in Angstrom, or 0 if not supplied */
         double wlMax_ = 0.0;      /**< User-requested maximum output wavelength, in Angstrom, or 0 if not supplied */
         unsigned long nWl_ = 0;   /**< User-requested number of output wavelengths, or 0 if not supplied */
