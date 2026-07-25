@@ -3,12 +3,14 @@
  * @author Mark Krumholz
  * @brief Unit tests for the classes in src/core.
  * @details
- * This file runs unit tests for all the classes in src/core.
+ * This file runs the fast unit tests for the classes in src/core; see
+ * testCoreFullAll.cpp for the slow, full-scale end-to-end counterpart
+ * (e.g. testClusterSpecsynFull), kept in a separate executable/CTest
+ * entry specifically so it can be skipped independently of this one.
  * @date 2026-07-13
  */
 
 #include "testCluster.hpp"
-#include "testClusterSpecsynFull.hpp"
 #include "testSimCluster.hpp"
 #include "testSpecsynChain.hpp"
 #include <exception>
@@ -21,7 +23,6 @@ auto main() -> int {
         result += testCluster();
         result += testSimCluster();
         result += testSpecsynChain();
-        result += testClusterSpecsynFull();
         return result;
     }
     catch (const std::exception& error)

@@ -85,7 +85,15 @@ jobs:
 
       - name: Test
         working-directory: build
-        run: ctest --output-on-failure
+        # Only the "quick" tests -- see CMakeLists.txt's own LABELS
+        # comment. Slow, full-scale end-to-end tests need real data
+        # files (MIST tracks, POWR/TLUSTY/BOSZ/CK04 spectra) that are
+        # gitignored and not fetched here, so they currently no-op
+        # (self-skip) on CI regardless; excluding them explicitly
+        # keeps CI fast on purpose rather than by accident of what
+        # data happens to be present, so it stays fast even once CI
+        # does have that data available.
+        run: ctest --output-on-failure -L quick
 
   lint:
     name: clang-tidy
