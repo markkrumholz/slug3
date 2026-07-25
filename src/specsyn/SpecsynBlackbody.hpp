@@ -35,19 +35,34 @@ namespace specsyn
         static constexpr double rydberg = GSL_CONST_CGSM_RYDBERG;            /**< Rydberg energy, erg */
         static constexpr double boltzmannK = GSL_CONST_CGSM_BOLTZMANN;       /**< Boltzmann constant, erg/K */
 
-        // Number of points in the wavelength grid
-        static constexpr std::size_t nWl = 1000;
+        // Default number of points in the wavelength grid, used when
+        // the caller doesn't request a grid of their own -- see the
+        // constructor
+        static constexpr std::size_t nWlDefault = 1000;
 
     public:
 
         /**
          * @brief Construct a SpecsynBlackbody
+         * @param wlMin Minimum wavelength of the output grid, in
+         *   Angstrom; if 0 (the default), used together with wlMax
+         *   and nWl below (see @details) as a flag to fall back on
+         *   this class's own default range
+         * @param wlMax Maximum wavelength of the output grid, in
+         *   Angstrom; see wlMin
+         * @param nWl Number of points in the output grid; if 0 (the
+         *   default), used as a flag to fall back on this class's own
+         *   default range and point count -- see @details
          * @param z The redshift; defaults to zero
          * @details
-         * Sets wl_ to a grid of nWl points, logarithmically spaced
-         * from hc / (10 Ry) to hc / (0.01 Ry).
+         * If nWl is 0, wlMin and wlMax are ignored (whatever they
+         * were passed as) and wl_ is instead set to a grid of
+         * nWlDefault points, logarithmically spaced from hc / (10 Ry)
+         * to hc / (0.01 Ry); otherwise wl_ is a grid of nWl points,
+         * logarithmically spaced from wlMin to wlMax.
          */
-        explicit SpecsynBlackbody(double z = 0.0);
+        explicit SpecsynBlackbody(double wlMin = 0.0, double wlMax = 0.0,
+            std::size_t nWl = 0, double z = 0.0);
 
         /**
          * @brief Compute the blackbody spectrum of a single star

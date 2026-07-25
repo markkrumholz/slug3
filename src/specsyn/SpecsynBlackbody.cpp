@@ -7,6 +7,7 @@
 
 #include "SpecsynBlackbody.hpp"
 #include "../tracks/TrackCommons.hpp"
+#include "../utils/MiscUtils.hpp"
 #include "Specsyn.hpp"
 #include <cmath>
 #include <cstddef>
@@ -16,21 +17,19 @@
 static constexpr double angstromToCm = 1e-8;
 static constexpr double cmToAngstrom = 1e8;
 
-specsyn::SpecsynBlackbody::SpecsynBlackbody(const double z) : Specsyn(z)
+specsyn::SpecsynBlackbody::SpecsynBlackbody(
+    double wlMin, double wlMax, std::size_t nWl, const double z) : Specsyn(z)
 {
-    // Wavelength range corresponding to photon energies from 10 Ry
-    // down to 0.01 Ry, converted from cm to Angstrom
-    const double wlMin = (planckH * speedOfLight / (10.0 * rydberg)) * cmToAngstrom;
-    const double wlMax = (planckH * speedOfLight / (0.01 * rydberg)) * cmToAngstrom;
-
-    wl_.resize(nWl);
-    const double logWlMin = std::log(wlMin);
-    const double logWlMax = std::log(wlMax);
-    const double dLogWl = (logWlMax - logWlMin) / static_cast<double>(nWl - 1);
-    for (std::size_t i = 0; i < nWl; ++i)
+    if (nWl == 0)
     {
-        wl_.at(i) = std::exp(logWlMin + (static_cast<double>(i) * dLogWl));
+        // Wavelength range corresponding to photon energies from 10 Ry
+        // down to 0.01 Ry, converted from cm to Angstrom
+        wlMin = (planckH * speedOfLight / (10.0 * rydberg)) * cmToAngstrom;
+        wlMax = (planckH * speedOfLight / (0.01 * rydberg)) * cmToAngstrom;
+        nWl = nWlDefault;
     }
+
+    wl_ = utils::logspace(wlMin, wlMax, nWl);
 }
 
 auto specsyn::SpecsynBlackbody::spec(const StarData& props, double /*feh*/) const -> std::vector<double>
