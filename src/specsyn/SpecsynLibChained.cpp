@@ -120,6 +120,11 @@ namespace specsyn
          *   for a WR library
          * @param r Spectral resolution; ignored for a WR library
          * @param registryName Name of the spectral library registry file
+         * @param wlMin Minimum wavelength of the output grid, in
+         *   Angstrom; see SpecsynLibChained's own constructor
+         * @param wlMax Maximum wavelength of the output grid, in
+         *   Angstrom; see wlMin
+         * @param nWl Number of points in the output grid; see wlMin
          * @param z The redshift
          * @returns The constructed library, upcast to SpecsynLib<Policy>
          * @details
@@ -132,21 +137,19 @@ namespace specsyn
             const std::string& name, const bool isWR,
             const double fehMin, const double fehMax,
             const double afe, const double cfe, const double microTurb,
-            const double r, const std::string& registryName, const double z)
+            const double r, const std::string& registryName,
+            const double wlMin, const double wlMax, const std::size_t nWl,
+            const double z)
         -> std::unique_ptr<SpecsynLib<Policy>>
         {
             if (isWR)
             {
-                // wlMin/wlMax/nWl are not yet threaded through
-                // makeChainedLib's own parameters, so pass their
-                // "not supplied" sentinels explicitly here rather than
-                // let z (the next positional parameter after
-                // registryName) silently bind to wlMin instead
                 return std::make_unique<SpecsynLibWR<Policy>>(
-                    name, fehMin, fehMax, registryName, 0.0, 0.0, 0, z);
+                    name, fehMin, fehMax, registryName, wlMin, wlMax, nWl, z);
             }
             return std::make_unique<SpecsynLibNoWind<Policy>>(
-                name, fehMin, fehMax, afe, cfe, microTurb, r, registryName, z);
+                name, fehMin, fehMax, afe, cfe, microTurb, r, registryName,
+                wlMin, wlMax, nWl, z);
         }
     } // namespace
 
@@ -159,6 +162,9 @@ namespace specsyn
         const std::vector<double>& microTurb,
         const double r,
         const std::string& registryName,
+        const double wlMin,
+        const double wlMax,
+        const std::size_t nWl,
         const double z) :
         Specsyn(z)
     {
@@ -222,12 +228,14 @@ namespace specsyn
             const double mt = microTurb.empty() ? useLibraryDefault : microTurb[i];
             coerceLibs.push_back(makeChainedLib<OOBPolicy::coerce>(
                 spectraName[i], isWRGrid(spectraName[i]),
-                fehMin, fehMax, afe, cfe, mt, r, registryName, z));
+                fehMin, fehMax, afe, cfe, mt, r, registryName,
+                wlMin, wlMax, nWl, z));
         }
         const double lastMt = microTurb.empty() ? useLibraryDefault : microTurb[n - 1];
         std::unique_ptr<SpecsynLib<OOBPolicy::raise>> raiseLib = makeChainedLib<OOBPolicy::raise>(
             spectraName[n - 1], isWRGrid(spectraName[n - 1]),
-            fehMin, fehMax, afe, cfe, lastMt, r, registryName, z);
+            fehMin, fehMax, afe, cfe, lastMt, r, registryName,
+            wlMin, wlMax, nWl, z);
 
         // Build a common wavelength grid spanning every library's own
         // native grid, and resample every library onto it, so that

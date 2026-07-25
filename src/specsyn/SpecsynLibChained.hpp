@@ -11,6 +11,7 @@
 #include "../tracks/TrackCommons.hpp"
 #include "Specsyn.hpp"
 #include "SpecsynCommons.hpp"
+#include <cstddef>
 #include <memory>
 #include <string>
 #include <vector>
@@ -60,6 +61,15 @@ namespace specsyn
          *   forcing every library in the chain to share one value.
          * @param r Spectral resolution
          * @param registryName Name of the spectral library registry file
+         * @param wlMin Minimum wavelength of the output grid, in
+         *   Angstrom; if 0 (the default), used together with wlMax
+         *   and nWl below (see @details) as a flag to fall back on
+         *   each library's own native wavelength coverage
+         * @param wlMax Maximum wavelength of the output grid, in
+         *   Angstrom; see wlMin
+         * @param nWl Number of points in the output grid; if 0 (the
+         *   default), used as a flag to fall back on each library's
+         *   own native wavelength grid -- see @details
          * @param z The redshift; defaults to zero
          * @throws std::runtime_error if spectraName is empty, or if
          *   microTurb is non-empty and its size does not match
@@ -72,7 +82,8 @@ namespace specsyn
          * (or that library's own registry default, if microTurb is
          * empty; ignored entirely for a SpecsynLibWR entry, which has
          * no microTurb axis) and otherwise using the remaining
-         * arguments unchanged for each one. Every library but the last
+         * arguments -- including wlMin, wlMax, and nWl -- unchanged
+         * for each one. Every library but the last
          * is constructed with OOBPolicy::coerce, so a star outside its
          * grid (or in one of its gaps) is still handled by that same
          * library if it has at least one valid neighboring grid point,
@@ -103,6 +114,9 @@ namespace specsyn
             const std::vector<double>& microTurb = {},
             double r = defaultR,
             const std::string& registryName = defaultRegistry,
+            double wlMin = 0.0,
+            double wlMax = 0.0,
+            std::size_t nWl = 0,
             double z = 0.0);
 
         /**

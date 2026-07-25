@@ -7,6 +7,7 @@
 
 #include "SpecsynLibNoWind.hpp"
 #include "../tracks/TrackCommons.hpp"
+#include "../utils/MiscUtils.hpp"
 #include "Specsyn.hpp"
 #include "SpecsynCommons.hpp"
 #include "SpecsynLib.hpp"
@@ -121,6 +122,9 @@ namespace specsyn
         const double microTurb,
         const double r,
         const std::string& registryName,
+        const double wlMin,
+        const double wlMax,
+        const std::size_t nWl,
         const double z) :
         SpecsynLib<Policy>(),
         FeH_(this->dim1_),
@@ -298,6 +302,10 @@ namespace specsyn
         H5Fclose(file);
 
         // NOLINTEND(misc-include-cleaner)
+
+        // If the caller requested an explicit output grid rather than
+        // this library's own native one, resample onto it now
+        if (nWl != 0) { this->resample(utils::logspace(wlMin, wlMax, nWl)); }
     }
 
     template <OOBPolicy Policy>

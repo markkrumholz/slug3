@@ -12,6 +12,7 @@
 #include "Specsyn.hpp"
 #include "SpecsynCommons.hpp"
 #include "SpecsynLib.hpp"
+#include <cstddef>
 #include <limits>
 #include <string>
 #include <vector>
@@ -64,7 +65,21 @@ namespace specsyn
          *   a single constant that fits every library equally well
          * @param r Spectral resolution
          * @param registryName Name of the spectral library registry file
+         * @param wlMin Minimum wavelength of the output grid, in
+         *   Angstrom; if 0 (the default), used together with wlMax
+         *   and nWl below (see @details) as a flag to fall back on
+         *   the library's own native wavelength grid
+         * @param wlMax Maximum wavelength of the output grid, in
+         *   Angstrom; see wlMin
+         * @param nWl Number of points in the output grid; if 0 (the
+         *   default), used as a flag to fall back on the library's
+         *   own native wavelength grid -- see @details
          * @param z The redshift; defaults to zero
+         * @details
+         * If nWl is nonzero, resamples onto nWl points log-spaced
+         * from wlMin to wlMax (via SpecsynLib::resample) after
+         * reading the library's own native wavelength grid; otherwise
+         * wl() simply returns that native grid as read from disk.
          */
         SpecsynLibNoWind(
             const std::string& spectraName,
@@ -75,6 +90,9 @@ namespace specsyn
             double microTurb = std::numeric_limits<double>::quiet_NaN(),
             double r = defaultR,
             const std::string& registryName = defaultRegistry,
+            double wlMin = 0.0,
+            double wlMax = 0.0,
+            std::size_t nWl = 0,
             double z = 0.0);
 
         /**
