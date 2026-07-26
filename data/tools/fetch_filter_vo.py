@@ -50,11 +50,15 @@ FILTER_VO_URL = "http://svo2.cab.inta-csic.es/svo/theory/fps3/index.php"
 FILTER_VO_VOTABLE_URL = "http://svo2.cab.inta-csic.es/theory/fps/fps.php"
 # The filter-level metadata fields fetched from each filter's VOTable and
 # stored as like-named HDF5 group attributes -- see fetch_filter_votable
-# and write_filter. Split into string-valued and numeric-valued fields
-# since they need different casting when read back from the VOTable's own
-# PARAM elements (all of which are themselves just XML attribute strings).
+# and write_filter. Split by value type (string/float/int) since each
+# needs different casting when read back from the VOTable's own PARAM
+# elements (all of which are themselves just XML attribute strings).
 FILTER_VO_STR_ATTRS = ["Description", "MagSys", "ZeroPointUnit", "ZeroPointType"]
 FILTER_VO_NUM_ATTRS = ["WavelengthRef", "WavelengthMin", "WavelengthMax", "ZeroPoint"]
+# DetectorType: 0 (energy counter) or 1 (photon counter) -- an integer
+# code, unlike FILTER_VO_NUM_ATTRS' continuous quantities, so cast and
+# stored separately from them
+FILTER_VO_INT_ATTRS = ["DetectorType"]
 FILTER_VO_references = [
     "Rodrigo, C., Cruz, P., Aguilar, J.F., et al. 2024, A&A, 689, 93",
     "Rodrigo, C., & Solano, E. 2020, XIV.0 Scientific Meeting of the Spanish Astronomical Society",
@@ -354,6 +358,9 @@ def write_filter(h5file: h5py.File, facility: str, instrument: str, filter_code:
     for key in FILTER_VO_NUM_ATTRS:
         if key in params:
             filt_grp.attrs[key] = float(params[key])
+    for key in FILTER_VO_INT_ATTRS:
+        if key in params:
+            filt_grp.attrs[key] = int(params[key])
     filt_grp.attrs["references"] = FILTER_VO_references
     filt_grp.attrs["reference_urls"] = FILTER_VO_reference_urls
     filt_grp.attrs["source"] = FILTER_VO_URL
