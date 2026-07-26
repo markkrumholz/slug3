@@ -7,15 +7,16 @@
 
 #include "SpecsynBlackbody.hpp"
 #include "../tracks/TrackCommons.hpp"
+#include "../utils/Constants.hpp"
 #include "../utils/MiscUtils.hpp"
 #include "Specsyn.hpp"
 #include <cmath>
 #include <cstddef>
 #include <vector>
 
-// Unit conversions between cm and Angstrom (1 Angstrom = 1e-8 cm)
-static constexpr double angstromToCm = 1e-8;
-static constexpr double cmToAngstrom = 1e8;
+// Unit conversions between cm and Angstrom
+static constexpr double angstromToCm = utils::Angstrom;
+static constexpr double cmToAngstrom = 1.0 / utils::Angstrom;
 
 specsyn::SpecsynBlackbody::SpecsynBlackbody(
     double wlMin, double wlMax, std::size_t nWl, const double z) : Specsyn(z)

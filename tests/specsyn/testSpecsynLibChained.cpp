@@ -39,6 +39,7 @@
 #include "../../src/specsyn/SpecsynLibNoWind.hpp"
 #include "../../src/specsyn/SpecsynLibChained.hpp"
 #include "../../src/tracks/TrackCommons.hpp"
+#include "../../src/utils/Constants.hpp"
 #include "../../src/utils/MiscUtils.hpp"
 #include "testSpecsynLibChained.hpp"
 #include <algorithm>
@@ -54,7 +55,7 @@ namespace
 {
     const std::string registryName = "tests/specsyn/assets/spectra.toml";
 
-    constexpr double solarLuminosity = 3.828e33; // erg/s, IAU 2015 nominal value
+    constexpr double solarLuminosity = utils::Lsun;
     constexpr double obLuminosity = 189859.68762747623 * solarLuminosity;
 
     /**

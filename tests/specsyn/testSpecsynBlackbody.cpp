@@ -10,11 +10,11 @@
 #include "../src/specsyn/Specsyn.hpp"
 #include "../src/specsyn/SpecsynBlackbody.hpp"
 #include "../src/tracks/TrackCommons.hpp"
+#include "../src/utils/Constants.hpp"
 #include "testSpecsynBlackbody.hpp"
 #include <array>
 #include <cmath>
 #include <cstddef>
-#include <gsl/gsl_const_cgsm.h> // NOLINT(misc-include-cleaner)
 #include <gsl/gsl_interp.h> // NOLINT(misc-include-cleaner)
 #include <iostream>
 #include <memory>
@@ -28,13 +28,13 @@ namespace
     // expected blackbody spectrum for made-up stellar data and check
     // it against the class's actual output, rather than just checking
     // that spec() runs without crashing.
-    constexpr double planckH = GSL_CONST_CGSM_PLANCKS_CONSTANT_H;
-    constexpr double speedOfLight = GSL_CONST_CGSM_SPEED_OF_LIGHT;
-    constexpr double stefanBoltzmann = GSL_CONST_CGSM_STEFAN_BOLTZMANN_CONSTANT;
-    constexpr double boltzmannK = GSL_CONST_CGSM_BOLTZMANN;
-    constexpr double solarLuminosity = 3.828e33; // erg/s, IAU 2015 nominal value
+    constexpr double planckH = utils::h;
+    constexpr double speedOfLight = utils::c;
+    constexpr double stefanBoltzmann = utils::sigmaSB;
+    constexpr double boltzmannK = utils::kB;
+    constexpr double solarLuminosity = utils::Lsun;
     constexpr double pi = std::numbers::pi_v<double>;
-    constexpr double angstromToCm = 1e-8;
+    constexpr double angstromToCm = utils::Angstrom;
     constexpr double relTol = 1e-6;
 
     // Arbitrary [Fe/H] value, used only because spec()/specCts() now

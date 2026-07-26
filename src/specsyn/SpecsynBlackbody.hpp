@@ -8,9 +8,9 @@
 #ifndef SPECSYNBLACKBODY_HPP
 #define SPECSYNBLACKBODY_HPP
 
+#include "../utils/Constants.hpp"
 #include "Specsyn.hpp"
 #include <cstddef>
-#include <gsl/gsl_const_cgsm.h> // NOLINT(misc-include-cleaner)
 #include <vector>
 
 namespace specsyn
@@ -30,10 +30,10 @@ namespace specsyn
     class SpecsynBlackbody : public Specsyn
     {
         // Physical constants, in cgs units, used by this class
-        static constexpr double planckH = GSL_CONST_CGSM_PLANCKS_CONSTANT_H; /**< Planck constant, erg s */
-        static constexpr double speedOfLight = GSL_CONST_CGSM_SPEED_OF_LIGHT; /**< Speed of light, cm/s */
-        static constexpr double rydberg = GSL_CONST_CGSM_RYDBERG;            /**< Rydberg energy, erg */
-        static constexpr double boltzmannK = GSL_CONST_CGSM_BOLTZMANN;       /**< Boltzmann constant, erg/K */
+        static constexpr double planckH = utils::h;       /**< Planck constant, erg s */
+        static constexpr double speedOfLight = utils::c;   /**< Speed of light, cm/s */
+        static constexpr double rydberg = utils::Ryd;      /**< Rydberg energy, erg */
+        static constexpr double boltzmannK = utils::kB;    /**< Boltzmann constant, erg/K */
 
         // Default number of points in the wavelength grid, used when
         // the caller doesn't request a grid of their own -- see the
