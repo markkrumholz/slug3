@@ -9,6 +9,7 @@
 #define PHOTCOMMONS_HPP
 
 #include "../utils/Constants.hpp"
+#include <cmath>
 #include <cstdint>
 
 /**
@@ -37,20 +38,26 @@ namespace phot
     inline constexpr double flux0ST = 3.631e-9;  /**< Zero point of the ST system, in erg/s/cm^2/Angstrom */
 
     /**
-     * @brief Convert a flux from one photometric system to another
+     * @brief Convert a flux or magnitude from one photometric system to another
      * @tparam from The PhotSystem fluxIn is expressed in
      * @tparam to The PhotSystem to convert fluxIn to
-     * @param fluxIn The input flux, in erg/s/cm^2/Angstrom (if from is
-     *   Flambda) or Jy (if from is Fnu)
-     * @param wl The wavelength at which fluxIn is evaluated, in Angstrom
-     * @return fluxIn converted to to, in Jy (if to is Fnu) or
-     *   erg/s/cm^2/Angstrom (if to is Flambda)
+     * @param fluxIn The input value, in erg/s/cm^2/Angstrom (if from
+     *   is Flambda), Jy (if from is Fnu), or a magnitude (if from is
+     *   ST or AB)
+     * @param wl The wavelength at which fluxIn is evaluated, in
+     *   Angstrom; unused (present only for a uniform signature across
+     *   every specialization) by any specialization whose from/to
+     *   pair doesn't itself depend on wavelength
+     * @return fluxIn converted to to, in Jy (if to is Fnu),
+     *   erg/s/cm^2/Angstrom (if to is Flambda), or a magnitude (if to
+     *   is ST or AB)
      * @details
-     * Only declared here, not defined: only the Flambda <-> Fnu
-     * conversions below are given a definition here, via explicit
-     * specialization. Conversions involving a magnitude system (ST,
-     * AB, Vega) are added by specializing this same template in a
-     * future commit.
+     * Only declared here, not defined: only specific (from, to) pairs
+     * are given a definition, via explicit specialization, below.
+     * Vega -- a filter-based magnitude system with no absolute
+     * flux/magnitude conversion of its own, unlike ST and AB -- is
+     * handled separately, as a special case, rather than by
+     * specializing this template.
      */
     template <PhotSystem from, PhotSystem to>
     constexpr auto PhotConvert(double fluxIn, double wl) -> double; // NOLINT(readability-identifier-naming) -- capitalized to match this file's other fixed photometric naming (PhotSystem above), rather than the project's usual camelBack function convention
@@ -86,6 +93,64 @@ namespace phot
     constexpr auto PhotConvert<PhotSystem::Fnu, PhotSystem::Flambda>(const double fluxIn, const double wl) -> double // NOLINT(readability-identifier-naming) -- see the primary template above
     {
         return fluxIn * utils::Jy * utils::c / (wl * wl * utils::Angstrom);
+    }
+
+    /**
+     * @brief Convert Fnu (Jy) to an AB magnitude
+     * @details
+     * The AB system's zero point (flux0AB) is a fixed flux in Jy,
+     * independent of wavelength, so wl goes unused here -- see the
+     * primary template's own comment. Note that std::log10 isn't
+     * actually usable in a constant expression with every standard
+     * library this project might build against, even though this
+     * function is still marked constexpr (for a uniform signature
+     * with this template's other specializations): unlike the
+     * Flambda <-> Fnu conversions above, this one can only actually
+     * be evaluated at runtime in practice.
+     */
+    template <>
+    constexpr auto PhotConvert<PhotSystem::Fnu, PhotSystem::AB>(const double fluxIn, double /*wl*/) -> double // NOLINT(readability-identifier-naming) -- see the primary template above
+    {
+        return -2.5 * std::log10(fluxIn / flux0AB);
+    }
+
+    /**
+     * @brief Convert an AB magnitude to Fnu (Jy)
+     * @details
+     * The algebraic inverse of the Fnu -> AB conversion above; see
+     * its own comment for why wl goes unused and why this can only
+     * actually be evaluated at runtime despite being marked constexpr.
+     */
+    template <>
+    constexpr auto PhotConvert<PhotSystem::AB, PhotSystem::Fnu>(const double magIn, double /*wl*/) -> double // NOLINT(readability-identifier-naming) -- see the primary template above
+    {
+        return flux0AB * std::pow(10.0, magIn / -2.5);
+    }
+
+    /**
+     * @brief Convert Flambda (erg/s/cm^2/Angstrom) to an ST magnitude
+     * @details
+     * The ST system's zero point (flux0ST) is a fixed flux in
+     * erg/s/cm^2/Angstrom, independent of wavelength, so wl goes
+     * unused here -- see PhotConvert<Fnu, AB>'s own comment for why,
+     * and for why this can only actually be evaluated at runtime
+     * despite being marked constexpr.
+     */
+    template <>
+    constexpr auto PhotConvert<PhotSystem::Flambda, PhotSystem::ST>(const double fluxIn, double /*wl*/) -> double // NOLINT(readability-identifier-naming) -- see the primary template above
+    {
+        return -2.5 * std::log10(fluxIn / flux0ST);
+    }
+
+    /**
+     * @brief Convert an ST magnitude to Flambda (erg/s/cm^2/Angstrom)
+     * @details
+     * The algebraic inverse of the Flambda -> ST conversion above.
+     */
+    template <>
+    constexpr auto PhotConvert<PhotSystem::ST, PhotSystem::Flambda>(const double magIn, double /*wl*/) -> double // NOLINT(readability-identifier-naming) -- see the primary template above
+    {
+        return flux0ST * std::pow(10.0, magIn / -2.5);
     }
 
 } // namespace phot
