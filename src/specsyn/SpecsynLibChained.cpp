@@ -6,6 +6,7 @@
  */
 
 #include "SpecsynLibChained.hpp"
+#include "../tracks/TrackCommons.hpp"
 #include "../utils/MiscUtils.hpp"
 #include "Specsyn.hpp"
 #include "SpecsynCommons.hpp"
@@ -18,6 +19,7 @@
 // NOLINT on SpecsynLib.cpp's own findBracket -- so both the include itself
 // and each call site need a NOLINT.
 #include <algorithm> // NOLINT(misc-include-cleaner)
+#include <cmath>
 #include <cstddef>
 #include <limits>
 #include <memory>
@@ -152,6 +154,59 @@ namespace specsyn
                 name, fehMin, fehMax, afe, cfe, microTurb, r, registryName,
                 wlMin, wlMax, nWl, z);
         }
+
+        /**
+         * @brief Widen [lo, hi] to also cover one chained library's own logTeff() range
+         * @tparam Policy OOBPolicy of lib
+         * @param lib A single chained library, as constructed by makeChainedLib
+         * @param lo Running global minimum, widened in place
+         * @param hi Running global maximum, widened in place
+         * @details
+         * lib is only ever actually a SpecsynLibNoWind<Policy> or a
+         * SpecsynLibWR<Policy> (see makeChainedLib), upcast to the
+         * common SpecsynLib<Policy> it's stored as -- neither of which
+         * exposes a logTeff() of its own, so this dynamic_casts back
+         * down to whichever concrete type lib actually is to reach it.
+         */
+        template <OOBPolicy Policy>
+        void updateLogTeffRange( //NOLINT(llvm-prefer-static-over-anonymous-namespace)
+            const SpecsynLib<Policy>& lib, double& lo, double& hi)
+        {
+            if (const auto* noWind = dynamic_cast<const SpecsynLibNoWind<Policy>*>(&lib))
+            {
+                lo = std::min(lo, noWind->logTeff().front());
+                hi = std::max(hi, noWind->logTeff().back());
+            }
+            else if (const auto* wr = dynamic_cast<const SpecsynLibWR<Policy>*>(&lib))
+            {
+                lo = std::min(lo, wr->logTeff().front());
+                hi = std::max(hi, wr->logTeff().back());
+            }
+        }
+
+        /**
+         * @brief Widen [lo, hi] to also cover one chained library's own logg() range, if it has one
+         * @tparam Policy OOBPolicy of lib
+         * @param lib A single chained library, as constructed by makeChainedLib
+         * @param lo Running global minimum, widened in place
+         * @param hi Running global maximum, widened in place
+         * @details
+         * Only SpecsynLibNoWind exposes a logg() -- SpecsynLibWR has no
+         * logg axis at all, since Wolf-Rayet atmospheres are
+         * parameterized by transformed radius instead -- so a lib that
+         * dynamic_casts to SpecsynLibWR<Policy> simply leaves [lo, hi]
+         * untouched.
+         */
+        template <OOBPolicy Policy>
+        void updateLoggRange( //NOLINT(llvm-prefer-static-over-anonymous-namespace)
+            const SpecsynLib<Policy>& lib, double& lo, double& hi)
+        {
+            if (const auto* noWind = dynamic_cast<const SpecsynLibNoWind<Policy>*>(&lib))
+            {
+                lo = std::min(lo, noWind->logg().front());
+                hi = std::max(hi, noWind->logg().back());
+            }
+        }
     } // namespace
 
     SpecsynLibChained::SpecsynLibChained(
@@ -166,7 +221,8 @@ namespace specsyn
         const double wlMin,
         const double wlMax,
         const std::size_t nWl,
-        const double z) :
+        const double z,
+        const bool tClamp) :
         Specsyn(z)
     {
         if (spectraName.empty())
@@ -288,6 +344,32 @@ namespace specsyn
         for (auto& lib : coerceLibs) { lib->resample(wl_); }
         raiseLib->resample(wl_);
 
+        // Widen [logTeffMin_, logTeffMax_] and [loggMin_, loggMax_]
+        // across every chained library's own logTeff()/logg() range,
+        // so spec() can clamp a star's log(Teff) (any library) and
+        // log(g) (SpecsynLibNoWind libraries only) into whatever this
+        // chain actually covers -- see this constructor's own comment
+        // for why. Left at their default quiet_NaN() (see the header)
+        // if tClamp is false, so spec() simply skips both clamps.
+        if (tClamp)
+        {
+            double loTeff = std::numeric_limits<double>::infinity();
+            double hiTeff = -std::numeric_limits<double>::infinity();
+            double loLogg = std::numeric_limits<double>::infinity();
+            double hiLogg = -std::numeric_limits<double>::infinity();
+            for (const auto& lib : coerceLibs)
+            {
+                updateLogTeffRange(*lib, loTeff, hiTeff);
+                updateLoggRange(*lib, loLogg, hiLogg);
+            }
+            updateLogTeffRange(*raiseLib, loTeff, hiTeff);
+            updateLoggRange(*raiseLib, loLogg, hiLogg);
+            logTeffMin_ = loTeff;
+            logTeffMax_ = hiTeff;
+            loggMin_ = loLogg;
+            loggMax_ = hiLogg;
+        }
+
         // Move every library, still in priority order, into libs_
         libs_.reserve(n);
         for (auto& lib : coerceLibs) { libs_.push_back(std::move(lib)); }
@@ -296,12 +378,57 @@ namespace specsyn
 
     auto SpecsynLibChained::spec(const StarData& props, const double feh) const -> std::vector<double>
     {
+        StarData clampedProps = props;
+        if (!std::isnan(logTeffMin_))
+        {
+            double& logTeff = clampedProps[static_cast<size_t>(tracks::FieldIdx::logTe)]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- StarData is a fixed-size std::array, and logTe is one of its compile-time-known indices
+            logTeff = std::clamp(logTeff, logTeffMin_, logTeffMax_);
+        }
+
+        // A logg clamp is only meaningful for a non-WR star -- a
+        // Wolf-Rayet star isn't placed on a (feh, logg, logTeff) grid
+        // at all (see SpecsynLibNoWind), so it has no logg to clamp;
+        // SpecsynLibWR::spec() already clamps its own analogous
+        // transformed-radius coordinate internally. Unlike the logTeff
+        // clamp above, logg isn't a native StarData field -- it's
+        // derived from mass, log(L), and log(Teff) via
+        // Specsyn::getSAandLogg -- so clamping it means adjusting one
+        // of those three instead: mass, specifically, rather than
+        // log(L) or log(Teff), since the latter two are exactly what
+        // getSAandLogg derives this star's surface area from, and
+        // perturbing the surface area would distort the emergent
+        // spectrum's overall scale for no physical reason. Since
+        // log(g) = log10(G * mass / R^2) and R depends only on log(L)
+        // and log(Teff) (both left untouched here), log(g) is exactly
+        // linear in log10(mass) with unit slope -- so scaling mass by
+        // 10^(loggTarget - logg) lands log(g) at exactly loggTarget,
+        // regardless of logg's own magnitude (unlike scaling by the
+        // ratio logg / loggTarget directly, which under- or
+        // over-corrects whenever |logg| is far from 1). The extra
+        // +/- 1e-10 in the exponent pushes the rescaled mass just past
+        // the relevant bound, so the log(g) recomputed from it
+        // afterwards (inside getSAandLogg, when spec() is called
+        // below) doesn't land just outside that bound again due to
+        // floating-point roundoff.
+        if (!std::isnan(loggMin_) &&
+            SpecsynLibWR<OOBPolicy::raise>::getWRType(clampedProps) == SpecsynLibWR<OOBPolicy::raise>::WRType::None)
+        {
+            const double logg = getSAandLogg(clampedProps).second;
+            if (logg < loggMin_ || logg > loggMax_)
+            {
+                double& mass = clampedProps[static_cast<size_t>(tracks::FieldIdx::mass)]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- StarData is a fixed-size std::array, and mass is one of its compile-time-known indices
+                mass *= (logg < loggMin_) ?
+                    std::pow(10.0, (loggMin_ - logg) + 1e-10) :
+                    std::pow(10.0, (loggMax_ - logg) - 1e-10);
+            }
+        }
+
         for (size_t i = 0; i + 1 < libs_.size(); ++i)
         {
-            auto result = libs_[i]->spec(props, feh);
+            auto result = libs_[i]->spec(clampedProps, feh);
             if (!result.empty()) { return result; }
         }
-        return libs_.back()->spec(props, feh);
+        return libs_.back()->spec(clampedProps, feh);
     }
 
     auto SpecsynLibChained::makeCommonWlGrid(
