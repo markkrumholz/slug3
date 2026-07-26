@@ -11,12 +11,12 @@
 #include "../interpolation/Interpolator1D.hpp"
 #include "../pdfs/PDF.hpp"
 #include "../tracks/TrackCommons.hpp"
+#include "../utils/Constants.hpp"
 #include "../utils/PDFIntegrator.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
-#include <gsl/gsl_const_cgsm.h> // NOLINT(misc-include-cleaner)
 #include <memory>
 #include <numbers>
 #include <utility>
@@ -195,28 +195,24 @@ namespace specsyn
          * the star's luminosity and effective temperature via the
          * Stefan-Boltzmann law, L = 4 pi R^2 sigma T^4. log(g) is then
          * computed as log10(G M / R^2), with the stellar mass (given
-         * in Msun) converted to grams and G taken from GSL's cgs unit
-         * system, so that g comes out in cgs units.
+         * in Msun) converted to grams via utils::Msun and G taken from
+         * utils::G, so that g comes out in cgs units.
          */
         [[nodiscard]] static auto getSAandLogg(const StarData& props) -> std::pair<double, double>
         {
             constexpr double pi = std::numbers::pi_v<double>;
-            constexpr double stefanBoltzmann = GSL_CONST_CGSM_STEFAN_BOLTZMANN_CONSTANT;
-            constexpr double gravConst = GSL_CONST_CGSM_GRAVITATIONAL_CONSTANT;
-            constexpr double solarMass = GSL_CONST_CGSM_SOLAR_MASS;
-            constexpr double solarLuminosity = 3.828e33; // erg/s, IAU 2015 nominal value
 
             const double logL = props[static_cast<size_t>(tracks::FieldIdx::logL)]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- StarData is a fixed-size std::array, and logL is one of its compile-time-known indices
             const double logTeff = props[static_cast<size_t>(tracks::FieldIdx::logTe)]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
             const double mass = props[static_cast<size_t>(tracks::FieldIdx::mass)]; // Msun // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
 
-            const double temperature = std::pow(10.0, logTeff);               // K
-            const double luminosity = std::pow(10.0, logL) * solarLuminosity; // erg/s
+            const double temperature = std::pow(10.0, logTeff);          // K
+            const double luminosity = std::pow(10.0, logL) * utils::Lsun; // erg/s
             const double temperature4 = temperature * temperature * temperature * temperature;
-            const double radius = std::sqrt(luminosity / (4.0 * pi * stefanBoltzmann * temperature4)); // cm
+            const double radius = std::sqrt(luminosity / (4.0 * pi * utils::sigmaSB * temperature4)); // cm
             const double area = 4.0 * pi * radius * radius; // cm^2
 
-            const double g = gravConst * mass * solarMass / (radius * radius); // cm/s^2
+            const double g = utils::G * mass * utils::Msun / (radius * radius); // cm/s^2
             const double logg = std::log10(g);
 
             return { area, logg };

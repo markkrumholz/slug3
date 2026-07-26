@@ -7,6 +7,7 @@
 
 #include "SpecsynLibWR.hpp"
 #include "../tracks/TrackCommons.hpp"
+#include "../utils/Constants.hpp"
 #include "../utils/MiscUtils.hpp"
 #include "Specsyn.hpp"
 #include "SpecsynCommons.hpp"
@@ -18,7 +19,6 @@
 #include <cctype>
 #include <cmath>
 #include <cstddef>
-#include <gsl/gsl_const_cgsm.h> // NOLINT(misc-include-cleaner)
 #include <limits>
 #include <mdspan> // NOLINT(misc-include-cleaner)
 #include <numbers>
@@ -580,24 +580,18 @@ namespace specsyn
         const double dInf = ((1.0 - bFeh.t_) * dInf_[bFeh.lo_]) + (bFeh.t_ * dInf_[bFeh.hi_]); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- bFeh.lo_/hi_ < dInf_.size() by construction (both sized nfeh)
 
         // Step 3: wind velocity vWind = L / (mdot c), in cgs
-        constexpr double solarLuminosity = 3.828e33; // erg/s, IAU 2015 nominal value (matches Specsyn::getSAandLogg)
-        constexpr double solarMass = GSL_CONST_CGSM_SOLAR_MASS;
-        constexpr double speedOfLight = GSL_CONST_CGSM_SPEED_OF_LIGHT;
-        constexpr double secPerYear = 3.15576e7; // Julian year (365.25 d), s -- GSL's cgsm constants have no year unit of their own
-
-        const double lumCgs = std::pow(10.0, logL) * solarLuminosity; // erg/s
-        const double mdotCgs = mdot * solarMass / secPerYear;         // g/s
-        const double vWind = lumCgs / (mdotCgs * speedOfLight);       // cm/s
+        const double lumCgs = std::pow(10.0, logL) * utils::Lsun;      // erg/s
+        const double mdotCgs = mdot * utils::Msun / utils::yr;         // g/s
+        const double vWind = lumCgs / (mdotCgs * utils::c);            // cm/s
 
         // Step 4: transformed radius Rt (Todt et al. 2015, eq. 2), via
         // the star's own radius -- derived from its surface area,
         // itself derived (by getSAandLogg) from L and Teff -- expressed
         // in Rsun to match the grid's own log_rt units (see
         // fetch_powr.py's R_TRANS [Rsun] -> log10(R_t) conversion)
-        constexpr double solarRadius = 6.957e10; // cm, IAU 2015 nominal value
         constexpr double pi = std::numbers::pi_v<double>;
         const double area = Specsyn::getSAandLogg(props).first; // cm^2
-        const double rStarRsun = std::sqrt(area / (4.0 * pi)) / solarRadius;
+        const double rStarRsun = std::sqrt(area / (4.0 * pi)) / utils::Rsun;
 
         constexpr double vWindNorm = 2500.0e5; // 2500 km/s, in cm/s
         constexpr double mdotNorm = 1.0e-4;    // Msun/yr

@@ -25,6 +25,7 @@
 
 #include "../../src/specsyn/SpecsynLibWR.hpp"
 #include "../../src/tracks/TrackCommons.hpp"
+#include "../../src/utils/Constants.hpp"
 #include "testSpecsynLibWR.hpp"
 #include <algorithm>
 #include <cstddef>
@@ -39,7 +40,7 @@ namespace
     const std::string registryName = "tests/specsyn/assets/spectra.toml";
     const std::string spectraName = "POWR_WNE_test";
     const std::string wnlSpectraName = "POWR_WNL_test";
-    constexpr double solarLuminosity = 3.828e33; // erg/s, IAU 2015 nominal value
+    constexpr double solarLuminosity = utils::Lsun;
 
     /**
      * @brief Build a StarData for a Wolf-Rayet star
