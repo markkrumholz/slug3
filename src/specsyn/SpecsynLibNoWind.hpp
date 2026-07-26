@@ -127,6 +127,27 @@ namespace specsyn
         [[nodiscard]] auto spec(const Specsyn::StarData& props, double feh) const
         -> std::vector<double> override;
 
+        /**
+         * @brief This library's log10(effective temperature) grid points
+         * @details
+         * Exposed for SpecsynLibChained's benefit, which needs to scan
+         * every chained library's own logTeff_ range (alongside
+         * SpecsynLibWR's) to derive a global (logTeffMin, logTeffMax)
+         * clamp -- see its tClamp constructor argument.
+         */
+        [[nodiscard]] auto logTeff() const -> const std::vector<double>& { return logTeff_; }
+
+        /**
+         * @brief This library's log(g) grid points
+         * @details
+         * Exposed for SpecsynLibChained's benefit, which needs to scan
+         * every chained SpecsynLibNoWind library's own logg_ range to
+         * derive a global (loggMin, loggMax) clamp -- see its tClamp
+         * constructor argument. SpecsynLibWR has no equivalent, since
+         * Wolf-Rayet atmospheres aren't parameterized by logg at all.
+         */
+        [[nodiscard]] auto logg() const -> const std::vector<double>& { return logg_; }
+
     private:
 
         // References into the parent class's dim1_/dim2_/dim3_, named

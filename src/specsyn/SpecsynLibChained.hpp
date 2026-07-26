@@ -12,6 +12,7 @@
 #include "Specsyn.hpp"
 #include "SpecsynCommons.hpp"
 #include <cstddef>
+#include <limits>
 #include <memory>
 #include <string>
 #include <vector>
@@ -71,6 +72,9 @@ namespace specsyn
          *   default), used as a flag to fall back on each library's
          *   own native wavelength grid -- see @details
          * @param z The redshift; defaults to zero
+         * @param tClamp Whether to clamp a star's log(Teff) to the
+         *   combined range spanned by every chained library before
+         *   calling spec() on it; defaults to true. See @details.
          * @throws std::runtime_error if spectraName is empty, or if
          *   microTurb is non-empty and its size does not match
          *   spectraName's
@@ -104,6 +108,37 @@ namespace specsyn
          * every chained library's spec() output shares the same
          * length and wavelength values -- and so that wl() correctly
          * describes every one of them, not just the first.
+         *
+         * If tClamp is true, also scans every chained SpecsynLibNoWind
+         * or SpecsynLibWR library's own log(Teff) grid (via their
+         * logTeff() accessors) for the global minimum and maximum,
+         * storing them in logTeffMin_/logTeffMax_ for spec() to clamp
+         * against (see spec()'s own comment); if false, both are set
+         * to quiet_NaN() instead, so spec() applies no clamp at all.
+         * This exists to work around a real quirk in some evolutionary
+         * tracks (e.g. MIST), whose effective temperatures for
+         * stripped, strong-wind stars can run far hotter than any
+         * spectral library actually covers -- and hotter than any
+         * known real star, since the whole premise of an effective
+         * temperature derived this way breaks down once the photosphere
+         * itself forms well above the stellar surface. Clamping to
+         * what the chained libraries actually cover is a deliberate
+         * choice to use the hottest (or coolest) library grid point as
+         * a stand-in in that regime, rather than raising or silently
+         * dropping the star.
+         *
+         * Likewise scans every chained SpecsynLibNoWind library's own
+         * log(g) grid (via logg()) for loggMin_/loggMax_ -- again both
+         * quiet_NaN() if tClamp is false. SpecsynLibWR contributes
+         * nothing here, since Wolf-Rayet atmospheres aren't
+         * parameterized by logg at all (see spec()'s own comment for
+         * how this clamp is actually applied, which is necessarily
+         * more involved than the logTeff one above). This addresses a
+         * distinct, genuine gap in every currently available spectral
+         * library -- not a track quirk this time, but real atmosphere
+         * grids simply not extending to the very low log(g) reached by
+         * red supergiants, since that regime is hard for atmosphere
+         * codes to model at all.
          */
         SpecsynLibChained(
             const std::vector<std::string>& spectraName,
@@ -117,7 +152,8 @@ namespace specsyn
             double wlMin = 0.0,
             double wlMax = 0.0,
             std::size_t nWl = 0,
-            double z = 0.0);
+            double z = 0.0,
+            bool tClamp = true);
 
         /**
          * @brief Compute a star's spectrum by trying each chained library in turn
@@ -132,12 +168,42 @@ namespace specsyn
          * @throws std::runtime_error if the star falls outside every
          *   chained library's grid
          * @details
-         * Calls spec() on each library in the chain in priority order,
-         * stopping at and returning the first non-empty result. The
-         * last library in the chain is constructed with
-         * OOBPolicy::raise, so if every earlier library returns an
-         * empty (out-of-bounds) result, this call throws rather than
-         * returning silently.
+         * If the constructor's tClamp argument was true, first clamps
+         * a copy of props' log(Teff) entry to [logTeffMin_,
+         * logTeffMax_] -- the combined range spanned by every chained
+         * SpecsynLibNoWind/SpecsynLibWR library's own grid -- before
+         * doing anything else with it (logTeffMin_/logTeffMax_ are
+         * quiet_NaN() otherwise, so the comparison is simply skipped).
+         * A copy is needed here since props itself is a const
+         * reference, but the cost is negligible next to the
+         * interpolation work spec() goes on to do.
+         *
+         * Next, if loggMin_/loggMax_ are not quiet_NaN() (see the
+         * constructor), classifies the star via
+         * SpecsynLibWR::getWRType: a Wolf-Rayet star (anything but
+         * WRType::None) is left alone here, since its analogous
+         * clamp (on transformed radius, not logg) is already handled
+         * internally by SpecsynLibWR::spec() itself. For any other
+         * star, computes log(g) via Specsyn::getSAandLogg and, if it
+         * falls outside [loggMin_, loggMax_], rescales the copy's mass
+         * entry -- rather than its luminosity or Teff, which would
+         * perturb the surface area (and hence the wavelength-dependent
+         * shape of the emergent spectrum) getSAandLogg derives from
+         * those two alone -- by 10^((loggMin_ - logg) + 1e-10) (below
+         * loggMin_) or 10^((loggMax_ - logg) - 1e-10) (above loggMax_).
+         * Since log(g) is exactly linear in log10(mass) with unit slope
+         * (at fixed radius, i.e. fixed log(L)/log(Teff)), this lands
+         * log(g) exactly 1e-10 dex past the relevant bound -- close
+         * enough to be physically meaningless, but far enough that
+         * floating-point roundoff in the subsequent recomputation can't
+         * leave it just outside that bound again.
+         *
+         * Finally calls spec() on each library in the chain in
+         * priority order, stopping at and returning the first
+         * non-empty result. The last library in the chain is
+         * constructed with OOBPolicy::raise, so if every earlier
+         * library returns an empty (out-of-bounds) result, this call
+         * throws rather than returning silently.
          */
         [[nodiscard]] auto spec(const StarData& props, double feh) const
         -> std::vector<double> override;
@@ -196,6 +262,30 @@ namespace specsyn
          * with.
          */
         std::vector<std::unique_ptr<Specsyn>> libs_;
+
+        /**
+         * @brief The combined log(Teff) range spanned by every chained library
+         * @details
+         * Both quiet_NaN() if the constructor's tClamp argument was
+         * false; otherwise the minimum/maximum, respectively, of every
+         * chained SpecsynLibNoWind/SpecsynLibWR library's own logTeff()
+         * grid. See the constructor's and spec()'s own comments.
+         */
+        double logTeffMin_ = std::numeric_limits<double>::quiet_NaN();
+        double logTeffMax_ = std::numeric_limits<double>::quiet_NaN(); /**< See logTeffMin_ */
+
+        /**
+         * @brief The combined log(g) range spanned by every chained SpecsynLibNoWind library
+         * @details
+         * Both quiet_NaN() if the constructor's tClamp argument was
+         * false; otherwise the minimum/maximum, respectively, of every
+         * chained SpecsynLibNoWind library's own logg() grid (WR
+         * libraries contribute nothing here -- see the constructor's
+         * own comment). See the constructor's and spec()'s own
+         * comments.
+         */
+        double loggMin_ = std::numeric_limits<double>::quiet_NaN();
+        double loggMax_ = std::numeric_limits<double>::quiet_NaN(); /**< See loggMin_ */
     };
 
 } // namespace specsyn

@@ -215,6 +215,16 @@ namespace specsyn
          */
         [[nodiscard]] static auto getWRType(const Specsyn::StarData& props) -> WRType;
 
+        /**
+         * @brief This library's log10(T_*) grid points
+         * @details
+         * Exposed for SpecsynLibChained's benefit, which needs to scan
+         * every chained library's own logTeff_ range (alongside
+         * SpecsynLibNoWind's) to derive a global (logTeffMin, logTeffMax)
+         * clamp -- see its tClamp constructor argument.
+         */
+        [[nodiscard]] auto logTeff() const -> const std::vector<double>& { return logTeff_; }
+
     private:
 
         /** @brief The shape of logLGrid_, the mdspan view onto logL_ */
