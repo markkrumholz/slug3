@@ -6,6 +6,7 @@
  */
 
 #include "SpecsynLibChained.hpp"
+#include "../utils/MiscUtils.hpp"
 #include "Specsyn.hpp"
 #include "SpecsynCommons.hpp"
 #include "SpecsynLib.hpp"
@@ -220,6 +221,16 @@ namespace specsyn
             return registry.at_path(name).at_path("WR_grid").value<bool>().value_or(false);
         };
 
+        // Each individual library is constructed on its own native
+        // wavelength grid (0/0/0 for wlMin/wlMax/nWl), regardless of
+        // what the caller passed to this constructor -- the requested
+        // output grid, if any, is instead built and applied once below,
+        // after every library exists, to resample each of them exactly
+        // once. Passing the caller's wlMin/wlMax/nWl through here too
+        // would resample every library twice over: once to the
+        // caller's grid (or, if only nWl was given, to that many points
+        // over the library's own native range) here, and then again to
+        // wl_ below.
         const size_t n = spectraName.size();
         std::vector<std::unique_ptr<SpecsynLib<OOBPolicy::coerce>>> coerceLibs;
         coerceLibs.reserve(n - 1);
@@ -229,32 +240,58 @@ namespace specsyn
             coerceLibs.push_back(makeChainedLib<OOBPolicy::coerce>(
                 spectraName[i], isWRGrid(spectraName[i]),
                 fehMin, fehMax, afe, cfe, mt, r, registryName,
-                wlMin, wlMax, nWl, z));
+                0.0, 0.0, 0, z));
         }
         const double lastMt = microTurb.empty() ? useLibraryDefault : microTurb[n - 1];
         std::unique_ptr<SpecsynLib<OOBPolicy::raise>> raiseLib = makeChainedLib<OOBPolicy::raise>(
             spectraName[n - 1], isWRGrid(spectraName[n - 1]),
             fehMin, fehMax, afe, cfe, lastMt, r, registryName,
-            wlMin, wlMax, nWl, z);
+            0.0, 0.0, 0, z);
 
-        // Build a common wavelength grid spanning every library's own
-        // native grid, and resample every library onto it, so that
-        // every chained library shares the same wl()
-        std::vector<std::vector<double>> wlGrids;
-        wlGrids.reserve(n);
-        for (const auto& lib : coerceLibs) { wlGrids.push_back(lib->wl()); }
-        wlGrids.push_back(raiseLib->wl());
+        // Determine the common wavelength grid every chained library
+        // will share, in one of three ways, then resample every
+        // library onto it exactly once
+        if (wlMin != 0.0)
+        {
+            // The caller fully specified the output grid -- use it
+            // directly rather than deriving one from the individual
+            // libraries' own native grids at all
+            wl_ = utils::logspace(wlMin, wlMax, nWl);
+        }
+        else if (nWl != 0)
+        {
+            // The caller requested a point count but not a range --
+            // span the combined native range of every library in the
+            // chain at that many points
+            double globalWlMin = std::numeric_limits<double>::infinity();
+            double globalWlMax = -std::numeric_limits<double>::infinity();
+            for (const auto& lib : coerceLibs)
+            {
+                globalWlMin = std::min(globalWlMin, lib->wl().front());
+                globalWlMax = std::max(globalWlMax, lib->wl().back());
+            }
+            globalWlMin = std::min(globalWlMin, raiseLib->wl().front());
+            globalWlMax = std::max(globalWlMax, raiseLib->wl().back());
+            wl_ = utils::logspace(globalWlMin, globalWlMax, nWl);
+        }
+        else
+        {
+            // No output grid requested at all -- combine every
+            // library's own native grid into one that spans them all
+            std::vector<std::vector<double>> wlGrids;
+            wlGrids.reserve(n);
+            for (const auto& lib : coerceLibs) { wlGrids.push_back(lib->wl()); }
+            wlGrids.push_back(raiseLib->wl());
+            wl_ = makeCommonWlGrid(wlGrids);
+        }
 
-        const auto commonWl = makeCommonWlGrid(wlGrids);
-        for (auto& lib : coerceLibs) { lib->resample(commonWl); }
-        raiseLib->resample(commonWl);
+        for (auto& lib : coerceLibs) { lib->resample(wl_); }
+        raiseLib->resample(wl_);
 
         // Move every library, still in priority order, into libs_
         libs_.reserve(n);
         for (auto& lib : coerceLibs) { libs_.push_back(std::move(lib)); }
         libs_.push_back(std::move(raiseLib));
-
-        wl_ = commonWl;
     }
 
     auto SpecsynLibChained::spec(const StarData& props, const double feh) const -> std::vector<double>
