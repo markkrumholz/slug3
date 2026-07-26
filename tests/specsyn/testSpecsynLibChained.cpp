@@ -27,13 +27,19 @@
  * window point-count logic can be checked exactly) and against
  * BOSZ_test/TLUSTY_test's own native grids (to confirm the
  * constructor actually resamples every chained library onto a single
- * common grid, rather than each keeping its own).
+ * common grid, rather than each keeping its own), and covers the
+ * constructor's other two wavelength-grid cases directly -- wlMin/
+ * wlMax/nWl all supplied (an exact utils::logspace grid, independent
+ * of either library's own native range) and nWl supplied alone (an
+ * utils::logspace grid spanning the combined native range of every
+ * library in the chain).
  * @date 2026-07-21
  */
 
 #include "../../src/specsyn/SpecsynLibNoWind.hpp"
 #include "../../src/specsyn/SpecsynLibChained.hpp"
 #include "../../src/tracks/TrackCommons.hpp"
+#include "../../src/utils/MiscUtils.hpp"
 #include "testSpecsynLibChained.hpp"
 #include <algorithm>
 #include <cmath>
@@ -332,6 +338,108 @@ static auto testChainUsesCommonGrid() -> int
     return 0;
 }
 
+// Check that supplying wlMin/wlMax/nWl to the constructor (case 1 of
+// its three-way common-grid selection) uses that grid directly --
+// exactly utils::logspace(wlMin, wlMax, nWl) -- rather than deriving
+// anything from the individual libraries' own native grids, and that
+// every chained library still produces spectra on it correctly
+static auto testChainWlMinMaxSpecified() -> int
+{
+    constexpr double wlMin = 1000.0;
+    constexpr double wlMax = 20000.0;
+    constexpr std::size_t nWl = 50;
+
+    const specsyn::SpecsynLibChained chain(
+        { "BOSZ_test", "TLUSTY_test" }, -3.0, 1.0, 0.0, 0.0,
+        {}, specsyn::defaultR, registryName, wlMin, wlMax, nWl);
+
+    const auto expected = utils::logspace(wlMin, wlMax, nWl);
+    if (chain.wl() != expected)
+    {
+        std::cerr << "testSpecsynLibChained: chain.wl() (" << chain.wl().size()
+            << " points, [" << chain.wl().front() << ", " << chain.wl().back()
+            << "]) does not match utils::logspace(wlMin, wlMax, nWl) ("
+            << expected.size() << " points, [" << expected.front() << ", "
+            << expected.back() << "]) when wlMin/wlMax/nWl are all supplied\n";
+        return 1;
+    }
+
+    int result = 0;
+    try
+    {
+        const auto solarResult = chain.spec(solarStar(), solarFeh);
+        result += checkSpectrum(solarResult, chain.wl(), solarLuminosity,
+            "a solar star with an explicit wlMin/wlMax/nWl grid");
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "testSpecsynLibChained: unexpected exception for a "
+            "solar star with an explicit wlMin/wlMax/nWl grid: " << e.what() << "\n";
+        result += 1;
+    }
+    try
+    {
+        const auto obResult = chain.spec(obStar(), obFeh);
+        result += checkSpectrum(obResult, chain.wl(), obLuminosity,
+            "an OB star with an explicit wlMin/wlMax/nWl grid");
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "testSpecsynLibChained: unexpected exception for an "
+            "OB star with an explicit wlMin/wlMax/nWl grid: " << e.what() << "\n";
+        result += 1;
+    }
+
+    return result;
+}
+
+// Check that supplying nWl alone (wlMin = wlMax = 0, the "not
+// supplied" sentinel; case 2 of the constructor's three-way common-
+// grid selection) spans the combined native range of every library in
+// the chain -- not just the first, or just whichever library's native
+// range happens to be requested -- at exactly nWl points
+static auto testChainNWlOnly() -> int
+{
+    const specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::raise> boszRef(
+        "BOSZ_test", -3.0, 1.0, 0.0, 0.0, 0.0, specsyn::defaultR, registryName);
+    const specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::raise> tlustyRef(
+        "TLUSTY_test", -3.0, 1.0, 0.0, 0.0, 10.0, specsyn::defaultR, registryName);
+    const double globalWlMin = std::min(boszRef.wl().front(), tlustyRef.wl().front());
+    const double globalWlMax = std::max(boszRef.wl().back(), tlustyRef.wl().back());
+
+    constexpr std::size_t nWl = 40;
+    const specsyn::SpecsynLibChained chain(
+        { "BOSZ_test", "TLUSTY_test" }, -3.0, 1.0, 0.0, 0.0,
+        {}, specsyn::defaultR, registryName, 0.0, 0.0, nWl);
+
+    const auto expected = utils::logspace(globalWlMin, globalWlMax, nWl);
+    if (chain.wl() != expected)
+    {
+        std::cerr << "testSpecsynLibChained: chain.wl() (" << chain.wl().size()
+            << " points, [" << chain.wl().front() << ", " << chain.wl().back()
+            << "]) does not match utils::logspace over the combined native "
+            "range [" << globalWlMin << ", " << globalWlMax << "] ("
+            << expected.size() << " points) when only nWl is supplied\n";
+        return 1;
+    }
+
+    int result = 0;
+    try
+    {
+        const auto solarResult = chain.spec(solarStar(), solarFeh);
+        result += checkSpectrum(solarResult, chain.wl(), solarLuminosity,
+            "a solar star with nWl alone");
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "testSpecsynLibChained: unexpected exception for a "
+            "solar star with nWl alone: " << e.what() << "\n";
+        result += 1;
+    }
+
+    return result;
+}
+
 // Check makeCommonWlGrid's window-selection logic against a fully
 // controlled synthetic scenario: a coarse grid spanning [200, 2000]
 // Angstrom every 10 Angstrom (181 points) and a fine grid spanning
@@ -423,6 +531,8 @@ auto testSpecsynLibChained() -> int
     result += testChainOOBThrows();
     result += testChainConstructorValidation();
     result += testChainUsesCommonGrid();
+    result += testChainWlMinMaxSpecified();
+    result += testChainNWlOnly();
     result += testMakeCommonWlGridWindows();
     result += testMakeCommonWlGridGap();
     result += testMakeCommonWlGridErrors();
