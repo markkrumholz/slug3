@@ -23,6 +23,7 @@
 
 #include "../../src/specsyn/SpecsynLibNoWind.hpp"
 #include "../../src/tracks/TrackCommons.hpp"
+#include "../../src/utils/Constants.hpp"
 #include "testSpecsynLib.hpp"
 #include <algorithm>
 #include <array>
@@ -44,7 +45,7 @@ namespace
     // Teff in [5750, 6000] K, logg in [4.0, 4.5], present at every one
     // of its 14 feh slices (see the fixture-generation notes in
     // testSpecsynUtils.cpp for how the fixture was built)
-    constexpr double solarLuminosity = 3.828e33; // erg/s, IAU 2015 nominal value
+    constexpr double solarLuminosity = utils::Lsun;
 
     /**
      * @brief Build a StarData with the given mass, log(L), and log(Teff)
@@ -220,7 +221,7 @@ static auto testSpecTlustySuccess() -> int
     // only: the peak of wl * spec(wl) should be within a few orders
     // of magnitude of the test star's own bolometric luminosity
     // (~1.9e5 Lsun for these parameters), not wildly off.
-    constexpr double solarLuminosity = 3.828e33; // erg/s, IAU 2015 nominal value
+    constexpr double solarLuminosity = utils::Lsun;
     constexpr double starLuminosity = 189859.68762747623 * solarLuminosity;
     double maxWlSpec = 0.0;
     for (std::size_t i = 0; i < result.size(); ++i)
