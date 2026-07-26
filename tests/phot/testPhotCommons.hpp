@@ -178,6 +178,135 @@ inline auto testPhotConvertFlambdaST() -> int
 }
 
 /**
+ * @brief Unit test for phot::PhotConvert<Flambda, AB> and <AB, Flambda>
+ * @return 0 if the test passes, 1 if it fails.
+ * @details
+ * These two are composed (Flambda -> Fnu -> AB and its inverse) from
+ * the direct Flambda <-> Fnu and Fnu <-> AB conversions tested above,
+ * rather than following any defining formula of their own, so this
+ * checks the composed AB magnitude against an expected value computed
+ * independently of PhotConvert entirely (i.e. not just independently
+ * of this specific specialization, the way the other tests above
+ * check against an independent formula -- there is no single formula
+ * here to independently reimplement other than the same two-step
+ * chain), and checks that Flambda -> AB -> Flambda recovers the
+ * original flux.
+ */
+inline auto testPhotConvertFlambdaAB() -> int
+{
+    constexpr double relTol = 1e-9;
+    constexpr double wl = 5000.0; // Angstrom
+    constexpr double flambda = 1e-15; // erg/s/cm^2/Angstrom
+
+    const double fnu = (flambda / utils::Angstrom) * (wl * utils::Angstrom) * (wl * utils::Angstrom) / utils::c / utils::Jy;
+    const double expectedMagAB = -2.5 * std::log10(fnu / phot::flux0AB);
+
+    const double magAB = phot::PhotConvert<phot::PhotSystem::Flambda, phot::PhotSystem::AB>(flambda, wl);
+    const double absErr = std::abs(magAB - expectedMagAB);
+    if (absErr > relTol)
+    {
+        std::cerr << "testPhotConvertFlambdaAB: Flambda -> AB gave " << magAB
+            << " mag, expected " << expectedMagAB << " mag (absolute error "
+            << absErr << ", tolerance " << relTol << ")\n";
+        return 1;
+    }
+
+    const double flambdaBack = phot::PhotConvert<phot::PhotSystem::AB, phot::PhotSystem::Flambda>(magAB, wl);
+    const double relErrBack = std::abs(flambdaBack - flambda) / std::abs(flambda);
+    if (relErrBack > relTol)
+    {
+        std::cerr << "testPhotConvertFlambdaAB: AB -> Flambda round trip gave "
+            << flambdaBack << " erg/s/cm^2/Angstrom, expected " << flambda
+            << " (relative error " << relErrBack << ", tolerance "
+            << relTol << ")\n";
+        return 1;
+    }
+
+    return 0;
+}
+
+/**
+ * @brief Unit test for phot::PhotConvert<Fnu, ST> and <ST, Fnu>
+ * @return 0 if the test passes, 1 if it fails.
+ * @details
+ * The Fnu/ST analog of testPhotConvertFlambdaAB (composed via Fnu ->
+ * Flambda -> ST and its inverse) -- see its own comment for what's
+ * checked and why.
+ */
+inline auto testPhotConvertFnuST() -> int
+{
+    constexpr double relTol = 1e-9;
+    constexpr double wl = 5000.0; // Angstrom
+    constexpr double fnu = 1e-3; // Jy
+
+    const double flambda = fnu * utils::Jy * utils::c / (wl * wl * utils::Angstrom);
+    const double expectedMagST = -2.5 * std::log10(flambda / phot::flux0ST);
+
+    const double magST = phot::PhotConvert<phot::PhotSystem::Fnu, phot::PhotSystem::ST>(fnu, wl);
+    const double absErr = std::abs(magST - expectedMagST);
+    if (absErr > relTol)
+    {
+        std::cerr << "testPhotConvertFnuST: Fnu -> ST gave " << magST
+            << " mag, expected " << expectedMagST << " mag (absolute error "
+            << absErr << ", tolerance " << relTol << ")\n";
+        return 1;
+    }
+
+    const double fnuBack = phot::PhotConvert<phot::PhotSystem::ST, phot::PhotSystem::Fnu>(magST, wl);
+    const double relErrBack = std::abs(fnuBack - fnu) / std::abs(fnu);
+    if (relErrBack > relTol)
+    {
+        std::cerr << "testPhotConvertFnuST: ST -> Fnu round trip gave "
+            << fnuBack << " Jy, expected " << fnu << " Jy (relative error "
+            << relErrBack << ", tolerance " << relTol << ")\n";
+        return 1;
+    }
+
+    return 0;
+}
+
+/**
+ * @brief Unit test for phot::PhotConvert<ST, AB> and <AB, ST>
+ * @return 0 if the test passes, 1 if it fails.
+ * @details
+ * The ST/AB analog of testPhotConvertFlambdaAB (composed via ST ->
+ * Flambda -> Fnu -> AB and its inverse, the longest of the composed
+ * chains) -- see its own comment for what's checked and why.
+ */
+inline auto testPhotConvertSTAB() -> int
+{
+    constexpr double relTol = 1e-9;
+    constexpr double wl = 5000.0; // Angstrom
+    constexpr double magST = 18.5;
+
+    const double flambda = phot::flux0ST * std::pow(10.0, magST / -2.5);
+    const double fnu = (flambda / utils::Angstrom) * (wl * utils::Angstrom) * (wl * utils::Angstrom) / utils::c / utils::Jy;
+    const double expectedMagAB = -2.5 * std::log10(fnu / phot::flux0AB);
+
+    const double magAB = phot::PhotConvert<phot::PhotSystem::ST, phot::PhotSystem::AB>(magST, wl);
+    const double absErr = std::abs(magAB - expectedMagAB);
+    if (absErr > relTol)
+    {
+        std::cerr << "testPhotConvertSTAB: ST -> AB gave " << magAB
+            << " mag, expected " << expectedMagAB << " mag (absolute error "
+            << absErr << ", tolerance " << relTol << ")\n";
+        return 1;
+    }
+
+    const double magSTBack = phot::PhotConvert<phot::PhotSystem::AB, phot::PhotSystem::ST>(magAB, wl);
+    const double absErrBack = std::abs(magSTBack - magST);
+    if (absErrBack > relTol)
+    {
+        std::cerr << "testPhotConvertSTAB: AB -> ST round trip gave "
+            << magSTBack << " mag, expected " << magST << " mag (absolute error "
+            << absErrBack << ", tolerance " << relTol << ")\n";
+        return 1;
+    }
+
+    return 0;
+}
+
+/**
  * @brief Unit tests for the definitions in PhotCommons.hpp
  * @return 0 if the test passes, 1 if it fails.
  */
@@ -187,6 +316,9 @@ inline auto testPhotCommons() -> int
     result += testPhotConvertFlambdaFnu();
     result += testPhotConvertFnuAB();
     result += testPhotConvertFlambdaST();
+    result += testPhotConvertFlambdaAB();
+    result += testPhotConvertFnuST();
+    result += testPhotConvertSTAB();
     return result;
 }
 

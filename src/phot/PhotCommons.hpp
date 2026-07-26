@@ -153,6 +153,94 @@ namespace phot
         return flux0ST * std::pow(10.0, magIn / -2.5);
     }
 
+    // The remaining (from, to) combinations -- every one not directly
+    // defined above, excluding any involving Vega (handled separately
+    // as a special case rather than through this template -- see the
+    // primary template's own comment) -- are each composed from the
+    // six direct conversions above, chained through Flambda and/or Fnu
+    // (the two physical-flux systems every magnitude system's own
+    // conversion above already goes through). wl is genuinely used by
+    // each of these, unlike PhotConvert<Fnu, AB>/<Flambda, ST> and
+    // their inverses: it's threaded through to whichever of those
+    // Flambda <-> Fnu steps the chain actually needs.
+
+    /**
+     * @brief Convert Flambda (erg/s/cm^2/Angstrom) to an AB magnitude
+     * @details
+     * Flambda -> Fnu -> AB.
+     */
+    template <>
+    constexpr auto PhotConvert<PhotSystem::Flambda, PhotSystem::AB>(const double fluxIn, const double wl) -> double // NOLINT(readability-identifier-naming) -- see the primary template above
+    {
+        return PhotConvert<PhotSystem::Fnu, PhotSystem::AB>(
+            PhotConvert<PhotSystem::Flambda, PhotSystem::Fnu>(fluxIn, wl), wl);
+    }
+
+    /**
+     * @brief Convert an AB magnitude to Flambda (erg/s/cm^2/Angstrom)
+     * @details
+     * AB -> Fnu -> Flambda, the algebraic inverse of the Flambda -> AB
+     * conversion above.
+     */
+    template <>
+    constexpr auto PhotConvert<PhotSystem::AB, PhotSystem::Flambda>(const double magIn, const double wl) -> double // NOLINT(readability-identifier-naming) -- see the primary template above
+    {
+        return PhotConvert<PhotSystem::Fnu, PhotSystem::Flambda>(
+            PhotConvert<PhotSystem::AB, PhotSystem::Fnu>(magIn, wl), wl);
+    }
+
+    /**
+     * @brief Convert Fnu (Jy) to an ST magnitude
+     * @details
+     * Fnu -> Flambda -> ST.
+     */
+    template <>
+    constexpr auto PhotConvert<PhotSystem::Fnu, PhotSystem::ST>(const double fluxIn, const double wl) -> double // NOLINT(readability-identifier-naming) -- see the primary template above
+    {
+        return PhotConvert<PhotSystem::Flambda, PhotSystem::ST>(
+            PhotConvert<PhotSystem::Fnu, PhotSystem::Flambda>(fluxIn, wl), wl);
+    }
+
+    /**
+     * @brief Convert an ST magnitude to Fnu (Jy)
+     * @details
+     * ST -> Flambda -> Fnu, the algebraic inverse of the Fnu -> ST
+     * conversion above.
+     */
+    template <>
+    constexpr auto PhotConvert<PhotSystem::ST, PhotSystem::Fnu>(const double magIn, const double wl) -> double // NOLINT(readability-identifier-naming) -- see the primary template above
+    {
+        return PhotConvert<PhotSystem::Flambda, PhotSystem::Fnu>(
+            PhotConvert<PhotSystem::ST, PhotSystem::Flambda>(magIn, wl), wl);
+    }
+
+    /**
+     * @brief Convert an ST magnitude to an AB magnitude
+     * @details
+     * ST -> Flambda -> Fnu -> AB.
+     */
+    template <>
+    constexpr auto PhotConvert<PhotSystem::ST, PhotSystem::AB>(const double magIn, const double wl) -> double // NOLINT(readability-identifier-naming) -- see the primary template above
+    {
+        return PhotConvert<PhotSystem::Fnu, PhotSystem::AB>(
+            PhotConvert<PhotSystem::Flambda, PhotSystem::Fnu>(
+                PhotConvert<PhotSystem::ST, PhotSystem::Flambda>(magIn, wl), wl), wl);
+    }
+
+    /**
+     * @brief Convert an AB magnitude to an ST magnitude
+     * @details
+     * AB -> Fnu -> Flambda -> ST, the algebraic inverse of the ST ->
+     * AB conversion above.
+     */
+    template <>
+    constexpr auto PhotConvert<PhotSystem::AB, PhotSystem::ST>(const double magIn, const double wl) -> double // NOLINT(readability-identifier-naming) -- see the primary template above
+    {
+        return PhotConvert<PhotSystem::Flambda, PhotSystem::ST>(
+            PhotConvert<PhotSystem::Fnu, PhotSystem::Flambda>(
+                PhotConvert<PhotSystem::AB, PhotSystem::Fnu>(magIn, wl), wl), wl);
+    }
+
 } // namespace phot
 
 #endif // PHOTCOMMONS_HPP
