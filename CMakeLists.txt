@@ -222,6 +222,17 @@ add_executable(slugTestCoreFull
     tests/core/testClusterSpecsynFull.cpp
     tests/core/testCoreFullAll.cpp
 )
+# slugTestCoreFull drives a real end-to-end run (real MIST tracks, real
+# multi-GB spectral libraries) through the same interpolation-heavy
+# code paths as production use, so building it at whatever
+# CMAKE_BUILD_TYPE the rest of the project happens to be configured
+# with (often an unoptimized Debug build, for everything else's
+# debuggability) makes it dramatically slower to run than it needs to
+# be. Force optimized flags for just this one target, independent of
+# CMAKE_BUILD_TYPE, so this slow test stays fast to run regardless of
+# how the rest of the project is configured.
+target_compile_options(slugTestCoreFull PRIVATE -O3)
+target_compile_definitions(slugTestCoreFull PRIVATE NDEBUG)
 add_executable(slugTestIo
     src/core/Cluster.cpp
     src/io/OutputManager.cpp
