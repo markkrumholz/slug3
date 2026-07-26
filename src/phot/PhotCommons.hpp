@@ -8,6 +8,7 @@
 #ifndef PHOTCOMMONS_HPP
 #define PHOTCOMMONS_HPP
 
+#include "../utils/Constants.hpp"
 #include <cstdint>
 
 /**
@@ -60,6 +61,61 @@ namespace phot
 
     inline constexpr double flux0AB = 3631.0;    /**< Zero point of the AB system, in Jy */
     inline constexpr double flux0ST = 3.631e-9;  /**< Zero point of the ST system, in erg/s/cm^2/Angstrom */
+
+    /**
+     * @brief Convert a physical flux from one photometric system to another
+     * @tparam from The PhotSystem fluxIn is expressed in
+     * @tparam to The PhotSystem to convert fluxIn to
+     * @param fluxIn The input flux, in erg/s/cm^2/Angstrom (if from is
+     *   Flambda) or Jy (if from is Fnu)
+     * @param wl The wavelength at which fluxIn is evaluated, in Angstrom
+     * @return fluxIn converted to to, in Jy (if to is Fnu) or
+     *   erg/s/cm^2/Angstrom (if to is Flambda)
+     * @details
+     * Only declared here, not defined: only the Flambda <-> Fnu
+     * conversions below are physical-flux conversions in the sense
+     * this function handles, so only those two (from, to)
+     * combinations are ever given a definition, via explicit
+     * specialization. Converting to or from a magnitude system (ST,
+     * AB, Vega) is a different kind of operation entirely, handled by
+     * separate functions rather than by specializing this one for
+     * those PhotSystem values.
+     */
+    template <PhotSystem from, PhotSystem to>
+    constexpr auto PhotConvertPhys(double fluxIn, double wl) -> double; // NOLINT(readability-identifier-naming) -- capitalized to match this file's other fixed photometric naming (PhotSystem, CounterType, ZPType above), rather than the project's usual camelBack function convention
+
+    /**
+     * @brief Convert Flambda (erg/s/cm^2/Angstrom) to Fnu (Jy)
+     * @details
+     * F_nu = F_lambda * lambda^2 / c (with every quantity in cgs
+     * units: F_lambda in erg/s/cm^2/cm, lambda and c in cm and cm/s
+     * respectively, giving F_nu in erg/s/cm^2/Hz), rewritten so
+     * F_lambda's own conversion from a per-Angstrom to a per-cm
+     * density (dividing by utils::Angstrom) and one of lambda's two
+     * powers' conversion from Angstrom to cm (multiplying by
+     * utils::Angstrom) cancel, leaving a single overall factor of
+     * utils::Angstrom -- confirmed against the standard F_nu[Jy] =
+     * 3.336e4 * lambda[Angstrom]^2 * F_lambda[erg/s/cm^2/Angstrom]
+     * conversion, since utils::Angstrom / utils::c / utils::Jy =
+     * 3.336e4. The final division by utils::Jy converts the
+     * erg/s/cm^2/Hz result to Jy.
+     */
+    template <>
+    constexpr auto PhotConvertPhys<PhotSystem::Flambda, PhotSystem::Fnu>(const double fluxIn, const double wl) -> double // NOLINT(readability-identifier-naming) -- see the primary template above
+    {
+        return fluxIn * wl * wl * utils::Angstrom / utils::c / utils::Jy;
+    }
+
+    /**
+     * @brief Convert Fnu (Jy) to Flambda (erg/s/cm^2/Angstrom)
+     * @details
+     * The algebraic inverse of the Flambda -> Fnu conversion above.
+     */
+    template <>
+    constexpr auto PhotConvertPhys<PhotSystem::Fnu, PhotSystem::Flambda>(const double fluxIn, const double wl) -> double // NOLINT(readability-identifier-naming) -- see the primary template above
+    {
+        return fluxIn * utils::Jy * utils::c / (wl * wl * utils::Angstrom);
+    }
 
 } // namespace phot
 

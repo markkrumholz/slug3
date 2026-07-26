@@ -1,0 +1,27 @@
+/**
+ * @file testPhotAll.cpp
+ * @author Mark Krumholz
+ * @brief Unit tests for the classes in src/phot.
+ * @details
+ * This file runs unit tests for all the classes in src/phot.
+ * @date 2026-07-26
+ */
+
+#include "testPhotCommons.hpp"
+#include <exception>
+#include <iostream>
+
+auto main() -> int {
+    try
+    {
+        int result = 0;
+        result += testPhotCommons();
+        return result;
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testPhotAll: uncaught exception: "
+            << error.what() << "\n";
+        return 1;
+    }
+}
