@@ -58,6 +58,9 @@ namespace phot
         Linear  /**< The linear (non-magnitude) system */ // NOLINT(readability-identifier-naming) -- see ZPType
     };
 
+    inline constexpr double flux0AB = 3631.0;    /**< Zero point of the AB system, in Jy */
+    inline constexpr double flux0ST = 3.631e-9;  /**< Zero point of the ST system, in erg/s/cm^2/Angstrom */
+
 } // namespace phot
 
 #endif // PHOTCOMMONS_HPP
