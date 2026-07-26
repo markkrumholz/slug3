@@ -94,8 +94,6 @@ parser.add_argument("--registry",
 parser.add_argument("--overwrite", action="store_true",
                     help="Overwrite filters already present in --output "
                          "(--mode fetch only)")
-parser.add_argument("--verbose", action="store_true",
-                    help="Print verbose output")
 args = parser.parse_args()
 
 if args.instrument and not args.facility:
@@ -322,21 +320,25 @@ def fetch_filter_votable(facility: str, instrument: str, filter_code: str):
 
 
 def write_filter(h5file: h5py.File, facility: str, instrument: str, filter_code: str,
-                 overwrite: bool, verbose: bool) -> None:
+                 overwrite: bool) -> None:
     """Fetch one filter's data and write it into h5file[facility][instrument][filter_code].
 
     Skips (rather than re-fetching) a filter already present in
     h5file unless overwrite is True, matching the other fetch_*.py
-    scripts' own --overwrite convention.
+    scripts' own --overwrite convention. Always prints which filter
+    it's working on (unlike the other fetch_*.py scripts' own
+    progress messages, which are opt-in via --verbose) since fetching
+    is one individual network request per filter -- potentially many
+    of them, for a broad wildcard query -- rather than one bulk
+    download followed by local processing, so a silent run here could
+    otherwise sit looking hung for a long time.
     """
     instr_grp = h5file.require_group(facility).require_group(instrument)
     if filter_code in instr_grp and not overwrite:
-        if verbose:
-            print(f"  Skipping {facility}/{instrument}.{filter_code}: already present.")
+        print(f"  Skipping {facility}/{instrument}.{filter_code}: already present.")
         return
 
-    if verbose:
-        print(f"  Fetching {facility}/{instrument}.{filter_code} ...")
+    print(f"  Fetching {facility}/{instrument}.{filter_code} ...")
     params, wavelength, transmission = fetch_filter_votable(facility, instrument, filter_code)
 
     if filter_code in instr_grp:
@@ -409,7 +411,7 @@ def update_registry(output: str, registry: str) -> None:
 
 
 def fetch(facility: str | None, instrument: str | None, filter_name: str | None,
-         output: str, registry: str, overwrite: bool, verbose: bool) -> None:
+         output: str, registry: str, overwrite: bool) -> None:
     """Fetch every filter matching the given query into output, then rebuild registry.
     """
     # Unlike data/spectra/ (which every fetch_*.py script targets, and which
@@ -422,15 +424,14 @@ def fetch(facility: str | None, instrument: str | None, filter_name: str | None,
 
     with h5py.File(output, "a") as h5file:
         for fac, instr, filt in iter_matching_filters(facility, instrument, filter_name):
-            write_filter(h5file, fac, instr, filt, overwrite, verbose)
+            write_filter(h5file, fac, instr, filt, overwrite)
 
     update_registry(output, registry)
-    if verbose:
-        print(f"Updated registry at {registry}.")
+    print(f"Updated registry at {registry}.")
 
 
 if args.mode == "query":
     query(args.facility, args.instrument, args.filter)
 else:
     fetch(args.facility, args.instrument, args.filter,
-          args.output, args.registry, args.overwrite, args.verbose)
+          args.output, args.registry, args.overwrite)
