@@ -116,6 +116,9 @@ add_executable(slugTestInterpolation
     tests/interpolation/testMesh2DInterpolator.cpp
     tests/interpolation/testMesh3DInterpolator.cpp
 )
+add_executable(slugTestPhot
+    tests/phot/testPhotAll.cpp
+)
 add_executable(slugTestPDFs
     src/pdfs/PDFFileParser.cpp
     src/pdfs/PDFSegment.cpp
@@ -343,6 +346,9 @@ target_include_directories(slug SYSTEM PRIVATE src/extern/pcg-cpp/include src/ex
 target_include_directories(slugTestInterpolation PRIVATE src)
 target_include_directories(slugTestInterpolation SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
 
+target_include_directories(slugTestPhot PRIVATE src)
+target_include_directories(slugTestPhot SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
+
 target_include_directories(slugTestPDFs PRIVATE src)
 target_include_directories(slugTestPDFs SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
 
@@ -370,6 +376,7 @@ target_include_directories(slugPython SYSTEM PRIVATE src/extern/pcg-cpp/include 
 
 target_include_directories(slug SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestInterpolation SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
+target_include_directories(slugTestPhot SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestPDFs SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestUtils SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestTracks SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
@@ -382,6 +389,7 @@ target_include_directories(slugPython SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 # Link to GSL
 target_link_libraries(slug PRIVATE GSL::gsl)
 target_link_libraries(slugTestInterpolation PRIVATE GSL::gsl)
+target_link_libraries(slugTestPhot PRIVATE GSL::gsl)
 target_link_libraries(slugTestPDFs PRIVATE GSL::gsl)
 target_link_libraries(slugTestUtils PRIVATE GSL::gsl)
 target_link_libraries(slugTestTracks PRIVATE GSL::gsl)
@@ -394,6 +402,7 @@ target_link_libraries(slugPython PRIVATE GSL::gsl)
 # Link to HDF5
 target_link_libraries(slug PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugTestInterpolation PRIVATE ${HDF5_CXX_LIBRARIES})
+target_link_libraries(slugTestPhot PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugTestPDFs PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugTestUtils PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugTestTracks PRIVATE ${HDF5_CXX_LIBRARIES})
@@ -407,6 +416,7 @@ target_link_libraries(slugPython PRIVATE ${HDF5_CXX_LIBRARIES})
 if(OpenMP_CXX_FOUND)
     target_link_libraries(slug PRIVATE OpenMP::OpenMP_CXX)
     target_link_libraries(slugTestInterpolation PRIVATE OpenMP::OpenMP_CXX)
+    target_link_libraries(slugTestPhot PRIVATE OpenMP::OpenMP_CXX)
     target_link_libraries(slugTestPDFs PRIVATE OpenMP::OpenMP_CXX)
     target_link_libraries(slugTestUtils PRIVATE OpenMP::OpenMP_CXX)
     target_link_libraries(slugTestTracks PRIVATE OpenMP::OpenMP_CXX)
@@ -422,6 +432,7 @@ enable_testing()
 
 # Define tests
 add_test(NAME test_Interpolation COMMAND slugTestInterpolation)
+add_test(NAME test_Phot COMMAND slugTestPhot)
 add_test(NAME test_PDFs COMMAND slugTestPDFs)
 # test_Utils loads a real IMF file (data/imfs/chabrier.toml) directly
 # by relative path for testPDFIntegrator, so it needs to run from the
@@ -487,7 +498,7 @@ set_tests_properties(test_PythonBindings PROPERTIES
 # inside one, so bundling a slow test into an otherwise-fast
 # executable would make it impossible to skip on its own.
 set_tests_properties(
-    test_Interpolation test_PDFs test_Utils test_Specsyn test_Tracks
+    test_Interpolation test_Phot test_PDFs test_Utils test_Specsyn test_Tracks
     test_Core test_Io test_PythonBindings
     PROPERTIES LABELS "quick")
 set_tests_properties(test_CoreFull PROPERTIES LABELS "slow")
