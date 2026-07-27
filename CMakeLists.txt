@@ -94,6 +94,7 @@ add_executable(slug
     src/pdfs/PDFSegmentNormal.cpp
     src/pdfs/PDFSegmentPowerlaw.cpp
     src/pdfs/PDFSegmentSchechter.cpp
+    src/phot/FilterTabulated.cpp
     src/specsyn/SpecsynBlackbody.cpp
     src/specsyn/SpecsynUtils.cpp
     src/specsyn/SpecsynLib.cpp
@@ -117,6 +118,7 @@ add_executable(slugTestInterpolation
     tests/interpolation/testMesh3DInterpolator.cpp
 )
 add_executable(slugTestPhot
+    src/phot/FilterTabulated.cpp
     tests/phot/testPhotAll.cpp
 )
 add_executable(slugTestPDFs

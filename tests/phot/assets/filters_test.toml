@@ -1,0 +1,13 @@
+name = "Registry of filters (test fixture)"
+file = "filters_test.h5"
+Facilities = ["SLUGTEST"]
+
+[SLUGTEST]
+instruments = ["CAM1"]
+
+[SLUGTEST.CAM1]
+filters = ["G500"]
+
+[SLUGTEST.CAM1.G500]
+description = "Synthetic Gaussian test filter"
+wl_ref = 5000.0
