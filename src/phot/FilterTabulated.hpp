@@ -12,6 +12,7 @@
 #include "Filter.hpp"
 #include "FilterCommons.hpp"
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace phot
@@ -28,6 +29,7 @@ namespace phot
 
         /**
          * @brief Construct a FilterTabulated directly from a tabulated response
+         * @param name Name of this filter, for output purposes
          * @param wl Wavelengths at which the response is tabulated, in Angstrom
          * @param response Filter response at each wavelength in wl
          * @details
@@ -38,8 +40,9 @@ namespace phot
          * unrelated to SVO's own "photon counter" vs. "energy counter"
          * detector-type distinction, and is not exposed here.
          */
-        FilterTabulated(const std::vector<double>& wl, const std::vector<double>& response)
-        : wl_(wl), lnWl_(lnGrid(wl_)), responseData_(response), response_(lnWl_, responseData_),
+        FilterTabulated(std::string name, const std::vector<double>& wl, const std::vector<double>& response)
+        : Filter(std::move(name)), wl_(wl), lnWl_(lnGrid(wl_)), responseData_(response),
+          response_(lnWl_, responseData_),
           norm_(response_.integ(response_.xMin(), response_.xMax()))
         { }
 
@@ -52,7 +55,8 @@ namespace phot
          * @details
          * Follows the facility/instrument/filter hierarchy used by
          * data/tools/fetch_filter_vo.py to fetch filter data and by
-         * the filters.h5 file it writes to store it.
+         * the filters.h5 file it writes to store it. name() is set to
+         * "facility.instrument.filter".
          */
         explicit FilterTabulated(const std::string& facility,
             const std::string& instrument,
@@ -126,11 +130,12 @@ namespace phot
         static auto lnGrid(const std::vector<double>& wl) -> std::vector<double>;
 
         /**
-         * @brief Construct a FilterTabulated from data read from a registry entry
+         * @brief Construct a FilterTabulated from a name and data read from a registry entry
+         * @param name Name of this filter, for output purposes
          * @param data Wavelengths and response read by loadFromRegistry
          */
-        explicit FilterTabulated(const RegistryData& data)
-        : FilterTabulated(data.wl_, data.response_) {}
+        FilterTabulated(std::string name, const RegistryData& data)
+        : FilterTabulated(std::move(name), data.wl_, data.response_) {}
 
         std::vector<double> wl_;             /**< Wavelengths at which the response is tabulated, in Angstrom */
         std::vector<double> lnWl_;           /**< ln(wl_) */

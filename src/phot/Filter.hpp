@@ -8,6 +8,8 @@
 #ifndef FILTER_HPP
 #define FILTER_HPP
 
+#include <string>
+#include <utility>
 #include <vector>
 
 namespace phot
@@ -29,15 +31,23 @@ namespace phot
         // Constructor and destructor
         /**
          * @brief Construct a Filter
+         * @param name Name of this filter, for output purposes
          * @param photCount If true, this filter returns photon counts
          *   rather than F_lambda values; see phot() for details
          */
-        explicit Filter(bool photCount = false) : photCount_(photCount) {}
+        explicit Filter(std::string name, bool photCount = false)
+        : name_(std::move(name)), photCount_(photCount) {}
         Filter(const Filter&) = default;
         auto operator=(const Filter&) -> Filter& = default;
         Filter(Filter&&) = default;
         auto operator=(Filter&&) -> Filter& = default;
         virtual ~Filter() = default;
+
+        /**
+         * @brief Get the name of this filter
+         * @return The name of this filter
+         */
+        [[nodiscard]] auto name() const -> const std::string& { return name_; }
 
         /**
          * @brief Get whether this filter returns photon counts
@@ -57,7 +67,8 @@ namespace phot
             const std::vector<double>& spec) const -> double = 0;
 
     private:
-        bool photCount_; /**< True if this filter returns photon counts rather than F_lambda values */
+        std::string name_; /**< Name of this filter, for output purposes */
+        bool photCount_;   /**< True if this filter returns photon counts rather than F_lambda values */
     };
 
 } // namespace phot

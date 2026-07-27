@@ -189,7 +189,8 @@ namespace phot
         const std::string& instrument,
         const std::string& filter,
         const std::string& registryName)
-    : FilterTabulated(loadFromRegistry(facility, instrument, filter, registryName))
+    : FilterTabulated(facility + "." + instrument + "." + filter,
+        loadFromRegistry(facility, instrument, filter, registryName))
     { }
 
 } // namespace phot

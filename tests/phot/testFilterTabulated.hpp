@@ -38,8 +38,14 @@ inline auto testFilterTabulatedDirect() -> int
 {
     const std::vector<double> wl = {3000.0, 6000.0, 9000.0};
     const std::vector<double> response = {1.0, 1.0, 1.0};
-    const phot::FilterTabulated filt(wl, response);
+    const phot::FilterTabulated filt("test_filter", wl, response);
 
+    if (filt.name() != "test_filter")
+    {
+        std::cerr << "testFilterTabulatedDirect: expected name() to be "
+            "\"test_filter\", got \"" << filt.name() << "\"\n";
+        return 1;
+    }
     if (filt.photCount())
     {
         std::cerr << "testFilterTabulatedDirect: expected photCount() to be "
@@ -108,6 +114,12 @@ inline auto testFilterTabulatedRegistry() -> int
     {
         const phot::FilterTabulated filt("SLUGTEST", "CAM1", "G500", registryName);
 
+        if (filt.name() != "SLUGTEST.CAM1.G500")
+        {
+            std::cerr << "testFilterTabulatedRegistry: expected name() to be "
+                "\"SLUGTEST.CAM1.G500\", got \"" << filt.name() << "\"\n";
+            return 1;
+        }
         if (filt.photCount())
         {
             std::cerr << "testFilterTabulatedRegistry: expected photCount() "
