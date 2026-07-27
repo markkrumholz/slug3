@@ -20,6 +20,7 @@ auto main() -> int {
         int result = 0;
         result += testInterpolator1D();
         result += testInterpolator1DInteg();
+        result += testInterpolator1DProductInteg();
         result += testMesh2DGrid();
         result += testMesh2DInterpolator();
         result += testMesh3DInterpolator();

@@ -194,4 +194,160 @@ auto testInterpolator1DInteg() -> int
     return 0; // Success
 }
 
+/**
+ * @brief Unit test for the Interpolator1D::integ(g, x0, x1) and
+ *        Interpolator1D::integ(g, x0, x1, idx) overloads
+ * @returns 0 if the test passes, 1 if it fails
+ * @details
+ * All cases use gsl_interp_linear so expected values can be computed exactly
+ * from the trapezoid rule.
+ *
+ * Case 1 – same grid, two fields, via the all-fields overload and the
+ * idx overload.  f[0] = x and g[0] = 1, f[1] = 1 and g[1] = x, both on
+ * x = {1, 2, 3, 4}. For both fields the product is x, so the exact integral
+ * over [1, 4] is (4^2 - 1^2) / 2 = 7.5.
+ *
+ * Case 2 – different grids, domain clipping by g.  f is on {0, 2, 4} with
+ * f = x; g is on {1, 3, 5} with g = 1 (constant).  With x0 = 0, x1 = 5
+ * the effective range is [max(0,1,0), min(4,5,5)] = [1, 4].  The merged
+ * grid becomes {1, 2, 3, 4}, and f * g = x there, so the expected integral
+ * is again 7.5.
+ *
+ * Case 3 – domain clipping by g from above.  f is on {1, 2, 3, 4} with
+ * f = x; g is on {2, 3} with g = 1.  With x0 = 1, x1 = 4 the effective
+ * range is [2, 3].  The only merged-grid points are xLo = 2 and xHi = 3,
+ * so the product interpolant is the straight line through (2, 2) and (3, 3),
+ * giving integral 0.5 * (2 + 3) * 1 = 2.5.
+ *
+ * Case 4 – non-overlapping domains → zero.  f is on {1, 2} and g is on
+ * {3, 4}; any integration limits give xLo >= xHi, so both overloads
+ * must return 0.
+ */
+auto testInterpolator1DProductInteg() -> int
+{
+    // Case 1: same grid, NF = 2
+    {
+        constexpr size_t nF = 2;
+        const std::vector<double> x = { 1.0, 2.0, 3.0, 4.0 };
+        // f[0] = x, f[1] = 1
+        const std::array<std::vector<double>, nF> fData = {
+            std::vector<double>{ 1.0, 2.0, 3.0, 4.0 },
+            std::vector<double>{ 1.0, 1.0, 1.0, 1.0 }
+        };
+        // g[0] = 1, g[1] = x
+        const std::array<std::vector<double>, nF> gData = {
+            std::vector<double>{ 1.0, 1.0, 1.0, 1.0 },
+            std::vector<double>{ 1.0, 2.0, 3.0, 4.0 }
+        };
+        interp::Interpolator1D<nF> fInterp(x, fData, gsl_interp_linear);
+        interp::Interpolator1D<nF> gInterp(x, gData, gsl_interp_linear);
+
+        constexpr double expected = 7.5; // integral of x from 1 to 4
+        constexpr double x0 = 1.0;
+        constexpr double x1 = 4.0;
+
+        // All-fields overload
+        const auto resultAll = fInterp.integ(gInterp, x0, x1);
+        for (size_t i = 0; i < nF; ++i)
+        {
+            if (!utils::approxEqual(resultAll[i], expected)) // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
+            {
+                std::cerr << "testInterpolator1DProductInteg case 1 (all-fields):"
+                    " field " << i << " expected " << expected
+                    << ", got " << resultAll[i] << "\n"; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
+                return 1;
+            }
+        }
+
+        // idx overload
+        for (size_t i = 0; i < nF; ++i)
+        {
+            const auto resultIdx = fInterp.integ(gInterp, x0, x1, i);
+            if (!utils::approxEqual(resultIdx, expected))
+            {
+                std::cerr << "testInterpolator1DProductInteg case 1 (idx=" << i
+                    << "): expected " << expected << ", got " << resultIdx << "\n";
+                return 1;
+            }
+        }
+    }
+
+    // Case 2: different grids, effective domain [1, 4], NF = 1
+    {
+        // f = x on {0, 2, 4}; g = 1 on {1, 3, 5}
+        interp::Interpolator1D<> fInterp(
+            { 0.0, 2.0, 4.0 }, { 0.0, 2.0, 4.0 }, gsl_interp_linear);
+        interp::Interpolator1D<> gInterp(
+            { 1.0, 3.0, 5.0 }, { 1.0, 1.0, 1.0 }, gsl_interp_linear);
+
+        constexpr double expected = 7.5; // integral of x from 1 to 4
+
+        const auto resultAll = fInterp.integ(gInterp, 0.0, 5.0);
+        if (!utils::approxEqual(resultAll, expected))
+        {
+            std::cerr << "testInterpolator1DProductInteg case 2 (all-fields):"
+                " expected " << expected << ", got " << resultAll << "\n";
+            return 1;
+        }
+        const auto resultIdx = fInterp.integ(gInterp, 0.0, 5.0, 0);
+        if (!utils::approxEqual(resultIdx, expected))
+        {
+            std::cerr << "testInterpolator1DProductInteg case 2 (idx=0):"
+                " expected " << expected << ", got " << resultIdx << "\n";
+            return 1;
+        }
+    }
+
+    // Case 3: g's domain clips the range from above, NF = 1
+    {
+        // f = x on {1, 2, 3, 4}; g = 1 on {2, 3}
+        interp::Interpolator1D<> fInterp(
+            { 1.0, 2.0, 3.0, 4.0 }, { 1.0, 2.0, 3.0, 4.0 }, gsl_interp_linear);
+        interp::Interpolator1D<> gInterp(
+            { 2.0, 3.0 }, { 1.0, 1.0 }, gsl_interp_linear);
+
+        constexpr double expected = 2.5; // trapezoid: 0.5*(2+3)*1
+
+        const auto resultAll = fInterp.integ(gInterp, 1.0, 4.0);
+        if (!utils::approxEqual(resultAll, expected))
+        {
+            std::cerr << "testInterpolator1DProductInteg case 3 (all-fields):"
+                " expected " << expected << ", got " << resultAll << "\n";
+            return 1;
+        }
+        const auto resultIdx = fInterp.integ(gInterp, 1.0, 4.0, 0);
+        if (!utils::approxEqual(resultIdx, expected))
+        {
+            std::cerr << "testInterpolator1DProductInteg case 3 (idx=0):"
+                " expected " << expected << ", got " << resultIdx << "\n";
+            return 1;
+        }
+    }
+
+    // Case 4: non-overlapping domains → both overloads must return 0, NF = 1
+    {
+        interp::Interpolator1D<> fInterp(
+            { 1.0, 2.0 }, { 1.0, 2.0 }, gsl_interp_linear);
+        interp::Interpolator1D<> gInterp(
+            { 3.0, 4.0 }, { 1.0, 1.0 }, gsl_interp_linear);
+
+        const auto resultAll = fInterp.integ(gInterp, 1.0, 4.0);
+        if (!utils::approxEqual(resultAll, 0.0))
+        {
+            std::cerr << "testInterpolator1DProductInteg case 4 (all-fields):"
+                " expected 0, got " << resultAll << "\n";
+            return 1;
+        }
+        const auto resultIdx = fInterp.integ(gInterp, 1.0, 4.0, 0);
+        if (!utils::approxEqual(resultIdx, 0.0))
+        {
+            std::cerr << "testInterpolator1DProductInteg case 4 (idx=0):"
+                " expected 0, got " << resultIdx << "\n";
+            return 1;
+        }
+    }
+
+    return 0; // Success
+}
+
 #endif // TESTINTERPOLATION1D_HPP

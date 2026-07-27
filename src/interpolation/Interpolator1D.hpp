@@ -187,6 +187,112 @@ namespace interp
             return gsl_interp_eval_integ(interp_[idx], x_.data(), f_[idx].data(), x0, x1, acc_()); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- idx is asserted < NF just above
         }
 
+        /**
+         * @brief Integrate the product f(x)*g(x) over [x0, x1] for a single field
+         * @param g A second Interpolator1D; must have the same NF as this one
+         * @param x0 Lower limit of integration
+         * @param x1 Upper limit of integration
+         * @param idx Field index to integrate; must be < NF
+         * @return The integral value as a double
+         * @details
+         * Evaluates \f$\int_{x_0}^{x_1} f_\mathrm{idx}(x)\, g_\mathrm{idx}(x)\, dx\f$
+         * where \f$f(x)\f$ is this Interpolator1D and \f$g(x)\f$ is a second
+         * Interpolator1D. Both Interpolator1D objects are required to have the same
+         * NF -- this is guaranteed at compile time by the template signature.
+         * The integration range is the intersection of [x0, x1] with both
+         * interpolators' domains; returns 0 if that intersection is empty.
+         */
+        [[nodiscard]] auto integ(
+            const Interpolator1D& g, double x0, double x1, size_t idx) const -> double
+        {
+            // NF equality is enforced at compile time: both are Interpolator1D<NF>
+            assert(idx < NF);
+
+            const double xLo = std::max({x_.front(), g.x_.front(), x0});
+            const double xHi = std::min({x_.back(),  g.x_.back(),  x1});
+            if (xLo >= xHi) { return 0.0; }
+
+            // Merged, deduplicated x-grid: xLo, all internal points from either
+            // grid that fall strictly inside (xLo, xHi), then xHi
+            std::vector<double> xGrid;
+            xGrid.reserve(x_.size() + g.x_.size() + 2);
+            xGrid.push_back(xLo);
+            for (const double xi : x_)   { if (xi > xLo && xi < xHi) { xGrid.push_back(xi); } }
+            for (const double xi : g.x_) { if (xi > xLo && xi < xHi) { xGrid.push_back(xi); } }
+            xGrid.push_back(xHi);
+            std::ranges::sort(xGrid);
+            auto toErase = std::ranges::unique(xGrid);
+            xGrid.erase(toErase.begin(), toErase.end());
+
+            // Evaluate f_idx(x) * g_idx(x) at each grid point
+            std::vector<double> fgGrid(xGrid.size());
+            for (size_t j = 0; j < xGrid.size(); ++j)
+            {
+                fgGrid[j] = (*this)(xGrid[j], idx) * g(xGrid[j], idx);
+            }
+
+            // Integrate the product interpolant
+            const Interpolator1D<1> fgInterp(xGrid, fgGrid, gsl_interp_linear);
+            return fgInterp.integ(xLo, xHi);
+        }
+
+        /**
+         * @brief Integrate the product f(x)*g(x) over [x0, x1] for all fields
+         * @param g A second Interpolator1D; must have the same NF as this one
+         * @param x0 Lower limit of integration
+         * @param x1 Upper limit of integration
+         * @return The integral value(s)
+         * @details
+         * Evaluates \f$\int_{x_0}^{x_1} f(x)\, g(x)\, dx\f$ where \f$f(x)\f$ is
+         * this Interpolator1D and \f$g(x)\f$ is a second Interpolator1D. Both
+         * Interpolator1D objects are required to have the same NF -- this is
+         * guaranteed at compile time by the template signature.
+         * The integration range is the intersection of [x0, x1] with both
+         * interpolators' domains; returns 0 (or an array of zeros) if that
+         * intersection is empty.
+         * Return type mirrors integ(double, double): a double if NF = 1,
+         * a std::array<double, NF> otherwise.
+         */
+        [[nodiscard]] auto integ(
+            const Interpolator1D& g, double x0, double x1) const
+        {
+            // NF equality is enforced at compile time: both are Interpolator1D<NF>
+            const double xLo = std::max({x_.front(), g.x_.front(), x0});
+            const double xHi = std::min({x_.back(),  g.x_.back(),  x1});
+            if (xLo >= xHi)
+            {
+                if constexpr (NF > 1) { return std::array<double, NF>{}; }
+                else { return 0.0; }
+            }
+
+            // Merged, deduplicated x-grid: xLo, all internal points from either
+            // grid that fall strictly inside (xLo, xHi), then xHi
+            std::vector<double> xGrid;
+            xGrid.reserve(x_.size() + g.x_.size() + 2);
+            xGrid.push_back(xLo);
+            for (const double xi : x_)   { if (xi > xLo && xi < xHi) { xGrid.push_back(xi); } }
+            for (const double xi : g.x_) { if (xi > xLo && xi < xHi) { xGrid.push_back(xi); } }
+            xGrid.push_back(xHi);
+            std::ranges::sort(xGrid);
+            auto toErase = std::ranges::unique(xGrid);
+            xGrid.erase(toErase.begin(), toErase.end());
+
+            // Evaluate f_i(x) * g_i(x) at each grid point for every field
+            std::array<std::vector<double>, NF> fgGrid;
+            for (auto& v : fgGrid) { v.resize(xGrid.size()); }
+            for (size_t j = 0; j < xGrid.size(); ++j)
+            {
+                for (size_t i = 0; i < NF; ++i)
+                {
+                    fgGrid[i][j] = (*this)(xGrid[j], i) * g(xGrid[j], i); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i is bounded by compile-time constant NF
+                }
+            }
+
+            // Integrate the product interpolant
+            const Interpolator1D<NF> fgInterp(xGrid, fgGrid, gsl_interp_linear);
+            return fgInterp.integ(xLo, xHi);
+        }
+
     private:
 
         /**
