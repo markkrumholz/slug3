@@ -384,6 +384,7 @@ def update_registry(output: str, registry: str) -> None:
     """
     doc = tomlkit.document()
     doc["name"] = "Registry of filters"
+    doc["file"] = output
 
     with h5py.File(output, "r") as h5file:
         facilities = sorted(h5file.keys())
