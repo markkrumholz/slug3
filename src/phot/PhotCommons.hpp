@@ -58,6 +58,13 @@ namespace phot
      * flux/magnitude conversion of its own, unlike ST and AB -- is
      * handled separately, as a special case, rather than by
      * specializing this template.
+     *
+     * Declared constexpr here, but not every specialization below
+     * actually is: only the Flambda <-> Fnu pair, which needs nothing
+     * but arithmetic, can be. Every specialization touching a
+     * magnitude system needs std::log10 or std::pow, neither of which
+     * is a constexpr function until C++26 -- see PhotConvert<Fnu,
+     * AB>'s own comment.
      */
     template <PhotSystem from, PhotSystem to>
     constexpr auto PhotConvert(double fluxIn, double wl) -> double; // NOLINT(readability-identifier-naming) -- capitalized to match this file's other fixed photometric naming (PhotSystem above), rather than the project's usual camelBack function convention
@@ -100,16 +107,15 @@ namespace phot
      * @details
      * The AB system's zero point (flux0AB) is a fixed flux in Jy,
      * independent of wavelength, so wl goes unused here -- see the
-     * primary template's own comment. Note that std::log10 isn't
-     * actually usable in a constant expression with every standard
-     * library this project might build against, even though this
-     * function is still marked constexpr (for a uniform signature
-     * with this template's other specializations): unlike the
-     * Flambda <-> Fnu conversions above, this one can only actually
-     * be evaluated at runtime in practice.
+     * primary template's own comment. Not marked constexpr, unlike
+     * the Flambda <-> Fnu conversions above: std::log10 isn't a
+     * constexpr function in C++23 (only as of C++26), and while Clang
+     * currently accepts it as an extension even in C++23 mode, GCC
+     * cannot be relied on to be as permissive, so this only ever
+     * actually needs to run at runtime anyway.
      */
     template <>
-    constexpr auto PhotConvert<PhotSystem::Fnu, PhotSystem::AB>(const double fluxIn, double /*wl*/) -> double // NOLINT(readability-identifier-naming) -- see the primary template above
+    auto PhotConvert<PhotSystem::Fnu, PhotSystem::AB>(const double fluxIn, double /*wl*/) -> double // NOLINT(readability-identifier-naming) -- see the primary template above
     {
         return -2.5 * std::log10(fluxIn / flux0AB);
     }
@@ -118,11 +124,12 @@ namespace phot
      * @brief Convert an AB magnitude to Fnu (Jy)
      * @details
      * The algebraic inverse of the Fnu -> AB conversion above; see
-     * its own comment for why wl goes unused and why this can only
-     * actually be evaluated at runtime despite being marked constexpr.
+     * its own comment for why wl goes unused and why this isn't
+     * marked constexpr (std::pow, used here, has the same C++23/C++26
+     * constexpr status as std::log10).
      */
     template <>
-    constexpr auto PhotConvert<PhotSystem::AB, PhotSystem::Fnu>(const double magIn, double /*wl*/) -> double // NOLINT(readability-identifier-naming) -- see the primary template above
+    auto PhotConvert<PhotSystem::AB, PhotSystem::Fnu>(const double magIn, double /*wl*/) -> double // NOLINT(readability-identifier-naming) -- see the primary template above
     {
         return flux0AB * std::pow(10.0, magIn / -2.5);
     }
@@ -133,11 +140,10 @@ namespace phot
      * The ST system's zero point (flux0ST) is a fixed flux in
      * erg/s/cm^2/Angstrom, independent of wavelength, so wl goes
      * unused here -- see PhotConvert<Fnu, AB>'s own comment for why,
-     * and for why this can only actually be evaluated at runtime
-     * despite being marked constexpr.
+     * and for why this isn't marked constexpr.
      */
     template <>
-    constexpr auto PhotConvert<PhotSystem::Flambda, PhotSystem::ST>(const double fluxIn, double /*wl*/) -> double // NOLINT(readability-identifier-naming) -- see the primary template above
+    auto PhotConvert<PhotSystem::Flambda, PhotSystem::ST>(const double fluxIn, double /*wl*/) -> double // NOLINT(readability-identifier-naming) -- see the primary template above
     {
         return -2.5 * std::log10(fluxIn / flux0ST);
     }
@@ -148,7 +154,7 @@ namespace phot
      * The algebraic inverse of the Flambda -> ST conversion above.
      */
     template <>
-    constexpr auto PhotConvert<PhotSystem::ST, PhotSystem::Flambda>(const double magIn, double /*wl*/) -> double // NOLINT(readability-identifier-naming) -- see the primary template above
+    auto PhotConvert<PhotSystem::ST, PhotSystem::Flambda>(const double magIn, double /*wl*/) -> double // NOLINT(readability-identifier-naming) -- see the primary template above
     {
         return flux0ST * std::pow(10.0, magIn / -2.5);
     }
@@ -162,7 +168,10 @@ namespace phot
     // conversion above already goes through). wl is genuinely used by
     // each of these, unlike PhotConvert<Fnu, AB>/<Flambda, ST> and
     // their inverses: it's threaded through to whichever of those
-    // Flambda <-> Fnu steps the chain actually needs.
+    // Flambda <-> Fnu steps the chain actually needs. None of these
+    // are marked constexpr either, since each calls at least one of
+    // the log10/pow-based conversions above that aren't -- see
+    // PhotConvert<Fnu, AB>'s own comment for why.
 
     /**
      * @brief Convert Flambda (erg/s/cm^2/Angstrom) to an AB magnitude
@@ -170,7 +179,7 @@ namespace phot
      * Flambda -> Fnu -> AB.
      */
     template <>
-    constexpr auto PhotConvert<PhotSystem::Flambda, PhotSystem::AB>(const double fluxIn, const double wl) -> double // NOLINT(readability-identifier-naming) -- see the primary template above
+    auto PhotConvert<PhotSystem::Flambda, PhotSystem::AB>(const double fluxIn, const double wl) -> double // NOLINT(readability-identifier-naming) -- see the primary template above
     {
         return PhotConvert<PhotSystem::Fnu, PhotSystem::AB>(
             PhotConvert<PhotSystem::Flambda, PhotSystem::Fnu>(fluxIn, wl), wl);
@@ -183,7 +192,7 @@ namespace phot
      * conversion above.
      */
     template <>
-    constexpr auto PhotConvert<PhotSystem::AB, PhotSystem::Flambda>(const double magIn, const double wl) -> double // NOLINT(readability-identifier-naming) -- see the primary template above
+    auto PhotConvert<PhotSystem::AB, PhotSystem::Flambda>(const double magIn, const double wl) -> double // NOLINT(readability-identifier-naming) -- see the primary template above
     {
         return PhotConvert<PhotSystem::Fnu, PhotSystem::Flambda>(
             PhotConvert<PhotSystem::AB, PhotSystem::Fnu>(magIn, wl), wl);
@@ -195,7 +204,7 @@ namespace phot
      * Fnu -> Flambda -> ST.
      */
     template <>
-    constexpr auto PhotConvert<PhotSystem::Fnu, PhotSystem::ST>(const double fluxIn, const double wl) -> double // NOLINT(readability-identifier-naming) -- see the primary template above
+    auto PhotConvert<PhotSystem::Fnu, PhotSystem::ST>(const double fluxIn, const double wl) -> double // NOLINT(readability-identifier-naming) -- see the primary template above
     {
         return PhotConvert<PhotSystem::Flambda, PhotSystem::ST>(
             PhotConvert<PhotSystem::Fnu, PhotSystem::Flambda>(fluxIn, wl), wl);
@@ -208,7 +217,7 @@ namespace phot
      * conversion above.
      */
     template <>
-    constexpr auto PhotConvert<PhotSystem::ST, PhotSystem::Fnu>(const double magIn, const double wl) -> double // NOLINT(readability-identifier-naming) -- see the primary template above
+    auto PhotConvert<PhotSystem::ST, PhotSystem::Fnu>(const double magIn, const double wl) -> double // NOLINT(readability-identifier-naming) -- see the primary template above
     {
         return PhotConvert<PhotSystem::Flambda, PhotSystem::Fnu>(
             PhotConvert<PhotSystem::ST, PhotSystem::Flambda>(magIn, wl), wl);
@@ -220,7 +229,7 @@ namespace phot
      * ST -> Flambda -> Fnu -> AB.
      */
     template <>
-    constexpr auto PhotConvert<PhotSystem::ST, PhotSystem::AB>(const double magIn, const double wl) -> double // NOLINT(readability-identifier-naming) -- see the primary template above
+    auto PhotConvert<PhotSystem::ST, PhotSystem::AB>(const double magIn, const double wl) -> double // NOLINT(readability-identifier-naming) -- see the primary template above
     {
         return PhotConvert<PhotSystem::Fnu, PhotSystem::AB>(
             PhotConvert<PhotSystem::Flambda, PhotSystem::Fnu>(
@@ -234,7 +243,7 @@ namespace phot
      * AB conversion above.
      */
     template <>
-    constexpr auto PhotConvert<PhotSystem::AB, PhotSystem::ST>(const double magIn, const double wl) -> double // NOLINT(readability-identifier-naming) -- see the primary template above
+    auto PhotConvert<PhotSystem::AB, PhotSystem::ST>(const double magIn, const double wl) -> double // NOLINT(readability-identifier-naming) -- see the primary template above
     {
         return PhotConvert<PhotSystem::Flambda, PhotSystem::ST>(
             PhotConvert<PhotSystem::Fnu, PhotSystem::Flambda>(
