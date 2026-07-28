@@ -8,19 +8,21 @@ those gaps by comparing each group's mass list against the canonical
 (maximum-count) mass grid, then fills them by linear interpolation in mass
 between the two nearest available tracks.
 
-Gaps are classified as follows:
+Gaps fall into two cases:
   Case 1  – Both neighboring tracks have the same number of time steps.
              The missing track is produced by direct linear interpolation
              in mass at each time step.
-  Case 2  – The neighboring tracks differ in length only because one
-             includes extra evolutionary phases at the very start or end
-             of the sequence (e.g. a pre-MS phase -9, or a late phase 6).
-             The extra-phase rows are stripped from the longer track so
-             that both tracks have the same length, then Case 1
-             interpolation is applied.
-  Tier 3  – One neighbor is truncated in its interior phases (e.g. it only
-             covers pre-MS and MS while the other has many more phases).
-             These gaps cannot be reliably filled and are skipped.
+  Case 2  – The neighboring tracks differ in length because they do not
+             cover the same set of evolutionary phases.  Only the phases
+             present in both neighbors are used; within each common phase
+             the track with more time steps is truncated to the shorter
+             count.  The resulting tracks are then interpolated as in
+             Case 1.  This handles both minor differences (one neighbor
+             has an extra leading/trailing phase) and severe ones (at very
+             low metallicity the low-mass neighbor may only have pre-MS and
+             MS phases).  In the latter case the interpolated track will be
+             missing post-MS evolution, but this is a limitation of the
+             available MIST data, not of the interpolation scheme.
 
 Interpolated tracks are written back into the same HDF5 file with the same
 dataset layout as the original tracks, plus a boolean attribute
@@ -71,29 +73,21 @@ def interpolate_gap(
     target_mass: float,
 ) -> tuple[str, np.ndarray | None]:
     """
-    Classify the gap between *lo_mass* and *hi_mass* and compute an
-    interpolated track at *target_mass*.
+    Compute an interpolated track at *target_mass* from neighbors at
+    *lo_mass* and *hi_mass*.
 
-    Returns (case, data) where *case* is 'case1', 'case2', or 'tier3'.
-    *data* is the interpolated 2-D array for case1/case2, None for tier3.
+    Returns (case, data) where *case* is 'case1', 'case2', or 'no_common'.
+    *data* is the interpolated 2-D array for case1/case2, None for no_common.
     """
     alpha = (target_mass - lo_mass) / (hi_mass - lo_mass)
 
     if len(lo_data) == len(hi_data):
         return "case1", (1.0 - alpha) * lo_data + alpha * hi_data
 
+    # Align phase by phase: keep only phases present in both tracks, and
+    # within each common phase take min(lo_count, hi_count) rows.
     lo_phases = get_phases(lo_data)
     hi_phases = get_phases(hi_data)
-    all_phases = lo_phases | hi_phases
-    sym_diff = lo_phases ^ hi_phases
-
-    # Case 2 only if every differing phase is the global min or max phase.
-    boundary = {min(all_phases), max(all_phases)}
-    if not sym_diff <= boundary:
-        return "tier3", None
-
-    # Align phase by phase: for each common phase take min(lo_count, hi_count)
-    # rows from the start of that phase in each track.
     common = sorted(lo_phases & hi_phases)
     lo_parts: list[np.ndarray] = []
     hi_parts: list[np.ndarray] = []
@@ -164,7 +158,6 @@ print(f"Found {len(group_work)} group(s) with {total_missing} missing tracks; "
 # ---------------------------------------------------------------------------
 
 n_interpolated = 0
-n_skipped_tier3 = 0
 n_skipped_exists = 0
 
 with h5py.File(args.input, "a") as h5:
@@ -188,10 +181,6 @@ with h5py.File(args.input, "a") as h5:
             case, new_data = interpolate_gap(
                 lo_data, hi_data, lo_mass, hi_mass, target_mass)
 
-            if case == "tier3":
-                n_skipped_tier3 += 1
-                continue
-
             ds = h5[grp].create_dataset(ds_name, data=new_data)
             ds.attrs["interpolated"] = True
             new_masses.append(target_mass)
@@ -206,6 +195,5 @@ with h5py.File(args.input, "a") as h5:
             h5[grp].attrs["nmass"] = len(updated)
 
 print(f"Interpolated : {n_interpolated} tracks")
-print(f"Skipped (tier 3, interior phase mismatch) : {n_skipped_tier3}")
 if n_skipped_exists:
     print(f"Skipped (already present) : {n_skipped_exists}")
