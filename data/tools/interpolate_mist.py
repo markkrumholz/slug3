@@ -5,30 +5,127 @@ The MIST tracks are supposed to contain the same set of initial masses for
 every combination of [Fe/H], [A/Fe], and v/vCrit, but a small number of
 models did not converge and are absent from the file. This script locates
 those gaps by comparing each group's mass list against the canonical
-(maximum-count) mass grid, then reports which masses are missing from which
-groups. A later pass will interpolate the missing tracks from their
-nearest-mass neighbours.
+(maximum-count) mass grid, then fills them by linear interpolation in mass
+between the two nearest available tracks.
+
+Gaps are classified as follows:
+  Case 1  – Both neighboring tracks have the same number of time steps.
+             The missing track is produced by direct linear interpolation
+             in mass at each time step.
+  Case 2  – The neighboring tracks differ in length only because one
+             includes extra evolutionary phases at the very start or end
+             of the sequence (e.g. a pre-MS phase -9, or a late phase 6).
+             The extra-phase rows are stripped from the longer track so
+             that both tracks have the same length, then Case 1
+             interpolation is applied.
+  Tier 3  – One neighbor is truncated in its interior phases (e.g. it only
+             covers pre-MS and MS while the other has many more phases).
+             These gaps cannot be reliably filled and are skipped.
+
+Interpolated tracks are written back into the same HDF5 file with the same
+dataset layout as the original tracks, plus a boolean attribute
+'interpolated = True' to distinguish them.
 """
 
 import argparse
 import shutil
+from collections import defaultdict
+
 import h5py
 import numpy as np
 
-# Default path to the MIST track file
 MIST_FILE = shutil.os.path.join("..", "tracks", "mist.h5")
-
-# Tolerance for floating-point comparison of mass values
 MASS_TOL = 1e-6
 
-# Parse command line arguments
+
+# ---------------------------------------------------------------------------
+# Helper functions
+# ---------------------------------------------------------------------------
+
+def get_phases(track_data: np.ndarray) -> frozenset[int]:
+    """Return the set of unique integer phase values in *track_data*."""
+    return frozenset(int(round(p)) for p in track_data[:, 10])
+
+
+def find_track_key(group: h5py.Group, mass: float) -> str | None:
+    """Return the dataset key for the track at *mass* in *group*, or None."""
+    for k in group.keys():
+        if k.startswith("track_m"):
+            try:
+                if abs(float(k[7:]) - mass) < MASS_TOL:
+                    return k
+            except ValueError:
+                pass
+    return None
+
+
+def track_dataset_name(mass: float) -> str:
+    return f"track_m{mass:.3f}"
+
+
+def interpolate_gap(
+    lo_data: np.ndarray,
+    hi_data: np.ndarray,
+    lo_mass: float,
+    hi_mass: float,
+    target_mass: float,
+) -> tuple[str, np.ndarray | None]:
+    """
+    Classify the gap between *lo_mass* and *hi_mass* and compute an
+    interpolated track at *target_mass*.
+
+    Returns (case, data) where *case* is 'case1', 'case2', or 'tier3'.
+    *data* is the interpolated 2-D array for case1/case2, None for tier3.
+    """
+    alpha = (target_mass - lo_mass) / (hi_mass - lo_mass)
+
+    if len(lo_data) == len(hi_data):
+        return "case1", (1.0 - alpha) * lo_data + alpha * hi_data
+
+    lo_phases = get_phases(lo_data)
+    hi_phases = get_phases(hi_data)
+    all_phases = lo_phases | hi_phases
+    sym_diff = lo_phases ^ hi_phases
+
+    # Case 2 only if every differing phase is the global min or max phase.
+    boundary = {min(all_phases), max(all_phases)}
+    if not sym_diff <= boundary:
+        return "tier3", None
+
+    # Align phase by phase: for each common phase take min(lo_count, hi_count)
+    # rows from the start of that phase in each track.
+    common = sorted(lo_phases & hi_phases)
+    lo_parts: list[np.ndarray] = []
+    hi_parts: list[np.ndarray] = []
+    for ph in common:
+        ph_mask_lo = np.round(lo_data[:, 10]).astype(int) == ph
+        ph_mask_hi = np.round(hi_data[:, 10]).astype(int) == ph
+        lo_rows = lo_data[ph_mask_lo]
+        hi_rows = hi_data[ph_mask_hi]
+        n = min(len(lo_rows), len(hi_rows))
+        lo_parts.append(lo_rows[:n])
+        hi_parts.append(hi_rows[:n])
+
+    lo_aligned = np.concatenate(lo_parts)
+    hi_aligned = np.concatenate(hi_parts)
+
+    return "case2", (1.0 - alpha) * lo_aligned + alpha * hi_aligned
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
 parser = argparse.ArgumentParser(
-    description="Identify (and later fill) missing MIST mass tracks")
+    description="Identify and fill missing MIST mass tracks by interpolation")
 parser.add_argument("--input", default=MIST_FILE,
                     help="Path to the MIST HDF5 track file (default: %(default)s)")
 args = parser.parse_args()
 
-# Open the file and read the nmass attribute and mass array for every group
+# ---------------------------------------------------------------------------
+# Read phase: collect group masses without modifying the file.
+# ---------------------------------------------------------------------------
+
 with h5py.File(args.input, "r") as h5:
     group_nmass: dict[str, int] = {
         g: int(h5[g].attrs["nmass"]) for g in h5.keys()
@@ -37,36 +134,78 @@ with h5py.File(args.input, "r") as h5:
         g: h5[g]["masses"][:] for g in h5.keys()
     }
 
-# The canonical mass grid is taken from a complete group (one whose nmass
-# equals the maximum). All complete groups have identical mass arrays.
 n_max = max(group_nmass.values())
 ref_group = next(g for g, n in group_nmass.items() if n == n_max)
 ref_masses = group_masses[ref_group]
 
-# Identify groups that are missing one or more mass tracks
-incomplete: dict[str, list[float]] = {}
+# Build per-group work lists: (target_mass, lo_mass, hi_mass)
+group_work: dict[str, list[tuple[float, float, float]]] = defaultdict(list)
 for grp, masses in group_masses.items():
     if len(masses) == n_max:
         continue
-    missing = [
-        float(m) for m in ref_masses
-        if not np.any(np.abs(masses - m) < MASS_TOL)
-    ]
-    if missing:
-        incomplete[grp] = missing
+    missing = [m for m in ref_masses if not np.any(np.abs(masses - m) < MASS_TOL)]
+    for m in missing:
+        below = [pm for pm in masses if pm < m - MASS_TOL]
+        above = [pm for pm in masses if pm > m + MASS_TOL]
+        if below and above:
+            group_work[grp].append((float(m), float(below[-1]), float(above[0])))
 
-if not incomplete:
-    print(f"All {len(group_nmass)} groups have the full set of {n_max} mass "
-          "tracks. Nothing to do.")
-else:
-    n_missing_total = sum(len(v) for v in incomplete.values())
-    print(f"Found {len(incomplete)} group(s) with missing mass tracks "
-          f"({n_missing_total} missing tracks in total, out of a canonical "
-          f"grid of {n_max} masses):\n")
-    print(f"  {'Group':<45s}  {'Have':>5s}  {'Missing masses (M_sun)'}")
-    print(f"  {'-'*45}  {'-'*5}  {'-'*40}")
-    for grp_name in sorted(incomplete):
-        missing = incomplete[grp_name]
-        n_have = group_nmass[grp_name]
-        missing_str = ", ".join(f"{m:.4g}" for m in missing)
-        print(f"  {grp_name:<45s}  {n_have:>5d}  {missing_str}")
+if not group_work:
+    print(f"All {len(group_nmass)} groups already have the full set of "
+          f"{n_max} mass tracks. Nothing to do.")
+    raise SystemExit(0)
+
+total_missing = sum(len(v) for v in group_work.values())
+print(f"Found {len(group_work)} group(s) with {total_missing} missing tracks; "
+      f"beginning interpolation.\n")
+
+# ---------------------------------------------------------------------------
+# Interpolation and write phase.
+# ---------------------------------------------------------------------------
+
+n_interpolated = 0
+n_skipped_tier3 = 0
+n_skipped_exists = 0
+
+with h5py.File(args.input, "a") as h5:
+    for grp in sorted(group_work):
+        new_masses: list[float] = []
+        for target_mass, lo_mass, hi_mass in group_work[grp]:
+            lo_key = find_track_key(h5[grp], lo_mass)
+            hi_key = find_track_key(h5[grp], hi_mass)
+            if lo_key is None or hi_key is None:
+                print(f"  WARNING: neighbor track missing for "
+                      f"{target_mass:.4g} M_sun in {grp}; skipping")
+                continue
+
+            ds_name = track_dataset_name(target_mass)
+            if ds_name in h5[grp]:
+                n_skipped_exists += 1
+                continue
+
+            lo_data = h5[grp][lo_key][:]
+            hi_data = h5[grp][hi_key][:]
+            case, new_data = interpolate_gap(
+                lo_data, hi_data, lo_mass, hi_mass, target_mass)
+
+            if case == "tier3":
+                n_skipped_tier3 += 1
+                continue
+
+            ds = h5[grp].create_dataset(ds_name, data=new_data)
+            ds.attrs["interpolated"] = True
+            new_masses.append(target_mass)
+            n_interpolated += 1
+
+        # Update the group's masses array and nmass attribute.
+        if new_masses:
+            old_masses = h5[grp]["masses"][:]
+            updated = np.sort(np.append(old_masses, new_masses))
+            del h5[grp]["masses"]
+            h5[grp].create_dataset("masses", data=updated)
+            h5[grp].attrs["nmass"] = len(updated)
+
+print(f"Interpolated : {n_interpolated} tracks")
+print(f"Skipped (tier 3, interior phase mismatch) : {n_skipped_tier3}")
+if n_skipped_exists:
+    print(f"Skipped (already present) : {n_skipped_exists}")
