@@ -55,8 +55,8 @@ namespace
     /**
      * @brief Build a StarData for a single star
      * @details
-     * hSurf/cSurf/nSurf default to values that classify as
-     * WRType::None via getWRType (hSurf = 0.7, well above the 0.3
+     * heSurf/cSurf/nSurf default to values that classify as
+     * WRType::None via getWRType (heSurf = 0.1, well below the 0.4
      * cutoff), matching an ordinary, unstripped star.
      */
     auto makeStarData(
@@ -64,7 +64,7 @@ namespace
         const double logL,
         const double logTeff,
         const double mdot,
-        const double hSurf = 0.7,
+        const double heSurf = 0.1,
         const double cSurf = 0.0,
         const double nSurf = 0.0) -> specsyn::Specsyn::StarData
     {
@@ -73,7 +73,7 @@ namespace
         props.at(static_cast<std::size_t>(tracks::FieldIdx::mdot)) = mdot;
         props.at(static_cast<std::size_t>(tracks::FieldIdx::logL)) = logL;
         props.at(static_cast<std::size_t>(tracks::FieldIdx::logTe)) = logTeff;
-        props.at(static_cast<std::size_t>(tracks::FieldIdx::hSurf)) = hSurf;
+        props.at(static_cast<std::size_t>(tracks::FieldIdx::heSurf)) = heSurf;
         props.at(static_cast<std::size_t>(tracks::FieldIdx::cSurf)) = cSurf;
         props.at(static_cast<std::size_t>(tracks::FieldIdx::nSurf)) = nSurf;
         return props;
@@ -175,17 +175,17 @@ static auto testSpecsynChainDispatch() -> int
         // PoWR test fixture's [0.5, 1.0] log_rt range (see
         // data/tools/make_powr_test_fixture.py), with logTeff = 4.7
         // similarly between its {4.6, 4.8} grid points. Only
-        // hSurf/cSurf/nSurf change between the three subtypes, per
+        // heSurf/cSurf/nSurf change between the three subtypes, per
         // getWRType's own classification rules.
         result += checkSpecSucceeds(*synth,
-            makeStarData(20.0, 5.7, 4.7, 3e-5, 1e-6, 0.01, 0.0), 0.0, "WC star"); // cSurf >= nSurf
+            makeStarData(20.0, 5.7, 4.7, 3e-5, 0.98, 0.01, 0.0), 0.0, "WC star"); // heSurf > 0.9, cSurf >= nSurf
         result += checkSpecSucceeds(*synth,
-            makeStarData(20.0, 5.7, 4.7, 3e-5, 1e-6, 0.0, 0.01), 0.0, "WNE star"); // cSurf < nSurf
+            makeStarData(20.0, 5.7, 4.7, 3e-5, 0.98, 0.0, 0.01), 0.0, "WNE star"); // heSurf > 0.9, cSurf < nSurf
         result += checkSpecSucceeds(*synth,
-            makeStarData(20.0, 5.7, 4.7, 3e-5, 0.1), 0.0, "WNL star"); // 1e-5 < hSurf <= 0.3
+            makeStarData(20.0, 5.7, 4.7, 3e-5, 0.7), 0.0, "WNL star"); // 0.4 <= heSurf <= 0.9
 
-        // A hot, unstripped OB star (hSurf = 0.7, well above the WR
-        // hSurf > 0.3 cutoff, so getWRType returns WRType::None and
+        // A hot, unstripped OB star (heSurf = 0.1, well below the WR
+        // heSurf >= 0.4 cutoff, so getWRType returns WRType::None and
         // every PoWR library falls through) at Teff ~= 28750 K,
         // logg ~= 3.1 -- inside TLUSTY_test's [27500, 30000] K x
         // [3.0, 3.25] grid, via the same Stefan-Boltzmann/gravity

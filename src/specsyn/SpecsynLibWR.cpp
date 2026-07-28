@@ -16,6 +16,7 @@
 #include "SpecsynUtils.hpp"
 #include "hdf5.h" // NOLINT(misc-include-cleaner)
 #include <algorithm> // NOLINT(misc-include-cleaner) -- see the identical NOLINT on SpecsynLib.cpp's findBracket for why std::ranges::lower_bound needs this
+#include <array>
 #include <cctype>
 #include <cmath>
 #include <cstddef>
@@ -294,19 +295,24 @@ namespace specsyn
         // WNL hack: PoWR's WNL grids carry an extra surface-hydrogen
         // (xh) axis this class does not model (see fetch_powr.py), so
         // each [Fe/H] can have several WNL groups here, one per xh.
-        // The Georgy et al. classification scheme getWRType uses,
-        // however, never classifies a star as WNL once its surface H
-        // mass fraction exceeds 0.3, so the xh = 0.20 ("H20") grids --
-        // the lowest-xh grids PoWR provides -- are always the nearest
-        // (indeed, the only relevant) neighbor for any WNL star this
-        // code will ever query. Rather than adding a fourth tensor
-        // axis just to handle that, keep only each [Fe/H]'s H20 group
-        // here, which reduces WNL to the same single-model-per-(FeH,
-        // log_rt, log_teff) shape WNE and WC already have, so the rest
-        // of this constructor can stay unchanged. This is a known,
-        // deliberate physical inconsistency with PoWR (not a bug), and
-        // would need revisiting only if a different WR classification
-        // scheme were adopted in the future.
+        // Keeping only the xh = 0.20 ("H20") group here was safe under
+        // the (now-replaced) Georgy et al. 2012 classification scheme,
+        // which never classified a star as WNL once its surface H mass
+        // fraction exceeded 0.3, making H20 -- the lowest-xh grid PoWR
+        // provides -- always the nearest (indeed, the only relevant)
+        // neighbor for any WNL star this code would ever query. Rather
+        // than adding a fourth tensor axis just to handle that, keep
+        // only each [Fe/H]'s H20 group here, which reduces WNL to the
+        // same single-model-per-(FeH, log_rt, log_teff) shape WNE and
+        // WC already have, so the rest of this constructor can stay
+        // unchanged.
+        //
+        // getWRType has since moved to the Roy et al. 2020 scheme
+        // (surface He mass fraction alone), under which a WNL star can
+        // retain a substantially larger hydrogen envelope than 0.3 --
+        // this filter is now a known gap (not yet fixed here), pending
+        // adding the higher-xh PoWR grids (e.g. SMC-H60) this class
+        // currently discards.
         if (type_ == WRType::WNL)
         {
             std::vector<double> fehFiltered;
@@ -526,25 +532,16 @@ namespace specsyn
     auto SpecsynLibWR<Policy>::getWRType(const Specsyn::StarData& props) -> WRType
     {
         // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- StarData is a fixed-size std::array, and every index used here is compile-time-known
+        const double heSurf = props[static_cast<size_t>(tracks::FieldIdx::heSurf)];
         const double logTeff = props[static_cast<size_t>(tracks::FieldIdx::logTe)];
-        const double hSurf = props[static_cast<size_t>(tracks::FieldIdx::hSurf)];
-        if (logTeff < 4.0 || hSurf > 0.3)
+        constexpr double logTeffNonWRMax = 4.6989700043360187; // log10(50000)
+        constexpr double logTeffAbsoluteMin = 4.0; // log10(10000)
+        if ((heSurf < 0.4 && logTeff < logTeffNonWRMax) || logTeff < logTeffAbsoluteMin)
         {
             return WRType::None;
         }
-        // PoWR's own WNL grid stops at Teff = 1e5 K (log(Teff) = 5) at
-        // every [Fe/H] -- verified directly against
-        // data/spectra/powr_wnl.h5 -- so a star hotter than that with
-        // some residual surface hydrogen still needs a spectrum,
-        // falling through to the hydrogen-free C/N check below instead
-        // of being (unhelpfully) classified WNL. This is a fixed
-        // constant rather than any one library's own logTeff_ range:
-        // getWRType runs identically for every library in a chain (see
-        // SpecsynLibChained), so sizing the cutoff to whichever
-        // library happens to be asking would size it to the wrong
-        // grid for every caller except WNL itself.
-        constexpr double wnlMaxLogTeff = 5.0; // log10(1e5 K)
-        if (hSurf > 1e-5 && logTeff < wnlMaxLogTeff)
+        constexpr double logTeffWNLMax = 5.0; // log10(1e5 K)
+        if (heSurf <= 0.9 && logTeff < logTeffWNLMax)
         {
             return WRType::WNL;
         }
@@ -628,38 +625,90 @@ namespace specsyn
         // multiply scattered and so faster (and hence a larger
         // transformed radius) than this estimate implies. There is no
         // well-established correction for this, so rather than reject
-        // these stars outright, clamp logRt into range and let them
-        // fall back on the nearest edge. PoWR's own (feh, logRt,
-        // logTeff) grids are ragged, not rectangular, so clamping to
-        // this library's *global* logRt_ range can still land on an
-        // entirely unpopulated (feh, logTeff) column; instead, clamp
-        // to the range of logRt values actually populated among the
-        // (up to 4) feh/logTeff columns bracketing this star's own feh
-        // and logTeff, so the clamped point lands on real data
-        // whenever any exists nearby. Falls back to the library's
-        // global logRt_ range if none of those columns has any
-        // populated point at all, which SpecsynLib::spec()'s own
-        // coerce/bounds handling then reports as out of bounds exactly
-        // as it would have before this clamp existed.
-        double populatedRtMin = std::numeric_limits<double>::infinity();
-        double populatedRtMax = -std::numeric_limits<double>::infinity();
-        for (const size_t f : { bFeh.lo_, bFeh.hi_ })
+        // these stars outright, move logRt to real data instead.
+        //
+        // PoWR's own (feh, logRt, logTeff) grids are ragged, not
+        // rectangular, and get sparser still at the hottest edge --
+        // e.g. WC's own grid has only 3 populated log_rt values at its
+        // hottest log_teff point, versus ~20 one grid step down --
+        // exactly the kind of gap a star whose logTeff has been
+        // clamped onto that hot edge in SpecsynLibChained::spec() (so
+        // bTeff.t_ is exactly 0 or 1, collapsing all interpolation
+        // weight onto a single logTeff column) can land in. So first
+        // look only at the (up to 4) feh/logTeff corner combinations
+        // that actually carry nonzero interpolation weight -- an exact
+        // hit on either axis makes the corresponding "other side"
+        // irrelevant regardless of what it has populated -- and move
+        // logRt (feh and logTeff both left fixed) to whichever
+        // populated grid value is closest to rawLogRt and has data at
+        // every one of those weight-carrying corners simultaneously,
+        // mirroring the mass rescaling that clamps log(g) in
+        // SpecsynLibChained::spec(): both replace an out-of-range
+        // continuous estimate with the nearest point guaranteed to
+        // actually have data, rather than interpolating across a gap.
+        const std::array<std::pair<size_t, size_t>, 4> fehTeffCorners = {{
+            { bFeh.lo_, bTeff.lo_ }, { bFeh.lo_, bTeff.hi_ },
+            { bFeh.hi_, bTeff.lo_ }, { bFeh.hi_, bTeff.hi_ },
+        }};
+        const std::array<double, 4> fehTeffWeights = {{
+            (1.0 - bFeh.t_) * (1.0 - bTeff.t_), (1.0 - bFeh.t_) * bTeff.t_,
+            bFeh.t_ * (1.0 - bTeff.t_), bFeh.t_ * bTeff.t_,
+        }};
+        double logRt = std::numeric_limits<double>::quiet_NaN();
+        double closestValidDist = std::numeric_limits<double>::infinity();
+        for (size_t r = 0; r < logRt_.size(); ++r)
         {
-            for (const size_t t : { bTeff.lo_, bTeff.hi_ })
+            bool populatedAtEveryWeightedCorner = true;
+            for (size_t c = 0; c < fehTeffCorners.size(); ++c)
             {
-                for (size_t r = 0; r < logRt_.size(); ++r)
+                if (fehTeffWeights[c] == 0.0) { continue; } // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index,cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- c < fehTeffWeights.size() by construction; this corner carries no interpolation weight, so it doesn't matter whether it's populated
+                const auto [f, t] = fehTeffCorners[c]; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index,cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- c < fehTeffCorners.size() by construction
+                if (this->grid_[f, r, t].empty())
                 {
-                    if (!this->grid_[f, r, t].empty())
+                    populatedAtEveryWeightedCorner = false;
+                    break;
+                }
+            }
+            if (!populatedAtEveryWeightedCorner) { continue; }
+            const double dist = std::abs(logRt_[r] - rawLogRt); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- r < logRt_.size() by construction
+            if (dist < closestValidDist)
+            {
+                closestValidDist = dist;
+                logRt = logRt_[r]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
+            }
+        }
+
+        if (std::isnan(logRt))
+        {
+            // No single logRt value has data at every weight-carrying
+            // corner -- fall back to clamping into the union of
+            // whatever each of the (up to 4) bracketing columns has
+            // populated at all, regardless of weight, so the parent
+            // class's own OOBPolicy::coerce handling still gets a
+            // chance to salvage a partial-weight interpolation.
+            // SpecsynLib::spec() reports this as out of bounds exactly
+            // as it would have before this fallback existed if even
+            // that comes up with nothing populated at all.
+            double populatedRtMin = std::numeric_limits<double>::infinity();
+            double populatedRtMax = -std::numeric_limits<double>::infinity();
+            for (const size_t f : { bFeh.lo_, bFeh.hi_ })
+            {
+                for (const size_t t : { bTeff.lo_, bTeff.hi_ })
+                {
+                    for (size_t r = 0; r < logRt_.size(); ++r)
                     {
-                        populatedRtMin = std::min(populatedRtMin, logRt_[r]); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- r < logRt_.size() by construction
-                        populatedRtMax = std::max(populatedRtMax, logRt_[r]); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
+                        if (!this->grid_[f, r, t].empty())
+                        {
+                            populatedRtMin = std::min(populatedRtMin, logRt_[r]); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- r < logRt_.size() by construction
+                            populatedRtMax = std::max(populatedRtMax, logRt_[r]); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
+                        }
                     }
                 }
             }
+            logRt = std::isfinite(populatedRtMin) ?
+                std::clamp(rawLogRt, populatedRtMin, populatedRtMax) :
+                std::clamp(rawLogRt, logRt_.front(), logRt_.back());
         }
-        const double logRt = std::isfinite(populatedRtMin) ?
-            std::clamp(rawLogRt, populatedRtMin, populatedRtMax) :
-            std::clamp(rawLogRt, logRt_.front(), logRt_.back());
 
         // Step 5: the actual trilinear interpolation, handled entirely
         // by the parent class -- also returns an OOB result if any of

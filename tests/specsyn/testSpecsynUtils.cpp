@@ -92,11 +92,12 @@ static auto testParseRegistry() -> int
  * 14 groups, all at afe = cfe = microTurb = 0.0 and r = 500, spanning
  * feh = -2.5 through 0.75 in steps of 0.25. It checks that the full
  * feh range returns all 14 groups, sorted from lowest to highest feh;
- * that a feh range not aligned with the grid returns only the groups
- * strictly inside it (unlike findMatchingTracks, findMatchingSpectra
- * does not bracket the range); that mismatched afe, cfe, microTurb,
- * or r values each return no groups; and that requesting an unknown
- * spectra set throws an exception.
+ * that a feh range not aligned with the grid returns the minimal
+ * bracketing superset of groups (like findMatchingTracks, not just
+ * the groups strictly inside it -- see findMatchingSpectra's own doc
+ * comment for why); that mismatched afe, cfe, microTurb, or r values
+ * each return no groups; and that requesting an unknown spectra set
+ * throws an exception.
  */
 static auto testFindMatchingSpectra() -> int
 {
@@ -119,16 +120,17 @@ static auto testFindMatchingSpectra() -> int
             return 1;
         }
 
-        // A feh range not aligned with the grid should return only the
-        // groups whose feh actually falls inside [fehMin, fehMax] --
-        // not a bracketing superset the way findMatchingTracks would
+        // A feh range not aligned with the grid should return the
+        // minimal bracketing superset of groups spanning it, the same
+        // way findMatchingTracks does: the largest grid feh <= -0.9
+        // (-1.0) through the smallest grid feh >= -0.1 (0.0), inclusive
         auto [fehSub, namesSub] = specsyn::findMatchingSpectra(
             spectraName, -0.9, -0.1, 0.0, 0.0, 0.0, 500, registryName);
-        const std::vector<double> expectedSub = { -0.75, -0.5, -0.25 };
+        const std::vector<double> expectedSub = { -1.0, -0.75, -0.5, -0.25, 0.0 };
         if (fehSub != expectedSub || namesSub.size() != expectedSub.size())
         {
             std::cerr << "testFindMatchingSpectra: off-grid feh range "
-                "did not return the expected literal subset of groups\n";
+                "did not return the expected bracketing superset of groups\n";
             return 1;
         }
 
@@ -199,6 +201,47 @@ static auto testFindMatchingSpectra() -> int
 }
 
 /**
+ * @brief Unit test for findMatchingSpectra with several groups tied at the same feh
+ * @return 0 if the test passes, 1 if it fails.
+ * @details
+ * Unlike a track set's groups, a spectral library's groups are not
+ * guaranteed to have distinct feh values -- POWR_WNL_test (like the
+ * real PoWR WNL grid it mimics) has two groups (different xh, surface
+ * hydrogen mass fraction) at each of its two feh values, -1.0 and 0.0.
+ * Querying with fehMin == fehMax == 0.0 -- exactly on that tied run --
+ * exercises the case that once made the minimal-bracketing-range
+ * computation invert (the last index <= fehMin landing after the
+ * first index >= fehMax, both within the same tied run), which
+ * previously produced an empty result instead of the two tied groups
+ * this checks for.
+ */
+static auto testFindMatchingSpectraTiedFeh() -> int
+{
+    try
+    {
+        auto [feh, names] = specsyn::findMatchingSpectra(
+            "POWR_WNL_test", 0.0, 0.0, tracks::defaultAFe,
+            specsyn::defaultCFe, specsyn::defaultMicroTurb, specsyn::defaultR,
+            registryName);
+        if (feh.size() != 2 || names.size() != 2 ||
+            !std::ranges::all_of(feh, [](const double f) -> bool { return f == 0.0; }))
+        {
+            std::cerr << "testFindMatchingSpectraTiedFeh: expected 2 groups "
+                "tied at feh = 0.0, got " << feh.size() << " groups\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "testFindMatchingSpectraTiedFeh: unexpected exception: "
+            << e.what() << "\n";
+        return 1;
+    }
+
+    return 0;
+}
+
+/**
  * @brief Unit test for the getMicroDefault function.
  * @return 0 if the test passes, 1 if it fails.
  * @details
@@ -250,6 +293,7 @@ auto testSpecsynUtils() -> int
     int result = 0;
     result += testParseRegistry();
     result += testFindMatchingSpectra();
+    result += testFindMatchingSpectraTiedFeh();
     result += testGetMicroDefault();
     return result;
 }

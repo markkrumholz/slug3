@@ -174,13 +174,15 @@ namespace specsyn
         H5Gget_info(file, &ginfo);
 
         // Loop over every group in the file, collecting the feh value
-        // and name of each one whose feh attribute lies in
-        // [fehMin, fehMax] and whose afe, cfe, micro, and r attributes
+        // and name of each one whose afe, cfe, micro, and r attributes
         // all match the input values; a group missing one of these
         // attributes is treated as matching regardless of the
         // corresponding input value. Groups with no feh attribute at
         // all (e.g. "wavelengths", "logg_Teff_grid") are simply
-        // skipped.
+        // skipped. The feh range is deliberately not applied here --
+        // every afe/cfe/micro/r match is collected, and the feh range
+        // is instead used below to select a bracketing subset of them
+        // (see this function's own doc comment for why).
         std::vector<std::pair<double, std::string>> matches;
         for (hsize_t i = 0; i < ginfo.nlinks; ++i)
         {
@@ -196,8 +198,7 @@ namespace specsyn
             if (grp < 0) { continue; }
 
             const auto fehVal = readScalarAttrIfPresent(grp, "feh");
-            bool isMatch = fehVal.has_value() &&
-                (*fehVal >= fehMin) && (*fehVal <= fehMax);
+            bool isMatch = fehVal.has_value();
 
             if (isMatch)
             {
@@ -241,17 +242,70 @@ namespace specsyn
 
         // NOLINTEND(misc-include-cleaner)
 
-        // Sort all the matches by feh, from lowest to highest
+        // Sort all the afe/cfe/micro/r-matching spectra by feh, from
+        // lowest to highest
         std::ranges::sort(matches, {},
             &std::pair<double, std::string>::first);
 
-        // Extract the matches into the output vectors
+        if (matches.empty())
+        {
+            return { {}, {} };
+        }
+
+        // Find the minimal bracketing range of indices into matches
+        // whose feh values encompass [fehMin, fehMax]: from the last
+        // index with feh <= fehMin (or index 0, if no feh is that low),
+        // through the first index with feh >= fehMax (or the last
+        // index, if no feh is that high) -- identical in purpose to
+        // TrackUtils::findMatchingTracks's own bracketing logic (see
+        // its own comment). std::ranges::upper_bound and lower_bound
+        // trip up misc-include-cleaner on some libc++ versions (it
+        // can't find a header to attribute them to, even with
+        // <algorithm> already included), hence the NOLINTs below.
+        const auto loBound = std::ranges::upper_bound(matches, fehMin, //NOLINT(misc-include-cleaner)
+            {}, &std::pair<double, std::string>::first);
+        size_t loIdx = (loBound == matches.begin()) ? 0 :
+            static_cast<size_t>(loBound - matches.begin()) - 1;
+        const auto hiBound = std::ranges::lower_bound(matches, fehMax, //NOLINT(misc-include-cleaner)
+            {}, &std::pair<double, std::string>::first);
+        size_t hiIdx = (hiBound == matches.end()) ?
+            matches.size() - 1 : static_cast<size_t>(hiBound - matches.begin());
+
+        // Unlike a track set's groups, a spectral library's groups are
+        // not guaranteed to have distinct feh values -- e.g. PoWR's
+        // WNL grid has several xh (surface-hydrogen) groups sharing
+        // each feh value. loIdx/hiIdx above each land on just one
+        // arbitrary member of such a tied run (std::ranges::sort is
+        // not required to be stable, so even which member is
+        // unspecified) whenever fehMin or fehMax falls at or beyond
+        // that run, so expand each outward to cover every group tied
+        // at that same feh value: loIdx back to the first index
+        // sharing matches[loIdx]'s feh, hiIdx forward to the last
+        // index sharing matches[hiIdx]'s feh. This also handles the
+        // case where fehMin == fehMax lands exactly on a tied run --
+        // loIdx and hiIdx there start out inverted (loIdx, the last
+        // index <= fehMin, past hiIdx, the first index >= fehMax, both
+        // within that same run), but expanding each to the full run
+        // brings loIdx back to its start and hiIdx to its end, so the
+        // two never need reconciling against each other directly.
+        while (loIdx > 0 && matches[loIdx - 1].first == matches[loIdx].first) // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- loIdx > 0 checked in the loop condition, and loIdx < matches.size() throughout since it only ever decreases from an initially valid index
+        {
+            --loIdx;
+        }
+        while (hiIdx + 1 < matches.size() && matches[hiIdx + 1].first == matches[hiIdx].first) // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- hiIdx + 1 < matches.size() checked in the loop condition, and hiIdx stays < matches.size() throughout since it only ever increases from an initially valid index
+        {
+            ++hiIdx;
+        }
+
+        // Extract the bracketing range of matches into the output vectors
         std::vector<double> fehOut;
         std::vector<std::string> nameOut;
-        fehOut.reserve(matches.size());
-        nameOut.reserve(matches.size());
-        for (auto& match : matches)
+        const size_t nOut = hiIdx - loIdx + 1;
+        fehOut.reserve(nOut);
+        nameOut.reserve(nOut);
+        for (size_t idx = loIdx; idx <= hiIdx; ++idx)
         {
+            auto& match = matches.at(idx);
             fehOut.push_back(match.first);
             nameOut.push_back(std::move(match.second));
         }
