@@ -45,8 +45,8 @@ namespace
     /**
      * @brief Build a StarData for a Wolf-Rayet star
      * @details
-     * hSurf, cSurf, and nSurf default to values that classify as
-     * WRType::WNE (hSurf <= 1e-5, cSurf < nSurf) via getWRType,
+     * heSurf, cSurf, and nSurf default to values that classify as
+     * WRType::WNE (heSurf > 0.9, cSurf < nSurf) via getWRType,
      * matching POWR_WNE_test's own type_.
      */
     auto makeWRStarData(
@@ -54,7 +54,7 @@ namespace
         const double logL,
         const double logTeff,
         const double mdot,
-        const double hSurf = 1e-6,
+        const double heSurf = 0.98,
         const double cSurf = 0.0,
         const double nSurf = 0.01) -> specsyn::Specsyn::StarData
     {
@@ -63,7 +63,7 @@ namespace
         props.at(static_cast<std::size_t>(tracks::FieldIdx::mdot)) = mdot;
         props.at(static_cast<std::size_t>(tracks::FieldIdx::logL)) = logL;
         props.at(static_cast<std::size_t>(tracks::FieldIdx::logTe)) = logTeff;
-        props.at(static_cast<std::size_t>(tracks::FieldIdx::hSurf)) = hSurf;
+        props.at(static_cast<std::size_t>(tracks::FieldIdx::heSurf)) = heSurf;
         props.at(static_cast<std::size_t>(tracks::FieldIdx::cSurf)) = cSurf;
         props.at(static_cast<std::size_t>(tracks::FieldIdx::nSurf)) = nSurf;
         return props;
@@ -127,15 +127,18 @@ static auto testSpecWNESuccess() -> int
 }
 
 // Check that spec() treats a WRType mismatch as out of bounds: a star
-// with hSurf = 0.5 (well above the 0.3 threshold in getWRType)
-// classifies as WRType::None, which can never match POWR_WNE_test's
-// own WRType::WNE, regardless of any other property
+// with heSurf = 0.2 (below the 0.4 threshold in getWRType) and
+// logTeff = 4.0 (below getWRType's log10(50000) None/WNL boundary, so
+// it isn't instead pulled into WRType::WNL for being hot enough to
+// look WC/WO-like -- see getWRType's own comment) classifies as
+// WRType::None, which can never match POWR_WNE_test's own
+// WRType::WNE, regardless of any other property
 static auto testSpecTypeMismatchThrow() -> int
 {
     const specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise> lib(
         spectraName, -3.0, 1.0, registryName);
 
-    const auto props = makeWRStarData(20.0, 5.7, 4.7, 3e-5, 0.5);
+    const auto props = makeWRStarData(20.0, 5.7, 4.0, 3e-5, 0.2);
 
     try
     {
@@ -156,7 +159,7 @@ static auto testSpecTypeMismatchSilent() -> int
     const specsyn::SpecsynLibWR<specsyn::OOBPolicy::silent> lib(
         spectraName, -3.0, 1.0, registryName);
 
-    const auto props = makeWRStarData(20.0, 5.7, 4.7, 3e-5, 0.5);
+    const auto props = makeWRStarData(20.0, 5.7, 4.0, 3e-5, 0.2);
 
     std::vector<double> result;
     try
@@ -294,7 +297,7 @@ static auto testSpecTeffGridBoundsSilent() -> int
 
 // Check that spec() successfully interpolates a spectrum for a
 // plausible WNL star (same mass/L/Teff/Mdot as testSpecWNESuccess,
-// just with hSurf = 0.1 so it classifies as WRType::WNL instead of
+// just with heSurf = 0.7 so it classifies as WRType::WNL instead of
 // WRType::WNE), loading from POWR_WNL_test -- a fixture whose
 // constructor comments (see make_powr_test_fixture.py) describe two
 // groups per [Fe/H]: an H20 (xh = 0.20) group with a Gaussian SED
@@ -316,7 +319,7 @@ static auto testSpecWNLSuccess() -> int
     const specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise> lib(
         wnlSpectraName, -3.0, 1.0, registryName);
 
-    const auto props = makeWRStarData(20.0, 5.7, 4.7, 3e-5, 0.1);
+    const auto props = makeWRStarData(20.0, 5.7, 4.7, 3e-5, 0.7);
 
     std::vector<double> result;
     try
@@ -375,15 +378,17 @@ static auto testSpecWNLSuccess() -> int
 }
 
 // Check that spec() treats a WRType mismatch as out of bounds for a
-// WNL library too: a star with hSurf = 0.5 (above the 0.3 threshold in
-// getWRType) classifies as WRType::None, which can never match
-// POWR_WNL_test's own WRType::WNL, regardless of any other property
+// WNL library too: a star with heSurf = 0.2 and logTeff = 4.0 (see
+// testSpecTypeMismatchThrow's own comment for why logTeff must be
+// below getWRType's log10(50000) None/WNL boundary here) classifies
+// as WRType::None, which can never match POWR_WNL_test's own
+// WRType::WNL, regardless of any other property
 static auto testSpecWNLTypeMismatchThrow() -> int
 {
     const specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise> lib(
         wnlSpectraName, -3.0, 1.0, registryName);
 
-    const auto props = makeWRStarData(20.0, 5.7, 4.7, 3e-5, 0.5);
+    const auto props = makeWRStarData(20.0, 5.7, 4.0, 3e-5, 0.2);
 
     try
     {

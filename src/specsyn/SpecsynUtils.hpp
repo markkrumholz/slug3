@@ -44,13 +44,23 @@ namespace specsyn
      * @param registryName Name of the spectral library registry file
      * @returns A pair consisting of a vector of [Fe/H] values and corresponding group names
      * @details
-     * Among the groups in the spectral model's HDF5 file, this
-     * returns those whose feh attribute lies in [fehMin, fehMax] and
-     * whose afe, cfe, microTurb (stored as "micro" in the file), and
-     * r attributes all match the corresponding input values; a group
-     * missing one of the afe, cfe, micro, or r attributes is treated
-     * as matching regardless of the corresponding input value. The
-     * returned vectors are sorted by increasing [Fe/H].
+     * Among the groups in the spectral model's HDF5 file whose afe,
+     * cfe, microTurb (stored as "micro" in the file), and r attributes
+     * all match the corresponding input values (a group missing one of
+     * these is treated as matching regardless of the corresponding
+     * input value), this returns the minimal bracketing subset whose
+     * feh values encompass [fehMin, fehMax] -- that is, the largest
+     * available feh <= fehMin (or the smallest available feh, if none
+     * is <= fehMin) through the smallest available feh >= fehMax (or
+     * the largest available feh, if none is >= fehMax), inclusive --
+     * mirroring TrackUtils::findMatchingTracks's identical bracketing
+     * behavior (see its own comment for why: a query point exactly at
+     * fehMin or fehMax, or a caller like SpecsynLibChained that passes
+     * a star population's own [Fe/H] range straight through, still
+     * needs a real bracketing grid point on each side to interpolate
+     * from, not just whatever feh values happen to fall strictly
+     * inside [fehMin, fehMax]). The returned vectors are sorted by
+     * increasing [Fe/H].
      */
     auto findMatchingSpectra(
         const std::string& spectraName,
