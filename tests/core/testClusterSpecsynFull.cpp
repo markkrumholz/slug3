@@ -28,7 +28,8 @@
  * fetch_bosz.py, and fetch_ck04.py); otherwise it is skipped,
  * returning an automatic pass rather than a failure. See
  * testClusterSpecsynFullAFe for the alphaFe = 0.2 counterpart of this
- * same test.
+ * same test, and testClusterSpecsynFullNonStoch for the
+ * min_stoch_mass-at-the-IMF-max (fully non-stochastic) counterpart.
  * @date 2026-07-24
  */
 

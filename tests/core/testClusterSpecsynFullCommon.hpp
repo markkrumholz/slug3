@@ -32,11 +32,16 @@ auto allRequiredDataFilesExist() -> bool;
  *   shape and contains only finite, non-trivial spectra; 1 (with a
  *   diagnostic on stderr) otherwise
  * @details
- * Shared by testClusterSpecsynFull and testClusterSpecsynFullAFe,
- * which differ only in which input deck they run (see each one's own
- * comment for what that changes) -- both decks share every other
- * setting, including n_trial = 10 and an output_times with 4 entries,
- * so those are fixed constants here rather than further parameters.
+ * Shared by testClusterSpecsynFull, testClusterSpecsynFullAFe, and
+ * testClusterSpecsynFullNonStoch, which differ only in which input
+ * deck they run (see each one's own comment for what that changes).
+ * n_trial is read back from the deck itself (via SimControls) rather
+ * than assumed, since not every caller's deck uses the same value --
+ * testClusterSpecsynFullNonStoch's uses n_trial = 1, since its
+ * min_stoch_mass setting makes every trial's stellar population
+ * non-stochastic, so multiple trials would just repeat the same
+ * exercise. output_times, with 4 entries, is shared by every deck and
+ * so is still a fixed constant here.
  */
 auto runClusterSpecsynFull(const std::string& inputFile, const std::string& modelName) -> int;
 
