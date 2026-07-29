@@ -224,7 +224,9 @@ add_executable(slugTestCoreFull
     src/tracks/Tracks3D.cpp
     src/utils/ParseUtils.cpp
     src/extern/cubature/pcubature.c
+    tests/core/testClusterSpecsynFullCommon.cpp
     tests/core/testClusterSpecsynFull.cpp
+    tests/core/testClusterSpecsynFullAFe.cpp
     tests/core/testCoreFullAll.cpp
 )
 # slugTestCoreFull drives a real end-to-end run (real MIST tracks, real
