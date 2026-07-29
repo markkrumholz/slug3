@@ -49,7 +49,61 @@ namespace core
             double time,
             const io::SimPhysics& physics);
 
+        /**
+         * @brief Reconstruct a cluster's stellar masses from a previously recorded rng state
+         * @param uid Unique ID of cluster
+         * @param mass Target cluster mass
+         * @param time Cluster formation time
+         * @param physics Simulation physics object
+         * @param rngState The rng state to draw star masses from --
+         *   typically one previously returned by rngState() (e.g. read
+         *   back from an output file), so that the resulting
+         *   starMasses()/birthMass() come out bitwise identical to the
+         *   original cluster's
+         * @details
+         * Sets every member the same way the primary constructor does,
+         * except for feH_, m_, and birthMass_: rngState_ is set to
+         * rngState directly, since that is this cluster's own birth
+         * state by construction, rather than one captured live.
+         * feH_ and m_ are then both drawn together, in the same order
+         * the primary constructor draws them, from rngState rather
+         * than the live rng stream -- saving the live state first and
+         * restoring it immediately afterward, so this constructor has
+         * no lasting effect on the ambient rng stream. Both draws,
+         * not just m_'s, must be replayed from rngState for the result
+         * to come out bitwise identical to the original cluster's:
+         * PDF::draw() consumes rng state (via a
+         * std::discrete_distribution used to pick a segment) even for
+         * a single-segment/delta [Fe/H] distribution, so drawing feH_
+         * live first would already have advanced the stream before
+         * m_'s draw ever saw rngState, decoupling the two draws from
+         * the sequence that originally produced them. birthMass_
+         * (which starts at 0.0, overwritten once m_ is drawn) is then
+         * reduced from m_ before m_ is sorted, matching the primary
+         * constructor's own order (there, forced by computing
+         * birthMass_ in the member initializer list, which runs
+         * before the constructor body's own sort) -- reducing in a
+         * different order would reproduce the same set of masses but
+         * not necessarily the same birthMass_ bit-for-bit, since
+         * floating-point addition is not associative.
+         */
+        Cluster(unsigned long uid,
+            double mass,
+            double time,
+            const io::SimPhysics& physics,
+            const utils::RngState& rngState);
+
         // Observers
+
+        /**
+         * @brief Return the state of the rng at this cluster's birth
+         * @return A const reference to the serialized rng state (see
+         *   utils::RngThread::getState()) in effect immediately before
+         *   this cluster's own stochastic draws, sufficient to exactly
+         *   reproduce its starMasses()/birthMass() later via the
+         *   rngState-accepting constructor overload
+         */
+        [[nodiscard]] auto rngState() const -> const utils::RngState& { return rngState_; }
 
         /**
          * @brief Return the cluster's unique identifier

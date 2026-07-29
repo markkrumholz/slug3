@@ -8,6 +8,7 @@
 #include "OutputManagerH5.hpp"
 #include "../core/Cluster.hpp"
 #include "../specsyn/Specsyn.hpp"
+#include "../utils/RngThread.hpp"
 #include "OutputManager.hpp"
 #include "SimControls.hpp"
 #include "SimPhysics.hpp"
@@ -32,6 +33,17 @@ static auto vlenStrType() -> hid_t
     const hid_t strType = H5Tcopy(H5T_C_S1);
     H5Tset_size(strType, H5T_VARIABLE);
     H5Tset_cset(strType, H5T_CSET_UTF8);
+    return strType;
+}
+
+// Create (and return) a fixed-length HDF5 string datatype of the
+// given size, in bytes -- used for the "rng" dataset, whose elements
+// are utils::RngState's own fixed-width, null-padded buffers rather
+// than variable-length text
+static auto fixedStrType(const size_t size) -> hid_t
+{
+    const hid_t strType = H5Tcopy(H5T_C_S1);
+    H5Tset_size(strType, size);
     return strType;
 }
 
@@ -312,6 +324,11 @@ void io::OutputManagerH5::openClustersGroup()
     const hid_t fehDset = createExtensible1dDataset(
         clustersGroup_, "feh", H5T_NATIVE_DOUBLE);
     H5Dclose(fehDset);
+    const hid_t rngType = fixedStrType(utils::rngStateWidth);
+    const hid_t rngDset = createExtensible1dDataset(
+        clustersGroup_, "rng", rngType);
+    H5Dclose(rngDset);
+    H5Tclose(rngType);
     // NOLINTEND(misc-include-cleaner)
 }
 
@@ -374,6 +391,7 @@ void io::OutputManagerH5::writeCluster(
     const double birthMass = cluster.birthMass();
     const double formTime = cluster.formTime();
     const double feH = cluster.feH();
+    const auto& rngState = cluster.rngState();
 
     // Guard the actual writes against concurrent callers from other
     // threads; unlike the constructor, this method is expected to be
@@ -389,6 +407,9 @@ void io::OutputManagerH5::writeCluster(
         appendToDataset(clustersGroup_, "birth_mass", H5T_NATIVE_DOUBLE, &birthMass);
         appendToDataset(clustersGroup_, "form_time", H5T_NATIVE_DOUBLE, &formTime);
         appendToDataset(clustersGroup_, "feh", H5T_NATIVE_DOUBLE, &feH);
+        const hid_t rngType = fixedStrType(utils::rngStateWidth);
+        appendToDataset(clustersGroup_, "rng", rngType, rngState.data());
+        H5Tclose(rngType);
         // NOLINTEND(misc-include-cleaner)
     }
 }
