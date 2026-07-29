@@ -1,0 +1,38 @@
+# Full end-to-end test input deck for
+# tests/core/testClusterSpecsynFullAFe.cpp: identical to
+# testClusterSpecsynFull.in (see that file's own comments for the full
+# rationale behind its spectra.model chain, output times, and FeH
+# distribution) except for alphaFe = 0.2 in place of 0.0. 0.2 is an
+# exact MIST track grid point (avoiding any track-level [[alpha/Fe]
+# interpolation gap -- Tracks3D/Tracks2D do not interpolate in afe at
+# all, see SpecsynLibNoWind.hpp's own comment on why) but falls
+# strictly between BOSZ's own alpha_Fe = [-0.25, 0.0, 0.25, 0.5] grid
+# points, so this specifically exercises SpecsynLibNoWind's
+# alpha/Fe-interpolation path (see its constructor) at full scale,
+# across every (FeH, logg, Teff) point the flat [Fe/H] = [-1, 0]
+# distribution below actually visits -- something no other test in
+# this repository does against real BOSZ data. MARCS also has an
+# alpha_Fe axis, but 0.2 happens to be one of its own exact grid
+# points, so it does not need interpolation here the way BOSZ does.
+
+sim_type = "cluster"
+# n_trial must appear here, before any [table] header -- see
+# testClusterSpecsynFull.in's own comment on why
+n_trial = 10
+
+[stars]
+IMF = "chabrier.toml"
+tracks = "MIST"
+v_vcrit = 0.4
+alphaFe = 0.2
+FeH = "tests/core/assets/testClusterSpecsynFullFeHDist.toml"
+
+[spectra]
+model = ["POWR_WC", "POWR_WNE", "POWR_WNL_H20", "POWR_WNL_H40", "POWR_WNL_H60", "TLUSTY_O", "TLUSTY_B", "BOSZ", "CK04", "MARCS"]
+nwl = 2048
+
+[clusters]
+CMF = 1e4
+
+[outputs]
+output_times = [2e6, 3e6, 4e6, 1e7]

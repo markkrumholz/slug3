@@ -18,6 +18,7 @@
  */
 
 #include "testClusterSpecsynFull.hpp"
+#include "testClusterSpecsynFullAFe.hpp"
 #include <exception>
 #include <iostream>
 
@@ -26,6 +27,7 @@ auto main() -> int {
     {
         int result = 0;
         result += testClusterSpecsynFull();
+        result += testClusterSpecsynFullAFe();
         return result;
     }
     catch (const std::exception& error)
