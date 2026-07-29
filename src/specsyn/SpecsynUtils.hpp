@@ -101,6 +101,29 @@ namespace specsyn
         const std::string& spectraName,
         const std::string& registryName = defaultRegistry) -> double;
 
+    /**
+     * @brief Return all [alpha/Fe] values present in a spectral library
+     * @param spectraName Name of the spectral model
+     * @param cfe Value of [C/Fe] (used to filter groups, matching findMatchingSpectra)
+     * @param microTurb Microturbulent velocity in km/s (same filtering)
+     * @param r Spectral resolution (same filtering)
+     * @param registryName Name of the spectral library registry file
+     * @returns Distinct afe values found on groups that match cfe, microTurb, and r
+     *   (with a missing attribute treated as a wildcard, exactly as in
+     *   findMatchingSpectra), sorted ascending. Returns an empty vector if no group
+     *   in the file carries an afe attribute at all (e.g. TLUSTY).
+     * @details
+     * Used by SpecsynLibNoWind when the requested afe value has no exact match:
+     * calling this first reveals what afe values are available, from which the
+     * two bracketing values can be identified for interpolation.
+     */
+    auto findAfeValues(
+        const std::string& spectraName,
+        double cfe = defaultCFe,
+        double microTurb = defaultMicroTurb,
+        double r = defaultR,
+        const std::string& registryName = defaultRegistry) -> std::vector<double>;
+
 } // namespace specsyn
 
 #endif // SPECSYNUTILS_HPP

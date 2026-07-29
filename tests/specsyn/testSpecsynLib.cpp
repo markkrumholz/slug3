@@ -774,6 +774,122 @@ static auto testResampleNWlOnly() -> int
     return 0;
 }
 
+// Check that SpecsynLibNoWind correctly interpolates between two
+// bracketing [alpha/Fe] values when no exact-match groups exist for
+// the requested afe. Uses the BOSZ_test.h5 fixture's two synthetic
+// groups at feh=0.0: afe=0.25 (constant flux = 1.0) and afe=0.50
+// (constant flux = 3.0). Requesting afe=0.375 gives alpha=0.5, so
+// the interpolated flux is (1-0.5)*1.0 + 0.5*3.0 = 2.0 at every
+// wavelength. A constant-flux grid always interpolates to exactly
+// that constant regardless of star position inside the cell, so the
+// returned spectrum is 2.0 * area at every wavelength, where area is
+// Lsun / (sigma_SB * 5772^4). Also checks that:
+//   - exact-afe construction still works (backward-compat check)
+//   - requesting afe outside the available range throws
+static auto testSpecAfeInterp() -> int
+{
+    // area = Lsun / (sigma_SB * Teff^4) for (logL=0, Teff=5772 K)
+    // Using SLUG's constants: Lsun=3.828e33, sigma_SB=GSL value
+    constexpr double areaExpected = 6.0820909091272306e+22; // cm^2
+    constexpr double loFlux = 1.0;
+    constexpr double hiFlux = 3.0;
+    // alpha = (0.375 - 0.25) / (0.50 - 0.25) = 0.5
+    constexpr double expectedFluxPerWl = (1.0 - 0.5) * loFlux + 0.5 * hiFlux; // = 2.0
+    constexpr double expectedSpec = expectedFluxPerWl * areaExpected;
+    constexpr double relTol = 1e-8;
+
+    const double logTeff = std::log10(5772.0);
+    const auto props = makeStarData(1.0, 0.0, logTeff);
+    constexpr double feh = 0.0;
+    // fehMin == fehMax == 0.0 → only the feh=0.0 group is loaded
+    constexpr double fehMin = 0.0;
+    constexpr double fehMax = 0.0;
+
+    // --- interpolating path ---
+    {
+        const specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::raise> lib(
+            spectraName, fehMin, fehMax, 0.375, 0.0, 0.0, 500, registryName);
+
+        std::vector<double> result;
+        try
+        {
+            result = lib.spec(props, feh);
+        }
+        catch (const std::exception& e)
+        {
+            std::cerr << "testSpecsynLib: afeInterp: unexpected exception from "
+                "spec() at afe=0.375: " << e.what() << "\n";
+            return 1;
+        }
+
+        if (result.size() != lib.wl().size())
+        {
+            std::cerr << "testSpecsynLib: afeInterp: spec() returned "
+                << result.size() << " values, expected " << lib.wl().size() << "\n";
+            return 1;
+        }
+
+        for (std::size_t i = 0; i < result.size(); ++i)
+        {
+            if (std::abs(result.at(i) - expectedSpec) > relTol * expectedSpec)
+            {
+                std::cerr << "testSpecsynLib: afeInterp: spec()[" << i << "] = "
+                    << result.at(i) << ", expected " << expectedSpec
+                    << " (afe=0.375 interpolated)\n";
+                return 1;
+            }
+        }
+    }
+
+    // --- exact-match path still works ---
+    {
+        try
+        {
+            const specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::raise> lib(
+                spectraName, fehMin, fehMax, 0.25, 0.0, 0.0, 500, registryName);
+            const auto result = lib.spec(props, feh);
+            if (result.size() != lib.wl().size())
+            {
+                std::cerr << "testSpecsynLib: afeInterp: exact-match at afe=0.25 "
+                    "returned wrong size\n";
+                return 1;
+            }
+            for (std::size_t i = 0; i < result.size(); ++i)
+            {
+                const double expected = loFlux * areaExpected;
+                if (std::abs(result.at(i) - expected) > relTol * expected)
+                {
+                    std::cerr << "testSpecsynLib: afeInterp: exact-match spec()["
+                        << i << "] = " << result.at(i) << ", expected "
+                        << expected << " (afe=0.25 exact)\n";
+                    return 1;
+                }
+            }
+        }
+        catch (const std::exception& e)
+        {
+            std::cerr << "testSpecsynLib: afeInterp: unexpected exception for "
+                "exact afe=0.25 match: " << e.what() << "\n";
+            return 1;
+        }
+    }
+
+    // --- afe outside available range throws ---
+    {
+        try
+        {
+            [[maybe_unused]] const specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::raise> lib(
+                spectraName, fehMin, fehMax, 0.75, 0.0, 0.0, 500, registryName);
+            std::cerr << "testSpecsynLib: afeInterp: expected constructor to throw "
+                "for afe=0.75 (above library's maximum 0.50), but it did not\n";
+            return 1;
+        }
+        catch (const std::runtime_error&) { /* expected */ }
+    }
+
+    return 0;
+}
+
 auto testSpecsynLib() -> int
 {
     int result = 0;
@@ -788,5 +904,6 @@ auto testSpecsynLib() -> int
     result += testMicroTurbDefault();
     result += testSpecCoerce();
     result += testSpecCoerceZeroWeight();
+    result += testSpecAfeInterp();
     return result;
 }
