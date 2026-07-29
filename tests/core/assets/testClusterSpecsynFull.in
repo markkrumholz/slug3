@@ -1,12 +1,17 @@
 # Full end-to-end test input deck for
 # tests/core/testClusterSpecsynFull.cpp: drives a complete run through
 # SimCluster using the real MIST tracks and the real POWR_WC/POWR_WNE/
-# POWR_WNL/TLUSTY_O/TLUSTY_B/BOSZ/CK04/MARCS spectral libraries (not
-# the small test fixtures used elsewhere), so this only runs if that
-# data -- too large to store in the repository -- has been fetched
-# locally (see data/tools/fetch_mist.py, fetch_powr.py, fetch_tlusty.py,
+# POWR_WNL_H20/POWR_WNL_H40/POWR_WNL_H60/TLUSTY_O/TLUSTY_B/BOSZ/CK04/
+# MARCS spectral libraries (not the small test fixtures used
+# elsewhere), so this only runs if that data -- too large to store in
+# the repository -- has been fetched locally (see
+# data/tools/fetch_mist.py, fetch_powr.py, fetch_tlusty.py,
 # fetch_bosz.py, fetch_ck04.py, fetch_marcs.py). spectra.model lists
-# TLUSTY_O and TLUSTY_B separately, rather than a single combined
+# POWR_WNL_H20/H40/H60 separately, rather than a single combined WNL
+# entry, since fetch_powr.py now splits PoWR's WNL grids by surface
+# hydrogen mass fraction into separate registry entries, one per
+# WRType::WNLH20/WNLH40/WNLH60 (see SpecsynLibWR::getWRType) -- and
+# lists TLUSTY_O and TLUSTY_B separately, rather than a single combined
 # TLUSTY entry, since fetch_tlusty.py now fetches PoWR's O-star and
 # B-star grids (different recommended default microturbulent
 # velocities) into separate registry entries; together they span
@@ -53,7 +58,7 @@ alphaFe = 0.0
 FeH = "tests/core/assets/testClusterSpecsynFullFeHDist.toml"
 
 [spectra]
-model = ["POWR_WC", "POWR_WNE", "POWR_WNL", "TLUSTY_O", "TLUSTY_B", "BOSZ", "CK04", "MARCS"]
+model = ["POWR_WC", "POWR_WNE", "POWR_WNL_H20", "POWR_WNL_H40", "POWR_WNL_H60", "TLUSTY_O", "TLUSTY_B", "BOSZ", "CK04", "MARCS"]
 # Rebins every chained library from its own native wavelength grid
 # down to 2048 points, spanning the same native range (wl_min/wl_max
 # are left unsupplied, so each library falls back to its own native

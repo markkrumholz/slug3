@@ -26,8 +26,9 @@ namespace specsyn
      * @tparam Policy See SpecsynLib.
      * @details
      * Covers the Potsdam Wolf-Rayet (PoWR) model grids fetched by
-     * data/tools/fetch_powr.py: powr_wne.h5, powr_wnl.h5, and
-     * powr_wc.h5. Unlike SpecsynLibNoWind's (FeH, logg, Teff) tensor
+     * data/tools/fetch_powr.py: powr_wne.h5, powr_wnl_h20.h5,
+     * powr_wnl_h40.h5, powr_wnl_h60.h5, and powr_wc.h5. Unlike
+     * SpecsynLibNoWind's (FeH, logg, Teff) tensor
      * grid, PoWR's WR atmospheres are parameterized by [Fe/H], the
      * stellar temperature, and the "transformed radius" (a function of
      * mass-loss rate and stellar radius that captures the optically
@@ -52,18 +53,22 @@ namespace specsyn
      * covers stars without optically thick winds (BOSZ, TLUSTY).
      *
      * PoWR's WNL grids carry an extra surface-hydrogen (xh) axis this
-     * class does not model as a tensor axis; the constructor instead
-     * keeps only the xh = 0.20 ("H20") group at each [Fe/H] for a WNL
-     * library. This was originally safe because the (now-replaced)
-     * Georgy et al. 2012 classification scheme never produced a WNL
-     * star with a surface H mass fraction above 0.3, making H20 --
-     * the lowest-xh grid PoWR provides -- always the relevant
-     * neighbor. getWRType now instead follows Roy et al. 2020, under
-     * which a WNL star can retain a substantially larger hydrogen
-     * envelope than that, so this H20-only restriction is a known gap
-     * -- not yet fixed here -- that leaves genuinely H-rich WNL stars
-     * (e.g. the PoWR SMC-H60-type case) without a matching grid point.
-     * See the constructor's own comments for details.
+     * class does not model as a tensor axis. Rather than collapsing it
+     * (the earlier, now-replaced approach: keep only the xh = 0.20
+     * ("H20") group at each [Fe/H], which was safe only under the
+     * now-replaced Georgy et al. 2012 classification scheme, which
+     * never produced a WNL star with a surface H mass fraction above
+     * 0.3), fetch_powr.py instead splits PoWR's WNL grids into three
+     * separate files -- powr_wnl_h20.h5, powr_wnl_h40.h5,
+     * powr_wnl_h60.h5, registered as POWR_WNL_H20/H40/H60 -- one per
+     * xh bucket, and this class treats each as its own WRType (see
+     * WRType and getWRType), constructed as its own separate
+     * SpecsynLibWR instance the same way POWR_WNE/POWR_WC are. This
+     * matches getWRType's Roy et al. 2020 classification, under which
+     * a WNL star can retain a substantially larger hydrogen envelope
+     * than Georgy et al. 2012 ever allowed, so a genuinely H-rich WNL
+     * star now has a matching grid point instead of being silently
+     * forced onto H20's.
      *
      * Besides the spectra themselves, the constructor also reads two
      * quantities spec() needs but that the parent SpecsynLib knows
@@ -83,7 +88,7 @@ namespace specsyn
         /**
          * @brief Construct a SpecsynLibWR from a spectral library on disk
          * @param spectraName Name of the spectral model (e.g.
-         *   "POWR_WNE" or "POWR_WC")
+         *   "POWR_WNE", "POWR_WNL_H40", or "POWR_WC")
          * @param fehMin Minimum [Fe/H] value
          * @param fehMax Maximum [Fe/H] value
          * @param registryName Name of the spectral library registry file
@@ -98,8 +103,9 @@ namespace specsyn
          *   own native wavelength grid -- see @details
          * @param z The redshift; defaults to zero
          * @throws std::runtime_error if spectraName does not contain
-         *   "wne", "wnl", or "wc" (case-insensitively), since type_
-         *   cannot be determined otherwise
+         *   "wne", "wc", or "wnl" together with one of "h20"/"h40"/
+         *   "h60" (case-insensitively), since type_ cannot be
+         *   determined otherwise
          * @details
          * Sets type_ from spectraName (see type_'s own comment), then
          * finds every registry group matching (spectraName, fehMin,
@@ -107,10 +113,7 @@ namespace specsyn
          * registry entries (see fetch_powr.py), so they are passed to
          * findMatchingSpectra at their library-wide defaults, which
          * that function ignores anyway for any group missing those
-         * attributes -- for a WNL library, further discards every
-         * matching group whose xh (surface H mass fraction) attribute
-         * isn't 0.20, keeping only the H20 models (see this class's
-         * own comment for why) -- reads every populated (log(R_t),
+         * attributes -- and reads every populated (log(R_t),
          * log(Teff)) point's own flux and wavelength grid within each
          * matching [Fe/H] group. If nWl is 0, builds a single common
          * wavelength grid spanning every populated point's own native
@@ -181,7 +184,13 @@ namespace specsyn
          * which -- unlike the surface-hydrogen-gated scheme of Georgy
          * et al. 2012 this replaced -- classifies mainly on surface
          * helium (and, for the He-rich case, C/N) mass fraction, so a
-         * WNL star can retain a substantial hydrogen envelope. The
+         * WNL star can retain a substantial hydrogen envelope. Roy et
+         * al. 2020 does not itself subdivide WNL further, but PoWR's
+         * WNL grids come in three surface-hydrogen (xh) buckets --
+         * H20, H40, H60 -- each its own file/registry entry (see
+         * fetch_powr.py), so getWRType further sub-classifies a WNL
+         * star by its own surface H mass fraction into WNLH20/WNLH40/
+         * WNLH60, matching it to exactly one of those files. The
          * None/WNL boundary also carries two log(Teff) conditions, not
          * part of Roy et al. 2020 itself: one that keeps a He-depleted,
          * C/O-rich WC/WO star from being misclassified as None or WNL,
@@ -195,10 +204,12 @@ namespace specsyn
          */
         enum class WRType : std::uint8_t
         {
-            None, /**< Not a Wolf-Rayet star */ // NOLINT(readability-identifier-naming) -- capitalized to match WNE/WNL/WC's fixed spectral-classification naming below, rather than the project's usual camelBack enum-constant convention
-            WNE,  /**< Hydrogen-free nitrogen-sequence WR star */ // NOLINT(readability-identifier-naming) -- WNE is a fixed spectral-classification abbreviation; lowercasing it would make it unrecognizable
-            WNL,  /**< Nitrogen-sequence WR star, possibly still hydrogen-rich */ // NOLINT(readability-identifier-naming) -- see WNE
-            WC    /**< Carbon-sequence WR star; also covers Georgy et al.'s WO and WNC subtypes, for which PoWR has no spectral models */ // NOLINT(readability-identifier-naming) -- see WNE
+            None,   /**< Not a Wolf-Rayet star */ // NOLINT(readability-identifier-naming) -- capitalized to match WNE/WNL/WC's fixed spectral-classification naming below, rather than the project's usual camelBack enum-constant convention
+            WNE,    /**< Hydrogen-free nitrogen-sequence WR star */ // NOLINT(readability-identifier-naming) -- WNE is a fixed spectral-classification abbreviation; lowercasing it would make it unrecognizable
+            WNLH20, /**< Nitrogen-sequence WR star, hydrogen-rich, surface H mass fraction < 0.3 (PoWR's "H20" WNL grid) */ // NOLINT(readability-identifier-naming) -- see WNE
+            WNLH40, /**< Nitrogen-sequence WR star, hydrogen-rich, surface H mass fraction in [0.3, 0.5] (PoWR's "H40" WNL grid) */ // NOLINT(readability-identifier-naming) -- see WNE
+            WNLH60, /**< Nitrogen-sequence WR star, hydrogen-rich, surface H mass fraction > 0.5 (PoWR's "H60" WNL grid) */ // NOLINT(readability-identifier-naming) -- see WNE
+            WC      /**< Carbon-sequence WR star; also covers Georgy et al.'s WO and WNC subtypes, for which PoWR has no spectral models */ // NOLINT(readability-identifier-naming) -- see WNE
         };
 
         /**
@@ -212,21 +223,25 @@ namespace specsyn
          * He mass fraction, extended with log(Teff) conditions at both
          * the None/WNL boundary and as an absolute floor (neither part
          * of Roy et al. 2020 itself, which does not distinguish WC
-         * from WO/WNC and does not address cool stars at all). The
-         * first extension keeps a He-depleted, C/O-rich WC/WO star --
-         * whose surface He mass fraction can itself fall below 0.4
-         * once He has been burned through to C/O, despite being
-         * unambiguously a Wolf-Rayet star -- from being misclassified
-         * as WRType::None, and keeps a star this hot from being
-         * misclassified as WRType::WNL instead of falling through to
-         * the WNE/WC check below. The second extension (log(Teff) <
-         * log10(10000 K), resurrecting the Georgy et al. 2012 scheme's
-         * own absolute floor) keeps an ordinary cool evolved star --
-         * whose surface He mass fraction can drift somewhat above 0.4
-         * from ordinary post-main-sequence mixing, with nothing to do
-         * with Wolf-Rayet-style stripping -- from being misclassified
-         * as WRType::WNL: no genuine Wolf-Rayet star, of any subtype,
-         * is this cool. Checked sequentially:
+         * from WO/WNC and does not address cool stars at all), and
+         * with a surface-H-mass-fraction subdivision of WNL into
+         * WNLH20/WNLH40/WNLH60 (not part of Roy et al. 2020 either,
+         * which treats WNL as one subtype) matching PoWR's own H20/
+         * H40/H60 grid split (see fetch_powr.py and WRType's own
+         * comment). The first log(Teff) extension keeps a He-depleted,
+         * C/O-rich WC/WO star -- whose surface He mass fraction can
+         * itself fall below 0.4 once He has been burned through to
+         * C/O, despite being unambiguously a Wolf-Rayet star -- from
+         * being misclassified as WRType::None, and keeps a star this
+         * hot from being misclassified as a WNL subtype instead of
+         * falling through to the WNE/WC check below. The second
+         * extension (log(Teff) < log10(10000 K), resurrecting the
+         * Georgy et al. 2012 scheme's own absolute floor) keeps an
+         * ordinary cool evolved star -- whose surface He mass fraction
+         * can drift somewhat above 0.4 from ordinary post-main-sequence
+         * mixing, with nothing to do with Wolf-Rayet-style stripping --
+         * from being misclassified as WNL: no genuine Wolf-Rayet star,
+         * of any subtype, is this cool. Checked sequentially:
          *   1) (Surface He mass fraction < 0.4 and log(Teff) <
          *      log10(50000 K)) or log(Teff) < log10(10000 K): not a
          *      Wolf-Rayet star at all (WRType::None). The first
@@ -236,19 +251,21 @@ namespace specsyn
          *      down through 0.4, so a cool, He-poor star really is
          *      just an ordinary, non-WR star. The second (absolute
          *      floor) clause is what keeps an ordinary cool star with
-         *      He mass fraction >= 0.4 from landing in WNL instead --
-         *      see this function's own comment above for both.
+         *      He mass fraction >= 0.4 from landing in a WNL subtype
+         *      instead -- see this function's own comment above for
+         *      both.
          *   2) Surface He mass fraction <= 0.9 and log(Teff) <
-         *      log10(1e5 K): WRType::WNL. Unlike the Georgy et al. 2012
-         *      scheme this replaced, this does not require the surface
-         *      to be hydrogen-poor -- a WNL star here can retain a
-         *      substantial hydrogen envelope (see SpecsynLibWR's own
-         *      file-level comment on the WNL H20-only grid filtering
-         *      this implies needs revisiting). The log(Teff) clause
-         *      keeps a star hot enough to be a WC/WO star, but with
-         *      He mass fraction in this same range (see step 1's own
-         *      comment), from being misclassified as WNL instead of
-         *      falling through to the WNE/WC check below.
+         *      log10(1e5 K): a WNL subtype, sub-classified by surface
+         *      H mass fraction: < 0.3 gives WRType::WNLH20; [0.3, 0.5]
+         *      gives WRType::WNLH40; > 0.5 gives WRType::WNLH60.
+         *      Unlike the Georgy et al. 2012 scheme this replaced,
+         *      this does not require the surface to be hydrogen-poor
+         *      -- a WNL star here can retain a substantial hydrogen
+         *      envelope. The log(Teff) clause keeps a star hot enough
+         *      to be a WC/WO star, but with He mass fraction in this
+         *      same range (see step 1's own comment), from being
+         *      misclassified as a WNL subtype instead of falling
+         *      through to the WNE/WC check below.
          *   3) Surface C mass fraction < surface N mass fraction:
          *      WRType::WNE (nitrogen-sequence, hydrogen-free).
          *   4) Otherwise: WRType::WC. Georgy et al. 2012 further split
@@ -312,12 +329,14 @@ namespace specsyn
          * @brief Which WR subtype this library's models are for
          * @details
          * Set by the constructor from spectraName (e.g. "POWR_WNE"
-         * gives WRType::WNE), rather than read from the HDF5 file --
-         * every model in a given library is the same subtype, since
-         * fetch_powr.py writes one file per subtype (powr_wne.h5,
-         * powr_wnl.h5, powr_wc.h5), so there is nothing to read per
-         * group or per model. Never WRType::None: the constructor
-         * throws if spectraName doesn't identify a subtype at all.
+         * gives WRType::WNE, "POWR_WNL_H40" gives WRType::WNLH40),
+         * rather than read from the HDF5 file -- every model in a
+         * given library is the same subtype, since fetch_powr.py
+         * writes one file per subtype (powr_wne.h5, powr_wnl_h20.h5,
+         * powr_wnl_h40.h5, powr_wnl_h60.h5, powr_wc.h5), so there is
+         * nothing to read per group or per model. Never WRType::None:
+         * the constructor throws if spectraName doesn't identify a
+         * subtype at all.
          */
         WRType type_;
     };

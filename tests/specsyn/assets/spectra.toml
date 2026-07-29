@@ -1,5 +1,5 @@
 name = "Registry of spectra sets (test fixture)"
-spectra_sets = ["BOSZ_test", "TLUSTY_test", "POWR_WNE_test", "POWR_WNL_test", "POWR_WC_test", "COERCE_test", "COERCE_ZERO_test"]
+spectra_sets = ["BOSZ_test", "TLUSTY_test", "POWR_WNE_test", "POWR_WNL_H20_test", "POWR_WNL_H40_test", "POWR_WNL_H60_test", "POWR_WC_test", "COERCE_test", "COERCE_ZERO_test", "TIEDFEH_test"]
 
 [BOSZ_test]
 file = "BOSZ_test.h5"
@@ -24,8 +24,20 @@ version = "test fixture"
 Fe_H = [-1.0, 0.0]
 WR_grid = true
 
-[POWR_WNL_test]
-file = "POWR_WNL_test.h5"
+[POWR_WNL_H20_test]
+file = "POWR_WNL_H20_test.h5"
+version = "test fixture"
+Fe_H = [-1.0, 0.0]
+WR_grid = true
+
+[POWR_WNL_H40_test]
+file = "POWR_WNL_H40_test.h5"
+version = "test fixture"
+Fe_H = [-1.0, 0.0]
+WR_grid = true
+
+[POWR_WNL_H60_test]
+file = "POWR_WNL_H60_test.h5"
 version = "test fixture"
 Fe_H = [-1.0, 0.0]
 WR_grid = true
@@ -34,6 +46,12 @@ WR_grid = true
 file = "POWR_WC_test.h5"
 version = "test fixture"
 Fe_H = [-1.0, 0.0]
+WR_grid = true
+
+[TIEDFEH_test]
+file = "TIEDFEH_test.h5"
+version = "test fixture"
+Fe_H = [0.0]
 WR_grid = true
 
 [COERCE_test]

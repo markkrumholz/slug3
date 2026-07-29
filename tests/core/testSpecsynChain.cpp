@@ -6,10 +6,16 @@
  * Exercises the spectra.model wiring most real applications will
  * actually use: an array of several library names, in priority order,
  * mixing Wolf-Rayet (WR_grid = true) and non-WR-grid libraries --
- * ["POWR_WC", "POWR_WNE", "POWR_WNL", "TLUSTY_O", "BOSZ"] in production
- * (TLUSTY's B-star grid, TLUSTY_B, would typically also be chained in,
- * but is omitted here since this test's fixture registry only has a
- * single TLUSTY_test entry) -- test-fixture versions of each here.
+ * ["POWR_WC", "POWR_WNE", "POWR_WNL_H20", "POWR_WNL_H40",
+ * "POWR_WNL_H60", "TLUSTY_O", "BOSZ"] in production (TLUSTY's B-star
+ * grid, TLUSTY_B, would typically also be chained in, but is omitted
+ * here since this test's fixture registry only has a single
+ * TLUSTY_test entry) -- test-fixture versions of a representative
+ * subset here: POWR_WNL_H20_test alone stands in for all three WNL
+ * H-buckets, since dispatching to the right one is exercised more
+ * thoroughly by tests/specsyn/testSpecsynLibWR.cpp's own
+ * testSpecWNLSuccess, and this test's WNL star (heSurf = 0.7, default
+ * hSurf = 0.0) already lands in H20's own range.
  * Builds a SimPhysics from a real input deck
  * (tests/core/assets/testCluster.in, with spectra.registry and
  * spectra.model overridden) and calls spec() directly on a small,
@@ -86,10 +92,12 @@ namespace
      * = 0.0 exactly, a grid point every one of the five test libraries
      * below shares, so no library ever sees an out-of-[Fe/H]-range
      * query) and overrides spectra.registry/spectra.model to chain
-     * POWR_WC_test, POWR_WNE_test, POWR_WNL_test, TLUSTY_test, and
+     * POWR_WC_test, POWR_WNE_test, POWR_WNL_H20_test, TLUSTY_test, and
      * BOSZ_test together, in priority order -- the test-fixture
-     * counterpart of the ["POWR_WC", "POWR_WNE", "POWR_WNL", "TLUSTY_O",
-     * "BOSZ"] combination most real applications will actually use.
+     * counterpart of the ["POWR_WC", "POWR_WNE", "POWR_WNL_H20",
+     * "TLUSTY_O", "BOSZ"] subset of the full 7-library combination most
+     * real applications will actually use (see this file's own
+     * top-level comment for why only one WNL H-bucket is chained here).
      */
     auto buildChainedSim() -> io::SimPhysics
     {
@@ -97,7 +105,7 @@ namespace
         auto* spectraTable = inputDeck.at_path("spectra").as_table();
         spectraTable->insert_or_assign("registry", registryName);
         spectraTable->insert_or_assign("model", toml::array{
-            "POWR_WC_test", "POWR_WNE_test", "POWR_WNL_test", "TLUSTY_test", "BOSZ_test" });
+            "POWR_WC_test", "POWR_WNE_test", "POWR_WNL_H20_test", "TLUSTY_test", "BOSZ_test" });
 
         const io::SimControls controls(inputDeck);
         return io::SimPhysics(inputDeck, controls.simType());

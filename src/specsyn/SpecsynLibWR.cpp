@@ -242,21 +242,38 @@ namespace specsyn
         this->z_ = z;
 
         // Determine which WR subtype this library covers from
-        // spectraName (e.g. "POWR_WNE" -> WRType::WNE), checked
-        // case-insensitively since nothing guarantees a caller passes
-        // exactly the upper-case naming fetch_powr.py's registry
-        // entries use (POWR_WNE/POWR_WNL/POWR_WC).
+        // spectraName (e.g. "POWR_WNE" -> WRType::WNE, "POWR_WNL_H40"
+        // -> WRType::WNLH40), checked case-insensitively since nothing
+        // guarantees a caller passes exactly the upper-case naming
+        // fetch_powr.py's registry entries use (POWR_WNE/
+        // POWR_WNL_H20/POWR_WNL_H40/POWR_WNL_H60/POWR_WC). A WNL
+        // library must further specify which of PoWR's three
+        // surface-hydrogen grids (H20/H40/H60) it is -- see WRType's
+        // own comment for why there is no longer a single bare WNL.
         std::string nameLower = spectraName;
         std::ranges::transform(nameLower, nameLower.begin(), // NOLINT(misc-include-cleaner) -- see the identical NOLINT on SpecsynLib.cpp's findBracket for why std::ranges functions need this despite <algorithm> already being included
             [](const unsigned char c) -> char { return static_cast<char>(std::tolower(c)); });
-        if (nameLower.contains("wnl")) { type_ = WRType::WNL; }
+        if (nameLower.contains("wnl"))
+        {
+            if (nameLower.contains("h20")) { type_ = WRType::WNLH20; }
+            else if (nameLower.contains("h40")) { type_ = WRType::WNLH40; }
+            else if (nameLower.contains("h60")) { type_ = WRType::WNLH60; }
+            else
+            {
+                throw std::runtime_error(
+                    "SpecsynLibWR: could not determine WR subtype from spectraName "
+                    + spectraName + " (a WNL library's spectraName must also "
+                    "contain h20, h40, or h60)");
+            }
+        }
         else if (nameLower.contains("wne")) { type_ = WRType::WNE; }
         else if (nameLower.contains("wc")) { type_ = WRType::WC; }
         else
         {
             throw std::runtime_error(
                 "SpecsynLibWR: could not determine WR subtype from spectraName "
-                + spectraName + " (expected it to contain wne, wnl, or wc)");
+                + spectraName + " (expected it to contain wne, wc, or wnl "
+                "together with h20, h40, or h60)");
         }
 
         // Step 1: find the set of spectra matching the input criteria.
@@ -292,60 +309,6 @@ namespace specsyn
                 "SpecsynLibWR: unable to open HDF5 file " + h5path.string());
         }
 
-        // WNL hack: PoWR's WNL grids carry an extra surface-hydrogen
-        // (xh) axis this class does not model (see fetch_powr.py), so
-        // each [Fe/H] can have several WNL groups here, one per xh.
-        // Keeping only the xh = 0.20 ("H20") group here was safe under
-        // the (now-replaced) Georgy et al. 2012 classification scheme,
-        // which never classified a star as WNL once its surface H mass
-        // fraction exceeded 0.3, making H20 -- the lowest-xh grid PoWR
-        // provides -- always the nearest (indeed, the only relevant)
-        // neighbor for any WNL star this code would ever query. Rather
-        // than adding a fourth tensor axis just to handle that, keep
-        // only each [Fe/H]'s H20 group here, which reduces WNL to the
-        // same single-model-per-(FeH, log_rt, log_teff) shape WNE and
-        // WC already have, so the rest of this constructor can stay
-        // unchanged.
-        //
-        // getWRType has since moved to the Roy et al. 2020 scheme
-        // (surface He mass fraction alone), under which a WNL star can
-        // retain a substantially larger hydrogen envelope than 0.3 --
-        // this filter is now a known gap (not yet fixed here), pending
-        // adding the higher-xh PoWR grids (e.g. SMC-H60) this class
-        // currently discards.
-        if (type_ == WRType::WNL)
-        {
-            std::vector<double> fehFiltered;
-            std::vector<std::string> groupsFiltered;
-            fehFiltered.reserve(FeH_.size());
-            groupsFiltered.reserve(groupNames.size());
-            for (size_t f = 0; f < groupNames.size(); ++f)
-            {
-                const hid_t grp = H5Gopen2(file, groupNames[f].c_str(), H5P_DEFAULT);
-                if (grp < 0)
-                {
-                    H5Fclose(file);
-                    throw std::runtime_error(
-                        "SpecsynLibWR: unable to open group " + groupNames[f]);
-                }
-                const double xh = readRequiredScalarAttr(grp, "xh");
-                H5Gclose(grp);
-                if (utils::approxEqual(xh, 0.20))
-                {
-                    fehFiltered.push_back(FeH_[f]); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- f < FeH_.size() by construction (both sized groupNames.size())
-                    groupsFiltered.push_back(groupNames[f]);
-                }
-            }
-            FeH_ = std::move(fehFiltered); //NOLINT(cppcoreguidelines-prefer-member-initializer)
-            groupNames = std::move(groupsFiltered);
-            if (FeH_.empty())
-            {
-                H5Fclose(file);
-                throw std::runtime_error(
-                    "SpecsynLibWR: no H20 (xh = 0.20) spectra found among "
-                    "the groups matching the input criteria");
-            }
-        }
         const size_t nfeh = FeH_.size();
 
         // Step 2: scan every matching group's datasets (without reading
@@ -543,7 +506,10 @@ namespace specsyn
         constexpr double logTeffWNLMax = 5.0; // log10(1e5 K)
         if (heSurf <= 0.9 && logTeff < logTeffWNLMax)
         {
-            return WRType::WNL;
+            const double hSurf = props[static_cast<size_t>(tracks::FieldIdx::hSurf)];
+            if (hSurf < 0.3) { return WRType::WNLH20; }
+            if (hSurf <= 0.5) { return WRType::WNLH40; }
+            return WRType::WNLH60;
         }
         const double cSurf = props[static_cast<size_t>(tracks::FieldIdx::cSurf)];
         const double nSurf = props[static_cast<size_t>(tracks::FieldIdx::nSurf)];

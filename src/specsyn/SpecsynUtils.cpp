@@ -272,9 +272,12 @@ namespace specsyn
             matches.size() - 1 : static_cast<size_t>(hiBound - matches.begin());
 
         // Unlike a track set's groups, a spectral library's groups are
-        // not guaranteed to have distinct feh values -- e.g. PoWR's
-        // WNL grid has several xh (surface-hydrogen) groups sharing
-        // each feh value. loIdx/hiIdx above each land on just one
+        // not guaranteed to have distinct feh values -- nothing here
+        // assumes a 1:1 (feh, group) correspondence, so a caller whose
+        // registry entry happens to have two groups share a feh (see
+        // tests/specsyn/assets/TIEDFEH_test.h5, built purely to
+        // exercise this) still gets correct behavior. loIdx/hiIdx
+        // above each land on just one
         // arbitrary member of such a tied run (std::ranges::sort is
         // not required to be stable, so even which member is
         // unspecified) whenever fehMin or fehMax falls at or beyond
