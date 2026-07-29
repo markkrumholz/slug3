@@ -388,6 +388,17 @@ for (feh_val, micro_val), source in sorted(tar_sources.items()):
             eddington_h      = data[:, 1]
             flux_orig        = 4.0 * np.pi * eddington_h
 
+            # Some TLUSTY models have NaN in the flux column at the
+            # long-wavelength tail (the atmosphere code wrote the string
+            # "NaN" where convergence failed). Replace with 0.0 before
+            # downsampling so nanmean doesn't produce NaN in the output.
+            n_bad = int(np.sum(~np.isfinite(flux_orig)))
+            if n_bad:
+                if args.verbose:
+                    print(f"    Warning: {n_bad} non-finite flux values "
+                          f"(t{teff} g{logg:+.2f}); replacing with 0.0")
+                flux_orig = np.where(np.isfinite(flux_orig), flux_orig, 0.0)
+
             wave_block, flux_block = downsample(wavelengths_orig, flux_orig,
                                                         n=args.downsample)
 
