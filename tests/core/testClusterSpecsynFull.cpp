@@ -5,10 +5,11 @@
  * @details
  * This is the first full-scale, end-to-end test of the code including
  * spectral synthesis, using the complete MIST tracks and the complete
- * POWR_WC/POWR_WNE/POWR_WNL/TLUSTY_O/TLUSTY_B/BOSZ/CK04 spectral
- * libraries -- as opposed to every other spectral-synthesis test in
- * this repository, which uses small synthetic or trimmed-down
- * fixtures. Its purpose is to turn up any gaps in coverage between
+ * POWR_WC/POWR_WNE/POWR_WNL_H20/POWR_WNL_H40/POWR_WNL_H60/TLUSTY_O/
+ * TLUSTY_B/BOSZ/CK04 spectral libraries -- as opposed to every other
+ * spectral-synthesis test in this repository, which uses small
+ * synthetic or trimmed-down fixtures. Its purpose is to turn up any
+ * gaps in coverage between
  * the tracks and the spectral libraries: for example, a star whose
  * (Teff, logg) or (Teff, transformed radius) the tracks produce but
  * none of the spectral libraries cover would surface here as an
@@ -54,13 +55,15 @@ namespace
     // *.h5 data files themselves are gitignored (too large, in the
     // h5 case, to store in the repository), so any of them may be
     // absent depending on whether this machine has fetched them
-    const std::array<std::string, 10> requiredDataFiles = {{
+    const std::array<std::string, 12> requiredDataFiles = {{
         "data/tracks/tracks.toml",
         "data/tracks/mist.h5",
         "data/spectra/spectra.toml",
         "data/spectra/powr_wc.h5",
         "data/spectra/powr_wne.h5",
-        "data/spectra/powr_wnl.h5",
+        "data/spectra/powr_wnl_h20.h5",
+        "data/spectra/powr_wnl_h40.h5",
+        "data/spectra/powr_wnl_h60.h5",
         "data/spectra/tlusty_o.h5",
         "data/spectra/tlusty_b.h5",
         "data/spectra/bosz.h5",
@@ -125,12 +128,11 @@ namespace
 } // namespace
 
 // Run the full simulation described by
-// tests/core/assets/testClusterSpecsynFull.in (MIST tracks; [Fe/H]
-// pinned to a delta function at exactly 0.0 for now -- see that
-// file's own comments for why -- rather than the flat [-1, 0]
-// distribution this test is meant to eventually use; alphaFe = 0,
-// v/vcrit = 0.4; a spectra.model chain of POWR_WC, POWR_WNE, POWR_WNL,
-// TLUSTY_O, TLUSTY_B, BOSZ, and CK04; a CMF fixed at 10^4 Msun; output at t = 2, 3, 4,
+// tests/core/assets/testClusterSpecsynFull.in (MIST tracks; a flat
+// [Fe/H] = [-1, 0] distribution -- see that file's own comments;
+// alphaFe = 0, v/vcrit = 0.4; a spectra.model chain of POWR_WC,
+// POWR_WNE, POWR_WNL_H20, POWR_WNL_H40, POWR_WNL_H60, TLUSTY_O,
+// TLUSTY_B, BOSZ, CK04, and MARCS; a CMF fixed at 10^4 Msun; output at t = 2, 3, 4,
 // and 10 Myr, spanning stellar evolution before, during, and after the
 // Wolf-Rayet phase; 10 trials) and check that the resulting HDF5
 // output has the expected shape and contains only finite, non-trivial

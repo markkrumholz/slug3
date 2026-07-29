@@ -205,22 +205,24 @@ static auto testFindMatchingSpectra() -> int
  * @return 0 if the test passes, 1 if it fails.
  * @details
  * Unlike a track set's groups, a spectral library's groups are not
- * guaranteed to have distinct feh values -- POWR_WNL_test (like the
- * real PoWR WNL grid it mimics) has two groups (different xh, surface
- * hydrogen mass fraction) at each of its two feh values, -1.0 and 0.0.
- * Querying with fehMin == fehMax == 0.0 -- exactly on that tied run --
- * exercises the case that once made the minimal-bracketing-range
- * computation invert (the last index <= fehMin landing after the
- * first index >= fehMax, both within the same tied run), which
- * previously produced an empty result instead of the two tied groups
- * this checks for.
+ * guaranteed to have distinct feh values -- TIEDFEH_test (see
+ * data/tools/make_tied_feh_test_fixture.py) is a minimal fixture built
+ * specifically to exercise this: two groups, both with feh = 0.0 and
+ * no afe/cfe/micro/r attributes, so both always match regardless of
+ * query parameters (mirroring a WR-type registry entry, which has no
+ * such axes at all). Querying with fehMin == fehMax == 0.0 -- exactly
+ * on that tied run -- exercises the case that once made the
+ * minimal-bracketing-range computation invert (the last index <=
+ * fehMin landing after the first index >= fehMax, both within the
+ * same tied run), which previously produced an empty result instead
+ * of the two tied groups this checks for.
  */
 static auto testFindMatchingSpectraTiedFeh() -> int
 {
     try
     {
         auto [feh, names] = specsyn::findMatchingSpectra(
-            "POWR_WNL_test", 0.0, 0.0, tracks::defaultAFe,
+            "TIEDFEH_test", 0.0, 0.0, tracks::defaultAFe,
             specsyn::defaultCFe, specsyn::defaultMicroTurb, specsyn::defaultR,
             registryName);
         if (feh.size() != 2 || names.size() != 2 ||

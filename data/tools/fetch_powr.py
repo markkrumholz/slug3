@@ -22,12 +22,16 @@ Each archive unpacks to a directory 'griddl-{gridname}-sed/' containing:
     empty sed.txt member); these are skipped.
 
 Once downloaded, each archive is unpacked in memory and repacked into one of
-three HDF5 files -- powr_wne.h5, powr_wnl.h5, powr_wc.h5 -- grouped by
-[Fe/H] (and, for WNL, also by surface hydrogen mass fraction), following the
-same conventions as fetch_bosz.py / fetch_tlusty.py. [Fe/H] is derived from
-each grid's iron mass fraction X_Fe (see POWR_XFE below) relative to the
-Milky Way grid of the same star type. SED fluxes, given at d = 10 pc, are
-converted to luminosities (multiplied by 4 pi (10 pc)^2) before storage.
+five HDF5 files -- powr_wne.h5, powr_wnl_h20.h5, powr_wnl_h40.h5,
+powr_wnl_h60.h5, powr_wc.h5 -- grouped by [Fe/H], following the same
+conventions as fetch_bosz.py / fetch_tlusty.py. WNL is split into three
+separate files, one per surface hydrogen mass fraction bucket (H20, H40,
+H60), rather than a single file with an extra xh axis, since SpecsynLibWR
+treats each as a distinct WR spectral subtype (see WNL_H_BUCKETS below and
+SpecsynLibWR::getWRType). [Fe/H] is derived from each grid's iron mass
+fraction X_Fe (see POWR_XFE below) relative to the Milky Way grid of the
+same star type. SED fluxes, given at d = 10 pc, are converted to
+luminosities (multiplied by 4 pi (10 pc)^2) before storage.
 Each spectrum's own wavelength grid is stored alongside it, since (verified
 empirically) no two models -- not even within the same grid -- share a
 wavelength grid.
@@ -137,9 +141,38 @@ POWR_DINF: dict[tuple[str, str], float] = {
 POWR_PC_CM = 3.0856775814913673e18
 POWR_LUM_FACTOR = 4.0 * math.pi * (10.0 * POWR_PC_CM) ** 2
 
-# Output HDF5 file, and spectra-registry entry name, for each star type
-POWR_H5_FILES = {"wne": "powr_wne.h5", "wnl": "powr_wnl.h5", "wc": "powr_wc.h5"}
-POWR_REGISTRY_NAMES = {"wne": "POWR_WNE", "wnl": "POWR_WNL", "wc": "POWR_WC"}
+# Output HDF5 file, and spectra-registry entry name, for each star type --
+# WNL is split into three (wnl_h20/wnl_h40/wnl_h60) rather than one, since
+# each is written to its own file/registry entry (see WNL_H_BUCKETS below).
+POWR_H5_FILES = {
+    "wne": "powr_wne.h5",
+    "wnl_h20": "powr_wnl_h20.h5",
+    "wnl_h40": "powr_wnl_h40.h5",
+    "wnl_h60": "powr_wnl_h60.h5",
+    "wc": "powr_wc.h5",
+}
+POWR_REGISTRY_NAMES = {
+    "wne": "POWR_WNE",
+    "wnl_h20": "POWR_WNL_H20",
+    "wnl_h40": "POWR_WNL_H40",
+    "wnl_h60": "POWR_WNL_H60",
+    "wc": "POWR_WC",
+}
+
+# Which output WNL bucket(s) (keys into POWR_H5_FILES/POWR_REGISTRY_NAMES,
+# minus the "wnl_" prefix) a WNL grid's h_fraction is written into. Every
+# metallicity except MW provides real H20/H40/H60 grids (LMC's own H60 grid
+# does not exist at PoWR, so LMC only ever contributes to h20/h40); MW alone
+# has H20 and H50 rather than H20/H40/H60, so, given how coarsely PoWR
+# samples this axis to begin with, its H50 grid is used as a stand-in for
+# both H40 and H60 at [Fe/H] = 0, rather than downloading (or existing)
+# separate MW H40/H60 grids that PoWR does not provide.
+WNL_H_BUCKETS: dict[float, list[str]] = {
+    0.20: ["h20"],
+    0.40: ["h40"],
+    0.50: ["h40", "h60"],  # MW-only: stands in for both H40 and H60
+    0.60: ["h60"],
+}
 
 # Parse command line arguments
 _all_grid_names = [g[0] for g in POWR_GRIDS]
@@ -157,8 +190,8 @@ parser.add_argument("--output-dir",
 parser.add_argument("--spectra-dir",
                     default=shutil.os.path.join("..", "spectra"),
                     help="Directory in which to write the output HDF5 files "
-                         "powr_wne.h5, powr_wnl.h5, powr_wc.h5 "
-                         "(default: %(default)s)")
+                         "powr_wne.h5, powr_wnl_h20.h5, powr_wnl_h40.h5, "
+                         "powr_wnl_h60.h5, powr_wc.h5 (default: %(default)s)")
 parser.add_argument("--registry",
                     default=shutil.os.path.join("..", "spectra", "spectra.toml"),
                     help="Spectra registry TOML file (default: %(default)s)")
@@ -347,7 +380,7 @@ def process_grid(archive_path: str, grid_name: str,
 
 
 # ---------------------------------------------------------------------------
-# Repack every downloaded archive into the three PoWR HDF5 files
+# Repack every downloaded archive into the five PoWR HDF5 files
 # ---------------------------------------------------------------------------
 
 shutil.os.makedirs(args.spectra_dir, exist_ok=True)
@@ -372,19 +405,25 @@ for grid_name, star_type, h_frac, metallicity in POWR_GRIDS:
         continue
 
     feh = powr_feh(star_type, metallicity)
-    if star_type == "wnl":
-        grp_name = f"spectra_feh{feh:.4g}_xh{h_frac:.2f}"
-    else:
-        grp_name = f"spectra_feh{feh:.4g}"
+    grp_name = f"spectra_feh{feh:.4g}"
 
-    h5_path = shutil.os.path.join(args.spectra_dir, POWR_H5_FILES[star_type])
-    with h5py.File(h5_path, "a") as h5:
-        already_done = grp_name in h5
-        if already_done and not args.overwrite:
-            if args.verbose:
-                print(f"Group {grp_name} already in {h5_path}; "
-                      f"skipping {grid_name}.")
-        else:
+    # A WNL grid may target more than one output file -- MW's H50 grid
+    # stands in for both the H40 and H60 buckets (see WNL_H_BUCKETS) -- so
+    # every grid is processed once per destination key, even though that
+    # means re-reading the same archive twice in that one MW-only case.
+    dest_keys = [f"wnl_{bucket}" for bucket in WNL_H_BUCKETS[h_frac]] \
+        if star_type == "wnl" else [star_type]
+
+    for dest_key in dest_keys:
+        h5_path = shutil.os.path.join(args.spectra_dir, POWR_H5_FILES[dest_key])
+        with h5py.File(h5_path, "a") as h5:
+            already_done = grp_name in h5
+            if already_done and not args.overwrite:
+                if args.verbose:
+                    print(f"Group {grp_name} already in {h5_path}; "
+                          f"skipping {grid_name}.")
+                continue
+
             if already_done:
                 del h5[grp_name]
 
@@ -400,9 +439,10 @@ for grid_name, star_type, h_frac, metallicity in POWR_GRIDS:
             if args.verbose:
                 print(f"  Wrote {n_written} spectra to {grp_name}.")
 
-    # This grid's spectra are now safely written to the output HDF5 file
-    # (whether just now or in an earlier run), so the downloaded archive
-    # is no longer needed -- delete it unless the user asked to keep it.
+    # This grid's spectra are now safely written to every destination HDF5
+    # file (whether just now or in an earlier run), so the downloaded
+    # archive is no longer needed -- delete it unless the user asked to
+    # keep it.
     if not args.keep_temp:
         shutil.os.remove(archive_path)
         if args.verbose:
@@ -431,8 +471,8 @@ else:
 # parameterized by (log T_*, log R_t) rather than (Teff, logg) -- are
 # interpolated in fundamentally different variables than stars without
 # optically thick winds.
-for star_type, reg_name in POWR_REGISTRY_NAMES.items():
-    h5_path = shutil.os.path.join(args.spectra_dir, POWR_H5_FILES[star_type])
+for dest_key, reg_name in POWR_REGISTRY_NAMES.items():
+    h5_path = shutil.os.path.join(args.spectra_dir, POWR_H5_FILES[dest_key])
     if not shutil.os.path.exists(h5_path):
         continue
 

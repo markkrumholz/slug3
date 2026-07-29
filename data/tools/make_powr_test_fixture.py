@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """Generate the synthetic PoWR test fixtures under tests/specsyn/assets/
 used to exercise SpecsynLibWR::spec(): POWR_test.h5 (for the WNE-type
-registry entry POWR_WNE_test), POWR_WNL_test.h5 (for the WNL-type
-registry entry POWR_WNL_test), and POWR_WC_test.h5 (for the WC-type
-registry entry POWR_WC_test). Not real PoWR data -- follows the schema
-fetch_powr.py writes (per-[Fe/H] groups with "feh"/"dinf" attributes,
-containing one dataset per (log_teff, log_rt) model with
-"log_teff"/"log_rt"/"logl" attributes and a "<name>_wave" companion
-dataset), but with a synthetic Gaussian SED shared by every model at a
-given (feh, xh) so that the interpolated result is exactly the same
-shape at every grid point, and only the overall normalization (via
+registry entry POWR_WNE_test), POWR_WNL_H20_test.h5/POWR_WNL_H40_test.h5/
+POWR_WNL_H60_test.h5 (for the WNL-type registry entries
+POWR_WNL_H20_test/POWR_WNL_H40_test/POWR_WNL_H60_test), and POWR_WC_test.h5
+(for the WC-type registry entry POWR_WC_test). Not real PoWR data --
+follows the schema fetch_powr.py writes (per-[Fe/H] groups with
+"feh"/"dinf" attributes, containing one dataset per (log_teff, log_rt)
+model with "log_teff"/"log_rt"/"logl" attributes and a "<name>_wave"
+companion dataset), but with a synthetic Gaussian SED shared by every
+model at a given [Fe/H] so that the interpolated result is exactly the
+same shape at every grid point, and only the overall normalization (via
 logl) changes.
 
 POWR_WC_test.h5 shares POWR_test.h5's exact (feh, log_teff, log_rt,
@@ -19,15 +20,14 @@ testSpecsynLibWR.cpp) lands inside its grid too -- only the star's
 hSurf/cSurf/nSurf need to change to get a different WRType out of
 getWRType.
 
-POWR_WNL_test.h5 additionally carries the "xh" (surface H mass
-fraction) group attribute real WNL groups have, and -- unlike real PoWR
-data, where every metallicity has exactly one xh = 0.20 ("H20") grid --
-gives each of its two [Fe/H] values both an H20 group and a decoy
-xh = 0.50 group with a deliberately different SED (peaked at a
-different wavelength, WL0_DECOY rather than WL0), so that a test can
-confirm SpecsynLibWR's WNL H20-only filtering (see its constructor)
-actually excludes the decoy rather than merely happening not to need
-it.
+Each of POWR_WNL_H20_test.h5/POWR_WNL_H40_test.h5/POWR_WNL_H60_test.h5
+shares that same (feh, log_teff, log_rt, dinf) grid too, but with its
+own Gaussian SED peak wavelength (WL0_H20/WL0_H40/WL0_H60) distinct from
+POWR_test.h5's and from one another, so a test querying one of the three
+can confirm it actually got that file's own spectrum rather than another
+H-bucket's -- unlike the pre-split single powr_wnl.h5, these are three
+separate files/registry entries (one per WRType::WNLH20/WNLH40/WNLH60),
+with no xh axis or per-group xh attribute at all (see fetch_powr.py).
 
 Run from the repository root: python3 data/tools/make_powr_test_fixture.py
 """
@@ -42,9 +42,11 @@ LOG_RT_VALS = [0.5, 1.0]
 LOGL = 5.5          # log10(L/Lsun) shared by every model in the fixture
 DINF = 1.0          # wind clumping density contrast, shared by every group
 
-WL0 = 5000.0         # Angstrom, Gaussian SED center for WNE and WNL's H20 models
-WL0_DECOY = 15000.0  # Angstrom, Gaussian SED center for WNL's decoy (xh = 0.50) models
-SIGMA = 500.0        # Angstrom, Gaussian SED width
+WL0 = 5000.0       # Angstrom, Gaussian SED center for WNE/WC
+WL0_H20 = 5000.0   # Angstrom, Gaussian SED center for WNL-H20 (matches WNE/WC)
+WL0_H40 = 10000.0  # Angstrom, Gaussian SED center for WNL-H40
+WL0_H60 = 15000.0  # Angstrom, Gaussian SED center for WNL-H60
+SIGMA = 500.0      # Angstrom, Gaussian SED width
 
 
 def make_flux(wave, wl0, logl):
@@ -57,9 +59,10 @@ def make_flux(wave, wl0, logl):
 
 
 def write_simple_powr_fixture(path, wave, flux):
-    """Write a WNE/WC-shaped PoWR test fixture: one group per FEH_VALS
-    entry (no xh axis), each holding one dataset per (log_teff, log_rt)
-    pair in LOG_TEFF_VALS x LOG_RT_VALS, all sharing flux/wave and LOGL.
+    """Write a WNE/WC/WNL-shaped PoWR test fixture: one group per
+    FEH_VALS entry (no xh axis), each holding one dataset per (log_teff,
+    log_rt) pair in LOG_TEFF_VALS x LOG_RT_VALS, all sharing flux/wave
+    and LOGL.
     """
     with h5py.File(path, "w") as h5:
         for feh in FEH_VALS:
@@ -91,26 +94,12 @@ print(f"amplitude = {(10.0 ** LOGL) * SOLAR_LUM / WL0:.6e} erg/s/Angstrom at "
 # real WC grids (like WNE's) have no xh axis either
 write_simple_powr_fixture("tests/specsyn/assets/POWR_WC_test.h5", wave, flux)
 
-# POWR_WNL_test.h5: the WNL-type fixture (POWR_WNL_test) -- each [Fe/H]
-# gets both an H20 (xh = 0.20) group and a decoy (xh = 0.50) group
-flux_h20 = make_flux(wave, WL0, LOGL)
-flux_decoy = make_flux(wave, WL0_DECOY, LOGL)
-with h5py.File("tests/specsyn/assets/POWR_WNL_test.h5", "w") as h5:
-    for feh in FEH_VALS:
-        for xh, flux_xh in ((0.20, flux_h20), (0.50, flux_decoy)):
-            grp = h5.create_group(f"feh_{feh:+.2f}_xh{xh:.2f}")
-            grp.attrs["feh"] = feh
-            grp.attrs["dinf"] = DINF
-            grp.attrs["xh"] = xh
-            for log_teff in LOG_TEFF_VALS:
-                for log_rt in LOG_RT_VALS:
-                    name = f"logt{log_teff:.2f}_logrt{log_rt:.2f}"
-                    ds = grp.create_dataset(name, data=flux_xh, compression="gzip")
-                    ds.attrs["log_teff"] = log_teff
-                    ds.attrs["log_rt"] = log_rt
-                    ds.attrs["logl"] = LOGL
-                    grp.create_dataset(f"{name}_wave", data=wave, compression="gzip")
-
-print("wrote tests/specsyn/assets/POWR_WNL_test.h5")
-print(f"H20 SED peaked at wl0 = {WL0} Angstrom; decoy SED peaked at "
-      f"wl0 = {WL0_DECOY} Angstrom")
+# POWR_WNL_H20_test.h5/POWR_WNL_H40_test.h5/POWR_WNL_H60_test.h5: the
+# three WNL-type fixtures, one per H-bucket, each its own file/registry
+# entry -- mirroring how fetch_powr.py now splits real PoWR WNL data
+# (see its own module docstring)
+for suffix, wl0 in (("H20", WL0_H20), ("H40", WL0_H40), ("H60", WL0_H60)):
+    flux_wnl = make_flux(wave, wl0, LOGL)
+    write_simple_powr_fixture(
+        f"tests/specsyn/assets/POWR_WNL_{suffix}_test.h5", wave, flux_wnl)
+    print(f"  {suffix} SED peaked at wl0 = {wl0} Angstrom")

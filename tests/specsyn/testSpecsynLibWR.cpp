@@ -19,7 +19,11 @@
  * a plausible WNE star, classifies WRType and out-of-range feh/logTeff
  * as out of bounds, clamps an out-of-range logRt into the grid rather
  * than rejecting it, and rescales the result to the star's own
- * luminosity rather than the grid point's.
+ * luminosity rather than the grid point's. The three POWR_WNL_H20/H40/
+ * H60_test.h5 fixtures share this same grid shape but each has its own
+ * distinct SED center (see make_powr_test_fixture.py), letting
+ * testSpecWNLSuccess confirm a WNL star's own hSurf-derived H-bucket
+ * (see getWRType) actually selects that bucket's own file.
  * @date 2026-07-23
  */
 
@@ -28,18 +32,21 @@
 #include "../../src/utils/Constants.hpp"
 #include "testSpecsynLibWR.hpp"
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <iostream>
-#include <limits>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace
 {
     const std::string registryName = "tests/specsyn/assets/spectra.toml";
     const std::string spectraName = "POWR_WNE_test";
-    const std::string wnlSpectraName = "POWR_WNL_test";
+    const std::string wnlH20SpectraName = "POWR_WNL_H20_test";
+    const std::string wnlH40SpectraName = "POWR_WNL_H40_test";
+    const std::string wnlH60SpectraName = "POWR_WNL_H60_test";
     constexpr double solarLuminosity = utils::Lsun;
 
     /**
@@ -47,7 +54,10 @@ namespace
      * @details
      * heSurf, cSurf, and nSurf default to values that classify as
      * WRType::WNE (heSurf > 0.9, cSurf < nSurf) via getWRType,
-     * matching POWR_WNE_test's own type_.
+     * matching POWR_WNE_test's own type_. hSurf defaults to 0.0
+     * (WRType::WNLH20's own range), which only matters for a star
+     * whose heSurf/logTeff otherwise puts it in one of the WNL
+     * subtypes.
      */
     auto makeWRStarData(
         const double mass,
@@ -56,7 +66,8 @@ namespace
         const double mdot,
         const double heSurf = 0.98,
         const double cSurf = 0.0,
-        const double nSurf = 0.01) -> specsyn::Specsyn::StarData
+        const double nSurf = 0.01,
+        const double hSurf = 0.0) -> specsyn::Specsyn::StarData
     {
         specsyn::Specsyn::StarData props{};
         props.at(static_cast<std::size_t>(tracks::FieldIdx::mass)) = mass;
@@ -66,6 +77,7 @@ namespace
         props.at(static_cast<std::size_t>(tracks::FieldIdx::heSurf)) = heSurf;
         props.at(static_cast<std::size_t>(tracks::FieldIdx::cSurf)) = cSurf;
         props.at(static_cast<std::size_t>(tracks::FieldIdx::nSurf)) = nSurf;
+        props.at(static_cast<std::size_t>(tracks::FieldIdx::hSurf)) = hSurf;
         return props;
     }
 } // namespace
@@ -296,30 +308,24 @@ static auto testSpecTeffGridBoundsSilent() -> int
 }
 
 // Check that spec() successfully interpolates a spectrum for a
-// plausible WNL star (same mass/L/Teff/Mdot as testSpecWNESuccess,
-// just with heSurf = 0.7 so it classifies as WRType::WNL instead of
-// WRType::WNE), loading from POWR_WNL_test -- a fixture whose
-// constructor comments (see make_powr_test_fixture.py) describe two
-// groups per [Fe/H]: an H20 (xh = 0.20) group with a Gaussian SED
-// peaked at 5000 Angstrom (width 500 Angstrom, so utterly negligible
-// by 15000 Angstrom -- 20 sigma out), and a decoy (xh = 0.50) group
-// with an equally tall Gaussian peaked at 15000 Angstrom instead.
-// Beyond the same in-range/luminosity sanity checks as
-// testSpecWNESuccess, this also checks that flux near 15000 Angstrom
-// is negligible relative to the peak: if SpecsynLibWR's WNL H20-only
-// filter (see its constructor) failed to discard the decoy group, the
-// decoy's own grid point would sit exactly at this star's feh = -0.5
-// query bracket alongside the H20 one (verified against this exact
-// fixture by hand: without the filter, spec() blends the two 50/50,
-// making the decoy's peak at 15000 Angstrom come out about as tall as
-// the real H20 peak at 5000 -- not just "present but small"), so this
-// check would fail loudly rather than by a hard-to-notice margin.
-static auto testSpecWNLSuccess() -> int
+// plausible WNL star of a given H-bucket (same mass/L/Teff/Mdot as
+// testSpecWNESuccess; heSurf = 0.7 puts it in a WNL subtype, and
+// hSurf -- via getWRType's own H20/H40/H60 subdivision -- selects
+// which one), loading from that bucket's own POWR_WNL_H*_test
+// fixture. Beyond the same in-range/luminosity sanity checks as
+// testSpecWNESuccess, this also checks that the peak of wl * spec(wl)
+// actually lands near that bucket's own fixture SED center (each of
+// the three POWR_WNL_H*_test fixtures has a different one -- see
+// data/tools/make_powr_test_fixture.py), confirming spec() loaded the
+// H-bucket file matching this star's own hSurf, not some other one.
+static auto testSpecWNLSuccess(
+    const std::string& wnlSpectraName, const double hSurf,
+    const double expectedPeakWl, const std::string& label) -> int
 {
     const specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise> lib(
         wnlSpectraName, -3.0, 1.0, registryName);
 
-    const auto props = makeWRStarData(20.0, 5.7, 4.7, 3e-5, 0.7);
+    const auto props = makeWRStarData(20.0, 5.7, 4.7, 3e-5, 0.7, 0.0, 0.01, hSurf);
 
     std::vector<double> result;
     try
@@ -329,7 +335,7 @@ static auto testSpecWNLSuccess() -> int
     catch (const std::exception& e)
     {
         std::cerr << "testSpecsynLibWR: unexpected exception from spec() "
-            "for an in-bounds WNL star: " << e.what() << "\n";
+            "for an in-bounds " << label << " star: " << e.what() << "\n";
         return 1;
     }
 
@@ -342,35 +348,30 @@ static auto testSpecWNLSuccess() -> int
 
     constexpr double starLuminosity = 501187.23362727246 * solarLuminosity; // 10^5.7 Lsun
     double maxWlSpec = 0.0;
-    double decoyWlSpec = 0.0; // wl * spec() nearest 15000 Angstrom, the decoy group's own peak
-    double bestDecoyDist = std::numeric_limits<double>::max();
+    double peakWl = 0.0;
     for (std::size_t i = 0; i < result.size(); ++i)
     {
         const double wl = lib.wl().at(i);
         const double wlSpec = result.at(i) * wl;
-        maxWlSpec = std::max(maxWlSpec, wlSpec);
-
-        const double decoyDist = std::abs(wl - 15000.0);
-        if (decoyDist < bestDecoyDist)
+        if (wlSpec > maxWlSpec)
         {
-            bestDecoyDist = decoyDist;
-            decoyWlSpec = wlSpec;
+            maxWlSpec = wlSpec;
+            peakWl = wl;
         }
     }
     if (maxWlSpec < 1e-3 * starLuminosity || maxWlSpec > 1e3 * starLuminosity)
     {
-        std::cerr << "testSpecsynLibWR: max(wl * spec) = " << maxWlSpec
-            << " erg/s is unreasonably far from the test star's own "
-            "luminosity = " << starLuminosity << " erg/s\n";
+        std::cerr << "testSpecsynLibWR: " << label << ": max(wl * spec) = " <<
+            maxWlSpec << " erg/s is unreasonably far from the test star's "
+            "own luminosity = " << starLuminosity << " erg/s\n";
         return 1;
     }
-    if (decoyWlSpec > 1e-6 * maxWlSpec)
+    if (std::abs(peakWl - expectedPeakWl) > 2000.0)
     {
-        std::cerr << "testSpecsynLibWR: wl * spec() near 15000 Angstrom = " <<
-            decoyWlSpec << " erg/s is a non-negligible fraction of the peak "
-            "(" << maxWlSpec << " erg/s) -- consistent with POWR_WNL_test's "
-            "decoy (xh = 0.50) group leaking into the result, meaning the "
-            "WNL H20-only filter does not appear to have excluded it\n";
+        std::cerr << "testSpecsynLibWR: " << label << ": peak of wl * spec() "
+            "is at " << peakWl << " Angstrom, expected near " <<
+            expectedPeakWl << " Angstrom -- did spec() load the wrong "
+            "H-bucket fixture?\n";
         return 1;
     }
 
@@ -381,9 +382,9 @@ static auto testSpecWNLSuccess() -> int
 // WNL library too: a star with heSurf = 0.2 and logTeff = 4.0 (see
 // testSpecTypeMismatchThrow's own comment for why logTeff must be
 // below getWRType's log10(50000) None/WNL boundary here) classifies
-// as WRType::None, which can never match POWR_WNL_test's own
-// WRType::WNL, regardless of any other property
-static auto testSpecWNLTypeMismatchThrow() -> int
+// as WRType::None, which can never match wnlSpectraName's own
+// WRType::WNLH20/WNLH40/WNLH60, regardless of any other property
+static auto testSpecWNLTypeMismatchThrow(const std::string& wnlSpectraName) -> int
 {
     const specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise> lib(
         wnlSpectraName, -3.0, 1.0, registryName);
@@ -400,6 +401,40 @@ static auto testSpecWNLTypeMismatchThrow() -> int
     catch (const std::runtime_error&) { /* this is the expected outcome */ }
 
     return 0;
+}
+
+// Check getWRType's WNL surface-H subdivision directly, at and around
+// its 0.3/0.5 boundaries (see its own doc comment): hSurf < 0.3 gives
+// WRType::WNLH20, hSurf in [0.3, 0.5] gives WRType::WNLH40, and
+// hSurf > 0.5 gives WRType::WNLH60. heSurf = 0.7 and logTeff = 4.7
+// (comfortably inside the WNL heSurf/logTeff window, unrelated to
+// hSurf) are held fixed throughout, so only hSurf varies.
+static auto testGetWRTypeWNLHBuckets() -> int
+{
+    using WRType = specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise>::WRType;
+    const std::array<std::pair<double, WRType>, 6> cases = {{
+        { 0.0,  WRType::WNLH20 },
+        { 0.29, WRType::WNLH20 },
+        { 0.3,  WRType::WNLH40 },
+        { 0.5,  WRType::WNLH40 },
+        { 0.51, WRType::WNLH60 },
+        { 1.0,  WRType::WNLH60 },
+    }};
+
+    int result = 0;
+    for (const auto& [hSurf, expected] : cases)
+    {
+        const auto props = makeWRStarData(20.0, 5.7, 4.7, 3e-5, 0.7, 0.0, 0.01, hSurf);
+        const auto actual =
+            specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise>::getWRType(props);
+        if (actual != expected)
+        {
+            std::cerr << "testSpecsynLibWR: getWRType(hSurf = " << hSurf
+                << ") returned the wrong WNL subtype\n";
+            result = 1;
+        }
+    }
+    return result;
 }
 
 // Check that requesting nWl alone (wlMin = wlMax = 0, the "not
@@ -448,8 +483,11 @@ auto testSpecsynLibWR() -> int
     result += testSpecLogRtClamped();
     result += testSpecTeffGridBoundsThrow();
     result += testSpecTeffGridBoundsSilent();
-    result += testSpecWNLSuccess();
-    result += testSpecWNLTypeMismatchThrow();
+    result += testSpecWNLSuccess(wnlH20SpectraName, 0.1, 5000.0, "WNL-H20");
+    result += testSpecWNLSuccess(wnlH40SpectraName, 0.4, 10000.0, "WNL-H40");
+    result += testSpecWNLSuccess(wnlH60SpectraName, 0.6, 15000.0, "WNL-H60");
+    result += testSpecWNLTypeMismatchThrow(wnlH20SpectraName);
+    result += testGetWRTypeWNLHBuckets();
     result += testNWlOnly();
     return result;
 }
