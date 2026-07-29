@@ -8,6 +8,7 @@
 #include "OutputManagerAscii.hpp"
 #include "../core/Cluster.hpp"
 #include "../specsyn/Specsyn.hpp"
+#include "../utils/RngThread.hpp"
 #include "OutputManager.hpp"
 #include "SimControls.hpp"
 #include "SimPhysics.hpp"
@@ -27,9 +28,12 @@
 // integer; numWidth accommodates a number in exponential notation
 // with six decimal places (e.g. "-1.234567e+01"). Both include a
 // couple of extra characters of padding so that columns are visibly
-// separated.
+// separated. rngWidth accommodates a serialized rng state (see
+// utils::RngState), which -- unlike every other column -- can be up
+// to rngStateWidth - 1 = 127 characters wide.
 static constexpr int uidWidth = 12;
 static constexpr int numWidth = 16;
+static constexpr int rngWidth = static_cast<int>(utils::rngStateWidth) + 4;
 
 // Number of digits used to zero-pad the trial/uid columns, and the
 // number of digits after the decimal point used for the
@@ -63,10 +67,12 @@ static void writeClustersHeader(std::ofstream& file)
          << std::setw(numWidth) << "target_mass"
          << std::setw(numWidth) << "birth_mass"
          << std::setw(numWidth) << "form_time"
-         << std::setw(numWidth) << "feh" << "\n";
+         << std::setw(numWidth) << "feh"
+         << std::setw(rngWidth) << "rng" << "\n";
     constexpr auto numColumns = 4;
     file << std::string(static_cast<std::string::size_type>(2) * uidWidth, '-')
-         << std::string(static_cast<std::string::size_type>(numColumns) * numWidth, '-') << "\n";
+         << std::string(static_cast<std::string::size_type>(numColumns) * numWidth, '-')
+         << std::string(static_cast<std::string::size_type>(rngWidth), '-') << "\n";
 }
 
 // Write the cluster-spectra ascii header (column names followed by a
@@ -191,7 +197,8 @@ void io::OutputManagerAscii::writeCluster(
                       << std::setw(numWidth) << formatSci(cluster.targetMass())
                       << std::setw(numWidth) << formatSci(cluster.birthMass())
                       << std::setw(numWidth) << formatSci(cluster.formTime())
-                      << std::setw(numWidth) << formatSci(cluster.feH()) << "\n";
+                      << std::setw(numWidth) << formatSci(cluster.feH())
+                      << std::setw(rngWidth) << std::string(cluster.rngState().data()) << "\n";
     }
 }
 

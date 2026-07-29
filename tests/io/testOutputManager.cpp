@@ -14,6 +14,7 @@
 #include "hdf5.h" // NOLINT(misc-include-cleaner)
 #include "io/SlugVersion.hpp"
 #include "testOutputManager.hpp"
+#include <algorithm>
 #include <cmath>
 #include <exception>
 #include <filesystem>
@@ -185,6 +186,89 @@ static auto testWriteClusterH5() -> int
     catch (const std::exception& error)
     {
         std::cerr << "testOutputManager: h5 writeCluster test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Verify that a cluster can be exactly reconstructed from its own
+// recorded rng state: write a cluster's rng state to the HDF5
+// clusters/rng dataset, read it back, and use it (together with the
+// same uid/mass/time/physics) to construct a second Cluster via the
+// rngState-accepting constructor. Since that constructor draws its
+// stellar masses using exactly the given rng state, the two clusters'
+// birthMass() should come out bitwise identical, even though the live
+// rng stream has moved on in between (the first cluster's own
+// construction, plus the second constructor's own [Fe/H] draw, both
+// consume it) -- confirming the round trip does not depend on the live
+// rng being in any particular state at reconstruction time.
+static auto testWriteReadClusterRngRoundTrip() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() / "slugTestOutputManagerRngRoundTrip";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+    const std::string modelName = "test_model";
+    const auto expectedPath = outDir / (modelName + ".h5");
+    const toml::table inputDeck = makeClusterPhysicsInputDeck(modelName, outDir);
+
+    try
+    {
+        const io::SimControls controls(inputDeck);
+        const io::SimPhysics sim(inputDeck, controls.simType());
+        utils::rng().seed(123);
+        constexpr unsigned long uid = 13;
+        constexpr double targetMass = 5e3;
+        constexpr double formTime = 0.0;
+        const core::Cluster cluster(uid, targetMass, formTime, sim);
+        constexpr unsigned long trial = 1;
+
+        {
+            io::OutputManagerH5 manager(controls, sim, inputDeck);
+            manager.writeCluster(trial, cluster);
+        }
+
+        // NOLINTBEGIN(misc-include-cleaner)
+        const hid_t file = H5Fopen(expectedPath.string().c_str(),
+            H5F_ACC_RDONLY, H5P_DEFAULT);
+        if (file < 0)
+        {
+            std::cerr << "testOutputManager: rng round trip: unable to reopen "
+                << expectedPath.string() << "\n";
+            return 1;
+        }
+        const hid_t grp = H5Gopen2(file, "clusters", H5P_DEFAULT);
+        const hid_t dset = H5Dopen2(grp, "rng", H5P_DEFAULT);
+        const hid_t strType = H5Tcopy(H5T_C_S1);
+        H5Tset_size(strType, utils::rngStateWidth);
+        utils::RngState readState{};
+        H5Dread(dset, strType, H5S_ALL, H5S_ALL, H5P_DEFAULT, readState.data());
+        H5Tclose(strType);
+        H5Dclose(dset);
+        H5Gclose(grp);
+        H5Fclose(file);
+        // NOLINTEND(misc-include-cleaner)
+
+        const core::Cluster rebuilt(uid, targetMass, formTime, sim, readState);
+
+        if (!std::ranges::equal(rebuilt.starMasses(), cluster.starMasses()))
+        {
+            std::cerr << "testOutputManager: rng round trip: rebuilt "
+                "starMasses() does not exactly match the original's\n";
+            return 1;
+        }
+        if (rebuilt.birthMass() != cluster.birthMass())
+        {
+            std::cerr << "testOutputManager: rng round trip: rebuilt "
+                "birthMass() = " << rebuilt.birthMass() << " does not "
+                "exactly match original birthMass() = " <<
+                cluster.birthMass() << "\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testOutputManager: rng round trip test failed: "
             << error.what() << "\n";
         return 1;
     }
@@ -363,5 +447,6 @@ auto testOutputManager() -> int
     result += testOutputManagerH5();
     result += testWriteClusterAscii();
     result += testWriteClusterH5();
+    result += testWriteReadClusterRngRoundTrip();
     return result;
 }

@@ -35,7 +35,7 @@ core::Cluster::Cluster(const unsigned long uid,
         physics.minStochMass(),
         physics.imf().getMax())),
     birthNonStochMass_((1.0 - physics.fracStochMass()) * mass),
-    birthMass_(std::reduce(m_.begin(), m_.end(), 0.0)),
+    birthMass_(std::accumulate(m_.begin(), m_.end(), 0.0)),
     disruptTime_(std::numeric_limits<double>::quiet_NaN()),
     curTime_(time)
 {
@@ -46,6 +46,77 @@ core::Cluster::Cluster(const unsigned long uid,
     const auto& ph = physics_.get();
     if (ph.clf().valid())
     { 
+        disruptTime_ = formTime_ + ph.clf().draw();
+    }
+
+    // If this simulation has a variable metallicity, generate tracks
+    // for the metallicity of this cluster and save them for future
+    // use. Otherwise, [Fe/H] is fixed for the whole simulation, so
+    // just point at the slice SimPhysics has already precomputed and
+    // shares across every cluster.
+    if (ph.constFeH())
+    {
+        tracks_ = std::cref(ph.tracks2D());
+    }
+    else
+    {
+        tracks_ = ph.tracks().sliceConstFeH(feH_);
+    }
+}
+
+// Reconstruction constructor: replays this cluster's original draw
+// sequence (feH_, then m_) from a previously recorded rng state,
+// rather than drawing feH_ live and m_ from that state independently,
+// so the result is bitwise identical to the original cluster's -- see
+// this constructor's own header comment for why both draws, not just
+// the mass one, need to be replayed: PDF::draw() consumes rng state
+// (via a std::discrete_distribution used to pick a segment) even for
+// a single-segment/delta [Fe/H] distribution, so feH_'s own draw
+// already advances the stream before m_'s draw would otherwise see it.
+core::Cluster::Cluster(const unsigned long uid,
+    const double mass,
+    const double time,
+    const io::SimPhysics& physics,
+    const utils::RngState& rngState) :
+    rngState_(rngState),
+    uid_(uid),
+    targetMass_(mass),
+    formTime_(time),
+    feH_(0.0), // placeholder; set in the constructor body below
+    physics_(std::cref(physics)),
+    birthNonStochMass_((1.0 - physics.fracStochMass()) * mass),
+    birthMass_(0.0), // placeholder; overwritten once m_ is drawn
+    disruptTime_(std::numeric_limits<double>::quiet_NaN()),
+    curTime_(time)
+{
+    // Draw feH_ and m_ from the given rng state rather than the live
+    // one: save the live state, temporarily switch to rngState, draw
+    // both in the same order the primary constructor does, then
+    // restore, so this constructor has no lasting effect on the
+    // ambient rng stream
+    const auto savedState = utils::rng().getState();
+    utils::rng().setState(rngState);
+    feH_ = physics.fehDist().draw(); //NOLINT(cppcoreguidelines-prefer-member-initializer) -- must happen after setState(rngState) above, not in the initializer list
+    m_ = physics.imf().drawTarget(
+        physics.fracStochMass() * mass,
+        physics.minStochMass(),
+        physics.imf().getMax());
+    utils::rng().setState(savedState);
+
+    // birthMass_ is summed before sorting m_, matching the primary
+    // constructor's own order of operations (there, forced by summing
+    // in the member initializer list, which runs before the
+    // constructor body's own sort) -- floating-point addition is not
+    // associative, so summing in a different order than the original
+    // draw would reproduce the same set of masses but not necessarily
+    // the same birthMass_ down to the last bit.
+    birthMass_ = std::accumulate(m_.begin(), m_.end(), 0.0); //NOLINT(cppcoreguidelines-prefer-member-initializer) -- must happen after m_ is drawn above, not in the initializer list
+    std::ranges::sort(m_);
+
+    // Set disruption time if disruption is on
+    const auto& ph = physics_.get();
+    if (ph.clf().valid())
+    {
         disruptTime_ = formTime_ + ph.clf().draw();
     }
 
