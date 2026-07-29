@@ -337,6 +337,44 @@ namespace specsyn
             .value<double>().value_or(defaultMicroTurb);
     }
 
+    namespace
+    {
+        // Returns a group's afe attribute if it has both feh and afe
+        // attributes and its cfe/micro/r attributes (where present)
+        // match the input constraints; nullopt otherwise. Factored out
+        // of findAfeValues to keep that function's cognitive complexity
+        // down.
+        auto groupAfeIfMatching( //NOLINT(llvm-prefer-static-over-anonymous-namespace)
+            const hid_t grp, const double cfe, const double microTurb, const double r)
+            -> std::optional<double>
+        {
+            const auto fehVal = readScalarAttrIfPresent(grp, "feh");
+            const auto afeVal = readScalarAttrIfPresent(grp, "afe");
+            if (!fehVal || !afeVal)
+            {
+                return std::nullopt;
+            }
+
+            const auto cfeVal = readScalarAttrIfPresent(grp, "cfe");
+            if (cfeVal && !utils::approxEqual(*cfeVal, cfe))
+            {
+                return std::nullopt;
+            }
+            const auto microVal = readScalarAttrIfPresent(grp, "micro");
+            if (microVal && !utils::approxEqual(*microVal, microTurb))
+            {
+                return std::nullopt;
+            }
+            const auto rVal = readScalarAttrIfPresent(grp, "r");
+            if (rVal && !utils::approxEqual(*rVal, r))
+            {
+                return std::nullopt;
+            }
+
+            return afeVal;
+        }
+    } // namespace
+
     auto findAfeValues(
         const std::string& spectraName,
         const double cfe,
@@ -388,41 +426,14 @@ namespace specsyn
             const hid_t grp = H5Gopen2(file, nameBuf.data(), H5P_DEFAULT);
             if (grp < 0) { continue; }
 
-            const auto fehVal = readScalarAttrIfPresent(grp, "feh");
-            const auto afeVal = readScalarAttrIfPresent(grp, "afe");
-            bool isMatch = fehVal.has_value() && afeVal.has_value();
-
-            if (isMatch)
-            {
-                const auto cfeVal = readScalarAttrIfPresent(grp, "cfe");
-                if (cfeVal && !utils::approxEqual(*cfeVal, cfe))
-                    isMatch = false;
-            }
-            if (isMatch)
-            {
-                const auto microVal = readScalarAttrIfPresent(grp, "micro");
-                if (microVal && !utils::approxEqual(*microVal, microTurb))
-                    isMatch = false;
-            }
-            if (isMatch)
-            {
-                const auto rVal = readScalarAttrIfPresent(grp, "r");
-                if (rVal && !utils::approxEqual(*rVal, r))
-                    isMatch = false;
-            }
-
-            if (isMatch)
-            {
-                const double a = *afeVal;
-                if (std::ranges::find_if(afeVals, [a](double v) {
-                        return utils::approxEqual(v, a);
-                    }) == afeVals.end())
-                {
-                    afeVals.push_back(a);
-                }
-            }
-
+            const auto afeVal = groupAfeIfMatching(grp, cfe, microTurb, r);
             H5Gclose(grp);
+            if (afeVal && std::ranges::find_if(afeVals, [a = *afeVal](const double v) {
+                    return utils::approxEqual(v, a);
+                }) == afeVals.end())
+            {
+                afeVals.push_back(*afeVal);
+            }
         }
 
         H5Fclose(file);
