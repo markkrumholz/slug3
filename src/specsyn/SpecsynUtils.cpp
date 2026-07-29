@@ -337,4 +337,100 @@ namespace specsyn
             .value<double>().value_or(defaultMicroTurb);
     }
 
+    auto findAfeValues(
+        const std::string& spectraName,
+        const double cfe,
+        const double microTurb,
+        const double r,
+        const std::string& registryName) -> std::vector<double>
+    {
+        // Parse registry and open the HDF5 file
+        auto [registry, registryPath] = parseRegistry(registryName);
+
+        auto spectraSets = getSpectraSetsFromRegistry(registry);
+        if (std::ranges::find(spectraSets, spectraName) == spectraSets.end())
+        {
+            throw std::runtime_error("findAfeValues: no spectra set named " +
+                spectraName + " found in spectra registry " + registryName);
+        }
+
+        const auto h5name =
+            registry.at_path(spectraName).at_path("file").value_or(std::string{});
+        const auto h5path = registryPath.parent_path() / h5name;
+
+        // NOLINTBEGIN(misc-include-cleaner)
+
+        const hid_t file = H5Fopen(h5path.string().c_str(),
+            H5F_ACC_RDONLY, H5P_DEFAULT);
+        if (file < 0)
+        {
+            throw std::runtime_error("findAfeValues: unable to open "
+                "HDF5 file " + h5path.string());
+        }
+
+        H5G_info_t ginfo{};
+        H5Gget_info(file, &ginfo);
+
+        // Collect all distinct afe values from groups that have an afe
+        // attribute and also match the cfe, micro, and r constraints.
+        // Groups with no feh attribute (non-spectra groups like
+        // "wavelengths") are skipped.
+        std::vector<double> afeVals;
+        for (hsize_t i = 0; i < ginfo.nlinks; ++i)
+        {
+            const auto nameLen = H5Lget_name_by_idx(file, ".",
+                H5_INDEX_NAME, H5_ITER_INC, i, nullptr, 0, H5P_DEFAULT);
+            if (nameLen < 0) { continue; }
+            std::vector<char> nameBuf(static_cast<size_t>(nameLen) + 1);
+            H5Lget_name_by_idx(file, ".", H5_INDEX_NAME, H5_ITER_INC, i,
+                nameBuf.data(), nameBuf.size(), H5P_DEFAULT);
+
+            const hid_t grp = H5Gopen2(file, nameBuf.data(), H5P_DEFAULT);
+            if (grp < 0) { continue; }
+
+            const auto fehVal = readScalarAttrIfPresent(grp, "feh");
+            const auto afeVal = readScalarAttrIfPresent(grp, "afe");
+            bool isMatch = fehVal.has_value() && afeVal.has_value();
+
+            if (isMatch)
+            {
+                const auto cfeVal = readScalarAttrIfPresent(grp, "cfe");
+                if (cfeVal && !utils::approxEqual(*cfeVal, cfe))
+                    isMatch = false;
+            }
+            if (isMatch)
+            {
+                const auto microVal = readScalarAttrIfPresent(grp, "micro");
+                if (microVal && !utils::approxEqual(*microVal, microTurb))
+                    isMatch = false;
+            }
+            if (isMatch)
+            {
+                const auto rVal = readScalarAttrIfPresent(grp, "r");
+                if (rVal && !utils::approxEqual(*rVal, r))
+                    isMatch = false;
+            }
+
+            if (isMatch)
+            {
+                const double a = *afeVal;
+                if (std::ranges::find_if(afeVals, [a](double v) {
+                        return utils::approxEqual(v, a);
+                    }) == afeVals.end())
+                {
+                    afeVals.push_back(a);
+                }
+            }
+
+            H5Gclose(grp);
+        }
+
+        H5Fclose(file);
+
+        // NOLINTEND(misc-include-cleaner)
+
+        std::ranges::sort(afeVals);
+        return afeVals;
+    }
+
 } // namespace specsyn

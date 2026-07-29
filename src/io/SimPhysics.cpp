@@ -186,6 +186,15 @@ void io::SimPhysics::readSpectra(const toml::table& inputDeck)
     const auto zInput = utils::getTOMLKeyWithError<double>(inputDeck, "spectra.z");
     const double z = zInput.value_or(0.0);
 
+    // Optional stars.alphaFe and stars.CFe: if not supplied, fall back
+    // to the library defaults. stars.alphaFe is the same key that
+    // readTracks() also reads (tracks and spectra share the same AFe
+    // value), while stars.CFe is spectra-only (tracks have no CFe axis).
+    const auto afeInput = utils::getTOMLKeyWithError<double>(inputDeck, "stars.alphaFe");
+    const double afe = afeInput.value_or(tracks::defaultAFe);
+    const auto cfeInput = utils::getTOMLKeyWithError<double>(inputDeck, "stars.CFe");
+    const double cfe = cfeInput.value_or(specsyn::defaultCFe);
+
     // A single string names one model directly; anything else must be
     // an array of strings, chained together via SpecsynLibChained
     if (const auto model = modelNode.value<std::string>(); model.has_value())
@@ -224,7 +233,7 @@ void io::SimPhysics::readSpectra(const toml::table& inputDeck)
         {
             specsyn_ = std::make_unique<specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::raise>>(
                 model.value(), fehDist_.getMin(), fehDist_.getMax(),
-                tracks::defaultAFe, specsyn::defaultCFe,
+                afe, cfe,
                 std::numeric_limits<double>::quiet_NaN(), specsyn::defaultR,
                 registryName, wlMin_, wlMax_, nWl_, z);
         }
@@ -249,6 +258,6 @@ void io::SimPhysics::readSpectra(const toml::table& inputDeck)
 
     specsyn_ = std::make_unique<specsyn::SpecsynLibChained>(
         models, fehDist_.getMin(), fehDist_.getMax(),
-        tracks::defaultAFe, specsyn::defaultCFe, std::vector<double>{},
+        afe, cfe, std::vector<double>{},
         specsyn::defaultR, registryName, wlMin_, wlMax_, nWl_, z);
 }

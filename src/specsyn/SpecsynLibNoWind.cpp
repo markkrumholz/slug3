@@ -16,7 +16,9 @@
 #include <algorithm> // NOLINT(misc-include-cleaner) -- see the identical NOLINT on SpecsynLib.cpp's findBracket for why std::ranges::lower_bound needs this
 #include <cmath>
 #include <cstddef>
+#include <map>
 #include <mdspan> // NOLINT(misc-include-cleaner)
+#include <optional>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -112,6 +114,47 @@ namespace specsyn
     } // namespace
     // NOLINTEND(misc-include-cleaner)
 
+    // Helper used by the interpolating AFe path: scan an HDF5 group's
+    // datasets and return a map from (logTeff, logg) to dataset name,
+    // updating logTeffSet and loggSet with the values found.
+    // NOLINTBEGIN(misc-include-cleaner)
+    static auto scanGroupForTeffLogg(
+        const hid_t file,
+        const std::string& groupName,
+        std::set<double>& logTeffSet,
+        std::set<double>& loggSet)
+        -> std::map<std::pair<double, double>, std::string>
+    {
+        const hid_t grp = H5Gopen2(file, groupName.c_str(), H5P_DEFAULT);
+        if (grp < 0)
+        {
+            H5Fclose(file);
+            throw std::runtime_error(
+                "SpecsynLibNoWind: unable to open group " + groupName);
+        }
+        std::map<std::pair<double, double>, std::string> entries;
+        for (const auto& name : listGroupDatasetNames(grp))
+        {
+            const hid_t dset = H5Dopen2(grp, name.c_str(), H5P_DEFAULT);
+            if (dset < 0)
+            {
+                H5Gclose(grp);
+                H5Fclose(file);
+                throw std::runtime_error(
+                    "SpecsynLibNoWind: unable to open dataset " + name);
+            }
+            const double logTeff = std::log10(readRequiredScalarAttr(dset, "teff"));
+            const double logg = readRequiredScalarAttr(dset, "logg");
+            H5Dclose(dset);
+            entries[{logTeff, logg}] = name;
+            logTeffSet.insert(logTeff);
+            loggSet.insert(logg);
+        }
+        H5Gclose(grp);
+        return entries;
+    }
+    // NOLINTEND(misc-include-cleaner)
+
     template <OOBPolicy Policy>
     SpecsynLibNoWind<Policy>::SpecsynLibNoWind(
         const std::string& spectraName,
@@ -146,13 +189,6 @@ namespace specsyn
         // Step 1: find the set of spectra matching the input criteria
         auto [fehVals, groupNames] = findMatchingSpectra(
             spectraName, fehMin, fehMax, afe, cfe, microTurb_, r, registryName);
-        FeH_ = std::move(fehVals); //NOLINT(cppcoreguidelines-prefer-member-initializer)
-        const size_t nfeh = FeH_.size();
-        if (nfeh == 0)
-        {
-            throw std::runtime_error(
-                "SpecsynLibNoWind: no spectra found matching the input criteria");
-        }
 
         // Re-derive the path to the HDF5 file holding these spectra, the
         // same way findMatchingSpectra does internally
@@ -212,91 +248,245 @@ namespace specsyn
                 h5path.string() + " is empty");
         }
 
-        // Step 3: scan every matching group's datasets (without reading
-        // their flux data yet) to read the Teff and logg attributes
-        // fetch_bosz.py (or any other spectral-library fetch script
-        // following the same convention) stores on each one, and
-        // thereby the unique sets of logg and log(Teff) values that,
-        // together with FeH_, generate the tensor grid on which the
-        // library's spectra sit. Interpolation is done in log(Teff)
-        // rather than Teff itself (matching SpecsynLibWR), even though
-        // the archive stores Teff directly, hence the log10 below. Not
-        // every (FeH, logg, Teff) point in that grid need have a
-        // spectrum, so groupEntries also records the (name, Teff,
-        // logg) triples for each group, to avoid re-reading these
-        // attributes when actually reading the spectra in step 5.
-        // Deliberately reads Teff/logg from each dataset's own
-        // attributes rather than parsing them out of its name, since
-        // not every spectral library on disk can be assumed to encode
-        // them in the name at all, let alone in the same way.
-        std::vector<std::vector<std::pair<std::string, std::pair<double, double>>>>
-            groupEntries(nfeh);
-        std::set<double> logTeffSet;
-        std::set<double> loggSet;
-        for (size_t f = 0; f < nfeh; ++f)
+        using SpectraGrid = typename SpecsynLib<Policy>::SpectraGrid;
+
+        if (!fehVals.empty())
         {
-            const hid_t grp = H5Gopen2(file, groupNames[f].c_str(), H5P_DEFAULT);
-            if (grp < 0)
+            // === EXACT AFe MATCH PATH ===
+            // Steps 3-5: scan, allocate, and read as before.
+
+            FeH_ = std::move(fehVals); //NOLINT(cppcoreguidelines-prefer-member-initializer)
+            const size_t nfeh = FeH_.size();
+
+            // Step 3: scan every matching group's datasets (without reading
+            // their flux data yet) to read the Teff and logg attributes
+            // fetch_bosz.py (or any other spectral-library fetch script
+            // following the same convention) stores on each one, and
+            // thereby the unique sets of logg and log(Teff) values that,
+            // together with FeH_, generate the tensor grid on which the
+            // library's spectra sit. Interpolation is done in log(Teff)
+            // rather than Teff itself (matching SpecsynLibWR), even though
+            // the archive stores Teff directly, hence the log10 below. Not
+            // every (FeH, logg, Teff) point in that grid need have a
+            // spectrum, so groupEntries also records the (name, Teff,
+            // logg) triples for each group, to avoid re-reading these
+            // attributes when actually reading the spectra in step 5.
+            // Deliberately reads Teff/logg from each dataset's own
+            // attributes rather than parsing them out of its name, since
+            // not every spectral library on disk can be assumed to encode
+            // them in the name at all, let alone in the same way.
+            std::vector<std::vector<std::pair<std::string, std::pair<double, double>>>>
+                groupEntries(nfeh);
+            std::set<double> logTeffSet;
+            std::set<double> loggSet;
+            for (size_t f = 0; f < nfeh; ++f)
             {
-                H5Fclose(file);
-                throw std::runtime_error(
-                    "SpecsynLibNoWind: unable to open group " + groupNames[f]);
-            }
-            for (const auto& name : listGroupDatasetNames(grp))
-            {
-                const hid_t dset = H5Dopen2(grp, name.c_str(), H5P_DEFAULT);
-                if (dset < 0)
+                const hid_t grp = H5Gopen2(file, groupNames[f].c_str(), H5P_DEFAULT);
+                if (grp < 0)
                 {
-                    H5Gclose(grp);
                     H5Fclose(file);
                     throw std::runtime_error(
-                        "SpecsynLibNoWind: unable to open dataset " + name);
+                        "SpecsynLibNoWind: unable to open group " + groupNames[f]);
                 }
-                const double logTeff = std::log10(readRequiredScalarAttr(dset, "teff"));
-                const double logg = readRequiredScalarAttr(dset, "logg");
-                H5Dclose(dset);
+                for (const auto& name : listGroupDatasetNames(grp))
+                {
+                    const hid_t dset = H5Dopen2(grp, name.c_str(), H5P_DEFAULT);
+                    if (dset < 0)
+                    {
+                        H5Gclose(grp);
+                        H5Fclose(file);
+                        throw std::runtime_error(
+                            "SpecsynLibNoWind: unable to open dataset " + name);
+                    }
+                    const double logTeff = std::log10(readRequiredScalarAttr(dset, "teff"));
+                    const double logg = readRequiredScalarAttr(dset, "logg");
+                    H5Dclose(dset);
 
-                groupEntries[f].emplace_back(name, std::make_pair(logTeff, logg));
-                logTeffSet.insert(logTeff);
-                loggSet.insert(logg);
+                    groupEntries[f].emplace_back(name, std::make_pair(logTeff, logg));
+                    logTeffSet.insert(logTeff);
+                    loggSet.insert(logg);
+                }
+                H5Gclose(grp);
             }
-            H5Gclose(grp);
+            logTeff_.assign(logTeffSet.begin(), logTeffSet.end());
+            logg_.assign(loggSet.begin(), loggSet.end());
+            const size_t nteff = logTeff_.size();
+            const size_t nlogg = logg_.size();
+
+            // Step 4: allocate storage for the (FeH, logg, log(Teff)) tensor
+            // grid of spectra, and point grid_ at it for convenient
+            // indexing. Every entry starts out as an empty vector, which
+            // is how unpopulated grid points are represented once step 5
+            // has filled in the populated ones.
+            this->spectra_.assign(nfeh * nlogg * nteff, std::vector<double>{});
+            this->grid_ = SpectraGrid(this->spectra_.data(), nfeh, nlogg, nteff);
+
+            // Step 5: read the actual spectra, placing each one at its
+            // point in the tensor grid
+            for (size_t f = 0; f < nfeh; ++f)
+            {
+                const hid_t grp = H5Gopen2(file, groupNames[f].c_str(), H5P_DEFAULT);
+                if (grp < 0)
+                {
+                    H5Fclose(file);
+                    throw std::runtime_error(
+                        "SpecsynLibNoWind: unable to open group " + groupNames[f]);
+                }
+                for (const auto& [name, teffLogg] : groupEntries[f])
+                {
+                    const auto [logTeff, logg] = teffLogg;
+                    const auto iTeff = static_cast<size_t>(
+                        std::ranges::lower_bound(logTeff_, logTeff) - logTeff_.begin());
+                    const auto iLogg = static_cast<size_t>(
+                        std::ranges::lower_bound(logg_, logg) - logg_.begin());
+                    this->grid_[f, iLogg, iTeff] = readDataset1D(grp, name);
+                }
+                H5Gclose(grp);
+            }
         }
-        logTeff_.assign(logTeffSet.begin(), logTeffSet.end());
-        logg_.assign(loggSet.begin(), loggSet.end());
-        const size_t nteff = logTeff_.size();
-        const size_t nlogg = logg_.size();
-
-        // Step 4: allocate storage for the (FeH, logg, log(Teff)) tensor
-        // grid of spectra, and point grid_ at it for convenient
-        // indexing. Every entry starts out as an empty vector, which
-        // is how unpopulated grid points are represented once step 5
-        // has filled in the populated ones.
-        using SpectraGrid = typename SpecsynLib<Policy>::SpectraGrid;
-        this->spectra_.assign(nfeh * nlogg * nteff, std::vector<double>{});
-        this->grid_ = SpectraGrid(this->spectra_.data(), nfeh, nlogg, nteff);
-
-        // Step 5: read the actual spectra, placing each one at its
-        // point in the tensor grid
-        for (size_t f = 0; f < nfeh; ++f)
+        else
         {
-            const hid_t grp = H5Gopen2(file, groupNames[f].c_str(), H5P_DEFAULT);
-            if (grp < 0)
+            // === INTERPOLATED AFe PATH ===
+            // No exact-match groups: look for bracketing afe values and
+            // linearly interpolate between them for every (feh, logg, Teff)
+            // grid point that has spectra in both brackets.
+
+            // Find all available afe values from this library
+            auto afeVals = findAfeValues(spectraName, cfe, microTurb_, r, registryName);
+            if (afeVals.empty())
             {
                 H5Fclose(file);
                 throw std::runtime_error(
-                    "SpecsynLibNoWind: unable to open group " + groupNames[f]);
+                    "SpecsynLibNoWind: no spectra found matching the input criteria");
             }
-            for (const auto& [name, teffLogg] : groupEntries[f])
+
+            // Find lo and hi bracketing afe values
+            const auto hiIt = std::ranges::upper_bound(afeVals, afe); //NOLINT(misc-include-cleaner)
+            if (hiIt == afeVals.end() || hiIt == afeVals.begin())
             {
-                const auto [logTeff, logg] = teffLogg;
-                const auto iTeff = static_cast<size_t>(
-                    std::ranges::lower_bound(logTeff_, logTeff) - logTeff_.begin());
-                const auto iLogg = static_cast<size_t>(
-                    std::ranges::lower_bound(logg_, logg) - logg_.begin());
-                this->grid_[f, iLogg, iTeff] = readDataset1D(grp, name);
+                H5Fclose(file);
+                throw std::runtime_error(
+                    "SpecsynLibNoWind: no spectra found matching the input criteria "
+                    "(requested afe=" + std::to_string(afe) +
+                    " is outside the library's available range)");
             }
-            H5Gclose(grp);
+            const double hiAfe = *hiIt;
+            const double loAfe = *std::prev(hiIt);
+            const double alpha = (afe - loAfe) / (hiAfe - loAfe);
+
+            // Find matching spectra groups for each bracketing afe value
+            auto [loFehVals, loGroupNames] = findMatchingSpectra(
+                spectraName, fehMin, fehMax, loAfe, cfe, microTurb_, r, registryName);
+            auto [hiFehVals, hiGroupNames] = findMatchingSpectra(
+                spectraName, fehMin, fehMax, hiAfe, cfe, microTurb_, r, registryName);
+            if (loFehVals.empty() || hiFehVals.empty())
+            {
+                H5Fclose(file);
+                throw std::runtime_error(
+                    "SpecsynLibNoWind: no spectra found matching the input criteria");
+            }
+
+            // Build union FeH_ from both bracketing sets, sorted ascending
+            {
+                std::vector<double> unionFeh = loFehVals;
+                for (double v : hiFehVals)
+                {
+                    if (std::ranges::find_if(unionFeh, [v](double u) {
+                            return utils::approxEqual(u, v);
+                        }) == unionFeh.end())
+                    {
+                        unionFeh.push_back(v);
+                    }
+                }
+                std::ranges::sort(unionFeh);
+                FeH_ = std::move(unionFeh); //NOLINT(cppcoreguidelines-prefer-member-initializer)
+            }
+            const size_t nfeh = FeH_.size();
+
+            // Scan each bracketing afe's groups to learn the (logTeff, logg)
+            // coverage, building per-group dataset maps for later reading
+            using DatasetMap = std::map<std::pair<double, double>, std::string>;
+            std::set<double> logTeffSet;
+            std::set<double> loggSet;
+
+            std::vector<DatasetMap> loEntries(loFehVals.size());
+            for (size_t i = 0; i < loFehVals.size(); ++i)
+                loEntries[i] = scanGroupForTeffLogg(
+                    file, loGroupNames[i], logTeffSet, loggSet);
+
+            std::vector<DatasetMap> hiEntries(hiFehVals.size());
+            for (size_t i = 0; i < hiFehVals.size(); ++i)
+                hiEntries[i] = scanGroupForTeffLogg(
+                    file, hiGroupNames[i], logTeffSet, loggSet);
+
+            logTeff_.assign(logTeffSet.begin(), logTeffSet.end());
+            logg_.assign(loggSet.begin(), loggSet.end());
+            const size_t nteff = logTeff_.size();
+            const size_t nlogg = logg_.size();
+
+            // Allocate the tensor grid (all entries start empty = missing)
+            this->spectra_.assign(nfeh * nlogg * nteff, std::vector<double>{});
+            this->grid_ = SpectraGrid(this->spectra_.data(), nfeh, nlogg, nteff);
+
+            // Helper: map a feh value to its index in a given feh vector,
+            // returning nullopt if it is not present
+            auto findFehIdx = [](const std::vector<double>& vals, double feh)
+                -> std::optional<size_t>
+            {
+                for (size_t i = 0; i < vals.size(); ++i)
+                    if (utils::approxEqual(vals[i], feh)) return i;
+                return std::nullopt;
+            };
+
+            // Read and interpolate: for each feh grid point, check that
+            // the value exists in both bracketing sets, then for each
+            // (logTeff, logg) point that both contain, read the lo and hi
+            // spectra and store the linear interpolant
+            for (size_t f = 0; f < nfeh; ++f)
+            {
+                const auto loFIdx = findFehIdx(loFehVals, FeH_[f]);
+                const auto hiFIdx = findFehIdx(hiFehVals, FeH_[f]);
+                if (!loFIdx || !hiFIdx) continue;
+
+                const hid_t loGrp = H5Gopen2(
+                    file, loGroupNames[*loFIdx].c_str(), H5P_DEFAULT);
+                const hid_t hiGrp = H5Gopen2(
+                    file, hiGroupNames[*hiFIdx].c_str(), H5P_DEFAULT);
+                if (loGrp < 0 || hiGrp < 0)
+                {
+                    if (loGrp >= 0) H5Gclose(loGrp);
+                    if (hiGrp >= 0) H5Gclose(hiGrp);
+                    H5Fclose(file);
+                    throw std::runtime_error(
+                        "SpecsynLibNoWind: unable to open bracketing afe group");
+                }
+
+                const DatasetMap& loDsets = loEntries[*loFIdx];
+                const DatasetMap& hiDsets = hiEntries[*hiFIdx];
+
+                for (size_t t = 0; t < nteff; ++t)
+                {
+                    for (size_t g = 0; g < nlogg; ++g)
+                    {
+                        const auto key = std::make_pair(logTeff_[t], logg_[g]);
+                        const auto loIt = loDsets.find(key);
+                        const auto hiIt = hiDsets.find(key);
+                        if (loIt == loDsets.end() || hiIt == hiDsets.end())
+                            continue; // missing from one bracket → leave empty
+
+                        auto loFlux = readDataset1D(loGrp, loIt->second);
+                        auto hiFlux = readDataset1D(hiGrp, hiIt->second);
+                        const size_t nw = loFlux.size();
+                        std::vector<double> interp(nw);
+                        for (size_t w = 0; w < nw; ++w)
+                            interp[w] = (1.0 - alpha) * loFlux[w] + alpha * hiFlux[w];
+                        this->grid_[f, g, t] = std::move(interp);
+                    }
+                }
+
+                H5Gclose(loGrp);
+                H5Gclose(hiGrp);
+            }
         }
 
         H5Fclose(file);
