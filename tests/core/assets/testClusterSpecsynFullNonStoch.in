@@ -42,6 +42,8 @@ min_stoch_mass = 120
 [spectra]
 model = ["POWR_WC", "POWR_WNE", "POWR_WNL_H20", "POWR_WNL_H40", "POWR_WNL_H60", "TLUSTY_O", "TLUSTY_B", "BOSZ", "CK04", "MARCS"]
 nwl = 1024
+wl_min = 500
+wl_max = 1e4
 
 [clusters]
 CMF = 1e4
