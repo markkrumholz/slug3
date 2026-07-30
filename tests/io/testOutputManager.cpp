@@ -215,7 +215,7 @@ static auto testWriteReadClusterRngRoundTrip() -> int
     try
     {
         const io::SimControls controls(inputDeck);
-        const io::SimPhysics sim(inputDeck, controls.simType());
+        const io::SimPhysics sim(inputDeck, controls);
         utils::rng().seed(123);
         constexpr unsigned long uid = 13;
         constexpr double targetMass = 5e3;
