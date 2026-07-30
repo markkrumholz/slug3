@@ -5,6 +5,7 @@
  * @date 2026-07-18
  */
 
+#include "../src/io/SimControls.hpp"
 #include "../src/pdfs/PDF.hpp"
 #include "../src/pdfs/PDFFileParser.hpp"
 #include "../src/specsyn/Specsyn.hpp"
@@ -219,7 +220,16 @@ static auto testNWlOnly() -> int
 
 auto testSpecsynBlackbody() -> int
 {
-    const specsyn::SpecsynBlackbody synth;
+    // testSpecCts() checks specCts()'s numerically-converged output
+    // against an independently-computed closed form to within relTol
+    // (1e-6); the library's own default intRelTol (1e-2, chosen for
+    // realistic production runs against real spectral libraries, see
+    // Specsyn::intRelTol_) is far too loose for that comparison, so
+    // this test explicitly requests tight convergence regardless of
+    // the library default.
+    io::SimControls controls;
+    controls.setIntRelTol(relTol);
+    const specsyn::SpecsynBlackbody synth(0.0, 0.0, 0, 0.0, controls);
     int result = 0;
     result += testWlGrid(synth.wl());
     result += testSpec(synth);

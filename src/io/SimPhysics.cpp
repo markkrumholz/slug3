@@ -216,13 +216,15 @@ void io::SimPhysics::readSpectra(const toml::table& inputDeck, const SimControls
     // of output wavelengths). All three are individually optional,
     // but wl_min and wl_max only make sense together with an nwl to
     // say how finely to sample between them, so if either endpoint is
-    // given, all three must be; nwl alone (a request to rebin onto a
-    // library's own native wavelength range at a different
-    // resolution) is fine on its own. Left at their default of 0 --
-    // not a valid value for any of the three -- when not supplied, a
-    // sentinel passed through to whichever spectral synthesizer
-    // constructor is used below, telling it to fall back on its own
-    // native wavelength grid instead.
+    // given, all three must be; nwl alone (a request to resample onto
+    // the default wavelength range at a different resolution) is fine
+    // on its own. Any not supplied falls back to specsyn::defaultWlMin/
+    // defaultWlMax/defaultNWl -- a fixed grid from ~91 Angstrom (10
+    // Rydberg, deep enough into the EUV to capture ionizing flux) to
+    // 1e5 Angstrom (10 micron) at 2048 points -- rather than each
+    // library's own native grid, so that every spectral synthesizer
+    // built without explicit wavelength settings covers the same
+    // physically-motivated range by default.
     const auto wlMinInput = utils::getTOMLKeyWithError<double>(inputDeck, "spectra.wl_min");
     const auto wlMaxInput = utils::getTOMLKeyWithError<double>(inputDeck, "spectra.wl_max");
     const auto nWlInput = utils::getTOMLKeyWithError<unsigned long>(inputDeck, "spectra.nwl");
@@ -233,9 +235,9 @@ void io::SimPhysics::readSpectra(const toml::table& inputDeck, const SimControls
             "SimPhysics: spectra.wl_min and spectra.wl_max must be "
             "given together with each other and with spectra.nwl");
     }
-    wlMin_ = wlMinInput.value_or(0.0);
-    wlMax_ = wlMaxInput.value_or(0.0);
-    nWl_ = nWlInput.value_or(0);
+    wlMin_ = wlMinInput.value_or(specsyn::defaultWlMin);
+    wlMax_ = wlMaxInput.value_or(specsyn::defaultWlMax);
+    nWl_ = nWlInput.value_or(specsyn::defaultNWl);
 
     // Optional redshift, applied by every Specsyn's own wlObs(); 0
     // (no redshift) if not supplied

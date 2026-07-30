@@ -104,7 +104,6 @@ auto allRequiredDataFilesExist() -> bool
 
 auto runClusterSpecsynFull(const std::string& inputFile, const std::string& modelName) -> int
 {
-    constexpr unsigned long nTrial = 10;
     constexpr std::size_t nTime = 4; // output_times has 4 entries
 
     const auto outDir = std::filesystem::temp_directory_path() / "slugTestClusterSpecsynFull";
@@ -120,6 +119,7 @@ auto runClusterSpecsynFull(const std::string& inputFile, const std::string& mode
 
         const io::SimControls simControls(inputDeck);
         const io::SimPhysics simPhysics(inputDeck, simControls);
+        const auto nTrial = simControls.nTrial(); // read back rather than assumed, since not every caller's deck uses the same n_trial
 
         std::unique_ptr<io::OutputManager> outputManager =
             std::make_unique<io::OutputManagerH5>(simControls, simPhysics, inputDeck);

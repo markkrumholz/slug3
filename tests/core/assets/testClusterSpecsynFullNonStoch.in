@@ -1,0 +1,52 @@
+# Full end-to-end test input deck for
+# tests/core/testClusterSpecsynFullNonStoch.cpp: identical to
+# testClusterSpecsynFull.in (see that file's own comments for the full
+# rationale behind its spectra.model chain, output times, and FeH
+# distribution) except for min_stoch_mass = 120 -- chabrier.toml's own
+# maximum mass -- in place of the default (0, meaning every star is
+# drawn individually/stochastically). Setting min_stoch_mass to the
+# IMF's own maximum mass makes fracStochMass_ (SimPhysics::fracStochMass(),
+# the IMF-integral fraction of mass above min_stoch_mass) exactly zero,
+# so the entire population is instead drawn as the continuously-sampled
+# (non-stochastic) part -- birthNonStochMass_ equal to the full target
+# mass, m_ empty -- exercising Cluster::computeSpec()'s
+# Specsyn::specCts() path against real spectral libraries at full
+# scale, something neither testClusterSpecsynFull nor
+# testClusterSpecsynFullAFe does (both leave min_stoch_mass at its
+# default, so every star in them is drawn individually instead).
+#
+# nwl is reduced from testClusterSpecsynFull.in's 2048 to 1024, to
+# help offset the added runtime cost of specCts()'s own quadrature
+# over the non-stochastic mass range.
+#
+# n_trial is 1 here, rather than testClusterSpecsynFull.in's 10:
+# min_stoch_mass = 120 makes every star in every trial's population
+# non-stochastic, so the only thing that still varies from trial to
+# trial is [Fe/H] (still drawn from the same flat distribution) --
+# running 10 trials would just repeat the same specCts() exercise 10
+# times over, at 10x the runtime, without exercising anything new.
+
+sim_type = "cluster"
+# n_trial must appear here, before any [table] header -- see
+# testClusterSpecsynFull.in's own comment on why
+n_trial = 1
+
+[stars]
+IMF = "chabrier.toml"
+tracks = "MIST"
+v_vcrit = 0.4
+alphaFe = 0.0
+FeH = "tests/core/assets/testClusterSpecsynFullFeHDist.toml"
+min_stoch_mass = 120
+
+[spectra]
+model = ["POWR_WC", "POWR_WNE", "POWR_WNL_H20", "POWR_WNL_H40", "POWR_WNL_H60", "TLUSTY_O", "TLUSTY_B", "BOSZ", "CK04", "MARCS"]
+nwl = 1024
+wl_min = 500
+wl_max = 1e4
+
+[clusters]
+CMF = 1e4
+
+[outputs]
+output_times = [2e6, 3e6, 4e6, 1e7]

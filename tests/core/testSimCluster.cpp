@@ -12,6 +12,7 @@
 #include "../src/io/SimControls.hpp"
 #include "../src/io/SimPhysics.hpp"
 #include "../src/specsyn/SpecsynBlackbody.hpp"
+#include "../src/specsyn/SpecsynCommons.hpp"
 #include "hdf5.h" // NOLINT(misc-include-cleaner)
 #include "testSimCluster.hpp"
 #include <array>
@@ -295,13 +296,16 @@ static auto runScenario(const std::string& scenario,
     return checkTrialsAndUids(rowsByTrial);
 }
 
-// The wavelength grid a default-constructed (z = 0) SpecsynBlackbody
-// produces, matching the one SimPhysics builds internally for
-// spectra.model = "blackbody", so tests can check the output's
-// wavelength grid without reaching into SimPhysics
+// The wavelength grid a SpecsynBlackbody built at SimPhysics's own
+// default wavelength range/resolution (z = 0) produces, matching the
+// one SimPhysics builds internally for spectra.model = "blackbody"
+// when the deck doesn't override spectra.wl_min/wl_max/nwl, so tests
+// can check the output's wavelength grid without reaching into
+// SimPhysics
 static auto referenceWlObs() -> std::vector<double>
 {
-    return specsyn::SpecsynBlackbody().wlObs();
+    return specsyn::SpecsynBlackbody(
+        specsyn::defaultWlMin, specsyn::defaultWlMax, specsyn::defaultNWl).wlObs();
 }
 
 // End-to-end check of HDF5 cluster-spectrum output: run with

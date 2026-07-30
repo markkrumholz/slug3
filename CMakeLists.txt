@@ -227,6 +227,7 @@ add_executable(slugTestCoreFull
     tests/core/testClusterSpecsynFullCommon.cpp
     tests/core/testClusterSpecsynFull.cpp
     tests/core/testClusterSpecsynFullAFe.cpp
+    tests/core/testClusterSpecsynFullNonStoch.cpp
     tests/core/testCoreFullAll.cpp
 )
 # slugTestCoreFull drives a real end-to-end run (real MIST tracks, real
