@@ -13,6 +13,7 @@
 #include "../tracks/Tracks2D.hpp"
 #include "../tracks/Tracks3D.hpp"
 #include "SimControls.hpp"
+#include <cstddef>
 #include <memory>
 #include <toml.hpp>
 
@@ -111,6 +112,58 @@ namespace io
          *   spectra.model, or nullptr if spectra.model was not given
          */
         [[nodiscard]] auto specsyn() const -> const specsyn::Specsyn* { return specsyn_.get(); }
+
+        // Integrator tolerance getters and setters: thin wrappers
+        // around the spectral synthesizer's own Specsyn::intRelTol()
+        // etc., so a caller holding a SimPhysics (e.g. from Python,
+        // where a Cluster only ever reaches the spectral synthesizer
+        // indirectly through the SimPhysics it was built from) can
+        // retune integration tolerances on an already-constructed
+        // synthesizer, without building an entirely new SimPhysics.
+        // All six throw if no spectral synthesizer was requested
+        // (spectra.model was not set in the input deck).
+
+        /**
+         * @brief Get the relative tolerance for the spectral synthesizer's PDF integration
+         * @return Relative tolerance passed to PDFIntegrator
+         * @throws std::runtime_error if no spectral synthesizer was requested
+         */
+        [[nodiscard]] auto intRelTol() const -> double;
+
+        /**
+         * @brief Get the absolute tolerance for the spectral synthesizer's PDF integration
+         * @return Absolute tolerance passed to PDFIntegrator
+         * @throws std::runtime_error if no spectral synthesizer was requested
+         */
+        [[nodiscard]] auto intAbsTol() const -> double;
+
+        /**
+         * @brief Get the max evaluations for the spectral synthesizer's PDF integration
+         * @return Max evaluations passed to PDFIntegrator (0 = unlimited)
+         * @throws std::runtime_error if no spectral synthesizer was requested
+         */
+        [[nodiscard]] auto intMaxIter() const -> std::size_t;
+
+        /**
+         * @brief Set the relative tolerance for the spectral synthesizer's PDF integration
+         * @param tol New relative tolerance
+         * @throws std::runtime_error if no spectral synthesizer was requested
+         */
+        void setIntRelTol(double tol);
+
+        /**
+         * @brief Set the absolute tolerance for the spectral synthesizer's PDF integration
+         * @param tol New absolute tolerance
+         * @throws std::runtime_error if no spectral synthesizer was requested
+         */
+        void setIntAbsTol(double tol);
+
+        /**
+         * @brief Set the max evaluations for the spectral synthesizer's PDF integration
+         * @param n New maximum (0 = unlimited)
+         * @throws std::runtime_error if no spectral synthesizer was requested
+         */
+        void setIntMaxIter(std::size_t n);
 
     private:
 

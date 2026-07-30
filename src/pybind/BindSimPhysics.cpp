@@ -91,6 +91,102 @@ static void checkSpecsyn(const io::SimPhysics& self)
     }
 }
 
+static constexpr std::string_view intRelTolDocstring = R"doc(Return the relative tolerance for the spectral synthesizer's PDF integration.
+
+Returns
+-------
+rel_tol : float
+    Relative convergence tolerance passed to the cubature integrator
+    used by the spectral synthesizer's specCts().
+
+Throws
+------
+RuntimeError
+    If no spectral synthesizer was requested (spectra.model was not
+    set in the input deck).)doc";
+
+static constexpr std::string_view intAbsTolDocstring = R"doc(Return the absolute tolerance for the spectral synthesizer's PDF integration.
+
+Returns
+-------
+abs_tol : float
+    Absolute convergence tolerance passed to the cubature integrator
+    used by the spectral synthesizer's specCts().
+
+Throws
+------
+RuntimeError
+    If no spectral synthesizer was requested (spectra.model was not
+    set in the input deck).)doc";
+
+static constexpr std::string_view intMaxIterDocstring = R"doc(Return the maximum number of evaluations for the spectral synthesizer's PDF integration.
+
+Returns
+-------
+max_iter : int
+    Maximum number of integrand evaluations used by the spectral
+    synthesizer's specCts(); 0 means unlimited.
+
+Throws
+------
+RuntimeError
+    If no spectral synthesizer was requested (spectra.model was not
+    set in the input deck).)doc";
+
+static constexpr std::string_view setIntRelTolDocstring = R"doc(Set the relative tolerance for the spectral synthesizer's PDF integration.
+
+Changes the tolerance on the spectral synthesizer this SimPhysics
+already holds, so any Cluster built from this SimPhysics picks up the
+new tolerance the next time it computes a spectrum -- no need to
+construct a new SimPhysics or Specsyn.
+
+Parameters
+----------
+rel_tol : float
+    New relative convergence tolerance.
+
+Throws
+------
+RuntimeError
+    If no spectral synthesizer was requested (spectra.model was not
+    set in the input deck).)doc";
+
+static constexpr std::string_view setIntAbsTolDocstring = R"doc(Set the absolute tolerance for the spectral synthesizer's PDF integration.
+
+Changes the tolerance on the spectral synthesizer this SimPhysics
+already holds, so any Cluster built from this SimPhysics picks up the
+new tolerance the next time it computes a spectrum -- no need to
+construct a new SimPhysics or Specsyn.
+
+Parameters
+----------
+abs_tol : float
+    New absolute convergence tolerance.
+
+Throws
+------
+RuntimeError
+    If no spectral synthesizer was requested (spectra.model was not
+    set in the input deck).)doc";
+
+static constexpr std::string_view setIntMaxIterDocstring = R"doc(Set the maximum number of evaluations for the spectral synthesizer's PDF integration.
+
+Changes the setting on the spectral synthesizer this SimPhysics
+already holds, so any Cluster built from this SimPhysics picks up the
+new value the next time it computes a spectrum -- no need to
+construct a new SimPhysics or Specsyn.
+
+Parameters
+----------
+max_iter : int
+    New maximum number of integrand evaluations; 0 means unlimited.
+
+Throws
+------
+RuntimeError
+    If no spectral synthesizer was requested (spectra.model was not
+    set in the input deck).)doc";
+
 // Disable linting for includes -- the pybind macro magic seems to confuse
 // the linter
 // NOLINTBEGIN(misc-include-cleaner)
@@ -121,6 +217,18 @@ void bindSimPhysics(py::module_& m)
                     checkSpecsyn(self);
                     return self.specsyn()->wlObs();
                 },
-                wlObsDocstring.data());
+                wlObsDocstring.data())
+        .def("intRelTol", &io::SimPhysics::intRelTol,
+                intRelTolDocstring.data())
+        .def("intAbsTol", &io::SimPhysics::intAbsTol,
+                intAbsTolDocstring.data())
+        .def("intMaxIter", &io::SimPhysics::intMaxIter,
+                intMaxIterDocstring.data())
+        .def("setIntRelTol", &io::SimPhysics::setIntRelTol,
+                setIntRelTolDocstring.data(), py::arg("rel_tol"))
+        .def("setIntAbsTol", &io::SimPhysics::setIntAbsTol,
+                setIntAbsTolDocstring.data(), py::arg("abs_tol"))
+        .def("setIntMaxIter", &io::SimPhysics::setIntMaxIter,
+                setIntMaxIterDocstring.data(), py::arg("max_iter"));
 }
 // NOLINTEND(misc-include-cleaner)
