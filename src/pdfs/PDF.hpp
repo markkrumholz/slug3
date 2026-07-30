@@ -294,11 +294,20 @@ namespace pdfs {
          * @param a The lower limit of the sampling range (should be >= sMin_, equal to sMin_ if not set).
          * @param b The upper limit of the sampling range (should be <= sMax_, equal to sMax_ if not set).
          */
-        [[nodiscard]] auto drawTarget(double target, 
+        [[nodiscard]] auto drawTarget(double target,
             double a = std::numeric_limits<double>::lowest(),
-            double b = std::numeric_limits<double>::max()) const 
+            double b = std::numeric_limits<double>::max()) const
             -> std::vector<double>
         {
+            // A degenerate (empty) range has no samples to draw,
+            // regardless of target: falling through to draw(a, b)
+            // below would build a std::discrete_distribution from
+            // all-zero per-segment weights (every segment's
+            // integral(a, b) is 0 when a >= b, matching integral()'s
+            // own a >= b convention above), which normalizes to NaN
+            // internally and hangs rather than erroring.
+            if (a >= b) { return {}; }
+
             std::vector<double> sample;
             switch (method_)
             {
