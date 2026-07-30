@@ -56,9 +56,19 @@ void bindTracks2D(py::module_& m);
 void bindTracks3D(py::module_& m);
 
 /**
+ * @brief Bind io::SimControls as SimControls
+ */
+void bindSimControls(py::module_& m);
+
+/**
  * @brief Bind io::SimPhysics as SimPhysics
  */
 void bindSimPhysics(py::module_& m);
+
+/**
+ * @brief Bind Specsyn and its concrete subclasses
+ */
+void bindSpecsyn(py::module_& m);
 
 /**
  * @brief Bind core::Cluster as Cluster

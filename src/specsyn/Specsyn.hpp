@@ -182,6 +182,42 @@ namespace specsyn
             return result;
         }
 
+        /**
+         * @brief Return the relative tolerance for PDF integration
+         * @return Relative tolerance passed to PDFIntegrator (default 1e-6)
+         */
+        [[nodiscard]] auto intRelTol() const { return intRelTol_; }
+
+        /**
+         * @brief Return the absolute tolerance for PDF integration
+         * @return Absolute tolerance passed to PDFIntegrator (default 0)
+         */
+        [[nodiscard]] auto intAbsTol() const { return intAbsTol_; }
+
+        /**
+         * @brief Return the maximum number of evaluations for PDF integration
+         * @return Max evaluations passed to PDFIntegrator (0 = unlimited, the default)
+         */
+        [[nodiscard]] auto intMaxIter() const { return intMaxIter_; }
+
+        /**
+         * @brief Set the relative tolerance for PDF integration
+         * @param tol New relative tolerance
+         */
+        void setIntRelTol(double tol) { intRelTol_ = tol; }
+
+        /**
+         * @brief Set the absolute tolerance for PDF integration
+         * @param tol New absolute tolerance
+         */
+        void setIntAbsTol(double tol) { intAbsTol_ = tol; }
+
+        /**
+         * @brief Set the maximum number of evaluations for PDF integration
+         * @param n New maximum (0 = unlimited)
+         */
+        void setIntMaxIter(std::size_t n) { intMaxIter_ = n; }
+
     protected:
 
         /**
