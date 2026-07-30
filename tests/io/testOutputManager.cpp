@@ -54,7 +54,7 @@ static auto testWriteClusterAscii() -> int
     try
     {
         const io::SimControls controls(inputDeck);
-        const io::SimPhysics sim(inputDeck, controls.simType());
+        const io::SimPhysics sim(inputDeck, controls);
         utils::rng().seed(42);
         constexpr unsigned long uid = 7;
         constexpr double targetMass = 1e3;
@@ -122,7 +122,7 @@ static auto testWriteClusterH5() -> int
     try
     {
         const io::SimControls controls(inputDeck);
-        const io::SimPhysics sim(inputDeck, controls.simType());
+        const io::SimPhysics sim(inputDeck, controls);
         utils::rng().seed(42);
         constexpr unsigned long uid = 11;
         constexpr double targetMass = 2e3;
@@ -287,7 +287,7 @@ static auto testOutputManagerAscii() -> int
     const auto expectedPath = outDir / (modelName + "_summary.txt");
     const toml::table inputDeck = makeClusterPhysicsInputDeck(modelName, outDir);
     const io::SimControls controls(inputDeck);
-    const io::SimPhysics sim(inputDeck, controls.simType());
+    const io::SimPhysics sim(inputDeck, controls);
 
     try
     {
@@ -363,7 +363,7 @@ static auto testOutputManagerH5() -> int
     const auto expectedPath = outDir / (modelName + ".h5");
     const toml::table inputDeck = makeClusterPhysicsInputDeck(modelName, outDir);
     const io::SimControls controls(inputDeck);
-    const io::SimPhysics sim(inputDeck, controls.simType());
+    const io::SimPhysics sim(inputDeck, controls);
 
     try
     {

@@ -45,7 +45,7 @@ auto main(int argc, char *argv[]) -> int
     // Use the input deck to initialize simulation control flow
     // and physics
     const io::SimControls simControls(inputDeck);
-    const io::SimPhysics simPhysics(inputDeck, simControls.simType());
+    const io::SimPhysics simPhysics(inputDeck, simControls);
 
     // Construct the output manager
     std::unique_ptr<io::OutputManager> outputManager;

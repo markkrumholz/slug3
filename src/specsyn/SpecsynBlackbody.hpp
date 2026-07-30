@@ -8,6 +8,7 @@
 #ifndef SPECSYNBLACKBODY_HPP
 #define SPECSYNBLACKBODY_HPP
 
+#include "../io/SimControls.hpp"
 #include "../utils/Constants.hpp"
 #include "Specsyn.hpp"
 #include <cstddef>
@@ -64,7 +65,8 @@ namespace specsyn
          * logarithmically spaced from wlMin to wlMax.
          */
         explicit SpecsynBlackbody(double wlMin = 0.0, double wlMax = 0.0,
-            std::size_t nWl = 0, double z = 0.0);
+            std::size_t nWl = 0, double z = 0.0,
+            const io::SimControls& controls = io::SimControls{});
 
         /**
          * @brief Compute the blackbody spectrum of a single star

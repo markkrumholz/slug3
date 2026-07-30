@@ -6,6 +6,7 @@
  */
 
 #include "SpecsynLibWR.hpp"
+#include "../io/SimControls.hpp"
 #include "../tracks/TrackCommons.hpp"
 #include "../utils/Constants.hpp"
 #include "../utils/MiscUtils.hpp"
@@ -233,13 +234,17 @@ namespace specsyn
         double wlMin,
         double wlMax,
         const std::size_t nWl,
-        const double z) :
+        const double z,
+        const io::SimControls& controls) :
         SpecsynLib<Policy>(),
         FeH_(this->dim1_),
         logRt_(this->dim2_),
         logTeff_(this->dim3_)
     {
         this->z_ = z;
+        this->intRelTol_ = controls.intRelTol();
+        this->intAbsTol_ = controls.intAbsTol();
+        this->intMaxIter_ = controls.intMaxIter();
 
         // Determine which WR subtype this library covers from
         // spectraName (e.g. "POWR_WNE" -> WRType::WNE, "POWR_WNL_H40"

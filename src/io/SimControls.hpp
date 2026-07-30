@@ -9,6 +9,7 @@
 #define SIMCONTROLS_HPP
 
 #include "../pdfs/PDF.hpp"
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <toml.hpp>
@@ -41,6 +42,17 @@ namespace io
             galaxy,  /**< Galaxy simulation */
             none     /**< Dummy value */
         };
+
+        /**
+         * @brief Default-construct a SimControls with all defaults
+         * @details
+         * Produces a SimControls with every parameter at its default
+         * value (simType = none, verbosity = 0, nTrial = 1, etc.).
+         * Intended for use as a default argument at Specsyn-derived
+         * class constructors, so call sites that don't have an input
+         * deck can still compile without a SimControls.
+         */
+        SimControls() = default;
 
         /**
          * @brief Initialize the simulation controls from the input deck
@@ -118,6 +130,24 @@ namespace io
          */
         [[nodiscard]] auto outputClusters() const { return outputClusters_; }
 
+        /**
+         * @brief Return the relative tolerance for PDF integration
+         * @return Relative tolerance passed to PDFIntegrator (default 1e-6)
+         */
+        [[nodiscard]] auto intRelTol() const { return intRelTol_; }
+
+        /**
+         * @brief Return the absolute tolerance for PDF integration
+         * @return Absolute tolerance passed to PDFIntegrator (default 0)
+         */
+        [[nodiscard]] auto intAbsTol() const { return intAbsTol_; }
+
+        /**
+         * @brief Return the maximum number of evaluations for PDF integration
+         * @return Max evaluations passed to PDFIntegrator (0 = unlimited, the default)
+         */
+        [[nodiscard]] auto intMaxIter() const { return intMaxIter_; }
+
     private:
 
         // Simulation control parameters
@@ -130,6 +160,9 @@ namespace io
         std::vector<double> outTimes_;                 /**< Times to write output */
         pdfs::PDF outTimeDist_;                        /**< Distribution of output times */
         bool outputClusters_ = true;                   /**< Whether outputs include individual clusters (galaxy sims only) */
+        double intRelTol_ = 1e-6;                      /**< Relative tolerance for PDF integrator */
+        double intAbsTol_ = 0.0;                       /**< Absolute tolerance for PDF integrator */
+        std::size_t intMaxIter_ = 0;                   /**< Max evaluations for PDF integrator (0 = unlimited) */
 
         /**
          * @brief Compute output times

@@ -119,7 +119,7 @@ auto runClusterSpecsynFull(const std::string& inputFile, const std::string& mode
         inputDeck.at_path("outputs").as_table()->insert("out_dir", outDir.string());
 
         const io::SimControls simControls(inputDeck);
-        const io::SimPhysics simPhysics(inputDeck, simControls.simType());
+        const io::SimPhysics simPhysics(inputDeck, simControls);
 
         std::unique_ptr<io::OutputManager> outputManager =
             std::make_unique<io::OutputManagerH5>(simControls, simPhysics, inputDeck);

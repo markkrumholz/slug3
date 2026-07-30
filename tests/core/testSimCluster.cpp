@@ -119,7 +119,7 @@ static auto readDataset2dShape(const hid_t group, const char* name) // NOLINT(mi
 static auto runEndToEnd(const toml::table& inputDeck) -> bool
 {
     const io::SimControls simControls(inputDeck);
-    const io::SimPhysics simPhysics(inputDeck, simControls.simType());
+    const io::SimPhysics simPhysics(inputDeck, simControls);
 
     std::unique_ptr<io::OutputManager> outputManager;
     if (simControls.outputMode() == io::SimControls::OutputMode::h5)
