@@ -6,6 +6,7 @@
  */
 
 #include "SpecsynLibNoWind.hpp"
+#include "../io/SimControls.hpp"
 #include "../tracks/TrackCommons.hpp"
 #include "../utils/MiscUtils.hpp"
 #include "Specsyn.hpp"
@@ -429,7 +430,8 @@ namespace specsyn
         double wlMin,
         double wlMax,
         const std::size_t nWl,
-        const double z) :
+        const double z,
+        const io::SimControls& controls) :
         SpecsynLib<Policy>(),
         FeH_(this->dim1_),
         logg_(this->dim2_),
@@ -446,6 +448,9 @@ namespace specsyn
         r_(r)
     {
         this->z_ = z;
+        this->intRelTol_ = controls.intRelTol();
+        this->intAbsTol_ = controls.intAbsTol();
+        this->intMaxIter_ = controls.intMaxIter();
 
         // Step 1: find the set of spectra matching the input criteria
         auto [fehVals, groupNames] = findMatchingSpectra(

@@ -8,6 +8,7 @@
 #ifndef SPECSYNLIBNOWIND_HPP
 #define SPECSYNLIBNOWIND_HPP
 
+#include "../io/SimControls.hpp"
 #include "../tracks/TrackCommons.hpp"
 #include "Specsyn.hpp"
 #include "SpecsynCommons.hpp"
@@ -97,7 +98,8 @@ namespace specsyn
             double wlMin = 0.0,
             double wlMax = 0.0,
             std::size_t nWl = 0,
-            double z = 0.0);
+            double z = 0.0,
+            const io::SimControls& controls = io::SimControls{});
 
         /**
          * @brief Compute a star's spectrum by trilinear interpolation on the library grid

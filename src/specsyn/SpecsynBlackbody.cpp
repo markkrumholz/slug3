@@ -6,6 +6,7 @@
  */
 
 #include "SpecsynBlackbody.hpp"
+#include "../io/SimControls.hpp"
 #include "../tracks/TrackCommons.hpp"
 #include "../utils/Constants.hpp"
 #include "../utils/MiscUtils.hpp"
@@ -19,8 +20,12 @@ static constexpr double angstromToCm = utils::Angstrom;
 static constexpr double cmToAngstrom = 1.0 / utils::Angstrom;
 
 specsyn::SpecsynBlackbody::SpecsynBlackbody(
-    double wlMin, double wlMax, std::size_t nWl, const double z) : Specsyn(z)
+    double wlMin, double wlMax, std::size_t nWl, const double z,
+    const io::SimControls& controls) : Specsyn(z)
 {
+    intRelTol_ = controls.intRelTol();
+    intAbsTol_ = controls.intAbsTol();
+    intMaxIter_ = controls.intMaxIter();
     // nWl == 0 means neither a grid nor a point count was requested
     // at all; nWl != 0 with wlMin == 0 means only nWl was requested
     // (wlMin/wlMax are still at SimPhysics::readSpectra's "not

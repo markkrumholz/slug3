@@ -101,9 +101,10 @@ void bindSimPhysics(py::module_& m)
                 [](const std::string& path, const std::string& simType)
                     -> std::unique_ptr<io::SimPhysics>
                 {
+                    simTypeFromString(simType); // validate; SimControls reads it from deck
                     const toml::table inputDeck = toml::parse_file(path);
-                    return std::make_unique<io::SimPhysics>(
-                        inputDeck, simTypeFromString(simType));
+                    const io::SimControls controls(inputDeck);
+                    return std::make_unique<io::SimPhysics>(inputDeck, controls);
                 }),
                 constructorDocstring.data(),
                 py::arg("path"), py::arg("sim_type"))

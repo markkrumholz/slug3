@@ -105,7 +105,7 @@ static auto testSimPhysicsCluster() -> int
     {
         const toml::table inputDeck = toml::parse_file(fileName);
         const io::SimControls controls(inputDeck);
-        const io::SimPhysics sim(inputDeck, controls.simType());
+        const io::SimPhysics sim(inputDeck, controls);
 
         if (controls.simType() != io::SimControls::SimType::cluster)
         {
@@ -159,7 +159,7 @@ static auto testSimPhysicsGalaxy() -> int
     {
         const toml::table inputDeck = toml::parse_file(fileName);
         const io::SimControls controls(inputDeck);
-        const io::SimPhysics sim(inputDeck, controls.simType());
+        const io::SimPhysics sim(inputDeck, controls);
 
         if (controls.simType() != io::SimControls::SimType::galaxy)
         {
@@ -227,7 +227,7 @@ static auto testSimPhysicsNoSpectraModel() -> int
         toml::table inputDeck = toml::parse_file(fileName);
         inputDeck.erase("spectra");
         const io::SimControls controls(inputDeck);
-        const io::SimPhysics sim(inputDeck, controls.simType());
+        const io::SimPhysics sim(inputDeck, controls);
         (void)sim;
     }
     catch (const std::exception& error)
@@ -249,7 +249,7 @@ static auto testSimPhysicsInvalidSpectraModel() -> int
     const io::SimControls controls(inputDeck);
     try
     {
-        const io::SimPhysics sim(inputDeck, controls.simType());
+        const io::SimPhysics sim(inputDeck, controls);
         std::cerr << "testSimPhysics: " << fileName
             << ": expected construction with invalid spectra.model to throw, but it succeeded\n";
         return 1;
@@ -276,7 +276,7 @@ static auto testSimPhysicsSpectraLibrary() -> int
     try
     {
         const io::SimControls controls(inputDeck);
-        const io::SimPhysics sim(inputDeck, controls.simType());
+        const io::SimPhysics sim(inputDeck, controls);
 
         if (sim.specsyn() == nullptr)
         {
@@ -316,7 +316,7 @@ static auto testSimPhysicsSpectraChained() -> int
     try
     {
         const io::SimControls controls(inputDeck);
-        const io::SimPhysics sim(inputDeck, controls.simType());
+        const io::SimPhysics sim(inputDeck, controls);
 
         if (sim.specsyn() == nullptr)
         {

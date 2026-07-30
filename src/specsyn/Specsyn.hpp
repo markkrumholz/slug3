@@ -162,7 +162,8 @@ namespace specsyn
         {
             using SpecSegFn = std::vector<double> (Specsyn::*)(double, const Segment&, double) const;
             const utils::PDFIntegrator integrator(
-                imf, static_cast<SpecSegFn>(&Specsyn::spec), static_cast<unsigned>(wl_.size()));
+                imf, static_cast<SpecSegFn>(&Specsyn::spec), static_cast<unsigned>(wl_.size()),
+                intMaxIter_, intAbsTol_, intRelTol_);
 
             std::vector<double> result(wl_.size(), 0.0);
             for (const auto& seg : isochrone)
@@ -220,6 +221,9 @@ namespace specsyn
 
         double z_;                   /**< Redshift */
         std::vector<double> wl_;     /**< Wavelength grid for the spectral synthesizer, in Angstrom */
+        double intRelTol_ = 1e-6;   /**< Relative tolerance for PDF integration */
+        double intAbsTol_ = 0.0;    /**< Absolute tolerance for PDF integration */
+        std::size_t intMaxIter_ = 0; /**< Max evaluations for PDF integration (0 = unlimited) */
     };
 
 } // namespace specsyn

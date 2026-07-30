@@ -30,11 +30,11 @@ namespace io
         /**
          * @brief Initialize the simulation physics settings
          * @param inputDeck A toml table holding the input deck
-         * @param simType Simulation type (as determined by SimControls);
-         *   used to decide whether to read galaxy-specific quantities
-         *   such as the CLF and SFR
+         * @param controls Simulation controls; used to determine the
+         *   simulation type and to thread integrator tolerance settings
+         *   through to the spectral synthesizer
          */
-        SimPhysics(const toml::table& inputDeck, SimControls::SimType simType);
+        SimPhysics(const toml::table& inputDeck, const SimControls& controls);
 
         // Getters for the physics settings
         /**
@@ -130,7 +130,7 @@ namespace io
          * rules. spectra.model is optional, so specsyn_ is left null
          * if it is absent.
          */
-        void readSpectra(const toml::table& inputDeck);
+        void readSpectra(const toml::table& inputDeck, const SimControls& controls);
 
         // Physics settings
         pdfs::PDF imf_;            /**< The IMF to use for the simulation */

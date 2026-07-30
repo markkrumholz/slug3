@@ -30,7 +30,7 @@ static auto testClusterConstruction() -> int
     {
         const toml::table inputDeck = toml::parse_file(inputFile);
         const io::SimControls controls(inputDeck);
-        const io::SimPhysics sim(inputDeck, controls.simType());
+        const io::SimPhysics sim(inputDeck, controls);
 
         utils::rng().seed(rngSeed);
         const core::Cluster cluster(0, 1e4, 0.0, sim);
@@ -69,7 +69,7 @@ static auto testClusterAdvance() -> int
     {
         const toml::table inputDeck = toml::parse_file(inputFile);
         const io::SimControls controls(inputDeck);
-        const io::SimPhysics sim(inputDeck, controls.simType());
+        const io::SimPhysics sim(inputDeck, controls);
 
         utils::rng().seed(rngSeed);
         core::Cluster cluster(0, 1e4, 0.0, sim);
@@ -148,7 +148,7 @@ static auto testClusterMinStochMass() -> int
     {
         const toml::table inputDeck = toml::parse_file(inputFileMinStochMass);
         const io::SimControls controls(inputDeck);
-        const io::SimPhysics sim(inputDeck, controls.simType());
+        const io::SimPhysics sim(inputDeck, controls);
 
         utils::rng().seed(rngSeed);
         const core::Cluster cluster(0, targetMass, 0.0, sim);
@@ -199,7 +199,7 @@ static auto testClusterSpecFullyStochastic() -> int
     {
         const toml::table inputDeck = toml::parse_file(inputFile);
         const io::SimControls controls(inputDeck);
-        const io::SimPhysics sim(inputDeck, controls.simType());
+        const io::SimPhysics sim(inputDeck, controls);
 
         utils::rng().seed(rngSeed);
         core::Cluster cluster(0, 1e4, 0.0, sim);
@@ -240,7 +240,7 @@ static auto testClusterSpecContinuousPopulation() -> int
     {
         const toml::table inputDeck = toml::parse_file(inputFileMinStochMass);
         const io::SimControls controls(inputDeck);
-        const io::SimPhysics sim(inputDeck, controls.simType());
+        const io::SimPhysics sim(inputDeck, controls);
 
         utils::rng().seed(rngSeed);
         core::Cluster cluster(0, 1e4, 0.0, sim);

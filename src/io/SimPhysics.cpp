@@ -31,7 +31,7 @@
 #include <vector>
 
 // SimPhysics constructor
-io::SimPhysics::SimPhysics(const toml::table& inputDeck, SimControls::SimType simType)
+io::SimPhysics::SimPhysics(const toml::table& inputDeck, const SimControls& controls)
 {
     // Read IMF, CMF, and FeH
     imf_ = utils::initPDFFromKey(inputDeck, "stars.IMF",
@@ -43,10 +43,10 @@ io::SimPhysics::SimPhysics(const toml::table& inputDeck, SimControls::SimType si
     // is optional, since not every simulation needs spectra computed.
     // Needs fehDist_ (just set above) to pick the [Fe/H] range a
     // library-based model is loaded over.
-    readSpectra(inputDeck);
+    readSpectra(inputDeck, controls);
 
     // In a galaxy simulation, read CLF and SFR
-    if (simType == SimControls::SimType::galaxy)
+    if (controls.simType() == SimControls::SimType::galaxy)
     {
         // CLF
         clf_ = utils::initPDFFromKey(inputDeck, "clusters.CLF");
@@ -143,7 +143,7 @@ void io::SimPhysics::readTracks(const toml::table& inputDeck)
 }
 
 // Spectral synthesizer reader
-void io::SimPhysics::readSpectra(const toml::table& inputDeck)
+void io::SimPhysics::readSpectra(const toml::table& inputDeck, const SimControls& controls)
 {
     // Check for an optional alternative registry
     auto registryNameInput = utils::getTOMLKeyWithError<std::string>(
@@ -203,7 +203,7 @@ void io::SimPhysics::readSpectra(const toml::table& inputDeck)
         // not require a spectral library at all
         if (model.value() == "blackbody")
         {
-            specsyn_ = std::make_unique<specsyn::SpecsynBlackbody>(wlMin_, wlMax_, nWl_, z);
+            specsyn_ = std::make_unique<specsyn::SpecsynBlackbody>(wlMin_, wlMax_, nWl_, z, controls);
             return;
         }
 
@@ -227,7 +227,7 @@ void io::SimPhysics::readSpectra(const toml::table& inputDeck)
         {
             specsyn_ = std::make_unique<specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise>>(
                 model.value(), fehDist_.getMin(), fehDist_.getMax(), registryName,
-                wlMin_, wlMax_, nWl_, z);
+                wlMin_, wlMax_, nWl_, z, controls);
         }
         else
         {
@@ -235,7 +235,7 @@ void io::SimPhysics::readSpectra(const toml::table& inputDeck)
                 model.value(), fehDist_.getMin(), fehDist_.getMax(),
                 afe, cfe,
                 std::numeric_limits<double>::quiet_NaN(), specsyn::defaultR,
-                registryName, wlMin_, wlMax_, nWl_, z);
+                registryName, wlMin_, wlMax_, nWl_, z, controls);
         }
         return;
     }
@@ -259,5 +259,5 @@ void io::SimPhysics::readSpectra(const toml::table& inputDeck)
     specsyn_ = std::make_unique<specsyn::SpecsynLibChained>(
         models, fehDist_.getMin(), fehDist_.getMax(),
         afe, cfe, std::vector<double>{},
-        specsyn::defaultR, registryName, wlMin_, wlMax_, nWl_, z);
+        specsyn::defaultR, registryName, wlMin_, wlMax_, nWl_, z, true, controls);
 }

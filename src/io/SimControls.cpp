@@ -10,6 +10,7 @@
 #include "../utils/RngThread.hpp"
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <stdexcept>
 #include <string>
 #include <toml.hpp>
@@ -192,6 +193,15 @@ io::SimControls::SimControls(const toml::table& inputDeck)
     const auto rngSeed =
         utils::getTOMLKeyWithError<unsigned long>(inputDeck, "rng_seed");
     if (rngSeed.has_value()) { utils::rng().seed(rngSeed.value()); }
+
+    // Read optional integrator tolerance controls; defaults match
+    // PDFIntegrator's own defaults so omitting them is a no-op
+    const auto relTolInput = utils::getTOMLKeyWithError<double>(inputDeck, "integrator.rel_tol");
+    if (relTolInput.has_value()) { intRelTol_ = relTolInput.value(); }
+    const auto absTolInput = utils::getTOMLKeyWithError<double>(inputDeck, "integrator.abs_tol");
+    if (absTolInput.has_value()) { intAbsTol_ = absTolInput.value(); }
+    const auto maxIterInput = utils::getTOMLKeyWithError<std::size_t>(inputDeck, "integrator.max_iter");
+    if (maxIterInput.has_value()) { intMaxIter_ = maxIterInput.value(); }
 }
 
 void io::SimControls::setOutputTimes(const toml::table& inputDeck)

@@ -6,6 +6,7 @@
  */
 
 #include "SpecsynLibChained.hpp"
+#include "../io/SimControls.hpp"
 #include "../tracks/TrackCommons.hpp"
 #include "../utils/MiscUtils.hpp"
 #include "Specsyn.hpp"
@@ -222,9 +223,13 @@ namespace specsyn
         const double wlMax,
         const std::size_t nWl,
         const double z,
-        const bool tClamp) :
+        const bool tClamp,
+        const io::SimControls& controls) :
         Specsyn(z)
     {
+        intRelTol_ = controls.intRelTol();
+        intAbsTol_ = controls.intAbsTol();
+        intMaxIter_ = controls.intMaxIter();
         if (spectraName.empty())
         {
             throw std::runtime_error(

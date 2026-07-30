@@ -309,6 +309,7 @@ pybind11_add_module(slugPython
     src/pybind/BindSimPhysics.cpp
     src/pybind/BindCluster.cpp
     src/core/Cluster.cpp
+    src/io/SimControls.cpp
     src/io/SimPhysics.cpp
     src/interpolation/Mesh2DGrid.cpp
     src/pdfs/PDFFileParser.cpp

@@ -108,7 +108,7 @@ namespace
             "POWR_WC_test", "POWR_WNE_test", "POWR_WNL_H20_test", "TLUSTY_test", "BOSZ_test" });
 
         const io::SimControls controls(inputDeck);
-        return io::SimPhysics(inputDeck, controls.simType());
+        return io::SimPhysics(inputDeck, controls);
     }
 
     /**
