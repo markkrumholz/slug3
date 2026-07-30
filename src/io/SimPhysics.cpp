@@ -9,6 +9,7 @@
 #include "../pdfs/PDF.hpp"
 #include "../pdfs/PDFFileParser.hpp"
 #include "../pdfs/PDFSegmentPowerlaw.hpp"
+#include "../specsyn/Specsyn.hpp"
 #include "../specsyn/SpecsynBlackbody.hpp"
 #include "../specsyn/SpecsynCommons.hpp"
 #include "../specsyn/SpecsynLibChained.hpp"
@@ -19,6 +20,7 @@
 #include "../utils/ParseUtils.hpp"
 #include "SimControls.hpp"
 #include <algorithm>
+#include <cstddef>
 #include <filesystem>
 #include <iostream>
 #include <limits>
@@ -119,6 +121,60 @@ io::SimPhysics::SimPhysics(const toml::table& inputDeck, const SimControls& cont
         minStochMass_ = minSM.value();
         fracStochMass_ = imf_.integral(minStochMass_, imf_.getMax());
     }
+}
+
+namespace
+{
+    // Shared null-check for the integrator tolerance wrappers below:
+    // specsyn_ is null whenever spectra.model was not set in the
+    // input deck, so there is no spectral synthesizer to forward to
+    void checkSpecsyn(const specsyn::Specsyn* specsyn)
+    {
+        if (specsyn == nullptr)
+        {
+            throw std::runtime_error(
+                "SimPhysics: no spectral synthesizer was requested "
+                "(spectra.model was not set in the input deck)");
+        }
+    }
+} // namespace
+
+// Integrator tolerance getters and setters: thin wrappers around
+// specsyn_'s own Specsyn::intRelTol() etc.
+auto io::SimPhysics::intRelTol() const -> double
+{
+    checkSpecsyn(specsyn_.get());
+    return specsyn_->intRelTol();
+}
+
+auto io::SimPhysics::intAbsTol() const -> double
+{
+    checkSpecsyn(specsyn_.get());
+    return specsyn_->intAbsTol();
+}
+
+auto io::SimPhysics::intMaxIter() const -> std::size_t
+{
+    checkSpecsyn(specsyn_.get());
+    return specsyn_->intMaxIter();
+}
+
+void io::SimPhysics::setIntRelTol(const double tol)
+{
+    checkSpecsyn(specsyn_.get());
+    specsyn_->setIntRelTol(tol);
+}
+
+void io::SimPhysics::setIntAbsTol(const double tol)
+{
+    checkSpecsyn(specsyn_.get());
+    specsyn_->setIntAbsTol(tol);
+}
+
+void io::SimPhysics::setIntMaxIter(const std::size_t n)
+{
+    checkSpecsyn(specsyn_.get());
+    specsyn_->setIntMaxIter(n);
 }
 
 // Track reader
