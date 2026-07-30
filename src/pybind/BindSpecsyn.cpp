@@ -22,7 +22,6 @@
 #include "../specsyn/SpecsynLibWR.hpp"
 #include "../tracks/TrackCommons.hpp"
 #include <algorithm>
-#include <array>
 #include <cstddef>
 #include <limits>
 #include <memory>
@@ -75,6 +74,54 @@ RuntimeError
     If props does not have exactly 9 elements, or if the star's
     parameters fall outside this synthesizer's domain and the
     out-of-bounds policy raises.)doc";
+
+static constexpr std::string_view specsynIntRelTolDocstring = R"doc(Return the relative tolerance for PDF integration.
+
+Returns
+-------
+rel_tol : float
+    Relative convergence tolerance passed to the cubature integrator
+    used by specCts().)doc";
+
+static constexpr std::string_view specsynIntAbsTolDocstring = R"doc(Return the absolute tolerance for PDF integration.
+
+Returns
+-------
+abs_tol : float
+    Absolute convergence tolerance passed to the cubature integrator
+    used by specCts().)doc";
+
+static constexpr std::string_view specsynIntMaxIterDocstring = R"doc(Return the maximum number of evaluations for PDF integration.
+
+Returns
+-------
+max_iter : int
+    Maximum number of integrand evaluations used by specCts(); 0 means
+    unlimited.)doc";
+
+static constexpr std::string_view specsynSetIntRelTolDocstring = R"doc(Set the relative tolerance for PDF integration.
+
+Parameters
+----------
+rel_tol : float
+    New relative convergence tolerance for the cubature integrator
+    used by specCts().)doc";
+
+static constexpr std::string_view specsynSetIntAbsTolDocstring = R"doc(Set the absolute tolerance for PDF integration.
+
+Parameters
+----------
+abs_tol : float
+    New absolute convergence tolerance for the cubature integrator
+    used by specCts().)doc";
+
+static constexpr std::string_view specsynSetIntMaxIterDocstring = R"doc(Set the maximum number of evaluations for PDF integration.
+
+Parameters
+----------
+max_iter : int
+    New maximum number of integrand evaluations for specCts(); 0 means
+    unlimited.)doc";
 
 // -------------------------------------------------------------------------
 // SpecsynBlackbody
@@ -262,10 +309,14 @@ RuntimeError
 // Helpers
 // -------------------------------------------------------------------------
 
+// Disable linting for includes -- the pybind macro magic seems to confuse
+// the linter
+// NOLINTBEGIN(misc-include-cleaner)
+
 // Convert props list to StarData, checking length
 static auto toStarData(const std::vector<double>& props) -> specsyn::Specsyn::StarData
 {
-    constexpr std::size_t nQty = static_cast<std::size_t>(tracks::FieldIdx::nTrackQty);
+    constexpr auto nQty = static_cast<std::size_t>(tracks::FieldIdx::nTrackQty);
     if (props.size() != nQty)
     {
         throw std::runtime_error(
@@ -288,9 +339,6 @@ static auto resolveControls(const py::object& controls,
     return py::cast<const io::SimControls&>(controls);
 }
 
-// Disable linting for includes -- the pybind macro magic seems to confuse
-// the linter
-// NOLINTBEGIN(misc-include-cleaner)
 void bindSpecsyn(py::module_& m)
 {
     // Abstract base class: no constructor, just wl/wlObs/spec
@@ -309,7 +357,19 @@ void bindSpecsyn(py::module_& m)
                     -> std::vector<double>
                 { return self.spec(toStarData(props), feh); },
                 specsynSpecDocstring.data(),
-                py::arg("props"), py::arg("feh"));
+                py::arg("props"), py::arg("feh"))
+        .def("intRelTol", &specsyn::Specsyn::intRelTol,
+                specsynIntRelTolDocstring.data())
+        .def("intAbsTol", &specsyn::Specsyn::intAbsTol,
+                specsynIntAbsTolDocstring.data())
+        .def("intMaxIter", &specsyn::Specsyn::intMaxIter,
+                specsynIntMaxIterDocstring.data())
+        .def("setIntRelTol", &specsyn::Specsyn::setIntRelTol,
+                specsynSetIntRelTolDocstring.data(), py::arg("rel_tol"))
+        .def("setIntAbsTol", &specsyn::Specsyn::setIntAbsTol,
+                specsynSetIntAbsTolDocstring.data(), py::arg("abs_tol"))
+        .def("setIntMaxIter", &specsyn::Specsyn::setIntMaxIter,
+                specsynSetIntMaxIterDocstring.data(), py::arg("max_iter"));
 
     // SpecsynBlackbody
     py::class_<specsyn::SpecsynBlackbody, specsyn::Specsyn, py::smart_holder>(
