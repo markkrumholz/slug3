@@ -8,6 +8,7 @@
 #ifndef SPECSYNCOMMONS_HPP
 #define SPECSYNCOMMONS_HPP
 
+#include "../utils/Constants.hpp"
 #include <cstdint>
 #include <filesystem>
 #include <string>
@@ -24,6 +25,18 @@ namespace specsyn
     inline constexpr double defaultCFe = 0.0;        /**< Default [C/Fe] value */
     inline constexpr double defaultMicroTurb = 0.0;  /**< Default microturbulent velocity, in km/s */
     inline constexpr double defaultR = 500;          /**< Default spectral resolution */
+
+    /**
+     * @brief Default minimum output wavelength, in Angstrom
+     * @details
+     * The photon energy corresponding to 10 Rydberg (~91 Angstrom),
+     * chosen as a floor deep enough into the extreme UV to capture
+     * hydrogen- and helium-ionizing flux from hot/massive stars.
+     */
+    inline constexpr double defaultWlMin = (utils::h * utils::c / (10.0 * utils::Ryd)) / utils::Angstrom;
+
+    inline constexpr double defaultWlMax = 1e5; /**< Default maximum output wavelength, in Angstrom (10 micron) */
+    inline constexpr unsigned long defaultNWl = 2048; /**< Default number of output wavelength points */
 
     /**
      * @brief Specifies how a Specsyn class handles out-of-bounds stars

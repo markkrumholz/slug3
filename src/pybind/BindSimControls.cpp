@@ -44,7 +44,7 @@ Parameters
 rel_tol : float, optional
     Relative convergence tolerance for the cubature integrator used
     when computing continuously-sampled stellar-population spectra.
-    Default is 1e-6.
+    Default is 1e-2.
 abs_tol : float, optional
     Absolute convergence tolerance for the same integrator. Useful when
     the integrand is near zero (e.g. outside a spectral library's
@@ -100,7 +100,7 @@ void bindSimControls(py::module_& m)
                     return controls;
                 }),
                 fromTolerancesDocstring.data(),
-                py::arg("rel_tol") = 1e-6,
+                py::arg("rel_tol") = 1e-2,
                 py::arg("abs_tol") = 0.0,
                 py::arg("max_iter") = static_cast<std::size_t>(0))
         .def("intRelTol", &io::SimControls::intRelTol,

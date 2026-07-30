@@ -132,7 +132,7 @@ namespace io
 
         /**
          * @brief Return the relative tolerance for PDF integration
-         * @return Relative tolerance passed to PDFIntegrator (default 1e-6)
+         * @return Relative tolerance passed to PDFIntegrator (default 1e-2)
          */
         [[nodiscard]] auto intRelTol() const { return intRelTol_; }
 
@@ -178,7 +178,7 @@ namespace io
         std::vector<double> outTimes_;                 /**< Times to write output */
         pdfs::PDF outTimeDist_;                        /**< Distribution of output times */
         bool outputClusters_ = true;                   /**< Whether outputs include individual clusters (galaxy sims only) */
-        double intRelTol_ = 1e-6;                      /**< Relative tolerance for PDF integrator */
+        double intRelTol_ = 1e-2;                      /**< Relative tolerance for PDF integrator */
         double intAbsTol_ = 0.0;                       /**< Absolute tolerance for PDF integrator */
         std::size_t intMaxIter_ = 0;                   /**< Max evaluations for PDF integrator (0 = unlimited) */
 

@@ -150,7 +150,7 @@ z : float, optional
 controls : SimControls, optional
     Simulation controls; only the integrator tolerance settings
     (``intRelTol``, ``intAbsTol``, ``intMaxIter``) are used. If None
-    (the default), uses ``SimControls()`` defaults: rel_tol = 1e-6,
+    (the default), uses ``SimControls()`` defaults: rel_tol = 1e-2,
     abs_tol = 0, max_iter = unlimited.)doc";
 
 // -------------------------------------------------------------------------

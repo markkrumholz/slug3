@@ -197,18 +197,19 @@ namespace io
         double fracStochMass_ = 1.0;  /**< Fraction of mass being treated stochastically */
         std::unique_ptr<specsyn::Specsyn> specsyn_; /**< Spectral synthesizer, or nullptr if spectra.model was not given */
 
-        // User-specified output wavelength grid (spectra.wl_min,
-        // spectra.wl_max, spectra.nwl), read by readSpectra and passed
-        // through to whichever spectral synthesizer constructor it
-        // builds, so a caller can request a coarser output grid than
-        // a library's own native one (e.g. for cheaper
-        // photometry-oriented output). 0 (readSpectra's default when
-        // a key is absent) is a "not supplied" flag for that purpose,
-        // since none of the three is a valid value in its own right
-        // (a wavelength grid can't have zero extent or zero points).
-        double wlMin_ = 0.0;      /**< User-requested minimum output wavelength, in Angstrom, or 0 if not supplied */
-        double wlMax_ = 0.0;      /**< User-requested maximum output wavelength, in Angstrom, or 0 if not supplied */
-        unsigned long nWl_ = 0;   /**< User-requested number of output wavelengths, or 0 if not supplied */
+        // Output wavelength grid (spectra.wl_min, spectra.wl_max,
+        // spectra.nwl), read by readSpectra and passed through to
+        // whichever spectral synthesizer constructor it builds. Any
+        // of the three not supplied in the deck falls back to
+        // specsyn::defaultWlMin/defaultWlMax/defaultNWl (see
+        // readSpectra's own comment for why); these in-class
+        // initializers are only ever visible if readSpectra returns
+        // early because spectra.model itself was absent, in which
+        // case no spectral synthesizer exists and these values are
+        // never read.
+        double wlMin_ = 0.0;      /**< Output minimum wavelength, in Angstrom */
+        double wlMax_ = 0.0;      /**< Output maximum wavelength, in Angstrom */
+        unsigned long nWl_ = 0;   /**< Number of output wavelengths */
     };
 
 } // namespace io

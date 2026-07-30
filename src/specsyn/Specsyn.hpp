@@ -122,6 +122,37 @@ namespace specsyn
         }
 
         /**
+         * @brief Compute the wavelength-weighted spectrum of a single star, given its mass and isochrone segment
+         * @param m Stellar mass, in Msun; must lie within segment's
+         *   valid domain (segment.xMin() <= m <= segment.xMax())
+         * @param segment A single isochrone segment (one element of
+         *   the Isochrone returned by Tracks2D::getIsochrone) to
+         *   evaluate at mass m
+         * @param feh [Fe/H] value of the segment's isochrone, passed
+         *   through to spec() unchanged
+         * @return spec(m, segment, feh), multiplied elementwise by
+         *   wl(): lambda * dL/dlambda rather than dL/dlambda, in
+         *   units of erg/s
+         * @details
+         * Exists so specCts() can integrate lambda * dL/dlambda
+         * instead of dL/dlambda: near the peak of a stellar
+         * population's SED, lambda * dL/dlambda is order-unity in
+         * reasonable physical units (comparable to the population's
+         * total luminosity), whereas dL/dlambda itself spans many
+         * orders of magnitude across a wide wavelength grid, making a
+         * single absolute tolerance on it effectively meaningless.
+         */
+        [[nodiscard]] auto specWl(double m, const Segment& segment, double feh) const -> std::vector<double>
+        {
+            auto result = spec(m, segment, feh);
+            for (std::size_t i = 0; i < result.size(); ++i)
+            {
+                result[i] *= wl_[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- result has the same size as wl_ (one entry per wavelength), and i is bounded by result.size()
+            }
+            return result;
+        }
+
+        /**
          * @brief Compute the spectrum of a continuously-sampled stellar population
          * @param isochrone The isochrone for the population, as
          *   returned by Tracks2D::getIsochrone
@@ -160,10 +191,14 @@ namespace specsyn
             double feh
         ) const -> std::vector<double>
         {
+            // Integrate lambda * dL/dlambda (via specWl) rather than
+            // dL/dlambda directly, and scale intAbsTol_ (specified in
+            // units of dL/dlambda's own natural scale) by utils::Lsun
+            // to match -- see specWl()'s own doc comment for why.
             using SpecSegFn = std::vector<double> (Specsyn::*)(double, const Segment&, double) const;
             const utils::PDFIntegrator integrator(
-                imf, static_cast<SpecSegFn>(&Specsyn::spec), static_cast<unsigned>(wl_.size()),
-                intMaxIter_, intAbsTol_, intRelTol_);
+                imf, static_cast<SpecSegFn>(&Specsyn::specWl), static_cast<unsigned>(wl_.size()),
+                intMaxIter_, intAbsTol_ * utils::Lsun, intRelTol_);
 
             std::vector<double> result(wl_.size(), 0.0);
             for (const auto& seg : isochrone)
@@ -175,16 +210,21 @@ namespace specsyn
                 const auto segResult = integrator.integrate(a, b, this, *seg, feh);
                 for (std::size_t i = 0; i < result.size(); ++i)
                 {
-                    result.at(i) += segResult.at(i);
+                    result[i] += segResult[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- segResult has the same size as result (both sized to wl_.size()), and i is bounded by result.size()
                 }
             }
-            for (auto& r : result) { r *= mTot; }
+            // Scale by mTot and divide back out by wl_ elementwise,
+            // undoing specWl()'s multiplication to recover dL/dlambda
+            for (std::size_t i = 0; i < result.size(); ++i)
+            {
+                result[i] = result[i] * mTot / wl_[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- wl_ has the same size as result (both sized to wl_.size()), and i is bounded by result.size()
+            }
             return result;
         }
 
         /**
          * @brief Return the relative tolerance for PDF integration
-         * @return Relative tolerance passed to PDFIntegrator (default 1e-6)
+         * @return Relative tolerance passed to PDFIntegrator (default 1e-2)
          */
         [[nodiscard]] auto intRelTol() const { return intRelTol_; }
 
@@ -257,7 +297,7 @@ namespace specsyn
 
         double z_;                   /**< Redshift */
         std::vector<double> wl_;     /**< Wavelength grid for the spectral synthesizer, in Angstrom */
-        double intRelTol_ = 1e-6;   /**< Relative tolerance for PDF integration */
+        double intRelTol_ = 1e-2;   /**< Relative tolerance for PDF integration */
         double intAbsTol_ = 0.0;    /**< Absolute tolerance for PDF integration */
         std::size_t intMaxIter_ = 0; /**< Max evaluations for PDF integration (0 = unlimited) */
     };
