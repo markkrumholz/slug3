@@ -7,10 +7,12 @@
 
 #include "FilterIdeal.hpp"
 #include "../elem/ElemData.hpp"
+#include "../interpolation/Interpolator1D.hpp"
 #include "../utils/Constants.hpp"
 #include "../utils/MiscUtils.hpp"
 #include "../utils/ParseUtils.hpp"
 #include "Filter.hpp"
+#include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <cstddef>
@@ -139,4 +141,31 @@ phot::FilterIdeal::FilterIdeal(std::string name) : Filter(name) // NOLINT(perfor
     }
 
     photCount_ = (tokens.at(1) == "phot");
+}
+
+auto phot::FilterIdeal::phot(const std::vector<double>& wl,
+    const std::vector<double>& spec) const -> double
+{
+    // Clamp integration range to the spectrum's wavelength coverage;
+    // any portion of [wlMin_, wlMax_] outside the grid contributes 0
+    const double x0 = std::max(wlMin_, wl.front());
+    const double x1 = std::min(wlMax_, wl.back());
+    if (x0 >= x1) { return 0.0; }
+
+    if (!photCount_)
+    {
+        const interp::Interpolator1D<> interp(wl, spec);
+        return interp.integ(x0, x1);
+    }
+
+    // Photon-count mode: convert F_lambda (erg/s/Å) to photon flux density
+    // (photons/s/Å) by dividing by the photon energy h*c/lambda; wavelength
+    // must be in cm to match h*c units (erg·cm), so multiply by Angstrom
+    std::vector<double> photSpec(spec.size());
+    for (std::size_t i = 0; i < spec.size(); ++i)
+    {
+        photSpec[i] = spec[i] * wl[i] * utils::Angstrom / (utils::h * utils::c); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- wl and spec are required to have the same size (Filter interface contract)
+    }
+    const interp::Interpolator1D<> interp(wl, photSpec);
+    return interp.integ(x0, x1);
 }

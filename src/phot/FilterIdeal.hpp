@@ -88,8 +88,19 @@ namespace phot
          */
         [[nodiscard]] auto wlMax() const -> double { return wlMax_; }
 
-        // phot() is intentionally not yet overridden here -- left for
-        // a future commit -- so FilterIdeal remains abstract for now
+        /**
+         * @brief Compute the photometric response of this filter to a spectrum
+         * @param wl The wavelength grid, in Angstrom
+         * @param spec The spectrum, in erg/s/Angstrom
+         * @return If photCount() is false: ∫ spec dλ over the filter's
+         *   passband [wlMin, wlMax], in erg/s/Angstrom integrated over
+         *   the intersection of [wlMin, wlMax] with the supplied
+         *   wavelength grid; if photCount() is true: the equivalent
+         *   photon-count rate, in photons/s, computed by integrating
+         *   spec × λ / (h c) over the same range
+         */
+        [[nodiscard]] auto phot(const std::vector<double>& wl,
+            const std::vector<double>& spec) const -> double override;
 
     private:
         double wlMin_; /**< Minimum wavelength of this filter's response, in Angstrom */
