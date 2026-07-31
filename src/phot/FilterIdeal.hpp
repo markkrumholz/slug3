@@ -46,17 +46,25 @@ namespace phot
          * @param name Name of this filter; must match one of the
          *   recognized ideal-filter naming conventions (see below)
          * @details
-         * Recognizes two naming conventions, both of the form
-         * ideal_<kind>_X_Y, where X and Y are wavelengths in Angstrom
-         * (Y may also be "inf", meaning no upper bound) giving wlMin
-         * and wlMax respectively, and <kind> is either:
-         *   - "energy": an energy-flux filter (photCount() is false)
-         *   - "phot": a photon-counting filter (photCount() is true)
-         * A third convention, Q(*) (a wildcard-based name for
-         * ionization-threshold filters), is not yet handled by this
-         * constructor and will be added in a future commit.
+         * Recognizes two naming conventions:
+         *
+         * 1. ideal_<kind>_X_Y, where X and Y are wavelengths in
+         *    Angstrom (Y may also be "inf", meaning no upper bound)
+         *    giving wlMin and wlMax respectively, and <kind> is either:
+         *    - "energy": an energy-flux filter (photCount() is false)
+         *    - "phot":   a photon-counting filter (photCount() is true)
+         *
+         * 2. Q(<spec>), where <spec> is an atomic symbol followed by a
+         *    Roman numeral giving the ionization state in astronomical
+         *    notation (e.g. Q(HI) = photons that ionize neutral
+         *    hydrogen, Q(CII) = photons that ionize C+ to C++).  The
+         *    filter is set to wlMin = h*c/IP (the ionization-threshold
+         *    wavelength in Angstrom, sourced from CRC data), wlMax =
+         *    infinity, and photCount = true.
+         *
          * @throws std::runtime_error if name does not match either
-         *   recognized convention
+         *   recognized convention, or if the requested ionization
+         *   potential is not available in the CRC data
          */
         explicit FilterIdeal(std::string name);
 
