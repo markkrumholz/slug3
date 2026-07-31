@@ -7,6 +7,7 @@
  * @date 2026-07-26
  */
 
+#include "testFilterIdeal.hpp"
 #include "testFilterTabulated.hpp"
 #include "testPhotCommons.hpp"
 #include <exception>
@@ -18,6 +19,7 @@ auto main() -> int {
         int result = 0;
         result += testPhotCommons();
         result += testFilterTabulated();
+        result += testFilterIdeal();
         return result;
     }
     catch (const std::exception& error)
