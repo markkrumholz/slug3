@@ -15,6 +15,8 @@ namespace elem
      */
     enum class Symbols
     {
+        // NOLINTBEGIN(readability-identifier-naming) -- atomic symbols follow
+        // standard IUPAC notation, not the project's camelBack enum-constant style
         H,                                                      // Z=1
         He,                                                     // Z=2
         Li, Be,  B,  C,  N,  O,  F, Ne,                       // Z=3-10
@@ -30,6 +32,7 @@ namespace elem
         Fr, Ra,                                                 // Z=87-88
         Ac, Th, Pa,  U, Np, Pu, Am, Cm, Bk, Cf, Es, Fm, Md, No, Lr, // Z=89-103
         Rf, Db, Sg, Bh, Hs, Mt, Ds, Rg, Cn, Nh, Fl, Mc, Lv, Ts, Og, // Z=104-118
+        // NOLINTEND(readability-identifier-naming)
         nElem
     };
 
