@@ -141,6 +141,18 @@ namespace phot
                 "') has no filter '" + filter + "' in registry " + registryPath.string());
         }
 
+        // Each filter's own entry (e.g. [SLUGTEST.CAM1.G500]) carries a
+        // wl_ref field giving this filter's pivot wavelength (see
+        // Filter::wlPivot())
+        const auto wlRef = registry[facility][instrument][filter]["wl_ref"].value<double>(); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see instruments above
+        if (!wlRef.has_value())
+        {
+            throw std::runtime_error(
+                "FilterTabulated: registry entry '" + facility + "." + instrument +
+                "." + filter + "' is missing required 'wl_ref' field in registry " +
+                registryPath.string());
+        }
+
         // The registry's top-level "file" entry names the HDF5 file
         // holding the actual tabulated data, relative to the directory
         // containing the registry itself -- the same convention used
@@ -176,6 +188,7 @@ namespace phot
         RegistryData data;
         data.wl_ = readDataset1D(grp, "wavelength");
         data.response_ = readDataset1D(grp, "transmission");
+        data.wlPivot_ = wlRef.value();
 
         H5Gclose(grp);
         H5Fclose(file);

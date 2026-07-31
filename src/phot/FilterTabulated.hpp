@@ -32,6 +32,10 @@ namespace phot
          * @param name Name of this filter, for output purposes
          * @param wl Wavelengths at which the response is tabulated, in Angstrom
          * @param response Filter response at each wavelength in wl
+         * @param wlPivot This filter's pivot wavelength, in Angstrom
+         *   (see Filter::wlPivot()); mandatory here since, unlike the
+         *   registry-based constructor, there is no registry entry to
+         *   read one from
          * @details
          * A FilterTabulated always returns an energy flux (photCount()
          * is always false); slug's photCount concept -- used for
@@ -40,10 +44,12 @@ namespace phot
          * unrelated to SVO's own "photon counter" vs. "energy counter"
          * detector-type distinction, and is not exposed here.
          */
-        FilterTabulated(std::string name, const std::vector<double>& wl, const std::vector<double>& response)
+        FilterTabulated(std::string name, const std::vector<double>& wl,
+            const std::vector<double>& response, double wlPivot)
         : Filter(std::move(name)), wl_(wl), lnWl_(lnGrid(wl_)), responseData_(response),
           response_(lnWl_, responseData_),
-          norm_(response_.integ(response_.xMin(), response_.xMax()))
+          norm_(response_.integ(response_.xMin(), response_.xMax())),
+          wlPivot_(wlPivot)
         { }
 
         /**
@@ -81,6 +87,14 @@ namespace phot
         [[nodiscard]] auto norm() const -> double { return norm_; }
 
         /**
+         * @brief Get this filter's pivot wavelength
+         * @return The pivot wavelength, in Angstrom -- either supplied
+         *   directly (the (wl, response) constructor) or read from the
+         *   registry entry's wl_ref field (the registry constructor)
+         */
+        [[nodiscard]] auto wlPivot() const -> double override { return wlPivot_; }
+
+        /**
          * @brief Compute the photometric response in this filter to a given spectrum
          * @param wl The wavelength grid, in Angstrom, on which spec is computed
          * @param spec The spectrum to which to compute the photometric response
@@ -106,6 +120,7 @@ namespace phot
         {
             std::vector<double> wl_;           /**< Wavelengths at which the response is tabulated, in Angstrom */
             std::vector<double> response_;     /**< Filter response at each wavelength in wl_ */
+            double wlPivot_ = 0.0;              /**< Pivot wavelength read from the registry entry's wl_ref field, in Angstrom */
         };
 
         /**
@@ -135,13 +150,14 @@ namespace phot
          * @param data Wavelengths and response read by loadFromRegistry
          */
         FilterTabulated(std::string name, const RegistryData& data)
-        : FilterTabulated(std::move(name), data.wl_, data.response_) {}
+        : FilterTabulated(std::move(name), data.wl_, data.response_, data.wlPivot_) {}
 
         std::vector<double> wl_;             /**< Wavelengths at which the response is tabulated, in Angstrom */
         std::vector<double> lnWl_;           /**< ln(wl_) */
         std::vector<double> responseData_;   /**< Filter response at each wavelength in wl_ */
         interp::Interpolator1D<1> response_; /**< Interpolator for responseData_ as a function of lnWl_ */
         double norm_;                        /**< Integral of the filter response with respect to ln(wavelength) */
+        double wlPivot_;                     /**< Pivot wavelength, in Angstrom */
     };
 
 } // namespace phot

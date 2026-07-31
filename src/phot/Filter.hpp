@@ -57,6 +57,18 @@ namespace phot
         [[nodiscard]] auto photCount() const -> bool { return photCount_; }
 
         /**
+         * @brief Get this filter's pivot wavelength
+         * @return A single characteristic wavelength for this filter,
+         *   in Angstrom
+         * @details
+         * Used, e.g., to convert an F_lambda value returned by phot()
+         * into F_nu or a wavelength-dependent magnitude system via
+         * PhotConvert, since phot() itself collapses a filter's
+         * response to a single number with no wavelength of its own.
+         */
+        [[nodiscard]] virtual auto wlPivot() const -> double = 0;
+
+        /**
          * @brief Compute the photometric response in this filter to a given spectrum
          * @param wl The wavelength grid, in Angstrom, on which spec is computed
          * @param spec The spectrum to which to compute the photometric response

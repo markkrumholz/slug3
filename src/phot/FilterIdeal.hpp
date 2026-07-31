@@ -9,6 +9,7 @@
 #define FILTERIDEAL_HPP
 
 #include "Filter.hpp"
+#include <cmath>
 #include <string>
 #include <utility>
 #include <vector>
@@ -88,6 +89,17 @@ namespace phot
          * @return The maximum wavelength of this filter's response, in Angstrom
          */
         [[nodiscard]] auto wlMax() const -> double { return wlMax_; }
+
+        /**
+         * @brief Get this filter's pivot wavelength
+         * @return The midpoint of [wlMin, wlMax], or wlMin if wlMax
+         *   is infinite (as for a Q(*) ionization-threshold filter,
+         *   whose passband has no finite upper end)
+         */
+        [[nodiscard]] auto wlPivot() const -> double override
+        {
+            return std::isinf(wlMax_) ? wlMin_ : 0.5 * (wlMin_ + wlMax_);
+        }
 
         /**
          * @brief Compute the photometric response of this filter to a spectrum
