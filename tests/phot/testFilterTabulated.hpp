@@ -38,7 +38,8 @@ inline auto testFilterTabulatedDirect() -> int
 {
     const std::vector<double> wl = {3000.0, 6000.0, 9000.0};
     const std::vector<double> response = {1.0, 1.0, 1.0};
-    const phot::FilterTabulated filt("test_filter", wl, response);
+    constexpr double wlPivot = 6000.0;
+    const phot::FilterTabulated filt("test_filter", wl, response, wlPivot);
 
     if (filt.name() != "test_filter")
     {
@@ -50,6 +51,12 @@ inline auto testFilterTabulatedDirect() -> int
     {
         std::cerr << "testFilterTabulatedDirect: expected photCount() to be "
             "false for a FilterTabulated, but it was true\n";
+        return 1;
+    }
+    if (filt.wlPivot() != wlPivot)
+    {
+        std::cerr << "testFilterTabulatedDirect: expected wlPivot() to be "
+            << wlPivot << ", got " << filt.wlPivot() << "\n";
         return 1;
     }
 
@@ -130,6 +137,14 @@ inline auto testFilterTabulatedRegistry() -> int
         {
             std::cerr << "testFilterTabulatedRegistry: expected norm() > 0, "
                 "got " << filt.norm() << "\n";
+            return 1;
+        }
+        // wl_ref = 5000.0 in tests/phot/assets/filters_test.toml's
+        // [SLUGTEST.CAM1.G500] entry
+        if (filt.wlPivot() != 5000.0)
+        {
+            std::cerr << "testFilterTabulatedRegistry: expected wlPivot() to "
+                "be 5000.0, got " << filt.wlPivot() << "\n";
             return 1;
         }
 
