@@ -10,6 +10,7 @@
 
 #include "ElemCommons.hpp"
 #include <array>
+#include <cstddef>
 #include <limits>
 
 namespace elem
@@ -77,13 +78,13 @@ namespace elem
         /** Fill an array of maxIP ionization potentials from a C-style array of N values,
          *  padding the rest with quiet_NaN() */
         template<std::size_t N>
-        constexpr auto makeIonPot(const double (&vals)[N]) noexcept
+        constexpr auto makeIonPot(const double (&vals)[N]) noexcept // NOLINT(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays) -- C array ref is the only constexpr-compatible way to accept a braced-list of N values in C++17
             -> std::array<double, maxIP>
         {
             constexpr double nan = std::numeric_limits<double>::quiet_NaN();
             std::array<double, maxIP> arr{};
             for (std::size_t i = 0; i < maxIP; ++i) {
-                arr[i] = (i < N) ? vals[i] : nan;
+                arr[i] = (i < N) ? vals[i] : nan; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i is bounded by the loop condition
             }
             return arr;
         }
@@ -94,7 +95,7 @@ namespace elem
             constexpr double nan = std::numeric_limits<double>::quiet_NaN();
             std::array<double, maxIP> arr{};
             for (std::size_t i = 0; i < maxIP; ++i) {
-                arr[i] = nan;
+                arr[i] = nan; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i is bounded by the loop condition
             }
             return arr;
         }

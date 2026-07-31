@@ -11,6 +11,7 @@
 #include "Filter.hpp"
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace phot
 {

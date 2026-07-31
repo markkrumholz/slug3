@@ -53,7 +53,7 @@ namespace
     {
         for (std::size_t i = 0; i < elem::elemData.size(); ++i)
         {
-            const auto& s = elem::elemData[i].symbol();
+            const auto& s = elem::elemData[i].symbol(); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i bounded by elemData.size() loop guard
             if (s[0] != sym[0]) { continue; }
             if (sym.size() == 1 && s[1] == '\0') { return i; }
             if (sym.size() == 2 && s[1] == sym[1]) { return i; }
@@ -77,7 +77,7 @@ phot::FilterIdeal::FilterIdeal(std::string name) : Filter(name) // NOLINT(perfor
         // if it is lowercase (all two-letter symbols have a lowercase
         // second character, while Roman numeral chars are all uppercase)
         const std::size_t symLen =
-            (inner.size() >= 2 && std::islower(static_cast<unsigned char>(inner[1])))
+            (inner.size() >= 2 && std::islower(static_cast<unsigned char>(inner[1])) != 0)
             ? 2U : 1U;
         const std::string sym   = inner.substr(0, symLen);
         const std::string roman = inner.substr(symLen);
@@ -100,7 +100,7 @@ phot::FilterIdeal::FilterIdeal(std::string name) : Filter(name) // NOLINT(perfor
         }
 
         const double ip =
-            elem::elemData[elemIdx].ionPot()[static_cast<std::size_t>(ionState - 1)];
+            elem::elemData[elemIdx].ionPot()[static_cast<std::size_t>(ionState - 1)]; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- index validated to be in [0, maxIP) by the romanToInt range check above
         if (std::isnan(ip))
         {
             throw std::runtime_error(

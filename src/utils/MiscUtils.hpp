@@ -119,7 +119,7 @@ namespace utils
         };
         int result = 0;
         int prev = 0;
-        for (auto it = s.rbegin(); it != s.rend(); ++it) {
+        for (auto it = s.rbegin(); it != s.rend(); ++it) { // NOLINT(modernize-loop-convert) -- range-based reverse iteration requires C++20 views::reverse
             const int val = romanVal(*it);
             if (val == 0) { return 0; }
             result += (val < prev) ? -val : val;
