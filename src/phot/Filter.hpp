@@ -66,9 +66,15 @@ namespace phot
         [[nodiscard]] virtual auto phot(const std::vector<double>& wl,
             const std::vector<double>& spec) const -> double = 0;
 
+    protected:
+        // Protected (rather than private with a setter) so a derived
+        // class's name-parsing constructor (e.g. FilterIdeal's) can
+        // set it directly after base construction, once it has
+        // determined it by parsing the name passed to the base class
+        bool photCount_; /**< True if this filter returns photon counts rather than F_lambda values */
+
     private:
         std::string name_; /**< Name of this filter, for output purposes */
-        bool photCount_;   /**< True if this filter returns photon counts rather than F_lambda values */
     };
 
 } // namespace phot

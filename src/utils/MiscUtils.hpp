@@ -95,6 +95,39 @@ namespace utils
      * to stay within some other interpolant's valid range -- which a
      * few ULPs of round-off on either end could otherwise violate.
      */
+    /**
+     * @brief Convert a Roman numeral string to an integer
+     * @param s Roman numeral string (e.g. "III", "IV", "XXVI"); must
+     *   consist only of the characters I, V, X, L, C, D, M
+     * @return The integer value, or 0 if s is empty or contains any
+     *   unrecognized character
+     */
+    inline auto romanToInt(const std::string& s) -> int
+    {
+        if (s.empty()) { return 0; }
+        const auto romanVal = [](char c) -> int {
+            switch (c) {
+                case 'I': return 1;
+                case 'V': return 5;
+                case 'X': return 10;
+                case 'L': return 50;
+                case 'C': return 100;
+                case 'D': return 500;
+                case 'M': return 1000;
+                default:  return 0;
+            }
+        };
+        int result = 0;
+        int prev = 0;
+        for (auto it = s.rbegin(); it != s.rend(); ++it) { // NOLINT(modernize-loop-convert) -- range-based reverse iteration requires C++20 views::reverse
+            const int val = romanVal(*it);
+            if (val == 0) { return 0; }
+            result += (val < prev) ? -val : val;
+            prev = val;
+        }
+        return result;
+    }
+
     inline auto logspace(const double xMin, const double xMax, const std::size_t n) -> std::vector<double>
     {
         std::vector<double> result(n);

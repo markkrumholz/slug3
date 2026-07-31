@@ -22,6 +22,7 @@ namespace utils
     inline constexpr double Angstrom = GSL_CONST_CGSM_ANGSTROM;                 /**< Angstrom, cm */ // NOLINT(readability-identifier-naming) -- see Ryd
     inline constexpr double sigmaSB = GSL_CONST_CGSM_STEFAN_BOLTZMANN_CONSTANT; /**< Stefan-Boltzmann constant, erg/cm^2/s/K^4 */
     inline constexpr double kB = GSL_CONST_CGSM_BOLTZMANN;                      /**< Boltzmann's constant, erg/K */
+    inline constexpr double eV = GSL_CONST_CGSM_ELECTRON_VOLT;                  /**< Electron volt, erg */
     inline constexpr double Msun = GSL_CONST_CGSM_SOLAR_MASS;                   /**< Solar mass, g */ // NOLINT(readability-identifier-naming) -- see Ryd
     inline constexpr double day = GSL_CONST_CGSM_DAY;                           /**< Day, s */
 
