@@ -60,6 +60,7 @@ void core::SimCluster::run()
         {
             cluster.advance(outTime);
             outputManager_->writeClusterSpec(trialNum, outTime, cluster);
+            outputManager_->writeClusterPhot(trialNum, outTime, cluster);
         }
     }
 
