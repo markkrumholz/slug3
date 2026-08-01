@@ -26,6 +26,7 @@ static constexpr std::string_view inputFile = "tests/core/assets/testCluster.in"
 static constexpr std::string_view inputFileMinStochMass =
     "tests/core/assets/testClusterMinStochMass.in";
 static constexpr std::string_view inputFilePhot = "tests/core/assets/testClusterPhot.in";
+static constexpr std::string_view inputFileLbol = "tests/core/assets/testClusterLbol.in";
 static constexpr unsigned int rngSeed = 42;
 
 // Verify that Cluster::starMasses() sums to within 5% of the target mass.
@@ -38,7 +39,7 @@ static auto testClusterConstruction() -> int
         const io::SimPhysics sim(inputDeck, controls);
 
         utils::rng().seed(rngSeed);
-        const core::Cluster cluster(0, 1e4, 0.0, sim);
+        const core::Cluster cluster(0, 1e4, 0.0, sim, controls);
 
         const auto& masses = cluster.starMasses();
         const double totalMass = std::reduce(masses.begin(), masses.end(), 0.0);
@@ -77,7 +78,7 @@ static auto testClusterAdvance() -> int
         const io::SimPhysics sim(inputDeck, controls);
 
         utils::rng().seed(rngSeed);
-        core::Cluster cluster(0, 1e4, 0.0, sim);
+        core::Cluster cluster(0, 1e4, 0.0, sim, controls);
 
         cluster.advance(ageYr);
 
@@ -156,7 +157,7 @@ static auto testClusterMinStochMass() -> int
         const io::SimPhysics sim(inputDeck, controls);
 
         utils::rng().seed(rngSeed);
-        const core::Cluster cluster(0, targetMass, 0.0, sim);
+        const core::Cluster cluster(0, targetMass, 0.0, sim, controls);
 
         const double minStochMass = sim.minStochMass();
         const auto& masses = cluster.starMasses();
@@ -207,7 +208,7 @@ static auto testClusterSpecFullyStochastic() -> int
         const io::SimPhysics sim(inputDeck, controls);
 
         utils::rng().seed(rngSeed);
-        core::Cluster cluster(0, 1e4, 0.0, sim);
+        core::Cluster cluster(0, 1e4, 0.0, sim, controls);
         cluster.advance(ageYr);
 
         const auto& spec = cluster.spec();
@@ -248,7 +249,7 @@ static auto testClusterSpecContinuousPopulation() -> int
         const io::SimPhysics sim(inputDeck, controls);
 
         utils::rng().seed(rngSeed);
-        core::Cluster cluster(0, 1e4, 0.0, sim);
+        core::Cluster cluster(0, 1e4, 0.0, sim, controls);
         cluster.advance(ageYr);
 
         const auto& spec = cluster.spec();
@@ -313,7 +314,7 @@ static auto testClusterPhot() -> int
         }
 
         utils::rng().seed(rngSeed);
-        core::Cluster cluster(0, 1e4, 0.0, sim);
+        core::Cluster cluster(0, 1e4, 0.0, sim, controls);
         cluster.advance(ageYr);
 
         const auto& phot = cluster.phot();
@@ -389,7 +390,7 @@ static auto testClusterPhotAbsent() -> int
         }
 
         utils::rng().seed(rngSeed);
-        core::Cluster cluster(0, 1e4, 0.0, sim);
+        core::Cluster cluster(0, 1e4, 0.0, sim, controls);
         cluster.advance(ageYr);
 
         if (!cluster.phot().empty())
@@ -408,6 +409,65 @@ static auto testClusterPhotAbsent() -> int
     return 0;
 }
 
+// Verify that Cluster::lbol() is populated by advance() when
+// SimPhysics::computeLbol() is true. testClusterLbol.in has "Lbol" as
+// the sole entry in phot.filters, so SimPhysics::filters() itself
+// should stay null (see SimPhysics::readFilters()'s own comment) even
+// though computeLbol() is true; it also sets min_stoch_mass, so
+// birthNonStochMass_ > 0 and both the stochastic and
+// continuously-sampled (utils::PDFIntegrator-based) code paths inside
+// computeLbol() actually run.
+static auto testClusterLbol() -> int
+{
+    constexpr double ageYr = 1e6;
+
+    try
+    {
+        const toml::table inputDeck = toml::parse_file(inputFileLbol);
+        const io::SimControls controls(inputDeck);
+        const io::SimPhysics sim(inputDeck, controls);
+
+        if (!sim.computeLbol())
+        {
+            std::cerr << "testCluster: lbol: expected SimPhysics::computeLbol() "
+                "to be true (\"Lbol\" was in phot.filters)\n";
+            return 1;
+        }
+        if (sim.filters() != nullptr)
+        {
+            std::cerr << "testCluster: lbol: expected SimPhysics::filters() "
+                "to be null when \"Lbol\" is the only entry in phot.filters\n";
+            return 1;
+        }
+
+        utils::rng().seed(rngSeed);
+        core::Cluster cluster(0, 1e4, 0.0, sim, controls);
+
+        if (cluster.lbol() != 0.0)
+        {
+            std::cerr << "testCluster: lbol: expected lbol() to be 0 "
+                "before advance() has ever run, got " << cluster.lbol() << "\n";
+            return 1;
+        }
+
+        cluster.advance(ageYr);
+
+        if (!std::isfinite(cluster.lbol()) || cluster.lbol() <= 0.0)
+        {
+            std::cerr << "testCluster: lbol: expected a finite, positive "
+                "lbol() after advance(), got " << cluster.lbol() << "\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testCluster: lbol test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
 auto testCluster() -> int
 {
     int result = 0;
@@ -418,5 +478,6 @@ auto testCluster() -> int
     result += testClusterSpecContinuousPopulation();
     result += testClusterPhot();
     result += testClusterPhotAbsent();
+    result += testClusterLbol();
     return result;
 }

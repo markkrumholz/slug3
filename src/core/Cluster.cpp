@@ -6,11 +6,15 @@
  */
 
 #include "Cluster.hpp"
+#include "../io/SimControls.hpp"
 #include "../io/SimPhysics.hpp"
 #include "../phot/FilterCollection.hpp"
+#include "../tracks/TrackCommons.hpp"
 #include "../tracks/Tracks2D.hpp"
+#include "../utils/PDFIntegrator.hpp"
 #include "../utils/RngThread.hpp"
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <functional>
@@ -24,13 +28,17 @@
 core::Cluster::Cluster(const unsigned long uid,
     const double mass,
     const double time,
-    const io::SimPhysics& physics) :
+    const io::SimPhysics& physics,
+    const io::SimControls& controls) :
     rngState_(utils::rng().getState()),
     uid_(uid),
     targetMass_(mass),
     formTime_(time),
     feH_(physics.fehDist().draw()),
     physics_(std::cref(physics)),
+    intRelTol_(controls.intRelTol()),
+    intAbsTol_(controls.intAbsTol()),
+    intMaxIter_(controls.intMaxIter()),
     m_(physics.imf().drawTarget(
         physics.fracStochMass() * mass,
         physics.minStochMass(),
@@ -78,6 +86,7 @@ core::Cluster::Cluster(const unsigned long uid,
     const double mass,
     const double time,
     const io::SimPhysics& physics,
+    const io::SimControls& controls,
     const utils::RngState& rngState) :
     rngState_(rngState),
     uid_(uid),
@@ -85,6 +94,9 @@ core::Cluster::Cluster(const unsigned long uid,
     formTime_(time),
     feH_(0.0), // placeholder; set in the constructor body below
     physics_(std::cref(physics)),
+    intRelTol_(controls.intRelTol()),
+    intAbsTol_(controls.intAbsTol()),
+    intMaxIter_(controls.intMaxIter()),
     birthNonStochMass_((1.0 - physics.fracStochMass()) * mass),
     birthMass_(0.0), // placeholder; overwritten once m_ is drawn
     disruptTime_(std::numeric_limits<double>::quiet_NaN()),
@@ -185,11 +197,16 @@ void core::Cluster::advance(const double t)
 
     // Update the population photometry from the spectrum just
     // computed above, if a filter collection was requested
-    const auto& filters = physics_.get().filters();
+    const auto& ph = physics_.get();
+    const auto& filters = ph.filters();
     if (filters != nullptr)
     {
-        phot_ = filters->phot(physics_.get().specsyn()->wl(), spec_);
+        phot_ = filters->phot(ph.specsyn()->wl(), spec_);
     }
+
+    // Update the population's bolometric luminosity, if "Lbol" was
+    // included in phot.filters (see SimPhysics::computeLbol())
+    if (ph.computeLbol()) { computeLbol(); }
 
     // Check for disruption
     if (curTime_ > disruptTime_) { isDisrupted_ = true; }
@@ -288,4 +305,67 @@ void core::Cluster::computeSpec()
             spec_[i] += starSpec[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- spec_ and starSpec both have size wl().size() by construction
         }
     }
+}
+
+// Compute the population's bolometric luminosity at the current
+// isochrone -- see this method's own header comment for the
+// two-part (stochastic + non-stochastic) structure it mirrors from
+// computeSpec()
+void core::Cluster::computeLbol()
+{
+    lbol_ = 0.0;
+
+    // Individually-sampled (stochastic) stars
+    for (const double m : m_)
+    {
+        // Stars below the tracks' minimum mass have no isochrone
+        // segment to evaluate on (this can happen when the IMF
+        // extends below the tracks' mass range); skip them, treating
+        // their contribution as negligible -- mirrors computeSpec()'s
+        // own identical skip
+        const auto seg = std::ranges::find_if(isochrone_,
+            [m](const auto& segment) -> bool
+            { return m >= segment->xMin() && m <= segment->xMax(); });
+        if (seg == isochrone_.end()) { continue; }
+
+        const auto logL = (**seg)(m, static_cast<size_t>(tracks::FieldIdx::logL));
+        lbol_ += std::pow(10.0, logL);
+    }
+
+    // Continuously-sampled (non-stochastic) part of the population:
+    // integrate lbolStar against the IMF over each isochrone segment,
+    // mirroring Specsyn::specCts's own per-segment integration (see
+    // its own comment for why -- an isochrone may have gaps between
+    // segments that pcubature has no way to know to avoid)
+    if (birthNonStochMass_ > 0.0)
+    {
+        const auto& ph = physics_.get();
+        using LbolSegFn = std::array<double, 1> (*)(double, const Segment&);
+        const utils::PDFIntegrator integrator(
+            ph.imf(), static_cast<LbolSegFn>(&Cluster::lbolStar), 1,
+            intMaxIter_, intAbsTol_, intRelTol_);
+
+        const double mMin = ph.imf().getMin();
+        const double mMax = ph.minStochMass();
+        double lbolCts = 0.0;
+        for (const auto& seg : isochrone_)
+        {
+            const double a = std::max(mMin, seg->xMin());
+            const double b = std::min(mMax, seg->xMax());
+            if (a >= b) { continue; } // empty intersection with [mMin, mMax]
+
+            const auto segResult = integrator.integrate(a, b, *seg);
+            lbolCts += segResult[0]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- segResult is a std::array<double, 1>, so index 0 is always valid
+        }
+        lbol_ += lbolCts * birthNonStochMass_;
+    }
+}
+
+// Per-star bolometric luminosity, given a mass and isochrone segment
+// -- see this method's own header comment for why it returns a
+// single-element array rather than a bare double
+auto core::Cluster::lbolStar(const double m, const Segment& segment) -> std::array<double, 1>
+{
+    const auto logL = segment(m, static_cast<size_t>(tracks::FieldIdx::logL));
+    return { std::pow(10.0, logL) };
 }

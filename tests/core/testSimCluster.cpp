@@ -532,12 +532,15 @@ static auto testSimClusterSpectraAscii() -> int
     return 0;
 }
 
-// The filter names tests/core/assets/testClusterPhot.in's phot.filters
-// resolves to, with "Lbol" popped out -- see testCluster.cpp's own
-// testClusterPhot() for where this expectation is derived from
+// The columns tests/core/assets/testClusterPhot.in's phot.filters
+// resolves to in cluster_phot output: "Lbol" is popped out of
+// FilterCollection's own filter list (see testCluster.cpp's own
+// testClusterPhot() for where that expectation is derived from), but
+// OutputManagerH5/Ascii both append it back as a final column when
+// SimPhysics::computeLbol() is true
 static auto expectedPhotFilters() -> std::vector<std::string>
 {
-    return { "SLUGTEST.CAM1.G500", "ideal_phot_700_1500" };
+    return { "SLUGTEST.CAM1.G500", "ideal_phot_700_1500", "Lbol" };
 }
 
 // End-to-end check of HDF5 cluster-photometry output: run with

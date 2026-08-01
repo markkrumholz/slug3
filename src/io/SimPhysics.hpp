@@ -223,7 +223,7 @@ namespace io
         double fracStochMass_ = 1.0;  /**< Fraction of mass being treated stochastically */
         std::unique_ptr<specsyn::Specsyn> specsyn_; /**< Spectral synthesizer, or nullptr if spectra.model was not given */
         std::unique_ptr<phot::FilterCollection> filters_; /**< Photometric filters requested via phot.filters, or nullptr if none were given */
-        bool computeLbol_ = false; /**< True if "Lbol" was included in phot.filters; the bolometric luminosity itself is not yet computed anywhere (a future PR) */
+        bool computeLbol_ = false; /**< True if "Lbol" was included in phot.filters; see Cluster::computeLbol() for where it is actually computed */
 
         // Output wavelength grid (spectra.wl_min, spectra.wl_max,
         // spectra.nwl), read by readSpectra and passed through to

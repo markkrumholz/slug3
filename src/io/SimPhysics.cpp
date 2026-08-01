@@ -391,8 +391,8 @@ void io::SimPhysics::readFilters(const toml::table& inputDeck)
     }
 
     // "Lbol" (bolometric luminosity) is photometry-like, but is
-    // computed outside the filter machinery entirely -- not yet
-    // implemented (a future PR); pull it out of the filter list here
+    // computed outside the filter machinery entirely (see
+    // Cluster::computeLbol()); pull it out of the filter list here
     // and just record that it was requested
     const auto lbolIt = std::ranges::find(filterNames, "Lbol");
     if (lbolIt != filterNames.end())

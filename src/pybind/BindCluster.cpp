@@ -7,6 +7,7 @@
 
 #include "Bindings.hpp"
 #include "../core/Cluster.hpp"
+#include "../io/SimControls.hpp"
 #include "../io/SimPhysics.hpp"
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h> // NOLINT(misc-include-cleaner); this is needed for correct Python binding, even if clang-tidy can't recognize it
@@ -24,7 +25,11 @@ mass : float
 time : float
     Cluster formation time, in yr.
 physics : SimPhysics
-    Simulation physics settings; physics must outlive this Cluster.)doc";
+    Simulation physics settings; physics must outlive this Cluster.
+controls : SimControls
+    Simulation control flow settings; used only to record this
+    cluster's own PDF-integration tolerances at construction, not
+    stored.)doc";
 
 static constexpr std::string_view uidDocstring = R"doc(Return the cluster's unique identifier.
 
@@ -108,13 +113,18 @@ t : float
 void bindCluster(py::module_& m)
 {
     py::class_<core::Cluster, py::smart_holder>(m, "Cluster")
-        .def(py::init<unsigned long, double, double, const io::SimPhysics&>(),
+        .def(py::init<unsigned long, double, double,
+                const io::SimPhysics&, const io::SimControls&>(),
                 constructorDocstring.data(),
-                py::arg("uid"), py::arg("mass"), py::arg("time"), py::arg("physics"),
+                py::arg("uid"), py::arg("mass"), py::arg("time"),
+                py::arg("physics"), py::arg("controls"),
                 // Keep the physics argument (index 5: 1 = self, 2-4 =
                 // uid/mass/time) alive at least as long as this
                 // Cluster, since Cluster stores only a reference to
-                // it rather than its own copy
+                // it rather than its own copy. controls needs no such
+                // keep_alive: Cluster copies the three tolerance
+                // values it needs out of it at construction, rather
+                // than storing a reference.
                 py::keep_alive<1, 5>())
         .def("uid", &core::Cluster::uid,
                 uidDocstring.data())

@@ -85,11 +85,12 @@ namespace io
          * @param time The output time at which the cluster's photometry was computed, in yr
          * @param cluster The cluster whose photometry should be written
          * @details
-         * If no filter collection was requested for this simulation
-         * (the cluster-photometry file was not opened), or the
-         * cluster has disrupted, this is a no-op. Otherwise writes one
-         * line, holding trial, time, uid, and one column per filter,
-         * to the cluster-photometry file.
+         * If no filter collection or bolometric luminosity was
+         * requested for this simulation (the cluster-photometry file
+         * was not opened), or the cluster has disrupted, this is a
+         * no-op. Otherwise writes one line, holding trial, time, uid,
+         * one column per filter, and (if requested) a final "Lbol"
+         * column, to the cluster-photometry file.
          */
         void writeClusterPhot(unsigned long trial, double time,
             const core::Cluster& cluster) override;

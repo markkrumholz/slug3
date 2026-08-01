@@ -73,12 +73,16 @@ nwl = 2048
 # Q(HeI), Q(OII)), three real tabulated filters spanning optical to
 # mid-infrared (registry/vega both default to the real data/filters
 # and data/spectra/vega.h5 fetched locally -- see
-# testClusterSpecsynFullCommon.cpp's own allPhotDataFilesExist()), and
-# one idealized energy-flux filter, all reported as Vega magnitudes
+# testClusterSpecsynFullCommon.cpp's own allPhotDataFilesExist()), one
+# idealized energy-flux filter, all reported as Vega magnitudes
 # (except the two photon-count filters, for which PhotSystem doesn't
-# apply).
+# apply), and "Lbol" -- exercising Cluster::computeLbol() against a
+# real, non-trivial (both stochastic and continuously-sampled, since
+# stars.min_stoch_mass is unset here so the whole population is drawn
+# stochastically -- see testClusterSpecsynFullNonStoch's own deck for
+# the fully continuous counterpart) population.
 [phot]
-filters = ["Q(HI)", "Q(HeI)", "Q(OII)", "HST.ACS_WFC.F435W", "HST.ACS_WFC.F606W", "JWST.MIRI.F770W", "ideal_energy_1000_5000"]
+filters = ["Q(HI)", "Q(HeI)", "Q(OII)", "HST.ACS_WFC.F435W", "HST.ACS_WFC.F606W", "JWST.MIRI.F770W", "ideal_energy_1000_5000", "Lbol"]
 system = "Vega"
 
 [clusters]
