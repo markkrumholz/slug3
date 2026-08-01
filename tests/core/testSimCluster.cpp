@@ -60,12 +60,16 @@ using TrialMap = std::map<unsigned long, std::vector<unsigned long>>;
 // injected so it can drive a real end-to-end run. If fehDistPath is
 // non-empty, stars.FeH is overridden to point at it, replacing the
 // deck's default fixed [Fe/H] value with a distribution, so
-// SimPhysics::constFeH() comes out false.
+// SimPhysics::constFeH() comes out false. deckPath selects which base
+// deck to start from -- defaulting to testCluster.in, but overridable
+// (e.g. to testClusterPhot.in, for the photometry-enabled scenarios)
+// since not every deck needs to carry every optional section.
 static auto makeInputDeck(const std::string& modelName,
     const std::filesystem::path& outDir,
-    const std::string& fehDistPath = "") -> toml::table
+    const std::string& fehDistPath = "",
+    const std::string& deckPath = "tests/core/assets/testCluster.in") -> toml::table
 {
-    toml::table inputDeck = toml::parse_file("tests/core/assets/testCluster.in");
+    toml::table inputDeck = toml::parse_file(deckPath);
     inputDeck.insert("output", toml::table{ { "model_name", modelName } });
     inputDeck.at_path("outputs").as_table()->insert("out_dir", outDir.string());
     inputDeck.insert("n_trial", static_cast<int64_t>(nTrial));
@@ -108,6 +112,41 @@ static auto readDataset2dShape(const hid_t group, const char* name) // NOLINT(mi
     H5Dclose(dset);
     // NOLINTEND(misc-include-cleaner)
     return { dims.at(0), dims.at(1) };
+}
+
+// Read a 1d array-of-strings attribute called name on the HDF5 object
+// loc -- used to check the "filters" attribute openClusterPhotGroup
+// writes on the cluster_phot group, independently of the writing code
+// itself
+static auto readStringArrayAttr(const hid_t loc, const char* name) // NOLINT(misc-include-cleaner)
+    -> std::vector<std::string>
+{
+    // NOLINTBEGIN(misc-include-cleaner)
+    const hid_t attr = H5Aopen(loc, name, H5P_DEFAULT);
+    if (attr < 0)
+    {
+        throw std::runtime_error(
+            "testSimCluster: unable to open attribute " + std::string(name));
+    }
+    const hid_t aspace = H5Aget_space(attr);
+    const auto npoints =
+        static_cast<size_t>(H5Sget_simple_extent_npoints(aspace));
+    const hid_t memtype = H5Aget_type(attr);
+
+    std::vector<char*> buf(npoints);
+    H5Aread(attr, memtype, static_cast<void*>(buf.data())); // NOLINT(bugprone-multi-level-implicit-pointer-conversion)
+    std::vector<std::string> values;
+    values.reserve(npoints);
+    for (const auto* s : buf) { values.emplace_back(s); }
+
+    H5Dvlen_reclaim(memtype, aspace, H5P_DEFAULT,
+        static_cast<void*>(buf.data())); // NOLINT(bugprone-multi-level-implicit-pointer-conversion)
+    H5Tclose(memtype);
+    H5Sclose(aspace);
+    H5Aclose(attr);
+    // NOLINTEND(misc-include-cleaner)
+
+    return values;
 }
 
 // Parse the deck, build SimControls/SimPhysics/OutputManager/
@@ -491,6 +530,189 @@ static auto testSimClusterSpectraAscii() -> int
     return 0;
 }
 
+// The filter names tests/core/assets/testClusterPhot.in's phot.filters
+// resolves to, with "Lbol" popped out -- see testCluster.cpp's own
+// testClusterPhot() for where this expectation is derived from
+static auto expectedPhotFilters() -> std::vector<std::string>
+{
+    return { "SLUGTEST.CAM1.G500", "ideal_phot_700_1500" };
+}
+
+// End-to-end check of HDF5 cluster-photometry output: run with
+// tests/core/assets/testClusterPhot.in (phot.filters set, "Lbol"
+// included) and verify the cluster_phot group's "filters" attribute
+// and dataset shapes come out as expected. As with
+// testSimClusterSpectraH5, there is no independent way to know what
+// the photometric values themselves should be from here, so this
+// checks the form of the output rather than its numerical content --
+// testCluster.cpp's own testClusterPhot() already cross-checks the
+// numerical content of Cluster::phot() against FilterCollection::phot().
+static auto testSimClusterPhotH5() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() / "slugTestSimClusterPhotH5";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+    const std::string modelName = "test_sim_cluster_phot_h5";
+    const auto h5Path = outDir / (modelName + ".h5");
+
+    try
+    {
+        runEndToEnd(makeInputDeck(modelName, outDir, "",
+            "tests/core/assets/testClusterPhot.in"));
+
+        const auto expectedFilters = expectedPhotFilters();
+        const auto nFilt = expectedFilters.size();
+        const auto expectedRows = static_cast<hsize_t>(nTrial) * static_cast<hsize_t>(nTime);
+
+        // NOLINTBEGIN(misc-include-cleaner)
+        const hid_t file = H5Fopen(h5Path.string().c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+        if (file < 0)
+        {
+            std::cerr << "testSimCluster: photH5: unable to reopen "
+                << h5Path.string() << "\n";
+            return 1;
+        }
+        if (H5Lexists(file, "cluster_phot", H5P_DEFAULT) <= 0)
+        {
+            std::cerr << "testSimCluster: photH5: missing cluster_phot group\n";
+            H5Fclose(file);
+            return 1;
+        }
+        const hid_t grp = H5Gopen2(file, "cluster_phot", H5P_DEFAULT);
+
+        const auto filterNames = readStringArrayAttr(grp, "filters");
+        const auto trial = readDataset<unsigned long>(grp, "trial", H5T_NATIVE_ULONG);
+        const auto time = readDataset<double>(grp, "time", H5T_NATIVE_DOUBLE);
+        const auto uid = readDataset<unsigned long>(grp, "uid", H5T_NATIVE_ULONG);
+        const auto [photRows, photCols] = readDataset2dShape(grp, "phot");
+
+        H5Gclose(grp);
+        H5Fclose(file);
+        // NOLINTEND(misc-include-cleaner)
+
+        if (filterNames != expectedFilters)
+        {
+            std::cerr << "testSimCluster: photH5: \"filters\" attribute did not "
+                "match the expected filter names (with \"Lbol\" popped out)\n";
+            return 1;
+        }
+
+        if (trial.size() != expectedRows || time.size() != expectedRows ||
+            uid.size() != expectedRows)
+        {
+            std::cerr << "testSimCluster: photH5: expected " << expectedRows
+                << " rows in trial/time/uid, got " << trial.size() << "/"
+                << time.size() << "/" << uid.size() << "\n";
+            return 1;
+        }
+
+        if (photRows != expectedRows || photCols != nFilt)
+        {
+            std::cerr << "testSimCluster: photH5: phot dataset has shape ("
+                << photRows << ", " << photCols << "), expected ("
+                << expectedRows << ", " << nFilt << ")\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimCluster: photH5 test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// End-to-end check of ascii cluster-photometry output: run with
+// tests/core/assets/testClusterPhot.in and outputs.output_mode =
+// "ascii", and verify the cluster_phot.txt file has the expected
+// number of data lines (nTrial * nTime -- one line per cluster, per
+// output time, unlike the per-wavelength cluster-spectra file) and
+// that every line has the expected number of whitespace-separated
+// photometry fields (trial, time, uid, then one per filter).
+static auto testSimClusterPhotAscii() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() / "slugTestSimClusterPhotAscii";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+    const std::string modelName = "test_sim_cluster_phot_ascii";
+    const auto photPath = outDir / (modelName + "_cluster_phot.txt");
+
+    const auto nFilt = expectedPhotFilters().size();
+
+    try
+    {
+        toml::table inputDeck = makeInputDeck(modelName, outDir, "",
+            "tests/core/assets/testClusterPhot.in");
+        inputDeck.at_path("outputs").as_table()->insert_or_assign(
+            "output_mode", std::string("ascii"));
+
+        runEndToEnd(inputDeck);
+
+        std::ifstream file(photPath);
+        if (!file)
+        {
+            std::cerr << "testSimCluster: photAscii: unable to open "
+                << photPath.string() << "\n";
+            return 1;
+        }
+
+        std::string headerLine;
+        std::string ruleLine;
+        std::getline(file, headerLine);
+        std::getline(file, ruleLine);
+
+        std::vector<std::string> dataLines;
+        std::string line;
+        while (std::getline(file, line))
+        {
+            if (!line.empty()) { dataLines.push_back(line); }
+        }
+
+        const std::size_t expectedLines = nTrial * nTime;
+        if (dataLines.size() != expectedLines)
+        {
+            std::cerr << "testSimCluster: photAscii: expected " << expectedLines
+                << " data lines, got " << dataLines.size() << "\n";
+            return 1;
+        }
+
+        for (std::size_t i = 0; i < dataLines.size(); ++i)
+        {
+            std::istringstream lineStream(dataLines.at(i));
+            unsigned long readTrial = 0;
+            double readTime = 0.0;
+            unsigned long readUid = 0;
+            lineStream >> readTrial >> readTime >> readUid;
+
+            if (readTrial >= nTrial)
+            {
+                std::cerr << "testSimCluster: photAscii: line " << i
+                    << " has out-of-range trial " << readTrial << "\n";
+                return 1;
+            }
+
+            std::size_t nPhotValues = 0;
+            double photValue = 0.0;
+            while (lineStream >> photValue) { ++nPhotValues; }
+            if (nPhotValues != nFilt)
+            {
+                std::cerr << "testSimCluster: photAscii: line " << i
+                    << " has " << nPhotValues << " photometry columns, "
+                    "expected " << nFilt << "\n";
+                return 1;
+            }
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimCluster: photAscii test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
 auto testSimCluster() -> int
 {
     const auto outDir = std::filesystem::temp_directory_path() / "slugTestSimCluster";
@@ -522,6 +744,8 @@ auto testSimCluster() -> int
 
     result += testSimClusterSpectraH5();
     result += testSimClusterSpectraAscii();
+    result += testSimClusterPhotH5();
+    result += testSimClusterPhotAscii();
 
     return result;
 }

@@ -9,6 +9,9 @@
 #include "../pdfs/PDF.hpp"
 #include "../pdfs/PDFFileParser.hpp"
 #include "../pdfs/PDFSegmentPowerlaw.hpp"
+#include "../phot/FilterCollection.hpp"
+#include "../phot/FilterCommons.hpp"
+#include "../phot/PhotCommons.hpp"
 #include "../specsyn/Specsyn.hpp"
 #include "../specsyn/SpecsynBlackbody.hpp"
 #include "../specsyn/SpecsynCommons.hpp"
@@ -18,6 +21,7 @@
 #include "../specsyn/SpecsynUtils.hpp"
 #include "../tracks/TrackCommons.hpp"
 #include "../utils/ParseUtils.hpp"
+#include "../utils/TOMLUtils.hpp"
 #include "SimControls.hpp"
 #include <algorithm>
 #include <cstddef>
@@ -46,6 +50,12 @@ io::SimPhysics::SimPhysics(const toml::table& inputDeck, const SimControls& cont
     // Needs fehDist_ (just set above) to pick the [Fe/H] range a
     // library-based model is loaded over.
     readSpectra(inputDeck, controls);
+
+    // Read the photometric filter collection to use, if any --
+    // phot.filters is optional. Needs specsyn_ (just set above) to
+    // check that a spectral synthesizer is actually available before
+    // building a filter collection that will need one.
+    readFilters(inputDeck);
 
     // In a galaxy simulation, read CLF and SFR
     if (controls.simType() == SimControls::SimType::galaxy)
@@ -318,4 +328,92 @@ void io::SimPhysics::readSpectra(const toml::table& inputDeck, const SimControls
         models, fehDist_.getMin(), fehDist_.getMax(),
         afe, cfe, std::vector<double>{},
         specsyn::defaultR, registryName, wlMin_, wlMax_, nWl_, z, true, controls);
+}
+
+// Photometric filter collection reader
+void io::SimPhysics::readFilters(const toml::table& inputDeck)
+{
+    // phot.system: optional; if present, must name one of the defined
+    // photometric systems. Flambda (a raw flux, needing no Vega
+    // spectrum or other extra data) is the default if the key is
+    // absent entirely.
+    phot::PhotSystem photSystem = phot::PhotSystem::Flambda;
+    const auto systemNode = inputDeck.at_path("phot.system");
+    if (systemNode)
+    {
+        const auto systemStr = systemNode.value<std::string>();
+        if (!systemStr.has_value())
+        {
+            throw std::runtime_error("SimPhysics: phot.system must be a string");
+        }
+        if (systemStr.value() == "Flambda") { photSystem = phot::PhotSystem::Flambda; }
+        else if (systemStr.value() == "Fnu") { photSystem = phot::PhotSystem::Fnu; }
+        else if (systemStr.value() == "ST") { photSystem = phot::PhotSystem::ST; }
+        else if (systemStr.value() == "AB") { photSystem = phot::PhotSystem::AB; }
+        else if (systemStr.value() == "Vega") { photSystem = phot::PhotSystem::Vega; }
+        else
+        {
+            throw std::runtime_error(
+                "SimPhysics: phot.system '" + systemStr.value() +
+                "' is not a recognized photometric system "
+                "(expected Flambda, Fnu, ST, AB, or Vega)");
+        }
+    }
+
+    // phot.registry / phot.vega: optional string overrides of the
+    // default filter registry and Vega reference spectrum
+    const auto registryInput = utils::getTOMLKeyWithError<std::string>(inputDeck, "phot.registry");
+    const std::string registryName = registryInput.value_or(phot::defaultRegistry);
+    const auto vegaInput = utils::getTOMLKeyWithError<std::string>(inputDeck, "phot.vega");
+    const std::string vegaName = vegaInput.value_or(phot::defaultVegaSpec);
+
+    // phot.filters: optional; a single string names one filter
+    // directly, interpreted as an array of length 1; anything else
+    // must be an array of strings
+    std::vector<std::string> filterNames;
+    const auto filtersNode = inputDeck.at_path("phot.filters");
+    if (filtersNode)
+    {
+        if (const auto single = filtersNode.value<std::string>(); single.has_value())
+        {
+            filterNames.push_back(single.value());
+        }
+        else
+        {
+            const toml::array* filtersArr = filtersNode.as_array();
+            if (filtersArr == nullptr)
+            {
+                throw std::runtime_error(
+                    "SimPhysics: phot.filters must be a string or an array of strings");
+            }
+            filterNames = utils::stringArrayContents(filtersArr);
+        }
+    }
+
+    // "Lbol" (bolometric luminosity) is photometry-like, but is
+    // computed outside the filter machinery entirely -- not yet
+    // implemented (a future PR); pull it out of the filter list here
+    // and just record that it was requested
+    const auto lbolIt = std::ranges::find(filterNames, "Lbol");
+    if (lbolIt != filterNames.end())
+    {
+        filterNames.erase(lbolIt);
+        computeLbol_ = true;
+    }
+
+    // Nothing further to do if no actual filters were requested
+    if (filterNames.empty()) { return; }
+
+    // Photometry requires a spectral synthesizer to generate the
+    // spectra filters are convolved against
+    if (specsyn_ == nullptr)
+    {
+        throw std::runtime_error(
+            "SimPhysics: phot.filters was given but no spectral "
+            "synthesizer was requested (spectra.model was not set "
+            "in the input deck)");
+    }
+
+    filters_ = std::make_unique<phot::FilterCollection>(
+        filterNames, photSystem, registryName, vegaName);
 }

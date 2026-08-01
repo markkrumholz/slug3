@@ -174,6 +174,16 @@ namespace core
         [[nodiscard]] auto spec() const -> const auto& { return spec_; }
 
         /**
+         * @brief Return the cluster's photometry
+         * @return A const reference to the photometric value computed
+         *   from spec() by each filter in SimPhysics::filters(), in
+         *   the same order as FilterCollection::filterNames()/
+         *   filterUnits(), or an empty vector if no filter collection
+         *   was requested (SimPhysics::filters() is null)
+         */
+        [[nodiscard]] auto phot() const -> const auto& { return phot_; }
+
+        /**
          * @brief Return whether the cluster has disrupted
          * @return True if the cluster has disrupted
          */
@@ -211,6 +221,7 @@ namespace core
         bool advanced_ = false;     /**< Has advance() ever run its body (as opposed to a same-time no-op)? */
         Interp1dPtr isochrone_;     /**< Isochrone for the current time */
         std::vector<double> spec_;  /**< Spectrum of the continuously-sampled part of the population at the current time */
+        std::vector<double> phot_;  /**< Photometry of spec_ through each filter in SimPhysics::filters(), at the current time */
 
         /**
          * Tracks for this cluster's [Fe/H]: either owned outright (when

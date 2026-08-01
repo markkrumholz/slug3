@@ -7,6 +7,7 @@
 
 #include "OutputManagerAscii.hpp"
 #include "../core/Cluster.hpp"
+#include "../phot/FilterCollection.hpp"
 #include "../specsyn/Specsyn.hpp"
 #include "../utils/RngThread.hpp"
 #include "OutputManager.hpp"
@@ -22,6 +23,7 @@
 #include <stdexcept>
 #include <string>
 #include <toml.hpp>
+#include <vector>
 
 // Column headings, and the field widths used to lay them out, for
 // the ascii cluster output file. uidWidth accommodates a 9-digit
@@ -91,6 +93,29 @@ static void writeClusterSpectraHeader(std::ofstream& file)
     constexpr auto numColumns = 3;
     file << std::string(static_cast<std::string::size_type>(2) * uidWidth, '-')
          << std::string(static_cast<std::string::size_type>(numColumns) * numWidth, '-') << "\n";
+}
+
+// Write the cluster-photometry ascii header (column names followed by
+// a dashed rule) to file. Like the cluster output file, this is laid
+// out one cluster (at one output time) per line, with one column per
+// filter -- named after Filter::name(), via
+// FilterCollection::filterNames() -- rather than the spectrum's
+// thousands of per-wavelength rows that writeClusterSpectraHeader
+// lays out.
+static void writeClusterPhotHeader(std::ofstream& file,
+    const std::vector<std::string>& filterNames)
+{
+    file << std::right << std::setw(uidWidth) << "trial"
+         << std::setw(numWidth) << "time"
+         << std::setw(uidWidth) << "uid";
+    for (const auto& name : filterNames)
+    {
+        file << std::setw(numWidth) << name;
+    }
+    file << "\n";
+    const auto numColumns = static_cast<std::string::size_type>(1 + filterNames.size());
+    file << std::string(static_cast<std::string::size_type>(2) * uidWidth, '-')
+         << std::string(numColumns * numWidth, '-') << "\n";
 }
 
 // Ascii constructor: open the summary file, write the header
@@ -168,12 +193,32 @@ io::OutputManagerAscii::OutputManagerAscii(
         }
         writeClusterSpectraHeader(clusterSpectraFile_);
     }
+
+    if (simPhysics_.filters() != nullptr)
+    {
+        const auto clusterPhotPath = std::filesystem::path(simControls_.outDir()) /
+            (simControls_.modelName() + "_cluster_phot.txt");
+        if (std::filesystem::exists(clusterPhotPath))
+        {
+            throw std::runtime_error(
+                "OutputManagerAscii: output file " + clusterPhotPath.string() + " already exists");
+        }
+
+        clusterPhotFile_.open(clusterPhotPath);
+        if (!clusterPhotFile_)
+        {
+            throw std::runtime_error(
+                "OutputManagerAscii: unable to open output file " + clusterPhotPath.string());
+        }
+        writeClusterPhotHeader(clusterPhotFile_, simPhysics_.filters()->filterNames());
+    }
 }
 
 io::OutputManagerAscii::~OutputManagerAscii()
 {
     if (clustersFile_.is_open()) { clustersFile_.close(); }
     if (clusterSpectraFile_.is_open()) { clusterSpectraFile_.close(); }
+    if (clusterPhotFile_.is_open()) { clusterPhotFile_.close(); }
 }
 
 // Write one fixed-width row of cluster data to the cluster output
@@ -236,5 +281,40 @@ void io::OutputManagerAscii::writeClusterSpec(
                                  << std::setw(numWidth) << formatSci(wlObs_.at(i))
                                  << std::setw(numWidth) << formatSci(spec.at(i)) << "\n";
         }
+    }
+}
+
+// Write one line (trial, time, uid, then one column per filter) to
+// the cluster-photometry output file. A no-op if no filter collection
+// was requested for this simulation, or if the cluster has disrupted
+// -- a disrupted cluster is no longer an observable object.
+void io::OutputManagerAscii::writeClusterPhot(
+    const unsigned long trial, const double time, const core::Cluster& cluster)
+{
+    if (!clusterPhotFile_.is_open()) { return; }
+    if (cluster.isDisrupted()) { return; }
+
+    const unsigned long uid = cluster.uid();
+    const auto& phot = cluster.phot();
+
+    // Guard the actual writes against concurrent callers from other
+    // threads; unlike the constructor, this method is expected to be
+    // called from inside an openMP parallel region. Uses its own
+    // critical section, distinct from writeCluster's/writeClusterSpec's,
+    // since all three methods write to independent files and so don't
+    // need to be serialized against each other.
+#ifdef _OPENMP
+#pragma omp critical(clusterPhotOutputWrite)
+#endif
+    {
+        clusterPhotFile_ << std::right
+                          << std::setw(uidWidth) << formatUid(trial)
+                          << std::setw(numWidth) << formatSci(time)
+                          << std::setw(uidWidth) << formatUid(uid);
+        for (const double value : phot)
+        {
+            clusterPhotFile_ << std::setw(numWidth) << formatSci(value);
+        }
+        clusterPhotFile_ << "\n";
     }
 }

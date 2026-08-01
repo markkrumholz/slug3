@@ -8,19 +8,24 @@
 #include "../src/core/Cluster.hpp"
 #include "../src/io/SimControls.hpp"
 #include "../src/io/SimPhysics.hpp"
+#include "../src/phot/FilterCollection.hpp"
 #include "../src/utils/RngThread.hpp"
 #include "testCluster.hpp"
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <exception>
 #include <iostream>
 #include <numeric>
+#include <string>
 #include <string_view>
 #include <toml.hpp>
+#include <vector>
 
 static constexpr std::string_view inputFile = "tests/core/assets/testCluster.in";
 static constexpr std::string_view inputFileMinStochMass =
     "tests/core/assets/testClusterMinStochMass.in";
+static constexpr std::string_view inputFilePhot = "tests/core/assets/testClusterPhot.in";
 static constexpr unsigned int rngSeed = 42;
 
 // Verify that Cluster::starMasses() sums to within 5% of the target mass.
@@ -270,6 +275,139 @@ static auto testClusterSpecContinuousPopulation() -> int
     return 0;
 }
 
+// Verify that Cluster::phot() is populated by advance() when a filter
+// collection is available (phot.filters given in the input deck), and
+// that SimPhysics::readFilters's "Lbol" handling and
+// SimPhysics::filters()->filterNames() come out as expected.
+static auto testClusterPhot() -> int
+{
+    constexpr double ageYr = 1e6;
+
+    try
+    {
+        const toml::table inputDeck = toml::parse_file(inputFilePhot);
+        const io::SimControls controls(inputDeck);
+        const io::SimPhysics sim(inputDeck, controls);
+
+        if (sim.filters() == nullptr)
+        {
+            std::cerr << "testCluster: phot: expected SimPhysics::filters() "
+                "to be non-null\n";
+            return 1;
+        }
+        if (!sim.computeLbol())
+        {
+            std::cerr << "testCluster: phot: expected SimPhysics::computeLbol() "
+                "to be true (\"Lbol\" was in phot.filters)\n";
+            return 1;
+        }
+        const auto& filterNames = sim.filters()->filterNames();
+        const std::vector<std::string> expectedNames =
+            { "SLUGTEST.CAM1.G500", "ideal_phot_700_1500" };
+        if (filterNames != expectedNames)
+        {
+            std::cerr << "testCluster: phot: expected filterNames() == "
+                "{SLUGTEST.CAM1.G500, ideal_phot_700_1500} (with \"Lbol\" "
+                "popped out), got a different result\n";
+            return 1;
+        }
+
+        utils::rng().seed(rngSeed);
+        core::Cluster cluster(0, 1e4, 0.0, sim);
+        cluster.advance(ageYr);
+
+        const auto& phot = cluster.phot();
+        if (phot.size() != filterNames.size())
+        {
+            std::cerr << "testCluster: phot: phot() size " << phot.size()
+                << " does not match filterNames() size " << filterNames.size() << "\n";
+            return 1;
+        }
+
+        // Cross-check against an independent call to
+        // FilterCollection::phot() on the same spectrum, to confirm
+        // Cluster::advance() actually wires the two together
+        // correctly. Both calls run the exact same deterministic
+        // computation on the same (spec, wl) inputs, so the results
+        // should be bitwise identical.
+        const auto expectedPhot = sim.filters()->phot(sim.specsyn()->wl(), cluster.spec());
+        for (std::size_t i = 0; i < phot.size(); ++i)
+        {
+            if (phot.at(i) != expectedPhot.at(i))
+            {
+                std::cerr << "testCluster: phot: phot()[" << i << "] = "
+                    << phot.at(i) << ", but recomputing FilterCollection::phot() "
+                    "on the same spectrum gives " << expectedPhot.at(i) << "\n";
+                return 1;
+            }
+        }
+
+        // Both filters should report a positive value for a genuine,
+        // non-zero blackbody spectrum: SLUGTEST.CAM1.G500 is an
+        // energy-flux filter (Flambda, the default phot.system, is
+        // always >= 0 for a physical spectrum), and
+        // ideal_phot_700_1500 is a photon-count filter (also always
+        // >= 0)
+        for (std::size_t i = 0; i < phot.size(); ++i)
+        {
+            if (!(phot.at(i) > 0.0))
+            {
+                std::cerr << "testCluster: phot: phot()[" << i << "] = "
+                    << phot.at(i) << ", expected a positive value for filter "
+                    << filterNames.at(i) << "\n";
+                return 1;
+            }
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testCluster: phot test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Verify that Cluster::phot() stays empty when no filter collection
+// was requested (SimPhysics::filters() is null), mirroring
+// testClusterSpecFullyStochastic's own check for spec()
+static auto testClusterPhotAbsent() -> int
+{
+    constexpr double ageYr = 1e6;
+
+    try
+    {
+        const toml::table inputDeck = toml::parse_file(inputFile);
+        const io::SimControls controls(inputDeck);
+        const io::SimPhysics sim(inputDeck, controls);
+
+        if (sim.filters() != nullptr)
+        {
+            std::cerr << "testCluster: phot: expected SimPhysics::filters() "
+                "to be null for a deck with no [phot] section\n";
+            return 1;
+        }
+
+        utils::rng().seed(rngSeed);
+        core::Cluster cluster(0, 1e4, 0.0, sim);
+        cluster.advance(ageYr);
+
+        if (!cluster.phot().empty())
+        {
+            std::cerr << "testCluster: phot: expected phot() to be empty "
+                "when no filter collection was requested\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testCluster: photAbsent test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
 auto testCluster() -> int
 {
     int result = 0;
@@ -278,5 +416,7 @@ auto testCluster() -> int
     result += testClusterMinStochMass();
     result += testClusterSpecFullyStochastic();
     result += testClusterSpecContinuousPopulation();
+    result += testClusterPhot();
+    result += testClusterPhotAbsent();
     return result;
 }

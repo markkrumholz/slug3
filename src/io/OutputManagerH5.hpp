@@ -76,6 +76,19 @@ namespace io
         void writeClusterSpec(unsigned long trial, double time,
             const core::Cluster& cluster) override;
 
+        /**
+         * @brief Write a cluster's photometry as a row of the cluster_phot datasets
+         * @param trial Trial number to which this cluster belongs
+         * @param time The output time at which the cluster's photometry was computed, in yr
+         * @param cluster The cluster whose photometry should be written
+         * @details
+         * If no filter collection was requested for this simulation
+         * (the cluster_phot group does not exist), or the cluster has
+         * disrupted, this is a no-op.
+         */
+        void writeClusterPhot(unsigned long trial, double time,
+            const core::Cluster& cluster) override;
+
     private:
 
         /**
@@ -88,9 +101,15 @@ namespace io
          */
         void openClusterSpectraGroup();
 
+        /**
+         * @brief Create the cluster_phot group and its datasets, if a filter collection was requested
+         */
+        void openClusterPhotGroup();
+
         hid_t file_ = -1; /**< Handle to the open HDF5 output file */ // NOLINT(misc-include-cleaner)
         hid_t clustersGroup_ = -1; /**< Handle to the open clusters group, if any */ // NOLINT(misc-include-cleaner)
         hid_t clusterSpectraGroup_ = -1; /**< Handle to the open cluster_spectra group, if any */ // NOLINT(misc-include-cleaner)
+        hid_t clusterPhotGroup_ = -1; /**< Handle to the open cluster_phot group, if any */ // NOLINT(misc-include-cleaner)
     };
 
 } // namespace io

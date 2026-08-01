@@ -50,9 +50,20 @@
 // pipeline runs to completion without an out-of-bounds or other
 // error, which is exactly what would happen if the tracks ever
 // produced a star outside every spectral library's coverage.
+//
+// The deck also has a [phot] section, requesting photometry (in the
+// Vega system) through a mix of idealized ionizing-photon-count
+// filters, real tabulated filters (against the real filter registry
+// and Vega reference spectrum, both gitignored -- see
+// allPhotDataFilesExist()), and an idealized energy-flux filter, so
+// this also exercises the full photometry pipeline against a real,
+// chained spectrum and checks that the result contains no NaNs or
+// infinities (e.g. from a Vega magnitude of a filter with genuinely
+// zero flux).
 auto testClusterSpecsynFull() -> int
 {
     if (!allRequiredDataFilesExist()) { return 0; }
+    if (!allPhotDataFilesExist()) { return 0; }
     return runClusterSpecsynFull(
         "tests/core/assets/testClusterSpecsynFull.in", "test_cluster_specsyn_full");
 }
