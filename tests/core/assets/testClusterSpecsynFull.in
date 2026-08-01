@@ -68,6 +68,19 @@ model = ["POWR_WC", "POWR_WNE", "POWR_WNL_H20", "POWR_WNL_H40", "POWR_WNL_H60", 
 # regime it actually exercises.
 nwl = 2048
 
+# Exercises the full photometry pipeline against a real, chained
+# spectrum: two idealized ionizing-photon-count filters (Q(HI),
+# Q(HeI), Q(OII)), three real tabulated filters spanning optical to
+# mid-infrared (registry/vega both default to the real data/filters
+# and data/spectra/vega.h5 fetched locally -- see
+# testClusterSpecsynFullCommon.cpp's own allPhotDataFilesExist()), and
+# one idealized energy-flux filter, all reported as Vega magnitudes
+# (except the two photon-count filters, for which PhotSystem doesn't
+# apply).
+[phot]
+filters = ["Q(HI)", "Q(HeI)", "Q(OII)", "HST.ACS_WFC.F435W", "HST.ACS_WFC.F606W", "JWST.MIRI.F770W", "ideal_energy_1000_5000"]
+system = "Vega"
+
 [clusters]
 CMF = 1e4
 

@@ -47,6 +47,16 @@ namespace
         "data/spectra/ck04.h5",
     }};
 
+    // The real (gitignored) filter registry and Vega reference
+    // spectrum testClusterSpecsynFull's own [phot] section needs --
+    // see allPhotDataFilesExist()'s own comment for why this is kept
+    // separate from requiredDataFiles above
+    const std::array<std::string, 3> requiredPhotDataFiles = { { // NOLINT(bugprone-throwing-static-initialization,cert-err58-cpp) -- see requiredDataFiles above
+        "data/filters/filters.toml",
+        "data/filters/filters.h5",
+        "data/spectra/vega.h5",
+    }};
+
     // Read an entire 1d extensible dataset of the given HDF5 native
     // type into a vector of the corresponding C++ type -- mirrors
     // testSimCluster.cpp's own identical helper
@@ -85,6 +95,106 @@ namespace
         // NOLINTEND(misc-include-cleaner)
         return { std::move(result), { dims.at(0), dims.at(1) } };
     }
+
+    // Read the cluster_phot group's "phot" dataset, if that group
+    // exists in the (already-open) HDF5 output file file -- i.e. if
+    // the deck that produced it had a [phot] section -- or an empty
+    // result (with shape (0, 0)) otherwise
+    auto readClusterPhotIfPresent(const hid_t file) // NOLINT(misc-include-cleaner)
+        -> std::pair<std::vector<double>, std::pair<hsize_t, hsize_t>>
+    {
+        // NOLINTBEGIN(misc-include-cleaner)
+        if (H5Lexists(file, "cluster_phot", H5P_DEFAULT) <= 0) { return {}; }
+        const hid_t photGrp = H5Gopen2(file, "cluster_phot", H5P_DEFAULT);
+        auto result = readDataset2D<double>(photGrp, "phot", H5T_NATIVE_DOUBLE);
+        H5Gclose(photGrp);
+        // NOLINTEND(misc-include-cleaner)
+        return result;
+    }
+
+    // Check that every row of the cluster_spectra "spec" dataset is
+    // finite everywhere, and has some non-trivial (positive) flux
+    // somewhere. Factored out of runClusterSpecsynFull to keep its
+    // own cognitive complexity down.
+    auto validateClusterSpectra(
+        const std::vector<double>& spec, const hsize_t nRows, const size_t nWl) -> int
+    {
+        for (hsize_t row = 0; row < nRows; ++row)
+        {
+            bool anyPositive = false;
+            for (size_t col = 0; col < nWl; ++col)
+            {
+                const double value = spec.at((static_cast<size_t>(row) * nWl) + col);
+                if (!std::isfinite(value))
+                {
+                    std::cerr << "testClusterSpecsynFull: spec row " << row
+                        << ", column " << col << " is not finite (" << value << ")\n";
+                    return 1;
+                }
+                anyPositive = anyPositive || (value > 0.0);
+            }
+            if (!anyPositive)
+            {
+                std::cerr << "testClusterSpecsynFull: spec row " << row
+                    << " has no positive flux anywhere\n";
+                return 1;
+            }
+        }
+        return 0;
+    }
+
+    // Check that the cluster_phot dataset (if present at all -- see
+    // readClusterPhotIfPresent above) has the expected number of rows
+    // and contains no NaNs or infinities (e.g. from a Vega magnitude
+    // of a filter with genuinely zero flux). Factored out of
+    // runClusterSpecsynFull to keep its own cognitive complexity down.
+    auto validateClusterPhot(const bool hasPhot,
+        const std::vector<double>& phot,
+        const std::pair<hsize_t, hsize_t>& photShape,
+        const hsize_t expectedRows) -> int
+    {
+        if (!hasPhot) { return 0; }
+
+        if (photShape.first != expectedRows)
+        {
+            std::cerr << "testClusterSpecsynFull: expected " << expectedRows
+                << " rows in cluster_phot/phot, got " << photShape.first << "\n";
+            return 1;
+        }
+        for (const double value : phot)
+        {
+            if (!std::isfinite(value))
+            {
+                std::cerr << "testClusterSpecsynFull: cluster_phot/phot "
+                    "contains a non-finite value (" << value << ")\n";
+                return 1;
+            }
+        }
+        return 0;
+    }
+
+    // Check that the clusters group's trial column has exactly
+    // nTrial rows, one per distinct trial number. Factored out of
+    // runClusterSpecsynFull to keep its own cognitive complexity down.
+    auto validateClustersTrialColumn(
+        const std::vector<unsigned long>& trialCol, const unsigned long nTrial) -> int
+    {
+        if (trialCol.size() != nTrial)
+        {
+            std::cerr << "testClusterSpecsynFull: expected " << nTrial
+                << " rows in clusters/trial, got " << trialCol.size() << "\n";
+            return 1;
+        }
+        const std::set<unsigned long> distinctTrials(trialCol.begin(), trialCol.end());
+        if (distinctTrials.size() != nTrial)
+        {
+            std::cerr << "testClusterSpecsynFull: expected " << nTrial
+                << " distinct trial numbers in clusters/trial, got "
+                << distinctTrials.size() << "\n";
+            return 1;
+        }
+        return 0;
+    }
 } // namespace
 
 auto allRequiredDataFilesExist() -> bool
@@ -94,6 +204,21 @@ auto allRequiredDataFilesExist() -> bool
         if (!std::filesystem::exists(path))
         {
             std::cerr << "testClusterSpecsynFull: required data file "
+                << path << " not found; skipping this optional "
+                "full-data end-to-end test\n";
+            return false;
+        }
+    }
+    return true;
+}
+
+auto allPhotDataFilesExist() -> bool
+{
+    for (const auto& path : requiredPhotDataFiles)
+    {
+        if (!std::filesystem::exists(path))
+        {
+            std::cerr << "testClusterSpecsynFull: required photometry data file "
                 << path << " not found; skipping this optional "
                 "full-data end-to-end test\n";
             return false;
@@ -142,19 +267,8 @@ auto runClusterSpecsynFull(const std::string& inputFile, const std::string& mode
         const auto trialCol = readDataset<unsigned long>(clustersGrp, "trial", H5T_NATIVE_ULONG);
         H5Gclose(clustersGrp);
 
-        if (trialCol.size() != nTrial)
+        if (validateClustersTrialColumn(trialCol, nTrial) != 0)
         {
-            std::cerr << "testClusterSpecsynFull: expected " << nTrial
-                << " rows in clusters/trial, got " << trialCol.size() << "\n";
-            H5Fclose(file);
-            return 1;
-        }
-        const std::set<unsigned long> distinctTrials(trialCol.begin(), trialCol.end());
-        if (distinctTrials.size() != nTrial)
-        {
-            std::cerr << "testClusterSpecsynFull: expected " << nTrial
-                << " distinct trial numbers in clusters/trial, got "
-                << distinctTrials.size() << "\n";
             H5Fclose(file);
             return 1;
         }
@@ -165,6 +279,12 @@ auto runClusterSpecsynFull(const std::string& inputFile, const std::string& mode
         const auto wl = readDataset<double>(specGrp, "wl", H5T_NATIVE_DOUBLE);
         auto [spec, specShape] = readDataset2D<double>(specGrp, "spec", H5T_NATIVE_DOUBLE);
         H5Gclose(specGrp);
+
+        // Only present if the deck had a [phot] section -- see this
+        // function's own comment
+        auto [phot, photShape] = readClusterPhotIfPresent(file);
+        const bool hasPhot = photShape.first != 0 || photShape.second != 0;
+
         H5Fclose(file);
         // NOLINTEND(misc-include-cleaner)
 
@@ -191,27 +311,20 @@ auto runClusterSpecsynFull(const std::string& inputFile, const std::string& mode
 
         // Every row's spectrum should be finite everywhere, and have
         // some non-trivial (positive) flux somewhere
-        const auto nWl = wl.size();
-        for (hsize_t row = 0; row < specShape.first; ++row)
+        if (validateClusterSpectra(spec, specShape.first, wl.size()) != 0)
         {
-            bool anyPositive = false;
-            for (size_t col = 0; col < nWl; ++col)
-            {
-                const double value = spec.at((static_cast<size_t>(row) * nWl) + col);
-                if (!std::isfinite(value))
-                {
-                    std::cerr << "testClusterSpecsynFull: spec row " << row
-                        << ", column " << col << " is not finite (" << value << ")\n";
-                    return 1;
-                }
-                anyPositive = anyPositive || (value > 0.0);
-            }
-            if (!anyPositive)
-            {
-                std::cerr << "testClusterSpecsynFull: spec row " << row
-                    << " has no positive flux anywhere\n";
-                return 1;
-            }
+            return 1;
+        }
+
+        // If the deck also requested photometry, check that every
+        // value written is finite. As with the spectrum above, there
+        // is no independently-computed expected magnitude/flux to
+        // check here, so this just confirms the full filter/
+        // photometric-conversion pipeline runs to completion without
+        // producing a NaN or infinity.
+        if (validateClusterPhot(hasPhot, phot, photShape, expectedRows) != 0)
+        {
+            return 1;
         }
     }
     catch (const std::exception& error)
