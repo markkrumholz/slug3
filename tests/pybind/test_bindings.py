@@ -56,6 +56,16 @@ SAFE_LOG_TIMES = (0.0, 1.0, 2.0, 3.0)
 CLUSTER_DECK = "tests/core/assets/testCluster.in"
 CLUSTER_TARGET_MASS = 1e3
 
+# Input decks used for the Cluster.phot()/lbol() tests below.
+# PHOT_DECK requests two real/idealized filters plus "Lbol"; LBOL_DECK
+# requests "Lbol" alone, so SimPhysics.filters() stays None there while
+# SimPhysics.computeLbol() is True (see the deck's own comment) -- both
+# are otherwise identical to CLUSTER_DECK and are also used by the C++
+# tests in tests/core/testCluster.cpp.
+PHOT_DECK = "tests/core/assets/testClusterPhot.in"
+PHOT_DECK_NFILTERS = 2  # SLUGTEST.CAM1.G500, ideal_phot_700_1500 ("Lbol" is not a filter)
+LBOL_DECK = "tests/core/assets/testClusterLbol.in"
+
 
 @pytest.fixture(scope="module")
 def tracks2d():
@@ -81,6 +91,30 @@ def sim_physics():
 def sim_controls():
     """A SimControls object built from CLUSTER_DECK."""
     return slug.SimControls(CLUSTER_DECK)
+
+
+@pytest.fixture(scope="module")
+def phot_physics():
+    """A SimPhysics object built from PHOT_DECK."""
+    return slug.SimPhysics(PHOT_DECK, "cluster")
+
+
+@pytest.fixture(scope="module")
+def phot_controls():
+    """A SimControls object built from PHOT_DECK."""
+    return slug.SimControls(PHOT_DECK)
+
+
+@pytest.fixture(scope="module")
+def lbol_physics():
+    """A SimPhysics object built from LBOL_DECK."""
+    return slug.SimPhysics(LBOL_DECK, "cluster")
+
+
+@pytest.fixture(scope="module")
+def lbol_controls():
+    """A SimControls object built from LBOL_DECK."""
+    return slug.SimControls(LBOL_DECK)
 
 
 # ---------------------------------------------------------------------
@@ -367,6 +401,43 @@ def test_simphysics_wl_without_specsyn_raises(tmp_path):
         physics.wlObs()
 
 
+def test_simphysics_compute_lbol_default_false(sim_physics):
+    """CLUSTER_DECK has no [phot] section, so computeLbol() should
+    default to False."""
+    assert not sim_physics.computeLbol()
+
+
+def test_simphysics_set_compute_lbol_toggles():
+    """setComputeLbol() should be reflected back by computeLbol(). Uses
+    its own SimPhysics, rather than the shared sim_physics fixture, so
+    a failed assertion here can't leave module-scoped state behind for
+    other tests to trip over."""
+    physics = slug.SimPhysics(CLUSTER_DECK, "cluster")
+    assert not physics.computeLbol()
+
+    physics.setComputeLbol(True)
+    assert physics.computeLbol()
+
+    physics.setComputeLbol(False)
+    assert not physics.computeLbol()
+
+
+def test_simphysics_set_compute_lbol_enables_lbol_computation():
+    """setComputeLbol(True) on a SimPhysics built from a deck with no
+    [phot] section should, on its own, be enough to make advance()
+    populate a Cluster's lbol() -- the Python-only path for requesting
+    Lbol output without a phot.filters deck entry."""
+    physics = slug.SimPhysics(CLUSTER_DECK, "cluster")
+    physics.setComputeLbol(True)
+    controls = slug.SimControls(CLUSTER_DECK)
+    cluster = slug.Cluster(30, CLUSTER_TARGET_MASS, 0.0, physics, controls)
+    assert cluster.lbol() == pytest.approx(0.0)
+
+    cluster.advance(5.0)
+
+    assert cluster.lbol() > 0.0
+
+
 # ---------------------------------------------------------------------
 # Cluster
 # ---------------------------------------------------------------------
@@ -464,3 +535,45 @@ def test_cluster_keeps_physics_alive():
     # use-after-free (and likely crash) if keep_alive were missing
     cluster.advance(5.0)
     assert len(cluster.spec()) > 0
+
+
+def test_cluster_phot_empty_without_filters(sim_physics, sim_controls):
+    """CLUSTER_DECK has no [phot] section, so phot() should stay empty
+    even after advance()."""
+    cluster = slug.Cluster(8, CLUSTER_TARGET_MASS, 0.0, sim_physics, sim_controls)
+    cluster.advance(5.0)
+    assert len(cluster.phot()) == 0
+
+
+def test_cluster_advance_populates_phot(phot_physics, phot_controls):
+    """phot() should be empty before advance() and, afterwards, should
+    hold one positive value per non-"Lbol" filter in PHOT_DECK's
+    phot.filters."""
+    cluster = slug.Cluster(9, CLUSTER_TARGET_MASS, 0.0, phot_physics, phot_controls)
+    assert len(cluster.phot()) == 0
+
+    cluster.advance(5.0)
+
+    assert len(cluster.phot()) == PHOT_DECK_NFILTERS
+    assert all(value > 0.0 for value in cluster.phot())
+
+
+def test_cluster_lbol_zero_before_advance(lbol_physics, lbol_controls):
+    """lbol() should be 0 for a freshly constructed Cluster, before
+    advance() has ever run."""
+    cluster = slug.Cluster(10, CLUSTER_TARGET_MASS, 0.0, lbol_physics, lbol_controls)
+    assert cluster.lbol() == pytest.approx(0.0)
+
+
+def test_cluster_advance_populates_lbol(lbol_physics, lbol_controls):
+    """advance() should populate lbol() with a finite, positive value
+    when computeLbol() is True -- LBOL_DECK sets stars.min_stoch_mass,
+    so this exercises both the stochastic and continuously-sampled
+    code paths in Cluster's bolometric-luminosity computation."""
+    assert lbol_physics.computeLbol()
+    cluster = slug.Cluster(11, CLUSTER_TARGET_MASS, 0.0, lbol_physics, lbol_controls)
+
+    cluster.advance(5.0)
+
+    assert np.isfinite(cluster.lbol())
+    assert cluster.lbol() > 0.0

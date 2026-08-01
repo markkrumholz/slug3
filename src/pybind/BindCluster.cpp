@@ -94,6 +94,26 @@ spec : list of float
     synthesizer, or an empty list if no spectral synthesizer was
     requested.)doc";
 
+static constexpr std::string_view photDocstring = R"doc(Return the cluster's photometry.
+
+Returns
+-------
+phot : list of float
+    The photometric value computed from spec() by each filter in
+    SimPhysics.filters(), in the same order as
+    FilterCollection.filterNames()/filterUnits(), or an empty list if
+    no filter collection was requested (SimPhysics.filters() is
+    None).)doc";
+
+static constexpr std::string_view lbolDocstring = R"doc(Return the cluster's bolometric luminosity.
+
+Returns
+-------
+lbol : float
+    The population's total bolometric luminosity, in Lsun, at the
+    current time, or 0 if no bolometric luminosity has ever been
+    computed (SimPhysics.computeLbol() is False).)doc";
+
 static constexpr std::string_view isDisruptedDocstring = R"doc(Return whether the cluster has disrupted.
 
 Returns
@@ -145,6 +165,10 @@ void bindCluster(py::module_& m)
                 py::return_value_policy::reference_internal)
         .def("spec", &core::Cluster::spec,
                 specDocstring.data())
+        .def("phot", &core::Cluster::phot,
+                photDocstring.data())
+        .def("lbol", &core::Cluster::lbol,
+                lbolDocstring.data())
         .def("isDisrupted", &core::Cluster::isDisrupted,
                 isDisruptedDocstring.data())
         .def("advance", &core::Cluster::advance,
