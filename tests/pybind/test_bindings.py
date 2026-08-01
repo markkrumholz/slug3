@@ -11,7 +11,10 @@ Interpolator1D objects returned by getTrack() and getIsochrone().
 SimPhysics and Cluster are exercised against
 tests/core/assets/testCluster.in, the same fixture the C++ tests in
 tests/core use, which also points at the MIST_test track set and
-requests spectra.model = "blackbody".
+requests spectra.model = "blackbody". FilterIdeal, FilterTabulated,
+and FilterCollection are exercised against the same small filter
+registry (tests/phot/assets/filters_test.toml) the C++ tests in
+tests/phot use.
 
 This file is run via pytest, invoked as a CTest test from CMakeLists.txt
 (see the test_PythonBindings target), so `ctest` alone runs both the
@@ -65,6 +68,25 @@ CLUSTER_TARGET_MASS = 1e3
 PHOT_DECK = "tests/core/assets/testClusterPhot.in"
 PHOT_DECK_NFILTERS = 2  # SLUGTEST.CAM1.G500, ideal_phot_700_1500 ("Lbol" is not a filter)
 LBOL_DECK = "tests/core/assets/testClusterLbol.in"
+
+# Filter registry used by the FilterIdeal/FilterTabulated/FilterCollection
+# tests below: a single tabulated filter, SLUGTEST.CAM1.G500 (a
+# synthetic Gaussian response peaked at 5000 Angstrom), on a facility
+# with exactly one instrument -- same fixture used by
+# tests/phot/testFilterCollection.hpp et al.
+FILTER_REGISTRY = "tests/phot/assets/filters_test.toml"
+
+
+def _make_const_spec(wl_lo, wl_hi, n, f0):
+    """A constant-F_lambda spectrum on a uniform grid of n points over
+    [wl_lo, wl_hi], mirroring tests/phot/testFilterCollection.hpp's own
+    makeConstSpec(): a constant spectrum's filter-integrated value
+    doesn't depend on the filter's response shape, giving an exact
+    closed form (== f0) for any energy-flux filter without needing to
+    duplicate any filter's own integration machinery."""
+    wl = [wl_lo + (wl_hi - wl_lo) * i / (n - 1) for i in range(n)]
+    wl[-1] = wl_hi
+    return wl, [f0] * n
 
 
 @pytest.fixture(scope="module")
@@ -535,6 +557,166 @@ def test_cluster_keeps_physics_alive():
     # use-after-free (and likely crash) if keep_alive were missing
     cluster.advance(5.0)
     assert len(cluster.spec()) > 0
+
+
+# ---------------------------------------------------------------------
+# FilterIdeal
+# ---------------------------------------------------------------------
+
+
+def test_filterideal_energy_filter():
+    """An ideal_energy_X_Y filter should report the parsed range and
+    photCount() == False, and phot() of a constant spectrum should
+    return that same constant (see _make_const_spec's own docstring)."""
+    filt = slug.FilterIdeal("ideal_energy_700_1500")
+    assert filt.name() == "ideal_energy_700_1500"
+    assert not filt.photCount()
+    assert filt.wlMin() == pytest.approx(700.0)
+    assert filt.wlMax() == pytest.approx(1500.0)
+    assert filt.wlPivot() == pytest.approx(1100.0)
+
+    wl, spec = _make_const_spec(500.0, 2000.0, 2000, 3.5)
+    assert filt.phot(wl, spec) == pytest.approx(3.5, rel=1e-6)
+
+
+def test_filterideal_phot_filter():
+    """An ideal_phot_X_Y filter should report photCount() == True and a
+    positive photon-count rate for a positive spectrum."""
+    filt = slug.FilterIdeal("ideal_phot_700_1500")
+    assert filt.photCount()
+    wl, spec = _make_const_spec(500.0, 2000.0, 2000, 3.5)
+    assert filt.phot(wl, spec) > 0.0
+
+
+def test_filterideal_ionization_threshold():
+    """A Q(<elem><ion>) filter should have wlMax() == inf and a finite,
+    positive wlMin() set from the ionization threshold, with
+    photCount() == True."""
+    filt = slug.FilterIdeal("Q(HI)")
+    assert filt.photCount()
+    assert filt.wlMin() > 0.0
+    assert np.isinf(filt.wlMax())
+    assert filt.wlPivot() == pytest.approx(filt.wlMin())
+
+
+def test_filterideal_invalid_name_raises():
+    """A name matching neither recognized convention should raise, not
+    crash."""
+    with pytest.raises(RuntimeError):
+        slug.FilterIdeal("not_a_valid_name")
+
+
+# ---------------------------------------------------------------------
+# FilterTabulated
+# ---------------------------------------------------------------------
+
+
+def test_filtertabulated_registry_constructor():
+    """The registry constructor should resolve SLUGTEST.CAM1.G500 from
+    FILTER_REGISTRY, reporting the full facility.instrument.filter name,
+    photCount() == False, and a finite, positive wlPivot()/norm()."""
+    filt = slug.FilterTabulated("SLUGTEST", "CAM1", "G500", FILTER_REGISTRY)
+    assert filt.name() == "SLUGTEST.CAM1.G500"
+    assert not filt.photCount()
+    assert filt.wlPivot() == pytest.approx(5000.0)
+    assert filt.norm() > 0.0
+
+
+def test_filtertabulated_direct_constructor():
+    """The direct (name, wl, response, wl_pivot) constructor should
+    round-trip its wl/response arrays through wl()/responseData(), and
+    report the supplied wlPivot()."""
+    wl = [1000.0, 2000.0, 3000.0]
+    response = [0.0, 1.0, 0.0]
+    filt = slug.FilterTabulated("my_filter", wl, response, 2000.0)
+
+    assert filt.name() == "my_filter"
+    assert not filt.photCount()
+    assert filt.wlPivot() == pytest.approx(2000.0)
+    assert list(filt.wl()) == pytest.approx(wl)
+    assert list(filt.responseData()) == pytest.approx(response)
+
+
+def test_filtertabulated_response_interpolator():
+    """response() should return an Interpolator1DScalar spanning
+    ln(wl()) that evaluates to responseData()'s peak value at the
+    corresponding ln(wavelength)."""
+    wl = [1000.0, 2000.0, 3000.0]
+    response = [0.0, 1.0, 0.0]
+    filt = slug.FilterTabulated("my_filter", wl, response, 2000.0)
+
+    interp = filt.response()
+    assert interp.xMin() == pytest.approx(np.log(1000.0))
+    assert interp.xMax() == pytest.approx(np.log(3000.0))
+    assert interp(np.log(2000.0)) == pytest.approx(1.0)
+
+
+def test_filtertabulated_phot_matches_const_spectrum():
+    """phot() of a constant spectrum should return that same constant,
+    same closed-form argument as test_filterideal_energy_filter."""
+    filt = slug.FilterTabulated("SLUGTEST", "CAM1", "G500", FILTER_REGISTRY)
+    wl, spec = _make_const_spec(2000.0, 8000.0, 5000, 3.5)
+    assert filt.phot(wl, spec) == pytest.approx(3.5, rel=1e-6)
+
+
+def test_filtertabulated_unknown_facility_raises():
+    """An unrecognized facility should raise, not crash."""
+    with pytest.raises(RuntimeError):
+        slug.FilterTabulated("BOGUS", "CAM1", "G500", FILTER_REGISTRY)
+
+
+# ---------------------------------------------------------------------
+# FilterCollection
+# ---------------------------------------------------------------------
+
+
+def test_filtercollection_mixed_construction():
+    """A FilterCollection built from one tabulated and three idealized
+    filter names should report filterNames()/filterUnits() in the
+    supplied order, and phot() should agree with the same filters'
+    own phot(), matching testFilterCollectionMixedConstruction in
+    tests/phot/testFilterCollection.hpp."""
+    names = ["SLUGTEST.CAM1.G500", "ideal_energy_700_1500", "ideal_phot_700_1500", "Q(HI)"]
+    fc = slug.FilterCollection(names, slug.PhotSystem.Flambda, FILTER_REGISTRY)
+
+    assert fc.filterNames() == names
+    assert fc.filterUnits() == [
+        "erg/s/Angstrom", "erg/s/Angstrom", "photons/s", "photons/s"]
+
+    wl, spec = _make_const_spec(500.0, 9000.0, 5000, 3.5)
+
+    ref_tab = slug.FilterTabulated("SLUGTEST", "CAM1", "G500", FILTER_REGISTRY)
+    ref_energy = slug.FilterIdeal("ideal_energy_700_1500")
+    ref_phot = slug.FilterIdeal("ideal_phot_700_1500")
+    ref_qhi = slug.FilterIdeal("Q(HI)")
+    expected = [
+        ref_tab.phot(wl, spec), ref_energy.phot(wl, spec),
+        ref_phot.phot(wl, spec), ref_qhi.phot(wl, spec)]
+
+    assert list(fc.phot(wl, spec)) == pytest.approx(expected, rel=1e-9)
+
+
+def test_filtercollection_phot_system_conversion():
+    """filterUnits() should report the requested photSystem's unit for
+    every energy-flux filter, leaving photon-count filters
+    unconverted."""
+    names = ["SLUGTEST.CAM1.G500", "ideal_phot_700_1500"]
+    fc = slug.FilterCollection(names, slug.PhotSystem.AB, FILTER_REGISTRY)
+    assert fc.filterUnits() == ["ABmag", "photons/s"]
+
+
+def test_filtercollection_instrument_omitted():
+    """FILTER_REGISTRY's SLUGTEST facility has exactly one instrument
+    (CAM1), so the instrument-omitted "SLUGTEST.G500" name should
+    resolve to the same filter as "SLUGTEST.CAM1.G500"."""
+    fc = slug.FilterCollection(["SLUGTEST.G500"], slug.PhotSystem.Flambda, FILTER_REGISTRY)
+    assert fc.filterNames() == ["SLUGTEST.CAM1.G500"]
+
+
+def test_filtercollection_invalid_name_raises():
+    """An unparseable filter name should raise, not crash."""
+    with pytest.raises(RuntimeError):
+        slug.FilterCollection(["not_a_valid_name"], slug.PhotSystem.Flambda, FILTER_REGISTRY)
 
 
 def test_cluster_phot_empty_without_filters(sim_physics, sim_controls):
