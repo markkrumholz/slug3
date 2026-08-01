@@ -49,7 +49,7 @@ void core::SimCluster::run()
         }
 
         // Create cluster for this trial
-        Cluster cluster(utils::getID(), simPhysics_.cmf().draw(), 0, simPhysics_);
+        Cluster cluster(utils::getID(), simPhysics_.cmf().draw(), 0, simPhysics_, simControls_);
 
         // Write time-invariant cluster properties to output
         outputManager_->writeCluster(trialNum, cluster);

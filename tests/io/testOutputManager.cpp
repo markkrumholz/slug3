@@ -59,7 +59,7 @@ static auto testWriteClusterAscii() -> int
         constexpr unsigned long uid = 7;
         constexpr double targetMass = 1e3;
         constexpr double formTime = 0.0;
-        const core::Cluster cluster(uid, targetMass, formTime, sim);
+        const core::Cluster cluster(uid, targetMass, formTime, sim, controls);
         constexpr unsigned long trial = 3;
 
         {
@@ -129,7 +129,7 @@ static auto testWriteClusterH5() -> int
         constexpr unsigned long uid = 11;
         constexpr double targetMass = 2e3;
         constexpr double formTime = 0.0;
-        const core::Cluster cluster(uid, targetMass, formTime, sim);
+        const core::Cluster cluster(uid, targetMass, formTime, sim, controls);
         constexpr unsigned long trial = 5;
 
         {
@@ -222,7 +222,7 @@ static auto testWriteReadClusterRngRoundTrip() -> int
         constexpr unsigned long uid = 13;
         constexpr double targetMass = 5e3;
         constexpr double formTime = 0.0;
-        const core::Cluster cluster(uid, targetMass, formTime, sim);
+        const core::Cluster cluster(uid, targetMass, formTime, sim, controls);
         constexpr unsigned long trial = 1;
 
         {
@@ -251,7 +251,7 @@ static auto testWriteReadClusterRngRoundTrip() -> int
         H5Fclose(file);
         // NOLINTEND(misc-include-cleaner)
 
-        const core::Cluster rebuilt(uid, targetMass, formTime, sim, readState);
+        const core::Cluster rebuilt(uid, targetMass, formTime, sim, controls, readState);
 
         if (!std::ranges::equal(rebuilt.starMasses(), cluster.starMasses()))
         {

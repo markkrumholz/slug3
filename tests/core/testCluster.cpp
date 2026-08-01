@@ -38,7 +38,7 @@ static auto testClusterConstruction() -> int
         const io::SimPhysics sim(inputDeck, controls);
 
         utils::rng().seed(rngSeed);
-        const core::Cluster cluster(0, 1e4, 0.0, sim);
+        const core::Cluster cluster(0, 1e4, 0.0, sim, controls);
 
         const auto& masses = cluster.starMasses();
         const double totalMass = std::reduce(masses.begin(), masses.end(), 0.0);
@@ -77,7 +77,7 @@ static auto testClusterAdvance() -> int
         const io::SimPhysics sim(inputDeck, controls);
 
         utils::rng().seed(rngSeed);
-        core::Cluster cluster(0, 1e4, 0.0, sim);
+        core::Cluster cluster(0, 1e4, 0.0, sim, controls);
 
         cluster.advance(ageYr);
 
@@ -156,7 +156,7 @@ static auto testClusterMinStochMass() -> int
         const io::SimPhysics sim(inputDeck, controls);
 
         utils::rng().seed(rngSeed);
-        const core::Cluster cluster(0, targetMass, 0.0, sim);
+        const core::Cluster cluster(0, targetMass, 0.0, sim, controls);
 
         const double minStochMass = sim.minStochMass();
         const auto& masses = cluster.starMasses();
@@ -207,7 +207,7 @@ static auto testClusterSpecFullyStochastic() -> int
         const io::SimPhysics sim(inputDeck, controls);
 
         utils::rng().seed(rngSeed);
-        core::Cluster cluster(0, 1e4, 0.0, sim);
+        core::Cluster cluster(0, 1e4, 0.0, sim, controls);
         cluster.advance(ageYr);
 
         const auto& spec = cluster.spec();
@@ -248,7 +248,7 @@ static auto testClusterSpecContinuousPopulation() -> int
         const io::SimPhysics sim(inputDeck, controls);
 
         utils::rng().seed(rngSeed);
-        core::Cluster cluster(0, 1e4, 0.0, sim);
+        core::Cluster cluster(0, 1e4, 0.0, sim, controls);
         cluster.advance(ageYr);
 
         const auto& spec = cluster.spec();
@@ -313,7 +313,7 @@ static auto testClusterPhot() -> int
         }
 
         utils::rng().seed(rngSeed);
-        core::Cluster cluster(0, 1e4, 0.0, sim);
+        core::Cluster cluster(0, 1e4, 0.0, sim, controls);
         cluster.advance(ageYr);
 
         const auto& phot = cluster.phot();
@@ -389,7 +389,7 @@ static auto testClusterPhotAbsent() -> int
         }
 
         utils::rng().seed(rngSeed);
-        core::Cluster cluster(0, 1e4, 0.0, sim);
+        core::Cluster cluster(0, 1e4, 0.0, sim, controls);
         cluster.advance(ageYr);
 
         if (!cluster.phot().empty())

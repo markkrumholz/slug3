@@ -9,10 +9,12 @@
 #define CLUSTER_HPP
 
 #include "../interpolation/Interpolator1D.hpp"
+#include "../io/SimControls.hpp"
 #include "../io/SimPhysics.hpp"
 #include "../tracks/TrackCommons.hpp"
 #include "../tracks/Tracks2D.hpp"
 #include "../utils/RngThread.hpp"
+#include <array>
 #include <cstddef>
 #include <functional>
 #include <memory>
@@ -30,11 +32,10 @@ namespace core
     public:
 
         // Shorten type names
-        using Interp1dPtr = std::vector<
-            std::unique_ptr<interp::Interpolator1D<
-            static_cast<size_t>(tracks::FieldIdx::nTrackQty)
-            >>>;
-        using Track2DVar = std::variant<tracks::Tracks2D, 
+        using Segment = interp::Interpolator1D<
+            static_cast<size_t>(tracks::FieldIdx::nTrackQty)>;
+        using Interp1dPtr = std::vector<std::unique_ptr<Segment>>;
+        using Track2DVar = std::variant<tracks::Tracks2D,
             std::reference_wrapper<const tracks::Tracks2D>>;
 
         /**
@@ -43,11 +44,16 @@ namespace core
          * @param mass Target cluster mass
          * @param time Cluster formation time
          * @param physics Simulation physics objectg
+         * @param controls Simulation control flow settings; used only
+         *   to record this cluster's own intRelTol_/intAbsTol_/
+         *   intMaxIter_ at construction (mirroring Specsyn's identical
+         *   pattern), not stored
          */
         Cluster(unsigned long uid,
             double mass,
             double time,
-            const io::SimPhysics& physics);
+            const io::SimPhysics& physics,
+            const io::SimControls& controls);
 
         /**
          * @brief Reconstruct a cluster's stellar masses from a previously recorded rng state
@@ -55,6 +61,8 @@ namespace core
          * @param mass Target cluster mass
          * @param time Cluster formation time
          * @param physics Simulation physics object
+         * @param controls Simulation control flow settings; see the
+         *   primary constructor's own comment
          * @param rngState The rng state to draw star masses from --
          *   typically one previously returned by rngState() (e.g. read
          *   back from an output file), so that the resulting
@@ -91,6 +99,7 @@ namespace core
             double mass,
             double time,
             const io::SimPhysics& physics,
+            const io::SimControls& controls,
             const utils::RngState& rngState);
 
         // Observers
@@ -184,6 +193,14 @@ namespace core
         [[nodiscard]] auto phot() const -> const auto& { return phot_; }
 
         /**
+         * @brief Return the cluster's bolometric luminosity
+         * @return The population's total bolometric luminosity, in
+         *   Lsun, at the current time, or 0 if computeLbol() has never
+         *   run (SimPhysics::computeLbol() is false)
+         */
+        [[nodiscard]] auto lbol() const { return lbol_; }
+
+        /**
          * @brief Return whether the cluster has disrupted
          * @return True if the cluster has disrupted
          */
@@ -205,6 +222,9 @@ namespace core
         double feH_;                /**< [Fe/H] of cluster */
         std::reference_wrapper<const io::SimPhysics>
             physics_;       /**< Simulation physics */
+        double intRelTol_;          /**< Relative tolerance for PDF integration, from SimControls at construction */
+        double intAbsTol_;          /**< Absolute tolerance for PDF integration, from SimControls at construction */
+        std::size_t intMaxIter_;    /**< Max evaluations for PDF integration (0 = unlimited), from SimControls at construction */
 
         // Masses
         std::vector<double> m_;     /**< Stellar masses */
@@ -222,6 +242,7 @@ namespace core
         Interp1dPtr isochrone_;     /**< Isochrone for the current time */
         std::vector<double> spec_;  /**< Spectrum of the continuously-sampled part of the population at the current time */
         std::vector<double> phot_;  /**< Photometry of spec_ through each filter in SimPhysics::filters(), at the current time */
+        double lbol_ = 0.0;         /**< Bolometric luminosity of the population, in Lsun, at the current time */
 
         /**
          * Tracks for this cluster's [Fe/H]: either owned outright (when
@@ -248,6 +269,47 @@ namespace core
          * (stochastic) star in m_.
          */
         void computeSpec();
+
+        /**
+         * @brief Update lbol_ from the current isochrone and star lists
+         * @details
+         * Mirrors computeSpec()'s own two-part structure: sums 10^logL
+         * (logL read directly off the isochrone via Segment's
+         * single-quantity operator()(x, idx), rather than interpolating
+         * every quantity) over each individually-sampled (stochastic)
+         * star in m_ with a valid isochrone segment, then adds the
+         * continuously-sampled (non-stochastic) part of the
+         * population's own contribution, integrated against the IMF
+         * over each isochrone segment via lbolStar() and
+         * utils::PDFIntegrator -- the same per-segment integration
+         * Specsyn::specCts() uses, and for the same reason (an
+         * isochrone may have gaps between segments that pcubature has
+         * no way to know to avoid).
+         */
+        void computeLbol();
+
+        /**
+         * @brief Bolometric luminosity of a single star, given its mass and isochrone segment
+         * @param m Stellar mass, in Msun; must lie within segment's
+         *   valid domain (segment.xMin() <= m <= segment.xMax())
+         * @param segment A single isochrone segment (one element of
+         *   the Isochrone returned by Tracks2D::getIsochrone) to
+         *   evaluate at mass m
+         * @return 10^logL at mass m, in Lsun, wrapped in a
+         *   single-element array
+         * @details
+         * Exists so computeLbol() can hand it to utils::PDFIntegrator,
+         * which expects a callable taking the integration variable
+         * (here, mass) as its first argument and returning a fixed- or
+         * dynamically-sized container of doubles -- mirroring
+         * Specsyn::specWl()'s own role for specCts(), but wrapped in a
+         * std::array<double, 1> rather than a per-wavelength vector,
+         * since there is only one quantity (Lbol) here, not one per
+         * wavelength. Static since it needs no instance state, which
+         * lets computeLbol() hand PDFIntegrator a plain function
+         * pointer rather than a pointer to member function.
+         */
+        [[nodiscard]] static auto lbolStar(double m, const Segment& segment) -> std::array<double, 1>;
 
     };
 
