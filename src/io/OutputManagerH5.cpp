@@ -412,13 +412,24 @@ void io::OutputManagerH5::openClusterSpectraGroup()
 }
 
 // Create the cluster_phot group and its datasets, if a filter
-// collection was requested for this simulation
+// collection or the bolometric luminosity was requested for this
+// simulation
 void io::OutputManagerH5::openClusterPhotGroup()
 {
-    if (simPhysics_.filters() == nullptr) { return; }
+    if (simPhysics_.filters() == nullptr && !simPhysics_.computeLbol()) { return; }
 
-    const auto filterNames = simPhysics_.filters()->filterNames();
-    const auto filterUnits = simPhysics_.filters()->filterUnits();
+    std::vector<std::string> filterNames;
+    std::vector<std::string> filterUnits;
+    if (simPhysics_.filters() != nullptr)
+    {
+        filterNames = simPhysics_.filters()->filterNames();
+        filterUnits = simPhysics_.filters()->filterUnits();
+    }
+    if (simPhysics_.computeLbol())
+    {
+        filterNames.emplace_back("Lbol");
+        filterUnits.emplace_back("Lsun");
+    }
     const auto nFilters = static_cast<hsize_t>(filterNames.size());
 
     // NOLINTBEGIN(misc-include-cleaner)
@@ -538,10 +549,10 @@ void io::OutputManagerH5::writeClusterSpec(
 }
 
 // Append one element to each of the trial/time/uid/phot cluster_phot
-// datasets. A no-op if no filter collection was requested for this
-// simulation (the cluster_phot group does not exist), or if the
-// cluster has disrupted -- a disrupted cluster is no longer an
-// observable object.
+// datasets. A no-op if no filter collection or bolometric luminosity
+// was requested for this simulation (the cluster_phot group does not
+// exist), or if the cluster has disrupted -- a disrupted cluster is
+// no longer an observable object.
 void io::OutputManagerH5::writeClusterPhot(
     const unsigned long trial, const double time, const core::Cluster& cluster)
 {
@@ -549,7 +560,8 @@ void io::OutputManagerH5::writeClusterPhot(
     if (cluster.isDisrupted()) { return; }
 
     const unsigned long uid = cluster.uid();
-    const auto& phot = cluster.phot();
+    auto phot = cluster.phot();
+    if (simPhysics_.computeLbol()) { phot.push_back(cluster.lbol()); }
 
     // Guard the actual writes against concurrent callers from other
     // threads, and against writeCluster's/writeClusterSpec's own

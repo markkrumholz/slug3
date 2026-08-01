@@ -1,0 +1,30 @@
+# Test input deck for a cluster simulation with "Lbol" as the sole
+# entry in phot.filters -- so SimPhysics::filters() itself stays null
+# (see SimPhysics::readFilters()'s own comment) while
+# SimPhysics::computeLbol() is true -- and min_stoch_mass set, so both
+# the stochastic and continuously-sampled code paths in
+# Cluster::computeLbol() get exercised
+
+sim_type = "cluster"
+
+[stars]
+IMF = "chabrier.toml"
+track_registry = "tests/tracks/assets/tracks.toml"
+tracks = "MIST_test"
+FeH = 0.0
+alphaFe = -0.2
+min_stoch_mass = 10.0
+
+[spectra]
+model = "blackbody"
+
+[phot]
+filters = "Lbol"
+
+[clusters]
+CMF = 1e3
+
+[outputs]
+start_time = 0.0
+end_time = 10.0
+ntime = 3

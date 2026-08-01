@@ -246,7 +246,7 @@ io::OutputManagerAscii::OutputManagerAscii(
         writeClusterSpectraHeader(clusterSpectraFile_);
     }
 
-    if (simPhysics_.filters() != nullptr)
+    if (simPhysics_.filters() != nullptr || simPhysics_.computeLbol())
     {
         const auto clusterPhotPath = std::filesystem::path(simControls_.outDir()) /
             (simControls_.modelName() + "_cluster_phot.txt");
@@ -262,8 +262,18 @@ io::OutputManagerAscii::OutputManagerAscii(
             throw std::runtime_error(
                 "OutputManagerAscii: unable to open output file " + clusterPhotPath.string());
         }
-        const auto& filterNames = simPhysics_.filters()->filterNames();
-        const auto& filterUnits = simPhysics_.filters()->filterUnits();
+        std::vector<std::string> filterNames;
+        std::vector<std::string> filterUnits;
+        if (simPhysics_.filters() != nullptr)
+        {
+            filterNames = simPhysics_.filters()->filterNames();
+            filterUnits = simPhysics_.filters()->filterUnits();
+        }
+        if (simPhysics_.computeLbol())
+        {
+            filterNames.emplace_back("Lbol");
+            filterUnits.emplace_back("Lsun");
+        }
         photColWidths_ = computePhotColWidths(filterNames, filterUnits);
         writeClusterPhotHeader(clusterPhotFile_, filterNames, filterUnits, photColWidths_);
     }
@@ -341,8 +351,9 @@ void io::OutputManagerAscii::writeClusterSpec(
 
 // Write one line (trial, time, uid, then one column per filter) to
 // the cluster-photometry output file. A no-op if no filter collection
-// was requested for this simulation, or if the cluster has disrupted
-// -- a disrupted cluster is no longer an observable object.
+// or bolometric luminosity was requested for this simulation, or if
+// the cluster has disrupted -- a disrupted cluster is no longer an
+// observable object.
 void io::OutputManagerAscii::writeClusterPhot(
     const unsigned long trial, const double time, const core::Cluster& cluster)
 {
@@ -350,7 +361,8 @@ void io::OutputManagerAscii::writeClusterPhot(
     if (cluster.isDisrupted()) { return; }
 
     const unsigned long uid = cluster.uid();
-    const auto& phot = cluster.phot();
+    auto phot = cluster.phot();
+    if (simPhysics_.computeLbol()) { phot.push_back(cluster.lbol()); }
 
     // Guard the actual writes against concurrent callers from other
     // threads; unlike the constructor, this method is expected to be

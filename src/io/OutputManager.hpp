@@ -88,8 +88,9 @@ namespace io
          * @param time The output time at which the cluster's photometry was computed, in yr
          * @param cluster The cluster whose photometry should be written
          * @details
-         * If no filter collection was requested for this simulation,
-         * or the cluster has disrupted, this is a no-op.
+         * If no filter collection or bolometric luminosity was
+         * requested for this simulation, or the cluster has
+         * disrupted, this is a no-op.
          */
         virtual void writeClusterPhot(unsigned long trial, double time,
             const core::Cluster& cluster) = 0;
