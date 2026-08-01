@@ -25,6 +25,8 @@
 #include "../../src/phot/FilterTabulated.hpp"
 #include "../../src/phot/PhotCommons.hpp"
 #include "../../src/utils/Constants.hpp"
+#include "../../src/utils/MiscUtils.hpp"
+#include "hdf5.h" // NOLINT(misc-include-cleaner)
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -68,6 +70,56 @@ namespace
         constexpr double pi = std::numbers::pi_v<double>;
         constexpr double tenPc = 10.0 * utils::pc;
         return value / (4.0 * pi * tenPc * tenPc);
+    }
+
+    // Disable linting for the next two functions -- including hdf5.h
+    // wholesale (rather than individual headers) is the paradigm
+    // HDF5 itself wants, which confuses misc-include-cleaner -- see
+    // FilterCollection.cpp's own identical suppression
+    // NOLINTBEGIN(misc-include-cleaner)
+
+    // Read a 1D double dataset from an already-open HDF5 file --
+    // independent, minimal re-implementation of FilterCollection.cpp's
+    // own private loadVegaSpectrum/readDataset1D, so this test
+    // verifies against the raw file contents rather than against
+    // FilterCollection's own loading code
+    auto readDataset1D(const hid_t file, const std::string& name) -> std::vector<double>
+    {
+        const hid_t dset = H5Dopen2(file, name.c_str(), H5P_DEFAULT);
+        const hid_t space = H5Dget_space(dset);
+        hsize_t dims = 0;
+        H5Sget_simple_extent_dims(space, &dims, nullptr);
+        std::vector<double> data(dims);
+        H5Dread(dset, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, data.data());
+        H5Sclose(space);
+        H5Dclose(dset);
+        return data;
+    }
+
+    // Load the Vega reference spectrum's wl/flux datasets directly
+    auto loadVegaSpectrumForTest(const std::string& vegaName)
+        -> std::pair<std::vector<double>, std::vector<double>>
+    {
+        const auto vegaPath = utils::getFilePath(vegaName);
+        const hid_t file = H5Fopen(vegaPath.string().c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+        std::vector<double> wlVega = readDataset1D(file, "wl");
+        std::vector<double> fluxVega = readDataset1D(file, "flux");
+        H5Fclose(file);
+        return { std::move(wlVega), std::move(fluxVega) };
+    }
+    // NOLINTEND(misc-include-cleaner)
+
+    // Index of the wlVega entry closest to target
+    auto closestIndex(const std::vector<double>& wlVega, const double target) -> std::size_t
+    {
+        std::size_t best = 0;
+        double bestDist = std::abs(wlVega.at(0) - target);
+        for (std::size_t i = 1; i < wlVega.size(); ++i)
+        {
+            const double dist = std::abs(wlVega.at(i) - target);
+            if (dist < bestDist) { bestDist = dist; best = i; }
+        }
+        return best;
     }
 } // namespace
 
@@ -342,6 +394,84 @@ inline auto testFilterCollectionErrors() -> int
 }
 
 /**
+ * @brief Test that PhotSystem::Vega populates fluxVega() correctly
+ * @return 0 on pass, 1 on failure
+ * @details
+ * Builds a FilterCollection with photSystem = Vega, from a mix of
+ * energy-flux (SLUGTEST.CAM1.G500, ideal_energy_4500_5500) and
+ * photon-count (ideal_phot_700_1500, Q(HI)) filters, using the real,
+ * committed data/spectra/vega.h5 (this collection's default vegaName).
+ * Checks: (1) every photCount() filter's fluxVega() is exactly 0 (the
+ * Vega spectrum is meaningless for a photon-count filter, so
+ * setFluxVega() is never called on one -- see FilterCollection's
+ * constructor); (2) every other filter's fluxVega() is within 5% of
+ * the Vega flux read directly from data/spectra/vega.h5 at the
+ * wavelength closest to that filter's own wlPivot(). This "closest
+ * point" comparison is only meaningful where the Vega spectrum varies
+ * smoothly across the filter's passband; ideal_energy_4500_5500 (well
+ * within the optical continuum) is chosen for that reason, unlike
+ * e.g. a passband straddling the Lyman limit (~912 Angstrom), where
+ * flux changes by orders of magnitude and a single nearby point is
+ * not a good stand-in for the passband mean.
+ */
+inline auto testFilterCollectionVega() -> int
+{
+    const std::vector<std::string> names = {
+        "SLUGTEST.CAM1.G500", "ideal_energy_4500_5500", "ideal_phot_700_1500", "Q(HI)"};
+
+    try
+    {
+        const phot::FilterCollection fc(names, phot::PhotSystem::Vega, registryName);
+        const auto& filters = fc.filters();
+        if (filters.size() != names.size())
+        {
+            std::cerr << "testFilterCollectionVega: expected " << names.size()
+                << " filters, got " << filters.size() << "\n";
+            return 1;
+        }
+
+        const auto [wlVega, fluxVega] = loadVegaSpectrumForTest(phot::defaultVegaSpec);
+
+        constexpr double relTol = 0.05;
+        for (const auto& filt : filters)
+        {
+            if (filt->photCount())
+            {
+                if (filt->fluxVega() != 0.0)
+                {
+                    std::cerr << "testFilterCollectionVega: filter '" << filt->name()
+                        << "' is photCount(); expected fluxVega() == 0, got "
+                        << filt->fluxVega() << "\n";
+                    return 1;
+                }
+                continue;
+            }
+
+            const auto idx = closestIndex(wlVega, filt->wlPivot());
+            const double expected = fluxVega.at(idx);
+            const double got = filt->fluxVega();
+            const double relErr = std::abs(got - expected) / std::abs(expected);
+            if (relErr > relTol)
+            {
+                std::cerr << "testFilterCollectionVega: filter '" << filt->name()
+                    << "' fluxVega() = " << got << ", expected ~" << expected
+                    << " (Vega flux at wl = " << wlVega.at(idx) << " Ang, filter "
+                    "pivot = " << filt->wlPivot() << " Ang; relative error "
+                    << relErr << ", tolerance " << relTol << ")\n";
+                return 1;
+            }
+        }
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "testFilterCollectionVega: unexpected exception: " << e.what() << "\n";
+        return 1;
+    }
+
+    return 0;
+}
+
+/**
  * @brief Run all FilterCollection unit tests
  * @return 0 if all tests pass, positive count of failures otherwise
  */
@@ -352,6 +482,7 @@ inline auto testFilterCollection() -> int
     result += testFilterCollectionPhotSystemConversion();
     result += testFilterCollectionInstrumentOmitted();
     result += testFilterCollectionErrors();
+    result += testFilterCollectionVega();
     return result;
 }
 

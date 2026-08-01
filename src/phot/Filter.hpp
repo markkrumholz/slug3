@@ -8,6 +8,8 @@
 #ifndef FILTER_HPP
 #define FILTER_HPP
 
+#include <algorithm>
+#include <cmath>
 #include <string>
 #include <utility>
 #include <vector>
@@ -78,6 +80,30 @@ namespace phot
         [[nodiscard]] virtual auto phot(const std::vector<double>& wl,
             const std::vector<double>& spec) const -> double = 0;
 
+        /**
+         * @brief Get this filter's mean Vega flux
+         * @return The filter-mean flux of Vega in this filter, in
+         *   erg/s/cm^2/Angstrom, as last set by setFluxVega() (0 if
+         *   setFluxVega() has never been called)
+         */
+        [[nodiscard]] auto fluxVega() const -> double { return fluxVega_; }
+
+        /**
+         * @brief Set this filter's mean Vega flux from the Vega reference spectrum
+         * @param wlVega Wavelength grid of the Vega reference spectrum, in Angstrom
+         * @param fluxVega The Vega reference spectrum, in erg/s/cm^2/Angstrom
+         * @details
+         * Computes fluxVega_ by evaluating this filter's own phot()
+         * on the Vega reference spectrum, and stores the result --
+         * i.e. fluxVega_ becomes this filter's own idea of "the flux
+         * of Vega," on whatever basis (tabulated response, top-hat
+         * passband, etc.) phot() itself uses.
+         */
+        void setFluxVega(const std::vector<double>& wlVega, const std::vector<double>& fluxVega)
+        {
+            fluxVega_ = phot(wlVega, fluxVega);
+        }
+
     protected:
         // Protected (rather than private with a setter) so a derived
         // class's name-parsing constructor (e.g. FilterIdeal's) can
@@ -85,8 +111,27 @@ namespace phot
         // determined it by parsing the name passed to the base class
         bool photCount_; /**< True if this filter returns photon counts rather than F_lambda values */
 
+        /**
+         * @brief Element-wise natural logarithm of a wavelength grid
+         * @param wl Wavelength grid, in Angstrom
+         * @return ln(wl), element-wise
+         * @details
+         * Shared by every derived class that integrates its
+         * photometric response in ln(wavelength) rather than
+         * wavelength itself (FilterTabulated and FilterIdeal, as of
+         * this writing), so it lives here instead of being
+         * duplicated in each of them.
+         */
+        static auto lnGrid(const std::vector<double>& wl) -> std::vector<double>
+        {
+            std::vector<double> result(wl.size());
+            std::ranges::transform(wl, result.begin(), [](const double w) -> double { return std::log(w); });
+            return result;
+        }
+
     private:
-        std::string name_; /**< Name of this filter, for output purposes */
+        std::string name_;      /**< Name of this filter, for output purposes */
+        double fluxVega_ = 0.0; /**< Filter-mean flux of Vega, in erg/s/cm^2/Angstrom; see setFluxVega() */
     };
 
 } // namespace phot

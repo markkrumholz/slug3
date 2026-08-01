@@ -141,6 +141,18 @@ phot::FilterIdeal::FilterIdeal(std::string name) : Filter(name) // NOLINT(perfor
     }
 
     photCount_ = (tokens.at(1) == "phot");
+
+    // phot()'s energy-flux mode integrates in ln(wavelength), which
+    // breaks for a non-positive wlMin or an infinite wlMax -- see
+    // FilterIdeal.hpp's own constructor comment
+    if (!photCount_ && (wlMin_ <= 0.0 || std::isinf(wlMax_)))
+    {
+        throw std::runtime_error(
+            "FilterIdeal: in filter name '" + name + "', an energy-flux "
+            "filter (ideal_energy_X_Y) must have a finite, positive "
+            "wavelength range; got X = " + std::to_string(wlMin_) +
+            ", Y = " + std::to_string(wlMax_));
+    }
 }
 
 auto phot::FilterIdeal::phot(const std::vector<double>& wl,
@@ -154,8 +166,19 @@ auto phot::FilterIdeal::phot(const std::vector<double>& wl,
 
     if (!photCount_)
     {
-        const interp::Interpolator1D<> interp(wl, spec);
-        return interp.integ(x0, x1);
+        // Mean flux density over the passband on a log-wavelength
+        // basis, matching FilterTabulated::phot()'s own convention:
+        // integrate in ln(wavelength) directly (building the
+        // interpolant on lnGrid(wl) rather than wl itself, exactly as
+        // FilterTabulated::phot() does via its own lnWl_), then
+        // divide by the ln-domain width -- the analog of dividing by
+        // FilterTabulated's norm_, since this filter's implicit
+        // top-hat response R = 1 on [wlMin_, wlMax_] integrates to
+        // ln(wlMax_ / wlMin_) with respect to ln(wavelength) exactly.
+        // Requires x0 > 0 and x1 finite, guaranteed for an
+        // energy-flux filter by both constructors' own validation.
+        const interp::Interpolator1D<> interp(lnGrid(wl), spec);
+        return interp.integ(std::log(x0), std::log(x1)) / std::log(x1 / x0);
     }
 
     // Photon-count mode: convert F_lambda (erg/s/Å) to photon flux density

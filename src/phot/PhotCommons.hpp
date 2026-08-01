@@ -11,6 +11,8 @@
 #include "../utils/Constants.hpp"
 #include <cmath>
 #include <cstdint>
+#include <filesystem>
+#include <string>
 
 /**
  * @brief A namespace to hold items dealing with photometry
@@ -36,6 +38,10 @@ namespace phot
 
     inline constexpr double flux0AB = 3631.0;    /**< Zero point of the AB system, in Jy */
     inline constexpr double flux0ST = 3.631e-9;  /**< Zero point of the ST system, in erg/s/cm^2/Angstrom */
+
+    inline static const std::string defaultVegaSpec = // NOLINT(bugprone-throwing-static-initialization,cert-err58-cpp) -- built from fixed string literals, so the (theoretically throwing) path conversion can never actually throw here
+        (std::filesystem::path("data") / std::filesystem::path("spectra")
+        / std::filesystem::path("vega.h5")); /**< Default Vega reference spectrum, for PhotSystem::Vega conversions */
 
     /**
      * @brief Convert a flux or magnitude from one photometric system to another
