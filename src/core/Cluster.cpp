@@ -7,6 +7,7 @@
 
 #include "Cluster.hpp"
 #include "../io/SimPhysics.hpp"
+#include "../phot/FilterCollection.hpp"
 #include "../tracks/Tracks2D.hpp"
 #include "../utils/RngThread.hpp"
 #include <algorithm>
@@ -181,6 +182,14 @@ void core::Cluster::advance(const double t)
 
     // Update the population spectrum, if a spectral synthesizer was requested
     computeSpec();
+
+    // Update the population photometry from the spectrum just
+    // computed above, if a filter collection was requested
+    const auto& filters = physics_.get().filters();
+    if (filters != nullptr)
+    {
+        phot_ = filters->phot(physics_.get().specsyn()->wl(), spec_);
+    }
 
     // Check for disruption
     if (curTime_ > disruptTime_) { isDisrupted_ = true; }
