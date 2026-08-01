@@ -60,7 +60,7 @@ namespace utils {
      * @param str The string to split
      * @returns A vector of strings containing str split by whitespace
      */
-    inline auto tokenize(const std::string& str) 
+    inline auto tokenize(const std::string& str)
         -> std::vector<std::string>
     {
         std::istringstream stream(str);
@@ -68,6 +68,34 @@ namespace utils {
             (std::istream_iterator<std::string>(stream)),
             std::istream_iterator<std::string>()
         );
+        return tokens;
+    }
+
+    /**
+     * @brief Split a string on every occurrence of a delimiter character
+     * @param str The string to split
+     * @param delim The delimiter character
+     * @returns str split on delim, keeping empty tokens (e.g. "a..b" splits
+     *   to {"a", "", "b"}) rather than collapsing them, so a malformed
+     *   input with an extra or missing delimiter fails to match the
+     *   expected token count downstream instead of silently merging fields
+     */
+    inline auto splitOnChar(const std::string& str, const char delim)
+        -> std::vector<std::string>
+    {
+        std::vector<std::string> tokens;
+        std::size_t start = 0;
+        while (true)
+        {
+            const std::size_t pos = str.find(delim, start);
+            if (pos == std::string::npos)
+            {
+                tokens.push_back(str.substr(start));
+                break;
+            }
+            tokens.push_back(str.substr(start, pos - start));
+            start = pos + 1;
+        }
         return tokens;
     }
 

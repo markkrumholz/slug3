@@ -6,11 +6,12 @@
  */
 
 #include "SpecsynUtils.hpp"
+#include "../utils/HDF5Utils.hpp"
 #include "../utils/MiscUtils.hpp"
+#include "../utils/TOMLUtils.hpp"
 #include "SpecsynCommons.hpp"
 #include "hdf5.h"   // NOLINT(misc-include-cleaner)
 #include <algorithm>
-#include <exception>
 #include <filesystem>
 #include <optional>
 #include <ranges>
@@ -22,106 +23,12 @@
 
 namespace specsyn
 {
-    static auto getSpectraSetsFromRegistry(toml::table& registry)
-    {
-        std::vector<std::string> spectraSets;
-        if (toml::array* arr = registry.at_path("spectra_sets").as_array())
-        {
-            arr->for_each([&spectraSets](auto&& el) -> void {
-                if constexpr (toml::is_string<decltype(el)>)
-                {
-                    spectraSets.push_back(std::string(el));
-                }
-            });
-        }
-        return std::move(spectraSets);
-    }
-
-    // Suppress clang-tidy warnings iun this namespace caused by just including
-    // hdf5.h, instead of the individual HDF5 headers, since this is the paradigm
-    // that HDF5 wants
-    // NOLINTBEGIN(misc-include-cleaner)
-
-    /**
-     * @brief Read a scalar double attribute from an HDF5 group, if present
-     * @param grp Handle to the group
-     * @param name Name of the attribute
-     * @returns The attribute's value, or an empty optional if the group
-     *   has no attribute of that name
-     */
-    static auto readScalarAttrIfPresent(const hid_t grp,
-        const std::string& name) -> std::optional<double>
-    {
-        if (H5Aexists(grp, name.c_str()) <= 0) { return std::nullopt; }
-        const hid_t attr = H5Aopen(grp, name.c_str(), H5P_DEFAULT);
-        if (attr < 0) { return std::nullopt; }
-        double value = 0.0;
-        H5Aread(attr, H5T_NATIVE_DOUBLE, &value);
-        H5Aclose(attr);
-        return value;
-    }
-
-    // NOLINTEND(misc-include-cleaner)
-
     auto parseRegistry(const std::string& registryName)
     -> std::pair<toml::table, std::filesystem::path>
     {
-        // Validate that registry file exists
-        auto registryPath = utils::getFilePath(registryName);
-        if (registryPath.empty())
-        {
-            throw std::runtime_error(
-                "parseRegistry: registry " + registryName +
-                " not found");
-        }
-
-        // Validate that registry file parses successfully
-        toml::table registry;
-        try
-        {
-            registry = toml::parse_file(registryPath.string());
-        }
-        catch(const std::exception& e)
-        {
-            throw std::runtime_error(
-                "parseRegistry: registry " + registryPath.string() +
-                " is not a valid toml file");
-        }
-
-        // Extract list of spectra sets
-        auto spectraSets = getSpectraSetsFromRegistry(registry);
-        if (spectraSets.empty())
-        {
-            throw std::runtime_error(
-                "parseRegistry: registry " + registryPath.string() +
-                " does not contain a valid [spectra_sets] field"
-            );
-        }
-
-        // For each entry in spectraSets, make sure we have a
-        // table entry that has the required "file" and "Fe_H" fields
-        for (const auto& ss : spectraSets)
-        {
-            if (!registry.contains(ss))
-            {
-                throw std::runtime_error(
-                    "parseRegistry: registry " + registryPath.string() +
-                    " is missing entry for spectra " + ss
-                );
-            }
-            auto ssEntry = registry.at_path(ss);
-            if (!ssEntry.at_path("file") || !ssEntry.at_path("Fe_H"))
-            {
-                throw std::runtime_error(
-                    "parseRegistry: registry " + registryPath.string() +
-                    ", entry for spectra " + ss + " is missing required "
-                    "'file' or 'Fe_H' fields"
-                );
-            }
-        }
-
-        // If we are here, parse was successful
-        return std::make_pair(registry, registryPath);
+        [[maybe_unused]] auto [registry, registryPath, spectraSets] =
+            utils::parseSetRegistry(registryName, "spectra_sets", "spectra", "parseRegistry");
+        return { std::move(registry), std::move(registryPath) };
     }
 
     auto findMatchingSpectra( // NOLINT(readability-function-cognitive-complexity)
@@ -139,7 +46,7 @@ namespace specsyn
         auto [registry, registryPath] = parseRegistry(registryName);
 
         // Now check the registry for spectra matching the given spectra name
-        auto spectraSets = getSpectraSetsFromRegistry(registry);
+        auto spectraSets = utils::getStringArrayField(registry, "spectra_sets");
         auto it = std::ranges::find(spectraSets.begin(), spectraSets.end(), spectraName);
         if (it == spectraSets.end())
         {
@@ -197,12 +104,12 @@ namespace specsyn
             const hid_t grp = H5Gopen2(file, groupName.c_str(), H5P_DEFAULT);
             if (grp < 0) { continue; }
 
-            const auto fehVal = readScalarAttrIfPresent(grp, "feh");
+            const auto fehVal = utils::readScalarAttrIfPresent(grp, "feh");
             bool isMatch = fehVal.has_value();
 
             if (isMatch)
             {
-                const auto afeVal = readScalarAttrIfPresent(grp, "afe");
+                const auto afeVal = utils::readScalarAttrIfPresent(grp, "afe");
                 if (afeVal && !utils::approxEqual(*afeVal, afe))
                 {
                     isMatch = false;
@@ -210,7 +117,7 @@ namespace specsyn
             }
             if (isMatch)
             {
-                const auto cfeVal = readScalarAttrIfPresent(grp, "cfe");
+                const auto cfeVal = utils::readScalarAttrIfPresent(grp, "cfe");
                 if (cfeVal && !utils::approxEqual(*cfeVal, cfe))
                 {
                     isMatch = false;
@@ -218,7 +125,7 @@ namespace specsyn
             }
             if (isMatch)
             {
-                const auto microVal = readScalarAttrIfPresent(grp, "micro");
+                const auto microVal = utils::readScalarAttrIfPresent(grp, "micro");
                 if (microVal && !utils::approxEqual(*microVal, microTurb))
                 {
                     isMatch = false;
@@ -226,7 +133,7 @@ namespace specsyn
             }
             if (isMatch)
             {
-                const auto rVal = readScalarAttrIfPresent(grp, "r");
+                const auto rVal = utils::readScalarAttrIfPresent(grp, "r");
                 if (rVal && !utils::approxEqual(*rVal, r))
                 {
                     isMatch = false;
@@ -321,7 +228,7 @@ namespace specsyn
     {
         auto registry = parseRegistry(registryName).first;
 
-        auto spectraSets = getSpectraSetsFromRegistry(registry);
+        auto spectraSets = utils::getStringArrayField(registry, "spectra_sets");
         if (std::ranges::find(spectraSets, spectraName) == spectraSets.end())
         {
             throw std::runtime_error("getMicroDefault: no spectra set named " +
@@ -351,24 +258,24 @@ namespace specsyn
             const hid_t grp, const double cfe, const double microTurb, const double r)
             -> std::optional<double>
         {
-            const auto fehVal = readScalarAttrIfPresent(grp, "feh");
-            const auto afeVal = readScalarAttrIfPresent(grp, "afe");
+            const auto fehVal = utils::readScalarAttrIfPresent(grp, "feh");
+            const auto afeVal = utils::readScalarAttrIfPresent(grp, "afe");
             if (!fehVal || !afeVal)
             {
                 return std::nullopt;
             }
 
-            const auto cfeVal = readScalarAttrIfPresent(grp, "cfe");
+            const auto cfeVal = utils::readScalarAttrIfPresent(grp, "cfe");
             if (cfeVal && !utils::approxEqual(*cfeVal, cfe))
             {
                 return std::nullopt;
             }
-            const auto microVal = readScalarAttrIfPresent(grp, "micro");
+            const auto microVal = utils::readScalarAttrIfPresent(grp, "micro");
             if (microVal && !utils::approxEqual(*microVal, microTurb))
             {
                 return std::nullopt;
             }
-            const auto rVal = readScalarAttrIfPresent(grp, "r");
+            const auto rVal = utils::readScalarAttrIfPresent(grp, "r");
             if (rVal && !utils::approxEqual(*rVal, r))
             {
                 return std::nullopt;
@@ -388,7 +295,7 @@ namespace specsyn
         // Parse registry and open the HDF5 file
         auto [registry, registryPath] = parseRegistry(registryName);
 
-        auto spectraSets = getSpectraSetsFromRegistry(registry);
+        auto spectraSets = utils::getStringArrayField(registry, "spectra_sets");
         if (std::ranges::find(spectraSets, spectraName) == spectraSets.end())
         {
             throw std::runtime_error("findAfeValues: no spectra set named " +
