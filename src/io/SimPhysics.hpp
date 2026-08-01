@@ -9,6 +9,7 @@
 #define SIMPHYSICS_HPP
 
 #include "../pdfs/PDF.hpp"
+#include "../phot/FilterCollection.hpp"
 #include "../specsyn/Specsyn.hpp"
 #include "../tracks/Tracks2D.hpp"
 #include "../tracks/Tracks3D.hpp"
@@ -113,6 +114,19 @@ namespace io
          */
         [[nodiscard]] auto specsyn() const -> const specsyn::Specsyn* { return specsyn_.get(); }
 
+        /**
+         * @brief Get the filter collection used to compute photometry, if any
+         * @return A const reference to the filter collection requested
+         *   via phot.filters, or nullptr if phot.filters was not given
+         */
+        [[nodiscard]] auto filters() const -> const auto& { return filters_; }
+
+        /**
+         * @brief Check whether the bolometric luminosity was requested as an output
+         * @return True if "Lbol" was included in phot.filters
+         */
+        [[nodiscard]] auto computeLbol() const { return computeLbol_; }
+
         // Integrator tolerance getters and setters: thin wrappers
         // around the spectral synthesizer's own Specsyn::intRelTol()
         // etc., so a caller holding a SimPhysics (e.g. from Python,
@@ -185,6 +199,18 @@ namespace io
          */
         void readSpectra(const toml::table& inputDeck, const SimControls& controls);
 
+        /**
+         * @brief Load the photometric filter collection specified by input deck
+         * @param inputDeck Name of input deck
+         * @details
+         * Reads phot.system, phot.filters, phot.registry, and
+         * phot.vega, and sets filters_/computeLbol_ accordingly; see
+         * the .cpp file for the exact rules. phot.filters is optional,
+         * so filters_ is left null if it (or the non-"Lbol" remainder
+         * of it) is empty.
+         */
+        void readFilters(const toml::table& inputDeck);
+
         // Physics settings
         pdfs::PDF imf_;            /**< The IMF to use for the simulation */
         pdfs::PDF cmf_;            /**< Cluster mass function */
@@ -196,6 +222,8 @@ namespace io
         double minStochMass_ = 0.0;   /**< Minimum mass for fully stochastic treatment */
         double fracStochMass_ = 1.0;  /**< Fraction of mass being treated stochastically */
         std::unique_ptr<specsyn::Specsyn> specsyn_; /**< Spectral synthesizer, or nullptr if spectra.model was not given */
+        std::unique_ptr<phot::FilterCollection> filters_; /**< Photometric filters requested via phot.filters, or nullptr if none were given */
+        bool computeLbol_ = false; /**< True if "Lbol" was included in phot.filters; the bolometric luminosity itself is not yet computed anywhere (a future PR) */
 
         // Output wavelength grid (spectra.wl_min, spectra.wl_max,
         // spectra.nwl), read by readSpectra and passed through to

@@ -178,6 +178,9 @@ add_executable(slugTestCore
     src/pdfs/PDFSegmentNormal.cpp
     src/pdfs/PDFSegmentPowerlaw.cpp
     src/pdfs/PDFSegmentSchechter.cpp
+    src/phot/FilterCollection.cpp
+    src/phot/FilterIdeal.cpp
+    src/phot/FilterTabulated.cpp
     src/specsyn/SpecsynBlackbody.cpp
     src/specsyn/SpecsynUtils.cpp
     src/specsyn/SpecsynLib.cpp
@@ -217,6 +220,9 @@ add_executable(slugTestCoreFull
     src/pdfs/PDFSegmentNormal.cpp
     src/pdfs/PDFSegmentPowerlaw.cpp
     src/pdfs/PDFSegmentSchechter.cpp
+    src/phot/FilterCollection.cpp
+    src/phot/FilterIdeal.cpp
+    src/phot/FilterTabulated.cpp
     src/specsyn/SpecsynBlackbody.cpp
     src/specsyn/SpecsynUtils.cpp
     src/specsyn/SpecsynLib.cpp
@@ -261,6 +267,9 @@ add_executable(slugTestIo
     src/pdfs/PDFSegmentNormal.cpp
     src/pdfs/PDFSegmentPowerlaw.cpp
     src/pdfs/PDFSegmentSchechter.cpp
+    src/phot/FilterCollection.cpp
+    src/phot/FilterIdeal.cpp
+    src/phot/FilterTabulated.cpp
     src/specsyn/SpecsynBlackbody.cpp
     src/specsyn/SpecsynUtils.cpp
     src/specsyn/SpecsynLib.cpp
@@ -327,6 +336,9 @@ pybind11_add_module(slugPython
     src/pdfs/PDFSegmentNormal.cpp
     src/pdfs/PDFSegmentPowerlaw.cpp
     src/pdfs/PDFSegmentSchechter.cpp
+    src/phot/FilterCollection.cpp
+    src/phot/FilterIdeal.cpp
+    src/phot/FilterTabulated.cpp
     src/specsyn/SpecsynBlackbody.cpp
     src/specsyn/SpecsynUtils.cpp
     src/specsyn/SpecsynLib.cpp
