@@ -110,10 +110,12 @@ namespace
     }
 
     // Convert an energy-flux value (in Flambda) to the requested
-    // PhotSystem at the given pivot wavelength; PhotConvert is a
-    // compile-time-dispatched template, so this switch maps the
+    // PhotSystem at the given pivot wavelength (and, for Vega, this
+    // filter's own fluxVega -- see Filter::fluxVega()); PhotConvert is
+    // a compile-time-dispatched template, so this switch maps the
     // runtime PhotSystem to the right instantiation
-    auto convertFlambda(const double value, const double wlPivot, const phot::PhotSystem to) -> double
+    auto convertFlambda(const double value, const double wlPivot,
+        const double fluxVega, const phot::PhotSystem to) -> double
     {
         switch (to)
         {
@@ -130,7 +132,10 @@ namespace
                 // returns a luminosity-like quantity (no distance
                 // baked in), so convert it to the flux that would be
                 // observed at the standard distance of 10 pc before
-                // handing it to PhotConvert
+                // handing it to PhotConvert. fluxVega itself needs no
+                // such scaling: it already comes from evaluating
+                // phot() on the real (already-at-Earth) Vega
+                // reference spectrum, not a simulated luminosity.
                 constexpr double pi = std::numbers::pi_v<double>;
                 constexpr double tenPc = 10.0 * utils::pc;
                 const double flux = value / (4.0 * pi * tenPc * tenPc);
@@ -142,9 +147,7 @@ namespace
                 {
                     return phot::PhotConvert<phot::PhotSystem::Flambda, phot::PhotSystem::AB>(flux, wlPivot);
                 }
-                throw std::runtime_error(
-                    "FilterCollection: conversion to the Vega magnitude "
-                    "system is not yet implemented");
+                return phot::PhotConvert<phot::PhotSystem::Flambda, phot::PhotSystem::Vega>(flux, wlPivot, fluxVega);
             }
         }
         throw std::runtime_error("FilterCollection: unrecognized PhotSystem value");
@@ -267,7 +270,7 @@ auto phot::FilterCollection::phot(const std::vector<double>& wl,
         const double value = filt->phot(wl, spec);
         result.at(i) = filt->photCount()
             ? value
-            : convertFlambda(value, filt->wlPivot(), photSystem_);
+            : convertFlambda(value, filt->wlPivot(), filt->fluxVega(), photSystem_);
     }
     return result;
 }

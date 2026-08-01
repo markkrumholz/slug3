@@ -76,10 +76,10 @@ namespace phot
          *   (PhotSystem conversions apply only to energy fluxes); for
          *   an energy-flux filter, Filter::phot()'s F_lambda value,
          *   converted to this collection's photSystem via PhotConvert
-         *   (left as-is if photSystem is already Flambda)
-         * @throws std::runtime_error if photSystem is Vega, since
-         *   conversion to the Vega magnitude system is not yet
-         *   implemented (a future PR)
+         *   (left as-is if photSystem is already Flambda; for Vega,
+         *   using this filter's own fluxVega() -- populated from
+         *   vegaName at construction, see the constructor -- as the
+         *   zero point)
          */
         [[nodiscard]] auto phot(const std::vector<double>& wl,
             const std::vector<double>& spec) const -> std::vector<double>;

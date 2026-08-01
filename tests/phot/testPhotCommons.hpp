@@ -307,6 +307,106 @@ inline auto testPhotConvertSTAB() -> int
 }
 
 /**
+ * @brief Unit test for phot::PhotConvert<Flambda, Vega> and <Vega, Flambda>
+ * @return 0 if the test passes, 1 if it fails.
+ * @details
+ * The Flambda/Vega analog of testPhotConvertFlambdaST -- see its own
+ * comment for what's checked and why. fluxVega plays the role
+ * flux0ST plays there: converting fluxVega itself gives magnitude 0
+ * by construction, but here that zero point is a per-call argument
+ * (a representative real Vega V-band flux density, from CALSPEC)
+ * rather than a fixed library constant, since Vega's own zero point
+ * is filter-dependent.
+ */
+inline auto testPhotConvertFlambdaVega() -> int
+{
+    constexpr double relTol = 1e-12;
+    constexpr double wl = 5000.0; // Angstrom, unused by this conversion but required by PhotConvert's signature
+    constexpr double fluxVega = 3.44e-9; // erg/s/cm^2/Angstrom, representative real Vega V-band flux density (CALSPEC)
+
+    const double zeroPointMag = phot::PhotConvert<phot::PhotSystem::Flambda, phot::PhotSystem::Vega>(fluxVega, wl, fluxVega);
+    if (std::abs(zeroPointMag) > relTol)
+    {
+        std::cerr << "testPhotConvertFlambdaVega: fluxVega converted to magnitude "
+            << zeroPointMag << ", expected exactly 0\n";
+        return 1;
+    }
+
+    constexpr double magIn = 18.5;
+    const double flambda = phot::PhotConvert<phot::PhotSystem::Vega, phot::PhotSystem::Flambda>(magIn, wl, fluxVega);
+    const double expectedFlambda = fluxVega * std::pow(10.0, magIn / -2.5);
+    const double relErrFlambda = std::abs(flambda - expectedFlambda) / std::abs(expectedFlambda);
+    if (relErrFlambda > relTol)
+    {
+        std::cerr << "testPhotConvertFlambdaVega: Vega -> Flambda gave " << flambda
+            << " erg/s/cm^2/Angstrom, expected " << expectedFlambda
+            << " erg/s/cm^2/Angstrom (relative error " << relErrFlambda
+            << ", tolerance " << relTol << ")\n";
+        return 1;
+    }
+
+    const double magBack = phot::PhotConvert<phot::PhotSystem::Flambda, phot::PhotSystem::Vega>(flambda, wl, fluxVega);
+    const double absErrBack = std::abs(magBack - magIn);
+    if (absErrBack > relTol)
+    {
+        std::cerr << "testPhotConvertFlambdaVega: Flambda -> Vega round trip gave "
+            << magBack << " mag, expected " << magIn
+            << " mag (absolute error " << absErrBack << ", tolerance "
+            << relTol << ")\n";
+        return 1;
+    }
+
+    return 0;
+}
+
+/**
+ * @brief Sanity check: the same flux converts to similar, but not identical, ST and Vega magnitudes
+ * @return 0 if the test passes, 1 if it fails.
+ * @details
+ * flux0ST (the ST system's fixed zero point) was historically chosen
+ * to be close to Vega's own flux, so converting an arbitrary Flambda
+ * value to both systems should give magnitudes that agree to within
+ * about a tenth of a magnitude. fluxVega here (a representative real
+ * Vega V-band flux density from CALSPEC) is deliberately not
+ * numerically equal to flux0ST, so the two magnitudes should still
+ * differ by a small but distinctly nonzero amount -- a difference of
+ * exactly 0 would indicate the Vega conversion is accidentally using
+ * flux0ST (or some other fixed constant) rather than the fluxVega
+ * argument actually passed in.
+ */
+inline auto testPhotConvertVegaSanityCheck() -> int
+{
+    constexpr double wl = 5500.0; // Angstrom, roughly V band
+    constexpr double flambda = 3.5e-9; // erg/s/cm^2/Angstrom, order-unity relative to both zero points below
+    constexpr double fluxVega = 3.44e-9; // erg/s/cm^2/Angstrom, representative real Vega V-band flux density (CALSPEC)
+
+    const double magST = phot::PhotConvert<phot::PhotSystem::Flambda, phot::PhotSystem::ST>(flambda, wl);
+    const double magVega = phot::PhotConvert<phot::PhotSystem::Flambda, phot::PhotSystem::Vega>(flambda, wl, fluxVega);
+    const double diff = std::abs(magST - magVega);
+
+    constexpr double maxDiff = 0.1;
+    if (diff > maxDiff)
+    {
+        std::cerr << "testPhotConvertVegaSanityCheck: ST mag " << magST
+            << " and Vega mag " << magVega << " differ by " << diff
+            << " mag, expected at most " << maxDiff << " mag\n";
+        return 1;
+    }
+    constexpr double minDiff = 1e-6;
+    if (diff < minDiff)
+    {
+        std::cerr << "testPhotConvertVegaSanityCheck: ST mag " << magST
+            << " and Vega mag " << magVega << " are essentially identical "
+            "(difference " << diff << " mag); expected a small but "
+            "nonzero difference, since flux0ST and fluxVega are not "
+            "the same value\n";
+        return 1;
+    }
+
+    return 0;
+}
+
+/**
  * @brief Unit tests for the definitions in PhotCommons.hpp
  * @return 0 if the test passes, 1 if it fails.
  */
@@ -319,6 +419,8 @@ inline auto testPhotCommons() -> int
     result += testPhotConvertFlambdaAB();
     result += testPhotConvertFnuST();
     result += testPhotConvertSTAB();
+    result += testPhotConvertFlambdaVega();
+    result += testPhotConvertVegaSanityCheck();
     return result;
 }
 
