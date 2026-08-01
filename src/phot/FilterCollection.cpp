@@ -7,14 +7,16 @@
 
 #include "FilterCollection.hpp"
 #include "../utils/Constants.hpp"
+#include "../utils/HDF5Utils.hpp"
 #include "../utils/MiscUtils.hpp"
+#include "../utils/ParseUtils.hpp"
+#include "../utils/TOMLUtils.hpp"
 #include "Filter.hpp"
 #include "FilterIdeal.hpp"
 #include "FilterTabulated.hpp"
 #include "PhotCommons.hpp"
 #include "hdf5.h" // NOLINT(misc-include-cleaner)
 #include <cstddef>
-#include <exception>
 #include <memory>
 #include <numbers>
 #include <stdexcept>
@@ -25,28 +27,6 @@
 
 namespace
 {
-    // Split str on every occurrence of delim, keeping empty tokens
-    // (e.g. "a..b" -> {"a", "", "b"}) rather than collapsing them, so
-    // a malformed name fails to match the expected token count
-    // downstream instead of silently merging fields
-    auto splitOnChar(const std::string& str, const char delim) -> std::vector<std::string>
-    {
-        std::vector<std::string> tokens;
-        std::size_t start = 0;
-        while (true)
-        {
-            const std::size_t pos = str.find(delim, start);
-            if (pos == std::string::npos)
-            {
-                tokens.push_back(str.substr(start));
-                break;
-            }
-            tokens.push_back(str.substr(start, pos - start));
-            start = pos + 1;
-        }
-        return tokens;
-    }
-
     // True if name matches one of FilterIdeal's own naming
     // conventions (ideal_energy_X_Y, ideal_phot_X_Y, or Q(...));
     // FilterIdeal's own constructor does the actual detailed parsing
@@ -63,23 +43,8 @@ namespace
     // facility
     auto resolveSingleInstrument(const std::string& facility, const std::string& registryName) -> std::string
     {
-        const auto registryPath = utils::getFilePath(registryName);
-        if (registryPath.empty())
-        {
-            throw std::runtime_error(
-                "FilterCollection: registry " + registryName + " not found");
-        }
-        toml::table registry;
-        try
-        {
-            registry = toml::parse_file(registryPath.string());
-        }
-        catch (const std::exception&)
-        {
-            throw std::runtime_error(
-                "FilterCollection: registry " + registryPath.string() +
-                " is not a valid toml file");
-        }
+        const auto [registry, registryPath] =
+            utils::parseTOMLFile(registryName, "FilterCollection");
 
         const auto* instruments = registry[facility]["instruments"].as_array(); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- toml::table/node_view::operator[] is a keyed lookup, not a bounds-checkable container index; a missing key just yields a null node_view, handled below
         if (instruments == nullptr || instruments->empty())
@@ -153,34 +118,11 @@ namespace
         throw std::runtime_error("FilterCollection: unrecognized PhotSystem value");
     }
 
-    // Disable linting for the next two functions -- including hdf5.h
-    // wholesale (rather than individual headers) is the paradigm
-    // HDF5 itself wants, which confuses misc-include-cleaner -- see
-    // FilterTabulated.cpp's own identical suppression for its
-    // equivalent readDataset1D
-    // NOLINTBEGIN(misc-include-cleaner)
-
-    // Read a 1D double dataset from an already-open HDF5 file
-    auto readDataset1D(const hid_t file, const std::string& name) -> std::vector<double>
-    {
-        const hid_t dset = H5Dopen2(file, name.c_str(), H5P_DEFAULT);
-        if (dset < 0)
-        {
-            throw std::runtime_error(
-                "FilterCollection: unable to open dataset " + name);
-        }
-        const hid_t space = H5Dget_space(dset);
-        hsize_t dims = 0;
-        H5Sget_simple_extent_dims(space, &dims, nullptr);
-        std::vector<double> data(dims);
-        H5Dread(dset, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, data.data());
-        H5Sclose(space);
-        H5Dclose(dset);
-        return data;
-    }
-
     // Load the Vega reference spectrum's wl/flux datasets from
     // vegaName -- see data/tools/fetch_vega.py for the file's schema
+    // NOLINTBEGIN(misc-include-cleaner) -- including hdf5.h wholesale
+    // (rather than individual headers) is the paradigm HDF5 itself
+    // wants, which confuses misc-include-cleaner
     auto loadVegaSpectrum(const std::string& vegaName) -> std::pair<std::vector<double>, std::vector<double>>
     {
         const auto vegaPath = utils::getFilePath(vegaName);
@@ -195,8 +137,8 @@ namespace
             throw std::runtime_error(
                 "FilterCollection: unable to open HDF5 file " + vegaPath.string());
         }
-        std::vector<double> wlVega = readDataset1D(file, "wl");
-        std::vector<double> fluxVega = readDataset1D(file, "flux");
+        std::vector<double> wlVega = utils::readDataset1D(file, "wl", "FilterCollection");
+        std::vector<double> fluxVega = utils::readDataset1D(file, "flux", "FilterCollection");
         H5Fclose(file);
         return { std::move(wlVega), std::move(fluxVega) };
     }
@@ -218,7 +160,7 @@ phot::FilterCollection::FilterCollection(
             continue;
         }
 
-        const auto tokens = splitOnChar(name, '.');
+        const auto tokens = utils::splitOnChar(name, '.');
         std::string facility;
         std::string instrument;
         std::string filter;

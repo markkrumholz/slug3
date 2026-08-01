@@ -8,6 +8,7 @@
 #include "SpecsynLibNoWind.hpp"
 #include "../io/SimControls.hpp"
 #include "../tracks/TrackCommons.hpp"
+#include "../utils/HDF5Utils.hpp"
 #include "../utils/MiscUtils.hpp"
 #include "Specsyn.hpp"
 #include "SpecsynCommons.hpp"
@@ -29,93 +30,6 @@
 
 namespace specsyn
 {
-    // Suppress clang-tidy warnings iun this namespace caused by just including
-    // hdf5.h, instead of the individual HDF5 headers, since this is the paradigm
-    // that HDF5 wants
-    // NOLINTBEGIN(misc-include-cleaner)
-    namespace
-    {
-        /**
-         * @brief Read a 1D double dataset from an HDF5 group
-         * @param grp Handle to the group containing the dataset
-         * @param name Name of the dataset
-         * @returns The dataset contents
-         */
-        auto readDataset1D(const hid_t grp, const std::string& name) //NOLINT(llvm-prefer-static-over-anonymous-namespace)
-            -> std::vector<double>
-        {
-            const hid_t dset = H5Dopen2(grp, name.c_str(), H5P_DEFAULT);
-            if (dset < 0)
-            {
-                throw std::runtime_error(
-                    "SpecsynLibNoWind: unable to open dataset " + name);
-            }
-            const hid_t space = H5Dget_space(dset);
-            hsize_t dims = 0;
-            H5Sget_simple_extent_dims(space, &dims, nullptr);
-            std::vector<double> data(dims);
-            H5Dread(dset, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL,
-                H5P_DEFAULT, data.data());
-            H5Sclose(space);
-            H5Dclose(dset);
-            return data;
-        }
-
-        /**
-         * @brief List the names of every dataset directly inside an HDF5 group
-         * @param grp Handle to the group
-         * @returns The names of the group's child datasets
-         */
-        auto listGroupDatasetNames(const hid_t grp) //NOLINT(llvm-prefer-static-over-anonymous-namespace)
-            -> std::vector<std::string>
-        {
-            H5G_info_t ginfo{};
-            H5Gget_info(grp, &ginfo);
-
-            std::vector<std::string> names;
-            names.reserve(ginfo.nlinks);
-            for (hsize_t i = 0; i < ginfo.nlinks; ++i)
-            {
-                const auto nameLen = H5Lget_name_by_idx(grp, ".",
-                    H5_INDEX_NAME, H5_ITER_INC, i, nullptr, 0, H5P_DEFAULT);
-                if (nameLen < 0) { continue; }
-                std::vector<char> nameBuf(static_cast<size_t>(nameLen) + 1);
-                H5Lget_name_by_idx(grp, ".", H5_INDEX_NAME, H5_ITER_INC, i,
-                    nameBuf.data(), nameBuf.size(), H5P_DEFAULT);
-                names.emplace_back(nameBuf.data());
-            }
-            return names;
-        }
-
-        /**
-         * @brief Read a required scalar double attribute from an HDF5 object
-         * @param obj Handle to the object (a group or a dataset)
-         * @param name Name of the attribute
-         * @returns The attribute's value
-         * @throws std::runtime_error if obj has no attribute of that name
-         */
-        auto readRequiredScalarAttr(const hid_t obj, const std::string& name) //NOLINT(llvm-prefer-static-over-anonymous-namespace)
-            -> double
-        {
-            if (H5Aexists(obj, name.c_str()) <= 0)
-            {
-                throw std::runtime_error(
-                    "SpecsynLibNoWind: missing required attribute " + name);
-            }
-            const hid_t attr = H5Aopen(obj, name.c_str(), H5P_DEFAULT);
-            if (attr < 0)
-            {
-                throw std::runtime_error(
-                    "SpecsynLibNoWind: unable to open attribute " + name);
-            }
-            double value = 0.0;
-            H5Aread(attr, H5T_NATIVE_DOUBLE, &value);
-            H5Aclose(attr);
-            return value;
-        }
-    } // namespace
-    // NOLINTEND(misc-include-cleaner)
-
     // Maps a (logTeff, logg) grid point to the name of the dataset
     // holding its spectrum, for one HDF5 group (i.e. one feh/afe
     // combination).
@@ -152,7 +66,7 @@ namespace specsyn
                 "SpecsynLibNoWind: unable to open group " + groupName);
         }
         DatasetMap entries;
-        for (const auto& name : listGroupDatasetNames(grp))
+        for (const auto& name : utils::listGroupDatasetNames(grp))
         {
             const hid_t dset = H5Dopen2(grp, name.c_str(), H5P_DEFAULT);
             if (dset < 0)
@@ -161,8 +75,8 @@ namespace specsyn
                 throw std::runtime_error(
                     "SpecsynLibNoWind: unable to open dataset " + name);
             }
-            const double logTeff = std::log10(readRequiredScalarAttr(dset, "teff"));
-            const double logg = readRequiredScalarAttr(dset, "logg");
+            const double logTeff = std::log10(utils::readRequiredScalarAttr(dset, "teff", "SpecsynLibNoWind"));
+            const double logg = utils::readRequiredScalarAttr(dset, "logg", "SpecsynLibNoWind");
             H5Dclose(dset);
             entries[{logTeff, logg}] = name;
             logTeffSet.insert(logTeff);
@@ -221,7 +135,7 @@ namespace specsyn
                     std::ranges::lower_bound(result.logg_, logg) -
                     result.logg_.begin());
                 result.spectra_[(f * nlogg + iLogg) * nteff + iTeff] =
-                    readDataset1D(grp, name);
+                    utils::readDataset1D(grp, name, "SpecsynLibNoWind");
             }
             H5Gclose(grp);
         }
@@ -306,8 +220,8 @@ namespace specsyn
                     continue; // missing from one bracket → leave empty
                 }
 
-                auto loFlux = readDataset1D(loGrp, loIt->second);
-                auto hiFlux = readDataset1D(hiGrp, hiIt->second);
+                auto loFlux = utils::readDataset1D(loGrp, loIt->second, "SpecsynLibNoWind");
+                auto hiFlux = utils::readDataset1D(hiGrp, hiIt->second, "SpecsynLibNoWind");
                 const size_t nw = loFlux.size();
                 std::vector<double> interp(nw);
                 for (size_t w = 0; w < nw; ++w)
@@ -504,13 +418,13 @@ namespace specsyn
             auto wlName = "r" + std::to_string(std::llround(r));
             if (H5Lexists(waveGrp, wlName.c_str(), H5P_DEFAULT) <= 0)
             {
-                const auto waveNames = listGroupDatasetNames(waveGrp);
+                const auto waveNames = utils::listGroupDatasetNames(waveGrp);
                 if (waveNames.size() == 1)
                 {
                     wlName = waveNames.front();
                 }
             }
-            this->wl_ = readDataset1D(waveGrp, wlName);
+            this->wl_ = utils::readDataset1D(waveGrp, wlName, "SpecsynLibNoWind");
             H5Gclose(waveGrp);
             if (this->wl_.empty())
             {

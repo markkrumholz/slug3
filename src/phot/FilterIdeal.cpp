@@ -24,29 +24,6 @@
 
 namespace
 {
-    // Split str on every occurrence of '_', keeping empty tokens (e.g.
-    // "a__b" -> {"a", "", "b"}) rather than collapsing them, so a
-    // malformed name (an extra or missing underscore) fails to match
-    // the expected token count downstream instead of silently merging
-    // fields
-    auto splitOnUnderscore(const std::string& str) -> std::vector<std::string>
-    {
-        std::vector<std::string> tokens;
-        std::size_t start = 0;
-        while (true)
-        {
-            const std::size_t pos = str.find('_', start);
-            if (pos == std::string::npos)
-            {
-                tokens.push_back(str.substr(start));
-                break;
-            }
-            tokens.push_back(str.substr(start, pos - start));
-            start = pos + 1;
-        }
-        return tokens;
-    }
-
     // Return the index into elem::elemData whose symbol matches sym
     // (a 1- or 2-character string), or elem::elemData.size() if not found
     auto findElement(const std::string& sym) -> std::size_t
@@ -116,7 +93,7 @@ phot::FilterIdeal::FilterIdeal(std::string name) : Filter(name) // NOLINT(perfor
         return;
     }
 
-    const auto tokens = splitOnUnderscore(name);
+    const auto tokens = utils::splitOnChar(name, '_');
     const bool wellFormed = tokens.size() == 4 && tokens.at(0) == "ideal" &&
         (tokens.at(1) == "energy" || tokens.at(1) == "phot");
     if (!wellFormed)

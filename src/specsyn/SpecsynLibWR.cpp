@@ -9,6 +9,7 @@
 #include "../io/SimControls.hpp"
 #include "../tracks/TrackCommons.hpp"
 #include "../utils/Constants.hpp"
+#include "../utils/HDF5Utils.hpp"
 #include "../utils/MiscUtils.hpp"
 #include "Specsyn.hpp"
 #include "SpecsynCommons.hpp"
@@ -33,93 +34,6 @@
 
 namespace specsyn
 {
-    // Suppress clang-tidy warnings iun this namespace caused by just including
-    // hdf5.h, instead of the individual HDF5 headers, since this is the paradigm
-    // that HDF5 wants
-    // NOLINTBEGIN(misc-include-cleaner)
-    namespace
-    {
-        /**
-         * @brief Read a 1D double dataset from an HDF5 group
-         * @param grp Handle to the group containing the dataset
-         * @param name Name of the dataset
-         * @returns The dataset contents
-         */
-        auto readDataset1D(const hid_t grp, const std::string& name) //NOLINT(llvm-prefer-static-over-anonymous-namespace)
-            -> std::vector<double>
-        {
-            const hid_t dset = H5Dopen2(grp, name.c_str(), H5P_DEFAULT);
-            if (dset < 0)
-            {
-                throw std::runtime_error(
-                    "SpecsynLibWR: unable to open dataset " + name);
-            }
-            const hid_t space = H5Dget_space(dset);
-            hsize_t dims = 0;
-            H5Sget_simple_extent_dims(space, &dims, nullptr);
-            std::vector<double> data(dims);
-            H5Dread(dset, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL,
-                H5P_DEFAULT, data.data());
-            H5Sclose(space);
-            H5Dclose(dset);
-            return data;
-        }
-
-        /**
-         * @brief List the names of every dataset directly inside an HDF5 group
-         * @param grp Handle to the group
-         * @returns The names of the group's child datasets
-         */
-        auto listGroupDatasetNames(const hid_t grp) //NOLINT(llvm-prefer-static-over-anonymous-namespace)
-            -> std::vector<std::string>
-        {
-            H5G_info_t ginfo{};
-            H5Gget_info(grp, &ginfo);
-
-            std::vector<std::string> names;
-            names.reserve(ginfo.nlinks);
-            for (hsize_t i = 0; i < ginfo.nlinks; ++i)
-            {
-                const auto nameLen = H5Lget_name_by_idx(grp, ".",
-                    H5_INDEX_NAME, H5_ITER_INC, i, nullptr, 0, H5P_DEFAULT);
-                if (nameLen < 0) { continue; }
-                std::vector<char> nameBuf(static_cast<size_t>(nameLen) + 1);
-                H5Lget_name_by_idx(grp, ".", H5_INDEX_NAME, H5_ITER_INC, i,
-                    nameBuf.data(), nameBuf.size(), H5P_DEFAULT);
-                names.emplace_back(nameBuf.data());
-            }
-            return names;
-        }
-
-        /**
-         * @brief Read a required scalar double attribute from an HDF5 object
-         * @param obj Handle to the object (a group or a dataset)
-         * @param name Name of the attribute
-         * @returns The attribute's value
-         * @throws std::runtime_error if obj has no attribute of that name
-         */
-        auto readRequiredScalarAttr(const hid_t obj, const std::string& name) //NOLINT(llvm-prefer-static-over-anonymous-namespace)
-            -> double
-        {
-            if (H5Aexists(obj, name.c_str()) <= 0)
-            {
-                throw std::runtime_error(
-                    "SpecsynLibWR: missing required attribute " + name);
-            }
-            const hid_t attr = H5Aopen(obj, name.c_str(), H5P_DEFAULT);
-            if (attr < 0)
-            {
-                throw std::runtime_error(
-                    "SpecsynLibWR: unable to open attribute " + name);
-            }
-            double value = 0.0;
-            H5Aread(attr, H5T_NATIVE_DOUBLE, &value);
-            H5Aclose(attr);
-            return value;
-        }
-    } // namespace
-    // NOLINTEND(misc-include-cleaner)
-
     namespace
     {
         /**
@@ -344,8 +258,8 @@ namespace specsyn
                 throw std::runtime_error(
                     "SpecsynLibWR: unable to open group " + groupNames[f]);
             }
-            dInf_[f] = readRequiredScalarAttr(grp, "dinf");
-            for (const auto& name : listGroupDatasetNames(grp))
+            dInf_[f] = utils::readRequiredScalarAttr(grp, "dinf", "SpecsynLibWR");
+            for (const auto& name : utils::listGroupDatasetNames(grp))
             {
                 if (name.ends_with("_wave")) { continue; } // wavelength companion, not a flux dataset
 
@@ -357,9 +271,9 @@ namespace specsyn
                     throw std::runtime_error(
                         "SpecsynLibWR: unable to open dataset " + name);
                 }
-                const double logTeff = readRequiredScalarAttr(dset, "log_teff");
-                const double logRt = readRequiredScalarAttr(dset, "log_rt");
-                const double logL = readRequiredScalarAttr(dset, "logl");
+                const double logTeff = utils::readRequiredScalarAttr(dset, "log_teff", "SpecsynLibWR");
+                const double logRt = utils::readRequiredScalarAttr(dset, "log_rt", "SpecsynLibWR");
+                const double logL = utils::readRequiredScalarAttr(dset, "logl", "SpecsynLibWR");
                 H5Dclose(dset);
 
                 groupEntries[f].emplace_back(name, std::make_tuple(logTeff, logRt, logL));
@@ -412,8 +326,8 @@ namespace specsyn
                     std::ranges::lower_bound(logTeff_, logTeffVal) - logTeff_.begin());
                 const auto iRt = static_cast<size_t>(
                     std::ranges::lower_bound(logRt_, logRtVal) - logRt_.begin());
-                this->grid_[f, iRt, iTeff] = readDataset1D(grp, name);
-                waveGrid[f, iRt, iTeff] = readDataset1D(grp, name + "_wave");
+                this->grid_[f, iRt, iTeff] = utils::readDataset1D(grp, name, "SpecsynLibWR");
+                waveGrid[f, iRt, iTeff] = utils::readDataset1D(grp, name + "_wave", "SpecsynLibWR");
                 logLGrid_[f, iRt, iTeff] = logLVal;
             }
             H5Gclose(grp);

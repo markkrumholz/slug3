@@ -6,15 +6,14 @@
  */
 
 #include "TrackUtils.hpp"
+#include "../utils/HDF5Utils.hpp"
 #include "../utils/MiscUtils.hpp"
+#include "../utils/TOMLUtils.hpp"
 #include "hdf5.h"   // NOLINT(misc-include-cleaner)
 #include <algorithm>
-#include <array>
 #include <cstddef>
-#include <exception>
 #include <filesystem>
 #include <format>
-#include <optional>
 #include <ranges>
 #include <stdexcept>
 #include <string>
@@ -24,152 +23,12 @@
 
 namespace tracks
 {
-    static auto getTrackSetsFromRegistry(toml::table& registry)
-    {
-        std::vector<std::string> trackSets;
-        if (toml::array* arr = registry.at_path("track_sets").as_array())
-        {
-            arr->for_each([&trackSets](auto&& el) -> void {
-                if constexpr (toml::is_string<decltype(el)>)
-                {
-                    trackSets.push_back(std::string(el));
-                }
-            });
-        }
-        return std::move(trackSets);
-    }
-
-    // Suppress clang-tidy warnings iun this namespace caused by just including
-    // hdf5.h, instead of the individual HDF5 headers, since this is the paradigm
-    // that HDF5 wants
-    // NOLINTBEGIN(misc-include-cleaner)
-        
-    /**
-     * @brief Read a scalar double attribute from an HDF5 group, if present
-     * @param grp Handle to the group
-     * @param name Name of the attribute
-     * @returns The attribute's value, or an empty optional if the group
-     *   has no attribute of that name
-     */
-    static auto readScalarAttrIfPresent(const hid_t grp,
-        const std::string& name) -> std::optional<double>
-    {
-        if (H5Aexists(grp, name.c_str()) <= 0) { return std::nullopt; }
-        const hid_t attr = H5Aopen(grp, name.c_str(), H5P_DEFAULT);
-        if (attr < 0) { return std::nullopt; }
-        double value = 0.0;
-        H5Aread(attr, H5T_NATIVE_DOUBLE, &value);
-        H5Aclose(attr);
-        return value;
-    }
-
-    /**
-     * @brief Read a 1D double dataset from an HDF5 group
-     * @param grp Handle to the group containing the dataset
-     * @param name Name of the dataset
-     * @returns The dataset contents
-     */
-    static auto readDataset1D(const hid_t grp, const std::string& name)
-        -> std::vector<double>
-    {
-        const hid_t dset = H5Dopen2(grp, name.c_str(), H5P_DEFAULT);
-        if (dset < 0)
-        {
-            throw std::runtime_error("getTrackSize: unable to open dataset " + name);
-        }
-        const hid_t space = H5Dget_space(dset);
-        hsize_t dims = 0;
-        H5Sget_simple_extent_dims(space, &dims, nullptr);
-        std::vector<double> data(dims);
-        H5Dread(dset, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, data.data());
-        H5Sclose(space);
-        H5Dclose(dset);
-        return data;
-    }
-
-    /**
-     * @brief Get the number of rows of a 2D dataset without reading its data
-     * @param grp Handle to the group containing the dataset
-     * @param name Name of the dataset
-     * @returns The number of rows (extent of the first dimension) of the dataset
-     */
-    static auto dataset2DRows(const hid_t grp, const std::string& name)
-        -> size_t
-    {
-        const hid_t dset = H5Dopen2(grp, name.c_str(), H5P_DEFAULT);
-        if (dset < 0)
-        {
-            throw std::runtime_error("getTrackSize: unable to open dataset " + name);
-        }
-        const hid_t space = H5Dget_space(dset);
-        std::array<hsize_t, 2> dims = {0, 0};
-        H5Sget_simple_extent_dims(space, dims.data(), nullptr);
-        H5Sclose(space);
-        H5Dclose(dset);
-        return dims[0]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    }
-
-    // NOLINTEND(misc-include-cleaner)
-
     auto parseRegistry(const std::string& registryName)
     -> std::pair<toml::table, std::filesystem::path>
     {
-        // Validate that registry file exists
-        auto registryPath = utils::getFilePath(registryName);
-        if (registryPath.empty())
-        {
-            throw std::runtime_error(
-                "parseRegistry: registry " + registryName + 
-                " not found");
-        }
-
-        // Validate that registry file parses successfully
-        toml::table registry;
-        try
-        {
-            registry = toml::parse_file(registryPath.string());
-        }
-        catch(const std::exception& e)
-        {
-            throw std::runtime_error(
-                "parseRegistry: registry " + registryPath.string() + 
-                " is not a valid toml file");
-        }
-
-        // Extract list of track sets
-        auto trackSets = getTrackSetsFromRegistry(registry);
-        if (trackSets.empty())        
-        {
-            throw std::runtime_error(
-                "parseRegistry: registry " + registryPath.string() +
-                " does not contain a valid [track_sets] field"
-            );
-        }
-
-        // For each entry in trackSets, make sure we have a
-        // table entry that has the required "file" and "Fe_H" fields
-        for (const auto& ts : trackSets)
-        {
-            if (!registry.contains(ts))
-            {
-                throw std::runtime_error(
-                    "parseRegistry: registry " + registryPath.string() +
-                    " is missing entry for tracks " + ts
-                );
-            }
-            auto tsEntry = registry.at_path(ts);
-            if (!tsEntry.at_path("file") || !tsEntry.at_path("Fe_H"))
-            {
-                throw std::runtime_error(
-                    "parseRegistry: registry " + registryPath.string() +
-                    ", entry for tracks " + ts + " is missing required "
-                    "'file' or 'Fe_H' fields"
-                );
-            }
-        }
-
-        // If we are here, parse was successful
-        return std::make_pair(registry, registryPath);
+        [[maybe_unused]] auto [registry, registryPath, trackSets] =
+            utils::parseSetRegistry(registryName, "track_sets", "tracks", "parseRegistry");
+        return { std::move(registry), std::move(registryPath) };
     }
 
     auto findMatchingTracks( // NOLINT(readability-function-cognitive-complexity)
@@ -186,7 +45,7 @@ namespace tracks
         auto [registry, registryPath] = parseRegistry(registryName);
 
         // Now check the registry for tracks matching the given track name
-        auto trackSets = getTrackSetsFromRegistry(registry);
+        auto trackSets = utils::getStringArrayField(registry, "track_sets");
         auto it = std::ranges::find(trackSets.begin(), trackSets.end(), trackName);
         if (it == trackSets.end())
         {
@@ -244,12 +103,12 @@ namespace tracks
             const hid_t grp = H5Gopen2(file, groupName.c_str(), H5P_DEFAULT);
             if (grp < 0) { continue; }
 
-            const auto fehVal = readScalarAttrIfPresent(grp, "feh");
+            const auto fehVal = utils::readScalarAttrIfPresent(grp, "feh");
             bool isMatch = fehVal.has_value();
 
             if (isMatch)
             {
-                const auto vvcritVal = readScalarAttrIfPresent(grp, "vvcrit");
+                const auto vvcritVal = utils::readScalarAttrIfPresent(grp, "vvcrit");
                 if (vvcritVal && !utils::approxEqual(*vvcritVal, vvcrit))
                 {
                     isMatch = false;
@@ -257,7 +116,7 @@ namespace tracks
             }
             if (isMatch)
             {
-                const auto afeVal = readScalarAttrIfPresent(grp, "afe");
+                const auto afeVal = utils::readScalarAttrIfPresent(grp, "afe");
                 if (afeVal && !utils::approxEqual(*afeVal, afe))
                 {
                     isMatch = false;
@@ -333,7 +192,7 @@ namespace tracks
         auto [registry, registryPath] = parseRegistry(registryName);
 
         // Now check the registry for tracks matching the given track name
-        auto trackSets = getTrackSetsFromRegistry(registry);
+        auto trackSets = utils::getStringArrayField(registry, "track_sets");
         auto it = std::ranges::find(trackSets.begin(), trackSets.end(), trackName);
         if (it == trackSets.end())
         {
@@ -390,14 +249,14 @@ namespace tracks
 
             bool isMatch = true;
 
-            const auto fehVal = readScalarAttrIfPresent(grp, "feh");
+            const auto fehVal = utils::readScalarAttrIfPresent(grp, "feh");
             if (fehVal && !utils::approxEqual(*fehVal, feh))
             {
                 isMatch = false;
             }
             if (isMatch)
             {
-                const auto vvcritVal = readScalarAttrIfPresent(grp, "vvcrit");
+                const auto vvcritVal = utils::readScalarAttrIfPresent(grp, "vvcrit");
                 if (vvcritVal && !utils::approxEqual(*vvcritVal, vvcrit))
                 {
                     isMatch = false;
@@ -405,7 +264,7 @@ namespace tracks
             }
             if (isMatch)
             {
-                const auto afeVal = readScalarAttrIfPresent(grp, "afe");
+                const auto afeVal = utils::readScalarAttrIfPresent(grp, "afe");
                 if (afeVal && !utils::approxEqual(*afeVal, afe))
                 {
                     isMatch = false;
@@ -456,7 +315,7 @@ namespace tracks
         }
 
         // The number of masses is the length of the masses dataset
-        const auto massData = readDataset1D(grp, "masses");
+        const auto massData = utils::readDataset1D(grp, "masses", "getTrackSize");
         const size_t nmass = massData.size();
 
         // The number of times is the maximum number of time points
@@ -466,7 +325,7 @@ namespace tracks
         for (const double m : massData)
         {
             const auto name = std::format("track_m{:.3f}", m);
-            ntime = std::max(ntime, dataset2DRows(grp, name));
+            ntime = std::max(ntime, utils::dataset2DShape(grp, name, "getTrackSize").first);
         }
 
         H5Gclose(grp);
