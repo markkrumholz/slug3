@@ -23,7 +23,6 @@
 #include "../utils/MiscUtils.hpp"
 #include "hdf5.h" // NOLINT(misc-include-cleaner)
 #include <algorithm>
-#include <cmath>
 #include <exception>
 #include <stdexcept>
 #include <string>
@@ -32,13 +31,6 @@
 
 namespace phot
 {
-    auto FilterTabulated::lnGrid(const std::vector<double>& wl) -> std::vector<double>
-    {
-        std::vector<double> result(wl.size());
-        std::ranges::transform(wl, result.begin(), [](const double w) -> double { return std::log(w); });
-        return result;
-    }
-
     auto FilterTabulated::phot(const std::vector<double>& wl,
         const std::vector<double>& spec) const -> double
     {

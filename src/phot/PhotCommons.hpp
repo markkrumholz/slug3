@@ -11,6 +11,8 @@
 #include "../utils/Constants.hpp"
 #include <cmath>
 #include <cstdint>
+#include <filesystem>
+#include <string>
 
 /**
  * @brief A namespace to hold items dealing with photometry
@@ -37,6 +39,10 @@ namespace phot
     inline constexpr double flux0AB = 3631.0;    /**< Zero point of the AB system, in Jy */
     inline constexpr double flux0ST = 3.631e-9;  /**< Zero point of the ST system, in erg/s/cm^2/Angstrom */
 
+    inline static const std::string defaultVegaSpec = // NOLINT(bugprone-throwing-static-initialization,cert-err58-cpp) -- built from fixed string literals, so the (theoretically throwing) path conversion can never actually throw here
+        (std::filesystem::path("data") / std::filesystem::path("spectra")
+        / std::filesystem::path("vega.h5")); /**< Default Vega reference spectrum, for PhotSystem::Vega conversions */
+
     /**
      * @brief Convert a flux or magnitude from one photometric system to another
      * @tparam From The PhotSystem fluxIn is expressed in
@@ -54,10 +60,12 @@ namespace phot
      * @details
      * Only declared here, not defined: only specific (from, to) pairs
      * are given a definition, via explicit specialization, below.
-     * Vega -- a filter-based magnitude system with no absolute
-     * flux/magnitude conversion of its own, unlike ST and AB -- is
-     * handled separately, as a special case, rather than by
-     * specializing this template.
+     * Neither From nor To may be PhotSystem::Vega for this overload --
+     * see the three-argument PhotConvert(fluxIn, wl, fluxVega)
+     * overload below for any (from, to) pair involving Vega, since
+     * Vega's zero point is filter-dependent (a given filter's own
+     * fluxVega(), see Filter::fluxVega()) rather than a fixed
+     * constant like flux0AB/flux0ST.
      *
      * Declared constexpr here, but not every specialization below
      * actually is: only the Flambda <-> Fnu pair, which needs nothing
@@ -68,6 +76,34 @@ namespace phot
      */
     template <PhotSystem From, PhotSystem To>
     constexpr auto PhotConvert(double fluxIn, double wl) -> double; // NOLINT(readability-identifier-naming) -- capitalized to match this file's other fixed photometric naming (PhotSystem above), rather than the project's usual camelBack function convention
+
+    /**
+     * @brief Convert a flux or magnitude to or from a Vega magnitude
+     * @tparam From The PhotSystem fluxIn is expressed in
+     * @tparam To The PhotSystem to convert fluxIn to
+     * @param fluxIn The input value, in the units/system documented
+     *   by the two-argument PhotConvert(fluxIn, wl) overload above
+     * @param wl The wavelength at which fluxIn is evaluated, in
+     *   Angstrom; see the two-argument overload above -- unused here
+     *   too, since the direct Flambda <-> Vega conversions need only
+     *   fluxVega, but kept for a uniform signature and because chained
+     *   conversions through Flambda/Fnu still need it
+     * @param fluxVega The filter-mean flux of Vega for the filter
+     *   whose photometry is being converted, in erg/s/cm^2/Angstrom
+     *   (see Filter::fluxVega()) -- Vega's own zero point, unlike
+     *   AB/ST's fixed flux0AB/flux0ST, since "the Vega magnitude
+     *   system" means different things in different filters
+     * @return fluxIn converted to To
+     * @details
+     * Overload of the two-argument PhotConvert(fluxIn, wl) above, for
+     * exactly the (From, To) pairs where one of the two is
+     * PhotSystem::Vega and the other is not (the pair (Vega, Vega) is
+     * not defined, for the same reason (Flambda, Flambda) etc. are
+     * not in the two-argument overload). Only declared here; see the
+     * specializations below.
+     */
+    template <PhotSystem From, PhotSystem To>
+    auto PhotConvert(double fluxIn, double wl, double fluxVega) -> double; // NOLINT(readability-identifier-naming) -- see the two-argument overload above
 
     /**
      * @brief Convert Flambda (erg/s/cm^2/Angstrom) to Fnu (Jy)
@@ -255,6 +291,121 @@ namespace phot
         return PhotConvert<PhotSystem::Flambda, PhotSystem::ST>(
             PhotConvert<PhotSystem::Fnu, PhotSystem::Flambda>(
                 PhotConvert<PhotSystem::AB, PhotSystem::Fnu>(fluxIn, wl), wl), wl);
+    }
+
+    // ---- Vega magnitude conversions (three-argument overload) ----
+    //
+    // Flambda <-> Vega are direct: identical in form to Flambda <->
+    // ST, but with flux0ST (a fixed constant) replaced by fluxVega (a
+    // per-filter value) as the zero point -- so Vega itself (fluxIn
+    // == fluxVega) evaluates to magnitude 0 by construction, exactly
+    // as the Vega system is defined to work. Every other (From, To)
+    // pair involving Vega is built by chaining through Flambda: To
+    // Vega, first convert From -> Flambda (via the two-argument
+    // overload), then Flambda -> Vega; from Vega, first convert
+    // Vega -> Flambda, then Flambda -> To (via the two-argument
+    // overload again). None of these are constexpr, for the same
+    // reason as their AB/ST counterparts above.
+
+    /**
+     * @brief Convert Flambda (erg/s/cm^2/Angstrom) to a Vega magnitude
+     * @details
+     * Identical in form to PhotConvert<Flambda, ST>, but using this
+     * filter's own Vega flux (fluxVega) as the zero point instead of
+     * the fixed ST zero point (flux0ST).
+     */
+    template <>
+    inline auto PhotConvert<PhotSystem::Flambda, PhotSystem::Vega>(const double fluxIn, double /*wl*/, const double fluxVega) -> double // NOLINT(readability-identifier-naming) -- see the two-argument overload above
+    {
+        return -2.5 * std::log10(fluxIn / fluxVega);
+    }
+
+    /**
+     * @brief Convert a Vega magnitude to Flambda (erg/s/cm^2/Angstrom)
+     * @details
+     * The algebraic inverse of the Flambda -> Vega conversion above,
+     * identical in form to PhotConvert<ST, Flambda> with flux0ST
+     * replaced by fluxVega.
+     */
+    template <>
+    inline auto PhotConvert<PhotSystem::Vega, PhotSystem::Flambda>(const double fluxIn, double /*wl*/, const double fluxVega) -> double // NOLINT(readability-identifier-naming) -- see the two-argument overload above
+    {
+        return fluxVega * std::pow(10.0, fluxIn / -2.5);
+    }
+
+    /**
+     * @brief Convert Fnu (Jy) to a Vega magnitude
+     * @details
+     * Fnu -> Flambda (two-argument overload) -> Vega.
+     */
+    template <>
+    inline auto PhotConvert<PhotSystem::Fnu, PhotSystem::Vega>(const double fluxIn, const double wl, const double fluxVega) -> double // NOLINT(readability-identifier-naming) -- see the two-argument overload above
+    {
+        return PhotConvert<PhotSystem::Flambda, PhotSystem::Vega>(
+            PhotConvert<PhotSystem::Fnu, PhotSystem::Flambda>(fluxIn, wl), wl, fluxVega);
+    }
+
+    /**
+     * @brief Convert a Vega magnitude to Fnu (Jy)
+     * @details
+     * Vega -> Flambda -> Fnu (two-argument overload), the algebraic
+     * inverse of the Fnu -> Vega conversion above.
+     */
+    template <>
+    inline auto PhotConvert<PhotSystem::Vega, PhotSystem::Fnu>(const double fluxIn, const double wl, const double fluxVega) -> double // NOLINT(readability-identifier-naming) -- see the two-argument overload above
+    {
+        return PhotConvert<PhotSystem::Flambda, PhotSystem::Fnu>(
+            PhotConvert<PhotSystem::Vega, PhotSystem::Flambda>(fluxIn, wl, fluxVega), wl);
+    }
+
+    /**
+     * @brief Convert an ST magnitude to a Vega magnitude
+     * @details
+     * ST -> Flambda (two-argument overload) -> Vega.
+     */
+    template <>
+    inline auto PhotConvert<PhotSystem::ST, PhotSystem::Vega>(const double fluxIn, const double wl, const double fluxVega) -> double // NOLINT(readability-identifier-naming) -- see the two-argument overload above
+    {
+        return PhotConvert<PhotSystem::Flambda, PhotSystem::Vega>(
+            PhotConvert<PhotSystem::ST, PhotSystem::Flambda>(fluxIn, wl), wl, fluxVega);
+    }
+
+    /**
+     * @brief Convert a Vega magnitude to an ST magnitude
+     * @details
+     * Vega -> Flambda -> ST (two-argument overload), the algebraic
+     * inverse of the ST -> Vega conversion above.
+     */
+    template <>
+    inline auto PhotConvert<PhotSystem::Vega, PhotSystem::ST>(const double fluxIn, const double wl, const double fluxVega) -> double // NOLINT(readability-identifier-naming) -- see the two-argument overload above
+    {
+        return PhotConvert<PhotSystem::Flambda, PhotSystem::ST>(
+            PhotConvert<PhotSystem::Vega, PhotSystem::Flambda>(fluxIn, wl, fluxVega), wl);
+    }
+
+    /**
+     * @brief Convert an AB magnitude to a Vega magnitude
+     * @details
+     * AB -> Flambda (two-argument overload) -> Vega.
+     */
+    template <>
+    inline auto PhotConvert<PhotSystem::AB, PhotSystem::Vega>(const double fluxIn, const double wl, const double fluxVega) -> double // NOLINT(readability-identifier-naming) -- see the two-argument overload above
+    {
+        return PhotConvert<PhotSystem::Flambda, PhotSystem::Vega>(
+            PhotConvert<PhotSystem::AB, PhotSystem::Flambda>(fluxIn, wl), wl, fluxVega);
+    }
+
+    /**
+     * @brief Convert a Vega magnitude to an AB magnitude
+     * @details
+     * Vega -> Flambda -> AB (two-argument overload), the algebraic
+     * inverse of the AB -> Vega conversion above.
+     */
+    template <>
+    inline auto PhotConvert<PhotSystem::Vega, PhotSystem::AB>(const double fluxIn, const double wl, const double fluxVega) -> double // NOLINT(readability-identifier-naming) -- see the two-argument overload above
+    {
+        return PhotConvert<PhotSystem::Flambda, PhotSystem::AB>(
+            PhotConvert<PhotSystem::Vega, PhotSystem::Flambda>(fluxIn, wl, fluxVega), wl);
     }
 
 } // namespace phot

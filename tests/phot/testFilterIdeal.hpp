@@ -42,10 +42,14 @@ namespace
         return {std::move(wl), std::move(spec)};
     }
 
-    // Analytical energy-flux integral ∫ (a + b·λ) dλ from lam0 to lam1
-    auto energyExact(double a, double b, double lam0, double lam1) -> double
+    // Analytical mean flux density on a log-wavelength basis:
+    // [∫ (a + b·λ)/λ dλ] / ln(lam1/lam0) = [a·ln(lam1/lam0) +
+    // b·(lam1 - lam0)] / ln(lam1/lam0), from lam0 to lam1 -- matches
+    // FilterIdeal::phot()'s own ln(wavelength)-domain mean convention
+    // (see its own comment for why, mirroring FilterTabulated)
+    auto energyExactLnMean(double a, double b, double lam0, double lam1) -> double
     {
-        return a * (lam1 - lam0) + 0.5 * b * (lam1 * lam1 - lam0 * lam0);
+        return a + b * (lam1 - lam0) / std::log(lam1 / lam0);
     }
 
     // Analytical photon-count integral ∫ (a + b·λ)·λ·Å/(h·c) dλ
@@ -60,12 +64,15 @@ namespace
 } // namespace
 
 /**
- * @brief Test ideal_energy_X_Y filter against an analytical energy integral
+ * @brief Test ideal_energy_X_Y filter against an analytical log-mean flux density
  * @return 0 on pass, 1 on failure
  * @details
  * Constructs a linear spectrum F(λ) = a + b·λ on [500, 2000] Å, then
- * checks that ideal_energy_700_1500 integrates it to the analytical value
- * a·(1500−700) + b·(1500²−700²)/2 to within 1e-8 relative tolerance.
+ * checks that ideal_energy_700_1500 returns the mean flux density
+ * over its passband on a log-wavelength basis -- [a·ln(1500/700) +
+ * b·(1500−700)] / ln(1500/700) -- since phot() integrates in
+ * ln(wavelength) (matching FilterTabulated's own convention), not
+ * linear wavelength, to within 1e-8 relative tolerance.
  */
 inline auto testFilterIdealEnergyMode() -> int
 {
@@ -76,7 +83,7 @@ inline auto testFilterIdealEnergyMode() -> int
 
     const phot::FilterIdeal f("ideal_energy_700_1500");
     const double got      = f.phot(wl, spec);
-    const double expected = energyExact(a, b, 700.0, 1500.0);
+    const double expected = energyExactLnMean(a, b, 700.0, 1500.0);
     const double relErr   = std::abs(got - expected) / std::abs(expected);
     constexpr double tol  = 1e-8;
     if (relErr > tol)
@@ -271,6 +278,43 @@ inline auto testFilterIdealErrors() -> int
     try {
         const phot::FilterIdeal f("ideal_energy_500");
         std::cerr << "testFilterIdealErrors: ideal_energy_500 should have thrown\n";
+        return 1;
+    } catch (const std::runtime_error&) {}
+
+    // Energy-flux filter with a non-positive wlMin: phot() integrates
+    // in ln(wavelength), which is undefined at/below 0
+    try {
+        const phot::FilterIdeal f("ideal_energy_0_1000");
+        std::cerr << "testFilterIdealErrors: ideal_energy_0_1000 should have thrown\n";
+        return 1;
+    } catch (const std::runtime_error&) {}
+
+    // Energy-flux filter with an infinite wlMax: ln(wlMax/wlMin)
+    // would be infinite, so the mean is undefined
+    try {
+        const phot::FilterIdeal f("ideal_energy_500_inf");
+        std::cerr << "testFilterIdealErrors: ideal_energy_500_inf should have thrown\n";
+        return 1;
+    } catch (const std::runtime_error&) {}
+
+    // The same two ranges are fine for a photon-count filter, where
+    // phot() is a raw dλ integral of a count rate, not a log-mean
+    // density -- neither should throw
+    try {
+        const phot::FilterIdeal f1("ideal_phot_0_1000");
+        const phot::FilterIdeal f2("ideal_phot_500_inf");
+    } catch (const std::runtime_error& e) {
+        std::cerr << "testFilterIdealErrors: a photCount filter with wlMin = 0 "
+            "or wlMax = inf should not have thrown, but got: " << e.what() << "\n";
+        return 1;
+    }
+
+    // The direct (name, wlMin, wlMax, photCount) constructor enforces
+    // the same restriction for photCount = false
+    try {
+        const phot::FilterIdeal f("direct_bad_range", 0.0, 1000.0, false);
+        std::cerr << "testFilterIdealErrors: direct constructor with wlMin = 0, "
+            "photCount = false should have thrown\n";
         return 1;
     } catch (const std::runtime_error&) {}
 

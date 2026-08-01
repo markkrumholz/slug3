@@ -10,6 +10,7 @@
 
 #include "Filter.hpp"
 #include <cmath>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -39,9 +40,24 @@ namespace phot
          * @param wlMax Maximum wavelength of the filter's response, in Angstrom
          * @param photCount If true, this filter returns photon counts
          *   rather than F_lambda values; see Filter::phot() for details
+         * @throws std::runtime_error if photCount is false and wlMin
+         *   <= 0 or wlMax is infinite -- phot()'s energy-flux mode
+         *   integrates in ln(wavelength), which breaks at either
+         *   extreme (see phot()'s own comment); a photCount filter
+         *   has no such restriction
          */
         FilterIdeal(std::string name, double wlMin, double wlMax, bool photCount = false)
-        : Filter(std::move(name), photCount), wlMin_(wlMin), wlMax_(wlMax) { }
+        : Filter(std::move(name), photCount), wlMin_(wlMin), wlMax_(wlMax)
+        {
+            if (!photCount_ && (wlMin_ <= 0.0 || std::isinf(wlMax_)))
+            {
+                throw std::runtime_error(
+                    "FilterIdeal: an energy-flux filter (photCount = false) "
+                    "must have a finite, positive wavelength range; got "
+                    "wlMin = " + std::to_string(wlMin_) + ", wlMax = " +
+                    std::to_string(wlMax_));
+            }
+        }
 
         /**
          * @brief Construct a FilterIdeal by parsing its name
@@ -105,12 +121,17 @@ namespace phot
          * @brief Compute the photometric response of this filter to a spectrum
          * @param wl The wavelength grid, in Angstrom
          * @param spec The spectrum, in erg/s/Angstrom
-         * @return If photCount() is false: ∫ spec dλ over the filter's
-         *   passband [wlMin, wlMax], in erg/s/Angstrom integrated over
-         *   the intersection of [wlMin, wlMax] with the supplied
-         *   wavelength grid; if photCount() is true: the equivalent
-         *   photon-count rate, in photons/s, computed by integrating
-         *   spec × λ / (h c) over the same range
+         * @return If photCount() is false: the mean value of spec over
+         *   the filter's passband [wlMin, wlMax] on a log-wavelength
+         *   basis -- (integral of spec d(ln λ)) / ln(wlMax / wlMin),
+         *   in erg/s/Angstrom, matching Filter::phot()'s own
+         *   documented units and FilterTabulated::phot()'s own
+         *   dlnλ convention -- over the intersection of
+         *   [wlMin, wlMax] with the supplied wavelength grid; if
+         *   photCount() is true: the total photon-count rate, in
+         *   photons/s, computed by integrating spec × λ / (h c) dλ
+         *   over the same range (a count rate, not a mean, so not
+         *   normalized)
          */
         [[nodiscard]] auto phot(const std::vector<double>& wl,
             const std::vector<double>& spec) const -> double override;

@@ -138,13 +138,6 @@ namespace phot
         -> RegistryData;
 
         /**
-         * @brief Element-wise natural logarithm of a wavelength grid
-         * @param wl Wavelength grid, in Angstrom
-         * @return ln(wl), element-wise
-         */
-        static auto lnGrid(const std::vector<double>& wl) -> std::vector<double>;
-
-        /**
          * @brief Construct a FilterTabulated from a name and data read from a registry entry
          * @param name Name of this filter, for output purposes
          * @param data Wavelengths and response read by loadFromRegistry
