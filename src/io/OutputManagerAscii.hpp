@@ -100,6 +100,7 @@ namespace io
         std::ofstream clusterSpectraFile_; /**< Handle to the open cluster-spectra output file, if any */
         std::ofstream clusterPhotFile_; /**< Handle to the open cluster-photometry output file, if any */
         std::vector<double> wlObs_; /**< Observed-frame wavelength grid, if spectral synthesis is enabled */
+        std::vector<int> photColWidths_; /**< Column width used for each filter in the cluster-photometry file -- see computePhotColWidths() */
     };
 
 } // namespace io

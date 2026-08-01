@@ -239,7 +239,7 @@ auto phot::FilterCollection::filterUnits() const -> std::vector<std::string>
         switch (photSystem_)
         {
             case PhotSystem::Flambda: result.emplace_back("erg/s/Angstrom"); break;
-            case PhotSystem::Fnu:     result.emplace_back("erg/s/Hz");       break;
+            case PhotSystem::Fnu:     result.emplace_back("Jy");             break;
             case PhotSystem::ST:      result.emplace_back("STmag");         break;
             case PhotSystem::AB:      result.emplace_back("ABmag");         break;
             case PhotSystem::Vega:    result.emplace_back("VegaMag");       break;

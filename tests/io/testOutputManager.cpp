@@ -70,9 +70,11 @@ static auto testWriteClusterAscii() -> int
 
         std::ifstream file(expectedPath);
         std::string headerLine;
+        std::string unitsLine;
         std::string ruleLine;
         std::string dataLine;
         std::getline(file, headerLine);
+        std::getline(file, unitsLine);
         std::getline(file, ruleLine);
         std::getline(file, dataLine);
 
