@@ -21,6 +21,7 @@
 #include "../specsyn/SpecsynUtils.hpp"
 #include "../tracks/TrackCommons.hpp"
 #include "../utils/ParseUtils.hpp"
+#include "../utils/TOMLUtils.hpp"
 #include "SimControls.hpp"
 #include <algorithm>
 #include <cstddef>
@@ -385,9 +386,7 @@ void io::SimPhysics::readFilters(const toml::table& inputDeck)
                 throw std::runtime_error(
                     "SimPhysics: phot.filters must be a string or an array of strings");
             }
-            filtersArr->for_each([&filterNames](auto&& el) -> void {
-                if constexpr (toml::is_string<decltype(el)>) { filterNames.push_back(std::string(el)); }
-            });
+            filterNames = utils::stringArrayContents(filtersArr);
         }
     }
 
