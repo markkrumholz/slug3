@@ -7,6 +7,7 @@
 
 #include "OutputManagerH5.hpp"
 #include "../core/Cluster.hpp"
+#include "../phot/FilterCollection.hpp"
 #include "../specsyn/Specsyn.hpp"
 #include "../utils/RngThread.hpp"
 #include "OutputManager.hpp"
@@ -89,6 +90,32 @@ static void writeStringDataset(const hid_t loc, const std::string& name,
     const char* cstr = value.c_str();
     H5Dwrite(dset, strType, H5S_ALL, H5S_ALL, H5P_DEFAULT, static_cast<const void*>(&cstr)); // NOLINT(bugprone-multi-level-implicit-pointer-conversion)
     H5Dclose(dset);
+    H5Sclose(space);
+    H5Tclose(strType);
+}
+
+// Write a 1d array-of-strings attribute called name, with the given
+// values, on the HDF5 object loc
+static void writeStringArrayAttr(const hid_t loc, const std::string& name,
+    const std::vector<std::string>& values)
+{
+    const hid_t strType = vlenStrType();
+    const auto n = static_cast<hsize_t>(values.size());
+    const hid_t space = H5Screate_simple(1, &n, nullptr);
+    const hid_t attr = H5Acreate2(loc, name.c_str(), strType, space,
+        H5P_DEFAULT, H5P_DEFAULT);
+    if (attr < 0)
+    {
+        H5Sclose(space);
+        H5Tclose(strType);
+        throw std::runtime_error(
+            "OutputManagerH5: unable to create attribute " + name);
+    }
+    std::vector<const char*> cstrs;
+    cstrs.reserve(values.size());
+    for (const auto& value : values) { cstrs.push_back(value.c_str()); }
+    H5Awrite(attr, strType, static_cast<const void*>(cstrs.data())); // NOLINT(bugprone-multi-level-implicit-pointer-conversion)
+    H5Aclose(attr);
     H5Sclose(space);
     H5Tclose(strType);
 }
@@ -284,6 +311,7 @@ io::OutputManagerH5::OutputManagerH5(
 
     openClustersGroup();
     openClusterSpectraGroup();
+    openClusterPhotGroup();
 }
 
 // Create the clusters group and its datasets, if cluster output is
@@ -370,11 +398,48 @@ void io::OutputManagerH5::openClusterSpectraGroup()
     // NOLINTEND(misc-include-cleaner)
 }
 
+// Create the cluster_phot group and its datasets, if a filter
+// collection was requested for this simulation
+void io::OutputManagerH5::openClusterPhotGroup()
+{
+    if (simPhysics_.filters() == nullptr) { return; }
+
+    const auto filterNames = simPhysics_.filters()->filterNames();
+    const auto nFilters = static_cast<hsize_t>(filterNames.size());
+
+    // NOLINTBEGIN(misc-include-cleaner)
+    clusterPhotGroup_ = H5Gcreate2(file_, "cluster_phot",
+        H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+    if (clusterPhotGroup_ < 0)
+    {
+        H5Fclose(file_);
+        throw std::runtime_error(
+            "OutputManagerH5: unable to create cluster_phot group");
+    }
+
+    writeStringArrayAttr(clusterPhotGroup_, "filters", filterNames);
+
+    const hid_t trialPhotDset = createExtensible1dDataset(
+        clusterPhotGroup_, "trial", H5T_NATIVE_ULONG);
+    H5Dclose(trialPhotDset);
+    const hid_t timePhotDset = createExtensible1dDataset(
+        clusterPhotGroup_, "time", H5T_NATIVE_DOUBLE);
+    H5Dclose(timePhotDset);
+    const hid_t uidPhotDset = createExtensible1dDataset(
+        clusterPhotGroup_, "uid", H5T_NATIVE_ULONG);
+    H5Dclose(uidPhotDset);
+    const hid_t photDset = createExtensible2dDataset(
+        clusterPhotGroup_, "phot", H5T_NATIVE_DOUBLE, nFilters);
+    H5Dclose(photDset);
+    // NOLINTEND(misc-include-cleaner)
+}
+
 io::OutputManagerH5::~OutputManagerH5()
 {
     // NOLINTBEGIN(misc-include-cleaner)
     if (clustersGroup_ >= 0) { H5Gclose(clustersGroup_); }
     if (clusterSpectraGroup_ >= 0) { H5Gclose(clusterSpectraGroup_); }
+    if (clusterPhotGroup_ >= 0) { H5Gclose(clusterPhotGroup_); }
     H5Fclose(file_);
     // NOLINTEND(misc-include-cleaner)
 }
@@ -445,6 +510,40 @@ void io::OutputManagerH5::writeClusterSpec(
         appendToDataset(clusterSpectraGroup_, "time", H5T_NATIVE_DOUBLE, &time);
         appendToDataset(clusterSpectraGroup_, "uid", H5T_NATIVE_ULONG, &uid);
         appendRowToDataset2d(clusterSpectraGroup_, "spec", H5T_NATIVE_DOUBLE, spec.data());
+        // NOLINTEND(misc-include-cleaner)
+    }
+}
+
+// Append one element to each of the trial/time/uid/phot cluster_phot
+// datasets. A no-op if no filter collection was requested for this
+// simulation (the cluster_phot group does not exist), or if the
+// cluster has disrupted -- a disrupted cluster is no longer an
+// observable object.
+void io::OutputManagerH5::writeClusterPhot(
+    const unsigned long trial, const double time, const core::Cluster& cluster)
+{
+    if (clusterPhotGroup_ < 0) { return; }
+    if (cluster.isDisrupted()) { return; }
+
+    const unsigned long uid = cluster.uid();
+    const auto& phot = cluster.phot();
+
+    // Guard the actual writes against concurrent callers from other
+    // threads, and against writeCluster's/writeClusterSpec's own
+    // writes to the same file handle -- shares their critical
+    // section rather than using a separate one, since HDF5 is not
+    // thread-safe across concurrent calls into the same file even
+    // when they target different groups/datasets, unless built with
+    // its (opt-in) thread-safety support
+#ifdef _OPENMP
+#pragma omp critical(clusterOutputWrite)
+#endif
+    {
+        // NOLINTBEGIN(misc-include-cleaner)
+        appendToDataset(clusterPhotGroup_, "trial", H5T_NATIVE_ULONG, &trial);
+        appendToDataset(clusterPhotGroup_, "time", H5T_NATIVE_DOUBLE, &time);
+        appendToDataset(clusterPhotGroup_, "uid", H5T_NATIVE_ULONG, &uid);
+        appendRowToDataset2d(clusterPhotGroup_, "phot", H5T_NATIVE_DOUBLE, phot.data());
         // NOLINTEND(misc-include-cleaner)
     }
 }

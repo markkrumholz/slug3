@@ -79,10 +79,26 @@ namespace io
         void writeClusterSpec(unsigned long trial, double time,
             const core::Cluster& cluster) override;
 
+        /**
+         * @brief Write a cluster's photometry
+         * @param trial Trial number to which this cluster belongs
+         * @param time The output time at which the cluster's photometry was computed, in yr
+         * @param cluster The cluster whose photometry should be written
+         * @details
+         * If no filter collection was requested for this simulation
+         * (the cluster-photometry file was not opened), or the
+         * cluster has disrupted, this is a no-op. Otherwise writes one
+         * line, holding trial, time, uid, and one column per filter,
+         * to the cluster-photometry file.
+         */
+        void writeClusterPhot(unsigned long trial, double time,
+            const core::Cluster& cluster) override;
+
     private:
 
         std::ofstream clustersFile_; /**< Handle to the open cluster output file */
         std::ofstream clusterSpectraFile_; /**< Handle to the open cluster-spectra output file, if any */
+        std::ofstream clusterPhotFile_; /**< Handle to the open cluster-photometry output file, if any */
         std::vector<double> wlObs_; /**< Observed-frame wavelength grid, if spectral synthesis is enabled */
     };
 
