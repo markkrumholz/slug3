@@ -472,8 +472,10 @@ static auto testSimClusterSpectraAscii() -> int
         }
 
         std::string headerLine;
+        std::string unitsLine;
         std::string ruleLine;
         std::getline(file, headerLine);
+        std::getline(file, unitsLine);
         std::getline(file, ruleLine);
 
         std::vector<std::string> dataLines;
@@ -658,8 +660,10 @@ static auto testSimClusterPhotAscii() -> int
         }
 
         std::string headerLine;
+        std::string unitsLine;
         std::string ruleLine;
         std::getline(file, headerLine);
+        std::getline(file, unitsLine);
         std::getline(file, ruleLine);
 
         std::vector<std::string> dataLines;

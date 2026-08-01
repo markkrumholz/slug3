@@ -175,10 +175,11 @@ static auto createExtensible2dDataset(const hid_t loc, const std::string& name,
 }
 
 // Create a 1d, non-extensible dataset called name, of the given
-// HDF5 datatype, in the HDF5 group loc, and immediately write data
-// (an array of len elements) into it
+// HDF5 datatype, in the HDF5 group loc, immediately write data (an
+// array of len elements) into it, and tag it with a scalar "units"
+// string attribute
 static void writeFixed1dDataset(const hid_t loc, const std::string& name,
-    const hid_t type, const void* data, const hsize_t len)
+    const hid_t type, const void* data, const hsize_t len, const std::string& units)
 {
     const hid_t space = H5Screate_simple(1, &len, nullptr);
     const hid_t dset = H5Dcreate2(loc, name.c_str(), type, space,
@@ -190,6 +191,7 @@ static void writeFixed1dDataset(const hid_t loc, const std::string& name,
             "OutputManagerH5: unable to create dataset " + name);
     }
     H5Dwrite(dset, type, H5S_ALL, H5S_ALL, H5P_DEFAULT, data);
+    writeStringAttr(dset, "units", units);
     H5Dclose(dset);
     H5Sclose(space);
 }
@@ -336,25 +338,32 @@ void io::OutputManagerH5::openClustersGroup()
 
     const hid_t trialDset = createExtensible1dDataset(
         clustersGroup_, "trial", H5T_NATIVE_ULONG);
+    writeStringAttr(trialDset, "units", "");
     H5Dclose(trialDset);
     const hid_t uidDset = createExtensible1dDataset(
         clustersGroup_, "uid", H5T_NATIVE_ULONG);
+    writeStringAttr(uidDset, "units", "");
     H5Dclose(uidDset);
     const hid_t targetMassDset = createExtensible1dDataset(
         clustersGroup_, "target_mass", H5T_NATIVE_DOUBLE);
+    writeStringAttr(targetMassDset, "units", "Msun");
     H5Dclose(targetMassDset);
     const hid_t birthMassDset = createExtensible1dDataset(
         clustersGroup_, "birth_mass", H5T_NATIVE_DOUBLE);
+    writeStringAttr(birthMassDset, "units", "Msun");
     H5Dclose(birthMassDset);
     const hid_t formTimeDset = createExtensible1dDataset(
         clustersGroup_, "form_time", H5T_NATIVE_DOUBLE);
+    writeStringAttr(formTimeDset, "units", "yr");
     H5Dclose(formTimeDset);
     const hid_t fehDset = createExtensible1dDataset(
         clustersGroup_, "feh", H5T_NATIVE_DOUBLE);
+    writeStringAttr(fehDset, "units", "");
     H5Dclose(fehDset);
     const hid_t rngType = fixedStrType(utils::rngStateWidth);
     const hid_t rngDset = createExtensible1dDataset(
         clustersGroup_, "rng", rngType);
+    writeStringAttr(rngDset, "units", "");
     H5Dclose(rngDset);
     H5Tclose(rngType);
     // NOLINTEND(misc-include-cleaner)
@@ -381,19 +390,23 @@ void io::OutputManagerH5::openClusterSpectraGroup()
     }
 
     writeFixed1dDataset(clusterSpectraGroup_, "wl", H5T_NATIVE_DOUBLE,
-        wlObs.data(), nWl);
+        wlObs.data(), nWl, "Angstrom");
 
     const hid_t trialSpecDset = createExtensible1dDataset(
         clusterSpectraGroup_, "trial", H5T_NATIVE_ULONG);
+    writeStringAttr(trialSpecDset, "units", "");
     H5Dclose(trialSpecDset);
     const hid_t timeDset = createExtensible1dDataset(
         clusterSpectraGroup_, "time", H5T_NATIVE_DOUBLE);
+    writeStringAttr(timeDset, "units", "yr");
     H5Dclose(timeDset);
     const hid_t uidSpecDset = createExtensible1dDataset(
         clusterSpectraGroup_, "uid", H5T_NATIVE_ULONG);
+    writeStringAttr(uidSpecDset, "units", "");
     H5Dclose(uidSpecDset);
     const hid_t specDset = createExtensible2dDataset(
         clusterSpectraGroup_, "spec", H5T_NATIVE_DOUBLE, nWl);
+    writeStringAttr(specDset, "units", "erg/s/Angstrom");
     H5Dclose(specDset);
     // NOLINTEND(misc-include-cleaner)
 }
@@ -405,6 +418,7 @@ void io::OutputManagerH5::openClusterPhotGroup()
     if (simPhysics_.filters() == nullptr) { return; }
 
     const auto filterNames = simPhysics_.filters()->filterNames();
+    const auto filterUnits = simPhysics_.filters()->filterUnits();
     const auto nFilters = static_cast<hsize_t>(filterNames.size());
 
     // NOLINTBEGIN(misc-include-cleaner)
@@ -421,15 +435,24 @@ void io::OutputManagerH5::openClusterPhotGroup()
 
     const hid_t trialPhotDset = createExtensible1dDataset(
         clusterPhotGroup_, "trial", H5T_NATIVE_ULONG);
+    writeStringAttr(trialPhotDset, "units", "");
     H5Dclose(trialPhotDset);
     const hid_t timePhotDset = createExtensible1dDataset(
         clusterPhotGroup_, "time", H5T_NATIVE_DOUBLE);
+    writeStringAttr(timePhotDset, "units", "yr");
     H5Dclose(timePhotDset);
     const hid_t uidPhotDset = createExtensible1dDataset(
         clusterPhotGroup_, "uid", H5T_NATIVE_ULONG);
+    writeStringAttr(uidPhotDset, "units", "");
     H5Dclose(uidPhotDset);
     const hid_t photDset = createExtensible2dDataset(
         clusterPhotGroup_, "phot", H5T_NATIVE_DOUBLE, nFilters);
+    // Each filter can have its own unit (e.g. a photon-count filter's
+    // "photons/s" alongside another filter's magnitude system), so
+    // this is a per-column string array -- unlike every other dataset
+    // here, whose units are uniform across the whole dataset -- in
+    // the same order as the "filters" attribute above
+    writeStringArrayAttr(photDset, "units", filterUnits);
     H5Dclose(photDset);
     // NOLINTEND(misc-include-cleaner)
 }

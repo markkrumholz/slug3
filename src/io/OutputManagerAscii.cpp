@@ -14,6 +14,7 @@
 #include "SimControls.hpp"
 #include "SimPhysics.hpp"
 #include "io/SlugVersion.hpp"
+#include <algorithm>
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
@@ -60,8 +61,9 @@ static auto formatSci(const double value) -> std::string
     return stream.str();
 }
 
-// Write the cluster-output ascii header (column names followed by a
-// dashed rule) to file
+// Write the cluster-output ascii header (column names, a row of
+// units -- "none" for a dimensionless column -- and a dashed rule) to
+// file
 static void writeClustersHeader(std::ofstream& file)
 {
     file << std::right << std::setw(uidWidth) << "trial"
@@ -71,17 +73,24 @@ static void writeClustersHeader(std::ofstream& file)
          << std::setw(numWidth) << "form_time"
          << std::setw(numWidth) << "feh"
          << std::setw(rngWidth) << "rng" << "\n";
+    file << std::right << std::setw(uidWidth) << "none"
+         << std::setw(uidWidth) << "none"
+         << std::setw(numWidth) << "Msun"
+         << std::setw(numWidth) << "Msun"
+         << std::setw(numWidth) << "yr"
+         << std::setw(numWidth) << "none"
+         << std::setw(rngWidth) << "none" << "\n";
     constexpr auto numColumns = 4;
     file << std::string(static_cast<std::string::size_type>(2) * uidWidth, '-')
          << std::string(static_cast<std::string::size_type>(numColumns) * numWidth, '-')
          << std::string(static_cast<std::string::size_type>(rngWidth), '-') << "\n";
 }
 
-// Write the cluster-spectra ascii header (column names followed by a
-// dashed rule) to file. Unlike the cluster output file, this file is
-// laid out one (wavelength, specific luminosity) pair per line
-// rather than one cluster per line, since a spectrum can have
-// thousands of wavelength points -- far too many to lay out as
+// Write the cluster-spectra ascii header (column names, a row of
+// units, and a dashed rule) to file. Unlike the cluster output file,
+// this file is laid out one (wavelength, specific luminosity) pair
+// per line rather than one cluster per line, since a spectrum can
+// have thousands of wavelength points -- far too many to lay out as
 // columns and still be human-readable.
 static void writeClusterSpectraHeader(std::ofstream& file)
 {
@@ -90,32 +99,75 @@ static void writeClusterSpectraHeader(std::ofstream& file)
          << std::setw(uidWidth) << "uid"
          << std::setw(numWidth) << "wl"
          << std::setw(numWidth) << "spec" << "\n";
+    file << std::right << std::setw(uidWidth) << "none"
+         << std::setw(numWidth) << "yr"
+         << std::setw(uidWidth) << "none"
+         << std::setw(numWidth) << "Angstrom"
+         << std::setw(numWidth) << "erg/s/Angstrom" << "\n";
     constexpr auto numColumns = 3;
     file << std::string(static_cast<std::string::size_type>(2) * uidWidth, '-')
          << std::string(static_cast<std::string::size_type>(numColumns) * numWidth, '-') << "\n";
 }
 
-// Write the cluster-photometry ascii header (column names followed by
-// a dashed rule) to file. Like the cluster output file, this is laid
-// out one cluster (at one output time) per line, with one column per
-// filter -- named after Filter::name(), via
-// FilterCollection::filterNames() -- rather than the spectrum's
+// Number of blank characters of padding a filter column is guaranteed
+// beyond its own name/unit string, or numWidth if that's already
+// wider -- see computePhotColWidths() below
+static constexpr int photColPad = 2;
+
+// Compute the column width to use for each filter in the
+// cluster-photometry file: numWidth (wide enough for any formatSci()
+// value) unless the filter's own name or unit string is longer than
+// that, in which case the column is widened to fit it (plus
+// photColPad blank characters), so a long filter name/unit never runs
+// into its neighboring columns
+static auto computePhotColWidths(const std::vector<std::string>& filterNames,
+    const std::vector<std::string>& filterUnits) -> std::vector<int>
+{
+    std::vector<int> widths(filterNames.size());
+    for (std::size_t i = 0; i < filterNames.size(); ++i)
+    {
+        const auto nameWidth = static_cast<int>(filterNames.at(i).size()) + photColPad;
+        const auto unitWidth = static_cast<int>(filterUnits.at(i).size()) + photColPad;
+        widths.at(i) = std::max({ numWidth, nameWidth, unitWidth });
+    }
+    return widths;
+}
+
+// Write the cluster-photometry ascii header (column names, a row of
+// units, and a dashed rule) to file. Like the cluster output file,
+// this is laid out one cluster (at one output time) per line, with
+// one column per filter -- named after Filter::name(), via
+// FilterCollection::filterNames(), with units from
+// FilterCollection::filterUnits() -- rather than the spectrum's
 // thousands of per-wavelength rows that writeClusterSpectraHeader
-// lays out.
+// lays out. colWidths (see computePhotColWidths()) gives each filter
+// column's own width, which may be wider than numWidth if the
+// filter's name or unit string doesn't otherwise fit.
 static void writeClusterPhotHeader(std::ofstream& file,
-    const std::vector<std::string>& filterNames)
+    const std::vector<std::string>& filterNames,
+    const std::vector<std::string>& filterUnits,
+    const std::vector<int>& colWidths)
 {
     file << std::right << std::setw(uidWidth) << "trial"
          << std::setw(numWidth) << "time"
          << std::setw(uidWidth) << "uid";
-    for (const auto& name : filterNames)
+    for (std::size_t i = 0; i < filterNames.size(); ++i)
     {
-        file << std::setw(numWidth) << name;
+        file << std::setw(colWidths.at(i)) << filterNames.at(i);
     }
     file << "\n";
-    const auto numColumns = static_cast<std::string::size_type>(1 + filterNames.size());
-    file << std::string(static_cast<std::string::size_type>(2) * uidWidth, '-')
-         << std::string(numColumns * numWidth, '-') << "\n";
+    file << std::right << std::setw(uidWidth) << "none"
+         << std::setw(numWidth) << "yr"
+         << std::setw(uidWidth) << "none";
+    for (std::size_t i = 0; i < filterUnits.size(); ++i)
+    {
+        file << std::setw(colWidths.at(i)) << filterUnits.at(i);
+    }
+    file << "\n";
+    auto totalWidth = (static_cast<std::string::size_type>(2) * uidWidth) +
+        static_cast<std::string::size_type>(numWidth);
+    for (const int w : colWidths) { totalWidth += static_cast<std::string::size_type>(w); }
+    file << std::string(totalWidth, '-') << "\n";
 }
 
 // Ascii constructor: open the summary file, write the header
@@ -210,7 +262,10 @@ io::OutputManagerAscii::OutputManagerAscii(
             throw std::runtime_error(
                 "OutputManagerAscii: unable to open output file " + clusterPhotPath.string());
         }
-        writeClusterPhotHeader(clusterPhotFile_, simPhysics_.filters()->filterNames());
+        const auto& filterNames = simPhysics_.filters()->filterNames();
+        const auto& filterUnits = simPhysics_.filters()->filterUnits();
+        photColWidths_ = computePhotColWidths(filterNames, filterUnits);
+        writeClusterPhotHeader(clusterPhotFile_, filterNames, filterUnits, photColWidths_);
     }
 }
 
@@ -311,9 +366,9 @@ void io::OutputManagerAscii::writeClusterPhot(
                           << std::setw(uidWidth) << formatUid(trial)
                           << std::setw(numWidth) << formatSci(time)
                           << std::setw(uidWidth) << formatUid(uid);
-        for (const double value : phot)
+        for (std::size_t i = 0; i < phot.size(); ++i)
         {
-            clusterPhotFile_ << std::setw(numWidth) << formatSci(value);
+            clusterPhotFile_ << std::setw(photColWidths_.at(i)) << formatSci(phot.at(i));
         }
         clusterPhotFile_ << "\n";
     }

@@ -94,7 +94,7 @@ namespace phot
          * @brief Get the units of every filter's phot() value
          * @return For a photCount() filter: "photons/s"; for an
          *   energy-flux filter: "erg/s/Angstrom" (Flambda),
-         *   "erg/s/Hz" (Fnu), "STmag" (ST), "ABmag" (AB), or "VegaMag"
+         *   "Jy" (Fnu), "STmag" (ST), "ABmag" (AB), or "VegaMag"
          *   (Vega), matching this collection's photSystem -- in the
          *   same order as phot()/filterNames()
          */
