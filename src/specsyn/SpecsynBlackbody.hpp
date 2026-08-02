@@ -53,7 +53,9 @@ namespace specsyn
          * @param nWl Number of points in the output grid; if 0 (the
          *   default), used as a flag to fall back on this class's own
          *   default range and point count -- see @details
-         * @param z The redshift; defaults to zero
+         * @param z The redshift; 0 for none
+         * @param controls Simulation controls; forwarded unchanged to
+         *   Specsyn's own constructor -- see its comment
          * @details
          * If nWl is 0, wlMin and wlMax are ignored (whatever they
          * were passed as) and wl_ is instead set to a grid of
@@ -64,9 +66,9 @@ namespace specsyn
          * instead. Otherwise wl_ is a grid of nWl points,
          * logarithmically spaced from wlMin to wlMax.
          */
-        explicit SpecsynBlackbody(double wlMin = 0.0, double wlMax = 0.0,
-            std::size_t nWl = 0, double z = 0.0,
-            const io::SimControls& controls = io::SimControls{});
+        explicit SpecsynBlackbody(double wlMin, double wlMax,
+            std::size_t nWl, double z,
+            const io::SimControls& controls);
 
         /**
          * @brief Compute the blackbody spectrum of a single star

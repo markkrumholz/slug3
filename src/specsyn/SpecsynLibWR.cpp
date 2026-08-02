@@ -150,16 +150,11 @@ namespace specsyn
         const std::size_t nWl,
         const double z,
         const io::SimControls& controls) :
-        SpecsynLib<Policy>(),
+        SpecsynLib<Policy>(controls, z),
         FeH_(this->dim1_),
         logRt_(this->dim2_),
         logTeff_(this->dim3_)
     {
-        this->z_ = z;
-        this->intRelTol_ = controls.intRelTol();
-        this->intAbsTol_ = controls.intAbsTol();
-        this->intMaxIter_ = controls.intMaxIter();
-
         // Determine which WR subtype this library covers from
         // spectraName (e.g. "POWR_WNE" -> WRType::WNE, "POWR_WNL_H40"
         // -> WRType::WNLH40), checked case-insensitively since nothing
@@ -361,7 +356,7 @@ namespace specsyn
         else
         {
             // wlMin == 0 here means only nWl was actually requested
-            // (wlMin/wlMax are still at SimPhysics::readSpectra's
+            // (wlMin/wlMax are still at SimControls::readSpectra's
             // "not supplied" sentinel), so fall back to the global
             // range spanned by every populated point's own native
             // wavelength grid -- the same grids the nWl == 0 branch

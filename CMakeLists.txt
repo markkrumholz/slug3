@@ -84,7 +84,6 @@ add_executable(slug
     src/io/OutputManager.cpp
     src/io/OutputManagerAscii.cpp
     src/io/OutputManagerH5.cpp
-    src/io/SimPhysics.cpp
     src/interpolation/Mesh2DGrid.cpp
     src/pdfs/PDFFileParser.cpp
     src/pdfs/PDFSegment.cpp
@@ -99,6 +98,7 @@ add_executable(slug
     src/phot/FilterIdeal.cpp
     src/phot/FilterTabulated.cpp
     src/specsyn/SpecsynBlackbody.cpp
+    src/specsyn/Specsyn.cpp
     src/specsyn/SpecsynUtils.cpp
     src/specsyn/SpecsynLib.cpp
     src/specsyn/SpecsynLibNoWind.cpp
@@ -170,7 +170,6 @@ add_executable(slugTestCore
     src/io/OutputManagerAscii.cpp
     src/io/OutputManagerH5.cpp
     src/io/SimControls.cpp
-    src/io/SimPhysics.cpp
     src/interpolation/Mesh2DGrid.cpp
     src/pdfs/PDFFileParser.cpp
     src/pdfs/PDFSegment.cpp
@@ -185,6 +184,7 @@ add_executable(slugTestCore
     src/phot/FilterIdeal.cpp
     src/phot/FilterTabulated.cpp
     src/specsyn/SpecsynBlackbody.cpp
+    src/specsyn/Specsyn.cpp
     src/specsyn/SpecsynUtils.cpp
     src/specsyn/SpecsynLib.cpp
     src/specsyn/SpecsynLibNoWind.cpp
@@ -213,7 +213,6 @@ add_executable(slugTestCoreFull
     src/io/OutputManagerAscii.cpp
     src/io/OutputManagerH5.cpp
     src/io/SimControls.cpp
-    src/io/SimPhysics.cpp
     src/interpolation/Mesh2DGrid.cpp
     src/pdfs/PDFFileParser.cpp
     src/pdfs/PDFSegment.cpp
@@ -228,6 +227,7 @@ add_executable(slugTestCoreFull
     src/phot/FilterIdeal.cpp
     src/phot/FilterTabulated.cpp
     src/specsyn/SpecsynBlackbody.cpp
+    src/specsyn/Specsyn.cpp
     src/specsyn/SpecsynUtils.cpp
     src/specsyn/SpecsynLib.cpp
     src/specsyn/SpecsynLibNoWind.cpp
@@ -261,7 +261,6 @@ add_executable(slugTestIo
     src/io/OutputManagerAscii.cpp
     src/io/OutputManagerH5.cpp
     src/io/SimControls.cpp
-    src/io/SimPhysics.cpp
     src/interpolation/Mesh2DGrid.cpp
     src/pdfs/PDFFileParser.cpp
     src/pdfs/PDFSegment.cpp
@@ -276,6 +275,7 @@ add_executable(slugTestIo
     src/phot/FilterIdeal.cpp
     src/phot/FilterTabulated.cpp
     src/specsyn/SpecsynBlackbody.cpp
+    src/specsyn/Specsyn.cpp
     src/specsyn/SpecsynUtils.cpp
     src/specsyn/SpecsynLib.cpp
     src/specsyn/SpecsynLibNoWind.cpp
@@ -289,10 +289,10 @@ add_executable(slugTestIo
     tests/io/testIoAll.cpp
     tests/io/testOutputManager.cpp
     tests/io/testSimControls.cpp
-    tests/io/testSimPhysics.cpp
 )
 add_executable(slugTestSpecsyn
     src/specsyn/SpecsynBlackbody.cpp
+    src/specsyn/Specsyn.cpp
     src/specsyn/SpecsynUtils.cpp
     src/specsyn/SpecsynLib.cpp
     src/specsyn/SpecsynLibNoWind.cpp
@@ -327,7 +327,6 @@ pybind11_add_module(slugPython
     src/pybind/BindTracks2D.cpp
     src/pybind/BindTracks3D.cpp
     src/pybind/BindSimControls.cpp
-    src/pybind/BindSimPhysics.cpp
     src/pybind/BindSpecsyn.cpp
     src/pybind/BindCluster.cpp
     src/pybind/BindFilter.cpp
@@ -338,7 +337,6 @@ pybind11_add_module(slugPython
     src/pybind/BindPDF.cpp
     src/core/Cluster.cpp
     src/io/SimControls.cpp
-    src/io/SimPhysics.cpp
     src/interpolation/Mesh2DGrid.cpp
     src/pdfs/PDFFileParser.cpp
     src/pdfs/PDFSegment.cpp
@@ -353,6 +351,7 @@ pybind11_add_module(slugPython
     src/phot/FilterIdeal.cpp
     src/phot/FilterTabulated.cpp
     src/specsyn/SpecsynBlackbody.cpp
+    src/specsyn/Specsyn.cpp
     src/specsyn/SpecsynUtils.cpp
     src/specsyn/SpecsynLib.cpp
     src/specsyn/SpecsynLibNoWind.cpp

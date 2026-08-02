@@ -10,7 +10,6 @@
 
 #include "../interpolation/Interpolator1D.hpp"
 #include "../io/SimControls.hpp"
-#include "../io/SimPhysics.hpp"
 #include "../tracks/TrackCommons.hpp"
 #include "../tracks/Tracks2D.hpp"
 #include "../utils/RngThread.hpp"
@@ -43,16 +42,14 @@ namespace core
          * @param uid Unique ID of cluster
          * @param mass Target cluster mass
          * @param time Cluster formation time
-         * @param physics Simulation physics objectg
-         * @param controls Simulation control flow settings; used only
-         *   to record this cluster's own intRelTol_/intAbsTol_/
-         *   intMaxIter_ at construction (mirroring Specsyn's identical
-         *   pattern), not stored
+         * @param controls Simulation controls (physics settings and
+         *   control-flow/integrator-tolerance settings together);
+         *   stored by reference, so it must outlive this Cluster --
+         *   see controls_'s own comment
          */
         Cluster(unsigned long uid,
             double mass,
             double time,
-            const io::SimPhysics& physics,
             const io::SimControls& controls);
 
         /**
@@ -60,9 +57,8 @@ namespace core
          * @param uid Unique ID of cluster
          * @param mass Target cluster mass
          * @param time Cluster formation time
-         * @param physics Simulation physics object
-         * @param controls Simulation control flow settings; see the
-         *   primary constructor's own comment
+         * @param controls Simulation controls; see the primary
+         *   constructor's own comment
          * @param rngState The rng state to draw star masses from --
          *   typically one previously returned by rngState() (e.g. read
          *   back from an output file), so that the resulting
@@ -98,7 +94,6 @@ namespace core
         Cluster(unsigned long uid,
             double mass,
             double time,
-            const io::SimPhysics& physics,
             const io::SimControls& controls,
             const utils::RngState& rngState);
 
@@ -162,7 +157,7 @@ namespace core
          *         cluster's [Fe/H]
          * @details
          * If the simulation has a fixed [Fe/H], this returns a
-         * reference to the slice shared by SimPhysics (and thus by
+         * reference to the slice shared by SimControls (and thus by
          * every Cluster in the simulation). Otherwise it returns a
          * reference to the slice computed for, and owned by, this
          * Cluster alone. Either way, callers can use the returned
@@ -177,7 +172,7 @@ namespace core
          *   non-stochastically-sampled part of the population, on
          *   the wavelength grid of the simulation's spectral
          *   synthesizer, or an empty vector if no spectral
-         *   synthesizer was requested (SimPhysics::specsyn() is
+         *   synthesizer was requested (SimControls::specsyn() is
          *   null)
          */
         [[nodiscard]] auto spec() const -> const auto& { return spec_; }
@@ -185,10 +180,10 @@ namespace core
         /**
          * @brief Return the cluster's photometry
          * @return A const reference to the photometric value computed
-         *   from spec() by each filter in SimPhysics::filters(), in
+         *   from spec() by each filter in SimControls::filters(), in
          *   the same order as FilterCollection::filterNames()/
          *   filterUnits(), or an empty vector if no filter collection
-         *   was requested (SimPhysics::filters() is null)
+         *   was requested (SimControls::filters() is null)
          */
         [[nodiscard]] auto phot() const -> const auto& { return phot_; }
 
@@ -196,7 +191,7 @@ namespace core
          * @brief Return the cluster's bolometric luminosity
          * @return The population's total bolometric luminosity, in
          *   Lsun, at the current time, or 0 if computeLbol() has never
-         *   run (SimPhysics::computeLbol() is false)
+         *   run (SimControls::computeLbol() is false)
          */
         [[nodiscard]] auto lbol() const { return lbol_; }
 
@@ -220,11 +215,18 @@ namespace core
         double targetMass_;         /**< Target mass */
         double formTime_;           /**< Formation time */
         double feH_;                /**< [Fe/H] of cluster */
-        std::reference_wrapper<const io::SimPhysics>
-            physics_;       /**< Simulation physics */
-        double intRelTol_;          /**< Relative tolerance for PDF integration, from SimControls at construction */
-        double intAbsTol_;          /**< Absolute tolerance for PDF integration, from SimControls at construction */
-        std::size_t intMaxIter_;    /**< Max evaluations for PDF integration (0 = unlimited), from SimControls at construction */
+
+        /**
+         * @brief Simulation controls (physics and control-flow settings) this cluster was built from
+         * @details
+         * Read live wherever this cluster needs a physics setting or
+         * an integrator tolerance (e.g. computeLbol()'s own
+         * utils::PDFIntegrator), rather than snapshotted at
+         * construction -- so a change to controls_'s own tolerances
+         * after this Cluster is built takes effect the next time it
+         * integrates, with no need to rebuild the Cluster.
+         */
+        std::reference_wrapper<const io::SimControls> controls_;
 
         // Masses
         std::vector<double> m_;     /**< Stellar masses */
@@ -241,14 +243,14 @@ namespace core
         bool advanced_ = false;     /**< Has advance() ever run its body (as opposed to a same-time no-op)? */
         Interp1dPtr isochrone_;     /**< Isochrone for the current time */
         std::vector<double> spec_;  /**< Spectrum of the continuously-sampled part of the population at the current time */
-        std::vector<double> phot_;  /**< Photometry of spec_ through each filter in SimPhysics::filters(), at the current time */
+        std::vector<double> phot_;  /**< Photometry of spec_ through each filter in SimControls::filters(), at the current time */
         double lbol_ = 0.0;         /**< Bolometric luminosity of the population, in Lsun, at the current time */
 
         /**
          * Tracks for this cluster's [Fe/H]: either owned outright (when
          * the simulation has a variable [Fe/H], so each cluster needs
          * its own slice) or a reference to the slice shared via
-         * SimPhysics (when [Fe/H] is fixed for the whole simulation).
+         * SimControls (when [Fe/H] is fixed for the whole simulation).
          * Use tracks() rather than this member directly.
          */
         Track2DVar tracks_;         /**< 2d track holder */
@@ -262,7 +264,7 @@ namespace core
         /**
          * @brief Update spec_ from the current isochrone and star lists
          * @details
-         * Does nothing if SimPhysics::specsyn() is null (no spectral
+         * Does nothing if SimControls::specsyn() is null (no spectral
          * synthesizer was requested). Otherwise sets spec_ to the sum
          * of the continuously-sampled (non-stochastic) part of the
          * population, if any, and each individually-sampled

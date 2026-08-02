@@ -9,7 +9,6 @@
 #define OUTPUTMANAGER_HPP
 
 #include "SimControls.hpp"
-#include "SimPhysics.hpp"
 #include <string>
 #include <toml.hpp>
 #include <utility>
@@ -37,19 +36,17 @@ namespace io
     public:
 
         /**
-         * @brief Cache references to the simulation controls, physics, and input deck
-         * @param simControls Simulation control flow settings
-         * @param simPhysics Simulation physics settings
+         * @brief Cache references to the simulation controls and input deck
+         * @param simControls Simulation controls (physics settings and
+         *   control-flow settings together)
          * @param inputDeck The simulation's toml input deck
          * @details
-         * simControls, simPhysics, and inputDeck are stored by
-         * reference, so the objects passed in must outlive this
-         * OutputManager. This base constructor does not open any
-         * output files; that is left to the constructors of the
-         * format-specific subclasses.
+         * simControls and inputDeck are stored by reference, so the
+         * objects passed in must outlive this OutputManager. This base
+         * constructor does not open any output files; that is left to
+         * the constructors of the format-specific subclasses.
          */
-        OutputManager(const SimControls& simControls, const SimPhysics& simPhysics,
-            const toml::table& inputDeck);
+        OutputManager(const SimControls& simControls, const toml::table& inputDeck);
 
         virtual ~OutputManager() = default;
 
@@ -110,8 +107,7 @@ namespace io
          */
         static auto currentRngStateString() -> std::string;
 
-        const SimControls& simControls_; /**< Simulation control flow settings */
-        const SimPhysics& simPhysics_;   /**< Simulation physics settings */
+        const SimControls& simControls_; /**< Simulation controls (physics and control-flow settings) */
         const toml::table& inputDeck_;   /**< The simulation's toml input deck */
     };
 

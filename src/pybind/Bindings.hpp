@@ -19,7 +19,6 @@
 
 #include "../interpolation/Interpolator1D.hpp"
 #include "../io/SimControls.hpp"
-#include "../io/SimPhysics.hpp"
 #include "../tracks/TrackCommons.hpp"
 #include <cstddef>
 #include <memory>
@@ -77,11 +76,6 @@ void bindTracks3D(py::module_& m);
 void bindSimControls(py::module_& m);
 
 /**
- * @brief Bind io::SimPhysics as SimPhysics
- */
-void bindSimPhysics(py::module_& m);
-
-/**
  * @brief Bind Specsyn and its concrete subclasses
  */
 void bindSpecsyn(py::module_& m);
@@ -131,50 +125,73 @@ void bindPDF(py::module_& m);
 /**
  * @brief Resolve an optional py::object SimControls argument to a real SimControls
  * @param controls The Python-facing controls argument; if py::none(),
- *   defaultControls is used instead
- * @param defaultControls Fallback used when controls is py::none();
- *   must outlive the returned reference, so callers should keep it
- *   alive (as a local variable) for the duration of the call using
- *   the returned reference
+ *   fallback is used instead
+ * @param fallback Fallback used when controls is py::none(); must be
+ *   a reference with a lifetime independent of this call (e.g. a
+ *   function-local static, as sharedDefaultControls() and
+ *   sharedMinimalControls() both return) -- never a stack-local
+ *   temporary, since every binding using this stores the resolved
+ *   reference live (see Specsyn's and Cluster's own controls_
+ *   members) rather than copying out of it, so it must remain valid
+ *   for as long as the object built from it does, not merely for the
+ *   duration of this call
  * @return A const reference to either the SimControls held by
- *   controls, or defaultControls
+ *   controls, or fallback
  * @details
  * Shared by every binding that takes an optional SimControls (e.g.
  * SpecsynBlackbody's constructor, Cluster's constructor), so each
  * doesn't have to duplicate this same is_none()/py::cast dance.
  */
 auto resolveControls(const py::object& controls,
-    const io::SimControls& defaultControls) -> const io::SimControls&;
+    const io::SimControls& fallback) -> const io::SimControls&;
 
 /**
- * @brief Build a fresh SimPhysics from slug's own bundled default deck
- * @return A new SimPhysics built from src/pybind/assets/PyDefaults.toml,
+ * @brief Build a fresh SimControls from slug's own bundled default deck
+ * @return A new SimControls built from src/pybind/assets/PyDefaults.toml,
  *   independent of any other call's result
  * @throws std::runtime_error if the bundled default deck cannot be found
  * @details
- * Used directly by SimPhysics's own Python constructor, when path is
- * empty; see sharedDefaultSimPhysics() for the shared, non-owning
- * counterpart used by Cluster's own default physics argument.
+ * Used directly by SimControls's own Python constructor, when path is
+ * empty; see sharedDefaultControls() for the shared, non-owning
+ * counterpart used by Cluster's own default controls argument.
  */
-auto buildDefaultSimPhysics() -> std::unique_ptr<io::SimPhysics>;
+auto buildDefaultControls() -> std::unique_ptr<io::SimControls>;
 
 /**
- * @brief Get slug's own default SimPhysics, shared for the life of the program
- * @return A const reference to a SimPhysics built (lazily, once) by
- *   buildDefaultSimPhysics()
+ * @brief Get slug's own default SimControls, shared for the life of the program
+ * @return A const reference to a SimControls built (lazily, once) by
+ *   buildDefaultControls()
  * @details
- * Used as Cluster's own default physics argument, so
- * slug.Cluster(mass) works without requiring a SimPhysics to be built
- * and kept alive by the caller. Unlike a SimPhysics a caller builds
+ * Used as Cluster's own default controls argument, so
+ * slug.Cluster(mass) works without requiring a SimControls to be built
+ * and kept alive by the caller. Unlike a SimControls a caller builds
  * itself, this instance is a function-local static -- its lifetime is
  * governed by the C++ runtime rather than Python's reference
  * counting, so a Cluster referencing it never needs py::keep_alive to
  * stay safe. It is shared (not rebuilt per Cluster), both to avoid
  * repeatedly reloading the real MIST tracks and spectral-library
- * chain PyDefaults.toml references, and because SimPhysics is
+ * chain PyDefaults.toml references, and because SimControls is
  * ordinarily meant to be shared across many Cluster objects anyway
  * (see SimCluster::run()).
  */
-auto sharedDefaultSimPhysics() -> const io::SimPhysics&;
+auto sharedDefaultControls() -> const io::SimControls&;
+
+/**
+ * @brief Get a minimal, all-C++-defaults SimControls, shared for the life of the program
+ * @return A const reference to a default-constructed SimControls
+ *   (io::SimControls{}: simType = none, every physics setting
+ *   invalid/empty, integrator tolerances at their own C++ defaults)
+ * @details
+ * Used as the default controls argument for every Specsyn-derived
+ * class's Python constructor, none of which need anything from
+ * SimControls beyond the integrator tolerances. Deliberately distinct
+ * from sharedDefaultControls(): that one loads slug's real bundled
+ * physics deck (PyDefaults.toml), which needs the real MIST tracks
+ * and spectral-library chain on disk -- overkill, and a dependency
+ * this cheap fallback should not carry, for something that only ever
+ * reads three scalar tolerances. Like sharedDefaultControls(), this is
+ * a function-local static, so it needs no py::keep_alive protection.
+ */
+auto sharedMinimalControls() -> const io::SimControls&;
 
 #endif // BINDINGS_HPP

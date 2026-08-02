@@ -10,7 +10,6 @@
 #include "../src/io/OutputManagerAscii.hpp"
 #include "../src/io/OutputManagerH5.hpp"
 #include "../src/io/SimControls.hpp"
-#include "../src/io/SimPhysics.hpp"
 #include "../src/specsyn/SpecsynBlackbody.hpp"
 #include "../src/specsyn/SpecsynCommons.hpp"
 #include "hdf5.h" // NOLINT(misc-include-cleaner)
@@ -56,11 +55,11 @@ using TrialMap = std::map<unsigned long, std::vector<unsigned long>>;
 
 // Build a cluster-simulation input deck with usable stellar physics
 // (IMF, tracks, CMF, [Fe/H]), reusing the deck already exercised by
-// testCluster/testSimPhysics, with model_name, out_dir, and n_trial
+// testCluster/testSimControls, with model_name, out_dir, and n_trial
 // injected so it can drive a real end-to-end run. If fehDistPath is
 // non-empty, stars.FeH is overridden to point at it, replacing the
 // deck's default fixed [Fe/H] value with a distribution, so
-// SimPhysics::constFeH() comes out false. deckPath selects which base
+// SimControls::constFeH() comes out false. deckPath selects which base
 // deck to start from -- defaulting to testCluster.in, but overridable
 // (e.g. to testClusterPhot.in, for the photometry-enabled scenarios)
 // since not every deck needs to carry every optional section.
@@ -149,34 +148,33 @@ static auto readStringArrayAttr(const hid_t loc, const char* name) // NOLINT(mis
     return values;
 }
 
-// Parse the deck, build SimControls/SimPhysics/OutputManager/
-// SimCluster (mirroring main.cpp's end-to-end setup), and run,
-// forcing real multi-threaded execution so SimCluster::run's parallel
-// for loop actually spans multiple threads. The output manager type
-// (h5 or ascii) is chosen from the deck's own outputs.output_mode.
-// Returns the resulting SimPhysics::constFeH(), so callers can
-// confirm the deck actually exercised the code path they intended.
+// Parse the deck, build SimControls/OutputManager/SimCluster
+// (mirroring main.cpp's end-to-end setup), and run, forcing real
+// multi-threaded execution so SimCluster::run's parallel for loop
+// actually spans multiple threads. The output manager type (h5 or
+// ascii) is chosen from the deck's own outputs.output_mode. Returns
+// the resulting SimControls::constFeH(), so callers can confirm the
+// deck actually exercised the code path they intended.
 static auto runEndToEnd(const toml::table& inputDeck) -> bool
 {
     const io::SimControls simControls(inputDeck);
-    const io::SimPhysics simPhysics(inputDeck, simControls);
 
     std::unique_ptr<io::OutputManager> outputManager;
     if (simControls.outputMode() == io::SimControls::OutputMode::h5)
     {
-        outputManager = std::make_unique<io::OutputManagerH5>(simControls, simPhysics, inputDeck);
+        outputManager = std::make_unique<io::OutputManagerH5>(simControls, inputDeck);
     }
     else
     {
-        outputManager = std::make_unique<io::OutputManagerAscii>(simControls, simPhysics, inputDeck);
+        outputManager = std::make_unique<io::OutputManagerAscii>(simControls, inputDeck);
     }
 
 #ifdef _OPENMP
     omp_set_num_threads(nThreads);
 #endif // _OPENMP
 
-    const bool constFeH = simPhysics.constFeH();
-    core::SimCluster simCluster(simControls, simPhysics, std::move(outputManager));
+    const bool constFeH = simControls.constFeH();
+    core::SimCluster simCluster(simControls, std::move(outputManager));
     simCluster.run();
     return constFeH;
 }
@@ -284,7 +282,7 @@ static auto checkTrialsAndUids(const TrialMap& rowsByTrial) -> int
 // Run one end-to-end scenario (either the deck's default fixed [Fe/H],
 // or a variable-[Fe/H] distribution) and verify its output. scenario
 // names the case for error messages; expectConstFeH is what
-// SimPhysics::constFeH() should come out to for the given deck, which
+// SimControls::constFeH() should come out to for the given deck, which
 // this also verifies, so a mistake in deck construction can't
 // silently turn a scenario into a no-op duplicate of the other one.
 static auto runScenario(const std::string& scenario,
@@ -299,7 +297,7 @@ static auto runScenario(const std::string& scenario,
         if (constFeH != expectConstFeH)
         {
             std::cerr << "testSimCluster: " << scenario << ": expected "
-                "SimPhysics::constFeH() to be " << expectConstFeH
+                "SimControls::constFeH() to be " << expectConstFeH
                 << ", got " << constFeH << "\n";
             return 1;
         }
@@ -335,16 +333,20 @@ static auto runScenario(const std::string& scenario,
     return checkTrialsAndUids(rowsByTrial);
 }
 
-// The wavelength grid a SpecsynBlackbody built at SimPhysics's own
+// The wavelength grid a SpecsynBlackbody built at SimControls's own
 // default wavelength range/resolution (z = 0) produces, matching the
-// one SimPhysics builds internally for spectra.model = "blackbody"
+// one SimControls builds internally for spectra.model = "blackbody"
 // when the deck doesn't override spectra.wl_min/wl_max/nwl, so tests
 // can check the output's wavelength grid without reaching into
-// SimPhysics
+// SimControls. The SimControls this SpecsynBlackbody references is a
+// throwaway local: nothing here reads its integrator tolerances, only
+// wlObs(), so it doesn't need to outlive this function's own return.
 static auto referenceWlObs() -> std::vector<double>
 {
+    const io::SimControls controls;
     return specsyn::SpecsynBlackbody(
-        specsyn::defaultWlMin, specsyn::defaultWlMax, specsyn::defaultNWl).wlObs();
+        specsyn::defaultWlMin, specsyn::defaultWlMax, specsyn::defaultNWl,
+        0.0, controls).wlObs();
 }
 
 // End-to-end check of HDF5 cluster-spectrum output: run with
@@ -537,7 +539,7 @@ static auto testSimClusterSpectraAscii() -> int
 // FilterCollection's own filter list (see testCluster.cpp's own
 // testClusterPhot() for where that expectation is derived from), but
 // OutputManagerH5/Ascii both append it back as a final column when
-// SimPhysics::computeLbol() is true
+// SimControls::computeLbol() is true
 static auto expectedPhotFilters() -> std::vector<std::string>
 {
     return { "SLUGTEST.CAM1.G500", "ideal_phot_700_1500", "Lbol" };
@@ -727,7 +729,7 @@ auto testSimCluster() -> int
     std::filesystem::create_directories(outDir);
 
     // Fixed [Fe/H] (constFeH() == true): every cluster references the
-    // single Tracks2D/Mesh2DGrid/Interpolator1D set SimPhysics builds
+    // single Tracks2D/Mesh2DGrid/Interpolator1D set SimControls builds
     // once, single-threaded, at construction time
     const std::string constModelName = "test_sim_cluster_const_feh";
     int result = runScenario("const [Fe/H]",

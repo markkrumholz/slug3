@@ -130,6 +130,8 @@ namespace specsyn
          *   Angstrom; see wlMin
          * @param nWl Number of points in the output grid; see wlMin
          * @param z The redshift
+         * @param controls Simulation controls, forwarded unchanged to
+         *   the constructed library's own constructor
          * @returns The constructed library, upcast to SpecsynLib<Policy>
          * @details
          * Wolf-Rayet libraries -- parameterized by transformed radius
@@ -143,17 +145,17 @@ namespace specsyn
             const double afe, const double cfe, const double microTurb,
             const double r, const std::string& registryName,
             const double wlMin, const double wlMax, const std::size_t nWl,
-            const double z)
+            const double z, const io::SimControls& controls)
         -> std::unique_ptr<SpecsynLib<Policy>>
         {
             if (isWR)
             {
                 return std::make_unique<SpecsynLibWR<Policy>>(
-                    name, fehMin, fehMax, registryName, wlMin, wlMax, nWl, z);
+                    name, fehMin, fehMax, registryName, wlMin, wlMax, nWl, z, controls);
             }
             return std::make_unique<SpecsynLibNoWind<Policy>>(
                 name, fehMin, fehMax, afe, cfe, microTurb, r, registryName,
-                wlMin, wlMax, nWl, z);
+                wlMin, wlMax, nWl, z, controls);
         }
 
         /**
@@ -225,11 +227,8 @@ namespace specsyn
         const double z,
         const bool tClamp,
         const io::SimControls& controls) :
-        Specsyn(z)
+        Specsyn(controls, z)
     {
-        intRelTol_ = controls.intRelTol();
-        intAbsTol_ = controls.intAbsTol();
-        intMaxIter_ = controls.intMaxIter();
         if (spectraName.empty())
         {
             throw std::runtime_error(
@@ -272,7 +271,7 @@ namespace specsyn
         // chain to share one hardcoded value
         constexpr double useLibraryDefault = std::numeric_limits<double>::quiet_NaN();
 
-        // Mirrors SimPhysics::readSpectra's own WR_grid check: a
+        // Mirrors SimControls::readSpectra's own WR_grid check: a
         // single parse of the registry tells us, for each entry of
         // spectraName, whether it needs SpecsynLibWR (WR_grid = true)
         // or SpecsynLibNoWind (WR_grid absent or false).
@@ -301,13 +300,13 @@ namespace specsyn
             coerceLibs.push_back(makeChainedLib<OOBPolicy::coerce>(
                 spectraName[i], isWRGrid(spectraName[i]),
                 fehMin, fehMax, afe, cfe, mt, r, registryName,
-                0.0, 0.0, 0, z));
+                0.0, 0.0, 0, z, controls));
         }
         const double lastMt = microTurb.empty() ? useLibraryDefault : microTurb[n - 1];
         std::unique_ptr<SpecsynLib<OOBPolicy::raise>> raiseLib = makeChainedLib<OOBPolicy::raise>(
             spectraName[n - 1], isWRGrid(spectraName[n - 1]),
             fehMin, fehMax, afe, cfe, lastMt, r, registryName,
-            0.0, 0.0, 0, z);
+            0.0, 0.0, 0, z, controls);
 
         // Determine the common wavelength grid every chained library
         // will share, in one of three ways, then resample every

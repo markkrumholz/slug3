@@ -1,7 +1,7 @@
 /**
  * @file testSpecsynChain.cpp
  * @author Mark Krumholz
- * @brief End-to-end test of a spectra.model library chain built through SimPhysics.
+ * @brief End-to-end test of a spectra.model library chain built through SimControls.
  * @details
  * Exercises the spectra.model wiring most real applications will
  * actually use: an array of several library names, in priority order,
@@ -16,7 +16,7 @@
  * thoroughly by tests/specsyn/testSpecsynLibWR.cpp's own
  * testSpecWNLSuccess, and this test's WNL star (heSurf = 0.7, default
  * hSurf = 0.0) already lands in H20's own range.
- * Builds a SimPhysics from a real input deck
+ * Builds a SimControls from a real input deck
  * (tests/core/assets/testCluster.in, with spectra.registry and
  * spectra.model overridden) and calls spec() directly on a small,
  * deliberately-chosen set of stars -- one per WRType, plus one landing
@@ -33,14 +33,13 @@
  * throw. Hand-picking each star's (mass, logL, logTeff, ...) instead
  * -- the same approach tests/specsyn/testSpecsynLibWR.cpp already uses
  * for its own WNE/WNL stars -- keeps this test exercising the real
- * SimPhysics -> SpecsynLibChained -> SpecsynLibWR/SpecsynLibNoWind
+ * SimControls -> SpecsynLibChained -> SpecsynLibWR/SpecsynLibNoWind
  * dispatch path without depending on fixture coverage this test
  * doesn't control.
  * @date 2026-07-24
  */
 
 #include "../src/io/SimControls.hpp"
-#include "../src/io/SimPhysics.hpp"
 #include "../src/specsyn/Specsyn.hpp"
 #include "../src/tracks/TrackCommons.hpp"
 #include "testSpecsynChain.hpp"
@@ -49,6 +48,7 @@
 #include <cstddef>
 #include <exception>
 #include <iostream>
+#include <memory>
 #include <string>
 #include <toml.hpp>
 #include <vector>
@@ -86,7 +86,7 @@ namespace
     }
 
     /**
-     * @brief Build a SimPhysics whose spectra.model is a 5-library chain
+     * @brief Build a SimControls whose spectra.model is a 5-library chain
      * @details
      * Starts from testCluster.in's usual tracks/IMF/[Fe/H] setup ([Fe/H]
      * = 0.0 exactly, a grid point every one of the five test libraries
@@ -98,8 +98,12 @@ namespace
      * "TLUSTY_O", "BOSZ"] subset of the full 7-library combination most
      * real applications will actually use (see this file's own
      * top-level comment for why only one WNL H-bucket is chained here).
+     * Returned as a unique_ptr, rather than by value, since SimControls
+     * is neither copyable nor movable -- the spectral synthesizer it
+     * builds holds a live reference back to it (see Specsyn's own
+     * controls_ member), so its address must never change.
      */
-    auto buildChainedSim() -> io::SimPhysics
+    auto buildChainedSim() -> std::unique_ptr<io::SimControls>
     {
         toml::table inputDeck = toml::parse_file(inputFile);
         auto* spectraTable = inputDeck.at_path("spectra").as_table();
@@ -107,8 +111,7 @@ namespace
         spectraTable->insert_or_assign("model", toml::array{
             "POWR_WC_test", "POWR_WNE_test", "POWR_WNL_H20_test", "TLUSTY_test", "BOSZ_test" });
 
-        const io::SimControls controls(inputDeck);
-        return io::SimPhysics(inputDeck, controls);
+        return std::make_unique<io::SimControls>(inputDeck);
     }
 
     /**
@@ -155,7 +158,7 @@ namespace
 } // namespace
 
 // Verify that the full 5-library spectra.model chain, built through
-// SimPhysics from a real input deck, dispatches each representative
+// SimControls from a real input deck, dispatches each representative
 // star to the correct library: a WC-, WNE-, and WNL-classified
 // Wolf-Rayet star each land on their own SpecsynLibWR (exercising
 // SpecsynLibChained's WR_grid dispatch, which previously hardcoded
@@ -169,7 +172,7 @@ static auto testSpecsynChainDispatch() -> int
     try
     {
         const auto sim = buildChainedSim();
-        const auto* synth = sim.specsyn();
+        const auto* synth = sim->specsyn();
         if (synth == nullptr)
         {
             std::cerr << "testSpecsynChain: expected specsyn() to be populated\n";
@@ -211,7 +214,7 @@ static auto testSpecsynChainDispatch() -> int
     }
     catch (const std::exception& error)
     {
-        std::cerr << "testSpecsynChain: failed to build chained SimPhysics: "
+        std::cerr << "testSpecsynChain: failed to build chained SimControls: "
             << error.what() << "\n";
         return 1;
     }

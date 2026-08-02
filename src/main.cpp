@@ -10,7 +10,6 @@
 #include "io/OutputManagerAscii.hpp"
 #include "io/OutputManagerH5.hpp"
 #include "io/SimControls.hpp"
-#include "io/SimPhysics.hpp"
 #include <cstdlib>
 #include <exception>
 #include <iostream>
@@ -42,26 +41,25 @@ auto main(int argc, char *argv[]) -> int
         return 1;
     }
 
-    // Use the input deck to initialize simulation control flow
-    // and physics
+    // Use the input deck to initialize simulation controls (control
+    // flow and physics settings together)
     const io::SimControls simControls(inputDeck);
-    const io::SimPhysics simPhysics(inputDeck, simControls);
 
     // Construct the output manager
     std::unique_ptr<io::OutputManager> outputManager;
     if (simControls.outputMode() == io::SimControls::OutputMode::h5)
     {
-        outputManager = std::make_unique<io::OutputManagerH5>(simControls, simPhysics, inputDeck);
+        outputManager = std::make_unique<io::OutputManagerH5>(simControls, inputDeck);
     }
     else
     {
-        outputManager = std::make_unique<io::OutputManagerAscii>(simControls, simPhysics, inputDeck);
+        outputManager = std::make_unique<io::OutputManagerAscii>(simControls, inputDeck);
     }
 
     // Run the simulation
     if (simControls.simType() == io::SimControls::SimType::cluster)
     {
-        core::SimCluster simCluster(simControls, simPhysics, std::move(outputManager));
+        core::SimCluster simCluster(simControls, std::move(outputManager));
         simCluster.run();
     }
     else if (simControls.simType() == io::SimControls::SimType::galaxy)

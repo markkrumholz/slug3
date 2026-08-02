@@ -7,7 +7,6 @@
 
 #include "Cluster.hpp"
 #include "../io/SimControls.hpp"
-#include "../io/SimPhysics.hpp"
 #include "../phot/FilterCollection.hpp"
 #include "../tracks/TrackCommons.hpp"
 #include "../tracks/Tracks2D.hpp"
@@ -28,22 +27,18 @@
 core::Cluster::Cluster(const unsigned long uid,
     const double mass,
     const double time,
-    const io::SimPhysics& physics,
     const io::SimControls& controls) :
     rngState_(utils::rng().getState()),
     uid_(uid),
     targetMass_(mass),
     formTime_(time),
-    feH_(physics.fehDist().draw()),
-    physics_(std::cref(physics)),
-    intRelTol_(controls.intRelTol()),
-    intAbsTol_(controls.intAbsTol()),
-    intMaxIter_(controls.intMaxIter()),
-    m_(physics.imf().drawTarget(
-        physics.fracStochMass() * mass,
-        physics.minStochMass(),
-        physics.imf().getMax())),
-    birthNonStochMass_((1.0 - physics.fracStochMass()) * mass),
+    feH_(controls.fehDist().draw()),
+    controls_(std::cref(controls)),
+    m_(controls.imf().drawTarget(
+        controls.fracStochMass() * mass,
+        controls.minStochMass(),
+        controls.imf().getMax())),
+    birthNonStochMass_((1.0 - controls.fracStochMass()) * mass),
     birthMass_(std::accumulate(m_.begin(), m_.end(), 0.0)),
     disruptTime_(std::numeric_limits<double>::quiet_NaN()),
     curTime_(time)
@@ -52,24 +47,24 @@ core::Cluster::Cluster(const unsigned long uid,
     std::ranges::sort(m_);
 
     // Set disruption time if disruption is on
-    const auto& ph = physics_.get();
-    if (ph.clf().valid())
-    { 
-        disruptTime_ = formTime_ + ph.clf().draw();
+    const auto& sc = controls_.get();
+    if (sc.clf().valid())
+    {
+        disruptTime_ = formTime_ + sc.clf().draw();
     }
 
     // If this simulation has a variable metallicity, generate tracks
     // for the metallicity of this cluster and save them for future
     // use. Otherwise, [Fe/H] is fixed for the whole simulation, so
-    // just point at the slice SimPhysics has already precomputed and
+    // just point at the slice SimControls has already precomputed and
     // shares across every cluster.
-    if (ph.constFeH())
+    if (sc.constFeH())
     {
-        tracks_ = std::cref(ph.tracks2D());
+        tracks_ = std::cref(sc.tracks2D());
     }
     else
     {
-        tracks_ = ph.tracks().sliceConstFeH(feH_);
+        tracks_ = sc.tracks().sliceConstFeH(feH_);
     }
 }
 
@@ -85,7 +80,6 @@ core::Cluster::Cluster(const unsigned long uid,
 core::Cluster::Cluster(const unsigned long uid,
     const double mass,
     const double time,
-    const io::SimPhysics& physics,
     const io::SimControls& controls,
     const utils::RngState& rngState) :
     rngState_(rngState),
@@ -93,11 +87,8 @@ core::Cluster::Cluster(const unsigned long uid,
     targetMass_(mass),
     formTime_(time),
     feH_(0.0), // placeholder; set in the constructor body below
-    physics_(std::cref(physics)),
-    intRelTol_(controls.intRelTol()),
-    intAbsTol_(controls.intAbsTol()),
-    intMaxIter_(controls.intMaxIter()),
-    birthNonStochMass_((1.0 - physics.fracStochMass()) * mass),
+    controls_(std::cref(controls)),
+    birthNonStochMass_((1.0 - controls.fracStochMass()) * mass),
     birthMass_(0.0), // placeholder; overwritten once m_ is drawn
     disruptTime_(std::numeric_limits<double>::quiet_NaN()),
     curTime_(time)
@@ -109,11 +100,11 @@ core::Cluster::Cluster(const unsigned long uid,
     // ambient rng stream
     const auto savedState = utils::rng().getState();
     utils::rng().setState(rngState);
-    feH_ = physics.fehDist().draw(); //NOLINT(cppcoreguidelines-prefer-member-initializer) -- must happen after setState(rngState) above, not in the initializer list
-    m_ = physics.imf().drawTarget(
-        physics.fracStochMass() * mass,
-        physics.minStochMass(),
-        physics.imf().getMax());
+    feH_ = controls.fehDist().draw(); //NOLINT(cppcoreguidelines-prefer-member-initializer) -- must happen after setState(rngState) above, not in the initializer list
+    m_ = controls.imf().drawTarget(
+        controls.fracStochMass() * mass,
+        controls.minStochMass(),
+        controls.imf().getMax());
     utils::rng().setState(savedState);
 
     // birthMass_ is summed before sorting m_, matching the primary
@@ -127,24 +118,24 @@ core::Cluster::Cluster(const unsigned long uid,
     std::ranges::sort(m_);
 
     // Set disruption time if disruption is on
-    const auto& ph = physics_.get();
-    if (ph.clf().valid())
+    const auto& sc = controls_.get();
+    if (sc.clf().valid())
     {
-        disruptTime_ = formTime_ + ph.clf().draw();
+        disruptTime_ = formTime_ + sc.clf().draw();
     }
 
     // If this simulation has a variable metallicity, generate tracks
     // for the metallicity of this cluster and save them for future
     // use. Otherwise, [Fe/H] is fixed for the whole simulation, so
-    // just point at the slice SimPhysics has already precomputed and
+    // just point at the slice SimControls has already precomputed and
     // shares across every cluster.
-    if (ph.constFeH())
+    if (sc.constFeH())
     {
-        tracks_ = std::cref(ph.tracks2D());
+        tracks_ = std::cref(sc.tracks2D());
     }
     else
     {
-        tracks_ = ph.tracks().sliceConstFeH(feH_);
+        tracks_ = sc.tracks().sliceConstFeH(feH_);
     }
 }
 
@@ -197,16 +188,16 @@ void core::Cluster::advance(const double t)
 
     // Update the population photometry from the spectrum just
     // computed above, if a filter collection was requested
-    const auto& ph = physics_.get();
-    const auto& filters = ph.filters();
+    const auto& sc = controls_.get();
+    const auto& filters = sc.filters();
     if (filters != nullptr)
     {
-        phot_ = filters->phot(ph.specsyn()->wl(), spec_);
+        phot_ = filters->phot(sc.specsyn()->wl(), spec_);
     }
 
     // Update the population's bolometric luminosity, if "Lbol" was
-    // included in phot.filters (see SimPhysics::computeLbol())
-    if (ph.computeLbol()) { computeLbol(); }
+    // included in phot.filters (see SimControls::computeLbol())
+    if (sc.computeLbol()) { computeLbol(); }
 
     // Check for disruption
     if (curTime_ > disruptTime_) { isDisrupted_ = true; }
@@ -274,8 +265,8 @@ void core::Cluster::updateLivingStars(const double logAge)
 // spectral synthesizer was requested
 void core::Cluster::computeSpec()
 {
-    const auto& ph = physics_.get();
-    const auto* synth = ph.specsyn();
+    const auto& sc = controls_.get();
+    const auto* synth = sc.specsyn();
     if (synth == nullptr) { return; }
 
     spec_.assign(synth->wl().size(), 0.0);
@@ -283,8 +274,8 @@ void core::Cluster::computeSpec()
     // Continuously-sampled (non-stochastic) part of the population
     if (birthNonStochMass_ > 0.0)
     {
-        spec_ = synth->specCts(isochrone_, ph.imf(),
-            birthNonStochMass_, ph.imf().getMin(), ph.minStochMass(), feH_);
+        spec_ = synth->specCts(isochrone_, sc.imf(),
+            birthNonStochMass_, sc.imf().getMin(), sc.minStochMass(), feH_);
     }
 
     // Individually-sampled (stochastic) stars
@@ -339,14 +330,14 @@ void core::Cluster::computeLbol()
     // segments that pcubature has no way to know to avoid)
     if (birthNonStochMass_ > 0.0)
     {
-        const auto& ph = physics_.get();
+        const auto& sc = controls_.get();
         using LbolSegFn = std::array<double, 1> (*)(double, const Segment&);
         const utils::PDFIntegrator integrator(
-            ph.imf(), static_cast<LbolSegFn>(&Cluster::lbolStar), 1,
-            intMaxIter_, intAbsTol_, intRelTol_);
+            sc.imf(), static_cast<LbolSegFn>(&Cluster::lbolStar), 1,
+            sc.intMaxIter(), sc.intAbsTol(), sc.intRelTol());
 
-        const double mMin = ph.imf().getMin();
-        const double mMax = ph.minStochMass();
+        const double mMin = sc.imf().getMin();
+        const double mMax = sc.minStochMass();
         double lbolCts = 0.0;
         for (const auto& seg : isochrone_)
         {

@@ -21,14 +21,11 @@ static constexpr double cmToAngstrom = 1.0 / utils::Angstrom;
 
 specsyn::SpecsynBlackbody::SpecsynBlackbody(
     double wlMin, double wlMax, std::size_t nWl, const double z,
-    const io::SimControls& controls) : Specsyn(z)
+    const io::SimControls& controls) : Specsyn(controls, z)
 {
-    intRelTol_ = controls.intRelTol();
-    intAbsTol_ = controls.intAbsTol();
-    intMaxIter_ = controls.intMaxIter();
     // nWl == 0 means neither a grid nor a point count was requested
     // at all; nWl != 0 with wlMin == 0 means only nWl was requested
-    // (wlMin/wlMax are still at SimPhysics::readSpectra's "not
+    // (wlMin/wlMax are still at SimControls::readSpectra's "not
     // supplied" sentinel) -- either way, wlMin/wlMax fall back to
     // this class's own default range (photon energies from 10 Ry
     // down to 0.01 Ry, converted from cm to Angstrom); nWl only falls

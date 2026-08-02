@@ -77,6 +77,10 @@ RuntimeError
 
 static constexpr std::string_view specsynIntRelTolDocstring = R"doc(Return the relative tolerance for PDF integration.
 
+Read live from the SimControls this synthesizer was built from (see
+its own intRelTol property) -- there is no setIntRelTol() here;
+changing the tolerance means setting it on that SimControls instead.
+
 Returns
 -------
 rel_tol : float
@@ -84,6 +88,9 @@ rel_tol : float
     used by specCts().)doc";
 
 static constexpr std::string_view specsynIntAbsTolDocstring = R"doc(Return the absolute tolerance for PDF integration.
+
+See intRelTol()'s own docstring: read live from the SimControls this
+synthesizer was built from.
 
 Returns
 -------
@@ -93,34 +100,13 @@ abs_tol : float
 
 static constexpr std::string_view specsynIntMaxIterDocstring = R"doc(Return the maximum number of evaluations for PDF integration.
 
+See intRelTol()'s own docstring: read live from the SimControls this
+synthesizer was built from.
+
 Returns
 -------
 max_iter : int
     Maximum number of integrand evaluations used by specCts(); 0 means
-    unlimited.)doc";
-
-static constexpr std::string_view specsynSetIntRelTolDocstring = R"doc(Set the relative tolerance for PDF integration.
-
-Parameters
-----------
-rel_tol : float
-    New relative convergence tolerance for the cubature integrator
-    used by specCts().)doc";
-
-static constexpr std::string_view specsynSetIntAbsTolDocstring = R"doc(Set the absolute tolerance for PDF integration.
-
-Parameters
-----------
-abs_tol : float
-    New absolute convergence tolerance for the cubature integrator
-    used by specCts().)doc";
-
-static constexpr std::string_view specsynSetIntMaxIterDocstring = R"doc(Set the maximum number of evaluations for PDF integration.
-
-Parameters
-----------
-max_iter : int
-    New maximum number of integrand evaluations for specCts(); 0 means
     unlimited.)doc";
 
 // -------------------------------------------------------------------------
@@ -150,8 +136,10 @@ z : float, optional
 controls : SimControls, optional
     Simulation controls; only the integrator tolerance settings
     (``intRelTol``, ``intAbsTol``, ``intMaxIter``) are used. If None
-    (the default), uses ``SimControls()`` defaults: rel_tol = 1e-2,
-    abs_tol = 0, max_iter = unlimited.)doc";
+    (the default), uses a minimal, all-C++-defaults SimControls --
+    intRelTol = 1e-2, intAbsTol = 0, intMaxIter = unlimited -- rather
+    than slug's bundled physics deck (unlike ``SimControls()`` itself,
+    this never touches disk).)doc";
 
 // -------------------------------------------------------------------------
 // SpecsynLibNoWind
@@ -196,7 +184,9 @@ z : float, optional
     Redshift. Default is 0.
 controls : SimControls, optional
     Simulation controls; only integrator tolerance settings are used.
-    None (the default) uses ``SimControls()`` defaults.
+    None (the default) uses a minimal, all-C++-defaults SimControls,
+    not slug's bundled physics deck -- see SpecsynBlackbody's own
+    controls docstring for why.
 
 Throws
 ------
@@ -239,7 +229,9 @@ z : float, optional
     Redshift. Default is 0.
 controls : SimControls, optional
     Simulation controls; only integrator tolerance settings are used.
-    None (the default) uses ``SimControls()`` defaults.
+    None (the default) uses a minimal, all-C++-defaults SimControls,
+    not slug's bundled physics deck -- see SpecsynBlackbody's own
+    controls docstring for why.
 
 Throws
 ------
@@ -297,7 +289,9 @@ t_clamp : bool, optional
     by the nearest library grid point rather than raising an error.
 controls : SimControls, optional
     Simulation controls; only integrator tolerance settings are used.
-    None (the default) uses ``SimControls()`` defaults.
+    None (the default) uses a minimal, all-C++-defaults SimControls,
+    not slug's bundled physics deck -- see SpecsynBlackbody's own
+    controls docstring for why.
 
 Throws
 ------
@@ -330,14 +324,11 @@ static auto toStarData(const std::vector<double>& props) -> specsyn::Specsyn::St
 
 // Declared in Bindings.hpp (shared with BindCluster.cpp -- see its own
 // comment there). Returns a const SimControls& from a py::object that
-// is either None (giving the default-constructed SimControls) or an
-// actual SimControls. The defaultControls local must outlive the
-// returned reference; callers must keep it alive for the duration of
-// the call.
+// is either None (giving fallback) or an actual SimControls.
 auto resolveControls(const py::object& controls,
-    const io::SimControls& defaultControls) -> const io::SimControls&
+    const io::SimControls& fallback) -> const io::SimControls&
 {
-    if (controls.is_none()) { return defaultControls; }
+    if (controls.is_none()) { return fallback; }
     return py::cast<const io::SimControls&>(controls);
 }
 
@@ -365,13 +356,7 @@ void bindSpecsyn(py::module_& m)
         .def("intAbsTol", &specsyn::Specsyn::intAbsTol,
                 specsynIntAbsTolDocstring.data())
         .def("intMaxIter", &specsyn::Specsyn::intMaxIter,
-                specsynIntMaxIterDocstring.data())
-        .def("setIntRelTol", &specsyn::Specsyn::setIntRelTol,
-                specsynSetIntRelTolDocstring.data(), py::arg("rel_tol"))
-        .def("setIntAbsTol", &specsyn::Specsyn::setIntAbsTol,
-                specsynSetIntAbsTolDocstring.data(), py::arg("abs_tol"))
-        .def("setIntMaxIter", &specsyn::Specsyn::setIntMaxIter,
-                specsynSetIntMaxIterDocstring.data(), py::arg("max_iter"));
+                specsynIntMaxIterDocstring.data());
 
     // SpecsynBlackbody
     py::class_<specsyn::SpecsynBlackbody, specsyn::Specsyn, py::smart_holder>(
@@ -381,16 +366,24 @@ void bindSpecsyn(py::module_& m)
                    const py::object& controls)
                     -> std::unique_ptr<specsyn::SpecsynBlackbody>
                 {
-                    const io::SimControls defaultControls{};
                     return std::make_unique<specsyn::SpecsynBlackbody>(
-                        wlMin, wlMax, nWl, z, resolveControls(controls, defaultControls));
+                        wlMin, wlMax, nWl, z, resolveControls(controls, sharedMinimalControls()));
                 }),
                 bbConstructorDocstring.data(),
                 py::arg("wl_min") = 0.0,
                 py::arg("wl_max") = 0.0,
                 py::arg("nwl") = static_cast<std::size_t>(0),
                 py::arg("z") = 0.0,
-                py::arg("controls") = py::none());
+                py::arg("controls") = py::none(),
+                // Keep controls (index 6: 1 = self, 2-5 = wl_min/
+                // wl_max/nwl/z) alive at least as long as this
+                // Specsyn, which stores a live reference to it rather
+                // than copying its tolerances out -- see Specsyn's
+                // own controls_ member. A harmless no-op when controls
+                // is omitted: sharedMinimalControls()'s own instance
+                // is a function-local static (see its own comment in
+                // Bindings.hpp).
+                py::keep_alive<1, 6>());
 
     // SpecsynLibNoWind<OOBPolicy::raise>
     py::class_<specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::raise>,
@@ -404,13 +397,12 @@ void bindSpecsyn(py::module_& m)
                    const py::object& controls)
                     -> std::unique_ptr<specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::raise>>
                 {
-                    const io::SimControls defaultControls{};
                     return std::make_unique<
                         specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::raise>>(
                             spectraName, fehMin, fehMax,
                             afe, cfe, microTurb, r,
                             registryName, wlMin, wlMax, nWl, z,
-                            resolveControls(controls, defaultControls));
+                            resolveControls(controls, sharedMinimalControls()));
                 }),
                 nwConstructorDocstring.data(),
                 py::arg("spectra_name"),
@@ -425,7 +417,11 @@ void bindSpecsyn(py::module_& m)
                 py::arg("wl_max") = 0.0,
                 py::arg("nwl") = static_cast<std::size_t>(0),
                 py::arg("z") = 0.0,
-                py::arg("controls") = py::none());
+                py::arg("controls") = py::none(),
+                // See SpecsynBlackbody's identical keep_alive comment
+                // above; index 14 here (1 = self, 2-13 = spectra_name
+                // through z).
+                py::keep_alive<1, 14>());
 
     // SpecsynLibWR<OOBPolicy::raise>
     py::class_<specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise>,
@@ -438,12 +434,11 @@ void bindSpecsyn(py::module_& m)
                    const py::object& controls)
                     -> std::unique_ptr<specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise>>
                 {
-                    const io::SimControls defaultControls{};
                     return std::make_unique<
                         specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise>>(
                             spectraName, fehMin, fehMax,
                             registryName, wlMin, wlMax, nWl, z,
-                            resolveControls(controls, defaultControls));
+                            resolveControls(controls, sharedMinimalControls()));
                 }),
                 wrConstructorDocstring.data(),
                 py::arg("spectra_name"),
@@ -454,7 +449,11 @@ void bindSpecsyn(py::module_& m)
                 py::arg("wl_max") = 0.0,
                 py::arg("nwl") = static_cast<std::size_t>(0),
                 py::arg("z") = 0.0,
-                py::arg("controls") = py::none());
+                py::arg("controls") = py::none(),
+                // See SpecsynBlackbody's identical keep_alive comment
+                // above; index 10 here (1 = self, 2-9 = spectra_name
+                // through z).
+                py::keep_alive<1, 10>());
 
     // SpecsynLibChained
     py::class_<specsyn::SpecsynLibChained, specsyn::Specsyn, py::smart_holder>(
@@ -469,12 +468,11 @@ void bindSpecsyn(py::module_& m)
                    bool tClamp, const py::object& controls)
                     -> std::unique_ptr<specsyn::SpecsynLibChained>
                 {
-                    const io::SimControls defaultControls{};
                     return std::make_unique<specsyn::SpecsynLibChained>(
                         spectraNames, fehMin, fehMax,
                         afe, cfe, microTurb, r,
                         registryName, wlMin, wlMax, nWl, z, tClamp,
-                        resolveControls(controls, defaultControls));
+                        resolveControls(controls, sharedMinimalControls()));
                 }),
                 chainedConstructorDocstring.data(),
                 py::arg("spectra_names"),
@@ -490,6 +488,10 @@ void bindSpecsyn(py::module_& m)
                 py::arg("nwl") = static_cast<std::size_t>(0),
                 py::arg("z") = 0.0,
                 py::arg("t_clamp") = true,
-                py::arg("controls") = py::none());
+                py::arg("controls") = py::none(),
+                // See SpecsynBlackbody's identical keep_alive comment
+                // above; index 15 here (1 = self, 2-14 =
+                // spectra_names through t_clamp).
+                py::keep_alive<1, 15>());
 }
 // NOLINTEND(misc-include-cleaner)

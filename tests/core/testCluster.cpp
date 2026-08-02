@@ -7,7 +7,6 @@
 
 #include "../src/core/Cluster.hpp"
 #include "../src/io/SimControls.hpp"
-#include "../src/io/SimPhysics.hpp"
 #include "../src/phot/FilterCollection.hpp"
 #include "../src/utils/RngThread.hpp"
 #include "testCluster.hpp"
@@ -36,10 +35,9 @@ static auto testClusterConstruction() -> int
     {
         const toml::table inputDeck = toml::parse_file(inputFile);
         const io::SimControls controls(inputDeck);
-        const io::SimPhysics sim(inputDeck, controls);
 
         utils::rng().seed(rngSeed);
-        const core::Cluster cluster(0, 1e4, 0.0, sim, controls);
+        const core::Cluster cluster(0, 1e4, 0.0, controls);
 
         const auto& masses = cluster.starMasses();
         const double totalMass = std::reduce(masses.begin(), masses.end(), 0.0);
@@ -75,15 +73,14 @@ static auto testClusterAdvance() -> int
     {
         const toml::table inputDeck = toml::parse_file(inputFile);
         const io::SimControls controls(inputDeck);
-        const io::SimPhysics sim(inputDeck, controls);
 
         utils::rng().seed(rngSeed);
-        core::Cluster cluster(0, 1e4, 0.0, sim, controls);
+        core::Cluster cluster(0, 1e4, 0.0, controls);
 
         cluster.advance(ageYr);
 
-        // Obtain the expected live mass range from SimPhysics
-        const auto lmr = sim.tracks().liveMassRange(logAge, 0.0);
+        // Obtain the expected live mass range from SimControls
+        const auto lmr = controls.tracks().liveMassRange(logAge, 0.0);
         if (lmr.empty())
         {
             std::cerr << "testCluster: advance: liveMassRange is empty at age "
@@ -154,12 +151,11 @@ static auto testClusterMinStochMass() -> int
     {
         const toml::table inputDeck = toml::parse_file(inputFileMinStochMass);
         const io::SimControls controls(inputDeck);
-        const io::SimPhysics sim(inputDeck, controls);
 
         utils::rng().seed(rngSeed);
-        const core::Cluster cluster(0, targetMass, 0.0, sim, controls);
+        const core::Cluster cluster(0, targetMass, 0.0, controls);
 
-        const double minStochMass = sim.minStochMass();
+        const double minStochMass = controls.minStochMass();
         const auto& masses = cluster.starMasses();
 
         // Every returned star must be at or above min_stoch_mass.
@@ -173,7 +169,7 @@ static auto testClusterMinStochMass() -> int
 
         // The total stochastic mass should be within tolerance of
         // fracStochMass * targetMass.
-        const double stochTarget = sim.fracStochMass() * targetMass;
+        const double stochTarget = controls.fracStochMass() * targetMass;
         const double totalMass = std::reduce(masses.begin(), masses.end(), 0.0);
         if (std::abs(totalMass - stochTarget) / stochTarget > tolerance)
         {
@@ -205,18 +201,17 @@ static auto testClusterSpecFullyStochastic() -> int
     {
         const toml::table inputDeck = toml::parse_file(inputFile);
         const io::SimControls controls(inputDeck);
-        const io::SimPhysics sim(inputDeck, controls);
 
         utils::rng().seed(rngSeed);
-        core::Cluster cluster(0, 1e4, 0.0, sim, controls);
+        core::Cluster cluster(0, 1e4, 0.0, controls);
         cluster.advance(ageYr);
 
         const auto& spec = cluster.spec();
-        if (spec.size() != sim.specsyn()->wl().size())
+        if (spec.size() != controls.specsyn()->wl().size())
         {
             std::cerr << "testCluster: specFullyStochastic: spec() size "
                 << spec.size() << " does not match wl() size "
-                << sim.specsyn()->wl().size() << "\n";
+                << controls.specsyn()->wl().size() << "\n";
             return 1;
         }
         if (std::reduce(spec.begin(), spec.end(), 0.0) <= 0.0)
@@ -246,18 +241,17 @@ static auto testClusterSpecContinuousPopulation() -> int
     {
         const toml::table inputDeck = toml::parse_file(inputFileMinStochMass);
         const io::SimControls controls(inputDeck);
-        const io::SimPhysics sim(inputDeck, controls);
 
         utils::rng().seed(rngSeed);
-        core::Cluster cluster(0, 1e4, 0.0, sim, controls);
+        core::Cluster cluster(0, 1e4, 0.0, controls);
         cluster.advance(ageYr);
 
         const auto& spec = cluster.spec();
-        if (spec.size() != sim.specsyn()->wl().size())
+        if (spec.size() != controls.specsyn()->wl().size())
         {
             std::cerr << "testCluster: specContinuousPopulation: spec() size "
                 << spec.size() << " does not match wl() size "
-                << sim.specsyn()->wl().size() << "\n";
+                << controls.specsyn()->wl().size() << "\n";
             return 1;
         }
         if (std::reduce(spec.begin(), spec.end(), 0.0) <= 0.0)
@@ -278,8 +272,8 @@ static auto testClusterSpecContinuousPopulation() -> int
 
 // Verify that Cluster::phot() is populated by advance() when a filter
 // collection is available (phot.filters given in the input deck), and
-// that SimPhysics::readFilters's "Lbol" handling and
-// SimPhysics::filters()->filterNames() come out as expected.
+// that SimControls::readFilters's "Lbol" handling and
+// SimControls::filters()->filterNames() come out as expected.
 static auto testClusterPhot() -> int
 {
     constexpr double ageYr = 1e6;
@@ -288,21 +282,20 @@ static auto testClusterPhot() -> int
     {
         const toml::table inputDeck = toml::parse_file(inputFilePhot);
         const io::SimControls controls(inputDeck);
-        const io::SimPhysics sim(inputDeck, controls);
 
-        if (sim.filters() == nullptr)
+        if (controls.filters() == nullptr)
         {
-            std::cerr << "testCluster: phot: expected SimPhysics::filters() "
+            std::cerr << "testCluster: phot: expected SimControls::filters() "
                 "to be non-null\n";
             return 1;
         }
-        if (!sim.computeLbol())
+        if (!controls.computeLbol())
         {
-            std::cerr << "testCluster: phot: expected SimPhysics::computeLbol() "
+            std::cerr << "testCluster: phot: expected SimControls::computeLbol() "
                 "to be true (\"Lbol\" was in phot.filters)\n";
             return 1;
         }
-        const auto& filterNames = sim.filters()->filterNames();
+        const auto& filterNames = controls.filters()->filterNames();
         const std::vector<std::string> expectedNames =
             { "SLUGTEST.CAM1.G500", "ideal_phot_700_1500" };
         if (filterNames != expectedNames)
@@ -314,7 +307,7 @@ static auto testClusterPhot() -> int
         }
 
         utils::rng().seed(rngSeed);
-        core::Cluster cluster(0, 1e4, 0.0, sim, controls);
+        core::Cluster cluster(0, 1e4, 0.0, controls);
         cluster.advance(ageYr);
 
         const auto& phot = cluster.phot();
@@ -331,7 +324,7 @@ static auto testClusterPhot() -> int
         // correctly. Both calls run the exact same deterministic
         // computation on the same (spec, wl) inputs, so the results
         // should be bitwise identical.
-        const auto expectedPhot = sim.filters()->phot(sim.specsyn()->wl(), cluster.spec());
+        const auto expectedPhot = controls.filters()->phot(controls.specsyn()->wl(), cluster.spec());
         for (std::size_t i = 0; i < phot.size(); ++i)
         {
             if (phot.at(i) != expectedPhot.at(i))
@@ -370,7 +363,7 @@ static auto testClusterPhot() -> int
 }
 
 // Verify that Cluster::phot() stays empty when no filter collection
-// was requested (SimPhysics::filters() is null), mirroring
+// was requested (SimControls::filters() is null), mirroring
 // testClusterSpecFullyStochastic's own check for spec()
 static auto testClusterPhotAbsent() -> int
 {
@@ -380,17 +373,16 @@ static auto testClusterPhotAbsent() -> int
     {
         const toml::table inputDeck = toml::parse_file(inputFile);
         const io::SimControls controls(inputDeck);
-        const io::SimPhysics sim(inputDeck, controls);
 
-        if (sim.filters() != nullptr)
+        if (controls.filters() != nullptr)
         {
-            std::cerr << "testCluster: phot: expected SimPhysics::filters() "
+            std::cerr << "testCluster: phot: expected SimControls::filters() "
                 "to be null for a deck with no [phot] section\n";
             return 1;
         }
 
         utils::rng().seed(rngSeed);
-        core::Cluster cluster(0, 1e4, 0.0, sim, controls);
+        core::Cluster cluster(0, 1e4, 0.0, controls);
         cluster.advance(ageYr);
 
         if (!cluster.phot().empty())
@@ -410,9 +402,9 @@ static auto testClusterPhotAbsent() -> int
 }
 
 // Verify that Cluster::lbol() is populated by advance() when
-// SimPhysics::computeLbol() is true. testClusterLbol.in has "Lbol" as
-// the sole entry in phot.filters, so SimPhysics::filters() itself
-// should stay null (see SimPhysics::readFilters()'s own comment) even
+// SimControls::computeLbol() is true. testClusterLbol.in has "Lbol" as
+// the sole entry in phot.filters, so SimControls::filters() itself
+// should stay null (see SimControls::readFilters()'s own comment) even
 // though computeLbol() is true; it also sets min_stoch_mass, so
 // birthNonStochMass_ > 0 and both the stochastic and
 // continuously-sampled (utils::PDFIntegrator-based) code paths inside
@@ -425,23 +417,22 @@ static auto testClusterLbol() -> int
     {
         const toml::table inputDeck = toml::parse_file(inputFileLbol);
         const io::SimControls controls(inputDeck);
-        const io::SimPhysics sim(inputDeck, controls);
 
-        if (!sim.computeLbol())
+        if (!controls.computeLbol())
         {
-            std::cerr << "testCluster: lbol: expected SimPhysics::computeLbol() "
+            std::cerr << "testCluster: lbol: expected SimControls::computeLbol() "
                 "to be true (\"Lbol\" was in phot.filters)\n";
             return 1;
         }
-        if (sim.filters() != nullptr)
+        if (controls.filters() != nullptr)
         {
-            std::cerr << "testCluster: lbol: expected SimPhysics::filters() "
+            std::cerr << "testCluster: lbol: expected SimControls::filters() "
                 "to be null when \"Lbol\" is the only entry in phot.filters\n";
             return 1;
         }
 
         utils::rng().seed(rngSeed);
-        core::Cluster cluster(0, 1e4, 0.0, sim, controls);
+        core::Cluster cluster(0, 1e4, 0.0, controls);
 
         if (cluster.lbol() != 0.0)
         {
