@@ -1,0 +1,14 @@
+# This is a toml-format SFH (star formation history) definition file
+# for SLUG v3, used for testing; it is the toml-format counterpart to
+# sfh_burst.txt. This file defines a burst of constant SFR = 0.001
+# between 0-1Myr
+
+format = "advanced"
+
+# First exponential burst
+[segment1]
+type = "powerlaw"
+min = 0.0     # min time
+max = 1e6     # max time
+weight = 1e3  # Form 1e3 Msun of stars in segment
+slope = 0     # make it constant

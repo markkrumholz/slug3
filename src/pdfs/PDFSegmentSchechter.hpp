@@ -21,6 +21,7 @@
 #include <fstream>
 #include <gsl/gsl_sf_gamma.h>
 #include <random>
+#include <toml.hpp>
 
 namespace pdfs {
 
@@ -66,7 +67,28 @@ namespace pdfs {
          * is ignored, while if fmt is advanced, then 
          * sMin and sMax are ignored and wgt is an output.
         */        
-        PDFSegmentSchechter(std::ifstream& file, 
+        PDFSegmentSchechter(std::ifstream& file,
+            FileFormats fmt,
+            double &sMin,
+            double &sMax,
+            double &wgt);
+        /**
+         * @brief Construct PDFSegmentSchechter from a toml-format PDF descriptor
+         * @param node A toml node view onto this segment's own
+         *   segmentN table (see parsePDFToml)
+         * @param fmt Format of the descriptor being read
+         * @param sMin The lower limit of the segment
+         * @param sMax The upper limit of the segment
+         * @param wgt The weight of the segment
+         * @details
+         * A toml-based counterpart to the ifstream-based constructor
+         * above, interpreting its arguments identically: how they are
+         * interpreted depends on fmt; if fmt is basic, then sMin and
+         * sMax are inputs, and wgt is ignored, while if fmt is
+         * advanced, then sMin and sMax are ignored and wgt is an
+         * output.
+        */
+        PDFSegmentSchechter(toml::node_view<const toml::node> node,
             FileFormats fmt,
             double &sMin,
             double &sMax,

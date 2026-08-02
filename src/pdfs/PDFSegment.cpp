@@ -12,6 +12,7 @@
 #include <map>
 #include <stdexcept>
 #include <string>
+#include <toml.hpp>
 #include <vector>
 
 auto pdfs::PDFSegment::segmentParser(std::ifstream& file,
@@ -74,4 +75,26 @@ auto pdfs::PDFSegment::segmentParser(std::ifstream& file,
     // without finding all the required tokens for this segment,
     // so we throw an error
     throw std::runtime_error("");
+}
+
+auto pdfs::PDFSegment::segmentParserToml(toml::node_view<const toml::node> node,
+    std::vector<std::string>& tok)
+    -> std::map<std::string, double>
+{
+    // Empty map to hold result
+    std::map<std::string, double> result;
+
+    // Look up each expected key directly and parse it as a number
+    for (auto const& key : tok)
+    {
+        auto val = node.at_path(key).value<double>();
+        if (!val.has_value())
+        {
+            throw std::runtime_error(
+                "missing or non-numeric required key '" + key + "'");
+        }
+        result[key] = val.value();
+    }
+
+    return result;
 }
