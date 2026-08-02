@@ -11,8 +11,10 @@
 #include "Filter.hpp"
 #include "FilterCommons.hpp"
 #include "PhotCommons.hpp"
+#include <cstddef>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace phot
@@ -48,23 +50,55 @@ namespace phot
          *   energy-flux (photCount() == false) filters' results into
          * @param registryName Name of the filter registry file to
          *   resolve tabulated filter names against
-         * @param vegaName Name of the HDF5 file holding the Vega
-         *   reference spectrum ("wl" and "flux" datasets -- see
-         *   data/tools/fetch_vega.py); only read if photSystem is
-         *   Vega, in which case every non-photCount() filter's
-         *   fluxVega() is set from it (see Filter::setFluxVega())
          * @throws std::runtime_error if any entry of filterNames does
          *   not match a recognized tabulated- or idealized-filter
          *   naming convention, or if constructing the corresponding
          *   Filter itself throws (e.g. an unknown facility/instrument/
          *   filter, an ambiguous instrument-omitted facility, or an
-         *   unparseable idealized-filter name); also throws if
-         *   photSystem is Vega and vegaName cannot be read
+         *   unparseable idealized-filter name)
+         * @details
+         * If photSystem is PhotSystem::Vega, each non-photCount()
+         * filter's Vega zero point is computed lazily, from the global
+         * Vega reference spectrum, the first time it is actually
+         * needed -- see Filter::fluxVega() and phot::vegaSpectrum().
          */
         FilterCollection(const std::vector<std::string>& filterNames,
             PhotSystem photSystem,
-            const std::string& registryName = defaultRegistry,
-            const std::string& vegaName = defaultVegaSpec);
+            const std::string& registryName = defaultRegistry);
+
+        /**
+         * @brief Parse a filter name and add the resulting filter to this collection
+         * @param name Name of the filter to add; see the constructor's
+         *   own filterNames parameter for the recognized naming
+         *   conventions
+         * @param registryName Name of the filter registry file to
+         *   resolve a tabulated filter name against; unused for an
+         *   idealized filter name
+         * @throws std::runtime_error if name does not match a
+         *   recognized tabulated- or idealized-filter naming
+         *   convention, or if constructing the corresponding Filter
+         *   itself throws
+         * @details
+         * Used by the constructor to build each filter named in
+         * filterNames, one at a time; also public so a caller (e.g.
+         * from Python, where a FilterCollection can be built up
+         * incrementally rather than from a single up-front list of
+         * names) can add filters to an already-constructed
+         * FilterCollection one name at a time.
+         */
+        void addFilter(const std::string& name, const std::string& registryName = defaultRegistry);
+
+        /**
+         * @brief Add an already-constructed filter to this collection
+         * @param filter The filter to add; ownership is transferred to
+         *   this FilterCollection
+         * @details
+         * Lets a caller (e.g. from Python, where FilterIdeal and
+         * FilterTabulated both have their own accessible constructors)
+         * add a filter it built directly, rather than by name via the
+         * other addFilter() overload.
+         */
+        void addFilter(std::unique_ptr<Filter> filter) { filters_.push_back(std::move(filter)); }
 
         /**
          * @brief Compute the photometric response of every filter in this collection to a spectrum
@@ -77,8 +111,8 @@ namespace phot
          *   an energy-flux filter, Filter::phot()'s F_lambda value,
          *   converted to this collection's photSystem via PhotConvert
          *   (left as-is if photSystem is already Flambda; for Vega,
-         *   using this filter's own fluxVega() -- populated from
-         *   vegaName at construction, see the constructor -- as the
+         *   using this filter's own fluxVega() -- lazily computed the
+         *   first time it is needed, see Filter::fluxVega() -- as the
          *   zero point)
          */
         [[nodiscard]] auto phot(const std::vector<double>& wl,
@@ -106,6 +140,23 @@ namespace phot
          *   same order as phot()/filterNames()/filterUnits()
          */
         [[nodiscard]] auto filters() const -> const std::vector<std::unique_ptr<Filter>>& { return filters_; }
+
+        /**
+         * @brief Get a single filter by index
+         * @param i Index of the filter to get, in the same order as
+         *   phot()/filterNames()/filterUnits()
+         * @return A const reference to the i'th filter
+         * @throws std::out_of_range if i >= filters().size()
+         */
+        [[nodiscard]] auto getFilter(std::size_t i) const -> const Filter&;
+
+        /**
+         * @brief Get a single filter by name
+         * @param name Name to search for
+         * @return A const reference to the filter whose name() exactly matches name
+         * @throws std::runtime_error if no filter's name() matches name
+         */
+        [[nodiscard]] auto getFilter(const std::string& name) const -> const Filter&;
 
     private:
         std::vector<std::unique_ptr<Filter>> filters_; /**< The filters in this collection */

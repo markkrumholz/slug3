@@ -8,6 +8,7 @@
 #ifndef FILTER_HPP
 #define FILTER_HPP
 
+#include "VegaSpectrum.hpp"
 #include <algorithm>
 #include <cmath>
 #include <string>
@@ -83,25 +84,31 @@ namespace phot
         /**
          * @brief Get this filter's mean Vega flux
          * @return The filter-mean flux of Vega in this filter, in
-         *   erg/s/cm^2/Angstrom, as last set by setFluxVega() (0 if
-         *   setFluxVega() has never been called)
+         *   erg/s/cm^2/Angstrom, computing and caching it (via
+         *   setFluxVega()) against the global Vega reference spectrum
+         *   (see vegaSpectrum()) the first time it is needed; always 0
+         *   if photCount() is true, since a photon-count filter's
+         *   phot() value has no Flambda meaning, so the Vega spectrum
+         *   is meaningless for it
          */
-        [[nodiscard]] auto fluxVega() const -> double { return fluxVega_; }
-
-        /**
-         * @brief Set this filter's mean Vega flux from the Vega reference spectrum
-         * @param wlVega Wavelength grid of the Vega reference spectrum, in Angstrom
-         * @param fluxVega The Vega reference spectrum, in erg/s/cm^2/Angstrom
-         * @details
-         * Computes fluxVega_ by evaluating this filter's own phot()
-         * on the Vega reference spectrum, and stores the result --
-         * i.e. fluxVega_ becomes this filter's own idea of "the flux
-         * of Vega," on whatever basis (tabulated response, top-hat
-         * passband, etc.) phot() itself uses.
-         */
-        void setFluxVega(const std::vector<double>& wlVega, const std::vector<double>& fluxVega)
+        [[nodiscard]] auto fluxVega() const -> double
         {
-            fluxVega_ = phot(wlVega, fluxVega);
+            if (photCount_) { return 0.0; }
+            if (fluxVega_ == 0.0)
+            {
+#ifdef _OPENMP
+#pragma omp critical(filterSetFluxVega)
+#endif
+                {
+                    // Re-check inside the critical section: another
+                    // thread may have already computed fluxVega_ while
+                    // this one was waiting to enter it (e.g. multiple
+                    // cluster trials, sharing this same Filter, running
+                    // concurrently in SimCluster::run()'s parallel for)
+                    if (fluxVega_ == 0.0) { setFluxVega(); }
+                }
+            }
+            return fluxVega_;
         }
 
     protected:
@@ -110,6 +117,23 @@ namespace phot
         // set it directly after base construction, once it has
         // determined it by parsing the name passed to the base class
         bool photCount_; /**< True if this filter returns photon counts rather than F_lambda values */
+
+        /**
+         * @brief Set this filter's mean Vega flux from the global Vega reference spectrum
+         * @details
+         * Computes fluxVega_ by evaluating this filter's own phot() on
+         * the global Vega reference spectrum (see vegaSpectrum()), and
+         * stores the result -- i.e. fluxVega_ becomes this filter's
+         * own idea of "the flux of Vega," on whatever basis (tabulated
+         * response, top-hat passband, etc.) phot() itself uses. Called
+         * automatically, at most once, by fluxVega() the first time it
+         * is needed; not normally called directly.
+         */
+        void setFluxVega() const
+        {
+            const auto [wlVega, flux] = vegaSpectrum();
+            fluxVega_ = phot(wlVega, flux);
+        }
 
         /**
          * @brief Element-wise natural logarithm of a wavelength grid
@@ -130,8 +154,8 @@ namespace phot
         }
 
     private:
-        std::string name_;      /**< Name of this filter, for output purposes */
-        double fluxVega_ = 0.0; /**< Filter-mean flux of Vega, in erg/s/cm^2/Angstrom; see setFluxVega() */
+        std::string name_; /**< Name of this filter, for output purposes */
+        mutable double fluxVega_ = 0.0; /**< Filter-mean flux of Vega, in erg/s/cm^2/Angstrom; lazily set by fluxVega(); see setFluxVega() */
     };
 
 } // namespace phot

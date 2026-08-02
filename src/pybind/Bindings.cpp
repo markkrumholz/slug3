@@ -20,11 +20,17 @@ PYBIND11_MODULE(slug, m, py::mod_gil_not_used()) {
     m.doc() = "slug Python frontend"; // optional module docstring
 
     bindInterpolator1D(m);
+    bindInterpolator1DScalar(m);
     bindTracks3D(m);
     bindTracks2D(m);
     bindSimControls(m);
     bindSimPhysics(m);
     bindSpecsyn(m);
     bindCluster(m);
+    bindFilter(m);
+    bindFilterIdeal(m);
+    bindFilterTabulated(m);
+    bindFilterCollection(m);
+    bindPhotConvert(m);
 }
 // NOLINTEND(misc-include-cleaner)

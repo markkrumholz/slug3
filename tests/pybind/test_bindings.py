@@ -11,7 +11,10 @@ Interpolator1D objects returned by getTrack() and getIsochrone().
 SimPhysics and Cluster are exercised against
 tests/core/assets/testCluster.in, the same fixture the C++ tests in
 tests/core use, which also points at the MIST_test track set and
-requests spectra.model = "blackbody".
+requests spectra.model = "blackbody". FilterIdeal, FilterTabulated,
+and FilterCollection are exercised against the same small filter
+registry (tests/phot/assets/filters_test.toml) the C++ tests in
+tests/phot use.
 
 This file is run via pytest, invoked as a CTest test from CMakeLists.txt
 (see the test_PythonBindings target), so `ctest` alone runs both the
@@ -56,6 +59,35 @@ SAFE_LOG_TIMES = (0.0, 1.0, 2.0, 3.0)
 CLUSTER_DECK = "tests/core/assets/testCluster.in"
 CLUSTER_TARGET_MASS = 1e3
 
+# Input decks used for the Cluster.phot()/lbol() tests below.
+# PHOT_DECK requests two real/idealized filters plus "Lbol"; LBOL_DECK
+# requests "Lbol" alone, so SimPhysics.filters() stays None there while
+# SimPhysics.computeLbol() is True (see the deck's own comment) -- both
+# are otherwise identical to CLUSTER_DECK and are also used by the C++
+# tests in tests/core/testCluster.cpp.
+PHOT_DECK = "tests/core/assets/testClusterPhot.in"
+PHOT_DECK_NFILTERS = 2  # SLUGTEST.CAM1.G500, ideal_phot_700_1500 ("Lbol" is not a filter)
+LBOL_DECK = "tests/core/assets/testClusterLbol.in"
+
+# Filter registry used by the FilterIdeal/FilterTabulated/FilterCollection
+# tests below: a single tabulated filter, SLUGTEST.CAM1.G500 (a
+# synthetic Gaussian response peaked at 5000 Angstrom), on a facility
+# with exactly one instrument -- same fixture used by
+# tests/phot/testFilterCollection.hpp et al.
+FILTER_REGISTRY = "tests/phot/assets/filters_test.toml"
+
+
+def _make_const_spec(wl_lo, wl_hi, n, f0):
+    """A constant-F_lambda spectrum on a uniform grid of n points over
+    [wl_lo, wl_hi], mirroring tests/phot/testFilterCollection.hpp's own
+    makeConstSpec(): a constant spectrum's filter-integrated value
+    doesn't depend on the filter's response shape, giving an exact
+    closed form (== f0) for any energy-flux filter without needing to
+    duplicate any filter's own integration machinery."""
+    wl = [wl_lo + (wl_hi - wl_lo) * i / (n - 1) for i in range(n)]
+    wl[-1] = wl_hi
+    return wl, [f0] * n
+
 
 @pytest.fixture(scope="module")
 def tracks2d():
@@ -81,6 +113,30 @@ def sim_physics():
 def sim_controls():
     """A SimControls object built from CLUSTER_DECK."""
     return slug.SimControls(CLUSTER_DECK)
+
+
+@pytest.fixture(scope="module")
+def phot_physics():
+    """A SimPhysics object built from PHOT_DECK."""
+    return slug.SimPhysics(PHOT_DECK, "cluster")
+
+
+@pytest.fixture(scope="module")
+def phot_controls():
+    """A SimControls object built from PHOT_DECK."""
+    return slug.SimControls(PHOT_DECK)
+
+
+@pytest.fixture(scope="module")
+def lbol_physics():
+    """A SimPhysics object built from LBOL_DECK."""
+    return slug.SimPhysics(LBOL_DECK, "cluster")
+
+
+@pytest.fixture(scope="module")
+def lbol_controls():
+    """A SimControls object built from LBOL_DECK."""
+    return slug.SimControls(LBOL_DECK)
 
 
 # ---------------------------------------------------------------------
@@ -367,6 +423,43 @@ def test_simphysics_wl_without_specsyn_raises(tmp_path):
         physics.wlObs()
 
 
+def test_simphysics_compute_lbol_default_false(sim_physics):
+    """CLUSTER_DECK has no [phot] section, so computeLbol() should
+    default to False."""
+    assert not sim_physics.computeLbol()
+
+
+def test_simphysics_set_compute_lbol_toggles():
+    """setComputeLbol() should be reflected back by computeLbol(). Uses
+    its own SimPhysics, rather than the shared sim_physics fixture, so
+    a failed assertion here can't leave module-scoped state behind for
+    other tests to trip over."""
+    physics = slug.SimPhysics(CLUSTER_DECK, "cluster")
+    assert not physics.computeLbol()
+
+    physics.setComputeLbol(True)
+    assert physics.computeLbol()
+
+    physics.setComputeLbol(False)
+    assert not physics.computeLbol()
+
+
+def test_simphysics_set_compute_lbol_enables_lbol_computation():
+    """setComputeLbol(True) on a SimPhysics built from a deck with no
+    [phot] section should, on its own, be enough to make advance()
+    populate a Cluster's lbol() -- the Python-only path for requesting
+    Lbol output without a phot.filters deck entry."""
+    physics = slug.SimPhysics(CLUSTER_DECK, "cluster")
+    physics.setComputeLbol(True)
+    controls = slug.SimControls(CLUSTER_DECK)
+    cluster = slug.Cluster(30, CLUSTER_TARGET_MASS, 0.0, physics, controls)
+    assert cluster.lbol() == pytest.approx(0.0)
+
+    cluster.advance(5.0)
+
+    assert cluster.lbol() > 0.0
+
+
 # ---------------------------------------------------------------------
 # Cluster
 # ---------------------------------------------------------------------
@@ -464,3 +557,427 @@ def test_cluster_keeps_physics_alive():
     # use-after-free (and likely crash) if keep_alive were missing
     cluster.advance(5.0)
     assert len(cluster.spec()) > 0
+
+
+# ---------------------------------------------------------------------
+# FilterIdeal
+# ---------------------------------------------------------------------
+
+
+def test_filterideal_energy_filter():
+    """An ideal_energy_X_Y filter should report the parsed range and
+    photCount() == False, and phot() of a constant spectrum should
+    return that same constant (see _make_const_spec's own docstring)."""
+    filt = slug.FilterIdeal("ideal_energy_700_1500")
+    assert filt.name() == "ideal_energy_700_1500"
+    assert not filt.photCount()
+    assert filt.wlMin() == pytest.approx(700.0)
+    assert filt.wlMax() == pytest.approx(1500.0)
+    assert filt.wlPivot() == pytest.approx(1100.0)
+
+    wl, spec = _make_const_spec(500.0, 2000.0, 2000, 3.5)
+    assert filt.phot(wl, spec) == pytest.approx(3.5, rel=1e-6)
+
+
+def test_filterideal_phot_filter():
+    """An ideal_phot_X_Y filter should report photCount() == True and a
+    positive photon-count rate for a positive spectrum."""
+    filt = slug.FilterIdeal("ideal_phot_700_1500")
+    assert filt.photCount()
+    wl, spec = _make_const_spec(500.0, 2000.0, 2000, 3.5)
+    assert filt.phot(wl, spec) > 0.0
+
+
+def test_filterideal_ionization_threshold():
+    """A Q(<elem><ion>) filter should have wlMax() == inf and a finite,
+    positive wlMin() set from the ionization threshold, with
+    photCount() == True."""
+    filt = slug.FilterIdeal("Q(HI)")
+    assert filt.photCount()
+    assert filt.wlMin() > 0.0
+    assert np.isinf(filt.wlMax())
+    assert filt.wlPivot() == pytest.approx(filt.wlMin())
+
+
+def test_filterideal_invalid_name_raises():
+    """A name matching neither recognized convention should raise, not
+    crash."""
+    with pytest.raises(RuntimeError):
+        slug.FilterIdeal("not_a_valid_name")
+
+
+# ---------------------------------------------------------------------
+# FilterTabulated
+# ---------------------------------------------------------------------
+
+
+def test_filtertabulated_registry_constructor():
+    """The registry constructor should resolve SLUGTEST.CAM1.G500 from
+    FILTER_REGISTRY, reporting the full facility.instrument.filter name,
+    photCount() == False, and a finite, positive wlPivot()/norm()."""
+    filt = slug.FilterTabulated("SLUGTEST", "CAM1", "G500", FILTER_REGISTRY)
+    assert filt.name() == "SLUGTEST.CAM1.G500"
+    assert not filt.photCount()
+    assert filt.wlPivot() == pytest.approx(5000.0)
+    assert filt.norm() > 0.0
+
+
+def test_filtertabulated_direct_constructor():
+    """The direct (name, wl, response, wl_pivot) constructor should
+    round-trip its wl/response arrays through wl()/responseData(), and
+    report the supplied wlPivot()."""
+    wl = [1000.0, 2000.0, 3000.0]
+    response = [0.0, 1.0, 0.0]
+    filt = slug.FilterTabulated("my_filter", wl, response, 2000.0)
+
+    assert filt.name() == "my_filter"
+    assert not filt.photCount()
+    assert filt.wlPivot() == pytest.approx(2000.0)
+    assert list(filt.wl()) == pytest.approx(wl)
+    assert list(filt.responseData()) == pytest.approx(response)
+
+
+def test_filtertabulated_response_interpolator():
+    """response() should return an Interpolator1DScalar spanning
+    ln(wl()) that evaluates to responseData()'s peak value at the
+    corresponding ln(wavelength)."""
+    wl = [1000.0, 2000.0, 3000.0]
+    response = [0.0, 1.0, 0.0]
+    filt = slug.FilterTabulated("my_filter", wl, response, 2000.0)
+
+    interp = filt.response()
+    assert interp.xMin() == pytest.approx(np.log(1000.0))
+    assert interp.xMax() == pytest.approx(np.log(3000.0))
+    assert interp(np.log(2000.0)) == pytest.approx(1.0)
+
+
+def test_filtertabulated_phot_matches_const_spectrum():
+    """phot() of a constant spectrum should return that same constant,
+    same closed-form argument as test_filterideal_energy_filter."""
+    filt = slug.FilterTabulated("SLUGTEST", "CAM1", "G500", FILTER_REGISTRY)
+    wl, spec = _make_const_spec(2000.0, 8000.0, 5000, 3.5)
+    assert filt.phot(wl, spec) == pytest.approx(3.5, rel=1e-6)
+
+
+def test_filtertabulated_unknown_facility_raises():
+    """An unrecognized facility should raise, not crash."""
+    with pytest.raises(RuntimeError):
+        slug.FilterTabulated("BOGUS", "CAM1", "G500", FILTER_REGISTRY)
+
+
+# ---------------------------------------------------------------------
+# FilterCollection
+# ---------------------------------------------------------------------
+
+
+def test_filtercollection_mixed_construction():
+    """A FilterCollection built from one tabulated and three idealized
+    filter names should report filterNames()/filterUnits() in the
+    supplied order, and phot() should agree with the same filters'
+    own phot(), matching testFilterCollectionMixedConstruction in
+    tests/phot/testFilterCollection.hpp."""
+    names = ["SLUGTEST.CAM1.G500", "ideal_energy_700_1500", "ideal_phot_700_1500", "Q(HI)"]
+    fc = slug.FilterCollection(names, slug.PhotSystem.Flambda, FILTER_REGISTRY)
+
+    assert fc.filterNames() == names
+    assert fc.filterUnits() == [
+        "erg/s/Angstrom", "erg/s/Angstrom", "photons/s", "photons/s"]
+
+    wl, spec = _make_const_spec(500.0, 9000.0, 5000, 3.5)
+
+    ref_tab = slug.FilterTabulated("SLUGTEST", "CAM1", "G500", FILTER_REGISTRY)
+    ref_energy = slug.FilterIdeal("ideal_energy_700_1500")
+    ref_phot = slug.FilterIdeal("ideal_phot_700_1500")
+    ref_qhi = slug.FilterIdeal("Q(HI)")
+    expected = [
+        ref_tab.phot(wl, spec), ref_energy.phot(wl, spec),
+        ref_phot.phot(wl, spec), ref_qhi.phot(wl, spec)]
+
+    assert list(fc.phot(wl, spec)) == pytest.approx(expected, rel=1e-9)
+
+
+def test_filtercollection_phot_system_conversion():
+    """filterUnits() should report the requested photSystem's unit for
+    every energy-flux filter, leaving photon-count filters
+    unconverted."""
+    names = ["SLUGTEST.CAM1.G500", "ideal_phot_700_1500"]
+    fc = slug.FilterCollection(names, slug.PhotSystem.AB, FILTER_REGISTRY)
+    assert fc.filterUnits() == ["ABmag", "photons/s"]
+
+
+def test_filtercollection_instrument_omitted():
+    """FILTER_REGISTRY's SLUGTEST facility has exactly one instrument
+    (CAM1), so the instrument-omitted "SLUGTEST.G500" name should
+    resolve to the same filter as "SLUGTEST.CAM1.G500"."""
+    fc = slug.FilterCollection(["SLUGTEST.G500"], slug.PhotSystem.Flambda, FILTER_REGISTRY)
+    assert fc.filterNames() == ["SLUGTEST.CAM1.G500"]
+
+
+def test_filtercollection_invalid_name_raises():
+    """An unparseable filter name should raise, not crash."""
+    with pytest.raises(RuntimeError):
+        slug.FilterCollection(["not_a_valid_name"], slug.PhotSystem.Flambda, FILTER_REGISTRY)
+
+
+def test_filtercollection_getfilter_by_index_downcasts():
+    """getFilter(i) should hand back each filter as its actual
+    concrete type (FilterTabulated or FilterIdeal), not a bare Filter
+    -- pybind11's automatic polymorphic downcasting, since FilterIdeal
+    and FilterTabulated are both registered as Filter subclasses."""
+    names = ["SLUGTEST.CAM1.G500", "ideal_phot_700_1500", "Q(HI)"]
+    fc = slug.FilterCollection(names, slug.PhotSystem.Flambda, FILTER_REGISTRY)
+
+    tab = fc.getFilter(0)
+    assert isinstance(tab, slug.FilterTabulated)
+    assert isinstance(tab, slug.Filter)
+    assert tab.name() == "SLUGTEST.CAM1.G500"
+    assert tab.norm() > 0.0  # FilterTabulated-only method
+
+    ideal = fc.getFilter(1)
+    assert isinstance(ideal, slug.FilterIdeal)
+    assert ideal.name() == "ideal_phot_700_1500"
+    assert ideal.wlMin() == pytest.approx(700.0)  # FilterIdeal-only method
+
+
+def test_filtercollection_getfilter_by_name():
+    """getFilter(name) should return the filter whose name() exactly
+    matches, agreeing with the same filter fetched by index."""
+    names = ["SLUGTEST.CAM1.G500", "ideal_phot_700_1500", "Q(HI)"]
+    fc = slug.FilterCollection(names, slug.PhotSystem.Flambda, FILTER_REGISTRY)
+
+    by_name = fc.getFilter("Q(HI)")
+    by_index = fc.getFilter(2)
+    assert type(by_name) is type(by_index)
+    assert by_name.name() == by_index.name() == "Q(HI)"
+
+
+def test_filtercollection_getfilter_bad_index_raises_indexerror():
+    """An out-of-range index should raise IndexError specifically, not
+    just any RuntimeError."""
+    fc = slug.FilterCollection(["Q(HI)"], slug.PhotSystem.Flambda, FILTER_REGISTRY)
+    with pytest.raises(IndexError):
+        fc.getFilter(1)
+
+
+def test_filtercollection_getfilter_bad_name_raises_runtimeerror():
+    """A name with no matching filter should raise RuntimeError, not
+    IndexError."""
+    fc = slug.FilterCollection(["Q(HI)"], slug.PhotSystem.Flambda, FILTER_REGISTRY)
+    with pytest.raises(RuntimeError):
+        fc.getFilter("not_in_this_collection")
+
+
+def test_filtercollection_filters_matches_names_and_order():
+    """filters() should return one filter per filterNames() entry, in
+    the same order, each downcast to its concrete type, agreeing with
+    the same filters fetched one at a time via getFilter()."""
+    names = ["SLUGTEST.CAM1.G500", "ideal_energy_700_1500", "ideal_phot_700_1500", "Q(HI)"]
+    fc = slug.FilterCollection(names, slug.PhotSystem.Flambda, FILTER_REGISTRY)
+
+    filts = fc.filters()
+    assert [f.name() for f in filts] == names
+    assert [type(f).__name__ for f in filts] == [
+        "FilterTabulated", "FilterIdeal", "FilterIdeal", "FilterIdeal"]
+    for i, filt in enumerate(filts):
+        assert type(filt) is type(fc.getFilter(i))
+        assert filt.name() == fc.getFilter(i).name()
+
+
+def test_filtercollection_filter_outlives_collection():
+    """A filter obtained from getFilter()/filters() must stay usable
+    even after every other reference to its owning FilterCollection is
+    dropped -- FilterCollection owns the underlying Filter objects, so
+    the binding must keep the collection alive as long as any filter
+    obtained from it survives (mirrors
+    test_cluster_tracks_reference_survives_cluster_deletion)."""
+    fc = slug.FilterCollection(["Q(HI)"], slug.PhotSystem.Flambda, FILTER_REGISTRY)
+    filt = fc.getFilter(0)
+    filts = fc.filters()
+    del fc
+    gc.collect()
+
+    assert filt.name() == "Q(HI)"
+    assert filts[0].name() == "Q(HI)"
+
+
+def test_filtercollection_addfilter_by_name_matches_constructor():
+    """Building a FilterCollection incrementally via addFilter(name)
+    should be equivalent to passing the same names to the constructor
+    up front: same filterNames() and same phot() values."""
+    names = ["SLUGTEST.CAM1.G500", "ideal_phot_700_1500", "Q(HI)"]
+
+    fc_ctor = slug.FilterCollection(names, slug.PhotSystem.Flambda, FILTER_REGISTRY)
+
+    fc_incremental = slug.FilterCollection([], slug.PhotSystem.Flambda)
+    for name in names:
+        fc_incremental.addFilter(name, FILTER_REGISTRY)
+
+    assert fc_incremental.filterNames() == fc_ctor.filterNames() == names
+
+    wl, spec = _make_const_spec(500.0, 9000.0, 5000, 3.5)
+    assert list(fc_incremental.phot(wl, spec)) == pytest.approx(
+        list(fc_ctor.phot(wl, spec)), rel=1e-9)
+
+
+def test_filtercollection_addfilter_by_name_invalid_raises():
+    """addFilter(name) should raise, not crash, for an unparseable name."""
+    fc = slug.FilterCollection([], slug.PhotSystem.Flambda)
+    with pytest.raises(RuntimeError):
+        fc.addFilter("not_a_valid_name")
+
+
+def test_filtercollection_addfilter_direct():
+    """addFilter(filter) should accept a directly-constructed
+    FilterIdeal or FilterTabulated and append it, preserving each
+    filter's own concrete type and values."""
+    fc = slug.FilterCollection([], slug.PhotSystem.Flambda)
+
+    ideal = slug.FilterIdeal("Q(HeI)")
+    fc.addFilter(ideal)
+
+    tab = slug.FilterTabulated("SLUGTEST", "CAM1", "G500", FILTER_REGISTRY)
+    fc.addFilter(tab)
+
+    assert fc.filterNames() == ["Q(HeI)", "SLUGTEST.CAM1.G500"]
+    assert isinstance(fc.getFilter(0), slug.FilterIdeal)
+    assert isinstance(fc.getFilter(1), slug.FilterTabulated)
+    assert fc.getFilter(1).norm() > 0.0
+
+
+def test_filtercollection_addfilter_direct_transfers_ownership():
+    """addFilter(filter) transfers filter's underlying C++ object into
+    the FilterCollection; the Python wrapper that was passed in should
+    no longer be usable afterwards, rather than silently aliasing an
+    object now owned (and possibly later destroyed alongside) the
+    collection."""
+    fc = slug.FilterCollection([], slug.PhotSystem.Flambda)
+    ideal = slug.FilterIdeal("Q(HeI)")
+    fc.addFilter(ideal)
+
+    with pytest.raises(ValueError):
+        ideal.name()
+
+    # the collection's own copy is unaffected
+    assert fc.getFilter(0).name() == "Q(HeI)"
+
+
+def test_cluster_phot_empty_without_filters(sim_physics, sim_controls):
+    """CLUSTER_DECK has no [phot] section, so phot() should stay empty
+    even after advance()."""
+    cluster = slug.Cluster(8, CLUSTER_TARGET_MASS, 0.0, sim_physics, sim_controls)
+    cluster.advance(5.0)
+    assert len(cluster.phot()) == 0
+
+
+def test_cluster_advance_populates_phot(phot_physics, phot_controls):
+    """phot() should be empty before advance() and, afterwards, should
+    hold one positive value per non-"Lbol" filter in PHOT_DECK's
+    phot.filters."""
+    cluster = slug.Cluster(9, CLUSTER_TARGET_MASS, 0.0, phot_physics, phot_controls)
+    assert len(cluster.phot()) == 0
+
+    cluster.advance(5.0)
+
+    assert len(cluster.phot()) == PHOT_DECK_NFILTERS
+    assert all(value > 0.0 for value in cluster.phot())
+
+
+def test_cluster_lbol_zero_before_advance(lbol_physics, lbol_controls):
+    """lbol() should be 0 for a freshly constructed Cluster, before
+    advance() has ever run."""
+    cluster = slug.Cluster(10, CLUSTER_TARGET_MASS, 0.0, lbol_physics, lbol_controls)
+    assert cluster.lbol() == pytest.approx(0.0)
+
+
+def test_cluster_advance_populates_lbol(lbol_physics, lbol_controls):
+    """advance() should populate lbol() with a finite, positive value
+    when computeLbol() is True -- LBOL_DECK sets stars.min_stoch_mass,
+    so this exercises both the stochastic and continuously-sampled
+    code paths in Cluster's bolometric-luminosity computation."""
+    assert lbol_physics.computeLbol()
+    cluster = slug.Cluster(11, CLUSTER_TARGET_MASS, 0.0, lbol_physics, lbol_controls)
+
+    cluster.advance(5.0)
+
+    assert np.isfinite(cluster.lbol())
+    assert cluster.lbol() > 0.0
+
+
+# ---------------------------------------------------------------------
+# PhotConvert
+# ---------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("system", ["Flambda", "Fnu", "ST", "AB", "Vega"])
+def test_photconvert_identity(system):
+    """Converting a system to itself should return flux_in unchanged,
+    even for Vega (where no filter is needed, since the identity case
+    is handled before fluxVega() would ever be read)."""
+    assert slug.PhotConvert(system, system, 5.0, 1000.0) == pytest.approx(5.0)
+
+
+def test_photconvert_flambda_fnu_roundtrip():
+    """Flambda -> Fnu -> Flambda should round-trip to the original value."""
+    flambda_in = 1e-15
+    wl = 5000.0
+    fnu = slug.PhotConvert("Flambda", "Fnu", flambda_in, wl)
+    back = slug.PhotConvert("Fnu", "Flambda", fnu, wl)
+    assert back == pytest.approx(flambda_in, rel=1e-9)
+
+
+@pytest.mark.parametrize("phot_to", ["ST", "AB"])
+def test_photconvert_flambda_magnitude_roundtrip(phot_to):
+    """Flambda -> {ST, AB} -> Flambda should round-trip, exercising the
+    magnitude-system conversions that don't need a filter."""
+    flambda_in = 1e-15
+    wl = 5000.0
+    mag = slug.PhotConvert("Flambda", phot_to, flambda_in, wl)
+    back = slug.PhotConvert(phot_to, "Flambda", mag, wl)
+    assert back == pytest.approx(flambda_in, rel=1e-9)
+
+
+def test_photconvert_unknown_system_raises():
+    """An unrecognized phot_from/phot_to should raise, not crash."""
+    with pytest.raises(RuntimeError):
+        slug.PhotConvert("bogus", "AB", 1.0, 1000.0)
+    with pytest.raises(RuntimeError):
+        slug.PhotConvert("AB", "bogus", 1.0, 1000.0)
+
+
+def test_photconvert_vega_without_filter_raises():
+    """Converting to or from Vega without a filter should raise."""
+    with pytest.raises(RuntimeError):
+        slug.PhotConvert("Flambda", "Vega", 1e-15, 5000.0)
+    with pytest.raises(RuntimeError):
+        slug.PhotConvert("Vega", "Flambda", 10.0, 5000.0)
+
+
+def test_photconvert_vega_matches_filter_fluxvega():
+    """Flambda -> Vega should match -2.5*log10(flux_in / filter.fluxVega()),
+    the definition of a Vega magnitude, and round-trip back to
+    flux_in. This also exercises fluxVega()'s lazy computation being
+    triggered as a side effect of the conversion."""
+    filt = slug.FilterTabulated("SLUGTEST", "CAM1", "G500", FILTER_REGISTRY)
+    flambda_in = 1e-15
+    wl = filt.wlPivot()
+
+    vegamag = slug.PhotConvert("Flambda", "Vega", flambda_in, wl, filt)
+
+    assert filt.fluxVega() > 0.0
+    assert vegamag == pytest.approx(-2.5 * np.log10(flambda_in / filt.fluxVega()))
+
+    back = slug.PhotConvert("Vega", "Flambda", vegamag, wl, filt)
+    assert back == pytest.approx(flambda_in, rel=1e-9)
+
+
+def test_photconvert_vega_photcount_filter_gives_negative_infinity():
+    """A photCount() filter's fluxVega() is always 0 (see
+    Filter.fluxVega()); PhotConvert should still accept it (it just
+    forwards fluxVega() through, without raising), giving
+    -2.5*log10(flux_in / 0) == -inf -- a well-defined, if degenerate,
+    IEEE double rather than a crash or NaN."""
+    filt = slug.FilterIdeal("Q(HI)")
+    assert filt.photCount()
+
+    result = slug.PhotConvert("Flambda", "Vega", 1e-15, filt.wlPivot(), filt)
+    assert result == float("-inf")

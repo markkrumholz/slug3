@@ -127,6 +127,16 @@ namespace io
          */
         [[nodiscard]] auto computeLbol() const { return computeLbol_; }
 
+        /**
+         * @brief Set whether the bolometric luminosity should be computed as an output
+         * @param value New value for computeLbol()
+         * @details
+         * Lets a caller (e.g. from Python, where there is no
+         * phot.filters input-deck entry to set "Lbol" through) request
+         * or suppress Lbol output on an already-constructed SimPhysics.
+         */
+        void setComputeLbol(bool value) { computeLbol_ = value; }
+
         // Integrator tolerance getters and setters: thin wrappers
         // around the spectral synthesizer's own Specsyn::intRelTol()
         // etc., so a caller holding a SimPhysics (e.g. from Python,

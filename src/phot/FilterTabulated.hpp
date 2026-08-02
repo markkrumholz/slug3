@@ -111,6 +111,26 @@ namespace phot
         [[nodiscard]] auto phot(const std::vector<double>& wl,
             const std::vector<double>& spec) const -> double override;
 
+        /**
+         * @brief Get the wavelengths at which the response is tabulated
+         * @return A const reference to the wavelength grid, in Angstrom
+         */
+        [[nodiscard]] auto wl() const -> const std::vector<double>& { return wl_; }
+
+        /**
+         * @brief Get the tabulated filter response data
+         * @return A const reference to the filter response at each
+         *   wavelength in wl()
+         */
+        [[nodiscard]] auto responseData() const -> const std::vector<double>& { return responseData_; }
+
+        /**
+         * @brief Get the interpolator built from the tabulated response
+         * @return A const reference to the Interpolator1D built from
+         *   ln(wl()) and responseData(), as used internally by phot()
+         */
+        [[nodiscard]] auto response() const -> const interp::Interpolator1D<1>& { return response_; }
+
     private:
 
         /**

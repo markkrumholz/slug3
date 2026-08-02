@@ -12,6 +12,7 @@
 #include "../phot/FilterCollection.hpp"
 #include "../phot/FilterCommons.hpp"
 #include "../phot/PhotCommons.hpp"
+#include "../phot/VegaSpectrum.hpp"
 #include "../specsyn/Specsyn.hpp"
 #include "../specsyn/SpecsynBlackbody.hpp"
 #include "../specsyn/SpecsynCommons.hpp"
@@ -360,12 +361,21 @@ void io::SimPhysics::readFilters(const toml::table& inputDeck)
         }
     }
 
-    // phot.registry / phot.vega: optional string overrides of the
-    // default filter registry and Vega reference spectrum
+    // phot.registry: optional string override of the default filter registry
     const auto registryInput = utils::getTOMLKeyWithError<std::string>(inputDeck, "phot.registry");
     const std::string registryName = registryInput.value_or(phot::defaultRegistry);
+
+    // phot.vega: optional string override of the default Vega
+    // reference spectrum file. The global Vega spectrum (see
+    // phot::vegaSpectrum()) is a lazily-constructed, program-wide
+    // singleton -- only the very first call to vegaSpectrum() anywhere
+    // determines which file actually gets loaded, so if the deck names
+    // a non-default file, force that first call to happen here, now,
+    // before any filter's own lazy Filter::fluxVega() can beat it to
+    // the punch with the default file instead. The returned spectrum
+    // itself is not needed here, only the side effect of loading it.
     const auto vegaInput = utils::getTOMLKeyWithError<std::string>(inputDeck, "phot.vega");
-    const std::string vegaName = vegaInput.value_or(phot::defaultVegaSpec);
+    if (vegaInput.has_value()) { phot::vegaSpectrum(vegaInput.value()); }
 
     // phot.filters: optional; a single string names one filter
     // directly, interpreted as an array of length 1; anything else
@@ -415,5 +425,5 @@ void io::SimPhysics::readFilters(const toml::table& inputDeck)
     }
 
     filters_ = std::make_unique<phot::FilterCollection>(
-        filterNames, photSystem, registryName, vegaName);
+        filterNames, photSystem, registryName);
 }

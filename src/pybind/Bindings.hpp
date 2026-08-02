@@ -40,10 +40,22 @@ constexpr std::size_t nQty = static_cast<std::size_t>(tracks::FieldIdx::nTrackQt
 extern template class interp::Interpolator1D<nQty>;
 using Interp1D = interp::Interpolator1D<nQty>;
 
+// A second explicit instantiation, for the single-quantity case (e.g.
+// phot::FilterTabulated::response_) -- a genuinely different C++ type
+// from Interp1D above (nQty != 1), so it needs its own pybind11 class
+// registration; see BindInterpolator1DScalar.cpp
+extern template class interp::Interpolator1D<1>;
+using Interp1DScalar = interp::Interpolator1D<1>;
+
 /**
  * @brief Bind interp::Interpolator1D<nQty> as Interpolator1D
  */
 void bindInterpolator1D(py::module_& m);
+
+/**
+ * @brief Bind interp::Interpolator1D<1> as Interpolator1DScalar
+ */
+void bindInterpolator1DScalar(py::module_& m);
 
 /**
  * @brief Bind tracks::Tracks2D as Tracks2D
@@ -74,5 +86,37 @@ void bindSpecsyn(py::module_& m);
  * @brief Bind core::Cluster as Cluster
  */
 void bindCluster(py::module_& m);
+
+/**
+ * @brief Bind phot::Filter as Filter
+ * @details
+ * Must run before bindFilterIdeal()/bindFilterTabulated(), since those
+ * register phot::Filter as their Python base class -- this is what
+ * lets pybind11 automatically hand back a FilterIdeal or
+ * FilterTabulated (rather than a bare Filter) wherever C++ returns a
+ * Filter reference/pointer whose most-derived type is one of them
+ * (e.g. FilterCollection::getFilter()).
+ */
+void bindFilter(py::module_& m);
+
+/**
+ * @brief Bind phot::FilterIdeal as FilterIdeal
+ */
+void bindFilterIdeal(py::module_& m);
+
+/**
+ * @brief Bind phot::FilterTabulated as FilterTabulated
+ */
+void bindFilterTabulated(py::module_& m);
+
+/**
+ * @brief Bind phot::FilterCollection as FilterCollection, and phot::PhotSystem as PhotSystem
+ */
+void bindFilterCollection(py::module_& m);
+
+/**
+ * @brief Bind phot::PhotConvert as the module-level function PhotConvert
+ */
+void bindPhotConvert(py::module_& m);
 
 #endif // BINDINGS_HPP

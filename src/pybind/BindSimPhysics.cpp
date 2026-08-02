@@ -91,6 +91,26 @@ static void checkSpecsyn(const io::SimPhysics& self)
     }
 }
 
+static constexpr std::string_view computeLbolDocstring = R"doc(Check whether the bolometric luminosity was requested as an output.
+
+Returns
+-------
+compute_lbol : bool
+    True if "Lbol" was included in phot.filters in the input deck, or
+    setComputeLbol(True) has since been called.)doc";
+
+static constexpr std::string_view setComputeLbolDocstring = R"doc(Set whether the bolometric luminosity should be computed as an output.
+
+Lets a caller request or suppress Lbol output on an already-constructed
+SimPhysics -- e.g. from Python, where there is no phot.filters input-
+deck entry to set "Lbol" through -- so any Cluster built from this
+SimPhysics picks up the new setting the next time it advances.
+
+Parameters
+----------
+value : bool
+    New value for computeLbol().)doc";
+
 static constexpr std::string_view intRelTolDocstring = R"doc(Return the relative tolerance for the spectral synthesizer's PDF integration.
 
 Returns
@@ -218,6 +238,10 @@ void bindSimPhysics(py::module_& m)
                     return self.specsyn()->wlObs();
                 },
                 wlObsDocstring.data())
+        .def("computeLbol", &io::SimPhysics::computeLbol,
+                computeLbolDocstring.data())
+        .def("setComputeLbol", &io::SimPhysics::setComputeLbol,
+                setComputeLbolDocstring.data(), py::arg("value"))
         .def("intRelTol", &io::SimPhysics::intRelTol,
                 intRelTolDocstring.data())
         .def("intAbsTol", &io::SimPhysics::intAbsTol,
