@@ -69,6 +69,13 @@ PHOT_DECK = "tests/core/assets/testClusterPhot.in"
 PHOT_DECK_NFILTERS = 2  # SLUGTEST.CAM1.G500, ideal_phot_700_1500 ("Lbol" is not a filter)
 LBOL_DECK = "tests/core/assets/testClusterLbol.in"
 
+# Otherwise identical to CLUSTER_DECK, but with stars.FeH set to a
+# uniform distribution over [-0.5, 0.5] rather than a fixed value, so
+# SimPhysics.constFeH() is False at construction (see the deck's own
+# comment) -- used by the setFeH() tests below to exercise the
+# variable-to-fixed transition.
+VAR_FEH_DECK = "tests/core/assets/testClusterVarFeH.in"
+
 # Filter registry used by the FilterIdeal/FilterTabulated/FilterCollection
 # tests below: a single tabulated filter, SLUGTEST.CAM1.G500 (a
 # synthetic Gaussian response peaked at 5000 Angstrom), on a facility
@@ -496,16 +503,27 @@ def test_simphysics_set_imf_invalid_raises():
         physics.setIMF("not_numeric_or_a_real_file")
 
 
-def test_simphysics_set_feh_reflected_in_cluster():
-    """setFeH() with a numeric argument should install a fixed [Fe/H];
-    a Cluster built from the resulting SimPhysics should report that
-    same value from feH()."""
-    physics = slug.SimPhysics(CLUSTER_DECK, "cluster")
-    physics.setFeH("-0.75")
-    controls = slug.SimControls(CLUSTER_DECK)
-    cluster = slug.Cluster(33, CLUSTER_TARGET_MASS, 0.0, physics, controls)
+def test_simphysics_set_feh_rebuilds_tracks2d_cache():
+    """setFeH() pinning a previously-variable [Fe/H] to a fixed value
+    must rebuild tracks2D() (constFeHTracks_) from the current
+    tracks_, not just fehDist_ -- otherwise Cluster (which switches to
+    reading tracks2D() once constFeH() is true, see Cluster.cpp) would
+    be left with a stale or invalid cache. VAR_FEH_DECK's [Fe/H] is a
+    uniform distribution over [-0.5, 0.5] (constFeH() is False at
+    construction, so the constructor itself never builds this cache),
+    so this exercises setFeH() building the cache for the first time,
+    including advancing the resulting Cluster far enough to require
+    tracks2D() actually being usable."""
+    physics = slug.SimPhysics(VAR_FEH_DECK, "cluster")
+    physics.setFeH("-0.25")
+    controls = slug.SimControls(VAR_FEH_DECK)
+    cluster = slug.Cluster(34, CLUSTER_TARGET_MASS, 0.0, physics, controls)
+    assert cluster.feH() == pytest.approx(-0.25)
 
-    assert cluster.feH() == pytest.approx(-0.75)
+    cluster.advance(5.0)
+
+    assert len(cluster.spec()) > 0
+    assert all(np.isfinite(v) for v in cluster.spec())
 
 
 def test_simphysics_set_feh_invalid_raises():
@@ -535,6 +553,100 @@ def test_simphysics_set_cmf_clf_sfr_invalid_raises(setter):
     physics = slug.SimPhysics(CLUSTER_DECK, "cluster")
     with pytest.raises(RuntimeError):
         getattr(physics, setter)("not_numeric_or_a_real_file")
+
+
+def test_simphysics_set_specsyn_installs_new_synthesizer(tmp_path):
+    """setSpecsyn() should install a working spectral synthesizer on a
+    SimPhysics built from a deck with no spectra.model (so wl() raises
+    beforehand), transferring ownership of the Python-built Specsyn
+    (mirroring FilterCollection.addFilter()'s own ownership-transfer
+    behavior for a directly-built Filter)."""
+    deck_text = pathlib.Path(CLUSTER_DECK).read_text()
+    stripped = deck_text.replace('[spectra]\nmodel = "blackbody"\n\n', "")
+    assert stripped != deck_text, "expected to find and strip a [spectra] section"
+    deck_path = tmp_path / "no_spectra.in"
+    deck_path.write_text(stripped)
+
+    physics = slug.SimPhysics(str(deck_path), "cluster")
+    with pytest.raises(RuntimeError):
+        physics.wl()
+
+    specsyn = slug.SpecsynBlackbody(3000.0, 9000.0, 50)
+    physics.setSpecsyn(specsyn)
+
+    assert list(physics.wl()) == pytest.approx(list(physics.wlObs()))
+    assert len(physics.wl()) == 50
+
+    with pytest.raises(ValueError):
+        specsyn.wl()
+
+
+def test_simphysics_set_filters_installs_new_collection():
+    """setFilters() should install a working FilterCollection on a
+    SimPhysics built from a deck with no phot.filters (so Cluster.phot()
+    stays empty), reflected in a Cluster built afterward."""
+    physics = slug.SimPhysics(CLUSTER_DECK, "cluster")
+    controls = slug.SimControls(CLUSTER_DECK)
+
+    fc = slug.FilterCollection([], slug.PhotSystem.Flambda)
+    fc.addFilter("Q(HI)")
+    physics.setFilters(fc)
+
+    cluster = slug.Cluster(35, CLUSTER_TARGET_MASS, 0.0, physics, controls)
+    assert len(cluster.phot()) == 0
+
+    cluster.advance(5.0)
+
+    assert len(cluster.phot()) == 1
+    assert cluster.phot()[0] > 0.0
+
+
+def test_simphysics_set_tracks_installs_new_tracks():
+    """setTracks() should install new stellar tracks, transferring
+    ownership of the Python-built Tracks3D, and a Cluster built
+    afterward should work normally with them. CLUSTER_DECK's [Fe/H] is
+    fixed (constFeH() is True), so this also exercises setTracks()'s
+    own recomputation of tracks2D() (constFeHTracks_) from the new
+    tracks -- the new Tracks3D spans the full MIST_test grid (unlike
+    CLUSTER_DECK's own tracks_, loaded as a single degenerate slice
+    at exactly [Fe/H] = 0.0, see testClusterVarFeH.in's own comment),
+    so the recomputed slice at [Fe/H] = 0.0 comes from genuinely
+    different (interpolated, not just copied) track data than before."""
+    physics = slug.SimPhysics(CLUSTER_DECK, "cluster")
+    controls = slug.SimControls(CLUSTER_DECK)
+
+    tracks = slug.Tracks3D(TRACK_SET, -1.0, 0.5, KNOWN_VVCRIT, KNOWN_AFE, REGISTRY)
+    physics.setTracks(tracks)
+
+    with pytest.raises(ValueError):
+        tracks.mMin()
+
+    cluster = slug.Cluster(36, CLUSTER_TARGET_MASS, 0.0, physics, controls)
+    cluster.advance(5.0)
+
+    assert len(cluster.starMasses()) + len(cluster.deadStarMasses()) > 0
+    assert len(cluster.spec()) > 0
+    assert all(np.isfinite(v) for v in cluster.spec())
+
+
+def test_simphysics_set_min_stoch_mass_disables_stochastic_sampling():
+    """setMinStochMass() with a value above the IMF's own maximum mass
+    should drive the stochastic mass fraction (recomputed internally
+    as imf().integral(min_stoch_mass, imf().getMax())) to zero, so no
+    stars in a Cluster built from the resulting SimPhysics are drawn
+    individually (starMasses() empty), while the continuously-sampled
+    population still produces a valid spectrum."""
+    physics = slug.SimPhysics(CLUSTER_DECK, "cluster")
+    physics.setMinStochMass(1e6)
+    controls = slug.SimControls(CLUSTER_DECK)
+
+    cluster = slug.Cluster(37, CLUSTER_TARGET_MASS, 0.0, physics, controls)
+    assert len(cluster.starMasses()) == 0
+
+    cluster.advance(5.0)
+
+    assert len(cluster.spec()) > 0
+    assert all(np.isfinite(v) for v in cluster.spec())
 
 
 # ---------------------------------------------------------------------

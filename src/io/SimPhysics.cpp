@@ -148,6 +148,31 @@ namespace
     }
 } // namespace
 
+// Set the [Fe/H] distribution, recomputing tracks2D() (constFeHTracks_)
+// from the current tracks_ if the new fehDist_ is fixed -- mirrors the
+// constructor's own post-readTracks() step, which does the same thing
+// once, after both tracks_ and fehDist_ are set
+void io::SimPhysics::setFeH(const std::string& feH)
+{
+    fehDist_ = utils::initPDFFromString(feH);
+    if (constFeH())
+    {
+        constFeHTracks_ = tracks_.sliceConstFeH(fehDist_.getMin());
+    }
+}
+
+// Set the stellar tracks, recomputing tracks2D() (constFeHTracks_)
+// from the new tracks_ if fehDist_ is already fixed -- see setFeH()'s
+// own comment
+void io::SimPhysics::setTracks(tracks::Tracks3D tracks)
+{
+    tracks_ = std::move(tracks);
+    if (constFeH())
+    {
+        constFeHTracks_ = tracks_.sliceConstFeH(fehDist_.getMin());
+    }
+}
+
 // Set the star formation rate -- mirrors the galaxy.sfr handling in
 // the constructor above exactly, including not resolving a file name
 // through utils::getFilePath (unlike setIMF()/setCMF()/setFeH()/

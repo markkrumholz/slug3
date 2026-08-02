@@ -9,6 +9,7 @@
 #include "../io/SimControls.hpp"
 #include "../io/SimPhysics.hpp"
 #include "../specsyn/Specsyn.hpp"
+#include "../tracks/Tracks3D.hpp"
 #include <memory>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h> // NOLINT(misc-include-cleaner); this is needed for correct Python binding, even if clang-tidy can't recognize it
@@ -188,6 +189,66 @@ galaxy.sfr itself is handled when parsing an input deck. Also unlike
 those four, a file name is not resolved relative to SLUG_DIR/REPO_DIR;
 it is used as given.)doc";
 
+static constexpr std::string_view setSpecsynDocstring = R"doc(Set the spectral synthesizer.
+
+Parameters
+----------
+specsyn : Specsyn
+    The spectral synthesizer to use (e.g. a SpecsynBlackbody,
+    SpecsynLibNoWind, SpecsynLibWR, or SpecsynLibChained); ownership is
+    transferred to this SimPhysics, so specsyn is no longer usable
+    from Python after this call.
+
+Details
+-------
+Lets a caller build its own spectral synthesizer and install it on an
+already-constructed SimPhysics, without needing an input deck.)doc";
+
+static constexpr std::string_view setFiltersDocstring = R"doc(Set the photometric filter collection.
+
+Parameters
+----------
+filters : FilterCollection
+    The filter collection to use; ownership is transferred to this
+    SimPhysics, so filters is no longer usable from Python after this
+    call.
+
+Details
+-------
+Lets a caller build its own FilterCollection (e.g. via addFilter())
+and install it on an already-constructed SimPhysics, without needing
+an input deck.)doc";
+
+static constexpr std::string_view setTracksDocstring = R"doc(Set the stellar tracks.
+
+Parameters
+----------
+tracks : Tracks3D
+    The stellar tracks to use; ownership is transferred to this
+    SimPhysics, so tracks is no longer usable from Python after this
+    call.
+
+Details
+-------
+Lets a caller build its own Tracks3D and install it on an
+already-constructed SimPhysics, without needing an input deck. If
+constFeH() is True, also recomputes tracks2D() (the [Fe/H]-sliced
+cache) from the new tracks, mirroring setFeH()'s own equivalent
+recomputation.)doc";
+
+static constexpr std::string_view setMinStochMassDocstring = R"doc(Set the minimum mass for fully stochastic treatment.
+
+Parameters
+----------
+min_stoch_mass : float
+    New minimum mass for fully stochastic treatment.
+
+Details
+-------
+Also recomputes the fraction of stellar mass being treated
+stochastically, as imf().integral(min_stoch_mass, imf().getMax()),
+exactly as the constructor does when stars.min_stoch_mass is given.)doc";
+
 static constexpr std::string_view intRelTolDocstring = R"doc(Return the relative tolerance for the spectral synthesizer's PDF integration.
 
 Returns
@@ -329,6 +390,18 @@ void bindSimPhysics(py::module_& m)
                 setCLFDocstring.data(), py::arg("clf"))
         .def("setSFR", &io::SimPhysics::setSFR,
                 setSFRDocstring.data(), py::arg("sfr"))
+        .def("setSpecsyn", &io::SimPhysics::setSpecsyn,
+                setSpecsynDocstring.data(), py::arg("specsyn"))
+        .def("setFilters", &io::SimPhysics::setFilters,
+                setFiltersDocstring.data(), py::arg("filters"))
+        .def("setTracks",
+                [](io::SimPhysics& self, std::unique_ptr<tracks::Tracks3D> tracks)
+                {
+                    self.setTracks(std::move(*tracks));
+                },
+                setTracksDocstring.data(), py::arg("tracks"))
+        .def("setMinStochMass", &io::SimPhysics::setMinStochMass,
+                setMinStochMassDocstring.data(), py::arg("min_stoch_mass"))
         .def("intRelTol", &io::SimPhysics::intRelTol,
                 intRelTolDocstring.data())
         .def("intAbsTol", &io::SimPhysics::intAbsTol,

@@ -185,8 +185,13 @@ namespace io
          *   [Fe/H]) or the name of a [Fe/H] PDF file
          * @throws std::runtime_error if feH is not numeric and does
          *   not name a file that can be found
+         * @details
+         * If the new fehDist_ is fixed (constFeH() becomes true),
+         * also recomputes tracks2D() (the [Fe/H]-sliced cache) from
+         * the current tracks_, mirroring the constructor's own
+         * post-readTracks() step.
          */
-        void setFeH(const std::string& feH) { fehDist_ = utils::initPDFFromString(feH); }
+        void setFeH(const std::string& feH);
 
         /**
          * @brief Set the cluster lifetime function
@@ -215,6 +220,60 @@ namespace io
          * constructor's own galaxy.sfr handling.
          */
         void setSFR(const std::string& sfr);
+
+        // Object-replacement setters: unlike the string-driven setters
+        // above, these accept an already-built object -- e.g. from
+        // Python, where Specsyn, FilterCollection, and Tracks3D are
+        // all directly constructible -- and install it in place of
+        // whatever this SimPhysics already holds.
+
+        /**
+         * @brief Set the spectral synthesizer
+         * @param specsyn The spectral synthesizer to use; ownership is
+         *   transferred to this SimPhysics
+         * @details
+         * Lets a caller replace this SimPhysics's spectral synthesizer
+         * with its own, without needing an input deck.
+         */
+        void setSpecsyn(std::unique_ptr<specsyn::Specsyn> specsyn) { specsyn_ = std::move(specsyn); }
+
+        /**
+         * @brief Set the photometric filter collection
+         * @param filters The filter collection to use; ownership is
+         *   transferred to this SimPhysics
+         * @details
+         * Lets a caller replace this SimPhysics's filter collection
+         * with its own, without needing an input deck.
+         */
+        void setFilters(std::unique_ptr<phot::FilterCollection> filters) { filters_ = std::move(filters); }
+
+        /**
+         * @brief Set the stellar tracks
+         * @param tracks The stellar tracks to use
+         * @details
+         * Lets a caller replace this SimPhysics's stellar tracks with
+         * its own, without needing an input deck. If constFeH() is
+         * true, also recomputes tracks2D() (the [Fe/H]-sliced cache)
+         * from the new tracks, mirroring setFeH()'s own amendment (see
+         * its comment) so the cache never goes stale relative to
+         * whichever of tracks_/fehDist_ changed most recently.
+         */
+        void setTracks(tracks::Tracks3D tracks);
+
+        /**
+         * @brief Set the minimum mass for fully stochastic treatment
+         * @param minStochMass New minimum mass for fully stochastic
+         *   treatment
+         * @details
+         * Also recomputes fracStochMass() as
+         * imf().integral(minStochMass, imf().getMax()), exactly as
+         * the constructor does when stars.min_stoch_mass is given.
+         */
+        void setMinStochMass(double minStochMass)
+        {
+            minStochMass_ = minStochMass;
+            fracStochMass_ = imf_.integral(minStochMass_, imf_.getMax());
+        }
 
         // Integrator tolerance getters and setters: thin wrappers
         // around the spectral synthesizer's own Specsyn::intRelTol()
