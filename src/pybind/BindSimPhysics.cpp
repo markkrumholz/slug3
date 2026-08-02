@@ -31,6 +31,33 @@ static auto simTypeFromString(const std::string& simType) -> io::SimControls::Si
     throw std::runtime_error("SimPhysics: sim_type must be 'cluster' or 'galaxy'");
 }
 
+// Declared in Bindings.hpp (shared with BindCluster.cpp -- see its own
+// comment there). The bundled deck specifies no output-time
+// information, so controls is built from SimControls's own
+// all-defaults constructor instead of parsing it out of the deck
+// (which would throw, since SimControls otherwise requires one of the
+// output-time options to be set).
+auto buildDefaultSimPhysics() -> std::unique_ptr<io::SimPhysics>
+{
+    const auto defaultsPath = utils::getFilePath("PyDefaults.toml", "src/pybind/assets");
+    if (defaultsPath.empty())
+    {
+        throw std::runtime_error(
+            "SimPhysics: default input deck PyDefaults.toml not found");
+    }
+    const toml::table inputDeck = toml::parse_file(defaultsPath.string());
+    const io::SimControls controls;
+    return std::make_unique<io::SimPhysics>(inputDeck, controls);
+}
+
+// Declared in Bindings.hpp (shared with BindCluster.cpp -- see its own
+// comment there)
+auto sharedDefaultSimPhysics() -> const io::SimPhysics&
+{
+    static const std::unique_ptr<io::SimPhysics> instance = buildDefaultSimPhysics();
+    return *instance;
+}
+
 // Numpy-style docstring for the Python constructor binding. This is
 // a convenience constructor, not a direct binding of SimPhysics's
 // real (toml::table, SimControls::SimType) constructor -- toml++ is
@@ -374,26 +401,7 @@ void bindSimPhysics(py::module_& m)
                         const io::SimControls controls(inputDeck);
                         return std::make_unique<io::SimPhysics>(inputDeck, controls);
                     }
-
-                    // No path given: fall back to slug's own bundled
-                    // default deck, meant for interactive use rather
-                    // than running a full simulation -- it specifies
-                    // no output-time information, so this builds
-                    // controls from SimControls's own all-defaults
-                    // constructor instead of parsing it out of the
-                    // deck (which would throw, since SimControls
-                    // otherwise requires one of the output-time
-                    // options to be set)
-                    const auto defaultsPath =
-                        utils::getFilePath("PyDefaults.toml", "src/pybind/assets");
-                    if (defaultsPath.empty())
-                    {
-                        throw std::runtime_error(
-                            "SimPhysics: default input deck PyDefaults.toml not found");
-                    }
-                    const toml::table inputDeck = toml::parse_file(defaultsPath.string());
-                    const io::SimControls controls;
-                    return std::make_unique<io::SimPhysics>(inputDeck, controls);
+                    return buildDefaultSimPhysics();
                 }),
                 constructorDocstring.data(),
                 py::arg("path") = "", py::arg("sim_type") = "cluster")

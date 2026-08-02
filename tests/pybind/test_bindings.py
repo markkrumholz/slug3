@@ -510,7 +510,7 @@ def test_simphysics_set_compute_lbol_enables_lbol_computation():
     physics = slug.SimPhysics(CLUSTER_DECK, "cluster")
     physics.setComputeLbol(True)
     controls = slug.SimControls(CLUSTER_DECK)
-    cluster = slug.Cluster(30, CLUSTER_TARGET_MASS, 0.0, physics, controls)
+    cluster = slug.Cluster(CLUSTER_TARGET_MASS, 30, 0.0, physics, controls)
     assert cluster.lbol() == pytest.approx(0.0)
 
     cluster.advance(5.0)
@@ -526,7 +526,7 @@ def test_simphysics_set_imf_numeric_reflected_in_cluster_stars():
     physics = slug.SimPhysics(CLUSTER_DECK, "cluster")
     physics.setIMF("20.0")
     controls = slug.SimControls(CLUSTER_DECK)
-    cluster = slug.Cluster(31, CLUSTER_TARGET_MASS, 0.0, physics, controls)
+    cluster = slug.Cluster(CLUSTER_TARGET_MASS, 31, 0.0, physics, controls)
 
     assert len(cluster.starMasses()) > 0
     for mass in cluster.starMasses():
@@ -541,7 +541,7 @@ def test_simphysics_set_imf_file():
     physics = slug.SimPhysics(CLUSTER_DECK, "cluster")
     physics.setIMF("chabrier.toml")
     controls = slug.SimControls(CLUSTER_DECK)
-    cluster = slug.Cluster(32, CLUSTER_TARGET_MASS, 0.0, physics, controls)
+    cluster = slug.Cluster(CLUSTER_TARGET_MASS, 32, 0.0, physics, controls)
 
     assert len(cluster.starMasses()) > 0
 
@@ -568,7 +568,7 @@ def test_simphysics_set_feh_rebuilds_tracks2d_cache():
     physics = slug.SimPhysics(VAR_FEH_DECK, "cluster")
     physics.setFeH("-0.25")
     controls = slug.SimControls(VAR_FEH_DECK)
-    cluster = slug.Cluster(34, CLUSTER_TARGET_MASS, 0.0, physics, controls)
+    cluster = slug.Cluster(CLUSTER_TARGET_MASS, 34, 0.0, physics, controls)
     assert cluster.feH() == pytest.approx(-0.25)
 
     cluster.advance(5.0)
@@ -643,7 +643,7 @@ def test_simphysics_set_filters_installs_new_collection():
     fc.addFilter("Q(HI)")
     physics.setFilters(fc)
 
-    cluster = slug.Cluster(35, CLUSTER_TARGET_MASS, 0.0, physics, controls)
+    cluster = slug.Cluster(CLUSTER_TARGET_MASS, 35, 0.0, physics, controls)
     assert len(cluster.phot()) == 0
 
     cluster.advance(5.0)
@@ -672,7 +672,7 @@ def test_simphysics_set_tracks_installs_new_tracks():
     with pytest.raises(ValueError):
         tracks.mMin()
 
-    cluster = slug.Cluster(36, CLUSTER_TARGET_MASS, 0.0, physics, controls)
+    cluster = slug.Cluster(CLUSTER_TARGET_MASS, 36, 0.0, physics, controls)
     cluster.advance(5.0)
 
     assert len(cluster.starMasses()) + len(cluster.deadStarMasses()) > 0
@@ -691,7 +691,7 @@ def test_simphysics_set_min_stoch_mass_disables_stochastic_sampling():
     physics.setMinStochMass(1e6)
     controls = slug.SimControls(CLUSTER_DECK)
 
-    cluster = slug.Cluster(37, CLUSTER_TARGET_MASS, 0.0, physics, controls)
+    cluster = slug.Cluster(CLUSTER_TARGET_MASS, 37, 0.0, physics, controls)
     assert len(cluster.starMasses()) == 0
 
     cluster.advance(5.0)
@@ -712,7 +712,7 @@ def test_cluster_construction(sim_physics, sim_controls):
     used by the C++ testCluster.cpp); feh should match the deck's
     fixed stars.FeH; it should not be disrupted, and should have no
     spectrum yet (advance() has not been called)."""
-    cluster = slug.Cluster(1, CLUSTER_TARGET_MASS, 0.0, sim_physics, sim_controls)
+    cluster = slug.Cluster(CLUSTER_TARGET_MASS, 1, 0.0, sim_physics, sim_controls)
 
     assert cluster.uid() == 1
     assert cluster.targetMass() == pytest.approx(CLUSTER_TARGET_MASS)
@@ -725,12 +725,47 @@ def test_cluster_construction(sim_physics, sim_controls):
     assert len(cluster.spec()) == 0
 
 
+def test_cluster_mass_only_defaults(sim_physics, sim_controls):
+    """Supplying only mass (by position) and physics/controls (by
+    keyword) should leave uid and time at their documented defaults
+    (0 and 0.0), confirming mass is now the first positional
+    parameter and that uid/time/physics/controls are all independently
+    optional."""
+    cluster = slug.Cluster(CLUSTER_TARGET_MASS, physics=sim_physics, controls=sim_controls)
+
+    assert cluster.uid() == 0
+    assert cluster.targetMass() == pytest.approx(CLUSTER_TARGET_MASS)
+    assert cluster.formTime() == pytest.approx(0.0)
+    assert cluster.feH() == pytest.approx(0.0)  # from CLUSTER_DECK's stars.FeH
+
+
+def test_cluster_fully_default_construction():
+    """Cluster(mass) -- with uid, time, physics, and controls all
+    omitted -- should construct a Cluster with uid() == 0,
+    formTime() == 0.0, and the given mass, using slug's own shared
+    default SimPhysics (built from PY_DEFAULTS_PATH). Since that deck
+    references real MIST/spectral-library data this environment does
+    not guarantee is fetched (see PY_DEFAULTS_PATH's own comment),
+    this only checks that any failure is not from the deck-loading
+    step itself, not that construction fully succeeds everywhere this
+    suite runs."""
+    try:
+        cluster = slug.Cluster(750.0)
+    except RuntimeError as e:
+        assert "PyDefaults.toml" not in str(e)
+        return
+
+    assert cluster.uid() == 0
+    assert cluster.targetMass() == pytest.approx(750.0)
+    assert cluster.formTime() == pytest.approx(0.0)
+
+
 def test_cluster_advance_populates_spec(sim_physics, sim_controls):
     """advance() should populate spec() (empty beforehand, since
     spectra.model = "blackbody" is set in CLUSTER_DECK) and can move
     stars from starMasses() to deadStarMasses() as the population
     ages."""
-    cluster = slug.Cluster(2, CLUSTER_TARGET_MASS, 0.0, sim_physics, sim_controls)
+    cluster = slug.Cluster(CLUSTER_TARGET_MASS, 2, 0.0, sim_physics, sim_controls)
     assert len(cluster.spec()) == 0
 
     cluster.advance(5.0)
@@ -742,7 +777,7 @@ def test_cluster_advance_populates_spec(sim_physics, sim_controls):
 def test_cluster_spec_matches_wl_length(sim_physics, sim_controls):
     """Cluster.spec() should be evaluated on the same wavelength grid
     as SimPhysics.wl()/wlObs()."""
-    cluster = slug.Cluster(7, CLUSTER_TARGET_MASS, 0.0, sim_physics, sim_controls)
+    cluster = slug.Cluster(CLUSTER_TARGET_MASS, 7, 0.0, sim_physics, sim_controls)
     cluster.advance(5.0)
 
     assert len(cluster.spec()) == len(sim_physics.wl())
@@ -752,7 +787,7 @@ def test_cluster_spec_matches_wl_length(sim_physics, sim_controls):
 def test_cluster_advance_backwards_raises(sim_physics, sim_controls):
     """advance() to a time before the cluster's current time should
     raise, not silently misbehave."""
-    cluster = slug.Cluster(3, CLUSTER_TARGET_MASS, 0.0, sim_physics, sim_controls)
+    cluster = slug.Cluster(CLUSTER_TARGET_MASS, 3, 0.0, sim_physics, sim_controls)
     cluster.advance(5.0)
     with pytest.raises(RuntimeError):
         cluster.advance(1.0)
@@ -761,7 +796,7 @@ def test_cluster_advance_backwards_raises(sim_physics, sim_controls):
 def test_cluster_tracks_returns_tracks2d(sim_physics, sim_controls):
     """tracks() should return a usable Tracks2D spanning the
     MIST_test mass grid."""
-    cluster = slug.Cluster(4, CLUSTER_TARGET_MASS, 0.0, sim_physics, sim_controls)
+    cluster = slug.Cluster(CLUSTER_TARGET_MASS, 4, 0.0, sim_physics, sim_controls)
     cluster_tracks = cluster.tracks()
 
     assert cluster_tracks.mMin() == pytest.approx(0.1)
@@ -773,7 +808,7 @@ def test_cluster_tracks_reference_survives_cluster_deletion(sim_physics, sim_con
     lifetime (py::return_value_policy::reference_internal); dropping
     every other reference to the Cluster should not invalidate a
     still-live Tracks2D object obtained from it."""
-    cluster = slug.Cluster(5, CLUSTER_TARGET_MASS, 0.0, sim_physics, sim_controls)
+    cluster = slug.Cluster(CLUSTER_TARGET_MASS, 5, 0.0, sim_physics, sim_controls)
     cluster_tracks = cluster.tracks()
     del cluster
     gc.collect()
@@ -789,7 +824,7 @@ def test_cluster_keeps_physics_alive():
     dangling reference."""
     physics = slug.SimPhysics(CLUSTER_DECK, "cluster")
     controls = slug.SimControls(CLUSTER_DECK)
-    cluster = slug.Cluster(6, CLUSTER_TARGET_MASS, 0.0, physics, controls)
+    cluster = slug.Cluster(CLUSTER_TARGET_MASS, 6, 0.0, physics, controls)
     del physics
     gc.collect()
 
@@ -1104,7 +1139,7 @@ def test_filtercollection_addfilter_direct_transfers_ownership():
 def test_cluster_phot_empty_without_filters(sim_physics, sim_controls):
     """CLUSTER_DECK has no [phot] section, so phot() should stay empty
     even after advance()."""
-    cluster = slug.Cluster(8, CLUSTER_TARGET_MASS, 0.0, sim_physics, sim_controls)
+    cluster = slug.Cluster(CLUSTER_TARGET_MASS, 8, 0.0, sim_physics, sim_controls)
     cluster.advance(5.0)
     assert len(cluster.phot()) == 0
 
@@ -1113,7 +1148,7 @@ def test_cluster_advance_populates_phot(phot_physics, phot_controls):
     """phot() should be empty before advance() and, afterwards, should
     hold one positive value per non-"Lbol" filter in PHOT_DECK's
     phot.filters."""
-    cluster = slug.Cluster(9, CLUSTER_TARGET_MASS, 0.0, phot_physics, phot_controls)
+    cluster = slug.Cluster(CLUSTER_TARGET_MASS, 9, 0.0, phot_physics, phot_controls)
     assert len(cluster.phot()) == 0
 
     cluster.advance(5.0)
@@ -1125,7 +1160,7 @@ def test_cluster_advance_populates_phot(phot_physics, phot_controls):
 def test_cluster_lbol_zero_before_advance(lbol_physics, lbol_controls):
     """lbol() should be 0 for a freshly constructed Cluster, before
     advance() has ever run."""
-    cluster = slug.Cluster(10, CLUSTER_TARGET_MASS, 0.0, lbol_physics, lbol_controls)
+    cluster = slug.Cluster(CLUSTER_TARGET_MASS, 10, 0.0, lbol_physics, lbol_controls)
     assert cluster.lbol() == pytest.approx(0.0)
 
 
@@ -1135,7 +1170,7 @@ def test_cluster_advance_populates_lbol(lbol_physics, lbol_controls):
     so this exercises both the stochastic and continuously-sampled
     code paths in Cluster's bolometric-luminosity computation."""
     assert lbol_physics.computeLbol()
-    cluster = slug.Cluster(11, CLUSTER_TARGET_MASS, 0.0, lbol_physics, lbol_controls)
+    cluster = slug.Cluster(CLUSTER_TARGET_MASS, 11, 0.0, lbol_physics, lbol_controls)
 
     cluster.advance(5.0)
 

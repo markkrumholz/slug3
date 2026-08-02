@@ -9,6 +9,7 @@
 #include "../core/Cluster.hpp"
 #include "../io/SimControls.hpp"
 #include "../io/SimPhysics.hpp"
+#include <memory>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h> // NOLINT(misc-include-cleaner); this is needed for correct Python binding, even if clang-tidy can't recognize it
 #include <string_view>
@@ -18,18 +19,23 @@ static constexpr std::string_view constructorDocstring = R"doc(Construct a Clust
 
 Parameters
 ----------
-uid : int
-    Unique identifier for this cluster.
 mass : float
     Target cluster mass, in Msun.
-time : float
-    Cluster formation time, in yr.
-physics : SimPhysics
+uid : int, optional
+    Unique identifier for this cluster. Defaults to 0.
+time : float, optional
+    Cluster formation time, in yr. Defaults to 0.
+physics : SimPhysics, optional
     Simulation physics settings; physics must outlive this Cluster.
-controls : SimControls
+    Defaults to slug's own shared, bundled-default SimPhysics (built
+    from src/pybind/assets/PyDefaults.toml the first time it is
+    needed, and reused after that -- see SimPhysics()'s own default
+    path), letting a caller do e.g. cl = slug.Cluster(1e3) without
+    building a SimPhysics at all.
+controls : SimControls, optional
     Simulation control flow settings; used only to record this
     cluster's own PDF-integration tolerances at construction, not
-    stored.)doc";
+    stored. Defaults to a SimControls with all-default tolerances.)doc";
 
 static constexpr std::string_view uidDocstring = R"doc(Return the cluster's unique identifier.
 
@@ -133,16 +139,32 @@ t : float
 void bindCluster(py::module_& m)
 {
     py::class_<core::Cluster, py::smart_holder>(m, "Cluster")
-        .def(py::init<unsigned long, double, double,
-                const io::SimPhysics&, const io::SimControls&>(),
+        .def(py::init(
+                [](double mass, unsigned long uid, double time,
+                   const py::object& physics, const py::object& controls)
+                    -> std::unique_ptr<core::Cluster>
+                {
+                    const io::SimControls defaultControls{};
+                    const io::SimPhysics& physicsRef = physics.is_none()
+                        ? sharedDefaultSimPhysics()
+                        : py::cast<const io::SimPhysics&>(physics);
+                    return std::make_unique<core::Cluster>(
+                        uid, mass, time, physicsRef,
+                        resolveControls(controls, defaultControls));
+                }),
                 constructorDocstring.data(),
-                py::arg("uid"), py::arg("mass"), py::arg("time"),
-                py::arg("physics"), py::arg("controls"),
+                py::arg("mass"), py::arg("uid") = 0UL, py::arg("time") = 0.0,
+                py::arg("physics") = py::none(), py::arg("controls") = py::none(),
                 // Keep the physics argument (index 5: 1 = self, 2-4 =
-                // uid/mass/time) alive at least as long as this
+                // mass/uid/time) alive at least as long as this
                 // Cluster, since Cluster stores only a reference to
-                // it rather than its own copy. controls needs no such
-                // keep_alive: Cluster copies the three tolerance
+                // it rather than its own copy. When physics is
+                // omitted (py::none()), this is a harmless no-op --
+                // sharedDefaultSimPhysics()'s own instance is a
+                // function-local static, needing no keep_alive
+                // protection at all (see its own comment in
+                // Bindings.hpp). controls needs no such keep_alive
+                // either way: Cluster copies the three tolerance
                 // values it needs out of it at construction, rather
                 // than storing a reference.
                 py::keep_alive<1, 5>())
