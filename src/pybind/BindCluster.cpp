@@ -7,6 +7,7 @@
 
 #include "Bindings.hpp"
 #include "../core/Cluster.hpp"
+#include "../io/SimControls.hpp"
 #include <memory>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h> // NOLINT(misc-include-cleaner); this is needed for correct Python binding, even if clang-tidy can't recognize it
@@ -142,8 +143,19 @@ void bindCluster(py::module_& m)
                    const py::object& controls)
                     -> std::unique_ptr<core::Cluster>
                 {
-                    return std::make_unique<core::Cluster>(
-                        uid, mass, time, resolveControls(controls, sharedDefaultControls()));
+                    // Deliberately a ternary, not
+                    // resolveControls(controls, sharedDefaultControls()):
+                    // sharedDefaultControls() is expensive (parses
+                    // PyDefaults.toml, the real MIST tracks, and the
+                    // full spectral-library chain) and can throw, so
+                    // it must only run when controls is actually
+                    // py::none() -- a plain function-call argument
+                    // would evaluate it eagerly on every construction
+                    // regardless.
+                    const io::SimControls& controlsRef = controls.is_none()
+                        ? sharedDefaultControls()
+                        : py::cast<const io::SimControls&>(controls);
+                    return std::make_unique<core::Cluster>(uid, mass, time, controlsRef);
                 }),
                 constructorDocstring.data(),
                 py::arg("mass"), py::arg("uid") = 0UL, py::arg("time") = 0.0,
