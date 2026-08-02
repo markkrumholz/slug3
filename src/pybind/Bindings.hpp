@@ -123,6 +123,11 @@ void bindFilterCollection(py::module_& m);
 void bindPhotConvert(py::module_& m);
 
 /**
+ * @brief Bind pdfs::PDF as PDF
+ */
+void bindPDF(py::module_& m);
+
+/**
  * @brief Resolve an optional py::object SimControls argument to a real SimControls
  * @param controls The Python-facing controls argument; if py::none(),
  *   defaultControls is used instead

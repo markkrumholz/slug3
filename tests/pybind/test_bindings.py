@@ -93,6 +93,11 @@ PY_DEFAULTS_PATH = pathlib.Path("src/pybind/assets/PyDefaults.toml")
 # tests/phot/testFilterCollection.hpp et al.
 FILTER_REGISTRY = "tests/phot/assets/filters_test.toml"
 
+# A two-segment (lognormal + powerlaw) IMF descriptor used by the PDF
+# tests below -- the same fixture tests/pdfs/testPDF.cpp itself uses,
+# with breakpoints 0.08, 1, 120 Msun.
+CHABRIER_IMF_DESCRIPTOR = "tests/pdfs/assets/chabrier_imf.txt"
+
 
 def _make_const_spec(wl_lo, wl_hi, n, f0):
     """A constant-F_lambda spectrum on a uniform grid of n points over
@@ -1256,3 +1261,120 @@ def test_photconvert_vega_photcount_filter_gives_negative_infinity():
 
     result = slug.PhotConvert("Flambda", "Vega", 1e-15, filt.wlPivot(), filt)
     assert result == float("-inf")
+
+
+# ---------------------------------------------------------------------
+# PDF
+# ---------------------------------------------------------------------
+
+
+def test_parse_pdf_descriptor():
+    """parsePDFDescriptor() should build a valid, normalized PDF whose
+    range matches CHABRIER_IMF_DESCRIPTOR's own breakpoints (0.08, 1,
+    120), with one weight per segment (lognormal + powerlaw)."""
+    pdf = slug.parsePDFDescriptor(CHABRIER_IMF_DESCRIPTOR)
+
+    assert pdf.valid()
+    assert pdf.getMin() == pytest.approx(0.08)
+    assert pdf.getMax() == pytest.approx(120.0)
+    assert pdf.normalized()
+    assert len(pdf.getWeights()) == 2
+    assert pdf.integral() == pytest.approx(1.0)
+
+
+def test_parse_pdf_descriptor_missing_file_raises():
+    """parsePDFDescriptor() should raise, not crash, for a file that
+    cannot be found."""
+    with pytest.raises(RuntimeError):
+        slug.parsePDFDescriptor("not_a_real_pdf_descriptor_file.txt")
+
+
+def test_pdf_sampling_default():
+    """CHABRIER_IMF_DESCRIPTOR specifies no explicit sampling method,
+    so the sampling property should read back
+    parsePDFDescriptor()'s/the file parser's own default,
+    "stop_nearest"."""
+    pdf = slug.parsePDFDescriptor(CHABRIER_IMF_DESCRIPTOR)
+    assert pdf.sampling == "stop_nearest"
+
+
+@pytest.mark.parametrize("method", [
+    "stop_nearest", "stop_before", "stop_after", "stop_50",
+    "number", "poisson", "sorted_sampling"])
+def test_pdf_sampling_property_round_trips(method):
+    """Setting the sampling property to each recognized method string
+    should be reflected back exactly by the getter."""
+    pdf = slug.parsePDFDescriptor(CHABRIER_IMF_DESCRIPTOR)
+    pdf.sampling = method
+    assert pdf.sampling == method
+
+
+def test_pdf_sampling_property_invalid_raises():
+    """Setting the sampling property to an unrecognized string should
+    raise, not crash, and should leave the previous value unchanged."""
+    pdf = slug.parsePDFDescriptor(CHABRIER_IMF_DESCRIPTOR)
+    with pytest.raises(RuntimeError):
+        pdf.sampling = "not_a_real_sampling_method"
+    assert pdf.sampling == "stop_nearest"
+
+
+def test_pdf_call_and_expectation_value():
+    """__call__ should return a non-negative density everywhere in
+    range; expectationValue() (full range) should itself lie within
+    [getMin(), getMax()], and narrowing the range via the two-argument
+    overload should change the result."""
+    pdf = slug.parsePDFDescriptor(CHABRIER_IMF_DESCRIPTOR)
+
+    assert pdf(0.5) >= 0.0
+    assert pdf(50.0) >= 0.0
+
+    full = pdf.expectationValue()
+    assert pdf.getMin() <= full <= pdf.getMax()
+
+    narrow = pdf.expectationValue(0.08, 1.0)
+    assert 0.08 <= narrow <= 1.0
+    assert narrow != pytest.approx(full)
+
+
+def test_pdf_integral_range():
+    """integral(a, b) over the full range should match integral();
+    over a sub-range it should be smaller (strictly, since both
+    segments have positive weight throughout)."""
+    pdf = slug.parsePDFDescriptor(CHABRIER_IMF_DESCRIPTOR)
+
+    assert pdf.integral(pdf.getMin(), pdf.getMax()) == pytest.approx(pdf.integral())
+    assert pdf.integral(0.08, 1.0) < pdf.integral()
+
+
+def test_pdf_draw_single_and_multiple():
+    """draw() (no args) should return a single float in range;
+    draw(n) should return a list of n floats, all in range -- these
+    are two distinct C++ overloads bound under the same Python name,
+    disambiguated by pybind on arity/argument type."""
+    pdf = slug.parsePDFDescriptor(CHABRIER_IMF_DESCRIPTOR)
+
+    single = pdf.draw()
+    assert pdf.getMin() <= single <= pdf.getMax()
+
+    many = pdf.draw(10)
+    assert len(many) == 10
+    assert all(pdf.getMin() <= v <= pdf.getMax() for v in many)
+
+
+def test_pdf_draw_range_override():
+    """draw(a=, b=) should restrict sampling to the given sub-range."""
+    pdf = slug.parsePDFDescriptor(CHABRIER_IMF_DESCRIPTOR)
+    samples = pdf.draw(20, a=1.0, b=10.0)
+    assert len(samples) == 20
+    assert all(1.0 <= v <= 10.0 for v in samples)
+
+
+def test_pdf_draw_target():
+    """drawTarget() should return a non-empty list of samples whose
+    sum is close to the requested target (guaranteed by the default
+    "stop_nearest" sampling policy)."""
+    pdf = slug.parsePDFDescriptor(CHABRIER_IMF_DESCRIPTOR)
+    target = 500.0
+    samples = pdf.drawTarget(target)
+    assert len(samples) > 0
+    assert sum(samples) == pytest.approx(target, rel=0.5)
