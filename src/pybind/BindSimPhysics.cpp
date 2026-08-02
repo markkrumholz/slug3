@@ -10,6 +10,7 @@
 #include "../io/SimPhysics.hpp"
 #include "../specsyn/Specsyn.hpp"
 #include "../tracks/Tracks3D.hpp"
+#include "../utils/MiscUtils.hpp"
 #include <memory>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h> // NOLINT(misc-include-cleaner); this is needed for correct Python binding, even if clang-tidy can't recognize it
@@ -40,17 +41,27 @@ static constexpr std::string_view constructorDocstring = R"doc(Construct a SimPh
 
 Parameters
 ----------
-path : str
-    Path to a slug TOML input deck.
-sim_type : str
+path : str, optional
+    Path to a slug TOML input deck. If omitted (or empty), loads
+    slug's own bundled default deck (src/pybind/assets/PyDefaults.toml)
+    instead, letting a caller build a usable SimPhysics for interactive
+    work -- e.g. sp = slug.SimPhysics() -- without touching an input
+    deck at all. That bundled deck specifies no output-time
+    information (it is not meant to drive a full simulation), so in
+    this case SimPhysics is built using an interactive-use SimControls
+    (all defaults, see SimControls's own default constructor) rather
+    than one parsed from the deck.
+sim_type : str, optional
     Either "cluster" or "galaxy"; controls whether galaxy-specific
-    quantities (the CLF and SFR) are read from the deck.
+    quantities (the CLF and SFR) are read from the deck. Defaults to
+    "cluster", matching the bundled default deck's own sim_type.
 
 Throws
 ------
 RuntimeError
     If the file cannot be parsed, sim_type is not "cluster" or
-    "galaxy", or the deck is otherwise invalid.)doc";
+    "galaxy", the deck is otherwise invalid, or (only if path is
+    empty) the bundled default deck cannot be found.)doc";
 
 static constexpr std::string_view wlDocstring = R"doc(Return the rest-frame wavelength grid of the spectral synthesizer.
 
@@ -356,12 +367,36 @@ void bindSimPhysics(py::module_& m)
                     -> std::unique_ptr<io::SimPhysics>
                 {
                     simTypeFromString(simType); // validate; SimControls reads it from deck
-                    const toml::table inputDeck = toml::parse_file(path);
-                    const io::SimControls controls(inputDeck);
+
+                    if (!path.empty())
+                    {
+                        const toml::table inputDeck = toml::parse_file(path);
+                        const io::SimControls controls(inputDeck);
+                        return std::make_unique<io::SimPhysics>(inputDeck, controls);
+                    }
+
+                    // No path given: fall back to slug's own bundled
+                    // default deck, meant for interactive use rather
+                    // than running a full simulation -- it specifies
+                    // no output-time information, so this builds
+                    // controls from SimControls's own all-defaults
+                    // constructor instead of parsing it out of the
+                    // deck (which would throw, since SimControls
+                    // otherwise requires one of the output-time
+                    // options to be set)
+                    const auto defaultsPath =
+                        utils::getFilePath("PyDefaults.toml", "src/pybind/assets");
+                    if (defaultsPath.empty())
+                    {
+                        throw std::runtime_error(
+                            "SimPhysics: default input deck PyDefaults.toml not found");
+                    }
+                    const toml::table inputDeck = toml::parse_file(defaultsPath.string());
+                    const io::SimControls controls;
                     return std::make_unique<io::SimPhysics>(inputDeck, controls);
                 }),
                 constructorDocstring.data(),
-                py::arg("path"), py::arg("sim_type"))
+                py::arg("path") = "", py::arg("sim_type") = "cluster")
         .def("wl",
                 [](const io::SimPhysics& self) -> std::vector<double>
                 {

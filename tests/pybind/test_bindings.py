@@ -26,6 +26,7 @@ resolves stars.IMF = "chabrier.toml" via SLUG_DIR + "data/imfs".
 
 import gc
 import pathlib
+import tomllib
 
 import numpy as np
 import pytest
@@ -75,6 +76,15 @@ LBOL_DECK = "tests/core/assets/testClusterLbol.in"
 # comment) -- used by the setFeH() tests below to exercise the
 # variable-to-fixed transition.
 VAR_FEH_DECK = "tests/core/assets/testClusterVarFeH.in"
+
+# slug's own bundled default deck, used by SimPhysics() when path is
+# omitted/empty (see the SimPhysics tests below). Unlike every other
+# deck used in this file, it references the real MIST tracks and a
+# real spectral-library chain (data/tracks, data/spectra), rather than
+# the small MIST_test/blackbody test fixtures -- see fetch_mist.py
+# etc. -- which this test environment does not guarantee are fetched
+# (CI in particular never fetches them).
+PY_DEFAULTS_PATH = pathlib.Path("src/pybind/assets/PyDefaults.toml")
 
 # Filter registry used by the FilterIdeal/FilterTabulated/FilterCollection
 # tests below: a single tabulated filter, SLUGTEST.CAM1.G500 (a
@@ -428,6 +438,47 @@ def test_simphysics_wl_without_specsyn_raises(tmp_path):
         physics.wl()
     with pytest.raises(RuntimeError):
         physics.wlObs()
+
+
+def test_simphysics_default_deck_file_contents():
+    """The bundled default deck should exist and contain the expected
+    keys. Checked directly against the file (independent of whether
+    slug.SimPhysics() itself can fully construct in this environment,
+    see test_simphysics_default_construction_finds_bundled_deck)."""
+    assert PY_DEFAULTS_PATH.is_file()
+    with PY_DEFAULTS_PATH.open("rb") as f:
+        deck = tomllib.load(f)
+
+    assert deck["sim_type"] == "cluster"
+    assert deck["n_trial"] == 1
+    assert deck["stars"]["IMF"] == "chabrier.toml"
+    assert deck["stars"]["tracks"] == "MIST"
+    assert deck["stars"]["v_vcrit"] == pytest.approx(0.4)
+    assert deck["stars"]["alphaFe"] == pytest.approx(0.0)
+    assert deck["stars"]["FeH"] == pytest.approx(0.0)
+    assert deck["spectra"]["model"] == [
+        "POWR_WC", "POWR_WNE", "POWR_WNL_H20", "POWR_WNL_H40", "POWR_WNL_H60",
+        "TLUSTY_O", "TLUSTY_B", "BOSZ", "CK04", "MARCS"]
+
+
+def test_simphysics_default_construction_finds_bundled_deck():
+    """SimPhysics() with an empty (or omitted) path should locate and
+    parse the bundled default deck, rather than raising "file not
+    found" the way it would for a genuinely missing path -- and,
+    unlike an explicit path, should not require sim_type either. Since
+    the bundled deck references real MIST/spectral-library data this
+    environment does not guarantee is fetched (see PY_DEFAULTS_PATH's
+    own comment), this only checks that the *deck itself* was found
+    (any failure must come from further downstream, e.g. missing
+    track/spectral data, not from the deck-loading step itself), not
+    that construction fully succeeds everywhere this suite runs."""
+    for kwargs in ({}, {"sim_type": "cluster"}, {"path": ""}):
+        try:
+            physics = slug.SimPhysics(**kwargs)
+        except RuntimeError as e:
+            assert "PyDefaults.toml" not in str(e)
+        else:
+            assert physics is not None
 
 
 def test_simphysics_compute_lbol_default_false(sim_physics):
