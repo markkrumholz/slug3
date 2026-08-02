@@ -1,20 +1,50 @@
 """
 Unit tests for the Python bindings exposed by src/pybind/Bindings.cpp.
 
-These tests exercise Tracks2D and Tracks3D against the small MIST_test
-track set in tests/tracks/assets/tracks.toml, the same fixture used by
-the C++ tests in tests/tracks, so that this suite can run without
-access to the full-size track files under data/tracks. Interpolator1D
-has no exposed constructor (it is only ever returned by Tracks2D and
-Tracks3D methods), so it is exercised indirectly through the
-Interpolator1D objects returned by getTrack() and getIsochrone().
-SimPhysics and Cluster are exercised against
-tests/core/assets/testCluster.in, the same fixture the C++ tests in
-tests/core use, which also points at the MIST_test track set and
-requests spectra.model = "blackbody". FilterIdeal, FilterTabulated,
-and FilterCollection are exercised against the same small filter
-registry (tests/phot/assets/filters_test.toml) the C++ tests in
-tests/phot use.
+Sections, in file order, and the fixtures each is built around:
+
+- Tracks2D / Tracks3D / Interpolator1D: the small MIST_test track set
+  in tests/tracks/assets/tracks.toml, the same fixture the C++ tests
+  in tests/tracks use, so this suite can run without access to the
+  full-size track files under data/tracks. Interpolator1D has no
+  exposed constructor (it is only ever returned by Tracks2D/Tracks3D
+  methods), so it is exercised indirectly through the objects
+  getTrack() and getIsochrone() return.
+
+- SimPhysics / Cluster: mostly built from
+  tests/core/assets/testCluster.in (CLUSTER_DECK), the same fixture
+  the C++ tests in tests/core use, which points at the MIST_test track
+  set and requests spectra.model = "blackbody". A few tests need
+  variant decks for a specific scenario: PHOT_DECK/LBOL_DECK add
+  phot.filters (otherwise identical to CLUSTER_DECK); VAR_FEH_DECK
+  gives stars.FeH a variable (rather than fixed) distribution, needed
+  by any test that changes SimPhysics.feH to a new value --
+  CLUSTER_DECK's own tracks_ loads as a single degenerate [Fe/H] slice
+  at exactly 0.0 (a Tracks3D optimization when the requested range's
+  min and max coincide with one grid point), so it has no track data
+  to interpolate at any other [Fe/H]. PyDefaults.toml (PY_DEFAULTS_PATH)
+  is slug's own bundled default deck, used by SimPhysics() when path
+  is omitted; unlike every other deck here it references the real MIST
+  tracks and a real spectral-library chain (data/tracks, data/spectra)
+  rather than small test fixtures, which this environment does not
+  guarantee are fetched (CI in particular never fetches them) -- tests
+  that exercise it accept either success or a failure that isn't about
+  the deck-loading step itself. SimPhysics's PDF-valued properties
+  (imf, cmf, feH, clf, sfr) and its and SimControls's constructor
+  keyword arguments are also covered here.
+
+- FilterIdeal / FilterTabulated / FilterCollection / PhotConvert: the
+  small filter registry in tests/phot/assets/filters_test.toml (a
+  single tabulated filter, SLUGTEST.CAM1.G500), the same fixture the
+  C++ tests in tests/phot use, combined with a few of FilterIdeal's
+  idealized naming conventions (ideal_energy_*, ideal_phot_*, Q(HI)).
+
+- PDF: parsePDFDescriptor() applied to
+  tests/pdfs/assets/chabrier_imf.txt (CHABRIER_IMF_DESCRIPTOR), the
+  same two-segment (lognormal + powerlaw) IMF fixture
+  tests/pdfs/testPDF.cpp itself uses -- PDF has no exposed constructor
+  of its own, so parsePDFDescriptor() is the only way to obtain one
+  from Python.
 
 This file is run via pytest, invoked as a CTest test from CMakeLists.txt
 (see the test_PythonBindings target), so `ctest` alone runs both the
