@@ -1,0 +1,29 @@
+# Test input deck for a cluster simulation with a variable (rather
+# than fixed) [Fe/H] distribution -- otherwise identical to
+# testCluster.in. SimPhysics::constFeH() is false for this deck, so
+# tracks_ is loaded across the full [-0.5, 0.5] range (rather than the
+# single degenerate feh=0.0 slice testCluster.in's fixed FeH loads),
+# and no tracks2D()/constFeHTracks_ cache is built at construction --
+# exercising the Python-only path where SimPhysics::setFeH() later
+# pins [Fe/H] to a fixed value and must build that cache itself. See
+# tests/core/testSimCluster.cpp for the same fixture used from C++.
+
+sim_type = "cluster"
+
+[stars]
+IMF = "chabrier.toml"
+track_registry = "tests/tracks/assets/tracks.toml"
+tracks = "MIST_test"
+FeH = "tests/core/assets/testClusterFeHDist.toml"
+alphaFe = -0.2
+
+[spectra]
+model = "blackbody"
+
+[clusters]
+CMF = 1e3
+
+[outputs]
+start_time = 0.0
+end_time = 10.0
+ntime = 3

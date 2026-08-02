@@ -8,6 +8,7 @@
 #include "SimControls.hpp"
 #include "../utils/ParseUtils.hpp"
 #include "../utils/RngThread.hpp"
+#include "../utils/TOMLUtils.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstddef>

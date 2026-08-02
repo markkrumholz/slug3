@@ -328,11 +328,13 @@ static auto toStarData(const std::vector<double>& props) -> specsyn::Specsyn::St
     return starData;
 }
 
-// Return a const SimControls& from a py::object that is either None
-// (giving the default-constructed SimControls) or an actual SimControls.
-// The defaultControls local must outlive the returned reference; callers
-// must keep it alive for the duration of the call.
-static auto resolveControls(const py::object& controls,
+// Declared in Bindings.hpp (shared with BindCluster.cpp -- see its own
+// comment there). Returns a const SimControls& from a py::object that
+// is either None (giving the default-constructed SimControls) or an
+// actual SimControls. The defaultControls local must outlive the
+// returned reference; callers must keep it alive for the duration of
+// the call.
+auto resolveControls(const py::object& controls,
     const io::SimControls& defaultControls) -> const io::SimControls&
 {
     if (controls.is_none()) { return defaultControls; }

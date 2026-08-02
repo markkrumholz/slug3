@@ -18,9 +18,13 @@
 #define BINDINGS_HPP
 
 #include "../interpolation/Interpolator1D.hpp"
+#include "../io/SimControls.hpp"
+#include "../io/SimPhysics.hpp"
 #include "../tracks/TrackCommons.hpp"
 #include <cstddef>
+#include <memory>
 #include <pybind11/pybind11.h>
+#include <pybind11/pytypes.h>
 
 namespace py = pybind11;
 
@@ -118,5 +122,59 @@ void bindFilterCollection(py::module_& m);
  * @brief Bind phot::PhotConvert as the module-level function PhotConvert
  */
 void bindPhotConvert(py::module_& m);
+
+/**
+ * @brief Bind pdfs::PDF as PDF
+ */
+void bindPDF(py::module_& m);
+
+/**
+ * @brief Resolve an optional py::object SimControls argument to a real SimControls
+ * @param controls The Python-facing controls argument; if py::none(),
+ *   defaultControls is used instead
+ * @param defaultControls Fallback used when controls is py::none();
+ *   must outlive the returned reference, so callers should keep it
+ *   alive (as a local variable) for the duration of the call using
+ *   the returned reference
+ * @return A const reference to either the SimControls held by
+ *   controls, or defaultControls
+ * @details
+ * Shared by every binding that takes an optional SimControls (e.g.
+ * SpecsynBlackbody's constructor, Cluster's constructor), so each
+ * doesn't have to duplicate this same is_none()/py::cast dance.
+ */
+auto resolveControls(const py::object& controls,
+    const io::SimControls& defaultControls) -> const io::SimControls&;
+
+/**
+ * @brief Build a fresh SimPhysics from slug's own bundled default deck
+ * @return A new SimPhysics built from src/pybind/assets/PyDefaults.toml,
+ *   independent of any other call's result
+ * @throws std::runtime_error if the bundled default deck cannot be found
+ * @details
+ * Used directly by SimPhysics's own Python constructor, when path is
+ * empty; see sharedDefaultSimPhysics() for the shared, non-owning
+ * counterpart used by Cluster's own default physics argument.
+ */
+auto buildDefaultSimPhysics() -> std::unique_ptr<io::SimPhysics>;
+
+/**
+ * @brief Get slug's own default SimPhysics, shared for the life of the program
+ * @return A const reference to a SimPhysics built (lazily, once) by
+ *   buildDefaultSimPhysics()
+ * @details
+ * Used as Cluster's own default physics argument, so
+ * slug.Cluster(mass) works without requiring a SimPhysics to be built
+ * and kept alive by the caller. Unlike a SimPhysics a caller builds
+ * itself, this instance is a function-local static -- its lifetime is
+ * governed by the C++ runtime rather than Python's reference
+ * counting, so a Cluster referencing it never needs py::keep_alive to
+ * stay safe. It is shared (not rebuilt per Cluster), both to avoid
+ * repeatedly reloading the real MIST tracks and spectral-library
+ * chain PyDefaults.toml references, and because SimPhysics is
+ * ordinarily meant to be shared across many Cluster objects anyway
+ * (see SimCluster::run()).
+ */
+auto sharedDefaultSimPhysics() -> const io::SimPhysics&;
 
 #endif // BINDINGS_HPP

@@ -44,39 +44,31 @@ auto utils::trim(const std::string& str) -> std::string
     return strNW;
 }
 
-// Initialize a PDF from a toml key
-auto utils::initPDFFromKey(const toml::table& inputDeck,
-    const std::string& key,
+// Initialize a PDF from a string
+auto utils::initPDFFromString(const std::string& value,
     const std::string& prefix) -> pdfs::PDF
 {
-    // First check for numerical value
-    const std::optional<double> num =
-        inputDeck.at_path(key).value<double>();
-    if (num.has_value())
+    // First check for a numerical value
+    try
     {
-        auto delta = std::make_unique<pdfs::PDFSegmentDelta>(num.value());
+        const double num = utils::stod(value);
+        auto delta = std::make_unique<pdfs::PDFSegmentDelta>(num);
         auto pdf = pdfs::PDF(std::move(delta));
         return std::move(pdf);
     }
-
-    // Next check for string value
-    const std::optional<std::string> pdfFile =
-        inputDeck.at_path(key).value<std::string>();
-    if (pdfFile.has_value())
+    catch (const std::invalid_argument&) // NOLINT(bugprone-empty-catch) -- deliberately empty: this exception just means value isn't numeric, so fall through to interpreting it as a file name below
     {
-        auto pdfFilePath = utils::getFilePath(pdfFile.value(), prefix).string();
-        if (pdfFilePath.empty())
-        {
-            throw std::runtime_error(
-                "initPDFFromKey: pdf file " + pdfFile.value() + " not found");
-        }
-        auto pdf = pdfs::parsePDFDescriptor(pdfFilePath);
-        return std::move(pdf);
     }
 
-    // If we get here, key does not exist or has invalid type
-    throw std::runtime_error(
-        "initPDFFromKey: invalid entry for " + key);
+    // Interpret value as naming a PDF file
+    auto pdfFilePath = utils::getFilePath(value, prefix).string();
+    if (pdfFilePath.empty())
+    {
+        throw std::runtime_error(
+            "initPDFFromString: pdf file " + value + " not found");
+    }
+    auto pdf = pdfs::parsePDFDescriptor(pdfFilePath);
+    return std::move(pdf);
 }
 
 // Check for TOML key of type and return error if type is wrong

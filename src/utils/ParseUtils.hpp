@@ -100,19 +100,20 @@ namespace utils {
     }
 
     /**
-     * @brief Initialize a PDF from a toml key
-     * @param inputDeck Input deck for simulation
-     * @param key Name of key
+     * @brief Initialize a PDF from a string
+     * @param value The string to interpret; plays the same role as
+     *   the value of the toml key in TOMLUtils.hpp's initPDFFromKey()
      * @param prefix Prefix to look for PDF file relative to SLUG_DIR
      * @details
-     * If the key resolves to a numerical value, this is interpreted
-     * as specifying a delta function at that value. If it resolves
-     * to a string, this is interpreted as supplying the name of the
-     * PDF file descriptor, with the path to the file resolved by
-     * utils::getFilePath.
+     * If value can be converted to a numerical value (via
+     * utils::stod), this is interpreted as specifying a delta
+     * function at that value. Otherwise, value is interpreted as the
+     * name of a PDF file descriptor, with the path to the file
+     * resolved by utils::getFilePath.
+     * @throws std::runtime_error if value is not numeric and does not
+     *   name a file that can be found
     */
-    auto initPDFFromKey(const toml::table& inputDeck,
-        const std::string& key,
+    auto initPDFFromString(const std::string& value,
         const std::string& prefix = "") -> pdfs::PDF;
 
     /**

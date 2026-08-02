@@ -1,0 +1,23 @@
+sim_type = "cluster"
+n_trial = 1
+
+[stars]
+IMF = "chabrier.toml"
+tracks = "MIST"
+v_vcrit = 0.4
+alphaFe = 0.0
+FeH = 0.0
+
+[spectra]
+model = ["POWR_WC", "POWR_WNE", "POWR_WNL_H20", "POWR_WNL_H40", "POWR_WNL_H60", "TLUSTY_O", "TLUSTY_B", "BOSZ", "CK04", "MARCS"]
+
+# SimPhysics's constructor requires clusters.CMF unconditionally, with
+# no fallback, even though this bundled deck is meant for interactive
+# Cluster exploration (where Cluster's own Python constructor takes an
+# explicit target mass, never drawing from cmf_ at all) rather than
+# running a full cluster simulation (where cmf_ actually matters). This
+# placeholder value is never used for that reason; call setCMF() to
+# give it real meaning if driving a simulation from this SimPhysics
+# instead. Revisit once galaxy-simulation defaults are implemented.
+[clusters]
+CMF = 1e4

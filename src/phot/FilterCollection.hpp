@@ -66,6 +66,22 @@ namespace phot
             PhotSystem photSystem,
             const std::string& registryName = defaultRegistry);
 
+        // Virtual destructor (making this class polymorphic), and
+        // correspondingly explicit copy/move declarations, since
+        // declaring any destructor suppresses the implicitly-declared
+        // move constructor/assignment: mirrors Tracks3D's own
+        // identical declarations, needed for the same reason -- a
+        // non-copyable class (filters_ holds unique_ptr<Filter>
+        // elements) being polymorphic lets pybind11's type_caster use
+        // its RTTI-based reference/pointer-return path, rather than
+        // one that requires attempting (and failing to compile) a
+        // copy
+        virtual ~FilterCollection() = default;
+        FilterCollection(const FilterCollection&) = delete;
+        auto operator=(const FilterCollection&) -> FilterCollection& = delete;
+        FilterCollection(FilterCollection&&) = default;
+        auto operator=(FilterCollection&&) -> FilterCollection& = default;
+
         /**
          * @brief Parse a filter name and add the resulting filter to this collection
          * @param name Name of the filter to add; see the constructor's

@@ -26,7 +26,6 @@
 #include "SimControls.hpp"
 #include <algorithm>
 #include <cstddef>
-#include <filesystem>
 #include <iostream>
 #include <limits>
 #include <memory>
@@ -41,8 +40,7 @@
 io::SimPhysics::SimPhysics(const toml::table& inputDeck, const SimControls& controls)
 {
     // Read IMF, CMF, and FeH
-    imf_ = utils::initPDFFromKey(inputDeck, "stars.IMF",
-        (std::filesystem::path("data") / std::filesystem::path("imfs")).string());
+    imf_ = utils::initPDFFromKey(inputDeck, "stars.IMF", imfPrefix);
     cmf_ = utils::initPDFFromKey(inputDeck, "clusters.CMF");
     fehDist_ = utils::initPDFFromKey(inputDeck, "stars.FeH");
 
@@ -149,6 +147,59 @@ namespace
         }
     }
 } // namespace
+
+// Set the [Fe/H] distribution, recomputing tracks2D() (constFeHTracks_)
+// from the current tracks_ if the new fehDist_ is fixed -- mirrors the
+// constructor's own post-readTracks() step, which does the same thing
+// once, after both tracks_ and fehDist_ are set
+void io::SimPhysics::setFeH(const std::string& feH)
+{
+    fehDist_ = utils::initPDFFromString(feH);
+    if (constFeH())
+    {
+        constFeHTracks_ = tracks_.sliceConstFeH(fehDist_.getMin());
+    }
+}
+
+// Set the stellar tracks, recomputing tracks2D() (constFeHTracks_)
+// from the new tracks_ if fehDist_ is already fixed -- see setFeH()'s
+// own comment
+void io::SimPhysics::setTracks(tracks::Tracks3D tracks)
+{
+    tracks_ = std::move(tracks);
+    if (constFeH())
+    {
+        constFeHTracks_ = tracks_.sliceConstFeH(fehDist_.getMin());
+    }
+}
+
+// Set the star formation rate -- mirrors the galaxy.sfr handling in
+// the constructor above exactly, including not resolving a file name
+// through utils::getFilePath (unlike setIMF()/setCMF()/setFeH()/
+// setCLF(), which all go through utils::initPDFFromString())
+void io::SimPhysics::setSFR(const std::string& sfr)
+{
+    try
+    {
+        const double sfrVal = utils::stod(sfr);
+
+        // We have been given a numerical value, so construct a
+        // constant PDF from t = 0 to T for a big number T, with
+        // the weight set to T / sfr so that the mass of stars
+        // formed in any time interval dt comes out to sfr * dt.
+        const double tMax = std::numeric_limits<double>::max() *
+            std::min(sfrVal, 1.0);
+        const double wgt = std::numeric_limits<double>::max() /
+            std::max(sfrVal, 1.0);
+        auto pl = std::make_unique<pdfs::PDFSegmentPowerlaw>(0.0, tMax, 0.0);
+        sfr_ = pdfs::PDF(std::move(pl), wgt);
+    }
+    catch (const std::invalid_argument&)
+    {
+        // We have been given a file
+        sfr_ = pdfs::parsePDFDescriptor(sfr);
+    }
+}
 
 // Integrator tolerance getters and setters: thin wrappers around
 // specsyn_'s own Specsyn::intRelTol() etc.
