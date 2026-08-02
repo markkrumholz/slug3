@@ -63,7 +63,7 @@ CLUSTER_TARGET_MASS = 1e3
 # Input decks used for the Cluster.phot()/lbol() tests below.
 # PHOT_DECK requests two real/idealized filters plus "Lbol"; LBOL_DECK
 # requests "Lbol" alone, so SimPhysics.filters() stays None there while
-# SimPhysics.computeLbol() is True (see the deck's own comment) -- both
+# SimPhysics.computeLbol is True (see the deck's own comment) -- both
 # are otherwise identical to CLUSTER_DECK and are also used by the C++
 # tests in tests/core/testCluster.cpp.
 PHOT_DECK = "tests/core/assets/testClusterPhot.in"
@@ -487,24 +487,24 @@ def test_simphysics_default_construction_finds_bundled_deck():
 
 
 def test_simphysics_compute_lbol_default_false(sim_physics):
-    """CLUSTER_DECK has no [phot] section, so computeLbol() should
+    """CLUSTER_DECK has no [phot] section, so computeLbol should
     default to False."""
-    assert not sim_physics.computeLbol()
+    assert not sim_physics.computeLbol
 
 
 def test_simphysics_set_compute_lbol_toggles():
-    """setComputeLbol() should be reflected back by computeLbol(). Uses
-    its own SimPhysics, rather than the shared sim_physics fixture, so
-    a failed assertion here can't leave module-scoped state behind for
-    other tests to trip over."""
+    """setComputeLbol() should be reflected back by the computeLbol
+    property. Uses its own SimPhysics, rather than the shared
+    sim_physics fixture, so a failed assertion here can't leave
+    module-scoped state behind for other tests to trip over."""
     physics = slug.SimPhysics(CLUSTER_DECK, "cluster")
-    assert not physics.computeLbol()
+    assert not physics.computeLbol
 
     physics.setComputeLbol(True)
-    assert physics.computeLbol()
+    assert physics.computeLbol
 
     physics.setComputeLbol(False)
-    assert not physics.computeLbol()
+    assert not physics.computeLbol
 
 
 def test_simphysics_set_compute_lbol_enables_lbol_computation():
@@ -703,6 +703,175 @@ def test_simphysics_set_min_stoch_mass_disables_stochastic_sampling():
 
     assert len(cluster.spec()) > 0
     assert all(np.isfinite(v) for v in cluster.spec())
+
+
+def test_simphysics_imf_property():
+    """The imf property should read back a real PDF reflecting the
+    deck's own stars.IMF, and assigning a str to it should have the
+    same effect as setIMF()."""
+    physics = slug.SimPhysics(CLUSTER_DECK, "cluster")
+    assert isinstance(physics.imf, slug.PDF)
+    assert physics.imf.valid()
+
+    physics.imf = "20.0"
+    assert physics.imf.getMin() == pytest.approx(20.0)
+    assert physics.imf.getMax() == pytest.approx(20.0)
+
+
+def test_simphysics_cmf_property():
+    """The cmf property should read back a real PDF reflecting the
+    deck's own clusters.CMF, and assigning a str to it should have the
+    same effect as setCMF()."""
+    physics = slug.SimPhysics(CLUSTER_DECK, "cluster")
+    assert physics.cmf.getMin() == pytest.approx(CLUSTER_TARGET_MASS)
+
+    physics.cmf = "500.0"
+    assert physics.cmf.getMin() == pytest.approx(500.0)
+
+
+def test_simphysics_feh_property():
+    """The feH property should read back a real PDF, and assigning a
+    str to it should have the same effect as setFeH() -- including
+    rebuilding tracks2D() when constFeH() becomes True, exercised here
+    via VAR_FEH_DECK exactly as in
+    test_simphysics_set_feh_rebuilds_tracks2d_cache."""
+    physics = slug.SimPhysics(VAR_FEH_DECK, "cluster")
+    assert physics.feH.getMin() == pytest.approx(-0.5)
+    assert physics.feH.getMax() == pytest.approx(0.5)
+
+    physics.feH = "-0.25"
+    assert physics.feH.getMin() == pytest.approx(-0.25)
+    assert physics.feH.getMax() == pytest.approx(-0.25)
+
+    controls = slug.SimControls(VAR_FEH_DECK)
+    cluster = slug.Cluster(CLUSTER_TARGET_MASS, 38, 0.0, physics, controls)
+    cluster.advance(5.0)
+    assert len(cluster.spec()) > 0
+
+
+def test_simphysics_clf_property():
+    """The clf property should read back a real PDF, and assigning a
+    str to it should have the same effect as setCLF()."""
+    physics = slug.SimPhysics(CLUSTER_DECK, "cluster")
+    physics.clf = "1e7"
+    assert physics.clf.getMin() == pytest.approx(1e7)
+
+
+def test_simphysics_sfr_property():
+    """The sfr property should read back a real PDF, and assigning a
+    str to it should have the same effect as setSFR()."""
+    physics = slug.SimPhysics(CLUSTER_DECK, "cluster")
+    physics.sfr = "1.0"
+    assert physics.sfr.valid()
+
+
+def test_simphysics_specsyn_property():
+    """The specsyn property should read back the Specsyn requested via
+    spectra.model, and assigning a Specsyn to it should have the same
+    effect as setSpecsyn(), transferring ownership."""
+    physics = slug.SimPhysics(CLUSTER_DECK, "cluster")
+    assert isinstance(physics.specsyn, slug.SpecsynBlackbody)
+
+    new_specsyn = slug.SpecsynBlackbody(3000.0, 9000.0, 50)
+    physics.specsyn = new_specsyn
+    assert len(physics.wl()) == 50
+    with pytest.raises(ValueError):
+        new_specsyn.wl()
+
+
+def test_simphysics_filters_property():
+    """The filters property should be None when phot.filters was not
+    given, and reflect an assigned FilterCollection afterward,
+    transferring ownership like setFilters()."""
+    physics = slug.SimPhysics(CLUSTER_DECK, "cluster")
+    assert physics.filters is None
+
+    fc = slug.FilterCollection([], slug.PhotSystem.Flambda)
+    fc.addFilter("Q(HI)")
+    physics.filters = fc
+    assert physics.filters is not None
+    assert physics.filters.filterNames() == ["Q(HI)"]
+
+
+def test_simphysics_tracks_property():
+    """The tracks property should read back the current stellar
+    tracks, and assigning a Tracks3D to it should have the same effect
+    as setTracks(), transferring ownership."""
+    physics = slug.SimPhysics(CLUSTER_DECK, "cluster")
+    assert physics.tracks.mMin() == pytest.approx(0.1)
+    assert physics.tracks.mMax() == pytest.approx(300.0)
+
+    new_tracks = slug.Tracks3D(TRACK_SET, -1.0, 0.5, KNOWN_VVCRIT, KNOWN_AFE, REGISTRY)
+    physics.tracks = new_tracks
+    assert physics.tracks.mMin() == pytest.approx(0.1)
+    assert physics.tracks.mMax() == pytest.approx(300.0)
+    with pytest.raises(ValueError):
+        new_tracks.mMin()
+
+
+def test_simphysics_min_stoch_mass_property():
+    """The minStochMass property should read back its current value,
+    and assigning a value to it should have the same effect as
+    setMinStochMass()."""
+    physics = slug.SimPhysics(CLUSTER_DECK, "cluster")
+    assert physics.minStochMass == pytest.approx(0.0)
+
+    physics.minStochMass = 1e6
+    assert physics.minStochMass == pytest.approx(1e6)
+
+    controls = slug.SimControls(CLUSTER_DECK)
+    cluster = slug.Cluster(CLUSTER_TARGET_MASS, 39, 0.0, physics, controls)
+    assert len(cluster.starMasses()) == 0
+
+
+def test_simphysics_int_tolerance_properties(sim_physics):
+    """intRelTol/intAbsTol/intMaxIter should be readable and
+    assignable as properties, matching setIntRelTol()/setIntAbsTol()/
+    setIntMaxIter()'s own effect."""
+    sim_physics.intRelTol = 1e-4
+    assert sim_physics.intRelTol == pytest.approx(1e-4)
+
+    sim_physics.intAbsTol = 1e-8
+    assert sim_physics.intAbsTol == pytest.approx(1e-8)
+
+    sim_physics.intMaxIter = 100
+    assert sim_physics.intMaxIter == 100
+
+    # Restore defaults so this shared, module-scoped fixture doesn't
+    # leak state into other tests
+    sim_physics.intRelTol = 1e-2
+    sim_physics.intAbsTol = 0.0
+    sim_physics.intMaxIter = 0
+
+
+def test_simphysics_int_tolerance_properties_without_specsyn_raise(tmp_path):
+    """Reading or assigning the int*Tol/intMaxIter properties should
+    raise, not crash, if no spectral synthesizer was requested."""
+    deck_text = pathlib.Path(CLUSTER_DECK).read_text()
+    stripped = deck_text.replace('[spectra]\nmodel = "blackbody"\n\n', "")
+    deck_path = tmp_path / "no_spectra.in"
+    deck_path.write_text(stripped)
+    physics = slug.SimPhysics(str(deck_path), "cluster")
+
+    with pytest.raises(RuntimeError):
+        _ = physics.intRelTol
+    with pytest.raises(RuntimeError):
+        physics.intRelTol = 1e-4
+
+
+def test_simcontrols_int_tolerance_properties():
+    """SimControls's intRelTol/intAbsTol/intMaxIter should be readable
+    and assignable as properties."""
+    controls = slug.SimControls(rel_tol=1e-2, abs_tol=0.0, max_iter=0)
+
+    controls.intRelTol = 1e-3
+    assert controls.intRelTol == pytest.approx(1e-3)
+
+    controls.intAbsTol = 1e-9
+    assert controls.intAbsTol == pytest.approx(1e-9)
+
+    controls.intMaxIter = 200
+    assert controls.intMaxIter == 200
 
 
 # ---------------------------------------------------------------------
@@ -1171,10 +1340,10 @@ def test_cluster_lbol_zero_before_advance(lbol_physics, lbol_controls):
 
 def test_cluster_advance_populates_lbol(lbol_physics, lbol_controls):
     """advance() should populate lbol() with a finite, positive value
-    when computeLbol() is True -- LBOL_DECK sets stars.min_stoch_mass,
+    when computeLbol is True -- LBOL_DECK sets stars.min_stoch_mass,
     so this exercises both the stochastic and continuously-sampled
     code paths in Cluster's bolometric-luminosity computation."""
-    assert lbol_physics.computeLbol()
+    assert lbol_physics.computeLbol
     cluster = slug.Cluster(CLUSTER_TARGET_MASS, 11, 0.0, lbol_physics, lbol_controls)
 
     cluster.advance(5.0)

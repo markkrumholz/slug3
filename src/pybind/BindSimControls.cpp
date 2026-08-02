@@ -54,26 +54,17 @@ max_iter : int, optional
     Maximum number of integrand evaluations before the integrator gives
     up. 0 (the default) means unlimited.)doc";
 
-static constexpr std::string_view intRelTolDocstring = R"doc(Return the relative tolerance for PDF integration.
+static constexpr std::string_view intRelTolDocstring = R"doc(The relative tolerance for PDF integration.
 
-Returns
--------
-rel_tol : float
-    Relative convergence tolerance passed to the cubature integrator.)doc";
+Relative convergence tolerance passed to the cubature integrator.)doc";
 
-static constexpr std::string_view intAbsTolDocstring = R"doc(Return the absolute tolerance for PDF integration.
+static constexpr std::string_view intAbsTolDocstring = R"doc(The absolute tolerance for PDF integration.
 
-Returns
--------
-abs_tol : float
-    Absolute convergence tolerance passed to the cubature integrator.)doc";
+Absolute convergence tolerance passed to the cubature integrator.)doc";
 
-static constexpr std::string_view intMaxIterDocstring = R"doc(Return the maximum number of evaluations for PDF integration.
+static constexpr std::string_view intMaxIterDocstring = R"doc(The maximum number of evaluations for PDF integration.
 
-Returns
--------
-max_iter : int
-    Maximum number of integrand evaluations; 0 means unlimited.)doc";
+Maximum number of integrand evaluations; 0 means unlimited.)doc";
 
 // Disable linting for includes -- the pybind macro magic seems to confuse
 // the linter
@@ -103,11 +94,17 @@ void bindSimControls(py::module_& m)
                 py::arg("rel_tol") = 1e-2,
                 py::arg("abs_tol") = 0.0,
                 py::arg("max_iter") = static_cast<std::size_t>(0))
-        .def("intRelTol", &io::SimControls::intRelTol,
+        .def_property("intRelTol",
+                &io::SimControls::intRelTol,
+                &io::SimControls::setIntRelTol,
                 intRelTolDocstring.data())
-        .def("intAbsTol", &io::SimControls::intAbsTol,
+        .def_property("intAbsTol",
+                &io::SimControls::intAbsTol,
+                &io::SimControls::setIntAbsTol,
                 intAbsTolDocstring.data())
-        .def("intMaxIter", &io::SimControls::intMaxIter,
+        .def_property("intMaxIter",
+                &io::SimControls::intMaxIter,
+                &io::SimControls::setIntMaxIter,
                 intMaxIterDocstring.data());
 }
 // NOLINTEND(misc-include-cleaner)

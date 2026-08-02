@@ -130,14 +130,6 @@ static void checkSpecsyn(const io::SimPhysics& self)
     }
 }
 
-static constexpr std::string_view computeLbolDocstring = R"doc(Check whether the bolometric luminosity was requested as an output.
-
-Returns
--------
-compute_lbol : bool
-    True if "Lbol" was included in phot.filters in the input deck, or
-    setComputeLbol(True) has since been called.)doc";
-
 static constexpr std::string_view setComputeLbolDocstring = R"doc(Set whether the bolometric luminosity should be computed as an output.
 
 Lets a caller request or suppress Lbol output on an already-constructed
@@ -287,47 +279,91 @@ Also recomputes the fraction of stellar mass being treated
 stochastically, as imf().integral(min_stoch_mass, imf().getMax()),
 exactly as the constructor does when stars.min_stoch_mass is given.)doc";
 
-static constexpr std::string_view intRelTolDocstring = R"doc(Return the relative tolerance for the spectral synthesizer's PDF integration.
+static constexpr std::string_view imfPropertyDocstring = R"doc(The initial mass function.
 
-Returns
--------
-rel_tol : float
-    Relative convergence tolerance passed to the cubature integrator
-    used by the spectral synthesizer's specCts().
+Reading returns a PDF; assigning a str sets a new one via setIMF() (a
+numerical value is interpreted as a delta-function IMF at that mass,
+otherwise the value is interpreted as the name of an IMF PDF file --
+see setIMF()'s own docstring for the exact rules).)doc";
+
+static constexpr std::string_view cmfPropertyDocstring = R"doc(The cluster mass function.
+
+Reading returns a PDF; assigning a str sets a new one via setCMF() --
+see its own docstring for the exact rules.)doc";
+
+static constexpr std::string_view feHPropertyDocstring = R"doc(The [Fe/H] distribution.
+
+Reading returns a PDF; assigning a str sets a new one via setFeH() --
+see its own docstring for the exact rules, including the tracks2D()
+cache rebuild that happens if constFeH() is True afterward.)doc";
+
+static constexpr std::string_view clfPropertyDocstring = R"doc(The cluster lifetime function.
+
+Reading returns a PDF; assigning a str sets a new one via setCLF() --
+see its own docstring for the exact rules.)doc";
+
+static constexpr std::string_view sfrPropertyDocstring = R"doc(The star formation rate.
+
+Reading returns a PDF; assigning a str sets a new one via setSFR() --
+see its own docstring for the exact rules, which differ from
+imf/cmf/feH/clf's.)doc";
+
+static constexpr std::string_view computeLbolPropertyDocstring = R"doc(Whether the bolometric luminosity is computed as an output.
+
+True if "Lbol" was included in phot.filters in the input deck, or
+this property (or setComputeLbol()) has since been set to True.)doc";
+
+static constexpr std::string_view specsynPropertyDocstring = R"doc(The spectral synthesizer, or None if none was requested.
+
+Reading returns the Specsyn requested via spectra.model (or None if
+spectra.model was not given). Assigning a Specsyn transfers its
+ownership to this SimPhysics, so it is no longer usable from Python
+after assignment -- see setSpecsyn()'s own docstring.)doc";
+
+static constexpr std::string_view filtersPropertyDocstring = R"doc(The photometric filter collection, or None if none was requested.
+
+Reading returns the FilterCollection requested via phot.filters (or
+None if phot.filters was not given). Assigning a FilterCollection
+transfers its ownership to this SimPhysics, so it is no longer usable
+from Python after assignment -- see setFilters()'s own docstring.)doc";
+
+static constexpr std::string_view tracksPropertyDocstring = R"doc(The stellar tracks.
+
+Assigning a Tracks3D transfers its ownership to this SimPhysics, so it
+is no longer usable from Python after assignment -- see setTracks()'s
+own docstring, including the tracks2D() cache rebuild that happens if
+constFeH() is True.)doc";
+
+static constexpr std::string_view minStochMassPropertyDocstring = R"doc(The minimum mass for fully stochastic treatment.
+
+Assigning a value also recomputes the fraction of stellar mass being
+treated stochastically -- see setMinStochMass()'s own docstring.)doc";
+
+static constexpr std::string_view intRelTolPropertyDocstring = R"doc(The relative tolerance for the spectral synthesizer's PDF integration.
 
 Throws
 ------
 RuntimeError
-    If no spectral synthesizer was requested (spectra.model was not
-    set in the input deck).)doc";
+    On read or assignment, if no spectral synthesizer was requested
+    (spectra.model was not set in the input deck).)doc";
 
-static constexpr std::string_view intAbsTolDocstring = R"doc(Return the absolute tolerance for the spectral synthesizer's PDF integration.
-
-Returns
--------
-abs_tol : float
-    Absolute convergence tolerance passed to the cubature integrator
-    used by the spectral synthesizer's specCts().
+static constexpr std::string_view intAbsTolPropertyDocstring = R"doc(The absolute tolerance for the spectral synthesizer's PDF integration.
 
 Throws
 ------
 RuntimeError
-    If no spectral synthesizer was requested (spectra.model was not
-    set in the input deck).)doc";
+    On read or assignment, if no spectral synthesizer was requested
+    (spectra.model was not set in the input deck).)doc";
 
-static constexpr std::string_view intMaxIterDocstring = R"doc(Return the maximum number of evaluations for the spectral synthesizer's PDF integration.
+static constexpr std::string_view intMaxIterPropertyDocstring = R"doc(The maximum number of evaluations for the spectral synthesizer's PDF integration.
 
-Returns
--------
-max_iter : int
-    Maximum number of integrand evaluations used by the spectral
-    synthesizer's specCts(); 0 means unlimited.
+0 means unlimited.
 
 Throws
 ------
 RuntimeError
-    If no spectral synthesizer was requested (spectra.model was not
-    set in the input deck).)doc";
+    On read or assignment, if no spectral synthesizer was requested
+    (spectra.model was not set in the input deck).)doc";
 
 static constexpr std::string_view setIntRelTolDocstring = R"doc(Set the relative tolerance for the spectral synthesizer's PDF integration.
 
@@ -419,8 +455,6 @@ void bindSimPhysics(py::module_& m)
                     return self.specsyn()->wlObs();
                 },
                 wlObsDocstring.data())
-        .def("computeLbol", &io::SimPhysics::computeLbol,
-                computeLbolDocstring.data())
         .def("setComputeLbol", &io::SimPhysics::setComputeLbol,
                 setComputeLbolDocstring.data(), py::arg("value"))
         .def("setIMF", &io::SimPhysics::setIMF,
@@ -445,17 +479,71 @@ void bindSimPhysics(py::module_& m)
                 setTracksDocstring.data(), py::arg("tracks"))
         .def("setMinStochMass", &io::SimPhysics::setMinStochMass,
                 setMinStochMassDocstring.data(), py::arg("min_stoch_mass"))
-        .def("intRelTol", &io::SimPhysics::intRelTol,
-                intRelTolDocstring.data())
-        .def("intAbsTol", &io::SimPhysics::intAbsTol,
-                intAbsTolDocstring.data())
-        .def("intMaxIter", &io::SimPhysics::intMaxIter,
-                intMaxIterDocstring.data())
         .def("setIntRelTol", &io::SimPhysics::setIntRelTol,
                 setIntRelTolDocstring.data(), py::arg("rel_tol"))
         .def("setIntAbsTol", &io::SimPhysics::setIntAbsTol,
                 setIntAbsTolDocstring.data(), py::arg("abs_tol"))
         .def("setIntMaxIter", &io::SimPhysics::setIntMaxIter,
-                setIntMaxIterDocstring.data(), py::arg("max_iter"));
+                setIntMaxIterDocstring.data(), py::arg("max_iter"))
+        // Properties: alternative, attribute-style access to the same
+        // getters/setters bound as plain methods above (e.g.
+        // sp.imf = "20.0" instead of sp.setIMF("20.0")). Getters that
+        // return a reference (imf, cmf, feH, clf, sfr, specsyn,
+        // filters, tracks) use def_property's own default
+        // return_value_policy::reference_internal, tying the
+        // returned object's lifetime to this SimPhysics.
+        .def_property("imf",
+                &io::SimPhysics::imf,
+                [](io::SimPhysics& self, const std::string& imf) { self.setIMF(imf); },
+                imfPropertyDocstring.data())
+        .def_property("cmf",
+                &io::SimPhysics::cmf,
+                [](io::SimPhysics& self, const std::string& cmf) { self.setCMF(cmf); },
+                cmfPropertyDocstring.data())
+        .def_property("feH",
+                &io::SimPhysics::fehDist,
+                [](io::SimPhysics& self, const std::string& feH) { self.setFeH(feH); },
+                feHPropertyDocstring.data())
+        .def_property("clf",
+                &io::SimPhysics::clf,
+                [](io::SimPhysics& self, const std::string& clf) { self.setCLF(clf); },
+                clfPropertyDocstring.data())
+        .def_property("sfr",
+                &io::SimPhysics::sfr,
+                [](io::SimPhysics& self, const std::string& sfr) { self.setSFR(sfr); },
+                sfrPropertyDocstring.data())
+        .def_property("computeLbol",
+                &io::SimPhysics::computeLbol,
+                &io::SimPhysics::setComputeLbol,
+                computeLbolPropertyDocstring.data())
+        .def_property("specsyn",
+                &io::SimPhysics::specsyn,
+                &io::SimPhysics::setSpecsyn,
+                specsynPropertyDocstring.data())
+        .def_property("filters",
+                &io::SimPhysics::filters,
+                &io::SimPhysics::setFilters,
+                filtersPropertyDocstring.data())
+        .def_property("tracks",
+                &io::SimPhysics::tracks,
+                [](io::SimPhysics& self, std::unique_ptr<tracks::Tracks3D> tracks)
+                { self.setTracks(std::move(*tracks)); },
+                tracksPropertyDocstring.data())
+        .def_property("minStochMass",
+                &io::SimPhysics::minStochMass,
+                &io::SimPhysics::setMinStochMass,
+                minStochMassPropertyDocstring.data())
+        .def_property("intRelTol",
+                &io::SimPhysics::intRelTol,
+                &io::SimPhysics::setIntRelTol,
+                intRelTolPropertyDocstring.data())
+        .def_property("intAbsTol",
+                &io::SimPhysics::intAbsTol,
+                &io::SimPhysics::setIntAbsTol,
+                intAbsTolPropertyDocstring.data())
+        .def_property("intMaxIter",
+                &io::SimPhysics::intMaxIter,
+                &io::SimPhysics::setIntMaxIter,
+                intMaxIterPropertyDocstring.data());
 }
 // NOLINTEND(misc-include-cleaner)
