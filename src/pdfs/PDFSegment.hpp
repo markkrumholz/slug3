@@ -16,6 +16,7 @@
 #include <fstream>
 #include <map>
 #include <string>
+#include <toml.hpp>
 #include <vector>
 
 namespace pdfs {
@@ -107,7 +108,17 @@ namespace pdfs {
          * @returns Map of token values
          */
         static auto segmentParser(std::ifstream& file,
-            std::vector<std::string>& tok) 
+            std::vector<std::string>& tok)
+            -> std::map<std::string, double>;
+
+        /**
+         * @brief Parse a segment declaration in a toml-format PDF descriptor
+         * @param node Toml node view onto this segment's own segmentN table
+         * @param tok List of expected keys for that segment
+         * @returns Map of key values
+         */
+        static auto segmentParserToml(toml::node_view<const toml::node> node,
+            std::vector<std::string>& tok)
             -> std::map<std::string, double>;
 
         double sMin_; /**< The lower limit of the segment */

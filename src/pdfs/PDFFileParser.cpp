@@ -20,13 +20,16 @@
 #include "PDFSegmentPowerlaw.hpp"
 #include "PDFSegmentSchechter.hpp"
 #include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <cstring>
 #include <exception>
 #include <fstream>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
+#include <toml.hpp>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -292,6 +295,260 @@ parseBody(const std::string& fileName,
     return { std::move(seg), wgt, method };
 }
 
+// Little utility function to handle errors in a toml-format PDF
+// descriptor -- mirrors parseError() above, but a toml::table has no
+// associated file name or line number of its own to report
+[[noreturn]]
+static void parseTomlError(const std::string& err)
+{
+    throw std::runtime_error("parsePDFToml: " + err);
+}
+
+// Map a sampling-method string to pdfs::SamplingMethods, mirroring
+// parseMethod() above; method is std::nullopt if the toml "method"
+// key was present but not a string, which -- like every unrecognized
+// string -- falls through to the error at the end
+static auto parseMethodToml(const std::optional<std::string>& method) -> pdfs::SamplingMethods
+{
+    if (method == "stop_nearest") { return pdfs::SamplingMethods::stopNearest; }
+    if (method == "stop_before") { return pdfs::SamplingMethods::stopBefore; }
+    if (method == "stop_after") { return pdfs::SamplingMethods::stopAfter; }
+    if (method == "stop_50") { return pdfs::SamplingMethods::stop50; }
+    if (method == "number") { return pdfs::SamplingMethods::number; }
+    if (method == "poisson") { return pdfs::SamplingMethods::poisson; }
+    if (method == "sorted_sampling") { return pdfs::SamplingMethods::sorted; }
+    parseTomlError("'method' must be a string naming a recognized sampling method");
+}
+
+namespace
+{
+    // Result of parsing a toml PDF descriptor's header -- every
+    // top-level key other than the segmentN tables -- see
+    // parseTomlHeader() and parsePDFToml()'s own doc comment
+    struct PDFTomlHeader
+    {
+        pdfs::FileFormats fmt_ = pdfs::FileFormats::basic; /**< Basic or advanced format */
+        std::vector<double> breakpoints_; /**< Segment breakpoints, only set (and only meaningful) if fmt_ is basic */
+        pdfs::SamplingMethods method_ = pdfs::SamplingMethods::stopNearest; /**< Sampling method to use */
+    };
+} // namespace
+
+// Parse the header of a toml PDF descriptor -- every top-level key
+// other than the segmentN tables -- and determine the format,
+// breakpoints (if any), and sampling method. See parsePDFToml's own
+// doc comment for the exact rules "format", "breakpoints", and
+// "method" must follow.
+static auto parseTomlHeader(const toml::table& deck) -> PDFTomlHeader
+{
+    PDFTomlHeader header;
+
+    // "format": optional, defaults to basic
+    if (const auto formatNode = deck.at_path("format"))
+    {
+        const auto formatStr = formatNode.value<std::string>();
+        if (formatStr == "basic") { header.fmt_ = pdfs::FileFormats::basic; }
+        else if (formatStr == "advanced") { header.fmt_ = pdfs::FileFormats::advanced; }
+        else { parseTomlError("'format' must be 'basic' or 'advanced'"); }
+    }
+
+    // "breakpoints": required (and parsed) iff fmt is basic; an error
+    // for it to be present at all if fmt is advanced
+    const auto breakpointsNode = deck.at_path("breakpoints");
+    const bool hasBreakpoints = static_cast<bool>(breakpointsNode);
+    if (hasBreakpoints)
+    {
+        const auto* arr = breakpointsNode.as_array();
+        if (arr == nullptr) { parseTomlError("'breakpoints' must be an array of numbers"); }
+        arr->for_each([&header](auto&& el) -> void {
+            if constexpr (toml::is_number<decltype(el)>)
+            {
+                header.breakpoints_.push_back(static_cast<double>(el.get()));
+            }
+        });
+        if (header.breakpoints_.size() != arr->size())
+        {
+            parseTomlError("'breakpoints' must be an array of numbers");
+        }
+        if (header.breakpoints_.size() < 2)
+        {
+            parseTomlError("'breakpoints' must have at least two elements");
+        }
+    }
+    if (header.fmt_ == pdfs::FileFormats::basic && !hasBreakpoints)
+    {
+        parseTomlError("'breakpoints' is required when format is 'basic'");
+    }
+    if (header.fmt_ == pdfs::FileFormats::advanced && hasBreakpoints)
+    {
+        parseTomlError("'breakpoints' must not be given when format is 'advanced'");
+    }
+
+    // "method": optional, defaults to stop-nearest sampling
+    if (const auto methodNode = deck.at_path("method"))
+    {
+        header.method_ = parseMethodToml(methodNode.value<std::string>());
+    }
+
+    return header;
+}
+
+// Find every top-level segmentN table in a toml PDF descriptor,
+// validate that their names are numbered sequentially starting at 1
+// with no gaps, and return their numbers in ascending order (so the
+// N'th entry of the result is always N + 1). Also validates that
+// every top-level table (as opposed to a plain key like "format" or
+// "breakpoints") is in fact named segmentN for some N -- any other
+// table name is an error.
+static auto findSegmentNumbers(const toml::table& deck) -> std::vector<int>
+{
+    static const std::string prefix = "segment";
+
+    std::vector<int> numbers;
+    for (const auto& [key, val] : deck)
+    {
+        if (!val.is_table()) { continue; }
+
+        const std::string keyStr(key.str());
+        const bool matchesPrefix = keyStr.size() > prefix.size() &&
+            keyStr.compare(0, prefix.size(), prefix) == 0;
+        const std::string numPart = matchesPrefix ? keyStr.substr(prefix.size()) : "";
+        const bool allDigits = !numPart.empty() &&
+            std::ranges::all_of(numPart,
+                [](const unsigned char c) -> bool { return std::isdigit(c) != 0; });
+        if (!matchesPrefix || !allDigits)
+        {
+            parseTomlError("table '" + keyStr +
+                "' does not match the expected 'segmentN' naming");
+        }
+
+        try
+        {
+            numbers.push_back(std::stoi(numPart));
+        }
+        catch (const std::exception&)
+        {
+            parseTomlError("table '" + keyStr +
+                "' does not match the expected 'segmentN' naming");
+        }
+    }
+
+    std::ranges::sort(numbers);
+    for (std::size_t i = 0; i < numbers.size(); i++)
+    {
+        if (numbers.at(i) != static_cast<int>(i) + 1)
+        {
+            parseTomlError("segment tables must be numbered sequentially "
+                "as segment1, segment2, ... with no gaps");
+        }
+    }
+    return numbers;
+}
+
+// Parse a single segmentN table, fully analogous to parseSegment()
+// above: reads the required "type" key, then calls the toml-based
+// constructor of the corresponding PDFSegment type, passing it node,
+// fmt, sMin, sMax, and a weight to fill in. sMin/sMax are inputs if
+// fmt is basic (the segment's own slice of the breakpoints array) and
+// outputs if fmt is advanced (in which case the caller passes 0.0 for
+// both, mirroring parseSegment()'s own identical convention).
+static void parseSegmentToml(
+    const std::string& key,
+    const pdfs::FileFormats fmt,
+    const toml::node_view<const toml::node>& node,
+    double sMin,
+    double sMax,
+    std::vector<std::unique_ptr<pdfs::PDFSegment> >& seg,
+    std::vector<double>& wgt)
+{
+    const auto type = node.at_path("type").value<std::string>();
+    if (!type.has_value())
+    {
+        parseTomlError(key + ": expected a string 'type' key");
+    }
+
+    double w = 0.0;
+    try
+    {
+        if (type == "delta")
+        {
+            seg.emplace_back(std::make_unique<pdfs::PDFSegmentDelta>(node, fmt, sMin, sMax, w));
+        }
+        else if (type == "exponential")
+        {
+            seg.emplace_back(std::make_unique<pdfs::PDFSegmentExponential>(node, fmt, sMin, sMax, w));
+        }
+        else if (type == "lognormal")
+        {
+            seg.emplace_back(std::make_unique<pdfs::PDFSegmentLognormal>(node, fmt, sMin, sMax, w));
+        }
+        else if (type == "normal")
+        {
+            seg.emplace_back(std::make_unique<pdfs::PDFSegmentNormal>(node, fmt, sMin, sMax, w));
+        }
+        else if (type == "powerlaw")
+        {
+            seg.emplace_back(std::make_unique<pdfs::PDFSegmentPowerlaw>(node, fmt, sMin, sMax, w));
+        }
+        else if (type == "schechter")
+        {
+            seg.emplace_back(std::make_unique<pdfs::PDFSegmentSchechter>(node, fmt, sMin, sMax, w));
+        }
+        else
+        {
+            parseTomlError(key + ": unknown segment type '" + type.value() + "'");
+        }
+    }
+    catch (const std::exception& error)
+    {
+        parseTomlError(key + ": invalid options for segment type '" +
+            type.value() + "': " + error.what());
+    }
+
+    // In advanced format mode, store weight
+    if (fmt == pdfs::FileFormats::advanced) { wgt.push_back(w); }
+}
+
+// Parse the body (the segmentN tables) of a toml PDF descriptor,
+// fully analogous to parseBody() above -- header must already have
+// been parsed (and validated) via parseTomlHeader()
+static auto parseTomlBody(const toml::table& deck,
+    const pdfs::FileFormats fmt,
+    const std::vector<double>& breakpoints) ->
+    std::pair<std::vector<std::unique_ptr<pdfs::PDFSegment> >, std::vector<double> >
+{
+    const auto segmentNumbers = findSegmentNumbers(deck);
+
+    // Check that we have the right number of segments
+    if (fmt == pdfs::FileFormats::basic)
+    {
+        if (segmentNumbers.size() + 1 != breakpoints.size())
+        {
+            parseTomlError("number of segment tables is inconsistent "
+                "with the number of breakpoints");
+        }
+    }
+    else if (segmentNumbers.empty())
+    {
+        parseTomlError("need at least one segment");
+    }
+
+    std::vector<std::unique_ptr<pdfs::PDFSegment> > seg;
+    std::vector<double> wgt;
+    seg.reserve(segmentNumbers.size());
+
+    for (const int n : segmentNumbers)
+    {
+        const std::string key = "segment" + std::to_string(n);
+        const double sMin = (fmt == pdfs::FileFormats::basic) ?
+            breakpoints.at(static_cast<std::size_t>(n) - 1) : 0.0;
+        const double sMax = (fmt == pdfs::FileFormats::basic) ?
+            breakpoints.at(static_cast<std::size_t>(n)) : 0.0;
+        parseSegmentToml(key, fmt, deck.at_path(key), sMin, sMax, seg, wgt);
+    }
+
+    return { std::move(seg), std::move(wgt) };
+}
+
 namespace pdfs {
 
     // General parser to start and decide if file is basic or advanced
@@ -383,8 +640,35 @@ namespace pdfs {
             // Advanced mode, so don't do any normalization,
             // just return
             const bool normalize = false;
-            return { std::move(seg), wgt, method, normalize };            
+            return { std::move(seg), wgt, method, normalize };
         }
+    }
+
+    // Toml-format counterpart to parsePDFDescriptor() -- see this
+    // function's own doc comment (PDFFileParser.hpp) for the exact
+    // format. Header parsing (format/breakpoints/method) is handled
+    // by parseTomlHeader(), body parsing (the segmentN tables) by
+    // parseTomlBody(), fully analogous to parsePDFDescriptor() above.
+    auto parsePDFToml(const toml::table& deck) -> PDF
+    {
+        auto header = parseTomlHeader(deck);
+        auto [seg, wgt] = parseTomlBody(deck, header.fmt_, header.breakpoints_);
+
+        // Final step depends on format
+        if (header.fmt_ == FileFormats::basic)
+        {
+            // Basic format: calculate weights to make
+            // segments continuous
+            computeWgt(seg, header.breakpoints_, wgt);
+
+            // Create and return normalized PDF
+            const bool normalize = true;
+            return { std::move(seg), wgt, header.method_, normalize };
+        }
+
+        // Advanced mode, so don't do any normalization, just return
+        const bool normalize = false;
+        return { std::move(seg), wgt, header.method_, normalize };
     }
 
 } // namespace pdfs

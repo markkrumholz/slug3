@@ -23,6 +23,7 @@
 #include <memory>
 #include <numbers>
 #include <string>
+#include <toml.hpp>
 #include <utility>
 #include <vector>
 
@@ -120,6 +121,105 @@ static auto testPDFParsing() -> int
         std::cerr << "testPDF: Failed to parse valid advanced-mode PDF:"
         " file 'sfh_burst.txt'" << "\n";
         return 1;
+    }
+
+    return 0; // Passed
+}
+
+static auto comparePDFs(const pdfs::PDF& pdfA, const pdfs::PDF& pdfB,
+    const std::string& label) -> int
+{
+    if (pdfA.getMin() != pdfB.getMin() || pdfA.getMax() != pdfB.getMax())
+    {
+        std::cerr << "testPDF: " << label << ": min/max do not match; "
+            << "got [" << pdfA.getMin() << ", " << pdfA.getMax() << "] vs ["
+            << pdfB.getMin() << ", " << pdfB.getMax() << "]\n";
+        return 1;
+    }
+    if (pdfA.getSampling() != pdfB.getSampling())
+    {
+        std::cerr << "testPDF: " << label << ": sampling methods do not match\n";
+        return 1;
+    }
+    const auto& wgtA = pdfA.getWeights();
+    const auto& wgtB = pdfB.getWeights();
+    if (wgtA.size() != wgtB.size())
+    {
+        std::cerr << "testPDF: " << label << ": number of segments does not match\n";
+        return 1;
+    }
+    for (std::size_t i = 0; i < wgtA.size(); i++)
+    {
+        if (!utils::approxEqual(wgtA[i], wgtB[i]))
+        {
+            std::cerr << "testPDF: " << label << ": weight " << i
+                << " does not match; got " << wgtA[i] << " vs " << wgtB[i] << "\n";
+            return 1;
+        }
+    }
+    if (!utils::approxEqual(pdfA.integral(), pdfB.integral()))
+    {
+        std::cerr << "testPDF: " << label << ": integrals over full range do not match; "
+            << "got " << pdfA.integral() << " vs " << pdfB.integral() << "\n";
+        return 1;
+    }
+    if (!utils::approxEqual(pdfA.expectationValue(), pdfB.expectationValue()))
+    {
+        std::cerr << "testPDF: " << label << ": expectation values do not match; "
+            << "got " << pdfA.expectationValue() << " vs " << pdfB.expectationValue() << "\n";
+        return 1;
+    }
+
+    // Compare pointwise evaluation and partial-range integrals/expectation
+    // values at a handful of points spanning the PDF's range
+    const int nPts = 10;
+    for (int i = 0; i <= nPts; i++)
+    {
+        const double frac = static_cast<double>(i) / static_cast<double>(nPts);
+        const double x = pdfA.getMin() + (frac * (pdfA.getMax() - pdfA.getMin()));
+        if (!utils::approxEqual(pdfA(x), pdfB(x)))
+        {
+            std::cerr << "testPDF: " << label << ": evaluation at x=" << x
+                << " does not match; got " << pdfA(x) << " vs " << pdfB(x) << "\n";
+            return 1;
+        }
+        if (!utils::approxEqual(pdfA.integral(pdfA.getMin(), x),
+            pdfB.integral(pdfB.getMin(), x)))
+        {
+            std::cerr << "testPDF: " << label << ": integral up to x=" << x
+                << " does not match; got " << pdfA.integral(pdfA.getMin(), x)
+                << " vs " << pdfB.integral(pdfB.getMin(), x) << "\n";
+            return 1;
+        }
+    }
+
+    return 0; // Passed
+}
+
+static auto testPDFTomlParsing() -> int
+{
+    const std::filesystem::path assetDir = "assets";
+    const std::array<std::string, 3> baseNames =
+        { "chabrier_imf", "wk06", "sfh_burst" };
+
+    for (const auto& baseName : baseNames)
+    {
+        try
+        {
+            auto pdfTxt = pdfs::parsePDFDescriptor(
+                (assetDir / (baseName + ".txt")).string());
+            const auto tomlTable = toml::parse_file(
+                (assetDir / (baseName + ".toml")).string());
+            auto pdfToml = pdfs::parsePDFToml(tomlTable);
+
+            if (comparePDFs(pdfTxt, pdfToml, baseName) == 1) { return 1; }
+        }
+        catch (const std::exception& error)
+        {
+            std::cerr << "testPDF: testPDFTomlParsing: failed on '" << baseName
+                << "': " << error.what() << "\n";
+            return 1;
+        }
     }
 
     return 0; // Passed
@@ -381,6 +481,9 @@ auto testPDF() -> int
 
     // Test parsing
     if (testPDFParsing() == 1) { return 1; }
+
+    // Test toml-based parsing against the text-format equivalent
+    if (testPDFTomlParsing() == 1) { return 1; }
 
     return 0; // If we have gotten here, tests have passed
 }

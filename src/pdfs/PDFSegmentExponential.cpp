@@ -12,6 +12,7 @@
 #include <fstream>
 #include <stdexcept>
 #include <string>
+#include <toml.hpp>
 #include <vector>
 
 // File-based constructor
@@ -41,6 +42,54 @@ pdfs::PDFSegmentExponential::PDFSegmentExponential(
         std::vector<std::string> tokens =
             { "scale", "min", "max", "weight" };
         auto contents = segmentParser(file, tokens);
+
+        // Use the parsed results to set parameters
+        scale_ = contents["scale"];
+        sMin_ = contents["min"];
+        sMax_ = contents["max"];
+        wgt = contents["weight" ];
+
+        // Safety check
+        if (sMin_ >= sMax_)
+        {
+            throw std::runtime_error(
+                "exponential segments must have min < max");
+        }
+    }
+
+    // Calculate normalization constant for the PDF segment
+    const double exMin = std::exp(-sMin_ / scale_);
+    const double exMax = std::exp(-sMax_ / scale_);
+    norm_ = 1.0 / (scale_ * (exMin - exMax));
+}
+
+// Toml-based constructor
+pdfs::PDFSegmentExponential::PDFSegmentExponential(
+    toml::node_view<const toml::node> node,
+    FileFormats fmt,
+    double& sMin, double& sMax, double& wgt) :
+    PDFSegment(sMin, sMax)
+{
+    // Action depends on format
+    if (fmt == FileFormats::basic)
+    {
+        // Basic format
+
+        // Look for the keys we need
+        std::vector<std::string> tokens = { "scale" };
+        auto contents = segmentParserToml(node, tokens);
+
+        // Use the parsed results to set parameters
+        scale_ = contents["scale"];
+    }
+    else
+    {
+        // Advanced format
+
+        // Look for the keys we need
+        std::vector<std::string> tokens =
+            { "scale", "min", "max", "weight" };
+        auto contents = segmentParserToml(node, tokens);
 
         // Use the parsed results to set parameters
         scale_ = contents["scale"];

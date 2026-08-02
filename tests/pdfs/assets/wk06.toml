@@ -1,0 +1,28 @@
+# This is a toml-format IMF definition file for SLUG v3, used for
+# testing; it is the toml-format counterpart to wk06.txt. This file
+# defines the Weidner & Kroupa (2006) IMF, which has the same
+# functional form as the Kroupa (2002) IMF, but uses sorted sampling
+# instead of stop-nearest.
+
+format = "basic"
+
+# Breakpoints: mass values where the functional form changes
+breakpoints = [0.01, 0.08, 0.5, 120]
+
+# Declare that we want to use sorted sampling
+method = "sorted_sampling"
+
+# First segment is a powerlaw of slope -0.3
+[segment1]
+type = "powerlaw"
+slope = -0.3
+
+# Next segment is a powerlaw of slope -1.3
+[segment2]
+type = "powerlaw"
+slope = -1.3
+
+# Third segment is a powerlaw of slope -2.3
+[segment3]
+type = "powerlaw"
+slope = -2.3

@@ -11,6 +11,7 @@
 #include <fstream>
 #include <stdexcept>
 #include <string>
+#include <toml.hpp>
 #include <vector>
 
 // File-based constructor
@@ -27,6 +28,35 @@ pdfs::PDFSegmentDelta::PDFSegmentDelta(
         std::vector<std::string> tokens =
             { "min", "max", "weight" };
         auto contents = segmentParser(file, tokens);
+
+        // Use the parsed results to set parameters
+        sMin_ = contents["min"];
+        sMax_ = contents["max"];
+        wgt = contents["weight" ];
+
+        // Safety check
+        if (sMin_ != sMax_)
+        {
+            throw std::runtime_error(
+                "delta segments must have min == max");
+        }
+    }
+}
+
+// Toml-based constructor
+pdfs::PDFSegmentDelta::PDFSegmentDelta(
+    toml::node_view<const toml::node> node,
+    FileFormats fmt,
+    double& sMin, double& sMax, double& wgt) :
+    PDFSegment(sMin, sMax)
+{
+    // Parameters expected only in advanced format
+    if (fmt == FileFormats::advanced)
+    {
+        // Look for the keys we need
+        std::vector<std::string> tokens =
+            { "min", "max", "weight" };
+        auto contents = segmentParserToml(node, tokens);
 
         // Use the parsed results to set parameters
         sMin_ = contents["min"];

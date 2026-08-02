@@ -12,6 +12,7 @@
 #include <fstream>
 #include <stdexcept>
 #include <string>
+#include <toml.hpp>
 #include <vector>
 
 // File-based constructor
@@ -56,6 +57,56 @@ pdfs::PDFSegmentPowerlaw::PDFSegmentPowerlaw(
         }
     }
     
+    // Compute normalization constant
+    if (alpha_ != -1) {
+        norm_ = (alpha_ + 1) / (std::pow(sMax_, alpha_ + 1) - std::pow(sMin_, alpha_ + 1));
+    } else {
+        norm_ = 1.0 / std::log(sMax_ / sMin_);
+    }
+}
+
+// Toml-based constructor
+pdfs::PDFSegmentPowerlaw::PDFSegmentPowerlaw(
+    toml::node_view<const toml::node> node,
+    FileFormats fmt,
+    double& sMin, double& sMax, double& wgt) :
+    PDFSegment(sMin, sMax)
+{
+    // Action depends on format
+    if (fmt == FileFormats::basic)
+    {
+        // Basic format
+
+        // Look for the keys we need
+        std::vector<std::string> tokens = { "slope" };
+        auto contents = segmentParserToml(node, tokens);
+
+        // Use the parsed results to set parameters
+        alpha_ = contents["slope"];
+    }
+    else
+    {
+        // Advanced format
+
+        // Look for the keys we need
+        std::vector<std::string> tokens =
+            { "slope", "min", "max", "weight" };
+        auto contents = segmentParserToml(node, tokens);
+
+        // Use the parsed results to set parameters
+        alpha_ = contents["slope"];
+        sMin_ = contents["min"];
+        sMax_ = contents["max"];
+        wgt = contents["weight" ];
+
+        // Safety check
+        if (sMin_ >= sMax_)
+        {
+            throw std::runtime_error(
+                "powerlaw segments must have min < max");
+        }
+    }
+
     // Compute normalization constant
     if (alpha_ != -1) {
         norm_ = (alpha_ + 1) / (std::pow(sMax_, alpha_ + 1) - std::pow(sMin_, alpha_ + 1));
