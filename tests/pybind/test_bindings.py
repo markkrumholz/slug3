@@ -901,3 +901,83 @@ def test_cluster_advance_populates_lbol(lbol_physics, lbol_controls):
 
     assert np.isfinite(cluster.lbol())
     assert cluster.lbol() > 0.0
+
+
+# ---------------------------------------------------------------------
+# PhotConvert
+# ---------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("system", ["Flambda", "Fnu", "ST", "AB", "Vega"])
+def test_photconvert_identity(system):
+    """Converting a system to itself should return flux_in unchanged,
+    even for Vega (where no filter is needed, since the identity case
+    is handled before fluxVega() would ever be read)."""
+    assert slug.PhotConvert(system, system, 5.0, 1000.0) == pytest.approx(5.0)
+
+
+def test_photconvert_flambda_fnu_roundtrip():
+    """Flambda -> Fnu -> Flambda should round-trip to the original value."""
+    flambda_in = 1e-15
+    wl = 5000.0
+    fnu = slug.PhotConvert("Flambda", "Fnu", flambda_in, wl)
+    back = slug.PhotConvert("Fnu", "Flambda", fnu, wl)
+    assert back == pytest.approx(flambda_in, rel=1e-9)
+
+
+@pytest.mark.parametrize("phot_to", ["ST", "AB"])
+def test_photconvert_flambda_magnitude_roundtrip(phot_to):
+    """Flambda -> {ST, AB} -> Flambda should round-trip, exercising the
+    magnitude-system conversions that don't need a filter."""
+    flambda_in = 1e-15
+    wl = 5000.0
+    mag = slug.PhotConvert("Flambda", phot_to, flambda_in, wl)
+    back = slug.PhotConvert(phot_to, "Flambda", mag, wl)
+    assert back == pytest.approx(flambda_in, rel=1e-9)
+
+
+def test_photconvert_unknown_system_raises():
+    """An unrecognized phot_from/phot_to should raise, not crash."""
+    with pytest.raises(RuntimeError):
+        slug.PhotConvert("bogus", "AB", 1.0, 1000.0)
+    with pytest.raises(RuntimeError):
+        slug.PhotConvert("AB", "bogus", 1.0, 1000.0)
+
+
+def test_photconvert_vega_without_filter_raises():
+    """Converting to or from Vega without a filter should raise."""
+    with pytest.raises(RuntimeError):
+        slug.PhotConvert("Flambda", "Vega", 1e-15, 5000.0)
+    with pytest.raises(RuntimeError):
+        slug.PhotConvert("Vega", "Flambda", 10.0, 5000.0)
+
+
+def test_photconvert_vega_matches_filter_fluxvega():
+    """Flambda -> Vega should match -2.5*log10(flux_in / filter.fluxVega()),
+    the definition of a Vega magnitude, and round-trip back to
+    flux_in. This also exercises fluxVega()'s lazy computation being
+    triggered as a side effect of the conversion."""
+    filt = slug.FilterTabulated("SLUGTEST", "CAM1", "G500", FILTER_REGISTRY)
+    flambda_in = 1e-15
+    wl = filt.wlPivot()
+
+    vegamag = slug.PhotConvert("Flambda", "Vega", flambda_in, wl, filt)
+
+    assert filt.fluxVega() > 0.0
+    assert vegamag == pytest.approx(-2.5 * np.log10(flambda_in / filt.fluxVega()))
+
+    back = slug.PhotConvert("Vega", "Flambda", vegamag, wl, filt)
+    assert back == pytest.approx(flambda_in, rel=1e-9)
+
+
+def test_photconvert_vega_photcount_filter_gives_negative_infinity():
+    """A photCount() filter's fluxVega() is always 0 (see
+    Filter.fluxVega()); PhotConvert should still accept it (it just
+    forwards fluxVega() through, without raising), giving
+    -2.5*log10(flux_in / 0) == -inf -- a well-defined, if degenerate,
+    IEEE double rather than a crash or NaN."""
+    filt = slug.FilterIdeal("Q(HI)")
+    assert filt.photCount()
+
+    result = slug.PhotConvert("Flambda", "Vega", 1e-15, filt.wlPivot(), filt)
+    assert result == float("-inf")

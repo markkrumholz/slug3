@@ -114,4 +114,9 @@ void bindFilterTabulated(py::module_& m);
  */
 void bindFilterCollection(py::module_& m);
 
+/**
+ * @brief Bind phot::PhotConvert as the module-level function PhotConvert
+ */
+void bindPhotConvert(py::module_& m);
+
 #endif // BINDINGS_HPP
