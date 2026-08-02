@@ -52,7 +52,18 @@ abs_tol : float, optional
     Default is 0 (rely on rel_tol alone).
 max_iter : int, optional
     Maximum number of integrand evaluations before the integrator gives
-    up. 0 (the default) means unlimited.)doc";
+    up. 0 (the default) means unlimited.
+intRelTol : float, optional
+    If given, overrides rel_tol -- equivalent to setting the intRelTol
+    property after construction. Provided (alongside intAbsTol and
+    intMaxIter below) so a keyword argument exists matching each
+    property's own name, not just rel_tol/abs_tol/max_iter.
+intAbsTol : float, optional
+    If given, overrides abs_tol -- equivalent to setting the
+    intAbsTol property after construction.
+intMaxIter : int, optional
+    If given, overrides max_iter -- equivalent to setting the
+    intMaxIter property after construction.)doc";
 
 static constexpr std::string_view intRelTolDocstring = R"doc(The relative tolerance for PDF integration.
 
@@ -81,19 +92,41 @@ void bindSimControls(py::module_& m)
                 fromPathDocstring.data(),
                 py::arg("path"))
         .def(py::init(
-                [](double relTol, double absTol, std::size_t maxIter)
+                [](double relTol, double absTol, std::size_t maxIter,
+                   const py::object& intRelTol, const py::object& intAbsTol,
+                   const py::object& intMaxIter)
                     -> std::unique_ptr<io::SimControls>
                 {
                     auto controls = std::make_unique<io::SimControls>();
                     controls->setIntRelTol(relTol);
                     controls->setIntAbsTol(absTol);
                     controls->setIntMaxIter(maxIter);
+
+                    // Property-named overrides, applied last, matching
+                    // SimPhysics's own property-named constructor
+                    // keyword arguments
+                    if (!intRelTol.is_none())
+                    {
+                        controls->setIntRelTol(py::cast<double>(intRelTol));
+                    }
+                    if (!intAbsTol.is_none())
+                    {
+                        controls->setIntAbsTol(py::cast<double>(intAbsTol));
+                    }
+                    if (!intMaxIter.is_none())
+                    {
+                        controls->setIntMaxIter(py::cast<std::size_t>(intMaxIter));
+                    }
+
                     return controls;
                 }),
                 fromTolerancesDocstring.data(),
                 py::arg("rel_tol") = 1e-2,
                 py::arg("abs_tol") = 0.0,
-                py::arg("max_iter") = static_cast<std::size_t>(0))
+                py::arg("max_iter") = static_cast<std::size_t>(0),
+                py::arg("intRelTol") = py::none(),
+                py::arg("intAbsTol") = py::none(),
+                py::arg("intMaxIter") = py::none())
         .def_property("intRelTol",
                 &io::SimControls::intRelTol,
                 &io::SimControls::setIntRelTol,

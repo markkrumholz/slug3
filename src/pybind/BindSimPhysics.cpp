@@ -8,16 +8,21 @@
 #include "Bindings.hpp"
 #include "../io/SimControls.hpp"
 #include "../io/SimPhysics.hpp"
+#include "../phot/FilterCollection.hpp"
 #include "../specsyn/Specsyn.hpp"
 #include "../tracks/Tracks3D.hpp"
 #include "../utils/MiscUtils.hpp"
+#include <cstddef>
 #include <memory>
+#include <pybind11/cast.h>
 #include <pybind11/pybind11.h>
+#include <pybind11/pytypes.h>
 #include <pybind11/stl.h> // NOLINT(misc-include-cleaner); this is needed for correct Python binding, even if clang-tidy can't recognize it
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <toml.hpp>
+#include <utility>
 #include <vector>
 
 // Map the Python-facing sim_type string to SimControls::SimType,
@@ -82,13 +87,30 @@ sim_type : str, optional
     Either "cluster" or "galaxy"; controls whether galaxy-specific
     quantities (the CLF and SFR) are read from the deck. Defaults to
     "cluster", matching the bundled default deck's own sim_type.
+imf, cmf, feH, clf, sfr : str, optional
+computeLbol : bool, optional
+specsyn : Specsyn, optional
+filters : FilterCollection, optional
+tracks : Tracks3D, optional
+minStochMass, intRelTol, intAbsTol : float, optional
+intMaxIter : int, optional
+    Each, if given, is applied via the corresponding property's own
+    setter (setIMF(), setCMF(), ..., setIntMaxIter()) after the
+    SimPhysics described above (from path, or the bundled default
+    deck) is otherwise fully built -- e.g.
+    SimPhysics(imf="20.0") is equivalent to
+    SimPhysics() followed by sp.imf = "20.0". specsyn/filters/tracks
+    transfer ownership exactly as their own setter/property does, so
+    the object passed in is no longer usable from Python afterward.
+    See each property's own docstring for further details.
 
 Throws
 ------
 RuntimeError
     If the file cannot be parsed, sim_type is not "cluster" or
-    "galaxy", the deck is otherwise invalid, or (only if path is
-    empty) the bundled default deck cannot be found.)doc";
+    "galaxy", the deck is otherwise invalid, (only if path is empty)
+    the bundled default deck cannot be found, or any of the
+    property-setting keyword arguments above would itself raise.)doc";
 
 static constexpr std::string_view wlDocstring = R"doc(Return the rest-frame wavelength grid of the spectral synthesizer.
 
@@ -419,6 +441,45 @@ RuntimeError
     If no spectral synthesizer was requested (spectra.model was not
     set in the input deck).)doc";
 
+// Apply each property-named constructor keyword argument that was
+// actually given (not py::none()) to an already-built sp, via the
+// same setter its property uses -- factored out of the constructor
+// lambda below purely to keep bindSimPhysics()'s own cognitive
+// complexity down; see constructorDocstring for the user-facing
+// contract this implements
+static void applyConstructorProperties(io::SimPhysics& sp,
+    const py::object& imf, const py::object& cmf, const py::object& feH,
+    const py::object& clf, const py::object& sfr, const py::object& computeLbol,
+    py::object specsynArg, py::object filtersArg, py::object tracksArg,
+    const py::object& minStochMass, const py::object& intRelTol,
+    const py::object& intAbsTol, const py::object& intMaxIter)
+{
+    if (!imf.is_none()) { sp.setIMF(py::cast<std::string>(imf)); }
+    if (!cmf.is_none()) { sp.setCMF(py::cast<std::string>(cmf)); }
+    if (!feH.is_none()) { sp.setFeH(py::cast<std::string>(feH)); }
+    if (!clf.is_none()) { sp.setCLF(py::cast<std::string>(clf)); }
+    if (!sfr.is_none()) { sp.setSFR(py::cast<std::string>(sfr)); }
+    if (!computeLbol.is_none()) { sp.setComputeLbol(py::cast<bool>(computeLbol)); }
+    if (!specsynArg.is_none())
+    {
+        sp.setSpecsyn(py::cast<std::unique_ptr<specsyn::Specsyn>>(std::move(specsynArg)));
+    }
+    if (!filtersArg.is_none())
+    {
+        sp.setFilters(
+            py::cast<std::unique_ptr<phot::FilterCollection>>(std::move(filtersArg)));
+    }
+    if (!tracksArg.is_none())
+    {
+        auto tracksPtr = py::cast<std::unique_ptr<tracks::Tracks3D>>(std::move(tracksArg));
+        sp.setTracks(std::move(*tracksPtr));
+    }
+    if (!minStochMass.is_none()) { sp.setMinStochMass(py::cast<double>(minStochMass)); }
+    if (!intRelTol.is_none()) { sp.setIntRelTol(py::cast<double>(intRelTol)); }
+    if (!intAbsTol.is_none()) { sp.setIntAbsTol(py::cast<double>(intAbsTol)); }
+    if (!intMaxIter.is_none()) { sp.setIntMaxIter(py::cast<std::size_t>(intMaxIter)); }
+}
+
 // Disable linting for includes -- the pybind macro magic seems to confuse
 // the linter
 // NOLINTBEGIN(misc-include-cleaner)
@@ -426,21 +487,44 @@ void bindSimPhysics(py::module_& m)
 {
     py::class_<io::SimPhysics, py::smart_holder>(m, "SimPhysics")
         .def(py::init(
-                [](const std::string& path, const std::string& simType)
+                [](const std::string& path, const std::string& simType,
+                   const py::object& imf, const py::object& cmf, const py::object& feH,
+                   const py::object& clf, const py::object& sfr,
+                   const py::object& computeLbol, py::object specsynArg,
+                   py::object filtersArg, py::object tracksArg,
+                   const py::object& minStochMass, const py::object& intRelTol,
+                   const py::object& intAbsTol, const py::object& intMaxIter)
                     -> std::unique_ptr<io::SimPhysics>
                 {
                     simTypeFromString(simType); // validate; SimControls reads it from deck
 
+                    std::unique_ptr<io::SimPhysics> sp;
                     if (!path.empty())
                     {
                         const toml::table inputDeck = toml::parse_file(path);
                         const io::SimControls controls(inputDeck);
-                        return std::make_unique<io::SimPhysics>(inputDeck, controls);
+                        sp = std::make_unique<io::SimPhysics>(inputDeck, controls);
                     }
-                    return buildDefaultSimPhysics();
+                    else
+                    {
+                        sp = buildDefaultSimPhysics();
+                    }
+
+                    applyConstructorProperties(*sp, imf, cmf, feH, clf, sfr, computeLbol,
+                        std::move(specsynArg), std::move(filtersArg), std::move(tracksArg),
+                        minStochMass, intRelTol, intAbsTol, intMaxIter);
+
+                    return sp;
                 }),
                 constructorDocstring.data(),
-                py::arg("path") = "", py::arg("sim_type") = "cluster")
+                py::arg("path") = "", py::arg("sim_type") = "cluster",
+                py::arg("imf") = py::none(), py::arg("cmf") = py::none(),
+                py::arg("feH") = py::none(), py::arg("clf") = py::none(),
+                py::arg("sfr") = py::none(), py::arg("computeLbol") = py::none(),
+                py::arg("specsyn") = py::none(), py::arg("filters") = py::none(),
+                py::arg("tracks") = py::none(), py::arg("minStochMass") = py::none(),
+                py::arg("intRelTol") = py::none(), py::arg("intAbsTol") = py::none(),
+                py::arg("intMaxIter") = py::none())
         .def("wl",
                 [](const io::SimPhysics& self) -> std::vector<double>
                 {

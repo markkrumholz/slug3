@@ -874,6 +874,93 @@ def test_simcontrols_int_tolerance_properties():
     assert controls.intMaxIter == 200
 
 
+def test_simcontrols_constructor_kwargs_override_precedence():
+    """SimControls's property-named constructor keyword arguments
+    (intRelTol/intAbsTol/intMaxIter) should be applied after, and so
+    override, the older rel_tol/abs_tol/max_iter keyword arguments."""
+    controls = slug.SimControls(rel_tol=1e-2, intRelTol=1e-7)
+    assert controls.intRelTol == pytest.approx(1e-7)
+
+
+def test_simphysics_constructor_kwargs_string_properties():
+    """SimPhysics's constructor should accept imf/cmf/feH/clf/sfr as
+    keyword arguments, each applying the corresponding setter after
+    the deck-driven SimPhysics is otherwise fully built -- equivalent
+    to constructing plain and then assigning the property. Uses
+    VAR_FEH_DECK for feH specifically so the value actually changes
+    (see test_simphysics_set_feh_rebuilds_tracks2d_cache's own
+    comment for why CLUSTER_DECK can't be used for that one)."""
+    physics = slug.SimPhysics(CLUSTER_DECK, "cluster", imf="20.0", cmf="500.0",
+                               clf="1e7", sfr="1.0")
+    assert physics.imf.getMin() == pytest.approx(20.0)
+    assert physics.cmf.getMin() == pytest.approx(500.0)
+    assert physics.clf.getMin() == pytest.approx(1e7)
+    assert physics.sfr.valid()
+
+    feh_physics = slug.SimPhysics(VAR_FEH_DECK, "cluster", feH="-0.25")
+    assert feh_physics.feH.getMin() == pytest.approx(-0.25)
+    assert feh_physics.feH.getMax() == pytest.approx(-0.25)
+
+
+def test_simphysics_constructor_kwargs_compute_lbol():
+    """SimPhysics's constructor should accept computeLbol as a keyword
+    argument, applying setComputeLbol()."""
+    physics = slug.SimPhysics(CLUSTER_DECK, "cluster", computeLbol=True)
+    assert physics.computeLbol
+
+
+def test_simphysics_constructor_kwargs_move_only_properties():
+    """SimPhysics's constructor should accept specsyn/filters/tracks
+    as keyword arguments, each transferring ownership exactly like
+    the corresponding property/setter does (disowning the Python
+    object passed in)."""
+    specsyn = slug.SpecsynBlackbody(3000.0, 9000.0, 50)
+    fc = slug.FilterCollection([], slug.PhotSystem.Flambda)
+    fc.addFilter("Q(HI)")
+    tracks = slug.Tracks3D(TRACK_SET, -1.0, 0.5, KNOWN_VVCRIT, KNOWN_AFE, REGISTRY)
+
+    physics = slug.SimPhysics(
+        CLUSTER_DECK, "cluster", specsyn=specsyn, filters=fc, tracks=tracks)
+
+    assert len(physics.wl()) == 50
+    assert physics.filters.filterNames() == ["Q(HI)"]
+    assert physics.tracks.mMin() == pytest.approx(0.1)
+    assert physics.tracks.mMax() == pytest.approx(300.0)
+
+    for obj, method in ((specsyn, "wl"), (fc, "filterNames"), (tracks, "mMin")):
+        with pytest.raises(ValueError):
+            getattr(obj, method)()
+
+
+def test_simphysics_constructor_kwargs_numeric_properties():
+    """SimPhysics's constructor should accept minStochMass/intRelTol/
+    intAbsTol/intMaxIter as keyword arguments, applying the
+    corresponding setter."""
+    physics = slug.SimPhysics(
+        CLUSTER_DECK, "cluster", minStochMass=1e6,
+        intRelTol=1e-4, intAbsTol=1e-8, intMaxIter=100)
+
+    assert physics.minStochMass == pytest.approx(1e6)
+    assert physics.intRelTol == pytest.approx(1e-4)
+    assert physics.intAbsTol == pytest.approx(1e-8)
+    assert physics.intMaxIter == 100
+
+
+def test_simphysics_constructor_kwargs_with_bundled_default_deck():
+    """Property-named keyword arguments should also work together with
+    the bundled default deck (path omitted), i.e. slug.SimPhysics(imf=...)
+    with no other arguments. Subject to the same environment caveat as
+    test_simphysics_default_construction_finds_bundled_deck (see
+    PY_DEFAULTS_PATH's own comment): only checks that any failure is
+    not from the deck-loading step itself."""
+    try:
+        physics = slug.SimPhysics(imf="30.0")
+    except RuntimeError as e:
+        assert "PyDefaults.toml" not in str(e)
+        return
+    assert physics.imf.getMin() == pytest.approx(30.0)
+
+
 # ---------------------------------------------------------------------
 # Cluster
 # ---------------------------------------------------------------------
