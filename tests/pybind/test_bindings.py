@@ -800,6 +800,67 @@ def test_filtercollection_filter_outlives_collection():
     assert filts[0].name() == "Q(HI)"
 
 
+def test_filtercollection_addfilter_by_name_matches_constructor():
+    """Building a FilterCollection incrementally via addFilter(name)
+    should be equivalent to passing the same names to the constructor
+    up front: same filterNames() and same phot() values."""
+    names = ["SLUGTEST.CAM1.G500", "ideal_phot_700_1500", "Q(HI)"]
+
+    fc_ctor = slug.FilterCollection(names, slug.PhotSystem.Flambda, FILTER_REGISTRY)
+
+    fc_incremental = slug.FilterCollection([], slug.PhotSystem.Flambda)
+    for name in names:
+        fc_incremental.addFilter(name, FILTER_REGISTRY)
+
+    assert fc_incremental.filterNames() == fc_ctor.filterNames() == names
+
+    wl, spec = _make_const_spec(500.0, 9000.0, 5000, 3.5)
+    assert list(fc_incremental.phot(wl, spec)) == pytest.approx(
+        list(fc_ctor.phot(wl, spec)), rel=1e-9)
+
+
+def test_filtercollection_addfilter_by_name_invalid_raises():
+    """addFilter(name) should raise, not crash, for an unparseable name."""
+    fc = slug.FilterCollection([], slug.PhotSystem.Flambda)
+    with pytest.raises(RuntimeError):
+        fc.addFilter("not_a_valid_name")
+
+
+def test_filtercollection_addfilter_direct():
+    """addFilter(filter) should accept a directly-constructed
+    FilterIdeal or FilterTabulated and append it, preserving each
+    filter's own concrete type and values."""
+    fc = slug.FilterCollection([], slug.PhotSystem.Flambda)
+
+    ideal = slug.FilterIdeal("Q(HeI)")
+    fc.addFilter(ideal)
+
+    tab = slug.FilterTabulated("SLUGTEST", "CAM1", "G500", FILTER_REGISTRY)
+    fc.addFilter(tab)
+
+    assert fc.filterNames() == ["Q(HeI)", "SLUGTEST.CAM1.G500"]
+    assert isinstance(fc.getFilter(0), slug.FilterIdeal)
+    assert isinstance(fc.getFilter(1), slug.FilterTabulated)
+    assert fc.getFilter(1).norm() > 0.0
+
+
+def test_filtercollection_addfilter_direct_transfers_ownership():
+    """addFilter(filter) transfers filter's underlying C++ object into
+    the FilterCollection; the Python wrapper that was passed in should
+    no longer be usable afterwards, rather than silently aliasing an
+    object now owned (and possibly later destroyed alongside) the
+    collection."""
+    fc = slug.FilterCollection([], slug.PhotSystem.Flambda)
+    ideal = slug.FilterIdeal("Q(HeI)")
+    fc.addFilter(ideal)
+
+    with pytest.raises(ValueError):
+        ideal.name()
+
+    # the collection's own copy is unaffected
+    assert fc.getFilter(0).name() == "Q(HeI)"
+
+
 def test_cluster_phot_empty_without_filters(sim_physics, sim_controls):
     """CLUSTER_DECK has no [phot] section, so phot() should stay empty
     even after advance()."""

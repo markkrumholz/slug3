@@ -7,22 +7,18 @@
 
 #include "FilterCollection.hpp"
 #include "../utils/Constants.hpp"
-#include "../utils/HDF5Utils.hpp"
-#include "../utils/MiscUtils.hpp"
 #include "../utils/ParseUtils.hpp"
 #include "../utils/TOMLUtils.hpp"
 #include "Filter.hpp"
 #include "FilterIdeal.hpp"
 #include "FilterTabulated.hpp"
 #include "PhotCommons.hpp"
-#include "hdf5.h" // NOLINT(misc-include-cleaner)
 #include <cstddef>
 #include <memory>
 #include <numbers>
 #include <stdexcept>
 #include <string>
 #include <toml.hpp>
-#include <utility>
 #include <vector>
 
 namespace
@@ -117,89 +113,51 @@ namespace
         }
         throw std::runtime_error("FilterCollection: unrecognized PhotSystem value");
     }
-
-    // Load the Vega reference spectrum's wl/flux datasets from
-    // vegaName -- see data/tools/fetch_vega.py for the file's schema
-    // NOLINTBEGIN(misc-include-cleaner) -- including hdf5.h wholesale
-    // (rather than individual headers) is the paradigm HDF5 itself
-    // wants, which confuses misc-include-cleaner
-    auto loadVegaSpectrum(const std::string& vegaName) -> std::pair<std::vector<double>, std::vector<double>>
-    {
-        const auto vegaPath = utils::getFilePath(vegaName);
-        if (vegaPath.empty())
-        {
-            throw std::runtime_error(
-                "FilterCollection: Vega reference spectrum " + vegaName + " not found");
-        }
-        const hid_t file = H5Fopen(vegaPath.string().c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
-        if (file < 0)
-        {
-            throw std::runtime_error(
-                "FilterCollection: unable to open HDF5 file " + vegaPath.string());
-        }
-        std::vector<double> wlVega = utils::readDataset1D(file, "wl", "FilterCollection");
-        std::vector<double> fluxVega = utils::readDataset1D(file, "flux", "FilterCollection");
-        H5Fclose(file);
-        return { std::move(wlVega), std::move(fluxVega) };
-    }
-    // NOLINTEND(misc-include-cleaner)
 } // namespace
 
 phot::FilterCollection::FilterCollection(
     const std::vector<std::string>& filterNames,
     const PhotSystem photSystem,
-    const std::string& registryName,
-    const std::string& vegaName)
+    const std::string& registryName)
 : photSystem_(photSystem)
 {
-    for (const auto& name : filterNames)
+    for (const auto& name : filterNames) { addFilter(name, registryName); }
+}
+
+void phot::FilterCollection::addFilter(const std::string& name, const std::string& registryName)
+{
+    if (isIdealFilterName(name))
     {
-        if (isIdealFilterName(name))
-        {
-            filters_.push_back(std::make_unique<FilterIdeal>(name));
-            continue;
-        }
-
-        const auto tokens = utils::splitOnChar(name, '.');
-        std::string facility;
-        std::string instrument;
-        std::string filter;
-        if (tokens.size() == 3)
-        {
-            facility = tokens.at(0);
-            instrument = tokens.at(1);
-            filter = tokens.at(2);
-        }
-        else if (tokens.size() == 2)
-        {
-            facility = tokens.at(0);
-            filter = tokens.at(1);
-            instrument = resolveSingleInstrument(facility, registryName);
-        }
-        else
-        {
-            throw std::runtime_error(
-                "FilterCollection: unable to parse filter name '" + name +
-                "'; expected a tabulated filter name (facility.filter or "
-                "facility.instrument.filter) or an idealized filter name "
-                "(ideal_energy_X_Y, ideal_phot_X_Y, or Q(...))");
-        }
-
-        filters_.push_back(std::make_unique<FilterTabulated>(facility, instrument, filter, registryName));
+        filters_.push_back(std::make_unique<FilterIdeal>(name));
+        return;
     }
 
-    if (photSystem_ == PhotSystem::Vega)
+    const auto tokens = utils::splitOnChar(name, '.');
+    std::string facility;
+    std::string instrument;
+    std::string filter;
+    if (tokens.size() == 3)
     {
-        const auto [wlVega, fluxVega] = loadVegaSpectrum(vegaName);
-        for (const auto& filt : filters_)
-        {
-            // A photon-count filter's phot() value has no Flambda
-            // meaning, so the Vega spectrum is meaningless for it;
-            // leave its fluxVega() at Filter's own default of 0
-            if (filt->photCount()) { continue; }
-            filt->setFluxVega(wlVega, fluxVega);
-        }
+        facility = tokens.at(0);
+        instrument = tokens.at(1);
+        filter = tokens.at(2);
     }
+    else if (tokens.size() == 2)
+    {
+        facility = tokens.at(0);
+        filter = tokens.at(1);
+        instrument = resolveSingleInstrument(facility, registryName);
+    }
+    else
+    {
+        throw std::runtime_error(
+            "FilterCollection: unable to parse filter name '" + name +
+            "'; expected a tabulated filter name (facility.filter or "
+            "facility.instrument.filter) or an idealized filter name "
+            "(ideal_energy_X_Y, ideal_phot_X_Y, or Q(...))");
+    }
+
+    filters_.push_back(std::make_unique<FilterTabulated>(facility, instrument, filter, registryName));
 }
 
 auto phot::FilterCollection::phot(const std::vector<double>& wl,
@@ -210,9 +168,15 @@ auto phot::FilterCollection::phot(const std::vector<double>& wl,
     {
         const auto& filt = filters_.at(i);
         const double value = filt->phot(wl, spec);
+        // fluxVega() lazily loads the (potentially large) global Vega
+        // reference spectrum on its first call (see Filter::fluxVega()),
+        // so only pay that cost when photSystem_ actually needs it;
+        // convertFlambda() ignores its fluxVega argument for every
+        // other PhotSystem anyway
+        const double fluxVega = (photSystem_ == PhotSystem::Vega) ? filt->fluxVega() : 0.0;
         result.at(i) = filt->photCount()
             ? value
-            : convertFlambda(value, filt->wlPivot(), filt->fluxVega(), photSystem_);
+            : convertFlambda(value, filt->wlPivot(), fluxVega, photSystem_);
     }
     return result;
 }

@@ -95,6 +95,7 @@ add_executable(slug
     src/pdfs/PDFSegmentPowerlaw.cpp
     src/pdfs/PDFSegmentSchechter.cpp
     src/phot/FilterCollection.cpp
+    src/phot/VegaSpectrum.cpp
     src/phot/FilterIdeal.cpp
     src/phot/FilterTabulated.cpp
     src/specsyn/SpecsynBlackbody.cpp
@@ -121,6 +122,7 @@ add_executable(slugTestInterpolation
 )
 add_executable(slugTestPhot
     src/phot/FilterCollection.cpp
+    src/phot/VegaSpectrum.cpp
     src/phot/FilterIdeal.cpp
     src/phot/FilterTabulated.cpp
     tests/phot/testPhotAll.cpp
@@ -179,6 +181,7 @@ add_executable(slugTestCore
     src/pdfs/PDFSegmentPowerlaw.cpp
     src/pdfs/PDFSegmentSchechter.cpp
     src/phot/FilterCollection.cpp
+    src/phot/VegaSpectrum.cpp
     src/phot/FilterIdeal.cpp
     src/phot/FilterTabulated.cpp
     src/specsyn/SpecsynBlackbody.cpp
@@ -221,6 +224,7 @@ add_executable(slugTestCoreFull
     src/pdfs/PDFSegmentPowerlaw.cpp
     src/pdfs/PDFSegmentSchechter.cpp
     src/phot/FilterCollection.cpp
+    src/phot/VegaSpectrum.cpp
     src/phot/FilterIdeal.cpp
     src/phot/FilterTabulated.cpp
     src/specsyn/SpecsynBlackbody.cpp
@@ -268,6 +272,7 @@ add_executable(slugTestIo
     src/pdfs/PDFSegmentPowerlaw.cpp
     src/pdfs/PDFSegmentSchechter.cpp
     src/phot/FilterCollection.cpp
+    src/phot/VegaSpectrum.cpp
     src/phot/FilterIdeal.cpp
     src/phot/FilterTabulated.cpp
     src/specsyn/SpecsynBlackbody.cpp
@@ -342,6 +347,7 @@ pybind11_add_module(slugPython
     src/pdfs/PDFSegmentPowerlaw.cpp
     src/pdfs/PDFSegmentSchechter.cpp
     src/phot/FilterCollection.cpp
+    src/phot/VegaSpectrum.cpp
     src/phot/FilterIdeal.cpp
     src/phot/FilterTabulated.cpp
     src/specsyn/SpecsynBlackbody.cpp

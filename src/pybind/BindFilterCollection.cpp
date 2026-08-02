@@ -10,10 +10,12 @@
 #include "../phot/FilterCollection.hpp"
 #include "../phot/PhotCommons.hpp"
 #include <cstddef>
+#include <memory>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h> // NOLINT(misc-include-cleaner); this is needed for correct Python binding, even if clang-tidy can't recognize it
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 // Numpy-style docstrings for the Python bindings below
@@ -40,18 +42,20 @@ phot_system : PhotSystem
 registry : str, optional
     Name of the filter registry file to resolve tabulated filter
     names against.
-vega : str, optional
-    Name of the HDF5 file holding the Vega reference spectrum ("wl"
-    and "flux" datasets); only read if phot_system is Vega, in which
-    case every non-photCount() filter's fluxVega() is set from it.
 
 Throws
 ------
 RuntimeError
     If any entry of filter_names does not match a recognized
     tabulated- or idealized-filter naming convention, or if
-    constructing the corresponding filter itself throws; also throws
-    if phot_system is Vega and vega cannot be read.)doc";
+    constructing the corresponding filter itself throws.
+
+Details
+-------
+If phot_system is PhotSystem.Vega, each non-photCount() filter's Vega
+zero point is computed lazily, from the global Vega reference
+spectrum, the first time it is actually needed -- see
+Filter.fluxVega().)doc";
 
 static constexpr std::string_view photDocstring = R"doc(Compute the photometric response of every filter in this collection to a spectrum.
 
@@ -134,6 +138,49 @@ filters : list of FilterIdeal or FilterTabulated
     it actually is, in the same order as
     phot()/filterNames()/filterUnits().)doc";
 
+static constexpr std::string_view addFilterByNameDocstring = R"doc(Parse a filter name and add the resulting filter to this collection.
+
+Parameters
+----------
+name : str
+    Name of the filter to add; see the constructor's own filter_names
+    parameter for the recognized naming conventions.
+registry : str, optional
+    Name of the filter registry file to resolve a tabulated filter
+    name against; unused for an idealized filter name.
+
+Throws
+------
+RuntimeError
+    If name does not match a recognized tabulated- or idealized-filter
+    naming convention, or if constructing the corresponding filter
+    itself throws.
+
+Details
+-------
+Unlike a filter named in the constructor's own filter_names, a filter
+added this way is not given a fluxVega() even if this collection's
+phot_system is PhotSystem.Vega -- the constructor sets fluxVega() in a
+second pass, after every filter named in filter_names has been built,
+which this single-filter entry point has no equivalent of yet.)doc";
+
+static constexpr std::string_view addFilterDirectDocstring = R"doc(Add an already-constructed filter to this collection.
+
+Parameters
+----------
+filter : FilterIdeal or FilterTabulated
+    The filter to add; ownership is transferred to this
+    FilterCollection, so filter is no longer usable from Python after
+    this call.
+
+Details
+-------
+Lets a caller build a filter directly, via FilterIdeal's or
+FilterTabulated's own constructor, and add it to this collection
+rather than by name via the other addFilter() overload. Like that
+overload, does not set the newly added filter's fluxVega() on a
+PhotSystem.Vega collection -- see its own docstring.)doc";
+
 // Disable linting for includes -- the pybind macro magic seems to confuse
 // the linter
 // NOLINTBEGIN(misc-include-cleaner)
@@ -148,11 +195,10 @@ void bindFilterCollection(py::module_& m)
 
     py::class_<phot::FilterCollection, py::smart_holder>(m, "FilterCollection")
         .def(py::init<const std::vector<std::string>&, phot::PhotSystem,
-                const std::string&, const std::string&>(),
+                const std::string&>(),
                 constructorDocstring.data(),
                 py::arg("filter_names"), py::arg("phot_system"),
-                py::arg("registry") = phot::defaultRegistry,
-                py::arg("vega") = phot::defaultVegaSpec)
+                py::arg("registry") = phot::defaultRegistry)
         .def("phot", &phot::FilterCollection::phot,
                 photDocstring.data(),
                 py::arg("wl"), py::arg("spec"))
@@ -183,6 +229,20 @@ void bindFilterCollection(py::module_& m)
                     return result;
                 },
                 filtersDocstring.data(),
-                py::return_value_policy::reference_internal);
+                py::return_value_policy::reference_internal)
+        .def("addFilter",
+                [](phot::FilterCollection& self, const std::string& name, const std::string& registry)
+                {
+                    self.addFilter(name, registry);
+                },
+                addFilterByNameDocstring.data(),
+                py::arg("name"), py::arg("registry") = phot::defaultRegistry)
+        .def("addFilter",
+                [](phot::FilterCollection& self, std::unique_ptr<phot::Filter> filter)
+                {
+                    self.addFilter(std::move(filter));
+                },
+                addFilterDirectDocstring.data(),
+                py::arg("filter"));
 }
 // NOLINTEND(misc-include-cleaner)
