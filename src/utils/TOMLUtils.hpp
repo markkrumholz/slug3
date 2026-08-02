@@ -8,9 +8,14 @@
 #ifndef TOMLUTILS_HPP
 #define TOMLUTILS_HPP
 
+#include "../pdfs/PDF.hpp"
+#include "../pdfs/PDFFileParser.hpp"
+#include "../pdfs/PDFSegmentDelta.hpp"
 #include "MiscUtils.hpp"
 #include <exception>
 #include <filesystem>
+#include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <toml.hpp>
@@ -51,6 +56,55 @@ namespace utils
     -> std::vector<std::string>
     {
         return stringArrayContents(registry.at_path(key).as_array());
+    }
+
+    /**
+     * @brief Initialize a PDF from a toml key
+     * @param inputDeck Input deck for simulation
+     * @param key Name of key
+     * @param prefix Prefix to look for PDF file relative to SLUG_DIR
+     * @details
+     * If the key resolves to a numerical value, this is interpreted
+     * as specifying a delta function at that value. If it resolves
+     * to a string, this is interpreted as supplying the name of the
+     * PDF file descriptor, with the path to the file resolved by
+     * utils::getFilePath. See ParseUtils.hpp's initPDFFromString() for
+     * the closely-related string-driven counterpart to this function,
+     * used when there is a value to interpret but no toml table/key to
+     * read it from (e.g. SimPhysics's own set* methods).
+    */
+    inline auto initPDFFromKey(const toml::table& inputDeck,
+        const std::string& key,
+        const std::string& prefix = "") -> pdfs::PDF
+    {
+        // First check for numerical value
+        const std::optional<double> num =
+            inputDeck.at_path(key).value<double>();
+        if (num.has_value())
+        {
+            auto delta = std::make_unique<pdfs::PDFSegmentDelta>(num.value());
+            auto pdf = pdfs::PDF(std::move(delta));
+            return std::move(pdf);
+        }
+
+        // Next check for string value
+        const std::optional<std::string> pdfFile =
+            inputDeck.at_path(key).value<std::string>();
+        if (pdfFile.has_value())
+        {
+            auto pdfFilePath = getFilePath(pdfFile.value(), prefix).string();
+            if (pdfFilePath.empty())
+            {
+                throw std::runtime_error(
+                    "initPDFFromKey: pdf file " + pdfFile.value() + " not found");
+            }
+            auto pdf = pdfs::parsePDFDescriptor(pdfFilePath);
+            return std::move(pdf);
+        }
+
+        // If we get here, key does not exist or has invalid type
+        throw std::runtime_error(
+            "initPDFFromKey: invalid entry for " + key);
     }
 
     /**

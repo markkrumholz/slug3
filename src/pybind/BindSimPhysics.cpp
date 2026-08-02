@@ -111,6 +111,83 @@ Parameters
 value : bool
     New value for computeLbol().)doc";
 
+static constexpr std::string_view setIMFDocstring = R"doc(Set the initial mass function.
+
+Parameters
+----------
+imf : str
+    A numerical value (interpreted as a delta-function IMF at that
+    mass) or the name of an IMF PDF file, resolved relative to
+    SLUG_DIR/REPO_DIR under data/imfs -- the same way stars.IMF is
+    resolved when parsing an input deck.
+
+Throws
+------
+RuntimeError
+    If imf is not numeric and does not name a file that can be found.)doc";
+
+static constexpr std::string_view setCMFDocstring = R"doc(Set the cluster mass function.
+
+Parameters
+----------
+cmf : str
+    A numerical value (interpreted as a delta-function CMF at that
+    mass) or the name of a CMF PDF file.
+
+Throws
+------
+RuntimeError
+    If cmf is not numeric and does not name a file that can be found.)doc";
+
+static constexpr std::string_view setFeHDocstring = R"doc(Set the [Fe/H] distribution.
+
+Parameters
+----------
+feh : str
+    A numerical value (interpreted as a fixed [Fe/H]) or the name of a
+    [Fe/H] PDF file.
+
+Throws
+------
+RuntimeError
+    If feh is not numeric and does not name a file that can be found.)doc";
+
+static constexpr std::string_view setCLFDocstring = R"doc(Set the cluster lifetime function.
+
+Parameters
+----------
+clf : str
+    A numerical value (interpreted as a delta-function CLF at that
+    lifetime) or the name of a CLF PDF file.
+
+Throws
+------
+RuntimeError
+    If clf is not numeric and does not name a file that can be found.)doc";
+
+static constexpr std::string_view setSFRDocstring = R"doc(Set the star formation rate.
+
+Parameters
+----------
+sfr : str
+    A numerical value (interpreted as a constant star formation rate,
+    in Msun/yr) or the name of an SFR PDF file.
+
+Throws
+------
+RuntimeError
+    If sfr is neither numeric nor names a file that can be parsed as a
+    PDF descriptor.
+
+Details
+-------
+Unlike setIMF()/setCMF()/setFeH()/setCLF(), a numerical value is not
+interpreted as a delta function, but as the normalization of a
+non-normalized PDF that is constant in time -- mirroring how
+galaxy.sfr itself is handled when parsing an input deck. Also unlike
+those four, a file name is not resolved relative to SLUG_DIR/REPO_DIR;
+it is used as given.)doc";
+
 static constexpr std::string_view intRelTolDocstring = R"doc(Return the relative tolerance for the spectral synthesizer's PDF integration.
 
 Returns
@@ -242,6 +319,16 @@ void bindSimPhysics(py::module_& m)
                 computeLbolDocstring.data())
         .def("setComputeLbol", &io::SimPhysics::setComputeLbol,
                 setComputeLbolDocstring.data(), py::arg("value"))
+        .def("setIMF", &io::SimPhysics::setIMF,
+                setIMFDocstring.data(), py::arg("imf"))
+        .def("setCMF", &io::SimPhysics::setCMF,
+                setCMFDocstring.data(), py::arg("cmf"))
+        .def("setFeH", &io::SimPhysics::setFeH,
+                setFeHDocstring.data(), py::arg("feh"))
+        .def("setCLF", &io::SimPhysics::setCLF,
+                setCLFDocstring.data(), py::arg("clf"))
+        .def("setSFR", &io::SimPhysics::setSFR,
+                setSFRDocstring.data(), py::arg("sfr"))
         .def("intRelTol", &io::SimPhysics::intRelTol,
                 intRelTolDocstring.data())
         .def("intAbsTol", &io::SimPhysics::intAbsTol,

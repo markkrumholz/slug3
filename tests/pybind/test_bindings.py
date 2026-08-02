@@ -460,6 +460,83 @@ def test_simphysics_set_compute_lbol_enables_lbol_computation():
     assert cluster.lbol() > 0.0
 
 
+def test_simphysics_set_imf_numeric_reflected_in_cluster_stars():
+    """setIMF() with a numeric argument should install a delta-function
+    IMF; every star in a Cluster built from the resulting SimPhysics
+    should then have exactly that mass, since there is no other mass
+    the IMF could ever draw."""
+    physics = slug.SimPhysics(CLUSTER_DECK, "cluster")
+    physics.setIMF("20.0")
+    controls = slug.SimControls(CLUSTER_DECK)
+    cluster = slug.Cluster(31, CLUSTER_TARGET_MASS, 0.0, physics, controls)
+
+    assert len(cluster.starMasses()) > 0
+    for mass in cluster.starMasses():
+        assert mass == pytest.approx(20.0)
+
+
+def test_simphysics_set_imf_file():
+    """setIMF() with a file name should load an IMF from that file,
+    exercising the non-numeric branch of setIMF()/initPDFFromString(),
+    including its data/imfs prefix resolution (mirroring how stars.IMF
+    itself is resolved when parsing an input deck)."""
+    physics = slug.SimPhysics(CLUSTER_DECK, "cluster")
+    physics.setIMF("chabrier.toml")
+    controls = slug.SimControls(CLUSTER_DECK)
+    cluster = slug.Cluster(32, CLUSTER_TARGET_MASS, 0.0, physics, controls)
+
+    assert len(cluster.starMasses()) > 0
+
+
+def test_simphysics_set_imf_invalid_raises():
+    """setIMF() with neither a numeric value nor a findable file name
+    should raise, not crash."""
+    physics = slug.SimPhysics(CLUSTER_DECK, "cluster")
+    with pytest.raises(RuntimeError):
+        physics.setIMF("not_numeric_or_a_real_file")
+
+
+def test_simphysics_set_feh_reflected_in_cluster():
+    """setFeH() with a numeric argument should install a fixed [Fe/H];
+    a Cluster built from the resulting SimPhysics should report that
+    same value from feH()."""
+    physics = slug.SimPhysics(CLUSTER_DECK, "cluster")
+    physics.setFeH("-0.75")
+    controls = slug.SimControls(CLUSTER_DECK)
+    cluster = slug.Cluster(33, CLUSTER_TARGET_MASS, 0.0, physics, controls)
+
+    assert cluster.feH() == pytest.approx(-0.75)
+
+
+def test_simphysics_set_feh_invalid_raises():
+    """setFeH() with neither a numeric value nor a findable file name
+    should raise, not crash."""
+    physics = slug.SimPhysics(CLUSTER_DECK, "cluster")
+    with pytest.raises(RuntimeError):
+        physics.setFeH("not_numeric_or_a_real_file")
+
+
+def test_simphysics_set_cmf_clf_sfr_numeric():
+    """setCMF()/setCLF()/setSFR() should all accept a numeric argument
+    without raising. cmf_/clf_/sfr_ are only read by simulation-driver
+    machinery (SimCluster/SimGalaxy) that has no Python binding of its
+    own, so this only exercises that the bindings are wired up and
+    accept valid input, not their downstream effect."""
+    physics = slug.SimPhysics(CLUSTER_DECK, "cluster")
+    physics.setCMF("2e3")
+    physics.setCLF("1e7")
+    physics.setSFR("0.5")
+
+
+@pytest.mark.parametrize("setter", ["setCMF", "setCLF", "setSFR"])
+def test_simphysics_set_cmf_clf_sfr_invalid_raises(setter):
+    """setCMF()/setCLF()/setSFR() should each raise, not crash, for a
+    value that is neither numeric nor a findable file name."""
+    physics = slug.SimPhysics(CLUSTER_DECK, "cluster")
+    with pytest.raises(RuntimeError):
+        getattr(physics, setter)("not_numeric_or_a_real_file")
+
+
 # ---------------------------------------------------------------------
 # Cluster
 # ---------------------------------------------------------------------

@@ -13,13 +13,26 @@
 #include "../specsyn/Specsyn.hpp"
 #include "../tracks/Tracks2D.hpp"
 #include "../tracks/Tracks3D.hpp"
+#include "../utils/ParseUtils.hpp"
 #include "SimControls.hpp"
 #include <cstddef>
+#include <filesystem>
 #include <memory>
+#include <string>
 #include <toml.hpp>
 
 namespace io
 {
+    /**
+     * @brief Prefix under which to resolve an IMF PDF file
+     * @details
+     * Shared by SimPhysics's constructor (reading stars.IMF via
+     * utils::initPDFFromKey()) and SimPhysics::setIMF() (via
+     * utils::initPDFFromString()), so both resolve an IMF file name
+     * identically.
+     */
+    inline const std::string imfPrefix = // NOLINT(bugprone-throwing-static-initialization,cert-err58-cpp) -- built from fixed string literals, so the (theoretically throwing) path conversion can never actually throw here
+        (std::filesystem::path("data") / std::filesystem::path("imfs")).string();
 
     /**
      * @class SimPhysics
@@ -136,6 +149,72 @@ namespace io
          * or suppress Lbol output on an already-constructed SimPhysics.
          */
         void setComputeLbol(bool value) { computeLbol_ = value; }
+
+        // Physics-setting setters: thin wrappers around
+        // utils::initPDFFromString(), letting a caller (e.g. from
+        // Python, building a SimPhysics without an input deck at all)
+        // set each physics PDF directly from a string playing the same
+        // role as the corresponding toml key's value would in the
+        // constructor -- a numerical value becomes a delta function,
+        // anything else is interpreted as a PDF file name. See
+        // utils::initPDFFromString()'s own comment for the exact rules.
+
+        /**
+         * @brief Set the initial mass function
+         * @param imf A numerical value (interpreted as a delta-function
+         *   IMF at that mass) or the name of an IMF PDF file, resolved
+         *   relative to SLUG_DIR/REPO_DIR under data/imfs -- the same
+         *   way stars.IMF is resolved by the constructor
+         * @throws std::runtime_error if imf is not numeric and does
+         *   not name a file that can be found
+         */
+        void setIMF(const std::string& imf) { imf_ = utils::initPDFFromString(imf, imfPrefix); }
+
+        /**
+         * @brief Set the cluster mass function
+         * @param cmf A numerical value (interpreted as a delta-function
+         *   CMF at that mass) or the name of a CMF PDF file
+         * @throws std::runtime_error if cmf is not numeric and does
+         *   not name a file that can be found
+         */
+        void setCMF(const std::string& cmf) { cmf_ = utils::initPDFFromString(cmf); }
+
+        /**
+         * @brief Set the [Fe/H] distribution
+         * @param feH A numerical value (interpreted as a fixed
+         *   [Fe/H]) or the name of a [Fe/H] PDF file
+         * @throws std::runtime_error if feH is not numeric and does
+         *   not name a file that can be found
+         */
+        void setFeH(const std::string& feH) { fehDist_ = utils::initPDFFromString(feH); }
+
+        /**
+         * @brief Set the cluster lifetime function
+         * @param clf A numerical value (interpreted as a delta-function
+         *   CLF at that lifetime) or the name of a CLF PDF file
+         * @throws std::runtime_error if clf is not numeric and does
+         *   not name a file that can be found
+         */
+        void setCLF(const std::string& clf) { clf_ = utils::initPDFFromString(clf); }
+
+        /**
+         * @brief Set the star formation rate
+         * @param sfr A numerical value (interpreted as a constant star
+         *   formation rate, in Msun/yr) or the name of an SFR PDF file
+         * @throws std::runtime_error if sfr is neither numeric nor
+         *   names a file that can be parsed as a PDF descriptor
+         * @details
+         * Mirrors the special handling the constructor itself applies
+         * to galaxy.sfr, unlike every setter above: a numerical value
+         * is not interpreted as a delta function, but as the
+         * normalization of a non-normalized PDF that is constant in
+         * time (see the .cpp file for the exact construction). A file
+         * name, unlike every setter above, is not resolved via
+         * utils::getFilePath -- it is passed to
+         * pdfs::parsePDFDescriptor() as-is, exactly mirroring the
+         * constructor's own galaxy.sfr handling.
+         */
+        void setSFR(const std::string& sfr);
 
         // Integrator tolerance getters and setters: thin wrappers
         // around the spectral synthesizer's own Specsyn::intRelTol()
