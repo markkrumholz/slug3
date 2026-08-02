@@ -17,13 +17,13 @@
 #include "testPDF.hpp"
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <exception>
 #include <filesystem>
 #include <iostream>
 #include <memory>
 #include <numbers>
 #include <string>
-#include <toml.hpp>
 #include <utility>
 #include <vector>
 
@@ -208,9 +208,8 @@ static auto testPDFTomlParsing() -> int
         {
             auto pdfTxt = pdfs::parsePDFDescriptor(
                 (assetDir / (baseName + ".txt")).string());
-            const auto tomlTable = toml::parse_file(
+            auto pdfToml = pdfs::parsePDFDescriptor(
                 (assetDir / (baseName + ".toml")).string());
-            auto pdfToml = pdfs::parsePDFToml(tomlTable);
 
             if (comparePDFs(pdfTxt, pdfToml, baseName) == 1) { return 1; }
         }

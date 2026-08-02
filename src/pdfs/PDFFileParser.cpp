@@ -42,7 +42,7 @@ static void parseError(const std::string& err,
     const std::string& line,
     const std::string& fileName)
 {
-    std::string errMsg = "parsePDFDescriptor: " +
+    std::string errMsg = "parsePDFLegacy: " +
         err + "; file " + fileName;
     if (!line.empty()) { errMsg += ", line " + line; }
     throw std::runtime_error(errMsg);
@@ -552,7 +552,7 @@ static auto parseTomlBody(const toml::table& deck,
 namespace pdfs {
 
     // General parser to start and decide if file is basic or advanced
-    auto parsePDFDescriptor(const std::string& fileName) -> PDF
+    auto parsePDFLegacy(const std::string& fileName) -> PDF
     {
         // First try to open file
         std::ifstream file(fileName);
@@ -644,11 +644,11 @@ namespace pdfs {
         }
     }
 
-    // Toml-format counterpart to parsePDFDescriptor() -- see this
+    // Toml-format counterpart to parsePDFLegacy() -- see this
     // function's own doc comment (PDFFileParser.hpp) for the exact
     // format. Header parsing (format/breakpoints/method) is handled
     // by parseTomlHeader(), body parsing (the segmentN tables) by
-    // parseTomlBody(), fully analogous to parsePDFDescriptor() above.
+    // parseTomlBody(), fully analogous to parsePDFLegacy() above.
     auto parsePDFToml(const toml::table& deck) -> PDF
     {
         auto header = parseTomlHeader(deck);
@@ -669,6 +669,24 @@ namespace pdfs {
         // Advanced mode, so don't do any normalization, just return
         const bool normalize = false;
         return { std::move(seg), wgt, header.method_, normalize };
+    }
+
+    // Drop-in replacement for the old parsePDFDescriptor(): tries to
+    // parse fileName as toml, and if that succeeds, hands it off to
+    // parsePDFToml(); otherwise falls back to the legacy custom
+    // format via parsePDFLegacy(). See PDFFileParser.hpp for details.
+    auto parsePDFDescriptor(const std::string& fileName) -> PDF
+    {
+        toml::table deck;
+        try
+        {
+            deck = toml::parse_file(fileName);
+        }
+        catch (const std::exception&)
+        {
+            return parsePDFLegacy(fileName);
+        }
+        return parsePDFToml(deck);
     }
 
 } // namespace pdfs
