@@ -10,7 +10,6 @@
 #include "../src/io/OutputManager.hpp"
 #include "../src/io/OutputManagerH5.hpp"
 #include "../src/io/SimControls.hpp"
-#include "../src/io/SimPhysics.hpp"
 #include "hdf5.h" // NOLINT(misc-include-cleaner)
 #include <array>
 #include <cmath>
@@ -243,13 +242,12 @@ auto runClusterSpecsynFull(const std::string& inputFile, const std::string& mode
         inputDeck.at_path("outputs").as_table()->insert("out_dir", outDir.string());
 
         const io::SimControls simControls(inputDeck);
-        const io::SimPhysics simPhysics(inputDeck, simControls);
         const auto nTrial = simControls.nTrial(); // read back rather than assumed, since not every caller's deck uses the same n_trial
 
         std::unique_ptr<io::OutputManager> outputManager =
-            std::make_unique<io::OutputManagerH5>(simControls, simPhysics, inputDeck);
+            std::make_unique<io::OutputManagerH5>(simControls, inputDeck);
 
-        core::SimCluster simCluster(simControls, simPhysics, std::move(outputManager));
+        core::SimCluster simCluster(simControls, std::move(outputManager));
         simCluster.run();
 
         // NOLINTBEGIN(misc-include-cleaner)

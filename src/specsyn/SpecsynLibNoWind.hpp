@@ -9,12 +9,10 @@
 #define SPECSYNLIBNOWIND_HPP
 
 #include "../io/SimControls.hpp"
-#include "../tracks/TrackCommons.hpp"
 #include "Specsyn.hpp"
 #include "SpecsynCommons.hpp"
 #include "SpecsynLib.hpp"
 #include <cstddef>
-#include <limits>
 #include <string>
 #include <vector>
 
@@ -75,7 +73,14 @@ namespace specsyn
          * @param nWl Number of points in the output grid; if 0 (the
          *   default), used as a flag to fall back on the library's
          *   own native wavelength grid -- see @details
-         * @param z The redshift; defaults to zero
+         * @param z The redshift; 0 for none
+         * @param controls Simulation controls; forwarded unchanged to
+         *   Specsyn's own constructor -- see its comment. Has no
+         *   default of its own (unlike every parameter above): a
+         *   reference bound to a temporary default-constructed
+         *   SimControls would dangle the moment this constructor
+         *   returned, since this class stores it live rather than
+         *   copying out of it.
          * @details
          * If nWl is nonzero, resamples onto nWl points log-spaced
          * from wlMin to wlMax (via SpecsynLib::resample) after
@@ -90,16 +95,16 @@ namespace specsyn
             const std::string& spectraName,
             double fehMin,
             double fehMax,
-            double afe = tracks::defaultAFe,
-            double cfe = defaultCFe,
-            double microTurb = std::numeric_limits<double>::quiet_NaN(),
-            double r = defaultR,
-            const std::string& registryName = defaultRegistry,
-            double wlMin = 0.0,
-            double wlMax = 0.0,
-            std::size_t nWl = 0,
-            double z = 0.0,
-            const io::SimControls& controls = io::SimControls{});
+            double afe,
+            double cfe,
+            double microTurb,
+            double r,
+            const std::string& registryName,
+            double wlMin,
+            double wlMax,
+            std::size_t nWl,
+            double z,
+            const io::SimControls& controls);
 
         /**
          * @brief Compute a star's spectrum by trilinear interpolation on the library grid

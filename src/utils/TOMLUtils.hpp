@@ -71,7 +71,7 @@ namespace utils
      * utils::getFilePath. See ParseUtils.hpp's initPDFFromString() for
      * the closely-related string-driven counterpart to this function,
      * used when there is a value to interpret but no toml table/key to
-     * read it from (e.g. SimPhysics's own set* methods).
+     * read it from (e.g. SimControls's own set* methods).
     */
     inline auto initPDFFromKey(const toml::table& inputDeck,
         const std::string& key,

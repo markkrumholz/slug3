@@ -193,9 +193,10 @@ static auto testSpecCts(const specsyn::SpecsynBlackbody& synth) -> int
 // uses -- at the requested point count, rather than at nWlDefault
 static auto testNWlOnly() -> int
 {
-    const specsyn::SpecsynBlackbody defaultSynth;
+    const io::SimControls testControls;
+    const specsyn::SpecsynBlackbody defaultSynth(0.0, 0.0, 0, 0.0, testControls);
     constexpr std::size_t nWlRequested = 37;
-    const specsyn::SpecsynBlackbody nWlOnlySynth(0.0, 0.0, nWlRequested);
+    const specsyn::SpecsynBlackbody nWlOnlySynth(0.0, 0.0, nWlRequested, 0.0, testControls);
 
     const auto& defaultWl = defaultSynth.wl();
     const auto& nWlOnlyWl = nWlOnlySynth.wl();

@@ -9,9 +9,7 @@
 #define SPECSYNLIBCHAINED_HPP
 
 #include "../io/SimControls.hpp"
-#include "../tracks/TrackCommons.hpp"
 #include "Specsyn.hpp"
-#include "SpecsynCommons.hpp"
 #include <cstddef>
 #include <limits>
 #include <memory>
@@ -72,7 +70,7 @@ namespace specsyn
          * @param nWl Number of points in the output grid; if 0 (the
          *   default), used as a flag to fall back on each library's
          *   own native wavelength grid -- see @details
-         * @param z The redshift; defaults to zero
+         * @param z The redshift; 0 for none
          * @param tClamp Whether to clamp a star's log(Teff) to the
          *   combined range spanned by every chained library before
          *   calling spec() on it; defaults to true. See @details.
@@ -140,22 +138,29 @@ namespace specsyn
          * grids simply not extending to the very low log(g) reached by
          * red supergiants, since that regime is hard for atmosphere
          * codes to model at all.
+         * @param controls Simulation controls; forwarded unchanged to
+         *   Specsyn's own constructor -- see its comment. Has no
+         *   default of its own (unlike every parameter above): a
+         *   reference bound to a temporary default-constructed
+         *   SimControls would dangle the moment this constructor
+         *   returned, since this class stores it live rather than
+         *   copying out of it.
          */
         SpecsynLibChained(
             const std::vector<std::string>& spectraName,
             double fehMin,
             double fehMax,
-            double afe = tracks::defaultAFe,
-            double cfe = defaultCFe,
-            const std::vector<double>& microTurb = {},
-            double r = defaultR,
-            const std::string& registryName = defaultRegistry,
-            double wlMin = 0.0,
-            double wlMax = 0.0,
-            std::size_t nWl = 0,
-            double z = 0.0,
-            bool tClamp = true,
-            const io::SimControls& controls = io::SimControls{});
+            double afe,
+            double cfe,
+            const std::vector<double>& microTurb,
+            double r,
+            const std::string& registryName,
+            double wlMin,
+            double wlMax,
+            std::size_t nWl,
+            double z,
+            bool tClamp,
+            const io::SimControls& controls);
 
         /**
          * @brief Compute a star's spectrum by trying each chained library in turn

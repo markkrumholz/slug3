@@ -16,7 +16,7 @@
 namespace
 {
     // Map a Python-facing PhotSystem name string to phot::PhotSystem,
-    // mirroring the phot.system string values io::SimPhysics::readFilters()
+    // mirroring the phot.system string values io::SimControls::readFilters()
     // itself recognizes
     auto photSystemFromString(const std::string& name) -> phot::PhotSystem
     {

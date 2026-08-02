@@ -9,7 +9,6 @@
 #include "../src/io/OutputManagerAscii.hpp"
 #include "../src/io/OutputManagerH5.hpp"
 #include "../src/io/SimControls.hpp"
-#include "../src/io/SimPhysics.hpp"
 #include "../src/utils/RngThread.hpp"
 #include "hdf5.h" // NOLINT(misc-include-cleaner)
 #include "io/SlugVersion.hpp"
@@ -27,7 +26,7 @@
 
 // Build a valid input deck for a cluster-type simulation that also
 // has usable stellar physics (IMF, tracks, CMF, etc.), by reusing
-// the deck already exercised by testSimPhysics/testCluster, and
+// the deck already exercised by testSimControls/testCluster, and
 // injecting model_name and out_dir into it as writeCluster's tests
 // need an OutputManager pointed at a real Cluster.
 static auto makeClusterPhysicsInputDeck(const std::string& modelName,
@@ -54,17 +53,16 @@ static auto testWriteClusterAscii() -> int
     try
     {
         const io::SimControls controls(inputDeck);
-        const io::SimPhysics sim(inputDeck, controls);
         utils::rng().seed(42);
         constexpr unsigned long uid = 7;
         constexpr double targetMass = 1e3;
         constexpr double formTime = 0.0;
-        const core::Cluster cluster(uid, targetMass, formTime, sim, controls);
+        const core::Cluster cluster(uid, targetMass, formTime, controls);
         constexpr unsigned long trial = 3;
 
         {
             io::OutputManagerAscii
-                manager(controls, sim, inputDeck);
+                manager(controls, inputDeck);
             manager.writeCluster(trial, cluster);
         }
 
@@ -124,17 +122,16 @@ static auto testWriteClusterH5() -> int
     try
     {
         const io::SimControls controls(inputDeck);
-        const io::SimPhysics sim(inputDeck, controls);
         utils::rng().seed(42);
         constexpr unsigned long uid = 11;
         constexpr double targetMass = 2e3;
         constexpr double formTime = 0.0;
-        const core::Cluster cluster(uid, targetMass, formTime, sim, controls);
+        const core::Cluster cluster(uid, targetMass, formTime, controls);
         constexpr unsigned long trial = 5;
 
         {
             io::OutputManagerH5
-                manager(controls, sim, inputDeck);
+                manager(controls, inputDeck);
             manager.writeCluster(trial, cluster);
         }
 
@@ -217,16 +214,15 @@ static auto testWriteReadClusterRngRoundTrip() -> int
     try
     {
         const io::SimControls controls(inputDeck);
-        const io::SimPhysics sim(inputDeck, controls);
         utils::rng().seed(123);
         constexpr unsigned long uid = 13;
         constexpr double targetMass = 5e3;
         constexpr double formTime = 0.0;
-        const core::Cluster cluster(uid, targetMass, formTime, sim, controls);
+        const core::Cluster cluster(uid, targetMass, formTime, controls);
         constexpr unsigned long trial = 1;
 
         {
-            io::OutputManagerH5 manager(controls, sim, inputDeck);
+            io::OutputManagerH5 manager(controls, inputDeck);
             manager.writeCluster(trial, cluster);
         }
 
@@ -251,7 +247,7 @@ static auto testWriteReadClusterRngRoundTrip() -> int
         H5Fclose(file);
         // NOLINTEND(misc-include-cleaner)
 
-        const core::Cluster rebuilt(uid, targetMass, formTime, sim, controls, readState);
+        const core::Cluster rebuilt(uid, targetMass, formTime, controls, readState);
 
         if (!std::ranges::equal(rebuilt.starMasses(), cluster.starMasses()))
         {
@@ -289,12 +285,11 @@ static auto testOutputManagerAscii() -> int
     const auto expectedPath = outDir / (modelName + "_summary.txt");
     const toml::table inputDeck = makeClusterPhysicsInputDeck(modelName, outDir);
     const io::SimControls controls(inputDeck);
-    const io::SimPhysics sim(inputDeck, controls);
 
     try
     {
         const io::OutputManagerAscii
-            manager(controls, sim, inputDeck);
+            manager(controls, inputDeck);
 
         if (!std::filesystem::exists(expectedPath))
         {
@@ -341,7 +336,7 @@ static auto testOutputManagerAscii() -> int
     try
     {
         const io::OutputManagerAscii
-            manager2(controls, sim, inputDeck);
+            manager2(controls, inputDeck);
         std::cerr << "testOutputManager: ascii: expected construction to "
             "throw on an existing output file, but it succeeded\n";
         return 1;
@@ -365,13 +360,12 @@ static auto testOutputManagerH5() -> int
     const auto expectedPath = outDir / (modelName + ".h5");
     const toml::table inputDeck = makeClusterPhysicsInputDeck(modelName, outDir);
     const io::SimControls controls(inputDeck);
-    const io::SimPhysics sim(inputDeck, controls);
 
     try
     {
         {
             const io::OutputManagerH5
-                manager(controls, sim, inputDeck);
+                manager(controls, inputDeck);
         }
 
         if (!std::filesystem::exists(expectedPath))
@@ -431,7 +425,7 @@ static auto testOutputManagerH5() -> int
     try
     {
         const io::OutputManagerH5
-            manager2(controls, sim, inputDeck);
+            manager2(controls, inputDeck);
         std::cerr << "testOutputManager: h5: expected construction to "
             "throw on an existing output file, but it succeeded\n";
         return 1;

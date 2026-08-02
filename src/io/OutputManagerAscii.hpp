@@ -10,7 +10,6 @@
 
 #include "OutputManager.hpp"
 #include "SimControls.hpp"
-#include "SimPhysics.hpp"
 #include <fstream>
 #include <toml.hpp>
 #include <vector>
@@ -33,15 +32,14 @@ namespace io
 
         /**
          * @brief Open the output file and write its header
-         * @param simControls Simulation control flow settings
-         * @param simPhysics Simulation physics settings
+         * @param simControls Simulation controls (physics settings and
+         *   control-flow settings together)
          * @param inputDeck The simulation's toml input deck
          * @details
-         * simControls, simPhysics, and inputDeck are stored by
-         * reference, so the objects passed in must outlive this
-         * OutputManagerAscii.
+         * simControls and inputDeck are stored by reference, so the
+         * objects passed in must outlive this OutputManagerAscii.
          */
-        OutputManagerAscii(const SimControls& simControls, const SimPhysics& simPhysics,
+        OutputManagerAscii(const SimControls& simControls,
             const toml::table& inputDeck);
 
         /**

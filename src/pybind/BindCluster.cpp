@@ -8,7 +8,6 @@
 #include "Bindings.hpp"
 #include "../core/Cluster.hpp"
 #include "../io/SimControls.hpp"
-#include "../io/SimPhysics.hpp"
 #include <memory>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h> // NOLINT(misc-include-cleaner); this is needed for correct Python binding, even if clang-tidy can't recognize it
@@ -25,17 +24,17 @@ uid : int, optional
     Unique identifier for this cluster. Defaults to 0.
 time : float, optional
     Cluster formation time, in yr. Defaults to 0.
-physics : SimPhysics, optional
-    Simulation physics settings; physics must outlive this Cluster.
-    Defaults to slug's own shared, bundled-default SimPhysics (built
-    from src/pybind/assets/PyDefaults.toml the first time it is
-    needed, and reused after that -- see SimPhysics()'s own default
-    path), letting a caller do e.g. cl = slug.Cluster(1e3) without
-    building a SimPhysics at all.
 controls : SimControls, optional
-    Simulation control flow settings; used only to record this
-    cluster's own PDF-integration tolerances at construction, not
-    stored. Defaults to a SimControls with all-default tolerances.)doc";
+    Simulation controls (physics settings and control-flow settings
+    together); controls must outlive this Cluster, and every value
+    this Cluster reads from it (e.g. its integrator tolerances) is
+    read live, not snapshotted, so changing controls after this
+    Cluster is built takes effect immediately. Defaults to slug's own
+    shared, bundled-default SimControls (built from
+    src/pybind/assets/PyDefaults.toml the first time it is needed, and
+    reused after that -- see SimControls()'s own default path),
+    letting a caller do e.g. cl = slug.Cluster(1e3) without building a
+    SimControls at all.)doc";
 
 static constexpr std::string_view uidDocstring = R"doc(Return the cluster's unique identifier.
 
@@ -106,9 +105,9 @@ Returns
 -------
 phot : list of float
     The photometric value computed from spec() by each filter in
-    SimPhysics.filters(), in the same order as
+    SimControls.filters(), in the same order as
     FilterCollection.filterNames()/filterUnits(), or an empty list if
-    no filter collection was requested (SimPhysics.filters() is
+    no filter collection was requested (SimControls.filters() is
     None).)doc";
 
 static constexpr std::string_view lbolDocstring = R"doc(Return the cluster's bolometric luminosity.
@@ -118,7 +117,7 @@ Returns
 lbol : float
     The population's total bolometric luminosity, in Lsun, at the
     current time, or 0 if no bolometric luminosity has ever been
-    computed (SimPhysics.computeLbol() is False).)doc";
+    computed (SimControls.computeLbol() is False).)doc";
 
 static constexpr std::string_view isDisruptedDocstring = R"doc(Return whether the cluster has disrupted.
 
@@ -141,32 +140,35 @@ void bindCluster(py::module_& m)
     py::class_<core::Cluster, py::smart_holder>(m, "Cluster")
         .def(py::init(
                 [](double mass, unsigned long uid, double time,
-                   const py::object& physics, const py::object& controls)
+                   const py::object& controls)
                     -> std::unique_ptr<core::Cluster>
                 {
-                    const io::SimControls defaultControls{};
-                    const io::SimPhysics& physicsRef = physics.is_none()
-                        ? sharedDefaultSimPhysics()
-                        : py::cast<const io::SimPhysics&>(physics);
-                    return std::make_unique<core::Cluster>(
-                        uid, mass, time, physicsRef,
-                        resolveControls(controls, defaultControls));
+                    // Deliberately a ternary, not
+                    // resolveControls(controls, sharedDefaultControls()):
+                    // sharedDefaultControls() is expensive (parses
+                    // PyDefaults.toml, the real MIST tracks, and the
+                    // full spectral-library chain) and can throw, so
+                    // it must only run when controls is actually
+                    // py::none() -- a plain function-call argument
+                    // would evaluate it eagerly on every construction
+                    // regardless.
+                    const io::SimControls& controlsRef = controls.is_none()
+                        ? sharedDefaultControls()
+                        : py::cast<const io::SimControls&>(controls);
+                    return std::make_unique<core::Cluster>(uid, mass, time, controlsRef);
                 }),
                 constructorDocstring.data(),
                 py::arg("mass"), py::arg("uid") = 0UL, py::arg("time") = 0.0,
-                py::arg("physics") = py::none(), py::arg("controls") = py::none(),
-                // Keep the physics argument (index 5: 1 = self, 2-4 =
+                py::arg("controls") = py::none(),
+                // Keep the controls argument (index 5: 1 = self, 2-4 =
                 // mass/uid/time) alive at least as long as this
-                // Cluster, since Cluster stores only a reference to
-                // it rather than its own copy. When physics is
-                // omitted (py::none()), this is a harmless no-op --
-                // sharedDefaultSimPhysics()'s own instance is a
-                // function-local static, needing no keep_alive
-                // protection at all (see its own comment in
-                // Bindings.hpp). controls needs no such keep_alive
-                // either way: Cluster copies the three tolerance
-                // values it needs out of it at construction, rather
-                // than storing a reference.
+                // Cluster, since Cluster stores only a live reference
+                // to it rather than copying anything out of it. When
+                // controls is omitted (py::none()), this is a
+                // harmless no-op -- sharedDefaultControls()'s own
+                // instance is a function-local static, needing no
+                // keep_alive protection at all (see its own comment
+                // in Bindings.hpp).
                 py::keep_alive<1, 5>())
         .def("uid", &core::Cluster::uid,
                 uidDocstring.data())

@@ -12,7 +12,6 @@
 #include "../pdfs/PDF.hpp"
 #include "../tracks/TrackCommons.hpp"
 #include "../utils/Constants.hpp"
-#include "../utils/PDFIntegrator.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -21,6 +20,11 @@
 #include <numbers>
 #include <utility>
 #include <vector>
+
+namespace io
+{
+    class SimControls;
+} // namespace io
 
 namespace specsyn
 {
@@ -51,15 +55,26 @@ namespace specsyn
 
         /**
          * @brief Construct a Specsyn
+         * @param controls Simulation controls this synthesizer reads
+         *   its integrator tolerances (intRelTol(), intAbsTol(),
+         *   intMaxIter()) from, live, for the rest of its lifetime --
+         *   see controls_'s own comment. Must outlive this Specsyn.
          * @param z The redshift; defaults to zero
          */
-        explicit Specsyn(double z = 0.0) : z_(z) { }
+        explicit Specsyn(const io::SimControls& controls, double z = 0.0) :
+            controls_(controls), z_(z) { }
 
         virtual ~Specsyn() = default;
+
+        // Copyable and movable (matching the C++ reference semantics
+        // of controls_, which just gets rebound to the same referent
+        // on copy), but never actually copied/assigned in practice --
+        // every Specsyn is held via unique_ptr (see SimControls's own
+        // specsyn_ and SpecsynLibChained's libs_)
         Specsyn(const Specsyn&) = default;
         Specsyn(Specsyn&&) = default;
-        auto operator=(const Specsyn&) -> Specsyn& = default;
-        auto operator=(Specsyn&&) -> Specsyn& = default;
+        auto operator=(const Specsyn&) -> Specsyn& = delete;
+        auto operator=(Specsyn&&) -> Specsyn& = delete;
 
         /**
          * @brief Return the rest-frame wavelength grid
@@ -189,74 +204,25 @@ namespace specsyn
             double mMin,
             double mMax,
             double feh
-        ) const -> std::vector<double>
-        {
-            // Integrate lambda * dL/dlambda (via specWl) rather than
-            // dL/dlambda directly, and scale intAbsTol_ (specified in
-            // units of dL/dlambda's own natural scale) by utils::Lsun
-            // to match -- see specWl()'s own doc comment for why.
-            using SpecSegFn = std::vector<double> (Specsyn::*)(double, const Segment&, double) const;
-            const utils::PDFIntegrator integrator(
-                imf, static_cast<SpecSegFn>(&Specsyn::specWl), static_cast<unsigned>(wl_.size()),
-                intMaxIter_, intAbsTol_ * utils::Lsun, intRelTol_);
-
-            std::vector<double> result(wl_.size(), 0.0);
-            for (const auto& seg : isochrone)
-            {
-                const double a = std::max(mMin, seg->xMin());
-                const double b = std::min(mMax, seg->xMax());
-                if (a >= b) { continue; } // empty intersection with [mMin, mMax]
-
-                const auto segResult = integrator.integrate(a, b, this, *seg, feh);
-                for (std::size_t i = 0; i < result.size(); ++i)
-                {
-                    result[i] += segResult[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- segResult has the same size as result (both sized to wl_.size()), and i is bounded by result.size()
-                }
-            }
-            // Scale by mTot and divide back out by wl_ elementwise,
-            // undoing specWl()'s multiplication to recover dL/dlambda
-            for (std::size_t i = 0; i < result.size(); ++i)
-            {
-                result[i] = result[i] * mTot / wl_[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- wl_ has the same size as result (both sized to wl_.size()), and i is bounded by result.size()
-            }
-            return result;
-        }
+        ) const -> std::vector<double>;
 
         /**
          * @brief Return the relative tolerance for PDF integration
-         * @return Relative tolerance passed to PDFIntegrator (default 1e-2)
+         * @return Relative tolerance passed to PDFIntegrator, read live from controls_
          */
-        [[nodiscard]] auto intRelTol() const { return intRelTol_; }
+        [[nodiscard]] auto intRelTol() const -> double;
 
         /**
          * @brief Return the absolute tolerance for PDF integration
-         * @return Absolute tolerance passed to PDFIntegrator (default 0)
+         * @return Absolute tolerance passed to PDFIntegrator, read live from controls_
          */
-        [[nodiscard]] auto intAbsTol() const { return intAbsTol_; }
+        [[nodiscard]] auto intAbsTol() const -> double;
 
         /**
          * @brief Return the maximum number of evaluations for PDF integration
-         * @return Max evaluations passed to PDFIntegrator (0 = unlimited, the default)
+         * @return Max evaluations passed to PDFIntegrator (0 = unlimited), read live from controls_
          */
-        [[nodiscard]] auto intMaxIter() const { return intMaxIter_; }
-
-        /**
-         * @brief Set the relative tolerance for PDF integration
-         * @param tol New relative tolerance
-         */
-        void setIntRelTol(double tol) { intRelTol_ = tol; }
-
-        /**
-         * @brief Set the absolute tolerance for PDF integration
-         * @param tol New absolute tolerance
-         */
-        void setIntAbsTol(double tol) { intAbsTol_ = tol; }
-
-        /**
-         * @brief Set the maximum number of evaluations for PDF integration
-         * @param n New maximum (0 = unlimited)
-         */
-        void setIntMaxIter(std::size_t n) { intMaxIter_ = n; }
+        [[nodiscard]] auto intMaxIter() const -> std::size_t;
 
     protected:
 
@@ -295,11 +261,23 @@ namespace specsyn
             return { area, logg };
         }
 
+        /**
+         * @brief Simulation controls this synthesizer reads its integrator tolerances from
+         * @details
+         * Read live, not snapshotted, every time specCts() integrates
+         * (see intRelTol()/intAbsTol()/intMaxIter(), which just
+         * forward to the same-named methods on this reference) --
+         * changing controls_'s own tolerances after this Specsyn is
+         * built takes effect immediately, with no need to rebuild the
+         * synthesizer. Bound once, at construction, from whichever
+         * SimControls actually built this synthesizer (see
+         * SimControls::readSpectra()); never reseated afterward, so
+         * that SimControls must outlive this Specsyn.
+         */
+        const io::SimControls& controls_; // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members) -- deliberately a live reference, not a copy: see this member's own comment for why (controls_'s own tolerances must be readable live, not snapshotted). This class is only ever used through the same non-copyable, non-movable ownership pattern (unique_ptr in SimControls's own specsyn_) as every other class with a reference member in this codebase (e.g. SpecsynLibNoWind's FeH_/logg_/logTeff_), so the usual objection (disabling implicit copy/move assignment) doesn't apply in practice.
+
         double z_;                   /**< Redshift */
         std::vector<double> wl_;     /**< Wavelength grid for the spectral synthesizer, in Angstrom */
-        double intRelTol_ = 1e-2;   /**< Relative tolerance for PDF integration */
-        double intAbsTol_ = 0.0;    /**< Absolute tolerance for PDF integration */
-        std::size_t intMaxIter_ = 0; /**< Max evaluations for PDF integration (0 = unlimited) */
     };
 
 } // namespace specsyn

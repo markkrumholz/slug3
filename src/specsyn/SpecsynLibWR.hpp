@@ -102,7 +102,14 @@ namespace specsyn
          * @param nWl Number of points in the output grid; if 0 (the
          *   default), used as a flag to fall back on the library's
          *   own native wavelength grid -- see @details
-         * @param z The redshift; defaults to zero
+         * @param z The redshift; 0 for none
+         * @param controls Simulation controls; forwarded unchanged to
+         *   Specsyn's own constructor -- see its comment. Has no
+         *   default of its own (unlike every parameter above): a
+         *   reference bound to a temporary default-constructed
+         *   SimControls would dangle the moment this constructor
+         *   returned, since this class stores it live rather than
+         *   copying out of it.
          * @throws std::runtime_error if spectraName does not contain
          *   "wne", "wc", or "wnl" together with one of "h20"/"h40"/
          *   "h60" (case-insensitively), since type_ cannot be
@@ -131,12 +138,12 @@ namespace specsyn
             const std::string& spectraName,
             double fehMin,
             double fehMax,
-            const std::string& registryName = defaultRegistry,
-            double wlMin = 0.0,
-            double wlMax = 0.0,
-            std::size_t nWl = 0,
-            double z = 0.0,
-            const io::SimControls& controls = io::SimControls{});
+            const std::string& registryName,
+            double wlMin,
+            double wlMax,
+            std::size_t nWl,
+            double z,
+            const io::SimControls& controls);
 
         /**
          * @brief Compute a star's spectrum by trilinear interpolation on the library grid

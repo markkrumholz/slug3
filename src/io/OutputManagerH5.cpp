@@ -12,7 +12,6 @@
 #include "../utils/RngThread.hpp"
 #include "OutputManager.hpp"
 #include "SimControls.hpp"
-#include "SimPhysics.hpp"
 #include "hdf5.h" // NOLINT(misc-include-cleaner)
 #include "io/SlugVersion.hpp"
 #include <array>
@@ -271,9 +270,9 @@ static void appendRowToDataset2d(const hid_t loc, const std::string& name,
 // (slug-hash, date, time) as top-level attributes, then dump the toml
 // input deck into an input_deck group, and leave the file open
 io::OutputManagerH5::OutputManagerH5(
-    const SimControls& simControls, const SimPhysics& simPhysics,
+    const SimControls& simControls,
     const toml::table& inputDeck) :
-    OutputManager(simControls, simPhysics, inputDeck)
+    OutputManager(simControls, inputDeck)
 {
     const auto path = std::filesystem::path(simControls_.outDir()) /
         (simControls_.modelName() + ".h5");
@@ -373,9 +372,9 @@ void io::OutputManagerH5::openClustersGroup()
 // synthesizer was requested for this simulation
 void io::OutputManagerH5::openClusterSpectraGroup()
 {
-    if (simPhysics_.specsyn() == nullptr) { return; }
+    if (simControls_.specsyn() == nullptr) { return; }
 
-    const auto& synth = *simPhysics_.specsyn();
+    const auto& synth = *simControls_.specsyn();
     const std::vector<double> wlObs = synth.wlObs();
     const auto nWl = static_cast<hsize_t>(wlObs.size());
 
@@ -416,16 +415,16 @@ void io::OutputManagerH5::openClusterSpectraGroup()
 // simulation
 void io::OutputManagerH5::openClusterPhotGroup()
 {
-    if (simPhysics_.filters() == nullptr && !simPhysics_.computeLbol()) { return; }
+    if (simControls_.filters() == nullptr && !simControls_.computeLbol()) { return; }
 
     std::vector<std::string> filterNames;
     std::vector<std::string> filterUnits;
-    if (simPhysics_.filters() != nullptr)
+    if (simControls_.filters() != nullptr)
     {
-        filterNames = simPhysics_.filters()->filterNames();
-        filterUnits = simPhysics_.filters()->filterUnits();
+        filterNames = simControls_.filters()->filterNames();
+        filterUnits = simControls_.filters()->filterUnits();
     }
-    if (simPhysics_.computeLbol())
+    if (simControls_.computeLbol())
     {
         filterNames.emplace_back("Lbol");
         filterUnits.emplace_back("Lsun");
@@ -561,7 +560,7 @@ void io::OutputManagerH5::writeClusterPhot(
 
     const unsigned long uid = cluster.uid();
     auto phot = cluster.phot();
-    if (simPhysics_.computeLbol()) { phot.push_back(cluster.lbol()); }
+    if (simControls_.computeLbol()) { phot.push_back(cluster.lbol()); }
 
     // Guard the actual writes against concurrent callers from other
     // threads, and against writeCluster's/writeClusterSpec's own

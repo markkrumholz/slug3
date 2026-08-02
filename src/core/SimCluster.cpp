@@ -8,7 +8,6 @@
 #include "SimCluster.hpp"
 #include "../io/OutputManager.hpp"
 #include "../io/SimControls.hpp"
-#include "../io/SimPhysics.hpp"
 #include "../utils/UniqueIDManager.hpp"
 #include "Cluster.hpp"
 #include <iostream>
@@ -16,10 +15,8 @@
 #include <utility>
 
 core::SimCluster::SimCluster(const io::SimControls& simControls,
-    const io::SimPhysics& simPhysics,
     std::unique_ptr<io::OutputManager> outputManager) :
     simControls_(simControls),
-    simPhysics_(simPhysics),
     outputManager_(std::move(outputManager))
 {
 }
@@ -49,7 +46,7 @@ void core::SimCluster::run()
         }
 
         // Create cluster for this trial
-        Cluster cluster(utils::getID(), simPhysics_.cmf().draw(), 0, simPhysics_, simControls_);
+        Cluster cluster(utils::getID(), simControls_.cmf().draw(), 0, simControls_);
 
         // Write time-invariant cluster properties to output
         outputManager_->writeCluster(trialNum, cluster);

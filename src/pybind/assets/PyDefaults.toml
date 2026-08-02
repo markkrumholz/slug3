@@ -1,6 +1,14 @@
 sim_type = "cluster"
 n_trial = 1
 
+# SimControls's constructor requires an outputs.* time specification
+# unconditionally, even though this bundled deck is meant for
+# interactive Cluster exploration (which never calls SimControls's
+# own outTimes()) rather than driving a full simulation. This
+# single-time placeholder is never used for that reason.
+[outputs]
+output_times = [0.0]
+
 [stars]
 IMF = "chabrier.toml"
 tracks = "MIST"
@@ -11,13 +19,13 @@ FeH = 0.0
 [spectra]
 model = ["POWR_WC", "POWR_WNE", "POWR_WNL_H20", "POWR_WNL_H40", "POWR_WNL_H60", "TLUSTY_O", "TLUSTY_B", "BOSZ", "CK04", "MARCS"]
 
-# SimPhysics's constructor requires clusters.CMF unconditionally, with
+# SimControls's constructor requires clusters.CMF unconditionally, with
 # no fallback, even though this bundled deck is meant for interactive
 # Cluster exploration (where Cluster's own Python constructor takes an
 # explicit target mass, never drawing from cmf_ at all) rather than
 # running a full cluster simulation (where cmf_ actually matters). This
 # placeholder value is never used for that reason; call setCMF() to
-# give it real meaning if driving a simulation from this SimPhysics
+# give it real meaning if driving a simulation from this SimControls
 # instead. Revisit once galaxy-simulation defaults are implemented.
 [clusters]
 CMF = 1e4

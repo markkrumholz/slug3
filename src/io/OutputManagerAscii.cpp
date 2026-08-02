@@ -12,7 +12,6 @@
 #include "../utils/RngThread.hpp"
 #include "OutputManager.hpp"
 #include "SimControls.hpp"
-#include "SimPhysics.hpp"
 #include "io/SlugVersion.hpp"
 #include <algorithm>
 #include <cstddef>
@@ -176,9 +175,9 @@ static void writeClusterPhotHeader(std::ofstream& file,
 // open the cluster output file, write its column-header rows, and
 // leave it open for later writing.
 io::OutputManagerAscii::OutputManagerAscii(
-    const SimControls& simControls, const SimPhysics& simPhysics,
+    const SimControls& simControls,
     const toml::table& inputDeck) :
-    OutputManager(simControls, simPhysics, inputDeck)
+    OutputManager(simControls, inputDeck)
 {
     const auto path = std::filesystem::path(simControls_.outDir()) /
         (simControls_.modelName() + "_summary.txt");
@@ -225,9 +224,9 @@ io::OutputManagerAscii::OutputManagerAscii(
         writeClustersHeader(clustersFile_);
     }
 
-    if (simPhysics_.specsyn() != nullptr)
+    if (simControls_.specsyn() != nullptr)
     {
-        wlObs_ = simPhysics_.specsyn()->wlObs();
+        wlObs_ = simControls_.specsyn()->wlObs();
 
         const auto clusterSpectraPath = std::filesystem::path(simControls_.outDir()) /
             (simControls_.modelName() + "_cluster_spectra.txt");
@@ -246,7 +245,7 @@ io::OutputManagerAscii::OutputManagerAscii(
         writeClusterSpectraHeader(clusterSpectraFile_);
     }
 
-    if (simPhysics_.filters() != nullptr || simPhysics_.computeLbol())
+    if (simControls_.filters() != nullptr || simControls_.computeLbol())
     {
         const auto clusterPhotPath = std::filesystem::path(simControls_.outDir()) /
             (simControls_.modelName() + "_cluster_phot.txt");
@@ -264,12 +263,12 @@ io::OutputManagerAscii::OutputManagerAscii(
         }
         std::vector<std::string> filterNames;
         std::vector<std::string> filterUnits;
-        if (simPhysics_.filters() != nullptr)
+        if (simControls_.filters() != nullptr)
         {
-            filterNames = simPhysics_.filters()->filterNames();
-            filterUnits = simPhysics_.filters()->filterUnits();
+            filterNames = simControls_.filters()->filterNames();
+            filterUnits = simControls_.filters()->filterUnits();
         }
-        if (simPhysics_.computeLbol())
+        if (simControls_.computeLbol())
         {
             filterNames.emplace_back("Lbol");
             filterUnits.emplace_back("Lsun");
@@ -362,7 +361,7 @@ void io::OutputManagerAscii::writeClusterPhot(
 
     const unsigned long uid = cluster.uid();
     auto phot = cluster.phot();
-    if (simPhysics_.computeLbol()) { phot.push_back(cluster.lbol()); }
+    if (simControls_.computeLbol()) { phot.push_back(cluster.lbol()); }
 
     // Guard the actual writes against concurrent callers from other
     // threads; unlike the constructor, this method is expected to be

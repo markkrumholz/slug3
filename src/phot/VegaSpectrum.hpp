@@ -76,7 +76,7 @@ namespace phot
      * caller that needs a non-default Vega file must therefore call
      * this function with that vegaName before anything else in the
      * program can call it with the default (see
-     * SimPhysics::readFilters()). Not marked [[nodiscard]]: unlike
+     * SimControls::readFilters()). Not marked [[nodiscard]]: unlike
      * VegaSpectrum::spectrum(), a caller is sometimes deliberately
      * calling this only to force that first, file-selecting
      * construction, with no use for the returned spectrum itself.

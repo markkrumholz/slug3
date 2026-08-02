@@ -6,7 +6,7 @@
  * @details
  * No constructor is exposed on PDF itself: a PDF is only ever obtained
  * from Python either by way of another bound object that owns one
- * (e.g. a future SimPhysics.imf property) or via the module-level
+ * (e.g. SimControls.imf) or via the module-level
  * parsePDFDescriptor() function, mirroring pdfs::parsePDFDescriptor().
  */
 

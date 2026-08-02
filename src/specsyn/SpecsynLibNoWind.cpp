@@ -346,7 +346,7 @@ namespace specsyn
         const std::size_t nWl,
         const double z,
         const io::SimControls& controls) :
-        SpecsynLib<Policy>(),
+        SpecsynLib<Policy>(controls, z),
         FeH_(this->dim1_),
         logg_(this->dim2_),
         logTeff_(this->dim3_),
@@ -361,11 +361,6 @@ namespace specsyn
             getMicroDefault(spectraName, registryName) : microTurb),
         r_(r)
     {
-        this->z_ = z;
-        this->intRelTol_ = controls.intRelTol();
-        this->intAbsTol_ = controls.intAbsTol();
-        this->intMaxIter_ = controls.intMaxIter();
-
         // Step 1: find the set of spectra matching the input criteria
         auto [fehVals, groupNames] = findMatchingSpectra(
             spectraName, fehMin, fehMax, afe, cfe, microTurb_, r, registryName);
@@ -466,7 +461,7 @@ namespace specsyn
         // If the caller requested an explicit output grid rather than
         // this library's own native one, resample onto it now. wlMin
         // == 0 here means only nWl was actually requested (wlMin/
-        // wlMax are still at SimPhysics::readSpectra's "not supplied"
+        // wlMax are still at SimControls::readSpectra's "not supplied"
         // sentinel), so fall back to this library's own just-read
         // native range in that case, keeping the caller's requested
         // point count.

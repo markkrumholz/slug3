@@ -10,7 +10,6 @@
 
 #include "../io/OutputManager.hpp"
 #include "../io/SimControls.hpp"
-#include "../io/SimPhysics.hpp"
 #include <memory>
 
 namespace core
@@ -26,17 +25,16 @@ namespace core
 
         /**
          * @brief Initialize a cluster simulation
-         * @param simControls Simulation control flow settings
-         * @param simPhysics Simulation physics settings
+         * @param simControls Simulation controls (physics settings and
+         *   control-flow settings together)
          * @param outputManager Output manager to which simulation
          *   results should be written; ownership is transferred to
          *   this SimCluster
          * @details
-         * simControls and simPhysics are stored by reference, so the
-         * objects passed in must outlive this SimCluster.
+         * simControls is stored by reference, so the object passed in
+         * must outlive this SimCluster.
          */
         SimCluster(const io::SimControls& simControls,
-            const io::SimPhysics& simPhysics,
             std::unique_ptr<io::OutputManager> outputManager);
 
         // Disallow copying and moving: this object owns the output
@@ -56,8 +54,7 @@ namespace core
 
     private:
 
-        const io::SimControls& simControls_; /**< Simulation control flow settings */
-        const io::SimPhysics& simPhysics_;   /**< Simulation physics settings */
+        const io::SimControls& simControls_; /**< Simulation controls (physics and control-flow settings) */
         std::unique_ptr<io::OutputManager> outputManager_; /**< Output manager */
     };
 

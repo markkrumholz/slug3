@@ -124,7 +124,7 @@ jobs:
 
       - name: Run clang-tidy on changed files
         run: |
-          CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD \
+          CHANGED=$(git diff --name-only --diff-filter=d origin/${{ github.base_ref }}...HEAD \
             | grep -E '^src/.*\.(cpp|hpp)$' \
             | grep -v 'pcg-cpp' || true)
           if [ -z "$CHANGED" ]; then

@@ -8,7 +8,6 @@
 #include "OutputManager.hpp"
 #include "../utils/RngThread.hpp"
 #include "SimControls.hpp"
-#include "SimPhysics.hpp"
 #include <chrono>
 #include <ctime>
 #include <iomanip>
@@ -18,9 +17,8 @@
 #include <utility>
 
 io::OutputManager::OutputManager(const SimControls& simControls,
-    const SimPhysics& simPhysics, const toml::table& inputDeck) :
+    const toml::table& inputDeck) :
     simControls_(simControls),
-    simPhysics_(simPhysics),
     inputDeck_(inputDeck)
 {
 }
