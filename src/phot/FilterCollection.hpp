@@ -11,6 +11,7 @@
 #include "Filter.hpp"
 #include "FilterCommons.hpp"
 #include "PhotCommons.hpp"
+#include <cstddef>
 #include <memory>
 #include <string>
 #include <vector>
@@ -106,6 +107,23 @@ namespace phot
          *   same order as phot()/filterNames()/filterUnits()
          */
         [[nodiscard]] auto filters() const -> const std::vector<std::unique_ptr<Filter>>& { return filters_; }
+
+        /**
+         * @brief Get a single filter by index
+         * @param i Index of the filter to get, in the same order as
+         *   phot()/filterNames()/filterUnits()
+         * @return A const reference to the i'th filter
+         * @throws std::out_of_range if i >= filters().size()
+         */
+        [[nodiscard]] auto getFilter(std::size_t i) const -> const Filter&;
+
+        /**
+         * @brief Get a single filter by name
+         * @param name Name to search for
+         * @return A const reference to the filter whose name() exactly matches name
+         * @throws std::runtime_error if no filter's name() matches name
+         */
+        [[nodiscard]] auto getFilter(const std::string& name) const -> const Filter&;
 
     private:
         std::vector<std::unique_ptr<Filter>> filters_; /**< The filters in this collection */

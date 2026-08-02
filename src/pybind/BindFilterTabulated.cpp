@@ -6,6 +6,7 @@
  */
 
 #include "Bindings.hpp"
+#include "../phot/Filter.hpp"
 #include "../phot/FilterTabulated.hpp"
 #include <memory>
 #include <pybind11/pybind11.h>
@@ -61,19 +62,6 @@ Throws
 ------
 RuntimeError
     If the facility/instrument/filter is not found in the registry.)doc";
-
-static constexpr std::string_view nameDocstring = R"doc(Get the name of this filter.
-
-Returns
--------
-name : str)doc";
-
-static constexpr std::string_view photCountDocstring = R"doc(Get whether this filter returns photon counts.
-
-Returns
--------
-phot_count : bool
-    Always False for a FilterTabulated.)doc";
 
 static constexpr std::string_view normDocstring = R"doc(Get the integral of the filter response with respect to ln(wavelength).
 
@@ -131,7 +119,7 @@ response : Interpolator1DScalar
 // NOLINTBEGIN(misc-include-cleaner)
 void bindFilterTabulated(py::module_& m)
 {
-    py::class_<phot::FilterTabulated, py::smart_holder>(m, "FilterTabulated")
+    py::class_<phot::FilterTabulated, phot::Filter, py::smart_holder>(m, "FilterTabulated")
         .def(py::init(
                 [](std::string name, const std::vector<double>& wl,
                    const std::vector<double>& response, double wlPivot)
@@ -154,10 +142,6 @@ void bindFilterTabulated(py::module_& m)
                 registryConstructorDocstring.data(),
                 py::arg("facility"), py::arg("instrument"), py::arg("filter"),
                 py::arg("registry") = phot::defaultRegistry)
-        .def("name", &phot::FilterTabulated::name,
-                nameDocstring.data())
-        .def("photCount", &phot::FilterTabulated::photCount,
-                photCountDocstring.data())
         .def("norm", &phot::FilterTabulated::norm,
                 normDocstring.data())
         .def("wlPivot", &phot::FilterTabulated::wlPivot,

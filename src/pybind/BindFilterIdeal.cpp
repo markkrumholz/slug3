@@ -6,6 +6,7 @@
  */
 
 #include "Bindings.hpp"
+#include "../phot/Filter.hpp"
 #include "../phot/FilterIdeal.hpp"
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h> // NOLINT(misc-include-cleaner); this is needed for correct Python binding, even if clang-tidy can't recognize it
@@ -40,20 +41,6 @@ Throws
 RuntimeError
     If name does not match either recognized convention, or if the
     requested ionization potential is not available.)doc";
-
-static constexpr std::string_view nameDocstring = R"doc(Get the name of this filter.
-
-Returns
--------
-name : str)doc";
-
-static constexpr std::string_view photCountDocstring = R"doc(Get whether this filter returns photon counts.
-
-Returns
--------
-phot_count : bool
-    True if this filter returns photon counts rather than F_lambda
-    values, false otherwise.)doc";
 
 static constexpr std::string_view wlMinDocstring = R"doc(Get the minimum wavelength of this filter's response.
 
@@ -101,14 +88,10 @@ value : float
 // NOLINTBEGIN(misc-include-cleaner)
 void bindFilterIdeal(py::module_& m)
 {
-    py::class_<phot::FilterIdeal, py::smart_holder>(m, "FilterIdeal")
+    py::class_<phot::FilterIdeal, phot::Filter, py::smart_holder>(m, "FilterIdeal")
         .def(py::init<std::string>(),
                 constructorDocstring.data(),
                 py::arg("name"))
-        .def("name", &phot::FilterIdeal::name,
-                nameDocstring.data())
-        .def("photCount", &phot::FilterIdeal::photCount,
-                photCountDocstring.data())
         .def("wlMin", &phot::FilterIdeal::wlMin,
                 wlMinDocstring.data())
         .def("wlMax", &phot::FilterIdeal::wlMax,

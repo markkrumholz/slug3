@@ -247,3 +247,23 @@ auto phot::FilterCollection::filterUnits() const -> std::vector<std::string>
     }
     return result;
 }
+
+auto phot::FilterCollection::getFilter(const std::size_t i) const -> const Filter&
+{
+    if (i >= filters_.size())
+    {
+        throw std::out_of_range(
+            "FilterCollection::getFilter: index " + std::to_string(i) +
+            " is out of range for " + std::to_string(filters_.size()) + " filters");
+    }
+    return *filters_[i]; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i is checked against filters_.size() just above
+}
+
+auto phot::FilterCollection::getFilter(const std::string& name) const -> const Filter&
+{
+    for (const auto& filt : filters_)
+    {
+        if (filt->name() == name) { return *filt; }
+    }
+    throw std::runtime_error("FilterCollection::getFilter: no filter named \"" + name + "\"");
+}

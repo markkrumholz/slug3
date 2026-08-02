@@ -27,6 +27,7 @@ PYBIND11_MODULE(slug, m, py::mod_gil_not_used()) {
     bindSimPhysics(m);
     bindSpecsyn(m);
     bindCluster(m);
+    bindFilter(m);
     bindFilterIdeal(m);
     bindFilterTabulated(m);
     bindFilterCollection(m);

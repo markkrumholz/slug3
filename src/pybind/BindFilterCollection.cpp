@@ -6,8 +6,10 @@
  */
 
 #include "Bindings.hpp"
+#include "../phot/Filter.hpp"
 #include "../phot/FilterCollection.hpp"
 #include "../phot/PhotCommons.hpp"
+#include <cstddef>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h> // NOLINT(misc-include-cleaner); this is needed for correct Python binding, even if clang-tidy can't recognize it
 #include <string>
@@ -87,6 +89,51 @@ units : list of str
     or "VegaMag" (Vega), matching this collection's phot_system -- in
     the same order as phot()/filterNames().)doc";
 
+static constexpr std::string_view getFilterByIndexDocstring = R"doc(Get a single filter by index.
+
+Parameters
+----------
+i : int
+    Index of the filter to get, in the same order as
+    phot()/filterNames()/filterUnits().
+
+Returns
+-------
+filter : FilterIdeal or FilterTabulated
+    The i'th filter, as whichever concrete type it actually is.
+
+Throws
+------
+IndexError
+    If i is out of range.)doc";
+
+static constexpr std::string_view getFilterByNameDocstring = R"doc(Get a single filter by name.
+
+Parameters
+----------
+name : str
+    Name to search for; must exactly match one entry of filterNames().
+
+Returns
+-------
+filter : FilterIdeal or FilterTabulated
+    The filter whose name() exactly matches name, as whichever
+    concrete type it actually is.
+
+Throws
+------
+RuntimeError
+    If no filter's name() matches name.)doc";
+
+static constexpr std::string_view filtersDocstring = R"doc(Get every filter in this collection.
+
+Returns
+-------
+filters : list of FilterIdeal or FilterTabulated
+    Every filter in this collection, each as whichever concrete type
+    it actually is, in the same order as
+    phot()/filterNames()/filterUnits().)doc";
+
 // Disable linting for includes -- the pybind macro magic seems to confuse
 // the linter
 // NOLINTBEGIN(misc-include-cleaner)
@@ -112,6 +159,30 @@ void bindFilterCollection(py::module_& m)
         .def("filterNames", &phot::FilterCollection::filterNames,
                 filterNamesDocstring.data())
         .def("filterUnits", &phot::FilterCollection::filterUnits,
-                filterUnitsDocstring.data());
+                filterUnitsDocstring.data())
+        .def("getFilter",
+                [](const phot::FilterCollection& self, std::size_t i) -> const phot::Filter&
+                {
+                    return self.getFilter(i);
+                },
+                getFilterByIndexDocstring.data(),
+                py::arg("i"), py::return_value_policy::reference_internal)
+        .def("getFilter",
+                [](const phot::FilterCollection& self, const std::string& name) -> const phot::Filter&
+                {
+                    return self.getFilter(name);
+                },
+                getFilterByNameDocstring.data(),
+                py::arg("name"), py::return_value_policy::reference_internal)
+        .def("filters",
+                [](const phot::FilterCollection& self) -> std::vector<const phot::Filter*>
+                {
+                    std::vector<const phot::Filter*> result;
+                    result.reserve(self.filters().size());
+                    for (const auto& filt : self.filters()) { result.push_back(filt.get()); }
+                    return result;
+                },
+                filtersDocstring.data(),
+                py::return_value_policy::reference_internal);
 }
 // NOLINTEND(misc-include-cleaner)

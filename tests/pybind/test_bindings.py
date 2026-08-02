@@ -719,6 +719,87 @@ def test_filtercollection_invalid_name_raises():
         slug.FilterCollection(["not_a_valid_name"], slug.PhotSystem.Flambda, FILTER_REGISTRY)
 
 
+def test_filtercollection_getfilter_by_index_downcasts():
+    """getFilter(i) should hand back each filter as its actual
+    concrete type (FilterTabulated or FilterIdeal), not a bare Filter
+    -- pybind11's automatic polymorphic downcasting, since FilterIdeal
+    and FilterTabulated are both registered as Filter subclasses."""
+    names = ["SLUGTEST.CAM1.G500", "ideal_phot_700_1500", "Q(HI)"]
+    fc = slug.FilterCollection(names, slug.PhotSystem.Flambda, FILTER_REGISTRY)
+
+    tab = fc.getFilter(0)
+    assert isinstance(tab, slug.FilterTabulated)
+    assert isinstance(tab, slug.Filter)
+    assert tab.name() == "SLUGTEST.CAM1.G500"
+    assert tab.norm() > 0.0  # FilterTabulated-only method
+
+    ideal = fc.getFilter(1)
+    assert isinstance(ideal, slug.FilterIdeal)
+    assert ideal.name() == "ideal_phot_700_1500"
+    assert ideal.wlMin() == pytest.approx(700.0)  # FilterIdeal-only method
+
+
+def test_filtercollection_getfilter_by_name():
+    """getFilter(name) should return the filter whose name() exactly
+    matches, agreeing with the same filter fetched by index."""
+    names = ["SLUGTEST.CAM1.G500", "ideal_phot_700_1500", "Q(HI)"]
+    fc = slug.FilterCollection(names, slug.PhotSystem.Flambda, FILTER_REGISTRY)
+
+    by_name = fc.getFilter("Q(HI)")
+    by_index = fc.getFilter(2)
+    assert type(by_name) is type(by_index)
+    assert by_name.name() == by_index.name() == "Q(HI)"
+
+
+def test_filtercollection_getfilter_bad_index_raises_indexerror():
+    """An out-of-range index should raise IndexError specifically, not
+    just any RuntimeError."""
+    fc = slug.FilterCollection(["Q(HI)"], slug.PhotSystem.Flambda, FILTER_REGISTRY)
+    with pytest.raises(IndexError):
+        fc.getFilter(1)
+
+
+def test_filtercollection_getfilter_bad_name_raises_runtimeerror():
+    """A name with no matching filter should raise RuntimeError, not
+    IndexError."""
+    fc = slug.FilterCollection(["Q(HI)"], slug.PhotSystem.Flambda, FILTER_REGISTRY)
+    with pytest.raises(RuntimeError):
+        fc.getFilter("not_in_this_collection")
+
+
+def test_filtercollection_filters_matches_names_and_order():
+    """filters() should return one filter per filterNames() entry, in
+    the same order, each downcast to its concrete type, agreeing with
+    the same filters fetched one at a time via getFilter()."""
+    names = ["SLUGTEST.CAM1.G500", "ideal_energy_700_1500", "ideal_phot_700_1500", "Q(HI)"]
+    fc = slug.FilterCollection(names, slug.PhotSystem.Flambda, FILTER_REGISTRY)
+
+    filts = fc.filters()
+    assert [f.name() for f in filts] == names
+    assert [type(f).__name__ for f in filts] == [
+        "FilterTabulated", "FilterIdeal", "FilterIdeal", "FilterIdeal"]
+    for i, filt in enumerate(filts):
+        assert type(filt) is type(fc.getFilter(i))
+        assert filt.name() == fc.getFilter(i).name()
+
+
+def test_filtercollection_filter_outlives_collection():
+    """A filter obtained from getFilter()/filters() must stay usable
+    even after every other reference to its owning FilterCollection is
+    dropped -- FilterCollection owns the underlying Filter objects, so
+    the binding must keep the collection alive as long as any filter
+    obtained from it survives (mirrors
+    test_cluster_tracks_reference_survives_cluster_deletion)."""
+    fc = slug.FilterCollection(["Q(HI)"], slug.PhotSystem.Flambda, FILTER_REGISTRY)
+    filt = fc.getFilter(0)
+    filts = fc.filters()
+    del fc
+    gc.collect()
+
+    assert filt.name() == "Q(HI)"
+    assert filts[0].name() == "Q(HI)"
+
+
 def test_cluster_phot_empty_without_filters(sim_physics, sim_controls):
     """CLUSTER_DECK has no [phot] section, so phot() should stay empty
     even after advance()."""

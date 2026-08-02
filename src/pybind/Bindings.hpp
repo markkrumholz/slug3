@@ -88,6 +88,18 @@ void bindSpecsyn(py::module_& m);
 void bindCluster(py::module_& m);
 
 /**
+ * @brief Bind phot::Filter as Filter
+ * @details
+ * Must run before bindFilterIdeal()/bindFilterTabulated(), since those
+ * register phot::Filter as their Python base class -- this is what
+ * lets pybind11 automatically hand back a FilterIdeal or
+ * FilterTabulated (rather than a bare Filter) wherever C++ returns a
+ * Filter reference/pointer whose most-derived type is one of them
+ * (e.g. FilterCollection::getFilter()).
+ */
+void bindFilter(py::module_& m);
+
+/**
  * @brief Bind phot::FilterIdeal as FilterIdeal
  */
 void bindFilterIdeal(py::module_& m);

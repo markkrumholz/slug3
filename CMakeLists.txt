@@ -325,6 +325,7 @@ pybind11_add_module(slugPython
     src/pybind/BindSimPhysics.cpp
     src/pybind/BindSpecsyn.cpp
     src/pybind/BindCluster.cpp
+    src/pybind/BindFilter.cpp
     src/pybind/BindFilterIdeal.cpp
     src/pybind/BindFilterTabulated.cpp
     src/pybind/BindFilterCollection.cpp
