@@ -87,6 +87,13 @@ data/filters/*.h5
 # library grid like the rest of data/spectra/*.h5), so it's committed
 # rather than fetched on demand
 !data/spectra/vega.h5
+# V_filter.h5/.toml are a standalone, single-filter (Generic.Johnson.V)
+# copy of data/filters/filters.h5, small enough to commit, needed for
+# extinction (conventionally quantified in V-band magnitudes) without
+# requiring the full filter set to be fetched -- see
+# data/tools/make_v_filter_fixture.py
+!data/filters/V_filter.h5
+!data/filters/V_filter.toml
 
 # Downloaded archive caches from data/tools fetch scripts
 data/tools/powr_temp/
