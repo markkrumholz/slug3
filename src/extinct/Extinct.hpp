@@ -16,6 +16,7 @@
 #include "hdf5.h" // NOLINT(misc-include-cleaner) -- see HDF5Utils.hpp's own comment on including hdf5.h wholesale
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <filesystem>
 #include <iterator>
 #include <stdexcept>
@@ -117,13 +118,22 @@ namespace extinct
             // Build an interpolator for the native curve data
             const interp::Interpolator1D<1> interp(wlDat_, extinctDat_);
 
-            // Chop wl down to the interpolator's own coverage, then
-            // interpolate the curve onto what remains
-            std::ranges::copy_if(wl, std::back_inserter(wl_),
-                [&interp](const double w) -> bool
-                { return w >= interp.xMin() && w <= interp.xMax(); });
-            extinct_.reserve(wl_.size());
-            for (const double w : wl_) { extinct_.push_back(interp(w)); }
+            // Chop wl down to the interpolator's own coverage -- wl is
+            // assumed sorted ascending (a spectral wavelength grid),
+            // so the kept elements are a single contiguous run;
+            // wlOffset_ records how many leading elements were
+            // dropped, so applyExtinction() can later line up a
+            // spectrum tabulated on this same original wl without
+            // having to rediscover the chop -- then interpolate the
+            // curve onto what remains
+            const auto firstIt = std::ranges::find_if(wl,
+                [&interp](const double w) -> bool { return w >= interp.xMin(); });
+            wlOffset_ = static_cast<std::size_t>(std::distance(wl.begin(), firstIt));
+            for (auto it = firstIt; it != wl.end() && *it <= interp.xMax(); ++it)
+            {
+                wl_.push_back(*it);
+                extinct_.push_back(interp(*it));
+            }
 
             // Normalize the curve to a V-band extinction of 1 mag
             normalize(wl_, extinct_);
@@ -159,6 +169,31 @@ namespace extinct
          *   arbitrary units, interpolated onto wl()
          */
         [[nodiscard]] auto extinct() const -> const std::vector<double>& { return extinct_; }
+
+        /**
+         * @brief Apply this extinction curve to a spectrum
+         * @param A_V V-band extinction to apply, in magnitudes
+         * @param spec Spectrum to extinguish, tabulated on exactly the
+         *   same wavelength grid as the wl originally passed to the
+         *   constructor
+         * @returns The extinguished spectrum, on the wavelength grid
+         *   returned by wl()
+         * @details
+         * spec's first wlOffset_ elements (those falling outside this
+         * curve's own wavelength coverage) are discarded; each of the
+         * remaining wl().size() elements is multiplied by
+         * exp(-A_V * extinct()) at the corresponding wavelength.
+         */
+        [[nodiscard]] auto applyExtinction(const double A_V, // NOLINT(readability-identifier-naming) -- see above
+            const std::vector<double>& spec) const -> std::vector<double>
+        {
+            std::vector<double> result(wl_.size());
+            for (std::size_t i = 0; i < wl_.size(); i++)
+            {
+                result.at(i) = spec.at(wlOffset_ + i) * std::exp(-A_V * extinct_.at(i));
+            }
+            return result;
+        }
 
     private:
 
@@ -218,6 +253,7 @@ namespace extinct
         std::vector<double> extinctDat_; /**< Native extinction curve, in arbitrary units */
         std::vector<double> wl_;         /**< Interpolated wavelength grid, in Angstrom */
         std::vector<double> extinct_;    /**< Extinction curve interpolated onto wl_ */
+        std::size_t wlOffset_ = 0;       /**< Number of leading elements of the constructor's own wl chopped off wl_'s front */
     };
 
 } // namespace extinct

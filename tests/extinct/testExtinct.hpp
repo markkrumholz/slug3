@@ -141,19 +141,20 @@ auto testExtinct() -> int
 }
 
 /**
- * @brief Unit test for Extinct's V-band normalization
+ * @brief Unit test for Extinct's V-band normalization and applyExtinction()
  * @returns 0 if the test passes, 1 if it fails
  * @details
  * Builds a flat (constant F_lambda) spectrum across the V band,
- * photometers it, then extinguishes it by multiplying by
- * exp(-extinct()) and photometers the result again -- the resulting
- * magnitude should be fainter by almost exactly 1 mag, since Extinct
- * normalizes every curve to A_V = 1 mag. "Almost" rather than
- * "exactly" because averaging kappa*R over frequency (the definition
- * used to normalize) and averaging F_lambda*R over ln(lambda) (what
- * phot() itself does) are two different weightings of the same
- * spectrum, so they don't cancel perfectly -- but the mismatch should
- * be at most a percent or two.
+ * photometers it, then for several A_V values extinguishes it via
+ * applyExtinction() and photometers the result again -- the resulting
+ * magnitude should be fainter by almost exactly A_V mag, since
+ * normalize() calibrates every curve's own extinct() to A_V = 1 mag
+ * and applyExtinction() applies exp(-A_V * extinct()). "Almost" rather
+ * than "exactly" because averaging kappa*R over frequency (the
+ * definition normalize() uses) and averaging F_lambda*R over
+ * ln(lambda) (what phot() itself does) are two different weightings
+ * of the same spectrum, so they don't cancel perfectly -- but the
+ * mismatch should be at most a percent or two.
  */
 auto testExtinctNormalization() -> int
 {
@@ -163,10 +164,13 @@ auto testExtinctNormalization() -> int
     constexpr double f0 = 1.0;
     const std::vector<double> specBefore(vFilt.wl().size(), f0);
     const double photBefore = vFilt.phot(vFilt.wl(), specBefore);
+    const double magBefore = -2.5 * std::log10(photBefore);
 
     // Any curve will do; V's own wavelength coverage sits comfortably
     // inside every curve's own native range, so wl() below should
-    // come back identical (untruncated) to vFilt.wl()
+    // come back identical (untruncated) to vFilt.wl(), i.e. wlOffset_
+    // should be 0 and specBefore is already on the right grid for
+    // applyExtinction()
     const extinct::Extinct ext("Calzetti_starburst", vFilt.wl());
     if (ext.wl() != vFilt.wl())
     {
@@ -175,25 +179,23 @@ auto testExtinctNormalization() -> int
         return 1;
     }
 
-    std::vector<double> specAfter(specBefore.size());
-    for (std::size_t i = 0; i < specBefore.size(); i++)
+    constexpr double relTol = 0.02; // a percent or two
+    for (const double AV : {0.5, 1.0, 2.0, 3.5})
     {
-        specAfter.at(i) = specBefore.at(i) * std::exp(-ext.extinct().at(i));
-    }
-    const double photAfter = vFilt.phot(ext.wl(), specAfter);
+        const auto specAfter = ext.applyExtinction(AV, specBefore);
+        const double photAfter = vFilt.phot(ext.wl(), specAfter);
+        const double magAfter = -2.5 * std::log10(photAfter);
+        const double deltaMag = magAfter - magBefore;
 
-    const double magBefore = -2.5 * std::log10(photBefore);
-    const double magAfter = -2.5 * std::log10(photAfter);
-    const double deltaMag = magAfter - magBefore;
-
-    constexpr double expected = 1.0;
-    constexpr double tol = 0.02; // a percent or two
-    if (!utils::approxEqual(deltaMag, expected, tol))
-    {
-        std::cerr << "testExtinctNormalization: extinguished spectrum is "
-            << deltaMag << " mag fainter, expected " << expected
-            << " (tolerance " << tol << ")\n";
-        return 1;
+        const double relErr = std::abs(deltaMag - AV) / AV;
+        if (relErr > relTol)
+        {
+            std::cerr << "testExtinctNormalization: A_V=" << AV
+                << ": extinguished spectrum is " << deltaMag
+                << " mag fainter (relative error " << relErr
+                << ", tolerance " << relTol << ")\n";
+            return 1;
+        }
     }
 
     return 0; // Passed
