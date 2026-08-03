@@ -9,6 +9,7 @@
 #include "../tracks/TrackCommons.hpp"
 #include "../tracks/Tracks2D.hpp"
 #include <memory>
+#include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h> // NOLINT(misc-include-cleaner); this is needed for correct Python binding, even if clang-tidy can't recognize it
 #include <stdexcept>
@@ -91,12 +92,12 @@ static constexpr std::string_view starLifetimeDocstring = R"doc(Return the lifet
 
 Parameters
 ----------
-m : float
+m : float or array_like of float
     Stellar mass, in Msun.
 
 Returns
 -------
-logt : float
+logt : float or numpy.ndarray of float
     log10(time / yr) at which a star of mass m ends this track.)doc";
 
 static constexpr std::string_view liveMassRangeDocstring = R"doc(Return the range(s) of stellar mass alive at a given time.
@@ -182,7 +183,10 @@ void bindTracks2D(py::module_& m)
                 aFeDocstring.data())
         .def("vVcrit", &tracks::Tracks2D::vVcrit,
                 vVcritDocstring.data())
-        .def("starLifetime", &tracks::Tracks2D::starLifetime,
+        .def("starLifetime",
+                py::vectorize(
+                    [](const tracks::Tracks2D* self, const double m) -> double
+                    { return self->starLifetime(m); }),
                 starLifetimeDocstring.data(),
                 py::arg("m"))
         .def("liveMassRange", &tracks::Tracks2D::liveMassRange,

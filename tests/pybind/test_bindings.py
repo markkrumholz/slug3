@@ -271,6 +271,24 @@ def test_tracks2d_isochrone_at_time_boundaries(tracks2d):
     assert isochrone_min[0].xMax() == pytest.approx(tracks2d.mMax())
 
 
+@pytest.mark.parametrize("mass", GRID_MASSES)
+def test_tracks2d_starlifetime_matches_track_xmax(tracks2d, mass):
+    """starLifetime(m) should match xMax() of the track getTrack(m)
+    returns -- both report the same 'star ends its track here' time."""
+    track = tracks2d.getTrack(mass)
+    assert tracks2d.starLifetime(mass) == pytest.approx(track.xMax())
+
+
+def test_tracks2d_starlifetime_vectorized(tracks2d):
+    """starLifetime() should broadcast elementwise over a numpy array of
+    masses, matching scalar evaluation at each mass."""
+    masses = np.array(GRID_MASSES)
+    lifetimes = tracks2d.starLifetime(masses)
+    assert lifetimes.shape == masses.shape
+    for i, m in enumerate(masses):
+        assert lifetimes[i] == pytest.approx(tracks2d.starLifetime(float(m)))
+
+
 # ---------------------------------------------------------------------
 # Tracks3D
 # ---------------------------------------------------------------------
@@ -350,6 +368,39 @@ def test_tracks3d_isochrone_at_time_boundaries(tracks3d):
     assert len(isochrone_min) == 1
     assert isochrone_min[0].xMin() == pytest.approx(tracks3d.mMin())
     assert isochrone_min[0].xMax() == pytest.approx(tracks3d.mMax())
+
+
+@pytest.mark.parametrize("mass", GRID_MASSES)
+def test_tracks3d_starlifetime_matches_track_xmax(tracks3d, mass):
+    """starLifetime(m, feh) should match xMax() of the track
+    getTrack(m, feh) returns, same cross-check as Tracks2D's own."""
+    track = tracks3d.getTrack(mass, KNOWN_FEH)
+    assert tracks3d.starLifetime(mass, KNOWN_FEH) == pytest.approx(track.xMax())
+
+
+def test_tracks3d_starlifetime_vectorized(tracks3d):
+    """starLifetime() should broadcast elementwise over numpy arrays of
+    mass and feh, matching scalar evaluation at each pair."""
+    masses = np.array(GRID_MASSES)
+    fehs = np.full_like(masses, KNOWN_FEH)
+    lifetimes = tracks3d.starLifetime(masses, fehs)
+    assert lifetimes.shape == masses.shape
+    for i, m in enumerate(masses):
+        assert lifetimes[i] == pytest.approx(
+            tracks3d.starLifetime(float(m), KNOWN_FEH))
+
+
+def test_tracks3d_livemassrange_matches_isochrone(tracks3d):
+    """liveMassRange(t, feh) should report ranges consistent with the
+    isochrone getIsochrone(t, feh) returns at the same time/feh: the
+    union of both should span the same mass extremes."""
+    ranges = tracks3d.liveMassRange(1.0, KNOWN_FEH)
+    isochrone = tracks3d.getIsochrone(1.0, KNOWN_FEH)
+    assert len(ranges) >= 1
+    assert min(r[0] for r in ranges) == pytest.approx(
+        min(seg.xMin() for seg in isochrone))
+    assert max(r[1] for r in ranges) == pytest.approx(
+        max(seg.xMax() for seg in isochrone))
 
 
 # ---------------------------------------------------------------------
@@ -1176,6 +1227,35 @@ def test_filtertabulated_response_interpolator():
     assert interp(np.log(2000.0)) == pytest.approx(1.0)
 
 
+def test_filtertabulated_response_interpolator_vectorized():
+    """Interpolator1DScalar's __call__ should broadcast elementwise
+    over a numpy array of x values, matching scalar evaluation at each
+    point."""
+    wl = [1000.0, 2000.0, 3000.0]
+    response = [0.0, 1.0, 0.0]
+    filt = slug.FilterTabulated("my_filter", wl, response, 2000.0)
+    interp = filt.response()
+
+    xs = np.log(np.array([1000.0, 1500.0, 2000.0, 3000.0]))
+    values = interp(xs)
+    assert values.shape == xs.shape
+    for i, x in enumerate(xs):
+        assert values[i] == pytest.approx(interp(float(x)))
+
+
+def test_filtertabulated_response_interpolator_vectorized_out_of_range_raises():
+    """The vectorized __call__ should still raise if any requested x is
+    outside [xMin(), xMax()], not silently return junk for that element."""
+    wl = [1000.0, 2000.0, 3000.0]
+    response = [0.0, 1.0, 0.0]
+    filt = slug.FilterTabulated("my_filter", wl, response, 2000.0)
+    interp = filt.response()
+
+    xs = np.array([np.log(1500.0), interp.xMax() + 1.0])
+    with pytest.raises(RuntimeError):
+        interp(xs)
+
+
 def test_filtertabulated_phot_matches_const_spectrum():
     """phot() of a constant spectrum should return that same constant,
     same closed-form argument as test_filterideal_energy_filter."""
@@ -1508,6 +1588,34 @@ def test_photconvert_vega_photcount_filter_gives_negative_infinity():
     assert result == float("-inf")
 
 
+def test_photconvert_vectorized():
+    """PhotConvert should broadcast elementwise over numpy arrays of
+    flux_in and wl, matching scalar evaluation at each point -- e.g.
+    converting a whole spectrum from one photometric system to another
+    in a single call."""
+    flambda_in = np.array([1e-15, 2e-15, 3e-15])
+    wl = np.array([4000.0, 5000.0, 6000.0])
+    fnu = slug.PhotConvert("Flambda", "Fnu", flambda_in, wl)
+    assert fnu.shape == flambda_in.shape
+    for i in range(len(flambda_in)):
+        assert fnu[i] == pytest.approx(
+            slug.PhotConvert("Flambda", "Fnu", float(flambda_in[i]), float(wl[i])))
+
+
+def test_photconvert_vectorized_with_filter():
+    """The vectorized form should also work with a fixed filter
+    argument (needed for Vega conversions), broadcasting an array
+    flux_in against a scalar wl."""
+    filt = slug.FilterTabulated("SLUGTEST", "CAM1", "G500", FILTER_REGISTRY)
+    flambda_in = np.array([1e-15, 2e-15, 3e-15])
+
+    vegamag = slug.PhotConvert("Flambda", "Vega", flambda_in, filt.wlPivot(), filt)
+    assert vegamag.shape == flambda_in.shape
+    for i in range(len(flambda_in)):
+        assert vegamag[i] == pytest.approx(
+            -2.5 * np.log10(flambda_in[i] / filt.fluxVega()))
+
+
 # ---------------------------------------------------------------------
 # PDF
 # ---------------------------------------------------------------------
@@ -1579,6 +1687,17 @@ def test_pdf_call_and_expectation_value():
     narrow = pdf.expectationValue(0.08, 1.0)
     assert 0.08 <= narrow <= 1.0
     assert narrow != pytest.approx(full)
+
+
+def test_pdf_call_vectorized():
+    """__call__ should broadcast elementwise over a numpy array of x
+    values, matching scalar evaluation at each point."""
+    pdf = slug.parsePDFDescriptor(CHABRIER_IMF_DESCRIPTOR)
+    xs = np.array([0.1, 0.5, 1.0, 50.0])
+    values = pdf(xs)
+    assert values.shape == xs.shape
+    for i, x in enumerate(xs):
+        assert values[i] == pytest.approx(pdf(float(x)))
 
 
 def test_pdf_integral_range():
