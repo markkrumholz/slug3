@@ -9,6 +9,7 @@
 #include "../tracks/TrackCommons.hpp"
 #include "../tracks/Tracks3D.hpp"
 #include <memory>
+#include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h> // NOLINT(misc-include-cleaner); this is needed for correct Python binding, even if clang-tidy can't recognize it
 #include <stdexcept>
@@ -90,6 +91,36 @@ Returns
 vvcrit : float
     v/vcrit value of this set of tracks, or NaN if not available.)doc";
 
+static constexpr std::string_view starLifetimeDocstring = R"doc(Return the lifetime of a star of a given mass and [Fe/H].
+
+Parameters
+----------
+m : float or array_like of float
+    Stellar mass, in Msun.
+feh : float or array_like of float
+    [Fe/H] value of the tracks to use. Broadcast against m.
+
+Returns
+-------
+logt : float or numpy.ndarray of float
+    log10(time / yr) at which a star of mass m ends this track.)doc";
+
+static constexpr std::string_view liveMassRangeDocstring = R"doc(Return the range(s) of stellar mass alive at a given time and [Fe/H].
+
+Parameters
+----------
+t : float
+    log10(time / yr) at which to evaluate.
+feh : float
+    [Fe/H] value of the tracks to use.
+
+Returns
+-------
+ranges : list of tuple of float
+    A list of (mMin, mMax) pairs giving the mass ranges alive at time
+    t. Usually contains a single pair, but may contain more than one
+    for non-monotonic tracks.)doc";
+
 static constexpr std::string_view getTrackDocstring = R"doc(Return the track for a star of a given mass and [Fe/H].
 
 Parameters
@@ -165,6 +196,15 @@ void bindTracks3D(py::module_& m)
                 aFeDocstring.data())
         .def("vVcrit", &tracks::Tracks3D::vVcrit,
                 vVcritDocstring.data())
+        .def("starLifetime",
+                py::vectorize(
+                    [](const tracks::Tracks3D* self, const double m, const double feh) -> double
+                    { return self->starLifetime(m, feh); }),
+                starLifetimeDocstring.data(),
+                py::arg("m"), py::arg("feh"))
+        .def("liveMassRange", &tracks::Tracks3D::liveMassRange,
+                liveMassRangeDocstring.data(),
+                py::arg("t"), py::arg("feh"))
         .def("getTrack",
                 [](const tracks::Tracks3D& self, const double m, const double feh)
                     -> std::unique_ptr<Interp1D>

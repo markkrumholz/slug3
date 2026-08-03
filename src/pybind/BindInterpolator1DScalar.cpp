@@ -7,6 +7,7 @@
 
 #include "Bindings.hpp"
 #include "../interpolation/Interpolator1D.hpp"
+#include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
 #include <stdexcept>
 #include <string>
@@ -45,18 +46,18 @@ static constexpr std::string_view callDocstring = R"doc(Interpolate to a given p
 
 Parameters
 ----------
-x : float
-    The point at which to interpolate.
+x : float or array_like of float
+    The point(s) at which to interpolate.
 
 Returns
 -------
-value : float
-    The interpolated value at x.
+value : float or numpy.ndarray of float
+    The interpolated value(s) at x.
 
 Throws
 ------
 RuntimeError
-    If x is outside the range [xMin(), xMax()].)doc";
+    If any requested x is outside the range [xMin(), xMax()].)doc";
 
 // Disable linting for includes -- the pybind macro magic seems to confuse
 // the linter
@@ -71,18 +72,19 @@ void bindInterpolator1DScalar(py::module_& m)
         .def("xRange", &Interp1DScalar::xRange,
                 xRangeDocstring.data())
         .def("__call__",
-                [](const Interp1DScalar& self, const double x) -> double
-                {
-                    if (x < self.xMin() || x > self.xMax())
+                py::vectorize(
+                    [](const Interp1DScalar* self, const double x) -> double
                     {
-                        throw std::runtime_error(
-                            "Interpolator1DScalar: x = " + std::to_string(x) +
-                            " is outside the allowed range [" +
-                            std::to_string(self.xMin()) + ", " +
-                            std::to_string(self.xMax()) + "]");
-                    }
-                    return self(x);
-                },
+                        if (x < self->xMin() || x > self->xMax())
+                        {
+                            throw std::runtime_error(
+                                "Interpolator1DScalar: x = " + std::to_string(x) +
+                                " is outside the allowed range [" +
+                                std::to_string(self->xMin()) + ", " +
+                                std::to_string(self->xMax()) + "]");
+                        }
+                        return (*self)(x);
+                    }),
                 callDocstring.data(),
                 py::arg("x"));
 }

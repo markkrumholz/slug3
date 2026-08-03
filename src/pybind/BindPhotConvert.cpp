@@ -8,6 +8,7 @@
 #include "Bindings.hpp"
 #include "../phot/Filter.hpp"
 #include "../phot/PhotCommons.hpp"
+#include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
 #include <stdexcept>
 #include <string>
@@ -131,14 +132,16 @@ phot_from : str
 phot_to : str
     The photometric system to convert flux_in to; same recognized
     values as phot_from.
-flux_in : float
-    The input value, in erg/s/cm^2/Angstrom (if phot_from is
+flux_in : float or array_like of float
+    The input value(s), in erg/s/cm^2/Angstrom (if phot_from is
     "Flambda"), Jy (if phot_from is "Fnu"), or a magnitude (if
     phot_from is "ST", "AB", or "Vega").
-wl : float
-    The wavelength, in Angstrom, at which flux_in is evaluated; unused
-    by conversions that don't depend on wavelength, but required for a
-    uniform signature.
+wl : float or array_like of float
+    The wavelength(s), in Angstrom, at which flux_in is evaluated;
+    unused by conversions that don't depend on wavelength, but
+    required for a uniform signature. Broadcast against flux_in, so
+    e.g. a whole spectrum can be converted in one call by passing
+    matching flux_in and wl arrays.
 filter : FilterIdeal or FilterTabulated, optional
     A filter whose fluxVega() gives the Vega zero point to use;
     required if phot_from or phot_to is "Vega" (fluxVega() is computed
@@ -147,7 +150,7 @@ filter : FilterIdeal or FilterTabulated, optional
 
 Returns
 -------
-flux_out : float
+flux_out : float or numpy.ndarray of float
     flux_in converted to phot_to, in the units/magnitude convention
     phot_to specifies (see flux_in's own docstring). Returns flux_in
     unchanged if phot_from and phot_to are the same system.
@@ -164,27 +167,28 @@ RuntimeError
 void bindPhotConvert(py::module_& m)
 {
     m.def("PhotConvert",
-            [](const std::string& photFrom, const std::string& photTo,
-               const double fluxIn, const double wl, const py::object& filter) -> double
-            {
-                const auto from = photSystemFromString(photFrom);
-                const auto to = photSystemFromString(photTo);
-                if (from == to) { return fluxIn; }
-
-                double fluxVega = 0.0;
-                if (from == phot::PhotSystem::Vega || to == phot::PhotSystem::Vega)
+            py::vectorize(
+                [](const std::string photFrom, const std::string photTo, // NOLINT(performance-unnecessary-value-param); pybind11's vectorize() requires non-vectorized arguments to be taken by value
+                   const double fluxIn, const double wl, const py::object filter) -> double // NOLINT(performance-unnecessary-value-param); see above
                 {
-                    if (filter.is_none())
-                    {
-                        throw std::runtime_error(
-                            "PhotConvert: filter is required when phot_from "
-                            "or phot_to is \"Vega\"");
-                    }
-                    fluxVega = py::cast<const phot::Filter&>(filter).fluxVega();
-                }
+                    const auto from = photSystemFromString(photFrom);
+                    const auto to = photSystemFromString(photTo);
+                    if (from == to) { return fluxIn; }
 
-                return photConvertDispatch(from, to, fluxIn, wl, fluxVega);
-            },
+                    double fluxVega = 0.0;
+                    if (from == phot::PhotSystem::Vega || to == phot::PhotSystem::Vega)
+                    {
+                        if (filter.is_none())
+                        {
+                            throw std::runtime_error(
+                                "PhotConvert: filter is required when phot_from "
+                                "or phot_to is \"Vega\"");
+                        }
+                        fluxVega = py::cast<const phot::Filter&>(filter).fluxVega();
+                    }
+
+                    return photConvertDispatch(from, to, fluxIn, wl, fluxVega);
+                }),
             photConvertDocstring.data(),
             py::arg("phot_from"), py::arg("phot_to"), py::arg("flux_in"),
             py::arg("wl"), py::arg("filter") = py::none());

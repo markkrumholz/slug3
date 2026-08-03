@@ -16,6 +16,7 @@
 #include "../pdfs/PDFFileParser.hpp"
 #include <limits>
 #include <memory>
+#include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h> // NOLINT(misc-include-cleaner); this is needed for correct Python binding, even if clang-tidy can't recognize it
 #include <stdexcept>
@@ -117,12 +118,12 @@ static constexpr std::string_view callDocstring = R"doc(Evaluate this PDF at a p
 
 Parameters
 ----------
-x : float
-    The point at which to evaluate this PDF.
+x : float or array_like of float
+    The point(s) at which to evaluate this PDF.
 
 Returns
 -------
-value : float)doc";
+value : float or numpy.ndarray of float)doc";
 
 static constexpr std::string_view expectationValueDocstring = R"doc(Get the expectation value of this PDF over its entire range.
 
@@ -264,7 +265,10 @@ void bindPDF(py::module_& m)
                 normalizePDFDocstring.data())
         .def("normalized", &pdfs::PDF::normalized,
                 normalizedDocstring.data())
-        .def("__call__", &pdfs::PDF::operator(),
+        .def("__call__",
+                py::vectorize(
+                    [](const pdfs::PDF* self, const double x) -> double
+                    { return (*self)(x); }),
                 callDocstring.data(), py::arg("x"))
         .def("expectationValue",
                 [](const pdfs::PDF& self) -> double { return self.expectationValue(); },
