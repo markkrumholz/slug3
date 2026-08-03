@@ -192,7 +192,7 @@ void core::Cluster::advance(const double t)
     const auto& filters = sc.filters();
     if (filters != nullptr)
     {
-        phot_ = filters->phot(sc.specsyn()->wl(), spec_);
+        phot_ = filters->phot(sc.specsyn()->wlObs(), spec_);
     }
 
     // Update the population's bolometric luminosity, if "Lbol" was
