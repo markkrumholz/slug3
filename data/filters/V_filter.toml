@@ -1,0 +1,14 @@
+name = "Registry of filters (V-band only)"
+file = "V_filter.h5"
+Facilities = ["Generic"]
+
+[Generic]
+instruments = ["Johnson"]
+
+[Generic.Johnson]
+filters = ["V"]
+
+[Generic.Johnson.V]
+description = "Johnson V"
+wl_ref = 5501.402599255
+source = "http://svo2.cab.inta-csic.es/svo/theory/fps3/index.php"
