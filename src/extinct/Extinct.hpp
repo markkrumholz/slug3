@@ -202,7 +202,7 @@ namespace extinct
          * @param wl Wavelength grid, in Angstrom, that extinct is defined on
          * @param extinct Extinction curve; rescaled in place so that it
          *   corresponds to a V-band extinction A_V = 1 mag
-         * @param VRegistry Name of the V-band filter registry file
+         * @param vRegistry Name of the V-band filter registry file
          * @details
          * The mean V-band opacity is defined as
          * \f$\kappa_V = \int \kappa(\nu) R(\nu)\, d\nu \big/ \int R(\nu)\, d\nu\f$,
@@ -218,9 +218,9 @@ namespace extinct
          */
         static void normalize(const std::vector<double>& wl,
             std::vector<double>& extinct,
-            const std::string& VRegistry = defaultVRegistry)
+            const std::string& vRegistry = defaultVRegistry)
         {
-            const phot::FilterTabulated vFilt("Generic", "Johnson", "V", VRegistry);
+            const phot::FilterTabulated vFilt("Generic", "Johnson", "V", vRegistry);
 
             // V filter response, converted from wavelength to
             // frequency and reversed back into increasing order (wl
