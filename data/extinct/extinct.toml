@@ -1,6 +1,6 @@
 name = "Registry of extinction curves"
 file = "extinct.h5"
-curves = ["Bouchet_SMC", "Calzetti_LMC", "Calzetti_MW", "Calzetti_starburst"]
+curves = ["Bouchet_SMC", "Calzetti_LMC", "Calzetti_MW", "Calzetti_starburst", "Draine_MW_RV3.1", "Draine_MW_RV4.0", "Draine_MW_RV5.5"]
 
 [Calzetti_starburst]
 reference = "Calzetti, D., Armus, L., Bohlin, R., et al. 2000, ApJ, 533, 682"
@@ -21,3 +21,18 @@ description = "Calzetti LMC extinction curve"
 reference = "Bouchet, P., Lequeux, J., Maurice, E., et al. 1985, A&A, 149, 330"
 reference_url = "https://ui.adsabs.harvard.edu/abs/1985A%26A...149..330B/abstract"
 description = "Bouchet SMC extinction curve"
+
+["Draine_MW_RV3.1"]
+reference = ["Weingartner, B., & Draine, B. 2001, ApJ, 548, 296", "Li, A., & Draine, B. 2001, ApJ, 554, 778", "Draine, B. 2003, ARA&A, 41, 241", "Draine, B., 2003, ApJ, 598, 1017", "Draine, B. 2003, ApJ, 598, 1026"]
+reference_url = ["https://ui.adsabs.harvard.edu/abs/2001ApJ...548..296W/abstract", "https://ui.adsabs.harvard.edu/abs/2001ApJ...554..778L/abstract", "https://ui.adsabs.harvard.edu/abs/2003ARA%26A..41..241D/abstract", "https://ui.adsabs.harvard.edu/abs/2003ApJ...598.1017D/abstract", "https://ui.adsabs.harvard.edu/abs/2003ApJ...598.1026D/abstract"]
+description = "Draine (2003) Milky Way extinction curve, R_V = 3.1"
+
+["Draine_MW_RV4.0"]
+reference = ["Weingartner, B., & Draine, B. 2001, ApJ, 548, 296", "Li, A., & Draine, B. 2001, ApJ, 554, 778", "Draine, B. 2003, ARA&A, 41, 241", "Draine, B., 2003, ApJ, 598, 1017", "Draine, B. 2003, ApJ, 598, 1026"]
+reference_url = ["https://ui.adsabs.harvard.edu/abs/2001ApJ...548..296W/abstract", "https://ui.adsabs.harvard.edu/abs/2001ApJ...554..778L/abstract", "https://ui.adsabs.harvard.edu/abs/2003ARA%26A..41..241D/abstract", "https://ui.adsabs.harvard.edu/abs/2003ApJ...598.1017D/abstract", "https://ui.adsabs.harvard.edu/abs/2003ApJ...598.1026D/abstract"]
+description = "Draine (2003) Milky Way extinction curve, R_V = 4.0"
+
+["Draine_MW_RV5.5"]
+reference = ["Weingartner, B., & Draine, B. 2001, ApJ, 548, 296", "Li, A., & Draine, B. 2001, ApJ, 554, 778", "Draine, B. 2003, ARA&A, 41, 241", "Draine, B., 2003, ApJ, 598, 1017", "Draine, B. 2003, ApJ, 598, 1026"]
+reference_url = ["https://ui.adsabs.harvard.edu/abs/2001ApJ...548..296W/abstract", "https://ui.adsabs.harvard.edu/abs/2001ApJ...554..778L/abstract", "https://ui.adsabs.harvard.edu/abs/2003ARA%26A..41..241D/abstract", "https://ui.adsabs.harvard.edu/abs/2003ApJ...598.1017D/abstract", "https://ui.adsabs.harvard.edu/abs/2003ApJ...598.1026D/abstract"]
+description = "Draine (2003) Milky Way extinction curve, R_V = 5.5"
