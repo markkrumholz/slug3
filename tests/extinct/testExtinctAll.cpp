@@ -16,6 +16,7 @@ auto main() -> int {
     {
         int result = 0;
         result += testExtinct();
+        result += testExtinctNormalization();
         return result;
     }
     catch (const std::exception& error)

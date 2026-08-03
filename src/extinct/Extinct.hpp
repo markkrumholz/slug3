@@ -9,10 +9,13 @@
 #define EXTINCT_HPP
 
 #include "../interpolation/Interpolator1D.hpp"
+#include "../phot/FilterTabulated.hpp"
+#include "../utils/Constants.hpp"
 #include "../utils/HDF5Utils.hpp"
 #include "../utils/TOMLUtils.hpp"
 #include "hdf5.h" // NOLINT(misc-include-cleaner) -- see HDF5Utils.hpp's own comment on including hdf5.h wholesale
 #include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <iterator>
 #include <stdexcept>
@@ -25,6 +28,10 @@ namespace extinct
     inline static const std::string defaultRegistry = // NOLINT(bugprone-throwing-static-initialization,cert-err58-cpp) -- built from fixed string literals, so the (theoretically throwing) path conversion can never actually throw here
         (std::filesystem::path("data") / std::filesystem::path("extinct")
         / std::filesystem::path("extinct.toml")); /**< Default registry */
+
+    inline static const std::string defaultVRegistry = // NOLINT(bugprone-throwing-static-initialization,cert-err58-cpp) -- see defaultRegistry above
+        (std::filesystem::path("data") / std::filesystem::path("filters")
+        / std::filesystem::path("V_filter.toml")); /**< Default V-band filter registry */
 
     /**
      * @class Extinct
@@ -117,6 +124,9 @@ namespace extinct
                 { return w >= interp.xMin() && w <= interp.xMax(); });
             extinct_.reserve(wl_.size());
             for (const double w : wl_) { extinct_.push_back(interp(w)); }
+
+            // Normalize the curve to a V-band extinction of 1 mag
+            normalize(wl_, extinct_);
         }
 
         // Observers
@@ -151,6 +161,58 @@ namespace extinct
         [[nodiscard]] auto extinct() const -> const std::vector<double>& { return extinct_; }
 
     private:
+
+        /**
+         * @brief Normalize an extinction curve to a V-band extinction of 1 mag
+         * @param wl Wavelength grid, in Angstrom, that extinct is defined on
+         * @param extinct Extinction curve; rescaled in place so that it
+         *   corresponds to a V-band extinction A_V = 1 mag
+         * @param VRegistry Name of the V-band filter registry file
+         * @details
+         * The mean V-band opacity is defined as
+         * \f$\kappa_V = \int \kappa(\nu) R(\nu)\, d\nu \big/ \int R(\nu)\, d\nu\f$,
+         * where \f$\kappa(\nu)\f$ is extinct and \f$R(\nu)\f$ is the V
+         * filter's response, both expressed as functions of frequency
+         * \f$\nu\f$ (by convention, rather than wavelength); the
+         * V-band extinction in magnitudes is then
+         * \f$A_V = (5 / \ln 100) \kappa_V\f$. FilterTabulated's own
+         * phot() can't be used for this integral, since it integrates
+         * over \f$\ln\lambda\f$ rather than \f$\nu\f$, so the V
+         * filter's raw wl()/responseData() are instead converted to
+         * frequency and rebuilt into a fresh Interpolator1D here.
+         */
+        static void normalize(const std::vector<double>& wl,
+            std::vector<double>& extinct,
+            const std::string& VRegistry = defaultVRegistry)
+        {
+            const phot::FilterTabulated vFilt("Generic", "Johnson", "V", VRegistry);
+
+            // V filter response, converted from wavelength to
+            // frequency and reversed back into increasing order (wl
+            // increases, so nu = c/wl decreases), then rebuilt as a
+            // frequency-space interpolator
+            std::vector<double> filtNu(vFilt.wl().size());
+            std::ranges::transform(vFilt.wl(), filtNu.begin(),
+                [](const double w) -> double { return utils::c / (w * utils::Angstrom); });
+            std::ranges::reverse(filtNu);
+            const std::vector<double> filtResp(vFilt.responseData().rbegin(), vFilt.responseData().rend());
+            const interp::Interpolator1D<1> respInterp(filtNu, filtResp);
+
+            // Same wavelength-to-frequency transformation for the
+            // extinction curve
+            std::vector<double> extNu(wl.size());
+            std::ranges::transform(wl, extNu.begin(),
+                [](const double w) -> double { return utils::c / (w * utils::Angstrom); });
+            std::ranges::reverse(extNu);
+            const std::vector<double> extRev(extinct.rbegin(), extinct.rend());
+            const interp::Interpolator1D<1> extInterp(extNu, extRev);
+
+            const double norm = (std::log(100.0) / 5.0) *
+                respInterp.integ(respInterp.xMin(), respInterp.xMax()) /
+                respInterp.integ(extInterp, respInterp.xMin(), respInterp.xMax());
+
+            for (double& e : extinct) { e *= norm; }
+        }
 
         std::vector<double> wlDat_;      /**< Native extinction curve wavelength grid, in Angstrom */
         std::vector<double> extinctDat_; /**< Native extinction curve, in arbitrary units */

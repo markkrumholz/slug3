@@ -121,6 +121,7 @@ add_executable(slugTestInterpolation
     tests/interpolation/testMesh3DInterpolator.cpp
 )
 add_executable(slugTestExtinct
+    src/phot/FilterTabulated.cpp
     tests/extinct/testExtinctAll.cpp
 )
 add_executable(slugTestPhot

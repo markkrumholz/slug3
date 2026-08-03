@@ -9,10 +9,12 @@
 #define TESTEXTINCT_HPP
 
 #include "../src/extinct/Extinct.hpp"
+#include "../src/phot/FilterTabulated.hpp"
 #include "../src/utils/HDF5Utils.hpp"
 #include "../src/utils/MiscUtils.hpp"
 #include "hdf5.h" // NOLINT(misc-include-cleaner) -- see HDF5Utils.hpp's own comment on including hdf5.h wholesale
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <iostream>
 #include <iterator>
@@ -90,8 +92,14 @@ auto testExtinct() -> int
     }
 
     // At wavelengths landing exactly on the native grid, the
-    // interpolated value should exactly match the native data
-    for (const double w : {1000.0, 5000.0, 10000.0})
+    // interpolated value should exactly reproduce the native data,
+    // up to the single uniform scale factor Extinct's constructor
+    // applies via normalize() (see testExtinctNormalization() for a
+    // dedicated check of that scale factor's own meaning) -- so the
+    // ratio of interpolated to native values should be the same at
+    // every such point
+    double scale = 0.0;
+    for (const double w : {1000.0, 5000.0, 10000.0, wlRaw.back()})
     {
         const auto rawIt = std::ranges::find(wlRaw, w);
         if (rawIt == wlRaw.end())
@@ -109,21 +117,15 @@ auto testExtinct() -> int
         }
         const auto extIdx = static_cast<std::size_t>(std::distance(ext.wl().begin(), extIt));
 
-        if (!utils::approxEqual(ext.extinct().at(extIdx), kappaRaw.at(rawIdx)))
+        const double thisScale = ext.extinct().at(extIdx) / kappaRaw.at(rawIdx);
+        if (scale == 0.0) { scale = thisScale; }
+        else if (!utils::approxEqual(thisScale, scale))
         {
-            std::cerr << "testExtinct: interpolated value at w=" << w
-                << " does not match native data: got " << ext.extinct().at(extIdx)
-                << ", expected " << kappaRaw.at(rawIdx) << "\n";
+            std::cerr << "testExtinct: interpolated/native ratio at w=" << w
+                << " is " << thisScale << ", expected " << scale
+                << " (the same ratio found at other native grid points)\n";
             return 1;
         }
-    }
-
-    // The last point of wl() (the native curve's own max) should also
-    // match exactly
-    if (!utils::approxEqual(ext.extinct().back(), kappaRaw.back()))
-    {
-        std::cerr << "testExtinct: interpolated value at native wl max does not match\n";
-        return 1;
     }
 
     // An unrecognized curve name should raise, not crash
@@ -134,6 +136,65 @@ auto testExtinct() -> int
         return 1;
     }
     catch (const std::runtime_error&) { /* expected */ }
+
+    return 0; // Passed
+}
+
+/**
+ * @brief Unit test for Extinct's V-band normalization
+ * @returns 0 if the test passes, 1 if it fails
+ * @details
+ * Builds a flat (constant F_lambda) spectrum across the V band,
+ * photometers it, then extinguishes it by multiplying by
+ * exp(-extinct()) and photometers the result again -- the resulting
+ * magnitude should be fainter by almost exactly 1 mag, since Extinct
+ * normalizes every curve to A_V = 1 mag. "Almost" rather than
+ * "exactly" because averaging kappa*R over frequency (the definition
+ * used to normalize) and averaging F_lambda*R over ln(lambda) (what
+ * phot() itself does) are two different weightings of the same
+ * spectrum, so they don't cancel perfectly -- but the mismatch should
+ * be at most a percent or two.
+ */
+auto testExtinctNormalization() -> int
+{
+    const phot::FilterTabulated vFilt("Generic", "Johnson", "V", "data/filters/V_filter.toml");
+
+    // A flat spectrum on the V filter's own native wavelength grid
+    constexpr double f0 = 1.0;
+    const std::vector<double> specBefore(vFilt.wl().size(), f0);
+    const double photBefore = vFilt.phot(vFilt.wl(), specBefore);
+
+    // Any curve will do; V's own wavelength coverage sits comfortably
+    // inside every curve's own native range, so wl() below should
+    // come back identical (untruncated) to vFilt.wl()
+    const extinct::Extinct ext("Calzetti_starburst", vFilt.wl());
+    if (ext.wl() != vFilt.wl())
+    {
+        std::cerr << "testExtinctNormalization: test bug: Extinct truncated "
+            "the V filter's own wavelength grid\n";
+        return 1;
+    }
+
+    std::vector<double> specAfter(specBefore.size());
+    for (std::size_t i = 0; i < specBefore.size(); i++)
+    {
+        specAfter.at(i) = specBefore.at(i) * std::exp(-ext.extinct().at(i));
+    }
+    const double photAfter = vFilt.phot(ext.wl(), specAfter);
+
+    const double magBefore = -2.5 * std::log10(photBefore);
+    const double magAfter = -2.5 * std::log10(photAfter);
+    const double deltaMag = magAfter - magBefore;
+
+    constexpr double expected = 1.0;
+    constexpr double tol = 0.02; // a percent or two
+    if (!utils::approxEqual(deltaMag, expected, tol))
+    {
+        std::cerr << "testExtinctNormalization: extinguished spectrum is "
+            << deltaMag << " mag fainter, expected " << expected
+            << " (tolerance " << tol << ")\n";
+        return 1;
+    }
 
     return 0; // Passed
 }
