@@ -407,6 +407,15 @@ void io::OutputManagerH5::openClusterSpectraGroup()
         clusterSpectraGroup_, "spec", H5T_NATIVE_DOUBLE, nWl);
     writeStringAttr(specDset, "units", "erg/s/Angstrom");
     H5Dclose(specDset);
+
+    if (simControls_.extinct() != nullptr)
+    {
+        const auto nWlExtinct = static_cast<hsize_t>(simControls_.extinct()->wl().size());
+        const hid_t specExtinctDset = createExtensible2dDataset(
+            clusterSpectraGroup_, "spec_extinct", H5T_NATIVE_DOUBLE, nWlExtinct);
+        writeStringAttr(specExtinctDset, "units", "erg/s/Angstrom");
+        H5Dclose(specExtinctDset);
+    }
     // NOLINTEND(misc-include-cleaner)
 }
 
@@ -464,6 +473,24 @@ void io::OutputManagerH5::openClusterPhotGroup()
     // the same order as the "filters" attribute above
     writeStringArrayAttr(photDset, "units", filterUnits);
     H5Dclose(photDset);
+
+    // phot_extinct only ever covers real filters, never Lbol -- Lbol is
+    // a separate bolometric quantity computed directly from the
+    // stellar tracks (see Cluster::computeLbol()), not from the
+    // (extincted or otherwise) spectrum, so it has no extincted
+    // counterpart; sized independently of nFilters/phot above rather
+    // than reusing them, since those may include the "Lbol" entry
+    // appended earlier in this function
+    if (simControls_.extinct() != nullptr && simControls_.filters() != nullptr)
+    {
+        const auto& realFilterNames = simControls_.filters()->filterNames();
+        const auto& realFilterUnits = simControls_.filters()->filterUnits();
+        const auto nRealFilters = static_cast<hsize_t>(realFilterNames.size());
+        const hid_t photExtinctDset = createExtensible2dDataset(
+            clusterPhotGroup_, "phot_extinct", H5T_NATIVE_DOUBLE, nRealFilters);
+        writeStringArrayAttr(photExtinctDset, "units", realFilterUnits);
+        H5Dclose(photExtinctDset);
+    }
     // NOLINTEND(misc-include-cleaner)
 }
 
@@ -543,6 +570,11 @@ void io::OutputManagerH5::writeClusterSpec(
         appendToDataset(clusterSpectraGroup_, "time", H5T_NATIVE_DOUBLE, &time);
         appendToDataset(clusterSpectraGroup_, "uid", H5T_NATIVE_ULONG, &uid);
         appendRowToDataset2d(clusterSpectraGroup_, "spec", H5T_NATIVE_DOUBLE, spec.data());
+        if (simControls_.extinct() != nullptr)
+        {
+            appendRowToDataset2d(clusterSpectraGroup_, "spec_extinct",
+                H5T_NATIVE_DOUBLE, cluster.specExtinct().data());
+        }
         // NOLINTEND(misc-include-cleaner)
     }
 }
@@ -578,6 +610,11 @@ void io::OutputManagerH5::writeClusterPhot(
         appendToDataset(clusterPhotGroup_, "time", H5T_NATIVE_DOUBLE, &time);
         appendToDataset(clusterPhotGroup_, "uid", H5T_NATIVE_ULONG, &uid);
         appendRowToDataset2d(clusterPhotGroup_, "phot", H5T_NATIVE_DOUBLE, phot.data());
+        if (simControls_.extinct() != nullptr && simControls_.filters() != nullptr)
+        {
+            appendRowToDataset2d(clusterPhotGroup_, "phot_extinct",
+                H5T_NATIVE_DOUBLE, cluster.photExtinct().data());
+        }
         // NOLINTEND(misc-include-cleaner)
     }
 }
