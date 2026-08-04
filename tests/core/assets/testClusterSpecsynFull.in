@@ -6,30 +6,38 @@
 # elsewhere), so this only runs if that data -- too large to store in
 # the repository -- has been fetched locally (see
 # data/tools/fetch_mist.py, fetch_powr.py, fetch_tlusty.py,
-# fetch_bosz.py, fetch_ck04.py, fetch_marcs.py). spectra.model lists
-# POWR_WNL_H20/H40/H60 separately, rather than a single combined WNL
-# entry, since fetch_powr.py now splits PoWR's WNL grids by surface
-# hydrogen mass fraction into separate registry entries, one per
-# WRType::WNLH20/WNLH40/WNLH60 (see SpecsynLibWR::getWRType) -- and
-# lists TLUSTY_O and TLUSTY_B separately, rather than a single combined
-# TLUSTY entry, since fetch_tlusty.py now fetches PoWR's O-star and
-# B-star grids (different recommended default microturbulent
-# velocities) into separate registry entries; together they span
-# 15000-55000 K, closing the 16000-27500 K gap this test originally
-# found between BOSZ and the old single TLUSTY grid. CK04 is listed
-# after BOSZ since it exists specifically to catch stars in BOSZ's own
-# gaps -- BOSZ has essentially no models for Teff >~ 8000 K combined
-# with log g <~ 1.5, a real hole this test also found, which CK04 (a
-# fully rectangular grid through that same region) fills. MARCS is
-# listed last, after CK04, to extend coverage down to cooler Teff
-# (2500 K, versus CK04's 3500 K floor) for red-supergiant-phase stars;
-# it does not extend log(g) coverage below BOSZ's own -0.5 floor
-# (MARCS's own published grid floors at exactly the same value), so
-# closing that remaining gap relies on SpecsynLibChained's tClamp
-# clamp of log(g) (and, separately, log(Teff)) into whatever the
-# chain actually covers -- see SpecsynLibChained's own constructor
-# comment. Output times span 2-10 Myr to capture stellar evolution
-# before, during, and after the Wolf-Rayet phase.
+# fetch_bosz.py, fetch_ck04.py, fetch_marcs.py). spectra.model is the
+# special value "default" (see specsyn::defaultModelList and
+# SimControls::readSpectra()), which expands to exactly this same
+# chained list, in this same order; spelled out here for reference,
+# since the order matters:
+#   - POWR_WNL_H20/H40/H60 are listed separately, rather than a single
+#     combined WNL entry, since fetch_powr.py now splits PoWR's WNL
+#     grids by surface hydrogen mass fraction into separate registry
+#     entries, one per WRType::WNLH20/WNLH40/WNLH60 (see
+#     SpecsynLibWR::getWRType)
+#   - TLUSTY_O and TLUSTY_B are listed separately, rather than a single
+#     combined TLUSTY entry, since fetch_tlusty.py now fetches PoWR's
+#     O-star and B-star grids (different recommended default
+#     microturbulent velocities) into separate registry entries;
+#     together they span 15000-55000 K, closing the 16000-27500 K gap
+#     this test originally found between BOSZ and the old single
+#     TLUSTY grid
+#   - CK04 is listed after BOSZ since it exists specifically to catch
+#     stars in BOSZ's own gaps -- BOSZ has essentially no models for
+#     Teff >~ 8000 K combined with log g <~ 1.5, a real hole this test
+#     also found, which CK04 (a fully rectangular grid through that
+#     same region) fills
+#   - MARCS is listed last, after CK04, to extend coverage down to
+#     cooler Teff (2500 K, versus CK04's 3500 K floor) for
+#     red-supergiant-phase stars; it does not extend log(g) coverage
+#     below BOSZ's own -0.5 floor (MARCS's own published grid floors
+#     at exactly the same value), so closing that remaining gap relies
+#     on SpecsynLibChained's tClamp clamp of log(g) (and, separately,
+#     log(Teff)) into whatever the chain actually covers -- see
+#     SpecsynLibChained's own constructor comment
+# Output times span 2-10 Myr to capture stellar evolution before,
+# during, and after the Wolf-Rayet phase.
 #
 # FeH uses a flat distribution from -1 to 0 (see
 # testClusterSpecsynFullFeHDist.toml). This was previously pinned to
@@ -58,7 +66,7 @@ alphaFe = 0.0
 FeH = "tests/core/assets/testClusterSpecsynFullFeHDist.toml"
 
 [spectra]
-model = ["POWR_WC", "POWR_WNE", "POWR_WNL_H20", "POWR_WNL_H40", "POWR_WNL_H60", "TLUSTY_O", "TLUSTY_B", "BOSZ", "CK04", "MARCS"]
+model = "default"
 # Rebins every chained library from its own native wavelength grid
 # down to 2048 points, spanning the same native range (wl_min/wl_max
 # are left unsupplied, so each library falls back to its own native

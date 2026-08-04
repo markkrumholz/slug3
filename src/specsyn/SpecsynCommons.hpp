@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <vector>
 
 /**
  * @brief A namespace to hold items dealing with spectral synthesis
@@ -37,6 +38,20 @@ namespace specsyn
 
     inline constexpr double defaultWlMax = 1e5; /**< Default maximum output wavelength, in Angstrom (10 micron) */
     inline constexpr unsigned long defaultNWl = 2048; /**< Default number of output wavelength points */
+
+    /**
+     * @brief Standard chained set of stellar atmosphere models
+     * @details
+     * What spectra.model = "default" expands to in
+     * SimControls::readSpectra() -- a reasonable general-purpose
+     * chained library covering Wolf-Rayet through cool giant/dwarf
+     * atmospheres, so users don't need to spell out the full list
+     * themselves.
+     */
+    inline const std::vector<std::string> defaultModelList = { // NOLINT(cert-err58-cpp) -- built from fixed string literals, so construction can never actually throw here
+        "POWR_WC", "POWR_WNE", "POWR_WNL_H20", "POWR_WNL_H40", "POWR_WNL_H60",
+        "TLUSTY_O", "TLUSTY_B", "BOSZ", "CK04", "MARCS"
+    };
 
     /**
      * @brief Specifies how a Specsyn class handles out-of-bounds stars
