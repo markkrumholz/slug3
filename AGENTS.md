@@ -79,5 +79,5 @@ slug relies on large data sets of stellar tracks, spectral libraries, etc. that 
 Large data sets are stored as HDF5 files, with one or more such files in each subdirectory of `data` except `data/tools`. These are indexed by a TOML registry file whose name matches the name of the subdirectory, e.g., the index file for stellar tracks is `data/tracks/tracks.toml`.
 
 There are also a number of smaller data files in `data`, which hold data sets small enough to be included in the repository, some of which are needed
-for code operations (e.g., `data/specta/vega.h5` holds
+for code operations (e.g., `data/spectra/vega.h5` holds
 a spectrum of Vega needed for the Vega photometry code to function). These files are not gitignore'd.
