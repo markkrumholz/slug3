@@ -112,6 +112,211 @@ static auto testWriteClusterAscii() -> int
     return 0;
 }
 
+// Verify that OutputManagerAscii writes extinction columns to all
+// three ascii output files when SimControls::extinct() is set: an
+// a_v column (mag) in the cluster file, a spec_ex column (same units
+// as spec) in the cluster-spectra file -- reading 0 outside
+// extinct()->wlOffset()'s own coverage and cluster.specExtinct()
+// inside it -- and one "<filter>_ex" column per real filter (Lbol
+// excluded) in the cluster-photometry file. Uses testClusterExtinct.in,
+// the same deck testCluster.cpp's own testClusterExtinct() and
+// testOutputManager.cpp's own testWriteClusterSpecPhotH5Extinct()
+// exercise the underlying Cluster/H5 side of this with.
+static auto testWriteClusterAsciiExtinct() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() / "slugTestOutputManagerAsciiExtinct";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+    const std::string modelName = "test_model";
+    const toml::table inputDeck = makeClusterPhysicsInputDeck(
+        modelName, outDir, "tests/core/assets/testClusterExtinct.in");
+
+    try
+    {
+        const io::SimControls controls(inputDeck);
+        if (controls.extinct() == nullptr)
+        {
+            std::cerr << "testOutputManager: ascii extinct: test bug: "
+                "expected SimControls::extinct() to be non-null\n";
+            return 1;
+        }
+
+        utils::rng().seed(42);
+        constexpr unsigned long uid = 23;
+        constexpr double targetMass = 1e4;
+        constexpr double formTime = 0.0;
+        core::Cluster cluster(uid, targetMass, formTime, controls);
+        constexpr double ageYr = 1e6;
+        cluster.advance(ageYr);
+        constexpr unsigned long trial = 4;
+
+        {
+            io::OutputManagerAscii manager(controls, inputDeck);
+            manager.writeCluster(trial, cluster);
+            manager.writeClusterSpec(trial, ageYr, cluster);
+            manager.writeClusterPhot(trial, ageYr, cluster);
+        }
+
+        constexpr double tol = 1e-5;
+
+        // clusters.txt: header should name an a_v column (units mag),
+        // and the data row's a_v field should match cluster.aV()
+        {
+            std::ifstream file(outDir / (modelName + "_clusters.txt"));
+            std::string headerLine;
+            std::string unitsLine;
+            std::string ruleLine;
+            std::string dataLine;
+            std::getline(file, headerLine);
+            std::getline(file, unitsLine);
+            std::getline(file, ruleLine);
+            std::getline(file, dataLine);
+
+            if (!headerLine.contains("a_v") || !unitsLine.contains("mag"))
+            {
+                std::cerr << "testOutputManager: ascii extinct: clusters.txt "
+                    "header is missing the expected a_v (mag) column\n";
+                return 1;
+            }
+
+            std::istringstream lineStream(dataLine);
+            unsigned long readTrial = 0;
+            unsigned long readUid = 0;
+            double readTargetMass = 0.0;
+            double readBirthMass = 0.0;
+            double readFormTime = 0.0;
+            double readFeH = 0.0;
+            double readAV = 0.0;
+            lineStream >> readTrial >> readUid >> readTargetMass >> readBirthMass
+                >> readFormTime >> readFeH >> readAV;
+            if (std::abs(readAV - cluster.aV()) > tol)
+            {
+                std::cerr << "testOutputManager: ascii extinct: clusters.txt "
+                    "a_v = " << readAV << " does not match cluster.aV() = "
+                    << cluster.aV() << "\n";
+                return 1;
+            }
+        }
+
+        // cluster_spectra.txt: one line per wavelength; spec_ex should
+        // read 0 outside extinct()->wl()'s own coverage and
+        // cluster.specExtinct() inside it
+        {
+            std::ifstream file(outDir / (modelName + "_cluster_spectra.txt"));
+            std::string headerLine;
+            std::string unitsLine;
+            std::string ruleLine;
+            std::getline(file, headerLine);
+            std::getline(file, unitsLine);
+            std::getline(file, ruleLine);
+
+            if (!headerLine.contains("spec_ex"))
+            {
+                std::cerr << "testOutputManager: ascii extinct: cluster_spectra.txt "
+                    "header is missing the expected spec_ex column\n";
+                return 1;
+            }
+
+            const auto& specExtinct = cluster.specExtinct();
+            const auto wlOffset = controls.extinct()->wlOffset();
+
+            std::string dataLine;
+            std::size_t i = 0;
+            while (std::getline(file, dataLine))
+            {
+                unsigned long readTrial = 0;
+                double readTime = 0.0;
+                unsigned long readUid = 0;
+                double readWl = 0.0;
+                double readSpec = 0.0;
+                double readSpecEx = 0.0;
+                std::istringstream lineStream(dataLine);
+                lineStream >> readTrial >> readTime >> readUid >> readWl
+                    >> readSpec >> readSpecEx;
+
+                const double expectedSpecEx =
+                    (i >= wlOffset && (i - wlOffset) < specExtinct.size()) ?
+                    specExtinct.at(i - wlOffset) : 0.0;
+                const double denom = std::max(std::abs(expectedSpecEx), 1.0);
+                if (std::abs(readSpecEx - expectedSpecEx) > tol * denom)
+                {
+                    std::cerr << "testOutputManager: ascii extinct: "
+                        "cluster_spectra.txt row " << i << ": spec_ex = "
+                        << readSpecEx << ", expected " << expectedSpecEx << "\n";
+                    return 1;
+                }
+                ++i;
+            }
+            if (i != controls.specsyn()->wlObs().size())
+            {
+                std::cerr << "testOutputManager: ascii extinct: cluster_spectra.txt "
+                    "has " << i << " data rows, expected "
+                    << controls.specsyn()->wlObs().size() << "\n";
+                return 1;
+            }
+        }
+
+        // cluster_phot.txt: header should carry a "<filter>_ex" column
+        // for each real filter (not Lbol), and the data row's trailing
+        // columns should match cluster.photExtinct()
+        {
+            std::ifstream file(outDir / (modelName + "_cluster_phot.txt"));
+            std::string headerLine;
+            std::string unitsLine;
+            std::string ruleLine;
+            std::string dataLine;
+            std::getline(file, headerLine);
+            std::getline(file, unitsLine);
+            std::getline(file, ruleLine);
+            std::getline(file, dataLine);
+
+            const auto& realFilterNames = controls.filters()->filterNames();
+            for (const auto& name : realFilterNames)
+            {
+                if (!headerLine.contains(name + "_ex"))
+                {
+                    std::cerr << "testOutputManager: ascii extinct: cluster_phot.txt "
+                        "header is missing the expected " << name << "_ex column\n";
+                    return 1;
+                }
+            }
+
+            std::istringstream lineStream(dataLine);
+            unsigned long readTrial = 0;
+            double readTime = 0.0;
+            unsigned long readUid = 0;
+            lineStream >> readTrial >> readTime >> readUid;
+            // phot columns: real filters + Lbol (in that order, per
+            // writeClusterPhot), then the extinct columns
+            const std::size_t nPhotCols = realFilterNames.size() +
+                (controls.computeLbol() ? 1 : 0);
+            std::vector<double> readPhot(nPhotCols);
+            for (double& v : readPhot) { lineStream >> v; }
+            std::vector<double> readPhotExtinct(cluster.photExtinct().size());
+            for (double& v : readPhotExtinct) { lineStream >> v; }
+
+            for (std::size_t i = 0; i < readPhotExtinct.size(); ++i)
+            {
+                const double expected = cluster.photExtinct().at(i);
+                if (std::abs(readPhotExtinct.at(i) - expected) > tol * std::abs(expected))
+                {
+                    std::cerr << "testOutputManager: ascii extinct: cluster_phot.txt "
+                        "extinct column " << i << " = " << readPhotExtinct.at(i)
+                        << ", expected " << expected << "\n";
+                    return 1;
+                }
+            }
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testOutputManager: ascii extinct test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
 // Verify that OutputManager::writeCluster appends the cluster's
 // trial number, uid, target mass, birth mass, formation time, and
 // [Fe/H] to the corresponding datasets in the HDF5 clusters group.
@@ -590,6 +795,7 @@ auto testOutputManager() -> int
     result += testOutputManagerAscii();
     result += testOutputManagerH5();
     result += testWriteClusterAscii();
+    result += testWriteClusterAsciiExtinct();
     result += testWriteClusterH5();
     result += testWriteReadClusterRngRoundTrip();
     result += testWriteClusterSpecPhotH5Extinct();

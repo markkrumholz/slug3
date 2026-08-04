@@ -209,6 +209,17 @@ namespace extinct
         [[nodiscard]] auto wlObs() const -> std::vector<double>;
 
         /**
+         * @brief Get the number of leading elements chopped off the constructor's own wl
+         * @return wlOffset_ -- the number of leading elements of the wl
+         *   passed to the constructor that fell below the native
+         *   curve's own coverage and so are absent from wl()/extinct()
+         *   (see the constructor's own comment). Lets a caller line up
+         *   a spectrum tabulated on that original wl with wl()'s own,
+         *   narrower grid, exactly as applyExtinction() does internally.
+         */
+        [[nodiscard]] auto wlOffset() const { return wlOffset_; }
+
+        /**
          * @brief Apply this extinction curve to a spectrum
          * @param A_V V-band extinction to apply, in magnitudes
          * @param spec Spectrum to extinguish, tabulated on exactly the
