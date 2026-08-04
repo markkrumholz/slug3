@@ -14,7 +14,9 @@
 #include "io/SlugVersion.hpp"
 #include "testOutputManager.hpp"
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstddef>
 #include <exception>
 #include <filesystem>
 #include <fstream>
@@ -23,16 +25,19 @@
 #include <stdexcept>
 #include <string>
 #include <toml.hpp>
+#include <vector>
 
 // Build a valid input deck for a cluster-type simulation that also
-// has usable stellar physics (IMF, tracks, CMF, etc.), by reusing
-// the deck already exercised by testSimControls/testCluster, and
-// injecting model_name and out_dir into it as writeCluster's tests
-// need an OutputManager pointed at a real Cluster.
+// has usable stellar physics (IMF, tracks, CMF, etc.), by reusing an
+// existing deck (testCluster.in by default, but any deck of the same
+// shape can be substituted), and injecting model_name and out_dir
+// into it as writeCluster's tests need an OutputManager pointed at a
+// real Cluster.
 static auto makeClusterPhysicsInputDeck(const std::string& modelName,
-    const std::filesystem::path& outDir) -> toml::table
+    const std::filesystem::path& outDir,
+    const std::string& deckPath = "tests/core/assets/testCluster.in") -> toml::table
 {
-    toml::table inputDeck = toml::parse_file("tests/core/assets/testCluster.in");
+    toml::table inputDeck = toml::parse_file(deckPath);
     inputDeck.insert("output", toml::table{ { "model_name", modelName } });
     inputDeck.at_path("outputs").as_table()->insert("out_dir", outDir.string());
     return inputDeck;
@@ -273,6 +278,129 @@ static auto testWriteReadClusterRngRoundTrip() -> int
     return 0;
 }
 
+// Verify that OutputManager::writeClusterSpec/writeClusterPhot append
+// spec_extinct/phot_extinct rows, alongside spec/phot, to the HDF5
+// cluster_spectra/cluster_phot groups whenever SimControls::extinct()
+// is set -- using testClusterExtinct.in, the same deck
+// testCluster.cpp's own testClusterExtinct() exercises Cluster's side
+// of this with. The values written are just cluster.specExtinct()/
+// photExtinct() copied verbatim, so the round trip should be bitwise
+// exact.
+static auto testWriteClusterSpecPhotH5Extinct() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() / "slugTestOutputManagerSpecPhotExtinct";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+    const std::string modelName = "test_model";
+    const auto expectedPath = outDir / (modelName + ".h5");
+    const toml::table inputDeck = makeClusterPhysicsInputDeck(
+        modelName, outDir, "tests/core/assets/testClusterExtinct.in");
+
+    try
+    {
+        const io::SimControls controls(inputDeck);
+        if (controls.extinct() == nullptr)
+        {
+            std::cerr << "testOutputManager: h5 spec/phot extinct: test bug: "
+                "expected SimControls::extinct() to be non-null\n";
+            return 1;
+        }
+
+        utils::rng().seed(42);
+        constexpr unsigned long uid = 17;
+        constexpr double targetMass = 1e4;
+        constexpr double formTime = 0.0;
+        core::Cluster cluster(uid, targetMass, formTime, controls);
+        constexpr double ageYr = 1e6;
+        cluster.advance(ageYr);
+        constexpr unsigned long trial = 2;
+
+        {
+            io::OutputManagerH5 manager(controls, inputDeck);
+            manager.writeClusterSpec(trial, ageYr, cluster);
+            manager.writeClusterPhot(trial, ageYr, cluster);
+        }
+
+        // NOLINTBEGIN(misc-include-cleaner)
+        const hid_t file = H5Fopen(expectedPath.string().c_str(),
+            H5F_ACC_RDONLY, H5P_DEFAULT);
+        if (file < 0)
+        {
+            std::cerr << "testOutputManager: h5 spec/phot extinct: unable to reopen "
+                << expectedPath.string() << "\n";
+            return 1;
+        }
+
+        const auto readRow = [](const hid_t grp, const char* name,
+            const std::size_t expectedLen) -> std::vector<double>
+        {
+            const hid_t dset = H5Dopen2(grp, name, H5P_DEFAULT);
+            if (dset < 0)
+            {
+                throw std::runtime_error(
+                    std::string("missing expected dataset ") + name);
+            }
+            const hid_t space = H5Dget_space(dset);
+            std::array<hsize_t, 2> dims{};
+            H5Sget_simple_extent_dims(space, dims.data(), nullptr);
+            H5Sclose(space);
+            if (dims.at(0) != 1 || dims.at(1) != expectedLen)
+            {
+                H5Dclose(dset);
+                throw std::runtime_error(
+                    std::string(name) + " has shape (" + std::to_string(dims.at(0)) +
+                    ", " + std::to_string(dims.at(1)) + "), expected (1, " +
+                    std::to_string(expectedLen) + ")");
+            }
+            std::vector<double> row(expectedLen);
+            H5Dread(dset, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, row.data());
+            H5Dclose(dset);
+            return row;
+        };
+
+        std::vector<double> readSpecExtinct;
+        std::vector<double> readPhotExtinct;
+        try
+        {
+            const hid_t specGrp = H5Gopen2(file, "cluster_spectra", H5P_DEFAULT);
+            readSpecExtinct = readRow(specGrp, "spec_extinct", cluster.specExtinct().size());
+            H5Gclose(specGrp);
+
+            const hid_t photGrp = H5Gopen2(file, "cluster_phot", H5P_DEFAULT);
+            readPhotExtinct = readRow(photGrp, "phot_extinct", cluster.photExtinct().size());
+            H5Gclose(photGrp);
+        }
+        catch (const std::runtime_error& error)
+        {
+            H5Fclose(file);
+            std::cerr << "testOutputManager: h5 spec/phot extinct: " << error.what() << "\n";
+            return 1;
+        }
+        H5Fclose(file);
+        // NOLINTEND(misc-include-cleaner)
+
+        if (!std::ranges::equal(readSpecExtinct, cluster.specExtinct()))
+        {
+            std::cerr << "testOutputManager: h5 spec/phot extinct: spec_extinct "
+                "row does not match cluster.specExtinct()\n";
+            return 1;
+        }
+        if (!std::ranges::equal(readPhotExtinct, cluster.photExtinct()))
+        {
+            std::cerr << "testOutputManager: h5 spec/phot extinct: phot_extinct "
+                "row does not match cluster.photExtinct()\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testOutputManager: h5 spec/phot extinct test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
 // Verify the ascii OutputManager: opens <model>_summary.txt, writes the
 // slug-hash/date/time/rng_state header followed by the toml input
 // deck, and refuses to overwrite an existing file.
@@ -444,5 +572,6 @@ auto testOutputManager() -> int
     result += testWriteClusterAscii();
     result += testWriteClusterH5();
     result += testWriteReadClusterRngRoundTrip();
+    result += testWriteClusterSpecPhotH5Extinct();
     return result;
 }
