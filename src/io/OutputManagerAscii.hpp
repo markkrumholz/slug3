@@ -100,6 +100,7 @@ namespace io
         std::ofstream clusterPhotFile_; /**< Handle to the open cluster-photometry output file, if any */
         std::vector<double> wlObs_; /**< Observed-frame wavelength grid, if spectral synthesis is enabled */
         std::vector<int> photColWidths_; /**< Column width used for each filter in the cluster-photometry file -- see computePhotColWidths() */
+        std::vector<int> photExtinctColWidths_; /**< Column width used for each "<filter>_ex" column in the cluster-photometry file, if SimControls::extinct() is set -- see computePhotColWidths() */
     };
 
 } // namespace io

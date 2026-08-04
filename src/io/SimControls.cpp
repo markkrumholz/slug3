@@ -6,6 +6,7 @@
  */
 
 #include "SimControls.hpp"
+#include "../extinct/Extinct.hpp"
 #include "../pdfs/PDF.hpp"
 #include "../pdfs/PDFFileParser.hpp"
 #include "../pdfs/PDFSegmentPowerlaw.hpp"
@@ -249,6 +250,11 @@ void io::SimControls::initPhysics(const toml::table& inputDeck)
     // check that a spectral synthesizer is actually available before
     // building a filter collection that will need one.
     readFilters(inputDeck);
+
+    // Read the extinction curve to apply, if any -- extinct.AV is
+    // optional. Needs specsyn_ (just set above) to provide the
+    // wavelength grid the extinction curve is interpolated onto.
+    readExtinct(inputDeck);
 
     // In a galaxy simulation, read CLF and SFR
     if (simType_ == SimType::galaxy)
@@ -518,10 +524,10 @@ void io::SimControls::readSpectra(const toml::table& inputDeck)
     wlMax_ = wlMaxInput.value_or(specsyn::defaultWlMax);
     nWl_ = nWlInput.value_or(specsyn::defaultNWl);
 
-    // Optional redshift, applied by every Specsyn's own wlObs(); 0
-    // (no redshift) if not supplied
+    // Optional redshift, read live by every Specsyn's/Extinct's own
+    // wlObs() (see z()); 0 (no redshift) if not supplied
     const auto zInput = utils::getTOMLKeyWithError<double>(inputDeck, "spectra.z");
-    const double z = zInput.value_or(0.0);
+    z_ = zInput.value_or(0.0);
 
     // Optional stars.alphaFe and stars.CFe: if not supplied, fall back
     // to the library defaults. stars.alphaFe is the same key that
@@ -545,7 +551,7 @@ void io::SimControls::readSpectra(const toml::table& inputDeck)
         // not require a spectral library at all
         if (model.value() == "blackbody")
         {
-            specsyn_ = std::make_unique<specsyn::SpecsynBlackbody>(wlMin_, wlMax_, nWl_, z, *this);
+            specsyn_ = std::make_unique<specsyn::SpecsynBlackbody>(wlMin_, wlMax_, nWl_, *this);
             return;
         }
 
@@ -569,7 +575,7 @@ void io::SimControls::readSpectra(const toml::table& inputDeck)
         {
             specsyn_ = std::make_unique<specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise>>(
                 model.value(), fehDist_.getMin(), fehDist_.getMax(), registryName,
-                wlMin_, wlMax_, nWl_, z, *this);
+                wlMin_, wlMax_, nWl_, *this);
         }
         else
         {
@@ -577,7 +583,7 @@ void io::SimControls::readSpectra(const toml::table& inputDeck)
                 model.value(), fehDist_.getMin(), fehDist_.getMax(),
                 afe, cfe,
                 std::numeric_limits<double>::quiet_NaN(), specsyn::defaultR,
-                registryName, wlMin_, wlMax_, nWl_, z, *this);
+                registryName, wlMin_, wlMax_, nWl_, *this);
         }
         return;
     }
@@ -601,7 +607,7 @@ void io::SimControls::readSpectra(const toml::table& inputDeck)
     specsyn_ = std::make_unique<specsyn::SpecsynLibChained>(
         models, fehDist_.getMin(), fehDist_.getMax(),
         afe, cfe, std::vector<double>{},
-        specsyn::defaultR, registryName, wlMin_, wlMax_, nWl_, z, true, *this);
+        specsyn::defaultR, registryName, wlMin_, wlMax_, nWl_, true, *this);
 }
 
 // Photometric filter collection reader
@@ -699,4 +705,39 @@ void io::SimControls::readFilters(const toml::table& inputDeck)
 
     filters_ = std::make_unique<phot::FilterCollection>(
         filterNames, photSystem, registryName);
+}
+
+// Extinction curve reader
+void io::SimControls::readExtinct(const toml::table& inputDeck)
+{
+    // extinct.AV: optional; if absent, this simulation applies no
+    // extinction, and avDist_/extinct_ are left at their default/null
+    // state
+    const auto avNode = inputDeck.at_path("extinct.AV");
+    if (!avNode) { return; }
+    avDist_ = utils::initPDFFromKey(inputDeck, "extinct.AV");
+
+    // extinct.model: required now that extinct.AV was given, names
+    // the extinction curve to use
+    const auto model = utils::getTOMLKeyWithError<std::string>(
+        inputDeck, "extinct.model", true);
+
+    // extinct.registry: optional override of the default extinction
+    // curve registry
+    const auto registryInput = utils::getTOMLKeyWithError<std::string>(
+        inputDeck, "extinct.registry");
+    const std::string registryName = registryInput.value_or(extinct::defaultRegistry);
+
+    // Extinction requires a spectral synthesizer to provide the
+    // wavelength grid the curve is interpolated onto
+    if (specsyn_ == nullptr)
+    {
+        throw std::runtime_error(
+            "SimControls: extinct.AV was given but no spectral "
+            "synthesizer was requested (spectra.model was not set "
+            "in the input deck)");
+    }
+
+    extinct_ = std::make_unique<extinct::Extinct>(
+        model.value(), specsyn_->wl(), *this, registryName); // NOLINT(bugprone-unchecked-optional-access) -- required=true above guarantees model has a value or getTOMLKeyWithError already threw
 }

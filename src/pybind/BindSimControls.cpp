@@ -388,6 +388,13 @@ static constexpr std::string_view intMaxIterPropertyDocstring = R"doc(The maximu
 0 means unlimited. See intRelTol's own docstring on live (not
 snapshotted) effect.)doc";
 
+static constexpr std::string_view zPropertyDocstring = R"doc(The redshift.
+
+Applied by every Specsyn's and Extinct's own wlObs(). Any such object
+built by this SimControls reads this value live, not a snapshot, so
+assigning a new value takes effect the next time wlObs() is called --
+no need to rebuild anything.)doc";
+
 // Apply each property-named constructor keyword argument that was
 // actually given (not py::none()) to an already-built sc, via the
 // same setter its property uses -- factored out of the constructor
@@ -515,6 +522,8 @@ void bindSimControls(py::module_& m)
                 intAbsTolPropertyDocstring.data(), py::arg("abs_tol"))
         .def("setIntMaxIter", &io::SimControls::setIntMaxIter,
                 intMaxIterPropertyDocstring.data(), py::arg("max_iter"))
+        .def("setZ", &io::SimControls::setZ,
+                zPropertyDocstring.data(), py::arg("z"))
         // Properties: alternative, attribute-style access to the same
         // getters/setters bound as plain methods above (e.g.
         // sc.imf = "20.0" instead of sc.setIMF("20.0")). Getters that
@@ -574,6 +583,10 @@ void bindSimControls(py::module_& m)
         .def_property("intMaxIter",
                 &io::SimControls::intMaxIter,
                 &io::SimControls::setIntMaxIter,
-                intMaxIterPropertyDocstring.data());
+                intMaxIterPropertyDocstring.data())
+        .def_property("z",
+                &io::SimControls::z,
+                &io::SimControls::setZ,
+                zPropertyDocstring.data());
 }
 // NOLINTEND(misc-include-cleaner)

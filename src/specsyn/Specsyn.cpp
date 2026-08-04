@@ -25,6 +25,15 @@ auto specsyn::Specsyn::intAbsTol() const -> double { return controls_.intAbsTol(
 
 auto specsyn::Specsyn::intMaxIter() const -> std::size_t { return controls_.intMaxIter(); }
 
+auto specsyn::Specsyn::wlObs() const -> std::vector<double>
+{
+    const double z = controls_.z();
+    std::vector<double> wlObs(wl_.size());
+    std::ranges::transform(wl_, wlObs.begin(),
+        [z](const double wl) -> double { return wl * (1.0 + z); });
+    return wlObs;
+}
+
 auto specsyn::Specsyn::specCts(
     const Isochrone& isochrone,
     const pdfs::PDF& imf,

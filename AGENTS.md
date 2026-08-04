@@ -11,6 +11,7 @@ This repository is version 3 of the code. The previous version is [slug2](https:
 The main top-level directories in the repository are `data`, `src`, and `tests`.
 
 * The `data` directory contains the data files on which slug relies. See below for more details on how slug handles data files. This directory is broken into subdirectories `filters`, `imfs`, `spectra`, `tools`, and `tracks`; a further subdirectory `yields` will be added.
+    * `extinct` holds tabulated extinction curves
     * `filters` contains photometric filters
     * `imfs` contains definition files for commonly-used initial mass functions
     * `spectra` contains libraries of stellar atomsphere models that provide spectra
@@ -19,7 +20,9 @@ The main top-level directories in the repository are `data`, `src`, and `tests`.
     * `yields` will contain libraries of stellar nucleosynthetic yields.
 * The `src` directory contains the main program source code; `main.cpp` is in the top-level source directory, and the rest of the code is in subdirectories; each subdirectory defines a namespace whose name matches the name of the subdirectory, and all classes and functions defined in that subdirectory below to that namespace. The subdirectories are:
     * `core` contains the top-level routines that manage simulations and store their data
+    * `elem` holds fundamental elemental and atomic data
     * `extern` contains external packages slug uses
+    * `extinct` contains code to handle extinction
     * `feedback` will be added in the future, and will contain code for calculating stellar feedback (e.g., number of SN explosions, stellar wind power, etc.)
     * `interpolation` contains utilities for doing interpolation
     * `io` contains classes that managed IO
@@ -38,8 +41,7 @@ Most of the code is C++, with a small number of Python helper scripts. For C++ c
 * The code uses the `C++23` standard.
 * Class names use `PascalCase`
 * Class member variables use `camelCase_` with a trailing underscore.
-* All functions, and variables that are not class members,
-use `camelCase` with no trailing underscore.
+* All functions, and variables that are not class members, use `camelCase` with no trailing underscore.
 * Non-void functions are always declared as `auto` with a trailing return type where necessary.
 * Items should be marked `const` where possible.
 * Code style is enforced by calling `clang-tidy` on all changed files in the CI, and rejecting PRs if any warnings occurs.
@@ -75,3 +77,7 @@ For any code changes that touch files in a given subdirectory of `src`, always r
 slug relies on large data sets of stellar tracks, spectral libraries, etc. that are much too large to fit in a GitHub repository. These are stored in the `data` subdirectories and may be available locally in a particular install, but are listed in `.gitignore` because they cannot go into the repository. The eventual plan, once a baseline set of large data files is established, is to host them in the ANU data commons and provide a script for users to download them.
 
 Large data sets are stored as HDF5 files, with one or more such files in each subdirectory of `data` except `data/tools`. These are indexed by a TOML registry file whose name matches the name of the subdirectory, e.g., the index file for stellar tracks is `data/tracks/tracks.toml`.
+
+There are also a number of smaller data files in `data`, which hold data sets small enough to be included in the repository, some of which are needed
+for code operations (e.g., `data/spectra/vega.h5` holds
+a spectrum of Vega needed for the Vega photometry code to function). These files are not gitignore'd.

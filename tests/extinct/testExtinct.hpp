@@ -9,6 +9,7 @@
 #define TESTEXTINCT_HPP
 
 #include "../src/extinct/Extinct.hpp"
+#include "../src/io/SimControls.hpp"
 #include "../src/phot/FilterTabulated.hpp"
 #include "../src/utils/HDF5Utils.hpp"
 #include "../src/utils/MiscUtils.hpp"
@@ -54,7 +55,8 @@ auto testExtinct() -> int
     for (const double w : {1000.0, 5000.0, 10000.0, wlRaw.back()}) { wl.push_back(w); }
     std::ranges::sort(wl);
 
-    const extinct::Extinct ext(curveName, wl, registryName);
+    const io::SimControls testControls;
+    const extinct::Extinct ext(curveName, wl, testControls, registryName);
 
     // Data should have been loaded correctly
     if (ext.wlDat() != wlRaw)
@@ -128,10 +130,30 @@ auto testExtinct() -> int
         }
     }
 
+    // wlObs() should read z live from testControls: 0 (the default)
+    // means it matches wl() exactly, and a nonzero z should redshift
+    // every element by exactly (1 + z)
+    if (ext.wlObs() != ext.wl())
+    {
+        std::cerr << "testExtinct: wlObs() should equal wl() when z = 0\n";
+        return 1;
+    }
+    io::SimControls redshiftedControls;
+    redshiftedControls.setZ(0.1);
+    const extinct::Extinct extRedshifted(curveName, wl, redshiftedControls, registryName);
+    for (std::size_t i = 0; i < extRedshifted.wl().size(); i++)
+    {
+        if (!utils::approxEqual(extRedshifted.wlObs().at(i), extRedshifted.wl().at(i) * 1.1))
+        {
+            std::cerr << "testExtinct: wlObs() does not match wl() * (1 + z) at index " << i << "\n";
+            return 1;
+        }
+    }
+
     // An unrecognized curve name should raise, not crash
     try
     {
-        const extinct::Extinct bad("NotARealCurve", wl, registryName);
+        const extinct::Extinct bad("NotARealCurve", wl, testControls, registryName);
         std::cerr << "testExtinct: expected exception for unknown curve name\n";
         return 1;
     }
@@ -171,7 +193,8 @@ auto testExtinctNormalization() -> int
     // come back identical (untruncated) to vFilt.wl(), i.e. wlOffset_
     // should be 0 and specBefore is already on the right grid for
     // applyExtinction()
-    const extinct::Extinct ext("Calzetti_starburst", vFilt.wl());
+    const io::SimControls testControls;
+    const extinct::Extinct ext("Calzetti_starburst", vFilt.wl(), testControls);
     if (ext.wl() != vFilt.wl())
     {
         std::cerr << "testExtinctNormalization: test bug: Extinct truncated "

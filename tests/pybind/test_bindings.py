@@ -693,7 +693,7 @@ def test_simcontrols_set_specsyn_installs_new_synthesizer(tmp_path):
     with pytest.raises(RuntimeError):
         controls.wl()
 
-    specsyn = slug.SpecsynBlackbody(3000.0, 9000.0, 50, 0.0, controls)
+    specsyn = slug.SpecsynBlackbody(3000.0, 9000.0, 50, controls)
     controls.setSpecsyn(specsyn)
 
     assert list(controls.wl()) == pytest.approx(list(controls.wlObs()))
@@ -834,7 +834,7 @@ def test_simcontrols_specsyn_property():
     controls = slug.SimControls(CLUSTER_DECK)
     assert isinstance(controls.specsyn, slug.SpecsynBlackbody)
 
-    new_specsyn = slug.SpecsynBlackbody(3000.0, 9000.0, 50, 0.0, controls)
+    new_specsyn = slug.SpecsynBlackbody(3000.0, 9000.0, 50, controls)
     controls.specsyn = new_specsyn
     assert len(controls.wl()) == 50
     with pytest.raises(ValueError):
@@ -957,7 +957,7 @@ def test_simcontrols_constructor_kwargs_move_only_properties():
     the corresponding property/setter does (disowning the Python
     object passed in)."""
     tolerances_only = slug.SimControls(CLUSTER_DECK)
-    specsyn = slug.SpecsynBlackbody(3000.0, 9000.0, 50, 0.0, tolerances_only)
+    specsyn = slug.SpecsynBlackbody(3000.0, 9000.0, 50, tolerances_only)
     fc = slug.FilterCollection([], slug.PhotSystem.Flambda)
     fc.addFilter("Q(HI)")
     tracks = slug.Tracks3D(TRACK_SET, -1.0, 0.5, KNOWN_VVCRIT, KNOWN_AFE, REGISTRY)

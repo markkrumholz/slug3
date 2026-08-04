@@ -131,15 +131,14 @@ nwl : int, optional
     Number of points in the output grid. 0 (the default) selects the
     built-in 1000-point default grid. If nonzero but wl_min is 0, uses
     nwl points spanning the default wavelength range.
-z : float, optional
-    Redshift. Default is 0.
 controls : SimControls, optional
     Simulation controls; only the integrator tolerance settings
-    (``intRelTol``, ``intAbsTol``, ``intMaxIter``) are used. If None
-    (the default), uses a minimal, all-C++-defaults SimControls --
-    intRelTol = 1e-2, intAbsTol = 0, intMaxIter = unlimited -- rather
-    than slug's bundled physics deck (unlike ``SimControls()`` itself,
-    this never touches disk).)doc";
+    (``intRelTol``, ``intAbsTol``, ``intMaxIter``) and ``z``
+    (redshift) are used. If None (the default), uses a minimal,
+    all-C++-defaults SimControls -- intRelTol = 1e-2, intAbsTol = 0,
+    intMaxIter = unlimited, z = 0 -- rather than slug's bundled
+    physics deck (unlike ``SimControls()`` itself, this never touches
+    disk).)doc";
 
 // -------------------------------------------------------------------------
 // SpecsynLibNoWind
@@ -180,13 +179,11 @@ wl_max : float, optional
 nwl : int, optional
     Number of output wavelength points. 0 (the default) uses the
     library's own native wavelength grid.
-z : float, optional
-    Redshift. Default is 0.
 controls : SimControls, optional
-    Simulation controls; only integrator tolerance settings are used.
-    None (the default) uses a minimal, all-C++-defaults SimControls,
-    not slug's bundled physics deck -- see SpecsynBlackbody's own
-    controls docstring for why.
+    Simulation controls; only integrator tolerance settings and z
+    (redshift) are used. None (the default) uses a minimal,
+    all-C++-defaults SimControls, not slug's bundled physics deck --
+    see SpecsynBlackbody's own controls docstring for why.
 
 Throws
 ------
@@ -225,13 +222,11 @@ wl_max : float, optional
 nwl : int, optional
     Number of output wavelength points. 0 (the default) uses the
     library's own common wavelength grid.
-z : float, optional
-    Redshift. Default is 0.
 controls : SimControls, optional
-    Simulation controls; only integrator tolerance settings are used.
-    None (the default) uses a minimal, all-C++-defaults SimControls,
-    not slug's bundled physics deck -- see SpecsynBlackbody's own
-    controls docstring for why.
+    Simulation controls; only integrator tolerance settings and z
+    (redshift) are used. None (the default) uses a minimal,
+    all-C++-defaults SimControls, not slug's bundled physics deck --
+    see SpecsynBlackbody's own controls docstring for why.
 
 Throws
 ------
@@ -280,18 +275,16 @@ wl_max : float, optional
 nwl : int, optional
     Number of output wavelength points. 0 (the default) uses a common
     wavelength grid derived from all chained libraries.
-z : float, optional
-    Redshift. Default is 0.
 t_clamp : bool, optional
     If True (the default), clamp each star's log(Teff) to the range
     spanned by the chained libraries before calling spec(), so a star
     with a track-derived Teff outside any library's coverage is handled
     by the nearest library grid point rather than raising an error.
 controls : SimControls, optional
-    Simulation controls; only integrator tolerance settings are used.
-    None (the default) uses a minimal, all-C++-defaults SimControls,
-    not slug's bundled physics deck -- see SpecsynBlackbody's own
-    controls docstring for why.
+    Simulation controls; only integrator tolerance settings and z
+    (redshift) are used. None (the default) uses a minimal,
+    all-C++-defaults SimControls, not slug's bundled physics deck --
+    see SpecsynBlackbody's own controls docstring for why.
 
 Throws
 ------
@@ -362,28 +355,27 @@ void bindSpecsyn(py::module_& m)
     py::class_<specsyn::SpecsynBlackbody, specsyn::Specsyn, py::smart_holder>(
             m, "SpecsynBlackbody")
         .def(py::init(
-                [](double wlMin, double wlMax, std::size_t nWl, double z,
+                [](double wlMin, double wlMax, std::size_t nWl,
                    const py::object& controls)
                     -> std::unique_ptr<specsyn::SpecsynBlackbody>
                 {
                     return std::make_unique<specsyn::SpecsynBlackbody>(
-                        wlMin, wlMax, nWl, z, resolveControls(controls, sharedMinimalControls()));
+                        wlMin, wlMax, nWl, resolveControls(controls, sharedMinimalControls()));
                 }),
                 bbConstructorDocstring.data(),
                 py::arg("wl_min") = 0.0,
                 py::arg("wl_max") = 0.0,
                 py::arg("nwl") = static_cast<std::size_t>(0),
-                py::arg("z") = 0.0,
                 py::arg("controls") = py::none(),
-                // Keep controls (index 6: 1 = self, 2-5 = wl_min/
-                // wl_max/nwl/z) alive at least as long as this
+                // Keep controls (index 5: 1 = self, 2-4 = wl_min/
+                // wl_max/nwl) alive at least as long as this
                 // Specsyn, which stores a live reference to it rather
-                // than copying its tolerances out -- see Specsyn's
-                // own controls_ member. A harmless no-op when controls
-                // is omitted: sharedMinimalControls()'s own instance
-                // is a function-local static (see its own comment in
-                // Bindings.hpp).
-                py::keep_alive<1, 6>());
+                // than copying its tolerances/redshift out -- see
+                // Specsyn's own controls_ member. A harmless no-op
+                // when controls is omitted: sharedMinimalControls()'s
+                // own instance is a function-local static (see its
+                // own comment in Bindings.hpp).
+                py::keep_alive<1, 5>());
 
     // SpecsynLibNoWind<OOBPolicy::raise>
     py::class_<specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::raise>,
@@ -393,7 +385,7 @@ void bindSpecsyn(py::module_& m)
                    double fehMin, double fehMax,
                    double afe, double cfe, double microTurb, double r,
                    const std::string& registryName,
-                   double wlMin, double wlMax, std::size_t nWl, double z,
+                   double wlMin, double wlMax, std::size_t nWl,
                    const py::object& controls)
                     -> std::unique_ptr<specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::raise>>
                 {
@@ -401,7 +393,7 @@ void bindSpecsyn(py::module_& m)
                         specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::raise>>(
                             spectraName, fehMin, fehMax,
                             afe, cfe, microTurb, r,
-                            registryName, wlMin, wlMax, nWl, z,
+                            registryName, wlMin, wlMax, nWl,
                             resolveControls(controls, sharedMinimalControls()));
                 }),
                 nwConstructorDocstring.data(),
@@ -416,12 +408,11 @@ void bindSpecsyn(py::module_& m)
                 py::arg("wl_min") = 0.0,
                 py::arg("wl_max") = 0.0,
                 py::arg("nwl") = static_cast<std::size_t>(0),
-                py::arg("z") = 0.0,
                 py::arg("controls") = py::none(),
                 // See SpecsynBlackbody's identical keep_alive comment
-                // above; index 14 here (1 = self, 2-13 = spectra_name
-                // through z).
-                py::keep_alive<1, 14>());
+                // above; index 13 here (1 = self, 2-12 = spectra_name
+                // through nwl).
+                py::keep_alive<1, 13>());
 
     // SpecsynLibWR<OOBPolicy::raise>
     py::class_<specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise>,
@@ -430,14 +421,14 @@ void bindSpecsyn(py::module_& m)
                 [](const std::string& spectraName,
                    double fehMin, double fehMax,
                    const std::string& registryName,
-                   double wlMin, double wlMax, std::size_t nWl, double z,
+                   double wlMin, double wlMax, std::size_t nWl,
                    const py::object& controls)
                     -> std::unique_ptr<specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise>>
                 {
                     return std::make_unique<
                         specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise>>(
                             spectraName, fehMin, fehMax,
-                            registryName, wlMin, wlMax, nWl, z,
+                            registryName, wlMin, wlMax, nWl,
                             resolveControls(controls, sharedMinimalControls()));
                 }),
                 wrConstructorDocstring.data(),
@@ -448,12 +439,11 @@ void bindSpecsyn(py::module_& m)
                 py::arg("wl_min") = 0.0,
                 py::arg("wl_max") = 0.0,
                 py::arg("nwl") = static_cast<std::size_t>(0),
-                py::arg("z") = 0.0,
                 py::arg("controls") = py::none(),
                 // See SpecsynBlackbody's identical keep_alive comment
-                // above; index 10 here (1 = self, 2-9 = spectra_name
-                // through z).
-                py::keep_alive<1, 10>());
+                // above; index 9 here (1 = self, 2-8 = spectra_name
+                // through nwl).
+                py::keep_alive<1, 9>());
 
     // SpecsynLibChained
     py::class_<specsyn::SpecsynLibChained, specsyn::Specsyn, py::smart_holder>(
@@ -464,14 +454,14 @@ void bindSpecsyn(py::module_& m)
                    double afe, double cfe,
                    const std::vector<double>& microTurb,
                    double r, const std::string& registryName,
-                   double wlMin, double wlMax, std::size_t nWl, double z,
+                   double wlMin, double wlMax, std::size_t nWl,
                    bool tClamp, const py::object& controls)
                     -> std::unique_ptr<specsyn::SpecsynLibChained>
                 {
                     return std::make_unique<specsyn::SpecsynLibChained>(
                         spectraNames, fehMin, fehMax,
                         afe, cfe, microTurb, r,
-                        registryName, wlMin, wlMax, nWl, z, tClamp,
+                        registryName, wlMin, wlMax, nWl, tClamp,
                         resolveControls(controls, sharedMinimalControls()));
                 }),
                 chainedConstructorDocstring.data(),
@@ -486,12 +476,11 @@ void bindSpecsyn(py::module_& m)
                 py::arg("wl_min") = 0.0,
                 py::arg("wl_max") = 0.0,
                 py::arg("nwl") = static_cast<std::size_t>(0),
-                py::arg("z") = 0.0,
                 py::arg("t_clamp") = true,
                 py::arg("controls") = py::none(),
                 // See SpecsynBlackbody's identical keep_alive comment
-                // above; index 15 here (1 = self, 2-14 =
+                // above; index 14 here (1 = self, 2-13 =
                 // spectra_names through t_clamp).
-                py::keep_alive<1, 15>());
+                py::keep_alive<1, 14>());
 }
 // NOLINTEND(misc-include-cleaner)

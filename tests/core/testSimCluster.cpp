@@ -346,7 +346,7 @@ static auto referenceWlObs() -> std::vector<double>
     const io::SimControls controls;
     return specsyn::SpecsynBlackbody(
         specsyn::defaultWlMin, specsyn::defaultWlMax, specsyn::defaultNWl,
-        0.0, controls).wlObs();
+        controls).wlObs();
 }
 
 // End-to-end check of HDF5 cluster-spectrum output: run with

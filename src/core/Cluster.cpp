@@ -6,6 +6,7 @@
  */
 
 #include "Cluster.hpp"
+#include "../extinct/Extinct.hpp"
 #include "../io/SimControls.hpp"
 #include "../phot/FilterCollection.hpp"
 #include "../tracks/TrackCommons.hpp"
@@ -33,6 +34,7 @@ core::Cluster::Cluster(const unsigned long uid,
     targetMass_(mass),
     formTime_(time),
     feH_(controls.fehDist().draw()),
+    aV_(controls.avDist().valid() ? controls.avDist().draw() : 0.0),
     controls_(std::cref(controls)),
     m_(controls.imf().drawTarget(
         controls.fracStochMass() * mass,
@@ -87,20 +89,22 @@ core::Cluster::Cluster(const unsigned long uid,
     targetMass_(mass),
     formTime_(time),
     feH_(0.0), // placeholder; set in the constructor body below
+    aV_(0.0), // placeholder; set in the constructor body below
     controls_(std::cref(controls)),
     birthNonStochMass_((1.0 - controls.fracStochMass()) * mass),
     birthMass_(0.0), // placeholder; overwritten once m_ is drawn
     disruptTime_(std::numeric_limits<double>::quiet_NaN()),
     curTime_(time)
 {
-    // Draw feH_ and m_ from the given rng state rather than the live
-    // one: save the live state, temporarily switch to rngState, draw
-    // both in the same order the primary constructor does, then
-    // restore, so this constructor has no lasting effect on the
-    // ambient rng stream
+    // Draw feH_, aV_ (if valid), and m_ from the given rng state
+    // rather than the live one: save the live state, temporarily
+    // switch to rngState, draw each in the same order the primary
+    // constructor does, then restore, so this constructor has no
+    // lasting effect on the ambient rng stream
     const auto savedState = utils::rng().getState();
     utils::rng().setState(rngState);
     feH_ = controls.fehDist().draw(); //NOLINT(cppcoreguidelines-prefer-member-initializer) -- must happen after setState(rngState) above, not in the initializer list
+    aV_ = controls.avDist().valid() ? controls.avDist().draw() : 0.0; //NOLINT(cppcoreguidelines-prefer-member-initializer) -- must happen after setState(rngState) above, not in the initializer list
     m_ = controls.imf().drawTarget(
         controls.fracStochMass() * mass,
         controls.minStochMass(),
@@ -183,20 +187,19 @@ void core::Cluster::advance(const double t)
     // Get isochrone for new time
     isochrone_ = tracks().getIsochrone(logAge);
 
-    // Update the population spectrum, if a spectral synthesizer was requested
+    // Update the population spectrum (and, if an extinction curve was
+    // requested, extincted spectrum), if a spectral synthesizer was
+    // requested
     computeSpec();
 
-    // Update the population photometry from the spectrum just
-    // computed above, if a filter collection was requested
-    const auto& sc = controls_.get();
-    const auto& filters = sc.filters();
-    if (filters != nullptr)
-    {
-        phot_ = filters->phot(sc.specsyn()->wlObs(), spec_);
-    }
+    // Update the population photometry (and extincted photometry)
+    // from the spectrum just computed above, if a filter collection
+    // was requested
+    computePhot();
 
     // Update the population's bolometric luminosity, if "Lbol" was
     // included in phot.filters (see SimControls::computeLbol())
+    const auto& sc = controls_.get();
     if (sc.computeLbol()) { computeLbol(); }
 
     // Check for disruption
@@ -295,6 +298,31 @@ void core::Cluster::computeSpec()
         {
             spec_[i] += starSpec[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- spec_ and starSpec both have size wl().size() by construction
         }
+    }
+
+    // Extinguish the spectrum just computed, if an extinction curve
+    // was requested
+    const auto* ext = sc.extinct();
+    if (ext != nullptr)
+    {
+        specExtinct_ = ext->applyExtinction(aV_, spec_);
+    }
+}
+
+// Update the population photometry (and, if an extinction curve was
+// requested, extincted photometry) from the current spec_/specExtinct_
+void core::Cluster::computePhot()
+{
+    const auto& sc = controls_.get();
+    const auto& filters = sc.filters();
+    if (filters == nullptr) { return; }
+
+    phot_ = filters->phot(sc.specsyn()->wlObs(), spec_);
+
+    const auto* ext = sc.extinct();
+    if (ext != nullptr)
+    {
+        photExtinct_ = filters->phot(ext->wlObs(), specExtinct_);
     }
 }
 

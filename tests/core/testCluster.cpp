@@ -8,6 +8,7 @@
 #include "../src/core/Cluster.hpp"
 #include "../src/io/SimControls.hpp"
 #include "../src/phot/FilterCollection.hpp"
+#include "../src/utils/MiscUtils.hpp"
 #include "../src/utils/RngThread.hpp"
 #include "testCluster.hpp"
 #include <algorithm>
@@ -15,6 +16,7 @@
 #include <cstddef>
 #include <exception>
 #include <iostream>
+#include <iterator>
 #include <numeric>
 #include <string>
 #include <string_view>
@@ -26,6 +28,7 @@ static constexpr std::string_view inputFileMinStochMass =
     "tests/core/assets/testClusterMinStochMass.in";
 static constexpr std::string_view inputFilePhot = "tests/core/assets/testClusterPhot.in";
 static constexpr std::string_view inputFileLbol = "tests/core/assets/testClusterLbol.in";
+static constexpr std::string_view inputFileExtinct = "tests/core/assets/testClusterExtinct.in";
 static constexpr unsigned int rngSeed = 42;
 
 // Verify that Cluster::starMasses() sums to within 5% of the target mass.
@@ -401,6 +404,109 @@ static auto testClusterPhotAbsent() -> int
     return 0;
 }
 
+// Verify that Cluster::aV(), Cluster::specExtinct() and
+// Cluster::photExtinct() are populated by advance() when extinction is
+// requested (extinct.AV/extinct.model given in the input deck). There's
+// no reference output to check against yet (that comes with a later,
+// dedicated commit) -- this just exercises the whole extinction code
+// path end to end and checks the results are physically sane: aV()
+// matches the deck's fixed AV, specExtinct() and photExtinct() are the
+// right sizes, and extinction makes both dimmer than their unextincted
+// counterparts.
+static auto testClusterExtinct() -> int
+{
+    constexpr double ageYr = 1e6;
+    constexpr double expectedAV = 1.0;
+
+    try
+    {
+        const toml::table inputDeck = toml::parse_file(inputFileExtinct);
+        const io::SimControls controls(inputDeck);
+
+        if (controls.extinct() == nullptr)
+        {
+            std::cerr << "testCluster: extinct: expected SimControls::extinct() "
+                "to be non-null\n";
+            return 1;
+        }
+
+        utils::rng().seed(rngSeed);
+        core::Cluster cluster(0, 1e4, 0.0, controls);
+
+        if (!utils::approxEqual(cluster.aV(), expectedAV))
+        {
+            std::cerr << "testCluster: extinct: expected aV() == " << expectedAV
+                << ", got " << cluster.aV() << "\n";
+            return 1;
+        }
+
+        cluster.advance(ageYr);
+
+        // specExtinct() lives on extinct()->wl(), which is spec()'s own
+        // wavelength grid (controls.specsyn()->wl()) clipped to the
+        // extinction curve's native coverage -- generally narrower than
+        // spec() itself, so align by locating where extinct()->wl()
+        // starts within spec()'s own grid rather than assuming the two
+        // are the same size
+        const auto& spec = cluster.spec();
+        const auto& specExtinct = cluster.specExtinct();
+        const auto& fullWl = controls.specsyn()->wl();
+        const auto& extWl = controls.extinct()->wl();
+        if (specExtinct.size() != extWl.size())
+        {
+            std::cerr << "testCluster: extinct: specExtinct() size "
+                << specExtinct.size() << " does not match extinct()->wl() size "
+                << extWl.size() << "\n";
+            return 1;
+        }
+        const auto offsetIt = std::ranges::find(fullWl, extWl.front());
+        if (offsetIt == fullWl.end())
+        {
+            std::cerr << "testCluster: extinct: test bug: extinct()->wl() "
+                "front is not on spec()'s own wavelength grid\n";
+            return 1;
+        }
+        const auto offset = static_cast<std::size_t>(std::distance(fullWl.begin(), offsetIt));
+        for (std::size_t i = 0; i < specExtinct.size(); ++i)
+        {
+            if (!(specExtinct.at(i) <= spec.at(offset + i)))
+            {
+                std::cerr << "testCluster: extinct: specExtinct()[" << i
+                    << "] = " << specExtinct.at(i) << " should be <= spec()["
+                    << offset + i << "] = " << spec.at(offset + i) << "\n";
+                return 1;
+            }
+        }
+
+        const auto& phot = cluster.phot();
+        const auto& photExtinct = cluster.photExtinct();
+        if (photExtinct.size() != phot.size())
+        {
+            std::cerr << "testCluster: extinct: photExtinct() size "
+                << photExtinct.size() << " does not match phot() size "
+                << phot.size() << "\n";
+            return 1;
+        }
+        for (std::size_t i = 0; i < phot.size(); ++i)
+        {
+            if (!(photExtinct.at(i) <= phot.at(i)))
+            {
+                std::cerr << "testCluster: extinct: photExtinct()[" << i
+                    << "] = " << photExtinct.at(i) << " should be <= phot()["
+                    << i << "] = " << phot.at(i) << "\n";
+                return 1;
+            }
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testCluster: extinct test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
 // Verify that Cluster::lbol() is populated by advance() when
 // SimControls::computeLbol() is true. testClusterLbol.in has "Lbol" as
 // the sole entry in phot.filters, so SimControls::filters() itself
@@ -469,6 +575,7 @@ auto testCluster() -> int
     result += testClusterSpecContinuousPopulation();
     result += testClusterPhot();
     result += testClusterPhotAbsent();
+    result += testClusterExtinct();
     result += testClusterLbol();
     return result;
 }

@@ -66,22 +66,23 @@ namespace core
          *   original cluster's
          * @details
          * Sets every member the same way the primary constructor does,
-         * except for feH_, m_, and birthMass_: rngState_ is set to
+         * except for feH_, aV_, m_, and birthMass_: rngState_ is set to
          * rngState directly, since that is this cluster's own birth
          * state by construction, rather than one captured live.
-         * feH_ and m_ are then both drawn together, in the same order
-         * the primary constructor draws them, from rngState rather
-         * than the live rng stream -- saving the live state first and
-         * restoring it immediately afterward, so this constructor has
-         * no lasting effect on the ambient rng stream. Both draws,
-         * not just m_'s, must be replayed from rngState for the result
+         * feH_, aV_ (if SimControls::avDist() is valid), and m_ are
+         * then all drawn together, in the same order the primary
+         * constructor draws them, from rngState rather than the live
+         * rng stream -- saving the live state first and restoring it
+         * immediately afterward, so this constructor has no lasting
+         * effect on the ambient rng stream. All of these draws, not
+         * just m_'s, must be replayed from rngState for the result
          * to come out bitwise identical to the original cluster's:
          * PDF::draw() consumes rng state (via a
          * std::discrete_distribution used to pick a segment) even for
          * a single-segment/delta [Fe/H] distribution, so drawing feH_
-         * live first would already have advanced the stream before
-         * m_'s draw ever saw rngState, decoupling the two draws from
-         * the sequence that originally produced them. birthMass_
+         * (and aV_) live first would already have advanced the stream
+         * before m_'s draw ever saw rngState, decoupling the draws
+         * from the sequence that originally produced them. birthMass_
          * (which starts at 0.0, overwritten once m_ is drawn) is then
          * reduced from m_ before m_ is sorted, matching the primary
          * constructor's own order (there, forced by computing
@@ -140,6 +141,15 @@ namespace core
         [[nodiscard]] auto feH() const { return feH_; }
 
         /**
+         * @brief Return the cluster's V-band extinction
+         * @return A_V, in magnitudes, drawn from
+         *   SimControls::avDist() at construction, or 0 if
+         *   SimControls::avDist() is not valid (extinct.AV was not
+         *   given in the input deck)
+         */
+        [[nodiscard]] auto aV() const { return aV_; }
+
+        /**
          * @brief Return the current list of living stellar masses
          * @return Masses of currently alive stars in Msun
          */
@@ -178,6 +188,17 @@ namespace core
         [[nodiscard]] auto spec() const -> const auto& { return spec_; }
 
         /**
+         * @brief Return the cluster's extincted spectrum
+         * @return A const reference to spec(), attenuated by aV()
+         *   through SimControls::extinct(), on the wavelength grid
+         *   returned by SimControls::extinct()'s own wl(); an empty
+         *   vector if no extinction curve was requested
+         *   (SimControls::extinct() is null) or spec() itself is
+         *   empty (no spectral synthesizer was requested)
+         */
+        [[nodiscard]] auto specExtinct() const -> const auto& { return specExtinct_; }
+
+        /**
          * @brief Return the cluster's photometry
          * @return A const reference to the photometric value computed
          *   from spec() by each filter in SimControls::filters(), in
@@ -186,6 +207,17 @@ namespace core
          *   was requested (SimControls::filters() is null)
          */
         [[nodiscard]] auto phot() const -> const auto& { return phot_; }
+
+        /**
+         * @brief Return the cluster's extincted photometry
+         * @return A const reference to the photometric value computed
+         *   from specExtinct() by each filter in
+         *   SimControls::filters(), in the same order as phot(); an
+         *   empty vector if no extinction curve was requested
+         *   (SimControls::extinct() is null) or no filter collection
+         *   was requested (SimControls::filters() is null)
+         */
+        [[nodiscard]] auto photExtinct() const -> const auto& { return photExtinct_; }
 
         /**
          * @brief Return the cluster's bolometric luminosity
@@ -215,6 +247,7 @@ namespace core
         double targetMass_;         /**< Target mass */
         double formTime_;           /**< Formation time */
         double feH_;                /**< [Fe/H] of cluster */
+        double aV_;                 /**< V-band extinction, in magnitudes, drawn from SimControls::avDist() (0 if that PDF is not valid) */
 
         /**
          * @brief Simulation controls (physics and control-flow settings) this cluster was built from
@@ -243,7 +276,9 @@ namespace core
         bool advanced_ = false;     /**< Has advance() ever run its body (as opposed to a same-time no-op)? */
         Interp1dPtr isochrone_;     /**< Isochrone for the current time */
         std::vector<double> spec_;  /**< Spectrum of the continuously-sampled part of the population at the current time */
+        std::vector<double> specExtinct_; /**< spec_ attenuated by aV_ through SimControls::extinct(), at the current time */
         std::vector<double> phot_;  /**< Photometry of spec_ through each filter in SimControls::filters(), at the current time */
+        std::vector<double> photExtinct_; /**< Photometry of specExtinct_ through each filter in SimControls::filters(), at the current time */
         double lbol_ = 0.0;         /**< Bolometric luminosity of the population, in Lsun, at the current time */
 
         /**
@@ -271,6 +306,17 @@ namespace core
          * (stochastic) star in m_.
          */
         void computeSpec();
+
+        /**
+         * @brief Update phot_ (and photExtinct_) from the current spec_ (and specExtinct_)
+         * @details
+         * Does nothing if SimControls::filters() is null (no filter
+         * collection was requested). Otherwise sets phot_ from spec_
+         * as before; if SimControls::extinct() is also non-null, also
+         * sets photExtinct_ from specExtinct_, on extinct()'s own
+         * wl().
+         */
+        void computePhot();
 
         /**
          * @brief Update lbol_ from the current isochrone and star lists

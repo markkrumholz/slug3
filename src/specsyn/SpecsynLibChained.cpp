@@ -129,7 +129,6 @@ namespace specsyn
          * @param wlMax Maximum wavelength of the output grid, in
          *   Angstrom; see wlMin
          * @param nWl Number of points in the output grid; see wlMin
-         * @param z The redshift
          * @param controls Simulation controls, forwarded unchanged to
          *   the constructed library's own constructor
          * @returns The constructed library, upcast to SpecsynLib<Policy>
@@ -145,17 +144,17 @@ namespace specsyn
             const double afe, const double cfe, const double microTurb,
             const double r, const std::string& registryName,
             const double wlMin, const double wlMax, const std::size_t nWl,
-            const double z, const io::SimControls& controls)
+            const io::SimControls& controls)
         -> std::unique_ptr<SpecsynLib<Policy>>
         {
             if (isWR)
             {
                 return std::make_unique<SpecsynLibWR<Policy>>(
-                    name, fehMin, fehMax, registryName, wlMin, wlMax, nWl, z, controls);
+                    name, fehMin, fehMax, registryName, wlMin, wlMax, nWl, controls);
             }
             return std::make_unique<SpecsynLibNoWind<Policy>>(
                 name, fehMin, fehMax, afe, cfe, microTurb, r, registryName,
-                wlMin, wlMax, nWl, z, controls);
+                wlMin, wlMax, nWl, controls);
         }
 
         /**
@@ -224,10 +223,9 @@ namespace specsyn
         const double wlMin,
         const double wlMax,
         const std::size_t nWl,
-        const double z,
         const bool tClamp,
         const io::SimControls& controls) :
-        Specsyn(controls, z)
+        Specsyn(controls)
     {
         if (spectraName.empty())
         {
@@ -300,13 +298,13 @@ namespace specsyn
             coerceLibs.push_back(makeChainedLib<OOBPolicy::coerce>(
                 spectraName[i], isWRGrid(spectraName[i]),
                 fehMin, fehMax, afe, cfe, mt, r, registryName,
-                0.0, 0.0, 0, z, controls));
+                0.0, 0.0, 0, controls));
         }
         const double lastMt = microTurb.empty() ? useLibraryDefault : microTurb[n - 1];
         std::unique_ptr<SpecsynLib<OOBPolicy::raise>> raiseLib = makeChainedLib<OOBPolicy::raise>(
             spectraName[n - 1], isWRGrid(spectraName[n - 1]),
             fehMin, fehMax, afe, cfe, lastMt, r, registryName,
-            0.0, 0.0, 0, z, controls);
+            0.0, 0.0, 0, controls);
 
         // Determine the common wavelength grid every chained library
         // will share, in one of three ways, then resample every

@@ -7,6 +7,7 @@
 
 #include "OutputManagerAscii.hpp"
 #include "../core/Cluster.hpp"
+#include "../extinct/Extinct.hpp"
 #include "../phot/FilterCollection.hpp"
 #include "../specsyn/Specsyn.hpp"
 #include "../utils/RngThread.hpp"
@@ -23,6 +24,7 @@
 #include <stdexcept>
 #include <string>
 #include <toml.hpp>
+#include <utility>
 #include <vector>
 
 // Column headings, and the field widths used to lay them out, for
@@ -62,24 +64,27 @@ static auto formatSci(const double value) -> std::string
 
 // Write the cluster-output ascii header (column names, a row of
 // units -- "none" for a dimensionless column -- and a dashed rule) to
-// file
-static void writeClustersHeader(std::ofstream& file)
+// file. hasExtinct adds an "a_v" (mag) column, right before "rng",
+// when SimControls::extinct() is set.
+static void writeClustersHeader(std::ofstream& file, const bool hasExtinct)
 {
     file << std::right << std::setw(uidWidth) << "trial"
          << std::setw(uidWidth) << "uid"
          << std::setw(numWidth) << "target_mass"
          << std::setw(numWidth) << "birth_mass"
          << std::setw(numWidth) << "form_time"
-         << std::setw(numWidth) << "feh"
-         << std::setw(rngWidth) << "rng" << "\n";
+         << std::setw(numWidth) << "feh";
+    if (hasExtinct) { file << std::setw(numWidth) << "a_v"; }
+    file << std::setw(rngWidth) << "rng" << "\n";
     file << std::right << std::setw(uidWidth) << "none"
          << std::setw(uidWidth) << "none"
          << std::setw(numWidth) << "Msun"
          << std::setw(numWidth) << "Msun"
          << std::setw(numWidth) << "yr"
-         << std::setw(numWidth) << "none"
-         << std::setw(rngWidth) << "none" << "\n";
-    constexpr auto numColumns = 4;
+         << std::setw(numWidth) << "none";
+    if (hasExtinct) { file << std::setw(numWidth) << "mag"; }
+    file << std::setw(rngWidth) << "none" << "\n";
+    const int numColumns = hasExtinct ? 5 : 4;
     file << std::string(static_cast<std::string::size_type>(2) * uidWidth, '-')
          << std::string(static_cast<std::string::size_type>(numColumns) * numWidth, '-')
          << std::string(static_cast<std::string::size_type>(rngWidth), '-') << "\n";
@@ -90,20 +95,27 @@ static void writeClustersHeader(std::ofstream& file)
 // this file is laid out one (wavelength, specific luminosity) pair
 // per line rather than one cluster per line, since a spectrum can
 // have thousands of wavelength points -- far too many to lay out as
-// columns and still be human-readable.
-static void writeClusterSpectraHeader(std::ofstream& file)
+// columns and still be human-readable. hasExtinct adds a "spec_ex"
+// column (same units as "spec") when SimControls::extinct() is set --
+// see writeClusterSpec's own comment for how its value is filled in
+// at wavelengths outside the extincted spectrum's own coverage.
+static void writeClusterSpectraHeader(std::ofstream& file, const bool hasExtinct)
 {
     file << std::right << std::setw(uidWidth) << "trial"
          << std::setw(numWidth) << "time"
          << std::setw(uidWidth) << "uid"
          << std::setw(numWidth) << "wl"
-         << std::setw(numWidth) << "spec" << "\n";
+         << std::setw(numWidth) << "spec";
+    if (hasExtinct) { file << std::setw(numWidth) << "spec_ex"; }
+    file << "\n";
     file << std::right << std::setw(uidWidth) << "none"
          << std::setw(numWidth) << "yr"
          << std::setw(uidWidth) << "none"
          << std::setw(numWidth) << "Angstrom"
-         << std::setw(numWidth) << "erg/s/Angstrom" << "\n";
-    constexpr auto numColumns = 3;
+         << std::setw(numWidth) << "erg/s/Angstrom";
+    if (hasExtinct) { file << std::setw(numWidth) << "erg/s/Angstrom"; }
+    file << "\n";
+    const int numColumns = hasExtinct ? 4 : 3;
     file << std::string(static_cast<std::string::size_type>(2) * uidWidth, '-')
          << std::string(static_cast<std::string::size_type>(numColumns) * numWidth, '-') << "\n";
 }
@@ -132,6 +144,29 @@ static auto computePhotColWidths(const std::vector<std::string>& filterNames,
     return widths;
 }
 
+// Build the "<filter>_ex" column names/units for the
+// cluster-photometry file's extincted-filter columns: one per real
+// filter, named after Filter::name() with "_ex" appended and using
+// the same units as the ordinary filter columns -- excluding Lbol,
+// which has no extincted counterpart (see
+// OutputManagerH5::openClusterPhotGroup's identical phot_extinct
+// sizing rationale). Both vectors come back empty if extinction was
+// not requested, or no filter collection exists.
+static auto buildExtinctFilterColumns(const io::SimControls& simControls)
+    -> std::pair<std::vector<std::string>, std::vector<std::string>>
+{
+    if (simControls.extinct() == nullptr || simControls.filters() == nullptr)
+    {
+        return {};
+    }
+    std::vector<std::string> extinctFilterNames;
+    for (const auto& name : simControls.filters()->filterNames())
+    {
+        extinctFilterNames.push_back(name + "_ex");
+    }
+    return { extinctFilterNames, simControls.filters()->filterUnits() };
+}
+
 // Write the cluster-photometry ascii header (column names, a row of
 // units, and a dashed rule) to file. Like the cluster output file,
 // this is laid out one cluster (at one output time) per line, with
@@ -141,11 +176,18 @@ static auto computePhotColWidths(const std::vector<std::string>& filterNames,
 // thousands of per-wavelength rows that writeClusterSpectraHeader
 // lays out. colWidths (see computePhotColWidths()) gives each filter
 // column's own width, which may be wider than numWidth if the
-// filter's name or unit string doesn't otherwise fit.
+// filter's name or unit string doesn't otherwise fit. extinctFilterNames/
+// extinctFilterUnits/extinctColWidths lay out one further "<filter>_ex"
+// column per real filter (excluding "Lbol", which has no extincted
+// counterpart) after the ordinary filter columns, when
+// SimControls::extinct() is set; all three are empty otherwise.
 static void writeClusterPhotHeader(std::ofstream& file,
     const std::vector<std::string>& filterNames,
     const std::vector<std::string>& filterUnits,
-    const std::vector<int>& colWidths)
+    const std::vector<int>& colWidths,
+    const std::vector<std::string>& extinctFilterNames,
+    const std::vector<std::string>& extinctFilterUnits,
+    const std::vector<int>& extinctColWidths)
 {
     file << std::right << std::setw(uidWidth) << "trial"
          << std::setw(numWidth) << "time"
@@ -153,6 +195,10 @@ static void writeClusterPhotHeader(std::ofstream& file,
     for (std::size_t i = 0; i < filterNames.size(); ++i)
     {
         file << std::setw(colWidths.at(i)) << filterNames.at(i);
+    }
+    for (std::size_t i = 0; i < extinctFilterNames.size(); ++i)
+    {
+        file << std::setw(extinctColWidths.at(i)) << extinctFilterNames.at(i);
     }
     file << "\n";
     file << std::right << std::setw(uidWidth) << "none"
@@ -162,10 +208,15 @@ static void writeClusterPhotHeader(std::ofstream& file,
     {
         file << std::setw(colWidths.at(i)) << filterUnits.at(i);
     }
+    for (std::size_t i = 0; i < extinctFilterUnits.size(); ++i)
+    {
+        file << std::setw(extinctColWidths.at(i)) << extinctFilterUnits.at(i);
+    }
     file << "\n";
     auto totalWidth = (static_cast<std::string::size_type>(2) * uidWidth) +
         static_cast<std::string::size_type>(numWidth);
     for (const int w : colWidths) { totalWidth += static_cast<std::string::size_type>(w); }
+    for (const int w : extinctColWidths) { totalWidth += static_cast<std::string::size_type>(w); }
     file << std::string(totalWidth, '-') << "\n";
 }
 
@@ -221,7 +272,7 @@ io::OutputManagerAscii::OutputManagerAscii(
             throw std::runtime_error(
                 "OutputManagerAscii: unable to open output file " + clustersPath.string());
         }
-        writeClustersHeader(clustersFile_);
+        writeClustersHeader(clustersFile_, simControls_.extinct() != nullptr);
     }
 
     if (simControls_.specsyn() != nullptr)
@@ -242,7 +293,7 @@ io::OutputManagerAscii::OutputManagerAscii(
             throw std::runtime_error(
                 "OutputManagerAscii: unable to open output file " + clusterSpectraPath.string());
         }
-        writeClusterSpectraHeader(clusterSpectraFile_);
+        writeClusterSpectraHeader(clusterSpectraFile_, simControls_.extinct() != nullptr);
     }
 
     if (simControls_.filters() != nullptr || simControls_.computeLbol())
@@ -274,7 +325,11 @@ io::OutputManagerAscii::OutputManagerAscii(
             filterUnits.emplace_back("Lsun");
         }
         photColWidths_ = computePhotColWidths(filterNames, filterUnits);
-        writeClusterPhotHeader(clusterPhotFile_, filterNames, filterUnits, photColWidths_);
+
+        const auto [extinctFilterNames, extinctFilterUnits] = buildExtinctFilterColumns(simControls_);
+        photExtinctColWidths_ = computePhotColWidths(extinctFilterNames, extinctFilterUnits);
+        writeClusterPhotHeader(clusterPhotFile_, filterNames, filterUnits, photColWidths_,
+            extinctFilterNames, extinctFilterUnits, photExtinctColWidths_);
     }
 }
 
@@ -306,8 +361,12 @@ void io::OutputManagerAscii::writeCluster(
                       << std::setw(numWidth) << formatSci(cluster.targetMass())
                       << std::setw(numWidth) << formatSci(cluster.birthMass())
                       << std::setw(numWidth) << formatSci(cluster.formTime())
-                      << std::setw(numWidth) << formatSci(cluster.feH())
-                      << std::setw(rngWidth) << std::string(cluster.rngState().data()) << "\n";
+                      << std::setw(numWidth) << formatSci(cluster.feH());
+        if (simControls_.extinct() != nullptr)
+        {
+            clustersFile_ << std::setw(numWidth) << formatSci(cluster.aV());
+        }
+        clustersFile_ << std::setw(rngWidth) << std::string(cluster.rngState().data()) << "\n";
     }
 }
 
@@ -325,6 +384,14 @@ void io::OutputManagerAscii::writeClusterSpec(
 
     const unsigned long uid = cluster.uid();
     const auto& spec = cluster.spec();
+    const auto* ext = simControls_.extinct();
+    const auto& specExtinct = cluster.specExtinct();
+    // specExtinct is tabulated on a subset of wlObs_ -- the first
+    // wlOffset() entries, and any past specExtinct's own end, fall
+    // outside the extinction curve's native coverage and have no
+    // extincted value, so spec_ex reads 0 there rather than the
+    // (nonsensical) unextincted spec value
+    const std::size_t wlOffset = (ext != nullptr) ? ext->wlOffset() : 0;
 
     // Guard the actual writes against concurrent callers from other
     // threads; unlike the constructor, this method is expected to be
@@ -343,7 +410,14 @@ void io::OutputManagerAscii::writeClusterSpec(
                                  << std::setw(numWidth) << formatSci(time)
                                  << std::setw(uidWidth) << formatUid(uid)
                                  << std::setw(numWidth) << formatSci(wlObs_.at(i))
-                                 << std::setw(numWidth) << formatSci(spec.at(i)) << "\n";
+                                 << std::setw(numWidth) << formatSci(spec.at(i));
+            if (ext != nullptr)
+            {
+                const double specEx = (i >= wlOffset && (i - wlOffset) < specExtinct.size()) ?
+                    specExtinct.at(i - wlOffset) : 0.0;
+                clusterSpectraFile_ << std::setw(numWidth) << formatSci(specEx);
+            }
+            clusterSpectraFile_ << "\n";
         }
     }
 }
@@ -380,6 +454,14 @@ void io::OutputManagerAscii::writeClusterPhot(
         for (std::size_t i = 0; i < phot.size(); ++i)
         {
             clusterPhotFile_ << std::setw(photColWidths_.at(i)) << formatSci(phot.at(i));
+        }
+        if (simControls_.extinct() != nullptr && simControls_.filters() != nullptr)
+        {
+            const auto& photExtinct = cluster.photExtinct();
+            for (std::size_t i = 0; i < photExtinct.size(); ++i)
+            {
+                clusterPhotFile_ << std::setw(photExtinctColWidths_.at(i)) << formatSci(photExtinct.at(i));
+            }
         }
         clusterPhotFile_ << "\n";
     }

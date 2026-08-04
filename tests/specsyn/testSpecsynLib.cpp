@@ -83,7 +83,7 @@ namespace
 static auto testSpecSuccess() -> int
 {
     const specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::raise> lib(
-        spectraName, -3.0, 1.0, 0.0, 0.0, 0.0, 500, registryName, 0.0, 0.0, 0, 0.0, testControls);
+        spectraName, -3.0, 1.0, 0.0, 0.0, 0.0, 500, registryName, 0.0, 0.0, 0, testControls);
 
     const double logTeff = std::log10(5772.0);
     const auto props = makeStarData(1.0, 0.0, logTeff);
@@ -136,7 +136,7 @@ static auto testSpecSuccess() -> int
 static auto testSpecOOBThrow() -> int
 {
     const specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::raise> lib(
-        spectraName, -3.0, 1.0, 0.0, 0.0, 0.0, 500, registryName, 0.0, 0.0, 0, 0.0, testControls);
+        spectraName, -3.0, 1.0, 0.0, 0.0, 0.0, 500, registryName, 0.0, 0.0, 0, testControls);
 
     const double logTeff = std::log10(15000.0);
     const auto props = makeStarData(1.0, 0.0, logTeff);
@@ -158,7 +158,7 @@ static auto testSpecOOBThrow() -> int
 static auto testSpecOOBSilent() -> int
 {
     const specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::silent> lib(
-        spectraName, -3.0, 1.0, 0.0, 0.0, 0.0, 500, registryName, 0.0, 0.0, 0, 0.0, testControls);
+        spectraName, -3.0, 1.0, 0.0, 0.0, 0.0, 500, registryName, 0.0, 0.0, 0, testControls);
 
     const double logTeff = std::log10(15000.0);
     const auto props = makeStarData(1.0, 0.0, logTeff);
@@ -202,7 +202,7 @@ static auto testSpecOOBSilent() -> int
 static auto testSpecTlustySuccess() -> int
 {
     const specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::raise> lib(
-        "TLUSTY_test", -3.0, 1.0, 0.0, 0.0, 10.0, specsyn::defaultR, registryName, 0.0, 0.0, 0, 0.0, testControls);
+        "TLUSTY_test", -3.0, 1.0, 0.0, 0.0, 10.0, specsyn::defaultR, registryName, 0.0, 0.0, 0, testControls);
 
     const double logTeff = std::log10(28750.0);
     const auto props = makeStarData(15.0, 5.278432762001573, logTeff);
@@ -263,7 +263,7 @@ static auto testSpecTlustySuccess() -> int
 static auto testResampleExactAndOOB() -> int
 {
     specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::raise> lib(
-        spectraName, -3.0, 1.0, 0.0, 0.0, 0.0, 500, registryName, 0.0, 0.0, 0, 0.0, testControls);
+        spectraName, -3.0, 1.0, 0.0, 0.0, 0.0, 500, registryName, 0.0, 0.0, 0, testControls);
 
     const double logTeff = std::log10(5772.0);
     const auto props = makeStarData(1.0, 0.0, logTeff);
@@ -385,7 +385,7 @@ static auto testResampleExactAndOOB() -> int
 static auto testResampleAllOutOfRange() -> int
 {
     specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::raise> lib(
-        spectraName, -3.0, 1.0, 0.0, 0.0, 0.0, 500, registryName, 0.0, 0.0, 0, 0.0, testControls);
+        spectraName, -3.0, 1.0, 0.0, 0.0, 0.0, 500, registryName, 0.0, 0.0, 0, testControls);
 
     const double logTeff = std::log10(5772.0);
     const auto props = makeStarData(1.0, 0.0, logTeff);
@@ -475,7 +475,7 @@ static auto testSpecCoerce() -> int
     // three populated corners
     {
         const specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::coerce> lib(
-            coerceSpectraName, 0.0, 0.0, 0.0, 0.0, 0.0, specsyn::defaultR, coerceRegistryName, 0.0, 0.0, 0, 0.0, testControls);
+            coerceSpectraName, 0.0, 0.0, 0.0, 0.0, 0.0, specsyn::defaultR, coerceRegistryName, 0.0, 0.0, 0, testControls);
 
         std::vector<double> result;
         try
@@ -512,7 +512,7 @@ static auto testSpecCoerce() -> int
     // genuine gap
     {
         const specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::raise> lib(
-            coerceSpectraName, 0.0, 0.0, 0.0, 0.0, 0.0, specsyn::defaultR, coerceRegistryName, 0.0, 0.0, 0, 0.0, testControls);
+            coerceSpectraName, 0.0, 0.0, 0.0, 0.0, 0.0, specsyn::defaultR, coerceRegistryName, 0.0, 0.0, 0, testControls);
         try
         {
             [[maybe_unused]] const auto result = lib.spec(props, feh);
@@ -526,7 +526,7 @@ static auto testSpecCoerce() -> int
     // Under silent: the same query returns an empty spectrum
     {
         const specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::silent> lib(
-            coerceSpectraName, 0.0, 0.0, 0.0, 0.0, 0.0, specsyn::defaultR, coerceRegistryName, 0.0, 0.0, 0, 0.0, testControls);
+            coerceSpectraName, 0.0, 0.0, 0.0, 0.0, 0.0, specsyn::defaultR, coerceRegistryName, 0.0, 0.0, 0, testControls);
         std::vector<double> result;
         try
         {
@@ -585,7 +585,7 @@ static auto testSpecCoerceZeroWeight() -> int
     const auto props = makeStarData(mass, logL, logTeff);
 
     const specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::coerce> lib(
-        coerceSpectraName, 0.0, 0.0, 0.0, 0.0, 0.0, specsyn::defaultR, coerceRegistryName, 0.0, 0.0, 0, 0.0, testControls);
+        coerceSpectraName, 0.0, 0.0, 0.0, 0.0, 0.0, specsyn::defaultR, coerceRegistryName, 0.0, 0.0, 0, testControls);
 
     std::vector<double> result;
     try
@@ -625,9 +625,9 @@ static auto testMicroTurbDefault() -> int
     try
     {
         const specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::raise> boszDefault(
-            spectraName, -3.0, 1.0, 0.0, 0.0, nan, 500, registryName, 0.0, 0.0, 0, 0.0, testControls);
+            spectraName, -3.0, 1.0, 0.0, 0.0, nan, 500, registryName, 0.0, 0.0, 0, testControls);
         const specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::raise> boszExplicit(
-            spectraName, -3.0, 1.0, 0.0, 0.0, 0.0, 500, registryName, 0.0, 0.0, 0, 0.0, testControls);
+            spectraName, -3.0, 1.0, 0.0, 0.0, 0.0, 500, registryName, 0.0, 0.0, 0, testControls);
 
         const auto props = makeStarData(1.0, 0.0, std::log10(5772.0));
         if (boszDefault.spec(props, 0.1) != boszExplicit.spec(props, 0.1))
@@ -647,9 +647,9 @@ static auto testMicroTurbDefault() -> int
     try
     {
         const specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::raise> tlustyDefault(
-            "TLUSTY_test", -3.0, 1.0, 0.0, 0.0, nan, specsyn::defaultR, registryName, 0.0, 0.0, 0, 0.0, testControls);
+            "TLUSTY_test", -3.0, 1.0, 0.0, 0.0, nan, specsyn::defaultR, registryName, 0.0, 0.0, 0, testControls);
         const specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::raise> tlustyExplicit(
-            "TLUSTY_test", -3.0, 1.0, 0.0, 0.0, 10.0, specsyn::defaultR, registryName, 0.0, 0.0, 0, 0.0, testControls);
+            "TLUSTY_test", -3.0, 1.0, 0.0, 0.0, 10.0, specsyn::defaultR, registryName, 0.0, 0.0, 0, testControls);
 
         const auto props = makeStarData(15.0, 5.278432762001573, std::log10(28750.0));
         if (tlustyDefault.spec(props, -1.2) != tlustyExplicit.spec(props, -1.2))
@@ -669,7 +669,7 @@ static auto testMicroTurbDefault() -> int
     try
     {
         [[maybe_unused]] const specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::raise> tlustyWrongMicro(
-            "TLUSTY_test", -3.0, 1.0, 0.0, 0.0, 0.0, specsyn::defaultR, registryName, 0.0, 0.0, 0, 0.0, testControls);
+            "TLUSTY_test", -3.0, 1.0, 0.0, 0.0, 0.0, specsyn::defaultR, registryName, 0.0, 0.0, 0, testControls);
         std::cerr << "testSpecsynLib: expected constructing TLUSTY_test with "
             "microTurb = 0 (BOSZ_test's default, not its own) to fail, but it "
             "did not\n";
@@ -697,13 +697,13 @@ static auto testMicroTurbDefault() -> int
 static auto testResampleFluxConservation() -> int
 {
     specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::raise> libNative(
-        spectraName, -3.0, 1.0, 0.0, 0.0, 0.0, 500, registryName, 0.0, 0.0, 0, 0.0, testControls);
+        spectraName, -3.0, 1.0, 0.0, 0.0, 0.0, 500, registryName, 0.0, 0.0, 0, testControls);
     const auto wlNative = libNative.wl();
 
     constexpr std::size_t nWlCoarse = 64;
     specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::raise> libCoarse(
         spectraName, -3.0, 1.0, 0.0, 0.0, 0.0, 500, registryName,
-        wlNative.front(), wlNative.back(), nWlCoarse, 0.0, testControls);
+        wlNative.front(), wlNative.back(), nWlCoarse, testControls);
 
     const double logTeff = std::log10(5772.0);
     const auto props = makeStarData(1.0, 0.0, logTeff);
@@ -758,13 +758,13 @@ static auto testResampleFluxConservation() -> int
 static auto testResampleNWlOnly() -> int
 {
     const specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::raise> libNative(
-        spectraName, -3.0, 1.0, 0.0, 0.0, 0.0, 500, registryName, 0.0, 0.0, 0, 0.0, testControls);
+        spectraName, -3.0, 1.0, 0.0, 0.0, 0.0, 500, registryName, 0.0, 0.0, 0, testControls);
     const auto& wlNative = libNative.wl();
 
     constexpr std::size_t nWlRequested = 37;
     const specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::raise> libNWlOnly(
         spectraName, -3.0, 1.0, 0.0, 0.0, 0.0, 500, registryName,
-        0.0, 0.0, nWlRequested, 0.0, testControls);
+        0.0, 0.0, nWlRequested, testControls);
     const auto& wlNWlOnly = libNWlOnly.wl();
 
     if (wlNWlOnly.size() != nWlRequested)
@@ -818,7 +818,7 @@ static auto testSpecAfeInterp() -> int
     // --- interpolating path ---
     {
         const specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::raise> lib(
-            spectraName, fehMin, fehMax, 0.375, 0.0, 0.0, 500, registryName, 0.0, 0.0, 0, 0.0, testControls);
+            spectraName, fehMin, fehMax, 0.375, 0.0, 0.0, 500, registryName, 0.0, 0.0, 0, testControls);
 
         std::vector<double> result;
         try
@@ -856,7 +856,7 @@ static auto testSpecAfeInterp() -> int
         try
         {
             const specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::raise> lib(
-                spectraName, fehMin, fehMax, 0.25, 0.0, 0.0, 500, registryName, 0.0, 0.0, 0, 0.0, testControls);
+                spectraName, fehMin, fehMax, 0.25, 0.0, 0.0, 500, registryName, 0.0, 0.0, 0, testControls);
             const auto result = lib.spec(props, feh);
             if (result.size() != lib.wl().size())
             {
@@ -889,7 +889,7 @@ static auto testSpecAfeInterp() -> int
         try
         {
             [[maybe_unused]] const specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::raise> lib(
-                spectraName, fehMin, fehMax, 0.75, 0.0, 0.0, 500, registryName, 0.0, 0.0, 0, 0.0, testControls);
+                spectraName, fehMin, fehMax, 0.75, 0.0, 0.0, 500, registryName, 0.0, 0.0, 0, testControls);
             std::cerr << "testSpecsynLib: afeInterp: expected constructor to throw "
                 "for afe=0.75 (above library's maximum 0.50), but it did not\n";
             return 1;
