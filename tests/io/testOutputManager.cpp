@@ -281,11 +281,12 @@ static auto testWriteReadClusterRngRoundTrip() -> int
 // Verify that OutputManager::writeClusterSpec/writeClusterPhot append
 // spec_extinct/phot_extinct rows, alongside spec/phot, to the HDF5
 // cluster_spectra/cluster_phot groups whenever SimControls::extinct()
-// is set -- using testClusterExtinct.in, the same deck
-// testCluster.cpp's own testClusterExtinct() exercises Cluster's side
-// of this with. The values written are just cluster.specExtinct()/
-// photExtinct() copied verbatim, so the round trip should be bitwise
-// exact.
+// is set, and that writeCluster appends the cluster's own A_V to the
+// clusters group's A_V dataset -- using testClusterExtinct.in, the
+// same deck testCluster.cpp's own testClusterExtinct() exercises
+// Cluster's side of this with. The values written are just
+// cluster.aV()/specExtinct()/photExtinct() copied verbatim, so the
+// round trip should be bitwise exact.
 static auto testWriteClusterSpecPhotH5Extinct() -> int
 {
     const auto outDir = std::filesystem::temp_directory_path() / "slugTestOutputManagerSpecPhotExtinct";
@@ -317,6 +318,7 @@ static auto testWriteClusterSpecPhotH5Extinct() -> int
 
         {
             io::OutputManagerH5 manager(controls, inputDeck);
+            manager.writeCluster(trial, cluster);
             manager.writeClusterSpec(trial, ageYr, cluster);
             manager.writeClusterPhot(trial, ageYr, cluster);
         }
@@ -360,6 +362,7 @@ static auto testWriteClusterSpecPhotH5Extinct() -> int
 
         std::vector<double> readSpecExtinct;
         std::vector<double> readPhotExtinct;
+        double readAV = 0.0;
         try
         {
             const hid_t specGrp = H5Gopen2(file, "cluster_spectra", H5P_DEFAULT);
@@ -369,6 +372,17 @@ static auto testWriteClusterSpecPhotH5Extinct() -> int
             const hid_t photGrp = H5Gopen2(file, "cluster_phot", H5P_DEFAULT);
             readPhotExtinct = readRow(photGrp, "phot_extinct", cluster.photExtinct().size());
             H5Gclose(photGrp);
+
+            const hid_t clustersGrp = H5Gopen2(file, "clusters", H5P_DEFAULT);
+            const hid_t aVDset = H5Dopen2(clustersGrp, "A_V", H5P_DEFAULT);
+            if (aVDset < 0)
+            {
+                H5Gclose(clustersGrp);
+                throw std::runtime_error("missing expected dataset A_V");
+            }
+            H5Dread(aVDset, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, &readAV);
+            H5Dclose(aVDset);
+            H5Gclose(clustersGrp);
         }
         catch (const std::runtime_error& error)
         {
@@ -389,6 +403,12 @@ static auto testWriteClusterSpecPhotH5Extinct() -> int
         {
             std::cerr << "testOutputManager: h5 spec/phot extinct: phot_extinct "
                 "row does not match cluster.photExtinct()\n";
+            return 1;
+        }
+        if (readAV != cluster.aV())
+        {
+            std::cerr << "testOutputManager: h5 spec/phot extinct: A_V = " << readAV
+                << " does not match cluster.aV() = " << cluster.aV() << "\n";
             return 1;
         }
     }

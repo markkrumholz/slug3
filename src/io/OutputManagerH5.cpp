@@ -365,6 +365,14 @@ void io::OutputManagerH5::openClustersGroup()
     writeStringAttr(rngDset, "units", "");
     H5Dclose(rngDset);
     H5Tclose(rngType);
+
+    if (simControls_.extinct() != nullptr)
+    {
+        const hid_t aVDset = createExtensible1dDataset(
+            clustersGroup_, "A_V", H5T_NATIVE_DOUBLE);
+        writeStringAttr(aVDset, "units", "magnitudes");
+        H5Dclose(aVDset);
+    }
     // NOLINTEND(misc-include-cleaner)
 }
 
@@ -535,6 +543,11 @@ void io::OutputManagerH5::writeCluster(
         const hid_t rngType = fixedStrType(utils::rngStateWidth);
         appendToDataset(clustersGroup_, "rng", rngType, rngState.data());
         H5Tclose(rngType);
+        if (simControls_.extinct() != nullptr)
+        {
+            const double aV = cluster.aV();
+            appendToDataset(clustersGroup_, "A_V", H5T_NATIVE_DOUBLE, &aV);
+        }
         // NOLINTEND(misc-include-cleaner)
     }
 }
