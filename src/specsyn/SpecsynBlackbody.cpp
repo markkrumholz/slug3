@@ -20,8 +20,8 @@ static constexpr double angstromToCm = utils::Angstrom;
 static constexpr double cmToAngstrom = 1.0 / utils::Angstrom;
 
 specsyn::SpecsynBlackbody::SpecsynBlackbody(
-    double wlMin, double wlMax, std::size_t nWl, const double z,
-    const io::SimControls& controls) : Specsyn(controls, z)
+    double wlMin, double wlMax, std::size_t nWl,
+    const io::SimControls& controls) : Specsyn(controls)
 {
     // nWl == 0 means neither a grid nor a point count was requested
     // at all; nWl != 0 with wlMin == 0 means only nWl was requested

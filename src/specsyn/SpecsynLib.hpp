@@ -67,14 +67,13 @@ namespace specsyn
          * @brief Construct an empty SpecsynLib
          * @param controls Simulation controls; forwarded unchanged to
          *   Specsyn's own constructor -- see its comment
-         * @param z The redshift; defaults to zero
          * @details
          * Leaves dim1_, dim2_, dim3_, and spectra_ empty, and grid_
          * default-constructed. See the class-level details for why
          * populating them is left entirely to derived classes.
          */
-        explicit SpecsynLib(const io::SimControls& controls, double z = 0.0) :
-            Specsyn(controls, z) { }
+        explicit SpecsynLib(const io::SimControls& controls) :
+            Specsyn(controls) { }
 
         /**
          * @brief Compute a star's spectrum

@@ -173,7 +173,7 @@ static auto testChainTlustyFirst() -> int
 {
     const specsyn::SpecsynLibChained chain(
         { "TLUSTY_test", "BOSZ_test" }, -3.0, 1.0, 0.0, 0.0,
-        {}, specsyn::defaultR, registryName, 0.0, 0.0, 0, 0.0, true, testControls);
+        {}, specsyn::defaultR, registryName, 0.0, 0.0, 0, true, testControls);
 
     int result = 0;
     try
@@ -213,7 +213,7 @@ static auto testChainBoszFirst() -> int
 {
     const specsyn::SpecsynLibChained chain(
         { "BOSZ_test", "TLUSTY_test" }, -3.0, 1.0, 0.0, 0.0,
-        {}, specsyn::defaultR, registryName, 0.0, 0.0, 0, 0.0, true, testControls);
+        {}, specsyn::defaultR, registryName, 0.0, 0.0, 0, true, testControls);
 
     int result = 0;
     try
@@ -253,7 +253,7 @@ static auto testChainOOBThrows() -> int
 {
     const specsyn::SpecsynLibChained chain(
         { "TLUSTY_test", "BOSZ_test" }, -3.0, 1.0, 0.0, 0.0,
-        {}, specsyn::defaultR, registryName, 0.0, 0.0, 0, 0.0, true, testControls);
+        {}, specsyn::defaultR, registryName, 0.0, 0.0, 0, true, testControls);
 
     try
     {
@@ -276,7 +276,7 @@ static auto testChainConstructorValidation() -> int
     try
     {
         [[maybe_unused]] const specsyn::SpecsynLibChained chain(
-            {}, -3.0, 1.0, 0.0, 0.0, {}, specsyn::defaultR, registryName, 0.0, 0.0, 0, 0.0, true, testControls);
+            {}, -3.0, 1.0, 0.0, 0.0, {}, specsyn::defaultR, registryName, 0.0, 0.0, 0, true, testControls);
         std::cerr << "testSpecsynLibChained: expected the constructor to throw "
             "for an empty spectraName, but it did not\n";
         result += 1;
@@ -287,7 +287,7 @@ static auto testChainConstructorValidation() -> int
     {
         [[maybe_unused]] const specsyn::SpecsynLibChained chain(
             { "TLUSTY_test", "BOSZ_test" }, -3.0, 1.0, 0.0, 0.0,
-            { 10.0 }, specsyn::defaultR, registryName, 0.0, 0.0, 0, 0.0, true, testControls);
+            { 10.0 }, specsyn::defaultR, registryName, 0.0, 0.0, 0, true, testControls);
         std::cerr << "testSpecsynLibChained: expected the constructor to throw "
             "for a mismatched microTurb size, but it did not\n";
         result += 1;
@@ -306,16 +306,16 @@ static auto testChainConstructorValidation() -> int
 static auto testChainUsesCommonGrid() -> int
 {
     const specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::raise> boszRef(
-        "BOSZ_test", -3.0, 1.0, 0.0, 0.0, 0.0, specsyn::defaultR, registryName, 0.0, 0.0, 0, 0.0, testControls);
+        "BOSZ_test", -3.0, 1.0, 0.0, 0.0, 0.0, specsyn::defaultR, registryName, 0.0, 0.0, 0, testControls);
     const specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::raise> tlustyRef(
-        "TLUSTY_test", -3.0, 1.0, 0.0, 0.0, 10.0, specsyn::defaultR, registryName, 0.0, 0.0, 0, 0.0, testControls);
+        "TLUSTY_test", -3.0, 1.0, 0.0, 0.0, 10.0, specsyn::defaultR, registryName, 0.0, 0.0, 0, testControls);
 
     const auto expected = specsyn::SpecsynLibChained::makeCommonWlGrid(
         { boszRef.wl(), tlustyRef.wl() });
 
     const specsyn::SpecsynLibChained chain(
         { "BOSZ_test", "TLUSTY_test" }, -3.0, 1.0, 0.0, 0.0,
-        {}, specsyn::defaultR, registryName, 0.0, 0.0, 0, 0.0, true, testControls);
+        {}, specsyn::defaultR, registryName, 0.0, 0.0, 0, true, testControls);
 
     if (chain.wl() != expected)
     {
@@ -359,7 +359,7 @@ static auto testChainWlMinMaxSpecified() -> int
 
     const specsyn::SpecsynLibChained chain(
         { "BOSZ_test", "TLUSTY_test" }, -3.0, 1.0, 0.0, 0.0,
-        {}, specsyn::defaultR, registryName, wlMin, wlMax, nWl, 0.0, true, testControls);
+        {}, specsyn::defaultR, registryName, wlMin, wlMax, nWl, true, testControls);
 
     const auto expected = utils::logspace(wlMin, wlMax, nWl);
     if (chain.wl() != expected)
@@ -409,16 +409,16 @@ static auto testChainWlMinMaxSpecified() -> int
 static auto testChainNWlOnly() -> int
 {
     const specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::raise> boszRef(
-        "BOSZ_test", -3.0, 1.0, 0.0, 0.0, 0.0, specsyn::defaultR, registryName, 0.0, 0.0, 0, 0.0, testControls);
+        "BOSZ_test", -3.0, 1.0, 0.0, 0.0, 0.0, specsyn::defaultR, registryName, 0.0, 0.0, 0, testControls);
     const specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::raise> tlustyRef(
-        "TLUSTY_test", -3.0, 1.0, 0.0, 0.0, 10.0, specsyn::defaultR, registryName, 0.0, 0.0, 0, 0.0, testControls);
+        "TLUSTY_test", -3.0, 1.0, 0.0, 0.0, 10.0, specsyn::defaultR, registryName, 0.0, 0.0, 0, testControls);
     const double globalWlMin = std::min(boszRef.wl().front(), tlustyRef.wl().front());
     const double globalWlMax = std::max(boszRef.wl().back(), tlustyRef.wl().back());
 
     constexpr std::size_t nWl = 40;
     const specsyn::SpecsynLibChained chain(
         { "BOSZ_test", "TLUSTY_test" }, -3.0, 1.0, 0.0, 0.0,
-        {}, specsyn::defaultR, registryName, 0.0, 0.0, nWl, 0.0, true, testControls);
+        {}, specsyn::defaultR, registryName, 0.0, 0.0, nWl, true, testControls);
 
     const auto expected = utils::logspace(globalWlMin, globalWlMax, nWl);
     if (chain.wl() != expected)

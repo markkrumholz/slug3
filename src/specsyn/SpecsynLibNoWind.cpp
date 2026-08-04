@@ -344,9 +344,8 @@ namespace specsyn
         double wlMin,
         double wlMax,
         const std::size_t nWl,
-        const double z,
         const io::SimControls& controls) :
-        SpecsynLib<Policy>(controls, z),
+        SpecsynLib<Policy>(controls),
         FeH_(this->dim1_),
         logg_(this->dim2_),
         logTeff_(this->dim3_),

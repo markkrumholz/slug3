@@ -8,6 +8,7 @@
 #ifndef SIMCONTROLS_HPP
 #define SIMCONTROLS_HPP
 
+#include "../extinct/Extinct.hpp"
 #include "../pdfs/PDF.hpp"
 #include "../phot/FilterCollection.hpp"
 #include "../specsyn/Specsyn.hpp"
@@ -200,6 +201,13 @@ namespace io
         [[nodiscard]] auto intMaxIter() const { return intMaxIter_; }
 
         /**
+         * @brief Return the redshift
+         * @return Redshift applied by every Specsyn's and Extinct's
+         *   own wlObs() (default 0, i.e. no redshift)
+         */
+        [[nodiscard]] auto z() const { return z_; }
+
+        /**
          * @brief Set the relative tolerance for PDF integration
          * @param tol New relative tolerance
          * @details
@@ -226,6 +234,17 @@ namespace io
          * See setIntRelTol()'s own comment on live (not snapshotted) effect.
          */
         void setIntMaxIter(std::size_t n) { intMaxIter_ = n; }
+
+        /**
+         * @brief Set the redshift
+         * @param z New redshift
+         * @details
+         * Every Specsyn/Extinct built by this SimControls reads this
+         * value live, not a snapshot (see z()), so the new redshift
+         * takes effect the next time their own wlObs() is called --
+         * no need to rebuild them.
+         */
+        void setZ(double z) { z_ = z; }
 
         // Getters for the physics settings
         /**
@@ -309,6 +328,21 @@ namespace io
          *   via phot.filters, or nullptr if phot.filters was not given
          */
         [[nodiscard]] auto filters() const -> const auto& { return filters_; }
+
+        /**
+         * @brief Get the distribution of V-band extinction, if any
+         * @return A const reference to the A_V distribution requested
+         *   via extinct.AV, or an invalid/empty PDF if extinct.AV was
+         *   not given
+         */
+        [[nodiscard]] auto avDist() const -> const auto& { return avDist_; }
+
+        /**
+         * @brief Get the extinction curve, if any
+         * @return A pointer to the extinction curve requested via
+         *   extinct.model, or nullptr if extinct.AV was not given
+         */
+        [[nodiscard]] auto extinct() const -> const extinct::Extinct* { return extinct_.get(); }
 
         /**
          * @brief Check whether the bolometric luminosity was requested as an output
@@ -523,6 +557,20 @@ namespace io
          */
         void readFilters(const toml::table& inputDeck);
 
+        /**
+         * @brief Load the extinction curve specified by input deck
+         * @param inputDeck A toml table holding the input deck
+         * @details
+         * Reads extinct.AV, extinct.model, and extinct.registry, and
+         * sets avDist_/extinct_ accordingly; see the .cpp file for the
+         * exact rules. extinct.AV is optional, so avDist_/extinct_ are
+         * left at their default/null state if it is absent. Requires a
+         * spectral synthesizer to already be set (see readSpectra()),
+         * since the extinction curve is interpolated onto its own
+         * wavelength grid.
+         */
+        void readExtinct(const toml::table& inputDeck);
+
         // Simulation control parameters
         SimType simType_ = SimType::none;              /**< Simulation type */
         unsigned int verbosity_ = 0;                   /**< Level of verbosity */
@@ -536,6 +584,7 @@ namespace io
         double intRelTol_ = 1e-2;                      /**< Relative tolerance for PDF integrator */
         double intAbsTol_ = 0.0;                       /**< Absolute tolerance for PDF integrator */
         std::size_t intMaxIter_ = 0;                   /**< Max evaluations for PDF integrator (0 = unlimited) */
+        double z_ = 0.0;                               /**< Redshift, read live by every Specsyn/Extinct built from this SimControls */
 
         // Physics settings
         pdfs::PDF imf_;            /**< The IMF to use for the simulation */
@@ -550,6 +599,8 @@ namespace io
         std::unique_ptr<specsyn::Specsyn> specsyn_; /**< Spectral synthesizer, or nullptr if spectra.model was not given */
         std::unique_ptr<phot::FilterCollection> filters_; /**< Photometric filters requested via phot.filters, or nullptr if none were given */
         bool computeLbol_ = false; /**< True if "Lbol" was included in phot.filters; see Cluster::computeLbol() for where it is actually computed */
+        pdfs::PDF avDist_; /**< Distribution of V-band extinction (A_V), requested via extinct.AV; invalid/empty if extinct.AV was not given */
+        std::unique_ptr<extinct::Extinct> extinct_; /**< Extinction curve requested via extinct.model, or nullptr if extinct.AV was not given */
 
         // Output wavelength grid (spectra.wl_min, spectra.wl_max,
         // spectra.nwl), read by readSpectra and passed through to

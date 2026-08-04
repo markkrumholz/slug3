@@ -73,7 +73,6 @@ namespace specsyn
          * @param nWl Number of points in the output grid; if 0 (the
          *   default), used as a flag to fall back on the library's
          *   own native wavelength grid -- see @details
-         * @param z The redshift; 0 for none
          * @param controls Simulation controls; forwarded unchanged to
          *   Specsyn's own constructor -- see its comment. Has no
          *   default of its own (unlike every parameter above): a
@@ -103,7 +102,6 @@ namespace specsyn
             double wlMin,
             double wlMax,
             std::size_t nWl,
-            double z,
             const io::SimControls& controls);
 
         /**

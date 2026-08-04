@@ -194,9 +194,9 @@ static auto testSpecCts(const specsyn::SpecsynBlackbody& synth) -> int
 static auto testNWlOnly() -> int
 {
     const io::SimControls testControls;
-    const specsyn::SpecsynBlackbody defaultSynth(0.0, 0.0, 0, 0.0, testControls);
+    const specsyn::SpecsynBlackbody defaultSynth(0.0, 0.0, 0, testControls);
     constexpr std::size_t nWlRequested = 37;
-    const specsyn::SpecsynBlackbody nWlOnlySynth(0.0, 0.0, nWlRequested, 0.0, testControls);
+    const specsyn::SpecsynBlackbody nWlOnlySynth(0.0, 0.0, nWlRequested, testControls);
 
     const auto& defaultWl = defaultSynth.wl();
     const auto& nWlOnlyWl = nWlOnlySynth.wl();
@@ -230,7 +230,7 @@ auto testSpecsynBlackbody() -> int
     // the library default.
     io::SimControls controls;
     controls.setIntRelTol(relTol);
-    const specsyn::SpecsynBlackbody synth(0.0, 0.0, 0, 0.0, controls);
+    const specsyn::SpecsynBlackbody synth(0.0, 0.0, 0, controls);
     int result = 0;
     result += testWlGrid(synth.wl());
     result += testSpec(synth);

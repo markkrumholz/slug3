@@ -53,7 +53,6 @@ namespace specsyn
          * @param nWl Number of points in the output grid; if 0 (the
          *   default), used as a flag to fall back on this class's own
          *   default range and point count -- see @details
-         * @param z The redshift; 0 for none
          * @param controls Simulation controls; forwarded unchanged to
          *   Specsyn's own constructor -- see its comment
          * @details
@@ -67,7 +66,7 @@ namespace specsyn
          * logarithmically spaced from wlMin to wlMax.
          */
         explicit SpecsynBlackbody(double wlMin, double wlMax,
-            std::size_t nWl, double z,
+            std::size_t nWl,
             const io::SimControls& controls);
 
         /**

@@ -24,6 +24,11 @@
 #include <toml.hpp>
 #include <vector>
 
+namespace io
+{
+    class SimControls;
+} // namespace io
+
 namespace extinct
 {
     inline static const std::string defaultRegistry = // NOLINT(bugprone-throwing-static-initialization,cert-err58-cpp) -- built from fixed string literals, so the (theoretically throwing) path conversion can never actually throw here
@@ -56,6 +61,14 @@ namespace extinct
          * @brief Construct an Extinct from a named registry entry
          * @param extinctName Name of the extinction curve to load (e.g. "Calzetti_starburst")
          * @param wl Wavelength grid, in Angstrom, to interpolate the curve onto
+         * @param controls Simulation controls this Extinct reads its
+         *   redshift (see wlObs()) from, live, for the rest of its
+         *   lifetime -- see controls_'s own comment. Must outlive this
+         *   Extinct. Has no default of its own (unlike registryName
+         *   below): a reference bound to a temporary default-
+         *   constructed SimControls would dangle the moment this
+         *   constructor returned, since this class stores it live
+         *   rather than copying out of it.
          * @param registryName Name of the extinction curve registry file
          * @throws std::runtime_error if extinctName is not found in the
          *   registry, or the registry/HDF5 file cannot be read
@@ -65,7 +78,9 @@ namespace extinct
          */
         Extinct(const std::string& extinctName,
             const std::vector<double>& wl,
-            const std::string& registryName = defaultRegistry)
+            const io::SimControls& controls,
+            const std::string& registryName = defaultRegistry) :
+            controls_(controls)
         {
             // Locate and parse the registry file
             const auto [registry, registryPath] =
@@ -139,6 +154,18 @@ namespace extinct
             normalize(wl_, extinct_);
         }
 
+        // Copyable (rebinding controls_ to the same referent) but not
+        // assignable (controls_ can't be reseated), matching Specsyn's
+        // own identical copy/move declarations exactly -- see its
+        // comment. Never actually copied/assigned in practice: every
+        // Extinct is held via unique_ptr (see SimControls's own
+        // extinct_).
+        Extinct(const Extinct&) = default;
+        Extinct(Extinct&&) = default;
+        auto operator=(const Extinct&) -> Extinct& = delete;
+        auto operator=(Extinct&&) -> Extinct& = delete;
+        ~Extinct() = default;
+
         // Observers
 
         /**
@@ -169,6 +196,17 @@ namespace extinct
          *   arbitrary units, interpolated onto wl()
          */
         [[nodiscard]] auto extinct() const -> const std::vector<double>& { return extinct_; }
+
+        /**
+         * @brief Get the observed-frame interpolated wavelength grid
+         * @return wl(), redshifted by (1 + z), with z read live from controls_
+         * @details
+         * Defined out-of-line, in Extinct.cpp -- see that file's own
+         * comment for why (controls_.z() needs io::SimControls's
+         * complete type, which this header can only forward-declare;
+         * mirrors Specsyn::wlObs()'s identical situation).
+         */
+        [[nodiscard]] auto wlObs() const -> std::vector<double>;
 
         /**
          * @brief Apply this extinction curve to a spectrum
@@ -248,6 +286,20 @@ namespace extinct
 
             for (double& e : extinct) { e *= norm; }
         }
+
+        /**
+         * @brief Simulation controls this Extinct reads its redshift from
+         * @details
+         * Read live, not snapshotted, every time wlObs() is called --
+         * changing controls_'s own redshift after this Extinct is
+         * built takes effect immediately, with no need to rebuild it.
+         * Bound once, at construction, from whichever SimControls
+         * actually built this Extinct (see SimControls::readExtinct());
+         * never reseated afterward, so that SimControls must outlive
+         * this Extinct. Mirrors Specsyn's own controls_ member exactly
+         * -- see its comment for the rationale.
+         */
+        const io::SimControls& controls_; // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members) -- deliberately a live reference, not a copy: see this member's own comment for why. Only ever used through the same non-copyable, non-movable ownership pattern (unique_ptr in SimControls's own extinct_) as every other class with a reference member in this codebase (e.g. Specsyn's own controls_), so the usual objection (disabling implicit copy/move assignment) doesn't apply in practice.
 
         std::vector<double> wlDat_;      /**< Native extinction curve wavelength grid, in Angstrom */
         std::vector<double> extinctDat_; /**< Native extinction curve, in arbitrary units */

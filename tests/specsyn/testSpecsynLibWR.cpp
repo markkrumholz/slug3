@@ -99,7 +99,7 @@ namespace
 static auto testSpecWNESuccess() -> int
 {
     const specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise> lib(
-        spectraName, -3.0, 1.0, registryName, 0.0, 0.0, 0, 0.0, testControls);
+        spectraName, -3.0, 1.0, registryName, 0.0, 0.0, 0, testControls);
 
     const auto props = makeWRStarData(20.0, 5.7, 4.7, 3e-5);
 
@@ -154,7 +154,7 @@ static auto testSpecWNESuccess() -> int
 static auto testSpecTypeMismatchThrow() -> int
 {
     const specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise> lib(
-        spectraName, -3.0, 1.0, registryName, 0.0, 0.0, 0, 0.0, testControls);
+        spectraName, -3.0, 1.0, registryName, 0.0, 0.0, 0, testControls);
 
     const auto props = makeWRStarData(20.0, 5.7, 4.0, 3e-5, 0.2);
 
@@ -175,7 +175,7 @@ static auto testSpecTypeMismatchThrow() -> int
 static auto testSpecTypeMismatchSilent() -> int
 {
     const specsyn::SpecsynLibWR<specsyn::OOBPolicy::silent> lib(
-        spectraName, -3.0, 1.0, registryName, 0.0, 0.0, 0, 0.0, testControls);
+        spectraName, -3.0, 1.0, registryName, 0.0, 0.0, 0, testControls);
 
     const auto props = makeWRStarData(20.0, 5.7, 4.0, 3e-5, 0.2);
 
@@ -215,7 +215,7 @@ static auto testSpecTypeMismatchSilent() -> int
 static auto testSpecLogRtClamped() -> int
 {
     const specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise> lib(
-        spectraName, -3.0, 1.0, registryName, 0.0, 0.0, 0, 0.0, testControls);
+        spectraName, -3.0, 1.0, registryName, 0.0, 0.0, 0, testControls);
 
     const auto props = makeWRStarData(20.0, 5.0, 4.7, 1e-4);
 
@@ -264,7 +264,7 @@ static auto testSpecLogRtClamped() -> int
 static auto testSpecTeffGridBoundsThrow() -> int
 {
     const specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise> lib(
-        spectraName, -3.0, 1.0, registryName, 0.0, 0.0, 0, 0.0, testControls);
+        spectraName, -3.0, 1.0, registryName, 0.0, 0.0, 0, testControls);
 
     const auto props = makeWRStarData(20.0, 5.0, 6.0, 1e-4);
 
@@ -286,7 +286,7 @@ static auto testSpecTeffGridBoundsThrow() -> int
 static auto testSpecTeffGridBoundsSilent() -> int
 {
     const specsyn::SpecsynLibWR<specsyn::OOBPolicy::silent> lib(
-        spectraName, -3.0, 1.0, registryName, 0.0, 0.0, 0, 0.0, testControls);
+        spectraName, -3.0, 1.0, registryName, 0.0, 0.0, 0, testControls);
 
     const auto props = makeWRStarData(20.0, 5.0, 6.0, 1e-4);
 
@@ -329,7 +329,7 @@ static auto testSpecWNLSuccess(
     const double expectedPeakWl, const std::string& label) -> int
 {
     const specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise> lib(
-        wnlSpectraName, -3.0, 1.0, registryName, 0.0, 0.0, 0, 0.0, testControls);
+        wnlSpectraName, -3.0, 1.0, registryName, 0.0, 0.0, 0, testControls);
 
     const auto props = makeWRStarData(20.0, 5.7, 4.7, 3e-5, 0.7, 0.0, 0.01, hSurf);
 
@@ -393,7 +393,7 @@ static auto testSpecWNLSuccess(
 static auto testSpecWNLTypeMismatchThrow(const std::string& wnlSpectraName) -> int
 {
     const specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise> lib(
-        wnlSpectraName, -3.0, 1.0, registryName, 0.0, 0.0, 0, 0.0, testControls);
+        wnlSpectraName, -3.0, 1.0, registryName, 0.0, 0.0, 0, testControls);
 
     const auto props = makeWRStarData(20.0, 5.7, 4.0, 3e-5, 0.2);
 
@@ -454,12 +454,12 @@ static auto testGetWRTypeWNLHBuckets() -> int
 static auto testNWlOnly() -> int
 {
     const specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise> libNative(
-        spectraName, -3.0, 1.0, registryName, 0.0, 0.0, 0, 0.0, testControls);
+        spectraName, -3.0, 1.0, registryName, 0.0, 0.0, 0, testControls);
     const auto& wlNative = libNative.wl();
 
     constexpr std::size_t nWlRequested = 37;
     const specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise> libNWlOnly(
-        spectraName, -3.0, 1.0, registryName, 0.0, 0.0, nWlRequested, 0.0, testControls);
+        spectraName, -3.0, 1.0, registryName, 0.0, 0.0, nWlRequested, testControls);
     const auto& wlNWlOnly = libNWlOnly.wl();
 
     if (wlNWlOnly.size() != nWlRequested)

@@ -70,7 +70,6 @@ namespace specsyn
          * @param nWl Number of points in the output grid; if 0 (the
          *   default), used as a flag to fall back on each library's
          *   own native wavelength grid -- see @details
-         * @param z The redshift; 0 for none
          * @param tClamp Whether to clamp a star's log(Teff) to the
          *   combined range spanned by every chained library before
          *   calling spec() on it; defaults to true. See @details.
@@ -158,7 +157,6 @@ namespace specsyn
             double wlMin,
             double wlMax,
             std::size_t nWl,
-            double z,
             bool tClamp,
             const io::SimControls& controls);
 

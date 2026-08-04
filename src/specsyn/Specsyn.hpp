@@ -12,7 +12,6 @@
 #include "../pdfs/PDF.hpp"
 #include "../tracks/TrackCommons.hpp"
 #include "../utils/Constants.hpp"
-#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -57,12 +56,12 @@ namespace specsyn
          * @brief Construct a Specsyn
          * @param controls Simulation controls this synthesizer reads
          *   its integrator tolerances (intRelTol(), intAbsTol(),
-         *   intMaxIter()) from, live, for the rest of its lifetime --
-         *   see controls_'s own comment. Must outlive this Specsyn.
-         * @param z The redshift; defaults to zero
+         *   intMaxIter()) and redshift (see wlObs()) from, live, for
+         *   the rest of its lifetime -- see controls_'s own comment.
+         *   Must outlive this Specsyn.
          */
-        explicit Specsyn(const io::SimControls& controls, double z = 0.0) :
-            controls_(controls), z_(z) { }
+        explicit Specsyn(const io::SimControls& controls) :
+            controls_(controls) { }
 
         virtual ~Specsyn() = default;
 
@@ -84,15 +83,15 @@ namespace specsyn
 
         /**
          * @brief Return the observed-frame wavelength grid
-         * @return The wavelength grid, in Angstrom, redshifted by (1 + z)
+         * @return The wavelength grid, in Angstrom, redshifted by
+         *   (1 + z), with z read live from controls_
+         * @details
+         * Defined out-of-line, in Specsyn.cpp -- see that file's own
+         * comment for why (same reason as intRelTol()/intAbsTol()/
+         * intMaxIter(): controls_.z() needs io::SimControls's complete
+         * type, which this header can only forward-declare).
          */
-        [[nodiscard]] auto wlObs() const -> std::vector<double>
-        {
-            std::vector<double> wlObs(wl_.size());
-            std::ranges::transform(wl_, wlObs.begin(),
-                [this](const double wl) -> double { return wl * (1.0 + z_); });
-            return wlObs;
-        }
+        [[nodiscard]] auto wlObs() const -> std::vector<double>;
 
         /**
          * @brief Compute the spectrum of a single star
@@ -262,21 +261,21 @@ namespace specsyn
         }
 
         /**
-         * @brief Simulation controls this synthesizer reads its integrator tolerances from
+         * @brief Simulation controls this synthesizer reads its integrator tolerances and redshift from
          * @details
          * Read live, not snapshotted, every time specCts() integrates
-         * (see intRelTol()/intAbsTol()/intMaxIter(), which just
-         * forward to the same-named methods on this reference) --
-         * changing controls_'s own tolerances after this Specsyn is
-         * built takes effect immediately, with no need to rebuild the
-         * synthesizer. Bound once, at construction, from whichever
-         * SimControls actually built this synthesizer (see
+         * or wlObs() is called (see intRelTol()/intAbsTol()/
+         * intMaxIter()/wlObs(), which just forward to the same-named
+         * methods on this reference) -- changing controls_'s own
+         * tolerances or redshift after this Specsyn is built takes
+         * effect immediately, with no need to rebuild the synthesizer.
+         * Bound once, at construction, from whichever SimControls
+         * actually built this synthesizer (see
          * SimControls::readSpectra()); never reseated afterward, so
          * that SimControls must outlive this Specsyn.
          */
-        const io::SimControls& controls_; // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members) -- deliberately a live reference, not a copy: see this member's own comment for why (controls_'s own tolerances must be readable live, not snapshotted). This class is only ever used through the same non-copyable, non-movable ownership pattern (unique_ptr in SimControls's own specsyn_) as every other class with a reference member in this codebase (e.g. SpecsynLibNoWind's FeH_/logg_/logTeff_), so the usual objection (disabling implicit copy/move assignment) doesn't apply in practice.
+        const io::SimControls& controls_; // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members) -- deliberately a live reference, not a copy: see this member's own comment for why (controls_'s own tolerances/redshift must be readable live, not snapshotted). This class is only ever used through the same non-copyable, non-movable ownership pattern (unique_ptr in SimControls's own specsyn_) as every other class with a reference member in this codebase (e.g. SpecsynLibNoWind's FeH_/logg_/logTeff_), so the usual objection (disabling implicit copy/move assignment) doesn't apply in practice.
 
-        double z_;                   /**< Redshift */
         std::vector<double> wl_;     /**< Wavelength grid for the spectral synthesizer, in Angstrom */
     };
 

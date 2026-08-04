@@ -107,6 +107,7 @@ add_executable(slug
     src/tracks/Tracks2D.cpp
     src/tracks/Tracks3D.cpp
     src/tracks/TrackUtils.cpp
+    src/extinct/Extinct.cpp
     src/io/SimControls.cpp
     src/utils/ParseUtils.cpp
     src/extern/cubature/pcubature.c
@@ -121,6 +122,7 @@ add_executable(slugTestInterpolation
     tests/interpolation/testMesh3DInterpolator.cpp
 )
 add_executable(slugTestExtinct
+    src/extinct/Extinct.cpp
     src/phot/FilterTabulated.cpp
     tests/extinct/testExtinctAll.cpp
 )
@@ -173,6 +175,7 @@ add_executable(slugTestCore
     src/io/OutputManager.cpp
     src/io/OutputManagerAscii.cpp
     src/io/OutputManagerH5.cpp
+    src/extinct/Extinct.cpp
     src/io/SimControls.cpp
     src/interpolation/Mesh2DGrid.cpp
     src/pdfs/PDFFileParser.cpp
@@ -216,6 +219,7 @@ add_executable(slugTestCoreFull
     src/io/OutputManager.cpp
     src/io/OutputManagerAscii.cpp
     src/io/OutputManagerH5.cpp
+    src/extinct/Extinct.cpp
     src/io/SimControls.cpp
     src/interpolation/Mesh2DGrid.cpp
     src/pdfs/PDFFileParser.cpp
@@ -264,6 +268,7 @@ add_executable(slugTestIo
     src/io/OutputManager.cpp
     src/io/OutputManagerAscii.cpp
     src/io/OutputManagerH5.cpp
+    src/extinct/Extinct.cpp
     src/io/SimControls.cpp
     src/interpolation/Mesh2DGrid.cpp
     src/pdfs/PDFFileParser.cpp
@@ -340,6 +345,7 @@ pybind11_add_module(slugPython
     src/pybind/BindPhotConvert.cpp
     src/pybind/BindPDF.cpp
     src/core/Cluster.cpp
+    src/extinct/Extinct.cpp
     src/io/SimControls.cpp
     src/interpolation/Mesh2DGrid.cpp
     src/pdfs/PDFFileParser.cpp
