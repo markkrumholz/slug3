@@ -1,0 +1,62 @@
+# clusterlib: an example input deck demonstrating a realistic,
+# large-scale Monte Carlo population of star clusters -- real MIST
+# tracks and a full chained set of stellar atmosphere models
+# (spectra.model = "default"; see specsyn::defaultModelList and
+# SimControls::readSpectra()), spectra and photometry (including dust
+# extinction), and every stochastic input (metallicity, cluster mass,
+# output time, visual extinction) drawn from its own distribution
+# rather than fixed. Run this from within this directory (so the
+# dists/*.toml paths below resolve) with:
+#   slug clusterlib.toml
+# It requires the real MIST tracks, spectral libraries, and filter/Vega
+# data referenced below to have been fetched locally (too large to
+# store in the repository -- see data/tools/fetch_*.py).
+#
+# The order the chained models are given in (via the "default"
+# special value) matters: POWR_WNL_H20/H40/H60 and TLUSTY_O/TLUSTY_B
+# are split by surface hydrogen fraction/microturbulent velocity
+# rather than combined; CK04 follows BOSZ to fill BOSZ's own gap at
+# high Teff and low log(g); and MARCS is listed last, to extend
+# coverage to the cool, low-gravity red-supergiant regime -- see
+# tests/core/assets/testClusterSpecsynFull.in's own comment for the
+# full rationale.
+
+sim_type = "cluster"
+# n_trial must appear here, before any [table] header -- TOML has no
+# way to return to the root table once a header opens one.
+n_trial = 1000
+
+[stars]
+IMF = "chabrier.toml"
+tracks = "MIST"
+v_vcrit = 0.4
+alphaFe = 0.0
+FeH = "dists/FeH.toml"
+
+[spectra]
+model = "default"
+wl_min = 200
+wl_max = 2e4
+nwl = 1024
+
+# Two idealized ionizing-photon-count filters (Q(HI), Q(HeI), Q(OII)),
+# five real HST WFC3/UVIS1 tabulated filters spanning near-UV to
+# I-band, all reported as Vega magnitudes (except the photon-count
+# filters, for which PhotSystem doesn't apply), and "Lbol"
+[phot]
+filters = ["HST.WFC3_UVIS1.F275W", "HST.WFC3_UVIS1.F336W", "HST.WFC3_UVIS1.F438W", "HST.WFC3_UVIS1.F555W", "HST.WFC3_UVIS1.F814W", "Q(HI)", "Q(HeI)", "Q(OII)", "Lbol"]
+system = "Vega"
+
+[clusters]
+CMF = "dists/CMF.toml"
+
+# Dust extinction: A_V drawn per cluster from dists/AV.toml, applied
+# via the Calzetti starburst attenuation curve
+[extinct]
+AV = "dists/AV.toml"
+model = "Calzetti_starburst"
+
+# A single output time per trial, drawn from dists/times.toml, rather
+# than a fixed time or grid of times
+[outputs]
+output_time_dist = "dists/times.toml"
