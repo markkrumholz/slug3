@@ -538,70 +538,82 @@ void io::SimControls::readSpectra(const toml::table& inputDeck)
     const auto cfeInput = utils::getTOMLKeyWithError<double>(inputDeck, "stars.CFe");
     const double cfe = cfeInput.value_or(specsyn::defaultCFe);
 
-    // A single string names one model directly; anything else must be
-    // an array of strings, chained together via SpecsynLibChained.
-    // Every spectral synthesizer built below stores a live reference
-    // back to *this (for its own integrator tolerances) -- see
-    // Specsyn's own controls_ member -- so this SimControls must
-    // outlive it, which holds as long as readSpectra() is only ever
-    // called from this SimControls's own constructor.
+    // A single string names one model directly, unless it's one of two
+    // special values: "blackbody" (a lightweight synthesizer needing
+    // no library at all) or "default" (expanding to
+    // specsyn::defaultModelList). Anything else must be an array of
+    // strings. "default" and an explicit array both end up chained
+    // together via SpecsynLibChained, using the shared construction
+    // call at the end of this function. Every spectral synthesizer
+    // built below stores a live reference back to *this (for its own
+    // integrator tolerances) -- see Specsyn's own controls_ member --
+    // so this SimControls must outlive it, which holds as long as
+    // readSpectra() is only ever called from this SimControls's own
+    // constructor.
+    std::vector<std::string> models;
     if (const auto model = modelNode.value<std::string>(); model.has_value())
     {
-        // "blackbody" is a special value, used for testing, that does
-        // not require a spectral library at all
         if (model.value() == "blackbody")
         {
             specsyn_ = std::make_unique<specsyn::SpecsynBlackbody>(wlMin_, wlMax_, nWl_, *this);
             return;
         }
 
-        // Look the model up in the registry, and use its WR_grid
-        // entry (if any) to decide which SpecsynLib specialization
-        // applies: Wolf-Rayet libraries -- parameterized by
-        // transformed radius and stellar temperature rather than
-        // logg and Teff -- need SpecsynLibWR, every other library
-        // needs SpecsynLibNoWind
-        auto [registry, registryPath] = specsyn::parseRegistry(registryName);
-        const auto modelEntry = registry.at_path(model.value());
-        if (!modelEntry)
+        if (model.value() == "default")
         {
-            throw std::runtime_error(
-                "SimControls: spectra.model '" + model.value() +
-                "' not found in spectra registry " + registryPath.string());
-        }
-        const bool wrGrid = modelEntry.at_path("WR_grid").value<bool>().value_or(false);
-
-        if (wrGrid)
-        {
-            specsyn_ = std::make_unique<specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise>>(
-                model.value(), fehDist_.getMin(), fehDist_.getMax(), registryName,
-                wlMin_, wlMax_, nWl_, *this);
+            models = specsyn::defaultModelList;
         }
         else
         {
-            specsyn_ = std::make_unique<specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::raise>>(
-                model.value(), fehDist_.getMin(), fehDist_.getMax(),
-                afe, cfe,
-                std::numeric_limits<double>::quiet_NaN(), specsyn::defaultR,
-                registryName, wlMin_, wlMax_, nWl_, *this);
-        }
-        return;
-    }
+            // Look the model up in the registry, and use its WR_grid
+            // entry (if any) to decide which SpecsynLib specialization
+            // applies: Wolf-Rayet libraries -- parameterized by
+            // transformed radius and stellar temperature rather than
+            // logg and Teff -- need SpecsynLibWR, every other library
+            // needs SpecsynLibNoWind
+            auto [registry, registryPath] = specsyn::parseRegistry(registryName);
+            const auto modelEntry = registry.at_path(model.value());
+            if (!modelEntry)
+            {
+                throw std::runtime_error(
+                    "SimControls: spectra.model '" + model.value() +
+                    "' not found in spectra registry " + registryPath.string());
+            }
+            const bool wrGrid = modelEntry.at_path("WR_grid").value<bool>().value_or(false);
 
-    const toml::array* modelArr = modelNode.as_array();
-    if (modelArr == nullptr)
-    {
-        throw std::runtime_error(
-            "SimControls: spectra.model must be a string or an array of strings");
+            if (wrGrid)
+            {
+                specsyn_ = std::make_unique<specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise>>(
+                    model.value(), fehDist_.getMin(), fehDist_.getMax(), registryName,
+                    wlMin_, wlMax_, nWl_, *this);
+            }
+            else
+            {
+                specsyn_ = std::make_unique<specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::raise>>(
+                    model.value(), fehDist_.getMin(), fehDist_.getMax(),
+                    afe, cfe,
+                    std::numeric_limits<double>::quiet_NaN(), specsyn::defaultR,
+                    registryName, wlMin_, wlMax_, nWl_, *this);
+            }
+            return;
+        }
     }
-    std::vector<std::string> models;
-    modelArr->for_each([&models](auto&& el) -> void {
-        if constexpr (toml::is_string<decltype(el)>) { models.push_back(std::string(el)); }
-    });
-    if (models.empty())
+    else
     {
-        throw std::runtime_error(
-            "SimControls: spectra.model array must contain at least one string entry");
+        const toml::array* modelArr = modelNode.as_array();
+        if (modelArr == nullptr)
+        {
+            throw std::runtime_error(
+                "SimControls: spectra.model must be a string or an array of strings");
+        }
+        modelArr->for_each([&models](auto&& el) -> void {
+            if constexpr (toml::is_string<decltype(el)>) { models.push_back(std::string(el)); }
+        });
+        if (models.empty())
+        {
+            throw std::runtime_error(
+                "SimControls: spectra.model array must contain at least one string entry");
+        }
     }
 
     specsyn_ = std::make_unique<specsyn::SpecsynLibChained>(
