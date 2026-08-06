@@ -2,15 +2,15 @@
 # tests/core/testClusterSpecsynFull.cpp: drives a complete run through
 # SimCluster using the real MIST tracks and the real POWR_WC/POWR_WNE/
 # POWR_WNL_H20/POWR_WNL_H40/POWR_WNL_H60/TLUSTY_O/TLUSTY_B/BOSZ/CK04/
-# MARCS spectral libraries (not the small test fixtures used
-# elsewhere), so this only runs if that data -- too large to store in
-# the repository -- has been fetched locally (see
+# MARCS/TREMBLAY_DA/TREMBLAY_ELM spectral libraries (not the small test
+# fixtures used elsewhere), so this only runs if that data -- too
+# large to store in the repository -- has been fetched locally (see
 # data/tools/fetch_mist.py, fetch_powr.py, fetch_tlusty.py,
-# fetch_bosz.py, fetch_ck04.py, fetch_marcs.py). spectra.model is the
-# special value "default" (see specsyn::defaultModelList and
-# SimControls::readSpectra()), which expands to exactly this same
-# chained list, in this same order; spelled out here for reference,
-# since the order matters:
+# fetch_bosz.py, fetch_ck04.py, fetch_marcs.py, fetch_tremblay.py).
+# spectra.model is the special value "default" (see
+# specsyn::defaultModelList and SimControls::readSpectra()), which
+# expands to exactly this same chained list, in this same order;
+# spelled out here for reference, since the order matters:
 #   - POWR_WNL_H20/H40/H60 are listed separately, rather than a single
 #     combined WNL entry, since fetch_powr.py now splits PoWR's WNL
 #     grids by surface hydrogen mass fraction into separate registry
@@ -28,16 +28,30 @@
 #     Teff >~ 8000 K combined with log g <~ 1.5, a real hole this test
 #     also found, which CK04 (a fully rectangular grid through that
 #     same region) fills
-#   - MARCS is listed last, after CK04, to extend coverage down to
-#     cooler Teff (2500 K, versus CK04's 3500 K floor) for
-#     red-supergiant-phase stars; it does not extend log(g) coverage
-#     below BOSZ's own -0.5 floor (MARCS's own published grid floors
-#     at exactly the same value), so closing that remaining gap relies
-#     on SpecsynLibChained's tClamp clamp of log(g) (and, separately,
+#   - MARCS is listed after CK04, to extend coverage down to cooler
+#     Teff (2500 K, versus CK04's 3500 K floor) for red-supergiant-
+#     phase stars; it does not extend log(g) coverage below BOSZ's own
+#     -0.5 floor (MARCS's own published grid floors at exactly the
+#     same value), so closing that remaining gap relies on
+#     SpecsynLibChained's tClamp clamp of log(g) (and, separately,
 #     log(Teff)) into whatever the chain actually covers -- see
 #     SpecsynLibChained's own constructor comment
-# Output times span 2-10 Myr to capture stellar evolution before,
-# during, and after the Wolf-Rayet phase.
+#   - TREMBLAY_DA and TREMBLAY_ELM are listed last, after every
+#     ordinary (non-degenerate) atmosphere library, since white dwarfs
+#     -- log(g) ~ 7-9.5 -- are outside every library above's own
+#     log(g) coverage entirely; TREMBLAY_DA (Teff up to 140000 K)
+#     before TREMBLAY_ELM (Teff only up to 40000 K) so the hottest
+#     young white dwarfs still resolve to DA rather than ELM's own
+#     final OOBPolicy::raise -- see specsyn::defaultModelList's own
+#     comment for the full rationale
+# Output times span 2 Myr-10 Gyr: 2-10 Myr to capture stellar
+# evolution before, during, and after the Wolf-Rayet phase, and
+# 1e8-1e10 yr to exercise the TREMBLAY_DA/TREMBLAY_ELM coverage added
+# above -- MIST evolves progressively lower-mass (and so longer-lived)
+# stars onto the white dwarf cooling track as a population ages, so
+# these later times are where white dwarfs actually start appearing at
+# a non-negligible fraction of the population's stochastically-sampled
+# stars.
 #
 # FeH uses a flat distribution from -1 to 0 (see
 # testClusterSpecsynFullFeHDist.toml). This was previously pinned to
@@ -97,4 +111,4 @@ system = "Vega"
 CMF = 1e4
 
 [outputs]
-output_times = [2e6, 3e6, 4e6, 1e7]
+output_times = [2e6, 3e6, 4e6, 1e7, 1e8, 1e9, 1e10]

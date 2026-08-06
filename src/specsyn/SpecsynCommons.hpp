@@ -46,11 +46,25 @@ namespace specsyn
      * SimControls::readSpectra() -- a reasonable general-purpose
      * chained library covering Wolf-Rayet through cool giant/dwarf
      * atmospheres, so users don't need to spell out the full list
-     * themselves.
+     * themselves. TREMBLAY_DA and TREMBLAY_ELM are listed last, after
+     * every ordinary (non-degenerate) atmosphere library, since white
+     * dwarfs are compact, evolved end states no earlier library in
+     * this list covers at all (none of POWR/TLUSTY/BOSZ/CK04/MARCS
+     * extend anywhere near a white dwarf's log(g) ~ 7-9.5) -- mirrors
+     * testSpecsynLibChained.cpp's own testChainWithWD, which chains an
+     * ordinary library before a white dwarf one in that same order.
+     * TREMBLAY_DA (log(g) 6.5-9.5, Teff up to 140000 K) is listed
+     * before TREMBLAY_ELM (log(g) 4.0-9.5, but Teff only up to
+     * 40000 K), so the hottest young white dwarfs -- outside ELM's own
+     * Teff range entirely -- still resolve to DA rather than ELM's
+     * final OOBPolicy::raise; the two grids otherwise overlap in
+     * (log(g), Teff) coverage, and either would interpolate a
+     * comparably reasonable spectrum there.
      */
     inline const std::vector<std::string> defaultModelList = { // NOLINT(cert-err58-cpp) -- built from fixed string literals, so construction can never actually throw here
         "POWR_WC", "POWR_WNE", "POWR_WNL_H20", "POWR_WNL_H40", "POWR_WNL_H60",
-        "TLUSTY_O", "TLUSTY_B", "BOSZ", "CK04", "MARCS"
+        "TLUSTY_O", "TLUSTY_B", "BOSZ", "CK04", "MARCS",
+        "TREMBLAY_DA", "TREMBLAY_ELM"
     };
 
     /**

@@ -40,7 +40,7 @@ FeH = "tests/core/assets/testClusterSpecsynFullFeHDist.toml"
 min_stoch_mass = 120
 
 [spectra]
-model = ["POWR_WC", "POWR_WNE", "POWR_WNL_H20", "POWR_WNL_H40", "POWR_WNL_H60", "TLUSTY_O", "TLUSTY_B", "BOSZ", "CK04", "MARCS"]
+model = "default"
 nwl = 1024
 wl_min = 500
 wl_max = 1e4
@@ -49,4 +49,4 @@ wl_max = 1e4
 CMF = 1e4
 
 [outputs]
-output_times = [2e6, 3e6, 4e6, 1e7]
+output_times = [2e6, 3e6, 4e6, 1e7, 1e8, 1e9, 1e10]
