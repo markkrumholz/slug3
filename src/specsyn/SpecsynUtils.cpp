@@ -26,8 +26,9 @@ namespace specsyn
     auto parseRegistry(const std::string& registryName)
     -> std::pair<toml::table, std::filesystem::path>
     {
+        // requireFeH=false: see this function's own header comment for why
         [[maybe_unused]] auto [registry, registryPath, spectraSets] =
-            utils::parseSetRegistry(registryName, "spectra_sets", "spectra", "parseRegistry");
+            utils::parseSetRegistry(registryName, "spectra_sets", "spectra", "parseRegistry", false);
         return { std::move(registry), std::move(registryPath) };
     }
 

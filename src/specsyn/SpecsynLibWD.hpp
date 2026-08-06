@@ -1,0 +1,138 @@
+/**
+ * @file SpecsynLibWD.hpp
+ * @author Mark Krumholz
+ * @brief A SpecsynLib2D for white dwarf atmosphere grids
+ * @date 2026-08-07
+ */
+
+#ifndef SPECSYNLIBWD_HPP
+#define SPECSYNLIBWD_HPP
+
+#include "../io/SimControls.hpp"
+#include "Specsyn.hpp"
+#include "SpecsynCommons.hpp"
+#include "SpecsynLib2D.hpp"
+#include <cstddef>
+#include <string>
+#include <vector>
+
+namespace specsyn
+{
+
+    /**
+     * @class SpecsynLibWD
+     * @brief A SpecsynLib2D specialization for white dwarf atmosphere grids
+     * @tparam Policy See SpecsynLib.
+     * @details
+     * Covers spectral libraries -- like the Tremblay et al. pure-
+     * hydrogen (DA) white dwarf grids fetched by
+     * data/tools/fetch_tremblay.py -- whose spectra sit on a (log(g),
+     * Teff) tensor grid with no [Fe/H]/[alpha/Fe]/[C/Fe] axis at all,
+     * stored as four flat top-level HDF5 datasets ("wl", "logg",
+     * "log_Teff", and a (n_logg, n_logTeff, n_wl) "flux" tensor)
+     * rather than the one-group-per-[Fe/H] layout SpecsynLibNoWind
+     * reads. dim2_, dim3_ (inherited from SpecsynLib, via
+     * SpecsynLib2D) hold log(g) and log(Teff) respectively, aliased
+     * here as logg_ and logTeff_ for readability -- mirroring
+     * SpecsynLibNoWind's identical FeH_/logg_/logTeff_ aliasing
+     * exactly. dim1_ is left empty (see SpecsynLib2D's own
+     * comment): this class has no first axis at all, not even a
+     * degenerate one populated with a single placeholder value.
+     */
+    template <OOBPolicy Policy>
+    class SpecsynLibWD : public SpecsynLib2D<Policy>
+    {
+    public:
+
+        /**
+         * @brief Construct a SpecsynLibWD from a white dwarf atmosphere grid on disk
+         * @param spectraName Name of the spectral model
+         * @param registryName Name of the spectral library registry file
+         * @param wlMin Minimum wavelength of the output grid, in
+         *   Angstrom; if 0 (the default), used together with wlMax
+         *   and nWl below (see @details) as a flag to fall back on
+         *   the library's own native wavelength grid
+         * @param wlMax Maximum wavelength of the output grid, in
+         *   Angstrom; see wlMin
+         * @param nWl Number of points in the output grid; if 0 (the
+         *   default), used as a flag to fall back on the library's
+         *   own native wavelength grid -- see @details
+         * @param controls Simulation controls; forwarded unchanged to
+         *   SpecsynLib2D's own constructor -- see its comment. Has no
+         *   default of its own (unlike every parameter above): a
+         *   reference bound to a temporary default-constructed
+         *   SimControls would dangle the moment this constructor
+         *   returned, since this class stores it live rather than
+         *   copying out of it.
+         * @throws std::runtime_error if spectraName is not found in
+         *   the registry, or its HDF5 file cannot be read, or its
+         *   "flux" dataset's shape does not match its "wl"/"logg"/
+         *   "log_Teff" datasets' own sizes
+         * @details
+         * Unlike SpecsynLibNoWind/SpecsynLibWR, this constructor takes
+         * no [Fe/H]/[alpha/Fe]/[C/Fe]/microturbulence/resolution
+         * arguments at all: white dwarf atmospheres here have none of
+         * those axes, and the registry's "file" entry names the one
+         * and only HDF5 file this model reads from directly (no
+         * per-[Fe/H] group filtering, unlike findMatchingSpectra).
+         *
+         * If nWl is nonzero, resamples onto nWl points log-spaced from
+         * wlMin to wlMax (via SpecsynLib::resample) after reading the
+         * library's own native wavelength grid; if wlMin is 0 there
+         * (nWl alone was requested, without an explicit range), wlMin/
+         * wlMax instead fall back to the front/back of that just-read
+         * native grid, keeping the caller's requested point count. If
+         * nWl is 0, wl() simply returns the native grid as read from
+         * disk, unresampled. Mirrors SpecsynLibNoWind's own identical
+         * resampling logic exactly.
+         */
+        SpecsynLibWD(
+            const std::string& spectraName,
+            const std::string& registryName,
+            double wlMin,
+            double wlMax,
+            std::size_t nWl,
+            const io::SimControls& controls);
+
+        /**
+         * @brief Compute a star's spectrum by bilinear interpolation on the library grid
+         * @param props Stellar properties, as produced by evaluating
+         *   the Interpolator1D returned by Tracks2D::getIsochrone at
+         *   this star's mass
+         * @param feh [Fe/H] value of the star; unused, since this
+         *   library has no [Fe/H] axis at all -- present only because
+         *   the Specsyn base class's own spec() signature requires it
+         * @return The star's spectrum, evaluated on the wavelength
+         *   grid returned by wl(), in units of erg/s/Angstrom; a
+         *   size-0 vector if the star falls outside this library's
+         *   (logg, Teff) grid and Policy is OOBPolicy::silent
+         * @throws std::runtime_error if the star falls outside this
+         *   library's grid and Policy is OOBPolicy::raise
+         * @details
+         * Derives the star's log(Teff) directly from props and checks
+         * it against logTeff_'s own range; then derives log(g) (and
+         * surface area) via Specsyn::getSAandLogg and checks that
+         * against logg_'s own range. If both checks pass, delegates
+         * the actual bilinear interpolation to
+         * SpecsynLib2D::spec(double, double) and scales the result by
+         * the star's surface area to convert specific flux at the
+         * surface into specific luminosity.
+         */
+        [[nodiscard]] auto spec(const Specsyn::StarData& props, double feh) const
+        -> std::vector<double> override;
+
+    private:
+
+        // References into the parent class's dim2_/dim3_, named for
+        // what they actually hold in this (logg, Teff) specialization
+        // -- mirrors SpecsynLibNoWind's identical FeH_/logg_/logTeff_
+        // aliasing exactly, including the same rationale (deliberately
+        // references rather than owned copies: the actual storage
+        // lives in, and is sized by, the parent).
+        std::vector<double>& logg_;    /**< log(g) values spanned by the tensor grid (alias for SpecsynLib::dim2_) */ // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
+        std::vector<double>& logTeff_; /**< log10(effective temperature) values spanned by the tensor grid (alias for SpecsynLib::dim3_) */ // NOLINT(readability-identifier-naming, cppcoreguidelines-avoid-const-or-ref-data-members)
+    };
+
+} // namespace specsyn
+
+#endif // SPECSYNLIBWD_HPP

@@ -102,6 +102,8 @@ add_executable(slug
     src/specsyn/SpecsynUtils.cpp
     src/specsyn/SpecsynLib.cpp
     src/specsyn/SpecsynLibNoWind.cpp
+    src/specsyn/SpecsynLib2D.cpp
+    src/specsyn/SpecsynLibWD.cpp
     src/specsyn/SpecsynLibWR.cpp
     src/specsyn/SpecsynLibChained.cpp
     src/tracks/Tracks2D.cpp
@@ -195,6 +197,8 @@ add_executable(slugTestCore
     src/specsyn/SpecsynUtils.cpp
     src/specsyn/SpecsynLib.cpp
     src/specsyn/SpecsynLibNoWind.cpp
+    src/specsyn/SpecsynLib2D.cpp
+    src/specsyn/SpecsynLibWD.cpp
     src/specsyn/SpecsynLibWR.cpp
     src/specsyn/SpecsynLibChained.cpp
     src/tracks/TrackUtils.cpp
@@ -239,6 +243,8 @@ add_executable(slugTestCoreFull
     src/specsyn/SpecsynUtils.cpp
     src/specsyn/SpecsynLib.cpp
     src/specsyn/SpecsynLibNoWind.cpp
+    src/specsyn/SpecsynLib2D.cpp
+    src/specsyn/SpecsynLibWD.cpp
     src/specsyn/SpecsynLibWR.cpp
     src/specsyn/SpecsynLibChained.cpp
     src/tracks/TrackUtils.cpp
@@ -288,6 +294,8 @@ add_executable(slugTestIo
     src/specsyn/SpecsynUtils.cpp
     src/specsyn/SpecsynLib.cpp
     src/specsyn/SpecsynLibNoWind.cpp
+    src/specsyn/SpecsynLib2D.cpp
+    src/specsyn/SpecsynLibWD.cpp
     src/specsyn/SpecsynLibWR.cpp
     src/specsyn/SpecsynLibChained.cpp
     src/tracks/TrackUtils.cpp
@@ -305,6 +313,8 @@ add_executable(slugTestSpecsyn
     src/specsyn/SpecsynUtils.cpp
     src/specsyn/SpecsynLib.cpp
     src/specsyn/SpecsynLibNoWind.cpp
+    src/specsyn/SpecsynLib2D.cpp
+    src/specsyn/SpecsynLibWD.cpp
     src/specsyn/SpecsynLibWR.cpp
     src/specsyn/SpecsynLibChained.cpp
     tests/specsyn/testSpecsynAll.cpp
@@ -312,6 +322,7 @@ add_executable(slugTestSpecsyn
     tests/specsyn/testSpecsynUtils.cpp
     tests/specsyn/testSpecsynLib.cpp
     tests/specsyn/testSpecsynLibWR.cpp
+    tests/specsyn/testSpecsynLibWD.cpp
     tests/specsyn/testSpecsynLibChained.cpp
     src/extern/cubature/pcubature.c
     src/pdfs/PDFFileParser.cpp
@@ -365,6 +376,8 @@ pybind11_add_module(slugPython
     src/specsyn/SpecsynUtils.cpp
     src/specsyn/SpecsynLib.cpp
     src/specsyn/SpecsynLibNoWind.cpp
+    src/specsyn/SpecsynLib2D.cpp
+    src/specsyn/SpecsynLibWD.cpp
     src/specsyn/SpecsynLibWR.cpp
     src/specsyn/SpecsynLibChained.cpp
     src/tracks/TrackUtils.cpp

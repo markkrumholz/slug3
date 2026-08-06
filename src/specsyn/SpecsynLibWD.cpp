@@ -1,0 +1,176 @@
+/**
+ * @file SpecsynLibWD.cpp
+ * @author Mark Krumholz
+ * @brief Implementation of SpecsynLibWD.hpp
+ * @date 2026-08-07
+ */
+
+#include "SpecsynLibWD.hpp"
+#include "../io/SimControls.hpp"
+#include "../tracks/TrackCommons.hpp"
+#include "../utils/HDF5Utils.hpp"
+#include "../utils/MiscUtils.hpp"
+#include "Specsyn.hpp"
+#include "SpecsynCommons.hpp"
+#include "SpecsynLib.hpp"
+#include "SpecsynLib2D.hpp"
+#include "SpecsynUtils.hpp"
+#include "hdf5.h" // NOLINT(misc-include-cleaner)
+#include <cstddef>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
+namespace specsyn
+{
+    template <OOBPolicy Policy>
+    SpecsynLibWD<Policy>::SpecsynLibWD(
+        const std::string& spectraName,
+        const std::string& registryName,
+        double wlMin,
+        double wlMax,
+        const std::size_t nWl,
+        const io::SimControls& controls) :
+        SpecsynLib2D<Policy>(controls),
+        logg_(this->dim2_),
+        logTeff_(this->dim3_)
+    {
+        // Step 1: find and open the HDF5 file this model names in the registry
+        auto [registry, registryPath] = parseRegistry(registryName);
+        const auto modelEntry = registry.at_path(spectraName);
+        if (!modelEntry)
+        {
+            throw std::runtime_error(
+                "SpecsynLibWD: spectral model '" + spectraName +
+                "' not found in registry " + registryPath.string());
+        }
+        const auto h5name = modelEntry.at_path("file").value<std::string>();
+        if (!h5name.has_value())
+        {
+            throw std::runtime_error(
+                "SpecsynLibWD: registry entry '" + spectraName +
+                "' in " + registryPath.string() + " is missing a 'file' field");
+        }
+        const auto h5path = registryPath.parent_path() / h5name.value();
+
+        // NOLINTBEGIN(misc-include-cleaner)
+        const hid_t file = H5Fopen(h5path.string().c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+        if (file < 0)
+        {
+            throw std::runtime_error(
+                "SpecsynLibWD: unable to open HDF5 file " + h5path.string());
+        }
+
+        // Everything from here through the matching H5Fclose below is
+        // wrapped in a try/catch so the file handle always gets
+        // closed, regardless of which of the several things that can
+        // go wrong while reading this file's four datasets actually
+        // does -- mirrors SpecsynLibNoWind's own identical pattern.
+        try
+        {
+            // Step 2: the wavelength grid
+            this->wl_ = utils::readDataset1D(file, "wl", "SpecsynLibWD");
+
+            // Step 3: logg_/logTeff_ (dim2_/dim3_); dim1_ is left
+            // empty entirely -- see SpecsynLib2D's own comment for why
+            logg_ = utils::readDataset1D(file, "logg", "SpecsynLibWD");
+            logTeff_ = utils::readDataset1D(file, "log_Teff", "SpecsynLibWD");
+
+            // Step 4: the flux tensor, shaped (n_logg, n_logTeff,
+            // n_wl) in the HDF5 file -- read as one flat buffer, then
+            // sliced into spectra_'s own per-(logg, Teff) spectra,
+            // each n_wl long; grid_'s first extent is hardcoded to 1
+            // rather than dim1_.size() (dim1_ is empty), exactly as
+            // SpecsynLib2D's own spec() hardcodes the corresponding
+            // index to 0
+            auto [flux, shape] = utils::readDataset3D(file, "flux", "SpecsynLibWD");
+            const auto nLogg = static_cast<std::size_t>(shape.at(0));
+            const auto nLogTeff = static_cast<std::size_t>(shape.at(1));
+            const auto nWlNative = static_cast<std::size_t>(shape.at(2));
+            if (nLogg != logg_.size() || nLogTeff != logTeff_.size() ||
+                nWlNative != this->wl_.size())
+            {
+                throw std::runtime_error(
+                    "SpecsynLibWD: 'flux' dataset shape (" + std::to_string(nLogg) +
+                    ", " + std::to_string(nLogTeff) + ", " + std::to_string(nWlNative) +
+                    ") does not match the sizes of 'logg' (" + std::to_string(logg_.size()) +
+                    "), 'log_Teff' (" + std::to_string(logTeff_.size()) + "), and 'wl' (" +
+                    std::to_string(this->wl_.size()) + ") in " + h5path.string());
+            }
+
+            this->spectra_.assign(nLogg * nLogTeff, std::vector<double>{});
+            for (std::size_t i = 0; i < nLogg; ++i)
+            {
+                for (std::size_t j = 0; j < nLogTeff; ++j)
+                {
+                    const auto offset = (i * nLogTeff + j) * nWlNative;
+                    this->spectra_.at(i * nLogTeff + j) = std::vector<double>(
+                        flux.begin() + static_cast<std::ptrdiff_t>(offset),
+                        flux.begin() + static_cast<std::ptrdiff_t>(offset + nWlNative));
+                }
+            }
+            using SpectraGrid = typename SpecsynLib<Policy>::SpectraGrid;
+            this->grid_ = SpectraGrid(this->spectra_.data(), 1, nLogg, nLogTeff);
+        }
+        catch (...)
+        {
+            H5Fclose(file);
+            throw;
+        }
+
+        H5Fclose(file);
+        // NOLINTEND(misc-include-cleaner)
+
+        // If the caller requested an explicit output grid rather than
+        // this library's own native one, resample onto it now --
+        // mirrors SpecsynLibNoWind's own identical "nWl alone" handling
+        if (nWl != 0)
+        {
+            if (wlMin == 0.0)
+            {
+                wlMin = this->wl_.front();
+                wlMax = this->wl_.back();
+            }
+            this->resample(utils::logspace(wlMin, wlMax, nWl));
+        }
+    }
+
+    template <OOBPolicy Policy>
+    auto SpecsynLibWD<Policy>::spec(const Specsyn::StarData& props, const double /*feh*/) const -> std::vector<double>
+    {
+        // Step 1: check log(Teff) against the grid's bounds
+        const double logTeff = props[static_cast<std::size_t>(tracks::FieldIdx::logTe)]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- StarData is a fixed-size std::array, and logTe is one of its compile-time-known indices
+        if (logTeff < logTeff_.front() || logTeff > logTeff_.back())
+        {
+            return SpecsynLib<Policy>::outOfBoundsResult(
+                "SpecsynLibWD: star with log(Teff) = " + std::to_string(logTeff) +
+                " is outside this library's grid");
+        }
+
+        // Step 2: surface area and log(g), then bounds-check log(g)
+        const auto [area, logg] = this->getSAandLogg(props);
+        if (logg < logg_.front() || logg > logg_.back())
+        {
+            return SpecsynLib<Policy>::outOfBoundsResult(
+                "SpecsynLibWD: star with log(g) = " + std::to_string(logg) +
+                " is outside this library's grid");
+        }
+
+        // Step 3: bilinear interpolation is handled entirely by the
+        // parent class, which knows nothing about surface area --
+        // scale its result to convert specific flux at the surface
+        // into specific luminosity
+        auto result = this->SpecsynLib2D<Policy>::spec(logg, logTeff);
+        for (auto& v : result) { v *= area; }
+        return result;
+    }
+
+    // Explicit instantiation for every OOBPolicy value actually used;
+    // this keeps the class's implementation in this .cpp file, as with
+    // every other class in src/specsyn, rather than forcing it into
+    // the header just because it is a template.
+    template class SpecsynLibWD<OOBPolicy::raise>;
+    template class SpecsynLibWD<OOBPolicy::silent>;
+    template class SpecsynLibWD<OOBPolicy::coerce>;
+
+} // namespace specsyn
