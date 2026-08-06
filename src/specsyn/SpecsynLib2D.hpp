@@ -70,6 +70,24 @@ namespace specsyn
         explicit SpecsynLib2D(const io::SimControls& controls) :
             SpecsynLib<Policy>(controls) { }
 
+        /**
+         * @brief Resample every spectrum in this library onto a new wavelength grid
+         * @param wlNew The new wavelength grid, in Angstrom
+         * @details
+         * Overrides SpecsynLib::resample(const std::vector<double>&):
+         * that base implementation iterates i1 from 0 to
+         * dim1_.size() - 1, which for this class would be zero
+         * iterations at all, since dim1_ is deliberately left empty
+         * (see this class's own comment) -- silently leaving every
+         * stored spectrum on its old wavelength grid, mismatched
+         * against the wl_ the base implementation still updates
+         * unconditionally at the end. This override does the same
+         * thing the base does, but iterating over (dim2_, dim3_) alone
+         * with the degenerate first tensor index hardcoded to 0,
+         * mirroring spec(double, double)'s own hardcoding of it.
+         */
+        void resample(const std::vector<double>& wlNew) override;
+
     protected:
 
         /**

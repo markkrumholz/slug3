@@ -380,6 +380,11 @@ tab["file"] = args.output
 tab["version"] = args.version
 tab["references"] = grid_cfg["references"]
 tab["reference_urls"] = grid_cfg["reference_urls"]
+# Tells SpecsynLibChained to build this entry as a SpecsynLibWD (the
+# flat, 4-dataset (logg, Teff)-only schema this script writes), rather
+# than the default SpecsynLibNoWind -- analogous to WR_grid, which
+# selects SpecsynLibWR instead
+tab["WD_grid"] = True
 tab["logg"] = [float(x) for x in logg_vals]
 tab["log_Teff"] = [float(x) for x in log_teff_vals]
 registry[registry_name] = tab

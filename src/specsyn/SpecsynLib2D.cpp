@@ -14,6 +14,28 @@
 namespace specsyn
 {
     template <OOBPolicy Policy>
+    void SpecsynLib2D<Policy>::resample(const std::vector<double>& wlNew)
+    {
+        // Mirrors SpecsynLib::resample(const std::vector<double>&)
+        // exactly, but iterating over (dim2_, dim3_) alone, with the
+        // degenerate first tensor index hardcoded to 0 -- see this
+        // method's own header comment for why the base implementation
+        // can't be used unmodified here.
+        for (std::size_t i2 = 0; i2 < this->dim2_.size(); ++i2) // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i2, i3 are both < the corresponding grid's size by construction
+        {
+            for (std::size_t i3 = 0; i3 < this->dim3_.size(); ++i3)
+            {
+                auto& spectrum = this->grid_[0, i2, i3];
+                if (spectrum.empty()) { continue; } // unpopulated grid point: leave empty
+
+                spectrum = SpecsynLib<Policy>::resample(this->wl_, wlNew, spectrum);
+            }
+        }
+
+        this->wl_ = wlNew;
+    }
+
+    template <OOBPolicy Policy>
     auto SpecsynLib2D<Policy>::spec(const double d2, const double d3) const -> std::vector<double>
     {
         // Locate the bracketing cell on each axis, exactly as

@@ -79,11 +79,13 @@ namespace specsyn
          * @details
          * Constructs one library per entry of spectraName, in order --
          * a SpecsynLibWR for an entry whose registry entry has
-         * WR_grid = true, a SpecsynLibNoWind for every other entry --
-         * pairing each one with the corresponding entry of microTurb
-         * (or that library's own registry default, if microTurb is
-         * empty; ignored entirely for a SpecsynLibWR entry, which has
-         * no microTurb axis) and otherwise using the remaining
+         * WR_grid = true, a SpecsynLibWD for an entry with
+         * WD_grid = true (mutually exclusive with WR_grid), a
+         * SpecsynLibNoWind for every other entry -- pairing each one
+         * with the corresponding entry of microTurb (or that library's
+         * own registry default, if microTurb is empty; ignored
+         * entirely for a SpecsynLibWR or SpecsynLibWD entry, neither of
+         * which has a microTurb axis) and otherwise using the remaining
          * arguments -- including wlMin, wlMax, and nWl -- unchanged
          * for each one. Every library but the last
          * is constructed with OOBPolicy::coerce, so a star outside its
@@ -107,9 +109,9 @@ namespace specsyn
          * length and wavelength values -- and so that wl() correctly
          * describes every one of them, not just the first.
          *
-         * If tClamp is true, also scans every chained SpecsynLibNoWind
-         * or SpecsynLibWR library's own log(Teff) grid (via their
-         * logTeff() accessors) for the global minimum and maximum,
+         * If tClamp is true, also scans every chained SpecsynLibNoWind,
+         * SpecsynLibWR, or SpecsynLibWD library's own log(Teff) grid
+         * (via their logTeff() accessors) for the global minimum and maximum,
          * storing them in logTeffMin_/logTeffMax_ for spec() to clamp
          * against (see spec()'s own comment); if false, both are set
          * to quiet_NaN() instead, so spec() applies no clamp at all.
@@ -125,10 +127,10 @@ namespace specsyn
          * a stand-in in that regime, rather than raising or silently
          * dropping the star.
          *
-         * Likewise scans every chained SpecsynLibNoWind library's own
-         * log(g) grid (via logg()) for loggMin_/loggMax_ -- again both
-         * quiet_NaN() if tClamp is false. SpecsynLibWR contributes
-         * nothing here, since Wolf-Rayet atmospheres aren't
+         * Likewise scans every chained SpecsynLibNoWind or SpecsynLibWD
+         * library's own log(g) grid (via logg()) for loggMin_/loggMax_
+         * -- again both quiet_NaN() if tClamp is false. SpecsynLibWR
+         * contributes nothing here, since Wolf-Rayet atmospheres aren't
          * parameterized by logg at all (see spec()'s own comment for
          * how this clamp is actually applied, which is necessarily
          * more involved than the logTeff one above). This addresses a
@@ -176,7 +178,7 @@ namespace specsyn
          * If the constructor's tClamp argument was true, first clamps
          * a copy of props' log(Teff) entry to [logTeffMin_,
          * logTeffMax_] -- the combined range spanned by every chained
-         * SpecsynLibNoWind/SpecsynLibWR library's own grid -- before
+         * SpecsynLibNoWind/SpecsynLibWR/SpecsynLibWD library's own grid -- before
          * doing anything else with it (logTeffMin_/logTeffMax_ are
          * quiet_NaN() otherwise, so the comparison is simply skipped).
          * A copy is needed here since props itself is a const

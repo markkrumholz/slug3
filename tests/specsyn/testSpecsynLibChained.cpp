@@ -115,6 +115,34 @@ namespace
     constexpr double oobFeh = 0.1;
 
     /**
+     * @brief A compact, hot ("white dwarf-like") star
+     * @details M = 0.0592346591493545 Msun, Teff = 28750 K (the same
+     *   Teff as obStar()), log(L) = -2.0, giving log(g) = 8.0 -- inside
+     *   WD_test's grid (logg 7.0-9.0, log(Teff) 4.0-4.6), but far
+     *   outside TLUSTY_test's own logg range (3.0-3.25, nowhere near a
+     *   compact star's), so a chain listing TLUSTY_test before WD_test
+     *   must fall through to WD_test for this star -- TLUSTY_test's
+     *   own (feh, logTeff) bounds check passes first (this Teff and
+     *   wdFeh both sit inside its range), so it's specifically the
+     *   logg mismatch, not an earlier check, that forces the fallthrough.
+     */
+    auto wdStar() -> specsyn::Specsyn::StarData
+    {
+        return makeStarData(0.0592346591493545, -2.0, std::log10(28750.0));
+    }
+    constexpr double wdFeh = 0.0;
+
+    // Expected peak(wl * spec) for wdStar() against WD_test's own
+    // amplitude(logg, logTeff) = 1 + 2*logg + 3*logTeff formula (see
+    // data/tools/make_wd_test_fixture.py), evaluated at logg = 8.0,
+    // log(Teff) = log10(28750), times the shape/wl values at WD_test's
+    // last (largest) grid point, times the surface area implied by
+    // wdStar()'s own (mass, logL, logTeff) -- see checkSpectrum's own
+    // generous (three-orders-of-magnitude) tolerance for why this
+    // doesn't need to be more precise than an order-of-magnitude estimate.
+    constexpr double wdLuminosity = 2.4e24;
+
+    /**
      * @brief Check that result is non-empty and that peak(wl * result) is near expectedLuminosity
      * @return 0 on success, 1 (after printing a diagnostic) on failure
      */
@@ -239,6 +267,49 @@ static auto testChainBoszFirst() -> int
     {
         std::cerr << "testSpecsynLibChained: unexpected exception for an "
             "OB star that should fall through to TLUSTY_test: "
+            << e.what() << "\n";
+        result += 1;
+    }
+
+    return result;
+}
+
+// Check that a chain including a WD_grid entry (WD_test) dispatches to
+// a SpecsynLibWD for it: a normal OB star is still handled by
+// TLUSTY_test as usual, and a compact, high-log(g) star -- out of
+// bounds for TLUSTY_test's own logg range, but inside WD_test's --
+// falls through to WD_test, exactly as an ordinary NoWind-to-NoWind
+// fallthrough would (see testChainTlustyFirst/testChainBoszFirst)
+static auto testChainWithWD() -> int
+{
+    const specsyn::SpecsynLibChained chain(
+        { "TLUSTY_test", "WD_test" }, -3.0, 1.0, 0.0, 0.0,
+        {}, specsyn::defaultR, registryName, 0.0, 0.0, 0, true, testControls);
+
+    int result = 0;
+    try
+    {
+        const auto obResult = chain.spec(obStar(), obFeh);
+        result += checkSpectrum(obResult, chain.wl(), obLuminosity,
+            "an OB star with TLUSTY_test first, WD_test chained after it");
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "testSpecsynLibChained: unexpected exception for an "
+            "in-bounds OB star (WD chain): " << e.what() << "\n";
+        result += 1;
+    }
+
+    try
+    {
+        const auto wdResult = chain.spec(wdStar(), wdFeh);
+        result += checkSpectrum(wdResult, chain.wl(), wdLuminosity,
+            "a compact star falling through to WD_test");
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "testSpecsynLibChained: unexpected exception for a "
+            "compact star that should fall through to WD_test: "
             << e.what() << "\n";
         result += 1;
     }
@@ -536,6 +607,7 @@ auto testSpecsynLibChained() -> int
     int result = 0;
     result += testChainTlustyFirst();
     result += testChainBoszFirst();
+    result += testChainWithWD();
     result += testChainOOBThrows();
     result += testChainConstructorValidation();
     result += testChainUsesCommonGrid();

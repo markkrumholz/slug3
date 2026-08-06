@@ -161,8 +161,17 @@ namespace specsyn
          * with wlNew, so wl() and every subsequent spec() call reflect
          * the new grid. Unpopulated grid points are left as empty
          * vectors, exactly as before.
+         *
+         * Virtual so that SpecsynLib2D -- whose dim1_ is left empty
+         * rather than sized to 1 (see its own comment) -- can override
+         * this to iterate over (dim2_, dim3_) alone: this base
+         * implementation's own iteration is driven by dim1_.size(),
+         * which would silently do nothing at all for a library whose
+         * dim1_ is empty, leaving every stored spectrum on its old
+         * (now size-mismatched) wavelength grid even as wl_ itself
+         * gets updated to wlNew.
          */
-        void resample(const std::vector<double>& wlNew);
+        virtual void resample(const std::vector<double>& wlNew);
 
         /**
          * @brief Resample a single spectrum from one wavelength grid onto another
