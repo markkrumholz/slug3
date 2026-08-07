@@ -248,19 +248,43 @@ namespace specsyn
          * can drift somewhat above 0.4 from ordinary post-main-sequence
          * mixing, with nothing to do with Wolf-Rayet-style stripping --
          * from being misclassified as WNL: no genuine Wolf-Rayet star,
-         * of any subtype, is this cool. Checked sequentially:
-         *   1) (Surface He mass fraction < 0.4 and log(Teff) <
-         *      log10(50000 K)) or log(Teff) < log10(10000 K): not a
-         *      Wolf-Rayet star at all (WRType::None). The first
-         *      log(Teff) clause is what keeps a He-depleted WC/WO star
-         *      from landing here: below that temperature, a genuinely
-         *      evolved WR star's surface He has not yet been burned
-         *      down through 0.4, so a cool, He-poor star really is
-         *      just an ordinary, non-WR star. The second (absolute
-         *      floor) clause is what keeps an ordinary cool star with
-         *      He mass fraction >= 0.4 from landing in a WNL subtype
-         *      instead -- see this function's own comment above for
-         *      both.
+         * of any subtype, is this cool.
+         *
+         * A third condition, on mass rather than log(Teff), guards the
+         * same log(Teff) >= log10(50000 K) escape hatch the first
+         * extension above relies on: that hatch exists specifically so
+         * a He-depleted, C/O-rich WC/WO star isn't misclassified as
+         * WRType::None purely for having surface He mass fraction below
+         * 0.4, but it makes no reference to mass, so it can equally
+         * well be triggered by a low-mass, ordinary-composition
+         * (H-rich) evolved star transiently passing through the same
+         * hot regime -- e.g. a MIST post-AGB "phase 6" star, whose
+         * effective temperature briefly exceeds 50000 K on its way to
+         * becoming a white dwarf despite having nothing like a
+         * stripped Wolf-Rayet envelope. Checked against MIST's own
+         * grids (see the WD/hot-atmosphere-coverage project notes):
+         * every genuinely WR-composition (surface He mass fraction >=
+         * 0.4) star has a current mass of at least ~17 Msun, while the
+         * low-mass post-AGB stars this hot-Teff escape hatch would
+         * otherwise misclassify never exceed ~1.1 Msun at this phase --
+         * a wide, clean gap (up to the next mass at which a genuine,
+         * massive He-depleted WC/WO star appears, ~13 Msun) that an
+         * 8 Msun floor sits comfortably inside. Checked sequentially:
+         *   1) Mass < 8 Msun, or (surface He mass fraction < 0.4 and
+         *      log(Teff) < log10(50000 K)), or log(Teff) <
+         *      log10(10000 K): not a Wolf-Rayet star at all
+         *      (WRType::None). The mass clause is what keeps a
+         *      low-mass, hot, but ordinary-composition star from
+         *      slipping through the log(Teff) escape hatch described
+         *      above. The log(Teff) clause itself is what keeps a
+         *      He-depleted WC/WO star from landing here: below that
+         *      temperature, a genuinely evolved WR star's surface He
+         *      has not yet been burned down through 0.4, so a cool,
+         *      He-poor star really is just an ordinary, non-WR star.
+         *      The absolute floor clause is what keeps an ordinary
+         *      cool star with He mass fraction >= 0.4 from landing in
+         *      a WNL subtype instead -- see this function's own
+         *      comment above for both.
          *   2) Surface He mass fraction <= 0.9 and log(Teff) <
          *      log10(1e5 K): a WNL subtype, sub-classified by surface
          *      H mass fraction: < 0.3 gives WRType::WNLH20; [0.3, 0.5]
