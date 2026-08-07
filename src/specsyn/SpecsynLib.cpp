@@ -20,23 +20,6 @@ namespace specsyn
     namespace
     {
         /**
-         * @brief A bracketing pair of grid indices, plus an interpolation weight
-         * @details
-         * lo_ and hi_ are the indices of the grid points immediately
-         * below and above (or equal to) a query value, and t_ is the
-         * fractional distance of the query value between them, so
-         * that (1 - t_) * grid[lo_] + t_ * grid[hi_] recovers the
-         * query value. For a grid of size 1 (a degenerate axis with
-         * no actual extent), lo_ == hi_ == 0 and t_ == 0.
-         */
-        struct Bracket
-        {
-            size_t lo_;
-            size_t hi_;
-            double t_;
-        };
-
-        /**
          * @brief Binary search for the bracketing index of a sorted grid, within given bounds
          * @param grid A sorted (ascending), non-empty grid of values
          * @param value The query value
@@ -68,67 +51,38 @@ namespace specsyn
             if (value == grid[hi]) { return hi; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
             return lo;
         }
-
-        /**
-         * @brief Find the bracketing grid points of a sorted grid
-         * @param grid A sorted (ascending), non-empty grid of values
-         * @param value The query value; assumed to already lie within
-         *   [grid.front(), grid.back()]
-         * @param cacheIdx The calling thread's cached bracket index
-         *   for this axis (one of SpecsynLib::dim1Cache_/dim2Cache_/
-         *   dim3Cache_, already resolved to the element private to
-         *   this thread); updated in place to the bracket this call
-         *   finds, so the next call -- if its own query value is
-         *   still within, or close to, this same cell -- can reuse it
-         * @returns The bracketing Bracket for value
-         * @details
-         * Locates the bracket via a binary search accelerated by
-         * cacheIdx, exactly as interp::Mesh2DGrid::yIdx accelerates
-         * its own search with jSave_: if value already falls within
-         * [grid[cacheIdx], grid[cacheIdx + 1]), the cached bracket is
-         * reused with no search at all; otherwise a binary search
-         * narrows from the cached index towards whichever side value
-         * fell outside of, rather than searching the full axis from
-         * scratch. This is an O(log n) search in the worst case
-         * (same as a plain binary search from scratch), but O(1) on a
-         * cache hit and faster on average whenever successive calls'
-         * query values are sorted, or nearly so, along this axis --
-         * the common case, since spec() is typically called for a
-         * long series of stars in Teff/logg order. None of the three
-         * tensor-grid axes can be assumed evenly spaced -- e.g. BOSZ's
-         * [Fe/H] grid is uniform, but TLUSTY's (log10 of a fixed set
-         * of archival Z values) is not -- so a search, cached or not,
-         * is needed regardless.
-         */
-        auto findBracket(const std::vector<double>& grid, const double value, //NOLINT(llvm-prefer-static-over-anonymous-namespace)
-            size_t& cacheIdx) -> Bracket
-        {
-            const size_t n = grid.size();
-            if (n == 1) { return { 0, 0, 0.0 }; }
-
-            // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- cacheIdx is always < n - 1 by construction, both on entry (see below) and after every branch here
-            if (value < grid[cacheIdx])
-            {
-                cacheIdx = bracketSearch(grid, value, 0, cacheIdx); // below cached position: search left
-            }
-            else if (value >= grid[cacheIdx + 1])
-            {
-                // above cached position, or exactly on its upper edge; in
-                // the latter case cacheIdx must still advance, since
-                // leaving it unchanged would compute t as 1 instead of 0
-                // for the next cell up
-                cacheIdx = bracketSearch(grid, value, cacheIdx, n - 1); // search right
-            }
-            if (cacheIdx == n - 1) { --cacheIdx; } // value == grid.back(): use the last interval, not a degenerate one past it
-            // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-
-            const size_t lo = cacheIdx;
-            const size_t hi = cacheIdx + 1;
-            const double t = std::clamp(
-                (value - grid[lo]) / (grid[hi] - grid[lo]), 0.0, 1.0); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- lo, hi < n by construction
-            return { lo, hi, t };
-        }
     } // namespace
+
+    // See SpecsynLib.hpp's own comment on why this lives in
+    // specsyn::detail rather than an anonymous namespace here.
+    auto detail::findBracket(const std::vector<double>& grid, const double value,
+        size_t& cacheIdx) -> detail::Bracket
+    {
+        const size_t n = grid.size();
+        if (n == 1) { return { 0, 0, 0.0 }; }
+
+        // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- cacheIdx is always < n - 1 by construction, both on entry (see below) and after every branch here
+        if (value < grid[cacheIdx])
+        {
+            cacheIdx = bracketSearch(grid, value, 0, cacheIdx); // below cached position: search left
+        }
+        else if (value >= grid[cacheIdx + 1])
+        {
+            // above cached position, or exactly on its upper edge; in
+            // the latter case cacheIdx must still advance, since
+            // leaving it unchanged would compute t as 1 instead of 0
+            // for the next cell up
+            cacheIdx = bracketSearch(grid, value, cacheIdx, n - 1); // search right
+        }
+        if (cacheIdx == n - 1) { --cacheIdx; } // value == grid.back(): use the last interval, not a degenerate one past it
+        // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+
+        const size_t lo = cacheIdx;
+        const size_t hi = cacheIdx + 1;
+        const double t = std::clamp(
+            (value - grid[lo]) / (grid[hi] - grid[lo]), 0.0, 1.0); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- lo, hi < n by construction
+        return { lo, hi, t };
+    }
 
     template <OOBPolicy Policy>
     auto SpecsynLib<Policy>::outOfBoundsResult(const std::string& message) -> std::vector<double>
@@ -156,9 +110,9 @@ namespace specsyn
         // findBracket). Each dimNCache_() call below binds the
         // element of that axis's ThreadVec private to this thread,
         // which findBracket then reads and updates in place.
-        const auto b1 = findBracket(dim1_, d1, dim1Cache_());
-        const auto b2 = findBracket(dim2_, d2, dim2Cache_());
-        const auto b3 = findBracket(dim3_, d3, dim3Cache_());
+        const auto b1 = detail::findBracket(dim1_, d1, dim1Cache_());
+        const auto b2 = detail::findBracket(dim2_, d2, dim2Cache_());
+        const auto b3 = detail::findBracket(dim3_, d3, dim3Cache_());
 
         // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- b1/b2/b3 indices are all < the corresponding grid's size by construction, and the interpolation loop below is a hot path where the cost of bounds checking matters
         // Every one of the 8 neighboring grid points must actually

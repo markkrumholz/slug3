@@ -54,10 +54,14 @@ auto allPhotDataFilesExist() -> bool;
  * testClusterSpecsynFullNonStoch's uses n_trial = 1, since its
  * min_stoch_mass setting makes every trial's stellar population
  * non-stochastic, so multiple trials would just repeat the same
- * exercise. output_times, with 4 entries, is shared by every deck and
- * so is still a fixed constant here. The cluster_phot check is
- * conditional on that group actually existing in the output, since
- * only testClusterSpecsynFull's own deck requests photometry.
+ * exercise. The number of output times is likewise read back from the
+ * deck (via SimControls::outTimes().size()) rather than assumed,
+ * since testClusterSpecsynFull/NonStoch's decks now list 7 entries
+ * (to also exercise white dwarf coverage at 1e8-1e10 yr) while
+ * testClusterSpecsynFullAFe's still lists the original 4. The
+ * cluster_phot check is conditional on that group actually existing
+ * in the output, since only testClusterSpecsynFull's own deck
+ * requests photometry.
  */
 auto runClusterSpecsynFull(const std::string& inputFile, const std::string& modelName) -> int;
 

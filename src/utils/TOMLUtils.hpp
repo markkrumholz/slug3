@@ -147,19 +147,27 @@ namespace utils
      *   (e.g. "tracks" or "spectra")
      * @param context Prefix used in thrown error messages (typically the
      *   name of the calling function)
+     * @param requireFeH Whether every set entry must also have a "Fe_H"
+     *   field, on top of the always-required "file" field; true by
+     *   default, since every track set and most spectra sets are
+     *   parameterized by metallicity, but false for a spectra set with
+     *   no [Fe/H] axis at all (e.g. a white dwarf atmosphere grid, read
+     *   by SpecsynLibWD) -- see SpecsynUtils.cpp's own parseRegistry()
      * @returns The parsed table, the path it was read from, and the list of
      *   set names read from its setsKey field
      * @details
      * On top of parseTOMLFile's own validation, this further checks that
      * the registry has a non-empty setsKey array, and that every set it
-     * names has its own table entry with both a "file" and a "Fe_H" field.
+     * names has its own table entry with a "file" field (and, if
+     * requireFeH, a "Fe_H" field too).
      * @throws std::runtime_error if any of the above conditions are not met
      */
     inline auto parseSetRegistry(
         const std::string& registryName,
         const std::string& setsKey,
         const std::string& itemNoun,
-        const std::string& context)
+        const std::string& context,
+        const bool requireFeH = true)
     -> std::tuple<toml::table, std::filesystem::path, std::vector<std::string>>
     {
         auto [registry, registryPath] = parseTOMLFile(registryName, context);
@@ -184,14 +192,16 @@ namespace utils
                 throw std::runtime_error(msg);
             }
             const auto entry = registry.at_path(s);
-            if (!entry.at_path("file") || !entry.at_path("Fe_H"))
+            if (!entry.at_path("file") || (requireFeH && !entry.at_path("Fe_H")))
             {
                 std::string msg = context + ": registry " + registryPath.string();
                 msg += ", entry for ";
                 msg += itemNoun;
                 msg += " ";
                 msg += s;
-                msg += " is missing required 'file' or 'Fe_H' fields";
+                msg += requireFeH ?
+                    " is missing required 'file' or 'Fe_H' fields" :
+                    " is missing required 'file' field";
                 throw std::runtime_error(msg);
             }
         }

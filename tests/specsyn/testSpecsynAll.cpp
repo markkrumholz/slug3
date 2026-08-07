@@ -10,6 +10,7 @@
 #include "testSpecsynBlackbody.hpp"
 #include "testSpecsynLib.hpp"
 #include "testSpecsynLibChained.hpp"
+#include "testSpecsynLibWD.hpp"
 #include "testSpecsynLibWR.hpp"
 #include "testSpecsynUtils.hpp"
 #include <exception>
@@ -23,6 +24,7 @@ auto main() -> int {
         result += testSpecsynUtils();
         result += testSpecsynLib();
         result += testSpecsynLibWR();
+        result += testSpecsynLibWD();
         result += testSpecsynLibChained();
         return result;
     }

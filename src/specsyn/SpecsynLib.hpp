@@ -23,6 +23,50 @@ namespace io
 
 namespace specsyn
 {
+    namespace detail
+    {
+        /**
+         * @brief A bracketing pair of grid indices, plus an interpolation weight
+         * @details
+         * lo_ and hi_ are the indices of the grid points immediately
+         * below and above (or equal to) a query value, and t_ is the
+         * fractional distance of the query value between them, so
+         * that (1 - t_) * grid[lo_] + t_ * grid[hi_] recovers the
+         * query value. For a grid of size 1 (a degenerate axis with
+         * no actual extent), lo_ == hi_ == 0 and t_ == 0.
+         */
+        struct Bracket
+        {
+            std::size_t lo_;
+            std::size_t hi_;
+            double t_;
+        };
+
+        /**
+         * @brief Find the bracketing grid points of a sorted grid
+         * @param grid A sorted (ascending), non-empty grid of values
+         * @param value The query value; assumed to already lie within
+         *   [grid.front(), grid.back()]
+         * @param cacheIdx The calling thread's cached bracket index
+         *   for this axis (one of SpecsynLib::dim1Cache_/dim2Cache_/
+         *   dim3Cache_, already resolved to the element private to
+         *   this thread); updated in place to the bracket this call
+         *   finds, so the next call -- if its own query value is
+         *   still within, or close to, this same cell -- can reuse it
+         * @returns The bracketing Bracket for value
+         * @details
+         * Locates the bracket via a binary search accelerated by
+         * cacheIdx -- see SpecsynLib.cpp's own definition for the
+         * full rationale. Declared here (in specsyn::detail, not an
+         * anonymous namespace local to SpecsynLib.cpp) so that
+         * SpecsynLib2D's own, simplified 2D spec() can reuse the
+         * exact same bracket-search logic rather than reimplementing
+         * it.
+         */
+        auto findBracket(const std::vector<double>& grid, double value,
+            std::size_t& cacheIdx) -> Bracket;
+    } // namespace detail
+
 
     /**
      * @class SpecsynLib
@@ -117,8 +161,17 @@ namespace specsyn
          * with wlNew, so wl() and every subsequent spec() call reflect
          * the new grid. Unpopulated grid points are left as empty
          * vectors, exactly as before.
+         *
+         * Virtual so that SpecsynLib2D -- whose dim1_ is left empty
+         * rather than sized to 1 (see its own comment) -- can override
+         * this to iterate over (dim2_, dim3_) alone: this base
+         * implementation's own iteration is driven by dim1_.size(),
+         * which would silently do nothing at all for a library whose
+         * dim1_ is empty, leaving every stored spectrum on its old
+         * (now size-mismatched) wavelength grid even as wl_ itself
+         * gets updated to wlNew.
          */
-        void resample(const std::vector<double>& wlNew);
+        virtual void resample(const std::vector<double>& wlNew);
 
         /**
          * @brief Resample a single spectrum from one wavelength grid onto another
@@ -197,7 +250,7 @@ namespace specsyn
          * across an unpopulated point would be meaningless), and
          * trilinearly interpolates across them.
          */
-        [[nodiscard]] auto spec(double d1, double d2, double d3) const -> std::vector<double>;
+        [[nodiscard]] virtual auto spec(double d1, double d2, double d3) const -> std::vector<double>;
 
         /**
          * @brief Handle a query point that falls outside this library's grid
@@ -251,18 +304,26 @@ namespace specsyn
         // nearly sorted along each axis (e.g. a series of stars fed
         // through in Teff/logg order), so the bracket found for one
         // query is usually still correct, or nearly so, for the next
-        // one. Caching it lets findBracket (SpecsynLib.cpp) skip the
-        // binary search entirely on a cache hit, and narrow its
-        // search range on a miss, rather than always searching the
-        // full axis from scratch. ThreadVec's, rather than plain
-        // size_t's, so that each OpenMP thread gets its own private
-        // cached index -- without this, concurrent calls from
-        // different threads would race to update a single shared
-        // cache. spec(double, double, double) must bind a local
-        // reference to the element private to the calling thread
-        // (e.g. "dim1Cache_()") before passing it to findBracket,
-        // exactly as Mesh2DGrid's own methods do with iSave_/jSave_.
+        // one. Caching it lets findBracket (detail::findBracket, in
+        // SpecsynLib.cpp) skip the binary search entirely on a cache
+        // hit, and narrow its search range on a miss, rather than
+        // always searching the full axis from scratch. ThreadVec's,
+        // rather than plain size_t's, so that each OpenMP thread gets
+        // its own private cached index -- without this, concurrent
+        // calls from different threads would race to update a single
+        // shared cache. spec(double, double, double) must bind a
+        // local reference to the element private to the calling
+        // thread (e.g. "dim1Cache_()") before passing it to
+        // findBracket, exactly as Mesh2DGrid's own methods do with
+        // iSave_/jSave_. dim2Cache_/dim3Cache_ are protected, rather
+        // than private like dim1Cache_, so that SpecsynLib2D's own 2D
+        // spec(double, double) -- which never touches dim1_ at all --
+        // can reuse them directly instead of keeping a redundant cache
+        // of its own.
         mutable utils::ThreadVec<size_t> dim1Cache_; /**< Cached bracket index for dim1_ */
+
+    protected:
+
         mutable utils::ThreadVec<size_t> dim2Cache_; /**< Cached bracket index for dim2_ */
         mutable utils::ThreadVec<size_t> dim3Cache_; /**< Cached bracket index for dim3_ */
     };

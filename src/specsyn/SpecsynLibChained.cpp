@@ -13,6 +13,7 @@
 #include "SpecsynCommons.hpp"
 #include "SpecsynLib.hpp"
 #include "SpecsynLibNoWind.hpp"
+#include "SpecsynLibWD.hpp"
 #include "SpecsynLibWR.hpp"
 #include "SpecsynUtils.hpp"
 // misc-include-cleaner can't attribute std::ranges::lower_bound/upper_bound
@@ -110,19 +111,22 @@ namespace specsyn
         }
 
         /**
-         * @brief Construct one chained library, dispatching on WR_grid
+         * @brief Construct one chained library, dispatching on WR_grid/WD_grid
          * @tparam Policy OOBPolicy for the constructed library
          * @param name Spectral model name
          * @param isWR Whether this model's registry entry has
          *   WR_grid = true
-         * @param fehMin Minimum [Fe/H] value
-         * @param fehMax Maximum [Fe/H] value
-         * @param afe Value of [alpha/Fe]; ignored for a WR library, which
-         *   has no afe axis (see SpecsynLibWR)
-         * @param cfe Value of [C/Fe]; ignored for a WR library
+         * @param isWD Whether this model's registry entry has
+         *   WD_grid = true; mutually exclusive with isWR
+         * @param fehMin Minimum [Fe/H] value; ignored for a WD library,
+         *   which has no [Fe/H] axis at all (see SpecsynLibWD)
+         * @param fehMax Maximum [Fe/H] value; ignored for a WD library
+         * @param afe Value of [alpha/Fe]; ignored for a WR or WD library, which
+         *   has no afe axis (see SpecsynLibWR/SpecsynLibWD)
+         * @param cfe Value of [C/Fe]; ignored for a WR or WD library
          * @param microTurb Microturbulent velocity, in km/s; ignored
-         *   for a WR library
-         * @param r Spectral resolution; ignored for a WR library
+         *   for a WR or WD library
+         * @param r Spectral resolution; ignored for a WR or WD library
          * @param registryName Name of the spectral library registry file
          * @param wlMin Minimum wavelength of the output grid, in
          *   Angstrom; see SpecsynLibChained's own constructor
@@ -132,14 +136,20 @@ namespace specsyn
          * @param controls Simulation controls, forwarded unchanged to
          *   the constructed library's own constructor
          * @returns The constructed library, upcast to SpecsynLib<Policy>
+         * @throws std::runtime_error if isWR and isWD are both true --
+         *   a malformed registry entry, since a spectral library can't
+         *   be both a Wolf-Rayet grid and a white dwarf grid at once
          * @details
          * Wolf-Rayet libraries -- parameterized by transformed radius
          * and stellar temperature rather than logg and Teff -- need
-         * SpecsynLibWR; every other library needs SpecsynLibNoWind.
+         * SpecsynLibWR; white dwarf atmosphere grids -- parameterized
+         * by logg and Teff alone, with no [Fe/H]/[alpha/Fe]/[C/Fe]/
+         * microturbulence/resolution axis at all -- need SpecsynLibWD;
+         * every other library needs SpecsynLibNoWind.
          */
         template <OOBPolicy Policy>
         auto makeChainedLib( //NOLINT(llvm-prefer-static-over-anonymous-namespace)
-            const std::string& name, const bool isWR,
+            const std::string& name, const bool isWR, const bool isWD,
             const double fehMin, const double fehMax,
             const double afe, const double cfe, const double microTurb,
             const double r, const std::string& registryName,
@@ -147,10 +157,21 @@ namespace specsyn
             const io::SimControls& controls)
         -> std::unique_ptr<SpecsynLib<Policy>>
         {
+            if (isWR && isWD)
+            {
+                throw std::runtime_error(
+                    "SpecsynLibChained: spectral model '" + name +
+                    "' has both WR_grid and WD_grid set in its registry entry");
+            }
             if (isWR)
             {
                 return std::make_unique<SpecsynLibWR<Policy>>(
                     name, fehMin, fehMax, registryName, wlMin, wlMax, nWl, controls);
+            }
+            if (isWD)
+            {
+                return std::make_unique<SpecsynLibWD<Policy>>(
+                    name, registryName, wlMin, wlMax, nWl, controls);
             }
             return std::make_unique<SpecsynLibNoWind<Policy>>(
                 name, fehMin, fehMax, afe, cfe, microTurb, r, registryName,
@@ -164,11 +185,12 @@ namespace specsyn
          * @param lo Running global minimum, widened in place
          * @param hi Running global maximum, widened in place
          * @details
-         * lib is only ever actually a SpecsynLibNoWind<Policy> or a
-         * SpecsynLibWR<Policy> (see makeChainedLib), upcast to the
-         * common SpecsynLib<Policy> it's stored as -- neither of which
-         * exposes a logTeff() of its own, so this dynamic_casts back
-         * down to whichever concrete type lib actually is to reach it.
+         * lib is only ever actually a SpecsynLibNoWind<Policy>, a
+         * SpecsynLibWR<Policy>, or a SpecsynLibWD<Policy> (see
+         * makeChainedLib), upcast to the common SpecsynLib<Policy> it's
+         * stored as -- none of which exposes a logTeff() of its own at
+         * that base-class level, so this dynamic_casts back down to
+         * whichever concrete type lib actually is to reach it.
          */
         template <OOBPolicy Policy>
         void updateLogTeffRange( //NOLINT(llvm-prefer-static-over-anonymous-namespace)
@@ -184,6 +206,11 @@ namespace specsyn
                 lo = std::min(lo, wr->logTeff().front());
                 hi = std::max(hi, wr->logTeff().back());
             }
+            else if (const auto* wd = dynamic_cast<const SpecsynLibWD<Policy>*>(&lib))
+            {
+                lo = std::min(lo, wd->logTeff().front());
+                hi = std::max(hi, wd->logTeff().back());
+            }
         }
 
         /**
@@ -193,11 +220,11 @@ namespace specsyn
          * @param lo Running global minimum, widened in place
          * @param hi Running global maximum, widened in place
          * @details
-         * Only SpecsynLibNoWind exposes a logg() -- SpecsynLibWR has no
-         * logg axis at all, since Wolf-Rayet atmospheres are
-         * parameterized by transformed radius instead -- so a lib that
-         * dynamic_casts to SpecsynLibWR<Policy> simply leaves [lo, hi]
-         * untouched.
+         * SpecsynLibNoWind and SpecsynLibWD both expose a logg() --
+         * SpecsynLibWR has no logg axis at all, since Wolf-Rayet
+         * atmospheres are parameterized by transformed radius instead
+         * -- so a lib that dynamic_casts to SpecsynLibWR<Policy> simply
+         * leaves [lo, hi] untouched.
          */
         template <OOBPolicy Policy>
         void updateLoggRange( //NOLINT(llvm-prefer-static-over-anonymous-namespace)
@@ -207,6 +234,11 @@ namespace specsyn
             {
                 lo = std::min(lo, noWind->logg().front());
                 hi = std::max(hi, noWind->logg().back());
+            }
+            else if (const auto* wd = dynamic_cast<const SpecsynLibWD<Policy>*>(&lib))
+            {
+                lo = std::min(lo, wd->logg().front());
+                hi = std::max(hi, wd->logg().back());
             }
         }
     } // namespace
@@ -255,7 +287,7 @@ namespace specsyn
         // type-erased libs_ vector, so that resample() (a SpecsynLib
         // method, not part of the polymorphic Specsyn interface) can
         // still be called on each of them below. Each is constructed
-        // by makeChainedLib, which picks SpecsynLibWR or
+        // by makeChainedLib, which picks SpecsynLibWR, SpecsynLibWD, or
         // SpecsynLibNoWind per entry of spectraName (see its own
         // comment), and immediately upcast to the SpecsynLib<Policy>
         // it's stored as, since every function this class actually
@@ -271,12 +303,17 @@ namespace specsyn
 
         // Mirrors SimControls::readSpectra's own WR_grid check: a
         // single parse of the registry tells us, for each entry of
-        // spectraName, whether it needs SpecsynLibWR (WR_grid = true)
-        // or SpecsynLibNoWind (WR_grid absent or false).
+        // spectraName, whether it needs SpecsynLibWR (WR_grid = true),
+        // SpecsynLibWD (WD_grid = true), or SpecsynLibNoWind (neither
+        // flag set).
         const auto registry = parseRegistry(registryName).first;
         auto isWRGrid = [&registry](const std::string& name) -> bool
         {
             return registry.at_path(name).at_path("WR_grid").value<bool>().value_or(false);
+        };
+        auto isWDGrid = [&registry](const std::string& name) -> bool
+        {
+            return registry.at_path(name).at_path("WD_grid").value<bool>().value_or(false);
         };
 
         // Each individual library is constructed on its own native
@@ -296,13 +333,13 @@ namespace specsyn
         {
             const double mt = microTurb.empty() ? useLibraryDefault : microTurb[i];
             coerceLibs.push_back(makeChainedLib<OOBPolicy::coerce>(
-                spectraName[i], isWRGrid(spectraName[i]),
+                spectraName[i], isWRGrid(spectraName[i]), isWDGrid(spectraName[i]),
                 fehMin, fehMax, afe, cfe, mt, r, registryName,
                 0.0, 0.0, 0, controls));
         }
         const double lastMt = microTurb.empty() ? useLibraryDefault : microTurb[n - 1];
         std::unique_ptr<SpecsynLib<OOBPolicy::raise>> raiseLib = makeChainedLib<OOBPolicy::raise>(
-            spectraName[n - 1], isWRGrid(spectraName[n - 1]),
+            spectraName[n - 1], isWRGrid(spectraName[n - 1]), isWDGrid(spectraName[n - 1]),
             fehMin, fehMax, afe, cfe, lastMt, r, registryName,
             0.0, 0.0, 0, controls);
 

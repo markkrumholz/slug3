@@ -148,6 +148,36 @@ namespace utils
     }
 
     /**
+     * @brief Read a full 3D double dataset from an HDF5 group
+     * @param grp Handle to the group (or already-open file) containing the dataset
+     * @param name Name of the dataset
+     * @param context Prefix used in thrown error messages (typically the
+     *   name of the calling class or function)
+     * @returns The dataset contents, flattened in the same row-major
+     *   (C) order HDF5/h5py itself stores a multidimensional dataset
+     *   in -- i.e. element (i, j, k) of a dataset shaped (n0, n1, n2)
+     *   is at flat index (i * n1 + j) * n2 + k -- and its (n0, n1, n2) shape
+     */
+    inline auto readDataset3D(const hid_t grp, const std::string& name,
+        const std::string& context)
+        -> std::pair<std::vector<double>, std::array<hsize_t, 3>>
+    {
+        const hid_t dset = H5Dopen2(grp, name.c_str(), H5P_DEFAULT);
+        if (dset < 0)
+        {
+            throw std::runtime_error(context + ": unable to open dataset " + name);
+        }
+        const hid_t space = H5Dget_space(dset);
+        std::array<hsize_t, 3> dims = {0, 0, 0};
+        H5Sget_simple_extent_dims(space, dims.data(), nullptr);
+        std::vector<double> data(dims[0] * dims[1] * dims[2]); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        H5Dread(dset, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, data.data());
+        H5Sclose(space);
+        H5Dclose(dset);
+        return { std::move(data), dims };
+    }
+
+    /**
      * @brief Read the field_names attribute of an HDF5 group
      * @param grp Handle to the group
      * @param context Prefix used in thrown error messages (typically the

@@ -31,7 +31,7 @@ namespace
     // (too large, in the h5 case, to store in the repository), so any
     // of them may be absent depending on whether this machine has
     // fetched them
-    const std::array<std::string, 12> requiredDataFiles = { { // NOLINT(bugprone-throwing-static-initialization,cert-err58-cpp) -- built from fixed string literals, so allocation failure aside (which would abort regardless), this can't actually throw
+    const std::array<std::string, 14> requiredDataFiles = { { // NOLINT(bugprone-throwing-static-initialization,cert-err58-cpp) -- built from fixed string literals, so allocation failure aside (which would abort regardless), this can't actually throw
         "data/tracks/tracks.toml",
         "data/tracks/mist.h5",
         "data/spectra/spectra.toml",
@@ -44,6 +44,8 @@ namespace
         "data/spectra/tlusty_b.h5",
         "data/spectra/bosz.h5",
         "data/spectra/ck04.h5",
+        "data/spectra/tremblay_da.h5",
+        "data/spectra/tremblay_elm.h5",
     }};
 
     // The real (gitignored) filter registry and Vega reference
@@ -228,8 +230,6 @@ auto allPhotDataFilesExist() -> bool
 
 auto runClusterSpecsynFull(const std::string& inputFile, const std::string& modelName) -> int
 {
-    constexpr std::size_t nTime = 4; // output_times has 4 entries
-
     const auto outDir = std::filesystem::temp_directory_path() / "slugTestClusterSpecsynFull";
     std::filesystem::remove_all(outDir);
     std::filesystem::create_directories(outDir);
@@ -243,6 +243,7 @@ auto runClusterSpecsynFull(const std::string& inputFile, const std::string& mode
 
         const io::SimControls simControls(inputDeck);
         const auto nTrial = simControls.nTrial(); // read back rather than assumed, since not every caller's deck uses the same n_trial
+        const auto nTime = simControls.outTimes().size(); // read back rather than assumed, since not every caller's deck uses the same number of output_times
 
         std::unique_ptr<io::OutputManager> outputManager =
             std::make_unique<io::OutputManagerH5>(simControls, inputDeck);

@@ -26,8 +26,19 @@ namespace specsyn
      *          table was read.
      * @details
      * This routine checks that registryName exists, is a valid toml
-     * file, and contains the minimum set of required entries. It
-     * throws a runtime error if any of these conditions are not met.
+     * file, and that every entry it lists has at least a "file"
+     * field. Unlike a track registry (see TrackUtils.cpp's own
+     * parseRegistry(), which does require every entry to also have a
+     * "Fe_H" field), a spectra registry's entries are not all
+     * guaranteed to share the same [Fe/H]-parameterized shape -- e.g.
+     * a white dwarf atmosphere grid (read by SpecsynLibWD) has no
+     * [Fe/H] axis at all -- so "Fe_H" is not required upfront here;
+     * any code that actually needs a specific entry's Fe_H values
+     * (e.g. findMatchingSpectra) fails clearly on its own if that
+     * entry doesn't have any, at the point it is actually used, rather
+     * than this function rejecting the entire registry file just
+     * because one entry in it happens not to need that field. Throws
+     * a runtime error if any of the above conditions are not met.
      */
     auto parseRegistry(const std::string& registryName = defaultRegistry)
     -> std::pair<toml::table, std::filesystem::path>;
