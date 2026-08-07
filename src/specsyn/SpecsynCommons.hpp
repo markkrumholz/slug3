@@ -57,14 +57,28 @@ namespace specsyn
      * before TREMBLAY_ELM (log(g) 4.0-9.5, but Teff only up to
      * 40000 K), so the hottest young white dwarfs -- outside ELM's own
      * Teff range entirely -- still resolve to DA rather than ELM's
-     * final OOBPolicy::raise; the two grids otherwise overlap in
+     * own OOBPolicy::raise; the two grids otherwise overlap in
      * (log(g), Teff) coverage, and either would interpolate a
      * comparably reasonable spectrum there.
+     *
+     * RAUCH is listed last of all, after both Tremblay grids: MIST's
+     * brief post-AGB ("phase 6") transit can reach Teff hotter than
+     * even TREMBLAY_DA's own ceiling (140000 K) while log(g) is still
+     * only ~6.3-6.6 -- below TREMBLAY_DA's own log(g) floor (6.5) at
+     * the same time -- a real gap neither Tremblay grid covers (see
+     * the WD/hot-atmosphere-coverage project notes for how this gap
+     * was found). RAUCH's own (log(g), Teff) coverage (5-8, 50000-
+     * 190000 K) overlaps both Tremblay grids' hot ends, and
+     * SpecsynLibChained's GridType::WDGrid classification (see its own
+     * comment) picks whichever chained WD-type library a given star's
+     * (log(g), Teff) actually falls in reach of, so listing RAUCH last
+     * only matters for a star literally nothing earlier in the chain
+     * can serve at all, even via a fallback clamp.
      */
     inline const std::vector<std::string> defaultModelList = { // NOLINT(cert-err58-cpp) -- built from fixed string literals, so construction can never actually throw here
         "POWR_WC", "POWR_WNE", "POWR_WNL_H20", "POWR_WNL_H40", "POWR_WNL_H60",
         "TLUSTY_O", "TLUSTY_B", "BOSZ", "CK04", "MARCS",
-        "TREMBLAY_DA", "TREMBLAY_ELM"
+        "TREMBLAY_DA", "TREMBLAY_ELM", "RAUCH"
     };
 
     /**
