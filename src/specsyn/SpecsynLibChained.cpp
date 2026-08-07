@@ -21,6 +21,7 @@
 // NOLINT on SpecsynLib.cpp's own findBracket -- so both the include itself
 // and each call site need a NOLINT.
 #include <algorithm> // NOLINT(misc-include-cleaner)
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <limits>
@@ -178,68 +179,162 @@ namespace specsyn
                 wlMin, wlMax, nWl, controls);
         }
 
+        // Number of real GridType enumerators -- see SpecsynCommons.hpp
+        constexpr auto gridTypeCount = static_cast<std::size_t>(GridType::nGridType);
+
         /**
-         * @brief Widen [lo, hi] to also cover one chained library's own logTeff() range
+         * @brief Widen lo[t]/hi[t] to also cover one chained library's own logTeff() range
          * @tparam Policy OOBPolicy of lib
          * @param lib A single chained library, as constructed by makeChainedLib
-         * @param lo Running global minimum, widened in place
-         * @param hi Running global maximum, widened in place
+         * @param lo Running per-GridType minimum, widened in place at
+         *   whichever index t corresponds to lib's own GridType
+         * @param hi Running per-GridType maximum, widened in place; see lo
          * @details
          * lib is only ever actually a SpecsynLibNoWind<Policy>, a
          * SpecsynLibWR<Policy>, or a SpecsynLibWD<Policy> (see
          * makeChainedLib), upcast to the common SpecsynLib<Policy> it's
          * stored as -- none of which exposes a logTeff() of its own at
          * that base-class level, so this dynamic_casts back down to
-         * whichever concrete type lib actually is to reach it.
+         * whichever concrete type lib actually is to reach it, and
+         * uses that to pick which GridType index to widen. lo[t]/hi[t]
+         * start at quiet_NaN() (see the constructor) rather than
+         * +/-infinity, so the first library of a given GridType simply
+         * adopts its own range outright instead of comparing against a
+         * NaN that would otherwise never be beaten.
          */
         template <OOBPolicy Policy>
         void updateLogTeffRange( //NOLINT(llvm-prefer-static-over-anonymous-namespace)
-            const SpecsynLib<Policy>& lib, double& lo, double& hi)
+            const SpecsynLib<Policy>& lib,
+            std::array<double, gridTypeCount>& lo, std::array<double, gridTypeCount>& hi)
         {
+            auto widen = [](double& loRef, double& hiRef, const double front, const double back)
+            {
+                loRef = std::isnan(loRef) ? front : std::min(loRef, front);
+                hiRef = std::isnan(hiRef) ? back : std::max(hiRef, back);
+            };
+
             if (const auto* noWind = dynamic_cast<const SpecsynLibNoWind<Policy>*>(&lib))
             {
-                lo = std::min(lo, noWind->logTeff().front());
-                hi = std::max(hi, noWind->logTeff().back());
+                const auto t = static_cast<std::size_t>(GridType::NormalGrid);
+                widen(lo[t], hi[t], noWind->logTeff().front(), noWind->logTeff().back()); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- t < gridTypeCount by construction
             }
             else if (const auto* wr = dynamic_cast<const SpecsynLibWR<Policy>*>(&lib))
             {
-                lo = std::min(lo, wr->logTeff().front());
-                hi = std::max(hi, wr->logTeff().back());
+                const auto t = static_cast<std::size_t>(GridType::WRGrid);
+                widen(lo[t], hi[t], wr->logTeff().front(), wr->logTeff().back()); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
             }
             else if (const auto* wd = dynamic_cast<const SpecsynLibWD<Policy>*>(&lib))
             {
-                lo = std::min(lo, wd->logTeff().front());
-                hi = std::max(hi, wd->logTeff().back());
+                const auto t = static_cast<std::size_t>(GridType::WDGrid);
+                widen(lo[t], hi[t], wd->logTeff().front(), wd->logTeff().back()); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
             }
         }
 
         /**
-         * @brief Widen [lo, hi] to also cover one chained library's own logg() range, if it has one
+         * @brief Widen lo[t]/hi[t] to also cover one chained library's own logg() range, if it has one
          * @tparam Policy OOBPolicy of lib
          * @param lib A single chained library, as constructed by makeChainedLib
-         * @param lo Running global minimum, widened in place
-         * @param hi Running global maximum, widened in place
+         * @param lo Running per-GridType minimum, widened in place at
+         *   whichever index t corresponds to lib's own GridType
+         * @param hi Running per-GridType maximum, widened in place; see lo
          * @details
          * SpecsynLibNoWind and SpecsynLibWD both expose a logg() --
          * SpecsynLibWR has no logg axis at all, since Wolf-Rayet
          * atmospheres are parameterized by transformed radius instead
          * -- so a lib that dynamic_casts to SpecsynLibWR<Policy> simply
-         * leaves [lo, hi] untouched.
+         * leaves lo/hi untouched, and GridType::WRGrid's entry in each
+         * stays at quiet_NaN().
          */
         template <OOBPolicy Policy>
         void updateLoggRange( //NOLINT(llvm-prefer-static-over-anonymous-namespace)
-            const SpecsynLib<Policy>& lib, double& lo, double& hi)
+            const SpecsynLib<Policy>& lib,
+            std::array<double, gridTypeCount>& lo, std::array<double, gridTypeCount>& hi)
         {
+            auto widen = [](double& loRef, double& hiRef, const double front, const double back)
+            {
+                loRef = std::isnan(loRef) ? front : std::min(loRef, front);
+                hiRef = std::isnan(hiRef) ? back : std::max(hiRef, back);
+            };
+
             if (const auto* noWind = dynamic_cast<const SpecsynLibNoWind<Policy>*>(&lib))
             {
-                lo = std::min(lo, noWind->logg().front());
-                hi = std::max(hi, noWind->logg().back());
+                const auto t = static_cast<std::size_t>(GridType::NormalGrid);
+                widen(lo[t], hi[t], noWind->logg().front(), noWind->logg().back()); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- t < gridTypeCount by construction
             }
             else if (const auto* wd = dynamic_cast<const SpecsynLibWD<Policy>*>(&lib))
             {
-                lo = std::min(lo, wd->logg().front());
-                hi = std::max(hi, wd->logg().back());
+                const auto t = static_cast<std::size_t>(GridType::WDGrid);
+                widen(lo[t], hi[t], wd->logg().front(), wd->logg().back()); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
             }
+        }
+
+        /**
+         * @brief Classify a star into the GridType whose clamp should apply to it
+         * @param props Stellar properties to classify
+         * @param logg props' own log(g), from Specsyn::getSAandLogg;
+         *   passed in rather than computed here since getSAandLogg is
+         *   protected on Specsyn, reachable only from a Specsyn (or
+         *   derived) member function, not this free function
+         * @param logTeffMax Per-GridType log(Teff) maximums (some entries may be quiet_NaN())
+         * @param loggMax Per-GridType log(g) maximums; see logTeffMax
+         * @param logTeffMin Per-GridType log(Teff) minimums; see logTeffMax
+         * @param loggMin Per-GridType log(g) minimums; see logTeffMax
+         * @returns The GridType whose clamp spec() should apply to props
+         * @details
+         * A Wolf-Rayet star (per SpecsynLibWR::getWRType) is always
+         * GridType::WRGrid, checked first and on props' own raw,
+         * unclamped values -- WR-ness is a property of the star's own
+         * surface composition (see getWRType), not something that
+         * could be affected by any clamp decided afterward.
+         *
+         * Otherwise, this star is GridType::WDGrid if -- and only if
+         * -- both of the following hold on its raw, unclamped log(Teff)
+         * (from props directly) and log(g) (the logg parameter):
+         *   - it lies above the normal grids' own coverage on at least
+         *     one axis (log(Teff) > logTeffMax[NormalGrid], or
+         *     log(g) > loggMax[NormalGrid]) -- i.e. it is a real gap in
+         *     normal-star coverage, not merely a star the normal grids
+         *     already handle;
+         *   - it also lies above the WD grids' own floor on *both*
+         *     axes (log(Teff) > logTeffMin[WDGrid] and
+         *     log(g) > loggMin[WDGrid]) -- i.e. the WD grids can
+         *     actually plausibly cover it, rather than just being the
+         *     nearest thing to clamp to.
+         * Any GridType whose relevant bound is quiet_NaN() (no chained
+         * library of that kind) can never satisfy either condition,
+         * so a star is never classified into a GridType with no actual
+         * grid backing it.
+         *
+         * Every other star -- including one with no clamp data at all,
+         * i.e. tClamp was false -- is GridType::NormalGrid.
+         */
+        auto classifyGridType( //NOLINT(llvm-prefer-static-over-anonymous-namespace)
+            const Specsyn::StarData& props, const double logg,
+            const std::array<double, gridTypeCount>& logTeffMin,
+            const std::array<double, gridTypeCount>& logTeffMax,
+            const std::array<double, gridTypeCount>& loggMin,
+            const std::array<double, gridTypeCount>& loggMax) -> GridType
+        {
+            if (SpecsynLibWR<OOBPolicy::raise>::getWRType(props) !=
+                SpecsynLibWR<OOBPolicy::raise>::WRType::None)
+            {
+                return GridType::WRGrid;
+            }
+
+            const auto normal = static_cast<std::size_t>(GridType::NormalGrid);
+            const auto wd = static_cast<std::size_t>(GridType::WDGrid);
+            // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- normal, wd are both < gridTypeCount by construction
+            const double logTeff = props[static_cast<std::size_t>(tracks::FieldIdx::logTe)];
+
+            const bool aboveNormal =
+                (!std::isnan(logTeffMax[normal]) && logTeff > logTeffMax[normal]) ||
+                (!std::isnan(loggMax[normal]) && logg > loggMax[normal]);
+            const bool withinWDFloor =
+                !std::isnan(logTeffMin[wd]) && logTeff > logTeffMin[wd] &&
+                !std::isnan(loggMin[wd]) && logg > loggMin[wd];
+            // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+
+            return (aboveNormal && withinWDFloor) ? GridType::WDGrid : GridType::NormalGrid;
         }
     } // namespace
 
@@ -259,6 +354,17 @@ namespace specsyn
         const io::SimControls& controls) :
         Specsyn(controls)
     {
+        // Unconditional, regardless of tClamp: every GridType entry
+        // starts (and, for tClamp == false, stays) at quiet_NaN(),
+        // rather than relying on a default member initializer, since
+        // std::array's own default member-initialization would leave
+        // its doubles indeterminate rather than NaN.
+        constexpr double unset = std::numeric_limits<double>::quiet_NaN();
+        logTeffMin_.fill(unset);
+        logTeffMax_.fill(unset);
+        loggMin_.fill(unset);
+        loggMax_.fill(unset);
+
         if (spectraName.empty())
         {
             throw std::runtime_error(
@@ -383,30 +489,23 @@ namespace specsyn
         for (auto& lib : coerceLibs) { lib->resample(wl_); }
         raiseLib->resample(wl_);
 
-        // Widen [logTeffMin_, logTeffMax_] and [loggMin_, loggMax_]
-        // across every chained library's own logTeff()/logg() range,
-        // so spec() can clamp a star's log(Teff) (any library) and
-        // log(g) (SpecsynLibNoWind libraries only) into whatever this
-        // chain actually covers -- see this constructor's own comment
-        // for why. Left at their default quiet_NaN() (see the header)
-        // if tClamp is false, so spec() simply skips both clamps.
+        // Widen logTeffMin_/logTeffMax_ and loggMin_/loggMax_, per
+        // GridType, across every chained library's own logTeff()/
+        // logg() range, so spec() can clamp a star's log(Teff) (any
+        // library) and log(g) (SpecsynLibNoWind/SpecsynLibWD libraries
+        // only) into whatever this chain actually covers -- see this
+        // constructor's own comment for why. Left at quiet_NaN() (set
+        // just above) for every GridType if tClamp is false, so
+        // spec() simply skips both clamps.
         if (tClamp)
         {
-            double loTeff = std::numeric_limits<double>::infinity();
-            double hiTeff = -std::numeric_limits<double>::infinity();
-            double loLogg = std::numeric_limits<double>::infinity();
-            double hiLogg = -std::numeric_limits<double>::infinity();
             for (const auto& lib : coerceLibs)
             {
-                updateLogTeffRange(*lib, loTeff, hiTeff);
-                updateLoggRange(*lib, loLogg, hiLogg);
+                updateLogTeffRange(*lib, logTeffMin_, logTeffMax_);
+                updateLoggRange(*lib, loggMin_, loggMax_);
             }
-            updateLogTeffRange(*raiseLib, loTeff, hiTeff);
-            updateLoggRange(*raiseLib, loLogg, hiLogg);
-            logTeffMin_ = loTeff;
-            logTeffMax_ = hiTeff;
-            loggMin_ = loLogg;
-            loggMax_ = hiLogg;
+            updateLogTeffRange(*raiseLib, logTeffMin_, logTeffMax_);
+            updateLoggRange(*raiseLib, loggMin_, loggMax_);
         }
 
         // Move every library, still in priority order, into libs_
@@ -417,29 +516,40 @@ namespace specsyn
 
     auto SpecsynLibChained::spec(const StarData& props, const double feh) const -> std::vector<double>
     {
+        // Classified on props' own raw, unclamped values -- see
+        // classifyGridType's own comment -- before any clamping below
+        // can change them.
+        const double rawLogg = getSAandLogg(props).second;
+        const auto type = classifyGridType(props, rawLogg, logTeffMin_, logTeffMax_, loggMin_, loggMax_);
+        const auto idx = static_cast<std::size_t>(type);
+
         StarData clampedProps = props;
-        if (!std::isnan(logTeffMin_))
+        if (!std::isnan(logTeffMin_[idx])) // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- idx < gridTypeCount by construction
         {
             double& logTeff = clampedProps[static_cast<size_t>(tracks::FieldIdx::logTe)]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- StarData is a fixed-size std::array, and logTe is one of its compile-time-known indices
-            logTeff = std::clamp(logTeff, logTeffMin_, logTeffMax_);
+            logTeff = std::clamp(logTeff, logTeffMin_[idx], logTeffMax_[idx]); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
         }
 
         // A logg clamp is only meaningful for a non-WR star -- a
         // Wolf-Rayet star isn't placed on a (feh, logg, logTeff) grid
         // at all (see SpecsynLibNoWind), so it has no logg to clamp;
         // SpecsynLibWR::spec() already clamps its own analogous
-        // transformed-radius coordinate internally. Unlike the logTeff
-        // clamp above, logg isn't a native StarData field -- it's
-        // derived from mass, log(L), and log(Teff) via
-        // Specsyn::getSAandLogg -- so clamping it means adjusting one
-        // of those three instead: mass, specifically, rather than
-        // log(L) or log(Teff), since the latter two are exactly what
-        // getSAandLogg derives this star's surface area from, and
-        // perturbing the surface area would distort the emergent
-        // spectrum's overall scale for no physical reason. Since
-        // log(g) = log10(G * mass / R^2) and R depends only on log(L)
-        // and log(Teff) (both left untouched here), log(g) is exactly
-        // linear in log10(mass) with unit slope -- so scaling mass by
+        // transformed-radius coordinate internally. This falls out
+        // automatically here, without an explicit WR check, since
+        // loggMin_[WRGrid]/loggMax_[WRGrid] are never populated (see
+        // updateLoggRange) and so are always quiet_NaN() whenever type
+        // is GridType::WRGrid. Unlike the logTeff clamp above, logg
+        // isn't a native StarData field -- it's derived from mass,
+        // log(L), and log(Teff) via Specsyn::getSAandLogg -- so
+        // clamping it means adjusting one of those three instead:
+        // mass, specifically, rather than log(L) or log(Teff), since
+        // the latter two are exactly what getSAandLogg derives this
+        // star's surface area from, and perturbing the surface area
+        // would distort the emergent spectrum's overall scale for no
+        // physical reason. Since log(g) = log10(G * mass / R^2) and R
+        // depends only on log(L) and log(Teff) (the latter already
+        // clamped, if at all, just above), log(g) is exactly linear in
+        // log10(mass) with unit slope -- so scaling mass by
         // 10^(loggTarget - logg) lands log(g) at exactly loggTarget,
         // regardless of logg's own magnitude (unlike scaling by the
         // ratio logg / loggTarget directly, which under- or
@@ -449,16 +559,17 @@ namespace specsyn
         // afterwards (inside getSAandLogg, when spec() is called
         // below) doesn't land just outside that bound again due to
         // floating-point roundoff.
-        if (!std::isnan(loggMin_) &&
-            SpecsynLibWR<OOBPolicy::raise>::getWRType(clampedProps) == SpecsynLibWR<OOBPolicy::raise>::WRType::None)
+        if (!std::isnan(loggMin_[idx])) // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- idx < gridTypeCount by construction
         {
             const double logg = getSAandLogg(clampedProps).second;
-            if (logg < loggMin_ || logg > loggMax_)
+            const double loggMin = loggMin_[idx]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
+            const double loggMax = loggMax_[idx]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
+            if (logg < loggMin || logg > loggMax)
             {
                 double& mass = clampedProps[static_cast<size_t>(tracks::FieldIdx::mass)]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- StarData is a fixed-size std::array, and mass is one of its compile-time-known indices
-                mass *= (logg < loggMin_) ?
-                    std::pow(10.0, (loggMin_ - logg) + 1e-10) :
-                    std::pow(10.0, (loggMax_ - logg) - 1e-10);
+                mass *= (logg < loggMin) ?
+                    std::pow(10.0, (loggMin - logg) + 1e-10) :
+                    std::pow(10.0, (loggMax - logg) - 1e-10);
             }
         }
 

@@ -85,6 +85,25 @@ namespace specsyn
         coerce  /**< Coerce an out-of-bounds star with at least one valid neighboring grid point to the nearest point it can be interpolated from, rather than treating it as out of bounds */
     };
 
+    /**
+     * @brief Distinguishes the different kinds of chained spectral library by how they're parameterized
+     * @details
+     * Used by SpecsynLibChained to track separate log(Teff)/log(g)
+     * clamp ranges per kind of library, rather than a single range
+     * combined across every chained library regardless of type --
+     * see SpecsynLibChained's own logTeffMin_/logTeffMax_/loggMin_/
+     * loggMax_ members. nGridType is not itself a grid type: it is a
+     * trailing sentinel giving the number of real enumerators above
+     * it, used to size those arrays.
+     */
+    enum class GridType : std::uint8_t
+    {
+        WRGrid,     /**< A SpecsynLibWR library (WR_grid = true in the registry) */
+        WDGrid,     /**< A SpecsynLibWD library (WD_grid = true in the registry) */
+        NormalGrid, /**< A SpecsynLibNoWind library (neither flag set) */
+        nGridType   /**< Sentinel: the number of real GridType enumerators above */
+    };
+
 } // namespace specsyn
 
 #endif // SPECSYNCOMMONS_HPP
