@@ -16,13 +16,129 @@
 #include "SpecsynLib2D.hpp"
 #include "SpecsynUtils.hpp"
 #include "hdf5.h" // NOLINT(misc-include-cleaner)
+#include <algorithm> // NOLINT(misc-include-cleaner) -- see the identical NOLINT on SpecsynLib.cpp's findBracket for why std::ranges::lower_bound needs this
 #include <cstddef>
+#include <set>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace specsyn
 {
+    // Holds everything the constructor needs to finish building a
+    // SpecsynLibWD once the (logg, logTeff) grid and its spectra have
+    // been assembled, by either readFilledTensorGrid or
+    // readSparseGrid below -- mirrors SpecsynLibNoWind's own identical
+    // GridBuildResult/buildExactMatchGrid split exactly, including the
+    // rationale for factoring this out as a plain (Policy-independent)
+    // free function rather than a member function: the grid-reading
+    // logic itself has nothing to do with OOBPolicy, so there is no
+    // reason to instantiate it three times over.
+    struct WDGridBuildResult
+    {
+        std::vector<double> logg_;
+        std::vector<double> logTeff_;
+        std::vector<std::vector<double>> spectra_;
+    };
+
+    // Reads a flux dataset stored as a filled (n_logg, n_logTeff,
+    // n_wl) tensor -- e.g. the Tremblay et al. white dwarf grids
+    // fetched by fetch_tremblay.py, whose (logg, Teff) coverage is
+    // already a full rectangular grid as distributed.
+    // NOLINTBEGIN(misc-include-cleaner)
+    static auto readFilledTensorGrid(const hid_t file, const std::size_t nWlNative,
+        const std::string& h5pathStr) -> WDGridBuildResult
+    {
+        WDGridBuildResult result;
+        result.logg_ = utils::readDataset1D(file, "logg", "SpecsynLibWD");
+        result.logTeff_ = utils::readDataset1D(file, "log_Teff", "SpecsynLibWD");
+
+        auto [flux, shape] = utils::readDataset3D(file, "flux", "SpecsynLibWD");
+        const auto nLogg = static_cast<std::size_t>(shape.at(0));
+        const auto nLogTeff = static_cast<std::size_t>(shape.at(1));
+        const auto nWl = static_cast<std::size_t>(shape.at(2));
+        if (nLogg != result.logg_.size() || nLogTeff != result.logTeff_.size() ||
+            nWl != nWlNative)
+        {
+            throw std::runtime_error(
+                "SpecsynLibWD: 'flux' dataset shape (" + std::to_string(nLogg) +
+                ", " + std::to_string(nLogTeff) + ", " + std::to_string(nWl) +
+                ") does not match the sizes of 'logg' (" + std::to_string(result.logg_.size()) +
+                "), 'log_Teff' (" + std::to_string(result.logTeff_.size()) + "), and 'wl' (" +
+                std::to_string(nWlNative) + ") in " + h5pathStr);
+        }
+
+        result.spectra_.assign(nLogg * nLogTeff, std::vector<double>{});
+        for (std::size_t i = 0; i < nLogg; ++i)
+        {
+            for (std::size_t j = 0; j < nLogTeff; ++j)
+            {
+                const auto offset = (i * nLogTeff + j) * nWl;
+                result.spectra_.at(i * nLogTeff + j) = std::vector<double>(
+                    flux.begin() + static_cast<std::ptrdiff_t>(offset),
+                    flux.begin() + static_cast<std::ptrdiff_t>(offset + nWl));
+            }
+        }
+        return result;
+    }
+    // NOLINTEND(misc-include-cleaner)
+
+    // Reads a flux dataset stored as a (n_models, n_wl) array
+    // alongside per-model "logg"/"log_Teff" datasets (also n_models
+    // long, and free to repeat values) -- e.g. the Rauch et al. NLTE
+    // hot star grid fetched by fetch_rauch.py, whose (logg, Teff)
+    // coverage is only partially filled (log g = 5 is missing above
+    // Teff = 100000 K), so there is no way to lay the models out as a
+    // full rectangular grid as distributed. Builds the (logg,
+    // logTeff) tensor axes from the sorted set of unique values
+    // actually present -- mirrors SpecsynLibNoWind's own
+    // buildExactMatchGrid exactly -- and leaves every (logg, logTeff)
+    // grid point with no matching model unpopulated (an empty
+    // spectrum), exactly as SpecsynLibNoWind does for its own missing
+    // grid points.
+    // NOLINTBEGIN(misc-include-cleaner)
+    static auto readSparseGrid(const hid_t file, const std::size_t nWlNative,
+        const std::string& h5pathStr) -> WDGridBuildResult
+    {
+        const auto loggPerModel = utils::readDataset1D(file, "logg", "SpecsynLibWD");
+        const auto logTeffPerModel = utils::readDataset1D(file, "log_Teff", "SpecsynLibWD");
+        auto [flux, shape] = utils::readDataset2D(file, "flux", "SpecsynLibWD");
+        const auto nModels = shape.first;
+        const auto nWl = shape.second;
+        if (loggPerModel.size() != nModels || logTeffPerModel.size() != nModels ||
+            nWl != nWlNative)
+        {
+            throw std::runtime_error(
+                "SpecsynLibWD: 'flux' dataset shape (" + std::to_string(nModels) +
+                ", " + std::to_string(nWl) + ") does not match the sizes of 'logg' (" +
+                std::to_string(loggPerModel.size()) + "), 'log_Teff' (" +
+                std::to_string(logTeffPerModel.size()) + "), and 'wl' (" +
+                std::to_string(nWlNative) + ") in " + h5pathStr);
+        }
+
+        WDGridBuildResult result;
+        const std::set<double> loggSet(loggPerModel.begin(), loggPerModel.end());
+        const std::set<double> logTeffSet(logTeffPerModel.begin(), logTeffPerModel.end());
+        result.logg_.assign(loggSet.begin(), loggSet.end());
+        result.logTeff_.assign(logTeffSet.begin(), logTeffSet.end());
+
+        result.spectra_.assign(result.logg_.size() * result.logTeff_.size(), std::vector<double>{});
+        for (std::size_t m = 0; m < nModels; ++m)
+        {
+            const auto iLogg = static_cast<std::size_t>(
+                std::ranges::lower_bound(result.logg_, loggPerModel.at(m)) - result.logg_.begin());
+            const auto iLogTeff = static_cast<std::size_t>(
+                std::ranges::lower_bound(result.logTeff_, logTeffPerModel.at(m)) - result.logTeff_.begin());
+            const auto offset = m * nWl;
+            result.spectra_.at(iLogg * result.logTeff_.size() + iLogTeff) = std::vector<double>(
+                flux.begin() + static_cast<std::ptrdiff_t>(offset),
+                flux.begin() + static_cast<std::ptrdiff_t>(offset + nWl));
+        }
+        return result;
+    }
+    // NOLINTEND(misc-include-cleaner)
+
     template <OOBPolicy Policy>
     SpecsynLibWD<Policy>::SpecsynLibWD(
         const std::string& spectraName,
@@ -71,46 +187,36 @@ namespace specsyn
             // Step 2: the wavelength grid
             this->wl_ = utils::readDataset1D(file, "wl", "SpecsynLibWD");
 
-            // Step 3: logg_/logTeff_ (dim2_/dim3_); dim1_ is left
-            // empty entirely -- see SpecsynLib2D's own comment for why
-            logg_ = utils::readDataset1D(file, "logg", "SpecsynLibWD");
-            logTeff_ = utils::readDataset1D(file, "log_Teff", "SpecsynLibWD");
-
-            // Step 4: the flux tensor, shaped (n_logg, n_logTeff,
-            // n_wl) in the HDF5 file -- read as one flat buffer, then
-            // sliced into spectra_'s own per-(logg, Teff) spectra,
-            // each n_wl long; grid_'s first extent is hardcoded to 1
-            // rather than dim1_.size() (dim1_ is empty), exactly as
-            // SpecsynLib2D's own spec() hardcodes the corresponding
-            // index to 0
-            auto [flux, shape] = utils::readDataset3D(file, "flux", "SpecsynLibWD");
-            const auto nLogg = static_cast<std::size_t>(shape.at(0));
-            const auto nLogTeff = static_cast<std::size_t>(shape.at(1));
-            const auto nWlNative = static_cast<std::size_t>(shape.at(2));
-            if (nLogg != logg_.size() || nLogTeff != logTeff_.size() ||
-                nWlNative != this->wl_.size())
+            // Step 3+4: logg_/logTeff_ (dim2_/dim3_) and the flux
+            // data -- dispatched on the "flux" dataset's own rank
+            // (a property of the data itself, not a registry flag)
+            // rather than assuming a filled tensor, since a grid like
+            // Rauch's stores flux as a (n_models, n_wl) array instead
+            // of a filled (n_logg, n_logTeff, n_wl) tensor -- see
+            // readFilledTensorGrid/readSparseGrid's own comments.
+            // dim1_ is left empty entirely -- see SpecsynLib2D's own
+            // comment for why.
+            const int fluxRank = utils::datasetRank(file, "flux", "SpecsynLibWD");
+            WDGridBuildResult built;
+            if (fluxRank == 3)
+            {
+                built = readFilledTensorGrid(file, this->wl_.size(), h5path.string());
+            }
+            else if (fluxRank == 2)
+            {
+                built = readSparseGrid(file, this->wl_.size(), h5path.string());
+            }
+            else
             {
                 throw std::runtime_error(
-                    "SpecsynLibWD: 'flux' dataset shape (" + std::to_string(nLogg) +
-                    ", " + std::to_string(nLogTeff) + ", " + std::to_string(nWlNative) +
-                    ") does not match the sizes of 'logg' (" + std::to_string(logg_.size()) +
-                    "), 'log_Teff' (" + std::to_string(logTeff_.size()) + "), and 'wl' (" +
-                    std::to_string(this->wl_.size()) + ") in " + h5path.string());
+                    "SpecsynLibWD: 'flux' dataset in " + h5path.string() +
+                    " has rank " + std::to_string(fluxRank) + " (expected 2 or 3)");
             }
-
-            this->spectra_.assign(nLogg * nLogTeff, std::vector<double>{});
-            for (std::size_t i = 0; i < nLogg; ++i)
-            {
-                for (std::size_t j = 0; j < nLogTeff; ++j)
-                {
-                    const auto offset = (i * nLogTeff + j) * nWlNative;
-                    this->spectra_.at(i * nLogTeff + j) = std::vector<double>(
-                        flux.begin() + static_cast<std::ptrdiff_t>(offset),
-                        flux.begin() + static_cast<std::ptrdiff_t>(offset + nWlNative));
-                }
-            }
+            logg_ = std::move(built.logg_);
+            logTeff_ = std::move(built.logTeff_);
+            this->spectra_ = std::move(built.spectra_);
             using SpectraGrid = typename SpecsynLib<Policy>::SpectraGrid;
-            this->grid_ = SpectraGrid(this->spectra_.data(), 1, nLogg, nLogTeff);
+            this->grid_ = SpectraGrid(this->spectra_.data(), 1, logg_.size(), logTeff_.size());
         }
         catch (...)
         {

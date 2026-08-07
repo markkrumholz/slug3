@@ -160,6 +160,13 @@ tab["file"] = args.output
 tab["version"] = RAUCH_VERSION
 tab["references"] = RAUCH_REFERENCES
 tab["reference_urls"] = RAUCH_REFERENCE_URLS
+# Tells SpecsynLibChained to build this entry as a SpecsynLibWD --
+# same flag fetch_tremblay.py sets, since this grid is read by the
+# same (logg, Teff)-parameterized reader despite not being white
+# dwarfs themselves, and despite its (logg, Teff) coverage being only
+# partially filled rather than a full tensor (see this file's own
+# docstring) -- SpecsynLib2D is being extended to handle that case
+tab["WD_grid"] = True
 tab["logg"] = [float(x) for x in logg_vals]
 tab["log_Teff"] = [float(x) for x in log_teff_vals]
 registry[RAUCH_REGISTRY_NAME] = tab
