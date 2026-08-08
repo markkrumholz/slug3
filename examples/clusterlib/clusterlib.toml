@@ -12,7 +12,7 @@
 # data referenced below to have been fetched locally (too large to
 # store in the repository -- see data/tools/fetch_*.py).
 
-# Name of run -- this will be the base name of the output files
+# Name of run -- this will be the base name of the output file(s)
 sim_type = "clusterlib"
 
 # Number of trials to run
