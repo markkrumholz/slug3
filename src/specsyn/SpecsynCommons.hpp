@@ -61,24 +61,37 @@ namespace specsyn
      * (log(g), Teff) coverage, and either would interpolate a
      * comparably reasonable spectrum there.
      *
-     * RAUCH is listed last of all, after both Tremblay grids: MIST's
-     * brief post-AGB ("phase 6") transit can reach Teff hotter than
-     * even TREMBLAY_DA's own ceiling (140000 K) while log(g) is still
-     * only ~6.3-6.6 -- below TREMBLAY_DA's own log(g) floor (6.5) at
-     * the same time -- a real gap neither Tremblay grid covers (see
-     * the WD/hot-atmosphere-coverage project notes for how this gap
-     * was found). RAUCH's own (log(g), Teff) coverage (5-8, 50000-
-     * 190000 K) overlaps both Tremblay grids' hot ends, and
-     * SpecsynLibChained's GridType::WDGrid classification (see its own
-     * comment) picks whichever chained WD-type library a given star's
-     * (log(g), Teff) actually falls in reach of, so listing RAUCH last
-     * only matters for a star literally nothing earlier in the chain
-     * can serve at all, even via a fallback clamp.
+     * RAUCH is listed after both Tremblay grids: MIST's brief post-AGB
+     * ("phase 6") transit can reach Teff hotter than even TREMBLAY_DA's
+     * own ceiling (140000 K) while log(g) is still only ~6.3-6.6 --
+     * below TREMBLAY_DA's own log(g) floor (6.5) at the same time -- a
+     * real gap neither Tremblay grid covers (see the WD/hot-atmosphere-
+     * coverage project notes for how this gap was found). RAUCH's own
+     * (log(g), Teff) coverage (5-8, 50000-190000 K) overlaps both
+     * Tremblay grids' hot ends, and SpecsynLibChained's GridType::
+     * WDGrid classification (see its own comment) picks whichever
+     * chained WD-type library a given star's (log(g), Teff) actually
+     * falls in reach of, so listing RAUCH after Tremblay only matters
+     * for a star literally nothing earlier in the chain can serve at
+     * all, even via a fallback clamp.
+     *
+     * RAUCH_H07 is listed last of all, after RAUCH: it reaches log(g)
+     * up to 9 (vs. RAUCH's own 8) at the same hot temperatures RAUCH
+     * covers, plugging a further gap -- a moderately massive white
+     * dwarf, log(g) 8-9, cooling from a still-hot (140000-190000 K)
+     * state -- that neither RAUCH nor either Tremblay grid covers on
+     * its own (RAUCH's own log(g) ceiling is too low there; the
+     * Tremblay grids' own Teff ceilings are too low). RAUCH_H07 is a
+     * pure H/He, no-metals grid (see fetch_rauch.py's own docstring),
+     * so it is less physically faithful than RAUCH's own solar-
+     * abundance models -- listed last, rather than merged with RAUCH,
+     * so RAUCH's more faithful models are always preferred wherever
+     * they actually cover a star.
      */
     inline const std::vector<std::string> defaultModelList = { // NOLINT(cert-err58-cpp) -- built from fixed string literals, so construction can never actually throw here
         "POWR_WC", "POWR_WNE", "POWR_WNL_H20", "POWR_WNL_H40", "POWR_WNL_H60",
         "TLUSTY_O", "TLUSTY_B", "BOSZ", "CK04", "MARCS",
-        "TREMBLAY_DA", "TREMBLAY_ELM", "RAUCH"
+        "TREMBLAY_DA", "TREMBLAY_ELM", "RAUCH", "RAUCH_H07"
     };
 
     /**
