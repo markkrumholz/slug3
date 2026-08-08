@@ -215,7 +215,7 @@ inline auto testFilterCollectionMixedConstruction() -> int
  * @details
  * Builds the same four filters as testFilterCollectionMixedConstruction,
  * but with photSystem = AB, and checks: (1) filterUnits() reports
- * "ABmag" for the two energy-flux filters and "photons/s" (unchanged)
+ * "mag(AB)" for the two energy-flux filters and "photons/s" (unchanged)
  * for the two photon-count filters; (2) phot()'s energy-flux entries
  * match phot::PhotConvert<Flambda, AB> applied directly to the same
  * reference filters' raw Flambda phot() values, at each filter's own
@@ -237,7 +237,7 @@ inline auto testFilterCollectionPhotSystemConversion() -> int
 
         const auto gotUnits = fc.filterUnits();
         const std::vector<std::string> expectedUnits = {
-            "ABmag", "ABmag", "photons/s", "photons/s"};
+            "mag(AB)", "mag(AB)", "photons/s", "photons/s"};
         if (gotUnits != expectedUnits)
         {
             std::cerr << "testFilterCollectionPhotSystemConversion: filterUnits() mismatch\n";

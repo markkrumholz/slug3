@@ -1307,7 +1307,7 @@ def test_filtercollection_phot_system_conversion():
     unconverted."""
     names = ["SLUGTEST.CAM1.G500", "ideal_phot_700_1500"]
     fc = slug.FilterCollection(names, slug.PhotSystem.AB, FILTER_REGISTRY)
-    assert fc.filterUnits() == ["ABmag", "photons/s"]
+    assert fc.filterUnits() == ["mag(AB)", "photons/s"]
 
 
 def test_filtercollection_instrument_omitted():

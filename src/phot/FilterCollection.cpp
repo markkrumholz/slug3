@@ -204,9 +204,13 @@ auto phot::FilterCollection::filterUnits() const -> std::vector<std::string>
         {
             case PhotSystem::Flambda: result.emplace_back("erg/(s Angstrom)"); break;
             case PhotSystem::Fnu:     result.emplace_back("Jy");             break;
-            case PhotSystem::ST:      result.emplace_back("STmag");         break;
-            case PhotSystem::AB:      result.emplace_back("ABmag");         break;
-            case PhotSystem::Vega:    result.emplace_back("VegaMag");       break;
+            case PhotSystem::ST:      result.emplace_back("mag(ST)");       break;
+            case PhotSystem::AB:      result.emplace_back("mag(AB)");       break;
+            // astropy has no dedicated Vega-magnitude unit, so this
+            // falls back to the generic "mag" -- callers that care
+            // about the distinction need photSystem_/PhotSystem::Vega
+            // itself, not this string
+            case PhotSystem::Vega:    result.emplace_back("mag");           break;
         }
     }
     return result;
