@@ -88,7 +88,7 @@ static constexpr std::string_view filterUnitsDocstring = R"doc(Get the units of 
 Returns
 -------
 units : list of str
-    For a photCount() filter: "photons/s"; for an energy-flux filter:
+    For a photCount() filter: "photon/s"; for an energy-flux filter:
     "erg/(s Angstrom)" (Flambda), "Jy" (Fnu), "mag(ST)" (ST), "mag(AB)"
     (AB), or "mag" (Vega -- astropy has no dedicated Vega-magnitude
     unit), matching this collection's phot_system -- in the same order

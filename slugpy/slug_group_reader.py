@@ -15,10 +15,13 @@ class slug_group_reader:
     Dataset names are read on construction; each dataset itself is
     only read from disk the first time it is requested via
     __getitem__, and attached to its "units" attribute as an astropy
-    Quantity -- unless that attribute is an empty string, in which
-    case the dataset has no physical unit (e.g. it's a dimensionless
-    count, or non-numeric data like a serialized RNG state) and is
-    returned as a plain numpy array instead.
+    Quantity -- unless that attribute is an empty string (the dataset
+    has no physical unit, e.g. it's a dimensionless count, or
+    non-numeric data like a serialized RNG state) or is not a single
+    string at all (e.g. cluster_phot's phot/phot_extinct datasets,
+    whose "units" attribute is one string per column, since each
+    filter can have its own unit), in which case it is returned as a
+    plain numpy array instead.
 
     Parameters
     ----------
@@ -49,8 +52,9 @@ class slug_group_reader:
         -------
         astropy.units.Quantity or numpy.ndarray
             The requested dataset, read from disk (and cached) on
-            first access: a Quantity if it has a physical unit, or a
-            plain array if its "units" attribute is empty.
+            first access: a Quantity if it has a single physical unit,
+            or a plain array if its "units" attribute is empty or is
+            not a single string.
 
         Raises
         ------
@@ -65,5 +69,6 @@ class slug_group_reader:
         dset = self._file[self._group_name][key]
         arr = dset[()]
         unit = dset.attrs["units"]
-        self._datasets[key] = arr if unit == "" else arr * u.Unit(unit)
+        has_unit = isinstance(unit, str) and unit != ""
+        self._datasets[key] = arr * u.Unit(unit) if has_unit else arr
         return self._datasets[key]

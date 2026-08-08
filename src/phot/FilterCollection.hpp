@@ -142,7 +142,7 @@ namespace phot
 
         /**
          * @brief Get the units of every filter's phot() value
-         * @return For a photCount() filter: "photons/s"; for an
+         * @return For a photCount() filter: "photon/s"; for an
          *   energy-flux filter: "erg/(s Angstrom)" (Flambda),
          *   "Jy" (Fnu), "mag(ST)" (ST), "mag(AB)" (AB), or "mag"
          *   (Vega -- astropy has no dedicated Vega-magnitude unit)

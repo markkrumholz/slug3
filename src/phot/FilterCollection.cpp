@@ -197,7 +197,7 @@ auto phot::FilterCollection::filterUnits() const -> std::vector<std::string>
     {
         if (filt->photCount())
         {
-            result.emplace_back("photons/s");
+            result.emplace_back("photon/s");
             continue;
         }
         switch (photSystem_)

@@ -8,6 +8,7 @@ import h5py
 import tomlkit
 
 from .slug_group_reader import slug_group_reader
+from .slug_phot_reader import slug_phot_reader
 
 
 class slug_reader:
@@ -45,6 +46,10 @@ class slug_reader:
         Lazy reader for the cluster_spectra group's datasets (wl,
         spec, ...), or None if this file has no cluster_spectra group
         (read-only).
+    cluster_phot : slug_phot_reader or None
+        Lazy reader for the cluster_phot group's per-filter photometry
+        (indexable by filter name, e.g. cluster_phot["Lbol"]), or None
+        if this file has no cluster_phot group (read-only).
     """
 
     def __init__(self, filename):
@@ -112,3 +117,21 @@ class slug_reader:
     @cluster_spectra.setter
     def cluster_spectra(self, value):
         raise AttributeError("cluster_spectra is read-only")
+
+    @property
+    def cluster_phot(self):
+        """
+        slug_phot_reader or None : lazy reader for the cluster_phot
+        group's per-filter photometry, built the first time this
+        property is accessed and cached thereafter, or None if this
+        file has no cluster_phot group.
+        """
+        if "cluster_phot" not in self._groups:
+            return None
+        if self._groups["cluster_phot"] is None:
+            self._groups["cluster_phot"] = slug_phot_reader(self._file, "cluster_phot")
+        return self._groups["cluster_phot"]
+
+    @cluster_phot.setter
+    def cluster_phot(self, value):
+        raise AttributeError("cluster_phot is read-only")
