@@ -45,6 +45,7 @@ Most of the code is C++, with a small number of Python helper scripts. For C++ c
 * All functions, and variables that are not class members, use `camelCase` with no trailing underscore.
 * Non-void functions are always declared as `auto` with a trailing return type where necessary.
 * Items should be marked `const` where possible.
+* Every public-facing class, method, and function gets a Doxygen-style docstring (`@file`/`@brief`/`@param`/`@return`/`@details`, as used throughout the existing code).
 * Code style is enforced by calling `clang-tidy` on all changed files in the CI, and rejecting PRs if any warnings occurs.
 * Important exceptions on `clang-tidy` and style enforcement:
     * When case standards conflict with standard physics or astronomy usage, prefer physics or astronomy usage and suppress warnings with a `// NOLINT`. Example: the gravitational constant is `utils::G`.
@@ -52,9 +53,10 @@ Most of the code is C++, with a small number of Python helper scripts. For C++ c
 * `WarningsAsErrors` is set to `*` in `.clang-tidy`, so any warning fails the check, not just the specific categories called out above.
 * CI only runs `clang-tidy` on files that changed relative to the PR's base branch (`git diff origin/<base>...HEAD`), not the whole repository. When checking your own work locally before pushing, lint against that same diff rather than the full tree.
 
-For Python code (the `data/tools` fetch/fixture scripts and the `pybind` test suite):
+For Python code (the `data/tools` fetch/fixture scripts, the `pybind` test suite, and the `slugpy` package):
 * Use `snake_case` for functions and variables, matching the existing scripts.
 * CLI scripts use `argparse` and lead with a short module docstring describing what the script does.
+* Every public-facing class, method, and function gets a numpy-style docstring (`Parameters`/`Attributes`/`Returns` sections, etc.). This also applies to C++ methods exposed to Python via a pybind binding (`src/pybind`): the docstring text passed to `.def(...)`/`py::init(...)` is what Python users actually see (e.g. via `help()`), so it should be numpy-style even though the C++ declaration it wraps also has its own separate Doxygen docstring -- see the `*Docstring` string_view constants already used throughout `src/pybind/Bind*.cpp` for the existing convention.
 
 ## Building
 
