@@ -72,3 +72,15 @@ class slug_group_reader:
         has_unit = isinstance(unit, str) and unit != ""
         self._datasets[key] = arr * u.Unit(unit) if has_unit else arr
         return self._datasets[key]
+
+    def keys(self):
+        """
+        Return the names of the datasets available in this group.
+
+        Returns
+        -------
+        KeysView of str
+            Names of every dataset in this group, whether or not it
+            has been read from disk yet.
+        """
+        return self._datasets.keys()

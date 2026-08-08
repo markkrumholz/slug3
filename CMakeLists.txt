@@ -574,6 +574,20 @@ add_test(NAME test_PythonBindings
 set_tests_properties(test_PythonBindings PROPERTIES
     ENVIRONMENT "PYTHONPATH=${CMAKE_SOURCE_DIR};SLUG_DIR=${CMAKE_SOURCE_DIR}")
 
+# slugpy tests: pure-Python, so unlike test_PythonBindings this doesn't
+# need slugPython/_slug built first -- only the slugpy package itself,
+# which is source, not a build artifact. Reads examples/clusterlib/
+# clusterlib.h5, a small enough real output file to be committed to the
+# repo directly, so (unlike test_CoreFull and its own real-data
+# dependencies) this needs no data fetched separately and can stay a
+# "quick" test. Requires h5py, tomlkit, and astropy for whichever
+# interpreter CMake picked up.
+add_test(NAME test_Slugpy
+    COMMAND ${Python_EXECUTABLE} -m pytest ${CMAKE_SOURCE_DIR}/tests/slugpy -v
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+set_tests_properties(test_Slugpy PROPERTIES
+    ENVIRONMENT "PYTHONPATH=${CMAKE_SOURCE_DIR}")
+
 # Tag every test "quick" or "slow", so `ctest -L quick` (or `ctest -LE
 # slow`) runs only the fast suite, skipping anything that takes
 # upwards of a minute to run -- currently just test_CoreFull, but
@@ -589,7 +603,7 @@ set_tests_properties(test_PythonBindings PROPERTIES
 # executable would make it impossible to skip on its own.
 set_tests_properties(
     test_Interpolation test_Extinct test_Phot test_PDFs test_Utils test_Specsyn test_Tracks
-    test_Core test_Io test_PythonBindings
+    test_Core test_Io test_PythonBindings test_Slugpy
     PROPERTIES LABELS "quick")
 set_tests_properties(test_CoreFull PROPERTIES LABELS "slow")
 
