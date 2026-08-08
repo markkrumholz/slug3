@@ -1,5 +1,5 @@
 # clusterlib: an example input deck demonstrating a realistic,
-# large-scale Monte Carlo population of star clusters -- real MIST
+# large-scale Monte Carlo population of star clusters -- using MIST
 # tracks and a full chained set of stellar atmosphere models
 # (spectra.model = "default"; see specsyn::defaultModelList and
 # SimControls::readSpectra()), spectra and photometry (including dust
@@ -11,52 +11,44 @@
 # It requires the real MIST tracks, spectral libraries, and filter/Vega
 # data referenced below to have been fetched locally (too large to
 # store in the repository -- see data/tools/fetch_*.py).
-#
-# The order the chained models are given in (via the "default"
-# special value) matters: POWR_WNL_H20/H40/H60 and TLUSTY_O/TLUSTY_B
-# are split by surface hydrogen fraction/microturbulent velocity
-# rather than combined; CK04 follows BOSZ to fill BOSZ's own gap at
-# high Teff and low log(g); and MARCS is listed last, to extend
-# coverage to the cool, low-gravity red-supergiant regime -- see
-# tests/core/assets/testClusterSpecsynFull.in's own comment for the
-# full rationale.
 
+# Name of run
 sim_type = "cluster"
-# n_trial must appear here, before any [table] header -- TOML has no
-# way to return to the root table once a header opens one.
+
+# Number of trials to run
 n_trial = 1000
 
+# Input stanza to describe stellar models
 [stars]
-IMF = "chabrier.toml"
-tracks = "MIST"
-v_vcrit = 0.4
-alphaFe = 0.0
-FeH = "dists/FeH.toml"
+IMF = "chabrier.toml"     # Chabrier (2005) IMF
+tracks = "MIST"           # MIST stellar tracks
+v_vcrit = 0.4             # Rotating at 40% of breakup
+alphaFe = 0.0             # [alpha/Fe] = 0 (Solar alpha/Fe)
+FeH = "dists/FeH.toml"    # [Fe/H] values drawm from this distribution
 
+# Input stanza to describe spectral synthesis
 [spectra]
-model = "default"
-wl_min = 200
-wl_max = 2e4
-nwl = 1024
+model = "default"         # Default spectral model
+wl_min = 200              # Wavelength grid starts at 200 Å
+wl_max = 2e5              # Wavelength grid ends at 2e5 Å
+nwl = 1024                # Wavelength grid has 1024 points
 
-# Two idealized ionizing-photon-count filters (Q(HI), Q(HeI), Q(OII)),
-# five real HST WFC3/UVIS1 tabulated filters spanning near-UV to
-# I-band, all reported as Vega magnitudes (except the photon-count
-# filters, for which PhotSystem doesn't apply), and "Lbol"
+# Input stanza to describe phometry
+# filters lists the filters to use, including a mix of real filters and
+# idealized filters representing ionizing photon fluxes and bolometric luminosity
 [phot]
 filters = ["HST.WFC3_UVIS1.F275W", "HST.WFC3_UVIS1.F336W", "HST.WFC3_UVIS1.F438W", "HST.WFC3_UVIS1.F555W", "HST.WFC3_UVIS1.F814W", "Q(HI)", "Q(HeI)", "Q(OII)", "Lbol"]
-system = "Vega"
+system = "Vega"           # Compute magnitudes in the Vega system
 
+# Input stanza to describe star clusters
 [clusters]
-CMF = "dists/CMF.toml"
+CMF = "dists/CMF.toml"    # Draw cluster masses from this distribution
 
-# Dust extinction: A_V drawn per cluster from dists/AV.toml, applied
-# via the Calzetti starburst attenuation curve
+# Input stanza to describe dust extinction
 [extinct]
-AV = "dists/AV.toml"
-model = "Calzetti_starburst"
+AV = "dists/AV.toml"      # Draw V extinction values (in mag) from this distribution
+model = "Calzetti_starburst"   # Extinction curve shape
 
-# A single output time per trial, drawn from dists/times.toml, rather
-# than a fixed time or grid of times
+# Input stanza describing output times
 [outputs]
-output_time_dist = "dists/times.toml"
+output_time_dist = "dists/times.toml"    # Draw output times from this distribution
