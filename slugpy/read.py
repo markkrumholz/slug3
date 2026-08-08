@@ -7,7 +7,7 @@ Implements read, a thin convenience wrapper around slug_reader.
 from .slug_reader import slug_reader
 
 
-def read(filename):
+def read(filename: str) -> slug_reader:
     """
     Open a slug HDF5 output file for lazy reading.
 

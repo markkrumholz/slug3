@@ -5,8 +5,13 @@ Implements slug_group_reader, a lazy reader for a single group within
 a slug HDF5 output file.
 """
 
+from collections.abc import KeysView
+
 import h5py
+import numpy as np
 from astropy import units as u
+
+Dataset = np.ndarray | u.Quantity
 
 
 class slug_group_reader:
@@ -31,15 +36,15 @@ class slug_group_reader:
         Name of the group within file to read.
     """
 
-    def __init__(self, file, group_name):
-        self._file = file
-        self._group_name = group_name
+    def __init__(self, file: h5py.File, group_name: str) -> None:
+        self._file: h5py.File = file
+        self._group_name: str = group_name
 
         group = self._file[self._group_name]
-        self._datasets = {name: None for name in group
+        self._datasets: dict[str, Dataset | None] = {name: None for name in group
             if isinstance(group[name], h5py.Dataset)}
 
-    def __getitem__(self, key):
+    def __getitem__(self, key: str) -> Dataset:
         """
         Return one dataset from this group, as an astropy Quantity.
 
@@ -63,17 +68,19 @@ class slug_group_reader:
         """
         if key not in self._datasets:
             raise KeyError(key)
-        if self._datasets[key] is not None:
-            return self._datasets[key]
+        cached = self._datasets[key]
+        if cached is not None:
+            return cached
 
         dset = self._file[self._group_name][key]
         arr = dset[()]
         unit = dset.attrs["units"]
         has_unit = isinstance(unit, str) and unit != ""
-        self._datasets[key] = arr * u.Unit(unit) if has_unit else arr
-        return self._datasets[key]
+        result: Dataset = arr * u.Unit(unit) if has_unit else arr
+        self._datasets[key] = result
+        return result
 
-    def keys(self):
+    def keys(self) -> KeysView[str]:
         """
         Return the names of the datasets available in this group.
 

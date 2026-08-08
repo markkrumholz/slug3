@@ -5,9 +5,10 @@ Implements slug_phot_reader, a lazy reader for the photometry
 (cluster_phot) group of a slug HDF5 output file.
 """
 
+import h5py
 from astropy import units as u
 
-from .slug_group_reader import slug_group_reader
+from .slug_group_reader import Dataset, slug_group_reader
 
 
 class slug_phot_reader(slug_group_reader):
@@ -41,20 +42,20 @@ class slug_phot_reader(slug_group_reader):
         filters (read-only).
     """
 
-    def __init__(self, file, group_name):
+    def __init__(self, file: h5py.File, group_name: str) -> None:
         super().__init__(file, group_name)
 
         group = self._file[self._group_name]
-        self._filters = list(group.attrs["filters"])
-        self._filter_units = list(group["phot"].attrs["units"])
+        self._filters: list[str] = list(group.attrs["filters"])
+        self._filter_units: list[str] = list(group["phot"].attrs["units"])
 
-        self._phot = {name: None for name in self._filters}
-        self._phot_extinct = None
+        self._phot: dict[str, Dataset | None] = {name: None for name in self._filters}
+        self._phot_extinct: dict[str, Dataset | None] | None = None
         if "phot_extinct" in self._datasets:
             self._phot_extinct = {name: None for name in self._filters}
 
     @property
-    def filters(self):
+    def filters(self) -> list[str]:
         """
         list of str : names of the filters this group has photometry
         for, in the order used to index the phot/phot_extinct
@@ -63,14 +64,14 @@ class slug_phot_reader(slug_group_reader):
         return self._filters
 
     @property
-    def filter_units(self):
+    def filter_units(self) -> list[str]:
         """
         list of str : units of each filter's photometry, in the same
         order as filters (read-only).
         """
         return self._filter_units
 
-    def __getitem__(self, key):
+    def __getitem__(self, key: str) -> Dataset:
         """
         Return one filter's photometry, or fall through to
         slug_group_reader.__getitem__ for a non-filter key.
@@ -102,12 +103,15 @@ class slug_phot_reader(slug_group_reader):
             return super().__getitem__(key)
 
         phot = self._phot_extinct if extinct else self._phot
-        if phot[name] is not None:
-            return phot[name]
+        assert phot is not None
+        cached = phot[name]
+        if cached is not None:
+            return cached
 
         index = self._filters.index(name)
         dataset_name = "phot_extinct" if extinct else "phot"
         arr = self._file[self._group_name][dataset_name][:, index]
         unit = self._filter_units[index]
-        phot[name] = arr if unit == "" else arr * u.Unit(unit)
-        return phot[name]
+        result: Dataset = arr if unit == "" else arr * u.Unit(unit)
+        phot[name] = result
+        return result
