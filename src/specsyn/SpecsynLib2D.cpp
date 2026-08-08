@@ -9,6 +9,7 @@
 #include "SpecsynCommons.hpp"
 #include "SpecsynLib.hpp"
 #include <cstddef>
+#include <string>
 #include <vector>
 
 namespace specsyn
@@ -36,17 +37,71 @@ namespace specsyn
     }
 
     template <OOBPolicy Policy>
-    auto SpecsynLib2D<Policy>::spec(const double d2, const double d3) const -> std::vector<double>
+    auto SpecsynLib2D<Policy>::spec(const double d2, const double d3) const -> std::vector<double> // NOLINT(readability-function-cognitive-complexity) -- mirrors SpecsynLib::spec(double, double, double)'s own identical structure, just with the leading dimension removed; see that function's own NOLINT for why splitting this further would only add indirection
     {
-        // Locate the bracketing cell on each axis, exactly as
+        // Locate the bracketing cell on each axis -- exactly as
         // SpecsynLib::spec(double, double, double) does for its own
-        // three axes -- see this method's own comment for why no
-        // unpopulated-neighbor checking is needed here.
+        // three axes.
         const auto b2 = detail::findBracket(this->dim2_, d2, this->dim2Cache_());
         const auto b3 = detail::findBracket(this->dim3_, d3, this->dim3Cache_());
 
         // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- b2/b3 indices are all < the corresponding grid's size by construction, and the interpolation loop below is a hot path where the cost of bounds checking matters
+        // Every one of the 4 neighboring grid points must actually
+        // have a spectrum -- interpolating across an unpopulated
+        // point would be meaningless -- or this query point counts as
+        // out of bounds. Under OOBPolicy::coerce, a query point is
+        // only out of bounds if none of its 4 neighbors has a
+        // spectrum; if at least one does, spec() instead interpolates
+        // using only the valid neighbors (see below), rather than
+        // requiring every corner to be populated. Mirrors
+        // SpecsynLib::spec(double, double, double)'s own identical
+        // logic, just over 4 corners instead of 8.
+        bool hasValidNeighbor = false; // NOLINT(misc-const-correctness) -- see the identical NOLINT on SpecsynLib::spec's own hasValidNeighbor
+        for (const std::size_t i2 : { b2.lo_, b2.hi_ })
+        {
+            for (const std::size_t i3 : { b3.lo_, b3.hi_ })
+            {
+                if constexpr (Policy == OOBPolicy::coerce)
+                {
+                    if (!this->grid_[0, i2, i3].empty())
+                    {
+                        hasValidNeighbor = true;
+                        break;
+                    }
+                }
+                else
+                {
+                    if (this->grid_[0, i2, i3].empty())
+                    {
+                        return SpecsynLib<Policy>::outOfBoundsResult(
+                            "SpecsynLib2D: point (" + std::to_string(d2) + ", " +
+                            std::to_string(d3) + ") falls in a gap in this library's grid");
+                    }
+                }
+            }
+        }
+        if constexpr (Policy == OOBPolicy::coerce)
+        {
+            if (!hasValidNeighbor)
+            {
+                return SpecsynLib<Policy>::outOfBoundsResult(
+                    "SpecsynLib2D: point (" + std::to_string(d2) + ", " +
+                    std::to_string(d3) + ") has no valid neighboring grid points to coerce to");
+            }
+        }
+
+        // Bilinear interpolation of the stored quantity over the 4
+        // neighboring grid points; no scaling (e.g. by surface area)
+        // is applied here -- that is left entirely to the caller.
+        // Under OOBPolicy::coerce, an unpopulated corner simply
+        // contributes nothing, and wSum (the total weight of the
+        // valid corners actually used, guaranteed to be 1 if every
+        // corner is populated) renormalizes the result at the end so
+        // it still represents a properly weighted average rather than
+        // an artificially dimmed spectrum. Mirrors SpecsynLib::spec(
+        // double, double, double)'s own identical logic exactly.
         std::vector<double> result(this->wl_.size(), 0.0);
+        double wSum = 0.0; // NOLINT(misc-const-correctness) -- see the identical NOLINT on SpecsynLib::spec's own wSum
         for (int b2i = 0; b2i < 2; ++b2i)
         {
             const std::size_t i2 = (b2i == 0) ? b2.lo_ : b2.hi_;
@@ -60,11 +115,32 @@ namespace specsyn
                 if (weight == 0.0) { continue; } // degenerate axis or exact grid hit: skip a zero-weight corner
 
                 const auto& corner = this->grid_[0, i2, i3];
+                if constexpr (Policy == OOBPolicy::coerce)
+                {
+                    if (corner.empty()) { continue; }
+                    wSum += weight;
+                }
                 for (std::size_t w = 0; w < result.size(); ++w)
                 {
                     result[w] += weight * corner[w];
                 }
             }
+        }
+        if constexpr (Policy == OOBPolicy::coerce)
+        {
+            // wSum can still be exactly 0 here despite hasValidNeighbor
+            // being true above -- see SpecsynLib::spec(double, double,
+            // double)'s own identical comment for why -- so treat that
+            // the same as having no valid neighbor at all, rather than
+            // dividing by 0 and silently producing a NaN/Inf "result".
+            if (wSum == 0.0)
+            {
+                return SpecsynLib<Policy>::outOfBoundsResult(
+                    "SpecsynLib2D: point (" + std::to_string(d2) + ", " +
+                    std::to_string(d3) + ") has no valid neighboring grid points "
+                    "with nonzero weight to coerce to");
+            }
+            for (auto& v : result) { v /= wSum; }
         }
         return result;
         // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)

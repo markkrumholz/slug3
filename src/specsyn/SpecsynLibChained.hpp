@@ -10,8 +10,9 @@
 
 #include "../io/SimControls.hpp"
 #include "Specsyn.hpp"
+#include "SpecsynCommons.hpp"
+#include <array>
 #include <cstddef>
-#include <limits>
 #include <memory>
 #include <string>
 #include <vector>
@@ -109,28 +110,35 @@ namespace specsyn
          * length and wavelength values -- and so that wl() correctly
          * describes every one of them, not just the first.
          *
-         * If tClamp is true, also scans every chained SpecsynLibNoWind,
-         * SpecsynLibWR, or SpecsynLibWD library's own log(Teff) grid
-         * (via their logTeff() accessors) for the global minimum and maximum,
-         * storing them in logTeffMin_/logTeffMax_ for spec() to clamp
-         * against (see spec()'s own comment); if false, both are set
-         * to quiet_NaN() instead, so spec() applies no clamp at all.
-         * This exists to work around a real quirk in some evolutionary
-         * tracks (e.g. MIST), whose effective temperatures for
-         * stripped, strong-wind stars can run far hotter than any
-         * spectral library actually covers -- and hotter than any
-         * known real star, since the whole premise of an effective
-         * temperature derived this way breaks down once the photosphere
-         * itself forms well above the stellar surface. Clamping to
-         * what the chained libraries actually cover is a deliberate
-         * choice to use the hottest (or coolest) library grid point as
-         * a stand-in in that regime, rather than raising or silently
-         * dropping the star.
+         * logTeffMin_/logTeffMax_/loggMin_/loggMax_ are unconditionally
+         * filled with quiet_NaN() first. If tClamp is true, also scans
+         * every chained library's own log(Teff) grid (via its
+         * logTeff() accessor) for its minimum and maximum, storing
+         * them in logTeffMin_[t]/logTeffMax_[t] (see
+         * updateLogTeffRange), where t is whichever GridType that
+         * library actually is (SpecsynLibWR -> wrGrid, SpecsynLibWD ->
+         * wdGrid, SpecsynLibNoWind -> normalGrid) -- so a GridType with
+         * no library of that kind in the chain at all is left at
+         * quiet_NaN(), rather than merging into some other type's
+         * range; if tClamp is false, every entry stays quiet_NaN(),
+         * so spec() applies no clamp at all. This exists to work
+         * around a real quirk in some evolutionary tracks (e.g. MIST),
+         * whose effective temperatures for stripped, strong-wind stars
+         * can run far hotter than any spectral library actually covers
+         * -- and hotter than any known real star, since the whole
+         * premise of an effective temperature derived this way breaks
+         * down once the photosphere itself forms well above the
+         * stellar surface. Clamping to what the chained libraries
+         * actually cover is a deliberate choice to use the hottest (or
+         * coolest) library grid point as a stand-in in that regime,
+         * rather than raising or silently dropping the star.
          *
          * Likewise scans every chained SpecsynLibNoWind or SpecsynLibWD
-         * library's own log(g) grid (via logg()) for loggMin_/loggMax_
-         * -- again both quiet_NaN() if tClamp is false. SpecsynLibWR
-         * contributes nothing here, since Wolf-Rayet atmospheres aren't
+         * library's own log(g) grid (via logg()) for
+         * loggMin_[normalGrid]/loggMax_[normalGrid] and
+         * loggMin_[wdGrid]/loggMax_[wdGrid] respectively -- again all
+         * quiet_NaN() if tClamp is false. GridType::wrGrid is never
+         * touched here, since Wolf-Rayet atmospheres aren't
          * parameterized by logg at all (see spec()'s own comment for
          * how this clamp is actually applied, which is necessarily
          * more involved than the logTeff one above). This addresses a
@@ -175,35 +183,44 @@ namespace specsyn
          * @throws std::runtime_error if the star falls outside every
          *   chained library's grid
          * @details
-         * If the constructor's tClamp argument was true, first clamps
-         * a copy of props' log(Teff) entry to [logTeffMin_,
-         * logTeffMax_] -- the combined range spanned by every chained
-         * SpecsynLibNoWind/SpecsynLibWR/SpecsynLibWD library's own grid -- before
-         * doing anything else with it (logTeffMin_/logTeffMax_ are
-         * quiet_NaN() otherwise, so the comparison is simply skipped).
-         * A copy is needed here since props itself is a const
+         * logTeffMin_/logTeffMax_/loggMin_/loggMax_ are tracked per
+         * GridType (see the constructor's own comment), so the first
+         * step is deciding which GridType's range actually applies to
+         * this star -- see classifyGridType's own comment for the
+         * exact rule (in short: WR if getWRType says so; else WD if
+         * the star lies above the normal grids' own coverage on
+         * log(Teff) or log(g), but the WD grids' own floor still
+         * plausibly covers it on both; else normal).
+         *
+         * If the resulting GridType's logTeffMin_/logTeffMax_ entry is
+         * not quiet_NaN() (i.e. tClamp was true and at least one
+         * chained library of that GridType exists), clamps a copy of
+         * props' log(Teff) entry to it before doing anything else with
+         * it. A copy is needed here since props itself is a const
          * reference, but the cost is negligible next to the
          * interpolation work spec() goes on to do.
          *
-         * Next, if loggMin_/loggMax_ are not quiet_NaN() (see the
-         * constructor), classifies the star via
-         * SpecsynLibWR::getWRType: a Wolf-Rayet star (anything but
-         * WRType::None) is left alone here, since its analogous
-         * clamp (on transformed radius, not logg) is already handled
-         * internally by SpecsynLibWR::spec() itself. For any other
-         * star, computes log(g) via Specsyn::getSAandLogg and, if it
-         * falls outside [loggMin_, loggMax_], rescales the copy's mass
+         * Likewise, if that GridType's loggMin_/loggMax_ entry is not
+         * quiet_NaN(), computes log(g) via Specsyn::getSAandLogg and,
+         * if it falls outside that range, rescales the copy's mass
          * entry -- rather than its luminosity or Teff, which would
          * perturb the surface area (and hence the wavelength-dependent
          * shape of the emergent spectrum) getSAandLogg derives from
-         * those two alone -- by 10^((loggMin_ - logg) + 1e-10) (below
-         * loggMin_) or 10^((loggMax_ - logg) - 1e-10) (above loggMax_).
-         * Since log(g) is exactly linear in log10(mass) with unit slope
-         * (at fixed radius, i.e. fixed log(L)/log(Teff)), this lands
-         * log(g) exactly 1e-10 dex past the relevant bound -- close
-         * enough to be physically meaningless, but far enough that
-         * floating-point roundoff in the subsequent recomputation can't
-         * leave it just outside that bound again.
+         * those two alone -- by 10^((loggMin - logg) + 1e-10) (below
+         * loggMin) or 10^((loggMax - logg) - 1e-10) (above loggMax),
+         * where loggMin/loggMax are that GridType's own entries. A
+         * Wolf-Rayet star is never affected by this, without needing
+         * an explicit check here: GridType::wrGrid's loggMin_/loggMax_
+         * entries are never populated (see updateLoggRange), since
+         * Wolf-Rayet atmospheres aren't parameterized by logg at all
+         * -- SpecsynLibWR::spec() already clamps its own analogous
+         * transformed-radius coordinate internally. Since log(g) is
+         * exactly linear in log10(mass) with unit slope (at fixed
+         * radius, i.e. fixed log(L)/log(Teff)), this lands log(g)
+         * exactly 1e-10 dex past the relevant bound -- close enough to
+         * be physically meaningless, but far enough that floating-
+         * point roundoff in the subsequent recomputation can't leave
+         * it just outside that bound again.
          *
          * Finally calls spec() on each library in the chain in
          * priority order, stopping at and returning the first
@@ -271,28 +288,42 @@ namespace specsyn
         std::vector<std::unique_ptr<Specsyn>> libs_;
 
         /**
-         * @brief The combined log(Teff) range spanned by every chained library
-         * @details
-         * Both quiet_NaN() if the constructor's tClamp argument was
-         * false; otherwise the minimum/maximum, respectively, of every
-         * chained SpecsynLibNoWind/SpecsynLibWR library's own logTeff()
-         * grid. See the constructor's and spec()'s own comments.
+         * @brief Number of real GridType enumerators, used to size the arrays below
          */
-        double logTeffMin_ = std::numeric_limits<double>::quiet_NaN();
-        double logTeffMax_ = std::numeric_limits<double>::quiet_NaN(); /**< See logTeffMin_ */
+        static constexpr std::size_t nGridType = static_cast<std::size_t>(GridType::nGridType);
 
         /**
-         * @brief The combined log(g) range spanned by every chained SpecsynLibNoWind library
+         * @brief The log(Teff) range spanned by each kind of chained library, indexed by GridType
          * @details
-         * Both quiet_NaN() if the constructor's tClamp argument was
-         * false; otherwise the minimum/maximum, respectively, of every
-         * chained SpecsynLibNoWind library's own logg() grid (WR
-         * libraries contribute nothing here -- see the constructor's
-         * own comment). See the constructor's and spec()'s own
-         * comments.
+         * Filled with quiet_NaN() unconditionally at the top of the
+         * constructor; if the constructor's tClamp argument is true,
+         * entries are then overwritten (via updateLogTeffRange) with
+         * the minimum/maximum of every chained library's own logTeff()
+         * grid, indexed by which kind of library it is (GridType::
+         * wrGrid/wdGrid/normalGrid) -- so, unlike before, a WR-type
+         * star's clamp no longer shares a single combined range with
+         * WD- or normal-type stars. A GridType with no library of that
+         * kind actually present in the chain is left at quiet_NaN().
+         * See the constructor's and spec()'s own comments.
          */
-        double loggMin_ = std::numeric_limits<double>::quiet_NaN();
-        double loggMax_ = std::numeric_limits<double>::quiet_NaN(); /**< See loggMin_ */
+        std::array<double, nGridType> logTeffMin_;
+        std::array<double, nGridType> logTeffMax_; /**< See logTeffMin_ */
+
+        /**
+         * @brief The log(g) range spanned by each kind of chained library, indexed by GridType
+         * @details
+         * Filled with quiet_NaN() unconditionally at the top of the
+         * constructor; if the constructor's tClamp argument is true,
+         * entries are then overwritten (via updateLoggRange) with the
+         * minimum/maximum of every chained SpecsynLibNoWind/SpecsynLibWD
+         * library's own logg() grid, indexed by GridType::normalGrid/
+         * wdGrid respectively -- GridType::wrGrid is never touched
+         * here, since Wolf-Rayet atmospheres aren't parameterized by
+         * logg at all (see the constructor's own comment). See the
+         * constructor's and spec()'s own comments.
+         */
+        std::array<double, nGridType> loggMin_;
+        std::array<double, nGridType> loggMax_; /**< See loggMin_ */
     };
 
 } // namespace specsyn

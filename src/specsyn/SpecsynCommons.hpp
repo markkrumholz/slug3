@@ -57,14 +57,41 @@ namespace specsyn
      * before TREMBLAY_ELM (log(g) 4.0-9.5, but Teff only up to
      * 40000 K), so the hottest young white dwarfs -- outside ELM's own
      * Teff range entirely -- still resolve to DA rather than ELM's
-     * final OOBPolicy::raise; the two grids otherwise overlap in
+     * own OOBPolicy::raise; the two grids otherwise overlap in
      * (log(g), Teff) coverage, and either would interpolate a
      * comparably reasonable spectrum there.
+     *
+     * RAUCH is listed after both Tremblay grids: MIST's brief post-AGB
+     * ("phase 6") transit can reach Teff hotter than even TREMBLAY_DA's
+     * own ceiling (140000 K) while log(g) is still only ~6.3-6.6 --
+     * below TREMBLAY_DA's own log(g) floor (6.5) at the same time -- a
+     * real gap neither Tremblay grid covers (see the WD/hot-atmosphere-
+     * coverage project notes for how this gap was found). RAUCH's own
+     * (log(g), Teff) coverage (5-8, 50000-190000 K) overlaps both
+     * Tremblay grids' hot ends, and SpecsynLibChained's GridType::
+     * wdGrid classification (see its own comment) picks whichever
+     * chained WD-type library a given star's (log(g), Teff) actually
+     * falls in reach of, so listing RAUCH after Tremblay only matters
+     * for a star literally nothing earlier in the chain can serve at
+     * all, even via a fallback clamp.
+     *
+     * RAUCH_H07 is listed last of all, after RAUCH: it reaches log(g)
+     * up to 9 (vs. RAUCH's own 8) at the same hot temperatures RAUCH
+     * covers, plugging a further gap -- a moderately massive white
+     * dwarf, log(g) 8-9, cooling from a still-hot (140000-190000 K)
+     * state -- that neither RAUCH nor either Tremblay grid covers on
+     * its own (RAUCH's own log(g) ceiling is too low there; the
+     * Tremblay grids' own Teff ceilings are too low). RAUCH_H07 is a
+     * pure H/He, no-metals grid (see fetch_rauch.py's own docstring),
+     * so it is less physically faithful than RAUCH's own solar-
+     * abundance models -- listed last, rather than merged with RAUCH,
+     * so RAUCH's more faithful models are always preferred wherever
+     * they actually cover a star.
      */
     inline const std::vector<std::string> defaultModelList = { // NOLINT(cert-err58-cpp) -- built from fixed string literals, so construction can never actually throw here
         "POWR_WC", "POWR_WNE", "POWR_WNL_H20", "POWR_WNL_H40", "POWR_WNL_H60",
         "TLUSTY_O", "TLUSTY_B", "BOSZ", "CK04", "MARCS",
-        "TREMBLAY_DA", "TREMBLAY_ELM"
+        "TREMBLAY_DA", "TREMBLAY_ELM", "RAUCH", "RAUCH_H07"
     };
 
     /**
@@ -83,6 +110,25 @@ namespace specsyn
         raise,  /**< Throw a runtime error for an out-of-bounds star */
         silent, /**< Silently return a spectrum of size 0 for an out-of-bounds star */
         coerce  /**< Coerce an out-of-bounds star with at least one valid neighboring grid point to the nearest point it can be interpolated from, rather than treating it as out of bounds */
+    };
+
+    /**
+     * @brief Distinguishes the different kinds of chained spectral library by how they're parameterized
+     * @details
+     * Used by SpecsynLibChained to track separate log(Teff)/log(g)
+     * clamp ranges per kind of library, rather than a single range
+     * combined across every chained library regardless of type --
+     * see SpecsynLibChained's own logTeffMin_/logTeffMax_/loggMin_/
+     * loggMax_ members. nGridType is not itself a grid type: it is a
+     * trailing sentinel giving the number of real enumerators above
+     * it, used to size those arrays.
+     */
+    enum class GridType : std::uint8_t
+    {
+        wrGrid,     /**< A SpecsynLibWR library (WR_grid = true in the registry) */
+        wdGrid,     /**< A SpecsynLibWD library (WD_grid = true in the registry) */
+        normalGrid, /**< A SpecsynLibNoWind library (neither flag set) */
+        nGridType   /**< Sentinel: the number of real GridType enumerators above */
     };
 
 } // namespace specsyn

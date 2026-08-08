@@ -410,9 +410,11 @@ namespace specsyn
         // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- StarData is a fixed-size std::array, and every index used here is compile-time-known
         const double heSurf = props[static_cast<size_t>(tracks::FieldIdx::heSurf)];
         const double logTeff = props[static_cast<size_t>(tracks::FieldIdx::logTe)];
+        const double mass = props[static_cast<size_t>(tracks::FieldIdx::mass)];
+        constexpr double massMin = 8.0; // Msun -- see this function's own comment
         constexpr double logTeffNonWRMax = 4.6989700043360187; // log10(50000)
         constexpr double logTeffAbsoluteMin = 4.0; // log10(10000)
-        if ((heSurf < 0.4 && logTeff < logTeffNonWRMax) || logTeff < logTeffAbsoluteMin)
+        if (mass < massMin || (heSurf < 0.4 && logTeff < logTeffNonWRMax) || logTeff < logTeffAbsoluteMin)
         {
             return WRType::None;
         }

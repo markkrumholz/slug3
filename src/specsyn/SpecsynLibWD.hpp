@@ -21,23 +21,32 @@ namespace specsyn
 
     /**
      * @class SpecsynLibWD
-     * @brief A SpecsynLib2D specialization for white dwarf atmosphere grids
+     * @brief A SpecsynLib2D specialization for white dwarf (and similarly log(g)/Teff-only) atmosphere grids
      * @tparam Policy See SpecsynLib.
      * @details
      * Covers spectral libraries -- like the Tremblay et al. pure-
      * hydrogen (DA) white dwarf grids fetched by
-     * data/tools/fetch_tremblay.py -- whose spectra sit on a (log(g),
-     * Teff) tensor grid with no [Fe/H]/[alpha/Fe]/[C/Fe] axis at all,
-     * stored as four flat top-level HDF5 datasets ("wl", "logg",
-     * "log_Teff", and a (n_logg, n_logTeff, n_wl) "flux" tensor)
-     * rather than the one-group-per-[Fe/H] layout SpecsynLibNoWind
-     * reads. dim2_, dim3_ (inherited from SpecsynLib, via
-     * SpecsynLib2D) hold log(g) and log(Teff) respectively, aliased
-     * here as logg_ and logTeff_ for readability -- mirroring
-     * SpecsynLibNoWind's identical FeH_/logg_/logTeff_ aliasing
-     * exactly. dim1_ is left empty (see SpecsynLib2D's own
-     * comment): this class has no first axis at all, not even a
-     * degenerate one populated with a single placeholder value.
+     * data/tools/fetch_tremblay.py, or the Rauch et al. NLTE hot star
+     * grid fetched by data/tools/fetch_rauch.py -- whose spectra are
+     * parameterized by (log(g), Teff) alone, with no [Fe/H]/[alpha/Fe]/
+     * [C/Fe] axis at all, stored as four flat top-level HDF5 datasets:
+     * "wl", "logg", "log_Teff", and "flux". "flux" may be either a
+     * filled (n_logg, n_logTeff, n_wl) tensor (Tremblay's grids,
+     * already a full rectangular grid as distributed) or a (n_models,
+     * n_wl) array alongside per-model "logg"/"log_Teff" values that
+     * don't together form a filled grid (Rauch's grid, missing some
+     * (log g, Teff) combinations at its hottest Teff values) -- the
+     * constructor detects which from "flux"'s own rank and dispatches
+     * to readFilledTensorGrid or readSparseGrid accordingly (see
+     * SpecsynLibWD.cpp). Either way this differs from the
+     * one-group-per-[Fe/H] layout SpecsynLibNoWind reads. dim2_, dim3_
+     * (inherited from SpecsynLib, via SpecsynLib2D) hold log(g) and
+     * log(Teff) respectively, aliased here as logg_ and logTeff_ for
+     * readability -- mirroring SpecsynLibNoWind's identical
+     * FeH_/logg_/logTeff_ aliasing exactly. dim1_ is left empty (see
+     * SpecsynLib2D's own comment): this class has no first axis at
+     * all, not even a degenerate one populated with a single
+     * placeholder value.
      */
     template <OOBPolicy Policy>
     class SpecsynLibWD : public SpecsynLib2D<Policy>

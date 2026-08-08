@@ -31,7 +31,7 @@ namespace
     // (too large, in the h5 case, to store in the repository), so any
     // of them may be absent depending on whether this machine has
     // fetched them
-    const std::array<std::string, 14> requiredDataFiles = { { // NOLINT(bugprone-throwing-static-initialization,cert-err58-cpp) -- built from fixed string literals, so allocation failure aside (which would abort regardless), this can't actually throw
+    const std::array<std::string, 16> requiredDataFiles = { { // NOLINT(bugprone-throwing-static-initialization,cert-err58-cpp) -- built from fixed string literals, so allocation failure aside (which would abort regardless), this can't actually throw
         "data/tracks/tracks.toml",
         "data/tracks/mist.h5",
         "data/spectra/spectra.toml",
@@ -46,6 +46,8 @@ namespace
         "data/spectra/ck04.h5",
         "data/spectra/tremblay_da.h5",
         "data/spectra/tremblay_elm.h5",
+        "data/spectra/rauch.h5",
+        "data/spectra/rauch_h07.h5",
     }};
 
     // The real (gitignored) filter registry and Vega reference

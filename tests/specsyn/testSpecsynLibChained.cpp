@@ -22,6 +22,18 @@
  * still throws (since the last library in the chain always uses
  * OOBPolicy::raise).
  *
+ * Also tests classifyGridType's per-GridType clamping (see
+ * SpecsynLibChained::spec()'s own comment): testClassifyWR/WD/
+ * NormalNotWD each construct a star whose raw properties fall outside
+ * one or more chained libraries' grids, and check that tClamp = true
+ * rescues it (routed to the correct GridType's own range) while
+ * tClamp = false genuinely fails for the same star -- confirming the
+ * clamp is doing real, GridType-specific work, not merely not
+ * breaking anything. testChainWithSparseWD checks that a WD_grid
+ * entry backed by a partially-filled grid (RAUCH_test) dispatches
+ * correctly through the full chain, not just standalone (see
+ * testSpecsynLibWD.cpp's own sparse-grid tests for that).
+ *
  * It also tests SpecsynLibChained::makeCommonWlGrid directly, both
  * against a fully controlled synthetic scenario (so the window-by-
  * window point-count logic can be checked exactly) and against
@@ -189,6 +201,29 @@ namespace
         for (double x = lo; x <= hi + 1e-9; x += step) { grid.push_back(x); }
         return grid;
     }
+
+    /**
+     * @brief Build a StarData with WNE-classifying surface composition, plus the given mass/logL/logTeff/mdot
+     * @details
+     * heSurf/cSurf/nSurf mirror testSpecsynLibWR.cpp's own
+     * makeWRStarData defaults, which classify as WRType::WNE via
+     * getWRType (heSurf > 0.9, cSurf < nSurf) -- matching
+     * POWR_WNE_test's own type.
+     */
+    auto makeWRStarData(const double mass, const double logL, const double logTeff, const double mdot)
+        -> specsyn::Specsyn::StarData
+    {
+        specsyn::Specsyn::StarData props{};
+        props.at(static_cast<std::size_t>(tracks::FieldIdx::mass)) = mass;
+        props.at(static_cast<std::size_t>(tracks::FieldIdx::mdot)) = mdot;
+        props.at(static_cast<std::size_t>(tracks::FieldIdx::logL)) = logL;
+        props.at(static_cast<std::size_t>(tracks::FieldIdx::logTe)) = logTeff;
+        props.at(static_cast<std::size_t>(tracks::FieldIdx::heSurf)) = 0.98;
+        props.at(static_cast<std::size_t>(tracks::FieldIdx::cSurf)) = 0.0;
+        props.at(static_cast<std::size_t>(tracks::FieldIdx::nSurf)) = 0.01;
+        props.at(static_cast<std::size_t>(tracks::FieldIdx::hSurf)) = 0.0;
+        return props;
+    }
 } // namespace
 
 // Check that, with TLUSTY_test listed first, an OB star is handled
@@ -314,6 +349,222 @@ static auto testChainWithWD() -> int
         result += 1;
     }
 
+    return result;
+}
+
+// Check that a chain including a WD_grid entry backed by a partially-
+// filled grid (RAUCH_test, see data/tools/make_rauch_test_fixture.py)
+// dispatches to it correctly through the full SpecsynLibChained
+// machinery -- not just standalone via SpecsynLibWD directly (see
+// testSpecsynLibWD.cpp's own testSparseGridExactPoint/
+// testSparseGridMissingCorner) -- for a star landing on one of its
+// populated grid points, exactly as testChainWithWD does for the
+// filled-tensor WD_test fixture. tClamp is left false here: this test
+// is purely about chain dispatch mechanics for a sparse-schema WD_grid
+// entry, not about clamping (covered separately by
+// testClassifyWR/WD/NormalNotWD below) -- with tClamp = true, this
+// star's log(g) = 7.0 exceeding TLUSTY_test's own ceiling would get
+// reclassified and clamped, defeating the point of placing it exactly
+// on RAUCH_test's own grid point.
+static auto testChainWithSparseWD() -> int
+{
+    const specsyn::SpecsynLibChained chain(
+        { "TLUSTY_test", "RAUCH_test" }, -3.0, 1.0, 0.0, 0.0,
+        {}, specsyn::defaultR, registryName, 0.0, 0.0, 0, false, testControls);
+
+    // (logg, log_Teff) = (7.0, 4.0): the first populated corner of
+    // RAUCH_test's fully-populated cell (see
+    // data/tools/make_rauch_test_fixture.py), where flux = 1.0. mass
+    // is chosen (offline) so that (logL, logTeff) below give exactly
+    // this log(g); log(Teff) = 4.0 (10000 K) is also far below
+    // TLUSTY_test's own 27500-30000 K range, so this star falls
+    // straight through to RAUCH_test.
+    constexpr double logL = -2.0;
+    constexpr double logTeff = 4.0;
+    constexpr double mass = 0.40477146921019436;
+    constexpr double area = 6.750845937121586e19; // surface area implied by (logL, logTeff) above
+    constexpr double rauchFluxAtCorner = 1.0;
+    constexpr double rauchWlMax = 10000.0; // RAUCH_test's own largest wavelength point
+
+    int result = 0;
+    try
+    {
+        const auto spec = chain.spec(makeStarData(mass, logL, logTeff), 0.0);
+        result += checkSpectrum(spec, chain.wl(), area * rauchFluxAtCorner * rauchWlMax,
+            "a star landing on RAUCH_test's own populated grid point via the chain");
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "testSpecsynLibChained: unexpected exception for a star "
+            "that should fall through to RAUCH_test: " << e.what() << "\n";
+        result += 1;
+    }
+    return result;
+}
+
+// Check that a WR-classified star far outside POWR_WNE_test's own
+// log(Teff) range (log(Teff) = 4.6-4.8, i.e. ~40000-63000 K) is
+// nonetheless handled when tClamp is true -- classifyGridType routes
+// it to GridType::wrGrid purely from its surface composition (per
+// SpecsynLibWR::getWRType), before ever looking at how far outside
+// range it actually is, so it gets clamped to POWR_WNE_test's own
+// range regardless of TLUSTY_test's or WD_test's own (much different)
+// ranges also present in this chain -- and genuinely fails without
+// that clamp (tClamp = false), confirming the clamp is doing real
+// work rather than being a no-op that happens to not matter here.
+static auto testClassifyWR() -> int
+{
+    // log(Teff) = 6.0 (~1e6 K) is far past every grid in this chain,
+    // including POWR_WNE_test's own
+    const auto props = makeWRStarData(20.0, 5.7, 6.0, 3e-5);
+    constexpr double wrFeh = -0.5; // inside POWR_WNE_test's own Fe_H = [-1.0, 0.0]
+
+    int result = 0;
+    {
+        const specsyn::SpecsynLibChained chain(
+            { "POWR_WNE_test", "TLUSTY_test", "WD_test" }, -3.0, 1.0, 0.0, 0.0,
+            {}, specsyn::defaultR, registryName, 0.0, 0.0, 0, true, testControls);
+        try
+        {
+            const auto spec = chain.spec(props, wrFeh);
+            if (spec.empty())
+            {
+                std::cerr << "testSpecsynLibChained: expected a non-empty spectrum "
+                    "for a WR star clamped to POWR_WNE_test's own range, got an "
+                    "empty one\n";
+                result += 1;
+            }
+        }
+        catch (const std::exception& e)
+        {
+            std::cerr << "testSpecsynLibChained: unexpected exception for a WR "
+                "star that tClamp should have rescued: " << e.what() << "\n";
+            result += 1;
+        }
+    }
+    {
+        const specsyn::SpecsynLibChained chain(
+            { "POWR_WNE_test", "TLUSTY_test", "WD_test" }, -3.0, 1.0, 0.0, 0.0,
+            {}, specsyn::defaultR, registryName, 0.0, 0.0, 0, false, testControls);
+        try
+        {
+            [[maybe_unused]] const auto spec = chain.spec(props, wrFeh);
+            std::cerr << "testSpecsynLibChained: expected a WR star this far "
+                "outside every grid to throw with tClamp = false, but it did not\n";
+            result += 1;
+        }
+        catch (const std::runtime_error&) { /* expected */ }
+    }
+    return result;
+}
+
+// Check that a star classified GridType::wdGrid by classifyGridType
+// (not WR; log(g) above TLUSTY_test's own 3.25 ceiling; both log(g)
+// and log(Teff) above WD_test's own floor) -- even one exceeding
+// WD_test's own log(g) ceiling too (log(g) = 12, versus WD_test's own
+// 9.0 maximum) -- is rescued by tClamp = true (clamped into
+// WD_test's own range, not TLUSTY_test's), and genuinely fails
+// without it.
+static auto testClassifyWD() -> int
+{
+    constexpr double logL = -2.0;
+    constexpr double logTeff = 4.3; // within WD_test's own 4.0-4.6 range
+    // mass chosen (offline) to give log(g) = 12.0 at (logL, logTeff) above
+    constexpr double mass = 2553.9353133421105;
+    const auto props = makeStarData(mass, logL, logTeff);
+
+    int result = 0;
+    {
+        const specsyn::SpecsynLibChained chain(
+            { "TLUSTY_test", "WD_test" }, -3.0, 1.0, 0.0, 0.0,
+            {}, specsyn::defaultR, registryName, 0.0, 0.0, 0, true, testControls);
+        try
+        {
+            const auto spec = chain.spec(props, wdFeh);
+            if (spec.empty())
+            {
+                std::cerr << "testSpecsynLibChained: expected a non-empty spectrum "
+                    "for a WD-classified star clamped to WD_test's own range, got "
+                    "an empty one\n";
+                result += 1;
+            }
+        }
+        catch (const std::exception& e)
+        {
+            std::cerr << "testSpecsynLibChained: unexpected exception for a "
+                "WD-classified star that tClamp should have rescued: "
+                << e.what() << "\n";
+            result += 1;
+        }
+    }
+    {
+        const specsyn::SpecsynLibChained chain(
+            { "TLUSTY_test", "WD_test" }, -3.0, 1.0, 0.0, 0.0,
+            {}, specsyn::defaultR, registryName, 0.0, 0.0, 0, false, testControls);
+        try
+        {
+            [[maybe_unused]] const auto spec = chain.spec(props, wdFeh);
+            std::cerr << "testSpecsynLibChained: expected a star with log(g) = 12 "
+                "(beyond even WD_test's own ceiling) to throw with tClamp = false, "
+                "but it did not\n";
+            result += 1;
+        }
+        catch (const std::runtime_error&) { /* expected */ }
+    }
+    return result;
+}
+
+// Check that a star exceeding TLUSTY_test's own log(Teff) ceiling, but
+// with too low a log(g) to plausibly be a white dwarf (log(g) = 1.0,
+// below WD_test's own 7.0 floor), is classified GridType::normalGrid
+// rather than GridType::wdGrid despite exceeding the normal grids'
+// ceiling on log(Teff) -- clamped into TLUSTY_test's own range on both
+// axes, and genuinely fails without that clamp.
+static auto testClassifyNormalNotWD() -> int
+{
+    constexpr double logL = -2.0;
+    constexpr double logTeff = 4.6; // above TLUSTY_test's own 4.477 (30000 K) ceiling
+    // mass chosen (offline) to give log(g) = 1.0 at (logL, logTeff) above
+    constexpr double mass = 1.6114242432805306e-09;
+    const auto props = makeStarData(mass, logL, logTeff);
+
+    int result = 0;
+    {
+        const specsyn::SpecsynLibChained chain(
+            { "TLUSTY_test", "WD_test" }, -3.0, 1.0, 0.0, 0.0,
+            {}, specsyn::defaultR, registryName, 0.0, 0.0, 0, true, testControls);
+        try
+        {
+            const auto spec = chain.spec(props, wdFeh);
+            if (spec.empty())
+            {
+                std::cerr << "testSpecsynLibChained: expected a non-empty spectrum "
+                    "for a star clamped to TLUSTY_test's own (normal) range, got "
+                    "an empty one\n";
+                result += 1;
+            }
+        }
+        catch (const std::exception& e)
+        {
+            std::cerr << "testSpecsynLibChained: unexpected exception for a star "
+                "that the normal-grid clamp should have rescued: " << e.what() << "\n";
+            result += 1;
+        }
+    }
+    {
+        const specsyn::SpecsynLibChained chain(
+            { "TLUSTY_test", "WD_test" }, -3.0, 1.0, 0.0, 0.0,
+            {}, specsyn::defaultR, registryName, 0.0, 0.0, 0, false, testControls);
+        try
+        {
+            [[maybe_unused]] const auto spec = chain.spec(props, wdFeh);
+            std::cerr << "testSpecsynLibChained: expected a star this far outside "
+                "both TLUSTY_test's and WD_test's own grids to throw with "
+                "tClamp = false, but it did not\n";
+            result += 1;
+        }
+        catch (const std::runtime_error&) { /* expected */ }
+    }
     return result;
 }
 
@@ -608,6 +859,10 @@ auto testSpecsynLibChained() -> int
     result += testChainTlustyFirst();
     result += testChainBoszFirst();
     result += testChainWithWD();
+    result += testChainWithSparseWD();
+    result += testClassifyWR();
+    result += testClassifyWD();
+    result += testClassifyNormalNotWD();
     result += testChainOOBThrows();
     result += testChainConstructorValidation();
     result += testChainUsesCommonGrid();

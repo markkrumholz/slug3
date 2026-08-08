@@ -97,6 +97,29 @@ namespace utils
     }
 
     /**
+     * @brief Get the rank (number of dimensions) of a dataset without reading its data
+     * @param grp Handle to the group (or already-open file) containing the dataset
+     * @param name Name of the dataset
+     * @param context Prefix used in thrown error messages (typically the
+     *   name of the calling class or function)
+     * @returns The dataset's rank
+     */
+    inline auto datasetRank(const hid_t grp, const std::string& name,
+        const std::string& context) -> int
+    {
+        const hid_t dset = H5Dopen2(grp, name.c_str(), H5P_DEFAULT);
+        if (dset < 0)
+        {
+            throw std::runtime_error(context + ": unable to open dataset " + name);
+        }
+        const hid_t space = H5Dget_space(dset);
+        const int rank = H5Sget_simple_extent_ndims(space);
+        H5Sclose(space);
+        H5Dclose(dset);
+        return rank;
+    }
+
+    /**
      * @brief Get the shape of a 2D dataset without reading its data
      * @param grp Handle to the group containing the dataset
      * @param name Name of the dataset
