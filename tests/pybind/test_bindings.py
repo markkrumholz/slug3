@@ -64,7 +64,7 @@ import tomllib
 import numpy as np
 import pytest
 
-import slug
+import slugpy as slug
 
 # Registry and track set used throughout this file: a reduced, 5-group
 # fixture with afe = -0.2, vvcrit = 0.0, and feh = -1.0, -0.5, -0.25,

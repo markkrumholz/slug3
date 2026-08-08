@@ -336,10 +336,14 @@ add_executable(slugTestSpecsyn
     src/utils/ParseUtils.cpp
 )
 
-# Python module, for testing the Python frontend. The CMake target is named
-# slugPython (the "slug" target name is already taken by the main
-# executable), but the output module file is named slug to match the
-# PYBIND11_MODULE name in Bindings.cpp.
+# Python module. The CMake target is named slugPython (the "slug" target
+# name is already taken by the main executable), but the output module
+# file is named _slug to match the PYBIND11_MODULE name in Bindings.cpp.
+# It is built directly into slugpy/, the top-level pure-Python package
+# that wraps it (see slugpy/__init__.py), rather than into the build
+# directory, so that package's compiled and pure-Python halves always
+# live side by side and "import slugpy" works straight out of the
+# source tree with no separate install step.
 pybind11_add_module(slugPython
     src/pybind/Bindings.cpp
     src/pybind/BindInterpolator1D.cpp
@@ -386,7 +390,18 @@ pybind11_add_module(slugPython
     src/utils/ParseUtils.cpp
     src/extern/cubature/pcubature.c
 )
-set_target_properties(slugPython PROPERTIES OUTPUT_NAME slug)
+set_target_properties(slugPython PROPERTIES
+    OUTPUT_NAME _slug
+    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/slugpy)
+
+# Force optimized flags for slugPython, independent of CMAKE_BUILD_TYPE,
+# for the same reason as slugTestCoreFull above: it drives the same
+# interpolation-heavy production code paths, so building it at whatever
+# (often unoptimized) CMAKE_BUILD_TYPE the rest of the project happens
+# to be configured with would make every slugpy-based analysis
+# needlessly slow.
+target_compile_options(slugPython PRIVATE -O3)
+target_compile_definitions(slugPython PRIVATE NDEBUG)
 
 # Include directories: project headers as regular includes; pcg-cpp,
 # tomlplusplus, and cubature as system includes so clang-tidy and the
@@ -549,11 +564,15 @@ set_tests_properties(test_CoreFull PROPERTIES
 # Requires pytest and numpy to be installed for that interpreter. Also
 # needs SLUG_DIR set, same as test_Core/test_Io above, since the
 # SimPhysics bindings exercise the same stars.IMF file-resolution path.
+# PYTHONPATH is the repo root, not slugPython's own output directory,
+# since the tests import the slugpy package (which re-exports slugPython's
+# _slug.cpython-*.so from slugpy/__init__.py) rather than the compiled
+# extension directly.
 add_test(NAME test_PythonBindings
     COMMAND ${Python_EXECUTABLE} -m pytest ${CMAKE_SOURCE_DIR}/tests/pybind -v
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 set_tests_properties(test_PythonBindings PROPERTIES
-    ENVIRONMENT "PYTHONPATH=$<TARGET_FILE_DIR:slugPython>;SLUG_DIR=${CMAKE_SOURCE_DIR}")
+    ENVIRONMENT "PYTHONPATH=${CMAKE_SOURCE_DIR};SLUG_DIR=${CMAKE_SOURCE_DIR}")
 
 # Tag every test "quick" or "slow", so `ctest -L quick` (or `ctest -LE
 # slow`) runs only the fast suite, skipping anything that takes

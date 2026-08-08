@@ -16,8 +16,9 @@
 // Disable linting for includes -- the pybind macro magic seems to confuse
 // the linter
 // NOLINTBEGIN(misc-include-cleaner)
-PYBIND11_MODULE(slug, m, py::mod_gil_not_used()) {
-    m.doc() = "slug Python frontend"; // optional module docstring
+PYBIND11_MODULE(_slug, m, py::mod_gil_not_used()) {
+    m.doc() = "slug Python frontend (compiled extension; see the slugpy "
+        "package for the public interface)"; // optional module docstring
 
     bindInterpolator1D(m);
     bindInterpolator1DScalar(m);
