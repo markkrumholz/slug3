@@ -69,7 +69,7 @@ namespace specsyn
      * coverage project notes for how this gap was found). RAUCH's own
      * (log(g), Teff) coverage (5-8, 50000-190000 K) overlaps both
      * Tremblay grids' hot ends, and SpecsynLibChained's GridType::
-     * WDGrid classification (see its own comment) picks whichever
+     * wdGrid classification (see its own comment) picks whichever
      * chained WD-type library a given star's (log(g), Teff) actually
      * falls in reach of, so listing RAUCH after Tremblay only matters
      * for a star literally nothing earlier in the chain can serve at
@@ -125,9 +125,9 @@ namespace specsyn
      */
     enum class GridType : std::uint8_t
     {
-        WRGrid,     /**< A SpecsynLibWR library (WR_grid = true in the registry) */
-        WDGrid,     /**< A SpecsynLibWD library (WD_grid = true in the registry) */
-        NormalGrid, /**< A SpecsynLibNoWind library (neither flag set) */
+        wrGrid,     /**< A SpecsynLibWR library (WR_grid = true in the registry) */
+        wdGrid,     /**< A SpecsynLibWD library (WD_grid = true in the registry) */
+        normalGrid, /**< A SpecsynLibNoWind library (neither flag set) */
         nGridType   /**< Sentinel: the number of real GridType enumerators above */
     };
 

@@ -215,17 +215,17 @@ namespace specsyn
 
             if (const auto* noWind = dynamic_cast<const SpecsynLibNoWind<Policy>*>(&lib))
             {
-                const auto t = static_cast<std::size_t>(GridType::NormalGrid);
+                const auto t = static_cast<std::size_t>(GridType::normalGrid);
                 widen(lo[t], hi[t], noWind->logTeff().front(), noWind->logTeff().back()); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- t < gridTypeCount by construction
             }
             else if (const auto* wr = dynamic_cast<const SpecsynLibWR<Policy>*>(&lib))
             {
-                const auto t = static_cast<std::size_t>(GridType::WRGrid);
+                const auto t = static_cast<std::size_t>(GridType::wrGrid);
                 widen(lo[t], hi[t], wr->logTeff().front(), wr->logTeff().back()); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
             }
             else if (const auto* wd = dynamic_cast<const SpecsynLibWD<Policy>*>(&lib))
             {
-                const auto t = static_cast<std::size_t>(GridType::WDGrid);
+                const auto t = static_cast<std::size_t>(GridType::wdGrid);
                 widen(lo[t], hi[t], wd->logTeff().front(), wd->logTeff().back()); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
             }
         }
@@ -242,7 +242,7 @@ namespace specsyn
          * SpecsynLibWR has no logg axis at all, since Wolf-Rayet
          * atmospheres are parameterized by transformed radius instead
          * -- so a lib that dynamic_casts to SpecsynLibWR<Policy> simply
-         * leaves lo/hi untouched, and GridType::WRGrid's entry in each
+         * leaves lo/hi untouched, and GridType::wrGrid's entry in each
          * stays at quiet_NaN().
          */
         template <OOBPolicy Policy>
@@ -258,12 +258,12 @@ namespace specsyn
 
             if (const auto* noWind = dynamic_cast<const SpecsynLibNoWind<Policy>*>(&lib))
             {
-                const auto t = static_cast<std::size_t>(GridType::NormalGrid);
+                const auto t = static_cast<std::size_t>(GridType::normalGrid);
                 widen(lo[t], hi[t], noWind->logg().front(), noWind->logg().back()); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- t < gridTypeCount by construction
             }
             else if (const auto* wd = dynamic_cast<const SpecsynLibWD<Policy>*>(&lib))
             {
-                const auto t = static_cast<std::size_t>(GridType::WDGrid);
+                const auto t = static_cast<std::size_t>(GridType::wdGrid);
                 widen(lo[t], hi[t], wd->logg().front(), wd->logg().back()); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
             }
         }
@@ -282,22 +282,22 @@ namespace specsyn
          * @returns The GridType whose clamp spec() should apply to props
          * @details
          * A Wolf-Rayet star (per SpecsynLibWR::getWRType) is always
-         * GridType::WRGrid, checked first and on props' own raw,
+         * GridType::wrGrid, checked first and on props' own raw,
          * unclamped values -- WR-ness is a property of the star's own
          * surface composition (see getWRType), not something that
          * could be affected by any clamp decided afterward.
          *
-         * Otherwise, this star is GridType::WDGrid if -- and only if
+         * Otherwise, this star is GridType::wdGrid if -- and only if
          * -- both of the following hold on its raw, unclamped log(Teff)
          * (from props directly) and log(g) (the logg parameter):
          *   - it lies above the normal grids' own coverage on at least
-         *     one axis (log(Teff) > logTeffMax[NormalGrid], or
-         *     log(g) > loggMax[NormalGrid]) -- i.e. it is a real gap in
+         *     one axis (log(Teff) > logTeffMax[normalGrid], or
+         *     log(g) > loggMax[normalGrid]) -- i.e. it is a real gap in
          *     normal-star coverage, not merely a star the normal grids
          *     already handle;
          *   - it also lies above the WD grids' own floor on *both*
-         *     axes (log(Teff) > logTeffMin[WDGrid] and
-         *     log(g) > loggMin[WDGrid]) -- i.e. the WD grids can
+         *     axes (log(Teff) > logTeffMin[wdGrid] and
+         *     log(g) > loggMin[wdGrid]) -- i.e. the WD grids can
          *     actually plausibly cover it, rather than just being the
          *     nearest thing to clamp to.
          * Any GridType whose relevant bound is quiet_NaN() (no chained
@@ -306,7 +306,7 @@ namespace specsyn
          * grid backing it.
          *
          * Every other star -- including one with no clamp data at all,
-         * i.e. tClamp was false -- is GridType::NormalGrid.
+         * i.e. tClamp was false -- is GridType::normalGrid.
          */
         auto classifyGridType( //NOLINT(llvm-prefer-static-over-anonymous-namespace)
             const Specsyn::StarData& props, const double logg,
@@ -318,11 +318,11 @@ namespace specsyn
             if (SpecsynLibWR<OOBPolicy::raise>::getWRType(props) !=
                 SpecsynLibWR<OOBPolicy::raise>::WRType::None)
             {
-                return GridType::WRGrid;
+                return GridType::wrGrid;
             }
 
-            const auto normal = static_cast<std::size_t>(GridType::NormalGrid);
-            const auto wd = static_cast<std::size_t>(GridType::WDGrid);
+            const auto normal = static_cast<std::size_t>(GridType::normalGrid);
+            const auto wd = static_cast<std::size_t>(GridType::wdGrid);
             // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- normal, wd are both < gridTypeCount by construction
             const double logTeff = props[static_cast<std::size_t>(tracks::FieldIdx::logTe)];
 
@@ -334,7 +334,25 @@ namespace specsyn
                 !std::isnan(loggMin[wd]) && logg > loggMin[wd];
             // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
 
-            return (aboveNormal && withinWDFloor) ? GridType::WDGrid : GridType::NormalGrid;
+            return (aboveNormal && withinWDFloor) ? GridType::wdGrid : GridType::normalGrid;
+        }
+
+        // std::array's own default member-initialization would leave its
+        // doubles indeterminate rather than NaN, so every GridType-indexed
+        // range member is instead constructed with this filled-array
+        // helper in the constructor's own initializer list below --
+        // satisfies cppcoreguidelines-pro-type-member-init while keeping
+        // every entry at quiet_NaN() until updateLogTeffRange/
+        // updateLoggRange (or nothing, if tClamp is false) overwrite it.
+        template <std::size_t N>
+        constexpr auto filledArray(double value) -> std::array<double, N>
+        {
+            std::array<double, N> arr{};
+            for (double& x : arr)
+            {
+                x = value;
+            }
+            return arr;
         }
     } // namespace
 
@@ -352,19 +370,16 @@ namespace specsyn
         const std::size_t nWl,
         const bool tClamp,
         const io::SimControls& controls) :
-        Specsyn(controls)
-    {
+        Specsyn(controls),
         // Unconditional, regardless of tClamp: every GridType entry
-        // starts (and, for tClamp == false, stays) at quiet_NaN(),
-        // rather than relying on a default member initializer, since
-        // std::array's own default member-initialization would leave
-        // its doubles indeterminate rather than NaN.
-        constexpr double unset = std::numeric_limits<double>::quiet_NaN();
-        logTeffMin_.fill(unset);
-        logTeffMax_.fill(unset);
-        loggMin_.fill(unset);
-        loggMax_.fill(unset);
-
+        // starts (and, for tClamp == false, stays) at quiet_NaN() --
+        // see filledArray's own comment for why this can't just be a
+        // default member initializer or a fill() call in the body.
+        logTeffMin_(filledArray<nGridType>(std::numeric_limits<double>::quiet_NaN())),
+        logTeffMax_(filledArray<nGridType>(std::numeric_limits<double>::quiet_NaN())),
+        loggMin_(filledArray<nGridType>(std::numeric_limits<double>::quiet_NaN())),
+        loggMax_(filledArray<nGridType>(std::numeric_limits<double>::quiet_NaN()))
+    {
         if (spectraName.empty())
         {
             throw std::runtime_error(
@@ -524,10 +539,10 @@ namespace specsyn
         const auto idx = static_cast<std::size_t>(type);
 
         StarData clampedProps = props;
-        if (!std::isnan(logTeffMin_[idx])) // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- idx < gridTypeCount by construction
+        if (!std::isnan(logTeffMin_[idx])) // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,cppcoreguidelines-pro-bounds-constant-array-index) -- idx < gridTypeCount by construction
         {
             double& logTeff = clampedProps[static_cast<size_t>(tracks::FieldIdx::logTe)]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- StarData is a fixed-size std::array, and logTe is one of its compile-time-known indices
-            logTeff = std::clamp(logTeff, logTeffMin_[idx], logTeffMax_[idx]); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
+            logTeff = std::clamp(logTeff, logTeffMin_[idx], logTeffMax_[idx]); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,cppcoreguidelines-pro-bounds-constant-array-index) -- see above
         }
 
         // A logg clamp is only meaningful for a non-WR star -- a
@@ -536,9 +551,9 @@ namespace specsyn
         // SpecsynLibWR::spec() already clamps its own analogous
         // transformed-radius coordinate internally. This falls out
         // automatically here, without an explicit WR check, since
-        // loggMin_[WRGrid]/loggMax_[WRGrid] are never populated (see
+        // loggMin_[wrGrid]/loggMax_[wrGrid] are never populated (see
         // updateLoggRange) and so are always quiet_NaN() whenever type
-        // is GridType::WRGrid. Unlike the logTeff clamp above, logg
+        // is GridType::wrGrid. Unlike the logTeff clamp above, logg
         // isn't a native StarData field -- it's derived from mass,
         // log(L), and log(Teff) via Specsyn::getSAandLogg -- so
         // clamping it means adjusting one of those three instead:
@@ -559,11 +574,11 @@ namespace specsyn
         // afterwards (inside getSAandLogg, when spec() is called
         // below) doesn't land just outside that bound again due to
         // floating-point roundoff.
-        if (!std::isnan(loggMin_[idx])) // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- idx < gridTypeCount by construction
+        if (!std::isnan(loggMin_[idx])) // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,cppcoreguidelines-pro-bounds-constant-array-index) -- idx < gridTypeCount by construction
         {
             const double logg = getSAandLogg(clampedProps).second;
-            const double loggMin = loggMin_[idx]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
-            const double loggMax = loggMax_[idx]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
+            const double loggMin = loggMin_[idx]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,cppcoreguidelines-pro-bounds-constant-array-index) -- see above
+            const double loggMax = loggMax_[idx]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,cppcoreguidelines-pro-bounds-constant-array-index) -- see above
             if (logg < loggMin || logg > loggMax)
             {
                 double& mass = clampedProps[static_cast<size_t>(tracks::FieldIdx::mass)]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- StarData is a fixed-size std::array, and mass is one of its compile-time-known indices

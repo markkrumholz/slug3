@@ -405,7 +405,7 @@ static auto testChainWithSparseWD() -> int
 // Check that a WR-classified star far outside POWR_WNE_test's own
 // log(Teff) range (log(Teff) = 4.6-4.8, i.e. ~40000-63000 K) is
 // nonetheless handled when tClamp is true -- classifyGridType routes
-// it to GridType::WRGrid purely from its surface composition (per
+// it to GridType::wrGrid purely from its surface composition (per
 // SpecsynLibWR::getWRType), before ever looking at how far outside
 // range it actually is, so it gets clamped to POWR_WNE_test's own
 // range regardless of TLUSTY_test's or WD_test's own (much different)
@@ -458,7 +458,7 @@ static auto testClassifyWR() -> int
     return result;
 }
 
-// Check that a star classified GridType::WDGrid by classifyGridType
+// Check that a star classified GridType::wdGrid by classifyGridType
 // (not WR; log(g) above TLUSTY_test's own 3.25 ceiling; both log(g)
 // and log(Teff) above WD_test's own floor) -- even one exceeding
 // WD_test's own log(g) ceiling too (log(g) = 12, versus WD_test's own
@@ -516,8 +516,8 @@ static auto testClassifyWD() -> int
 
 // Check that a star exceeding TLUSTY_test's own log(Teff) ceiling, but
 // with too low a log(g) to plausibly be a white dwarf (log(g) = 1.0,
-// below WD_test's own 7.0 floor), is classified GridType::NormalGrid
-// rather than GridType::WDGrid despite exceeding the normal grids'
+// below WD_test's own 7.0 floor), is classified GridType::normalGrid
+// rather than GridType::wdGrid despite exceeding the normal grids'
 // ceiling on log(Teff) -- clamped into TLUSTY_test's own range on both
 // axes, and genuinely fails without that clamp.
 static auto testClassifyNormalNotWD() -> int

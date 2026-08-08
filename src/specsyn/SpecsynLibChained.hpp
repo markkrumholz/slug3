@@ -13,7 +13,6 @@
 #include "SpecsynCommons.hpp"
 #include <array>
 #include <cstddef>
-#include <limits>
 #include <memory>
 #include <string>
 #include <vector>
@@ -117,8 +116,8 @@ namespace specsyn
          * logTeff() accessor) for its minimum and maximum, storing
          * them in logTeffMin_[t]/logTeffMax_[t] (see
          * updateLogTeffRange), where t is whichever GridType that
-         * library actually is (SpecsynLibWR -> WRGrid, SpecsynLibWD ->
-         * WDGrid, SpecsynLibNoWind -> NormalGrid) -- so a GridType with
+         * library actually is (SpecsynLibWR -> wrGrid, SpecsynLibWD ->
+         * wdGrid, SpecsynLibNoWind -> normalGrid) -- so a GridType with
          * no library of that kind in the chain at all is left at
          * quiet_NaN(), rather than merging into some other type's
          * range; if tClamp is false, every entry stays quiet_NaN(),
@@ -136,9 +135,9 @@ namespace specsyn
          *
          * Likewise scans every chained SpecsynLibNoWind or SpecsynLibWD
          * library's own log(g) grid (via logg()) for
-         * loggMin_[NormalGrid]/loggMax_[NormalGrid] and
-         * loggMin_[WDGrid]/loggMax_[WDGrid] respectively -- again all
-         * quiet_NaN() if tClamp is false. GridType::WRGrid is never
+         * loggMin_[normalGrid]/loggMax_[normalGrid] and
+         * loggMin_[wdGrid]/loggMax_[wdGrid] respectively -- again all
+         * quiet_NaN() if tClamp is false. GridType::wrGrid is never
          * touched here, since Wolf-Rayet atmospheres aren't
          * parameterized by logg at all (see spec()'s own comment for
          * how this clamp is actually applied, which is necessarily
@@ -211,7 +210,7 @@ namespace specsyn
          * loggMin) or 10^((loggMax - logg) - 1e-10) (above loggMax),
          * where loggMin/loggMax are that GridType's own entries. A
          * Wolf-Rayet star is never affected by this, without needing
-         * an explicit check here: GridType::WRGrid's loggMin_/loggMax_
+         * an explicit check here: GridType::wrGrid's loggMin_/loggMax_
          * entries are never populated (see updateLoggRange), since
          * Wolf-Rayet atmospheres aren't parameterized by logg at all
          * -- SpecsynLibWR::spec() already clamps its own analogous
@@ -301,7 +300,7 @@ namespace specsyn
          * entries are then overwritten (via updateLogTeffRange) with
          * the minimum/maximum of every chained library's own logTeff()
          * grid, indexed by which kind of library it is (GridType::
-         * WRGrid/WDGrid/NormalGrid) -- so, unlike before, a WR-type
+         * wrGrid/wdGrid/normalGrid) -- so, unlike before, a WR-type
          * star's clamp no longer shares a single combined range with
          * WD- or normal-type stars. A GridType with no library of that
          * kind actually present in the chain is left at quiet_NaN().
@@ -317,8 +316,8 @@ namespace specsyn
          * constructor; if the constructor's tClamp argument is true,
          * entries are then overwritten (via updateLoggRange) with the
          * minimum/maximum of every chained SpecsynLibNoWind/SpecsynLibWD
-         * library's own logg() grid, indexed by GridType::NormalGrid/
-         * WDGrid respectively -- GridType::WRGrid is never touched
+         * library's own logg() grid, indexed by GridType::normalGrid/
+         * wdGrid respectively -- GridType::wrGrid is never touched
          * here, since Wolf-Rayet atmospheres aren't parameterized by
          * logg at all (see the constructor's own comment). See the
          * constructor's and spec()'s own comments.
