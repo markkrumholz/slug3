@@ -12,8 +12,8 @@
 # data referenced below to have been fetched locally (too large to
 # store in the repository -- see data/tools/fetch_*.py).
 
-# Name of run
-sim_type = "cluster"
+# Name of run -- this will be the base name of the output files
+sim_type = "clusterlib"
 
 # Number of trials to run
 n_trial = 1000
