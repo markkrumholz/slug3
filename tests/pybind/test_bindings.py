@@ -64,7 +64,7 @@ import tomllib
 import numpy as np
 import pytest
 
-import slug
+import slugpy as slug
 
 # Registry and track set used throughout this file: a reduced, 5-group
 # fixture with afe = -0.2, vvcrit = 0.0, and feh = -1.0, -0.5, -0.25,
@@ -1286,7 +1286,7 @@ def test_filtercollection_mixed_construction():
 
     assert fc.filterNames() == names
     assert fc.filterUnits() == [
-        "erg/s/Angstrom", "erg/s/Angstrom", "photons/s", "photons/s"]
+        "erg/(s Angstrom)", "erg/(s Angstrom)", "photon/s", "photon/s"]
 
     wl, spec = _make_const_spec(500.0, 9000.0, 5000, 3.5)
 
@@ -1307,7 +1307,7 @@ def test_filtercollection_phot_system_conversion():
     unconverted."""
     names = ["SLUGTEST.CAM1.G500", "ideal_phot_700_1500"]
     fc = slug.FilterCollection(names, slug.PhotSystem.AB, FILTER_REGISTRY)
-    assert fc.filterUnits() == ["ABmag", "photons/s"]
+    assert fc.filterUnits() == ["mag(AB)", "photon/s"]
 
 
 def test_filtercollection_instrument_omitted():
