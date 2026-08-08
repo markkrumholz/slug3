@@ -13,6 +13,7 @@ import re
 import shutil
 import tomlkit
 import urllib3
+from mist_truncate_wd import mist_truncate_wd
 
 # Magic strings
 MIST_version = "v2.5"
@@ -48,6 +49,10 @@ parser.add_argument("--vvcrit", type=float, nargs="+", default=[],
                     help="List of v/vcrit values to fetch; if unspecified, fetch all")
 parser.add_argument("--verbose", action="store_true",
                     help="Print verbose output")
+parser.add_argument("--no_truncate", action="store_true",
+                    help="Do not truncate tracks after they enter the "
+                         "post-AGB/white dwarf cooling phase (phase 6); "
+                         "see mist_truncate_wd.py")
 args = parser.parse_args()
 
 # Start by reading the URL and fetching the list of available files
@@ -280,6 +285,13 @@ for f in files_avail:
 
 # Clean up all downloads
 shutil.rmtree(temp_dir, ignore_errors=True)
+
+# Truncate tracks after they enter the post-AGB/white dwarf cooling
+# phase, unless disabled -- see mist_truncate_wd.py's own docstring
+if not args.no_truncate:
+    if args.verbose:
+        print(f"Truncating post-AGB/white dwarf cooling tails in {args.output}...")
+    mist_truncate_wd(args.output)
 
 # Read existing registry file if it exists, otherwise create a new one
 if shutil.os.path.exists(args.registry):
