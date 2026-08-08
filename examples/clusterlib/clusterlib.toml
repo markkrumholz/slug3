@@ -12,11 +12,15 @@
 # data referenced below to have been fetched locally (too large to
 # store in the repository -- see data/tools/fetch_*.py).
 
-# Name of run -- this will be the base name of the output file(s)
-sim_type = "clusterlib"
+# This is a cluster (rather than galaxy) simulation
+sim_type = "cluster"
 
 # Number of trials to run
-n_trial = 1000
+n_trial = 2000
+
+# Base name of the output file(s)
+[output]
+model_name = "clusterlib"
 
 # Input stanza to describe stellar models
 [stars]
