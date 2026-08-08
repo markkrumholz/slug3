@@ -16,3 +16,4 @@ below explicitly.
 """
 
 from ._slug import *  # noqa: F401,F403
+from .read import read
