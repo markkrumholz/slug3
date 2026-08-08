@@ -206,6 +206,27 @@ def test_cluster_phot_filters_match_input_deck(cluster_phot, reader):
     assert len(cluster_phot.filter_units) == len(cluster_phot.filters)
 
 
+# ---------------------------------------------------------------------
+# slug_reader.filters / filter_units: aliases for cluster_phot's own
+# ---------------------------------------------------------------------
+
+def test_reader_filters_alias(reader, cluster_phot):
+    """reader.filters is the identical object as reader.cluster_phot.filters."""
+    assert reader.filters is cluster_phot.filters
+
+
+def test_reader_filter_units_alias(reader, cluster_phot):
+    """reader.filter_units is the identical object as reader.cluster_phot.filter_units."""
+    assert reader.filter_units is cluster_phot.filter_units
+
+
+@pytest.mark.parametrize("attr", ["filters", "filter_units"])
+def test_reader_filters_readonly(reader, attr):
+    """Assigning to reader.filters/filter_units raises AttributeError."""
+    with pytest.raises(AttributeError):
+        setattr(reader, attr, None)
+
+
 def test_cluster_phot_magnitude_filter(cluster_phot):
     """A Vega-system real filter comes back as a magnitude Quantity."""
     phot = cluster_phot["HST.WFC3_UVIS1.F555W"]

@@ -50,6 +50,10 @@ class slug_reader:
         Lazy reader for the cluster_phot group's per-filter photometry
         (indexable by filter name, e.g. cluster_phot["Lbol"]), or None
         if this file has no cluster_phot group (read-only).
+    filters : list of str
+        Alias for cluster_phot.filters (read-only).
+    filter_units : list of str
+        Alias for cluster_phot.filter_units (read-only).
     """
 
     def __init__(self, filename):
@@ -135,3 +139,25 @@ class slug_reader:
     @cluster_phot.setter
     def cluster_phot(self, value):
         raise AttributeError("cluster_phot is read-only")
+
+    @property
+    def filters(self):
+        """
+        list of str : alias for cluster_phot.filters (read-only).
+        """
+        return self.cluster_phot.filters
+
+    @filters.setter
+    def filters(self, value):
+        raise AttributeError("filters is read-only")
+
+    @property
+    def filter_units(self):
+        """
+        list of str : alias for cluster_phot.filter_units (read-only).
+        """
+        return self.cluster_phot.filter_units
+
+    @filter_units.setter
+    def filter_units(self, value):
+        raise AttributeError("filter_units is read-only")
