@@ -1,0 +1,14 @@
+# Cluster mass function for the clusterlib example: a Schechter
+# distribution (a powerlaw of slope alpha with an exponential cutoff
+# above xStar) with alpha = -2 and xStar = 1e5 Msun. Breakpoints set
+# the mass range this is sampled over: 100 Msun (a typical minimum
+# bound-cluster mass) to 1e7 Msun -- well above xStar, so the
+# exponential cutoff, not this upper bound, is what actually shapes
+# the high-mass tail.
+
+breakpoints = [1e2, 1e7]
+
+[segment1]
+type = "schechter"
+slope = -2
+xStar = 1e5

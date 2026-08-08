@@ -1,0 +1,58 @@
+# clusterlib: an example input deck demonstrating a realistic,
+# large-scale Monte Carlo population of star clusters -- using MIST
+# tracks and a full chained set of stellar atmosphere models
+# (spectra.model = "default"; see specsyn::defaultModelList and
+# SimControls::readSpectra()), spectra and photometry (including dust
+# extinction), and every stochastic input (metallicity, cluster mass,
+# output time, visual extinction) drawn from its own distribution
+# rather than fixed. Run this from within this directory (so the
+# dists/*.toml paths below resolve) with:
+#   slug clusterlib.toml
+# It requires the real MIST tracks, spectral libraries, and filter/Vega
+# data referenced below to have been fetched locally (too large to
+# store in the repository -- see data/tools/fetch_*.py).
+
+# This is a cluster (rather than galaxy) simulation
+sim_type = "cluster"
+
+# Number of trials to run
+n_trial = 2000
+
+# Base name of the output file(s)
+[output]
+model_name = "clusterlib"
+
+# Input stanza to describe stellar models
+[stars]
+IMF = "chabrier.toml"     # Chabrier (2005) IMF
+tracks = "MIST"           # MIST stellar tracks
+v_vcrit = 0.4             # Rotating at 40% of breakup
+alphaFe = 0.0             # [alpha/Fe] = 0 (Solar alpha/Fe)
+FeH = "dists/FeH.toml"    # [Fe/H] values drawm from this distribution
+
+# Input stanza to describe spectral synthesis
+[spectra]
+model = "default"         # Default spectral model
+wl_min = 200              # Wavelength grid starts at 200 Å
+wl_max = 2e5              # Wavelength grid ends at 2e5 Å
+nwl = 1024                # Wavelength grid has 1024 points
+
+# Input stanza to describe phometry
+# filters lists the filters to use, including a mix of real filters and
+# idealized filters representing ionizing photon fluxes and bolometric luminosity
+[phot]
+filters = ["HST.WFC3_UVIS1.F275W", "HST.WFC3_UVIS1.F336W", "HST.WFC3_UVIS1.F438W", "HST.WFC3_UVIS1.F555W", "HST.WFC3_UVIS1.F814W", "Q(HI)", "Q(HeI)", "Q(OII)", "Lbol"]
+system = "Vega"           # Compute magnitudes in the Vega system
+
+# Input stanza to describe star clusters
+[clusters]
+CMF = "dists/CMF.toml"    # Draw cluster masses from this distribution
+
+# Input stanza to describe dust extinction
+[extinct]
+AV = "dists/AV.toml"      # Draw V extinction values (in mag) from this distribution
+model = "Calzetti_starburst"   # Extinction curve shape
+
+# Input stanza describing output times
+[outputs]
+output_time_dist = "dists/times.toml"    # Draw output times from this distribution
