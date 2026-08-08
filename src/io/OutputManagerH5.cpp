@@ -413,7 +413,7 @@ void io::OutputManagerH5::openClusterSpectraGroup()
     H5Dclose(uidSpecDset);
     const hid_t specDset = createExtensible2dDataset(
         clusterSpectraGroup_, "spec", H5T_NATIVE_DOUBLE, nWl);
-    writeStringAttr(specDset, "units", "erg/s/Angstrom");
+    writeStringAttr(specDset, "units", "erg/(s Angstrom)");
     H5Dclose(specDset);
 
     if (simControls_.extinct() != nullptr)
@@ -421,7 +421,7 @@ void io::OutputManagerH5::openClusterSpectraGroup()
         const auto nWlExtinct = static_cast<hsize_t>(simControls_.extinct()->wl().size());
         const hid_t specExtinctDset = createExtensible2dDataset(
             clusterSpectraGroup_, "spec_extinct", H5T_NATIVE_DOUBLE, nWlExtinct);
-        writeStringAttr(specExtinctDset, "units", "erg/s/Angstrom");
+        writeStringAttr(specExtinctDset, "units", "erg/(s Angstrom)");
         H5Dclose(specExtinctDset);
     }
     // NOLINTEND(misc-include-cleaner)

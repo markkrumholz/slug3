@@ -160,7 +160,7 @@ inline auto testFilterCollectionMixedConstruction() -> int
 
         const auto gotUnits = fc.filterUnits();
         const std::vector<std::string> expectedUnits = {
-            "erg/s/Angstrom", "erg/s/Angstrom", "photons/s", "photons/s"};
+            "erg/(s Angstrom)", "erg/(s Angstrom)", "photons/s", "photons/s"};
         if (gotUnits != expectedUnits)
         {
             std::cerr << "testFilterCollectionMixedConstruction: filterUnits() mismatch\n";

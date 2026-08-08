@@ -1286,7 +1286,7 @@ def test_filtercollection_mixed_construction():
 
     assert fc.filterNames() == names
     assert fc.filterUnits() == [
-        "erg/s/Angstrom", "erg/s/Angstrom", "photons/s", "photons/s"]
+        "erg/(s Angstrom)", "erg/(s Angstrom)", "photons/s", "photons/s"]
 
     wl, spec = _make_const_spec(500.0, 9000.0, 5000, 3.5)
 

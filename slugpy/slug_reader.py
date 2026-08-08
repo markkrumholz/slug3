@@ -41,6 +41,10 @@ class slug_reader:
         Lazy reader for the clusters group's datasets (target_mass,
         birth_mass, ...), or None if this file has no clusters group
         (read-only).
+    cluster_spectra : slug_group_reader or None
+        Lazy reader for the cluster_spectra group's datasets (wl,
+        spec, ...), or None if this file has no cluster_spectra group
+        (read-only).
     """
 
     def __init__(self, filename):
@@ -90,3 +94,21 @@ class slug_reader:
     @clusters.setter
     def clusters(self, value):
         raise AttributeError("clusters is read-only")
+
+    @property
+    def cluster_spectra(self):
+        """
+        slug_group_reader or None : lazy reader for the
+        cluster_spectra group's datasets, built the first time this
+        property is accessed and cached thereafter, or None if this
+        file has no cluster_spectra group.
+        """
+        if "cluster_spectra" not in self._groups:
+            return None
+        if self._groups["cluster_spectra"] is None:
+            self._groups["cluster_spectra"] = slug_group_reader(self._file, "cluster_spectra")
+        return self._groups["cluster_spectra"]
+
+    @cluster_spectra.setter
+    def cluster_spectra(self, value):
+        raise AttributeError("cluster_spectra is read-only")
