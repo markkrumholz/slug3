@@ -33,5 +33,9 @@ PYBIND11_MODULE(_slug, m, py::mod_gil_not_used()) {
     bindFilterTabulated(m);
     bindFilterCollection(m);
     bindPhotConvert(m);
+    bindOutputManager(m);
+    bindOutputManagerH5(m);
+    bindOutputManagerAscii(m);
+    bindSimCluster(m);
 }
 // NOLINTEND(misc-include-cleaner)

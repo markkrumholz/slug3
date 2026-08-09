@@ -49,6 +49,16 @@ Sections, in file order, and the fixtures each is built around:
   of its own, so parsePDFDescriptor() is the only way to obtain one
   from Python.
 
+- OutputManagerH5 / OutputManagerAscii / SimCluster: built from
+  CLUSTER_DECK_ABS (CLUSTER_DECK's own absolute path, needed since
+  these tests chdir into tmp_path so the files they write don't land
+  in the repo itself -- SimControls's own path argument has no SLUG_DIR
+  fallback the way paths *inside* a deck do, so a relative path would
+  stop resolving once the cwd moves). OutputManager itself has no
+  exposed constructor (Python only ever encounters it as the common
+  base of OutputManagerH5/OutputManagerAscii, e.g. via
+  isinstance()) -- see BindOutputManager.cpp.
+
 This file is run via pytest, invoked as a CTest test from CMakeLists.txt
 (see the test_PythonBindings target), so `ctest` alone runs both the
 C++ and Python sides of the test suite. It requires the SLUG_DIR
@@ -61,6 +71,7 @@ import gc
 import pathlib
 import tomllib
 
+import h5py
 import numpy as np
 import pytest
 
@@ -92,6 +103,12 @@ SAFE_LOG_TIMES = (0.0, 1.0, 2.0, 3.0)
 # spectra.model = "blackbody".
 CLUSTER_DECK = "tests/core/assets/testCluster.in"
 CLUSTER_TARGET_MASS = 1e3
+
+# Absolute form of CLUSTER_DECK, for the OutputManagerH5/
+# OutputManagerAscii/SimCluster tests below, which chdir into tmp_path
+# (so the files they write don't land in the repo) before constructing
+# anything from it -- see those tests' own comment.
+CLUSTER_DECK_ABS = str(pathlib.Path(CLUSTER_DECK).resolve())
 
 # Input decks used for the Cluster.phot()/lbol() tests below.
 # PHOT_DECK requests two real/idealized filters plus "Lbol"; LBOL_DECK
@@ -1742,3 +1759,111 @@ def test_pdf_draw_target():
     samples = pdf.drawTarget(target)
     assert len(samples) > 0
     assert sum(samples) == pytest.approx(target, rel=0.5)
+
+
+# ---------------------------------------------------------------------
+# OutputManagerH5 / OutputManagerAscii / SimCluster
+# ---------------------------------------------------------------------
+
+def test_outputmanagerh5_writes_valid_file(tmp_path, monkeypatch):
+    """OutputManagerH5 opens a real HDF5 file (named after
+    sim_controls.modelName(), in the current directory since
+    CLUSTER_DECK sets neither), writing its header and input_deck
+    group to match sim_controls and the deck used to build it."""
+    sim_controls = slug.SimControls(CLUSTER_DECK_ABS)
+    monkeypatch.chdir(tmp_path)
+
+    output_manager = slug.OutputManagerH5(sim_controls, CLUSTER_DECK_ABS)
+    del output_manager
+    gc.collect()
+
+    output_path = tmp_path / "slug_sim.h5"
+    assert output_path.exists()
+
+    with h5py.File(output_path, "r") as f:
+        assert {"slug-hash", "date", "time", "rng_state"} <= set(f.attrs.keys())
+        assert "input_deck" in f
+        assert "clusters" in f
+        assert "cluster_spectra" in f
+
+
+def test_outputmanagerh5_existing_file_raises(tmp_path, monkeypatch):
+    """Constructing a second OutputManagerH5 for the same output file
+    raises RuntimeError rather than silently overwriting it."""
+    sim_controls = slug.SimControls(CLUSTER_DECK_ABS)
+    monkeypatch.chdir(tmp_path)
+
+    slug.OutputManagerH5(sim_controls, CLUSTER_DECK_ABS)
+    with pytest.raises(RuntimeError):
+        slug.OutputManagerH5(sim_controls, CLUSTER_DECK_ABS)
+
+
+def test_outputmanagerh5_accepts_literal_toml_content(tmp_path, monkeypatch):
+    """input_deck may be the deck's own text, not just a path to it --
+    same rule as SimControls's own constructor."""
+    deck_text = pathlib.Path(CLUSTER_DECK_ABS).read_text()
+    sim_controls = slug.SimControls(deck_text)
+    monkeypatch.chdir(tmp_path)
+
+    slug.OutputManagerH5(sim_controls, deck_text)
+
+    output_path = tmp_path / "slug_sim.h5"
+    assert output_path.exists()
+    with h5py.File(output_path, "r") as f:
+        written_deck = tomllib.loads(f["input_deck"]["toml"][()].decode())
+        assert written_deck == tomllib.loads(deck_text)
+
+
+def test_outputmanagerh5_is_an_outputmanager(tmp_path, monkeypatch):
+    """OutputManagerH5 is recognized as an OutputManager -- the
+    relationship SimCluster's own constructor relies on to accept
+    either OutputManagerH5 or OutputManagerAscii."""
+    sim_controls = slug.SimControls(CLUSTER_DECK_ABS)
+    monkeypatch.chdir(tmp_path)
+
+    output_manager = slug.OutputManagerH5(sim_controls, CLUSTER_DECK_ABS)
+    assert isinstance(output_manager, slug.OutputManager)
+
+
+def test_outputmanagerascii_writes_valid_files(tmp_path, monkeypatch):
+    """OutputManagerAscii opens the summary/clusters/cluster_spectra
+    text files (no cluster_phot, since CLUSTER_DECK requests no
+    filters) and writes sim_controls's own header plus the input deck
+    into the summary file."""
+    sim_controls = slug.SimControls(CLUSTER_DECK_ABS)
+    monkeypatch.chdir(tmp_path)
+
+    output_manager = slug.OutputManagerAscii(sim_controls, CLUSTER_DECK_ABS)
+    assert isinstance(output_manager, slug.OutputManager)
+    del output_manager
+    gc.collect()
+
+    assert (tmp_path / "slug_sim_summary.txt").exists()
+    assert (tmp_path / "slug_sim_clusters.txt").exists()
+    assert (tmp_path / "slug_sim_cluster_spectra.txt").exists()
+    assert not (tmp_path / "slug_sim_cluster_phot.txt").exists()
+
+    summary = (tmp_path / "slug_sim_summary.txt").read_text()
+    assert "slug-hash" in summary
+    assert "input_deck" in summary
+
+
+def test_simcluster_run_matches_deck(tmp_path, monkeypatch):
+    """SimCluster.run() drives a full simulation exactly as the slug
+    command-line executable does: one cluster (CLUSTER_DECK's own
+    fixed clusters.CMF), advanced through each of its own three output
+    times (outputs.start_time/end_time/ntime), with a spectrum written
+    at each."""
+    sim_controls = slug.SimControls(CLUSTER_DECK_ABS)
+    monkeypatch.chdir(tmp_path)
+    output_manager = slug.OutputManagerH5(sim_controls, CLUSTER_DECK_ABS)
+
+    sim = slug.SimCluster(sim_controls, output_manager)
+    sim.run()
+    del sim
+    gc.collect()
+
+    with h5py.File(tmp_path / "slug_sim.h5", "r") as f:
+        assert list(f["clusters"]["target_mass"]) == [CLUSTER_TARGET_MASS]
+        assert sorted(f["cluster_spectra"]["time"][:]) == [0.0, 5.0, 10.0]
+        assert f["cluster_spectra"]["spec"].shape[0] == 3

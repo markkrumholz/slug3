@@ -359,9 +359,17 @@ pybind11_add_module(slugPython
     src/pybind/BindFilterCollection.cpp
     src/pybind/BindPhotConvert.cpp
     src/pybind/BindPDF.cpp
+    src/pybind/BindOutputManager.cpp
+    src/pybind/BindOutputManagerH5.cpp
+    src/pybind/BindOutputManagerAscii.cpp
+    src/pybind/BindSimCluster.cpp
     src/core/Cluster.cpp
+    src/core/SimCluster.cpp
     src/extinct/Extinct.cpp
     src/io/SimControls.cpp
+    src/io/OutputManager.cpp
+    src/io/OutputManagerAscii.cpp
+    src/io/OutputManagerH5.cpp
     src/interpolation/Mesh2DGrid.cpp
     src/pdfs/PDFFileParser.cpp
     src/pdfs/PDFSegment.cpp
@@ -448,7 +456,7 @@ target_include_directories(slugTestIo SYSTEM PRIVATE src/extern/pcg-cpp/include 
 target_include_directories(slugTestSpecsyn PRIVATE src)
 target_include_directories(slugTestSpecsyn SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus src/extern/cubature)
 
-target_include_directories(slugPython PRIVATE src)
+target_include_directories(slugPython PRIVATE src ${CMAKE_BINARY_DIR}/generated)
 target_include_directories(slugPython SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus src/extern/cubature)
 
 target_include_directories(slug SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})

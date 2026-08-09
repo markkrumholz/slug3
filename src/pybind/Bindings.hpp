@@ -24,6 +24,8 @@
 #include <memory>
 #include <pybind11/pybind11.h>
 #include <pybind11/pytypes.h>
+#include <string>
+#include <toml.hpp>
 
 namespace py = pybind11;
 
@@ -121,6 +123,60 @@ void bindPhotConvert(py::module_& m);
  * @brief Bind pdfs::PDF as PDF
  */
 void bindPDF(py::module_& m);
+
+/**
+ * @brief Bind io::OutputManager as OutputManager
+ * @details
+ * OutputManager is abstract (writeCluster()/writeClusterSpec()/
+ * writeClusterPhot() are pure virtual), so no constructor is exposed
+ * here, and none of those methods are bound either (see
+ * BindOutputManagerH5.cpp's/BindOutputManagerAscii.cpp's own file
+ * comments on why). Python code only ever encounters an OutputManager
+ * through an OutputManagerH5 or OutputManagerAscii, and only to hand
+ * one to SimCluster's own constructor. Must run before
+ * bindOutputManagerH5()/bindOutputManagerAscii(), since those register
+ * OutputManager as their Python base -- mirrors bindFilter()'s own
+ * ordering requirement relative to bindFilterIdeal()/
+ * bindFilterTabulated(), for the identical reason (see BindFilter.cpp).
+ */
+void bindOutputManager(py::module_& m);
+
+/**
+ * @brief Bind io::OutputManagerH5 as OutputManagerH5
+ */
+void bindOutputManagerH5(py::module_& m);
+
+/**
+ * @brief Bind io::OutputManagerAscii as OutputManagerAscii
+ */
+void bindOutputManagerAscii(py::module_& m);
+
+/**
+ * @brief Bind core::SimCluster as SimCluster
+ */
+void bindSimCluster(py::module_& m);
+
+/**
+ * @brief Parse a string as either literal TOML text or a path to a TOML file
+ * @param pathOrContent Either the text of a TOML document, or a path
+ *   to one on disk
+ * @return The parsed toml::table
+ * @throws toml::parse_error if pathOrContent parses as neither literal
+ *   TOML text nor a path to a file that itself contains valid TOML
+ * @details
+ * Tried first as literal TOML text (via toml::parse); if that fails to
+ * parse, tried again as a file path instead (via toml::parse_file) --
+ * so e.g. a path like "deck.toml" (not valid TOML on its own) falls
+ * through to being read as a file, while a string like "n_trial = 10"
+ * (a path that could never exist) is used directly as the document's
+ * own content. Shared by every binding that accepts a toml input deck
+ * as a Python string (OutputManagerH5's and OutputManagerAscii's own
+ * constructors) -- SimControls's own constructor needs to tell which
+ * of the two interpretations actually matched (see its own comment in
+ * BindSimControls.cpp), so it does not use this shared helper, even
+ * though its logic is the same.
+ */
+auto parseTomlPathOrContent(const std::string& pathOrContent) -> toml::table;
 
 /**
  * @brief Resolve an optional py::object SimControls argument to a real SimControls
