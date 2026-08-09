@@ -146,6 +146,35 @@ RuntimeError
     If no spectral synthesizer was requested (spectra.model was not
     set in the input deck).)doc";
 
+static constexpr std::string_view simTypeGetterDocstring = R"doc(Return the simulation type.
+
+Returns
+-------
+sim_type : SimControls.SimType)doc";
+
+static constexpr std::string_view outputModeGetterDocstring = R"doc(Return the output mode.
+
+Returns
+-------
+output_mode : SimControls.OutputMode)doc";
+
+static constexpr std::string_view modelNameGetterDocstring = R"doc(Return the model name.
+
+Returns
+-------
+model_name : str
+    Base name of this simulation's output file(s) -- e.g. for HDF5
+    output, model_name + ".h5".)doc";
+
+static constexpr std::string_view outDirGetterDocstring = R"doc(Return the output directory.
+
+Returns
+-------
+out_dir : str
+    Directory into which output will be written. An empty string (the
+    default) means output will be written into the current working
+    directory.)doc";
+
 static constexpr std::string_view wlObsDocstring = R"doc(Return the observed-frame wavelength grid of the spectral synthesizer.
 
 Returns
@@ -448,7 +477,21 @@ static void applyConstructorProperties(io::SimControls& sc,
 // NOLINTBEGIN(misc-include-cleaner)
 void bindSimControls(py::module_& m)
 {
-    py::class_<io::SimControls, py::smart_holder>(m, "SimControls")
+    py::class_<io::SimControls, py::smart_holder> simControlsClass(m, "SimControls");
+
+    py::enum_<io::SimControls::SimType>(simControlsClass, "SimType",
+            "The type of simulation this SimControls describes.")
+        .value("cluster", io::SimControls::SimType::cluster, "Cluster simulation")
+        .value("galaxy", io::SimControls::SimType::galaxy, "Galaxy simulation")
+        .value("none", io::SimControls::SimType::none,
+                "Dummy value, before a real simulation type has been set");
+
+    py::enum_<io::SimControls::OutputMode>(simControlsClass, "OutputMode",
+            "The format this SimControls's own output will be written in.")
+        .value("h5", io::SimControls::OutputMode::h5, "HDF5 output")
+        .value("ascii", io::SimControls::OutputMode::ascii, "ASCII output");
+
+    simControlsClass
         .def(py::init(
                 [](const std::string& path, const std::string& simType,
                    const py::object& imf, const py::object& cmf, const py::object& feH,
@@ -519,6 +562,14 @@ void bindSimControls(py::module_& m)
                     return self.specsyn()->wlObs();
                 },
                 wlObsDocstring.data())
+        .def("simType", &io::SimControls::simType,
+                simTypeGetterDocstring.data())
+        .def("outputMode", &io::SimControls::outputMode,
+                outputModeGetterDocstring.data())
+        .def("modelName", &io::SimControls::modelName,
+                modelNameGetterDocstring.data())
+        .def("outDir", &io::SimControls::outDir,
+                outDirGetterDocstring.data())
         .def("setComputeLbol", &io::SimControls::setComputeLbol,
                 setComputeLbolDocstring.data(), py::arg("value"))
         .def("setIMF", &io::SimControls::setIMF,

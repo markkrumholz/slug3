@@ -162,7 +162,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y clang-18 libc++-18-dev libc++abi-18-dev libgsl-dev libhdf5-dev
-          python -m pip install pyright h5py tomlkit astropy numpy
+          python -m pip install pyright pytest h5py tomlkit astropy numpy
 
       - name: Configure
         run: |
