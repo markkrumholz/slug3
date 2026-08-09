@@ -18,10 +18,7 @@
 sim_type = "cluster"
 
 # Number of trials to run
-n_trial = 20
-
-# Set moderately verbose output, so we can see progress
-verbosity = 1
+n_trial = 2000
 
 # Base name of the output file(s) and time of output
 [output]
