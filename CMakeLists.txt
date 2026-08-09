@@ -325,6 +325,16 @@ add_executable(slugTestSpecsyn
     tests/specsyn/testSpecsynLibWD.cpp
     tests/specsyn/testSpecsynLibChained.cpp
     src/extern/cubature/pcubature.c
+    src/extinct/Extinct.cpp
+    src/io/SimControls.cpp
+    src/interpolation/Mesh2DGrid.cpp
+    src/phot/FilterCollection.cpp
+    src/phot/VegaSpectrum.cpp
+    src/phot/FilterIdeal.cpp
+    src/phot/FilterTabulated.cpp
+    src/tracks/TrackUtils.cpp
+    src/tracks/Tracks2D.cpp
+    src/tracks/Tracks3D.cpp
     src/pdfs/PDFFileParser.cpp
     src/pdfs/PDFSegment.cpp
     src/pdfs/PDFSegmentDelta.cpp
