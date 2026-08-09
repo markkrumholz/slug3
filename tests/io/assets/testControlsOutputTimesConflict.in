@@ -1,5 +1,6 @@
-# Test input deck for SimControls: both output_time_dist and output_times
-# specified at once (invalid -- only one option may be given)
+# Test input deck for SimControls: both output.output_times and the
+# output.start_time/end_time/ntime range specified at once (invalid --
+# only one option may be given)
 
 sim_type = "cluster"
 
@@ -13,6 +14,8 @@ alphaFe = -0.2
 [clusters]
 CMF = 1e3
 
-[outputs]
-output_time_dist = 5.0
+[output]
 output_times = [1.0, 2.0]
+start_time = 0.0
+end_time = 10.0
+ntime = 3

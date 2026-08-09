@@ -17,11 +17,11 @@ CMF = 1e3
 
 [output]
 model_name = "my_test_model"
-
-[outputs]
 start_time = 0.0
 end_time = 10.0
 ntime = 3
+
+[outputs]
 output_mode = "ascii"
 out_dir = "my_test_outdir"
 # output_clusters is only meaningful (and only read) for a galaxy-type

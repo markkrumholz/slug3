@@ -530,7 +530,7 @@ def test_simcontrols_wl_without_specsyn_raises(tmp_path):
 
 def test_simcontrols_default_deck_file_contents():
     """The bundled default deck should exist and contain the expected
-    keys, including a placeholder [outputs] section (a single output
+    keys, including a placeholder [output] section (a single output
     time), which the merged SimControls constructor requires even
     though nothing here ever reads it -- see PyDefaults.toml's own
     comment. Checked directly against the file (independent of whether
@@ -542,7 +542,7 @@ def test_simcontrols_default_deck_file_contents():
 
     assert deck["sim_type"] == "cluster"
     assert deck["n_trial"] == 1
-    assert deck["outputs"]["output_times"] == [0.0]
+    assert deck["output"]["output_times"] == [0.0]
     assert deck["stars"]["IMF"] == "chabrier.toml"
     assert deck["stars"]["tracks"] == "MIST"
     assert deck["stars"]["v_vcrit"] == pytest.approx(0.4)
@@ -1852,7 +1852,7 @@ def test_simcluster_run_matches_deck(tmp_path, monkeypatch):
     """SimCluster.run() drives a full simulation exactly as the slug
     command-line executable does: one cluster (CLUSTER_DECK's own
     fixed clusters.CMF), advanced through each of its own three output
-    times (outputs.start_time/end_time/ntime), with a spectrum written
+    times (output.start_time/end_time/ntime), with a spectrum written
     at each."""
     sim_controls = slug.SimControls(CLUSTER_DECK_ABS)
     monkeypatch.chdir(tmp_path)

@@ -1,4 +1,6 @@
-# Test input deck for SimControls: output_time_dist option (option 1)
+# Test input deck for SimControls: output.output_times, given a single
+# scalar value, drawing every trial's output time from a delta-function
+# PDF (option 1's PDF interpretation)
 
 sim_type = "cluster"
 
@@ -12,5 +14,5 @@ alphaFe = -0.2
 [clusters]
 CMF = 1e3
 
-[outputs]
-output_time_dist = 5.0
+[output]
+output_times = 5.0

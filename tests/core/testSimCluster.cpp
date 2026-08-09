@@ -69,8 +69,12 @@ static auto makeInputDeck(const std::string& modelName,
     const std::string& deckPath = "tests/core/assets/testCluster.in") -> toml::table
 {
     toml::table inputDeck = toml::parse_file(deckPath);
-    inputDeck.insert("output", toml::table{ { "model_name", modelName } });
-    inputDeck.at_path("outputs").as_table()->insert("out_dir", outDir.string());
+    if (toml::table* outputTbl = inputDeck["output"].as_table())
+    { outputTbl->insert("model_name", modelName); }
+    else { inputDeck.insert("output", toml::table{ { "model_name", modelName } }); }
+    if (toml::table* outputsTbl = inputDeck["outputs"].as_table())
+    { outputsTbl->insert("out_dir", outDir.string()); }
+    else { inputDeck.insert("outputs", toml::table{ { "out_dir", outDir.string() } }); }
     inputDeck.insert("n_trial", static_cast<int64_t>(nTrial));
     if (!fehDistPath.empty())
     {
