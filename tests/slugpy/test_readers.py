@@ -31,6 +31,41 @@ REPO_ROOT = pathlib.Path.cwd()
 CLUSTERLIB_DIR = REPO_ROOT / "examples" / "clusterlib"
 CLUSTERLIB_H5 = "examples/clusterlib/clusterlib.h5"
 
+# clusterlib.h5's own input_deck requests the real MIST tracks and the
+# full "default" chained spectral library (see clusterlib.toml), so
+# building a real SimControls from it -- as slug_reader.controls (and
+# so get_cluster()) does -- needs every one of these files. They're
+# fetched data (see data/tools/fetch_*.py), not committed to the repo,
+# so are unavailable in CI -- mirrors tests/core/
+# testClusterSpecsynFullCommon.cpp's own requiredDataFiles/
+# requiredPhotDataFiles and allRequiredDataFilesExist(), which guard
+# the C++ side's own equivalent full-chain tests the same way.
+_REQUIRED_FULL_DATA_FILES = (
+    "data/tracks/tracks.toml",
+    "data/tracks/mist.h5",
+    "data/spectra/spectra.toml",
+    "data/spectra/powr_wc.h5",
+    "data/spectra/powr_wne.h5",
+    "data/spectra/powr_wnl_h20.h5",
+    "data/spectra/powr_wnl_h40.h5",
+    "data/spectra/powr_wnl_h60.h5",
+    "data/spectra/tlusty_o.h5",
+    "data/spectra/tlusty_b.h5",
+    "data/spectra/bosz.h5",
+    "data/spectra/ck04.h5",
+    "data/spectra/tremblay_da.h5",
+    "data/spectra/tremblay_elm.h5",
+    "data/spectra/rauch.h5",
+    "data/spectra/rauch_h07.h5",
+    "data/filters/filters.toml",
+    "data/filters/filters.h5",
+)
+_FULL_DATA_AVAILABLE = all((REPO_ROOT / p).exists() for p in _REQUIRED_FULL_DATA_FILES)
+requires_full_data = pytest.mark.skipif(
+    not _FULL_DATA_AVAILABLE,
+    reason="requires the real MIST tracks + full spectral library chain + "
+        "filter registry (fetched data, not committed to the repo)")
+
 
 @pytest.fixture(scope="module")
 def reader():
@@ -320,6 +355,7 @@ def test_cluster_phot_unknown_key(cluster_phot):
 # repo root.
 # ---------------------------------------------------------------------
 
+@requires_full_data
 def test_get_cluster_reconstructs_correctly(reader, clusters, monkeypatch):
     """get_cluster(uid) returns a Cluster with that uid's own uid/target_mass."""
     uid = int(clusters["uid"][0])
@@ -332,6 +368,7 @@ def test_get_cluster_reconstructs_correctly(reader, clusters, monkeypatch):
     assert cl.targetMass() == target_mass
 
 
+@requires_full_data
 def test_get_cluster_bitwise_reproducible(reader, clusters, monkeypatch):
     """Two independent get_cluster() calls for the same uid agree bit-for-bit."""
     uid = int(clusters["uid"][1])
@@ -345,6 +382,7 @@ def test_get_cluster_bitwise_reproducible(reader, clusters, monkeypatch):
     assert cl_a.feH() == cl_b.feH()
 
 
+@requires_full_data
 def test_get_cluster_caches_controls(monkeypatch):
     """The SimControls built for get_cluster() is cached and reused across calls."""
     fresh_reader = slug_reader(CLUSTERLIB_H5)
