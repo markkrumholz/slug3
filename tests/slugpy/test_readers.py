@@ -15,12 +15,14 @@ SLUG_DIR or any other environment variable.
 """
 
 import pathlib
+from typing import cast
 
 import h5py
 import numpy as np
 import pytest
 from astropy import units as u
 
+from slugpy._slug import Filter, FilterCollection
 from slugpy.slug_group_reader import slug_group_reader
 from slugpy.slug_phot_reader import slug_phot_reader
 from slugpy.slug_reader import slug_reader
@@ -379,3 +381,214 @@ def test_get_cluster_no_clusters_group(tmp_path, monkeypatch):
     empty_reader = slug_reader(str(path))
     with pytest.raises(RuntimeError):
         empty_reader.get_cluster(1)
+
+
+# ---------------------------------------------------------------------
+# slug_phot_reader.filter_collection / get_filter, and
+# slug_reader.get_filter
+#
+# Only idealized filters (Q(HI), Q(HeI), ...) are exercised against
+# clusterlib.h5 itself: its real HST filters resolve through the
+# default filter registry (data/filters/filters.h5/.toml), which,
+# unlike data/filters/V_filter.h5/.toml, is fetched data rather than
+# committed to the repo, so a test depending on it wouldn't run in CI.
+# The registry-propagation test below builds its own tiny fixture
+# instead, pointing phot.registry at the committed V_filter registry.
+# ---------------------------------------------------------------------
+
+def test_filter_collection_starts_empty(cluster_phot):
+    """filter_collection is a PhotSystem.Vega FilterCollection, initially empty."""
+    assert isinstance(cluster_phot.filter_collection, FilterCollection)
+    assert cluster_phot.filter_collection.filterNames() == []
+
+
+def test_filter_collection_readonly(cluster_phot):
+    """Assigning to filter_collection raises AttributeError."""
+    with pytest.raises(AttributeError):
+        cluster_phot.filter_collection = None
+
+
+def test_get_filter_idealized(cluster_phot):
+    """get_filter() on an idealized filter needs no registry at all."""
+    filt = cluster_phot.get_filter("Q(HI)")
+    assert isinstance(filt, Filter)
+    assert filt.name() == "Q(HI)"
+    assert "Q(HI)" in cluster_phot.filter_collection.filterNames()
+
+
+def test_get_filter_cached(cluster_phot):
+    """Repeated get_filter() calls for the same name return the identical object."""
+    assert cluster_phot.get_filter("Q(HeI)") is cluster_phot.get_filter("Q(HeI)")
+
+
+def test_get_filter_via_reader(reader):
+    """slug_reader.get_filter() delegates to cluster_phot.get_filter()."""
+    assert reader.get_filter("Q(OII)").name() == "Q(OII)"
+
+
+def test_get_filter_unknown_name(cluster_phot):
+    """A name that isn't one of this file's own filters raises KeyError."""
+    with pytest.raises(KeyError):
+        cluster_phot.get_filter("not_one_of_the_filters")
+
+
+def test_get_filter_unparseable_name(cluster_phot):
+    """A filter name in this file that isn't a real filter (Lbol) raises RuntimeError."""
+    with pytest.raises(RuntimeError):
+        cluster_phot.get_filter("Lbol")
+
+
+def test_get_filter_no_cluster_phot_group(tmp_path):
+    """slug_reader.get_filter() raises RuntimeError when this file has no cluster_phot group."""
+    path = tmp_path / "no_cluster_phot.h5"
+    with h5py.File(path, "w") as f:
+        f.attrs["slug-hash"] = "deadbeef"
+        f.attrs["date"] = "2026-01-01"
+        f.attrs["time"] = "00:00:00"
+        f.attrs["rng_state"] = "x"
+        f.create_group("input_deck").create_dataset("toml", data="n_trial = 1")
+
+    empty_reader = slug_reader(str(path))
+    with pytest.raises(RuntimeError):
+        empty_reader.get_filter("Q(HI)")
+
+
+def test_get_filter_registry_propagation(tmp_path):
+    """phot.registry in input_deck is passed through to slug_phot_reader."""
+    path = tmp_path / "registry_test.h5"
+    with h5py.File(path, "w") as f:
+        f.attrs["slug-hash"] = "deadbeef"
+        f.attrs["date"] = "2026-01-01"
+        f.attrs["time"] = "00:00:00"
+        f.attrs["rng_state"] = "x"
+        deck = (
+            "n_trial = 1\n"
+            "sim_type = \"cluster\"\n\n"
+            "[phot]\n"
+            "registry = \"data/filters/V_filter.toml\"\n")
+        f.create_group("input_deck").create_dataset("toml", data=deck)
+        g = f.create_group("cluster_phot")
+        g.attrs["filters"] = ["Generic.Johnson.V"]
+        phot = g.create_dataset("phot", data=np.array([[15.0]]))
+        phot.attrs["units"] = ["mag"]
+        trial = g.create_dataset("trial", data=np.array([0], dtype="u8"))
+        trial.attrs["units"] = ""
+
+    registry_reader = slug_reader(str(path))
+    filt = registry_reader.get_filter("Generic.Johnson.V")
+    assert filt.name() == "Generic.Johnson.V"
+    assert abs(filt.wlPivot() - 5501.402599255) < 1e-6
+
+
+# ---------------------------------------------------------------------
+# slug_phot_reader.phot_convert / slug_reader.phot_convert
+#
+# Like test_get_filter_registry_propagation above, uses its own tiny
+# fixture pointing phot.registry at the committed V_filter registry,
+# rather than clusterlib.h5's own real HST filters, which resolve
+# through the default filter registry (fetched data, unavailable in
+# CI) -- see that test's own comment.
+# ---------------------------------------------------------------------
+
+def _make_phot_convert_test_file(tmp_path):
+    """A cluster_phot fixture with one real (Vega-system) filter and one idealized one."""
+    path = tmp_path / "phot_convert_test.h5"
+    with h5py.File(path, "w") as f:
+        f.attrs["slug-hash"] = "deadbeef"
+        f.attrs["date"] = "2026-01-01"
+        f.attrs["time"] = "00:00:00"
+        f.attrs["rng_state"] = "x"
+        deck = (
+            "n_trial = 1\n"
+            "sim_type = \"cluster\"\n\n"
+            "[phot]\n"
+            "registry = \"data/filters/V_filter.toml\"\n")
+        f.create_group("input_deck").create_dataset("toml", data=deck)
+        g = f.create_group("cluster_phot")
+        g.attrs["filters"] = ["Generic.Johnson.V", "Q(HI)"]
+        phot = g.create_dataset("phot", data=np.array([[15.0, 1e47]]))
+        phot.attrs["units"] = ["mag", "photon/s"]
+        # Only one column -- Q(HI) has no extincted counterpart here,
+        # mirroring clusterlib.h5's own Lbol/phot_extinct gap.
+        phot_extinct = g.create_dataset("phot_extinct", data=np.array([[15.5]]))
+        phot_extinct.attrs["units"] = ["mag"]
+        trial = g.create_dataset("trial", data=np.array([0], dtype="u8"))
+        trial.attrs["units"] = ""
+    return path
+
+
+def test_phot_convert_converts_real_filter(tmp_path):
+    """phot_convert() converts a real filter's photometry to the target system."""
+    reader = slug_reader(str(_make_phot_convert_test_file(tmp_path)))
+    cp = reader.cluster_phot
+    assert cp is not None
+    orig = cast(u.Quantity, cp["Generic.Johnson.V"])
+    assert orig.unit == u.mag
+
+    reader.phot_convert("AB")
+    converted = cast(u.Quantity, cp["Generic.Johnson.V"])
+    assert converted.unit == u.ABmag
+    assert not np.allclose(converted.value, orig.value)
+
+
+def test_phot_convert_leaves_non_convertible_units_untouched(tmp_path):
+    """phot_convert() leaves a photon-count filter's entry alone."""
+    reader = slug_reader(str(_make_phot_convert_test_file(tmp_path)))
+    cp = reader.cluster_phot
+    assert cp is not None
+    orig = cast(u.Quantity, cp["Q(HI)"])
+
+    reader.phot_convert("AB")
+    after = cast(u.Quantity, cp["Q(HI)"])
+    assert after.unit == orig.unit
+    assert np.allclose(after.value, orig.value)
+
+
+def test_phot_convert_extinct_dict_and_missing_column(tmp_path):
+    """phot_convert() also converts phot_extinct, skipping a filter missing there."""
+    reader = slug_reader(str(_make_phot_convert_test_file(tmp_path)))
+    cp = reader.cluster_phot
+    assert cp is not None
+
+    reader.phot_convert("AB")  # must not raise, despite Q(HI) having no extinct column
+    ext = cast(u.Quantity, cp["Generic.Johnson.V_ext"])
+    assert ext.unit == u.ABmag
+    with pytest.raises(IndexError):
+        cp["Q(HI)_ext"]
+
+
+def test_phot_convert_roundtrip(tmp_path):
+    """Converting Vega -> AB -> Vega recovers the original value."""
+    reader = slug_reader(str(_make_phot_convert_test_file(tmp_path)))
+    cp = reader.cluster_phot
+    assert cp is not None
+    orig = cast(u.Quantity, cp["Generic.Johnson.V"]).value
+
+    reader.phot_convert("AB")
+    reader.phot_convert("Vega")
+    back = cast(u.Quantity, cp["Generic.Johnson.V"])
+    assert np.allclose(back.value, orig, atol=1e-9)
+
+
+def test_phot_convert_via_reader_delegates(tmp_path):
+    """slug_reader.phot_convert() delegates to cluster_phot.phot_convert()."""
+    reader = slug_reader(str(_make_phot_convert_test_file(tmp_path)))
+    reader.phot_convert("AB")
+    cp = reader.cluster_phot
+    assert cp is not None
+    converted = cast(u.Quantity, cp["Generic.Johnson.V"])
+    assert converted.unit == u.ABmag
+
+
+def test_phot_convert_noop_when_no_cluster_phot(tmp_path):
+    """slug_reader.phot_convert() is a silent no-op when there's no cluster_phot group."""
+    path = tmp_path / "no_cluster_phot_convert.h5"
+    with h5py.File(path, "w") as f:
+        f.attrs["slug-hash"] = "deadbeef"
+        f.attrs["date"] = "2026-01-01"
+        f.attrs["time"] = "00:00:00"
+        f.attrs["rng_state"] = "x"
+        f.create_group("input_deck").create_dataset("toml", data="n_trial = 1")
+
+    reader = slug_reader(str(path))
+    reader.phot_convert("AB")

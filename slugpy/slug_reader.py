@@ -10,7 +10,7 @@ import h5py
 import numpy as np
 import tomlkit
 
-from ._slug import Cluster, SimControls
+from ._slug import Cluster, Filter, SimControls
 from .slug_group_reader import slug_group_reader
 from .slug_phot_reader import slug_phot_reader
 
@@ -147,7 +147,9 @@ class slug_reader:
         if "cluster_phot" not in self._groups:
             return None
         if self._groups["cluster_phot"] is None:
-            self._groups["cluster_phot"] = slug_phot_reader(self._file, "cluster_phot")
+            registry_name = self.input_deck.get("phot", {}).get("registry")
+            self._groups["cluster_phot"] = slug_phot_reader(
+                self._file, "cluster_phot", registry_name=registry_name)
         return cast(slug_phot_reader, self._groups["cluster_phot"])
 
     @cluster_phot.setter
@@ -243,3 +245,52 @@ class slug_reader:
         target_mass = float(clusters["target_mass"][index].value)
 
         return Cluster(target_mass, uid, 0.0, self.controls, rng_state)
+
+    def get_filter(self, filter_name: str) -> Filter:
+        """
+        Get a Filter object for one of this file's own filters.
+
+        Parameters
+        ----------
+        filter_name : str
+            Name of the filter to get; must be one of this file's own
+            filters (see filters).
+
+        Returns
+        -------
+        Filter
+            The requested filter -- see cluster_phot.get_filter()'s
+            own docstring for how it's constructed and cached.
+
+        Raises
+        ------
+        RuntimeError
+            If this file has no cluster_phot group.
+        KeyError
+            If filter_name is not one of this file's own filters.
+        """
+        cluster_phot = self.cluster_phot
+        if cluster_phot is None:
+            raise RuntimeError("get_filter: this file has no cluster_phot group")
+        return cluster_phot.get_filter(filter_name)
+
+    def phot_convert(self, phot_to: str) -> None:
+        """
+        Convert every cached filter's photometry to a new photometric
+        system, in place. A no-op if this file has no cluster_phot
+        group.
+
+        Parameters
+        ----------
+        phot_to : str
+            The photometric system to convert to: one of "Flambda",
+            "Fnu", "ST", "AB", or "Vega".
+
+        Details
+        -------
+        Thin wrapper around cluster_phot.phot_convert() -- see its own
+        docstring for exactly which entries get converted and how.
+        """
+        cluster_phot = self.cluster_phot
+        if cluster_phot is not None:
+            cluster_phot.phot_convert(phot_to)
