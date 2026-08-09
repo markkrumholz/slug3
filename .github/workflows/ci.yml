@@ -132,3 +132,53 @@ jobs:
             exit 0
           fi
           echo "$CHANGED" | xargs clang-tidy-18 -p build
+
+  pyright:
+    name: pyright
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        id: setup-python
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        # pyright itself, plus slugpy's own runtime dependencies, so it
+        # can resolve their imports (see pyrightconfig.json's own
+        # comment on useLibraryCodeForTypes: this only stops pyright
+        # from inferring types from their source, not from needing the
+        # packages installed at all).
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgsl-dev libhdf5-dev
+          python -m pip install pyright h5py tomlkit astropy numpy
+
+      - name: Configure
+        run: cmake -B build -DPython_EXECUTABLE="${{ steps.setup-python.outputs.python-path }}"
+
+      - name: Build slugPython
+        # pyright needs the compiled _slug extension actually present
+        # to resolve slugpy's "from ._slug import ..." lines -- without
+        # it, every file in the package fails to import at all.
+        run: cmake --build build --target slugPython
+
+      - name: Run pyright on changed Python files
+        run: |
+          CHANGED=$(git diff --name-only --diff-filter=d origin/${{ github.base_ref }}...HEAD \
+            | grep -E '^(slugpy|tests/slugpy)/.*\.py$' || true)
+          if [ -z "$CHANGED" ]; then
+            echo "No slugpy Python files changed, skipping pyright."
+            exit 0
+          fi
+          # --pythonpath is required: "python -m pyright" does not
+          # auto-detect its own interpreter's site-packages, so without
+          # it pyright can't resolve h5py/tomlkit/astropy/pytest at all
+          # even though this exact interpreter just pip-installed them.
+          echo "$CHANGED" | xargs python -m pyright --pythonpath "${{ steps.setup-python.outputs.python-path }}"
