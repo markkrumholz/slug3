@@ -13,6 +13,6 @@ alphaFe = -0.2
 [clusters]
 CMF = 1e3
 
-[outputs]
+[output]
 start_time = 0.0
 end_time = 10.0

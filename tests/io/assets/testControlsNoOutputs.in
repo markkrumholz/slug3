@@ -1,4 +1,4 @@
-# Test input deck for SimControls: no outputs.* option specified at all (invalid)
+# Test input deck for SimControls: no output.* time option specified at all (invalid)
 
 sim_type = "cluster"
 

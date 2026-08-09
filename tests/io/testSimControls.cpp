@@ -194,8 +194,10 @@ static auto testSimControlsExplicit() -> int
     }
 }
 
-// Verify option 1: outputs.output_time_dist draws a single output time
-// from a distribution. Here the distribution is a delta function at
+// Verify option 1's PDF interpretation: output.output_times, given a
+// single scalar value, is tried first as a PDF (via
+// utils::initPDFFromKey) and succeeds without ever falling back to
+// readOutputTimesArray -- here the distribution is a delta function at
 // 5.0, so the draw is deterministic.
 static auto testSimControlsOutputTimeDist() -> int
 {
@@ -214,8 +216,10 @@ static auto testSimControlsOutputTimeDist() -> int
     }
 }
 
-// Verify option 2: outputs.output_times is read back exactly as an
-// explicit array of output times.
+// Verify option 1's array-fallback interpretation: output.output_times,
+// given an array, fails utils::initPDFFromKey (an array is neither a
+// number nor a string) and falls back to readOutputTimesArray, which
+// reads it back exactly as an explicit array of output times.
 static auto testSimControlsOutputTimesArray() -> int
 {
     const std::string fileName = "tests/io/assets/testControlsOutputTimesArray.in";
@@ -272,7 +276,8 @@ static auto testSimControlsNoOutputs() -> int
 }
 
 // Verify that constructing SimControls from a deck specifying both
-// outputs.output_time_dist and outputs.output_times throws.
+// output.output_times and the output.start_time/end_time/ntime range
+// throws.
 static auto testSimControlsOutputTimesConflict() -> int
 {
     const std::string fileName = "tests/io/assets/testControlsOutputTimesConflict.in";
@@ -291,7 +296,7 @@ static auto testSimControlsOutputTimesConflict() -> int
 }
 
 // Verify that constructing SimControls from a deck specifying only
-// outputs.start_time and outputs.end_time, without outputs.ntime, throws.
+// output.start_time and output.end_time, without output.ntime, throws.
 static auto testSimControlsOutputTimesPartialRange() -> int
 {
     const std::string fileName = "tests/io/assets/testControlsOutputTimesPartialRange.in";

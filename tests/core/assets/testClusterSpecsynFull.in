@@ -110,5 +110,5 @@ system = "Vega"
 [clusters]
 CMF = 1e4
 
-[outputs]
+[output]
 output_times = [2e6, 3e6, 4e6, 1e7, 1e8, 1e9, 1e10]

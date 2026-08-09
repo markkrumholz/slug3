@@ -18,9 +18,11 @@ sim_type = "cluster"
 # Number of trials to run
 n_trial = 2000
 
-# Base name of the output file(s)
+# Base name of the output file(s), and the output times to use --
+# drawn from this distribution
 [output]
 model_name = "clusterlib"
+output_times = "dists/times.toml"
 
 # Input stanza to describe stellar models
 [stars]
@@ -52,7 +54,3 @@ CMF = "dists/CMF.toml"    # Draw cluster masses from this distribution
 [extinct]
 AV = "dists/AV.toml"      # Draw V extinction values (in mag) from this distribution
 model = "Calzetti_starburst"   # Extinction curve shape
-
-# Input stanza describing output times
-[outputs]
-output_time_dist = "dists/times.toml"    # Draw output times from this distribution

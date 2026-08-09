@@ -38,14 +38,14 @@
 #include <utility>
 #include <vector>
 
-// Read an explicit array of output times from outputs.output_times
+// Read an explicit array of output times from output.output_times
 static auto readOutputTimesArray(const toml::table& inputDeck) -> std::vector<double>
 {
-    const toml::array* arr = inputDeck.at_path("outputs.output_times").as_array();
+    const toml::array* arr = inputDeck.at_path("output.output_times").as_array();
     if (arr == nullptr)
     {
         throw std::runtime_error(
-            "SimControls: outputs.output_times must be an array of numbers");
+            "SimControls: output.output_times must be an array of numbers");
     }
     std::vector<double> times;
     times.reserve(arr->size());
@@ -55,7 +55,7 @@ static auto readOutputTimesArray(const toml::table& inputDeck) -> std::vector<do
         if (!val.has_value())
         {
             throw std::runtime_error(
-                "SimControls: outputs.output_times must be an array of numbers");
+                "SimControls: output.output_times must be an array of numbers");
         }
         times.push_back(val.value());
     }
@@ -64,57 +64,57 @@ static auto readOutputTimesArray(const toml::table& inputDeck) -> std::vector<do
 }
 
 // Generate a uniformly- or log-spaced grid of output times from
-// outputs.start_time, outputs.end_time, outputs.ntime, and the
-// optional outputs.log_time
+// output.start_time, output.end_time, output.ntime, and the
+// optional output.log_time
 static auto generateOutputTimesRange(const toml::table& inputDeck) -> std::vector<double>
 {
     const auto startTimeInput = utils::getTOMLKeyWithError<double>(
-        inputDeck, "outputs.start_time", true);
+        inputDeck, "output.start_time", true);
     if (!startTimeInput.has_value())
     {
-        throw std::runtime_error("SimControls: outputs.start_time not found");
+        throw std::runtime_error("SimControls: output.start_time not found");
     }
     const double startTime = startTimeInput.value();
 
     const auto endTimeInput = utils::getTOMLKeyWithError<double>(
-        inputDeck, "outputs.end_time", true);
+        inputDeck, "output.end_time", true);
     if (!endTimeInput.has_value())
     {
-        throw std::runtime_error("SimControls: outputs.end_time not found");
+        throw std::runtime_error("SimControls: output.end_time not found");
     }
     const double endTime = endTimeInput.value();
 
     const auto nTimeInput = utils::getTOMLKeyWithError<unsigned long>(
-        inputDeck, "outputs.ntime", true);
+        inputDeck, "output.ntime", true);
     if (!nTimeInput.has_value())
     {
-        throw std::runtime_error("SimControls: outputs.ntime not found");
+        throw std::runtime_error("SimControls: output.ntime not found");
     }
     const unsigned long nTime = nTimeInput.value();
 
     const bool logTime = utils::getTOMLKeyWithError<bool>(
-        inputDeck, "outputs.log_time").value_or(false);
+        inputDeck, "output.log_time").value_or(false);
 
     if (startTime < 0.0 || endTime < 0.0)
     {
         throw std::runtime_error(
-            "SimControls: outputs.start_time and outputs.end_time must be >= 0");
+            "SimControls: output.start_time and output.end_time must be >= 0");
     }
     if (nTime == 0)
     {
-        throw std::runtime_error("SimControls: outputs.ntime must be > 0");
+        throw std::runtime_error("SimControls: output.ntime must be > 0");
     }
     if ((startTime == endTime) != (nTime == 1))
     {
         throw std::runtime_error(
-            "SimControls: outputs.start_time == outputs.end_time is allowed "
-            "only if outputs.ntime == 1, and outputs.ntime == 1 is allowed "
-            "only if outputs.start_time == outputs.end_time");
+            "SimControls: output.start_time == output.end_time is allowed "
+            "only if output.ntime == 1, and output.ntime == 1 is allowed "
+            "only if output.start_time == output.end_time");
     }
     if (logTime && startTime <= 0.0)
     {
         throw std::runtime_error(
-            "SimControls: outputs.start_time must be > 0 when outputs.log_time is set");
+            "SimControls: output.start_time must be > 0 when output.log_time is set");
     }
 
     std::vector<double> times(nTime, 0.0);
@@ -334,77 +334,84 @@ void io::SimControls::initPhysics(const toml::table& inputDeck)
 
 void io::SimControls::setOutputTimes(const toml::table& inputDeck)
 {
-    // This routine computes the output times. These are set in a somewhat
-    // complex way: a user can specify specify the times of outputs in three distinct
-    // ways:
-    // (1) The user can set outputs.output_time_dist, which will be
-    //     interpreted as a PDF. In this case there is one output per
-    //     simulation, with the output time drawn from the PDF.
-    // (2) The user can specify outputs.output_times, which will be
-    //     interpreted as an explicit array of output times, wiht one
-    //     output per trial at each of the specified times.
-    // (3) The user can specify all three of outputs.start_time,
-    //     outputs.end_time, and outputs.ntime, with the first two interpreted
+    // This routine computes the output times. A user can specify the
+    // times of outputs in one of two ways:
+    // (1) The user can set output.output_times. This is tried first as
+    //     a PDF, via utils::initPDFFromKey: a single number is
+    //     interpreted as a delta function, giving one output per
+    //     simulation at that time, and a string is interpreted as the
+    //     name of a PDF file, giving one output per simulation drawn
+    //     from that PDF. If that interpretation fails -- most commonly
+    //     because the value is an array -- output.output_times is
+    //     instead read as an explicit array of output times, via
+    //     readOutputTimesArray, giving one output per trial at each of
+    //     the specified times. This mirrors the try-then-fall-back
+    //     convention used elsewhere for a key that can be given in more
+    //     than one form (e.g. SimControls's own constructor, which
+    //     tries its input deck argument as literal toml text before
+    //     falling back to a file path).
+    // (2) The user can specify all three of output.start_time,
+    //     output.end_time, and output.ntime, with the first two interpreted
     //     as doubles (required to be >= 0) and the third as an unsigned int (which must be > 0). In
-    //     this case the outputs times will be automatically generated as a
+    //     this case the output times will be automatically generated as a
     //     uniformly-spaced array of ntime values from start_time to end_time.
     //     (For this option, start_time == end_time is allowed only if ntime = 1,
     //     and ntime == 1 is allowed only if start_time == end_time.)
-    // (3a) For option 3, the user can also specify the optional boolean
+    // (2a) For option 2, the user can also specify the optional boolean
     //      output.log_time; if this is specified, the array of values generated
     //      will be log-spaced rather than linearly spaced.
     // Thus in this routine we need to check which of these options the user has
     // provided, verify that only that option is been provided (e.g., the user
-    // hasn't accidentially provided both output_time_dist and output_times), and
-    // fill the variables outTimes_ and outTimeDist_ based on them. For option 1,
-    // outTimeDist_ will be set to a valid PDF and outTimes_ will be left empty,
-    // while for options 2 or 3 outTimes_ will be a non-empty array and outTimeDist_
-    // will be left as an invalid, uninitialized PDF.
+    // hasn't accidentially provided both output_times and start_time/end_time/ntime), and
+    // fill the variables outTimes_ and outTimeDist_ based on them. For option 1's
+    // PDF interpretation, outTimeDist_ will be set to a valid PDF and outTimes_
+    // will be left empty, while for option 1's array interpretation or option 2,
+    // outTimes_ will be a non-empty array and outTimeDist_ will be left as an
+    // invalid, uninitialized PDF.
 
     // Determine which option(s) the user has specified
-    const bool hasDist = static_cast<bool>(inputDeck.at_path("outputs.output_time_dist"));
-    const bool hasTimes = static_cast<bool>(inputDeck.at_path("outputs.output_times"));
-    const bool hasStart = static_cast<bool>(inputDeck.at_path("outputs.start_time"));
-    const bool hasEnd = static_cast<bool>(inputDeck.at_path("outputs.end_time"));
-    const bool hasNTime = static_cast<bool>(inputDeck.at_path("outputs.ntime"));
+    const bool hasTimes = static_cast<bool>(inputDeck.at_path("output.output_times"));
+    const bool hasStart = static_cast<bool>(inputDeck.at_path("output.start_time"));
+    const bool hasEnd = static_cast<bool>(inputDeck.at_path("output.end_time"));
+    const bool hasNTime = static_cast<bool>(inputDeck.at_path("output.ntime"));
     const bool hasRange = hasStart || hasEnd || hasNTime;
 
-    const int nOptions = static_cast<int>(hasDist) +
-        static_cast<int>(hasTimes) + static_cast<int>(hasRange);
+    const int nOptions = static_cast<int>(hasTimes) + static_cast<int>(hasRange);
     if (nOptions == 0)
     {
         throw std::runtime_error(
-            "SimControls: must specify one of outputs.output_time_dist, "
-            "outputs.output_times, or outputs.start_time/outputs.end_time/outputs.ntime");
+            "SimControls: must specify one of output.output_times, "
+            "or output.start_time/output.end_time/output.ntime");
     }
     if (nOptions > 1)
     {
         throw std::runtime_error(
-            "SimControls: only one of outputs.output_time_dist, "
-            "outputs.output_times, or outputs.start_time/outputs.end_time/outputs.ntime "
+            "SimControls: only one of output.output_times, "
+            "or output.start_time/output.end_time/output.ntime "
             "may be specified");
     }
 
-    // Option 1: draw a single output time per trial from a distribution
-    if (hasDist)
-    {
-        outTimeDist_ = utils::initPDFFromKey(inputDeck, "outputs.output_time_dist");
-        return;
-    }
-
-    // Option 2: an explicit array of output times
+    // Option 1: output.output_times, tried first as a PDF, falling
+    // back to an explicit array of output times if that fails
     if (hasTimes)
     {
-        outTimes_ = readOutputTimesArray(inputDeck);
+        try
+        {
+            outTimeDist_ = utils::initPDFFromKey(inputDeck, "output.output_times");
+        }
+        catch (const std::runtime_error&)
+        {
+            outTimes_ = readOutputTimesArray(inputDeck);
+        }
         return;
     }
 
-    // Option 3: a uniformly- or log-spaced grid of output times
+    // Option 2: a uniformly- or log-spaced grid of output times
     if (!(hasStart && hasEnd && hasNTime))
     {
         throw std::runtime_error(
-            "SimControls: outputs.start_time, outputs.end_time, and "
-            "outputs.ntime must all be specified together");
+            "SimControls: output.start_time, output.end_time, and "
+            "output.ntime must all be specified together");
     }
     outTimes_ = generateOutputTimesRange(inputDeck);
 }

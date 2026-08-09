@@ -342,7 +342,7 @@ def test_cluster_phot_unknown_key(cluster_phot):
 # ---------------------------------------------------------------------
 # slug_reader.get_cluster
 #
-# clusterlib.toml's outputs.output_time_dist points at dists/times.toml,
+# clusterlib.toml's output.output_times points at dists/times.toml,
 # a path relative to examples/clusterlib/ (see that deck's own leading
 # comment); get_cluster() reconstructs SimControls purely from
 # input_deck's own text, with no memory of which directory the

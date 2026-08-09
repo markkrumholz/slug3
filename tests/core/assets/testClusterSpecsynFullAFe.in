@@ -34,5 +34,5 @@ nwl = 2048
 [clusters]
 CMF = 1e4
 
-[outputs]
+[output]
 output_times = [2e6, 3e6, 4e6, 1e7]

@@ -12,5 +12,5 @@ alphaFe = -0.2
 [clusters]
 CMF = 1e3
 
-[outputs]
+[output]
 output_times = [1.0, 2.5, 9.0]
