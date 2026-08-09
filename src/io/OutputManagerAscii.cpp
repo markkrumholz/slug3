@@ -10,6 +10,7 @@
 #include "../extinct/Extinct.hpp"
 #include "../phot/FilterCollection.hpp"
 #include "../specsyn/Specsyn.hpp"
+#include "../utils/ParseUtils.hpp"
 #include "../utils/RngThread.hpp"
 #include "OutputManager.hpp"
 #include "SimControls.hpp"
@@ -275,7 +276,16 @@ io::OutputManagerAscii::OutputManagerAscii(
         writeClustersHeader(clustersFile_, simControls_.extinct() != nullptr);
     }
 
-    if (simControls_.specsyn() != nullptr)
+    // Spectra can be wanted only as an intermediate for computing
+    // photometry, in which case writing them out as well just wastes
+    // disk space -- output.write_cluster_spec (optional, defaults to
+    // true) opts out of that file
+    const auto writeClusterSpecInput = utils::getTOMLKeyWithError<bool>(
+        inputDeck_, "output.write_cluster_spec");
+    const bool writeClusterSpec =
+        !writeClusterSpecInput.has_value() || writeClusterSpecInput.value();
+
+    if (simControls_.specsyn() != nullptr && writeClusterSpec)
     {
         wlObs_ = simControls_.specsyn()->wlObs();
 

@@ -626,6 +626,76 @@ static auto testWriteClusterSpecPhotH5Extinct() -> int
     return 0;
 }
 
+// Verify that output.write_cluster_spec = false (an optional key,
+// defaulting to true) suppresses the cluster_spectra HDF5 group and
+// the ascii cluster_spectra.txt file, even though a spectral
+// synthesizer was requested -- letting a simulation compute cluster
+// spectra (needed as an intermediate for photometry) without also
+// paying the disk space to write them out.
+static auto testOptOutClusterSpecOutput() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() / "slugTestOutputManagerNoSpecOutput";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+    const std::string modelName = "test_model";
+    toml::table inputDeck = makeClusterPhysicsInputDeck(modelName, outDir);
+    inputDeck.at_path("output").as_table()->insert("write_cluster_spec", false);
+
+    try
+    {
+        const io::SimControls controls(inputDeck);
+        if (controls.specsyn() == nullptr)
+        {
+            std::cerr << "testOutputManager: opt-out cluster spec: test bug: "
+                "expected SimControls::specsyn() to be non-null\n";
+            return 1;
+        }
+
+        {
+            const io::OutputManagerAscii manager(controls, inputDeck);
+        }
+        {
+            const io::OutputManagerH5 manager(controls, inputDeck);
+        }
+
+        const auto asciiSpecPath = outDir / (modelName + "_cluster_spectra.txt");
+        if (std::filesystem::exists(asciiSpecPath))
+        {
+            std::cerr << "testOutputManager: opt-out cluster spec: ascii "
+                "unexpectedly wrote " << asciiSpecPath.string() << "\n";
+            return 1;
+        }
+
+        const auto h5Path = outDir / (modelName + ".h5");
+        // NOLINTBEGIN(misc-include-cleaner)
+        const hid_t file = H5Fopen(h5Path.string().c_str(),
+            H5F_ACC_RDONLY, H5P_DEFAULT);
+        if (file < 0)
+        {
+            std::cerr << "testOutputManager: opt-out cluster spec: unable to reopen "
+                << h5Path.string() << "\n";
+            return 1;
+        }
+        const bool hasSpecGroup = H5Lexists(file, "cluster_spectra", H5P_DEFAULT) > 0;
+        H5Fclose(file);
+        // NOLINTEND(misc-include-cleaner)
+
+        if (hasSpecGroup)
+        {
+            std::cerr << "testOutputManager: opt-out cluster spec: h5 "
+                "unexpectedly created a cluster_spectra group\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testOutputManager: opt-out cluster spec test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
 // Verify the ascii OutputManager: opens <model>_summary.txt, writes the
 // slug-hash/date/time/rng_state header followed by the toml input
 // deck, and refuses to overwrite an existing file.
@@ -799,5 +869,6 @@ auto testOutputManager() -> int
     result += testWriteClusterH5();
     result += testWriteReadClusterRngRoundTrip();
     result += testWriteClusterSpecPhotH5Extinct();
+    result += testOptOutClusterSpecOutput();
     return result;
 }
