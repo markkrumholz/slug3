@@ -7,8 +7,10 @@ Implements slug_reader, a lazy reader for slug HDF5 output files.
 from typing import Any, cast
 
 import h5py
+import numpy as np
 import tomlkit
 
+from ._slug import Cluster, SimControls
 from .slug_group_reader import slug_group_reader
 from .slug_phot_reader import slug_phot_reader
 
@@ -60,6 +62,11 @@ class slug_reader:
     filter_units : list of str or None
         Alias for cluster_phot.filter_units, or None if this file has
         no cluster_phot group (read-only).
+    controls : SimControls
+        Simulation controls parsed from this file's own input_deck,
+        built the first time this property is accessed and cached
+        thereafter; used by get_cluster() to reconstruct clusters
+        (read-only).
     """
 
     def __init__(self, filename: str) -> None:
@@ -74,6 +81,7 @@ class slug_reader:
             if isinstance(self._file[name], h5py.Group)}
 
         self._input_deck: tomlkit.TOMLDocument | None = None
+        self._controls: SimControls | None = None
 
     @property
     def input_deck(self) -> tomlkit.TOMLDocument:
@@ -175,3 +183,63 @@ class slug_reader:
     @filter_units.setter
     def filter_units(self, value: Any) -> None:
         raise AttributeError("filter_units is read-only")
+
+    @property
+    def controls(self) -> SimControls:
+        """
+        SimControls : simulation controls parsed from this file's own
+        input_deck, built the first time this property is accessed
+        and cached thereafter.
+        """
+        if self._controls is None:
+            self._controls = SimControls(tomlkit.dumps(self.input_deck))
+        return self._controls
+
+    @controls.setter
+    def controls(self, value: Any) -> None:
+        raise AttributeError("controls is read-only")
+
+    def get_cluster(self, uid: int) -> Cluster:
+        """
+        Reconstruct one cluster from this file's clusters group.
+
+        Parameters
+        ----------
+        uid : int
+            Unique ID of the cluster to reconstruct (see
+            clusters["uid"]).
+
+        Returns
+        -------
+        Cluster
+            A Cluster built from this cluster's own target_mass and
+            rng_state, so its birth-time draws -- birthMass(),
+            starMasses(), feH(), aV() -- are reproduced bit-for-bit;
+            not yet advanced to any output time.
+
+        Raises
+        ------
+        RuntimeError
+            If this file has no clusters group.
+        KeyError
+            If uid is not one of this file's clusters.
+
+        Details
+        -------
+        Built from this reader's own controls property -- see its own
+        docstring on how (and how cheaply) that's constructed.
+        """
+        clusters = self.clusters
+        if clusters is None:
+            raise RuntimeError("get_cluster: this file has no clusters group")
+
+        uids = clusters["uid"]
+        matches = np.nonzero(uids == uid)[0]
+        if len(matches) == 0:
+            raise KeyError(uid)
+        index = int(matches[0])
+
+        rng_state = clusters["rng"][index]
+        target_mass = float(clusters["target_mass"][index].value)
+
+        return Cluster(target_mass, uid, 0.0, self.controls, rng_state)

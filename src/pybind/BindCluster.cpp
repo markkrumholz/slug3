@@ -8,9 +8,14 @@
 #include "Bindings.hpp"
 #include "../core/Cluster.hpp"
 #include "../io/SimControls.hpp"
+#include "../utils/RngThread.hpp"
+#include <algorithm>
 #include <memory>
 #include <pybind11/pybind11.h>
+#include <pybind11/pytypes.h>
 #include <pybind11/stl.h> // NOLINT(misc-include-cleaner); this is needed for correct Python binding, even if clang-tidy can't recognize it
+#include <stdexcept>
+#include <string>
 #include <string_view>
 
 // Numpy-style docstrings for the Python bindings below
@@ -34,7 +39,23 @@ controls : SimControls, optional
     src/pybind/assets/PyDefaults.toml the first time it is needed, and
     reused after that -- see SimControls()'s own default path),
     letting a caller do e.g. cl = slug.Cluster(1e3) without building a
-    SimControls at all.)doc";
+    SimControls at all.
+rng_state : bytes, optional
+    Serialized pcg64 rng state (see Cluster.rngState() in the C++ API;
+    from Python, typically a value previously read back from an output
+    file's clusters/rng dataset) to draw this cluster's star masses
+    (and feh/aV, if applicable) from, in place of the live rng stream
+    -- so the resulting starMasses()/birthMass() come out bitwise
+    identical to whatever cluster originally produced this state. If
+    omitted, mass/feh/aV are all drawn live instead, as normal.
+
+Throws
+------
+RuntimeError
+    If rng_state is longer than the fixed-width buffer a serialized
+    rng state is stored in (128 bytes) -- in practice, only possible
+    if rng_state did not actually come from a previous Cluster's own
+    rngState().)doc";
 
 static constexpr std::string_view uidDocstring = R"doc(Return the cluster's unique identifier.
 
@@ -132,6 +153,23 @@ Parameters
 t : float
     Time to which to advance, in yr.)doc";
 
+// Convert a Python bytes object (typically a value read straight back
+// from an output file's clusters/rng dataset) to a utils::RngState --
+// a fixed-width, null-padded buffer, matching the convention
+// RngThread::getState() itself uses to build one
+static auto pyBytesToRngState(const py::bytes& rngState) -> utils::RngState
+{
+    const std::string state = rngState;
+    if (state.size() > utils::rngStateWidth)
+    {
+        throw std::runtime_error(
+            "Cluster: rng_state is too long to fit in the fixed-width RngState buffer");
+    }
+    utils::RngState buf{};
+    std::ranges::copy(state, buf.begin());
+    return buf;
+}
+
 // Disable linting for includes -- the pybind macro magic seems to confuse
 // the linter
 // NOLINTBEGIN(misc-include-cleaner)
@@ -140,7 +178,7 @@ void bindCluster(py::module_& m)
     py::class_<core::Cluster, py::smart_holder>(m, "Cluster")
         .def(py::init(
                 [](double mass, unsigned long uid, double time,
-                   const py::object& controls)
+                   const py::object& controls, const py::object& rngState)
                     -> std::unique_ptr<core::Cluster>
                 {
                     // Deliberately a ternary, not
@@ -155,11 +193,16 @@ void bindCluster(py::module_& m)
                     const io::SimControls& controlsRef = controls.is_none()
                         ? sharedDefaultControls()
                         : py::cast<const io::SimControls&>(controls);
-                    return std::make_unique<core::Cluster>(uid, mass, time, controlsRef);
+                    if (rngState.is_none())
+                    {
+                        return std::make_unique<core::Cluster>(uid, mass, time, controlsRef);
+                    }
+                    return std::make_unique<core::Cluster>(uid, mass, time, controlsRef,
+                        pyBytesToRngState(py::cast<py::bytes>(rngState)));
                 }),
                 constructorDocstring.data(),
                 py::arg("mass"), py::arg("uid") = 0UL, py::arg("time") = 0.0,
-                py::arg("controls") = py::none(),
+                py::arg("controls") = py::none(), py::arg("rng_state") = py::none(),
                 // Keep the controls argument (index 5: 1 = self, 2-4 =
                 // mass/uid/time) alive at least as long as this
                 // Cluster, since Cluster stores only a live reference

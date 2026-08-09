@@ -88,11 +88,20 @@ static constexpr std::string_view constructorDocstring = R"doc(Construct a SimCo
 Parameters
 ----------
 path : str, optional
-    Path to a slug TOML input deck. If omitted (or empty), loads
-    slug's own bundled default deck (src/pybind/assets/PyDefaults.toml)
-    instead, letting a caller build a usable SimControls for
-    interactive work -- e.g. sc = slug.SimControls() -- without
-    touching an input deck at all.
+    Either the text of a slug TOML input deck, or a path to one on
+    disk. Tried first as literal TOML text (via toml::parse); if that
+    fails to parse, tried again as a file path instead (via
+    toml::parse_file) -- so e.g. a path like "deck.toml" (not valid
+    TOML on its own) falls through to being read as a file, while a
+    string like "n_trial = 10" (a path that could never exist) is used
+    directly as the deck's own content. If path parses successfully as
+    literal TOML text, every other argument below is ignored -- there
+    is no sim_type key to cross-check outside of the deck's own text,
+    and none of imf/cmf/... would have any given deck left to
+    override. If path is omitted (or empty), loads slug's own bundled
+    default deck (src/pybind/assets/PyDefaults.toml) instead, letting
+    a caller build a usable SimControls for interactive work -- e.g.
+    sc = slug.SimControls() -- without touching an input deck at all.
 sim_type : str, optional
     Either "cluster" or "galaxy"; validated against the deck's own
     sim_type key (which is what actually determines the simulation
@@ -450,6 +459,24 @@ void bindSimControls(py::module_& m)
                    const py::object& intAbsTol, const py::object& intMaxIter)
                     -> std::unique_ptr<io::SimControls>
                 {
+                    // path may be literal TOML text rather than a
+                    // file path (see constructorDocstring); try that
+                    // interpretation first, and if it succeeds, return
+                    // immediately -- every other argument here only
+                    // makes sense relative to a deck this path doesn't
+                    // name, so there is nothing left for them to do.
+                    if (!path.empty())
+                    {
+                        try
+                        {
+                            const toml::table inputDeck = toml::parse(path);
+                            return std::make_unique<io::SimControls>(inputDeck);
+                        }
+                        catch (const toml::parse_error&) // NOLINT(bugprone-empty-catch) -- deliberately empty: this exception just means path isn't literal TOML text, so fall through and treat it as a file path instead
+                        {
+                        }
+                    }
+
                     simTypeFromString(simType); // validate; the deck's own sim_type key is authoritative
 
                     std::unique_ptr<io::SimControls> sc;

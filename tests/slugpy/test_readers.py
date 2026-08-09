@@ -14,6 +14,9 @@ set to the repo root, so CLUSTERLIB_H5 below resolves without needing
 SLUG_DIR or any other environment variable.
 """
 
+import pathlib
+
+import h5py
 import numpy as np
 import pytest
 from astropy import units as u
@@ -22,6 +25,8 @@ from slugpy.slug_group_reader import slug_group_reader
 from slugpy.slug_phot_reader import slug_phot_reader
 from slugpy.slug_reader import slug_reader
 
+REPO_ROOT = pathlib.Path.cwd()
+CLUSTERLIB_DIR = REPO_ROOT / "examples" / "clusterlib"
 CLUSTERLIB_H5 = "examples/clusterlib/clusterlib.h5"
 
 
@@ -295,3 +300,82 @@ def test_cluster_phot_unknown_key(cluster_phot):
     """A key that's neither a filter name nor a dataset name raises KeyError."""
     with pytest.raises(KeyError):
         cluster_phot["not_a_filter_or_dataset"]
+
+
+# ---------------------------------------------------------------------
+# slug_reader.get_cluster
+#
+# clusterlib.toml's outputs.output_time_dist points at dists/times.toml,
+# a path relative to examples/clusterlib/ (see that deck's own leading
+# comment); get_cluster() reconstructs SimControls purely from
+# input_deck's own text, with no memory of which directory the
+# original deck lived in, so that reconstruction only resolves such
+# relative paths correctly when the current working directory happens
+# to match -- exactly the same constraint the original slug run itself
+# had. Every test below chdir's into examples/clusterlib for this
+# reason (monkeypatch.chdir, so it's undone automatically after each
+# test), even though the reader fixture itself was opened from the
+# repo root.
+# ---------------------------------------------------------------------
+
+def test_get_cluster_reconstructs_correctly(reader, clusters, monkeypatch):
+    """get_cluster(uid) returns a Cluster with that uid's own uid/target_mass."""
+    uid = int(clusters["uid"][0])
+    target_mass = float(clusters["target_mass"][0].value)
+
+    monkeypatch.chdir(CLUSTERLIB_DIR)
+    cl = reader.get_cluster(uid)
+
+    assert cl.uid() == uid
+    assert cl.targetMass() == target_mass
+
+
+def test_get_cluster_bitwise_reproducible(reader, clusters, monkeypatch):
+    """Two independent get_cluster() calls for the same uid agree bit-for-bit."""
+    uid = int(clusters["uid"][1])
+
+    monkeypatch.chdir(CLUSTERLIB_DIR)
+    cl_a = reader.get_cluster(uid)
+    cl_b = reader.get_cluster(uid)
+
+    assert cl_a.starMasses() == cl_b.starMasses()
+    assert cl_a.birthMass() == cl_b.birthMass()
+    assert cl_a.feH() == cl_b.feH()
+
+
+def test_get_cluster_caches_controls(monkeypatch):
+    """The SimControls built for get_cluster() is cached and reused across calls."""
+    fresh_reader = slug_reader(CLUSTERLIB_H5)
+    monkeypatch.chdir(CLUSTERLIB_DIR)
+    clusters = fresh_reader.clusters
+    assert clusters is not None
+
+    assert fresh_reader._controls is None
+    fresh_reader.get_cluster(int(clusters["uid"][0]))
+    controls = fresh_reader._controls
+    assert controls is not None
+    fresh_reader.get_cluster(int(clusters["uid"][1]))
+    assert fresh_reader._controls is controls
+
+
+def test_get_cluster_unknown_uid(reader, monkeypatch):
+    """An unrecognized uid raises KeyError."""
+    monkeypatch.chdir(CLUSTERLIB_DIR)
+    with pytest.raises(KeyError):
+        reader.get_cluster(-1)
+
+
+def test_get_cluster_no_clusters_group(tmp_path, monkeypatch):
+    """get_cluster() raises RuntimeError when this file has no clusters group."""
+    path = tmp_path / "no_clusters.h5"
+    with h5py.File(path, "w") as f:
+        f.attrs["slug-hash"] = "deadbeef"
+        f.attrs["date"] = "2026-01-01"
+        f.attrs["time"] = "00:00:00"
+        f.attrs["rng_state"] = "x"
+        f.create_group("input_deck").create_dataset("toml", data="n_trial = 1")
+
+    monkeypatch.chdir(CLUSTERLIB_DIR)
+    empty_reader = slug_reader(str(path))
+    with pytest.raises(RuntimeError):
+        empty_reader.get_cluster(1)
