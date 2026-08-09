@@ -1,0 +1,53 @@
+# QHIstats: an example input deck demonstrating how to use slug to
+# compute the probability distribution of ionizing photon production
+# per unit stellar mass and per unit visible-band flux, as a function
+# of cluster mass. Like clusterlib (examples/clusterlib/clusterlib.toml),
+# this uses MIST tracks and a full chained set of stellar atmosphere
+# models (spectra.model = "default"), with cluster mass drawn from its
+# own distribution -- but with a fixed (rather than stochastic)
+# metallicity, no dust extinction, and photometry pared down to just
+# the two filters (visible-band flux and Q(HI)) this comparison needs.
+# Run this from within this directory (so the dists/*.toml paths below
+# resolve) with:
+#   slug QHIstats.toml
+# It requires the real MIST tracks, spectral libraries, and filter/Vega
+# data referenced below to have been fetched locally (too large to
+# store in the repository -- see data/tools/fetch_*.py).
+
+# This is a cluster (rather than galaxy) simulation
+sim_type = "cluster"
+
+# Number of trials to run
+n_trial = 2000
+
+# Base name of the output file(s) and time of output
+[output]
+model_name = "QHIstats"
+output_times = 1.0e5    # Effectively the ZAMS, but old enough that
+                        # massive protostars have reached the main sequence
+
+# Input stanza to describe stellar models
+[stars]
+IMF = "chabrier.toml"     # Chabrier (2005) IMF
+tracks = "MIST"           # MIST stellar tracks
+v_vcrit = 0.4             # Rotating at 40% of breakup
+alphaFe = 0.0             # [alpha/Fe] = 0 (Solar alpha/Fe)
+FeH = 0.0                 # Solar metallicity
+
+# Input stanza to describe spectral synthesis
+[spectra]
+model = "default"         # Default spectral model
+wl_min = 200              # Wavelength grid starts at 200 Å
+wl_max = 2e5              # Wavelength grid ends at 2e5 Å
+nwl = 1024                # Wavelength grid has 1024 points
+
+# Input stanza to describe phometry
+# filters lists the filters to use: an HST visible-band filter, and an
+# idealized filter representing ionizing photon flux
+[phot]
+filters = ["HST.WFC3_UVIS1.F555W", "Q(HI)"]
+system = "Flambda"        # Compute photometry as raw flux (no zero point)
+
+# Input stanza to describe star clusters
+[clusters]
+CMF = "dists/CMF.toml"    # Draw cluster masses from this distribution
