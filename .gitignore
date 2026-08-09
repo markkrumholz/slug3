@@ -73,6 +73,9 @@ Testing/
 # VS Code settings
 .vscode/
 
+# marimo notebook session-state cache
+__marimo__/
+
 # Claude settings
 .claude/
 

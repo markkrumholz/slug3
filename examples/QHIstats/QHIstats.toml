@@ -18,11 +18,16 @@
 sim_type = "cluster"
 
 # Number of trials to run
-n_trial = 2000
+n_trial = 20
 
-# Base name of the output file(s)
+# Set moderately verbose output, so we can see progress
+verbosity = 1
+
+# Base name of the output file(s) and time of output
 [output]
 model_name = "QHIstats"
+output_times = 1.0e5    # Effectively the ZAMS, but old enough that
+                        # massive protostars have reached the main sequence
 
 # Input stanza to describe stellar models
 [stars]
@@ -49,7 +54,3 @@ system = "Flambda"        # Compute photometry as raw flux (no zero point)
 # Input stanza to describe star clusters
 [clusters]
 CMF = "dists/CMF.toml"    # Draw cluster masses from this distribution
-
-# Input stanza describing output times
-[outputs]
-output_times = [0]        # A single output time, at cluster formation
