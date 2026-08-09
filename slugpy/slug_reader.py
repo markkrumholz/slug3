@@ -4,11 +4,17 @@ slug_reader.py
 Implements slug_reader, a lazy reader for slug HDF5 output files.
 """
 
+from typing import Any, cast
+
 import h5py
+import numpy as np
 import tomlkit
 
+from ._slug import Cluster, Filter, SimControls
 from .slug_group_reader import slug_group_reader
 from .slug_phot_reader import slug_phot_reader
+
+AnyGroupReader = slug_group_reader | slug_phot_reader
 
 
 class slug_reader:
@@ -50,23 +56,35 @@ class slug_reader:
         Lazy reader for the cluster_phot group's per-filter photometry
         (indexable by filter name, e.g. cluster_phot["Lbol"]), or None
         if this file has no cluster_phot group (read-only).
+    filters : list of str or None
+        Alias for cluster_phot.filters, or None if this file has no
+        cluster_phot group (read-only).
+    filter_units : list of str or None
+        Alias for cluster_phot.filter_units, or None if this file has
+        no cluster_phot group (read-only).
+    controls : SimControls
+        Simulation controls parsed from this file's own input_deck,
+        built the first time this property is accessed and cached
+        thereafter; used by get_cluster() to reconstruct clusters
+        (read-only).
     """
 
-    def __init__(self, filename):
-        self._file = h5py.File(filename, "r")
+    def __init__(self, filename: str) -> None:
+        self._file: h5py.File = h5py.File(filename, "r")
 
-        self.slug_hash = self._file.attrs["slug-hash"]
-        self.date = self._file.attrs["date"]
-        self.time = self._file.attrs["time"]
-        self.rng_state = self._file.attrs["rng_state"]
+        self.slug_hash: str = self._file.attrs["slug-hash"]
+        self.date: str = self._file.attrs["date"]
+        self.time: str = self._file.attrs["time"]
+        self.rng_state: str = self._file.attrs["rng_state"]
 
-        self._groups = {name: None for name in self._file
+        self._groups: dict[str, AnyGroupReader | None] = {name: None for name in self._file
             if isinstance(self._file[name], h5py.Group)}
 
-        self._input_deck = None
+        self._input_deck: tomlkit.TOMLDocument | None = None
+        self._controls: SimControls | None = None
 
     @property
-    def input_deck(self):
+    def input_deck(self) -> tomlkit.TOMLDocument:
         """
         tomlkit.TOMLDocument : the input deck used to produce this
         file, parsed from the input_deck group's toml dataset the
@@ -79,11 +97,11 @@ class slug_reader:
         return self._input_deck
 
     @input_deck.setter
-    def input_deck(self, value):
+    def input_deck(self, value: Any) -> None:
         raise AttributeError("input_deck is read-only")
 
     @property
-    def clusters(self):
+    def clusters(self) -> slug_group_reader | None:
         """
         slug_group_reader or None : lazy reader for the clusters
         group's datasets, built the first time this property is
@@ -97,11 +115,11 @@ class slug_reader:
         return self._groups["clusters"]
 
     @clusters.setter
-    def clusters(self, value):
+    def clusters(self, value: Any) -> None:
         raise AttributeError("clusters is read-only")
 
     @property
-    def cluster_spectra(self):
+    def cluster_spectra(self) -> slug_group_reader | None:
         """
         slug_group_reader or None : lazy reader for the
         cluster_spectra group's datasets, built the first time this
@@ -115,11 +133,11 @@ class slug_reader:
         return self._groups["cluster_spectra"]
 
     @cluster_spectra.setter
-    def cluster_spectra(self, value):
+    def cluster_spectra(self, value: Any) -> None:
         raise AttributeError("cluster_spectra is read-only")
 
     @property
-    def cluster_phot(self):
+    def cluster_phot(self) -> slug_phot_reader | None:
         """
         slug_phot_reader or None : lazy reader for the cluster_phot
         group's per-filter photometry, built the first time this
@@ -129,9 +147,150 @@ class slug_reader:
         if "cluster_phot" not in self._groups:
             return None
         if self._groups["cluster_phot"] is None:
-            self._groups["cluster_phot"] = slug_phot_reader(self._file, "cluster_phot")
-        return self._groups["cluster_phot"]
+            registry_name = self.input_deck.get("phot", {}).get("registry")
+            self._groups["cluster_phot"] = slug_phot_reader(
+                self._file, "cluster_phot", registry_name=registry_name)
+        return cast(slug_phot_reader, self._groups["cluster_phot"])
 
     @cluster_phot.setter
-    def cluster_phot(self, value):
+    def cluster_phot(self, value: Any) -> None:
         raise AttributeError("cluster_phot is read-only")
+
+    @property
+    def filters(self) -> list[str] | None:
+        """
+        list of str or None : alias for cluster_phot.filters, or None
+        if this file has no cluster_phot group (read-only).
+        """
+        cluster_phot = self.cluster_phot
+        if cluster_phot is None:
+            return None
+        return cluster_phot.filters
+
+    @filters.setter
+    def filters(self, value: Any) -> None:
+        raise AttributeError("filters is read-only")
+
+    @property
+    def filter_units(self) -> list[str] | None:
+        """
+        list of str or None : alias for cluster_phot.filter_units, or
+        None if this file has no cluster_phot group (read-only).
+        """
+        cluster_phot = self.cluster_phot
+        if cluster_phot is None:
+            return None
+        return cluster_phot.filter_units
+
+    @filter_units.setter
+    def filter_units(self, value: Any) -> None:
+        raise AttributeError("filter_units is read-only")
+
+    @property
+    def controls(self) -> SimControls:
+        """
+        SimControls : simulation controls parsed from this file's own
+        input_deck, built the first time this property is accessed
+        and cached thereafter.
+        """
+        if self._controls is None:
+            self._controls = SimControls(tomlkit.dumps(self.input_deck))
+        return self._controls
+
+    @controls.setter
+    def controls(self, value: Any) -> None:
+        raise AttributeError("controls is read-only")
+
+    def get_cluster(self, uid: int) -> Cluster:
+        """
+        Reconstruct one cluster from this file's clusters group.
+
+        Parameters
+        ----------
+        uid : int
+            Unique ID of the cluster to reconstruct (see
+            clusters["uid"]).
+
+        Returns
+        -------
+        Cluster
+            A Cluster built from this cluster's own target_mass and
+            rng_state, so its birth-time draws -- birthMass(),
+            starMasses(), feH(), aV() -- are reproduced bit-for-bit;
+            not yet advanced to any output time.
+
+        Raises
+        ------
+        RuntimeError
+            If this file has no clusters group.
+        KeyError
+            If uid is not one of this file's clusters.
+
+        Details
+        -------
+        Built from this reader's own controls property -- see its own
+        docstring on how (and how cheaply) that's constructed.
+        """
+        clusters = self.clusters
+        if clusters is None:
+            raise RuntimeError("get_cluster: this file has no clusters group")
+
+        uids = clusters["uid"]
+        matches = np.nonzero(uids == uid)[0]
+        if len(matches) == 0:
+            raise KeyError(uid)
+        index = int(matches[0])
+
+        rng_state = clusters["rng"][index]
+        target_mass = float(clusters["target_mass"][index].value)
+
+        return Cluster(target_mass, uid, 0.0, self.controls, rng_state)
+
+    def get_filter(self, filter_name: str) -> Filter:
+        """
+        Get a Filter object for one of this file's own filters.
+
+        Parameters
+        ----------
+        filter_name : str
+            Name of the filter to get; must be one of this file's own
+            filters (see filters).
+
+        Returns
+        -------
+        Filter
+            The requested filter -- see cluster_phot.get_filter()'s
+            own docstring for how it's constructed and cached.
+
+        Raises
+        ------
+        RuntimeError
+            If this file has no cluster_phot group.
+        KeyError
+            If filter_name is not one of this file's own filters.
+        """
+        cluster_phot = self.cluster_phot
+        if cluster_phot is None:
+            raise RuntimeError("get_filter: this file has no cluster_phot group")
+        return cluster_phot.get_filter(filter_name)
+
+    def phot_convert(self, phot_to: str) -> None:
+        """
+        Convert every cached filter's photometry to a new photometric
+        system, in place. A no-op if this file has no cluster_phot
+        group.
+
+        Parameters
+        ----------
+        phot_to : str
+            The photometric system to convert to: one of "Flambda",
+            "Fnu", "ST", "AB", or "Vega".
+
+        Details
+        -------
+        Thin wrapper around cluster_phot.phot_convert() -- see its own
+        docstring for exactly which entries get converted and how.
+        """
+        cluster_phot = self.cluster_phot
+        if cluster_phot is not None:
+            cluster_phot.phot_convert(phot_to)

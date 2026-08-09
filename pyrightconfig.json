@@ -1,0 +1,22 @@
+{
+    // Pinned to match the minimum Python this project actually
+    // requires (see AGENTS.md's Building section and .github/workflows/
+    // ci.yml), independent of whichever interpreter a given editor
+    // happens to have selected -- without this, pyright/pylance can
+    // reject perfectly valid modern syntax (e.g. "X | Y" union
+    // annotations, valid since Python 3.10) if it falls back to an
+    // older default.
+    "pythonVersion": "3.12",
+
+    // h5py, tomlkit, and astropy (slugpy's third-party dependencies)
+    // ship no type stubs or py.typed marker. Left at its default of
+    // true, pyright falls back to inferring types by tracing through
+    // their actual (untyped) source, which produces extremely noisy,
+    // often-wrong types for basically every access into an h5py
+    // object -- false has it treat unstubbed libraries as
+    // effectively untyped (Any) instead, which is both more accurate
+    // and far quieter.
+    "useLibraryCodeForTypes": false,
+
+    "include": ["slugpy", "tests/slugpy"]
+}
