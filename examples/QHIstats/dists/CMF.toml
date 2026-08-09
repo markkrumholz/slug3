@@ -1,0 +1,9 @@
+# Cluster mass function for the QHIstats example: a single powerlaw
+# segment with slope -1, from 100 Msun (a typical minimum bound-cluster
+# mass) to 1e5 Msun.
+
+breakpoints = [1e2, 1e5]
+
+[segment1]
+type = "powerlaw"
+slope = -1
