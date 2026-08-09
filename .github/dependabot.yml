@@ -1,0 +1,15 @@
+version: 2
+updates:
+  # Keep the GitHub Actions pinned in .github/workflows/ci.yml
+  # (actions/checkout, actions/setup-python) up to date.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  # Keep the vendored git submodules under src/extern/ (pybind11,
+  # tomlplusplus, cubature, pcg-cpp) up to date.
+  - package-ecosystem: "gitsubmodule"
+    directory: "/"
+    schedule:
+      interval: "weekly"
