@@ -96,6 +96,12 @@ namespace io
 
         /**
          * @brief Create the cluster_spectra group and its datasets, if a spectral synthesizer was requested
+         * @details
+         * A no-op if output.write_cluster_spec is set to false in the
+         * input deck (it defaults to true), even if a spectral
+         * synthesizer was requested -- spectra can be wanted only as
+         * an intermediate for computing photometry, in which case
+         * writing them out as well just wastes disk space.
          */
         void openClusterSpectraGroup();
 

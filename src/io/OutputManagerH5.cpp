@@ -9,6 +9,7 @@
 #include "../core/Cluster.hpp"
 #include "../phot/FilterCollection.hpp"
 #include "../specsyn/Specsyn.hpp"
+#include "../utils/ParseUtils.hpp"
 #include "../utils/RngThread.hpp"
 #include "OutputManager.hpp"
 #include "SimControls.hpp"
@@ -377,10 +378,17 @@ void io::OutputManagerH5::openClustersGroup()
 }
 
 // Create the cluster_spectra group and its datasets, if a spectral
-// synthesizer was requested for this simulation
+// synthesizer was requested for this simulation and output.write_cluster_spec
+// (optional, defaults to true) was not set to false -- spectra can be
+// wanted only as an intermediate for computing photometry, in which
+// case writing them out as well just wastes disk space
 void io::OutputManagerH5::openClusterSpectraGroup()
 {
     if (simControls_.specsyn() == nullptr) { return; }
+
+    const auto writeClusterSpecInput = utils::getTOMLKeyWithError<bool>(
+        inputDeck_, "output.write_cluster_spec");
+    if (writeClusterSpecInput.has_value() && !writeClusterSpecInput.value()) { return; }
 
     const auto& synth = *simControls_.specsyn();
     const std::vector<double> wlObs = synth.wlObs();
