@@ -81,16 +81,14 @@ void core::Galaxy::advance(const double t)
     }
     clusters_ = std::move(stillAlive);
 
-    // 7-8) Sum spectra (and extincted spectra) over every cluster,
-    // then compute photometry (and extincted photometry) from the
-    // sums just computed
-    computeSpec();
-    computePhot();
+    // 7) Mark spec_/specExtinct_/phot_/photExtinct_/lbol_ as stale;
+    // recomputed lazily, on demand, the next time spec()/specExtinct()/
+    // phot()/photExtinct()/lbol() is actually called
+    specCurrent_ = false;
+    photCurrent_ = false;
+    lbolCurrent_ = false;
 
-    // Sum bolometric luminosity over every cluster, if requested
-    if (sc.computeLbol()) { computeLbol(); }
-
-    // 9) Update current time
+    // 8) Update current time
     curTime_ = t;
 }
 
@@ -104,9 +102,9 @@ void core::Galaxy::computeSpec()
     if (synth == nullptr) { return; }
 
     spec_.assign(synth->wl().size(), 0.0);
-    const auto sumSpec = [this](const std::vector<Cluster>& clusterList)
+    const auto sumSpec = [this](std::vector<Cluster>& clusterList)
     {
-        for (const auto& cluster : clusterList)
+        for (auto& cluster : clusterList)
         {
             const auto& clusterSpec = cluster.spec();
             for (std::size_t i = 0; i < spec_.size(); ++i) { spec_[i] += clusterSpec[i]; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- clusterSpec has size wl().size() by Cluster::computeSpec()'s own contract, matching spec_'s size set just above
@@ -119,9 +117,9 @@ void core::Galaxy::computeSpec()
     if (ext != nullptr)
     {
         specExtinct_.assign(ext->wl().size(), 0.0);
-        const auto sumSpecExtinct = [this](const std::vector<Cluster>& clusterList)
+        const auto sumSpecExtinct = [this](std::vector<Cluster>& clusterList)
         {
-            for (const auto& cluster : clusterList)
+            for (auto& cluster : clusterList)
             {
                 const auto& clusterSpecExtinct = cluster.specExtinct();
                 for (std::size_t i = 0; i < specExtinct_.size(); ++i) { specExtinct_[i] += clusterSpecExtinct[i]; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- clusterSpecExtinct has size extinct()->wl().size() by Cluster::computeSpec()'s own contract, matching specExtinct_'s size set just above
@@ -133,28 +131,34 @@ void core::Galaxy::computeSpec()
 }
 
 // Update the galaxy's photometry (and, if an extinction curve was
-// requested, extincted photometry) from the current spec_/specExtinct_
+// requested, extincted photometry) from the current spec()/specExtinct()
 // -- identical to Cluster::computePhot(), just reading this Galaxy's
-// own spec_/specExtinct_
+// own spec()/specExtinct() (the lazy getters, not spec_/specExtinct_
+// directly, so this forces a current summed spectrum first if needed,
+// regardless of call order)
 void core::Galaxy::computePhot()
 {
     const auto& sc = controls_.get();
     const auto& filters = sc.filters();
     if (filters == nullptr) { return; }
 
-    phot_ = filters->phot(sc.specsyn()->wlObs(), spec_);
+    phot_ = filters->phot(sc.specsyn()->wlObs(), spec());
 
     const auto* ext = sc.extinct();
     if (ext != nullptr)
     {
-        photExtinct_ = filters->phot(ext->wlObs(), specExtinct_);
+        photExtinct_ = filters->phot(ext->wlObs(), specExtinct());
     }
 }
 
-// Sum lbol_ over every cluster in clusters_ and disruptedClusters_
+// Sum lbol_ over every cluster in clusters_ and disruptedClusters_,
+// unless Lbol was never requested (see this method's own header comment)
 void core::Galaxy::computeLbol()
 {
+    const auto& sc = controls_.get();
+    if (!sc.computeLbol()) { return; }
+
     lbol_ = 0.0;
-    for (const auto& cluster : clusters_) { lbol_ += cluster.lbol(); }
-    for (const auto& cluster : disruptedClusters_) { lbol_ += cluster.lbol(); }
+    for (auto& cluster : clusters_) { lbol_ += cluster.lbol(); }
+    for (auto& cluster : disruptedClusters_) { lbol_ += cluster.lbol(); }
 }

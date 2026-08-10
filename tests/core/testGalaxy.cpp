@@ -51,7 +51,7 @@ static constexpr double massTolerance = 0.3;
 // every list/vector empty, and lbol() == 0, before advance() has ever run.
 static auto checkConstruction(const io::SimControls& controls) -> int
 {
-    const core::Galaxy galaxy(controls);
+    core::Galaxy galaxy(controls);
 
     if (galaxy.curTime() != 0.0)
     {
@@ -132,13 +132,13 @@ static auto advanceAndCheckMassAge(core::Galaxy& galaxy,
 // disruptedClusters() -- this independently performs the identical
 // summation, in the identical (clusters() then disruptedClusters())
 // order, so the result should match bit for bit, not just approximately.
-static auto checkSpecSum(const core::Galaxy& galaxy, const io::SimControls& controls) -> int
+static auto checkSpecSum(core::Galaxy& galaxy, const io::SimControls& controls) -> int
 {
     std::vector<double> expectedSpec(controls.specsyn()->wl().size(), 0.0);
     std::vector<double> expectedSpecExtinct(controls.extinct()->wl().size(), 0.0);
-    const auto accumulate = [&](const std::vector<core::Cluster>& list)
+    const auto accumulate = [&](std::vector<core::Cluster>& list)
     {
-        for (const auto& c : list)
+        for (auto& c : list)
         {
             const auto& s = c.spec();
             for (std::size_t i = 0; i < expectedSpec.size(); ++i)
@@ -183,16 +183,16 @@ static auto checkSpecSum(const core::Galaxy& galaxy, const io::SimControls& cont
 // filters.phot() interpolates each spectrum before integrating, and
 // interpolating-then-integrating the sum need not round identically to
 // integrating each cluster's own spectrum and summing the results.
-static auto checkPhotSum(const core::Galaxy& galaxy, const io::SimControls& controls) -> int
+static auto checkPhotSum(core::Galaxy& galaxy, const io::SimControls& controls) -> int
 {
     constexpr double photTolerance = 1e-6;
 
     const auto nFilt = controls.filters()->filterNames().size();
     std::vector<double> expectedPhot(nFilt, 0.0);
     std::vector<double> expectedPhotExtinct(nFilt, 0.0);
-    const auto accumulate = [&](const std::vector<core::Cluster>& list)
+    const auto accumulate = [&](std::vector<core::Cluster>& list)
     {
-        for (const auto& c : list)
+        for (auto& c : list)
         {
             const auto& p = c.phot();
             for (std::size_t i = 0; i < nFilt; ++i) { expectedPhot.at(i) += p.at(i); }
@@ -235,11 +235,11 @@ static auto checkPhotSum(const core::Galaxy& galaxy, const io::SimControls& cont
 
 // Verify that Galaxy::lbol() equals the sum of lbol() over every
 // cluster in clusters() and disruptedClusters()
-static auto checkLbolSum(const core::Galaxy& galaxy) -> int
+static auto checkLbolSum(core::Galaxy& galaxy) -> int
 {
     double expectedLbol = 0.0;
-    for (const auto& c : galaxy.clusters()) { expectedLbol += c.lbol(); }
-    for (const auto& c : galaxy.disruptedClusters()) { expectedLbol += c.lbol(); }
+    for (auto& c : galaxy.clusters()) { expectedLbol += c.lbol(); }
+    for (auto& c : galaxy.disruptedClusters()) { expectedLbol += c.lbol(); }
 
     if (galaxy.lbol() != expectedLbol)
     {
@@ -262,7 +262,7 @@ static auto checkLbolSum(const core::Galaxy& galaxy) -> int
 // comment), disruptedClusters() is non-empty, every cluster in it
 // reports isDisrupted() == true, and every cluster still in clusters()
 // reports isDisrupted() == false
-static auto checkDisruption(const core::Galaxy& galaxy) -> int
+static auto checkDisruption(core::Galaxy& galaxy) -> int
 {
     if (galaxy.disruptedClusters().empty())
     {

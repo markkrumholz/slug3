@@ -217,16 +217,6 @@ void io::SimControls::initControlFlow(const toml::table& inputDeck)
         utils::getTOMLKeyWithError<std::string>(inputDeck, "outputs.out_dir");
     if (outDirInput.has_value()) { outDir_ = outDirInput.value(); }
 
-    // In a galaxy simulation, read whether outputs should include
-    // individual clusters or only the integrated properties of the
-    // whole galaxy
-    if (simType_ == SimType::galaxy)
-    {
-        const auto outputClustersInput = utils::getTOMLKeyWithError<bool>(
-            inputDeck, "outputs.output_clusters");
-        if (outputClustersInput.has_value()) { outputClusters_ = outputClustersInput.value(); }
-    }
-
     // Read number of trials
     const auto nTrialInput =
         utils::getTOMLKeyWithError<unsigned long>(inputDeck, "n_trial");

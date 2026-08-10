@@ -56,17 +56,24 @@ namespace core
 
         /**
          * @brief Return the galaxy's currently-alive (non-disrupted) clusters
-         * @return A const reference to the list of clusters formed so
-         *   far that have not yet disrupted
+         * @return A reference to the list of clusters formed so far
+         *   that have not yet disrupted
+         * @details
+         * Not const: callers commonly need to call a lazily-computed
+         * getter (spec()/phot()/lbol()/etc. -- see spec()'s own
+         * comment) on the individual Cluster elements this returns,
+         * which are themselves non-const for the same reason.
          */
-        [[nodiscard]] auto clusters() const -> const auto& { return clusters_; }
+        [[nodiscard]] auto clusters() -> auto& { return clusters_; }
 
         /**
          * @brief Return the galaxy's disrupted clusters
-         * @return A const reference to the list of clusters formed so
-         *   far that have already disrupted
+         * @return A reference to the list of clusters formed so far
+         *   that have already disrupted
+         * @details
+         * Not const -- see clusters()'s own comment.
          */
-        [[nodiscard]] auto disruptedClusters() const -> const auto& { return disruptedClusters_; }
+        [[nodiscard]] auto disruptedClusters() -> auto& { return disruptedClusters_; }
 
         /**
          * @brief Return the galaxy's continuously-sampled spectrum
@@ -75,8 +82,19 @@ namespace core
          *   wavelength grid of the simulation's spectral synthesizer,
          *   or an empty vector if no spectral synthesizer was
          *   requested (SimControls::specsyn() is null)
+         * @details
+         * Computed lazily: if advance() has run since spec_/specExtinct_
+         * were last computed, this triggers computeSpec() (which
+         * computes both together) before returning, so the result is
+         * always current as of the last advance() -- see specCurrent_'s
+         * own comment. Not const, since it may need to run that
+         * computation.
          */
-        [[nodiscard]] auto spec() const -> const auto& { return spec_; }
+        [[nodiscard]] auto spec() -> const auto&
+        {
+            if (!specCurrent_) { computeSpec(); specCurrent_ = true; }
+            return spec_;
+        }
 
         /**
          * @brief Return the galaxy's extincted spectrum
@@ -86,8 +104,16 @@ namespace core
          *   own wl(); an empty vector if no extinction curve was
          *   requested (SimControls::extinct() is null) or spec()
          *   itself is empty (no spectral synthesizer was requested)
+         * @details
+         * Computed lazily -- see spec()'s own comment; both share the
+         * same specCurrent_ flag, since a single computeSpec() call
+         * computes both together.
          */
-        [[nodiscard]] auto specExtinct() const -> const auto& { return specExtinct_; }
+        [[nodiscard]] auto specExtinct() -> const auto&
+        {
+            if (!specCurrent_) { computeSpec(); specCurrent_ = true; }
+            return specExtinct_;
+        }
 
         /**
          * @brief Return the galaxy's photometry
@@ -96,8 +122,20 @@ namespace core
          *   the same order as FilterCollection::filterNames()/
          *   filterUnits(), or an empty vector if no filter collection
          *   was requested (SimControls::filters() is null)
+         * @details
+         * Computed lazily -- see spec()'s own comment; computePhot()
+         * itself calls spec()/specExtinct() (rather than reading
+         * spec_/specExtinct_ directly), so calling phot() alone, with
+         * no prior call to spec(), still computes a spectrum current
+         * as of the last advance() first -- which in turn computes
+         * each individual cluster's own spectrum, but not its
+         * photometry (see Cluster::computePhot()'s own comment).
          */
-        [[nodiscard]] auto phot() const -> const auto& { return phot_; }
+        [[nodiscard]] auto phot() -> const auto&
+        {
+            if (!photCurrent_) { computePhot(); photCurrent_ = true; }
+            return phot_;
+        }
 
         /**
          * @brief Return the galaxy's extincted photometry
@@ -107,17 +145,34 @@ namespace core
          *   empty vector if no extinction curve was requested
          *   (SimControls::extinct() is null) or no filter collection
          *   was requested (SimControls::filters() is null)
+         * @details
+         * Computed lazily -- see phot()'s own comment; both share the
+         * same photCurrent_ flag, since a single computePhot() call
+         * computes both together.
          */
-        [[nodiscard]] auto photExtinct() const -> const auto& { return photExtinct_; }
+        [[nodiscard]] auto photExtinct() -> const auto&
+        {
+            if (!photCurrent_) { computePhot(); photCurrent_ = true; }
+            return photExtinct_;
+        }
 
         /**
          * @brief Return the galaxy's bolometric luminosity
          * @return The sum of lbol() over every cluster in clusters()
          *   and disruptedClusters(), in Lsun, at the current time, or
-         *   0 if advance() has never run with
-         *   SimControls::computeLbol() true
+         *   0 if SimControls::computeLbol() is false (Lbol was never
+         *   requested)
+         * @details
+         * Computed lazily -- see spec()'s own comment. computeLbol()
+         * itself is a no-op (leaving lbol_ at 0) unless
+         * SimControls::computeLbol() is true, mirroring computeSpec()/
+         * computePhot()'s own null-guards.
          */
-        [[nodiscard]] auto lbol() const { return lbol_; }
+        [[nodiscard]] auto lbol()
+        {
+            if (!lbolCurrent_) { computeLbol(); lbolCurrent_ = true; }
+            return lbol_;
+        }
 
         /**
          * @brief Return the total target mass of clusters formed so far
@@ -148,9 +203,12 @@ namespace core
          * actualMass(), advances every cluster formed so far (in
          * clusters() and disruptedClusters()) to t, moves any cluster
          * that disrupted during this step from clusters() to
-         * disruptedClusters(), then recomputes spec()/specExtinct()/
-         * phot()/photExtinct()/lbol() as sums over the resulting
-         * cluster population, before finally updating curTime() to t.
+         * disruptedClusters(), then marks spec_/specExtinct_/phot_/
+         * photExtinct_/lbol_ as stale (see specCurrent_/photCurrent_/
+         * lbolCurrent_'s own comments) rather than recomputing them
+         * itself -- they are instead recomputed lazily, on demand, the
+         * next time spec()/specExtinct()/phot()/photExtinct()/lbol() is
+         * actually called -- before finally updating curTime() to t.
          */
         void advance(double t);
 
@@ -169,6 +227,30 @@ namespace core
         double actualMass_ = 0.0;          /**< Cumulative actual mass of clusters formed so far, over every advance() call, in Msun */
 
         /**
+         * @brief Whether spec_/specExtinct_ are current as of curTime_
+         * @details
+         * Mirrors Cluster::specCurrent_'s own comment: true at
+         * construction, set false at the end of every advance() call,
+         * and back to true by spec()/specExtinct() after recomputing
+         * them.
+         */
+        bool specCurrent_ = true;
+
+        /**
+         * @brief Whether phot_/photExtinct_ are current as of curTime_
+         * @details
+         * Mirrors specCurrent_'s own comment, for phot()/photExtinct().
+         */
+        bool photCurrent_ = true;
+
+        /**
+         * @brief Whether lbol_ is current as of curTime_
+         * @details
+         * Mirrors specCurrent_'s own comment, for lbol().
+         */
+        bool lbolCurrent_ = true;
+
+        /**
          * @brief Simulation controls (physics and control-flow settings) this galaxy was built from
          * @details
          * See Cluster::controls_'s own comment: read live wherever a
@@ -184,9 +266,10 @@ namespace core
          * over clusters rather than stars: does nothing if
          * SimControls::specsyn() is null. Otherwise sets spec_ to the
          * sum of spec() over every cluster in clusters_ and
-         * disruptedClusters_; if SimControls::extinct() is also
-         * non-null, also sets specExtinct_ to the sum of specExtinct()
-         * over the same clusters.
+         * disruptedClusters_ (forcing each cluster's own spectrum to be
+         * computed, if not already current); if SimControls::extinct()
+         * is also non-null, also sets specExtinct_ to the sum of
+         * specExtinct() over the same clusters.
          */
         void computeSpec();
 
@@ -194,15 +277,24 @@ namespace core
          * @brief Update phot_ (and photExtinct_) from the current spec_ (and specExtinct_)
          * @details
          * Identical to Cluster::computePhot(), but reading this
-         * Galaxy's own spec_/specExtinct_ rather than a Cluster's.
+         * Galaxy's own spec()/specExtinct() (the lazy getters, not
+         * spec_/specExtinct_ directly) rather than a Cluster's -- note
+         * that this reads the Galaxy's own already-summed spectrum,
+         * not a sum of each cluster's own phot(), so requesting
+         * Galaxy::phot() alone forces every cluster's own spectrum to
+         * be computed, but not any cluster's own photometry.
          */
         void computePhot();
 
         /**
          * @brief Update lbol_ from the current cluster population
          * @details
-         * Sets lbol_ to the sum of lbol() over every cluster in
-         * clusters_ and disruptedClusters_.
+         * Does nothing if SimControls::computeLbol() is false (Lbol was
+         * never requested), mirroring Cluster::computeLbol()'s own
+         * null-guard. Otherwise sets lbol_ to the sum of lbol() over
+         * every cluster in clusters_ and disruptedClusters_ (forcing
+         * each cluster's own Lbol to be computed, if not already
+         * current).
          */
         void computeLbol();
 

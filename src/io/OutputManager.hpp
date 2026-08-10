@@ -37,7 +37,7 @@ namespace io
     public:
 
         /**
-         * @brief Cache references to the simulation controls and input deck
+         * @brief Cache references to the simulation controls and input deck, and parse the output-control keys
          * @param simControls Simulation controls (physics settings and
          *   control-flow settings together)
          * @param inputDeck The simulation's toml input deck
@@ -46,6 +46,26 @@ namespace io
          * objects passed in must outlive this OutputManager. This base
          * constructor does not open any output files; that is left to
          * the constructors of the format-specific subclasses.
+         *
+         * Also reads the six optional output.write_cluster/
+         * write_cluster_spec/write_cluster_phot/write_galaxy/
+         * write_galaxy_spec/write_galaxy_phot keys (each defaulting to
+         * true) into writeCluster_/writeClusterSpec_/writeClusterPhot_/
+         * writeGalaxy_/writeGalaxySpec_/writeGalaxyPhot_, for the
+         * subclass constructors to gate their own group/file creation
+         * on, then sanity-checks the resulting combination:
+         * @throws std::runtime_error if every output relevant to this
+         *   simulation's own SimType (all six for a galaxy-type
+         *   simulation; just writeCluster_/writeClusterSpec_/
+         *   writeClusterPhot_ for a cluster-type simulation, since
+         *   write_galaxy* is meaningless when there is no Galaxy object
+         *   at all) is false, since nothing would be written
+         * @throws std::runtime_error if writeClusterPhot_ and
+         *   writeGalaxyPhot_ are both false while SimControls::filters()
+         *   is non-null, since that means photometry was requested but
+         *   would never be written anywhere -- almost certainly a
+         *   mistake, rather than a deliberate "compute filters() for
+         *   some other purpose but discard the result" request
          */
         OutputManager(const SimControls& simControls, const toml::table& inputDeck);
 
@@ -72,32 +92,39 @@ namespace io
          * @brief Write a cluster's spectrum as a row of the cluster-spectra datasets
          * @param trial Trial number to which this cluster belongs
          * @param time The output time at which the cluster's spectrum was computed, in yr
-         * @param cluster The cluster whose spectrum should be written
+         * @param cluster The cluster whose spectrum should be written;
+         *   not const, since this may need to lazily compute the
+         *   spectrum if it is not already current (see
+         *   core::Cluster::spec()'s own comment)
          * @details
          * If spectral synthesis was not enabled for this simulation,
          * or the cluster has disrupted, this is a no-op.
          */
         virtual void writeClusterSpec(unsigned long trial, double time,
-            const core::Cluster& cluster) = 0;
+            core::Cluster& cluster) = 0;
 
         /**
          * @brief Write a cluster's photometry as a row of the cluster-photometry datasets
          * @param trial Trial number to which this cluster belongs
          * @param time The output time at which the cluster's photometry was computed, in yr
-         * @param cluster The cluster whose photometry should be written
+         * @param cluster The cluster whose photometry should be
+         *   written; not const -- see writeClusterSpec()'s own comment
          * @details
          * If no filter collection or bolometric luminosity was
          * requested for this simulation, or the cluster has
          * disrupted, this is a no-op.
          */
         virtual void writeClusterPhot(unsigned long trial, double time,
-            const core::Cluster& cluster) = 0;
+            core::Cluster& cluster) = 0;
 
         /**
          * @brief Write a galaxy's data as a row of the galaxy output
          * @param trial Trial number to which this galaxy belongs
          * @param time The output time at which this row was recorded, in yr
-         * @param galaxy The galaxy whose data should be written
+         * @param galaxy The galaxy whose data should be written; not
+         *   const, since this needs a non-const reference to loop over
+         *   galaxy's own clusters (see core::Galaxy::clusters()'s own
+         *   comment)
          * @details
          * If galaxy output was not enabled for this simulation (only
          * possible for a galaxy-type simulation to begin with), this
@@ -107,13 +134,14 @@ namespace io
          * recorded in the clusters output too.
          */
         virtual void writeGalaxy(unsigned long trial, double time,
-            const core::Galaxy& galaxy) = 0;
+            core::Galaxy& galaxy) = 0;
 
         /**
          * @brief Write a galaxy's spectrum as a row of the galaxy-spectra datasets
          * @param trial Trial number to which this galaxy belongs
          * @param time The output time at which the galaxy's spectrum was computed, in yr
-         * @param galaxy The galaxy whose spectrum should be written
+         * @param galaxy The galaxy whose spectrum should be written;
+         *   not const -- see writeGalaxy()'s own comment
          * @details
          * If spectral synthesis was not enabled for this simulation,
          * this is a no-op. Otherwise, after writing this row, also
@@ -121,13 +149,14 @@ namespace io
          * (non-disrupted) cluster in galaxy.
          */
         virtual void writeGalaxySpec(unsigned long trial, double time,
-            const core::Galaxy& galaxy) = 0;
+            core::Galaxy& galaxy) = 0;
 
         /**
          * @brief Write a galaxy's photometry as a row of the galaxy-photometry datasets
          * @param trial Trial number to which this galaxy belongs
          * @param time The output time at which the galaxy's photometry was computed, in yr
-         * @param galaxy The galaxy whose photometry should be written
+         * @param galaxy The galaxy whose photometry should be written;
+         *   not const -- see writeGalaxy()'s own comment
          * @details
          * If no filter collection or bolometric luminosity was
          * requested for this simulation, this is a no-op. Otherwise,
@@ -135,7 +164,7 @@ namespace io
          * every currently-alive (non-disrupted) cluster in galaxy.
          */
         virtual void writeGalaxyPhot(unsigned long trial, double time,
-            const core::Galaxy& galaxy) = 0;
+            core::Galaxy& galaxy) = 0;
 
     protected:
 
@@ -154,6 +183,20 @@ namespace io
 
         const SimControls& simControls_; /**< Simulation controls (physics and control-flow settings) */
         const toml::table& inputDeck_;   /**< The simulation's toml input deck */
+
+        // Output-control flags, parsed from the input deck's
+        // output.write_cluster/write_cluster_spec/write_cluster_phot/
+        // write_galaxy/write_galaxy_spec/write_galaxy_phot keys (each
+        // optional, defaulting to true) by this base class's own
+        // constructor -- see its own comment. Read by the H5/Ascii
+        // subclass constructors to decide which groups/files to create
+        // at all.
+        bool writeCluster_ = true;      /**< Whether to write the clusters group/file */
+        bool writeClusterSpec_ = true;  /**< Whether to write the cluster_spectra group/file */
+        bool writeClusterPhot_ = true;  /**< Whether to write the cluster_phot group/file */
+        bool writeGalaxy_ = true;       /**< Whether to write the galaxy group/file (galaxy-type simulations only) */
+        bool writeGalaxySpec_ = true;   /**< Whether to write the galaxy_spectra group/file (galaxy-type simulations only) */
+        bool writeGalaxyPhot_ = true;   /**< Whether to write the galaxy_phot group/file (galaxy-type simulations only) */
     };
 
 } // namespace io

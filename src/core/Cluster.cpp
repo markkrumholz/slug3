@@ -187,20 +187,13 @@ void core::Cluster::advance(const double t)
     // Get isochrone for new time
     isochrone_ = tracks().getIsochrone(logAge);
 
-    // Update the population spectrum (and, if an extinction curve was
-    // requested, extincted spectrum), if a spectral synthesizer was
-    // requested
-    computeSpec();
-
-    // Update the population photometry (and extincted photometry)
-    // from the spectrum just computed above, if a filter collection
-    // was requested
-    computePhot();
-
-    // Update the population's bolometric luminosity, if "Lbol" was
-    // included in phot.filters (see SimControls::computeLbol())
-    const auto& sc = controls_.get();
-    if (sc.computeLbol()) { computeLbol(); }
+    // Mark spec_/specExtinct_/phot_/photExtinct_/lbol_ as stale; they
+    // are recomputed lazily, on demand, the next time spec()/
+    // specExtinct()/phot()/photExtinct()/lbol() is actually called
+    // (see specCurrent_/photCurrent_/lbolCurrent_'s own comments)
+    specCurrent_ = false;
+    photCurrent_ = false;
+    lbolCurrent_ = false;
 
     // Check for disruption
     if (curTime_ > disruptTime_) { isDisrupted_ = true; }
@@ -311,27 +304,33 @@ void core::Cluster::computeSpec()
 
 // Update the population photometry (and, if an extinction curve was
 // requested, extincted photometry) from the current spec_/specExtinct_
+// -- via spec()/specExtinct(), not the raw members, so this computes a
+// current spectrum first if needed, regardless of call order (see this
+// method's own header comment)
 void core::Cluster::computePhot()
 {
     const auto& sc = controls_.get();
     const auto& filters = sc.filters();
     if (filters == nullptr) { return; }
 
-    phot_ = filters->phot(sc.specsyn()->wlObs(), spec_);
+    phot_ = filters->phot(sc.specsyn()->wlObs(), spec());
 
     const auto* ext = sc.extinct();
     if (ext != nullptr)
     {
-        photExtinct_ = filters->phot(ext->wlObs(), specExtinct_);
+        photExtinct_ = filters->phot(ext->wlObs(), specExtinct());
     }
 }
 
 // Compute the population's bolometric luminosity at the current
 // isochrone -- see this method's own header comment for the
-// two-part (stochastic + non-stochastic) structure it mirrors from
-// computeSpec()
+// null-guard and the two-part (stochastic + non-stochastic) structure
+// it mirrors from computeSpec()
 void core::Cluster::computeLbol()
 {
+    const auto& sc = controls_.get();
+    if (!sc.computeLbol()) { return; }
+
     lbol_ = 0.0;
 
     // Individually-sampled (stochastic) stars
@@ -358,7 +357,6 @@ void core::Cluster::computeLbol()
     // segments that pcubature has no way to know to avoid)
     if (birthNonStochMass_ > 0.0)
     {
-        const auto& sc = controls_.get();
         using LbolSegFn = std::array<double, 1> (*)(double, const Segment&);
         const utils::PDFIntegrator integrator(
             sc.imf(), static_cast<LbolSegFn>(&Cluster::lbolStar), 1,

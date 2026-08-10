@@ -184,8 +184,19 @@ namespace core
          *   synthesizer, or an empty vector if no spectral
          *   synthesizer was requested (SimControls::specsyn() is
          *   null)
+         * @details
+         * Computed lazily: if advance() has run since spec_/specExtinct_
+         * were last computed, this triggers computeSpec() (which
+         * computes both together) before returning, so the result is
+         * always current as of the last advance() -- see specCurrent_'s
+         * own comment. Not const, since it may need to run that
+         * computation.
          */
-        [[nodiscard]] auto spec() const -> const auto& { return spec_; }
+        [[nodiscard]] auto spec() -> const auto&
+        {
+            if (!specCurrent_) { computeSpec(); specCurrent_ = true; }
+            return spec_;
+        }
 
         /**
          * @brief Return the cluster's extincted spectrum
@@ -195,8 +206,16 @@ namespace core
          *   vector if no extinction curve was requested
          *   (SimControls::extinct() is null) or spec() itself is
          *   empty (no spectral synthesizer was requested)
+         * @details
+         * Computed lazily -- see spec()'s own comment; both share the
+         * same specCurrent_ flag, since a single computeSpec() call
+         * computes both together.
          */
-        [[nodiscard]] auto specExtinct() const -> const auto& { return specExtinct_; }
+        [[nodiscard]] auto specExtinct() -> const auto&
+        {
+            if (!specCurrent_) { computeSpec(); specCurrent_ = true; }
+            return specExtinct_;
+        }
 
         /**
          * @brief Return the cluster's photometry
@@ -205,8 +224,18 @@ namespace core
          *   the same order as FilterCollection::filterNames()/
          *   filterUnits(), or an empty vector if no filter collection
          *   was requested (SimControls::filters() is null)
+         * @details
+         * Computed lazily -- see spec()'s own comment; computePhot()
+         * itself calls spec()/specExtinct() (rather than reading
+         * spec_/specExtinct_ directly), so calling phot() alone, with
+         * no prior call to spec(), still computes a spectrum current
+         * as of the last advance() first.
          */
-        [[nodiscard]] auto phot() const -> const auto& { return phot_; }
+        [[nodiscard]] auto phot() -> const auto&
+        {
+            if (!photCurrent_) { computePhot(); photCurrent_ = true; }
+            return phot_;
+        }
 
         /**
          * @brief Return the cluster's extincted photometry
@@ -216,16 +245,33 @@ namespace core
          *   empty vector if no extinction curve was requested
          *   (SimControls::extinct() is null) or no filter collection
          *   was requested (SimControls::filters() is null)
+         * @details
+         * Computed lazily -- see phot()'s own comment; both share the
+         * same photCurrent_ flag, since a single computePhot() call
+         * computes both together.
          */
-        [[nodiscard]] auto photExtinct() const -> const auto& { return photExtinct_; }
+        [[nodiscard]] auto photExtinct() -> const auto&
+        {
+            if (!photCurrent_) { computePhot(); photCurrent_ = true; }
+            return photExtinct_;
+        }
 
         /**
          * @brief Return the cluster's bolometric luminosity
          * @return The population's total bolometric luminosity, in
-         *   Lsun, at the current time, or 0 if computeLbol() has never
-         *   run (SimControls::computeLbol() is false)
+         *   Lsun, at the current time, or 0 if SimControls::computeLbol()
+         *   is false (Lbol was never requested)
+         * @details
+         * Computed lazily -- see spec()'s own comment. computeLbol()
+         * itself is a no-op (leaving lbol_ at 0) unless
+         * SimControls::computeLbol() is true, mirroring computeSpec()/
+         * computePhot()'s own null-guards.
          */
-        [[nodiscard]] auto lbol() const { return lbol_; }
+        [[nodiscard]] auto lbol()
+        {
+            if (!lbolCurrent_) { computeLbol(); lbolCurrent_ = true; }
+            return lbol_;
+        }
 
         /**
          * @brief Return whether the cluster has disrupted
@@ -236,6 +282,13 @@ namespace core
         /**
          * @brief Advance the cluster in time
          * @param t Time to which to advance, in yr
+         * @details
+         * Updates the living/dead star lists and the isochrone for the
+         * new time, then marks spec_/specExtinct_/phot_/photExtinct_/
+         * lbol_ as stale (see specCurrent_/photCurrent_/lbolCurrent_'s
+         * own comments) rather than recomputing them itself -- they are
+         * instead recomputed lazily, on demand, the next time spec()/
+         * specExtinct()/phot()/photExtinct()/lbol() is actually called.
          */
         void advance(double t);
         
@@ -282,6 +335,39 @@ namespace core
         double lbol_ = 0.0;         /**< Bolometric luminosity of the population, in Lsun, at the current time */
 
         /**
+         * @brief Whether spec_/specExtinct_ are current as of curTime_
+         * @details
+         * True at construction (spec_/specExtinct_'s own empty
+         * in-class defaults are already the correct, current value
+         * before advance() has ever run), and after every spec()/
+         * specExtinct() call recomputes them; set back to false at the
+         * end of every advance() call, so the next spec()/specExtinct()
+         * call recomputes them lazily -- see advance()'s and spec()'s
+         * own comments. Letting spec()/phot()/lbol() compute only when
+         * actually requested, rather than unconditionally inside
+         * advance() itself, avoids e.g. computing this cluster's own
+         * photometry (an unwanted expense) when a galaxy this cluster
+         * belongs to needs only this cluster's spectrum, to build the
+         * galaxy's own summed spectrum, but per-cluster photometry
+         * output was disabled (output.write_cluster_phot = false).
+         */
+        bool specCurrent_ = true;
+
+        /**
+         * @brief Whether phot_/photExtinct_ are current as of curTime_
+         * @details
+         * Mirrors specCurrent_'s own comment, for phot()/photExtinct().
+         */
+        bool photCurrent_ = true;
+
+        /**
+         * @brief Whether lbol_ is current as of curTime_
+         * @details
+         * Mirrors specCurrent_'s own comment, for lbol().
+         */
+        bool lbolCurrent_ = true;
+
+        /**
          * Tracks for this cluster's [Fe/H]: either owned outright (when
          * the simulation has a variable [Fe/H], so each cluster needs
          * its own slice) or a reference to the slice shared via
@@ -311,22 +397,26 @@ namespace core
          * @brief Update phot_ (and photExtinct_) from the current spec_ (and specExtinct_)
          * @details
          * Does nothing if SimControls::filters() is null (no filter
-         * collection was requested). Otherwise sets phot_ from spec_
-         * as before; if SimControls::extinct() is also non-null, also
-         * sets photExtinct_ from specExtinct_, on extinct()'s own
-         * wl().
+         * collection was requested). Otherwise sets phot_ from spec()
+         * (the lazy getter, not spec_ directly, so that calling phot()
+         * alone -- with no prior call to spec() -- still computes a
+         * current spectrum first, regardless of call order); if
+         * SimControls::extinct() is also non-null, also sets
+         * photExtinct_ from specExtinct() likewise.
          */
         void computePhot();
 
         /**
          * @brief Update lbol_ from the current isochrone and star lists
          * @details
-         * Mirrors computeSpec()'s own two-part structure: sums 10^logL
-         * (logL read directly off the isochrone via Segment's
-         * single-quantity operator()(x, idx), rather than interpolating
-         * every quantity) over each individually-sampled (stochastic)
-         * star in m_ with a valid isochrone segment, then adds the
-         * continuously-sampled (non-stochastic) part of the
+         * Does nothing if SimControls::computeLbol() is false (Lbol was
+         * never requested), mirroring computeSpec()/computePhot()'s own
+         * null-guards. Otherwise mirrors computeSpec()'s own two-part
+         * structure: sums 10^logL (logL read directly off the isochrone
+         * via Segment's single-quantity operator()(x, idx), rather than
+         * interpolating every quantity) over each individually-sampled
+         * (stochastic) star in m_ with a valid isochrone segment, then
+         * adds the continuously-sampled (non-stochastic) part of the
          * population's own contribution, integrated against the IMF
          * over each isochrone segment via lbolStar() and
          * utils::PDFIntegrator -- the same per-segment integration

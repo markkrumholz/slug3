@@ -1325,7 +1325,7 @@ static constexpr double galaxyWriteTime = 3e5;
 // trial/time/galaxy.targetMass()/galaxy.actualMass(). Throws
 // std::runtime_error (caught by the caller) describing any mismatch.
 static void checkGalaxyRowH5(const hid_t file, const unsigned long trial,
-    const double time, const core::Galaxy& galaxy)
+    const double time, core::Galaxy& galaxy)
 {
     // NOLINTBEGIN(misc-include-cleaner)
     const hid_t grp = H5Gopen2(file, "galaxy", H5P_DEFAULT);
@@ -1352,7 +1352,7 @@ static void checkGalaxyRowH5(const hid_t file, const unsigned long trial,
 // written by writeGalaxy()'s own per-cluster writeCluster() calls.
 // Throws std::runtime_error (caught by the caller) describing any
 // mismatch.
-static void checkClustersPassthroughH5(const hid_t file, const core::Galaxy& galaxy)
+static void checkClustersPassthroughH5(const hid_t file, core::Galaxy& galaxy)
 {
     // NOLINTBEGIN(misc-include-cleaner)
     const hid_t grp = H5Gopen2(file, "clusters", H5P_DEFAULT);
@@ -1383,7 +1383,7 @@ static void checkClustersPassthroughH5(const hid_t file, const core::Galaxy& gal
 // Check the galaxy_spectra group's own row (written by
 // writeGalaxySpec) matches galaxy.spec()/specExtinct(). Throws
 // std::runtime_error (caught by the caller) describing any mismatch.
-static void checkGalaxySpecRowH5(const hid_t file, const core::Galaxy& galaxy)
+static void checkGalaxySpecRowH5(const hid_t file, core::Galaxy& galaxy)
 {
     // NOLINTBEGIN(misc-include-cleaner)
     const hid_t grp = H5Gopen2(file, "galaxy_spectra", H5P_DEFAULT);
@@ -1409,7 +1409,7 @@ static void checkGalaxySpecRowH5(const hid_t file, const core::Galaxy& galaxy)
 // by writeGalaxySpec()'s own per-cluster writeClusterSpec() calls.
 // Throws std::runtime_error (caught by the caller) describing any
 // mismatch.
-static void checkClusterSpectraPassthroughH5(const hid_t file, const core::Galaxy& galaxy)
+static void checkClusterSpectraPassthroughH5(const hid_t file, core::Galaxy& galaxy)
 {
     // NOLINTBEGIN(misc-include-cleaner)
     const hid_t grp = H5Gopen2(file, "cluster_spectra", H5P_DEFAULT);
@@ -1424,7 +1424,7 @@ static void checkClusterSpectraPassthroughH5(const hid_t file, const core::Galax
             std::to_string(uidCol.size()) + " rows, expected " +
             std::to_string(galaxy.clusters().size()));
     }
-    for (const auto& cluster : galaxy.clusters())
+    for (auto& cluster : galaxy.clusters())
     {
         const auto i = findIndex(uidCol, cluster.uid());
         // NOLINTBEGIN(misc-include-cleaner)
@@ -1445,7 +1445,7 @@ static void checkClusterSpectraPassthroughH5(const hid_t file, const core::Galax
 // galaxy.photExtinct(). Throws std::runtime_error (caught by the
 // caller) describing any mismatch.
 static void checkGalaxyPhotRowH5(const hid_t file, const io::SimControls& controls,
-    const core::Galaxy& galaxy)
+    core::Galaxy& galaxy)
 {
     auto expectedPhot = galaxy.phot();
     if (controls.computeLbol()) { expectedPhot.push_back(galaxy.lbol()); }
@@ -1475,7 +1475,7 @@ static void checkGalaxyPhotRowH5(const hid_t file, const io::SimControls& contro
 // writeClusterPhot() calls. Throws std::runtime_error (caught by the
 // caller) describing any mismatch.
 static void checkClusterPhotPassthroughH5(const hid_t file,
-    const io::SimControls& controls, const core::Galaxy& galaxy)
+    const io::SimControls& controls, core::Galaxy& galaxy)
 {
     // NOLINTBEGIN(misc-include-cleaner)
     const hid_t grp = H5Gopen2(file, "cluster_phot", H5P_DEFAULT);
@@ -1490,7 +1490,7 @@ static void checkClusterPhotPassthroughH5(const hid_t file,
             std::to_string(uidCol.size()) + " rows, expected " +
             std::to_string(galaxy.clusters().size()));
     }
-    for (const auto& cluster : galaxy.clusters())
+    for (auto& cluster : galaxy.clusters())
     {
         const auto i = findIndex(uidCol, cluster.uid());
         auto expectedPhot = cluster.phot();
@@ -1607,7 +1607,7 @@ static void skipAsciiHeader(std::ifstream& file)
 // galaxy.actualMass(), within tol. Throws std::runtime_error (caught
 // by the caller) describing any mismatch.
 static void checkGalaxyRowAscii(const std::filesystem::path& path,
-    const unsigned long trial, const double time, const core::Galaxy& galaxy,
+    const unsigned long trial, const double time, core::Galaxy& galaxy,
     const double tol)
 {
     std::ifstream file(path);
@@ -1635,7 +1635,7 @@ static void checkGalaxyRowAscii(const std::filesystem::path& path,
 // uid. Throws std::runtime_error (caught by the caller) describing
 // any mismatch.
 static void checkClustersPassthroughAscii(const std::filesystem::path& path,
-    const core::Galaxy& galaxy, const double tol)
+    core::Galaxy& galaxy, const double tol)
 {
     std::ifstream file(path);
     skipAsciiHeader(file);
@@ -1677,7 +1677,7 @@ static void checkClustersPassthroughAscii(const std::filesystem::path& path,
 // per-cluster files below, so no need to match rows by uid). Throws
 // std::runtime_error (caught by the caller) describing any mismatch.
 static void checkGalaxySpecRowsAscii(const std::filesystem::path& path,
-    const std::vector<double>& wlObs, const core::Galaxy& galaxy, const double tol)
+    const std::vector<double>& wlObs, core::Galaxy& galaxy, const double tol)
 {
     std::ifstream file(path);
     skipAsciiHeader(file);
@@ -1719,7 +1719,7 @@ static void checkGalaxySpecRowsAscii(const std::filesystem::path& path,
 // throws std::runtime_error (caught by the caller) if it does not
 // match.
 static void checkClusterSpectraPassthroughAscii(const std::filesystem::path& path,
-    const std::vector<double>& wlObs, const core::Galaxy& galaxy)
+    const std::vector<double>& wlObs, core::Galaxy& galaxy)
 {
     std::ifstream file(path);
     skipAsciiHeader(file);
@@ -1740,7 +1740,7 @@ static void checkClusterSpectraPassthroughAscii(const std::filesystem::path& pat
 // Throws std::runtime_error (caught by the caller) describing any
 // mismatch.
 static void checkGalaxyPhotRowAscii(const std::filesystem::path& path,
-    const io::SimControls& controls, const core::Galaxy& galaxy, const double tol)
+    const io::SimControls& controls, core::Galaxy& galaxy, const double tol)
 {
     auto expectedPhot = galaxy.phot();
     if (controls.computeLbol()) { expectedPhot.push_back(galaxy.lbol()); }
@@ -1772,7 +1772,7 @@ static void checkGalaxyPhotRowAscii(const std::filesystem::path& path,
 // testWriteClusterAsciiExtinct()); throws std::runtime_error (caught
 // by the caller) if it does not match.
 static void checkClusterPhotPassthroughAscii(const std::filesystem::path& path,
-    const core::Galaxy& galaxy)
+    core::Galaxy& galaxy)
 {
     std::ifstream file(path);
     skipAsciiHeader(file);
@@ -1864,6 +1864,274 @@ static auto testWriteGalaxyAscii() -> int
         return 1;
     }
     return 0;
+}
+
+// ---------------------------------------------------------------------
+// Output-control tests: output.write_cluster/write_cluster_phot/
+// write_galaxy/write_galaxy_spec/write_galaxy_phot (write_cluster_spec
+// is covered above by testOptOutClusterSpecOutput) and the two sanity
+// checks OutputManager's own constructor runs on the combination of
+// all six -- see checkOptOutSuppressesGroup()'s own docstring for the
+// shared implementation these opt-out tests build on.
+// ---------------------------------------------------------------------
+
+// Verify that setting output.<key> to false in inputDeck, then
+// constructing both an OutputManagerAscii and an OutputManagerH5 from
+// it, creates neither the ascii <modelName><asciiSuffix> file nor the
+// H5 <h5GroupName> group -- mirrors testOptOutClusterSpecOutput()'s
+// own logic, factored out so each individual key can be checked with a
+// one-line test function below. Returns 0 on success, 1 (after
+// printing a diagnostic prefixed with label) on any mismatch or
+// unexpected exception.
+static auto checkOptOutSuppressesGroup(const toml::table& inputDeck,
+    const std::filesystem::path& outDir, const std::string& modelName,
+    const std::string& h5GroupName, const std::string& asciiSuffix,
+    const std::string& label) -> int
+{
+    try
+    {
+        const io::SimControls controls(inputDeck);
+        {
+            const io::OutputManagerAscii manager(controls, inputDeck);
+        }
+        {
+            const io::OutputManagerH5 manager(controls, inputDeck);
+        }
+
+        const auto asciiPath = outDir / (modelName + asciiSuffix);
+        if (std::filesystem::exists(asciiPath))
+        {
+            std::cerr << "testOutputManager: " << label << ": ascii "
+                "unexpectedly wrote " << asciiPath.string() << "\n";
+            return 1;
+        }
+
+        const auto h5Path = outDir / (modelName + ".h5");
+        // NOLINTBEGIN(misc-include-cleaner)
+        const hid_t file = H5Fopen(h5Path.string().c_str(),
+            H5F_ACC_RDONLY, H5P_DEFAULT);
+        if (file < 0)
+        {
+            std::cerr << "testOutputManager: " << label << ": unable to reopen "
+                << h5Path.string() << "\n";
+            return 1;
+        }
+        const bool hasGroup = H5Lexists(file, h5GroupName.c_str(), H5P_DEFAULT) > 0;
+        H5Fclose(file);
+        // NOLINTEND(misc-include-cleaner)
+
+        if (hasGroup)
+        {
+            std::cerr << "testOutputManager: " << label << ": h5 unexpectedly "
+                "created a " << h5GroupName << " group\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testOutputManager: " << label << " test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Verify that output.write_cluster = false suppresses the clusters H5
+// group and the ascii _clusters.txt file, for a cluster-type
+// simulation with spectral synthesis still enabled (so write_cluster
+// being the only output disabled doesn't also trip the "every relevant
+// output is false" sanity check).
+static auto testOptOutClusterOutput() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() / "slugTestOutputManagerNoClusterOutput";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+    const std::string modelName = "test_model";
+    toml::table inputDeck = makeClusterPhysicsInputDeck(modelName, outDir);
+    inputDeck.at_path("output").as_table()->insert("write_cluster", false);
+    return checkOptOutSuppressesGroup(inputDeck, outDir, modelName,
+        "clusters", "_clusters.txt", "opt-out cluster output");
+}
+
+// Verify that output.write_cluster_phot = false suppresses the
+// cluster_phot H5 group and the ascii _cluster_phot.txt file, for a
+// cluster-type simulation with a filter collection requested (so there
+// would be something to write if the key were not set to false).
+static auto testOptOutClusterPhotOutput() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() / "slugTestOutputManagerNoClusterPhotOutput";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+    const std::string modelName = "test_model";
+    toml::table inputDeck = makeClusterPhysicsInputDeck(
+        modelName, outDir, "tests/core/assets/testClusterPhot.in");
+    inputDeck.at_path("output").as_table()->insert("write_cluster_phot", false);
+    return checkOptOutSuppressesGroup(inputDeck, outDir, modelName,
+        "cluster_phot", "_cluster_phot.txt", "opt-out cluster phot output");
+}
+
+// Verify that output.write_galaxy = false suppresses the galaxy H5
+// group and the ascii _galaxy.txt file, for a galaxy-type simulation.
+static auto testOptOutGalaxyOutput() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() / "slugTestOutputManagerNoGalaxyOutput";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+    const std::string modelName = "test_model";
+    toml::table inputDeck = makeGalaxyPhysicsInputDeck(modelName, outDir);
+    inputDeck.at_path("output").as_table()->insert("write_galaxy", false);
+    return checkOptOutSuppressesGroup(inputDeck, outDir, modelName,
+        "galaxy", "_galaxy.txt", "opt-out galaxy output");
+}
+
+// Verify that output.write_galaxy_spec = false suppresses the
+// galaxy_spectra H5 group and the ascii _galaxy_spectra.txt file, for
+// a galaxy-type simulation with spectral synthesis requested.
+static auto testOptOutGalaxySpecOutput() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() / "slugTestOutputManagerNoGalaxySpecOutput";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+    const std::string modelName = "test_model";
+    toml::table inputDeck = makeGalaxyPhysicsInputDeck(modelName, outDir);
+    inputDeck.at_path("output").as_table()->insert("write_galaxy_spec", false);
+    return checkOptOutSuppressesGroup(inputDeck, outDir, modelName,
+        "galaxy_spectra", "_galaxy_spectra.txt", "opt-out galaxy spec output");
+}
+
+// Verify that output.write_galaxy_phot = false suppresses the
+// galaxy_phot H5 group and the ascii _galaxy_phot.txt file, for a
+// galaxy-type simulation with a filter collection requested.
+static auto testOptOutGalaxyPhotOutput() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() / "slugTestOutputManagerNoGalaxyPhotOutput";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+    const std::string modelName = "test_model";
+    toml::table inputDeck = makeGalaxyPhysicsInputDeck(modelName, outDir);
+    inputDeck.at_path("output").as_table()->insert("write_galaxy_phot", false);
+    return checkOptOutSuppressesGroup(inputDeck, outDir, modelName,
+        "galaxy_phot", "_galaxy_phot.txt", "opt-out galaxy phot output");
+}
+
+// Verify that constructing an OutputManager (via either subclass) from
+// a galaxy-type deck with all six output.write_* keys set to false
+// throws std::runtime_error, since nothing at all would ever be
+// written -- sanity check 1 in OutputManager's own constructor.
+static auto testAllOutputsFalseThrows() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() / "slugTestOutputManagerAllOutputsFalse";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+    const std::string modelName = "test_model";
+    toml::table inputDeck = makeGalaxyPhysicsInputDeck(modelName, outDir);
+    toml::table* outputTbl = inputDeck.at_path("output").as_table();
+    for (const std::string& key : { "write_cluster", "write_cluster_spec",
+        "write_cluster_phot", "write_galaxy", "write_galaxy_spec", "write_galaxy_phot" })
+    {
+        outputTbl->insert(key, false);
+    }
+
+    try
+    {
+        const io::SimControls controls(inputDeck);
+        const io::OutputManagerH5 manager(controls, inputDeck);
+        std::cerr << "testOutputManager: all outputs false: expected "
+            "construction to throw, but it succeeded\n";
+        return 1;
+    }
+    catch (const std::runtime_error&)
+    {
+        return 0;
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testOutputManager: all outputs false test failed "
+            "with an unexpected exception type: " << error.what() << "\n";
+        return 1;
+    }
+}
+
+// Verify that constructing an OutputManager from a cluster-type deck
+// with write_cluster/write_cluster_spec/write_cluster_phot all set to
+// false also throws -- confirming sanity check 1 correctly excludes
+// the (irrelevant, still-defaulted-true) write_galaxy* keys when
+// deciding whether "every output relevant to this simulation" is
+// false, rather than only ever checking the literal six regardless of
+// SimType.
+static auto testAllClusterOutputsFalseThrows() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() / "slugTestOutputManagerAllClusterOutputsFalse";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+    const std::string modelName = "test_model";
+    toml::table inputDeck = makeClusterPhysicsInputDeck(modelName, outDir);
+    toml::table* outputTbl = inputDeck.at_path("output").as_table();
+    for (const std::string& key : { "write_cluster", "write_cluster_spec", "write_cluster_phot" })
+    {
+        outputTbl->insert(key, false);
+    }
+
+    try
+    {
+        const io::SimControls controls(inputDeck);
+        const io::OutputManagerAscii manager(controls, inputDeck);
+        std::cerr << "testOutputManager: all cluster outputs false: expected "
+            "construction to throw, but it succeeded\n";
+        return 1;
+    }
+    catch (const std::runtime_error&)
+    {
+        return 0;
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testOutputManager: all cluster outputs false test failed "
+            "with an unexpected exception type: " << error.what() << "\n";
+        return 1;
+    }
+}
+
+// Verify that constructing an OutputManager from a deck with
+// phot.filters given, but both write_cluster_phot and write_galaxy_phot
+// set to false, throws -- sanity check 2 in OutputManager's own
+// constructor, catching the case where photometry was requested but
+// would never be written anywhere.
+static auto testPhotWithoutOutputThrows() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() / "slugTestOutputManagerPhotWithoutOutput";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+    const std::string modelName = "test_model";
+    toml::table inputDeck = makeGalaxyPhysicsInputDeck(modelName, outDir);
+    toml::table* outputTbl = inputDeck.at_path("output").as_table();
+    outputTbl->insert("write_cluster_phot", false);
+    outputTbl->insert("write_galaxy_phot", false);
+
+    try
+    {
+        const io::SimControls controls(inputDeck);
+        if (controls.filters() == nullptr)
+        {
+            std::cerr << "testOutputManager: phot without output: test bug: "
+                "expected SimControls::filters() to be non-null\n";
+            return 1;
+        }
+        const io::OutputManagerH5 manager(controls, inputDeck);
+        std::cerr << "testOutputManager: phot without output: expected "
+            "construction to throw, but it succeeded\n";
+        return 1;
+    }
+    catch (const std::runtime_error&)
+    {
+        return 0;
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testOutputManager: phot without output test failed "
+            "with an unexpected exception type: " << error.what() << "\n";
+        return 1;
+    }
 }
 
 // Verify the ascii OutputManager: opens <model>_summary.txt, writes the
@@ -2046,5 +2314,13 @@ auto testOutputManager() -> int
     result += testGalaxyFilesAbsentAscii();
     result += testWriteGalaxyH5();
     result += testWriteGalaxyAscii();
+    result += testOptOutClusterOutput();
+    result += testOptOutClusterPhotOutput();
+    result += testOptOutGalaxyOutput();
+    result += testOptOutGalaxySpecOutput();
+    result += testOptOutGalaxyPhotOutput();
+    result += testAllOutputsFalseThrows();
+    result += testAllClusterOutputsFalseThrows();
+    result += testPhotWithoutOutputThrows();
     return result;
 }

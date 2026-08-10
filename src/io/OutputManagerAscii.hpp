@@ -76,7 +76,7 @@ namespace io
          * and specific luminosity, to the cluster-spectra file.
          */
         void writeClusterSpec(unsigned long trial, double time,
-            const core::Cluster& cluster) override;
+            core::Cluster& cluster) override;
 
         /**
          * @brief Write a cluster's photometry
@@ -92,7 +92,7 @@ namespace io
          * column, to the cluster-photometry file.
          */
         void writeClusterPhot(unsigned long trial, double time,
-            const core::Cluster& cluster) override;
+            core::Cluster& cluster) override;
 
         /**
          * @brief Write a galaxy's data as a row of the galaxy output file
@@ -106,7 +106,7 @@ namespace io
          * currently-alive (non-disrupted) cluster in galaxy.
          */
         void writeGalaxy(unsigned long trial, double time,
-            const core::Galaxy& galaxy) override;
+            core::Galaxy& galaxy) override;
 
         /**
          * @brief Write a galaxy's spectrum
@@ -122,7 +122,7 @@ namespace io
          * currently-alive (non-disrupted) cluster in galaxy.
          */
         void writeGalaxySpec(unsigned long trial, double time,
-            const core::Galaxy& galaxy) override;
+            core::Galaxy& galaxy) override;
 
         /**
          * @brief Write a galaxy's photometry
@@ -139,12 +139,15 @@ namespace io
          * (non-disrupted) cluster in galaxy.
          */
         void writeGalaxyPhot(unsigned long trial, double time,
-            const core::Galaxy& galaxy) override;
+            core::Galaxy& galaxy) override;
 
     private:
 
         /**
          * @brief Open the cluster output file and write its header, if cluster output is enabled
+         * @details
+         * A no-op if output.write_cluster (optional, defaults to true)
+         * is set to false.
          */
         void openClustersFile();
 
@@ -161,6 +164,9 @@ namespace io
 
         /**
          * @brief Open the cluster-photometry output file and write its header, if a filter collection or the bolometric luminosity was requested
+         * @details
+         * A no-op if output.write_cluster_phot (optional, defaults to
+         * true) is set to false.
          */
         void openClusterPhotFile();
 
@@ -169,24 +175,28 @@ namespace io
          * @details
          * A no-op unless SimControls::simType() is SimType::galaxy --
          * there is no Galaxy object, and so nothing to write here, for
-         * a cluster-type simulation.
+         * a cluster-type simulation -- or if output.write_galaxy
+         * (optional, defaults to true) is set to false.
          */
         void openGalaxyFile();
 
         /**
          * @brief Open the galaxy-spectra output file and write its header, if a spectral synthesizer was requested
          * @details
-         * A no-op unless SimControls::simType() is SimType::galaxy, or
-         * if no spectral synthesizer was requested.
+         * A no-op unless SimControls::simType() is SimType::galaxy, if
+         * no spectral synthesizer was requested, or if
+         * output.write_galaxy_spec (optional, defaults to true) is set
+         * to false.
          */
         void openGalaxySpectraFile();
 
         /**
          * @brief Open the galaxy-photometry output file and write its header, if a filter collection or the bolometric luminosity was requested
          * @details
-         * A no-op unless SimControls::simType() is SimType::galaxy, or
-         * if neither a filter collection nor the bolometric luminosity
-         * was requested.
+         * A no-op unless SimControls::simType() is SimType::galaxy, if
+         * neither a filter collection nor the bolometric luminosity
+         * was requested, or if output.write_galaxy_phot (optional,
+         * defaults to true) is set to false.
          */
         void openGalaxyPhotFile();
 

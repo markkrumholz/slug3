@@ -73,7 +73,7 @@ namespace io
          * has disrupted, this is a no-op.
          */
         void writeClusterSpec(unsigned long trial, double time,
-            const core::Cluster& cluster) override;
+            core::Cluster& cluster) override;
 
         /**
          * @brief Write a cluster's photometry as a row of the cluster_phot datasets
@@ -86,7 +86,7 @@ namespace io
          * not exist), or the cluster has disrupted, this is a no-op.
          */
         void writeClusterPhot(unsigned long trial, double time,
-            const core::Cluster& cluster) override;
+            core::Cluster& cluster) override;
 
         /**
          * @brief Write a galaxy's data as a row of the galaxy datasets
@@ -100,7 +100,7 @@ namespace io
          * currently-alive (non-disrupted) cluster in galaxy.
          */
         void writeGalaxy(unsigned long trial, double time,
-            const core::Galaxy& galaxy) override;
+            core::Galaxy& galaxy) override;
 
         /**
          * @brief Write a galaxy's spectrum as a row of the galaxy_spectra datasets
@@ -115,7 +115,7 @@ namespace io
          * cluster in galaxy.
          */
         void writeGalaxySpec(unsigned long trial, double time,
-            const core::Galaxy& galaxy) override;
+            core::Galaxy& galaxy) override;
 
         /**
          * @brief Write a galaxy's photometry as a row of the galaxy_phot datasets
@@ -130,12 +130,15 @@ namespace io
          * (non-disrupted) cluster in galaxy.
          */
         void writeGalaxyPhot(unsigned long trial, double time,
-            const core::Galaxy& galaxy) override;
+            core::Galaxy& galaxy) override;
 
     private:
 
         /**
          * @brief Create the clusters group and its datasets, if cluster output is enabled
+         * @details
+         * A no-op if output.write_cluster (optional, defaults to true)
+         * is set to false.
          */
         void openClustersGroup();
 
@@ -152,6 +155,9 @@ namespace io
 
         /**
          * @brief Create the cluster_phot group and its datasets, if a filter collection or the bolometric luminosity was requested
+         * @details
+         * A no-op if output.write_cluster_phot (optional, defaults to
+         * true) is set to false.
          */
         void openClusterPhotGroup();
 
@@ -160,24 +166,28 @@ namespace io
          * @details
          * A no-op unless SimControls::simType() is SimType::galaxy --
          * there is no Galaxy object, and so nothing to write here, for
-         * a cluster-type simulation.
+         * a cluster-type simulation -- or if output.write_galaxy
+         * (optional, defaults to true) is set to false.
          */
         void openGalaxyGroup();
 
         /**
          * @brief Create the galaxy_spectra group and its datasets, if a spectral synthesizer was requested
          * @details
-         * A no-op unless SimControls::simType() is SimType::galaxy, or
-         * if no spectral synthesizer was requested.
+         * A no-op unless SimControls::simType() is SimType::galaxy, if
+         * no spectral synthesizer was requested, or if
+         * output.write_galaxy_spec (optional, defaults to true) is set
+         * to false.
          */
         void openGalaxySpectraGroup();
 
         /**
          * @brief Create the galaxy_phot group and its datasets, if a filter collection or the bolometric luminosity was requested
          * @details
-         * A no-op unless SimControls::simType() is SimType::galaxy, or
-         * if neither a filter collection nor the bolometric luminosity
-         * was requested.
+         * A no-op unless SimControls::simType() is SimType::galaxy, if
+         * neither a filter collection nor the bolometric luminosity
+         * was requested, or if output.write_galaxy_phot (optional,
+         * defaults to true) is set to false.
          */
         void openGalaxyPhotGroup();
 
