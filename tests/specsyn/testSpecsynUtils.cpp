@@ -206,7 +206,7 @@ static auto testFindMatchingSpectra() -> int
  * @details
  * Unlike a track set's groups, a spectral library's groups are not
  * guaranteed to have distinct feh values -- TIEDFEH_test (see
- * data/tools/make_tied_feh_test_fixture.py) is a minimal fixture built
+ * data/tools/spectra/make_tied_feh_test_fixture.py) is a minimal fixture built
  * specifically to exercise this: two groups, both with feh = 0.0 and
  * no afe/cfe/micro/r attributes, so both always match regardless of
  * query parameters (mirroring a WR-type registry entry, which has no

@@ -12,7 +12,7 @@ tie-free files -- see its own module docstring). No datasets are needed
 inside either group: findMatchingSpectra only ever reads a group's own
 attributes, never its contents.
 
-Run from the repository root: python3 data/tools/make_tied_feh_test_fixture.py
+Run from the repository root: python3 data/tools/spectra/make_tied_feh_test_fixture.py
 """
 import h5py
 

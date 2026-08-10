@@ -35,7 +35,7 @@ CLUSTERLIB_H5 = "examples/clusterlib/clusterlib.h5"
 # full "default" chained spectral library (see clusterlib.toml), so
 # building a real SimControls from it -- as slug_reader.controls (and
 # so get_cluster()) does -- needs every one of these files. They're
-# fetched data (see data/tools/fetch_*.py), not committed to the repo,
+# fetched data (see data/tools/*/fetch_*.py), not committed to the repo,
 # so are unavailable in CI -- mirrors tests/core/
 # testClusterSpecsynFullCommon.cpp's own requiredDataFiles/
 # requiredPhotDataFiles and allRequiredDataFilesExist(), which guard

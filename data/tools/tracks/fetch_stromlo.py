@@ -40,10 +40,10 @@ parser.add_argument("--url", type=str, nargs=3, default=STROMLO_URLS,
                     help="URLs of the Google Drive folders holding the "
                     "v/vcrit = 0.0, 0.2, and 0.4 track grids")
 parser.add_argument("--output",
-                    default=shutil.os.path.join("..", "tracks", "stromlo.h5"),
+                    default=shutil.os.path.join("..", "..", "tracks", "stromlo.h5"),
                     help="Output file for the HDF5 tracks")
 parser.add_argument("--registry",
-                    default=shutil.os.path.join("..", "tracks", "tracks.toml"),
+                    default=shutil.os.path.join("..", "..", "tracks", "tracks.toml"),
                     help="Output file for the registry")
 parser.add_argument("--overwrite", action="store_true",
                     help="Overwrite existing output file")
@@ -327,7 +327,7 @@ else:
 if "Stromlo" in registry.keys():
     registry.pop("Stromlo")
 stromlo_tab = tomlkit.table()
-stromlo_tab["file"] = args.output
+stromlo_tab["file"] = shutil.os.path.basename(args.output)
 stromlo_tab["references"] = STROMLO_references
 stromlo_tab["reference_urls"] = STROMLO_reference_URLs
 for qty, attr in zip(["Fe_H", "alpha_Fe", "v_vcrit"],

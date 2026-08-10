@@ -2,7 +2,7 @@
 """Generate tests/specsyn/assets/RAUCH_test.h5, a tiny synthetic
 fixture for exercising SpecsynLibWD/SpecsynLib2D's handling of a
 partially-filled (logg, log_Teff) grid -- the schema
-data/tools/fetch_rauch.py writes for the real Rauch et al. NLTE hot
+data/tools/spectra/fetch_rauch.py writes for the real Rauch et al. NLTE hot
 star grid, whose (logg, Teff) coverage is not a full rectangular grid.
 Not real Rauch data: a flat "wl"/"logg"/"log_Teff"/"flux" schema on a
 3x2 (logg, log_Teff) grid, with only one corner missing -- mirroring
@@ -36,7 +36,7 @@ dependence), so the interpolated result at every wavelength is exactly
 this weighted average, making the expected result trivial to check
 exactly rather than only approximately.
 
-Run from the repository root: python3 data/tools/make_rauch_test_fixture.py
+Run from the repository root: python3 data/tools/spectra/make_rauch_test_fixture.py
 """
 import h5py
 import numpy as np

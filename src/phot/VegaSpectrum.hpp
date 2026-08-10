@@ -27,7 +27,7 @@ namespace phot
          * @brief Construct a VegaSpectrum, reading the reference spectrum from a file
          * @param vegaName Name of the HDF5 file holding the Vega
          *   reference spectrum ("wl" and "flux" datasets -- see
-         *   data/tools/fetch_vega.py)
+         *   data/tools/spectra/fetch_vega.py)
          * @throws std::runtime_error if vegaName cannot be found or read
          */
         explicit VegaSpectrum(const std::string& vegaName = defaultVegaSpec);

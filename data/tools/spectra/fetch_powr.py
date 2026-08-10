@@ -188,12 +188,12 @@ parser.add_argument("--output-dir",
                          "and from which they are read for repacking "
                          "(default: %(default)s)")
 parser.add_argument("--spectra-dir",
-                    default=shutil.os.path.join("..", "spectra"),
+                    default=shutil.os.path.join("..", "..", "spectra"),
                     help="Directory in which to write the output HDF5 files "
                          "powr_wne.h5, powr_wnl_h20.h5, powr_wnl_h40.h5, "
                          "powr_wnl_h60.h5, powr_wc.h5 (default: %(default)s)")
 parser.add_argument("--registry",
-                    default=shutil.os.path.join("..", "spectra", "spectra.toml"),
+                    default=shutil.os.path.join("..", "..", "spectra", "spectra.toml"),
                     help="Spectra registry TOML file (default: %(default)s)")
 parser.add_argument("--grids", nargs="+", default=[], metavar="GRIDNAME",
                     help="Grid names to download/process (default: all). "
@@ -479,7 +479,7 @@ for dest_key, reg_name in POWR_REGISTRY_NAMES.items():
     if reg_name in registry:
         registry.pop(reg_name)
     tab = tomlkit.table()
-    tab["file"] = h5_path
+    tab["file"] = shutil.os.path.basename(h5_path)
     tab["version"] = args.version
     tab["references"] = POWR_references
     tab["reference_urls"] = POWR_reference_urls

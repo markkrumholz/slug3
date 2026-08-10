@@ -36,7 +36,7 @@ parser = argparse.ArgumentParser(
 parser.add_argument("--url", default=VEGA_URL,
                     help="URL of the CALSPEC Vega FITS file (default: %(default)s)")
 parser.add_argument("--output",
-                    default=shutil.os.path.join("..", "spectra", "vega.h5"),
+                    default=shutil.os.path.join("..", "..", "spectra", "vega.h5"),
                     help="Output file for the HDF5 Vega spectrum (default: %(default)s)")
 parser.add_argument("--overwrite", action="store_true",
                     help="Overwrite --output if it already exists")

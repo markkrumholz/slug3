@@ -33,7 +33,7 @@ actually used in the weighted sum had zero total weight, so dividing
 by that sum produced NaN/Inf instead of a clean out-of-bounds result.
 
 Run from the repository root:
-    python3 data/tools/make_coerce_zero_weight_test_fixture.py
+    python3 data/tools/spectra/make_coerce_zero_weight_test_fixture.py
 """
 import h5py
 import numpy as np

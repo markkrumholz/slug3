@@ -13,7 +13,7 @@
  *     own schema), with flux(logg, logTeff, wl) = amplitude(logg,
  *     logTeff) * shape(wl), where amplitude is an exactly linear
  *     function of (logg, logTeff) -- see
- *     data/tools/make_wd_test_fixture.py for the precise coefficients
+ *     data/tools/spectra/make_wd_test_fixture.py for the precise coefficients
  *     and shape values used. Bilinear interpolation of a function that
  *     is linear (not bilinear) in its two variables is exact
  *     everywhere within the grid, not just at grid points, so
@@ -23,7 +23,7 @@
  *     (mirroring fetch_rauch.py's own schema, and its real data's own
  *     partially-filled coverage), with one corner of an otherwise
  *     complete 2x2 cell deliberately left unpopulated -- see
- *     data/tools/make_rauch_test_fixture.py -- used by
+ *     data/tools/spectra/make_rauch_test_fixture.py -- used by
  *     testSparseGridExactPoint/testSparseGridMissingCorner below to
  *     exercise SpecsynLib2D::spec()'s unpopulated-neighbor handling
  *     under all three OOBPolicy variants.
@@ -49,7 +49,7 @@ namespace
     const std::string spectraName = "WD_test";
     const std::string sparseSpectraName = "RAUCH_test";
 
-    // Mirrors data/tools/make_rauch_test_fixture.py's own constants
+    // Mirrors data/tools/spectra/make_rauch_test_fixture.py's own constants
     // exactly: a partially-filled 3x2 (logg, log_Teff) grid, missing
     // only the (logg=9.0, log_Teff=4.5) corner, with a constant
     // (wavelength-independent) flux value at each populated point.
@@ -72,7 +72,7 @@ namespace
     // identical comment on testControls for why.
     const io::SimControls testControls;
 
-    // Mirrors data/tools/make_wd_test_fixture.py's own constants exactly
+    // Mirrors data/tools/spectra/make_wd_test_fixture.py's own constants exactly
     constexpr double amp0 = 1.0;
     constexpr double ampLogg = 2.0;
     constexpr double ampLogTeff = 3.0;
@@ -162,7 +162,7 @@ namespace
      * hold a constant (wavelength-independent) flux value rather than
      * WD_test's amplitude(logg, logTeff) * shape(wl) form -- see this
      * file's own sparseFlux* constants and
-     * data/tools/make_rauch_test_fixture.py.
+     * data/tools/spectra/make_rauch_test_fixture.py.
      */
     auto checkConstantResult(const std::vector<double>& result, const double expectedFlux,
         const double logL, const double logTeff, const std::string& label) -> int
@@ -297,7 +297,7 @@ static auto testOutOfBoundsLogg() -> int
 
 // Check that an exact, populated grid point in the fully-populated
 // cell of the RAUCH_test fixture (see
-// data/tools/make_rauch_test_fixture.py) reproduces its own stored
+// data/tools/spectra/make_rauch_test_fixture.py) reproduces its own stored
 // constant flux value exactly under OOBPolicy::raise -- confirms
 // SpecsynLibWD's sparse-grid loading path itself is correct,
 // independent of the missing-corner handling testSparseGridMissingCorner
@@ -332,7 +332,7 @@ static auto testSparseGridExactPoint() -> int
 }
 
 // Check that a query point whose bracketing cell has one missing
-// corner (see data/tools/make_rauch_test_fixture.py) is handled
+// corner (see data/tools/spectra/make_rauch_test_fixture.py) is handled
 // per-OOBPolicy exactly as SpecsynLib::spec(double, double, double)
 // handles the analogous 3D case: raise throws, silent returns empty,
 // and coerce interpolates from the 3 populated corners alone,

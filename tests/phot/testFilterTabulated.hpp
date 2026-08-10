@@ -7,7 +7,7 @@
  * HDF5 file stored under tests/phot/assets so that they can run
  * without access to the full-size filter data under data/filters,
  * which is too large to store in the repository -- see
- * data/tools/make_filter_test_fixture.py for how that fixture was
+ * data/tools/filters/make_filter_test_fixture.py for how that fixture was
  * generated.
  * @date 2026-07-27
  */

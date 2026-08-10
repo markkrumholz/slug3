@@ -435,7 +435,7 @@ static auto testResampleAllOutOfRange() -> int
 // still fails under OOBPolicy::raise/::silent, confirming this really
 // is a gap under the old semantics rather than something coerce merely
 // papers over regardless of policy. Uses COERCE_test.h5 (see
-// data/tools/make_coerce_test_fixture.py), whose only populated
+// data/tools/spectra/make_coerce_test_fixture.py), whose only populated
 // (Teff, logg) cell is missing exactly one of its four corners
 // (Teff = 6000 K, logg = 4.5), each holding a constant (wavelength-
 // independent) flux: 1.0, 2.0, and 3.0 at the three populated corners.
@@ -555,7 +555,7 @@ static auto testSpecCoerce() -> int
 // along one axis, so that every corner with nonzero interpolation
 // weight is unpopulated even though some (zero-weight) corner is
 // populated. Uses COERCE_ZERO_test.h5 (see
-// data/tools/make_coerce_zero_weight_test_fixture.py), whose Teff axis
+// data/tools/spectra/make_coerce_zero_weight_test_fixture.py), whose Teff axis
 // is {1000, 10000} K and whose only populated points are (1000, 4.0),
 // (1000, 4.5), and (10000, 5.0). A query at exactly Teff = 10000 K
 // (which -- unlike an arbitrary Teff -- round-trips exactly through

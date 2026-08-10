@@ -97,7 +97,7 @@ CLARET_2020_URL   = "https://ui.adsabs.harvard.edu/abs/2020A%26A...634A..93C/abs
 TREMBLAY_GRID_TYPES = {
     "ir": {
         "url": TREMBLAY_IR_URL,
-        "output": shutil.os.path.join("..", "spectra", "tremblay_da.h5"),
+        "output": shutil.os.path.join("..", "..", "spectra", "tremblay_da.h5"),
         "registry_name": "TREMBLAY_DA",
         "references": [TREMBLAY_2011, KOWALSKI_2006],
         "reference_urls": [TREMBLAY_2011_URL, KOWALSKI_2006_URL],
@@ -105,7 +105,7 @@ TREMBLAY_GRID_TYPES = {
     },
     "elm": {
         "url": TREMBLAY_ELM_URL,
-        "output": shutil.os.path.join("..", "spectra", "tremblay_elm.h5"),
+        "output": shutil.os.path.join("..", "..", "spectra", "tremblay_elm.h5"),
         "registry_name": "TREMBLAY_ELM",
         "references": [CLARET_2020],
         "reference_urls": [CLARET_2020_URL],
@@ -130,7 +130,7 @@ parser.add_argument("--version", default="",
 parser.add_argument("--output", default="",
                     help="Output HDF5 file (default: chosen by --grid-type)")
 parser.add_argument("--registry",
-                    default=shutil.os.path.join("..", "spectra", "spectra.toml"),
+                    default=shutil.os.path.join("..", "..", "spectra", "spectra.toml"),
                     help="Spectra registry TOML file (default: %(default)s)")
 parser.add_argument("--overwrite", action="store_true",
                     help="Overwrite the output HDF5 file and registry entry if already present")
@@ -376,7 +376,7 @@ else:
 if registry_name in registry:
     registry.pop(registry_name)
 tab = tomlkit.table()
-tab["file"] = args.output
+tab["file"] = shutil.os.path.basename(args.output)
 tab["version"] = args.version
 tab["references"] = grid_cfg["references"]
 tab["reference_urls"] = grid_cfg["reference_urls"]
