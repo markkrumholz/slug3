@@ -47,13 +47,22 @@ void core::SimGalaxy::run()
         // Create galaxy for this trial
         Galaxy galaxy(simControls_);
 
-        // Loop over output times, updating the galaxy's internal
-        // state -- writing this state to output is left for a future
-        // commit
+        // Loop over output times, advancing the galaxy's internal
+        // state and writing it out at each one -- writeGalaxy/
+        // writeGalaxySpec/writeGalaxyPhot each also write out every
+        // currently-alive cluster in the galaxy, so no separate
+        // writeCluster/writeClusterSpec/writeClusterPhot calls are
+        // needed here (unlike SimCluster::run's single writeCluster
+        // call, there is no single moment when every cluster this
+        // trial will ever form already exists, since new clusters
+        // keep forming as the galaxy advances)
         const auto outTimes = simControls_.outTimes();
         for (const auto outTime : outTimes)
         {
             galaxy.advance(outTime);
+            outputManager_->writeGalaxy(trialNum, outTime, galaxy);
+            outputManager_->writeGalaxySpec(trialNum, outTime, galaxy);
+            outputManager_->writeGalaxyPhot(trialNum, outTime, galaxy);
         }
     }
 

@@ -277,6 +277,7 @@ target_compile_options(slugTestCoreFull PRIVATE -O3)
 target_compile_definitions(slugTestCoreFull PRIVATE NDEBUG)
 add_executable(slugTestIo
     src/core/Cluster.cpp
+    src/core/Galaxy.cpp
     src/io/OutputManager.cpp
     src/io/OutputManagerAscii.cpp
     src/io/OutputManagerH5.cpp

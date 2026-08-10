@@ -16,6 +16,7 @@
 namespace core
 {
     class Cluster;
+    class Galaxy;
 } // namespace core
 
 namespace io
@@ -86,6 +87,50 @@ namespace io
          */
         void writeClusterPhot(unsigned long trial, double time,
             const core::Cluster& cluster) override;
+
+        /**
+         * @brief Write a galaxy's data as a row of the galaxy datasets
+         * @param trial Trial number to which this galaxy belongs
+         * @param time The output time at which this row was recorded, in yr
+         * @param galaxy The galaxy whose data should be written
+         * @details
+         * If galaxy output was not enabled for this simulation (the
+         * galaxy group does not exist), this is a no-op. Otherwise,
+         * after writing this row, also calls writeCluster() on every
+         * currently-alive (non-disrupted) cluster in galaxy.
+         */
+        void writeGalaxy(unsigned long trial, double time,
+            const core::Galaxy& galaxy) override;
+
+        /**
+         * @brief Write a galaxy's spectrum as a row of the galaxy_spectra datasets
+         * @param trial Trial number to which this galaxy belongs
+         * @param time The output time at which the galaxy's spectrum was computed, in yr
+         * @param galaxy The galaxy whose spectrum should be written
+         * @details
+         * If spectral synthesis was not enabled for this simulation
+         * (the galaxy_spectra group does not exist), this is a no-op.
+         * Otherwise, after writing this row, also calls
+         * writeClusterSpec() on every currently-alive (non-disrupted)
+         * cluster in galaxy.
+         */
+        void writeGalaxySpec(unsigned long trial, double time,
+            const core::Galaxy& galaxy) override;
+
+        /**
+         * @brief Write a galaxy's photometry as a row of the galaxy_phot datasets
+         * @param trial Trial number to which this galaxy belongs
+         * @param time The output time at which the galaxy's photometry was computed, in yr
+         * @param galaxy The galaxy whose photometry should be written
+         * @details
+         * If no filter collection or bolometric luminosity was
+         * requested for this simulation (the galaxy_phot group does
+         * not exist), this is a no-op. Otherwise, after writing this
+         * row, also calls writeClusterPhot() on every currently-alive
+         * (non-disrupted) cluster in galaxy.
+         */
+        void writeGalaxyPhot(unsigned long trial, double time,
+            const core::Galaxy& galaxy) override;
 
     private:
 

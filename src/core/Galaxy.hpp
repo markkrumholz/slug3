@@ -38,10 +38,11 @@ namespace core
          *   stored by reference, so it must outlive this Galaxy --
          *   see controls_'s own comment
          * @details
-         * curTime_ and lbol_ start at 0, and clusters_/disruptedClusters_/
-         * spec_/specExtinct_/phot_/photExtinct_ all start empty -- no
-         * clusters exist, and no spectrum/photometry has been computed,
-         * until the first call to advance().
+         * curTime_, lbol_, targetMass_, and actualMass_ all start at 0,
+         * and clusters_/disruptedClusters_/spec_/specExtinct_/phot_/
+         * photExtinct_ all start empty -- no clusters exist, and no
+         * spectrum/photometry has been computed, until the first call
+         * to advance().
          */
         explicit Galaxy(const io::SimControls& controls);
 
@@ -119,13 +120,34 @@ namespace core
         [[nodiscard]] auto lbol() const { return lbol_; }
 
         /**
+         * @brief Return the total target mass of clusters formed so far
+         * @return The sum, over every advance() call so far, of the
+         *   target mass (sfr().integral() over that call's own
+         *   (curTime(), t] step) of clusters that should have formed,
+         *   in Msun -- may differ from actualMass() due to stochastic
+         *   sampling from SimControls::cmf() (see Galaxy::advance())
+         */
+        [[nodiscard]] auto targetMass() const { return targetMass_; }
+
+        /**
+         * @brief Return the total actual mass of clusters formed so far
+         * @return The sum, over every advance() call so far, of the
+         *   target mass (Cluster::targetMass()) of every cluster
+         *   actually drawn from SimControls::cmf() during that call,
+         *   in Msun
+         */
+        [[nodiscard]] auto actualMass() const { return actualMass_; }
+
+        /**
          * @brief Advance the galaxy in time
          * @param t Time to which to advance, in yr; must be >= curTime()
          * @details
          * Draws and forms new clusters over (curTime(), t] from
-         * SimControls::sfr()/cmf(), advances every cluster formed so
-         * far (in clusters() and disruptedClusters()) to t, moves any
-         * cluster that disrupted during this step from clusters() to
+         * SimControls::sfr()/cmf(), accumulating the target and actual
+         * mass of that step's new clusters into targetMass()/
+         * actualMass(), advances every cluster formed so far (in
+         * clusters() and disruptedClusters()) to t, moves any cluster
+         * that disrupted during this step from clusters() to
          * disruptedClusters(), then recomputes spec()/specExtinct()/
          * phot()/photExtinct()/lbol() as sums over the resulting
          * cluster population, before finally updating curTime() to t.
@@ -143,6 +165,8 @@ namespace core
         std::vector<double> phot_;         /**< Photometry of spec_ through each filter in SimControls::filters(), at the current time */
         std::vector<double> photExtinct_;  /**< Photometry of specExtinct_ through each filter in SimControls::filters(), at the current time */
         double lbol_ = 0.0;                /**< Sum of lbol() over every cluster in clusters_/disruptedClusters_, at the current time */
+        double targetMass_ = 0.0;          /**< Cumulative target mass of clusters formed so far, over every advance() call, in Msun */
+        double actualMass_ = 0.0;          /**< Cumulative actual mass of clusters formed so far, over every advance() call, in Msun */
 
         /**
          * @brief Simulation controls (physics and control-flow settings) this galaxy was built from

@@ -7,6 +7,7 @@
 
 #include "OutputManagerAscii.hpp"
 #include "../core/Cluster.hpp"
+#include "../core/Galaxy.hpp"
 #include "../extinct/Extinct.hpp"
 #include "../phot/FilterCollection.hpp"
 #include "../specsyn/Specsyn.hpp"
@@ -683,4 +684,120 @@ void io::OutputManagerAscii::writeClusterPhot(
         }
         clusterPhotFile_ << "\n";
     }
+}
+
+// Write one fixed-width row of galaxy data (trial, time, target_mass,
+// actual_mass -- no uid, since a galaxy has no individual identity)
+// to the galaxy output file, then call writeCluster() on every
+// currently-alive (non-disrupted) cluster in galaxy. A no-op if
+// galaxy output was not enabled for this simulation.
+void io::OutputManagerAscii::writeGalaxy(
+    const unsigned long trial, const double time, const core::Galaxy& galaxy)
+{
+    if (galaxyFile_.is_open())
+    {
+        // Guard the actual write against concurrent callers from other
+        // threads; unlike the constructor, this method is expected to
+        // be called from inside an openMP parallel region
+#ifdef _OPENMP
+#pragma omp critical(galaxyOutputWrite)
+#endif
+        {
+            galaxyFile_ << std::right
+                        << std::setw(uidWidth) << formatUid(trial)
+                        << std::setw(numWidth) << formatSci(time)
+                        << std::setw(numWidth) << formatSci(galaxy.targetMass())
+                        << std::setw(numWidth) << formatSci(galaxy.actualMass()) << "\n";
+        }
+    }
+
+    for (const auto& cluster : galaxy.clusters()) { writeCluster(trial, cluster); }
+}
+
+// Write one line per wavelength (trial, time, wavelength, specific
+// luminosity -- no uid) to the galaxy-spectra output file, then call
+// writeClusterSpec() on every currently-alive (non-disrupted) cluster
+// in galaxy. A no-op if spectral synthesis was not enabled for this
+// simulation.
+void io::OutputManagerAscii::writeGalaxySpec(
+    const unsigned long trial, const double time, const core::Galaxy& galaxy)
+{
+    if (galaxySpectraFile_.is_open())
+    {
+        const auto& spec = galaxy.spec();
+        const auto* ext = simControls_.extinct();
+        const auto& specExtinct = galaxy.specExtinct();
+        // See writeClusterSpec's own comment on wlOffset()/spec_ex's
+        // fallback to 0 outside the extinction curve's own coverage
+        const std::size_t wlOffset = (ext != nullptr) ? ext->wlOffset() : 0;
+
+        // Guard the actual writes against concurrent callers from
+        // other threads; uses its own critical section, distinct from
+        // writeGalaxy's, since the two write to independent files
+#ifdef _OPENMP
+#pragma omp critical(galaxySpecOutputWrite)
+#endif
+        {
+            for (std::size_t i = 0; i < wlObs_.size(); ++i)
+            {
+                galaxySpectraFile_ << std::right
+                                    << std::setw(uidWidth) << formatUid(trial)
+                                    << std::setw(numWidth) << formatSci(time)
+                                    << std::setw(numWidth) << formatSci(wlObs_.at(i))
+                                    << std::setw(numWidth) << formatSci(spec.at(i));
+                if (ext != nullptr)
+                {
+                    const double specEx = (i >= wlOffset && (i - wlOffset) < specExtinct.size()) ?
+                        specExtinct.at(i - wlOffset) : 0.0;
+                    galaxySpectraFile_ << std::setw(numWidth) << formatSci(specEx);
+                }
+                galaxySpectraFile_ << "\n";
+            }
+        }
+    }
+
+    for (const auto& cluster : galaxy.clusters()) { writeClusterSpec(trial, time, cluster); }
+}
+
+// Write one line (trial, time, then one column per filter) to the
+// galaxy-photometry output file, then call writeClusterPhot() on
+// every currently-alive (non-disrupted) cluster in galaxy. A no-op if
+// no filter collection or bolometric luminosity was requested for
+// this simulation.
+void io::OutputManagerAscii::writeGalaxyPhot(
+    const unsigned long trial, const double time, const core::Galaxy& galaxy)
+{
+    if (galaxyPhotFile_.is_open())
+    {
+        auto phot = galaxy.phot();
+        if (simControls_.computeLbol()) { phot.push_back(galaxy.lbol()); }
+
+        // Guard the actual writes against concurrent callers from
+        // other threads; uses its own critical section, distinct from
+        // writeGalaxy's/writeGalaxySpec's, since all three write to
+        // independent files
+#ifdef _OPENMP
+#pragma omp critical(galaxyPhotOutputWrite)
+#endif
+        {
+            galaxyPhotFile_ << std::right
+                             << std::setw(uidWidth) << formatUid(trial)
+                             << std::setw(numWidth) << formatSci(time);
+            for (std::size_t i = 0; i < phot.size(); ++i)
+            {
+                galaxyPhotFile_ << std::setw(photColWidths_.at(i)) << formatSci(phot.at(i));
+            }
+            if (simControls_.extinct() != nullptr && simControls_.filters() != nullptr)
+            {
+                const auto& photExtinct = galaxy.photExtinct();
+                for (std::size_t i = 0; i < photExtinct.size(); ++i)
+                {
+                    galaxyPhotFile_ << std::setw(photExtinctColWidths_.at(i)) << formatSci(photExtinct.at(i));
+                }
+            }
+            galaxyPhotFile_ << "\n";
+        }
+    }
+
+    for (const auto& cluster : galaxy.clusters()) { writeClusterPhot(trial, time, cluster); }
 }

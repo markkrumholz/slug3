@@ -13,6 +13,7 @@
 #include "Cluster.hpp"
 #include <cstddef>
 #include <functional>
+#include <numeric>
 #include <sstream>
 #include <stdexcept>
 #include <utility>
@@ -44,6 +45,8 @@ void core::Galaxy::advance(const double t)
     // the CMF to reach that target
     const double mClusterNew = sc.sfr().integral(curTime_, t);
     const auto newMasses = sc.cmf().drawTarget(mClusterNew);
+    targetMass_ += mClusterNew;
+    actualMass_ += std::accumulate(newMasses.begin(), newMasses.end(), 0.0);
 
     // 3-4) For each new cluster, draw a formation time from the SFR
     // over (curTime_, t] and create it, with a unique ID from the uid
