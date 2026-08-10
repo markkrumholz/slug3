@@ -294,9 +294,9 @@ def test_cluster_phot_lbol_filter(cluster_phot):
 
 
 def test_cluster_phot_ext_suffix(cluster_phot):
-    """Appending _ext to a real filter name returns its extincted counterpart."""
+    """Appending _ex to a real filter name returns its extincted counterpart."""
     plain = cluster_phot["HST.WFC3_UVIS1.F555W"]
-    extinct = cluster_phot["HST.WFC3_UVIS1.F555W_ext"]
+    extinct = cluster_phot["HST.WFC3_UVIS1.F555W_ex"]
     assert isinstance(extinct, u.Quantity)
     assert extinct.unit == plain.unit
     assert len(extinct) == len(plain)
@@ -304,9 +304,9 @@ def test_cluster_phot_ext_suffix(cluster_phot):
 
 
 def test_cluster_phot_lbol_has_no_extincted_counterpart(cluster_phot):
-    """Lbol_ext isn't a real column (phot_extinct excludes Lbol) and fails."""
+    """Lbol_ex isn't a real column (phot_extinct excludes Lbol) and fails."""
     with pytest.raises(Exception):
-        cluster_phot["Lbol_ext"]
+        cluster_phot["Lbol_ex"]
 
 
 def test_cluster_phot_getitem_cached(cluster_phot):
@@ -589,10 +589,10 @@ def test_phot_convert_extinct_dict_and_missing_column(tmp_path):
     assert cp is not None
 
     reader.phot_convert("AB")  # must not raise, despite Q(HI) having no extinct column
-    ext = cast(u.Quantity, cp["Generic.Johnson.V_ext"])
+    ext = cast(u.Quantity, cp["Generic.Johnson.V_ex"])
     assert ext.unit == u.ABmag
     with pytest.raises(IndexError):
-        cp["Q(HI)_ext"]
+        cp["Q(HI)_ex"]
 
 
 def test_phot_convert_roundtrip(tmp_path):

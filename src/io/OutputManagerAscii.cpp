@@ -221,6 +221,95 @@ static void writeClusterPhotHeader(std::ofstream& file,
     file << std::string(totalWidth, '-') << "\n";
 }
 
+// Write the galaxy-output ascii header (column names, a row of
+// units, and a dashed rule) to file: one row per (trial, time) pair,
+// holding the target and actual total stellar mass formed by that
+// time -- unlike the cluster output file, a galaxy has no per-object
+// identity, so there is no "uid" column here.
+static void writeGalaxyHeader(std::ofstream& file)
+{
+    file << std::right << std::setw(uidWidth) << "trial"
+         << std::setw(numWidth) << "time"
+         << std::setw(numWidth) << "target_mass"
+         << std::setw(numWidth) << "actual_mass" << "\n";
+    file << std::right << std::setw(uidWidth) << "none"
+         << std::setw(numWidth) << "yr"
+         << std::setw(numWidth) << "Msun"
+         << std::setw(numWidth) << "Msun" << "\n";
+    constexpr int numColumns = 3;
+    file << std::string(static_cast<std::string::size_type>(uidWidth), '-')
+         << std::string(static_cast<std::string::size_type>(numColumns) * numWidth, '-') << "\n";
+}
+
+// Write the galaxy-spectra ascii header (column names, a row of
+// units, and a dashed rule) to file. Mirrors writeClusterSpectraHeader's
+// own one-(wavelength, specific luminosity)-pair-per-line layout and
+// "spec_ex" naming, but with no "uid" column, since a galaxy (unlike a
+// cluster) has no individual identity.
+static void writeGalaxySpectraHeader(std::ofstream& file, const bool hasExtinct)
+{
+    file << std::right << std::setw(uidWidth) << "trial"
+         << std::setw(numWidth) << "time"
+         << std::setw(numWidth) << "wl"
+         << std::setw(numWidth) << "spec";
+    if (hasExtinct) { file << std::setw(numWidth) << "spec_ex"; }
+    file << "\n";
+    file << std::right << std::setw(uidWidth) << "none"
+         << std::setw(numWidth) << "yr"
+         << std::setw(numWidth) << "Angstrom"
+         << std::setw(numWidth) << "erg/s/Angstrom";
+    if (hasExtinct) { file << std::setw(numWidth) << "erg/s/Angstrom"; }
+    file << "\n";
+    const int numColumns = hasExtinct ? 4 : 3;
+    file << std::string(static_cast<std::string::size_type>(uidWidth), '-')
+         << std::string(static_cast<std::string::size_type>(numColumns) * numWidth, '-') << "\n";
+}
+
+// Write the galaxy-photometry ascii header (column names, a row of
+// units, and a dashed rule) to file. Mirrors writeClusterPhotHeader's
+// own one-row-per-(trial, time)-with-one-column-per-filter layout, but
+// with no "uid" column, since a galaxy (unlike a cluster) has no
+// individual identity. colWidths/extinctFilterNames/extinctFilterUnits/
+// extinctColWidths carry exactly the same meaning as in
+// writeClusterPhotHeader -- and, in practice, the same values, since
+// both are built from the same SimControls::filters().
+static void writeGalaxyPhotHeader(std::ofstream& file,
+    const std::vector<std::string>& filterNames,
+    const std::vector<std::string>& filterUnits,
+    const std::vector<int>& colWidths,
+    const std::vector<std::string>& extinctFilterNames,
+    const std::vector<std::string>& extinctFilterUnits,
+    const std::vector<int>& extinctColWidths)
+{
+    file << std::right << std::setw(uidWidth) << "trial"
+         << std::setw(numWidth) << "time";
+    for (std::size_t i = 0; i < filterNames.size(); ++i)
+    {
+        file << std::setw(colWidths.at(i)) << filterNames.at(i);
+    }
+    for (std::size_t i = 0; i < extinctFilterNames.size(); ++i)
+    {
+        file << std::setw(extinctColWidths.at(i)) << extinctFilterNames.at(i);
+    }
+    file << "\n";
+    file << std::right << std::setw(uidWidth) << "none"
+         << std::setw(numWidth) << "yr";
+    for (std::size_t i = 0; i < filterUnits.size(); ++i)
+    {
+        file << std::setw(colWidths.at(i)) << filterUnits.at(i);
+    }
+    for (std::size_t i = 0; i < extinctFilterUnits.size(); ++i)
+    {
+        file << std::setw(extinctColWidths.at(i)) << extinctFilterUnits.at(i);
+    }
+    file << "\n";
+    auto totalWidth = static_cast<std::string::size_type>(uidWidth) +
+        static_cast<std::string::size_type>(numWidth);
+    for (const int w : colWidths) { totalWidth += static_cast<std::string::size_type>(w); }
+    for (const int w : extinctColWidths) { totalWidth += static_cast<std::string::size_type>(w); }
+    file << std::string(totalWidth, '-') << "\n";
+}
+
 // Ascii constructor: open the summary file, write the header
 // (slug-hash, date, time), then dump the toml input deck, and close
 // the file. If the simulation outputs individual clusters, also
@@ -256,91 +345,207 @@ io::OutputManagerAscii::OutputManagerAscii(
 
     file.close();
 
-    if (simControls_.simType() == SimControls::SimType::cluster ||
-        simControls_.outputClusters())
-    {
-        const auto clustersPath = std::filesystem::path(simControls_.outDir()) /
-            (simControls_.modelName() + "_clusters.txt");
-        if (std::filesystem::exists(clustersPath))
-        {
-            throw std::runtime_error(
-                "OutputManagerAscii: output file " + clustersPath.string() + " already exists");
-        }
+    openClustersFile();
+    openClusterSpectraFile();
+    openClusterPhotFile();
+    openGalaxyFile();
+    openGalaxySpectraFile();
+    openGalaxyPhotFile();
+}
 
-        clustersFile_.open(clustersPath);
-        if (!clustersFile_)
-        {
-            throw std::runtime_error(
-                "OutputManagerAscii: unable to open output file " + clustersPath.string());
-        }
-        writeClustersHeader(clustersFile_, simControls_.extinct() != nullptr);
+// Open the cluster output file and write its header, if cluster
+// output is enabled for this simulation (see OutputManagerH5::
+// openClustersGroup()'s identical gating condition)
+void io::OutputManagerAscii::openClustersFile()
+{
+    if (simControls_.simType() != SimControls::SimType::cluster &&
+        !simControls_.outputClusters())
+    {
+        return;
     }
 
-    // Spectra can be wanted only as an intermediate for computing
-    // photometry, in which case writing them out as well just wastes
-    // disk space -- output.write_cluster_spec (optional, defaults to
-    // true) opts out of that file
+    const auto clustersPath = std::filesystem::path(simControls_.outDir()) /
+        (simControls_.modelName() + "_clusters.txt");
+    if (std::filesystem::exists(clustersPath))
+    {
+        throw std::runtime_error(
+            "OutputManagerAscii: output file " + clustersPath.string() + " already exists");
+    }
+
+    clustersFile_.open(clustersPath);
+    if (!clustersFile_)
+    {
+        throw std::runtime_error(
+            "OutputManagerAscii: unable to open output file " + clustersPath.string());
+    }
+    writeClustersHeader(clustersFile_, simControls_.extinct() != nullptr);
+}
+
+// Open the cluster-spectra output file and write its header, if a
+// spectral synthesizer was requested and output.write_cluster_spec
+// (optional, defaults to true) was not set to false -- spectra can be
+// wanted only as an intermediate for computing photometry, in which
+// case writing them out as well just wastes disk space
+void io::OutputManagerAscii::openClusterSpectraFile()
+{
+    if (simControls_.specsyn() == nullptr) { return; }
+
     const auto writeClusterSpecInput = utils::getTOMLKeyWithError<bool>(
         inputDeck_, "output.write_cluster_spec");
-    const bool writeClusterSpec =
-        !writeClusterSpecInput.has_value() || writeClusterSpecInput.value();
+    if (writeClusterSpecInput.has_value() && !writeClusterSpecInput.value()) { return; }
 
-    if (simControls_.specsyn() != nullptr && writeClusterSpec)
+    wlObs_ = simControls_.specsyn()->wlObs();
+
+    const auto clusterSpectraPath = std::filesystem::path(simControls_.outDir()) /
+        (simControls_.modelName() + "_cluster_spectra.txt");
+    if (std::filesystem::exists(clusterSpectraPath))
     {
-        wlObs_ = simControls_.specsyn()->wlObs();
-
-        const auto clusterSpectraPath = std::filesystem::path(simControls_.outDir()) /
-            (simControls_.modelName() + "_cluster_spectra.txt");
-        if (std::filesystem::exists(clusterSpectraPath))
-        {
-            throw std::runtime_error(
-                "OutputManagerAscii: output file " + clusterSpectraPath.string() + " already exists");
-        }
-
-        clusterSpectraFile_.open(clusterSpectraPath);
-        if (!clusterSpectraFile_)
-        {
-            throw std::runtime_error(
-                "OutputManagerAscii: unable to open output file " + clusterSpectraPath.string());
-        }
-        writeClusterSpectraHeader(clusterSpectraFile_, simControls_.extinct() != nullptr);
+        throw std::runtime_error(
+            "OutputManagerAscii: output file " + clusterSpectraPath.string() + " already exists");
     }
 
-    if (simControls_.filters() != nullptr || simControls_.computeLbol())
+    clusterSpectraFile_.open(clusterSpectraPath);
+    if (!clusterSpectraFile_)
     {
-        const auto clusterPhotPath = std::filesystem::path(simControls_.outDir()) /
-            (simControls_.modelName() + "_cluster_phot.txt");
-        if (std::filesystem::exists(clusterPhotPath))
-        {
-            throw std::runtime_error(
-                "OutputManagerAscii: output file " + clusterPhotPath.string() + " already exists");
-        }
-
-        clusterPhotFile_.open(clusterPhotPath);
-        if (!clusterPhotFile_)
-        {
-            throw std::runtime_error(
-                "OutputManagerAscii: unable to open output file " + clusterPhotPath.string());
-        }
-        std::vector<std::string> filterNames;
-        std::vector<std::string> filterUnits;
-        if (simControls_.filters() != nullptr)
-        {
-            filterNames = simControls_.filters()->filterNames();
-            filterUnits = simControls_.filters()->filterUnits();
-        }
-        if (simControls_.computeLbol())
-        {
-            filterNames.emplace_back("Lbol");
-            filterUnits.emplace_back("Lsun");
-        }
-        photColWidths_ = computePhotColWidths(filterNames, filterUnits);
-
-        const auto [extinctFilterNames, extinctFilterUnits] = buildExtinctFilterColumns(simControls_);
-        photExtinctColWidths_ = computePhotColWidths(extinctFilterNames, extinctFilterUnits);
-        writeClusterPhotHeader(clusterPhotFile_, filterNames, filterUnits, photColWidths_,
-            extinctFilterNames, extinctFilterUnits, photExtinctColWidths_);
+        throw std::runtime_error(
+            "OutputManagerAscii: unable to open output file " + clusterSpectraPath.string());
     }
+    writeClusterSpectraHeader(clusterSpectraFile_, simControls_.extinct() != nullptr);
+}
+
+// Open the cluster-photometry output file and write its header, if a
+// filter collection or the bolometric luminosity was requested
+void io::OutputManagerAscii::openClusterPhotFile()
+{
+    if (simControls_.filters() == nullptr && !simControls_.computeLbol()) { return; }
+
+    const auto clusterPhotPath = std::filesystem::path(simControls_.outDir()) /
+        (simControls_.modelName() + "_cluster_phot.txt");
+    if (std::filesystem::exists(clusterPhotPath))
+    {
+        throw std::runtime_error(
+            "OutputManagerAscii: output file " + clusterPhotPath.string() + " already exists");
+    }
+
+    clusterPhotFile_.open(clusterPhotPath);
+    if (!clusterPhotFile_)
+    {
+        throw std::runtime_error(
+            "OutputManagerAscii: unable to open output file " + clusterPhotPath.string());
+    }
+    std::vector<std::string> filterNames;
+    std::vector<std::string> filterUnits;
+    if (simControls_.filters() != nullptr)
+    {
+        filterNames = simControls_.filters()->filterNames();
+        filterUnits = simControls_.filters()->filterUnits();
+    }
+    if (simControls_.computeLbol())
+    {
+        filterNames.emplace_back("Lbol");
+        filterUnits.emplace_back("Lsun");
+    }
+    photColWidths_ = computePhotColWidths(filterNames, filterUnits);
+
+    const auto [extinctFilterNames, extinctFilterUnits] = buildExtinctFilterColumns(simControls_);
+    photExtinctColWidths_ = computePhotColWidths(extinctFilterNames, extinctFilterUnits);
+    writeClusterPhotHeader(clusterPhotFile_, filterNames, filterUnits, photColWidths_,
+        extinctFilterNames, extinctFilterUnits, photExtinctColWidths_);
+}
+
+// Open the galaxy output file and write its header, for a galaxy-type
+// simulation. A no-op for a cluster-type simulation -- unlike cluster
+// output, there is no equivalent of outputClusters() that would make
+// galaxy output available for a cluster-type simulation, since a
+// cluster-type simulation has no Galaxy object at all.
+void io::OutputManagerAscii::openGalaxyFile()
+{
+    if (simControls_.simType() != SimControls::SimType::galaxy) { return; }
+
+    const auto galaxyPath = std::filesystem::path(simControls_.outDir()) /
+        (simControls_.modelName() + "_galaxy.txt");
+    if (std::filesystem::exists(galaxyPath))
+    {
+        throw std::runtime_error(
+            "OutputManagerAscii: output file " + galaxyPath.string() + " already exists");
+    }
+
+    galaxyFile_.open(galaxyPath);
+    if (!galaxyFile_)
+    {
+        throw std::runtime_error(
+            "OutputManagerAscii: unable to open output file " + galaxyPath.string());
+    }
+    writeGalaxyHeader(galaxyFile_);
+}
+
+// Open the galaxy-spectra output file and write its header, for a
+// galaxy-type simulation with a spectral synthesizer requested
+void io::OutputManagerAscii::openGalaxySpectraFile()
+{
+    if (simControls_.simType() != SimControls::SimType::galaxy) { return; }
+    if (simControls_.specsyn() == nullptr) { return; }
+
+    wlObs_ = simControls_.specsyn()->wlObs();
+
+    const auto galaxySpectraPath = std::filesystem::path(simControls_.outDir()) /
+        (simControls_.modelName() + "_galaxy_spectra.txt");
+    if (std::filesystem::exists(galaxySpectraPath))
+    {
+        throw std::runtime_error(
+            "OutputManagerAscii: output file " + galaxySpectraPath.string() + " already exists");
+    }
+
+    galaxySpectraFile_.open(galaxySpectraPath);
+    if (!galaxySpectraFile_)
+    {
+        throw std::runtime_error(
+            "OutputManagerAscii: unable to open output file " + galaxySpectraPath.string());
+    }
+    writeGalaxySpectraHeader(galaxySpectraFile_, simControls_.extinct() != nullptr);
+}
+
+// Open the galaxy-photometry output file and write its header, for a
+// galaxy-type simulation with a filter collection or the bolometric
+// luminosity requested -- mirrors openClusterPhotFile()'s own
+// filter-list construction
+void io::OutputManagerAscii::openGalaxyPhotFile()
+{
+    if (simControls_.simType() != SimControls::SimType::galaxy) { return; }
+    if (simControls_.filters() == nullptr && !simControls_.computeLbol()) { return; }
+
+    const auto galaxyPhotPath = std::filesystem::path(simControls_.outDir()) /
+        (simControls_.modelName() + "_galaxy_phot.txt");
+    if (std::filesystem::exists(galaxyPhotPath))
+    {
+        throw std::runtime_error(
+            "OutputManagerAscii: output file " + galaxyPhotPath.string() + " already exists");
+    }
+
+    galaxyPhotFile_.open(galaxyPhotPath);
+    if (!galaxyPhotFile_)
+    {
+        throw std::runtime_error(
+            "OutputManagerAscii: unable to open output file " + galaxyPhotPath.string());
+    }
+    std::vector<std::string> filterNames;
+    std::vector<std::string> filterUnits;
+    if (simControls_.filters() != nullptr)
+    {
+        filterNames = simControls_.filters()->filterNames();
+        filterUnits = simControls_.filters()->filterUnits();
+    }
+    if (simControls_.computeLbol())
+    {
+        filterNames.emplace_back("Lbol");
+        filterUnits.emplace_back("Lsun");
+    }
+    photColWidths_ = computePhotColWidths(filterNames, filterUnits);
+
+    const auto [extinctFilterNames, extinctFilterUnits] = buildExtinctFilterColumns(simControls_);
+    photExtinctColWidths_ = computePhotColWidths(extinctFilterNames, extinctFilterUnits);
+    writeGalaxyPhotHeader(galaxyPhotFile_, filterNames, filterUnits, photColWidths_,
+        extinctFilterNames, extinctFilterUnits, photExtinctColWidths_);
 }
 
 io::OutputManagerAscii::~OutputManagerAscii()
@@ -348,6 +553,9 @@ io::OutputManagerAscii::~OutputManagerAscii()
     if (clustersFile_.is_open()) { clustersFile_.close(); }
     if (clusterSpectraFile_.is_open()) { clusterSpectraFile_.close(); }
     if (clusterPhotFile_.is_open()) { clusterPhotFile_.close(); }
+    if (galaxyFile_.is_open()) { galaxyFile_.close(); }
+    if (galaxySpectraFile_.is_open()) { galaxySpectraFile_.close(); }
+    if (galaxyPhotFile_.is_open()) { galaxyPhotFile_.close(); }
 }
 
 // Write one fixed-width row of cluster data to the cluster output

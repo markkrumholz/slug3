@@ -110,10 +110,39 @@ namespace io
          */
         void openClusterPhotGroup();
 
+        /**
+         * @brief Create the galaxy group and its datasets, for a galaxy-type simulation
+         * @details
+         * A no-op unless SimControls::simType() is SimType::galaxy --
+         * there is no Galaxy object, and so nothing to write here, for
+         * a cluster-type simulation.
+         */
+        void openGalaxyGroup();
+
+        /**
+         * @brief Create the galaxy_spectra group and its datasets, if a spectral synthesizer was requested
+         * @details
+         * A no-op unless SimControls::simType() is SimType::galaxy, or
+         * if no spectral synthesizer was requested.
+         */
+        void openGalaxySpectraGroup();
+
+        /**
+         * @brief Create the galaxy_phot group and its datasets, if a filter collection or the bolometric luminosity was requested
+         * @details
+         * A no-op unless SimControls::simType() is SimType::galaxy, or
+         * if neither a filter collection nor the bolometric luminosity
+         * was requested.
+         */
+        void openGalaxyPhotGroup();
+
         hid_t file_ = -1; /**< Handle to the open HDF5 output file */ // NOLINT(misc-include-cleaner)
         hid_t clustersGroup_ = -1; /**< Handle to the open clusters group, if any */ // NOLINT(misc-include-cleaner)
         hid_t clusterSpectraGroup_ = -1; /**< Handle to the open cluster_spectra group, if any */ // NOLINT(misc-include-cleaner)
         hid_t clusterPhotGroup_ = -1; /**< Handle to the open cluster_phot group, if any */ // NOLINT(misc-include-cleaner)
+        hid_t galaxyGroup_ = -1; /**< Handle to the open galaxy group, if any */ // NOLINT(misc-include-cleaner)
+        hid_t galaxySpectraGroup_ = -1; /**< Handle to the open galaxy_spectra group, if any */ // NOLINT(misc-include-cleaner)
+        hid_t galaxyPhotGroup_ = -1; /**< Handle to the open galaxy_phot group, if any */ // NOLINT(misc-include-cleaner)
     };
 
 } // namespace io

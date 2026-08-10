@@ -23,8 +23,8 @@ class slug_phot_reader(slug_group_reader):
     by a filter name (e.g. "HST.WFC3_UVIS1.F555W") returns that
     filter's photometry as an astropy Quantity, read from the phot
     dataset's column for that filter on first access and cached
-    thereafter; appending "_ext" to the filter name (e.g.
-    "HST.WFC3_UVIS1.F555W_ext") returns the same filter's extincted
+    thereafter; appending "_ex" to the filter name (e.g.
+    "HST.WFC3_UVIS1.F555W_ex") returns the same filter's extincted
     photometry from phot_extinct instead. Any other key falls through
     to slug_group_reader's own __getitem__ (e.g. "trial", "time",
     "uid").
@@ -111,8 +111,8 @@ class slug_phot_reader(slug_group_reader):
         ----------
         key : str
             A filter name (e.g. "HST.WFC3_UVIS1.F555W"); that same
-            name with "_ext" appended for its extincted counterpart
-            (e.g. "HST.WFC3_UVIS1.F555W_ext"); or any dataset name
+            name with "_ex" appended for its extincted counterpart
+            (e.g. "HST.WFC3_UVIS1.F555W_ex"); or any dataset name
             from the underlying group (e.g. "trial", "time", "uid").
 
         Returns
@@ -125,10 +125,10 @@ class slug_phot_reader(slug_group_reader):
         ------
         KeyError
             If key is neither a known filter name (with or without a
-            trailing "_ext") nor a dataset name in this group.
+            trailing "_ex") nor a dataset name in this group.
         """
-        extinct = key.endswith("_ext")
-        name = key[:-len("_ext")] if extinct else key
+        extinct = key.endswith("_ex")
+        name = key[:-len("_ex")] if extinct else key
 
         if name not in self._filters:
             return super().__getitem__(key)
@@ -197,7 +197,7 @@ class slug_phot_reader(slug_group_reader):
             try:
                 value = self[filter_name + suffix]
             except IndexError:
-                # e.g. filter_name + "_ext" for a filter (Lbol) that
+                # e.g. filter_name + "_ex" for a filter (Lbol) that
                 # phot_extinct has no column for at all -- see
                 # __getitem__'s own docstring
                 continue
@@ -254,4 +254,4 @@ class slug_phot_reader(slug_group_reader):
         """
         self._convert_phot_dict(self._phot, "", phot_to)
         if self._phot_extinct is not None:
-            self._convert_phot_dict(self._phot_extinct, "_ext", phot_to)
+            self._convert_phot_dict(self._phot_extinct, "_ex", phot_to)
