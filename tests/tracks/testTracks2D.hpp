@@ -14,8 +14,8 @@
 #define TESTTRACKS2D_HPP
 
 #include "../../src/tracks/Tracks2D.hpp"
-#include "trackFieldFixture.hpp"
 #include "hdf5.h"  // NOLINT(misc-include-cleaner)
+#include "trackFieldFixture.hpp"
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -40,9 +40,9 @@ enum class TestTracks2DOutcome
  */
 struct TestTracks2DCase
 {
-    std::string h5Path;       /**< Path to the HDF5 file, used only to check existence */
-    std::string trackName;    /**< Name of the track set within the registry */
-    std::string registryName; /**< Registry file containing trackName */
+    std::string h5Path_;       /**< Path to the HDF5 file, used only to check existence */
+    std::string trackName_;    /**< Name of the track set within the registry */
+    std::string registryName_; /**< Registry file containing trackName_ */
 };
 
 // Suppress clang-tidy warnings iun this namespace caused by just including
@@ -68,17 +68,17 @@ struct TestTracks2DCase
  */
 inline auto testTracks2DFile(const TestTracks2DCase& testCase) -> TestTracks2DOutcome
 {
-    if (!std::filesystem::exists(testCase.h5Path))
+    if (!std::filesystem::exists(testCase.h5Path_))
     {
-        std::cerr << "testTracks2D: file " << testCase.h5Path
+        std::cerr << "testTracks2D: file " << testCase.h5Path_
             << " not found, skipping\n";
         return TestTracks2DOutcome::notFound;
     }
 
-    const hid_t file = H5Fopen(testCase.h5Path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+    const hid_t file = H5Fopen(testCase.h5Path_.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
     if (file < 0)
     {
-        std::cerr << "testTracks2D: unable to open file " << testCase.h5Path << "\n";
+        std::cerr << "testTracks2D: unable to open file " << testCase.h5Path_ << "\n";
         return TestTracks2DOutcome::failed;
     }
 
@@ -88,7 +88,7 @@ inline auto testTracks2DFile(const TestTracks2DCase& testCase) -> TestTracks2DOu
     if (nameLen < 0)
     {
         std::cerr << "testTracks2D: unable to find a group in "
-            << testCase.h5Path << "\n";
+            << testCase.h5Path_ << "\n";
         H5Fclose(file);
         return TestTracks2DOutcome::failed;
     }
@@ -101,7 +101,7 @@ inline auto testTracks2DFile(const TestTracks2DCase& testCase) -> TestTracks2DOu
     if (grp < 0)
     {
         std::cerr << "testTracks2D: unable to open group " << groupName
-            << " in " << testCase.h5Path << "\n";
+            << " in " << testCase.h5Path_ << "\n";
         H5Fclose(file);
         return TestTracks2DOutcome::failed;
     }
@@ -130,12 +130,12 @@ inline auto testTracks2DFile(const TestTracks2DCase& testCase) -> TestTracks2DOu
     try
     {
         const tracks::Tracks2D tracks2d(
-            testCase.trackName, feh, vvcrit, afe, testCase.registryName);
+            testCase.trackName_, feh, vvcrit, afe, testCase.registryName_);
     }
     catch (const std::exception& e)
     {
         std::cerr << "testTracks2D: failed to construct Tracks2D from "
-            << testCase.h5Path << ", group " << groupName << ": "
+            << testCase.h5Path_ << ", group " << groupName << ": "
             << e.what() << "\n";
         outcome = TestTracks2DOutcome::failed;
     }
@@ -295,12 +295,13 @@ inline auto testTracks2DFieldOrder() -> int
  */
 inline auto testTracks2D() -> int
 {
-    const std::array<TestTracks2DCase, 5> files = {{
+    const std::array<TestTracks2DCase, 6> files = {{
         { "tests/tracks/assets/MIST_test.h5", "MIST_test",
             "tests/tracks/assets/tracks.toml" },
         { "data/tracks/mist.h5", "MIST", tracks::defaultRegistry },
         { "data/tracks/parsec_rot.h5", "PARSEC_rot", tracks::defaultRegistry },
         { "data/tracks/parsec_vms.h5", "PARSEC_vms", tracks::defaultRegistry },
+        { "data/tracks/parsec_composite.h5", "PARSEC_comp", tracks::defaultRegistry },
         { "data/tracks/stromlo.h5", "Stromlo", tracks::defaultRegistry }
     }};
 
