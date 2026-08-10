@@ -5,8 +5,9 @@
 # MARCS/TREMBLAY_DA/TREMBLAY_ELM spectral libraries (not the small test
 # fixtures used elsewhere), so this only runs if that data -- too
 # large to store in the repository -- has been fetched locally (see
-# data/tools/fetch_mist.py, fetch_powr.py, fetch_tlusty.py,
-# fetch_bosz.py, fetch_ck04.py, fetch_marcs.py, fetch_tremblay.py).
+# data/tools/tracks/fetch_mist.py and data/tools/spectra/fetch_powr.py,
+# fetch_tlusty.py, fetch_bosz.py, fetch_ck04.py, fetch_marcs.py,
+# fetch_tremblay.py).
 # spectra.model is the special value "default" (see
 # specsyn::defaultModelList and SimControls::readSpectra()), which
 # expands to exactly this same chained list, in this same order;
@@ -59,7 +60,7 @@
 # v_vcrit=0.4) group was short two masses (1.95 and 2.00 Msun), and
 # Tracks3D requires every bracketed [Fe/H] group to share an identical
 # mass grid. The missing tracks have since been filled by
-# data/tools/interpolate_mist.py.
+# data/tools/tracks/interpolate_mist.py.
 
 sim_type = "cluster"
 # n_trial must appear here, before any [table] header -- TOML has no

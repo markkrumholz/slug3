@@ -146,7 +146,7 @@ namespace
 
     // Expected peak(wl * spec) for wdStar() against WD_test's own
     // amplitude(logg, logTeff) = 1 + 2*logg + 3*logTeff formula (see
-    // data/tools/make_wd_test_fixture.py), evaluated at logg = 8.0,
+    // data/tools/spectra/make_wd_test_fixture.py), evaluated at logg = 8.0,
     // log(Teff) = log10(28750), times the shape/wl values at WD_test's
     // last (largest) grid point, times the surface area implied by
     // wdStar()'s own (mass, logL, logTeff) -- see checkSpectrum's own
@@ -353,7 +353,7 @@ static auto testChainWithWD() -> int
 }
 
 // Check that a chain including a WD_grid entry backed by a partially-
-// filled grid (RAUCH_test, see data/tools/make_rauch_test_fixture.py)
+// filled grid (RAUCH_test, see data/tools/spectra/make_rauch_test_fixture.py)
 // dispatches to it correctly through the full SpecsynLibChained
 // machinery -- not just standalone via SpecsynLibWD directly (see
 // testSpecsynLibWD.cpp's own testSparseGridExactPoint/
@@ -374,7 +374,7 @@ static auto testChainWithSparseWD() -> int
 
     // (logg, log_Teff) = (7.0, 4.0): the first populated corner of
     // RAUCH_test's fully-populated cell (see
-    // data/tools/make_rauch_test_fixture.py), where flux = 1.0. mass
+    // data/tools/spectra/make_rauch_test_fixture.py), where flux = 1.0. mass
     // is chosen (offline) so that (logL, logTeff) below give exactly
     // this log(g); log(Teff) = 4.0 (10000 K) is also far below
     // TLUSTY_test's own 27500-30000 K range, so this star falls

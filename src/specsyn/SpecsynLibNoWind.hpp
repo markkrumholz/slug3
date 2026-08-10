@@ -27,8 +27,9 @@ namespace specsyn
      * Covers spectral libraries -- like BOSZ and TLUSTY -- whose
      * spectra sit on a (FeH, logg, Teff) tensor grid, one HDF5 file
      * per library, following the conventions of
-     * data/tools/fetch_bosz.py and data/tools/fetch_tlusty.py: groups
-     * named spectra_feh<feh>... holding one dataset per (Teff, logg)
+     * data/tools/spectra/fetch_bosz.py and
+     * data/tools/spectra/fetch_tlusty.py: groups named
+     * spectra_feh<feh>... holding one dataset per (Teff, logg)
      * pair actually present, plus a top-level wavelengths group.
      * dim1_, dim2_, dim3_ (inherited from SpecsynLib) hold FeH, logg,
      * and log(Teff) respectively, aliased here as FeH_, logg_, and

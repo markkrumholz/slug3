@@ -1,8 +1,8 @@
 """
-This is a script to fetch the very-massive-star (VMS) branch of PARSEC
-(PAdova and TRieste Stellar Evolution Code) tracks from the official
-PARSEC database, extract the data needed by slug, and write it out in
-slug's HDF5 track format.
+This is a script to fetch the rotating branch of PARSEC (PAdova and
+TRieste Stellar Evolution Code) tracks from the official PARSEC database,
+extract the data needed by slug, and write it out in slug's HDF5 track
+format.
 """
 
 # Imports
@@ -17,10 +17,10 @@ import zipfile
 
 # Magic strings
 PARSEC_version = "v2.0"
-PARSEC_VMS_URL = "https://stev.oapd.inaf.it/PARSEC/Database/PARSECv2.0_VMS/"
+PARSEC_ROT_URL = "https://stev.oapd.inaf.it/PARSEC/Database/PARSECv2.0_ROT_2025/"
 # Regex used to pick out the downloadable track archives from the
 # directory listing at the URL above
-PARSEC_VMS_FILE_PATTERN = r'<a href="(Z[^"]*?_tracks\.zip)">'
+PARSEC_ROT_FILE_PATTERN = r'<a href="(VAR_ROT[^"]*?\.zip)">'
 PARSEC_references = [
     "Nguyen, C. T., Costa, G., Girardi, L., et al. 2022, A&A, 665, A126",
     "Nguyen, C. T., Costa, G., Bressan, A., et al. 2025, A&A, 701, A258",
@@ -38,21 +38,23 @@ PARSEC_reference_URLs = [
 PARSEC_ZSUN = 0.01524    # PARSEC's preferred "Solar" metallicity
 
 # Parse command line arguments
-parser = argparse.ArgumentParser(description="Fetch PARSEC VMS tracks")
+parser = argparse.ArgumentParser(description="Fetch PARSEC rotating tracks")
 parser.add_argument("--version", default=PARSEC_version,
                     help="PARSEC version to fetch")
-parser.add_argument("--url", default=PARSEC_VMS_URL,
-                    help="URL of the PARSEC VMS track database")
+parser.add_argument("--url", default=PARSEC_ROT_URL,
+                    help="URL of the PARSEC rotating track database")
 parser.add_argument("--output",
-                    default=shutil.os.path.join("..", "tracks", "parsec_vms.h5"),
+                    default=shutil.os.path.join("..", "..", "tracks", "parsec_rot.h5"),
                     help="Output file for the HDF5 tracks")
 parser.add_argument("--registry",
-                    default=shutil.os.path.join("..", "tracks", "tracks.toml"),
+                    default=shutil.os.path.join("..", "..", "tracks", "tracks.toml"),
                     help="Output file for the registry")
 parser.add_argument("--overwrite", action="store_true",
                     help="Overwrite existing output file")
 parser.add_argument("--feh", type=float, nargs="+", default=[],
                     help="List of [Fe/H] values to fetch; if unspecified, fetch all")
+parser.add_argument("--vvcrit", type=float, nargs="+", default=[],
+                    help="List of v/vcrit values to fetch; if unspecified, fetch all")
 parser.add_argument("--verbose", action="store_true",
                     help="Print verbose output")
 args = parser.parse_args()
@@ -74,15 +76,15 @@ if not shutil.os.path.exists(args.output):
     h5file.close()
 
 # Create a temporary directory to store the downloaded files
-temp_dir = "parsec_vms_temp"
+temp_dir = "parsec_rot_temp"
 shutil.rmtree(temp_dir, ignore_errors=True)
 shutil.os.makedirs(temp_dir, exist_ok=True)
 
-# Fetch the directory listing for the VMS track database
+# Fetch the directory listing for the rotating track database
 response = http.request('GET', args.url)
 if response.status != 200:
     raise RuntimeError(f"Failed to fetch PARSEC data from {args.url}: HTTP {response.status}")
-files_avail = re.findall(PARSEC_VMS_FILE_PATTERN, str(response.data))
+files_avail = re.findall(PARSEC_ROT_FILE_PATTERN, str(response.data))
 if args.verbose:
     print(f"Fetched track list from {args.url}: {len(files_avail)} files found.")
 
@@ -98,8 +100,21 @@ if args.feh:
                    if feh_ in args.feh ]
     feh = [ feh_ for feh_ in feh if feh_ in args.feh ]
 
+# From the file names, extract the value of v/vcrit for each file, encoded
+# as VAR_ROT<value>_ in the filename
+vvcrit = [ float(re.findall(r'VAR_ROT([\d.]+)_', f)[0]) for f in files_avail ]
+
+# If we were given a list of v/vcrit values to fetch, filter the list of
+# files accordingly
+if args.vvcrit:
+    files_avail = [ f for f, vvcrit_ in zip(files_avail, vvcrit)
+                   if vvcrit_ in args.vvcrit ]
+    feh = [ feh_ for feh_, vvcrit_ in zip(feh, vvcrit)
+           if vvcrit_ in args.vvcrit ]
+    vvcrit = [ vvcrit_ for vvcrit_ in vvcrit if vvcrit_ in args.vvcrit ]
+
 # Print effects of filtering
-if args.verbose and args.feh:
+if args.verbose and (args.vvcrit or args.feh):
     print(f"Filtered track list: {len(files_avail)} files to fetch.")
 
 # If target file exists and overwrite is not specified, check if any of
@@ -113,18 +128,21 @@ if shutil.os.path.exists(args.output) and not args.overwrite:
     nduplicates = 0
     for grp in h5file.keys():
         existing_feh = h5file[grp].attrs['feh']
-        for i, feh_ in zip(np.arange(len(feh)), feh):
-            if np.abs(np.log10(feh_/PARSEC_ZSUN) - existing_feh) < 1e-4:
+        existing_vvcrit = h5file[grp].attrs['vvcrit']
+        for i, feh_, vvcrit_ in zip(np.arange(len(feh)), feh, vvcrit):
+            if (np.abs(np.log10(feh_/PARSEC_ZSUN) - existing_feh) < 1e-4) \
+                and (vvcrit_ == existing_vvcrit):
                 nduplicates += 1
                 files_avail.pop(i)
                 feh.pop(i)
+                vvcrit.pop(i)
                 break
     if args.verbose and nduplicates > 0:
         print(f"Found {nduplicates} existing tracks in {args.output}; skipping them.")
     h5file.close()
 
 # Loop over files to fetch
-for filename, feh_ in zip(files_avail, feh):
+for filename, feh_, vvcrit_ in zip(files_avail, feh, vvcrit):
 
     # Construct the full URL for the file
     file_url = args.url + filename
@@ -208,6 +226,7 @@ for filename, feh_ in zip(files_avail, feh):
             'm_init' : m_init,
             'y_init' : y_init,
             'z_init' : z_init,
+            'v_vcrit' : vvcrit_,
             'fe_h' : feh_,
             'n_pts' : fdat.shape[0]
         }
@@ -236,13 +255,14 @@ for filename, feh_ in zip(files_avail, feh):
 
         # Create a group for this set of tracks; delete existing one if
         # found, since if we're here it means we want to overwrite it
-        grp_name = f"feh_{feh_solar:.6g}"
+        grp_name = f"feh_{feh_solar:.6g}_vvcrit_{vvcrit_:.2f}"
         if grp_name in h5file:
             del h5file[grp_name]
         grp = h5file.create_group(grp_name)
 
         # Write metadata for this set of tracks
         grp.attrs['feh'] = feh_solar
+        grp.attrs['vvcrit'] = track_metadata[0]['v_vcrit']
         grp.attrs['y_init'] = track_metadata[0]['y_init']
         grp.attrs['z_init'] = track_metadata[0]['z_init']
         grp.attrs['ntime'] = track_metadata[0]['n_pts']
@@ -284,30 +304,32 @@ if shutil.os.path.exists(args.registry):
 else:
     registry = { "name" : "Registry of track sets" }
 
-# Add parsec_vms to list of track sets
+# Add parsec_rot to list of track sets
 if "track_sets" in registry.keys():
-    if "PARSEC_vms" not in registry["track_sets"]:
-        registry["track_sets"].append("PARSEC_vms")
+    if "PARSEC_rot" not in registry["track_sets"]:
+        registry["track_sets"].append("PARSEC_rot")
 else:
-    registry["track_sets"] = [ "PARSEC_vms" ]
+    registry["track_sets"] = [ "PARSEC_rot" ]
 
-# Generate registry entry for parsec_vms
-if "PARSEC_vms" in registry.keys():
-    registry.pop("PARSEC_vms")
+# Generate registry entry for parsec_rot
+if "PARSEC_rot" in registry.keys():
+    registry.pop("PARSEC_rot")
 parsec_tab = tomlkit.table()
-parsec_tab["file"] = args.output
+parsec_tab["file"] = shutil.os.path.basename(args.output)
 parsec_tab["version"] = args.version
 parsec_tab["references"] = PARSEC_references
 parsec_tab["reference_urls"] = PARSEC_reference_URLs
-val_in_file = []
-with h5py.File(args.output, 'r') as h5file:
-    for grp in h5file.keys():
-        if h5file[grp].attrs['feh'] not in val_in_file:
-            val_in_file.append(h5file[grp].attrs['feh'])
-val_in_file = np.array(val_in_file)
-val_in_file.sort()
-parsec_tab["Fe_H"] = [ v for v in val_in_file ]
-registry["PARSEC_vms"] = parsec_tab
+for qty, attr in zip(["Fe_H", "v_vcrit"],
+                     ["feh", "vvcrit"]):
+    val_in_file = []
+    with h5py.File(args.output, 'r') as h5file:
+        for grp in h5file.keys():
+            if h5file[grp].attrs[attr] not in val_in_file:
+                val_in_file.append(h5file[grp].attrs[attr])
+    val_in_file = np.array(val_in_file)
+    val_in_file.sort()
+    parsec_tab[qty] = [ v for v in val_in_file ]
+registry["PARSEC_rot"] = parsec_tab
 
 # Write registry back to file
 with open(args.registry, 'w') as fp:

@@ -42,10 +42,10 @@ parser.add_argument("--version", default=CK04_version,
 parser.add_argument("--url", default=CK04_URL,
                     help="URL of the CK04 data (default: %(default)s)")
 parser.add_argument("--output",
-                    default=shutil.os.path.join("..", "spectra", "ck04.h5"),
+                    default=shutil.os.path.join("..", "..", "spectra", "ck04.h5"),
                     help="Output file for the HDF5 spectra (default: %(default)s)")
 parser.add_argument("--registry",
-                    default=shutil.os.path.join("..", "spectra", "spectra.toml"),
+                    default=shutil.os.path.join("..", "..", "spectra", "spectra.toml"),
                     help="Spectra registry TOML file (default: %(default)s)")
 parser.add_argument("--overwrite", action="store_true",
                     help="Overwrite spectra groups already in the output file")
@@ -216,7 +216,7 @@ else:
 if "CK04" in registry:
     registry.pop("CK04")
 tab = tomlkit.table()
-tab["file"] = args.output
+tab["file"] = shutil.os.path.basename(args.output)
 tab["version"] = args.version
 tab["references"] = CK04_references
 tab["reference_urls"] = CK04_reference_urls

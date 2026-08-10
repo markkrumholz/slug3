@@ -45,7 +45,7 @@ namespace extinct
      * @details
      * An Extinct is built from a named curve in an extinction curve
      * registry (see data/extinct/extinct.toml/extinct.h5 and
-     * data/tools/add_extinction_curve.py/fetch_draine_extinction.py
+     * data/tools/extinct/add_extinction_curve.py/fetch_draine_extinction.py
      * for how these are populated): the curve's own native
      * (wavelength, kappa) tabulation is read from the registry, then
      * interpolated onto the wavelength grid the caller supplies,

@@ -38,16 +38,16 @@ parser = argparse.ArgumentParser(
     description="Combine PARSEC rotating (v/vcrit=0) and VMS tracks into "
                 "a composite grid with full mass coverage")
 parser.add_argument("--rot",
-                    default=shutil.os.path.join("..", "tracks", "parsec_rot.h5"),
+                    default=shutil.os.path.join("..", "..", "tracks", "parsec_rot.h5"),
                     help="Input HDF5 file containing the rotating PARSEC tracks")
 parser.add_argument("--vms",
-                    default=shutil.os.path.join("..", "tracks", "parsec_vms.h5"),
+                    default=shutil.os.path.join("..", "..", "tracks", "parsec_vms.h5"),
                     help="Input HDF5 file containing the VMS PARSEC tracks")
 parser.add_argument("--output",
-                    default=shutil.os.path.join("..", "tracks", "parsec_composite.h5"),
+                    default=shutil.os.path.join("..", "..", "tracks", "parsec_composite.h5"),
                     help="Output file for the composite HDF5 tracks")
 parser.add_argument("--registry",
-                    default=shutil.os.path.join("..", "tracks", "tracks.toml"),
+                    default=shutil.os.path.join("..", "..", "tracks", "tracks.toml"),
                     help="Output file for the registry")
 parser.add_argument("--mass_break", type=float, default=MASS_BREAK,
                     help="Initial mass (Msun) at which to switch from the "
@@ -241,7 +241,7 @@ else:
 if "PARSEC_comp" in registry.keys():
     registry.pop("PARSEC_comp")
 parsec_tab = tomlkit.table()
-parsec_tab["file"] = args.output
+parsec_tab["file"] = shutil.os.path.basename(args.output)
 parsec_tab["version"] = PARSEC_version
 parsec_tab["references"] = references
 parsec_tab["reference_urls"] = reference_urls

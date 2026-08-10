@@ -63,13 +63,13 @@ TLUSTY_reference_urls = [
 TLUSTY_STAR_TYPES = {
     "o": {
         "prefix": "OSTAR",
-        "output": shutil.os.path.join("..", "spectra", "tlusty_o.h5"),
+        "output": shutil.os.path.join("..", "..", "spectra", "tlusty_o.h5"),
         "registry_name": "TLUSTY_O",
         "micro_default": 10,
     },
     "b": {
         "prefix": "BSTAR",
-        "output": shutil.os.path.join("..", "spectra", "tlusty_b.h5"),
+        "output": shutil.os.path.join("..", "..", "spectra", "tlusty_b.h5"),
         "registry_name": "TLUSTY_B",
         "micro_default": 2,
     },
@@ -98,7 +98,7 @@ parser.add_argument("--output", default="",
                     help="Output HDF5 file (default: tlusty_o.h5 or "
                          "tlusty_b.h5, chosen by --star-type)")
 parser.add_argument("--registry",
-                    default=shutil.os.path.join("..", "spectra", "spectra.toml"),
+                    default=shutil.os.path.join("..", "..", "spectra", "spectra.toml"),
                     help="Spectra registry TOML file (default: %(default)s)")
 parser.add_argument("--overwrite", action="store_true",
                     help="Overwrite spectra groups already in the output file")
@@ -484,7 +484,7 @@ else:
 if registry_name in registry:
     registry.pop(registry_name)
 tab = tomlkit.table()
-tab["file"]           = args.output
+tab["file"]           = shutil.os.path.basename(args.output)
 tab["version"]        = args.version
 tab["references"]     = TLUSTY_references
 tab["reference_urls"] = TLUSTY_reference_urls

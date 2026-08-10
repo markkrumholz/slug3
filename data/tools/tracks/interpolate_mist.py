@@ -53,7 +53,7 @@ from collections import defaultdict
 import h5py
 import numpy as np
 
-MIST_FILE = shutil.os.path.join("..", "tracks", "mist.h5")
+MIST_FILE = shutil.os.path.join("..", "..", "tracks", "mist.h5")
 MASS_TOL = 1e-6
 STALL_DEX_THRESHOLD = 1.0  # flag a track as stalled if some more massive
                            # track in the same group has a final tabulated

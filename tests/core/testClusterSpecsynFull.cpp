@@ -24,8 +24,8 @@
  * exclusions), so, mirroring tests/tracks/testTracks2D.hpp's own
  * optional-file pattern, this test runs only if every one of them is
  * present locally (i.e. has been fetched separately via
- * data/tools/fetch_mist.py, fetch_powr.py, fetch_tlusty.py,
- * fetch_bosz.py, and fetch_ck04.py); otherwise it is skipped,
+ * data/tools/tracks/fetch_mist.py and data/tools/spectra/fetch_powr.py,
+ * fetch_tlusty.py, fetch_bosz.py, and fetch_ck04.py); otherwise it is skipped,
  * returning an automatic pass rather than a failure. See
  * testClusterSpecsynFullAFe for the alphaFe = 0.2 counterpart of this
  * same test, and testClusterSpecsynFullNonStoch for the

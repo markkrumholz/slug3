@@ -2,7 +2,7 @@
 """Generate tests/specsyn/assets/COERCE_test.h5, a tiny synthetic
 fixture for exercising SpecsynLib::spec()'s OOBPolicy::coerce behavior.
 Not real spectral data -- follows the same schema as
-data/tools/fetch_tlusty.py (a single shared wavelength grid under
+data/tools/spectra/fetch_tlusty.py (a single shared wavelength grid under
 wavelengths/<name>, and per-(Teff, logg) datasets carrying "teff"/
 "logg" attributes), but deliberately leaves one corner of an otherwise
 complete 2x2 (Teff, logg) grid unpopulated:
@@ -25,7 +25,7 @@ so the interpolated result at every wavelength is exactly this
 weighted average, making the expected result trivial to check exactly
 rather than only approximately.
 
-Run from the repository root: python3 data/tools/make_coerce_test_fixture.py
+Run from the repository root: python3 data/tools/spectra/make_coerce_test_fixture.py
 """
 import h5py
 import numpy as np

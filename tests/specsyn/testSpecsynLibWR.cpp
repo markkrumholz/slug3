@@ -11,7 +11,7 @@
  * grid of exactly {4.6, 4.8} x {0.5, 1.0}, every one of whose 4 grid
  * points holds the same Gaussian SED (centered at 5000 Angstrom) and
  * the same logl = 5.5 and dinf = 1.0 -- see
- * data/tools/make_powr_test_fixture.py for exactly how it was built.
+ * data/tools/spectra/make_powr_test_fixture.py for exactly how it was built.
  * Sharing one SED and logl across every point removes any dependence
  * on the interpolation weights themselves from the expected result,
  * isolating what these tests actually care about: that spec() derives
@@ -91,7 +91,7 @@ namespace
 // Check that spec() successfully interpolates a spectrum for a
 // plausible WNE star (M = 20 Msun, L = 10^5.7 Lsun, Teff = 10^4.7 K,
 // Mdot = 3e-5 Msun/yr) that works out (see
-// data/tools/make_powr_test_fixture.py's own derivation notes) to
+// data/tools/spectra/make_powr_test_fixture.py's own derivation notes) to
 // logRt ~= 0.74, comfortably inside POWR_WNE_test's [0.5, 1.0] log_rt
 // range; logTeff = 4.7 and feh = -0.5 similarly fall strictly between
 // this fixture's grid points, so this exercises genuine (non-
@@ -205,7 +205,7 @@ static auto testSpecTypeMismatchSilent() -> int
 // Check that spec() clamps a derived logRt outside the grid to the
 // grid's own edge, rather than treating it as out of bounds. M = 20
 // Msun, L = 10^5.0 Lsun, Teff = 10^4.7 K, Mdot = 1e-4 Msun/yr works out
-// to logRt ~= -0.77 (see data/tools/make_powr_test_fixture.py's own
+// to logRt ~= -0.77 (see data/tools/spectra/make_powr_test_fixture.py's own
 // derivation notes), well outside POWR_WNE_test's [0.5, 1.0] log_rt
 // range -- logRt is a single-scattering (mdot * vWind = L / c)
 // estimate that a handful of real high-mdot/L Wolf-Rayet points push
@@ -322,7 +322,7 @@ static auto testSpecTeffGridBoundsSilent() -> int
 // testSpecWNESuccess, this also checks that the peak of wl * spec(wl)
 // actually lands near that bucket's own fixture SED center (each of
 // the three POWR_WNL_H*_test fixtures has a different one -- see
-// data/tools/make_powr_test_fixture.py), confirming spec() loaded the
+// data/tools/spectra/make_powr_test_fixture.py), confirming spec() loaded the
 // H-bucket file matching this star's own hSurf, not some other one.
 static auto testSpecWNLSuccess(
     const std::string& wnlSpectraName, const double hSurf,

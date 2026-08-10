@@ -184,7 +184,7 @@ static auto testSpecsynChainDispatch() -> int
         // tests/specsyn/testSpecsynLibWR.cpp's own WNE/WNL tests use,
         // which works out to logRt ~= 0.74, comfortably inside every
         // PoWR test fixture's [0.5, 1.0] log_rt range (see
-        // data/tools/make_powr_test_fixture.py), with logTeff = 4.7
+        // data/tools/spectra/make_powr_test_fixture.py), with logTeff = 4.7
         // similarly between its {4.6, 4.8} grid points. Only
         // heSurf/cSurf/nSurf change between the three subtypes, per
         // getWRType's own classification rules.

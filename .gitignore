@@ -94,10 +94,10 @@ data/filters/*.h5
 # copy of data/filters/filters.h5, small enough to commit, needed for
 # extinction (conventionally quantified in V-band magnitudes) without
 # requiring the full filter set to be fetched -- see
-# data/tools/make_v_filter_fixture.py
+# data/tools/filters/make_v_filter_fixture.py
 !data/filters/V_filter.h5
 !data/filters/V_filter.toml
 
 # Downloaded archive caches from data/tools fetch scripts
-data/tools/powr_temp/
-data/tools/marcs_temp/
+data/tools/spectra/powr_temp/
+data/tools/spectra/marcs_temp/

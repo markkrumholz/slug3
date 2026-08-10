@@ -18,7 +18,7 @@ SpecsynLibWD's interpolated result against amplitude()*shape()
 evaluated directly, rather than only checking exact grid points or
 settling for an approximate/sanity check.
 
-Run from the repository root: python3 data/tools/make_wd_test_fixture.py
+Run from the repository root: python3 data/tools/spectra/make_wd_test_fixture.py
 """
 import h5py
 import numpy as np

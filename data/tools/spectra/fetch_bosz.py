@@ -36,10 +36,10 @@ parser.add_argument("--version", default=BOSZ_version,
 parser.add_argument("--url", default=BOSZ_URL, 
                     help="URL of the BOSZ data")
 parser.add_argument("--output", 
-                    default=shutil.os.path.join("..", "spectra", "bosz.h5"), 
+                    default=shutil.os.path.join("..", "..", "spectra", "bosz.h5"), 
                     help="Output file for the HDF5 spectra")
 parser.add_argument("--registry", 
-                    default=shutil.os.path.join("..", "spectra", "spectra.toml"), 
+                    default=shutil.os.path.join("..", "..", "spectra", "spectra.toml"), 
                     help="Output file for the registry")
 parser.add_argument("--overwrite", action="store_true",
                     help="Overwrite existing output file")
@@ -338,7 +338,7 @@ else:
 if "BOSZ" in registry.keys():
     registry.pop("BOSZ")
 bosz_tab = tomlkit.table()
-bosz_tab["file"] = args.output
+bosz_tab["file"] = shutil.os.path.basename(args.output)
 bosz_tab["version"] = args.version
 bosz_tab["references"] = BOSZ_references
 bosz_tab["reference_urls"] = BOSZ_refernce_URLS

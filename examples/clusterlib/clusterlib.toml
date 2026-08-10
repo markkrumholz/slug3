@@ -10,7 +10,7 @@
 #   slug clusterlib.toml
 # It requires the real MIST tracks, spectral libraries, and filter/Vega
 # data referenced below to have been fetched locally (too large to
-# store in the repository -- see data/tools/fetch_*.py).
+# store in the repository -- see data/tools/*/fetch_*.py).
 
 # This is a cluster (rather than galaxy) simulation
 sim_type = "cluster"

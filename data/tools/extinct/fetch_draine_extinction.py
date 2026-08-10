@@ -26,7 +26,7 @@ its own native decreasing order and keeping only rows strictly less
 than the last kept wavelength) -- no hardcoded wavelengths or
 thresholds -- rather than trying to correct or special-case them.
 
-Run from the repository root: python3 data/tools/fetch_draine_extinction.py
+Run from the repository root: python3 data/tools/extinct/fetch_draine_extinction.py
 """
 import re
 import sys

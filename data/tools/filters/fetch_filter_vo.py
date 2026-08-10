@@ -88,11 +88,11 @@ parser.add_argument("--filter", default=None,
                     help="Filter to query/fetch (e.g. 'F435W'); requires --instrument. "
                          "If unspecified, matches every filter of --instrument")
 parser.add_argument("--output",
-                    default=shutil.os.path.join("..", "filters", "filters.h5"),
+                    default=shutil.os.path.join("..", "..", "filters", "filters.h5"),
                     help="Output file for the HDF5 filter data (--mode fetch only; "
                          "default: %(default)s)")
 parser.add_argument("--registry",
-                    default=shutil.os.path.join("..", "filters", "filters.toml"),
+                    default=shutil.os.path.join("..", "..", "filters", "filters.toml"),
                     help="Filter registry TOML file (--mode fetch only; "
                          "default: %(default)s)")
 parser.add_argument("--overwrite", action="store_true",
@@ -384,7 +384,7 @@ def update_registry(output: str, registry: str) -> None:
     """
     doc = tomlkit.document()
     doc["name"] = "Registry of filters"
-    doc["file"] = output
+    doc["file"] = shutil.os.path.basename(output)
 
     with h5py.File(output, "r") as h5file:
         facilities = sorted(h5file.keys())

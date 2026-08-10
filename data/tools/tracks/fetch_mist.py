@@ -34,10 +34,10 @@ parser.add_argument("--version", default=MIST_version,
 parser.add_argument("--url", default=MIST_URL, 
                     help="URL of the MIST data")
 parser.add_argument("--output", 
-                    default=shutil.os.path.join("..", "tracks", "mist.h5"), 
+                    default=shutil.os.path.join("..", "..", "tracks", "mist.h5"), 
                     help="Output file for the HDF5 tracks")
 parser.add_argument("--registry", 
-                    default=shutil.os.path.join("..", "tracks", "tracks.toml"), 
+                    default=shutil.os.path.join("..", "..", "tracks", "tracks.toml"), 
                     help="Output file for the registry")
 parser.add_argument("--overwrite", action="store_true",
                     help="Overwrite existing output file")
@@ -311,7 +311,7 @@ else:
 if "MIST" in registry.keys():
     registry.pop("MIST")
 mist_tab = tomlkit.table()
-mist_tab["file"] = args.output
+mist_tab["file"] = shutil.os.path.basename(args.output)
 mist_tab["version"] = args.version
 mist_tab["references"] = MIST_references
 mist_tab["reference_urls"] = MIST_reference_URLs

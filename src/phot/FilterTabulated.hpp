@@ -60,7 +60,7 @@ namespace phot
          * @param registryName Name of the filter registry file
          * @details
          * Follows the facility/instrument/filter hierarchy used by
-         * data/tools/fetch_filter_vo.py to fetch filter data and by
+         * data/tools/filters/fetch_filter_vo.py to fetch filter data and by
          * the filters.h5 file it writes to store it. name() is set to
          * "facility.instrument.filter".
          */

@@ -27,7 +27,7 @@ namespace specsyn
      * @tparam Policy See SpecsynLib.
      * @details
      * Covers the Potsdam Wolf-Rayet (PoWR) model grids fetched by
-     * data/tools/fetch_powr.py: powr_wne.h5, powr_wnl_h20.h5,
+     * data/tools/spectra/fetch_powr.py: powr_wne.h5, powr_wnl_h20.h5,
      * powr_wnl_h40.h5, powr_wnl_h60.h5, and powr_wc.h5. Unlike
      * SpecsynLibNoWind's (FeH, logg, Teff) tensor
      * grid, PoWR's WR atmospheres are parameterized by [Fe/H], the

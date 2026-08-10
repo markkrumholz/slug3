@@ -133,13 +133,13 @@ RAUCH_GRID_TYPES = {
     "solar": {
         "query_params": RAUCH_QUERY_PARAMS_SOLAR,
         "spec_range": None,
-        "output": shutil.os.path.join("..", "spectra", "rauch.h5"),
+        "output": shutil.os.path.join("..", "..", "spectra", "rauch.h5"),
         "registry_name": "RAUCH",
     },
     "h07": {
         "query_params": RAUCH_QUERY_PARAMS_H07,
         "spec_range": RAUCH_SPEC_RANGE_H07,
-        "output": shutil.os.path.join("..", "spectra", "rauch_h07.h5"),
+        "output": shutil.os.path.join("..", "..", "spectra", "rauch_h07.h5"),
         "registry_name": "RAUCH_H07",
     },
 }
@@ -161,7 +161,7 @@ parser.add_argument("--url", default=RAUCH_SSA_URL,
 parser.add_argument("--output", default="",
                     help="Output HDF5 file (default: chosen by --grid-type)")
 parser.add_argument("--registry",
-                    default=shutil.os.path.join("..", "spectra", "spectra.toml"),
+                    default=shutil.os.path.join("..", "..", "spectra", "spectra.toml"),
                     help="Spectra registry TOML file (default: %(default)s)")
 parser.add_argument("--overwrite", action="store_true",
                     help="Overwrite the output HDF5 file and registry entry if already present")
@@ -270,7 +270,7 @@ else:
 if registry_name in registry:
     registry.pop(registry_name)
 tab = tomlkit.table()
-tab["file"] = args.output
+tab["file"] = shutil.os.path.basename(args.output)
 tab["version"] = RAUCH_VERSION
 tab["references"] = RAUCH_REFERENCES
 tab["reference_urls"] = RAUCH_REFERENCE_URLS

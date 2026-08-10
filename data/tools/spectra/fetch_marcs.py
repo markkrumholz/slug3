@@ -82,7 +82,7 @@ parser.add_argument("--wavelength-url", default=MARCS_WAVELENGTH_URL,
                     help="URL of the shared MARCS wavelength grid "
                          "(default: %(default)s)")
 parser.add_argument("--output",
-                    default=shutil.os.path.join("..", "spectra", "marcs.h5"),
+                    default=shutil.os.path.join("..", "..", "spectra", "marcs.h5"),
                     help="Output file for the HDF5 spectra (default: %(default)s)")
 parser.add_argument("--output-dir",
                     default="marcs_temp",
@@ -100,7 +100,7 @@ parser.add_argument("--local-dir",
                          "into --output-dir for any composition not found "
                          "here")
 parser.add_argument("--registry",
-                    default=shutil.os.path.join("..", "spectra", "spectra.toml"),
+                    default=shutil.os.path.join("..", "..", "spectra", "spectra.toml"),
                     help="Spectra registry TOML file (default: %(default)s)")
 parser.add_argument("--overwrite", action="store_true",
                     help="Overwrite spectra groups already in the output file")
@@ -415,7 +415,7 @@ else:
 if "MARCS" in registry:
     registry.pop("MARCS")
 tab = tomlkit.table()
-tab["file"] = args.output
+tab["file"] = shutil.os.path.basename(args.output)
 tab["version"] = args.version
 tab["references"] = MARCS_references
 tab["reference_urls"] = MARCS_reference_urls

@@ -20,7 +20,7 @@ this one curve's own entry is touched -- every other curve already in
 extinct.toml/extinct.h5 is left exactly as it was.
 
 Run from the repository root, e.g.:
-    python3 data/tools/add_extinction_curve.py \\
+    python3 data/tools/extinct/add_extinction_curve.py \\
         --input /path/to/SB_ATT_SLUG.dat \\
         --name Calzetti_starburst \\
         --reference "Calzetti, D., Armus, L., Bohlin, R., et al. 2000, ApJ, 533, 682" \\

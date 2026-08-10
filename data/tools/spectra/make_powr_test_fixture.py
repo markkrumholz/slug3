@@ -29,7 +29,7 @@ H-bucket's -- unlike the pre-split single powr_wnl.h5, these are three
 separate files/registry entries (one per WRType::WNLH20/WNLH40/WNLH60),
 with no xh axis or per-group xh attribute at all (see fetch_powr.py).
 
-Run from the repository root: python3 data/tools/make_powr_test_fixture.py
+Run from the repository root: python3 data/tools/spectra/make_powr_test_fixture.py
 """
 import h5py
 import numpy as np

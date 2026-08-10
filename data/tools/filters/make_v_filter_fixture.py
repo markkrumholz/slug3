@@ -15,7 +15,7 @@ every other filter alongside it. V_filter.toml is a registry in the
 same format fetch_filter_vo.py's own update_registry() writes,
 containing only this one facility/instrument/filter.
 
-Run from the repository root: python3 data/tools/make_v_filter_fixture.py
+Run from the repository root: python3 data/tools/filters/make_v_filter_fixture.py
 """
 import h5py
 import tomlkit

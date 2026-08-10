@@ -26,10 +26,11 @@ namespace specsyn
      * @details
      * Covers spectral libraries -- like the Tremblay et al. pure-
      * hydrogen (DA) white dwarf grids fetched by
-     * data/tools/fetch_tremblay.py, or the Rauch et al. NLTE hot star
-     * grid fetched by data/tools/fetch_rauch.py -- whose spectra are
-     * parameterized by (log(g), Teff) alone, with no [Fe/H]/[alpha/Fe]/
-     * [C/Fe] axis at all, stored as four flat top-level HDF5 datasets:
+     * data/tools/spectra/fetch_tremblay.py, or the Rauch et al. NLTE
+     * hot star grid fetched by data/tools/spectra/fetch_rauch.py --
+     * whose spectra are parameterized by (log(g), Teff) alone, with
+     * no [Fe/H]/[alpha/Fe]/[C/Fe] axis at all, stored as four flat
+     * top-level HDF5 datasets:
      * "wl", "logg", "log_Teff", and "flux". "flux" may be either a
      * filled (n_logg, n_logTeff, n_wl) tensor (Tremblay's grids,
      * already a full rectangular grid as distributed) or a (n_models,
