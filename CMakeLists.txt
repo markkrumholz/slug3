@@ -82,6 +82,7 @@ add_executable(slug
     src/core/Cluster.cpp
     src/core/Galaxy.cpp
     src/core/SimCluster.cpp
+    src/core/SimGalaxy.cpp
     src/io/OutputManager.cpp
     src/io/OutputManagerAscii.cpp
     src/io/OutputManagerH5.cpp
@@ -176,6 +177,7 @@ add_executable(slugTestCore
     src/core/Cluster.cpp
     src/core/Galaxy.cpp
     src/core/SimCluster.cpp
+    src/core/SimGalaxy.cpp
     src/io/OutputManager.cpp
     src/io/OutputManagerAscii.cpp
     src/io/OutputManagerH5.cpp
@@ -212,6 +214,7 @@ add_executable(slugTestCore
     tests/core/testCoreAll.cpp
     tests/core/testGalaxy.cpp
     tests/core/testSimCluster.cpp
+    tests/core/testSimGalaxy.cpp
     tests/core/testSpecsynChain.cpp
 )
 # slugTestCoreFull: the slow, full-scale end-to-end counterpart to

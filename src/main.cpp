@@ -6,6 +6,7 @@
  */
 
 #include "core/SimCluster.hpp"
+#include "core/SimGalaxy.hpp"
 #include "io/OutputManager.hpp"
 #include "io/OutputManagerAscii.hpp"
 #include "io/OutputManagerH5.hpp"
@@ -64,6 +65,7 @@ auto main(int argc, char *argv[]) -> int
     }
     else if (simControls.simType() == io::SimControls::SimType::galaxy)
     {
-        // Galaxy simulation support will be added in a future PR
+        core::SimGalaxy simGalaxy(simControls, std::move(outputManager));
+        simGalaxy.run();
     }
 }

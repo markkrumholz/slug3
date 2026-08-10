@@ -1,31 +1,30 @@
 /**
- * @file SimCluster.cpp
+ * @file SimGalaxy.cpp
  * @author Mark Krumholz
- * @brief Implementation of SimCluster
- * @date 2026-07-17
+ * @brief Implementation of SimGalaxy
+ * @date 2026-08-10
  */
 
-#include "SimCluster.hpp"
+#include "SimGalaxy.hpp"
 #include "../io/OutputManager.hpp"
 #include "../io/SimControls.hpp"
-#include "../utils/UniqueIDManager.hpp"
-#include "Cluster.hpp"
+#include "Galaxy.hpp"
 #include <iostream>
 #include <memory>
 #include <utility>
 
-core::SimCluster::SimCluster(const io::SimControls& simControls,
+core::SimGalaxy::SimGalaxy(const io::SimControls& simControls,
     std::unique_ptr<io::OutputManager> outputManager) :
     simControls_(simControls),
     outputManager_(std::move(outputManager))
 {
 }
 
-void core::SimCluster::run()
+void core::SimGalaxy::run()
 {
     if (simControls_.verbosity() > 0)
     {
-        std::cout << "slug: cluster simulation starting with "
+        std::cout << "slug: galaxy simulation starting with "
             << simControls_.nTrial() << " trials\n";
     }
 
@@ -45,19 +44,16 @@ void core::SimCluster::run()
             }
         }
 
-        // Create cluster for this trial
-        Cluster cluster(utils::getID(), simControls_.cmf().draw(), 0, simControls_);
+        // Create galaxy for this trial
+        Galaxy galaxy(simControls_);
 
-        // Write time-invariant cluster properties to output
-        outputManager_->writeCluster(trialNum, cluster);
-
-        // Loop over output times
+        // Loop over output times, updating the galaxy's internal
+        // state -- writing this state to output is left for a future
+        // commit
         const auto outTimes = simControls_.outTimes();
         for (const auto outTime : outTimes)
         {
-            cluster.advance(outTime);
-            outputManager_->writeClusterSpec(trialNum, outTime, cluster);
-            outputManager_->writeClusterPhot(trialNum, outTime, cluster);
+            galaxy.advance(outTime);
         }
     }
 
