@@ -6,6 +6,7 @@
  */
 
 #include "../src/core/Cluster.hpp"
+#include "../src/core/Galaxy.hpp"
 #include "../src/io/OutputManagerAscii.hpp"
 #include "../src/io/OutputManagerH5.hpp"
 #include "../src/io/SimControls.hpp"
@@ -21,10 +22,13 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
+#include <map>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <toml.hpp>
+#include <utility>
 #include <vector>
 
 // Build a valid input deck for a cluster-type simulation that also
@@ -570,12 +574,31 @@ static auto testWriteClusterSpecPhotH5Extinct() -> int
         };
 
         std::vector<double> readSpecExtinct;
+        std::vector<double> readWlExtinct;
         std::vector<double> readPhotExtinct;
         double readAV = 0.0;
         try
         {
             const hid_t specGrp = H5Gopen2(file, "cluster_spectra", H5P_DEFAULT);
             readSpecExtinct = readRow(specGrp, "spec_extinct", cluster.specExtinct().size());
+
+            // Regression check: cluster_spectra used to write "wl"
+            // (the full, unextincted grid) but no separate "wl_extinct"
+            // dataset at all, leaving spec_extinct's own wavelength
+            // grid unrecorded
+            const hid_t wlExtinctDset = H5Dopen2(specGrp, "wl_extinct", H5P_DEFAULT);
+            if (wlExtinctDset < 0)
+            {
+                H5Gclose(specGrp);
+                throw std::runtime_error("missing expected dataset wl_extinct");
+            }
+            const hid_t wlExtinctSpace = H5Dget_space(wlExtinctDset);
+            hsize_t wlExtinctLen = 0;
+            H5Sget_simple_extent_dims(wlExtinctSpace, &wlExtinctLen, nullptr);
+            H5Sclose(wlExtinctSpace);
+            readWlExtinct.resize(wlExtinctLen);
+            H5Dread(wlExtinctDset, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, readWlExtinct.data());
+            H5Dclose(wlExtinctDset);
             H5Gclose(specGrp);
 
             const hid_t photGrp = H5Gopen2(file, "cluster_phot", H5P_DEFAULT);
@@ -606,6 +629,12 @@ static auto testWriteClusterSpecPhotH5Extinct() -> int
         {
             std::cerr << "testOutputManager: h5 spec/phot extinct: spec_extinct "
                 "row does not match cluster.specExtinct()\n";
+            return 1;
+        }
+        if (!std::ranges::equal(readWlExtinct, controls.extinct()->wlObs()))
+        {
+            std::cerr << "testOutputManager: h5 spec/phot extinct: wl_extinct "
+                "does not match extinct()->wlObs()\n";
             return 1;
         }
         if (!std::ranges::equal(readPhotExtinct, cluster.photExtinct()))
@@ -694,6 +723,1143 @@ static auto testOptOutClusterSpecOutput() -> int
     catch (const std::exception& error)
     {
         std::cerr << "testOutputManager: opt-out cluster spec test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Build a valid input deck for a galaxy-type simulation that also has
+// usable stellar physics, spectral synthesis, photometry, and
+// extinction, by reusing an existing deck (testGalaxyDynamics.in by
+// default -- the same one testGalaxy.cpp's own Galaxy-class tests use,
+// chosen over the simpler testGalaxy.in, which has neither photometry
+// nor extinction) and injecting model_name/out_dir into it, mirroring
+// makeClusterPhysicsInputDeck's own approach.
+static auto makeGalaxyPhysicsInputDeck(const std::string& modelName,
+    const std::filesystem::path& outDir,
+    const std::string& deckPath = "tests/core/assets/testGalaxyDynamics.in") -> toml::table
+{
+    toml::table inputDeck = toml::parse_file(deckPath);
+    if (toml::table* outputTbl = inputDeck["output"].as_table())
+    { outputTbl->insert("model_name", modelName); }
+    else { inputDeck.insert("output", toml::table{ { "model_name", modelName } }); }
+    if (toml::table* outputsTbl = inputDeck["outputs"].as_table())
+    { outputsTbl->insert("out_dir", outDir.string()); }
+    else { inputDeck.insert("outputs", toml::table{ { "out_dir", outDir.string() } }); }
+    return inputDeck;
+}
+
+// Read a scalar string "units" attribute off an HDF5 dataset
+static auto readUnitsAttr(const hid_t dset) -> std::string // NOLINT(misc-include-cleaner)
+{
+    // NOLINTBEGIN(misc-include-cleaner)
+    const hid_t attr = H5Aopen(dset, "units", H5P_DEFAULT);
+    if (attr < 0) { throw std::runtime_error("missing expected units attribute"); }
+    const hid_t strType = H5Aget_type(attr);
+    char* cstr = nullptr;
+    H5Aread(attr, strType, &cstr); // NOLINT(bugprone-multi-level-implicit-pointer-conversion)
+    std::string result(cstr != nullptr ? cstr : "");
+    if (cstr != nullptr)
+    {
+        const hid_t space = H5Aget_space(attr);
+        H5Dvlen_reclaim(strType, space, H5P_DEFAULT, &cstr); // NOLINT(bugprone-multi-level-implicit-pointer-conversion)
+        H5Sclose(space);
+    }
+    H5Tclose(strType);
+    H5Aclose(attr);
+    return result;
+    // NOLINTEND(misc-include-cleaner)
+}
+
+// Read a 1d array-of-strings attribute called name on the HDF5 object loc
+static auto readStringArrayAttr(const hid_t loc, const char* name) -> std::vector<std::string> // NOLINT(misc-include-cleaner)
+{
+    // NOLINTBEGIN(misc-include-cleaner)
+    const hid_t attr = H5Aopen(loc, name, H5P_DEFAULT);
+    if (attr < 0)
+    {
+        throw std::runtime_error(std::string("missing expected attribute ") + name);
+    }
+    const hid_t space = H5Aget_space(attr);
+    const auto npoints = static_cast<std::size_t>(H5Sget_simple_extent_npoints(space));
+    const hid_t memType = H5Aget_type(attr);
+
+    std::vector<char*> buf(npoints);
+    H5Aread(attr, memType, static_cast<void*>(buf.data())); // NOLINT(bugprone-multi-level-implicit-pointer-conversion)
+    std::vector<std::string> values;
+    values.reserve(npoints);
+    for (const auto* s : buf) { values.emplace_back(s); }
+
+    H5Dvlen_reclaim(memType, space, H5P_DEFAULT, static_cast<void*>(buf.data())); // NOLINT(bugprone-multi-level-implicit-pointer-conversion)
+    H5Tclose(memType);
+    H5Sclose(space);
+    H5Aclose(attr);
+    return values;
+    // NOLINTEND(misc-include-cleaner)
+}
+
+// Get the current length of a 1d dataset, or the (rows, cols) extent
+// of a 2d dataset, in loc
+static auto readExtent1d(const hid_t loc, const char* name) -> hsize_t // NOLINT(misc-include-cleaner)
+{
+    // NOLINTBEGIN(misc-include-cleaner)
+    const hid_t dset = H5Dopen2(loc, name, H5P_DEFAULT);
+    if (dset < 0) { throw std::runtime_error(std::string("missing expected dataset ") + name); }
+    const hid_t space = H5Dget_space(dset);
+    hsize_t len = 0;
+    H5Sget_simple_extent_dims(space, &len, nullptr);
+    H5Sclose(space);
+    H5Dclose(dset);
+    return len;
+    // NOLINTEND(misc-include-cleaner)
+}
+static auto readExtent2d(const hid_t loc, const char* name) -> std::pair<hsize_t, hsize_t> // NOLINT(misc-include-cleaner)
+{
+    // NOLINTBEGIN(misc-include-cleaner)
+    const hid_t dset = H5Dopen2(loc, name, H5P_DEFAULT);
+    if (dset < 0) { throw std::runtime_error(std::string("missing expected dataset ") + name); }
+    const hid_t space = H5Dget_space(dset);
+    std::array<hsize_t, 2> dims{};
+    H5Sget_simple_extent_dims(space, dims.data(), nullptr);
+    H5Sclose(space);
+    H5Dclose(dset);
+    return { dims.at(0), dims.at(1) };
+    // NOLINTEND(misc-include-cleaner)
+}
+
+// Read an entire 1d dataset of doubles, or of unsigned longs, from loc
+static auto readColumnDouble(const hid_t loc, const char* name) -> std::vector<double> // NOLINT(misc-include-cleaner)
+{
+    // NOLINTBEGIN(misc-include-cleaner)
+    std::vector<double> result(readExtent1d(loc, name));
+    const hid_t dset = H5Dopen2(loc, name, H5P_DEFAULT);
+    H5Dread(dset, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, result.data());
+    H5Dclose(dset);
+    return result;
+    // NOLINTEND(misc-include-cleaner)
+}
+static auto readColumnULong(const hid_t loc, const char* name) -> std::vector<unsigned long> // NOLINT(misc-include-cleaner)
+{
+    // NOLINTBEGIN(misc-include-cleaner)
+    std::vector<unsigned long> result(readExtent1d(loc, name));
+    const hid_t dset = H5Dopen2(loc, name, H5P_DEFAULT);
+    H5Dread(dset, H5T_NATIVE_ULONG, H5S_ALL, H5S_ALL, H5P_DEFAULT, result.data());
+    H5Dclose(dset);
+    return result;
+    // NOLINTEND(misc-include-cleaner)
+}
+
+// Read one row (of nCols doubles) of a 2d dataset in loc
+static auto readRow2d(const hid_t loc, const char* name,
+    const hsize_t row, const hsize_t nCols) -> std::vector<double> // NOLINT(misc-include-cleaner)
+{
+    // NOLINTBEGIN(misc-include-cleaner)
+    const hid_t dset = H5Dopen2(loc, name, H5P_DEFAULT);
+    if (dset < 0) { throw std::runtime_error(std::string("missing expected dataset ") + name); }
+    const hid_t fileSpace = H5Dget_space(dset);
+    const std::array<hsize_t, 2> start = { row, 0 };
+    const std::array<hsize_t, 2> count = { 1, nCols };
+    H5Sselect_hyperslab(fileSpace, H5S_SELECT_SET, start.data(), nullptr, count.data(), nullptr);
+    const hid_t memSpace = H5Screate_simple(2, count.data(), nullptr);
+    std::vector<double> result(nCols);
+    H5Dread(dset, H5T_NATIVE_DOUBLE, memSpace, fileSpace, H5P_DEFAULT, result.data());
+    H5Sclose(memSpace);
+    H5Sclose(fileSpace);
+    H5Dclose(dset);
+    return result;
+    // NOLINTEND(misc-include-cleaner)
+}
+
+// Find value's index in column, throwing std::runtime_error (caught
+// by the caller) if it is not present
+static auto findIndex(const std::vector<unsigned long>& column,
+    const unsigned long value) -> hsize_t
+{
+    const auto it = std::ranges::find(column, value);
+    if (it == column.end())
+    {
+        throw std::runtime_error("uid " + std::to_string(value) + " not found");
+    }
+    return static_cast<hsize_t>(std::distance(column.begin(), it));
+}
+
+// Check the galaxy group: empty trial/time/target_mass/actual_mass
+// datasets, each with the expected units attribute -- see
+// testGalaxyGroupsH5()'s own docstring. Throws std::runtime_error
+// (caught by the caller) describing the first mismatch found.
+static void checkGalaxyGroup(const hid_t file) // NOLINT(misc-include-cleaner)
+{
+    // NOLINTBEGIN(misc-include-cleaner)
+    const hid_t galaxyGrp = H5Gopen2(file, "galaxy", H5P_DEFAULT);
+    if (galaxyGrp < 0) { throw std::runtime_error("missing galaxy group"); }
+    for (const auto& [name, units] : { std::pair{"trial", ""},
+        std::pair{"time", "yr"}, std::pair{"target_mass", "Msun"},
+        std::pair{"actual_mass", "Msun"} })
+    {
+        if (readExtent1d(galaxyGrp, name) != 0)
+        {
+            H5Gclose(galaxyGrp);
+            throw std::runtime_error(std::string(name) + " is not empty");
+        }
+        const hid_t dset = H5Dopen2(galaxyGrp, name, H5P_DEFAULT);
+        const auto actualUnits = readUnitsAttr(dset);
+        H5Dclose(dset);
+        if (actualUnits != units)
+        {
+            H5Gclose(galaxyGrp);
+            throw std::runtime_error(std::string(name) + " has units '" +
+                actualUnits + "', expected '" + units + "'");
+        }
+    }
+    H5Gclose(galaxyGrp);
+    // NOLINTEND(misc-include-cleaner)
+}
+
+// Check the galaxy_spectra group: fixed wl/wl_extinct datasets
+// (matching SimControls::specsyn()/extinct()'s own wlObs(), each with
+// units "Angstrom") plus empty trial/time/spec/spec_extinct -- see
+// testGalaxyGroupsH5()'s own docstring. Throws std::runtime_error
+// (caught by the caller) describing the first mismatch found.
+static void checkGalaxySpectraGroup(const hid_t file, const io::SimControls& controls) // NOLINT(misc-include-cleaner)
+{
+    // NOLINTBEGIN(misc-include-cleaner)
+    const hid_t specGrp = H5Gopen2(file, "galaxy_spectra", H5P_DEFAULT);
+    if (specGrp < 0) { throw std::runtime_error("missing galaxy_spectra group"); }
+
+    const auto& wlObs = controls.specsyn()->wlObs();
+    const auto& wlExtinctObs = controls.extinct()->wlObs();
+
+    const auto checkFixed = [&](const char* name, const std::vector<double>& expected)
+    {
+        if (readExtent1d(specGrp, name) != expected.size())
+        {
+            throw std::runtime_error(std::string(name) + " has unexpected length");
+        }
+        const hid_t dset = H5Dopen2(specGrp, name, H5P_DEFAULT);
+        std::vector<double> actual(expected.size());
+        H5Dread(dset, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, actual.data());
+        const auto units = readUnitsAttr(dset);
+        H5Dclose(dset);
+        if (!std::ranges::equal(actual, expected) || units != "Angstrom")
+        {
+            throw std::runtime_error(std::string(name) + " does not match the expected wlObs()/Angstrom");
+        }
+    };
+
+    try
+    {
+        checkFixed("wl", wlObs);
+        checkFixed("wl_extinct", wlExtinctObs);
+        if (readExtent1d(specGrp, "trial") != 0 || readExtent1d(specGrp, "time") != 0)
+        {
+            throw std::runtime_error("galaxy_spectra trial/time are not empty");
+        }
+        const auto [specRows, specCols] = readExtent2d(specGrp, "spec");
+        if (specRows != 0 || specCols != wlObs.size())
+        {
+            throw std::runtime_error("spec has unexpected shape");
+        }
+        const auto [specExRows, specExCols] = readExtent2d(specGrp, "spec_extinct");
+        if (specExRows != 0 || specExCols != wlExtinctObs.size())
+        {
+            throw std::runtime_error("spec_extinct has unexpected shape");
+        }
+    }
+    catch (...)
+    {
+        H5Gclose(specGrp);
+        throw;
+    }
+    H5Gclose(specGrp);
+    // NOLINTEND(misc-include-cleaner)
+}
+
+// Check the galaxy_phot group: a "filters" attribute matching
+// filterNames() (with "Lbol" appended) plus empty trial/time/phot/
+// phot_extinct -- see testGalaxyGroupsH5()'s own docstring. Throws
+// std::runtime_error (caught by the caller) describing the first
+// mismatch found.
+static void checkGalaxyPhotGroup(const hid_t file, const io::SimControls& controls) // NOLINT(misc-include-cleaner)
+{
+    // NOLINTBEGIN(misc-include-cleaner)
+    const hid_t photGrp = H5Gopen2(file, "galaxy_phot", H5P_DEFAULT);
+    if (photGrp < 0) { throw std::runtime_error("missing galaxy_phot group"); }
+
+    try
+    {
+        std::vector<std::string> expectedFilters = controls.filters()->filterNames();
+        expectedFilters.emplace_back("Lbol");
+        const auto actualFilters = readStringArrayAttr(photGrp, "filters");
+        if (actualFilters != expectedFilters)
+        {
+            throw std::runtime_error("filters attribute does not match expected filter list");
+        }
+        if (readExtent1d(photGrp, "trial") != 0 || readExtent1d(photGrp, "time") != 0)
+        {
+            throw std::runtime_error("galaxy_phot trial/time are not empty");
+        }
+        const auto [photRows, photCols] = readExtent2d(photGrp, "phot");
+        if (photRows != 0 || photCols != expectedFilters.size())
+        {
+            throw std::runtime_error("phot has unexpected shape");
+        }
+        const auto [photExRows, photExCols] = readExtent2d(photGrp, "phot_extinct");
+        if (photExRows != 0 || photExCols != controls.filters()->filterNames().size())
+        {
+            throw std::runtime_error("phot_extinct has unexpected shape");
+        }
+    }
+    catch (...)
+    {
+        H5Gclose(photGrp);
+        throw;
+    }
+    H5Gclose(photGrp);
+    // NOLINTEND(misc-include-cleaner)
+}
+
+// Verify that OutputManagerH5's constructor creates the galaxy,
+// galaxy_spectra, and galaxy_phot groups (and only those -- no rows
+// have been written yet) for a galaxy-type simulation with spectral
+// synthesis, photometry, and extinction all requested -- see
+// checkGalaxyGroup()/checkGalaxySpectraGroup()/checkGalaxyPhotGroup()'s
+// own docstrings for exactly what each group is expected to hold. See
+// testGalaxyGroupsAbsentH5() for the complementary check that none of
+// these groups exist for a cluster-type simulation.
+static auto testGalaxyGroupsH5() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() / "slugTestOutputManagerGalaxyGroupsH5";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+    const std::string modelName = "test_model";
+    const auto expectedPath = outDir / (modelName + ".h5");
+    const toml::table inputDeck = makeGalaxyPhysicsInputDeck(modelName, outDir);
+
+    try
+    {
+        const io::SimControls controls(inputDeck);
+        if (controls.specsyn() == nullptr || controls.filters() == nullptr ||
+            controls.extinct() == nullptr)
+        {
+            std::cerr << "testOutputManager: galaxy groups h5: test bug: "
+                "expected specsyn()/filters()/extinct() to all be non-null\n";
+            return 1;
+        }
+
+        {
+            const io::OutputManagerH5 manager(controls, inputDeck);
+        }
+
+        // NOLINTBEGIN(misc-include-cleaner)
+        const hid_t file = H5Fopen(expectedPath.string().c_str(),
+            H5F_ACC_RDONLY, H5P_DEFAULT);
+        if (file < 0)
+        {
+            std::cerr << "testOutputManager: galaxy groups h5: unable to reopen "
+                << expectedPath.string() << "\n";
+            return 1;
+        }
+
+        try
+        {
+            checkGalaxyGroup(file);
+            checkGalaxySpectraGroup(file, controls);
+            checkGalaxyPhotGroup(file, controls);
+        }
+        catch (const std::runtime_error& error)
+        {
+            H5Fclose(file);
+            std::cerr << "testOutputManager: galaxy groups h5: " << error.what() << "\n";
+            return 1;
+        }
+        H5Fclose(file);
+        // NOLINTEND(misc-include-cleaner)
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testOutputManager: galaxy groups h5 test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Verify that OutputManagerH5's constructor creates none of the
+// galaxy/galaxy_spectra/galaxy_phot groups for a cluster-type
+// simulation, even with spectral synthesis, photometry, and extinction
+// all requested -- a cluster-type simulation has no Galaxy object at
+// all, so there is nothing for these groups to hold.
+static auto testGalaxyGroupsAbsentH5() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() / "slugTestOutputManagerGalaxyGroupsAbsentH5";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+    const std::string modelName = "test_model";
+    const auto expectedPath = outDir / (modelName + ".h5");
+    const toml::table inputDeck = makeClusterPhysicsInputDeck(
+        modelName, outDir, "tests/core/assets/testClusterExtinct.in");
+
+    try
+    {
+        const io::SimControls controls(inputDeck);
+        if (controls.simType() != io::SimControls::SimType::cluster)
+        {
+            std::cerr << "testOutputManager: galaxy groups absent h5: test bug: "
+                "expected simType() == cluster\n";
+            return 1;
+        }
+
+        {
+            const io::OutputManagerH5 manager(controls, inputDeck);
+        }
+
+        // NOLINTBEGIN(misc-include-cleaner)
+        const hid_t file = H5Fopen(expectedPath.string().c_str(),
+            H5F_ACC_RDONLY, H5P_DEFAULT);
+        if (file < 0)
+        {
+            std::cerr << "testOutputManager: galaxy groups absent h5: unable to reopen "
+                << expectedPath.string() << "\n";
+            return 1;
+        }
+        const bool anyGalaxyGroup =
+            H5Lexists(file, "galaxy", H5P_DEFAULT) > 0 ||
+            H5Lexists(file, "galaxy_spectra", H5P_DEFAULT) > 0 ||
+            H5Lexists(file, "galaxy_phot", H5P_DEFAULT) > 0;
+        H5Fclose(file);
+        // NOLINTEND(misc-include-cleaner)
+
+        if (anyGalaxyGroup)
+        {
+            std::cerr << "testOutputManager: galaxy groups absent h5: "
+                "unexpectedly created a galaxy/galaxy_spectra/galaxy_phot group "
+                "for a cluster-type simulation\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testOutputManager: galaxy groups absent h5 test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Verify that OutputManagerAscii's constructor writes the expected
+// column-name/units header lines to _galaxy.txt, _galaxy_spectra.txt,
+// and _galaxy_phot.txt for a galaxy-type simulation with spectral
+// synthesis, photometry, and extinction all requested -- mirroring
+// testGalaxyGroupsH5()'s own checks, but for the ascii column layout
+// (no "uid" column, since a galaxy has no individual identity -- see
+// writeGalaxyHeader/writeGalaxySpectraHeader/writeGalaxyPhotHeader's
+// own comments).
+static auto testGalaxyFilesAscii() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() / "slugTestOutputManagerGalaxyFilesAscii";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+    const std::string modelName = "test_model";
+    const toml::table inputDeck = makeGalaxyPhysicsInputDeck(modelName, outDir);
+
+    try
+    {
+        const io::SimControls controls(inputDeck);
+        if (controls.specsyn() == nullptr || controls.filters() == nullptr ||
+            controls.extinct() == nullptr)
+        {
+            std::cerr << "testOutputManager: galaxy files ascii: test bug: "
+                "expected specsyn()/filters()/extinct() to all be non-null\n";
+            return 1;
+        }
+
+        {
+            const io::OutputManagerAscii manager(controls, inputDeck);
+        }
+
+        // _galaxy.txt: trial/time/target_mass/actual_mass, no uid
+        {
+            std::ifstream file(outDir / (modelName + "_galaxy.txt"));
+            std::string headerLine;
+            std::string unitsLine;
+            std::getline(file, headerLine);
+            std::getline(file, unitsLine);
+            if (!headerLine.contains("trial") || !headerLine.contains("time") ||
+                !headerLine.contains("target_mass") || !headerLine.contains("actual_mass") ||
+                headerLine.contains("uid"))
+            {
+                std::cerr << "testOutputManager: galaxy files ascii: _galaxy.txt "
+                    "header does not match the expected trial/time/target_mass/"
+                    "actual_mass columns (and no uid): " << headerLine << "\n";
+                return 1;
+            }
+            if (!unitsLine.contains("yr") || !unitsLine.contains("Msun"))
+            {
+                std::cerr << "testOutputManager: galaxy files ascii: _galaxy.txt "
+                    "units line does not match the expected yr/Msun units: "
+                    << unitsLine << "\n";
+                return 1;
+            }
+        }
+
+        // _galaxy_spectra.txt: trial/time/wl/spec/spec_ex, no uid
+        {
+            std::ifstream file(outDir / (modelName + "_galaxy_spectra.txt"));
+            std::string headerLine;
+            std::string unitsLine;
+            std::getline(file, headerLine);
+            std::getline(file, unitsLine);
+            if (!headerLine.contains("trial") || !headerLine.contains("time") ||
+                !headerLine.contains("wl") || !headerLine.contains("spec") ||
+                !headerLine.contains("spec_ex") || headerLine.contains("uid"))
+            {
+                std::cerr << "testOutputManager: galaxy files ascii: "
+                    "_galaxy_spectra.txt header does not match the expected "
+                    "trial/time/wl/spec/spec_ex columns (and no uid): "
+                    << headerLine << "\n";
+                return 1;
+            }
+            if (!unitsLine.contains("Angstrom") || !unitsLine.contains("erg/s/Angstrom"))
+            {
+                std::cerr << "testOutputManager: galaxy files ascii: "
+                    "_galaxy_spectra.txt units line does not match the expected "
+                    "Angstrom/erg-s-Angstrom units: " << unitsLine << "\n";
+                return 1;
+            }
+        }
+
+        // _galaxy_phot.txt: trial/time, one column per filter (+ Lbol),
+        // then one "<filter>_ex" column per real filter, no uid
+        {
+            std::ifstream file(outDir / (modelName + "_galaxy_phot.txt"));
+            std::string headerLine;
+            std::getline(file, headerLine);
+            if (!headerLine.contains("trial") || !headerLine.contains("time") ||
+                headerLine.contains("uid") || !headerLine.contains("Lbol"))
+            {
+                std::cerr << "testOutputManager: galaxy files ascii: "
+                    "_galaxy_phot.txt header does not match the expected "
+                    "trial/time/.../Lbol columns (and no uid): " << headerLine << "\n";
+                return 1;
+            }
+            for (const auto& name : controls.filters()->filterNames())
+            {
+                if (!headerLine.contains(name) || !headerLine.contains(name + "_ex"))
+                {
+                    std::cerr << "testOutputManager: galaxy files ascii: "
+                        "_galaxy_phot.txt header is missing the expected " << name
+                        << "/" << name << "_ex columns\n";
+                    return 1;
+                }
+            }
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testOutputManager: galaxy files ascii test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Verify that OutputManagerAscii's constructor writes none of
+// _galaxy.txt, _galaxy_spectra.txt, or _galaxy_phot.txt for a
+// cluster-type simulation, even with spectral synthesis, photometry,
+// and extinction all requested -- mirrors testGalaxyGroupsAbsentH5()'s
+// own check for the ascii side.
+static auto testGalaxyFilesAbsentAscii() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() / "slugTestOutputManagerGalaxyFilesAbsentAscii";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+    const std::string modelName = "test_model";
+    const toml::table inputDeck = makeClusterPhysicsInputDeck(
+        modelName, outDir, "tests/core/assets/testClusterExtinct.in");
+
+    try
+    {
+        const io::SimControls controls(inputDeck);
+        if (controls.simType() != io::SimControls::SimType::cluster)
+        {
+            std::cerr << "testOutputManager: galaxy files absent ascii: test bug: "
+                "expected simType() == cluster\n";
+            return 1;
+        }
+
+        {
+            const io::OutputManagerAscii manager(controls, inputDeck);
+        }
+
+        for (const std::string& suffix : { "_galaxy.txt", "_galaxy_spectra.txt", "_galaxy_phot.txt" })
+        {
+            const auto path = outDir / (modelName + suffix);
+            if (std::filesystem::exists(path))
+            {
+                std::cerr << "testOutputManager: galaxy files absent ascii: "
+                    "unexpectedly wrote " << path.string()
+                    << " for a cluster-type simulation\n";
+                return 1;
+            }
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testOutputManager: galaxy files absent ascii test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Advance time used by testWriteGalaxyH5()/testWriteGalaxyAscii(): a
+// single advance() call to this time, from testGalaxyDynamics.in's
+// own CMF/sfr, forms a manageable number of clusters (a few dozen --
+// see that deck's own comment on why it bounds pcubature's cost) with
+// clusters.CLF (5e5) long enough that none have disrupted yet, so
+// galaxy.clusters() holds every cluster formed.
+static constexpr double galaxyWriteTime = 3e5;
+
+// Check the galaxy group's own row (written by writeGalaxy) matches
+// trial/time/galaxy.targetMass()/galaxy.actualMass(). Throws
+// std::runtime_error (caught by the caller) describing any mismatch.
+static void checkGalaxyRowH5(const hid_t file, const unsigned long trial,
+    const double time, const core::Galaxy& galaxy)
+{
+    // NOLINTBEGIN(misc-include-cleaner)
+    const hid_t grp = H5Gopen2(file, "galaxy", H5P_DEFAULT);
+    if (grp < 0) { throw std::runtime_error("missing galaxy group"); }
+    const auto readTrial = readColumnULong(grp, "trial");
+    const auto readTime = readColumnDouble(grp, "time");
+    const auto readTargetMass = readColumnDouble(grp, "target_mass");
+    const auto readActualMass = readColumnDouble(grp, "actual_mass");
+    H5Gclose(grp);
+    // NOLINTEND(misc-include-cleaner)
+
+    if (readTrial.size() != 1 || readTrial.at(0) != trial ||
+        readTime.at(0) != time ||
+        readTargetMass.at(0) != galaxy.targetMass() ||
+        readActualMass.at(0) != galaxy.actualMass())
+    {
+        throw std::runtime_error("galaxy group row does not match trial/time/"
+            "targetMass()/actualMass()");
+    }
+}
+
+// Check that the clusters group holds exactly one row -- matching
+// target_mass and birth_mass -- for every cluster in galaxy.clusters(),
+// written by writeGalaxy()'s own per-cluster writeCluster() calls.
+// Throws std::runtime_error (caught by the caller) describing any
+// mismatch.
+static void checkClustersPassthroughH5(const hid_t file, const core::Galaxy& galaxy)
+{
+    // NOLINTBEGIN(misc-include-cleaner)
+    const hid_t grp = H5Gopen2(file, "clusters", H5P_DEFAULT);
+    if (grp < 0) { throw std::runtime_error("missing clusters group"); }
+    const auto uidCol = readColumnULong(grp, "uid");
+    const auto targetMassCol = readColumnDouble(grp, "target_mass");
+    const auto birthMassCol = readColumnDouble(grp, "birth_mass");
+    H5Gclose(grp);
+    // NOLINTEND(misc-include-cleaner)
+
+    if (uidCol.size() != galaxy.clusters().size())
+    {
+        throw std::runtime_error("clusters group has " + std::to_string(uidCol.size()) +
+            " rows, expected " + std::to_string(galaxy.clusters().size()));
+    }
+    for (const auto& cluster : galaxy.clusters())
+    {
+        const auto i = findIndex(uidCol, cluster.uid());
+        if (targetMassCol.at(i) != cluster.targetMass() ||
+            birthMassCol.at(i) != cluster.birthMass())
+        {
+            throw std::runtime_error("clusters group row for uid " +
+                std::to_string(cluster.uid()) + " does not match");
+        }
+    }
+}
+
+// Check the galaxy_spectra group's own row (written by
+// writeGalaxySpec) matches galaxy.spec()/specExtinct(). Throws
+// std::runtime_error (caught by the caller) describing any mismatch.
+static void checkGalaxySpecRowH5(const hid_t file, const core::Galaxy& galaxy)
+{
+    // NOLINTBEGIN(misc-include-cleaner)
+    const hid_t grp = H5Gopen2(file, "galaxy_spectra", H5P_DEFAULT);
+    if (grp < 0) { throw std::runtime_error("missing galaxy_spectra group"); }
+    const auto readSpec = readRow2d(grp, "spec", 0, galaxy.spec().size());
+    const auto readSpecExtinct = readRow2d(grp, "spec_extinct", 0, galaxy.specExtinct().size());
+    H5Gclose(grp);
+    // NOLINTEND(misc-include-cleaner)
+
+    if (!std::ranges::equal(readSpec, galaxy.spec()))
+    {
+        throw std::runtime_error("galaxy_spectra spec row does not match galaxy.spec()");
+    }
+    if (!std::ranges::equal(readSpecExtinct, galaxy.specExtinct()))
+    {
+        throw std::runtime_error("galaxy_spectra spec_extinct row does not match "
+            "galaxy.specExtinct()");
+    }
+}
+
+// Check that the cluster_spectra group holds exactly one row --
+// matching spec() -- for every cluster in galaxy.clusters(), written
+// by writeGalaxySpec()'s own per-cluster writeClusterSpec() calls.
+// Throws std::runtime_error (caught by the caller) describing any
+// mismatch.
+static void checkClusterSpectraPassthroughH5(const hid_t file, const core::Galaxy& galaxy)
+{
+    // NOLINTBEGIN(misc-include-cleaner)
+    const hid_t grp = H5Gopen2(file, "cluster_spectra", H5P_DEFAULT);
+    if (grp < 0) { throw std::runtime_error("missing cluster_spectra group"); }
+    const auto uidCol = readColumnULong(grp, "uid");
+    H5Gclose(grp);
+    // NOLINTEND(misc-include-cleaner)
+
+    if (uidCol.size() != galaxy.clusters().size())
+    {
+        throw std::runtime_error("cluster_spectra group has " +
+            std::to_string(uidCol.size()) + " rows, expected " +
+            std::to_string(galaxy.clusters().size()));
+    }
+    for (const auto& cluster : galaxy.clusters())
+    {
+        const auto i = findIndex(uidCol, cluster.uid());
+        // NOLINTBEGIN(misc-include-cleaner)
+        const hid_t grp2 = H5Gopen2(file, "cluster_spectra", H5P_DEFAULT);
+        const auto readSpec = readRow2d(grp2, "spec", i, cluster.spec().size());
+        H5Gclose(grp2);
+        // NOLINTEND(misc-include-cleaner)
+        if (!std::ranges::equal(readSpec, cluster.spec()))
+        {
+            throw std::runtime_error("cluster_spectra row for uid " +
+                std::to_string(cluster.uid()) + " does not match spec()");
+        }
+    }
+}
+
+// Check the galaxy_phot group's own row (written by writeGalaxyPhot)
+// matches galaxy.phot() (with lbol() appended, if requested) and
+// galaxy.photExtinct(). Throws std::runtime_error (caught by the
+// caller) describing any mismatch.
+static void checkGalaxyPhotRowH5(const hid_t file, const io::SimControls& controls,
+    const core::Galaxy& galaxy)
+{
+    auto expectedPhot = galaxy.phot();
+    if (controls.computeLbol()) { expectedPhot.push_back(galaxy.lbol()); }
+
+    // NOLINTBEGIN(misc-include-cleaner)
+    const hid_t grp = H5Gopen2(file, "galaxy_phot", H5P_DEFAULT);
+    if (grp < 0) { throw std::runtime_error("missing galaxy_phot group"); }
+    const auto readPhot = readRow2d(grp, "phot", 0, expectedPhot.size());
+    const auto readPhotExtinct = readRow2d(grp, "phot_extinct", 0, galaxy.photExtinct().size());
+    H5Gclose(grp);
+    // NOLINTEND(misc-include-cleaner)
+
+    if (!std::ranges::equal(readPhot, expectedPhot))
+    {
+        throw std::runtime_error("galaxy_phot phot row does not match galaxy.phot()/lbol()");
+    }
+    if (!std::ranges::equal(readPhotExtinct, galaxy.photExtinct()))
+    {
+        throw std::runtime_error("galaxy_phot phot_extinct row does not match "
+            "galaxy.photExtinct()");
+    }
+}
+
+// Check that the cluster_phot group holds exactly one row -- matching
+// phot() (with lbol() appended, if requested) -- for every cluster in
+// galaxy.clusters(), written by writeGalaxyPhot()'s own per-cluster
+// writeClusterPhot() calls. Throws std::runtime_error (caught by the
+// caller) describing any mismatch.
+static void checkClusterPhotPassthroughH5(const hid_t file,
+    const io::SimControls& controls, const core::Galaxy& galaxy)
+{
+    // NOLINTBEGIN(misc-include-cleaner)
+    const hid_t grp = H5Gopen2(file, "cluster_phot", H5P_DEFAULT);
+    if (grp < 0) { throw std::runtime_error("missing cluster_phot group"); }
+    const auto uidCol = readColumnULong(grp, "uid");
+    H5Gclose(grp);
+    // NOLINTEND(misc-include-cleaner)
+
+    if (uidCol.size() != galaxy.clusters().size())
+    {
+        throw std::runtime_error("cluster_phot group has " +
+            std::to_string(uidCol.size()) + " rows, expected " +
+            std::to_string(galaxy.clusters().size()));
+    }
+    for (const auto& cluster : galaxy.clusters())
+    {
+        const auto i = findIndex(uidCol, cluster.uid());
+        auto expectedPhot = cluster.phot();
+        if (controls.computeLbol()) { expectedPhot.push_back(cluster.lbol()); }
+        // NOLINTBEGIN(misc-include-cleaner)
+        const hid_t grp2 = H5Gopen2(file, "cluster_phot", H5P_DEFAULT);
+        const auto readPhot = readRow2d(grp2, "phot", i, expectedPhot.size());
+        H5Gclose(grp2);
+        // NOLINTEND(misc-include-cleaner)
+        if (!std::ranges::equal(readPhot, expectedPhot))
+        {
+            throw std::runtime_error("cluster_phot row for uid " +
+                std::to_string(cluster.uid()) + " does not match phot()/lbol()");
+        }
+    }
+}
+
+// Verify that OutputManagerH5::writeGalaxy/writeGalaxySpec/
+// writeGalaxyPhot write correct galaxy-level rows (matching the
+// Galaxy object's own targetMass()/actualMass()/spec()/specExtinct()/
+// phot()/photExtinct()), and that each also writes a matching
+// passthrough row, via its own internal writeCluster()/
+// writeClusterSpec()/writeClusterPhot() calls, for every currently-
+// alive cluster in the galaxy -- see checkGalaxyRowH5()/
+// checkClustersPassthroughH5()/etc.'s own docstrings for exactly what
+// is checked.
+static auto testWriteGalaxyH5() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() / "slugTestOutputManagerWriteGalaxyH5";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+    const std::string modelName = "test_model";
+    const auto expectedPath = outDir / (modelName + ".h5");
+    const toml::table inputDeck = makeGalaxyPhysicsInputDeck(modelName, outDir);
+
+    try
+    {
+        const io::SimControls controls(inputDeck);
+        if (controls.specsyn() == nullptr || controls.filters() == nullptr ||
+            controls.extinct() == nullptr)
+        {
+            std::cerr << "testOutputManager: write galaxy h5: test bug: "
+                "expected specsyn()/filters()/extinct() to all be non-null\n";
+            return 1;
+        }
+
+        utils::rng().seed(42);
+        core::Galaxy galaxy(controls);
+        galaxy.advance(galaxyWriteTime);
+        if (galaxy.clusters().empty())
+        {
+            std::cerr << "testOutputManager: write galaxy h5: test bug: "
+                "expected at least one cluster to have formed\n";
+            return 1;
+        }
+        constexpr unsigned long trial = 6;
+
+        {
+            io::OutputManagerH5 manager(controls, inputDeck);
+            manager.writeGalaxy(trial, galaxyWriteTime, galaxy);
+            manager.writeGalaxySpec(trial, galaxyWriteTime, galaxy);
+            manager.writeGalaxyPhot(trial, galaxyWriteTime, galaxy);
+        }
+
+        // NOLINTBEGIN(misc-include-cleaner)
+        const hid_t file = H5Fopen(expectedPath.string().c_str(),
+            H5F_ACC_RDONLY, H5P_DEFAULT);
+        if (file < 0)
+        {
+            std::cerr << "testOutputManager: write galaxy h5: unable to reopen "
+                << expectedPath.string() << "\n";
+            return 1;
+        }
+
+        try
+        {
+            checkGalaxyRowH5(file, trial, galaxyWriteTime, galaxy);
+            checkClustersPassthroughH5(file, galaxy);
+            checkGalaxySpecRowH5(file, galaxy);
+            checkClusterSpectraPassthroughH5(file, galaxy);
+            checkGalaxyPhotRowH5(file, controls, galaxy);
+            checkClusterPhotPassthroughH5(file, controls, galaxy);
+        }
+        catch (const std::runtime_error& error)
+        {
+            H5Fclose(file);
+            std::cerr << "testOutputManager: write galaxy h5: " << error.what() << "\n";
+            return 1;
+        }
+        H5Fclose(file);
+        // NOLINTEND(misc-include-cleaner)
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testOutputManager: write galaxy h5 test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Skip an ascii output file's 3-line header (column names, units,
+// dashed rule), leaving file positioned at its first data line
+static void skipAsciiHeader(std::ifstream& file)
+{
+    std::string line;
+    std::getline(file, line);
+    std::getline(file, line);
+    std::getline(file, line);
+}
+
+// Check the _galaxy.txt file's own single data row (trial, time,
+// target_mass, actual_mass) matches trial/time/galaxy.targetMass()/
+// galaxy.actualMass(), within tol. Throws std::runtime_error (caught
+// by the caller) describing any mismatch.
+static void checkGalaxyRowAscii(const std::filesystem::path& path,
+    const unsigned long trial, const double time, const core::Galaxy& galaxy,
+    const double tol)
+{
+    std::ifstream file(path);
+    skipAsciiHeader(file);
+    std::string line;
+    std::getline(file, line);
+
+    std::istringstream lineStream(line);
+    unsigned long readTrial = 0;
+    double readTime = 0.0;
+    double readTargetMass = 0.0;
+    double readActualMass = 0.0;
+    lineStream >> readTrial >> readTime >> readTargetMass >> readActualMass;
+
+    if (readTrial != trial || std::abs(readTime - time) > tol ||
+        std::abs(readTargetMass - galaxy.targetMass()) > tol * galaxy.targetMass() ||
+        std::abs(readActualMass - galaxy.actualMass()) > tol * galaxy.actualMass())
+    {
+        throw std::runtime_error("_galaxy.txt row does not match: " + line);
+    }
+}
+
+// Check that _clusters.txt holds exactly one row -- matching
+// target_mass -- for every cluster in galaxy.clusters(), found by
+// uid. Throws std::runtime_error (caught by the caller) describing
+// any mismatch.
+static void checkClustersPassthroughAscii(const std::filesystem::path& path,
+    const core::Galaxy& galaxy, const double tol)
+{
+    std::ifstream file(path);
+    skipAsciiHeader(file);
+
+    std::map<unsigned long, double> targetMassByUid;
+    std::string line;
+    while (std::getline(file, line))
+    {
+        if (line.empty()) { continue; }
+        std::istringstream lineStream(line);
+        unsigned long readTrial = 0;
+        unsigned long readUid = 0;
+        double readTargetMass = 0.0;
+        lineStream >> readTrial >> readUid >> readTargetMass;
+        targetMassByUid[readUid] = readTargetMass;
+    }
+
+    if (targetMassByUid.size() != galaxy.clusters().size())
+    {
+        throw std::runtime_error("_clusters.txt has " +
+            std::to_string(targetMassByUid.size()) + " rows, expected " +
+            std::to_string(galaxy.clusters().size()));
+    }
+    for (const auto& cluster : galaxy.clusters())
+    {
+        const auto it = targetMassByUid.find(cluster.uid());
+        if (it == targetMassByUid.end() ||
+            std::abs(it->second - cluster.targetMass()) > tol * cluster.targetMass())
+        {
+            throw std::runtime_error("_clusters.txt row for uid " +
+                std::to_string(cluster.uid()) + " missing or does not match target_mass");
+        }
+    }
+}
+
+// Check that _galaxy_spectra.txt holds exactly wlObs.size() data rows,
+// each one's wl/spec columns matching wlObs/galaxy.spec() in order (a
+// single galaxy/time combination lays out sequentially, unlike the
+// per-cluster files below, so no need to match rows by uid). Throws
+// std::runtime_error (caught by the caller) describing any mismatch.
+static void checkGalaxySpecRowsAscii(const std::filesystem::path& path,
+    const std::vector<double>& wlObs, const core::Galaxy& galaxy, const double tol)
+{
+    std::ifstream file(path);
+    skipAsciiHeader(file);
+
+    const auto& spec = galaxy.spec();
+    std::string line;
+    std::size_t i = 0;
+    while (std::getline(file, line))
+    {
+        if (line.empty()) { continue; }
+        std::istringstream lineStream(line);
+        unsigned long readTrial = 0;
+        double readTime = 0.0;
+        double readWl = 0.0;
+        double readSpec = 0.0;
+        lineStream >> readTrial >> readTime >> readWl >> readSpec;
+
+        if (std::abs(readWl - wlObs.at(i)) > tol * wlObs.at(i) ||
+            std::abs(readSpec - spec.at(i)) > tol * std::max(std::abs(spec.at(i)), 1.0))
+        {
+            throw std::runtime_error("_galaxy_spectra.txt row " + std::to_string(i) +
+                " does not match: " + line);
+        }
+        ++i;
+    }
+    if (i != wlObs.size())
+    {
+        throw std::runtime_error("_galaxy_spectra.txt has " + std::to_string(i) +
+            " rows, expected " + std::to_string(wlObs.size()));
+    }
+}
+
+// Check that _cluster_spectra.txt holds exactly
+// clusters().size() * wlObs.size() data rows -- one block of
+// wlObs.size() consecutive rows per cluster in galaxy.clusters(),
+// written by writeGalaxySpec()'s own per-cluster writeClusterSpec()
+// calls. Only checks the row count (the per-cluster ascii spectrum
+// layout itself is already covered by testWriteClusterAsciiExtinct());
+// throws std::runtime_error (caught by the caller) if it does not
+// match.
+static void checkClusterSpectraPassthroughAscii(const std::filesystem::path& path,
+    const std::vector<double>& wlObs, const core::Galaxy& galaxy)
+{
+    std::ifstream file(path);
+    skipAsciiHeader(file);
+    std::size_t nRows = 0;
+    std::string line;
+    while (std::getline(file, line)) { if (!line.empty()) { ++nRows; } }
+
+    const auto expected = galaxy.clusters().size() * wlObs.size();
+    if (nRows != expected)
+    {
+        throw std::runtime_error("_cluster_spectra.txt has " + std::to_string(nRows) +
+            " rows, expected " + std::to_string(expected));
+    }
+}
+
+// Check the _galaxy_phot.txt file's own single data row matches
+// galaxy.phot() (with lbol() appended, if requested), within tol.
+// Throws std::runtime_error (caught by the caller) describing any
+// mismatch.
+static void checkGalaxyPhotRowAscii(const std::filesystem::path& path,
+    const io::SimControls& controls, const core::Galaxy& galaxy, const double tol)
+{
+    auto expectedPhot = galaxy.phot();
+    if (controls.computeLbol()) { expectedPhot.push_back(galaxy.lbol()); }
+
+    std::ifstream file(path);
+    skipAsciiHeader(file);
+    std::string line;
+    std::getline(file, line);
+
+    std::istringstream lineStream(line);
+    unsigned long readTrial = 0;
+    double readTime = 0.0;
+    lineStream >> readTrial >> readTime;
+    for (const double expected : expectedPhot)
+    {
+        double readValue = 0.0;
+        lineStream >> readValue;
+        if (std::abs(readValue - expected) > tol * std::max(std::abs(expected), 1.0))
+        {
+            throw std::runtime_error("_galaxy_phot.txt row does not match: " + line);
+        }
+    }
+}
+
+// Check that _cluster_phot.txt holds exactly one data row per cluster
+// in galaxy.clusters(), written by writeGalaxyPhot()'s own per-cluster
+// writeClusterPhot() calls. Only checks the row count (the per-cluster
+// ascii photometry layout itself is already covered by
+// testWriteClusterAsciiExtinct()); throws std::runtime_error (caught
+// by the caller) if it does not match.
+static void checkClusterPhotPassthroughAscii(const std::filesystem::path& path,
+    const core::Galaxy& galaxy)
+{
+    std::ifstream file(path);
+    skipAsciiHeader(file);
+    std::size_t nRows = 0;
+    std::string line;
+    while (std::getline(file, line)) { if (!line.empty()) { ++nRows; } }
+
+    if (nRows != galaxy.clusters().size())
+    {
+        throw std::runtime_error("_cluster_phot.txt has " + std::to_string(nRows) +
+            " rows, expected " + std::to_string(galaxy.clusters().size()));
+    }
+}
+
+// Verify that OutputManagerAscii::writeGalaxy/writeGalaxySpec/
+// writeGalaxyPhot write correct galaxy-level rows (matching the
+// Galaxy object's own targetMass()/actualMass()/spec()/phot()), and
+// that each also writes a passthrough row (or, for the two spectra/
+// phot files, the right total row count) via its own internal
+// writeCluster()/writeClusterSpec()/writeClusterPhot() calls, for
+// every currently-alive cluster in the galaxy -- mirrors
+// testWriteGalaxyH5()'s own checks for the ascii text layout; see
+// checkGalaxyRowAscii()/checkClustersPassthroughAscii()/etc.'s own
+// docstrings for exactly what each checks.
+static auto testWriteGalaxyAscii() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() / "slugTestOutputManagerWriteGalaxyAscii";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+    const std::string modelName = "test_model";
+    const toml::table inputDeck = makeGalaxyPhysicsInputDeck(modelName, outDir);
+    constexpr double tol = 1e-5;
+
+    try
+    {
+        const io::SimControls controls(inputDeck);
+        if (controls.specsyn() == nullptr || controls.filters() == nullptr ||
+            controls.extinct() == nullptr)
+        {
+            std::cerr << "testOutputManager: write galaxy ascii: test bug: "
+                "expected specsyn()/filters()/extinct() to all be non-null\n";
+            return 1;
+        }
+
+        utils::rng().seed(42);
+        core::Galaxy galaxy(controls);
+        galaxy.advance(galaxyWriteTime);
+        if (galaxy.clusters().empty())
+        {
+            std::cerr << "testOutputManager: write galaxy ascii: test bug: "
+                "expected at least one cluster to have formed\n";
+            return 1;
+        }
+        constexpr unsigned long trial = 9;
+
+        {
+            io::OutputManagerAscii manager(controls, inputDeck);
+            manager.writeGalaxy(trial, galaxyWriteTime, galaxy);
+            manager.writeGalaxySpec(trial, galaxyWriteTime, galaxy);
+            manager.writeGalaxyPhot(trial, galaxyWriteTime, galaxy);
+        }
+
+        const auto wlObs = controls.specsyn()->wlObs();
+
+        try
+        {
+            checkGalaxyRowAscii(outDir / (modelName + "_galaxy.txt"),
+                trial, galaxyWriteTime, galaxy, tol);
+            checkClustersPassthroughAscii(outDir / (modelName + "_clusters.txt"), galaxy, tol);
+            checkGalaxySpecRowsAscii(outDir / (modelName + "_galaxy_spectra.txt"),
+                wlObs, galaxy, tol);
+            checkClusterSpectraPassthroughAscii(
+                outDir / (modelName + "_cluster_spectra.txt"), wlObs, galaxy);
+            checkGalaxyPhotRowAscii(outDir / (modelName + "_galaxy_phot.txt"),
+                controls, galaxy, tol);
+            checkClusterPhotPassthroughAscii(
+                outDir / (modelName + "_cluster_phot.txt"), galaxy);
+        }
+        catch (const std::runtime_error& error)
+        {
+            std::cerr << "testOutputManager: write galaxy ascii: " << error.what() << "\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testOutputManager: write galaxy ascii test failed: "
             << error.what() << "\n";
         return 1;
     }
@@ -874,5 +2040,11 @@ auto testOutputManager() -> int
     result += testWriteReadClusterRngRoundTrip();
     result += testWriteClusterSpecPhotH5Extinct();
     result += testOptOutClusterSpecOutput();
+    result += testGalaxyGroupsH5();
+    result += testGalaxyGroupsAbsentH5();
+    result += testGalaxyFilesAscii();
+    result += testGalaxyFilesAbsentAscii();
+    result += testWriteGalaxyH5();
+    result += testWriteGalaxyAscii();
     return result;
 }

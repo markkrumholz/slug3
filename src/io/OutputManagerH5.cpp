@@ -7,6 +7,7 @@
 
 #include "OutputManagerH5.hpp"
 #include "../core/Cluster.hpp"
+#include "../core/Galaxy.hpp"
 #include "../phot/FilterCollection.hpp"
 #include "../specsyn/Specsyn.hpp"
 #include "../utils/ParseUtils.hpp"
@@ -314,6 +315,9 @@ io::OutputManagerH5::OutputManagerH5(
     openClustersGroup();
     openClusterSpectraGroup();
     openClusterPhotGroup();
+    openGalaxyGroup();
+    openGalaxySpectraGroup();
+    openGalaxyPhotGroup();
 }
 
 // Create the clusters group and its datasets, if cluster output is
@@ -426,7 +430,10 @@ void io::OutputManagerH5::openClusterSpectraGroup()
 
     if (simControls_.extinct() != nullptr)
     {
-        const auto nWlExtinct = static_cast<hsize_t>(simControls_.extinct()->wl().size());
+        const std::vector<double> wlExtinctObs = simControls_.extinct()->wlObs();
+        const auto nWlExtinct = static_cast<hsize_t>(wlExtinctObs.size());
+        writeFixed1dDataset(clusterSpectraGroup_, "wl_extinct", H5T_NATIVE_DOUBLE,
+            wlExtinctObs.data(), nWlExtinct, "Angstrom");
         const hid_t specExtinctDset = createExtensible2dDataset(
             clusterSpectraGroup_, "spec_extinct", H5T_NATIVE_DOUBLE, nWlExtinct);
         writeStringAttr(specExtinctDset, "units", "erg/(s Angstrom)");
@@ -510,12 +517,169 @@ void io::OutputManagerH5::openClusterPhotGroup()
     // NOLINTEND(misc-include-cleaner)
 }
 
+// Create the galaxy group and its datasets, for a galaxy-type
+// simulation. A no-op for a cluster-type simulation, which has no
+// Galaxy object at all.
+void io::OutputManagerH5::openGalaxyGroup()
+{
+    if (simControls_.simType() != SimControls::SimType::galaxy) { return; }
+
+    // NOLINTBEGIN(misc-include-cleaner)
+    galaxyGroup_ = H5Gcreate2(file_, "galaxy",
+        H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+    if (galaxyGroup_ < 0)
+    {
+        H5Fclose(file_);
+        throw std::runtime_error(
+            "OutputManagerH5: unable to create galaxy group");
+    }
+
+    const hid_t trialDset = createExtensible1dDataset(
+        galaxyGroup_, "trial", H5T_NATIVE_ULONG);
+    writeStringAttr(trialDset, "units", "");
+    H5Dclose(trialDset);
+    const hid_t timeDset = createExtensible1dDataset(
+        galaxyGroup_, "time", H5T_NATIVE_DOUBLE);
+    writeStringAttr(timeDset, "units", "yr");
+    H5Dclose(timeDset);
+    const hid_t targetMassDset = createExtensible1dDataset(
+        galaxyGroup_, "target_mass", H5T_NATIVE_DOUBLE);
+    writeStringAttr(targetMassDset, "units", "Msun");
+    H5Dclose(targetMassDset);
+    const hid_t actualMassDset = createExtensible1dDataset(
+        galaxyGroup_, "actual_mass", H5T_NATIVE_DOUBLE);
+    writeStringAttr(actualMassDset, "units", "Msun");
+    H5Dclose(actualMassDset);
+    // NOLINTEND(misc-include-cleaner)
+}
+
+// Create the galaxy_spectra group and its datasets, for a galaxy-type
+// simulation with a spectral synthesizer requested. A no-op for a
+// cluster-type simulation, or if no spectral synthesizer was
+// requested.
+void io::OutputManagerH5::openGalaxySpectraGroup()
+{
+    if (simControls_.simType() != SimControls::SimType::galaxy) { return; }
+    if (simControls_.specsyn() == nullptr) { return; }
+
+    const auto& synth = *simControls_.specsyn();
+    const std::vector<double> wlObs = synth.wlObs();
+    const auto nWl = static_cast<hsize_t>(wlObs.size());
+
+    // NOLINTBEGIN(misc-include-cleaner)
+    galaxySpectraGroup_ = H5Gcreate2(file_, "galaxy_spectra",
+        H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+    if (galaxySpectraGroup_ < 0)
+    {
+        H5Fclose(file_);
+        throw std::runtime_error(
+            "OutputManagerH5: unable to create galaxy_spectra group");
+    }
+
+    writeFixed1dDataset(galaxySpectraGroup_, "wl", H5T_NATIVE_DOUBLE,
+        wlObs.data(), nWl, "Angstrom");
+
+    const hid_t trialSpecDset = createExtensible1dDataset(
+        galaxySpectraGroup_, "trial", H5T_NATIVE_ULONG);
+    writeStringAttr(trialSpecDset, "units", "");
+    H5Dclose(trialSpecDset);
+    const hid_t timeDset = createExtensible1dDataset(
+        galaxySpectraGroup_, "time", H5T_NATIVE_DOUBLE);
+    writeStringAttr(timeDset, "units", "yr");
+    H5Dclose(timeDset);
+    const hid_t specDset = createExtensible2dDataset(
+        galaxySpectraGroup_, "spec", H5T_NATIVE_DOUBLE, nWl);
+    writeStringAttr(specDset, "units", "erg/(s Angstrom)");
+    H5Dclose(specDset);
+
+    if (simControls_.extinct() != nullptr)
+    {
+        const std::vector<double> wlExtinctObs = simControls_.extinct()->wlObs();
+        const auto nWlExtinct = static_cast<hsize_t>(wlExtinctObs.size());
+        writeFixed1dDataset(galaxySpectraGroup_, "wl_extinct", H5T_NATIVE_DOUBLE,
+            wlExtinctObs.data(), nWlExtinct, "Angstrom");
+        const hid_t specExtinctDset = createExtensible2dDataset(
+            galaxySpectraGroup_, "spec_extinct", H5T_NATIVE_DOUBLE, nWlExtinct);
+        writeStringAttr(specExtinctDset, "units", "erg/(s Angstrom)");
+        H5Dclose(specExtinctDset);
+    }
+    // NOLINTEND(misc-include-cleaner)
+}
+
+// Create the galaxy_phot group and its datasets, for a galaxy-type
+// simulation with a filter collection or the bolometric luminosity
+// requested -- mirrors openClusterPhotGroup()'s own filter-list
+// construction. A no-op for a cluster-type simulation, or if neither
+// was requested.
+void io::OutputManagerH5::openGalaxyPhotGroup()
+{
+    if (simControls_.simType() != SimControls::SimType::galaxy) { return; }
+    if (simControls_.filters() == nullptr && !simControls_.computeLbol()) { return; }
+
+    std::vector<std::string> filterNames;
+    std::vector<std::string> filterUnits;
+    if (simControls_.filters() != nullptr)
+    {
+        filterNames = simControls_.filters()->filterNames();
+        filterUnits = simControls_.filters()->filterUnits();
+    }
+    if (simControls_.computeLbol())
+    {
+        filterNames.emplace_back("Lbol");
+        filterUnits.emplace_back("Lsun");
+    }
+    const auto nFilters = static_cast<hsize_t>(filterNames.size());
+
+    // NOLINTBEGIN(misc-include-cleaner)
+    galaxyPhotGroup_ = H5Gcreate2(file_, "galaxy_phot",
+        H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+    if (galaxyPhotGroup_ < 0)
+    {
+        H5Fclose(file_);
+        throw std::runtime_error(
+            "OutputManagerH5: unable to create galaxy_phot group");
+    }
+
+    writeStringArrayAttr(galaxyPhotGroup_, "filters", filterNames);
+
+    const hid_t trialPhotDset = createExtensible1dDataset(
+        galaxyPhotGroup_, "trial", H5T_NATIVE_ULONG);
+    writeStringAttr(trialPhotDset, "units", "");
+    H5Dclose(trialPhotDset);
+    const hid_t timePhotDset = createExtensible1dDataset(
+        galaxyPhotGroup_, "time", H5T_NATIVE_DOUBLE);
+    writeStringAttr(timePhotDset, "units", "yr");
+    H5Dclose(timePhotDset);
+    const hid_t photDset = createExtensible2dDataset(
+        galaxyPhotGroup_, "phot", H5T_NATIVE_DOUBLE, nFilters);
+    // Each filter can have its own unit, as in openClusterPhotGroup()
+    writeStringArrayAttr(photDset, "units", filterUnits);
+    H5Dclose(photDset);
+
+    // phot_extinct only ever covers real filters, never Lbol -- see
+    // openClusterPhotGroup()'s own identical comment
+    if (simControls_.extinct() != nullptr && simControls_.filters() != nullptr)
+    {
+        const auto& realFilterNames = simControls_.filters()->filterNames();
+        const auto& realFilterUnits = simControls_.filters()->filterUnits();
+        const auto nRealFilters = static_cast<hsize_t>(realFilterNames.size());
+        const hid_t photExtinctDset = createExtensible2dDataset(
+            galaxyPhotGroup_, "phot_extinct", H5T_NATIVE_DOUBLE, nRealFilters);
+        writeStringArrayAttr(photExtinctDset, "units", realFilterUnits);
+        H5Dclose(photExtinctDset);
+    }
+    // NOLINTEND(misc-include-cleaner)
+}
+
 io::OutputManagerH5::~OutputManagerH5()
 {
     // NOLINTBEGIN(misc-include-cleaner)
     if (clustersGroup_ >= 0) { H5Gclose(clustersGroup_); }
     if (clusterSpectraGroup_ >= 0) { H5Gclose(clusterSpectraGroup_); }
     if (clusterPhotGroup_ >= 0) { H5Gclose(clusterPhotGroup_); }
+    if (galaxyGroup_ >= 0) { H5Gclose(galaxyGroup_); }
+    if (galaxySpectraGroup_ >= 0) { H5Gclose(galaxySpectraGroup_); }
+    if (galaxyPhotGroup_ >= 0) { H5Gclose(galaxyPhotGroup_); }
     H5Fclose(file_);
     // NOLINTEND(misc-include-cleaner)
 }
@@ -638,4 +802,104 @@ void io::OutputManagerH5::writeClusterPhot(
         }
         // NOLINTEND(misc-include-cleaner)
     }
+}
+
+// Append one element to each of the trial/time/target_mass/actual_mass
+// galaxy datasets, then call writeCluster() on every currently-alive
+// (non-disrupted) cluster in galaxy, so each is also recorded in the
+// clusters datasets. A no-op if galaxy output was not enabled for this
+// simulation (the galaxy group does not exist).
+void io::OutputManagerH5::writeGalaxy(
+    const unsigned long trial, const double time, const core::Galaxy& galaxy)
+{
+    if (galaxyGroup_ < 0) { return; }
+
+    const double targetMass = galaxy.targetMass();
+    const double actualMass = galaxy.actualMass();
+
+    // Guard the actual writes against concurrent callers from other
+    // threads; shares clusterOutputWrite's critical section (rather
+    // than a separate one) since it targets the same file handle --
+    // see writeClusterSpec's own comment. Released before the
+    // writeCluster() calls below, each of which takes this same
+    // critical section itself; OpenMP critical regions are not
+    // reentrant, so those calls must happen outside this block.
+#ifdef _OPENMP
+#pragma omp critical(clusterOutputWrite)
+#endif
+    {
+        // NOLINTBEGIN(misc-include-cleaner)
+        appendToDataset(galaxyGroup_, "trial", H5T_NATIVE_ULONG, &trial);
+        appendToDataset(galaxyGroup_, "time", H5T_NATIVE_DOUBLE, &time);
+        appendToDataset(galaxyGroup_, "target_mass", H5T_NATIVE_DOUBLE, &targetMass);
+        appendToDataset(galaxyGroup_, "actual_mass", H5T_NATIVE_DOUBLE, &actualMass);
+        // NOLINTEND(misc-include-cleaner)
+    }
+
+    for (const auto& cluster : galaxy.clusters()) { writeCluster(trial, cluster); }
+}
+
+// Append one element to each of the trial/time/spec galaxy_spectra
+// datasets, then call writeClusterSpec() on every currently-alive
+// (non-disrupted) cluster in galaxy. A no-op if spectral synthesis
+// was not enabled for this simulation (the galaxy_spectra group does
+// not exist).
+void io::OutputManagerH5::writeGalaxySpec(
+    const unsigned long trial, const double time, const core::Galaxy& galaxy)
+{
+    if (galaxySpectraGroup_ < 0) { return; }
+
+    const auto& spec = galaxy.spec();
+
+    // See writeGalaxy's own comment on this critical section
+#ifdef _OPENMP
+#pragma omp critical(clusterOutputWrite)
+#endif
+    {
+        // NOLINTBEGIN(misc-include-cleaner)
+        appendToDataset(galaxySpectraGroup_, "trial", H5T_NATIVE_ULONG, &trial);
+        appendToDataset(galaxySpectraGroup_, "time", H5T_NATIVE_DOUBLE, &time);
+        appendRowToDataset2d(galaxySpectraGroup_, "spec", H5T_NATIVE_DOUBLE, spec.data());
+        if (simControls_.extinct() != nullptr)
+        {
+            appendRowToDataset2d(galaxySpectraGroup_, "spec_extinct",
+                H5T_NATIVE_DOUBLE, galaxy.specExtinct().data());
+        }
+        // NOLINTEND(misc-include-cleaner)
+    }
+
+    for (const auto& cluster : galaxy.clusters()) { writeClusterSpec(trial, time, cluster); }
+}
+
+// Append one element to each of the trial/time/phot galaxy_phot
+// datasets, then call writeClusterPhot() on every currently-alive
+// (non-disrupted) cluster in galaxy. A no-op if no filter collection
+// or bolometric luminosity was requested for this simulation (the
+// galaxy_phot group does not exist).
+void io::OutputManagerH5::writeGalaxyPhot(
+    const unsigned long trial, const double time, const core::Galaxy& galaxy)
+{
+    if (galaxyPhotGroup_ < 0) { return; }
+
+    auto phot = galaxy.phot();
+    if (simControls_.computeLbol()) { phot.push_back(galaxy.lbol()); }
+
+    // See writeGalaxy's own comment on this critical section
+#ifdef _OPENMP
+#pragma omp critical(clusterOutputWrite)
+#endif
+    {
+        // NOLINTBEGIN(misc-include-cleaner)
+        appendToDataset(galaxyPhotGroup_, "trial", H5T_NATIVE_ULONG, &trial);
+        appendToDataset(galaxyPhotGroup_, "time", H5T_NATIVE_DOUBLE, &time);
+        appendRowToDataset2d(galaxyPhotGroup_, "phot", H5T_NATIVE_DOUBLE, phot.data());
+        if (simControls_.extinct() != nullptr && simControls_.filters() != nullptr)
+        {
+            appendRowToDataset2d(galaxyPhotGroup_, "phot_extinct",
+                H5T_NATIVE_DOUBLE, galaxy.photExtinct().data());
+        }
+        // NOLINTEND(misc-include-cleaner)
+    }
+
+    for (const auto& cluster : galaxy.clusters()) { writeClusterPhot(trial, time, cluster); }
 }

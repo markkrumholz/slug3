@@ -80,7 +80,9 @@ add_subdirectory(src/extern/pybind11)
 add_executable(slug
     src/main.cpp
     src/core/Cluster.cpp
+    src/core/Galaxy.cpp
     src/core/SimCluster.cpp
+    src/core/SimGalaxy.cpp
     src/io/OutputManager.cpp
     src/io/OutputManagerAscii.cpp
     src/io/OutputManagerH5.cpp
@@ -173,7 +175,9 @@ add_executable(slugTestTracks
 )
 add_executable(slugTestCore
     src/core/Cluster.cpp
+    src/core/Galaxy.cpp
     src/core/SimCluster.cpp
+    src/core/SimGalaxy.cpp
     src/io/OutputManager.cpp
     src/io/OutputManagerAscii.cpp
     src/io/OutputManagerH5.cpp
@@ -208,7 +212,9 @@ add_executable(slugTestCore
     src/extern/cubature/pcubature.c
     tests/core/testCluster.cpp
     tests/core/testCoreAll.cpp
+    tests/core/testGalaxy.cpp
     tests/core/testSimCluster.cpp
+    tests/core/testSimGalaxy.cpp
     tests/core/testSpecsynChain.cpp
 )
 # slugTestCoreFull: the slow, full-scale end-to-end counterpart to
@@ -271,6 +277,7 @@ target_compile_options(slugTestCoreFull PRIVATE -O3)
 target_compile_definitions(slugTestCoreFull PRIVATE NDEBUG)
 add_executable(slugTestIo
     src/core/Cluster.cpp
+    src/core/Galaxy.cpp
     src/io/OutputManager.cpp
     src/io/OutputManagerAscii.cpp
     src/io/OutputManagerH5.cpp

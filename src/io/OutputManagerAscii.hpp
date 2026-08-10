@@ -17,6 +17,7 @@
 namespace core
 {
     class Cluster;
+    class Galaxy;
 } // namespace core
 
 namespace io
@@ -93,14 +94,111 @@ namespace io
         void writeClusterPhot(unsigned long trial, double time,
             const core::Cluster& cluster) override;
 
+        /**
+         * @brief Write a galaxy's data as a row of the galaxy output file
+         * @param trial Trial number to which this galaxy belongs
+         * @param time The output time at which this row was recorded, in yr
+         * @param galaxy The galaxy whose data should be written
+         * @details
+         * If galaxy output was not enabled for this simulation (the
+         * galaxy file was not opened), this is a no-op. Otherwise,
+         * after writing this row, also calls writeCluster() on every
+         * currently-alive (non-disrupted) cluster in galaxy.
+         */
+        void writeGalaxy(unsigned long trial, double time,
+            const core::Galaxy& galaxy) override;
+
+        /**
+         * @brief Write a galaxy's spectrum
+         * @param trial Trial number to which this galaxy belongs
+         * @param time The output time at which the galaxy's spectrum was computed, in yr
+         * @param galaxy The galaxy whose spectrum should be written
+         * @details
+         * If spectral synthesis was not enabled for this simulation
+         * (the galaxy-spectra file was not opened), this is a no-op.
+         * Otherwise writes one line per wavelength, each holding
+         * trial, time, wavelength, and specific luminosity, to the
+         * galaxy-spectra file, then calls writeClusterSpec() on every
+         * currently-alive (non-disrupted) cluster in galaxy.
+         */
+        void writeGalaxySpec(unsigned long trial, double time,
+            const core::Galaxy& galaxy) override;
+
+        /**
+         * @brief Write a galaxy's photometry
+         * @param trial Trial number to which this galaxy belongs
+         * @param time The output time at which the galaxy's photometry was computed, in yr
+         * @param galaxy The galaxy whose photometry should be written
+         * @details
+         * If no filter collection or bolometric luminosity was
+         * requested for this simulation (the galaxy-photometry file
+         * was not opened), this is a no-op. Otherwise writes one
+         * line, holding trial, time, one column per filter, and (if
+         * requested) a final "Lbol" column, to the galaxy-photometry
+         * file, then calls writeClusterPhot() on every currently-alive
+         * (non-disrupted) cluster in galaxy.
+         */
+        void writeGalaxyPhot(unsigned long trial, double time,
+            const core::Galaxy& galaxy) override;
+
     private:
+
+        /**
+         * @brief Open the cluster output file and write its header, if cluster output is enabled
+         */
+        void openClustersFile();
+
+        /**
+         * @brief Open the cluster-spectra output file and write its header, if a spectral synthesizer was requested
+         * @details
+         * A no-op if output.write_cluster_spec is set to false in the
+         * input deck (it defaults to true), even if a spectral
+         * synthesizer was requested -- spectra can be wanted only as
+         * an intermediate for computing photometry, in which case
+         * writing them out as well just wastes disk space.
+         */
+        void openClusterSpectraFile();
+
+        /**
+         * @brief Open the cluster-photometry output file and write its header, if a filter collection or the bolometric luminosity was requested
+         */
+        void openClusterPhotFile();
+
+        /**
+         * @brief Open the galaxy output file and write its header, for a galaxy-type simulation
+         * @details
+         * A no-op unless SimControls::simType() is SimType::galaxy --
+         * there is no Galaxy object, and so nothing to write here, for
+         * a cluster-type simulation.
+         */
+        void openGalaxyFile();
+
+        /**
+         * @brief Open the galaxy-spectra output file and write its header, if a spectral synthesizer was requested
+         * @details
+         * A no-op unless SimControls::simType() is SimType::galaxy, or
+         * if no spectral synthesizer was requested.
+         */
+        void openGalaxySpectraFile();
+
+        /**
+         * @brief Open the galaxy-photometry output file and write its header, if a filter collection or the bolometric luminosity was requested
+         * @details
+         * A no-op unless SimControls::simType() is SimType::galaxy, or
+         * if neither a filter collection nor the bolometric luminosity
+         * was requested.
+         */
+        void openGalaxyPhotFile();
 
         std::ofstream clustersFile_; /**< Handle to the open cluster output file */
         std::ofstream clusterSpectraFile_; /**< Handle to the open cluster-spectra output file, if any */
         std::ofstream clusterPhotFile_; /**< Handle to the open cluster-photometry output file, if any */
-        std::vector<double> wlObs_; /**< Observed-frame wavelength grid, if spectral synthesis is enabled */
-        std::vector<int> photColWidths_; /**< Column width used for each filter in the cluster-photometry file -- see computePhotColWidths() */
-        std::vector<int> photExtinctColWidths_; /**< Column width used for each "<filter>_ex" column in the cluster-photometry file, if SimControls::extinct() is set -- see computePhotColWidths() */
+        std::ofstream galaxyFile_; /**< Handle to the open galaxy output file, if any (galaxy-type simulations only) */
+        std::ofstream galaxySpectraFile_; /**< Handle to the open galaxy-spectra output file, if any */
+        std::ofstream galaxyPhotFile_; /**< Handle to the open galaxy-photometry output file, if any */
+        std::vector<double> wlObs_; /**< Observed-frame wavelength grid, if spectral synthesis is enabled -- shared by both the cluster- and galaxy-spectra files, since both are drawn from the same SimControls::specsyn() */
+        std::vector<int> photColWidths_; /**< Column width used for each filter in the cluster- and galaxy-photometry files -- see computePhotColWidths() */
+        std::vector<int> photExtinctColWidths_; /**< Column width used for each "<filter>_ex" column in the cluster- and galaxy-photometry files, if SimControls::extinct() is set -- see computePhotColWidths() */
     };
 
 } // namespace io

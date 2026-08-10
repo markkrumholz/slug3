@@ -34,7 +34,7 @@ void core::SimCluster::run()
 #endif
     for (unsigned long trialNum = 0; trialNum < simControls_.nTrial(); ++trialNum)
     {
-        if (simControls_.verbosity() > 2)
+        if (simControls_.verbosity() > 1)
         {
 #ifdef _OPENMP
 #pragma omp critical

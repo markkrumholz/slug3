@@ -10,13 +10,13 @@
 #include "../src/pdfs/PDFSegment.hpp"
 #include "../src/pdfs/PDFSegmentLognormal.hpp"
 #include "../src/pdfs/PDFSegmentPowerlaw.hpp"
+#include "../src/utils/MiscUtils.hpp"
 #include "testSimControls.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <exception>
 #include <iostream>
-#include <limits>
 #include <memory>
 #include <numbers>
 #include <stdexcept>
@@ -591,15 +591,38 @@ static auto testSimControlsPhysicsGalaxy() -> int
             return 1;
         }
 
-        // The SFR was given as a bare number, so it should have been
-        // turned into a non-normalized, constant-in-time PDF spanning
-        // [0, DBL_MAX] with weight DBL_MAX (since sfr = 1.0).
+        // The SFR was given as a bare number (1.0), so it should have
+        // been turned into a non-normalized, constant-in-time PDF
+        // spanning [0, tMax] (see SimControls.cpp's own
+        // buildConstantSFR(), whose tMax is fixed at 1e15 yr -- far
+        // beyond any realistic simulation timescale).
+        constexpr double sfrTMax = 1e15;
         if (sim.sfr().getMin() != 0.0 ||
-            sim.sfr().getMax() != std::numeric_limits<double>::max() ||
+            sim.sfr().getMax() != sfrTMax ||
             sim.sfr().normalized())
         {
             std::cerr << "testSimControls: " << fileName
                 << ": SFR does not match expected non-normalized constant PDF\n";
+            return 1;
+        }
+
+        // Check the actual physical behavior this construction exists
+        // to produce: integral(a, b) should equal sfr * (b - a) for
+        // any interval well within [0, tMax]. A previous version of
+        // this construction got the weight/tMax scaling backwards,
+        // returning (b - a) / sfr instead -- undetected until now
+        // because nothing checked the integral's actual value, only
+        // the PDF's structural properties checked just above.
+        constexpr double sfrValue = 1.0; // matches galaxy.sfr in the deck
+        constexpr double intervalStart = 100.0;
+        constexpr double intervalEnd = 300.0;
+        const double expectedIntegral = sfrValue * (intervalEnd - intervalStart);
+        const double actualIntegral = sim.sfr().integral(intervalStart, intervalEnd);
+        if (!utils::approxEqual(actualIntegral, expectedIntegral))
+        {
+            std::cerr << "testSimControls: " << fileName << ": SFR integral("
+                << intervalStart << ", " << intervalEnd << ") = " << actualIntegral
+                << ", expected sfr * (b - a) = " << expectedIntegral << "\n";
             return 1;
         }
 

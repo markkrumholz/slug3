@@ -1,0 +1,53 @@
+# Test input deck for a galaxy simulation, used by testGalaxy.cpp to
+# exercise Galaxy::advance()'s own cluster-formation/spectra/photometry
+# machinery (distinct from tests/core/assets/testGalaxy.in, which
+# testSimControls.cpp uses to check input-deck *parsing* only).
+# Combines photometry and extinction (unlike testCluster.in) so a
+# single deck can exercise Galaxy::spec()/specExtinct()/phot()/
+# photExtinct()/lbol() summation all at once.
+
+sim_type = "galaxy"
+
+[stars]
+IMF = "chabrier.toml"
+track_registry = "tests/tracks/assets/tracks.toml"
+tracks = "MIST_test"
+FeH = 0.0
+alphaFe = -0.2
+min_stoch_mass = 10.0
+
+[spectra]
+model = "blackbody"
+
+[phot]
+filters = ["SLUGTEST.CAM1.G500", "ideal_phot_700_1500", "Lbol"]
+registry = "tests/phot/assets/filters_test.toml"
+
+[extinct]
+AV = 1.0
+model = "Calzetti_starburst"
+
+[clusters]
+CMF = "tests/core/assets/testGalaxyDynamicsCMF.toml"
+CLF = 5e5
+
+[galaxy]
+sfr = 1e-2
+
+# Bounds specCts()'s per-isochrone-segment pcubature calls (one per
+# cluster, over the full ~2048-point wavelength grid): with the
+# default max_iter = 0 (unlimited) and abs_tol = 0 (relative tolerance
+# only), wavelength bins where the blackbody flux is many orders of
+# magnitude below the peak make 1% *relative* accuracy essentially
+# unreachable, so pcubature keeps subdividing indefinitely. A bounded
+# max_iter caps the cost per call without materially affecting these
+# tests, which only check internal consistency (do per-cluster sums
+# match the galaxy's own combined values), not absolute accuracy
+# against an independently-known answer.
+[integrator]
+max_iter = 2000
+
+[output]
+start_time = 0.0
+end_time = 10.0
+ntime = 3

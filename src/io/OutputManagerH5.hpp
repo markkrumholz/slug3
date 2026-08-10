@@ -16,6 +16,7 @@
 namespace core
 {
     class Cluster;
+    class Galaxy;
 } // namespace core
 
 namespace io
@@ -87,6 +88,50 @@ namespace io
         void writeClusterPhot(unsigned long trial, double time,
             const core::Cluster& cluster) override;
 
+        /**
+         * @brief Write a galaxy's data as a row of the galaxy datasets
+         * @param trial Trial number to which this galaxy belongs
+         * @param time The output time at which this row was recorded, in yr
+         * @param galaxy The galaxy whose data should be written
+         * @details
+         * If galaxy output was not enabled for this simulation (the
+         * galaxy group does not exist), this is a no-op. Otherwise,
+         * after writing this row, also calls writeCluster() on every
+         * currently-alive (non-disrupted) cluster in galaxy.
+         */
+        void writeGalaxy(unsigned long trial, double time,
+            const core::Galaxy& galaxy) override;
+
+        /**
+         * @brief Write a galaxy's spectrum as a row of the galaxy_spectra datasets
+         * @param trial Trial number to which this galaxy belongs
+         * @param time The output time at which the galaxy's spectrum was computed, in yr
+         * @param galaxy The galaxy whose spectrum should be written
+         * @details
+         * If spectral synthesis was not enabled for this simulation
+         * (the galaxy_spectra group does not exist), this is a no-op.
+         * Otherwise, after writing this row, also calls
+         * writeClusterSpec() on every currently-alive (non-disrupted)
+         * cluster in galaxy.
+         */
+        void writeGalaxySpec(unsigned long trial, double time,
+            const core::Galaxy& galaxy) override;
+
+        /**
+         * @brief Write a galaxy's photometry as a row of the galaxy_phot datasets
+         * @param trial Trial number to which this galaxy belongs
+         * @param time The output time at which the galaxy's photometry was computed, in yr
+         * @param galaxy The galaxy whose photometry should be written
+         * @details
+         * If no filter collection or bolometric luminosity was
+         * requested for this simulation (the galaxy_phot group does
+         * not exist), this is a no-op. Otherwise, after writing this
+         * row, also calls writeClusterPhot() on every currently-alive
+         * (non-disrupted) cluster in galaxy.
+         */
+        void writeGalaxyPhot(unsigned long trial, double time,
+            const core::Galaxy& galaxy) override;
+
     private:
 
         /**
@@ -110,10 +155,39 @@ namespace io
          */
         void openClusterPhotGroup();
 
+        /**
+         * @brief Create the galaxy group and its datasets, for a galaxy-type simulation
+         * @details
+         * A no-op unless SimControls::simType() is SimType::galaxy --
+         * there is no Galaxy object, and so nothing to write here, for
+         * a cluster-type simulation.
+         */
+        void openGalaxyGroup();
+
+        /**
+         * @brief Create the galaxy_spectra group and its datasets, if a spectral synthesizer was requested
+         * @details
+         * A no-op unless SimControls::simType() is SimType::galaxy, or
+         * if no spectral synthesizer was requested.
+         */
+        void openGalaxySpectraGroup();
+
+        /**
+         * @brief Create the galaxy_phot group and its datasets, if a filter collection or the bolometric luminosity was requested
+         * @details
+         * A no-op unless SimControls::simType() is SimType::galaxy, or
+         * if neither a filter collection nor the bolometric luminosity
+         * was requested.
+         */
+        void openGalaxyPhotGroup();
+
         hid_t file_ = -1; /**< Handle to the open HDF5 output file */ // NOLINT(misc-include-cleaner)
         hid_t clustersGroup_ = -1; /**< Handle to the open clusters group, if any */ // NOLINT(misc-include-cleaner)
         hid_t clusterSpectraGroup_ = -1; /**< Handle to the open cluster_spectra group, if any */ // NOLINT(misc-include-cleaner)
         hid_t clusterPhotGroup_ = -1; /**< Handle to the open cluster_phot group, if any */ // NOLINT(misc-include-cleaner)
+        hid_t galaxyGroup_ = -1; /**< Handle to the open galaxy group, if any */ // NOLINT(misc-include-cleaner)
+        hid_t galaxySpectraGroup_ = -1; /**< Handle to the open galaxy_spectra group, if any */ // NOLINT(misc-include-cleaner)
+        hid_t galaxyPhotGroup_ = -1; /**< Handle to the open galaxy_phot group, if any */ // NOLINT(misc-include-cleaner)
     };
 
 } // namespace io
