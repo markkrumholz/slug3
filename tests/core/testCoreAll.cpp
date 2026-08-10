@@ -11,6 +11,7 @@
  */
 
 #include "testCluster.hpp"
+#include "testGalaxy.hpp"
 #include "testSimCluster.hpp"
 #include "testSpecsynChain.hpp"
 #include <exception>
@@ -21,6 +22,7 @@ auto main() -> int {
     {
         int result = 0;
         result += testCluster();
+        result += testGalaxy();
         result += testSimCluster();
         result += testSpecsynChain();
         return result;

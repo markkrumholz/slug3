@@ -1,0 +1,28 @@
+# Test input deck for a galaxy simulation, used by testGalaxy.cpp's
+# fast cluster/star-drawing checks. Deliberately has no [spectra],
+# [phot], or [extinct] section, so SimControls::specsyn() stays null
+# and Cluster::computeSpec()/computePhot() are no-ops -- this isolates
+# Galaxy::advance()'s cluster/star formation machinery from the much
+# more expensive spectral synthesis path (see testGalaxyDynamics.in's
+# own [integrator] comment).
+
+sim_type = "galaxy"
+
+[stars]
+IMF = "chabrier.toml"
+track_registry = "tests/tracks/assets/tracks.toml"
+tracks = "MIST_test"
+FeH = 0.0
+alphaFe = -0.2
+
+[clusters]
+CMF = "tests/core/assets/testGalaxyDynamicsCMF.toml"
+CLF = 5e5
+
+[galaxy]
+sfr = 1e-2
+
+[output]
+start_time = 0.0
+end_time = 10.0
+ntime = 3

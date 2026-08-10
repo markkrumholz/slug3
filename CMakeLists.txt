@@ -80,6 +80,7 @@ add_subdirectory(src/extern/pybind11)
 add_executable(slug
     src/main.cpp
     src/core/Cluster.cpp
+    src/core/Galaxy.cpp
     src/core/SimCluster.cpp
     src/io/OutputManager.cpp
     src/io/OutputManagerAscii.cpp
@@ -173,6 +174,7 @@ add_executable(slugTestTracks
 )
 add_executable(slugTestCore
     src/core/Cluster.cpp
+    src/core/Galaxy.cpp
     src/core/SimCluster.cpp
     src/io/OutputManager.cpp
     src/io/OutputManagerAscii.cpp
@@ -208,6 +210,7 @@ add_executable(slugTestCore
     src/extern/cubature/pcubature.c
     tests/core/testCluster.cpp
     tests/core/testCoreAll.cpp
+    tests/core/testGalaxy.cpp
     tests/core/testSimCluster.cpp
     tests/core/testSpecsynChain.cpp
 )

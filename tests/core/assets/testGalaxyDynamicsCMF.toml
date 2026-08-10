@@ -1,0 +1,12 @@
+# A small power-law cluster mass function, used only by testGalaxy.cpp,
+# so that Galaxy::advance()'s cmf().drawTarget() calls produce genuine
+# stochastic scatter in both cluster count and total mass (a delta-
+# function CMF would draw the same fixed mass every time, defeating the
+# point of a "close to, but not exactly, the target mass" test).
+
+format = "basic"
+breakpoints = [1e2, 1e3]
+
+[segment1]
+type = "powerlaw"
+slope = -2.0

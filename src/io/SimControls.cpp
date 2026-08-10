@@ -38,6 +38,27 @@
 #include <utility>
 #include <vector>
 
+// Build a constant-in-time PDF representing a fixed star formation
+// rate, used by both the constructor's own galaxy.sfr handling and
+// setSFR() below. Represented as a single flat (alpha = 0) powerlaw
+// segment spanning [0, tMax], with tMax fixed far larger than any
+// realistic simulation timescale so that every query [a, b] this PDF
+// ever sees (cluster formation times, sfr().integral() over an
+// advance() step) falls well inside the flat region, never clamped
+// against tMax. A flat segment's own normalized integral over [a, b]
+// is (b - a) / tMax (see PDFSegmentPowerlaw::integral()), so setting
+// the segment's PDF-level weight to sfr * tMax makes
+// PDF::integral(a, b) -- weight times that normalized integral --
+// come out to exactly sfr * (b - a), matching the physical
+// definition of a star formation rate.
+static auto buildConstantSFR(const double sfr) -> pdfs::PDF
+{
+    constexpr double tMax = 1e15; // yr; far beyond any realistic simulation time
+    const double wgt = sfr * tMax;
+    auto pl = std::make_unique<pdfs::PDFSegmentPowerlaw>(0.0, tMax, 0.0);
+    return pdfs::PDF(std::move(pl), wgt);
+}
+
 // Read an explicit array of output times from output.output_times
 static auto readOutputTimesArray(const toml::table& inputDeck) -> std::vector<double>
 {
@@ -265,21 +286,12 @@ void io::SimControls::initPhysics(const toml::table& inputDeck)
         // SFR -- this requires special handling because here
         // a numerical value is not interpreted as a delta function
         // but as the normalization for a non-normalized PDF that is
-        // constant in time
+        // constant in time -- see buildConstantSFR()'s own comment
         const std::optional<double> sfr =
             inputDeck.at_path("galaxy.sfr").value<double>();
         if (sfr.has_value())
         {
-            // We have been given a numerical value, so construct a
-            // constant PDF from t = 0 to T for a big number T, with
-            // the weight set to T / sfr so that the mass of stars
-            // formed in any time interval dt comes out to sfr * dt.
-            const double tMax = std::numeric_limits<double>::max() *
-                std::min(sfr.value(), 1.0);
-            const double wgt = std::numeric_limits<double>::max() /
-                std::max(sfr.value(), 1.0);
-            auto pl = std::make_unique<pdfs::PDFSegmentPowerlaw>(0.0, tMax, 0.0);
-            sfr_ = pdfs::PDF(std::move(pl), wgt);
+            sfr_ = buildConstantSFR(sfr.value());
         }
         else
         {
@@ -450,17 +462,7 @@ void io::SimControls::setSFR(const std::string& sfr)
     try
     {
         const double sfrVal = utils::stod(sfr);
-
-        // We have been given a numerical value, so construct a
-        // constant PDF from t = 0 to T for a big number T, with
-        // the weight set to T / sfr so that the mass of stars
-        // formed in any time interval dt comes out to sfr * dt.
-        const double tMax = std::numeric_limits<double>::max() *
-            std::min(sfrVal, 1.0);
-        const double wgt = std::numeric_limits<double>::max() /
-            std::max(sfrVal, 1.0);
-        auto pl = std::make_unique<pdfs::PDFSegmentPowerlaw>(0.0, tMax, 0.0);
-        sfr_ = pdfs::PDF(std::move(pl), wgt);
+        sfr_ = buildConstantSFR(sfrVal);
     }
     catch (const std::invalid_argument&)
     {
