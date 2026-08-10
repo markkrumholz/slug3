@@ -11,7 +11,6 @@
 #include "../extinct/Extinct.hpp"
 #include "../phot/FilterCollection.hpp"
 #include "../specsyn/Specsyn.hpp"
-#include "../utils/ParseUtils.hpp"
 #include "../utils/RngThread.hpp"
 #include "OutputManager.hpp"
 #include "SimControls.hpp"
@@ -359,11 +358,7 @@ io::OutputManagerAscii::OutputManagerAscii(
 // openClustersGroup()'s identical gating condition)
 void io::OutputManagerAscii::openClustersFile()
 {
-    if (simControls_.simType() != SimControls::SimType::cluster &&
-        !simControls_.outputClusters())
-    {
-        return;
-    }
+    if (!writeCluster_) { return; }
 
     const auto clustersPath = std::filesystem::path(simControls_.outDir()) /
         (simControls_.modelName() + "_clusters.txt");
@@ -390,10 +385,7 @@ void io::OutputManagerAscii::openClustersFile()
 void io::OutputManagerAscii::openClusterSpectraFile()
 {
     if (simControls_.specsyn() == nullptr) { return; }
-
-    const auto writeClusterSpecInput = utils::getTOMLKeyWithError<bool>(
-        inputDeck_, "output.write_cluster_spec");
-    if (writeClusterSpecInput.has_value() && !writeClusterSpecInput.value()) { return; }
+    if (!writeClusterSpec_) { return; }
 
     wlObs_ = simControls_.specsyn()->wlObs();
 
@@ -419,6 +411,7 @@ void io::OutputManagerAscii::openClusterSpectraFile()
 void io::OutputManagerAscii::openClusterPhotFile()
 {
     if (simControls_.filters() == nullptr && !simControls_.computeLbol()) { return; }
+    if (!writeClusterPhot_) { return; }
 
     const auto clusterPhotPath = std::filesystem::path(simControls_.outDir()) /
         (simControls_.modelName() + "_cluster_phot.txt");
@@ -455,13 +448,13 @@ void io::OutputManagerAscii::openClusterPhotFile()
 }
 
 // Open the galaxy output file and write its header, for a galaxy-type
-// simulation. A no-op for a cluster-type simulation -- unlike cluster
-// output, there is no equivalent of outputClusters() that would make
-// galaxy output available for a cluster-type simulation, since a
+// simulation with output.write_galaxy (optional, defaults to true)
+// not set to false. A no-op for a cluster-type simulation, since a
 // cluster-type simulation has no Galaxy object at all.
 void io::OutputManagerAscii::openGalaxyFile()
 {
     if (simControls_.simType() != SimControls::SimType::galaxy) { return; }
+    if (!writeGalaxy_) { return; }
 
     const auto galaxyPath = std::filesystem::path(simControls_.outDir()) /
         (simControls_.modelName() + "_galaxy.txt");
@@ -486,6 +479,7 @@ void io::OutputManagerAscii::openGalaxySpectraFile()
 {
     if (simControls_.simType() != SimControls::SimType::galaxy) { return; }
     if (simControls_.specsyn() == nullptr) { return; }
+    if (!writeGalaxySpec_) { return; }
 
     wlObs_ = simControls_.specsyn()->wlObs();
 
@@ -514,6 +508,7 @@ void io::OutputManagerAscii::openGalaxyPhotFile()
 {
     if (simControls_.simType() != SimControls::SimType::galaxy) { return; }
     if (simControls_.filters() == nullptr && !simControls_.computeLbol()) { return; }
+    if (!writeGalaxyPhot_) { return; }
 
     const auto galaxyPhotPath = std::filesystem::path(simControls_.outDir()) /
         (simControls_.modelName() + "_galaxy_phot.txt");
@@ -596,7 +591,7 @@ void io::OutputManagerAscii::writeCluster(
 // observable object, though its light still belongs in the total
 // galaxy spectrum, which is handled elsewhere.
 void io::OutputManagerAscii::writeClusterSpec(
-    const unsigned long trial, const double time, const core::Cluster& cluster)
+    const unsigned long trial, const double time, core::Cluster& cluster)
 {
     if (!clusterSpectraFile_.is_open()) { return; }
     if (cluster.isDisrupted()) { return; }
@@ -647,14 +642,20 @@ void io::OutputManagerAscii::writeClusterSpec(
 // the cluster has disrupted -- a disrupted cluster is no longer an
 // observable object.
 void io::OutputManagerAscii::writeClusterPhot(
-    const unsigned long trial, const double time, const core::Cluster& cluster)
+    const unsigned long trial, const double time, core::Cluster& cluster)
 {
     if (!clusterPhotFile_.is_open()) { return; }
     if (cluster.isDisrupted()) { return; }
 
+    // phot()/photExtinct()/lbol() are computed here, outside the
+    // critical section below, since they may need to lazily
+    // (re)compute -- potentially expensive work that must not run
+    // while holding an OpenMP critical section, which would
+    // needlessly serialize it across threads
     const unsigned long uid = cluster.uid();
     auto phot = cluster.phot();
     if (simControls_.computeLbol()) { phot.push_back(cluster.lbol()); }
+    const auto& photExtinct = cluster.photExtinct();
 
     // Guard the actual writes against concurrent callers from other
     // threads; unlike the constructor, this method is expected to be
@@ -676,7 +677,6 @@ void io::OutputManagerAscii::writeClusterPhot(
         }
         if (simControls_.extinct() != nullptr && simControls_.filters() != nullptr)
         {
-            const auto& photExtinct = cluster.photExtinct();
             for (std::size_t i = 0; i < photExtinct.size(); ++i)
             {
                 clusterPhotFile_ << std::setw(photExtinctColWidths_.at(i)) << formatSci(photExtinct.at(i));
@@ -692,7 +692,7 @@ void io::OutputManagerAscii::writeClusterPhot(
 // currently-alive (non-disrupted) cluster in galaxy. A no-op if
 // galaxy output was not enabled for this simulation.
 void io::OutputManagerAscii::writeGalaxy(
-    const unsigned long trial, const double time, const core::Galaxy& galaxy)
+    const unsigned long trial, const double time, core::Galaxy& galaxy)
 {
     if (galaxyFile_.is_open())
     {
@@ -720,7 +720,7 @@ void io::OutputManagerAscii::writeGalaxy(
 // in galaxy. A no-op if spectral synthesis was not enabled for this
 // simulation.
 void io::OutputManagerAscii::writeGalaxySpec(
-    const unsigned long trial, const double time, const core::Galaxy& galaxy)
+    const unsigned long trial, const double time, core::Galaxy& galaxy)
 {
     if (galaxySpectraFile_.is_open())
     {
@@ -756,7 +756,7 @@ void io::OutputManagerAscii::writeGalaxySpec(
         }
     }
 
-    for (const auto& cluster : galaxy.clusters()) { writeClusterSpec(trial, time, cluster); }
+    for (auto& cluster : galaxy.clusters()) { writeClusterSpec(trial, time, cluster); }
 }
 
 // Write one line (trial, time, then one column per filter) to the
@@ -765,12 +765,15 @@ void io::OutputManagerAscii::writeGalaxySpec(
 // no filter collection or bolometric luminosity was requested for
 // this simulation.
 void io::OutputManagerAscii::writeGalaxyPhot(
-    const unsigned long trial, const double time, const core::Galaxy& galaxy)
+    const unsigned long trial, const double time, core::Galaxy& galaxy)
 {
     if (galaxyPhotFile_.is_open())
     {
+        // phot()/photExtinct()/lbol() are computed here, outside the
+        // critical section below -- see writeClusterPhot's own comment
         auto phot = galaxy.phot();
         if (simControls_.computeLbol()) { phot.push_back(galaxy.lbol()); }
+        const auto& photExtinct = galaxy.photExtinct();
 
         // Guard the actual writes against concurrent callers from
         // other threads; uses its own critical section, distinct from
@@ -789,7 +792,6 @@ void io::OutputManagerAscii::writeGalaxyPhot(
             }
             if (simControls_.extinct() != nullptr && simControls_.filters() != nullptr)
             {
-                const auto& photExtinct = galaxy.photExtinct();
                 for (std::size_t i = 0; i < photExtinct.size(); ++i)
                 {
                     galaxyPhotFile_ << std::setw(photExtinctColWidths_.at(i)) << formatSci(photExtinct.at(i));
@@ -799,5 +801,5 @@ void io::OutputManagerAscii::writeGalaxyPhot(
         }
     }
 
-    for (const auto& cluster : galaxy.clusters()) { writeClusterPhot(trial, time, cluster); }
+    for (auto& cluster : galaxy.clusters()) { writeClusterPhot(trial, time, cluster); }
 }

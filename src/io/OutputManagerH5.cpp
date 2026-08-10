@@ -10,7 +10,6 @@
 #include "../core/Galaxy.hpp"
 #include "../phot/FilterCollection.hpp"
 #include "../specsyn/Specsyn.hpp"
-#include "../utils/ParseUtils.hpp"
 #include "../utils/RngThread.hpp"
 #include "OutputManager.hpp"
 #include "SimControls.hpp"
@@ -320,15 +319,11 @@ io::OutputManagerH5::OutputManagerH5(
     openGalaxyPhotGroup();
 }
 
-// Create the clusters group and its datasets, if cluster output is
-// enabled for this simulation
+// Create the clusters group and its datasets, if output.write_cluster
+// (optional, defaults to true) was not set to false
 void io::OutputManagerH5::openClustersGroup()
 {
-    if (simControls_.simType() != SimControls::SimType::cluster &&
-        !simControls_.outputClusters())
-    {
-        return;
-    }
+    if (!writeCluster_) { return; }
 
     // NOLINTBEGIN(misc-include-cleaner)
     clustersGroup_ = H5Gcreate2(file_, "clusters",
@@ -389,10 +384,7 @@ void io::OutputManagerH5::openClustersGroup()
 void io::OutputManagerH5::openClusterSpectraGroup()
 {
     if (simControls_.specsyn() == nullptr) { return; }
-
-    const auto writeClusterSpecInput = utils::getTOMLKeyWithError<bool>(
-        inputDeck_, "output.write_cluster_spec");
-    if (writeClusterSpecInput.has_value() && !writeClusterSpecInput.value()) { return; }
+    if (!writeClusterSpec_) { return; }
 
     const auto& synth = *simControls_.specsyn();
     const std::vector<double> wlObs = synth.wlObs();
@@ -448,6 +440,7 @@ void io::OutputManagerH5::openClusterSpectraGroup()
 void io::OutputManagerH5::openClusterPhotGroup()
 {
     if (simControls_.filters() == nullptr && !simControls_.computeLbol()) { return; }
+    if (!writeClusterPhot_) { return; }
 
     std::vector<std::string> filterNames;
     std::vector<std::string> filterUnits;
@@ -523,6 +516,7 @@ void io::OutputManagerH5::openClusterPhotGroup()
 void io::OutputManagerH5::openGalaxyGroup()
 {
     if (simControls_.simType() != SimControls::SimType::galaxy) { return; }
+    if (!writeGalaxy_) { return; }
 
     // NOLINTBEGIN(misc-include-cleaner)
     galaxyGroup_ = H5Gcreate2(file_, "galaxy",
@@ -561,6 +555,7 @@ void io::OutputManagerH5::openGalaxySpectraGroup()
 {
     if (simControls_.simType() != SimControls::SimType::galaxy) { return; }
     if (simControls_.specsyn() == nullptr) { return; }
+    if (!writeGalaxySpec_) { return; }
 
     const auto& synth = *simControls_.specsyn();
     const std::vector<double> wlObs = synth.wlObs();
@@ -615,6 +610,7 @@ void io::OutputManagerH5::openGalaxyPhotGroup()
 {
     if (simControls_.simType() != SimControls::SimType::galaxy) { return; }
     if (simControls_.filters() == nullptr && !simControls_.computeLbol()) { return; }
+    if (!writeGalaxyPhot_) { return; }
 
     std::vector<std::string> filterNames;
     std::vector<std::string> filterUnits;
@@ -731,13 +727,20 @@ void io::OutputManagerH5::writeCluster(
 // no longer an observable object, though its light still belongs in
 // the total galaxy spectrum, which is handled elsewhere.
 void io::OutputManagerH5::writeClusterSpec(
-    const unsigned long trial, const double time, const core::Cluster& cluster)
+    const unsigned long trial, const double time, core::Cluster& cluster)
 {
     if (clusterSpectraGroup_ < 0) { return; }
     if (cluster.isDisrupted()) { return; }
 
+    // spec()/specExtinct() are computed here, outside the critical
+    // section below, since they may need to lazily (re)compute the
+    // cluster's spectrum -- potentially expensive work that must not
+    // run while holding an OpenMP critical section, which would
+    // needlessly serialize it across threads (see this class's own
+    // header comment on write* taking non-const Cluster&/Galaxy&)
     const unsigned long uid = cluster.uid();
     const auto& spec = cluster.spec();
+    const auto& specExtinct = cluster.specExtinct();
 
     // Guard the actual writes against concurrent callers from other
     // threads, and against writeCluster's own writes to the same
@@ -758,7 +761,7 @@ void io::OutputManagerH5::writeClusterSpec(
         if (simControls_.extinct() != nullptr)
         {
             appendRowToDataset2d(clusterSpectraGroup_, "spec_extinct",
-                H5T_NATIVE_DOUBLE, cluster.specExtinct().data());
+                H5T_NATIVE_DOUBLE, specExtinct.data());
         }
         // NOLINTEND(misc-include-cleaner)
     }
@@ -770,14 +773,17 @@ void io::OutputManagerH5::writeClusterSpec(
 // exist), or if the cluster has disrupted -- a disrupted cluster is
 // no longer an observable object.
 void io::OutputManagerH5::writeClusterPhot(
-    const unsigned long trial, const double time, const core::Cluster& cluster)
+    const unsigned long trial, const double time, core::Cluster& cluster)
 {
     if (clusterPhotGroup_ < 0) { return; }
     if (cluster.isDisrupted()) { return; }
 
+    // phot()/photExtinct()/lbol() are computed here, outside the
+    // critical section below -- see writeClusterSpec's own comment
     const unsigned long uid = cluster.uid();
     auto phot = cluster.phot();
     if (simControls_.computeLbol()) { phot.push_back(cluster.lbol()); }
+    const auto& photExtinct = cluster.photExtinct();
 
     // Guard the actual writes against concurrent callers from other
     // threads, and against writeCluster's/writeClusterSpec's own
@@ -798,7 +804,7 @@ void io::OutputManagerH5::writeClusterPhot(
         if (simControls_.extinct() != nullptr && simControls_.filters() != nullptr)
         {
             appendRowToDataset2d(clusterPhotGroup_, "phot_extinct",
-                H5T_NATIVE_DOUBLE, cluster.photExtinct().data());
+                H5T_NATIVE_DOUBLE, photExtinct.data());
         }
         // NOLINTEND(misc-include-cleaner)
     }
@@ -810,7 +816,7 @@ void io::OutputManagerH5::writeClusterPhot(
 // clusters datasets. A no-op if galaxy output was not enabled for this
 // simulation (the galaxy group does not exist).
 void io::OutputManagerH5::writeGalaxy(
-    const unsigned long trial, const double time, const core::Galaxy& galaxy)
+    const unsigned long trial, const double time, core::Galaxy& galaxy)
 {
     if (galaxyGroup_ < 0) { return; }
 
@@ -845,11 +851,14 @@ void io::OutputManagerH5::writeGalaxy(
 // was not enabled for this simulation (the galaxy_spectra group does
 // not exist).
 void io::OutputManagerH5::writeGalaxySpec(
-    const unsigned long trial, const double time, const core::Galaxy& galaxy)
+    const unsigned long trial, const double time, core::Galaxy& galaxy)
 {
     if (galaxySpectraGroup_ < 0) { return; }
 
+    // spec()/specExtinct() are computed here, outside the critical
+    // section below -- see writeClusterSpec's own comment
     const auto& spec = galaxy.spec();
+    const auto& specExtinct = galaxy.specExtinct();
 
     // See writeGalaxy's own comment on this critical section
 #ifdef _OPENMP
@@ -863,12 +872,12 @@ void io::OutputManagerH5::writeGalaxySpec(
         if (simControls_.extinct() != nullptr)
         {
             appendRowToDataset2d(galaxySpectraGroup_, "spec_extinct",
-                H5T_NATIVE_DOUBLE, galaxy.specExtinct().data());
+                H5T_NATIVE_DOUBLE, specExtinct.data());
         }
         // NOLINTEND(misc-include-cleaner)
     }
 
-    for (const auto& cluster : galaxy.clusters()) { writeClusterSpec(trial, time, cluster); }
+    for (auto& cluster : galaxy.clusters()) { writeClusterSpec(trial, time, cluster); }
 }
 
 // Append one element to each of the trial/time/phot galaxy_phot
@@ -877,12 +886,15 @@ void io::OutputManagerH5::writeGalaxySpec(
 // or bolometric luminosity was requested for this simulation (the
 // galaxy_phot group does not exist).
 void io::OutputManagerH5::writeGalaxyPhot(
-    const unsigned long trial, const double time, const core::Galaxy& galaxy)
+    const unsigned long trial, const double time, core::Galaxy& galaxy)
 {
     if (galaxyPhotGroup_ < 0) { return; }
 
+    // phot()/photExtinct()/lbol() are computed here, outside the
+    // critical section below -- see writeClusterSpec's own comment
     auto phot = galaxy.phot();
     if (simControls_.computeLbol()) { phot.push_back(galaxy.lbol()); }
+    const auto& photExtinct = galaxy.photExtinct();
 
     // See writeGalaxy's own comment on this critical section
 #ifdef _OPENMP
@@ -896,10 +908,10 @@ void io::OutputManagerH5::writeGalaxyPhot(
         if (simControls_.extinct() != nullptr && simControls_.filters() != nullptr)
         {
             appendRowToDataset2d(galaxyPhotGroup_, "phot_extinct",
-                H5T_NATIVE_DOUBLE, galaxy.photExtinct().data());
+                H5T_NATIVE_DOUBLE, photExtinct.data());
         }
         // NOLINTEND(misc-include-cleaner)
     }
 
-    for (const auto& cluster : galaxy.clusters()) { writeClusterPhot(trial, time, cluster); }
+    for (auto& cluster : galaxy.clusters()) { writeClusterPhot(trial, time, cluster); }
 }

@@ -225,6 +225,7 @@ add_executable(slugTestCore
 # tests here as this grows.
 add_executable(slugTestCoreFull
     src/core/Cluster.cpp
+    src/core/Galaxy.cpp
     src/core/SimCluster.cpp
     src/io/OutputManager.cpp
     src/io/OutputManagerAscii.cpp
@@ -381,6 +382,7 @@ pybind11_add_module(slugPython
     src/pybind/BindOutputManagerAscii.cpp
     src/pybind/BindSimCluster.cpp
     src/core/Cluster.cpp
+    src/core/Galaxy.cpp
     src/core/SimCluster.cpp
     src/extinct/Extinct.cpp
     src/io/SimControls.cpp

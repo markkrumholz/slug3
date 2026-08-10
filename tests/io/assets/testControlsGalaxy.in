@@ -1,5 +1,4 @@
-# Test input deck for SimControls: a galaxy-type simulation with
-# output_clusters left at its default (true)
+# Test input deck for SimControls: a minimal galaxy-type simulation
 
 sim_type = "galaxy"
 
