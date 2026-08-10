@@ -371,6 +371,7 @@ pybind11_add_module(slugPython
     src/pybind/BindSimControls.cpp
     src/pybind/BindSpecsyn.cpp
     src/pybind/BindCluster.cpp
+    src/pybind/BindGalaxy.cpp
     src/pybind/BindFilter.cpp
     src/pybind/BindFilterIdeal.cpp
     src/pybind/BindFilterTabulated.cpp
@@ -381,9 +382,11 @@ pybind11_add_module(slugPython
     src/pybind/BindOutputManagerH5.cpp
     src/pybind/BindOutputManagerAscii.cpp
     src/pybind/BindSimCluster.cpp
+    src/pybind/BindSimGalaxy.cpp
     src/core/Cluster.cpp
     src/core/Galaxy.cpp
     src/core/SimCluster.cpp
+    src/core/SimGalaxy.cpp
     src/extinct/Extinct.cpp
     src/io/SimControls.cpp
     src/io/OutputManager.cpp

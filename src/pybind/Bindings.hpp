@@ -88,6 +88,11 @@ void bindSpecsyn(py::module_& m);
 void bindCluster(py::module_& m);
 
 /**
+ * @brief Bind core::Galaxy as Galaxy
+ */
+void bindGalaxy(py::module_& m);
+
+/**
  * @brief Bind phot::Filter as Filter
  * @details
  * Must run before bindFilterIdeal()/bindFilterTabulated(), since those
@@ -155,6 +160,11 @@ void bindOutputManagerAscii(py::module_& m);
  * @brief Bind core::SimCluster as SimCluster
  */
 void bindSimCluster(py::module_& m);
+
+/**
+ * @brief Bind core::SimGalaxy as SimGalaxy
+ */
+void bindSimGalaxy(py::module_& m);
 
 /**
  * @brief Parse a string as either literal TOML text or a path to a TOML file

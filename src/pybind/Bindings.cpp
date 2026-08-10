@@ -28,6 +28,7 @@ PYBIND11_MODULE(_slug, m, py::mod_gil_not_used()) {
     bindSimControls(m);
     bindSpecsyn(m);
     bindCluster(m);
+    bindGalaxy(m);
     bindFilter(m);
     bindFilterIdeal(m);
     bindFilterTabulated(m);
@@ -37,5 +38,6 @@ PYBIND11_MODULE(_slug, m, py::mod_gil_not_used()) {
     bindOutputManagerH5(m);
     bindOutputManagerAscii(m);
     bindSimCluster(m);
+    bindSimGalaxy(m);
 }
 // NOLINTEND(misc-include-cleaner)

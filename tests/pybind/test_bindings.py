@@ -49,12 +49,29 @@ Sections, in file order, and the fixtures each is built around:
   of its own, so parsePDFDescriptor() is the only way to obtain one
   from Python.
 
-- OutputManagerH5 / OutputManagerAscii / SimCluster: built from
-  CLUSTER_DECK_ABS (CLUSTER_DECK's own absolute path, needed since
-  these tests chdir into tmp_path so the files they write don't land
-  in the repo itself -- SimControls's own path argument has no SLUG_DIR
-  fallback the way paths *inside* a deck do, so a relative path would
-  stop resolving once the cwd moves). OutputManager itself has no
+- Galaxy: built from tests/core/assets/testGalaxy.in (GALAXY_DECK,
+  also shared with the C++ testSimGalaxy.cpp fixture), a galaxy-type
+  counterpart to CLUSTER_DECK -- fixed clusters.CMF = 1e3,
+  spectra.model = "blackbody", no phot.filters. Since a Galaxy's own
+  clusters form stochastically (unlike a Cluster's single, fixed-mass
+  population), most tests here call advance() with an explicit, large
+  time directly rather than relying on GALAXY_DECK's own (deliberately
+  tiny, 10 yr) output range, so at least one cluster reliably forms.
+  GALAXY_DYNAMICS_DECK (tests/core/assets/testGalaxyDynamics.in, the
+  same fixture tests/core/testGalaxy.cpp's own C++ tests use) adds
+  photometry and extinction, with a real (file-based) CMF and a finite
+  clusters.CLF, for the phot()/photExtinct()/lbol() tests.
+
+- OutputManagerH5 / OutputManagerAscii / SimCluster / SimGalaxy: built
+  from CLUSTER_DECK_ABS/GALAXY_PYBIND_DECK_ABS (each deck's own
+  absolute path, needed since these tests chdir into tmp_path so the
+  files they write don't land in the repo itself -- SimControls's own
+  path argument has no SLUG_DIR fallback the way paths *inside* a deck
+  do, so a relative path would stop resolving once the cwd moves).
+  GALAXY_PYBIND_DECK_ABS (tests/core/assets/testGalaxyPybind.in) is
+  GALAXY_DECK's own shape with a much longer output range, so
+  SimGalaxy.run() reliably forms clusters to check the output against,
+  unlike GALAXY_DECK's own tiny range. OutputManager itself has no
   exposed constructor (Python only ever encounters it as the common
   base of OutputManagerH5/OutputManagerAscii, e.g. via
   isinstance()) -- see BindOutputManager.cpp.
@@ -127,6 +144,47 @@ LBOL_DECK = "tests/core/assets/testClusterLbol.in"
 # variable-to-fixed transition.
 VAR_FEH_DECK = "tests/core/assets/testClusterVarFeH.in"
 
+# Input deck used for the Galaxy tests below: a galaxy-type deck
+# pointing at the MIST_test track set, with a fixed cluster mass
+# (clusters.CMF = 1e3, same value as CLUSTER_TARGET_MASS) and a
+# constant star formation rate (galaxy.sfr = 1.0 Msun/yr), and
+# spectra.model = "blackbody" -- otherwise the same shape as
+# CLUSTER_DECK. Its own output.end_time (10 yr) is deliberately short
+# (matching the C++ testSimGalaxy.cpp fixture it's shared with), so
+# most Galaxy tests below call advance() directly with an explicit,
+# much larger time rather than relying on GALAXY_DECK's own output
+# times. clusters.CLF = 1e300 means clusters essentially never
+# disrupt, so disruptedClusters() stays empty throughout.
+GALAXY_DECK = "tests/core/assets/testGalaxy.in"
+GALAXY_CLUSTER_MASS = 1e3
+
+# Absolute form of GALAXY_DECK -- unused directly (no Python test
+# currently chdirs while using it), kept for symmetry with
+# CLUSTER_DECK_ABS in case a future test needs it.
+GALAXY_DECK_ABS = str(pathlib.Path(GALAXY_DECK).resolve())
+
+# A galaxy-type deck with a much longer output time range than
+# GALAXY_DECK (0 to 5e4 yr, vs. 10 yr), so its own final target mass
+# (5e4 Msun) reliably forms several clusters by the last output time --
+# see the deck's own comment. Used by the SimGalaxy.run() test below,
+# which checks that clusters actually appear in the output, not just
+# that the run doesn't crash.
+GALAXY_PYBIND_DECK_ABS = str(
+    pathlib.Path("tests/core/assets/testGalaxyPybind.in").resolve())
+
+# Input deck used for the Galaxy.phot()/photExtinct()/lbol() tests
+# below: the same fixture tests/core/testGalaxy.cpp's own C++ tests
+# use, combining photometry and extinction with a real (file-based)
+# CMF and clusters.CLF = 5e5 yr, so clusters form well within a single
+# advance() call (see GALAXY_DYNAMICS_TIME below).
+GALAXY_DYNAMICS_DECK = "tests/core/assets/testGalaxyDynamics.in"
+
+# An advance() time (matching tests/io/testOutputManager.cpp's own
+# galaxyWriteTime) chosen to form "a manageable number of clusters"
+# from GALAXY_DYNAMICS_DECK's own sfr/CMF, well before any of them
+# reach their clusters.CLF = 5e5 yr disruption time.
+GALAXY_DYNAMICS_TIME = 3e5
+
 # slug's own bundled default deck, used by SimControls() when path is
 # omitted/empty (see the SimControls tests below). Unlike every other
 # deck used in this file, it references the real MIST tracks and a
@@ -191,6 +249,18 @@ def phot_controls():
 def lbol_controls():
     """A SimControls object built from LBOL_DECK."""
     return slug.SimControls(LBOL_DECK)
+
+
+@pytest.fixture(scope="module")
+def galaxy_controls():
+    """A SimControls object built from GALAXY_DECK."""
+    return slug.SimControls(GALAXY_DECK)
+
+
+@pytest.fixture(scope="module")
+def galaxy_dynamics_controls():
+    """A SimControls object built from GALAXY_DYNAMICS_DECK."""
+    return slug.SimControls(GALAXY_DYNAMICS_DECK)
 
 
 # ---------------------------------------------------------------------
@@ -675,10 +745,10 @@ def test_simcontrols_set_feh_invalid_raises():
 
 def test_simcontrols_set_cmf_clf_sfr_numeric():
     """setCMF()/setCLF()/setSFR() should all accept a numeric argument
-    without raising. cmf_/clf_/sfr_ are only read by simulation-driver
-    machinery (SimCluster/SimGalaxy) that has no Python binding of its
-    own, so this only exercises that the bindings are wired up and
-    accept valid input, not their downstream effect."""
+    without raising. This only exercises that the bindings are wired up
+    and accept valid input, not their downstream effect -- see the
+    Galaxy tests below (which read cmf_/clf_/sfr_ via Galaxy.advance())
+    for that."""
     controls = slug.SimControls(CLUSTER_DECK)
     controls.setCMF("2e3")
     controls.setCLF("1e7")
@@ -1150,6 +1220,167 @@ def test_cluster_keeps_controls_alive():
     # use-after-free (and likely crash) if keep_alive were missing
     cluster.advance(5.0)
     assert len(cluster.spec()) > 0
+
+
+# ---------------------------------------------------------------------
+# Galaxy
+# ---------------------------------------------------------------------
+
+
+def test_galaxy_construction(galaxy_controls):
+    """A freshly constructed Galaxy should report curTime() == 0,
+    empty clusters()/disruptedClusters()/spec()/specExtinct()/phot()/
+    photExtinct(), and lbol()/targetMass()/actualMass() == 0 -- before
+    advance() has ever run."""
+    galaxy = slug.Galaxy(galaxy_controls)
+
+    assert galaxy.curTime() == pytest.approx(0.0)
+    assert galaxy.clusters() == []
+    assert galaxy.disruptedClusters() == []
+    assert galaxy.spec() == []
+    assert galaxy.specExtinct() == []
+    assert galaxy.phot() == []
+    assert galaxy.photExtinct() == []
+    assert galaxy.lbol() == pytest.approx(0.0)
+    assert galaxy.targetMass() == pytest.approx(0.0)
+    assert galaxy.actualMass() == pytest.approx(0.0)
+
+
+def test_galaxy_fully_default_construction():
+    """Galaxy() -- with controls omitted -- should construct a Galaxy
+    using slug's own shared default SimControls (built from
+    PY_DEFAULTS_PATH); see test_cluster_fully_default_construction's
+    own comment on why this only checks that any failure is not from
+    the deck-loading step itself, not that construction fully succeeds
+    everywhere this suite runs."""
+    try:
+        galaxy = slug.Galaxy()
+    except RuntimeError as e:
+        assert "PyDefaults.toml" not in str(e)
+        return
+
+    assert galaxy.curTime() == pytest.approx(0.0)
+
+
+def test_galaxy_advance_forms_clusters(galaxy_controls):
+    """advance() to a time far beyond GALAXY_DECK's own tiny 10 yr
+    output range should form clusters (galaxy.sfr = 1.0 Msun/yr,
+    clusters.CMF = 1e3 -- a delta function -- so a large enough target
+    mass reliably forms several whole clusters), each with a
+    targetMass() equal to GALAXY_CLUSTER_MASS and a formTime() within
+    [0, t]; clusters.CLF = 1e300 means none of them disrupt."""
+    galaxy = slug.Galaxy(galaxy_controls)
+    galaxy.advance(5000.0)
+
+    clusters = galaxy.clusters()
+    assert len(clusters) > 0
+    for cluster in clusters:
+        assert cluster.targetMass() == pytest.approx(GALAXY_CLUSTER_MASS)
+        assert 0.0 <= cluster.formTime() <= 5000.0
+    assert galaxy.disruptedClusters() == []
+    assert galaxy.actualMass() == pytest.approx(len(clusters) * GALAXY_CLUSTER_MASS)
+
+
+def test_galaxy_advance_populates_spec(galaxy_controls):
+    """advance() should populate spec() (empty beforehand, since
+    spectra.model = "blackbody" is set in GALAXY_DECK) once at least
+    one cluster has formed, matching galaxy_controls's own wavelength
+    grid length."""
+    galaxy = slug.Galaxy(galaxy_controls)
+    assert len(galaxy.spec()) == 0
+
+    galaxy.advance(5000.0)
+
+    assert len(galaxy.clusters()) > 0
+    assert len(galaxy.spec()) == len(galaxy_controls.wl())
+    assert sum(galaxy.spec()) > 0.0
+
+
+def test_galaxy_advance_backwards_raises(galaxy_controls):
+    """advance() to a time before the galaxy's current time should
+    raise, not silently misbehave."""
+    galaxy = slug.Galaxy(galaxy_controls)
+    galaxy.advance(5.0)
+    with pytest.raises(RuntimeError):
+        galaxy.advance(1.0)
+
+
+def test_galaxy_keeps_controls_alive():
+    """Galaxy stores only a live reference to the SimControls it was
+    constructed with, so the binding must keep_alive its controls
+    argument; dropping every other reference to the SimControls object
+    used to construct a Galaxy should not leave that Galaxy with a
+    dangling reference."""
+    controls = slug.SimControls(GALAXY_DECK)
+    galaxy = slug.Galaxy(controls)
+    del controls
+    gc.collect()
+
+    # advance() reads controls_ internally (sfr()/cmf()); this would be
+    # a use-after-free (and likely crash) if keep_alive were missing
+    galaxy.advance(5000.0)
+    assert len(galaxy.clusters()) > 0
+
+
+def test_galaxy_cluster_reference_survives_galaxy_deletion(galaxy_controls):
+    """clusters() returns Cluster objects tied to the owning Galaxy's
+    lifetime (py::return_value_policy::reference_internal); dropping
+    every other reference to the Galaxy should not invalidate a
+    still-live Cluster obtained from it."""
+    galaxy = slug.Galaxy(galaxy_controls)
+    galaxy.advance(5000.0)
+    cluster = galaxy.clusters()[0]
+    del galaxy
+    gc.collect()
+
+    assert cluster.targetMass() == pytest.approx(GALAXY_CLUSTER_MASS)
+
+
+def test_galaxy_phot_empty_without_filters(galaxy_controls):
+    """GALAXY_DECK has no [phot] section, so phot() should stay empty
+    even after advance() forms clusters."""
+    galaxy = slug.Galaxy(galaxy_controls)
+    galaxy.advance(5000.0)
+    assert len(galaxy.clusters()) > 0
+    assert len(galaxy.phot()) == 0
+
+
+def test_galaxy_advance_populates_phot_and_extinct(galaxy_dynamics_controls):
+    """advance() should populate phot()/photExtinct() with one value
+    per filter in GALAXY_DYNAMICS_DECK's phot.filters (not counting
+    "Lbol", which is tracked separately via lbol() -- see
+    Galaxy.phot()'s own docstring), each extincted value no brighter
+    than its unextincted counterpart, once at least one cluster has
+    formed."""
+    galaxy = slug.Galaxy(galaxy_dynamics_controls)
+    assert len(galaxy.phot()) == 0
+
+    galaxy.advance(GALAXY_DYNAMICS_TIME)
+
+    assert len(galaxy.clusters()) > 0
+    n_filters = len(galaxy_dynamics_controls.filters.filterNames())
+    assert len(galaxy.phot()) == n_filters
+    assert all(value > 0.0 for value in galaxy.phot())
+    assert len(galaxy.photExtinct()) == n_filters
+    for extinct_value, value in zip(galaxy.photExtinct(), galaxy.phot()):
+        assert extinct_value <= value
+
+
+def test_galaxy_advance_populates_lbol(galaxy_dynamics_controls):
+    """advance() should populate lbol() with a finite, positive value,
+    equal to the sum of lbol() over every currently-alive and disrupted
+    cluster, once at least one cluster has formed."""
+    galaxy = slug.Galaxy(galaxy_dynamics_controls)
+    assert galaxy.lbol() == pytest.approx(0.0)
+
+    galaxy.advance(GALAXY_DYNAMICS_TIME)
+
+    assert len(galaxy.clusters()) > 0
+    assert np.isfinite(galaxy.lbol())
+    assert galaxy.lbol() > 0.0
+    expected_lbol = sum(c.lbol() for c in galaxy.clusters()) + sum(
+        c.lbol() for c in galaxy.disruptedClusters())
+    assert galaxy.lbol() == pytest.approx(expected_lbol)
 
 
 # ---------------------------------------------------------------------
@@ -1867,3 +2098,28 @@ def test_simcluster_run_matches_deck(tmp_path, monkeypatch):
         assert list(f["clusters"]["target_mass"]) == [CLUSTER_TARGET_MASS]
         assert sorted(f["cluster_spectra"]["time"][:]) == [0.0, 5.0, 10.0]
         assert f["cluster_spectra"]["spec"].shape[0] == 3
+
+
+def test_simgalaxy_run_writes_output(tmp_path, monkeypatch):
+    """SimGalaxy.run() drives a full simulation exactly as the slug
+    command-line executable does for a galaxy-type deck: one trial,
+    advanced through each of GALAXY_PYBIND_DECK's own three output
+    times, forming at least one cluster (its target mass at the final,
+    5e4 yr output time is 5e4 Msun -- see the deck's own comment) and
+    writing each through to the clusters/cluster_spectra groups via
+    writeGalaxy()'s/writeGalaxySpec()'s own per-cluster passthrough."""
+    sim_controls = slug.SimControls(GALAXY_PYBIND_DECK_ABS)
+    monkeypatch.chdir(tmp_path)
+    output_manager = slug.OutputManagerH5(sim_controls, GALAXY_PYBIND_DECK_ABS)
+
+    sim = slug.SimGalaxy(sim_controls, output_manager)
+    sim.run()
+    del sim
+    gc.collect()
+
+    with h5py.File(tmp_path / "slug_sim.h5", "r") as f:
+        assert sorted(f["galaxy"]["time"][:]) == [0.0, 25000.0, 50000.0]
+        assert f["galaxy"]["target_mass"][-1] == pytest.approx(50000.0)
+        n_clusters = len(f["clusters"]["uid"])
+        assert n_clusters > 0
+        assert f["cluster_spectra"]["spec"].shape[0] == n_clusters
