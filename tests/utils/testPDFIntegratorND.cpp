@@ -297,6 +297,162 @@ static auto testMemberFunctionVec2D(const pdfs::PDF& p1, const pdfs::PDF& p2) ->
     return 0;
 }
 
+// Verify the N = 1 case with CubatureMethod::pAdaptive gives the same
+// result as test1D's own default-Method (hAdaptive) version --
+// exercises the Method template parameter's non-default value for the
+// first time, otherwise identical to test1D
+static auto test1DPAdaptive(const pdfs::PDF& imf) -> int
+{
+    const std::array<std::reference_wrapper<const pdfs::PDF>, 1> p{ std::cref(imf) };
+    const utils::PDFIntegratorND<decltype(&constTwo1D), 1, false, utils::CubatureMethod::pAdaptive>
+        integrator(p, constTwo1D, 1U);
+
+    const double a = imf.getMin();
+    const double b = imf.getMax();
+    const std::array<double, 1> aArr{ a };
+    const std::array<double, 1> bArr{ b };
+    const auto result = integrator.integrate(aArr, bArr);
+
+    const double expected = 2.0 * imf.integral(a, b);
+    constexpr double tol = 1e-6;
+    if (std::abs(result.at(0) - expected) > tol * std::abs(expected))
+    {
+        std::cerr << "testPDFIntegratorND: 1D pAdaptive case: expected "
+            << expected << ", got " << result.at(0) << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// pAdaptive counterpart to testVectorizedSpanFallback1D
+static auto testVectorizedSpanFallback1DPAdaptive(const pdfs::PDF& imf) -> int
+{
+    const utils::PDFIntegratorND<decltype(&constTwo1DVec), 1, true, utils::CubatureMethod::pAdaptive>
+        integrator(imf, constTwo1DVec, 1U);
+
+    const double a = imf.getMin();
+    const double b = imf.getMax();
+    const auto result = integrator.integrate(a, b);
+
+    const double expected = 2.0 * imf.integral(a, b);
+    constexpr double tol = 1e-4;
+    if (std::abs(result.at(0) - expected) > tol * std::abs(expected))
+    {
+        std::cerr << "testPDFIntegratorND: vectorized 1D pAdaptive span-fallback case: expected "
+            << expected << ", got " << result.at(0) << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// pAdaptive counterpart to testPlainFunction2D
+static auto testPlainFunction2DPAdaptive(const pdfs::PDF& p1, const pdfs::PDF& p2) -> int
+{
+    const utils::PDFIntegratorND<decltype(&constThree2D), 2, false, utils::CubatureMethod::pAdaptive>
+        integrator({ std::cref(p1), std::cref(p2) }, constThree2D, 1U);
+
+    const double a1 = p1.getMin();
+    const double b1 = p1.getMax();
+    const double a2 = p2.getMin();
+    const double b2 = p2.getMax();
+    const auto result = integrator.integrate({ a1, a2 }, { b1, b2 });
+
+    const double expected = 3.0 * p1.integral(a1, b1) * p2.integral(a2, b2);
+    constexpr double tol = 1e-4;
+    if (std::abs(result.at(0) - expected) > tol * std::abs(expected))
+    {
+        std::cerr << "testPDFIntegratorND: plain-function 2D pAdaptive case: expected "
+            << expected << ", got " << result.at(0) << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// pAdaptive counterpart to testMemberFunction2D
+static auto testMemberFunction2DPAdaptive(const pdfs::PDF& p1, const pdfs::PDF& p2) -> int
+{
+    const std::vector<double> m = { 1.0, -2.5, 3.0 };
+    const Multiplier2D mult(m);
+
+    const utils::PDFIntegratorND<decltype(&Multiplier2D::f), 2, false, utils::CubatureMethod::pAdaptive>
+        integrator({ std::cref(p1), std::cref(p2) }, &Multiplier2D::f, static_cast<unsigned>(m.size()));
+
+    const double a1 = p1.getMin();
+    const double b1 = p1.getMax();
+    const double a2 = p2.getMin();
+    const double b2 = p2.getMax();
+    const auto result = integrator.integrate({ a1, a2 }, { b1, b2 }, mult);
+
+    const double firstMoment1 = p1.expectationValue(a1, b1) * p1.integral(a1, b1);
+    const double firstMoment2 = p2.expectationValue(a2, b2) * p2.integral(a2, b2);
+    constexpr double tol = 1e-4;
+    for (std::size_t i = 0; i < m.size(); ++i)
+    {
+        const double expected = m.at(i) * firstMoment1 * firstMoment2;
+        if (std::abs(result.at(i) - expected) > tol * std::abs(expected))
+        {
+            std::cerr << "testPDFIntegratorND: member-function 2D pAdaptive case: at i = " << i
+                << " expected " << expected << ", got " << result.at(i) << "\n";
+            return 1;
+        }
+    }
+    return 0;
+}
+
+// pAdaptive counterpart to testPlainFunctionVec2D
+static auto testPlainFunctionVec2DPAdaptive(const pdfs::PDF& p1, const pdfs::PDF& p2) -> int
+{
+    const utils::PDFIntegratorND<decltype(&constThree2DVec), 2, true, utils::CubatureMethod::pAdaptive>
+        integrator({ std::cref(p1), std::cref(p2) }, constThree2DVec, 1U);
+
+    const double a1 = p1.getMin();
+    const double b1 = p1.getMax();
+    const double a2 = p2.getMin();
+    const double b2 = p2.getMax();
+    const auto result = integrator.integrate({ a1, a2 }, { b1, b2 });
+
+    const double expected = 3.0 * p1.integral(a1, b1) * p2.integral(a2, b2);
+    constexpr double tol = 1e-4;
+    if (std::abs(result.at(0) - expected) > tol * std::abs(expected))
+    {
+        std::cerr << "testPDFIntegratorND: plain-function vectorized 2D pAdaptive case: expected "
+            << expected << ", got " << result.at(0) << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// pAdaptive counterpart to testMemberFunctionVec2D
+static auto testMemberFunctionVec2DPAdaptive(const pdfs::PDF& p1, const pdfs::PDF& p2) -> int
+{
+    const std::vector<double> m = { 1.0, -2.5, 3.0 };
+    const Multiplier2DVec mult(m);
+
+    const utils::PDFIntegratorND<decltype(&Multiplier2DVec::f), 2, true, utils::CubatureMethod::pAdaptive>
+        integrator({ std::cref(p1), std::cref(p2) }, &Multiplier2DVec::f, static_cast<unsigned>(m.size()));
+
+    const double a1 = p1.getMin();
+    const double b1 = p1.getMax();
+    const double a2 = p2.getMin();
+    const double b2 = p2.getMax();
+    const auto result = integrator.integrate({ a1, a2 }, { b1, b2 }, mult);
+
+    const double firstMoment1 = p1.expectationValue(a1, b1) * p1.integral(a1, b1);
+    const double firstMoment2 = p2.expectationValue(a2, b2) * p2.integral(a2, b2);
+    constexpr double tol = 1e-4;
+    for (std::size_t i = 0; i < m.size(); ++i)
+    {
+        const double expected = m.at(i) * firstMoment1 * firstMoment2;
+        if (std::abs(result.at(i) - expected) > tol * std::abs(expected))
+        {
+            std::cerr << "testPDFIntegratorND: member-function vectorized 2D pAdaptive case: at i = " << i
+                << " expected " << expected << ", got " << result.at(i) << "\n";
+            return 1;
+        }
+    }
+    return 0;
+}
+
 auto testPDFIntegratorND() -> int
 {
     const pdfs::PDF imf = pdfs::parsePDFDescriptor("data/imfs/chabrier.toml");
@@ -309,5 +465,29 @@ auto testPDFIntegratorND() -> int
     result += testMemberFunction2D(imf, salpeter);
     result += testPlainFunctionVec2D(imf, salpeter);
     result += testMemberFunctionVec2D(imf, salpeter);
+
+    // CubatureMethod::pAdaptive's cases below weight every dimension
+    // with a bespoke pure-lognormal PDF (tests/utils/assets/
+    // smoothLognormal.toml) rather than imf/salpeter: both of those
+    // have a power-law tail, and pcubature's global tensor-product
+    // rule converges only as fast as its integrand is analytic in a
+    // generous complex neighborhood of the integration domain --
+    // confirmed experimentally that chabrier's lognormal/power-law
+    // breakpoint at 1 Msun (a genuine kink) makes 2D pcubature blow up
+    // to an impractical point count, and that even salpeter alone (a
+    // pure power law, mathematically smooth on its own domain, but
+    // with a singularity at x = 0 just outside it) has the same
+    // problem in 2D. That is exactly the tradeoff CubatureMethod's
+    // own doc comment describes, not a bug, so exercising it here
+    // with either real IMF would make this a test of pcubature's
+    // known worst case rather than of PDFIntegratorND's own Method
+    // dispatch, which is all these cases are meant to cover.
+    const pdfs::PDF smoothPdf = pdfs::parsePDFDescriptor("tests/utils/assets/smoothLognormal.toml");
+    result += test1DPAdaptive(smoothPdf);
+    result += testVectorizedSpanFallback1DPAdaptive(smoothPdf);
+    result += testPlainFunction2DPAdaptive(smoothPdf, smoothPdf);
+    result += testMemberFunction2DPAdaptive(smoothPdf, smoothPdf);
+    result += testPlainFunctionVec2DPAdaptive(smoothPdf, smoothPdf);
+    result += testMemberFunctionVec2DPAdaptive(smoothPdf, smoothPdf);
     return result;
 }

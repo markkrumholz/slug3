@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <cubature.h> // NOLINT(misc-include-cleaner)
 #include <functional>
 #include <mdspan> // NOLINT(misc-include-cleaner)
@@ -32,6 +33,31 @@ namespace utils
     // toolchains, since it doesn't depend on any template parameter.
     template <class...>
     inline constexpr bool alwaysFalse = false;
+
+    /**
+     * @brief Selects which cubature package routine PDFIntegratorND uses
+     * @details
+     * hAdaptive subdivides the integration domain into progressively
+     * smaller regions, concentrating effort where the integrand
+     * varies most -- well suited to integrands with sharp, localized
+     * features, but each subdivision's own quadrature points are
+     * recomputed from scratch, so identical coordinate values recur
+     * across separate evaluations only incidentally (e.g. when a
+     * region happens to be split along a different dimension than a
+     * sibling). pAdaptive instead keeps the domain fixed and raises
+     * the degree of a single nested Clenshaw-Curtis product rule one
+     * dimension at a time, explicitly caching every point ever
+     * evaluated so no coordinate value is ever requested twice over
+     * the life of one integral -- better suited to smooth integrands,
+     * and far friendlier to caching per-coordinate work (e.g. one
+     * isochrone per distinct age, reused across every mass point
+     * evaluated at that age) that is shared across many points.
+     */
+    enum class CubatureMethod : std::uint8_t
+    {
+        hAdaptive, /**< cubature's h-adaptive routine (hcubature/hcubature_v) */
+        pAdaptive  /**< cubature's p-adaptive routine (pcubature/pcubature_v) */
+    };
 
     /**
      * @class PDFIntegratorND
@@ -72,6 +98,24 @@ namespace utils
      *   advantage of that batching, which is why this is a template
      *   parameter (selecting F's own required signature) rather than a
      *   runtime option.
+     * @tparam Method Which cubature package routine to integrate with;
+     *   see CubatureMethod's own comment for the tradeoffs. Defaults
+     *   to CubatureMethod::hAdaptive, which is the better default for
+     *   N > 1 (pAdaptive's single global tensor-product grid scales
+     *   far worse with dimension than hAdaptive's domain subdivision)
+     *   and for integrands with sharp, localized features anywhere in
+     *   the domain. CubatureMethod::pAdaptive is worth selecting
+     *   instead when the integrand is smooth and per-point cost is
+     *   dominated by work shareable across many points at a fixed
+     *   coordinate in one dimension (e.g. one isochrone per distinct
+     *   age): pAdaptive's own nested-quadrature point cache guarantees
+     *   no coordinate value is ever re-requested over the life of one
+     *   integral, so pairing it with Vectorized == true and an
+     *   F-side cache keyed on that dimension's coordinate gives every
+     *   cached value a guaranteed hit on every later reuse, unlike
+     *   hAdaptive's domain subdivision, where a coordinate recurring
+     *   across separate evaluations is possible but incidental, not
+     *   guaranteed.
      * @details
      * Generalizes PDFIntegrator to N dimensions -- indeed, PDFIntegrator
      * is a thin alias for PDFIntegratorND<F, 1> (see PDFIntegrator.hpp),
@@ -84,15 +128,12 @@ namespace utils
      * callable or a class member function -- and the integration
      * range is the tensor product of each dimension's own [a_i, b_i]
      * interval. Integration is performed with the cubature package's
-     * h-adaptive routine, hcubature (or its vectorized counterpart,
-     * hcubature_v, if Vectorized is true), which subdivides the
-     * integration domain rather than raising the degree of a single
-     * tensor-product quadrature rule (as PDFIntegrator's own previous,
-     * now-replaced implementation, based on cubature's p-adaptive
-     * pcubature, used to), and so scales far better to N > 1
-     * dimensions. In practice this class is expected to be used to
-     * integrate quantities against a stellar IMF (N = 1, via the
-     * PDFIntegrator alias) or against the joint distribution of a
+     * h-adaptive routine, hcubature/hcubature_v, or its p-adaptive
+     * routine, pcubature/pcubature_v, according to Method (see its own
+     * @tparam comment above for the tradeoff between the two). In
+     * practice this class is expected to be used to integrate
+     * quantities against a stellar IMF (N = 1, via the PDFIntegrator
+     * alias) or against the joint distribution of a
      * continuously-sampled stellar population's mass, age, and
      * metallicity (N = 3).
      *
@@ -112,7 +153,7 @@ namespace utils
      *   the degenerate size-1 second dimension) instead of a
      *   std::mdspan of shape (npts, 1).
      */
-    template <class F, std::size_t N, bool Vectorized = false>
+    template <class F, std::size_t N, bool Vectorized = false, CubatureMethod Method = CubatureMethod::hAdaptive>
     class PDFIntegratorND
     {
     public:
@@ -324,19 +365,41 @@ namespace utils
             {
                 result.resize(nInt_);
             }
-            std::vector<double> errBuf(nInt_); // discarded; hcubature/hcubature_v requires it regardless
+            std::vector<double> errBuf(nInt_); // discarded; every cubature routine used here requires it regardless
 
+            // hcubature/hcubature_v and pcubature/pcubature_v share an
+            // identical calling convention (cubature.h), so Method
+            // only selects which pair of routines gets called here --
+            // integrand()/integrandV() themselves are agnostic to it.
             if constexpr (Vectorized)
             {
-                hcubature_v(nInt_, &integrandV<Args...>, &ctx, N, a.data(), b.data(),
-                    maxEval_, reqAbsError_, reqRelError_, norm_,
-                    std::data(result), errBuf.data());
+                if constexpr (Method == CubatureMethod::hAdaptive)
+                {
+                    hcubature_v(nInt_, &integrandV<Args...>, &ctx, N, a.data(), b.data(),
+                        maxEval_, reqAbsError_, reqRelError_, norm_,
+                        std::data(result), errBuf.data());
+                }
+                else
+                {
+                    pcubature_v(nInt_, &integrandV<Args...>, &ctx, N, a.data(), b.data(),
+                        maxEval_, reqAbsError_, reqRelError_, norm_,
+                        std::data(result), errBuf.data());
+                }
             }
             else
             {
-                hcubature(nInt_, &integrand<Args...>, &ctx, N, a.data(), b.data(),
-                    maxEval_, reqAbsError_, reqRelError_, norm_,
-                    std::data(result), errBuf.data());
+                if constexpr (Method == CubatureMethod::hAdaptive)
+                {
+                    hcubature(nInt_, &integrand<Args...>, &ctx, N, a.data(), b.data(),
+                        maxEval_, reqAbsError_, reqRelError_, norm_,
+                        std::data(result), errBuf.data());
+                }
+                else
+                {
+                    pcubature(nInt_, &integrand<Args...>, &ctx, N, a.data(), b.data(),
+                        maxEval_, reqAbsError_, reqRelError_, norm_,
+                        std::data(result), errBuf.data());
+                }
             }
 
             return result;
