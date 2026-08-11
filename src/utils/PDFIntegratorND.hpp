@@ -24,6 +24,15 @@
 namespace utils
 {
 
+    // A dependent "false" usable inside a discarded if-constexpr
+    // branch's static_assert, so the assert only fires if that branch
+    // is actually reached for some real instantiation -- a bare
+    // static_assert(false, ...) in such a branch is ill-formed
+    // regardless of whether the branch is ever taken on some
+    // toolchains, since it doesn't depend on any template parameter.
+    template <class...>
+    inline constexpr bool alwaysFalse = false;
+
     /**
      * @class PDFIntegratorND
      * @brief Evaluate integrals of the form int p_1(x_1) ... p_N(x_N) f(x) d^N x
@@ -64,8 +73,10 @@ namespace utils
      *   parameter (selecting F's own required signature) rather than a
      *   runtime option.
      * @details
-     * Generalizes PDFIntegrator to N dimensions: this class evaluates
-     * integrals of the form
+     * Generalizes PDFIntegrator to N dimensions -- indeed, PDFIntegrator
+     * is a thin alias for PDFIntegratorND<F, 1> (see PDFIntegrator.hpp),
+     * so this class is the sole implementation for every N, including
+     * N = 1. This class evaluates integrals of the form
      * int p_1(x_1) p_2(x_2) ... p_N(x_N) f(x) d^N x, where each
      * p_i(x_i) is a pdfs::PDF weighting a single component of the
      * N-dimensional integration variable x, f(x) is an arbitrary,
@@ -74,14 +85,32 @@ namespace utils
      * range is the tensor product of each dimension's own [a_i, b_i]
      * interval. Integration is performed with the cubature package's
      * h-adaptive routine, hcubature (or its vectorized counterpart,
-     * hcubature_v, if Vectorized is true), which (unlike
-     * PDFIntegrator's own p-adaptive pcubature) subdivides the
+     * hcubature_v, if Vectorized is true), which subdivides the
      * integration domain rather than raising the degree of a single
-     * tensor-product quadrature rule, and so scales far better to
-     * N > 1 dimensions. In practice this class is expected to be used
-     * to integrate quantities against the joint distribution of a
+     * tensor-product quadrature rule (as PDFIntegrator's own previous,
+     * now-replaced implementation, based on cubature's p-adaptive
+     * pcubature, used to), and so scales far better to N > 1
+     * dimensions. In practice this class is expected to be used to
+     * integrate quantities against a stellar IMF (N = 1, via the
+     * PDFIntegrator alias) or against the joint distribution of a
      * continuously-sampled stellar population's mass, age, and
-     * metallicity.
+     * metallicity (N = 3).
+     *
+     * For backward compatibility with PDFIntegrator's own pre-existing
+     * API, N == 1 accepts two additional, non-obvious forms beyond
+     * this class's own general @tparam F contract, auto-detected via
+     * std::is_invocable_v against F's own (compile-time) type -- never
+     * ambiguous in practice, since every real F in this codebase has a
+     * single, concrete call signature, though a hypothetical F valid
+     * under more than one of these forms (e.g. a generic lambda) would
+     * silently prefer whichever is checked first, in the order listed:
+     * - N == 1, Vectorized == false: F may take a plain double (the
+     *   single dimension's coordinate directly, unwrapped from its
+     *   1-element span) instead of a std::span<double>.
+     * - N == 1, Vectorized == true: F may take a plain
+     *   std::span<double> of length npts (the batch's values, without
+     *   the degenerate size-1 second dimension) instead of a
+     *   std::mdspan of shape (npts, 1).
      */
     template <class F, std::size_t N, bool Vectorized = false>
     class PDFIntegratorND
@@ -150,6 +179,43 @@ namespace utils
         norm_(norm)
         { }
 
+        /**
+         * @brief Construct a PDFIntegratorND from a single PDF (N == 1 only)
+         * @param p The one-dimensional PDF p(x) weighting the
+         *   integrand; p must outlive this PDFIntegratorND, since it
+         *   is stored by reference
+         * @param f The integrand f(x); see the array-taking
+         *   constructor's own comment
+         * @param nInt The number of quantities f returns per point
+         * @param maxEval Maximum number of integrand evaluations
+         *   hcubature/hcubature_v is allowed to make; 0 means no limit
+         * @param reqAbsError Required absolute error
+         * @param reqRelError Required relative error
+         * @param norm Method used to combine the per-component error
+         *   estimates into the single value checked against
+         *   reqAbsError/reqRelError; see cubature.h's error_norm
+         * @details
+         * Convenience overload for the common N == 1 case, preserving
+         * PDFIntegrator's own pre-existing single-PDF constructor
+         * signature (mirrors Interpolator1D's own analogous
+         * single-value convenience constructor). Only participates in
+         * overload resolution when N == 1 -- for N != 1, a single PDF
+         * doesn't unambiguously specify all N dimensions, so callers
+         * must use the array-taking constructor above instead.
+         */
+        PDFIntegratorND(
+            const pdfs::PDF& p,
+            F f,
+            unsigned nInt,
+            std::size_t maxEval = 0,
+            double reqAbsError = 0.0,
+            double reqRelError = 1e-6,
+            error_norm norm = ERROR_INDIVIDUAL // NOLINT(misc-include-cleaner)
+        ) requires (N == 1)
+        : PDFIntegratorND(std::array<std::reference_wrapper<const pdfs::PDF>, N>{ std::cref(p) },
+            std::move(f), nInt, maxEval, reqAbsError, reqRelError, norm)
+        { }
+
         // Disallow copying and moving -- see PDFIntegrator's own
         // identical comment: p_ holds references, so a copy would
         // alias the same PDFs as the original rather than being an
@@ -167,7 +233,8 @@ namespace utils
          * @param x The point(s) at which to evaluate f -- a
          *   std::span<double> of length N if Vectorized is false, or a
          *   std::mdspan of shape (npts, N) if Vectorized is true; see
-         *   this class's own @tparam F for the exact contract
+         *   this class's own @tparam F for the exact contract,
+         *   including the two additional forms accepted when N == 1
          * @param args Any additional arguments f requires; if f is a
          *   pointer to member function, the first of these must be
          *   an instance of the class it is a member of
@@ -186,9 +253,33 @@ namespace utils
             {
                 return invokeMember(x, std::forward<Args>(args)...);
             }
-            else
+            else if constexpr (std::is_invocable_v<F, Arg, Args...>)
             {
                 return std::invoke(f_, x, std::forward<Args>(args)...);
+            }
+            else if constexpr (N == 1 && !Vectorized && std::is_invocable_v<F, double, Args...>)
+            {
+                // PDFIntegrator's own pre-existing API: F takes the
+                // single dimension's coordinate directly -- see this
+                // class's own @tparam F.
+                return std::invoke(f_, x[0], std::forward<Args>(args)...); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- x has length N == 1 in this branch
+            }
+            else if constexpr (N == 1 && Vectorized && std::is_invocable_v<F, std::span<double>, Args...>)
+            {
+                // Flat-span convenience for the vectorized N == 1
+                // case -- see this class's own @tparam F. Safe to
+                // reinterpret x's own contiguous buffer this way:
+                // PointsView uses the default (row-major) layout, so
+                // for a single column, consecutive points are already
+                // contiguous with no padding.
+                return std::invoke(f_, std::span<double>(x.data_handle(), x.extent(0)),
+                    std::forward<Args>(args)...);
+            }
+            else
+            {
+                static_assert(alwaysFalse<F>,
+                    "F is not invocable with any signature PDFIntegratorND supports "
+                    "for this N/Vectorized combination -- see this class's own @tparam F");
             }
         }
 
@@ -251,16 +342,63 @@ namespace utils
             return result;
         }
 
+        /**
+         * @brief Evaluate the integral of p(x) f(x) from a to b (N == 1 only)
+         * @param a Lower limit of integration
+         * @param b Upper limit of integration
+         * @param args Any additional arguments f requires, exactly as
+         *   they would be passed to operator()
+         * @return The integral, in a container of the same type
+         *   returned by f
+         * @details
+         * Convenience overload for the common N == 1 case, preserving
+         * PDFIntegrator's own pre-existing bare-double integrate()
+         * signature (mirrors the single-PDF constructor's own
+         * identical rationale). Only participates in overload
+         * resolution when N == 1; for N != 1, a's/b's own dimension
+         * count would be ambiguous, so callers must use the
+         * array-taking overload above instead.
+         */
+        template <class... Args>
+        [[nodiscard]] auto integrate(const double a, const double b, Args&&... args) const
+            requires (N == 1)
+        {
+            return integrate(std::array<double, N>{ a }, std::array<double, N>{ b },
+                std::forward<Args>(args)...);
+        }
+
     private:
 
         // Helper for operator(): splits the (x, instance, rest...)
         // argument order this class's API uses into the
         // (instance, x, rest...) order std::invoke's INVOKE protocol
-        // requires to dispatch a pointer to member function
+        // requires to dispatch a pointer to member function. Mirrors
+        // operator()'s own N == 1 fallback dispatch (see its comments
+        // for the rationale behind each branch), just with the member
+        // instance threaded through every std::invoke call.
         template <class Obj, class... Rest>
         [[nodiscard]] auto invokeMember(Arg x, Obj&& obj, Rest&&... rest) const
         {
-            return std::invoke(f_, std::forward<Obj>(obj), x, std::forward<Rest>(rest)...);
+            if constexpr (std::is_invocable_v<F, Obj, Arg, Rest...>)
+            {
+                return std::invoke(f_, std::forward<Obj>(obj), x, std::forward<Rest>(rest)...);
+            }
+            else if constexpr (N == 1 && !Vectorized && std::is_invocable_v<F, Obj, double, Rest...>)
+            {
+                return std::invoke(f_, std::forward<Obj>(obj),
+                    x[0], std::forward<Rest>(rest)...); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- x has length N == 1 in this branch
+            }
+            else if constexpr (N == 1 && Vectorized && std::is_invocable_v<F, Obj, std::span<double>, Rest...>)
+            {
+                return std::invoke(f_, std::forward<Obj>(obj),
+                    std::span<double>(x.data_handle(), x.extent(0)), std::forward<Rest>(rest)...);
+            }
+            else
+            {
+                static_assert(alwaysFalse<F>,
+                    "F is not invocable with any signature PDFIntegratorND supports "
+                    "for this N/Vectorized combination -- see this class's own @tparam F");
+            }
         }
 
         // Bundles a pointer back to this PDFIntegratorND, the

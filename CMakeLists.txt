@@ -115,6 +115,7 @@ add_executable(slug
     src/io/SimControls.cpp
     src/utils/ParseUtils.cpp
     src/extern/cubature/pcubature.c
+    src/extern/cubature/hcubature.c
 )
 
 # Test executables
@@ -212,6 +213,7 @@ add_executable(slugTestCore
     src/tracks/Tracks3D.cpp
     src/utils/ParseUtils.cpp
     src/extern/cubature/pcubature.c
+    src/extern/cubature/hcubature.c
     tests/core/testCluster.cpp
     tests/core/testCoreAll.cpp
     tests/core/testGalaxy.cpp
@@ -261,6 +263,7 @@ add_executable(slugTestCoreFull
     src/tracks/Tracks3D.cpp
     src/utils/ParseUtils.cpp
     src/extern/cubature/pcubature.c
+    src/extern/cubature/hcubature.c
     tests/core/testClusterSpecsynFullCommon.cpp
     tests/core/testClusterSpecsynFull.cpp
     tests/core/testClusterSpecsynFullAFe.cpp
@@ -313,6 +316,7 @@ add_executable(slugTestIo
     src/tracks/Tracks3D.cpp
     src/utils/ParseUtils.cpp
     src/extern/cubature/pcubature.c
+    src/extern/cubature/hcubature.c
     tests/io/testIoAll.cpp
     tests/io/testOutputManager.cpp
     tests/io/testSimControls.cpp
@@ -335,6 +339,7 @@ add_executable(slugTestSpecsyn
     tests/specsyn/testSpecsynLibWD.cpp
     tests/specsyn/testSpecsynLibChained.cpp
     src/extern/cubature/pcubature.c
+    src/extern/cubature/hcubature.c
     src/extinct/Extinct.cpp
     src/io/SimControls.cpp
     src/interpolation/Mesh2DGrid.cpp
@@ -421,6 +426,7 @@ pybind11_add_module(slugPython
     src/tracks/Tracks3D.cpp
     src/utils/ParseUtils.cpp
     src/extern/cubature/pcubature.c
+    src/extern/cubature/hcubature.c
 )
 set_target_properties(slugPython PROPERTIES
     OUTPUT_NAME _slug
