@@ -155,6 +155,7 @@ add_executable(slugTestPDFs
 add_executable(slugTestUtils
     tests/utils/testUtilsAll.cpp
     tests/utils/testPDFIntegrator.cpp
+    tests/utils/testPDFIntegratorND.cpp
     src/pdfs/PDFFileParser.cpp
     src/pdfs/PDFSegment.cpp
     src/pdfs/PDFSegmentDelta.cpp
@@ -165,6 +166,7 @@ add_executable(slugTestUtils
     src/pdfs/PDFSegmentSchechter.cpp
     src/utils/ParseUtils.cpp
     src/extern/cubature/pcubature.c
+    src/extern/cubature/hcubature.c
 )
 add_executable(slugTestTracks
     src/interpolation/Mesh2DGrid.cpp
@@ -550,8 +552,9 @@ add_test(NAME test_Extinct COMMAND slugTestExtinct
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 add_test(NAME test_Phot COMMAND slugTestPhot)
 add_test(NAME test_PDFs COMMAND slugTestPDFs)
-# test_Utils loads a real IMF file (data/imfs/chabrier.toml) directly
-# by relative path for testPDFIntegrator, so it needs to run from the
+# test_Utils loads real IMF files (data/imfs/chabrier.toml,
+# data/imfs/salpeter.toml) directly by relative path for
+# testPDFIntegrator/testPDFIntegratorND, so it needs to run from the
 # source tree root.
 add_test(NAME test_Utils COMMAND slugTestUtils
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
