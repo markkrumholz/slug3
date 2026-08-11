@@ -30,6 +30,18 @@ static auto constTwo1D(std::span<double> /*x*/) -> std::array<double, 1>
     return { 2.0 };
 }
 
+// Plain-function integrand for the 1-dimensional, vectorized case,
+// using the N == 1 flat-span convenience form (a plain
+// std::span<double> of the batch's npts values, rather than an
+// (npts, 1) mdspan with a degenerate second dimension) -- see
+// PDFIntegratorND's own @tparam F for this N == 1-only fallback.
+// Returns the constant value 2 for every point in the batch.
+static auto constTwo1DVec(const std::span<double> x) -> std::vector<double>
+{
+    // NOLINTNEXTLINE(modernize-return-braced-init-list) -- see constThree2DVec's own identical comment
+    return std::vector<double>(x.size(), 2.0);
+}
+
 // Plain-function integrand for the 2-dimensional case: returns the
 // constant value 3 for every x
 static auto constThree2D(std::span<double> /*x*/) -> std::array<double, 1>
@@ -111,21 +123,56 @@ namespace
 
 // Verify the N = 1 case reduces to the same behavior as PDFIntegrator
 // itself: f(x) = {2.0} for every x, so int_a^b p(x) f(x) dx should
-// equal 2 * PDF::integral(a, b)
+// equal 2 * PDF::integral(a, b). Uses the array-taking constructor and
+// integrate() overloads directly (rather than the N == 1 single-PDF/
+// bare-double convenience overloads PDFIntegrator itself relies on --
+// covered by tests/utils/testPDFIntegrator.cpp instead, since
+// PDFIntegrator is literally PDFIntegratorND<F, 1>, so there is
+// nothing left to verify separately here), to independently exercise
+// the same general-N code path testPlainFunction2D()/
+// testMemberFunction2D() do below, just at N = 1.
 static auto test1D(const pdfs::PDF& imf) -> int
 {
-    const utils::PDFIntegratorND<decltype(&constTwo1D), 1> integrator(
-        { std::cref(imf) }, constTwo1D, 1U);
+    const std::array<std::reference_wrapper<const pdfs::PDF>, 1> p{ std::cref(imf) };
+    const utils::PDFIntegratorND<decltype(&constTwo1D), 1> integrator(p, constTwo1D, 1U);
 
     const double a = imf.getMin();
     const double b = imf.getMax();
-    const auto result = integrator.integrate({ a }, { b });
+    const std::array<double, 1> aArr{ a };
+    const std::array<double, 1> bArr{ b };
+    const auto result = integrator.integrate(aArr, bArr);
 
     const double expected = 2.0 * imf.integral(a, b);
     constexpr double tol = 1e-6;
     if (std::abs(result.at(0) - expected) > tol * std::abs(expected))
     {
         std::cerr << "testPDFIntegratorND: 1D case: expected "
+            << expected << ", got " << result.at(0) << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Verify the N = 1, vectorized case's flat-span convenience form
+// (constTwo1DVec, taking a plain std::span<double> rather than an
+// (npts, 1) mdspan) gives the same result as test1D's own
+// non-vectorized version -- also exercises the N == 1 single-PDF
+// constructor and bare-double integrate() overloads together with
+// Vectorized == true, which test1D (Vectorized == false) does not.
+static auto testVectorizedSpanFallback1D(const pdfs::PDF& imf) -> int
+{
+    const utils::PDFIntegratorND<decltype(&constTwo1DVec), 1, true> integrator(
+        imf, constTwo1DVec, 1U);
+
+    const double a = imf.getMin();
+    const double b = imf.getMax();
+    const auto result = integrator.integrate(a, b);
+
+    const double expected = 2.0 * imf.integral(a, b);
+    constexpr double tol = 1e-4;
+    if (std::abs(result.at(0) - expected) > tol * std::abs(expected))
+    {
+        std::cerr << "testPDFIntegratorND: vectorized 1D span-fallback case: expected "
             << expected << ", got " << result.at(0) << "\n";
         return 1;
     }
@@ -257,6 +304,7 @@ auto testPDFIntegratorND() -> int
 
     int result = 0;
     result += test1D(imf);
+    result += testVectorizedSpanFallback1D(imf);
     result += testPlainFunction2D(imf, salpeter);
     result += testMemberFunction2D(imf, salpeter);
     result += testPlainFunctionVec2D(imf, salpeter);
