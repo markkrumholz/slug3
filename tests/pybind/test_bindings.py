@@ -914,6 +914,19 @@ def test_simcontrols_sfr_property():
     assert controls.sfr.valid()
 
 
+def test_simcontrols_fcluster_property():
+    """The fCluster property should default to 1.0 and be assignable,
+    with the same effect as setFCluster()."""
+    controls = slug.SimControls(GALAXY_DECK)
+    assert controls.fCluster == pytest.approx(1.0)
+
+    controls.fCluster = 0.5
+    assert controls.fCluster == pytest.approx(0.5)
+
+    controls.setFCluster(0.75)
+    assert controls.fCluster == pytest.approx(0.75)
+
+
 def test_simcontrols_specsyn_property():
     """The specsyn property should read back the Specsyn requested via
     spectra.model, and assigning a Specsyn to it should have the same

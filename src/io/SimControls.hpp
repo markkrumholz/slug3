@@ -272,6 +272,18 @@ namespace io
         [[nodiscard]] auto clf() const -> const auto& { return clf_; }
 
         /**
+         * @brief Get the fraction of stellar mass formed in stochastically-treated clusters
+         * @return The fraction of a galaxy simulation's stellar mass
+         *   that forms in clusters treated stochastically (as
+         *   individual Cluster objects); the remaining (1 - fCluster())
+         *   is treated as a stellar population continuous in both mass
+         *   and time. Defaults to 1.0 (every star forms in a
+         *   stochastic cluster); only meaningful for, and only read
+         *   from, a galaxy-type simulation's own clusters.f_cluster.
+         */
+        [[nodiscard]] auto fCluster() const { return fCluster_; }
+
+        /**
          * @brief Get simulation stellar tracks
          * @return Pointer to the simulation stellar tracks
          */
@@ -418,6 +430,17 @@ namespace io
          * constructor's own galaxy.sfr handling.
          */
         void setSFR(const std::string& sfr);
+
+        /**
+         * @brief Set the fraction of stellar mass formed in stochastically-treated clusters
+         * @param fCluster New fraction; see fCluster()'s own comment
+         * @details
+         * Unlike setCLF()/setSFR(), fCluster_ is a plain double (not a
+         * pdfs::PDF), so this is a direct assignment, mirroring
+         * setZ()'s/setIntRelTol()'s own simple setters rather than
+         * setCLF()'s/setSFR()'s string-parsing ones.
+         */
+        void setFCluster(double fCluster) { fCluster_ = fCluster; }
 
         // Object-replacement setters: unlike the string-driven setters
         // above, these accept an already-built object -- e.g. from
@@ -579,6 +602,7 @@ namespace io
         pdfs::PDF fehDist_;        /**< [Fe/H] distribution */
         pdfs::PDF sfr_;            /**< Star formation rate */
         pdfs::PDF clf_;            /**< Cluster lifetime function */
+        double fCluster_ = 1.0;    /**< Fraction of stellar mass formed in stochastically-treated clusters (galaxy sims only) */
         tracks::Tracks3D tracks_;  /**< Stellar tracks */
         tracks::Tracks2D constFeHTracks_; /**< Tracks sliced at fehDist_'s value, if constFeH() */
         double minStochMass_ = 0.0;   /**< Minimum mass for fully stochastic treatment */

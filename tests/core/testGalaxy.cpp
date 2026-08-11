@@ -43,8 +43,8 @@ static constexpr double t2 = 1.2e6;
 // Loose enough to tolerate genuine Poisson-like scatter from a handful
 // of stochastically-drawn cluster masses (testGalaxyDynamicsCMF.toml
 // is a real power-law CMF, not a delta function -- see its own
-// comment), tight enough to catch a real bug in how mClusterNew/
-// newMasses/formTime are computed.
+// comment), tight enough to catch a real bug in how mNew/newMasses/
+// formTime are computed.
 static constexpr double massTolerance = 0.3;
 
 // Verify that a freshly-constructed Galaxy starts with curTime() == 0,
@@ -361,9 +361,89 @@ static auto testGalaxyBasics() -> int
     }
 }
 
+// Verify that Galaxy::advance() correctly incorporates
+// SimControls::fCluster() into its own mass accounting: with
+// fCluster < 1, only fCluster of the target stellar mass should be
+// drawn into stochastic clusters (clusters.CMF), with the remaining
+// (1 - fCluster) folded directly into actualMass() as the continuous,
+// non-clustered population's own share -- see Galaxy::advance()'s own
+// comment for the exact formula this checks.
+static auto testFCluster() -> int
+{
+    constexpr double fClusterValue = 0.5;
+    constexpr double tightTol = 1e-9;
+
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFile);
+        inputDeck.at_path("clusters").as_table()->insert("f_cluster", fClusterValue);
+        const io::SimControls controls(inputDeck);
+        if (std::abs(controls.fCluster() - fClusterValue) > tightTol)
+        {
+            std::cerr << "testGalaxy: fCluster: test bug: expected "
+                "SimControls::fCluster() == " << fClusterValue << ", got "
+                << controls.fCluster() << "\n";
+            return 1;
+        }
+
+        utils::rng().seed(rngSeed);
+        core::Galaxy galaxy(controls);
+        galaxy.advance(t1);
+
+        // targetMass() should be unaffected by fCluster -- always the
+        // full SFR-integrated target, clustered and continuous together
+        const double expectedTargetMass = controls.sfr().integral(0.0, t1);
+        if (std::abs(galaxy.targetMass() - expectedTargetMass) >
+            tightTol * expectedTargetMass)
+        {
+            std::cerr << "testGalaxy: fCluster: targetMass() = " << galaxy.targetMass()
+                << ", expected sfr().integral(0, t1) = " << expectedTargetMass << "\n";
+            return 1;
+        }
+
+        // actualMass() should equal (1 - fCluster) * targetMass() (the
+        // continuous population's own share) plus the sum of every
+        // newly-formed cluster's own targetMass() -- an exact identity
+        // (not just approximate), since this is the very first (and
+        // only) advance() call
+        double clusterMass = 0.0;
+        for (const auto& c : galaxy.clusters()) { clusterMass += c.targetMass(); }
+        for (const auto& c : galaxy.disruptedClusters()) { clusterMass += c.targetMass(); }
+        const double expectedActualMass =
+            ((1.0 - fClusterValue) * galaxy.targetMass()) + clusterMass;
+        if (std::abs(galaxy.actualMass() - expectedActualMass) >
+            tightTol * expectedActualMass)
+        {
+            std::cerr << "testGalaxy: fCluster: actualMass() = " << galaxy.actualMass()
+                << ", expected (1 - fCluster) * targetMass() + cluster mass = "
+                << expectedActualMass << "\n";
+            return 1;
+        }
+
+        // The stochastic clusters' own total target mass should be
+        // close to fCluster * targetMass() -- loose tolerance, since
+        // CMF sampling is stochastic (see massTolerance's own comment)
+        const double expectedClusterMass = fClusterValue * galaxy.targetMass();
+        if (std::abs(clusterMass - expectedClusterMass) > massTolerance * expectedClusterMass)
+        {
+            std::cerr << "testGalaxy: fCluster: stochastic cluster mass "
+                << clusterMass << " deviates from fCluster * targetMass() = "
+                << expectedClusterMass << " by more than " << massTolerance * 100 << "%\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testGalaxy: fCluster test failed: " << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
 auto testGalaxy() -> int
 {
     int result = testGalaxyBasics();
+    result += testFCluster();
 
     try
     {

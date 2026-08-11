@@ -39,14 +39,20 @@ void core::Galaxy::advance(const double t)
     }
 
     const auto& sc = controls_.get();
+    const double fCluster = sc.fCluster();
 
-    // 1) Total mass of new clusters that should have formed between
-    // curTime_ and t, and 2) the individual cluster masses drawn from
-    // the CMF to reach that target
-    const double mClusterNew = sc.sfr().integral(curTime_, t);
-    const auto newMasses = sc.cmf().drawTarget(mClusterNew);
-    targetMass_ += mClusterNew;
-    actualMass_ += std::accumulate(newMasses.begin(), newMasses.end(), 0.0);
+    // 1) Total stellar mass that should have formed between curTime_
+    // and t, and 2) the individual cluster masses drawn from the CMF
+    // to reach the stochastically-treated fraction (fCluster) of that
+    // target -- the remaining (1 - fCluster) forms as a continuous
+    // (non-clustered) population, not represented by any individual
+    // Cluster object, so actualMass_ folds its own target mass in
+    // directly rather than via newMasses
+    const double mNew = sc.sfr().integral(curTime_, t);
+    const auto newMasses = sc.cmf().drawTarget(mNew * fCluster);
+    targetMass_ += mNew;
+    actualMass_ += ((1.0 - fCluster) * mNew) +
+        std::accumulate(newMasses.begin(), newMasses.end(), 0.0);
 
     // 3-4) For each new cluster, draw a formation time from the SFR
     // over (curTime_, t] and create it, with a unique ID from the uid

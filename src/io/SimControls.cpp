@@ -267,7 +267,8 @@ void io::SimControls::initPhysics(const toml::table& inputDeck)
     // wavelength grid the extinction curve is interpolated onto.
     readExtinct(inputDeck);
 
-    // In a galaxy simulation, read CLF and SFR
+    // In a galaxy simulation, read CLF, SFR, and the stochastic
+    // cluster mass fraction
     if (simType_ == SimType::galaxy)
     {
         // CLF
@@ -298,6 +299,13 @@ void io::SimControls::initPhysics(const toml::table& inputDeck)
                     "SimControls: invalid entry for galaxy.sfr");
             }
         }
+
+        // Fraction of stellar mass formed in stochastically-treated
+        // clusters, optional, defaults to fCluster_'s own in-class
+        // default of 1.0
+        const auto fClusterInput = utils::getTOMLKeyWithError<double>(
+            inputDeck, "clusters.f_cluster");
+        if (fClusterInput.has_value()) { fCluster_ = fClusterInput.value(); }
     }
 
     // Read the tracks

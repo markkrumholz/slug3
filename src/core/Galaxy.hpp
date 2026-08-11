@@ -175,21 +175,25 @@ namespace core
         }
 
         /**
-         * @brief Return the total target mass of clusters formed so far
+         * @brief Return the total target stellar mass formed so far
          * @return The sum, over every advance() call so far, of the
-         *   target mass (sfr().integral() over that call's own
-         *   (curTime(), t] step) of clusters that should have formed,
-         *   in Msun -- may differ from actualMass() due to stochastic
-         *   sampling from SimControls::cmf() (see Galaxy::advance())
+         *   total stellar mass (sfr().integral() over that call's own
+         *   (curTime(), t] step) that should have formed -- both the
+         *   stochastically-treated (clustered) and continuous
+         *   (non-clustered) parts together -- in Msun -- may differ
+         *   from actualMass() due to stochastic sampling from
+         *   SimControls::cmf() (see Galaxy::advance())
          */
         [[nodiscard]] auto targetMass() const { return targetMass_; }
 
         /**
-         * @brief Return the total actual mass of clusters formed so far
-         * @return The sum, over every advance() call so far, of the
-         *   target mass (Cluster::targetMass()) of every cluster
-         *   actually drawn from SimControls::cmf() during that call,
-         *   in Msun
+         * @brief Return the total actual stellar mass formed so far
+         * @return The sum, over every advance() call so far, of (1)
+         *   the target mass (Cluster::targetMass()) of every cluster
+         *   actually drawn from SimControls::cmf() during that call
+         *   and (2) that same call's own continuous (non-clustered)
+         *   population mass, (1 - SimControls::fCluster()) times that
+         *   call's own total target stellar mass, in Msun
          */
         [[nodiscard]] auto actualMass() const { return actualMass_; }
 
@@ -198,8 +202,13 @@ namespace core
          * @param t Time to which to advance, in yr; must be >= curTime()
          * @details
          * Draws and forms new clusters over (curTime(), t] from
-         * SimControls::sfr()/cmf(), accumulating the target and actual
-         * mass of that step's new clusters into targetMass()/
+         * SimControls::sfr()/cmf(), scaled down to the
+         * stochastically-treated fraction SimControls::fCluster() of
+         * the step's own total target mass (the remaining
+         * (1 - fCluster()) is folded directly into actualMass(), as
+         * the continuous, non-clustered population's own share, with
+         * no individual Cluster object of its own), accumulating the
+         * step's own target and actual mass into targetMass()/
          * actualMass(), advances every cluster formed so far (in
          * clusters() and disruptedClusters()) to t, moves any cluster
          * that disrupted during this step from clusters() to
@@ -223,8 +232,8 @@ namespace core
         std::vector<double> phot_;         /**< Photometry of spec_ through each filter in SimControls::filters(), at the current time */
         std::vector<double> photExtinct_;  /**< Photometry of specExtinct_ through each filter in SimControls::filters(), at the current time */
         double lbol_ = 0.0;                /**< Sum of lbol() over every cluster in clusters_/disruptedClusters_, at the current time */
-        double targetMass_ = 0.0;          /**< Cumulative target mass of clusters formed so far, over every advance() call, in Msun */
-        double actualMass_ = 0.0;          /**< Cumulative actual mass of clusters formed so far, over every advance() call, in Msun */
+        double targetMass_ = 0.0;          /**< Cumulative total target stellar mass formed so far (clustered and continuous together), over every advance() call, in Msun */
+        double actualMass_ = 0.0;          /**< Cumulative total actual stellar mass formed so far (clustered and continuous together), over every advance() call, in Msun */
 
         /**
          * @brief Whether spec_/specExtinct_ are current as of curTime_
