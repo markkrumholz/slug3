@@ -360,7 +360,7 @@ void core::Cluster::computeLbol()
         using LbolSegFn = std::array<double, 1> (*)(double, const Segment&);
         const utils::PDFIntegrator integrator(
             sc.imf(), static_cast<LbolSegFn>(&Cluster::lbolStar), 1,
-            sc.intMaxIter(), sc.intAbsTol(), sc.intRelTol());
+            std::array<bool, 1>{}, sc.intMaxIter(), sc.intAbsTol(), sc.intRelTol());
 
         const double mMin = sc.imf().getMin();
         const double mMax = sc.minStochMass();
