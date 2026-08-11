@@ -51,7 +51,9 @@ namespace utils
      * on a genuine class template are ordinary C++17 and work
      * everywhere. Although this class is general purpose, in practice
      * it will most often be used to integrate quantities against a
-     * stellar IMF.
+     * stellar IMF, whose steep dynamic range often benefits from the
+     * inherited logTransform constructor parameter -- see
+     * PDFIntegratorND's own comment on it.
      */
     template <class F>
     class PDFIntegrator : public PDFIntegratorND<F, 1>
@@ -73,6 +75,7 @@ namespace utils
         std::array<std::reference_wrapper<const pdfs::PDF>, 1> p,
         F f,
         unsigned nInt,
+        std::array<bool, 1> logTransform = {},
         std::size_t maxEval = 0,
         double reqAbsError = 0.0,
         double reqRelError = 1e-6,
@@ -84,6 +87,7 @@ namespace utils
         const pdfs::PDF& p,
         F f,
         unsigned nInt,
+        std::array<bool, 1> logTransform = {},
         std::size_t maxEval = 0,
         double reqAbsError = 0.0,
         double reqRelError = 1e-6,

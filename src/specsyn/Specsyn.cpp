@@ -16,6 +16,7 @@
 #include "../utils/Constants.hpp"
 #include "../utils/PDFIntegrator.hpp"
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <vector>
 
@@ -50,7 +51,7 @@ auto specsyn::Specsyn::specCts(
     using SpecSegFn = std::vector<double> (Specsyn::*)(double, const Segment&, double) const;
     const utils::PDFIntegrator integrator(
         imf, static_cast<SpecSegFn>(&Specsyn::specWl), static_cast<unsigned>(wl_.size()),
-        intMaxIter(), intAbsTol() * utils::Lsun, intRelTol());
+        std::array<bool, 1>{}, intMaxIter(), intAbsTol() * utils::Lsun, intRelTol());
 
     std::vector<double> result(wl_.size(), 0.0);
     for (const auto& seg : isochrone)

@@ -11,12 +11,15 @@
 #include "../pdfs/PDF.hpp"
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cubature.h> // NOLINT(misc-include-cleaner)
 #include <functional>
 #include <mdspan> // NOLINT(misc-include-cleaner)
 #include <span>
+#include <stdexcept>
+#include <string>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -135,7 +138,14 @@ namespace utils
      * quantities against a stellar IMF (N = 1, via the PDFIntegrator
      * alias) or against the joint distribution of a
      * continuously-sampled stellar population's mass, age, and
-     * metallicity (N = 3).
+     * metallicity (N = 3). Any dimension may optionally be integrated
+     * in log space instead of linear space (see the logTransform
+     * constructor parameter below) -- a mathematically exact change
+     * of variables that often converges far faster for a dimension
+     * (e.g. stellar mass) spanning several orders of magnitude with
+     * sharp behavior concentrated near one edge of its domain, since
+     * the transform spreads that behavior out relative to the
+     * quadrature rule's own sample spacing.
      *
      * For backward compatibility with PDFIntegrator's own pre-existing
      * API, N == 1 accepts two additional, non-obvious forms beyond
@@ -194,6 +204,21 @@ namespace utils
          *   (i.e. the size of the container returned by f, if
          *   Vectorized is false; or 1/npts of the size of the
          *   container returned by f, if Vectorized is true)
+         * @param logTransform For each dimension d, whether to
+         *   integrate over ln(x_d) instead of x_d directly -- a
+         *   mathematically exact change of variables (int p(x) f(x)
+         *   dx = int p(e^u) f(e^u) e^u du, u = ln(x)) that leaves the
+         *   value of the integral, f's own required signature, and
+         *   the coordinates f/p are evaluated at (always the real,
+         *   untransformed x_d, regardless of this parameter) all
+         *   unchanged -- it only changes which variable the
+         *   underlying cubature routine subdivides/raises degree in.
+         *   Defaults to every dimension false (no transform, matching
+         *   this class's own pre-existing behavior). Every dimension
+         *   with logTransform[d] == true must have strictly positive
+         *   integration bounds (after clamping to p[d]'s own support
+         *   in integrate()); integrate() throws std::runtime_error
+         *   otherwise, since ln() of a non-positive bound is undefined.
          * @param maxEval Maximum number of integrand evaluations
          *   hcubature/hcubature_v is allowed to make; 0 means no limit
          * @param reqAbsError Required absolute error
@@ -206,6 +231,7 @@ namespace utils
             std::array<std::reference_wrapper<const pdfs::PDF>, N> p,
             F f,
             unsigned nInt,
+            std::array<bool, N> logTransform = {},
             std::size_t maxEval = 0,
             double reqAbsError = 0.0,
             double reqRelError = 1e-6,
@@ -214,6 +240,7 @@ namespace utils
         p_(p),
         f_(std::move(f)),
         nInt_(nInt),
+        logTransform_(logTransform),
         maxEval_(maxEval),
         reqAbsError_(reqAbsError),
         reqRelError_(reqRelError),
@@ -228,6 +255,9 @@ namespace utils
          * @param f The integrand f(x); see the array-taking
          *   constructor's own comment
          * @param nInt The number of quantities f returns per point
+         * @param logTransform Whether to integrate over ln(x) instead
+         *   of x directly; see the array-taking constructor's own
+         *   comment for the full contract
          * @param maxEval Maximum number of integrand evaluations
          *   hcubature/hcubature_v is allowed to make; 0 means no limit
          * @param reqAbsError Required absolute error
@@ -248,13 +278,14 @@ namespace utils
             const pdfs::PDF& p,
             F f,
             unsigned nInt,
+            std::array<bool, N> logTransform = {},
             std::size_t maxEval = 0,
             double reqAbsError = 0.0,
             double reqRelError = 1e-6,
             error_norm norm = ERROR_INDIVIDUAL // NOLINT(misc-include-cleaner)
         ) requires (N == 1)
         : PDFIntegratorND(std::array<std::reference_wrapper<const pdfs::PDF>, N>{ std::cref(p) },
-            std::move(f), nInt, maxEval, reqAbsError, reqRelError, norm)
+            std::move(f), nInt, logTransform, maxEval, reqAbsError, reqRelError, norm)
         { }
 
         // Disallow copying and moving -- see PDFIntegrator's own
@@ -332,6 +363,9 @@ namespace utils
          *   they would be passed to operator()
          * @return The integral, in a container of the same type
          *   returned by f
+         * @throws std::runtime_error if logTransform[d] is true for
+         *   some dimension d whose integration bounds, after clamping
+         *   to p[d]'s own support, are not both strictly positive
          */
         template <class... Args>
         [[nodiscard]] auto integrate(std::array<double, N> a,
@@ -349,6 +383,21 @@ namespace utils
             {
                 a[d] = std::max(a[d], p_[d].get().getMin()); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
                 b[d] = std::min(b[d], p_[d].get().getMax()); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
+
+                if (logTransform_[d]) // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
+                {
+                    if (a[d] <= 0.0 || b[d] <= 0.0) // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
+                    {
+                        throw std::runtime_error(
+                            "PDFIntegratorND::integrate: dimension " + std::to_string(d) +
+                            " has logTransform set, but its integration bounds "
+                            "(after clamping to the PDF's own support) are not "
+                            "both strictly positive: a = " + std::to_string(a[d]) + // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
+                            ", b = " + std::to_string(b[d])); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
+                    }
+                    a[d] = std::log(a[d]); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
+                    b[d] = std::log(b[d]); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
+                }
             }
 
             // Bundle a pointer back to this PDFIntegratorND, the
@@ -482,12 +531,20 @@ namespace utils
         // unpacks the Context pointed to by fdata, evaluates
         // p_1(x_1) * ... * p_N(x_N) * f(x, args...) at the single
         // point x (an N-element array in hcubature's own convention,
-        // clamped element-wise into [ctx->a_, ctx->b_] -- see
-        // PDFIntegrator::integrand()'s own identical comment on why),
-        // and writes the result into fval. The clamped coordinates are
-        // copied into a local buffer (rather than clamping x itself,
-        // which hcubature owns) so that buffer can be handed to f as
-        // a std::span<double>.
+        // clamped element-wise into [ctx->a_, ctx->b_], which are
+        // themselves already in log space for any dimension d with
+        // self_->logTransform_[d] == true -- see
+        // PDFIntegrator::integrand()'s own identical comment on why
+        // clamping happens at all), and writes the result into fval.
+        // xInvTransform undoes that log transform dimension-by-
+        // dimension (exp() where logTransform_[d] is true, identity
+        // otherwise) to recover the real coordinate p and f are always
+        // evaluated at, picking up the change-of-variables Jacobian
+        // (dx = x d(ln x)) as an extra factor of xInvTransform[d] in
+        // weight for exactly those dimensions. The clamped coordinates
+        // are copied into a local buffer (rather than clamping x
+        // itself, which hcubature owns) so that buffer can be handed
+        // to f as a std::span<double>.
         template <class... Args>
         static auto integrand(unsigned /*ndim*/, const double* x, void* fdata,
             unsigned /*fdim*/, double* fval) -> int
@@ -501,13 +558,21 @@ namespace utils
                 xClamped[d] = std::clamp(x[d], ctx->a_[d], ctx->b_[d]);
             }
 
+            std::array<double, N> xInvTransform{};
+            for (std::size_t d = 0; d < N; ++d)
+            {
+                xInvTransform[d] = ctx->self_->logTransform_[d] // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
+                    ? std::exp(xClamped[d]) : xClamped[d]; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
+            }
+
             double weight = 1.0;
             for (std::size_t d = 0; d < N; ++d)
             {
-                weight *= ctx->self_->p_[d].get()(xClamped[d]); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
+                weight *= ctx->self_->p_[d].get()(xInvTransform[d]); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
+                if (ctx->self_->logTransform_[d]) { weight *= xInvTransform[d]; } // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
             }
 
-            const std::span<double> xSpan(xClamped);
+            const std::span<double> xSpan(xInvTransform);
             const auto val = std::apply(
                 [&](auto&&... args) -> auto { return (*ctx->self_)(xSpan, std::forward<decltype(args)>(args)...); },
                 ctx->args_);
@@ -524,9 +589,10 @@ namespace utils
         // k-th quantity at the i-th point -- in a single call, so that
         // f can share work (e.g. one isochrone per distinct age)
         // across every point in the batch. Mirrors integrand()'s own
-        // clamp-into-a-local-buffer approach, but for the whole batch
-        // at once, so that buffer can be handed to f as a single
-        // PointsView.
+        // clamp-into-a-local-buffer-then-undo-the-log-transform
+        // approach (see its own comment for the Jacobian rationale),
+        // but for the whole batch at once, so that buffer can be
+        // handed to f as a single PointsView.
         template <class... Args>
         static auto integrandV(unsigned /*ndim*/, std::size_t npt, const double* x,
             void* fdata, unsigned fdim, double* fval) -> int
@@ -543,16 +609,32 @@ namespace utils
                 }
             }
 
+            std::vector<double> xInvTransform(npt * N);
+            for (std::size_t i = 0; i < npt; ++i)
+            {
+                for (std::size_t d = 0; d < N; ++d)
+                {
+                    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index,cppcoreguidelines-pro-bounds-pointer-arithmetic) -- xClamped/xInvTransform are both sized npt * N just above
+                    xInvTransform[(i * N) + d] = ctx->self_->logTransform_[d] // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
+                        ? std::exp(xClamped[(i * N) + d]) : xClamped[(i * N) + d];
+                }
+            }
+
             std::vector<double> weight(npt, 1.0);
             for (std::size_t i = 0; i < npt; ++i)
             {
                 for (std::size_t d = 0; d < N; ++d)
                 {
-                    weight[i] *= ctx->self_->p_[d].get()(xClamped[(i * N) + d]); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
+                    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index,cppcoreguidelines-pro-bounds-pointer-arithmetic) -- xInvTransform is sized npt * N just above
+                    weight[i] *= ctx->self_->p_[d].get()(xInvTransform[(i * N) + d]); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
+                    if (ctx->self_->logTransform_[d]) // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
+                    {
+                        weight[i] *= xInvTransform[(i * N) + d]; // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+                    }
                 }
             }
 
-            const PointsView points(xClamped.data(), npt);
+            const PointsView points(xInvTransform.data(), npt);
             const auto val = std::apply(
                 [&](auto&&... args) -> auto { return (*ctx->self_)(points, std::forward<decltype(args)>(args)...); },
                 ctx->args_);
@@ -576,6 +658,7 @@ namespace utils
         std::array<std::reference_wrapper<const pdfs::PDF>, N> p_; /**< The PDFs weighting each dimension of the integrand */
         F f_;                      /**< The integrand */
         unsigned nInt_;            /**< Number of quantities f returns per point */
+        std::array<bool, N> logTransform_; /**< Whether each dimension is integrated over ln(x) instead of x */
         std::size_t maxEval_;      /**< Maximum number of integrand evaluations */
         double reqAbsError_;       /**< Required absolute error */
         double reqRelError_;       /**< Required relative error */

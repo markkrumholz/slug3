@@ -7,6 +7,7 @@
 
 #include "../../src/pdfs/PDF.hpp"
 #include "../../src/pdfs/PDFFileParser.hpp"
+#include "../../src/utils/PDFIntegrator.hpp"
 #include "../../src/utils/PDFIntegratorND.hpp"
 #include "testPDFIntegratorND.hpp"
 #include <algorithm>
@@ -17,6 +18,7 @@
 #include <iostream>
 #include <mdspan> // NOLINT(misc-include-cleaner)
 #include <span>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -453,6 +455,160 @@ static auto testMemberFunctionVec2DPAdaptive(const pdfs::PDF& p1, const pdfs::PD
     return 0;
 }
 
+// Verify the N == 1 single-PDF constructor's logTransform forwarding:
+// int p(x) f(x) dx should be unchanged by integrating over ln(x)
+// instead of x, up to quadrature error -- exercises the single-PDF
+// (N == 1) convenience constructor specifically (testLogTransformMixed2D
+// below exercises the array-taking constructor instead), against imf
+// (chabrier), whose lognormal/power-law breakpoint at 1 Msun makes this
+// a non-trivial check that the transform's Jacobian is applied correctly,
+// not just a check against an already-trivial integrand
+static auto testLogTransform1D(const pdfs::PDF& imf) -> int
+{
+    const utils::PDFIntegratorND<decltype(&constTwo1D), 1> integrator(
+        imf, constTwo1D, 1U, std::array<bool, 1>{ true });
+
+    const double a = imf.getMin();
+    const double b = imf.getMax();
+    const auto result = integrator.integrate(a, b);
+
+    const double expected = 2.0 * imf.integral(a, b);
+    constexpr double tol = 1e-4;
+    if (std::abs(result.at(0) - expected) > tol * std::abs(expected))
+    {
+        std::cerr << "testPDFIntegratorND: logTransform 1D case: expected "
+            << expected << ", got " << result.at(0) << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Verify a mixed case (only p1's own dimension log-transformed, p2's
+// left in linear space) via the array-taking constructor, gives the
+// same result as testPlainFunction2D's own untransformed version
+static auto testLogTransformMixed2D(const pdfs::PDF& p1, const pdfs::PDF& p2) -> int
+{
+    const utils::PDFIntegratorND<decltype(&constThree2D), 2> integrator(
+        { std::cref(p1), std::cref(p2) }, constThree2D, 1U, std::array<bool, 2>{ true, false });
+
+    const double a1 = p1.getMin();
+    const double b1 = p1.getMax();
+    const double a2 = p2.getMin();
+    const double b2 = p2.getMax();
+    const auto result = integrator.integrate({ a1, a2 }, { b1, b2 });
+
+    const double expected = 3.0 * p1.integral(a1, b1) * p2.integral(a2, b2);
+    constexpr double tol = 1e-4;
+    if (std::abs(result.at(0) - expected) > tol * std::abs(expected))
+    {
+        std::cerr << "testPDFIntegratorND: logTransform mixed 2D case: expected "
+            << expected << ", got " << result.at(0) << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Verify the vectorized trampoline's own xInvTransform/Jacobian logic
+// (integrandV(), as opposed to integrand() above) with both dimensions
+// log-transformed
+static auto testLogTransformVectorized2D(const pdfs::PDF& p1, const pdfs::PDF& p2) -> int
+{
+    const utils::PDFIntegratorND<decltype(&constThree2DVec), 2, true> integrator(
+        { std::cref(p1), std::cref(p2) }, constThree2DVec, 1U, std::array<bool, 2>{ true, true });
+
+    const double a1 = p1.getMin();
+    const double b1 = p1.getMax();
+    const double a2 = p2.getMin();
+    const double b2 = p2.getMax();
+    const auto result = integrator.integrate({ a1, a2 }, { b1, b2 });
+
+    const double expected = 3.0 * p1.integral(a1, b1) * p2.integral(a2, b2);
+    constexpr double tol = 1e-4;
+    if (std::abs(result.at(0) - expected) > tol * std::abs(expected))
+    {
+        std::cerr << "testPDFIntegratorND: logTransform vectorized 2D case: expected "
+            << expected << ", got " << result.at(0) << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// The motivating case: chabrier x salpeter with CubatureMethod::pAdaptive
+// previously did not converge within an impractical number of points
+// (see testPDFIntegratorND()'s own comment on the smoothLognormal
+// fixture) -- verify that log-transforming both dimensions fixes this,
+// converging quickly to the correct answer with the real IMFs pAdaptive
+// otherwise cannot handle
+static auto testLogTransformPAdaptiveRealIMF(const pdfs::PDF& imf, const pdfs::PDF& salpeter) -> int
+{
+    const utils::PDFIntegratorND<decltype(&constThree2D), 2, false, utils::CubatureMethod::pAdaptive>
+        integrator({ std::cref(imf), std::cref(salpeter) }, constThree2D, 1U,
+            std::array<bool, 2>{ true, true }, 200000);
+
+    const double a1 = imf.getMin();
+    const double b1 = imf.getMax();
+    const double a2 = salpeter.getMin();
+    const double b2 = salpeter.getMax();
+    const auto result = integrator.integrate({ a1, a2 }, { b1, b2 });
+
+    const double expected = 3.0 * imf.integral(a1, b1) * salpeter.integral(a2, b2);
+    constexpr double tol = 1e-3;
+    if (std::abs(result.at(0) - expected) > tol * std::abs(expected))
+    {
+        std::cerr << "testPDFIntegratorND: logTransform pAdaptive real-IMF case: expected "
+            << expected << ", got " << result.at(0) << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Verify that requesting logTransform on a dimension whose (clamped)
+// integration bounds are not both strictly positive throws
+// std::runtime_error rather than silently taking ln() of a
+// non-positive number -- negativeSupportNormal.toml's own domain is
+// [-1, 1], so its lower bound is always <= 0
+static auto testLogTransformThrowsOnNonPositiveBounds() -> int
+{
+    const pdfs::PDF negNormal = pdfs::parsePDFDescriptor("tests/utils/assets/negativeSupportNormal.toml");
+    const utils::PDFIntegratorND<decltype(&constTwo1D), 1> integrator(
+        negNormal, constTwo1D, 1U, std::array<bool, 1>{ true });
+
+    try
+    {
+        [[maybe_unused]] const auto result = integrator.integrate(negNormal.getMin(), negNormal.getMax());
+        std::cerr << "testPDFIntegratorND: logTransform non-positive-bounds case: "
+            "expected std::runtime_error, but integrate() returned normally\n";
+        return 1;
+    }
+    catch (const std::runtime_error&)
+    {
+        return 0;
+    }
+}
+
+// Verify logTransform is reachable through PDFIntegrator's own CTAD
+// deduction guides (as opposed to PDFIntegratorND directly, exercised
+// by the tests above), which had to be updated in lockstep with
+// PDFIntegratorND's own constructors when logTransform was added
+static auto testLogTransformCTAD(const pdfs::PDF& imf) -> int
+{
+    const utils::PDFIntegrator integrator(imf, constTwo1D, 1U, std::array<bool, 1>{ true });
+
+    const double a = imf.getMin();
+    const double b = imf.getMax();
+    const auto result = integrator.integrate(a, b);
+
+    const double expected = 2.0 * imf.integral(a, b);
+    constexpr double tol = 1e-4;
+    if (std::abs(result.at(0) - expected) > tol * std::abs(expected))
+    {
+        std::cerr << "testPDFIntegratorND: logTransform CTAD case: expected "
+            << expected << ", got " << result.at(0) << "\n";
+        return 1;
+    }
+    return 0;
+}
+
 auto testPDFIntegratorND() -> int
 {
     const pdfs::PDF imf = pdfs::parsePDFDescriptor("data/imfs/chabrier.toml");
@@ -489,5 +645,12 @@ auto testPDFIntegratorND() -> int
     result += testMemberFunction2DPAdaptive(smoothPdf, smoothPdf);
     result += testPlainFunctionVec2DPAdaptive(smoothPdf, smoothPdf);
     result += testMemberFunctionVec2DPAdaptive(smoothPdf, smoothPdf);
+
+    result += testLogTransform1D(imf);
+    result += testLogTransformMixed2D(imf, salpeter);
+    result += testLogTransformVectorized2D(imf, salpeter);
+    result += testLogTransformPAdaptiveRealIMF(imf, salpeter);
+    result += testLogTransformThrowsOnNonPositiveBounds();
+    result += testLogTransformCTAD(imf);
     return result;
 }
