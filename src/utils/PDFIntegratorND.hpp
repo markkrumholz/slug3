@@ -383,7 +383,26 @@ namespace utils
             {
                 a[d] = std::max(a[d], p_[d].get().getMin()); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
                 b[d] = std::min(b[d], p_[d].get().getMax()); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
+            }
 
+            // Bundle a pointer back to this PDFIntegratorND, the real
+            // (untransformed) integration bounds just clamped above,
+            // and the extra arguments into a context local to this
+            // call -- see PDFIntegrator::integrate()'s own identical
+            // comment on why this makes integrate() safe to call
+            // concurrently on a single, shared PDFIntegratorND
+            // instance, and on why Args are stored exactly as deduced
+            // rather than decayed. Deliberately captured before a/b
+            // are (possibly) log-transformed below, for
+            // integrand()/integrandV()'s own final clamp -- see their
+            // own comment on why that clamp must happen in real,
+            // rather than log, space.
+            Context<Args...> ctx{ this, a, b, std::tuple<Args...>(std::forward<Args>(args)...) };
+
+            // Log-transform the *local* a/b (not ctx's own copies)
+            // for the underlying cubature routine's own domain.
+            for (std::size_t d = 0; d < N; ++d)
+            {
                 if (logTransform_[d]) // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
                 {
                     if (a[d] <= 0.0 || b[d] <= 0.0) // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
@@ -399,15 +418,6 @@ namespace utils
                     b[d] = std::log(b[d]); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
                 }
             }
-
-            // Bundle a pointer back to this PDFIntegratorND, the
-            // (already-clamped) integration bounds, and the extra
-            // arguments into a context local to this call -- see
-            // PDFIntegrator::integrate()'s own identical comment on
-            // why this makes integrate() safe to call concurrently on
-            // a single, shared PDFIntegratorND instance, and on why
-            // Args are stored exactly as deduced rather than decayed.
-            Context<Args...> ctx{ this, a, b, std::tuple<Args...>(std::forward<Args>(args)...) };
 
             Result result{};
             if constexpr (requires { result.resize(nInt_); })
@@ -513,11 +523,13 @@ namespace utils
             }
         }
 
-        // Bundles a pointer back to this PDFIntegratorND, the
-        // (already-clamped) integration bounds, and the extra
-        // arguments passed to integrate(), so integrand()/integrandV()
-        // can recover all of them from the single void* fdata
-        // hcubature/hcubature_v hands them
+        // Bundles a pointer back to this PDFIntegratorND, the real
+        // (untransformed, already-clamped-to-PDF-support) integration
+        // bounds, and the extra arguments passed to integrate(), so
+        // integrand()/integrandV() can recover all of them from the
+        // single void* fdata hcubature/hcubature_v hands them. a_/b_
+        // are deliberately real-space even for a log-transformed
+        // dimension -- see integrand()'s own comment on why.
         template <class... Args>
         struct Context
         {
@@ -530,39 +542,39 @@ namespace utils
         // The hcubature-compatible trampoline (Vectorized == false):
         // unpacks the Context pointed to by fdata, evaluates
         // p_1(x_1) * ... * p_N(x_N) * f(x, args...) at the single
-        // point x (an N-element array in hcubature's own convention,
-        // clamped element-wise into [ctx->a_, ctx->b_], which are
-        // themselves already in log space for any dimension d with
-        // self_->logTransform_[d] == true -- see
-        // PDFIntegrator::integrand()'s own identical comment on why
-        // clamping happens at all), and writes the result into fval.
-        // xInvTransform undoes that log transform dimension-by-
-        // dimension (exp() where logTransform_[d] is true, identity
-        // otherwise) to recover the real coordinate p and f are always
-        // evaluated at, picking up the change-of-variables Jacobian
-        // (dx = x d(ln x)) as an extra factor of xInvTransform[d] in
-        // weight for exactly those dimensions. The clamped coordinates
-        // are copied into a local buffer (rather than clamping x
-        // itself, which hcubature owns) so that buffer can be handed
-        // to f as a std::span<double>.
+        // point x (an N-element array in hcubature's own convention;
+        // for a log-transformed dimension d, x[d] is ln of the real
+        // coordinate, since that is the domain integrate() gave the
+        // underlying cubature routine), and writes the result into
+        // fval. xInvTransform recovers the real coordinate p and f
+        // are always evaluated at: exp() first for a log-transformed
+        // dimension (identity otherwise), *then* clamped into
+        // [ctx->a_, ctx->b_] -- deliberately in that order, not
+        // clamp-then-exp: exp() and ln() are not exact inverses under
+        // floating point, so exp(x[d]) can land fractionally outside
+        // the real [a_, b_] even when x[d] itself was exactly
+        // ctx->a_/ctx->b_'s own (correctly clamped) log -- e.g. if
+        // spec/track lookups reject a mass a few ULPs above a
+        // segment's own xMax(). Clamping the real-space result instead
+        // (ctx->a_/b_ are always real-space, even for a
+        // log-transformed dimension -- see Context's own comment)
+        // guarantees xInvTransform never leaves [a_, b_], regardless
+        // of which direction that roundoff goes. Also picks up the
+        // change-of-variables Jacobian (dx = x d(ln x)) as an extra
+        // factor of xInvTransform[d] in weight for exactly those
+        // dimensions.
         template <class... Args>
         static auto integrand(unsigned /*ndim*/, const double* x, void* fdata,
             unsigned /*fdim*/, double* fval) -> int
         {
             const auto* ctx = static_cast<Context<Args...>*>(fdata);
 
-            std::array<double, N> xClamped{};
-            for (std::size_t d = 0; d < N; ++d)
-            {
-                // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index,cppcoreguidelines-pro-bounds-pointer-arithmetic) -- x is hcubature's own N-element array, guaranteed length N by construction; xClamped/ctx->a_/ctx->b_ are all N-element containers
-                xClamped[d] = std::clamp(x[d], ctx->a_[d], ctx->b_[d]);
-            }
-
             std::array<double, N> xInvTransform{};
             for (std::size_t d = 0; d < N; ++d)
             {
-                xInvTransform[d] = ctx->self_->logTransform_[d] // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
-                    ? std::exp(xClamped[d]) : xClamped[d]; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
+                // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index,cppcoreguidelines-pro-bounds-pointer-arithmetic) -- x is hcubature's own N-element array, guaranteed length N by construction; xInvTransform/ctx->a_/ctx->b_ are all N-element containers
+                const double xReal = ctx->self_->logTransform_[d] ? std::exp(x[d]) : x[d];
+                xInvTransform[d] = std::clamp(xReal, ctx->a_[d], ctx->b_[d]); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
             }
 
             double weight = 1.0;
@@ -589,34 +601,27 @@ namespace utils
         // k-th quantity at the i-th point -- in a single call, so that
         // f can share work (e.g. one isochrone per distinct age)
         // across every point in the batch. Mirrors integrand()'s own
-        // clamp-into-a-local-buffer-then-undo-the-log-transform
-        // approach (see its own comment for the Jacobian rationale),
-        // but for the whole batch at once, so that buffer can be
-        // handed to f as a single PointsView.
+        // exp-then-clamp-in-real-space approach (see its own comment
+        // for why that order, not the reverse), but for the whole
+        // batch at once, so that buffer can be handed to f as a single
+        // PointsView.
         template <class... Args>
         static auto integrandV(unsigned /*ndim*/, std::size_t npt, const double* x,
             void* fdata, unsigned fdim, double* fval) -> int
         {
             const auto* ctx = static_cast<Context<Args...>*>(fdata);
 
-            std::vector<double> xClamped(npt * N);
-            for (std::size_t i = 0; i < npt; ++i)
-            {
-                for (std::size_t d = 0; d < N; ++d)
-                {
-                    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index,cppcoreguidelines-pro-bounds-pointer-arithmetic) -- x is hcubature_v's own (npt, ndim) array, guaranteed length npt * N by construction; xClamped is sized npt * N just above
-                    xClamped[(i * N) + d] = std::clamp(x[(i * N) + d], ctx->a_[d], ctx->b_[d]);
-                }
-            }
-
             std::vector<double> xInvTransform(npt * N);
             for (std::size_t i = 0; i < npt; ++i)
             {
                 for (std::size_t d = 0; d < N; ++d)
                 {
-                    // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-constant-array-index,cppcoreguidelines-pro-bounds-pointer-arithmetic) -- xClamped/xInvTransform are both sized npt * N just above
-                    xInvTransform[(i * N) + d] = ctx->self_->logTransform_[d] // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index)
-                        ? std::exp(xClamped[(i * N) + d]) : xClamped[(i * N) + d];
+                    // x is hcubature_v's own (npt, ndim) array, guaranteed length npt * N by construction; xInvTransform is sized npt * N just above
+                    // NOLINTBEGIN(cppcoreguidelines-pro-bounds-constant-array-index,cppcoreguidelines-pro-bounds-pointer-arithmetic)
+                    const double xReal = ctx->self_->logTransform_[d]
+                        ? std::exp(x[(i * N) + d]) : x[(i * N) + d];
+                    xInvTransform[(i * N) + d] = std::clamp(xReal, ctx->a_[d], ctx->b_[d]);
+                    // NOLINTEND(cppcoreguidelines-pro-bounds-constant-array-index,cppcoreguidelines-pro-bounds-pointer-arithmetic)
                 }
             }
 
