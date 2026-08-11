@@ -1,0 +1,35 @@
+# Test input deck for a galaxy simulation, used by the Python
+# SimGalaxy binding tests in tests/pybind/test_bindings.py. Otherwise
+# identical to testGalaxy.in, but with a much longer output time range
+# (0 to 5e4 yr, vs. testGalaxy.in's 0 to 10 yr) -- long enough, given
+# clusters.CMF = 1e3 and galaxy.sfr = 1.0 Msun/yr, that the target mass
+# at the final output time (5e4 Msun) reliably forms several clusters,
+# which testGalaxy.in's own tiny 10 yr range (10 Msun target) almost
+# never does. Cluster count itself is still stochastic (drawn from the
+# CMF to reach each step's target mass), so tests built on this deck
+# check structural properties (e.g. "at least one cluster formed by
+# the last output time") rather than an exact expected count.
+
+sim_type = "galaxy"
+
+[stars]
+IMF = "chabrier.toml"
+track_registry = "tests/tracks/assets/tracks.toml"
+tracks = "MIST_test"
+alphaFe = -0.2
+FeH = 0.0
+
+[spectra]
+model = "blackbody"
+
+[clusters]
+CMF = 1e3
+CLF = 1e300
+
+[galaxy]
+sfr = 1.0
+
+[output]
+start_time = 0.0
+end_time = 5e4
+ntime = 3
