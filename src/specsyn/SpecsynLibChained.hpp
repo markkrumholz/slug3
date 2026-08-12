@@ -15,6 +15,7 @@
 #include <cstddef>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace specsyn
@@ -140,6 +141,13 @@ namespace specsyn
          * chains and specForce(), spec() itself no longer clamps a
          * star's properties into any of these ranges before
          * dispatching it.
+         *
+         * wnlTeffRanges_ is computed separately, and unconditionally
+         * (regardless of tClamp): every chained SpecsynLibWR library's
+         * own type()/logTeff() range is scanned into it, and it is then
+         * handed to every one of those same libraries via their own
+         * setWNLTeffRanges() -- see wnlTeffRanges_'s own comment for why
+         * this, unlike the tClamp-gated arrays above, is not optional.
          * @param controls Simulation controls; forwarded unchanged to
          *   Specsyn's own constructor -- see its comment. Has no
          *   default of its own (unlike every parameter above): a
@@ -245,6 +253,18 @@ namespace specsyn
     private:
 
         /**
+         * @brief Hand wnlTeffRanges_ down to every chained SpecsynLibWR library's own copy
+         * @details
+         * Factored out of the constructor purely to keep its own
+         * cognitive complexity down. Called once, after wnlTeffRanges_
+         * has been fully computed and wrLibs_ populated -- see
+         * wnlTeffRanges_'s own comment for why every chained
+         * SpecsynLibWR library needs its own copy of the same combined
+         * range data classifyGridType uses.
+         */
+        void propagateWNLTeffRanges();
+
+        /**
          * @brief Return whichever of wrLibs_/wdLibs_/normalLibs_ matches type
          * @param type The GridType to look up
          * @return A const reference to that GridType's own chain
@@ -325,6 +345,27 @@ namespace specsyn
          */
         std::array<double, nGridType> loggMin_;
         std::array<double, nGridType> loggMax_; /**< See loggMin_ */
+
+        /**
+         * @brief The [min, max] log(Teff) range spanned by each of the three chained WNL buckets
+         * @details
+         * Index 0 is WNLH20's own range, 1 is WNLH40's, 2 is WNLH60's --
+         * see SpecsynLibWR::getWRType's own wnlTeffRanges parameter, which
+         * this is passed to (from classifyGridType, via spec()) unconditionally,
+         * regardless of tClamp -- unlike logTeffMin_/logTeffMax_/loggMin_/
+         * loggMax_, this isn't an optional coercion clamp, but data
+         * classifyGridType needs to correctly tell a genuine WNL star
+         * apart from an ordinary star whose surface composition merely
+         * resembles one (see getWRType's own comment for why). Computed
+         * once, unconditionally, in the constructor by scanning every
+         * chained SpecsynLibWR library's own type()/logTeff(), and also
+         * handed to each of those same libraries via their own
+         * setWNLTeffRanges(), so wrLibs_'s own spec() calls agree with
+         * classifyGridType's decision about which star is which WRType.
+         * An index whose bucket has no chained library at all is left at
+         * {quiet_NaN(), quiet_NaN()}.
+         */
+        std::array<std::pair<double, double>, 3> wnlTeffRanges_;
     };
 
 } // namespace specsyn

@@ -12,10 +12,13 @@
 #include "Specsyn.hpp"
 #include "SpecsynCommons.hpp"
 #include "SpecsynLib.hpp"
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <mdspan> // NOLINT(misc-include-cleaner)
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace specsyn
@@ -183,6 +186,54 @@ namespace specsyn
         -> std::vector<double> override;
 
         /**
+         * @brief Compute a star's spectrum, forcing a result by moving to the nearest populated (log(R_t), log(Teff)) grid point if needed
+         * @param props Stellar properties, as produced by evaluating
+         *   the Interpolator1D returned by Tracks2D::getIsochrone at
+         *   this star's mass
+         * @param feh [Fe/H] value of the star; needed because it is
+         *   not carried by props itself
+         * @return The star's spectrum, evaluated on the wavelength
+         *   grid returned by wl(), in units of erg/s/Angstrom --
+         *   never a size-0 vector
+         * @throws std::runtime_error if feh itself falls entirely
+         *   outside FeH_'s own range (so not even a bracketing feh
+         *   corner exists to search), or if neither of the (up to two)
+         *   bracketing feh corners has any populated (log(R_t),
+         *   log(Teff)) grid point at all
+         * @details
+         * Overrides Specsyn::specForce() -- see its own comment for
+         * when SpecsynLibChained calls this rather than spec(). Unlike
+         * SpecsynLibNoWind::specForce()/SpecsynLibWD::specForce(),
+         * which each bracket every axis except the one being rescued
+         * (log(g)) and search only that one, this class rescues along
+         * *two* axes at once: spec()'s own bounds check rejects a star
+         * whose log(Teff) alone falls outside logTeff_'s range, and
+         * that same star's log(R_t) -- always a crude, single-scattering
+         * estimate (see spec()'s own implementation comment) -- has no
+         * reason to be any more trustworthy once log(Teff) already
+         * is not. So rather than bracket log(Teff) and search log(R_t)
+         * (or vice versa), this brackets only feh (the one axis with
+         * no physical reason to be unreliable) and, at each of the (up
+         * to two) bracketing feh corners, searches every populated
+         * (log(R_t), log(Teff)) grid point for whichever is closest --
+         * by ordinary Euclidean distance in (log(R_t), log(Teff))
+         * space, both O(1)-dex quantities of comparable dynamic range,
+         * so no relative weighting between them is applied -- to this
+         * star's own raw (unclamped) (log(R_t), log(Teff)). Each
+         * chosen point's own spectrum is rescaled by
+         * 10^(logL_star - logLGrid) (logLGrid read directly off
+         * logLGrid_ at that point, not trilinearly interpolated, since
+         * this is a single discrete grid point rather than a bracketed
+         * cell) before being weighted by the ordinary feh bilinear
+         * weight and renormalized by the sum of weights actually used
+         * -- the same OOBPolicy::coerce-style renormalization pattern
+         * SpecsynLibNoWind::specForce()/SpecsynLibWD::specForce() use
+         * for their own single-corner/blended results.
+         */
+        [[nodiscard]] auto specForce(const Specsyn::StarData& props, double feh) const
+        -> std::vector<double> override;
+
+        /**
          * @brief A star's Wolf-Rayet spectral subtype
          * @details
          * Follows the classification scheme of Roy et al. 2020, MNRAS,
@@ -197,17 +248,14 @@ namespace specsyn
          * H20, H40, H60 -- each its own file/registry entry (see
          * fetch_powr.py), so getWRType further sub-classifies a WNL
          * star by its own surface H mass fraction into WNLH20/WNLH40/
-         * WNLH60, matching it to exactly one of those files. The
-         * None/WNL boundary also carries two log(Teff) conditions, not
-         * part of Roy et al. 2020 itself: one that keeps a He-depleted,
-         * C/O-rich WC/WO star from being misclassified as None or WNL,
-         * and an absolute floor (resurrecting Georgy et al. 2012's own
-         * cool-star cutoff) that keeps an ordinary cool evolved star
-         * from being misclassified as WNL merely because ordinary
-         * mixing has nudged its surface He mass fraction above 0.4 --
-         * see getWRType for the full rule and why. WO and WNC (which
-         * Georgy et al. 2012 split out separately) are folded into WC
-         * here, since PoWR has no spectral models for either.
+         * WNLH60, matching it to exactly one of those files. Unlike
+         * Roy et al. 2020 itself, a candidate WNL subtype is only
+         * actually assigned if the star's own log(Teff) falls within
+         * that specific bucket's own PoWR grid coverage (see
+         * getWRType's own comment for why this matters and what
+         * happens when it doesn't). WO and WNC (which Georgy et al.
+         * 2012 split out separately) are folded into WC here, since
+         * PoWR has no spectral models for either.
          */
         enum class WRType : std::uint8_t
         {
@@ -224,87 +272,118 @@ namespace specsyn
          * @param props Stellar properties, as produced by evaluating
          *   the Interpolator1D returned by Tracks2D::getIsochrone at
          *   this star's mass
+         * @param wnlTeffRanges The [min, max] log(Teff) actually
+         *   spanned by each of PoWR's three WNL surface-hydrogen grids
+         *   -- index 0 for WNLH20, 1 for WNLH40, 2 for WNLH60 (see
+         *   wnlTeffRanges_'s own comment for how this is normally
+         *   populated). A NaN entry (either bound) means that bucket's
+         *   own range is unknown, so a star that would otherwise land
+         *   in it never actually does -- see this function's own
+         *   comment for why that matters.
          * @return The star's WRType
          * @details
          * Follows Roy et al. 2020's classification scheme on surface
-         * He mass fraction, extended with log(Teff) conditions at both
-         * the None/WNL boundary and as an absolute floor (neither part
-         * of Roy et al. 2020 itself, which does not distinguish WC
-         * from WO/WNC and does not address cool stars at all), and
-         * with a surface-H-mass-fraction subdivision of WNL into
-         * WNLH20/WNLH40/WNLH60 (not part of Roy et al. 2020 either,
-         * which treats WNL as one subtype) matching PoWR's own H20/
-         * H40/H60 grid split (see fetch_powr.py and WRType's own
-         * comment). The first log(Teff) extension keeps a He-depleted,
-         * C/O-rich WC/WO star -- whose surface He mass fraction can
-         * itself fall below 0.4 once He has been burned through to
-         * C/O, despite being unambiguously a Wolf-Rayet star -- from
-         * being misclassified as WRType::None, and keeps a star this
-         * hot from being misclassified as a WNL subtype instead of
-         * falling through to the WNE/WC check below. The second
-         * extension (log(Teff) < log10(10000 K), resurrecting the
-         * Georgy et al. 2012 scheme's own absolute floor) keeps an
-         * ordinary cool evolved star -- whose surface He mass fraction
-         * can drift somewhat above 0.4 from ordinary post-main-sequence
-         * mixing, with nothing to do with Wolf-Rayet-style stripping --
-         * from being misclassified as WNL: no genuine Wolf-Rayet star,
-         * of any subtype, is this cool.
+         * He mass fraction, with a surface-H-mass-fraction subdivision
+         * of WNL into WNLH20/WNLH40/WNLH60 (not part of Roy et al. 2020
+         * itself, which treats WNL as one subtype) matching PoWR's own
+         * H20/H40/H60 grid split (see fetch_powr.py and WRType's own
+         * comment), and gated by wnlTeffRanges so that a star is only
+         * ever assigned a WNL subtype if its own log(Teff) actually
+         * falls within that subtype's real PoWR grid coverage.
          *
-         * A third condition, on mass rather than log(Teff), guards the
-         * same log(Teff) >= log10(50000 K) escape hatch the first
-         * extension above relies on: that hatch exists specifically so
-         * a He-depleted, C/O-rich WC/WO star isn't misclassified as
-         * WRType::None purely for having surface He mass fraction below
-         * 0.4, but it makes no reference to mass, so it can equally
-         * well be triggered by a low-mass, ordinary-composition
-         * (H-rich) evolved star transiently passing through the same
-         * hot regime -- e.g. a MIST post-AGB "phase 6" star, whose
-         * effective temperature briefly exceeds 50000 K on its way to
-         * becoming a white dwarf despite having nothing like a
-         * stripped Wolf-Rayet envelope. Checked against MIST's own
-         * grids (see the WD/hot-atmosphere-coverage project notes):
-         * every genuinely WR-composition (surface He mass fraction >=
-         * 0.4) star has a current mass of at least ~17 Msun, while the
+         * That temperature gate exists because surface composition
+         * alone is a poor guide to WNL-ness at the cool end: ordinary
+         * post-main-sequence mixing can nudge a star's surface He mass
+         * fraction above 0.4 -- squarely inside the WNL composition
+         * window -- long before it is anywhere near hot enough to
+         * actually be a Wolf-Rayet star (real WNL spectra exist only
+         * for O-star-and-hotter temperatures). Gating on each bucket's
+         * own actual grid coverage, rather than a single fixed ceiling
+         * shared by all three buckets, keeps such a star from being
+         * misclassified as WNL (and then failing to find a covering
+         * spectrum) merely because its composition happens to match --
+         * it instead falls through to WRType::None, letting it be
+         * classified as an ordinary (e.g. O-star) grid star downstream.
+         * The WNE/WC branch below has no equivalent gate: a He-depleted,
+         * C/O-rich WC/WO star's surface He mass fraction can itself
+         * fall below 0.4 once He has been burned through to C/O,
+         * despite being unambiguously a Wolf-Rayet star, so that branch
+         * is reached by a log(Teff) floor alone, independent of
+         * wnlTeffRanges and of the WNL composition window entirely.
+         *
+         * A mass floor guards that same log(Teff) >= log10(50000 K)
+         * escape hatch: it exists specifically so a He-depleted,
+         * C/O-rich WC/WO star isn't missed purely for having surface He
+         * mass fraction below 0.4, but log(Teff) alone can equally well
+         * be triggered by a low-mass, ordinary-composition (H-rich)
+         * evolved star transiently passing through the same hot regime
+         * -- e.g. a MIST post-AGB "phase 6" star, whose effective
+         * temperature briefly exceeds 50000 K on its way to becoming a
+         * white dwarf despite having nothing like a stripped
+         * Wolf-Rayet envelope. Checked against MIST's own grids (see
+         * the WD/hot-atmosphere-coverage project notes): every
+         * genuinely WR-composition (surface He mass fraction >= 0.4)
+         * star has a current mass of at least ~17 Msun, while the
          * low-mass post-AGB stars this hot-Teff escape hatch would
          * otherwise misclassify never exceed ~1.1 Msun at this phase --
          * a wide, clean gap (up to the next mass at which a genuine,
          * massive He-depleted WC/WO star appears, ~13 Msun) that an
          * 8 Msun floor sits comfortably inside. Checked sequentially:
-         *   1) Mass < 8 Msun, or (surface He mass fraction < 0.4 and
-         *      log(Teff) < log10(50000 K)), or log(Teff) <
-         *      log10(10000 K): not a Wolf-Rayet star at all
-         *      (WRType::None). The mass clause is what keeps a
-         *      low-mass, hot, but ordinary-composition star from
-         *      slipping through the log(Teff) escape hatch described
-         *      above. The log(Teff) clause itself is what keeps a
-         *      He-depleted WC/WO star from landing here: below that
-         *      temperature, a genuinely evolved WR star's surface He
-         *      has not yet been burned down through 0.4, so a cool,
-         *      He-poor star really is just an ordinary, non-WR star.
-         *      The absolute floor clause is what keeps an ordinary
-         *      cool star with He mass fraction >= 0.4 from landing in
-         *      a WNL subtype instead -- see this function's own
-         *      comment above for both.
-         *   2) Surface He mass fraction <= 0.9 and log(Teff) <
-         *      log10(1e5 K): a WNL subtype, sub-classified by surface
-         *      H mass fraction: < 0.3 gives WRType::WNLH20; [0.3, 0.5]
-         *      gives WRType::WNLH40; > 0.5 gives WRType::WNLH60.
-         *      Unlike the Georgy et al. 2012 scheme this replaced,
-         *      this does not require the surface to be hydrogen-poor
-         *      -- a WNL star here can retain a substantial hydrogen
-         *      envelope. The log(Teff) clause keeps a star hot enough
-         *      to be a WC/WO star, but with He mass fraction in this
-         *      same range (see step 1's own comment), from being
-         *      misclassified as a WNL subtype instead of falling
-         *      through to the WNE/WC check below.
-         *   3) Surface C mass fraction < surface N mass fraction:
-         *      WRType::WNE (nitrogen-sequence, hydrogen-free).
-         *   4) Otherwise: WRType::WC. Georgy et al. 2012 further split
-         *      this remaining case into WC, WO, and WNC subtypes;
-         *      PoWR has no spectral models for WO or WNC, so all
-         *      three are lumped into WC here.
+         *   1) Mass < 8 Msun: not a Wolf-Rayet star at all
+         *      (WRType::None) -- see the mass-floor discussion above.
+         *   2) Surface He mass fraction in [0.4, 0.9] and log(Teff)
+         *      within the log(Teff) range of the WNL bucket implied by
+         *      surface H mass fraction (< 0.3 for WNLH20; [0.3, 0.5]
+         *      for WNLH40; > 0.5 for WNLH60, per wnlTeffRanges[0/1/2]
+         *      respectively): that WNL subtype. Unlike the Georgy et
+         *      al. 2012 scheme this replaced, this does not require the
+         *      surface to be hydrogen-poor -- a WNL star here can
+         *      retain a substantial hydrogen envelope. If the He mass
+         *      fraction condition holds but the log(Teff) gate does
+         *      not (see this function's own comment above for why that
+         *      can happen), falls through to step 3 rather than
+         *      returning here.
+         *   3) log(Teff) > log10(50000 K): WRType::WNE if surface C
+         *      mass fraction < surface N mass fraction
+         *      (nitrogen-sequence, hydrogen-free), else WRType::WC.
+         *      Georgy et al. 2012 further split the WC case into WC,
+         *      WO, and WNC subtypes; PoWR has no spectral models for
+         *      WO or WNC, so all three are lumped into WC here.
+         *   4) Otherwise: WRType::None.
          */
-        [[nodiscard]] static auto getWRType(const Specsyn::StarData& props) -> WRType;
+        [[nodiscard]] static auto getWRType(
+            const Specsyn::StarData& props,
+            const std::array<std::pair<double, double>, 3>& wnlTeffRanges) -> WRType;
+
+        /**
+         * @brief Which WR subtype this library's models are for
+         * @details
+         * Exposed for SpecsynLibChained's benefit, which needs to know
+         * every chained SpecsynLibWR library's own type() (alongside
+         * its logTeff()) to build the wnlTeffRanges getWRType needs --
+         * see wnlTeffRanges_'s own comment.
+         */
+        [[nodiscard]] auto type() const -> WRType { return type_; }
+
+        /**
+         * @brief Tell this library the real log(Teff) range of each WNL bucket
+         * @param ranges See getWRType's own wnlTeffRanges parameter
+         * @details
+         * Called by SpecsynLibChained once every chained library has
+         * been constructed, so that this library's own spec() -- which
+         * must call getWRType with the same ranges classifyGridType
+         * uses, or the two could disagree about whether a given star is
+         * even this library's own WRType at all -- sees the combined
+         * range spanning every chained WNL library, not just
+         * wnlTeffRanges_'s own single-bucket default. See
+         * wnlTeffRanges_'s own comment for what happens when this is
+         * never called (e.g. a SpecsynLibWR used standalone, outside
+         * SpecsynLibChained, as in this class's own unit tests).
+         */
+        void setWNLTeffRanges(const std::array<std::pair<double, double>, 3>& ranges)
+        {
+            wnlTeffRanges_ = ranges;
+        }
 
         /**
          * @brief This library's log10(T_*) grid points
@@ -317,6 +396,23 @@ namespace specsyn
         [[nodiscard]] auto logTeff() const -> const std::vector<double>& { return logTeff_; }
 
     private:
+
+        /**
+         * @brief Derive the transformed radius log(R_t) a star maps to
+         * @param props Stellar properties; see spec()'s own props parameter
+         * @param feh [Fe/H] value of the star; needed to look up D_infinity
+         * @return The star's raw (unclamped, possibly outside logRt_'s
+         *   own range) log(R_t), by Todt et al. 2015, eq. 2
+         * @details
+         * Factored out of spec() (which calls this, then moves the
+         * result to the nearest populated logRt_ value) so specForce()
+         * can reuse the exact same derivation without duplicating it --
+         * see spec()'s own implementation comment for the full physical
+         * derivation this performs (D_infinity by interpolation on
+         * dInf_, wind velocity from luminosity and mass-loss rate, then
+         * the transformed radius itself).
+         */
+        [[nodiscard]] auto computeRawLogRt(const Specsyn::StarData& props, double feh) const -> double;
 
         /** @brief The shape of logLGrid_, the mdspan view onto logL_ */
         using ScalarGrid = std::mdspan<double, std::dextents<std::size_t, 3>>; // NOLINT(misc-include-cleaner) -- see the identical NOLINT on SpecsynLib.hpp's SpectraGrid alias
@@ -370,6 +466,33 @@ namespace specsyn
          * subtype at all.
          */
         WRType type_;
+
+        /**
+         * @brief The [min, max] log(Teff) range of each WNL bucket, as known to this instance
+         * @details
+         * Index 0 is WNLH20's own range, 1 is WNLH40's, 2 is WNLH60's --
+         * see getWRType's own wnlTeffRanges parameter for how these are
+         * used. Defaults to {quiet_NaN(), quiet_NaN()} at every index
+         * except type_'s own (if type_ is itself one of WNLH20/WNLH40/
+         * WNLH60), which the constructor instead sets to this library's
+         * own logTeff_.front()/back() -- the only range this instance
+         * can know on its own, without help from any sibling library --
+         * so that a standalone SpecsynLibWR (e.g. in this class's own
+         * unit tests, or any other use outside SpecsynLibChained) still
+         * correctly recognizes stars of its own WRType. SpecsynLibChained
+         * overwrites this default via setWNLTeffRanges() once every
+         * chained library exists, with the combined range spanning
+         * every chained WNL library -- necessary because a star of, say,
+         * WNLH40 composition must be correctly told apart from one of
+         * WNLH20 composition even when checked from a WNE or WC
+         * library's own spec() (which needs to know it is NOT looking
+         * at a WNL star at all), not just from a WNLH40 library's own.
+         */
+        std::array<std::pair<double, double>, 3> wnlTeffRanges_ = {{
+            {std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::quiet_NaN()},
+            {std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::quiet_NaN()},
+            {std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::quiet_NaN()},
+        }};
     };
 
 } // namespace specsyn

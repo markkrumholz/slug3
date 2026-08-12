@@ -269,6 +269,45 @@ namespace specsyn
         }
 
         /**
+         * @brief Widen ranges[i]'s own [min, max] to also cover one chained library's own logTeff() range, if it's a WNL bucket
+         * @tparam Policy OOBPolicy of lib
+         * @param lib A single chained library, as constructed by makeChainedLib
+         * @param ranges Running per-WNL-bucket [min, max], widened in
+         *   place at whichever index corresponds to lib's own type(),
+         *   if lib is a SpecsynLibWR whose type() is WNLH20/WNLH40/
+         *   WNLH60; left untouched for every other kind of library
+         *   (including a non-WNL SpecsynLibWR, e.g. WNE or WC, which
+         *   getWRType never needs a range for -- see its own comment)
+         * @details
+         * Mirrors updateLogTeffRange/updateLoggRange's own dynamic_cast
+         * pattern, but keyed by SpecsynLibWR::type() rather than
+         * GridType, since all three WNL buckets share GridType::wrGrid
+         * and so need a finer-grained index than that alone provides.
+         */
+        template <OOBPolicy Policy>
+        void updateWNLTeffRanges( //NOLINT(llvm-prefer-static-over-anonymous-namespace)
+            const SpecsynLib<Policy>& lib,
+            std::array<std::pair<double, double>, 3>& ranges)
+        {
+            const auto* wr = dynamic_cast<const SpecsynLibWR<Policy>*>(&lib);
+            if (wr == nullptr) { return; }
+
+            const auto type = wr->type();
+            if (type != SpecsynLibWR<Policy>::WRType::WNLH20 &&
+                type != SpecsynLibWR<Policy>::WRType::WNLH40 &&
+                type != SpecsynLibWR<Policy>::WRType::WNLH60)
+            {
+                return;
+            }
+            const auto idx = static_cast<std::size_t>(type) -
+                static_cast<std::size_t>(SpecsynLibWR<Policy>::WRType::WNLH20);
+
+            auto& [rangeMin, rangeMax] = ranges.at(idx);
+            rangeMin = std::isnan(rangeMin) ? wr->logTeff().front() : std::min(rangeMin, wr->logTeff().front());
+            rangeMax = std::isnan(rangeMax) ? wr->logTeff().back() : std::max(rangeMax, wr->logTeff().back());
+        }
+
+        /**
          * @brief Classify a star into the GridType whose clamp should apply to it
          * @param props Stellar properties to classify
          * @param logg props' own log(g), from Specsyn::getSAandLogg;
@@ -279,12 +318,16 @@ namespace specsyn
          * @param loggMax Per-GridType log(g) maximums; see logTeffMax
          * @param logTeffMin Per-GridType log(Teff) minimums; see logTeffMax
          * @param loggMin Per-GridType log(g) minimums; see logTeffMax
+         * @param wnlTeffRanges See SpecsynLibWR::getWRType's own
+         *   wnlTeffRanges parameter, which this is simply forwarded to
          * @returns The GridType whose clamp spec() should apply to props
          * @details
          * A Wolf-Rayet star (per SpecsynLibWR::getWRType) is always
          * GridType::wrGrid, checked first and on props' own raw,
          * unclamped values -- WR-ness is a property of the star's own
-         * surface composition (see getWRType), not something that
+         * surface composition (and, for a candidate WNL subtype, its
+         * log(Teff) actually falling within that subtype's real grid
+         * coverage -- see getWRType's own comment), not something that
          * could be affected by any clamp decided afterward.
          *
          * Otherwise, this star is GridType::wdGrid if -- and only if
@@ -313,9 +356,10 @@ namespace specsyn
             const std::array<double, gridTypeCount>& logTeffMin,
             const std::array<double, gridTypeCount>& logTeffMax,
             const std::array<double, gridTypeCount>& loggMin,
-            const std::array<double, gridTypeCount>& loggMax) -> GridType
+            const std::array<double, gridTypeCount>& loggMax,
+            const std::array<std::pair<double, double>, 3>& wnlTeffRanges) -> GridType
         {
-            if (SpecsynLibWR<OOBPolicy::raise>::getWRType(props) !=
+            if (SpecsynLibWR<OOBPolicy::raise>::getWRType(props, wnlTeffRanges) !=
                 SpecsynLibWR<OOBPolicy::raise>::WRType::None)
             {
                 return GridType::wrGrid;
@@ -378,7 +422,12 @@ namespace specsyn
         logTeffMin_(filledArray<nGridType>(std::numeric_limits<double>::quiet_NaN())),
         logTeffMax_(filledArray<nGridType>(std::numeric_limits<double>::quiet_NaN())),
         loggMin_(filledArray<nGridType>(std::numeric_limits<double>::quiet_NaN())),
-        loggMax_(filledArray<nGridType>(std::numeric_limits<double>::quiet_NaN()))
+        loggMax_(filledArray<nGridType>(std::numeric_limits<double>::quiet_NaN())),
+        wnlTeffRanges_({{
+            {std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::quiet_NaN()},
+            {std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::quiet_NaN()},
+            {std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::quiet_NaN()},
+        }})
     {
         if (spectraName.empty())
         {
@@ -509,6 +558,13 @@ namespace specsyn
             }
         }
 
+        // Widen wnlTeffRanges_ across every chained SpecsynLibWR
+        // library's own type()/logTeff() range, unconditionally
+        // (regardless of tClamp) -- see wnlTeffRanges_'s own comment
+        // for why this isn't an optional clamp the way the arrays
+        // above are.
+        for (const auto& lib : allLibs) { updateWNLTeffRanges(*lib, wnlTeffRanges_); }
+
         // Sort every library, still in its own original relative
         // order within spectraName, into whichever of wrLibs_/wdLibs_/
         // normalLibs_ matches its own already-known GridType
@@ -522,6 +578,23 @@ namespace specsyn
                 case GridType::wrGrid: wrLibs_.push_back(std::move(allLibs[i])); break; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
                 case GridType::wdGrid: wdLibs_.push_back(std::move(allLibs[i])); break; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
                 default: normalLibs_.push_back(std::move(allLibs[i])); break; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
+            }
+        }
+
+        // Hand the combined wnlTeffRanges_ down to every chained
+        // SpecsynLibWR library, so its own spec() classifies stars via
+        // getWRType exactly as classifyGridType does -- see
+        // wnlTeffRanges_'s own comment for why the two must agree.
+        propagateWNLTeffRanges();
+    }
+
+    void SpecsynLibChained::propagateWNLTeffRanges()
+    {
+        for (const auto& lib : wrLibs_)
+        {
+            if (auto* wr = dynamic_cast<SpecsynLibWR<OOBPolicy::coerce>*>(lib.get()))
+            {
+                wr->setWNLTeffRanges(wnlTeffRanges_);
             }
         }
     }
@@ -539,7 +612,7 @@ namespace specsyn
     auto SpecsynLibChained::spec(const StarData& props, const double feh) const -> std::vector<double>
     {
         const double rawLogg = getSAandLogg(props).second;
-        const auto type = classifyGridType(props, rawLogg, logTeffMin_, logTeffMax_, loggMin_, loggMax_);
+        const auto type = classifyGridType(props, rawLogg, logTeffMin_, logTeffMax_, loggMin_, loggMax_, wnlTeffRanges_);
         const auto& chain = chainFor(type);
 
         if (chain.empty())
