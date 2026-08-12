@@ -16,9 +16,11 @@
 #include "SpecsynUtils.hpp"
 #include "hdf5.h" // NOLINT(misc-include-cleaner)
 #include <algorithm> // NOLINT(misc-include-cleaner) -- see the identical NOLINT on SpecsynLib.cpp's findBracket for why std::ranges::lower_bound needs this
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <iterator>
+#include <limits>
 #include <map>
 #include <mdspan> // NOLINT(misc-include-cleaner)
 #include <optional>
@@ -506,6 +508,91 @@ namespace specsyn
         // specific luminosity
         auto result = this->SpecsynLib<Policy>::spec(feh, logg, logTeff);
         for (auto& v : result) { v *= area; }
+        return result;
+    }
+
+    template <OOBPolicy Policy>
+    auto SpecsynLibNoWind<Policy>::nearestPopulatedLogg(
+        const std::size_t f, const std::size_t t, const double targetLogg) const -> std::optional<std::size_t>
+    {
+        double bestDist = std::numeric_limits<double>::infinity();
+        std::optional<std::size_t> best;
+        for (std::size_t g = 0; g < logg_.size(); ++g)
+        {
+            if (this->grid_[f, g, t].empty()) { continue; }
+            const double dist = std::abs(logg_[g] - targetLogg); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- g < logg_.size() by construction
+            if (dist < bestDist)
+            {
+                bestDist = dist;
+                best = g;
+            }
+        }
+        return best;
+    }
+
+    template <OOBPolicy Policy>
+    auto SpecsynLibNoWind<Policy>::specForce(const Specsyn::StarData& props, const double feh) const -> std::vector<double>
+    {
+        // Reject only if feh or log(Teff) themselves can't even be
+        // bracketed -- log(g) is never checked against its own range
+        // here, since the whole point of this function is to search
+        // for a populated log(g) value regardless of how far out of
+        // range this star's own log(g) starts.
+        const double logTeff = props[static_cast<std::size_t>(tracks::FieldIdx::logTe)]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- StarData is a fixed-size std::array, and logTe is one of its compile-time-known indices
+        if (feh < FeH_.front() || feh > FeH_.back() ||
+            logTeff < logTeff_.front() || logTeff > logTeff_.back())
+        {
+            throw std::runtime_error(
+                "SpecsynLibNoWind::specForce: star with feh = " + std::to_string(feh) +
+                ", log(Teff) = " + std::to_string(logTeff) +
+                " is entirely outside this library's grid");
+        }
+
+        const auto [area, logg] = this->getSAandLogg(props);
+        std::size_t fehCache = 0;
+        std::size_t teffCache = 0;
+        const auto bFeh = detail::findBracket(FeH_, feh, fehCache);
+        const auto bTeff = detail::findBracket(logTeff_, logTeff, teffCache);
+
+        // For each of the (up to four) bracketing (feh, logTeff)
+        // corners, search every logg_ value for whichever is both
+        // populated and closest to this star's own (real, unclamped)
+        // log(g); renormalize by wSum at the end, mirroring
+        // SpecsynLib::spec(double, double, double)'s own
+        // OOBPolicy::coerce handling of a partially-populated cell --
+        // see this function's own header comment for what that
+        // reduces to when only one corner has a populated log(g).
+        const std::array<std::pair<std::size_t, double>, 2> fehSides {
+            {{bFeh.lo_, 1.0 - bFeh.t_}, {bFeh.hi_, bFeh.t_}}};
+        const std::array<std::pair<std::size_t, double>, 2> teffSides {
+            {{bTeff.lo_, 1.0 - bTeff.t_}, {bTeff.hi_, bTeff.t_}}};
+
+        std::vector<double> result(this->wl_.size(), 0.0);
+        double wSum = 0.0;
+        for (const auto& [f, wgtF] : fehSides)
+        {
+            for (const auto& [t, wgtT] : teffSides)
+            {
+                const double weight = wgtF * wgtT;
+                if (weight == 0.0) { continue; } // degenerate axis or exact grid hit: skip a zero-weight corner
+
+                const auto bestG = nearestPopulatedLogg(f, t, logg);
+                if (!bestG) { continue; } // this corner has no populated log(g) value at all
+
+                wSum += weight;
+                const auto& spectrum = this->grid_[f, *bestG, t];
+                for (std::size_t w = 0; w < result.size(); ++w) { result[w] += weight * spectrum[w]; }
+            }
+        }
+
+        if (wSum == 0.0)
+        {
+            throw std::runtime_error(
+                "SpecsynLibNoWind::specForce: no populated grid point found near "
+                "feh = " + std::to_string(feh) + ", log(Teff) = " + std::to_string(logTeff) +
+                " at any log(g)");
+        }
+        for (auto& v : result) { v = (v / wSum) * area; }
         return result;
     }
 

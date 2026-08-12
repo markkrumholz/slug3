@@ -13,6 +13,7 @@
 #include "SpecsynCommons.hpp"
 #include "SpecsynLib.hpp"
 #include <cstddef>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -134,6 +135,46 @@ namespace specsyn
         -> std::vector<double> override;
 
         /**
+         * @brief Compute a star's spectrum, forcing a result by moving log(g) to the nearest populated grid value if needed
+         * @param props Stellar properties, as produced by evaluating
+         *   the Interpolator1D returned by Tracks2D::getIsochrone at
+         *   this star's mass
+         * @param feh [Fe/H] value of the star; needed because it is
+         *   not carried by props itself
+         * @return The star's spectrum, evaluated on the wavelength
+         *   grid returned by wl(), in units of erg/s/Angstrom --
+         *   never a size-0 vector
+         * @throws std::runtime_error if feh or log(Teff) themselves
+         *   fall entirely outside FeH_/logTeff_'s own range (so not
+         *   even a bracketing (feh, logTeff) corner exists to
+         *   search), or if none of the (up to four) bracketing
+         *   (feh, logTeff) corners has any populated log(g) value at
+         *   all
+         * @details
+         * Overrides Specsyn::specForce() -- see its own comment for
+         * when SpecsynLibChained calls this rather than spec().
+         * Mirrors SpecsynLibWD::specForce() exactly, extended to this
+         * class's extra feh axis: finds the (up to four) (feh,
+         * logTeff) grid-index corners bracketing this star's own
+         * (feh, log(Teff)); at each, searches every logg_ value for
+         * whichever is both populated and closest to this star's own
+         * log(g) (derived via Specsyn::getSAandLogg), regardless of
+         * how far out of logg_'s own range that log(g) is. Corners
+         * with a populated log(g) value contribute their own single
+         * grid point's spectrum, weighted by the ordinary (feh,
+         * logTeff) bilinear weight and renormalized by the sum of
+         * weights actually used -- exactly the OOBPolicy::coerce
+         * renormalization pattern SpecsynLib::spec(double, double,
+         * double) uses for a partially-populated interpolation cell
+         * -- so this reduces to returning a single corner's own
+         * spectrum unscaled when only one corner has any populated
+         * log(g) value, and to a proper (feh, logTeff)-weighted
+         * blend when more than one does.
+         */
+        [[nodiscard]] auto specForce(const Specsyn::StarData& props, double feh) const
+        -> std::vector<double> override;
+
+        /**
          * @brief This library's log10(effective temperature) grid points
          * @details
          * Exposed for SpecsynLibChained's benefit, which needs to scan
@@ -155,6 +196,21 @@ namespace specsyn
         [[nodiscard]] auto logg() const -> const std::vector<double>& { return logg_; }
 
     private:
+
+        /**
+         * @brief Find the logg_ index closest to targetLogg with a populated spectrum at (f, ., t)
+         * @param f Index into FeH_ to search at
+         * @param t Index into logTeff_ to search at
+         * @param targetLogg The log(g) value to search for the nearest match to
+         * @return The index into logg_ whose grid_[f, ., t] is
+         *   populated and closest to targetLogg, or std::nullopt if
+         *   grid_[f, g, t] is unpopulated for every g
+         * @details
+         * Factored out of specForce() purely to keep its own cognitive
+         * complexity down -- see its own comment for how this is used.
+         */
+        [[nodiscard]] auto nearestPopulatedLogg(std::size_t f, std::size_t t, double targetLogg) const
+        -> std::optional<std::size_t>;
 
         // References into the parent class's dim1_/dim2_/dim3_, named
         // for what they actually hold in this (FeH, logg, Teff)
