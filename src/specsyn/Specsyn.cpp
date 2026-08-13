@@ -14,7 +14,7 @@
 #include "../io/SimControls.hpp"
 #include "../pdfs/PDF.hpp"
 #include "../utils/Constants.hpp"
-#include "../utils/PDFIntegrator.hpp"
+#include "../utils/PDFIntegratorND.hpp"
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -48,8 +48,25 @@ auto specsyn::Specsyn::specCts(
     // dL/dlambda directly, and scale intAbsTol() (specified in units
     // of dL/dlambda's own natural scale) by utils::Lsun to match --
     // see specWl()'s own doc comment for why.
+    //
+    // Uses cubature's p-adaptive routine (CubatureMethod::pAdaptive),
+    // in linear (not log) mass space, rather than PDFIntegrator's own
+    // default of h-adaptive: benchmarked head to head against
+    // h-adaptive (linear and log) and p-adaptive-in-log-space on a
+    // full-scale, 100-output-time non-stochastic cluster run (real
+    // MIST tracks and spectral libraries, so the comparison reflects
+    // this integrand's actual cost -- a spectral flux that is smooth
+    // in mass but spans many orders of magnitude in value), p-adaptive
+    // in linear space was the clear winner: roughly 2x faster than
+    // h-adaptive at identical accuracy (integrated luminosity agreed
+    // to within ~0.1% across every configuration and output time
+    // checked), while log-transforming the mass coordinate under
+    // p-adaptive was instead slower than the old h-adaptive default --
+    // this integrand isn't sharply peaked enough near either edge of
+    // its mass domain for the log transform to pay for the extra
+    // nonlinearity it introduces.
     using SpecSegFn = std::vector<double> (Specsyn::*)(double, const Segment&, double) const;
-    const utils::PDFIntegrator integrator(
+    const utils::PDFIntegratorND<SpecSegFn, 1, false, utils::CubatureMethod::pAdaptive> integrator(
         imf, static_cast<SpecSegFn>(&Specsyn::specWl), static_cast<unsigned>(wl_.size()),
         std::array<bool, 1>{}, intMaxIter(), intAbsTol() * utils::Lsun, intRelTol());
 
