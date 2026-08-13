@@ -17,7 +17,9 @@
 #include "SpecsynUtils.hpp"
 #include "hdf5.h" // NOLINT(misc-include-cleaner)
 #include <algorithm> // NOLINT(misc-include-cleaner) -- see the identical NOLINT on SpecsynLib.cpp's findBracket for why std::ranges::lower_bound needs this
+#include <cmath>
 #include <cstddef>
+#include <limits>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -268,6 +270,74 @@ namespace specsyn
         // into specific luminosity
         auto result = this->SpecsynLib2D<Policy>::spec(logg, logTeff);
         for (auto& v : result) { v *= area; }
+        return result;
+    }
+
+    template <OOBPolicy Policy>
+    auto SpecsynLibWD<Policy>::specForce(const Specsyn::StarData& props, const double /*feh*/) const -> std::vector<double>
+    {
+        // Reject only if log(Teff) itself can't even be bracketed --
+        // log(g) is never checked against its own range here, since
+        // the whole point of this function is to search for a
+        // populated log(g) value regardless of how far out of range
+        // this star's own log(g) starts.
+        const double logTeff = props[static_cast<std::size_t>(tracks::FieldIdx::logTe)]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- StarData is a fixed-size std::array, and logTe is one of its compile-time-known indices
+        if (logTeff < logTeff_.front() || logTeff > logTeff_.back())
+        {
+            throw std::runtime_error(
+                "SpecsynLibWD::specForce: star with log(Teff) = " + std::to_string(logTeff) +
+                " is entirely outside this library's grid");
+        }
+
+        const auto [area, logg] = this->getSAandLogg(props);
+        std::size_t cacheIdx = 0;
+        const auto bTeff = detail::findBracket(logTeff_, logTeff, cacheIdx);
+
+        // For each of the (up to two) bracketing logTeff columns,
+        // search every logg_ value for whichever is both populated
+        // and closest to this star's own (real, unclamped) log(g).
+        // Renormalizing by wSum at the end -- exactly as
+        // SpecsynLib2D::spec()'s own OOBPolicy::coerce handling
+        // does for a partially-populated cell -- means a single
+        // populated column's own spectrum is returned unscaled if
+        // the other column has nothing populated at all, and a
+        // proper log(Teff)-weighted blend of both otherwise.
+        std::vector<double> result(this->wl_.size(), 0.0);
+        double wSum = 0.0;
+        for (int ti = 0; ti < 2; ++ti)
+        {
+            const std::size_t t = (ti == 0) ? bTeff.lo_ : bTeff.hi_;
+            const double weight = (ti == 0) ? (1.0 - bTeff.t_) : bTeff.t_;
+            if (weight == 0.0) { continue; } // degenerate axis or exact grid hit: skip a zero-weight column
+
+            double bestDist = std::numeric_limits<double>::infinity();
+            std::size_t bestG = 0;
+            bool found = false;
+            for (std::size_t g = 0; g < logg_.size(); ++g)
+            {
+                if (this->grid_[0, g, t].empty()) { continue; }
+                const double dist = std::abs(logg_[g] - logg); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- g < logg_.size() by construction
+                if (dist < bestDist)
+                {
+                    bestDist = dist;
+                    bestG = g;
+                    found = true;
+                }
+            }
+            if (!found) { continue; } // this column has no populated log(g) value at all
+
+            wSum += weight;
+            const auto& spectrum = this->grid_[0, bestG, t];
+            for (std::size_t w = 0; w < result.size(); ++w) { result[w] += weight * spectrum[w]; }
+        }
+
+        if (wSum == 0.0)
+        {
+            throw std::runtime_error(
+                "SpecsynLibWD::specForce: no populated grid point found near "
+                "log(Teff) = " + std::to_string(logTeff) + " at any log(g)");
+        }
+        for (auto& v : result) { v = (v / wSum) * area; }
         return result;
     }
 

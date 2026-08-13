@@ -132,6 +132,43 @@ namespace specsyn
         -> std::vector<double> override;
 
         /**
+         * @brief Compute a star's spectrum, forcing a result by moving log(g) to the nearest populated grid value if needed
+         * @param props Stellar properties, as produced by evaluating
+         *   the Interpolator1D returned by Tracks2D::getIsochrone at
+         *   this star's mass
+         * @param feh [Fe/H] value of the star; unused, since this
+         *   library has no [Fe/H] axis at all -- present only because
+         *   Specsyn's own specForce() signature requires it
+         * @return The star's spectrum, evaluated on the wavelength
+         *   grid returned by wl(), in units of erg/s/Angstrom --
+         *   never a size-0 vector
+         * @throws std::runtime_error if log(Teff) itself falls
+         *   entirely outside logg_/logTeff_'s own range (so not even
+         *   a bracketing logTeff column exists to search), or if
+         *   neither bracketing logTeff column has any populated
+         *   log(g) value at all
+         * @details
+         * Overrides Specsyn::specForce() -- see its own comment for
+         * when SpecsynLibChained calls this rather than spec().
+         * Finds the (up to two) logTeff_ grid values bracketing this
+         * star's own log(Teff); at each, searches every logg_ value
+         * for whichever is both populated and closest to this star's
+         * own log(g) (derived via Specsyn::getSAandLogg), regardless
+         * of how far out of logg_'s own range that log(g) is. If
+         * only one bracketing logTeff column has any populated
+         * log(g) value at all, returns that single grid point's own
+         * spectrum (scaled by surface area); if both do, linearly
+         * interpolates the two (independently log(g)-snapped)
+         * spectra in log(Teff), using the ordinary bracket weight
+         * for each -- mirroring the renormalized-weight pattern
+         * SpecsynLib2D::spec(double, double)'s own OOBPolicy::coerce
+         * handling uses for a partially-populated interpolation
+         * cell.
+         */
+        [[nodiscard]] auto specForce(const Specsyn::StarData& props, double feh) const
+        -> std::vector<double> override;
+
+        /**
          * @brief This library's log10(effective temperature) grid points
          * @details
          * Exposed for SpecsynLibChained's benefit, which needs to scan

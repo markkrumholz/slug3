@@ -25,6 +25,7 @@
 #include <limits>
 #include <mdspan> // NOLINT(misc-include-cleaner)
 #include <numbers>
+#include <optional>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -136,6 +137,54 @@ namespace specsyn
                 }
             }
             return result / wSum;
+        }
+
+        /**
+         * @brief Find the (log(R_t), log(Teff)) grid indices, at a given feh index, with a populated spectrum closest to a target point
+         * @param grid The spectrum tensor grid (SpecsynLibWR::grid_)
+         * @param logRt The log(R_t) values spanned by grid's own second axis
+         * @param logTeff The log(Teff) values spanned by grid's own third axis
+         * @param f Index into grid's own first (feh) axis to search at
+         * @param targetLogRt The log(R_t) value to search for the nearest match to
+         * @param targetLogTeff The log(Teff) value to search for the nearest match to
+         * @return The (r, t) indices whose grid[f, r, t] is populated
+         *   and closest to (targetLogRt, targetLogTeff) -- by ordinary
+         *   Euclidean distance in (log(R_t), log(Teff)) space -- or
+         *   std::nullopt if grid[f, ., .] is unpopulated for every
+         *   (r, t)
+         * @details
+         * Factored out of SpecsynLibWR::specForce() purely to keep its
+         * own cognitive complexity down -- see its own comment for how
+         * this is used.
+         */
+        auto nearestPopulatedRtTeff( //NOLINT(llvm-prefer-static-over-anonymous-namespace)
+            const std::mdspan<std::vector<double>, std::dextents<std::size_t, 3>>& grid, // NOLINT(misc-include-cleaner) -- see the identical NOLINT on SpecsynLib.hpp's SpectraGrid alias
+            const std::vector<double>& logRt, const std::vector<double>& logTeff,
+            const size_t f, const double targetLogRt, const double targetLogTeff)
+            -> std::optional<std::pair<size_t, size_t>>
+        {
+            bool found = false;
+            double bestDist = std::numeric_limits<double>::infinity();
+            size_t bestR = 0;
+            size_t bestT = 0;
+            for (size_t r = 0; r < logRt.size(); ++r)
+            {
+                for (size_t t = 0; t < logTeff.size(); ++t)
+                {
+                    if (grid[f, r, t].empty()) { continue; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- f, r, t all < the corresponding axis's size by construction
+                    const double dr = logRt[r] - targetLogRt; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- r < logRt.size() by the loop bound
+                    const double dt = logTeff[t] - targetLogTeff; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- t < logTeff.size() by the loop bound
+                    const double dist = (dr * dr) + (dt * dt);
+                    if (dist < bestDist)
+                    {
+                        bestDist = dist;
+                        bestR = r;
+                        bestT = t;
+                        found = true;
+                    }
+                }
+            }
+            return found ? std::optional<std::pair<size_t, size_t>>({bestR, bestT}) : std::nullopt;
         }
     } // namespace
 
@@ -402,70 +451,88 @@ namespace specsyn
 
         // Step 7: store the common grid as this library's wavelength grid
         this->wl_ = commonWl;
+
+        // Step 8: if this library is one of the three WNL buckets, seed
+        // wnlTeffRanges_'s own entry with this library's own logTeff_
+        // range -- the only range this instance can know about without
+        // help from a sibling library -- so getWRType behaves sensibly
+        // even when this instance is never told about its siblings via
+        // setWNLTeffRanges() (e.g. used standalone). See wnlTeffRanges_'s
+        // own comment.
+        if (type_ == WRType::WNLH20 || type_ == WRType::WNLH40 || type_ == WRType::WNLH60)
+        {
+            const auto idx = static_cast<std::size_t>(type_) - static_cast<std::size_t>(WRType::WNLH20);
+            wnlTeffRanges_.at(idx) = {logTeff_.front(), logTeff_.back()};
+        }
     }
 
     template <OOBPolicy Policy>
-    auto SpecsynLibWR<Policy>::getWRType(const Specsyn::StarData& props) -> WRType
+    auto SpecsynLibWR<Policy>::getWRType(
+        const Specsyn::StarData& props,
+        const std::array<std::pair<double, double>, 3>& wnlTeffRanges) -> WRType
     {
         // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- StarData is a fixed-size std::array, and every index used here is compile-time-known
         const double heSurf = props[static_cast<size_t>(tracks::FieldIdx::heSurf)];
         const double logTeff = props[static_cast<size_t>(tracks::FieldIdx::logTe)];
         const double mass = props[static_cast<size_t>(tracks::FieldIdx::mass)];
         constexpr double massMin = 8.0; // Msun -- see this function's own comment
-        constexpr double logTeffNonWRMax = 4.6989700043360187; // log10(50000)
-        constexpr double logTeffAbsoluteMin = 4.0; // log10(10000)
-        if (mass < massMin || (heSurf < 0.4 && logTeff < logTeffNonWRMax) || logTeff < logTeffAbsoluteMin)
-        {
-            return WRType::None;
-        }
-        constexpr double logTeffWNLMax = 5.0; // log10(1e5 K)
-        if (heSurf <= 0.9 && logTeff < logTeffWNLMax)
+        if (mass < massMin) { return WRType::None; }
+
+        if (heSurf >= 0.4 && heSurf <= 0.9)
         {
             const double hSurf = props[static_cast<size_t>(tracks::FieldIdx::hSurf)];
-            if (hSurf < 0.3) { return WRType::WNLH20; }
-            if (hSurf <= 0.5) { return WRType::WNLH40; }
-            return WRType::WNLH60;
+            std::size_t idx = 0;
+            WRType candidate = WRType::WNLH20;
+            if (hSurf < 0.3) { idx = 0; candidate = WRType::WNLH20; }
+            else if (hSurf <= 0.5) { idx = 1; candidate = WRType::WNLH40; }
+            else { idx = 2; candidate = WRType::WNLH60; }
+
+            const auto [teffMin, teffMax] = wnlTeffRanges.at(idx);
+            if (!std::isnan(teffMin) && logTeff >= teffMin && logTeff <= teffMax)
+            {
+                return candidate;
+            }
+            // Composition matches a WNL bucket, but this star's own
+            // log(Teff) doesn't fall within that bucket's real grid
+            // coverage (or that bucket's range is unknown entirely) --
+            // fall through to the WNE/WC check below rather than
+            // returning WRType::None here, since a hot enough star in
+            // this He window could still genuinely be a WC/WO star.
         }
-        const double cSurf = props[static_cast<size_t>(tracks::FieldIdx::cSurf)];
-        const double nSurf = props[static_cast<size_t>(tracks::FieldIdx::nSurf)];
-        if (cSurf < nSurf)
+
+        constexpr double logTeffHotMin = 4.6989700043360187; // log10(50000)
+        if (logTeff > logTeffHotMin)
         {
-            return WRType::WNE;
+            const double cSurf = props[static_cast<size_t>(tracks::FieldIdx::cSurf)];
+            const double nSurf = props[static_cast<size_t>(tracks::FieldIdx::nSurf)];
+            return (cSurf < nSurf) ? WRType::WNE : WRType::WC;
         }
-        return WRType::WC;
+
+        return WRType::None;
         // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     }
 
     template <OOBPolicy Policy>
-    auto SpecsynLibWR<Policy>::spec(const Specsyn::StarData& props, const double feh) const -> std::vector<double> // NOLINT(readability-function-cognitive-complexity) -- WRType check, dInf/vWind/Rt derivation, bounds check, and the final logL rescaling are each simple on their own; splitting them into separate functions would only add indirection, not clarity
+    auto SpecsynLibWR<Policy>::computeRawLogRt(const Specsyn::StarData& props, const double feh) const -> double
     {
-        // Step 1: a WRType mismatch means this library's spectra don't
-        // apply to this star at all
-        if (getWRType(props) != type_)
-        {
-            return SpecsynLib<Policy>::outOfBoundsResult(
-                "SpecsynLibWR: star's WRType does not match this library's type");
-        }
-
         // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- StarData is a fixed-size std::array, and every index used here is compile-time-known
         const double logL = props[static_cast<size_t>(tracks::FieldIdx::logL)];
-        const double logTeff = props[static_cast<size_t>(tracks::FieldIdx::logTe)];
         const double mdot = props[static_cast<size_t>(tracks::FieldIdx::mdot)]; // Msun/yr
         // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
 
-        // Step 2: D_infinity by linear interpolation in [Fe/H] on dInf_
+        // D_infinity by linear interpolation in [Fe/H] on dInf_
         const auto bFeh = findBracket(FeH_, feh);
         const double dInf = ((1.0 - bFeh.t_) * dInf_[bFeh.lo_]) + (bFeh.t_ * dInf_[bFeh.hi_]); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- bFeh.lo_/hi_ < dInf_.size() by construction (both sized nfeh)
 
-        // Step 3: wind velocity vWind = L / (mdot c), in cgs
+        // Wind velocity vWind = L / (mdot c), in cgs
         const double lumCgs = std::pow(10.0, logL) * utils::Lsun;      // erg/s
         const double mdotCgs = mdot * utils::Msun / utils::yr;         // g/s
         const double vWind = lumCgs / (mdotCgs * utils::c);            // cm/s
 
-        // Step 4: transformed radius Rt (Todt et al. 2015, eq. 2), via
-        // the star's own radius -- derived from its surface area,
-        // itself derived (by getSAandLogg) from L and Teff -- expressed
-        // in Rsun to match the grid's own log_rt units (see
+        // Transformed radius Rt (Todt et al. 2015, eq. 2), via the
+        // star's own radius -- derived from its surface area, itself
+        // derived (by getSAandLogg) from L and Teff -- expressed in
+        // Rsun to match the grid's own log_rt units (see
         // fetch_powr.py's R_TRANS [Rsun] -> log10(R_t) conversion)
         constexpr double pi = std::numbers::pi_v<double>;
         const double area = Specsyn::getSAandLogg(props).first; // cm^2
@@ -474,7 +541,27 @@ namespace specsyn
         constexpr double vWindNorm = 2500.0e5; // 2500 km/s, in cm/s
         constexpr double mdotNorm = 1.0e-4;    // Msun/yr
         const double ratio = (vWind / vWindNorm) / (mdot * std::sqrt(dInf) / mdotNorm);
-        const double rawLogRt = std::log10(rStarRsun * std::pow(ratio, 2.0 / 3.0));
+        return std::log10(rStarRsun * std::pow(ratio, 2.0 / 3.0));
+    }
+
+    template <OOBPolicy Policy>
+    auto SpecsynLibWR<Policy>::spec(const Specsyn::StarData& props, const double feh) const -> std::vector<double> // NOLINT(readability-function-cognitive-complexity) -- WRType check, bounds check, logRt search, and the final logL rescaling are each simple on their own; splitting them into separate functions would only add indirection, not clarity
+    {
+        // Step 1: a WRType mismatch means this library's spectra don't
+        // apply to this star at all
+        if (getWRType(props, wnlTeffRanges_) != type_)
+        {
+            return SpecsynLib<Policy>::outOfBoundsResult(
+                "SpecsynLibWR: star's WRType does not match this library's type");
+        }
+
+        // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- StarData is a fixed-size std::array, and every index used here is compile-time-known
+        const double logL = props[static_cast<size_t>(tracks::FieldIdx::logL)];
+        const double logTeff = props[static_cast<size_t>(tracks::FieldIdx::logTe)];
+        // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+
+        // Step 2: derive the transformed radius this star maps to
+        const double rawLogRt = computeRawLogRt(props, feh);
 
         // Bounds check: (feh, logTeff) must fall within this library's
         // grid before delegating to the parent class's own spec(),
@@ -491,6 +578,7 @@ namespace specsyn
                 ", logTeff = " + std::to_string(logTeff) +
                 " is outside this library's grid");
         }
+        const auto bFeh = findBracket(FeH_, feh);
         const auto bTeff = findBracket(logTeff_, logTeff);
 
         // vWind above is a single-scattering estimate (wind momentum
@@ -607,6 +695,68 @@ namespace specsyn
         for (auto& v : result) { v *= scale; }
 
         // Step 7
+        return result;
+    }
+
+    template <OOBPolicy Policy>
+    auto SpecsynLibWR<Policy>::specForce(const Specsyn::StarData& props, const double feh) const -> std::vector<double>
+    {
+        // Reject only if feh itself can't even be bracketed -- neither
+        // logRt nor logTeff is checked against its own range here,
+        // since the whole point of this function is to search for a
+        // populated (log(R_t), log(Teff)) point regardless of how far
+        // out of range this star's own values start (see this
+        // function's own header comment for why both, not just
+        // log(R_t), are searched).
+        if (feh < FeH_.front() || feh > FeH_.back())
+        {
+            throw std::runtime_error(
+                "SpecsynLibWR::specForce: star with feh = " + std::to_string(feh) +
+                " is entirely outside this library's feh range");
+        }
+
+        // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- StarData is a fixed-size std::array, and every index used here is compile-time-known
+        const double logL = props[static_cast<size_t>(tracks::FieldIdx::logL)];
+        const double logTeff = props[static_cast<size_t>(tracks::FieldIdx::logTe)];
+        // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        const double rawLogRt = computeRawLogRt(props, feh);
+
+        const auto bFeh = findBracket(FeH_, feh);
+        const std::array<std::pair<size_t, double>, 2> fehSides = {{
+            {bFeh.lo_, 1.0 - bFeh.t_}, {bFeh.hi_, bFeh.t_}}};
+
+        // At each of the (up to two) bracketing feh corners, find
+        // whichever populated (log(R_t), log(Teff)) grid point is
+        // closest to this star's own raw values, rescale that point's
+        // own spectrum to this star's luminosity, and blend across feh
+        // corners by the ordinary feh bilinear weight, renormalized by
+        // the sum of weights actually used -- see this function's own
+        // header comment for the full rationale.
+        std::vector<double> result(this->wl_.size(), 0.0);
+        double wSum = 0.0;
+        for (const auto& [f, wgtF] : fehSides)
+        {
+            if (wgtF == 0.0) { continue; } // degenerate axis or exact grid hit: skip a zero-weight corner
+
+            const auto nearest = nearestPopulatedRtTeff(this->grid_, logRt_, logTeff_, f, rawLogRt, logTeff);
+            if (!nearest) { continue; } // this feh corner has no populated grid point at all
+            const auto [r, t] = *nearest;
+
+            wSum += wgtF;
+            const double logLGrid = logLGrid_[f, r, t]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- f, r, t all < the corresponding axis's size by construction
+            const double scale = std::pow(10.0, logL - logLGrid);
+            const auto& spectrum = this->grid_[f, r, t]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
+            for (size_t w = 0; w < result.size(); ++w) { result[w] += wgtF * scale * spectrum[w]; }
+        }
+
+        if (wSum == 0.0)
+        {
+            throw std::runtime_error(
+                "SpecsynLibWR::specForce: no populated (log(R_t), log(Teff)) grid "
+                "point found for feh = " + std::to_string(feh) + ", logTeff = " +
+                std::to_string(logTeff));
+        }
+        for (auto& v : result) { v /= wSum; }
         return result;
     }
 

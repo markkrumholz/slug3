@@ -17,6 +17,7 @@
 #include <cstddef>
 #include <memory>
 #include <numbers>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -106,6 +107,51 @@ namespace specsyn
          */
         [[nodiscard]] virtual auto spec(const StarData& props, double feh) const
         -> std::vector<double> = 0;
+
+        /**
+         * @brief Compute a star's spectrum, forcing a result even if it falls outside this Specsyn's own domain
+         * @param props Stellar properties, as produced by evaluating
+         *   the Interpolator1D returned by Tracks2D::getIsochrone at
+         *   this star's mass
+         * @param feh [Fe/H] value of the star, needed because it is
+         *   not carried by props itself
+         * @return The star's spectrum, evaluated on the wavelength
+         *   grid returned by wl(), in units of erg/s/Angstrom --
+         *   unlike spec(), never a size-0 vector
+         * @throws std::runtime_error if no spectrum can be produced
+         *   for this star even by forcing
+         * @details
+         * Unlike spec(), which may return an empty vector (depending
+         * on OOBPolicy) for a star outside this Specsyn's own domain,
+         * specForce() always either returns a genuine spectrum or
+         * throws. Used by SpecsynLibChained as a last resort on the
+         * last library in a star's own type-specific chain, once
+         * every library in that chain (tried via ordinary spec())
+         * has failed to produce one.
+         *
+         * The default implementation here just calls spec() and
+         * throws if it comes back empty -- appropriate for a Specsyn
+         * (like SpecsynLibWR) whose own spec() already forces a
+         * match internally (e.g. by moving a star to the nearest
+         * populated grid point along one axis) rather than ever
+         * returning empty for a star within its own domain.
+         * SpecsynLibNoWind and SpecsynLibWD override this with a
+         * real forcing mechanism of their own (moving log(g) to the
+         * nearest populated grid value), since their own spec() can
+         * genuinely return empty for a star whose log(g) falls in a
+         * gap ordinary interpolation can't bridge.
+         */
+        [[nodiscard]] virtual auto specForce(const StarData& props, double feh) const
+        -> std::vector<double>
+        {
+            auto result = spec(props, feh);
+            if (result.empty())
+            {
+                throw std::runtime_error(
+                    "Specsyn::specForce: unable to force a spectrum for this star");
+            }
+            return result;
+        }
 
         /**
          * @brief Compute the spectrum of a single star, given its mass and isochrone segment

@@ -36,6 +36,7 @@
 #include <array>
 #include <cstddef>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -414,7 +415,12 @@ static auto testSpecWNLTypeMismatchThrow(const std::string& wnlSpectraName) -> i
 // WRType::WNLH20, hSurf in [0.3, 0.5] gives WRType::WNLH40, and
 // hSurf > 0.5 gives WRType::WNLH60. heSurf = 0.7 and logTeff = 4.7
 // (comfortably inside the WNL heSurf/logTeff window, unrelated to
-// hSurf) are held fixed throughout, so only hSurf varies.
+// hSurf) are held fixed throughout, so only hSurf varies. wnlRanges
+// below stands in for what SpecsynLibChained would normally compute
+// from every chained WNL library's own logTeff() -- {4.6, 4.8} is the
+// actual log_teff range shared by every POWR_WNL_H*_test fixture (see
+// this file's own top-level comment), so this exercises the same gate
+// getWRType applies in real use, not a no-op stand-in.
 static auto testGetWRTypeWNLHBuckets() -> int
 {
     using WRType = specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise>::WRType;
@@ -426,17 +432,76 @@ static auto testGetWRTypeWNLHBuckets() -> int
         { 0.51, WRType::WNLH60 },
         { 1.0,  WRType::WNLH60 },
     }};
+    const std::array<std::pair<double, double>, 3> wnlRanges = {{
+        { 4.6, 4.8 }, { 4.6, 4.8 }, { 4.6, 4.8 },
+    }};
 
     int result = 0;
     for (const auto& [hSurf, expected] : cases)
     {
         const auto props = makeWRStarData(20.0, 5.7, 4.7, 3e-5, 0.7, 0.0, 0.01, hSurf);
         const auto actual =
-            specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise>::getWRType(props);
+            specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise>::getWRType(props, wnlRanges);
         if (actual != expected)
         {
             std::cerr << "testSpecsynLibWR: getWRType(hSurf = " << hSurf
                 << ") returned the wrong WNL subtype\n";
+            result = 1;
+        }
+    }
+    return result;
+}
+
+// Check that a star whose surface composition matches a WNL bucket
+// (heSurf = 0.7, hSurf = 0.4 -> WNLH40) but whose own log(Teff) = 4.08
+// (~12000 K) falls outside that bucket's real grid coverage
+// ({4.6, 4.8} here, standing in for a real WNL grid's own much hotter
+// coverage) correctly falls through to WRType::None rather than being
+// misclassified as WNLH40 -- this is the exact scenario that used to
+// misclassify an ordinary, merely He-enriched evolved star as
+// Wolf-Rayet purely because its composition happened to match, even
+// though no real WNL spectrum exists anywhere near this cool. Also
+// checks that an entirely unknown bucket range (NaN, e.g. because no
+// WNLH20 library was ever chained) has the same effect for an
+// otherwise-in-range star.
+static auto testGetWRTypeOutOfRangeFallsThroughToNone() -> int
+{
+    using WRType = specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise>::WRType;
+    constexpr double nan = std::numeric_limits<double>::quiet_NaN();
+    const std::array<std::pair<double, double>, 3> wnlRanges = {{
+        { 4.6, 4.8 }, { 4.6, 4.8 }, { 4.6, 4.8 },
+    }};
+    const std::array<std::pair<double, double>, 3> unknownH20Range = {{
+        { nan, nan }, { 4.6, 4.8 }, { 4.6, 4.8 },
+    }};
+
+    int result = 0;
+    {
+        const auto props = makeWRStarData(20.0, 5.0, 4.08, 3e-5, 0.7, 0.0, 0.01, 0.4);
+        const auto actual =
+            specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise>::getWRType(props, wnlRanges);
+        if (actual != WRType::None)
+        {
+            std::cerr << "testSpecsynLibWR: getWRType for a WNL-composition star "
+                "whose logTeff falls outside its bucket's own grid should return "
+                "WRType::None, not force a WNL classification\n";
+            result = 1;
+        }
+    }
+    {
+        // logTeff = 4.65 here (not 4.7, as elsewhere in this file):
+        // must stay below the log10(50000) = 4.69897 WNE/WC hot
+        // threshold, or this star would legitimately fall through to
+        // WRType::WNE via that branch instead, defeating the point of
+        // checking that an unknown WNL range alone is what's forcing
+        // WRType::None here.
+        const auto props = makeWRStarData(20.0, 5.7, 4.65, 3e-5, 0.7, 0.0, 0.01, 0.1);
+        const auto actual =
+            specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise>::getWRType(props, unknownH20Range);
+        if (actual != WRType::None)
+        {
+            std::cerr << "testSpecsynLibWR: getWRType for a WNLH20-composition star "
+                "with an unknown (NaN) WNLH20 range should return WRType::None\n";
             result = 1;
         }
     }
@@ -494,6 +559,7 @@ auto testSpecsynLibWR() -> int
     result += testSpecWNLSuccess(wnlH60SpectraName, 0.6, 15000.0, "WNL-H60");
     result += testSpecWNLTypeMismatchThrow(wnlH20SpectraName);
     result += testGetWRTypeWNLHBuckets();
+    result += testGetWRTypeOutOfRangeFallsThroughToNone();
     result += testNWlOnly();
     return result;
 }
