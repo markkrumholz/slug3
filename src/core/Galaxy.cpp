@@ -100,7 +100,10 @@ void core::Galaxy::advance(const double t)
 
 // Sum spec_ (and specExtinct_) over every cluster in clusters_ and
 // disruptedClusters_ -- see this method's own header comment for the
-// null-guards this mirrors from Cluster::computeSpec()
+// null-guards this mirrors from Cluster::computeSpec() -- plus, if
+// fCluster() < 1, the continuously-treated (non-clustered) share of
+// the population's own spectrum, via Specsyn::specCts()'s
+// continuous-population overload
 void core::Galaxy::computeSpec()
 {
     const auto& sc = controls_.get();
@@ -118,6 +121,13 @@ void core::Galaxy::computeSpec()
     };
     sumSpec(clusters_);
     sumSpec(disruptedClusters_);
+
+    const double fCluster = sc.fCluster();
+    if (fCluster < 1.0)
+    {
+        const auto contSpec = synth->specCts(sc.sfr(), sc.imf(), sc.fehDist(), curTime_, fCluster);
+        for (std::size_t i = 0; i < spec_.size(); ++i) { spec_[i] += contSpec[i]; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- contSpec has size wl().size() by Specsyn::specCts()'s own contract, matching spec_'s size set just above
+    }
 
     const auto* ext = sc.extinct();
     if (ext != nullptr)

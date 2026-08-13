@@ -361,6 +361,222 @@ static auto testGalaxyBasics() -> int
     }
 }
 
+// Verify that Galaxy::computeSpec() correctly adds the continuously-
+// treated population's own spectral contribution (via
+// Specsyn::specCts()'s continuous-population overload) when
+// fCluster() < 1. Uses fCluster = 0.0 exactly (entirely continuous, no
+// stochastic clusters at all) so galaxy.spec() is guaranteed to come
+// *entirely* from the new code path, with no cluster-summed
+// contribution to confound it -- clusters()/disruptedClusters() are
+// both checked empty as a sanity check on that premise. inputFile's
+// own stars.FeH = 0.0 (a constant) exercises specCts()'s 2D (time,
+// mass) code path; testContinuousPopSpecMultiFeh below instead
+// overrides it with a real distribution, exercising the 3D (time,
+// feh, mass) path. See testContinuousPopSpecReferenceCheck for a
+// stronger, independent correctness check of the same 2D case (this
+// test only checks the result is finite, non-negative, and non-zero).
+static auto testContinuousPopSpecSingleFeh() -> int
+{
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFile);
+        inputDeck.at_path("clusters").as_table()->insert("f_cluster", 0.0);
+        const io::SimControls controls(inputDeck);
+
+        utils::rng().seed(rngSeed);
+        core::Galaxy galaxy(controls);
+        galaxy.advance(t1);
+
+        if (!galaxy.clusters().empty() || !galaxy.disruptedClusters().empty())
+        {
+            std::cerr << "testGalaxy: continuousPopSpecSingleFeh: test bug: "
+                "expected no stochastic clusters at all with f_cluster = 0\n";
+            return 1;
+        }
+
+        const auto& spec = galaxy.spec();
+        if (spec.size() != controls.specsyn()->wl().size())
+        {
+            std::cerr << "testGalaxy: continuousPopSpecSingleFeh: spec() size "
+                << spec.size() << " does not match wl() size "
+                << controls.specsyn()->wl().size() << "\n";
+            return 1;
+        }
+        double total = 0.0;
+        for (const double v : spec)
+        {
+            if (!std::isfinite(v) || v < 0.0)
+            {
+                std::cerr << "testGalaxy: continuousPopSpecSingleFeh: spec() "
+                    "contains a non-finite or negative value\n";
+                return 1;
+            }
+            total += v;
+        }
+        if (!(total > 0.0))
+        {
+            std::cerr << "testGalaxy: continuousPopSpecSingleFeh: expected a "
+                "non-trivial spectrum from the continuous population, got "
+                "all zeros\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testGalaxy: continuousPopSpecSingleFeh test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Same as testContinuousPopSpecSingleFeh, but overrides stars.FeH with
+// a real (non-degenerate) distribution -- flat over [-1, 0], well
+// within MIST_test's own [-1, 0.5] grid (see
+// tests/tracks/assets/tracks.toml) -- so specCts()'s 3D (time, feh,
+// mass) code path is exercised instead of its 2D one.
+static auto testContinuousPopSpecMultiFeh() -> int
+{
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFile);
+        inputDeck.at_path("clusters").as_table()->insert("f_cluster", 0.0);
+        inputDeck.at_path("stars").as_table()->insert_or_assign(
+            "FeH", "tests/core/assets/testClusterSpecsynFullFeHDist.toml");
+        const io::SimControls controls(inputDeck);
+
+        utils::rng().seed(rngSeed);
+        core::Galaxy galaxy(controls);
+        galaxy.advance(t1);
+
+        if (!galaxy.clusters().empty() || !galaxy.disruptedClusters().empty())
+        {
+            std::cerr << "testGalaxy: continuousPopSpecMultiFeh: test bug: "
+                "expected no stochastic clusters at all with f_cluster = 0\n";
+            return 1;
+        }
+
+        const auto& spec = galaxy.spec();
+        if (spec.size() != controls.specsyn()->wl().size())
+        {
+            std::cerr << "testGalaxy: continuousPopSpecMultiFeh: spec() size "
+                << spec.size() << " does not match wl() size "
+                << controls.specsyn()->wl().size() << "\n";
+            return 1;
+        }
+        double total = 0.0;
+        for (const double v : spec)
+        {
+            if (!std::isfinite(v) || v < 0.0)
+            {
+                std::cerr << "testGalaxy: continuousPopSpecMultiFeh: spec() "
+                    "contains a non-finite or negative value\n";
+                return 1;
+            }
+            total += v;
+        }
+        if (!(total > 0.0))
+        {
+            std::cerr << "testGalaxy: continuousPopSpecMultiFeh: expected a "
+                "non-trivial spectrum from the continuous population, got "
+                "all zeros\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testGalaxy: continuousPopSpecMultiFeh test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Cross-checks the new joint (time, mass) integral -- exercised via
+// testContinuousPopSpecSingleFeh's own scenario (fCluster = 0,
+// constant FeH) -- against an independent brute-force reference: a
+// fixed-step Riemann sum over age, at each step calling the *other*,
+// already-established specCts() overload (single fixed-age isochrone,
+// integrated over mass alone) on that step's own isochrone, weighted
+// by the star-forming mass in that step (sfr().integral() over it),
+// exactly mirroring how a real continuous stellar population's light
+// is built up from stars of many different ages. This doesn't rely on
+// any of the new PDFIntegratorND/isochroneCache_ machinery at all, so
+// close agreement between the two is strong evidence the new code
+// path's own age/mass weighting and isochrone lookups are correct,
+// not just that it runs without crashing (which is all
+// testContinuousPopSpecSingleFeh itself checks).
+static auto testContinuousPopSpecReferenceCheck() -> int
+{
+    constexpr double relTolerance = 0.05; // the brute-force reference has its own O(1/nSteps) discretization error
+    constexpr int nSteps = 400;
+    constexpr double feh = 0.0; // matches inputFile's own stars.FeH
+
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFile);
+        inputDeck.at_path("clusters").as_table()->insert("f_cluster", 0.0);
+        const io::SimControls controls(inputDeck);
+
+        utils::rng().seed(rngSeed);
+        core::Galaxy galaxy(controls);
+        galaxy.advance(t1);
+        const auto& newSpec = galaxy.spec();
+
+        const auto* synth = controls.specsyn();
+        const auto& tracks2D = controls.tracks2D();
+        const auto& imf = controls.imf();
+        const auto& sfr = controls.sfr();
+
+        std::vector<double> refSpec(synth->wl().size(), 0.0);
+        const double dt = t1 / nSteps;
+        for (int i = 0; i < nSteps; ++i)
+        {
+            const double tLo = i * dt;
+            const double tHi = (i + 1) * dt;
+            const double mStep = sfr.integral(tLo, tHi);
+            if (mStep <= 0.0) { continue; }
+
+            const double age = t1 - (0.5 * (tLo + tHi));
+            const double logAge = std::max(std::log10(age), tracks2D.logTMin());
+            const auto isochrone = tracks2D.getIsochrone(logAge);
+
+            const auto stepSpec = synth->specCts(
+                isochrone, imf, mStep, imf.getMin(), imf.getMax(), feh);
+            for (std::size_t k = 0; k < refSpec.size(); ++k) { refSpec.at(k) += stepSpec.at(k); }
+        }
+
+        double newTotal = 0.0;
+        double refTotal = 0.0;
+        for (std::size_t k = 0; k < newSpec.size(); ++k)
+        {
+            newTotal += newSpec.at(k);
+            refTotal += refSpec.at(k);
+        }
+        if (!(refTotal > 0.0))
+        {
+            std::cerr << "testGalaxy: continuousPopSpecReferenceCheck: test bug: "
+                "brute-force reference spectrum is all zeros\n";
+            return 1;
+        }
+        if (std::abs(newTotal - refTotal) > relTolerance * refTotal)
+        {
+            std::cerr << "testGalaxy: continuousPopSpecReferenceCheck: total "
+                "flux from the new joint integral (" << newTotal << ") deviates "
+                "from the brute-force per-age reference (" << refTotal <<
+                ") by more than " << relTolerance * 100 << "%\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testGalaxy: continuousPopSpecReferenceCheck test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
 // Verify that Galaxy::advance() correctly incorporates
 // SimControls::fCluster() into its own mass accounting: with
 // fCluster < 1, only fCluster of the target stellar mass should be
@@ -444,6 +660,9 @@ auto testGalaxy() -> int
 {
     int result = testGalaxyBasics();
     result += testFCluster();
+    result += testContinuousPopSpecSingleFeh();
+    result += testContinuousPopSpecMultiFeh();
+    result += testContinuousPopSpecReferenceCheck();
 
     try
     {

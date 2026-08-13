@@ -15,6 +15,8 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <map>
+#include <mdspan> // NOLINT(misc-include-cleaner) -- see the identical NOLINT on SpecsynLibWR.hpp's own <mdspan> include
 #include <memory>
 #include <numbers>
 #include <stdexcept>
@@ -252,6 +254,82 @@ namespace specsyn
         ) const -> std::vector<double>;
 
         /**
+         * @brief Compute the integrated spectrum of a continuously-formed stellar population
+         * @param sfr Star formation rate, in Msun/yr, as a function of
+         *   time (see io::SimControls::sfr()) -- unlike a strictly
+         *   normalized probability density, integrating this over a
+         *   time range gives the actual stellar mass (in Msun) formed
+         *   over that range, matching how io::SimControls::sfr() is
+         *   already used elsewhere (e.g. Galaxy::advance())
+         * @param imf The initial mass function of the population
+         * @param fehDist The [Fe/H] distribution of the population
+         * @param curTime The current time, in yr; star formation is
+         *   integrated from 0 to curTime
+         * @param fCluster The fraction of star-forming mass treated
+         *   stochastically, in individual Cluster objects (see
+         *   io::SimControls::fCluster()); the result is scaled by
+         *   (1 - fCluster), the remaining continuously-treated share
+         * @return The specific luminosity of the continuously-formed
+         *   population, evaluated on the wavelength grid returned by
+         *   wl(), in units of erg/s/Angstrom
+         * @details
+         * Computes the integrated spectrum from a stellar population
+         * that is continuously distributed in age from 0 to curTime,
+         * in mass over imf, and in metallicity over fehDist -- unlike
+         * the other specCts() overload, which integrates a single
+         * fixed-age isochrone over mass alone, this one integrates
+         * over age (equivalently, formation time) and metallicity as
+         * well, so a different isochrone applies at different points
+         * in the integration domain, computed on demand and cached in
+         * isochroneCache_ (cleared again once this integral finishes).
+         *
+         * Called by Galaxy::computeSpec() when fCluster() < 1, to
+         * cover the star-forming mass Galaxy's own individual Cluster
+         * objects don't -- see io::SimControls::fCluster()'s own
+         * comment.
+         *
+         * Uses a single PDFIntegratorND evaluation, either 2D (time,
+         * mass), weighted by (sfr, imf), if fehDist is degenerate
+         * (fehDist.getMin() == fehDist.getMax(), a single metallicity
+         * shared by every star), or 3D (time, feh, mass), weighted by
+         * (sfr, fehDist, imf), otherwise -- a genuine multi-dimensional
+         * integral, rather than nested 1D integrals, so the underlying
+         * cubature routine can refine wherever in the full joint domain
+         * it needs to in order to hit its own target accuracy, instead
+         * of a fixed, uniform refinement in each dimension separately.
+         * Uses CubatureMethod::pAdaptive specifically because the
+         * integrand's own dominant cost -- building an isochrone at a
+         * given (age, feh) -- is shareable across every mass evaluated
+         * at that same (age, feh): pAdaptive's nested-quadrature point
+         * cache guarantees every batch of points continuousSpecIntegrand()
+         * receives shares the same time coordinate (see its own
+         * comment), letting isochroneCache_ hit on every reuse.
+         *
+         * The time dimension is deliberately not log-transformed, even
+         * though the mass dimension is: the integral's own lower time
+         * bound is always exactly 0 (star formation begins at the
+         * start of the simulation), and sfr's own domain -- for the
+         * common constant-SFR case (see io::SimControls's own
+         * buildConstantSFR()) -- already starts at 0 too, so after
+         * PDFIntegratorND::integrate()'s own clamp to sfr's support,
+         * the log-transformed lower bound would be exactly log(0),
+         * which PDFIntegratorND::integrate() rejects outright.
+         *
+         * As with the other specCts() overload, the actual quantity
+         * integrated is lambda * dL/dlambda (via continuousSpecIntegrand(),
+         * which mirrors specWl()'s own multiplication), undone by
+         * dividing back out by wl_ elementwise once the integral
+         * itself is complete, before scaling by (1 - fCluster).
+         */
+        [[nodiscard]] auto specCts(
+            const pdfs::PDF& sfr,
+            const pdfs::PDF& imf,
+            const pdfs::PDF& fehDist,
+            double curTime,
+            double fCluster
+        ) const -> std::vector<double>;
+
+        /**
          * @brief Return the relative tolerance for PDF integration
          * @return Relative tolerance passed to PDFIntegrator, read live from controls_
          */
@@ -323,6 +401,78 @@ namespace specsyn
         const io::SimControls& controls_; // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members) -- deliberately a live reference, not a copy: see this member's own comment for why (controls_'s own tolerances/redshift must be readable live, not snapshotted). This class is only ever used through the same non-copyable, non-movable ownership pattern (unique_ptr in SimControls's own specsyn_) as every other class with a reference member in this codebase (e.g. SpecsynLibNoWind's FeH_/logg_/logTeff_), so the usual objection (disabling implicit copy/move assignment) doesn't apply in practice.
 
         std::vector<double> wl_;     /**< Wavelength grid for the spectral synthesizer, in Angstrom */
+
+    private:
+
+        /**
+         * @brief The vectorized integrand for the continuous-population specCts() overload
+         * @tparam Ndim Dimensionality of the integral this is being
+         *   used for -- 2 (time, mass) or 3 (time, feh, mass); see
+         *   specCts()'s own comment for when each applies
+         * @param points An (npts, Ndim) view of the points to evaluate,
+         *   as handed by PDFIntegratorND's own vectorized (pAdaptive)
+         *   interface: points[i, 0] is the i-th point's time
+         *   coordinate, points[i, Ndim - 1] its mass coordinate, and
+         *   (if Ndim == 3) points[i, 1] its [Fe/H] coordinate
+         * @param cache The calling specCts() call's own isochroneCache_,
+         *   passed by reference (rather than read via *this directly)
+         *   so this stays a plain function of its own explicit
+         *   arguments, matching PDFIntegratorND's own vectorized F
+         *   contract
+         * @param curTime The current time, in yr, passed through from
+         *   specCts() unchanged -- needed to convert each point's own
+         *   time coordinate into an age (curTime - time) for isochrone
+         *   lookup, since PDFIntegratorND has no notion of this
+         *   function's own caller-side context beyond its arguments
+         * @return npts * wl_.size() values of lambda * dL/dlambda (see
+         *   specWl()), laid out as result[i * wl_.size() + k] for the
+         *   k-th wavelength of the i-th point -- the layout
+         *   PDFIntegratorND's own vectorized interface requires
+         * @details
+         * For each of the (up to npts) distinct (age, feh) pairs
+         * represented in points (age computed from each point's own
+         * time coordinate; feh taken directly from points if Ndim == 3,
+         * or from controls_.fehDist().getMin() if Ndim == 2, where
+         * fehDist is necessarily degenerate -- see specCts()'s own
+         * comment), builds (or reuses, from cache) the isochrone at
+         * that (age, feh) via controls_.tracks().getIsochrone(),
+         * flooring log(age) at controls_.tracks().logTMin() first (as
+         * Cluster::advance() already does) to avoid taking log(0) for
+         * a point landing exactly at age == 0. Then, for each point,
+         * finds whichever of that point's own cached isochrone's
+         * segments (if any) contains its mass coordinate -- if none
+         * does, that point represents a star already dead at this age,
+         * so its own npts row is left at zero -- and evaluates
+         * specWl() at that point's own (mass, segment, feh) otherwise.
+         *
+         * Deliberately does not clear cache itself: a single specCts()
+         * integral typically calls this function many times (once per
+         * cubature refinement step), and cache is meant to accumulate
+         * isochrones across all of them, only cleared by specCts()
+         * itself once the whole integral is done.
+         */
+        template <std::size_t Ndim>
+        [[nodiscard]] auto continuousSpecIntegrand(
+            std::mdspan<double, std::extents<std::size_t, std::dynamic_extent, Ndim>> points, // NOLINT(misc-include-cleaner) -- see the identical NOLINT on the <mdspan> include above
+            std::map<std::pair<double, double>, Isochrone>& cache,
+            double curTime) const -> std::vector<double>;
+
+        /**
+         * @brief Cache of isochrones built while evaluating the continuous-population specCts() overload
+         * @details
+         * Keyed by (age, feh) -- see continuousSpecIntegrand()'s own
+         * comment for how each entry is built and reused. Always empty
+         * outside of a specCts(sfr, imf, fehDist, curTime, fCluster)
+         * call: populated as needed during that call, then cleared
+         * again once it returns. Never wrapped for thread safety (e.g.
+         * in a ThreadVec), since a single Specsyn is never evaluated
+         * from more than one thread at a time in practice (a Galaxy,
+         * and the Specsyn it reads from SimControls, are never shared
+         * across threads). Declared mutable so specCts() -- a const
+         * method, like every other Specsyn method that touches
+         * controls_ -- can still populate and clear it.
+         */
+        mutable std::map<std::pair<double, double>, Isochrone> isochroneCache_;
     };
 
 } // namespace specsyn
