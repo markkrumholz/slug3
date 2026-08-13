@@ -100,10 +100,11 @@ void core::Galaxy::advance(const double t)
 
 // Sum spec_ (and specExtinct_) over every cluster in clusters_ and
 // disruptedClusters_ -- see this method's own header comment for the
-// null-guards this mirrors from Cluster::computeSpec() -- plus, if
-// fCluster() < 1, the continuously-treated (non-clustered) share of
-// the population's own spectrum, via Specsyn::specCts()'s
-// continuous-population overload
+// null-guards this mirrors from Cluster::computeSpec() -- then, if
+// fCluster() < 1, add the continuously-treated (non-clustered) share
+// of the population's own spectrum (via Specsyn::specCts()'s
+// continuous-population overload) to both, unattenuated in
+// specExtinct_'s own case -- see that block's own comment for why
 void core::Galaxy::computeSpec()
 {
     const auto& sc = controls_.get();
@@ -122,13 +123,6 @@ void core::Galaxy::computeSpec()
     sumSpec(clusters_);
     sumSpec(disruptedClusters_);
 
-    const double fCluster = sc.fCluster();
-    if (fCluster < 1.0)
-    {
-        const auto contSpec = synth->specCts(sc.sfr(), sc.imf(), sc.fehDist(), curTime_, fCluster);
-        for (std::size_t i = 0; i < spec_.size(); ++i) { spec_[i] += contSpec[i]; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- contSpec has size wl().size() by Specsyn::specCts()'s own contract, matching spec_'s size set just above
-    }
-
     const auto* ext = sc.extinct();
     if (ext != nullptr)
     {
@@ -143,6 +137,30 @@ void core::Galaxy::computeSpec()
         };
         sumSpecExtinct(clusters_);
         sumSpecExtinct(disruptedClusters_);
+    }
+
+    // Add the continuously-treated (non-clustered) share of the
+    // population's own spectrum, if any, to both spec_ and (if an
+    // extinction curve was requested) specExtinct_ -- unlike a bound
+    // cluster, which draws its own A_V, the continuous/field
+    // population is assumed negligibly extincted, so its own light
+    // passes into specExtinct_ unattenuated
+    const double fCluster = sc.fCluster();
+    if (fCluster < 1.0)
+    {
+        const auto contSpec = synth->specCts(sc.sfr(), sc.imf(), sc.fehDist(), curTime_, fCluster);
+        for (std::size_t i = 0; i < spec_.size(); ++i) { spec_[i] += contSpec[i]; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- contSpec has size wl().size() by Specsyn::specCts()'s own contract, matching spec_'s size set just above
+        if (ext != nullptr)
+        {
+            // specExtinct_ sits on ext->wl(), a possibly-narrower,
+            // offset window of spec_'s own wavelength grid (see
+            // Extinct::applyExtinction()'s own wlOffset_ comment) --
+            // specExtinct_[i] lines up with contSpec[wlOffset + i], not
+            // contSpec[i], and (per this function's own comment) gets
+            // no exp(-A_V * extinct()) attenuation of its own.
+            const auto wlOffset = ext->wlOffset();
+            for (std::size_t i = 0; i < specExtinct_.size(); ++i) { specExtinct_[i] += contSpec[wlOffset + i]; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- specExtinct_.size() == wl_.size() <= contSpec.size() - wlOffset by Extinct's own constructor contract (wl_ is a sub-window of the wl originally passed to it, which matches contSpec's own grid)
+        }
     }
 }
 

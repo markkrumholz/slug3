@@ -420,6 +420,39 @@ static auto testContinuousPopSpecSingleFeh() -> int
                 "all zeros\n";
             return 1;
         }
+
+        // With clusters()/disruptedClusters() both empty, specExtinct()
+        // comes entirely from the continuous population's own
+        // (unattenuated) contribution -- see Galaxy::computeSpec()'s own
+        // comment for why -- so specExtinct()[i] should exactly equal
+        // spec()[wlOffset + i], the same underlying contSpec value at the
+        // same wavelength, just offset by however many of spec()'s own
+        // leading elements fall outside the extinction curve's own
+        // narrower coverage (see Extinct::wlOffset()'s own comment).
+        const auto wlOffset = controls.extinct()->wlOffset();
+        const auto& specExtinct = galaxy.specExtinct();
+        if (specExtinct.size() != controls.extinct()->wl().size())
+        {
+            std::cerr << "testGalaxy: continuousPopSpecSingleFeh: specExtinct() "
+                "size does not match extinct()->wl() size\n";
+            return 1;
+        }
+        for (std::size_t i = 0; i < specExtinct.size(); ++i)
+        {
+            if (specExtinct.at(i) != spec.at(wlOffset + i))
+            {
+                std::cerr << "testGalaxy: continuousPopSpecSingleFeh: "
+                    "specExtinct()[" << i << "] does not exactly equal "
+                    "spec()[" << (wlOffset + i) << "]\n";
+                return 1;
+            }
+        }
+        if (galaxy.phot().empty() || galaxy.photExtinct().empty())
+        {
+            std::cerr << "testGalaxy: continuousPopSpecSingleFeh: expected "
+                "non-empty phot() and photExtinct()\n";
+            return 1;
+        }
     }
     catch (const std::exception& error)
     {
@@ -480,6 +513,33 @@ static auto testContinuousPopSpecMultiFeh() -> int
             std::cerr << "testGalaxy: continuousPopSpecMultiFeh: expected a "
                 "non-trivial spectrum from the continuous population, got "
                 "all zeros\n";
+            return 1;
+        }
+
+        // See testContinuousPopSpecSingleFeh's own identical check for why
+        // specExtinct()[i] should exactly equal spec()[wlOffset + i] here.
+        const auto wlOffset = controls.extinct()->wlOffset();
+        const auto& specExtinct = galaxy.specExtinct();
+        if (specExtinct.size() != controls.extinct()->wl().size())
+        {
+            std::cerr << "testGalaxy: continuousPopSpecMultiFeh: specExtinct() "
+                "size does not match extinct()->wl() size\n";
+            return 1;
+        }
+        for (std::size_t i = 0; i < specExtinct.size(); ++i)
+        {
+            if (specExtinct.at(i) != spec.at(wlOffset + i))
+            {
+                std::cerr << "testGalaxy: continuousPopSpecMultiFeh: "
+                    "specExtinct()[" << i << "] does not exactly equal "
+                    "spec()[" << (wlOffset + i) << "]\n";
+                return 1;
+            }
+        }
+        if (galaxy.phot().empty() || galaxy.photExtinct().empty())
+        {
+            std::cerr << "testGalaxy: continuousPopSpecMultiFeh: expected "
+                "non-empty phot() and photExtinct()\n";
             return 1;
         }
     }
