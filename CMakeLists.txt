@@ -150,6 +150,7 @@ add_executable(slugTestPDFs
     src/utils/ParseUtils.cpp
     tests/pdfs/testPDF.cpp
     tests/pdfs/testPDFAll.cpp
+    tests/pdfs/testPDFReflect.cpp
     tests/pdfs/testPDFSegmentPowerlaw.cpp
     tests/pdfs/testPDFSegmentSchechter.cpp
 )
