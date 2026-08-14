@@ -13,6 +13,7 @@
 #include "Specsyn.hpp"
 #include "../io/SimControls.hpp"
 #include "../pdfs/PDF.hpp"
+#include "../tracks/TrackCommons.hpp"
 #include "../tracks/Tracks3D.hpp"
 #include "../utils/Constants.hpp"
 #include "../utils/PDFIntegratorND.hpp"
@@ -103,12 +104,14 @@ template <std::size_t Ndim>
 auto specsyn::Specsyn::continuousSpecIntegrand(
     const std::mdspan<double, std::extents<std::size_t, std::dynamic_extent, Ndim>> points, // NOLINT(misc-include-cleaner) -- see the identical NOLINT on the <mdspan> include above
     std::map<std::pair<double, double>, Isochrone>& cache,
-    const double curTime
+    const double curTime,
+    const bool computeLbol
 ) const -> std::vector<double>
 {
     static_assert(Ndim == 2 || Ndim == 3, "continuousSpecIntegrand only supports Ndim == 2 or 3");
 
     const std::size_t npts = points.extent(0);
+    const std::size_t nPerPoint = wl_.size() + (computeLbol ? 1 : 0);
 
     // Step 1: find the unique (age, feh) pairs represented in points --
     // age = curTime - (each point's own time coordinate, column 0);
@@ -141,11 +144,15 @@ auto specsyn::Specsyn::continuousSpecIntegrand(
     // Step 3: evaluate each point's own spectrum -- lambda *
     // dL/dlambda (via specWl()), matching the other specCts()
     // overload's own convention -- against its own cached isochrone,
-    // leaving a point's row at zero if its own mass falls in none of
-    // that isochrone's segments (a star already dead at this age)
-    std::vector<double> resultFlat(npts * wl_.size(), 0.0);
+    // leaving a point's row at zero (Lbol element included, if
+    // present) if its own mass falls in none of that isochrone's
+    // segments (a star already dead at this age); if computeLbol, also
+    // evaluates that same (mass, segment) directly to read off the
+    // star's own bolometric luminosity, storing it as the row's final
+    // element (see this function's own header comment for both)
+    std::vector<double> resultFlat(npts * nPerPoint, 0.0);
     const std::mdspan<double, std::extents<std::size_t, std::dynamic_extent, std::dynamic_extent>> // NOLINT(misc-include-cleaner) -- see the identical NOLINT on the <mdspan> include above
-        resultView(resultFlat.data(), npts, wl_.size());
+        resultView(resultFlat.data(), npts, nPerPoint);
     for (std::size_t i = 0; i < npts; ++i)
     {
         const double age = curTime - points[i, 0]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i < npts == points.extent(0) by the loop bound
@@ -167,20 +174,106 @@ auto specsyn::Specsyn::continuousSpecIntegrand(
         {
             resultView[i, k] = starSpecWl[k]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- starSpecWl has size wl_.size() by specWl()'s own contract, matching k's own loop bound
         }
+        if (computeLbol)
+        {
+            const auto props = (*seg)(mass);
+            const double logL = props[static_cast<std::size_t>(tracks::FieldIdx::logL)]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- StarData is a fixed-size std::array, and logL is one of its compile-time-known indices
+            // erg/s, not Lsun, despite Cluster::lbol()'s own Lsun
+            // convention: specCtsHelper()'s own absolute tolerance is
+            // in erg/s (like the spectral elements), so a Lbol value
+            // of order unity (Lsun) would look converged to that
+            // tolerance immediately, regardless of its actual
+            // accuracy -- specCtsHelper() itself divides this back
+            // down to Lsun once the integral is done.
+            resultView[i, wl_.size()] = std::pow(10.0, logL) * utils::Lsun;
+        }
     }
     return resultFlat;
 }
 
-// Explicit instantiation for the two dimensionalities specCts() ever
-// uses this with (2: time+mass, single feh; 3: time+feh+mass) --
+// Explicit instantiation for the two dimensionalities specCtsHelper()
+// ever uses this with (2: time+mass, single feh; 3: time+feh+mass) --
 // keeps this template's implementation in this .cpp file, as with
 // every other template class/method in src/specsyn.
 template auto specsyn::Specsyn::continuousSpecIntegrand<2>(
     std::mdspan<double, std::extents<std::size_t, std::dynamic_extent, 2>>,
-    std::map<std::pair<double, double>, Isochrone>&, double) const -> std::vector<double>;
+    std::map<std::pair<double, double>, Isochrone>&, double, bool) const -> std::vector<double>;
 template auto specsyn::Specsyn::continuousSpecIntegrand<3>(
     std::mdspan<double, std::extents<std::size_t, std::dynamic_extent, 3>>,
-    std::map<std::pair<double, double>, Isochrone>&, double) const -> std::vector<double>;
+    std::map<std::pair<double, double>, Isochrone>&, double, bool) const -> std::vector<double>;
+
+auto specsyn::Specsyn::specCtsHelper(
+    const pdfs::PDF& sfr,
+    const pdfs::PDF& imf,
+    const pdfs::PDF& fehDist,
+    const double curTime,
+    const double fCluster,
+    const bool computeLbol
+) const -> std::vector<double>
+{
+    // See specCts()'s own header comment for why the time dimension is
+    // never log-transformed (its lower bound is always exactly 0),
+    // while the mass dimension always is.
+    const bool singleFeh = (fehDist.getMin() == fehDist.getMax());
+    const double absTol = intAbsTol() * utils::Lsun * sfr.integral(0.0, curTime);
+    const auto nInt = static_cast<unsigned>(wl_.size()) + (computeLbol ? 1U : 0U);
+
+    std::vector<double> result;
+    if (singleFeh)
+    {
+        using IntegrandFn = std::vector<double> (Specsyn::*)(
+            std::mdspan<double, std::extents<std::size_t, std::dynamic_extent, 2>>,
+            std::map<std::pair<double, double>, Isochrone>&, double, bool) const;
+        const utils::PDFIntegratorND<IntegrandFn, 2, true, utils::CubatureMethod::pAdaptive> integrator(
+            std::array<std::reference_wrapper<const pdfs::PDF>, 2>{ std::cref(sfr), std::cref(imf) },
+            static_cast<IntegrandFn>(&Specsyn::continuousSpecIntegrand<2>),
+            nInt,
+            std::array<bool, 2>{ false, true },
+            intMaxIter(), absTol, intRelTol());
+        result = integrator.integrate(
+            std::array<double, 2>{ 0.0, imf.getMin() },
+            std::array<double, 2>{ curTime, imf.getMax() },
+            *this, isochroneCache_, curTime, computeLbol);
+    }
+    else
+    {
+        using IntegrandFn = std::vector<double> (Specsyn::*)(
+            std::mdspan<double, std::extents<std::size_t, std::dynamic_extent, 3>>,
+            std::map<std::pair<double, double>, Isochrone>&, double, bool) const;
+        const utils::PDFIntegratorND<IntegrandFn, 3, true, utils::CubatureMethod::pAdaptive> integrator(
+            std::array<std::reference_wrapper<const pdfs::PDF>, 3>{
+                std::cref(sfr), std::cref(fehDist), std::cref(imf) },
+            static_cast<IntegrandFn>(&Specsyn::continuousSpecIntegrand<3>),
+            nInt,
+            std::array<bool, 3>{ false, false, true },
+            intMaxIter(), absTol, intRelTol());
+        result = integrator.integrate(
+            std::array<double, 3>{ 0.0, fehDist.getMin(), imf.getMin() },
+            std::array<double, 3>{ curTime, fehDist.getMax(), imf.getMax() },
+            *this, isochroneCache_, curTime, computeLbol);
+    }
+
+    // Undo continuousSpecIntegrand()'s own lambda * dL/dlambda
+    // weighting over the spectral elements alone (the trailing Lbol
+    // element, if present, is a genuine luminosity already, not a
+    // lambda-weighted flux, so it's excluded from this division), and
+    // scale everything -- spectrum and Lbol alike -- by (1 - fCluster)
+    // for the continuously-treated share of the population.
+    for (std::size_t i = 0; i < wl_.size(); ++i)
+    {
+        result[i] = result[i] * (1.0 - fCluster) / wl_[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- wl_.size() <= result.size() by construction (result.size() == wl_.size() + computeLbol), and i is bounded by wl_.size()
+    }
+    if (computeLbol)
+    {
+        // continuousSpecIntegrand() reports Lbol in erg/s, not Lsun --
+        // see its own comment for why -- so convert back to Lsun here,
+        // matching Cluster::lbol()'s own units, alongside the same
+        // (1 - fCluster) scaling every other element gets.
+        result[wl_.size()] *= (1.0 - fCluster) / utils::Lsun; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- result.size() == wl_.size() + 1 when computeLbol is true, by construction
+    }
+    isochroneCache_.clear();
+    return result;
+}
 
 auto specsyn::Specsyn::specCts(
     const pdfs::PDF& sfr,
@@ -190,54 +283,19 @@ auto specsyn::Specsyn::specCts(
     const double fCluster
 ) const -> std::vector<double>
 {
-    // See this overload's own header comment for why the time
-    // dimension is never log-transformed (its lower bound is always
-    // exactly 0), while the mass dimension always is.
-    const bool singleFeh = (fehDist.getMin() == fehDist.getMax());
-    const double absTol = intAbsTol() * utils::Lsun * sfr.integral(0.0, curTime);
+    return specCtsHelper(sfr, imf, fehDist, curTime, fCluster, false);
+}
 
-    std::vector<double> result;
-    if (singleFeh)
-    {
-        using IntegrandFn = std::vector<double> (Specsyn::*)(
-            std::mdspan<double, std::extents<std::size_t, std::dynamic_extent, 2>>,
-            std::map<std::pair<double, double>, Isochrone>&, double) const;
-        const utils::PDFIntegratorND<IntegrandFn, 2, true, utils::CubatureMethod::pAdaptive> integrator(
-            std::array<std::reference_wrapper<const pdfs::PDF>, 2>{ std::cref(sfr), std::cref(imf) },
-            static_cast<IntegrandFn>(&Specsyn::continuousSpecIntegrand<2>),
-            static_cast<unsigned>(wl_.size()),
-            std::array<bool, 2>{ false, true },
-            intMaxIter(), absTol, intRelTol());
-        result = integrator.integrate(
-            std::array<double, 2>{ 0.0, imf.getMin() },
-            std::array<double, 2>{ curTime, imf.getMax() },
-            *this, isochroneCache_, curTime);
-    }
-    else
-    {
-        using IntegrandFn = std::vector<double> (Specsyn::*)(
-            std::mdspan<double, std::extents<std::size_t, std::dynamic_extent, 3>>,
-            std::map<std::pair<double, double>, Isochrone>&, double) const;
-        const utils::PDFIntegratorND<IntegrandFn, 3, true, utils::CubatureMethod::pAdaptive> integrator(
-            std::array<std::reference_wrapper<const pdfs::PDF>, 3>{
-                std::cref(sfr), std::cref(fehDist), std::cref(imf) },
-            static_cast<IntegrandFn>(&Specsyn::continuousSpecIntegrand<3>),
-            static_cast<unsigned>(wl_.size()),
-            std::array<bool, 3>{ false, false, true },
-            intMaxIter(), absTol, intRelTol());
-        result = integrator.integrate(
-            std::array<double, 3>{ 0.0, fehDist.getMin(), imf.getMin() },
-            std::array<double, 3>{ curTime, fehDist.getMax(), imf.getMax() },
-            *this, isochroneCache_, curTime);
-    }
-
-    // Undo continuousSpecIntegrand()'s own lambda * dL/dlambda
-    // weighting, and scale by (1 - fCluster) for the continuously-
-    // treated share of the population.
-    for (std::size_t i = 0; i < result.size(); ++i)
-    {
-        result[i] = result[i] * (1.0 - fCluster) / wl_[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- wl_ has the same size as result (both sized to wl_.size()), and i is bounded by result.size()
-    }
-    isochroneCache_.clear();
-    return result;
+auto specsyn::Specsyn::specAndLbolCts(
+    const pdfs::PDF& sfr,
+    const pdfs::PDF& imf,
+    const pdfs::PDF& fehDist,
+    const double curTime,
+    const double fCluster
+) const -> std::pair<std::vector<double>, double>
+{
+    auto spec = specCtsHelper(sfr, imf, fehDist, curTime, fCluster, true);
+    const double lBol = spec.back();
+    spec.pop_back();
+    return { std::move(spec), lBol };
 }

@@ -213,11 +213,12 @@ namespace core
          * clusters() and disruptedClusters()) to t, moves any cluster
          * that disrupted during this step from clusters() to
          * disruptedClusters(), then marks spec_/specExtinct_/phot_/
-         * photExtinct_/lbol_ as stale (see specCurrent_/photCurrent_/
-         * lbolCurrent_'s own comments) rather than recomputing them
-         * itself -- they are instead recomputed lazily, on demand, the
-         * next time spec()/specExtinct()/phot()/photExtinct()/lbol() is
-         * actually called -- before finally updating curTime() to t.
+         * photExtinct_/lbol_/lbolCts_ as stale (see specCurrent_/
+         * photCurrent_/lbolCurrent_/lbolCtsCurrent_'s own comments)
+         * rather than recomputing them itself -- they are instead
+         * recomputed lazily, on demand, the next time spec()/
+         * specExtinct()/phot()/photExtinct()/lbol() is actually called
+         * -- before finally updating curTime() to t.
          */
         void advance(double t);
 
@@ -260,6 +261,43 @@ namespace core
         bool lbolCurrent_ = true;
 
         /**
+         * @brief The continuous population's own bolometric luminosity, in Lsun (matching lbol_'s own units)
+         * @details
+         * Set by computeSpec() whenever it computes a spectrum via
+         * Specsyn::specAndLbolCts() rather than plain specCts() (see
+         * lbolCtsCurrent_'s own comment for when that happens), as a
+         * byproduct of that same integral rather than a separate one
+         * -- see specAndLbolCts()'s own comment for why. Read by
+         * computeLbol(), which adds it into lbol_ when
+         * lbolCtsCurrent_ is true. Stays 0 whenever it was never set
+         * this way (fCluster() == 1, no spectral synthesizer, or Lbol
+         * was computed via the standalone computeLbolCts() path
+         * instead -- see lbolCtsCurrent_'s own comment).
+         */
+        double lbolCts_ = 0.0;
+
+        /**
+         * @brief Whether lbolCts_ is current as of curTime_
+         * @details
+         * Unlike specCurrent_/photCurrent_/lbolCurrent_ (all true at
+         * construction, since there is nothing yet to be stale), starts
+         * false: lbolCts_ itself starts at 0, which is both the
+         * "nothing computed yet" value and a value computeLbol() must
+         * not blindly trust without this flag. Set true by
+         * computeSpec() only when it actually took the
+         * Specsyn::specAndLbolCts() path (SimControls::computeLbol()
+         * true and fCluster() < 1); set false at the end of every
+         * advance() call, alongside specCurrent_/photCurrent_/
+         * lbolCurrent_. computeLbol() checks this before trusting
+         * lbolCts_: if false when Lbol is still wanted (Lbol requested
+         * but no spectrum was computed this step, e.g. only lbol() was
+         * called, not spec()), it instead falls back to the standalone
+         * computeLbolCts() path -- not yet implemented, so that branch
+         * is presently a no-op.
+         */
+        bool lbolCtsCurrent_ = false;
+
+        /**
          * @brief Simulation controls (physics and control-flow settings) this galaxy was built from
          * @details
          * See Cluster::controls_'s own comment: read live wherever a
@@ -279,6 +317,18 @@ namespace core
          * computed, if not already current); if SimControls::extinct()
          * is also non-null, also sets specExtinct_ to the sum of
          * specExtinct() over the same clusters.
+         *
+         * If fCluster() < 1, then adds the continuous population's own
+         * contribution to both spec_ and (if extinct() is non-null)
+         * specExtinct_ -- see the implementation's own comment for why
+         * specExtinct_'s own share goes in unattenuated, and at an
+         * offset from spec_'s own. Gets this contribution via
+         * Specsyn::specAndLbolCts() rather than plain specCts() -- also
+         * setting lbolCts_/lbolCtsCurrent_ from its own second return
+         * value -- whenever SimControls::computeLbol() is true, so Lbol
+         * comes along for free from the same integral; via plain
+         * specCts() otherwise, leaving lbolCts_/lbolCtsCurrent_
+         * untouched.
          */
         void computeSpec();
 
@@ -296,14 +346,27 @@ namespace core
         void computePhot();
 
         /**
-         * @brief Update lbol_ from the current cluster population
+         * @brief Update lbol_ from the current cluster population (and, if current, the continuous population)
          * @details
          * Does nothing if SimControls::computeLbol() is false (Lbol was
          * never requested), mirroring Cluster::computeLbol()'s own
          * null-guard. Otherwise sets lbol_ to the sum of lbol() over
          * every cluster in clusters_ and disruptedClusters_ (forcing
          * each cluster's own Lbol to be computed, if not already
-         * current).
+         * current), plus lbolCts_ if lbolCtsCurrent_ is true (i.e.
+         * computeSpec() already computed it this step, as a byproduct
+         * of computing spec() -- see lbolCtsCurrent_'s own comment).
+         *
+         * If lbolCtsCurrent_ is instead false -- Lbol was requested,
+         * fCluster() < 1, but computeSpec() hasn't run since the last
+         * advance() (e.g. a caller asked for lbol() without ever
+         * asking for spec()) -- the continuous population's own Lbol
+         * still needs computing, but not by paying for a full spectrum
+         * it was never asked for; this is exactly what the standalone
+         * Specsyn::computeLbolCts()-based path (not yet implemented) is
+         * for, so that branch is presently a no-op, leaving the
+         * continuous population's own Lbol share missing from lbol()
+         * in this specific case until it exists.
          */
         void computeLbol();
 

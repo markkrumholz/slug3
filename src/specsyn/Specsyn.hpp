@@ -320,6 +320,11 @@ namespace specsyn
          * which mirrors specWl()'s own multiplication), undone by
          * dividing back out by wl_ elementwise once the integral
          * itself is complete, before scaling by (1 - fCluster).
+         *
+         * A thin wrapper over specCtsHelper() (computeLbol = false) --
+         * see specAndLbolCts() for the sibling that also returns the
+         * same population's bolometric luminosity, computed alongside
+         * the spectrum in the same integral rather than a second one.
          */
         [[nodiscard]] auto specCts(
             const pdfs::PDF& sfr,
@@ -328,6 +333,42 @@ namespace specsyn
             double curTime,
             double fCluster
         ) const -> std::vector<double>;
+
+        /**
+         * @brief Compute the integrated spectrum and bolometric luminosity of a continuously-formed stellar population, together
+         * @param sfr See specCts()'s own sfr parameter
+         * @param imf See specCts()'s own imf parameter
+         * @param fehDist See specCts()'s own fehDist parameter
+         * @param curTime See specCts()'s own curTime parameter
+         * @param fCluster See specCts()'s own fCluster parameter
+         * @return A pair of (1) the same specific luminosity specCts()
+         *   itself returns, and (2) the population's own bolometric
+         *   luminosity, in Lsun (matching Cluster::lbol()'s own units)
+         * @details
+         * Identical to specCts() in every respect but what it returns:
+         * calls specCtsHelper() with computeLbol = true, so the same
+         * PDFIntegratorND evaluation -- the expensive part of which is
+         * building an isochrone at every distinct (age, feh) the
+         * integral visits, not the handful of extra scalar quantities
+         * integrated alongside the spectrum at each of those isochrones
+         * -- also integrates the population's bolometric luminosity,
+         * rather than requiring a second, separate integral (sharing
+         * none of the same isochrones) to get it. See
+         * continuousSpecIntegrand()'s own comment for exactly how the
+         * extra quantity is folded into the integrand itself.
+         *
+         * Used by Galaxy::computeSpec() in place of specCts() itself
+         * when io::SimControls::computeLbol() is true, so that a
+         * caller requesting both a spectrum and Lbol together (the
+         * common case) never pays for isochrone construction twice.
+         */
+        [[nodiscard]] auto specAndLbolCts(
+            const pdfs::PDF& sfr,
+            const pdfs::PDF& imf,
+            const pdfs::PDF& fehDist,
+            double curTime,
+            double fCluster
+        ) const -> std::pair<std::vector<double>, double>;
 
         /**
          * @brief Return the relative tolerance for PDF integration
@@ -405,6 +446,50 @@ namespace specsyn
     private:
 
         /**
+         * @brief Shared implementation behind specCts()/specAndLbolCts()'s continuous-population overloads
+         * @param sfr See specCts()'s own sfr parameter
+         * @param imf See specCts()'s own imf parameter
+         * @param fehDist See specCts()'s own fehDist parameter
+         * @param curTime See specCts()'s own curTime parameter
+         * @param fCluster See specCts()'s own fCluster parameter
+         * @param computeLbol Whether to also integrate the population's
+         *   bolometric luminosity alongside its spectrum
+         * @return If computeLbol is false, exactly what specCts()
+         *   itself returns. If computeLbol is true, that same result
+         *   with one extra element appended, at index wl_.size() (see
+         *   continuousSpecIntegrand()'s own comment for how it gets
+         *   there): the population's own bolometric luminosity, in
+         *   Lsun -- specAndLbolCts() is the one that splits this back
+         *   out into its own pair.
+         * @details
+         * Everything specCts()'s own comment describes -- the 2D-vs-3D
+         * dimensionality choice, why CubatureMethod::pAdaptive, why the
+         * time dimension isn't log-transformed, the lambda * dL/dlambda
+         * convention -- applies here unchanged; computeLbol only
+         * changes nInt (wl_.size(), or wl_.size() + 1) and whether
+         * continuousSpecIntegrand() is asked to also fill in that extra
+         * element. The trailing Lbol element, when present, is a
+         * genuine luminosity, not a lambda-weighted flux, so it is
+         * excluded from this function's own dL/dlambda-recovering
+         * division by wl_ -- only scaled by (1 - fCluster), same as
+         * every other element. It does, however, get one further
+         * unit conversion of its own: continuousSpecIntegrand() reports
+         * it in erg/s, to stay on the same absolute scale as the
+         * spectral elements this function's own reqAbsError applies to
+         * (see its own comment for why), so this function divides it
+         * by utils::Lsun before returning, converting it to the Lsun
+         * Cluster::lbol() itself uses.
+         */
+        [[nodiscard]] auto specCtsHelper(
+            const pdfs::PDF& sfr,
+            const pdfs::PDF& imf,
+            const pdfs::PDF& fehDist,
+            double curTime,
+            double fCluster,
+            bool computeLbol
+        ) const -> std::vector<double>;
+
+        /**
          * @brief The vectorized integrand for the continuous-population specCts() overload
          * @tparam Ndim Dimensionality of the integral this is being
          *   used for -- 2 (time, mass) or 3 (time, feh, mass); see
@@ -424,10 +509,18 @@ namespace specsyn
          *   time coordinate into an age (curTime - time) for isochrone
          *   lookup, since PDFIntegratorND has no notion of this
          *   function's own caller-side context beyond its arguments
-         * @return npts * wl_.size() values of lambda * dL/dlambda (see
-         *   specWl()), laid out as result[i * wl_.size() + k] for the
-         *   k-th wavelength of the i-th point -- the layout
-         *   PDFIntegratorND's own vectorized interface requires
+         * @param computeLbol Whether to also compute, and append, each
+         *   point's own bolometric luminosity -- see specCtsHelper()'s
+         *   own comment for the outward effect of this
+         * @return npts * (wl_.size() + computeLbol) values: for each
+         *   point, lambda * dL/dlambda (see specWl()) at every one of
+         *   wl_.size() wavelengths, then -- only if computeLbol -- one
+         *   further value, that point's own bolometric luminosity, in
+         *   erg/s (see this function's own @details for why erg/s
+         *   rather than Cluster::lbol()'s own Lsun). Laid out as
+         *   result[i * (wl_.size() + computeLbol) + k] for the k-th
+         *   such value of the i-th point -- the layout
+         *   PDFIntegratorND's own vectorized interface requires.
          * @details
          * For each of the (up to npts) distinct (age, feh) pairs
          * represented in points (age computed from each point's own
@@ -442,35 +535,52 @@ namespace specsyn
          * finds whichever of that point's own cached isochrone's
          * segments (if any) contains its mass coordinate -- if none
          * does, that point represents a star already dead at this age,
-         * so its own npts row is left at zero -- and evaluates
-         * specWl() at that point's own (mass, segment, feh) otherwise.
+         * so its own row is left at zero (including its own Lbol
+         * element, if present) -- and evaluates specWl() at that
+         * point's own (mass, segment, feh) otherwise, storing the
+         * result in that point's own row. If computeLbol, also
+         * evaluates that same segment at that same mass directly (a
+         * second, cheap Interpolator1D call -- specWl() doesn't expose
+         * the StarData it computes internally) to read off log(L/Lsun),
+         * and stores 10^that value times utils::Lsun -- the star's own
+         * bolometric luminosity, in erg/s, not the Lsun
+         * Cluster::lbol() itself returns -- as the row's own final
+         * element. erg/s, matching the scale of the spectral elements
+         * alongside it, because specCtsHelper()'s own reqAbsError is
+         * itself in erg/s (see its own comment): a Lbol value of order
+         * unity (Lsun) would look converged to that tolerance
+         * immediately regardless of its actual accuracy, so
+         * specCtsHelper() instead divides this back down to Lsun only
+         * after the integral itself is done.
          *
          * Deliberately does not clear cache itself: a single specCts()
          * integral typically calls this function many times (once per
          * cubature refinement step), and cache is meant to accumulate
-         * isochrones across all of them, only cleared by specCts()
+         * isochrones across all of them, only cleared by specCtsHelper()
          * itself once the whole integral is done.
          */
         template <std::size_t Ndim>
         [[nodiscard]] auto continuousSpecIntegrand(
             std::mdspan<double, std::extents<std::size_t, std::dynamic_extent, Ndim>> points, // NOLINT(misc-include-cleaner) -- see the identical NOLINT on the <mdspan> include above
             std::map<std::pair<double, double>, Isochrone>& cache,
-            double curTime) const -> std::vector<double>;
+            double curTime,
+            bool computeLbol) const -> std::vector<double>;
 
         /**
          * @brief Cache of isochrones built while evaluating the continuous-population specCts() overload
          * @details
          * Keyed by (age, feh) -- see continuousSpecIntegrand()'s own
          * comment for how each entry is built and reused. Always empty
-         * outside of a specCts(sfr, imf, fehDist, curTime, fCluster)
-         * call: populated as needed during that call, then cleared
-         * again once it returns. Never wrapped for thread safety (e.g.
-         * in a ThreadVec), since a single Specsyn is never evaluated
-         * from more than one thread at a time in practice (a Galaxy,
-         * and the Specsyn it reads from SimControls, are never shared
-         * across threads). Declared mutable so specCts() -- a const
-         * method, like every other Specsyn method that touches
-         * controls_ -- can still populate and clear it.
+         * outside of a specCtsHelper() call (i.e. one made via
+         * specCts()/specAndLbolCts()): populated as needed during that
+         * call, then cleared again once it returns. Never wrapped for
+         * thread safety (e.g. in a ThreadVec), since a single Specsyn is
+         * never evaluated from more than one thread at a time in
+         * practice (a Galaxy, and the Specsyn it reads from
+         * SimControls, are never shared across threads). Declared
+         * mutable so specCtsHelper() -- a const method, like every
+         * other Specsyn method that touches controls_ -- can still
+         * populate and clear it.
          */
         mutable std::map<std::pair<double, double>, Isochrone> isochroneCache_;
     };

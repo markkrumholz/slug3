@@ -87,12 +87,13 @@ void core::Galaxy::advance(const double t)
     }
     clusters_ = std::move(stillAlive);
 
-    // 7) Mark spec_/specExtinct_/phot_/photExtinct_/lbol_ as stale;
-    // recomputed lazily, on demand, the next time spec()/specExtinct()/
-    // phot()/photExtinct()/lbol() is actually called
+    // 7) Mark spec_/specExtinct_/phot_/photExtinct_/lbol_/lbolCts_ as
+    // stale; recomputed lazily, on demand, the next time spec()/
+    // specExtinct()/phot()/photExtinct()/lbol() is actually called
     specCurrent_ = false;
     photCurrent_ = false;
     lbolCurrent_ = false;
+    lbolCtsCurrent_ = false;
 
     // 8) Update current time
     curTime_ = t;
@@ -144,11 +145,26 @@ void core::Galaxy::computeSpec()
     // extinction curve was requested) specExtinct_ -- unlike a bound
     // cluster, which draws its own A_V, the continuous/field
     // population is assumed negligibly extincted, so its own light
-    // passes into specExtinct_ unattenuated
+    // passes into specExtinct_ unattenuated. If Lbol was also
+    // requested, gets it via specAndLbolCts() (a byproduct of the same
+    // integral) rather than paying for a second one via the standalone
+    // Lbol path -- see lbolCtsCurrent_'s own comment.
     const double fCluster = sc.fCluster();
     if (fCluster < 1.0)
     {
-        const auto contSpec = synth->specCts(sc.sfr(), sc.imf(), sc.fehDist(), curTime_, fCluster);
+        std::vector<double> contSpec;
+        if (sc.computeLbol())
+        {
+            auto [s, l] = synth->specAndLbolCts(sc.sfr(), sc.imf(), sc.fehDist(), curTime_, fCluster);
+            contSpec = std::move(s);
+            lbolCts_ = l;
+            lbolCtsCurrent_ = true;
+        }
+        else
+        {
+            contSpec = synth->specCts(sc.sfr(), sc.imf(), sc.fehDist(), curTime_, fCluster);
+        }
+
         for (std::size_t i = 0; i < spec_.size(); ++i) { spec_[i] += contSpec[i]; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- contSpec has size wl().size() by Specsyn::specCts()'s own contract, matching spec_'s size set just above
         if (ext != nullptr)
         {
@@ -186,7 +202,8 @@ void core::Galaxy::computePhot()
 }
 
 // Sum lbol_ over every cluster in clusters_ and disruptedClusters_,
-// unless Lbol was never requested (see this method's own header comment)
+// plus the continuous population's own share if already current, unless
+// Lbol was never requested (see this method's own header comment)
 void core::Galaxy::computeLbol()
 {
     const auto& sc = controls_.get();
@@ -195,4 +212,20 @@ void core::Galaxy::computeLbol()
     lbol_ = 0.0;
     for (auto& cluster : clusters_) { lbol_ += cluster.lbol(); }
     for (auto& cluster : disruptedClusters_) { lbol_ += cluster.lbol(); }
+
+    if (lbolCtsCurrent_)
+    {
+        lbol_ += lbolCts_;
+    }
+    else if (sc.fCluster() < 1.0)
+    {
+        // Lbol was requested and there is a continuous-population
+        // share to account for, but computeSpec() hasn't run since the
+        // last advance() to compute it as a byproduct -- e.g. a caller
+        // asked for lbol() without ever asking for spec(). Needs the
+        // standalone Specsyn::computeLbolCts()-based path (not yet
+        // implemented) to get the continuous population's own Lbol
+        // without paying for a full spectrum it wasn't asked for; a
+        // no-op for now, so lbol_ is missing that share in this case.
+    }
 }

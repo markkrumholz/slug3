@@ -9,6 +9,7 @@
 #include "../src/core/Galaxy.hpp"
 #include "../src/io/SimControls.hpp"
 #include "../src/phot/FilterCollection.hpp"
+#include "../src/utils/Constants.hpp"
 #include "../src/utils/RngThread.hpp"
 #include "../src/utils/UniqueIDManager.hpp"
 #include "testGalaxy.hpp"
@@ -453,6 +454,42 @@ static auto testContinuousPopSpecSingleFeh() -> int
                 "non-empty phot() and photExtinct()\n";
             return 1;
         }
+
+        // inputFile's own phot.filters includes "Lbol" (see
+        // io::SimControls::computeLbol()'s own comment), so this
+        // exercises Specsyn::specAndLbolCts() rather than plain
+        // specCts() -- see Galaxy::computeSpec()'s own comment. Lbol
+        // must be finite, positive, and at least as large as the
+        // luminosity already visible within spec()'s own covered
+        // wavelength range (a trapezoidal integral of spec() over
+        // wl(), converted from erg/s/Angstrom to erg/s): light outside
+        // that range can only add to the true bolometric total, never
+        // subtract from it, so this one-directional bound holds
+        // regardless of the exact SED shape, while still catching a
+        // badly broken Lbol calculation (e.g. wrong units, or Lbol not
+        // really being computed at all).
+        const double lbol = galaxy.lbol();
+        if (!std::isfinite(lbol) || !(lbol > 0.0))
+        {
+            std::cerr << "testGalaxy: continuousPopSpecSingleFeh: expected a "
+                "finite, positive lbol(), got " << lbol << "\n";
+            return 1;
+        }
+        const auto& wl = controls.specsyn()->wl();
+        double trapzErgS = 0.0;
+        for (std::size_t k = 0; k + 1 < spec.size(); ++k)
+        {
+            trapzErgS += 0.5 * (spec.at(k) + spec.at(k + 1)) * (wl.at(k + 1) - wl.at(k));
+        }
+        constexpr double lbolTolerance = 1e-6; // floating-point/quadrature-level slop only
+        if (lbol * utils::Lsun < trapzErgS * (1.0 - lbolTolerance))
+        {
+            std::cerr << "testGalaxy: continuousPopSpecSingleFeh: lbol() = "
+                << lbol << " Lsun (" << (lbol * utils::Lsun) << " erg/s) is "
+                "less than the luminosity already visible in spec()'s own "
+                "covered wavelength range (" << trapzErgS << " erg/s)\n";
+            return 1;
+        }
     }
     catch (const std::exception& error)
     {
@@ -540,6 +577,31 @@ static auto testContinuousPopSpecMultiFeh() -> int
         {
             std::cerr << "testGalaxy: continuousPopSpecMultiFeh: expected "
                 "non-empty phot() and photExtinct()\n";
+            return 1;
+        }
+
+        // See testContinuousPopSpecSingleFeh's own identical check for
+        // the rationale.
+        const double lbol = galaxy.lbol();
+        if (!std::isfinite(lbol) || !(lbol > 0.0))
+        {
+            std::cerr << "testGalaxy: continuousPopSpecMultiFeh: expected a "
+                "finite, positive lbol(), got " << lbol << "\n";
+            return 1;
+        }
+        const auto& wl = controls.specsyn()->wl();
+        double trapzErgS = 0.0;
+        for (std::size_t k = 0; k + 1 < spec.size(); ++k)
+        {
+            trapzErgS += 0.5 * (spec.at(k) + spec.at(k + 1)) * (wl.at(k + 1) - wl.at(k));
+        }
+        constexpr double lbolTolerance = 1e-6; // floating-point/quadrature-level slop only
+        if (lbol * utils::Lsun < trapzErgS * (1.0 - lbolTolerance))
+        {
+            std::cerr << "testGalaxy: continuousPopSpecMultiFeh: lbol() = "
+                << lbol << " Lsun (" << (lbol * utils::Lsun) << " erg/s) is "
+                "less than the luminosity already visible in spec()'s own "
+                "covered wavelength range (" << trapzErgS << " erg/s)\n";
             return 1;
         }
     }
