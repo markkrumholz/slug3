@@ -198,7 +198,7 @@ namespace pdfs {
          * @param x The point at which to evaluate the PDF.
          * @return The value of the PDF at the given point.
          */
-        auto operator()(double x) const -> double
+        virtual auto operator()(double x) const -> double
         {
             double p = 0.0;
             for (auto const& [s,w] : std::views::zip(seg_,wgt_)) {
@@ -214,7 +214,7 @@ namespace pdfs {
          * @param b The upper limit of the range for expectation value calculation; if set to a value >= sMax, will be set to sMax_.
          * @return The expectation value of the PDF segment.
          */
-        [[nodiscard]] auto expectationValue(const double a, const double b) const -> double
+        [[nodiscard]] virtual auto expectationValue(const double a, const double b) const -> double
         {
             double e = 0.0;
             double wSum = 0.0;
@@ -229,7 +229,7 @@ namespace pdfs {
          * @brief Calculate the expectation value of the PDF segment over its entire range.
          * @return The expectation value of the PDF segment.
          */
-        [[nodiscard]] auto expectationValue() const -> double
+        [[nodiscard]] virtual auto expectationValue() const -> double
         {
             return expectationValue(sMin_, sMax_);
         }
@@ -239,7 +239,7 @@ namespace pdfs {
          * @param b The upper limit of the range for integral calculation; if set to a value >= sMax, will be set to sMax_.
          * @return The integral of the PDF over the specified range.
          */
-        [[nodiscard]] auto integral(const double a, const double b) const -> double {
+        [[nodiscard]] virtual auto integral(const double a, const double b) const -> double {
             if (a >= b) {
                 return 0.0; // Interval is empty
             }
@@ -263,7 +263,7 @@ namespace pdfs {
          * @return A random value drawn from the PDF within the specified range.
          */
         [[nodiscard]]
-        auto draw(const double a = std::numeric_limits<double>::lowest(),
+        virtual auto draw(const double a = std::numeric_limits<double>::lowest(),
          const double b = std::numeric_limits<double>::max()) const -> double {
             std::vector<double> wLim(wgt_.size());
             for (auto const& [wL,s,w] : std::views::zip(wLim,seg_,wgt_)) {
@@ -279,14 +279,14 @@ namespace pdfs {
          * @param b The upper limit of the sampling range (should be <= sMax_, equal to sMax_ if not set).
          * @return A vector of nDraw random values drawn from the PDF within the specified range.
         */
-        [[nodiscard]] auto draw(unsigned int nDraw, 
+        [[nodiscard]] virtual auto draw(unsigned int nDraw,
             double a = std::numeric_limits<double>::lowest(),
             double b = std::numeric_limits<double>::max())
             const -> std::vector<double>
         {
             std::vector<double> result(nDraw);
             for (auto &r : result) { r = draw(a, b); }
-            return result;        
+            return result;
         }
         /**
          * @brief Draw a sample from the PDF targeting a fixed total value
@@ -294,7 +294,7 @@ namespace pdfs {
          * @param a The lower limit of the sampling range (should be >= sMin_, equal to sMin_ if not set).
          * @param b The upper limit of the sampling range (should be <= sMax_, equal to sMax_ if not set).
          */
-        [[nodiscard]] auto drawTarget(double target,
+        [[nodiscard]] virtual auto drawTarget(double target,
             double a = std::numeric_limits<double>::lowest(),
             double b = std::numeric_limits<double>::max()) const
             -> std::vector<double>

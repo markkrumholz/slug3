@@ -8,6 +8,7 @@
  */
 
 #include "testPDF.hpp"
+#include "testPDFReflect.hpp"
 #include "testPDFSegmentDelta.hpp"
 #include "testPDFSegmentExponential.hpp"
 #include "testPDFSegmentLognormal.hpp"
@@ -28,6 +29,7 @@ auto main() -> int {
         result += testPDFSegmentPowerlaw();
         result += testPDFSegmentSchechter();
         result += testPDF();
+        result += testPDFReflect();
         return result;
     }
     catch (const std::exception& error)
