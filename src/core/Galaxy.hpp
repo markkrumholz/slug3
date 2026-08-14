@@ -9,8 +9,13 @@
 #define GALAXY_HPP
 
 #include "../io/SimControls.hpp"
+#include "../specsyn/Specsyn.hpp"
 #include "Cluster.hpp"
+#include <cstddef>
 #include <functional>
+#include <map>
+#include <mdspan> // NOLINT(misc-include-cleaner) -- see the identical NOLINT on SpecsynLibWR.hpp's own <mdspan> include
+#include <utility>
 #include <vector>
 
 namespace core
@@ -292,8 +297,7 @@ namespace core
          * lbolCts_: if false when Lbol is still wanted (Lbol requested
          * but no spectrum was computed this step, e.g. only lbol() was
          * called, not spec()), it instead falls back to the standalone
-         * computeLbolCts() path -- not yet implemented, so that branch
-         * is presently a no-op.
+         * computeLbolCts() path.
          */
         bool lbolCtsCurrent_ = false;
 
@@ -305,6 +309,20 @@ namespace core
          * than snapshotted at construction.
          */
         std::reference_wrapper<const io::SimControls> controls_;
+
+        /**
+         * @brief Cache of isochrones built while evaluating computeLbolCts()'s own standalone integral
+         * @details
+         * A Galaxy-owned counterpart to Specsyn::isochroneCache_,
+         * needed because computeLbolCts() must work even when
+         * SimControls::specsyn() is null (no spectral synthesizer
+         * requested at all) -- see computeLbolCts()'s own comment for
+         * why. Keyed by (age, feh), populated (via
+         * Specsyn::cacheIsochrones()) and read the same way
+         * Specsyn::isochroneCache_ is; always empty outside of a
+         * computeLbolCts() call.
+         */
+        std::map<std::pair<double, double>, specsyn::Specsyn::Isochrone> isochroneCache_;
 
         /**
          * @brief Update spec_ (and specExtinct_) from the current cluster population
@@ -362,13 +380,84 @@ namespace core
          * advance() (e.g. a caller asked for lbol() without ever
          * asking for spec()) -- the continuous population's own Lbol
          * still needs computing, but not by paying for a full spectrum
-         * it was never asked for; this is exactly what the standalone
-         * Specsyn::computeLbolCts()-based path (not yet implemented) is
-         * for, so that branch is presently a no-op, leaving the
-         * continuous population's own Lbol share missing from lbol()
-         * in this specific case until it exists.
+         * it was never asked for; calls computeLbolCts() for exactly
+         * that.
          */
         void computeLbol();
+
+        /**
+         * @brief The vectorized integrand for computeLbolCts()'s own standalone Lbol integral
+         * @tparam Ndim Dimensionality of the integral this is being
+         *   used for -- 2 (time, mass) or 3 (time, feh, mass); see
+         *   Specsyn::continuousSpecIntegrand()'s own @tparam Ndim
+         * @param points An (npts, Ndim) view of the points to
+         *   evaluate -- see Specsyn::continuousSpecIntegrand()'s own
+         *   points parameter for the exact column layout
+         * @param cache This Galaxy's own isochroneCache_, passed by
+         *   reference rather than read directly, matching
+         *   Specsyn::continuousSpecIntegrand()'s own cache parameter
+         * @param curTime The current time, in yr -- see
+         *   Specsyn::continuousSpecIntegrand()'s own curTime parameter
+         * @return npts values, each point's own bolometric luminosity,
+         *   in Lsun -- unlike Specsyn::continuousSpecIntegrand()'s own
+         *   Lbol element, no further unit conversion is needed
+         *   afterward, since this integral's own absolute tolerance is
+         *   already specified directly in Lsun (see computeLbolCts()'s
+         *   own comment for why that differs from the shared-with-a-
+         *   spectrum case)
+         * @details
+         * First calls Specsyn::cacheIsochrones() (passing controls_
+         * and this Galaxy's own isochroneCache_) to ensure every
+         * (age, feh) pair points touches has a cached isochrone, then,
+         * for each point, mirrors Specsyn::continuousSpecIntegrand()'s
+         * own per-point logic exactly, but only reads off that point's
+         * own log(L/Lsun) (leaving it at 0 for a point whose mass
+         * falls in none of its own cached isochrone's segments, a star
+         * already dead at this age) -- there is no spectrum to also
+         * compute here, so no mdspan view of the result is needed
+         * either, unlike continuousSpecIntegrand()'s own resultView.
+         */
+        template <std::size_t Ndim>
+        [[nodiscard]] auto lbolCtsIntegrand(
+            std::mdspan<double, std::extents<std::size_t, std::dynamic_extent, Ndim>> points, // NOLINT(misc-include-cleaner) -- see the identical NOLINT on the <mdspan> include above
+            std::map<std::pair<double, double>, specsyn::Specsyn::Isochrone>& cache,
+            double curTime) const -> std::vector<double>;
+
+        /**
+         * @brief Compute lbolCts_ directly, without going through a full spectrum
+         * @details
+         * Called by computeLbol() when Lbol is wanted but computeSpec()
+         * hasn't already computed lbolCts_ as a byproduct of computing
+         * a spectrum (lbolCtsCurrent_ is false) -- most notably when
+         * SimControls::specsyn() is null (no spectral synthesizer
+         * configured at all, so Galaxy::computeSpec() is a no-op and
+         * Specsyn::specAndLbolCts() never runs), but also whenever
+         * lbol() is requested without spec() ever having been
+         * requested first this step.
+         *
+         * Mirrors Specsyn::specCtsHelper()'s own construction of a
+         * PDFIntegratorND exactly (the 2D-vs-3D dimensionality choice,
+         * CubatureMethod::pAdaptive, why the time dimension isn't
+         * log-transformed -- see its own comment), just integrating a
+         * single quantity (Lbol alone, via lbolCtsIntegrand()) instead
+         * of a spectrum plus Lbol together, and directly in Lsun
+         * throughout: unlike specCtsHelper(), there is no spectral
+         * absolute tolerance for an erg/s-scale intermediate to share,
+         * so reqAbsError is simply intAbsTol() * sfr().integral(0,
+         * curTime()), with no utils::Lsun factor. Uses this Galaxy's
+         * own isochroneCache_, not a Specsyn's, since a Specsyn (and
+         * its own isochroneCache_) may not exist at all here -- see
+         * isochroneCache_'s own comment.
+         *
+         * Sets lbolCts_ to the integral's own result, scaled by
+         * (1 - fCluster()) for the continuously-treated share of the
+         * population, matching Specsyn::specAndLbolCts()'s own
+         * identical scaling -- necessary for the two to agree when
+         * both are exercised for the same population. Sets
+         * lbolCtsCurrent_ to true, and clears isochroneCache_,
+         * afterward.
+         */
+        void computeLbolCts();
 
     };
 

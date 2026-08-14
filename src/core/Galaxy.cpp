@@ -8,11 +8,18 @@
 #include "Galaxy.hpp"
 #include "../extinct/Extinct.hpp"
 #include "../io/SimControls.hpp"
+#include "../pdfs/PDF.hpp"
 #include "../phot/FilterCollection.hpp"
+#include "../tracks/TrackCommons.hpp"
+#include "../utils/PDFIntegratorND.hpp"
 #include "../utils/UniqueIDManager.hpp"
 #include "Cluster.hpp"
+#include <array>
+#include <cmath>
 #include <cstddef>
 #include <functional>
+#include <map>
+#include <mdspan> // NOLINT(misc-include-cleaner) -- see the identical NOLINT on SpecsynLibWR.hpp's own <mdspan> include
 #include <numeric>
 #include <sstream>
 #include <stdexcept>
@@ -222,10 +229,111 @@ void core::Galaxy::computeLbol()
         // Lbol was requested and there is a continuous-population
         // share to account for, but computeSpec() hasn't run since the
         // last advance() to compute it as a byproduct -- e.g. a caller
-        // asked for lbol() without ever asking for spec(). Needs the
-        // standalone Specsyn::computeLbolCts()-based path (not yet
-        // implemented) to get the continuous population's own Lbol
-        // without paying for a full spectrum it wasn't asked for; a
-        // no-op for now, so lbol_ is missing that share in this case.
+        // asked for lbol() without ever asking for spec(). Get it via
+        // the standalone path instead, which doesn't pay for a full
+        // spectrum it wasn't asked for.
+        computeLbolCts();
+        lbol_ += lbolCts_;
     }
+}
+
+template <std::size_t Ndim>
+auto core::Galaxy::lbolCtsIntegrand(
+    const std::mdspan<double, std::extents<std::size_t, std::dynamic_extent, Ndim>> points, // NOLINT(misc-include-cleaner) -- see the identical NOLINT on the <mdspan> include above
+    std::map<std::pair<double, double>, specsyn::Specsyn::Isochrone>& cache,
+    const double curTime
+) const -> std::vector<double>
+{
+    static_assert(Ndim == 2 || Ndim == 3, "lbolCtsIntegrand only supports Ndim == 2 or 3");
+
+    const auto& sc = controls_.get();
+    specsyn::Specsyn::cacheIsochrones<Ndim>(points, cache, curTime, sc);
+
+    const std::size_t npts = points.extent(0);
+    std::vector<double> resultFlat(npts, 0.0);
+    for (std::size_t i = 0; i < npts; ++i)
+    {
+        const double age = curTime - points[i, 0]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i < npts == points.extent(0) by the loop bound
+        double feh = 0.0;
+        double mass = 0.0;
+        if constexpr (Ndim == 3) { feh = points[i, 1]; mass = points[i, 2]; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
+        else { feh = sc.fehDist().getMin(); mass = points[i, 1]; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
+
+        const auto& isochrone = cache.at({ age, feh });
+        const specsyn::Specsyn::Segment* seg = nullptr;
+        for (const auto& s : isochrone)
+        {
+            if (mass >= s->xMin() && mass <= s->xMax()) { seg = s.get(); break; }
+        }
+        if (seg == nullptr) { continue; } // dead star: leave this point's own value at zero
+
+        const auto props = (*seg)(mass);
+        const double logL = props[static_cast<std::size_t>(tracks::FieldIdx::logL)]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- StarData is a fixed-size std::array, and logL is one of its compile-time-known indices
+        resultFlat[i] = std::pow(10.0, logL); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i < npts == resultFlat.size() by construction
+    }
+    return resultFlat;
+}
+
+// Explicit instantiation for the two dimensionalities this is ever
+// used with (2: time+mass, single feh; 3: time+feh+mass).
+template auto core::Galaxy::lbolCtsIntegrand<2>(
+    std::mdspan<double, std::extents<std::size_t, std::dynamic_extent, 2>>, // NOLINT(misc-include-cleaner) -- see the identical NOLINT on the <mdspan> include above
+    std::map<std::pair<double, double>, specsyn::Specsyn::Isochrone>&, double) const -> std::vector<double>;
+template auto core::Galaxy::lbolCtsIntegrand<3>(
+    std::mdspan<double, std::extents<std::size_t, std::dynamic_extent, 3>>, // NOLINT(misc-include-cleaner) -- see the identical NOLINT on the <mdspan> include above
+    std::map<std::pair<double, double>, specsyn::Specsyn::Isochrone>&, double) const -> std::vector<double>;
+
+void core::Galaxy::computeLbolCts()
+{
+    const auto& sc = controls_.get();
+    const auto& sfr = sc.sfr();
+    const auto& imf = sc.imf();
+    const auto& fehDist = sc.fehDist();
+    const double fCluster = sc.fCluster();
+
+    // See Specsyn::specCts()'s own comment for why the time dimension
+    // is never log-transformed, while the mass dimension always is;
+    // see computeLbolCts()'s own header comment for why absTol has no
+    // utils::Lsun factor here, unlike Specsyn::specCtsHelper()'s own.
+    const bool singleFeh = (fehDist.getMin() == fehDist.getMax());
+    const double absTol = sc.intAbsTol() * sfr.integral(0.0, curTime_);
+
+    std::vector<double> result;
+    if (singleFeh)
+    {
+        using IntegrandFn = std::vector<double> (Galaxy::*)(
+            std::mdspan<double, std::extents<std::size_t, std::dynamic_extent, 2>>, // NOLINT(misc-include-cleaner) -- see the identical NOLINT on the <mdspan> include above
+            std::map<std::pair<double, double>, specsyn::Specsyn::Isochrone>&, double) const;
+        const utils::PDFIntegratorND<IntegrandFn, 2, true, utils::CubatureMethod::pAdaptive> integrator(
+            std::array<std::reference_wrapper<const pdfs::PDF>, 2>{ std::cref(sfr), std::cref(imf) },
+            static_cast<IntegrandFn>(&Galaxy::lbolCtsIntegrand<2>),
+            1,
+            std::array<bool, 2>{ false, true },
+            sc.intMaxIter(), absTol, sc.intRelTol());
+        result = integrator.integrate(
+            std::array<double, 2>{ 0.0, imf.getMin() },
+            std::array<double, 2>{ curTime_, imf.getMax() },
+            *this, isochroneCache_, curTime_);
+    }
+    else
+    {
+        using IntegrandFn = std::vector<double> (Galaxy::*)(
+            std::mdspan<double, std::extents<std::size_t, std::dynamic_extent, 3>>, // NOLINT(misc-include-cleaner) -- see the identical NOLINT on the <mdspan> include above
+            std::map<std::pair<double, double>, specsyn::Specsyn::Isochrone>&, double) const;
+        const utils::PDFIntegratorND<IntegrandFn, 3, true, utils::CubatureMethod::pAdaptive> integrator(
+            std::array<std::reference_wrapper<const pdfs::PDF>, 3>{
+                std::cref(sfr), std::cref(fehDist), std::cref(imf) },
+            static_cast<IntegrandFn>(&Galaxy::lbolCtsIntegrand<3>),
+            1,
+            std::array<bool, 3>{ false, false, true },
+            sc.intMaxIter(), absTol, sc.intRelTol());
+        result = integrator.integrate(
+            std::array<double, 3>{ 0.0, fehDist.getMin(), imf.getMin() },
+            std::array<double, 3>{ curTime_, fehDist.getMax(), imf.getMax() },
+            *this, isochroneCache_, curTime_);
+    }
+
+    lbolCts_ = result[0] * (1.0 - fCluster); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- result has exactly 1 element, by construction (nInt == 1)
+    lbolCtsCurrent_ = true;
+    isochroneCache_.clear();
 }

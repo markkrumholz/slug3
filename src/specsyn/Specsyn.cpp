@@ -101,6 +101,56 @@ auto specsyn::Specsyn::specCts(
 }
 
 template <std::size_t Ndim>
+void specsyn::Specsyn::cacheIsochrones(
+    const std::mdspan<double, std::extents<std::size_t, std::dynamic_extent, Ndim>> points, // NOLINT(misc-include-cleaner) -- see the identical NOLINT on the <mdspan> include above
+    std::map<std::pair<double, double>, Isochrone>& cache,
+    const double curTime,
+    const io::SimControls& controls
+)
+{
+    static_assert(Ndim == 2 || Ndim == 3, "cacheIsochrones only supports Ndim == 2 or 3");
+
+    const std::size_t npts = points.extent(0);
+
+    // Step 1: find the unique (age, feh) pairs represented in points --
+    // age = curTime - (each point's own time coordinate, column 0);
+    // feh is column 1 if Ndim == 3, or -- since Ndim == 2 means the
+    // caller's own fehDist was degenerate -- controls.fehDist()'s
+    // single value otherwise.
+    std::set<std::pair<double, double>> uniqueAgeFeh;
+    for (std::size_t i = 0; i < npts; ++i)
+    {
+        const double age = curTime - points[i, 0]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i < npts == points.extent(0) by the loop bound
+        double feh = 0.0;
+        if constexpr (Ndim == 3) { feh = points[i, 1]; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
+        else { feh = controls.fehDist().getMin(); }
+        uniqueAgeFeh.emplace(age, feh);
+    }
+
+    // Step 2: build (or reuse, from cache) the isochrone at every one
+    // of those (age, feh) pairs -- log(age) is floored at
+    // controls.tracks().logTMin(), mirroring Cluster::advance()'s own
+    // identical floor, so a point landing at (or numerically near)
+    // age == 0 doesn't take log(0)
+    for (const auto& ageFeh : uniqueAgeFeh)
+    {
+        if (cache.contains(ageFeh)) { continue; }
+        const auto& [age, feh] = ageFeh;
+        const double logAge = std::max(std::log10(age), controls.tracks().logTMin());
+        cache.emplace(ageFeh, controls.tracks().getIsochrone(logAge, feh));
+    }
+}
+
+// Explicit instantiation for the two dimensionalities this is ever
+// used with (2: time+mass, single feh; 3: time+feh+mass).
+template void specsyn::Specsyn::cacheIsochrones<2>(
+    std::mdspan<double, std::extents<std::size_t, std::dynamic_extent, 2>>,
+    std::map<std::pair<double, double>, Isochrone>&, double, const io::SimControls&);
+template void specsyn::Specsyn::cacheIsochrones<3>(
+    std::mdspan<double, std::extents<std::size_t, std::dynamic_extent, 3>>,
+    std::map<std::pair<double, double>, Isochrone>&, double, const io::SimControls&);
+
+template <std::size_t Ndim>
 auto specsyn::Specsyn::continuousSpecIntegrand(
     const std::mdspan<double, std::extents<std::size_t, std::dynamic_extent, Ndim>> points, // NOLINT(misc-include-cleaner) -- see the identical NOLINT on the <mdspan> include above
     std::map<std::pair<double, double>, Isochrone>& cache,
@@ -113,35 +163,9 @@ auto specsyn::Specsyn::continuousSpecIntegrand(
     const std::size_t npts = points.extent(0);
     const std::size_t nPerPoint = wl_.size() + (computeLbol ? 1 : 0);
 
-    // Step 1: find the unique (age, feh) pairs represented in points --
-    // age = curTime - (each point's own time coordinate, column 0);
-    // feh is column 1 if Ndim == 3, or -- since Ndim == 2 means
-    // specCts()'s own fehDist was degenerate -- controls_.fehDist()'s
-    // single value otherwise.
-    std::set<std::pair<double, double>> uniqueAgeFeh;
-    for (std::size_t i = 0; i < npts; ++i)
-    {
-        const double age = curTime - points[i, 0]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i < npts == points.extent(0) by the loop bound
-        double feh = 0.0;
-        if constexpr (Ndim == 3) { feh = points[i, 1]; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
-        else { feh = controls_.fehDist().getMin(); }
-        uniqueAgeFeh.emplace(age, feh);
-    }
+    cacheIsochrones<Ndim>(points, cache, curTime, controls_);
 
-    // Step 2: build (or reuse, from cache) the isochrone at every one
-    // of those (age, feh) pairs -- log(age) is floored at
-    // controls_.tracks().logTMin(), mirroring Cluster::advance()'s own
-    // identical floor, so a point landing at (or numerically near)
-    // age == 0 doesn't take log(0)
-    for (const auto& ageFeh : uniqueAgeFeh)
-    {
-        if (cache.contains(ageFeh)) { continue; }
-        const auto& [age, feh] = ageFeh;
-        const double logAge = std::max(std::log10(age), controls_.tracks().logTMin());
-        cache.emplace(ageFeh, controls_.tracks().getIsochrone(logAge, feh));
-    }
-
-    // Step 3: evaluate each point's own spectrum -- lambda *
+    // Evaluate each point's own spectrum -- lambda *
     // dL/dlambda (via specWl()), matching the other specCts()
     // overload's own convention -- against its own cached isochrone,
     // leaving a point's row at zero (Lbol element included, if

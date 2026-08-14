@@ -371,6 +371,51 @@ namespace specsyn
         ) const -> std::pair<std::vector<double>, double>;
 
         /**
+         * @brief Find (or build, from tracks) the isochrones a batch of continuous-population integration points needs
+         * @tparam Ndim Dimensionality of the integral this is being
+         *   used for -- 2 (time, mass) or 3 (time, feh, mass)
+         * @param points An (npts, Ndim) view of the points to evaluate
+         *   -- see continuousSpecIntegrand()'s own points parameter for
+         *   the exact column layout
+         * @param cache The isochrone cache to look in (and add to) --
+         *   see isochroneCache_'s own comment for the usual case of
+         *   this being *this Specsyn's own isochroneCache_, though
+         *   nothing here actually requires that (see @details)
+         * @param curTime The current time, in yr -- see
+         *   continuousSpecIntegrand()'s own curTime parameter
+         * @param controls Simulation controls to read tracks()/
+         *   fehDist() from
+         * @details
+         * A static, standalone helper -- rather than a plain private
+         * member reading controls_ directly, the way the rest of this
+         * class's continuous-population machinery does -- specifically
+         * so it can be called even when no Specsyn instance exists at
+         * all: Galaxy::computeLbolCts() calls this (passing its own
+         * isochroneCache_, not any Specsyn's) to support computing the
+         * continuous population's own bolometric luminosity even when
+         * io::SimControls::specsyn() is null (no spectral synthesizer
+         * requested), the one case Galaxy::computeSpec()'s own
+         * Specsyn::specAndLbolCts() call can't cover.
+         *
+         * For each of the (up to points.extent(0)) distinct (age, feh)
+         * pairs represented in points (age computed from each point's
+         * own time coordinate, column 0; feh taken directly from
+         * points if Ndim == 3, column 1, or from controls.fehDist()'s
+         * own single value if Ndim == 2, where fehDist is necessarily
+         * degenerate), builds (or reuses, from cache) the isochrone at
+         * that (age, feh) via controls.tracks().getIsochrone(),
+         * flooring log(age) at controls.tracks().logTMin() first (as
+         * Cluster::advance() already does) to avoid taking log(0) for
+         * a point landing exactly at age == 0.
+         */
+        template <std::size_t Ndim>
+        static void cacheIsochrones(
+            std::mdspan<double, std::extents<std::size_t, std::dynamic_extent, Ndim>> points, // NOLINT(misc-include-cleaner) -- see the identical NOLINT on the <mdspan> include above
+            std::map<std::pair<double, double>, Isochrone>& cache,
+            double curTime,
+            const io::SimControls& controls);
+
+        /**
          * @brief Return the relative tolerance for PDF integration
          * @return Relative tolerance passed to PDFIntegrator, read live from controls_
          */
@@ -522,18 +567,12 @@ namespace specsyn
          *   such value of the i-th point -- the layout
          *   PDFIntegratorND's own vectorized interface requires.
          * @details
-         * For each of the (up to npts) distinct (age, feh) pairs
-         * represented in points (age computed from each point's own
-         * time coordinate; feh taken directly from points if Ndim == 3,
-         * or from controls_.fehDist().getMin() if Ndim == 2, where
-         * fehDist is necessarily degenerate -- see specCts()'s own
-         * comment), builds (or reuses, from cache) the isochrone at
-         * that (age, feh) via controls_.tracks().getIsochrone(),
-         * flooring log(age) at controls_.tracks().logTMin() first (as
-         * Cluster::advance() already does) to avoid taking log(0) for
-         * a point landing exactly at age == 0. Then, for each point,
-         * finds whichever of that point's own cached isochrone's
-         * segments (if any) contains its mass coordinate -- if none
+         * First calls cacheIsochrones() (passing controls_ and
+         * isochroneCache_) to ensure every (age, feh) pair points
+         * touches has a cached isochrone -- see its own comment for
+         * exactly how. Then, for each point, finds whichever of that
+         * point's own cached isochrone's segments (if any) contains
+         * its mass coordinate -- if none
          * does, that point represents a star already dead at this age,
          * so its own row is left at zero (including its own Lbol
          * element, if present) -- and evaluates specWl() at that

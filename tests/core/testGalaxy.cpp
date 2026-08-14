@@ -699,6 +699,74 @@ static auto testContinuousPopSpecReferenceCheck() -> int
     return 0;
 }
 
+// Verify that Galaxy::lbol()'s two different paths to the continuous
+// population's own Lbol -- as a byproduct of computing a spectrum
+// (Specsyn::specAndLbolCts(), via Galaxy::computeSpec()) versus
+// standalone (Galaxy::computeLbolCts()), used respectively when spec()
+// has or hasn't already been computed this step -- agree with each
+// other. Builds two separate Galaxy instances from the same input
+// deck and rng seed (so both draw an identical population), one where
+// spec() is called before lbol() (forcing the spec-computed path) and
+// one where lbol() alone is ever called (forcing the standalone path),
+// then compares the two lbol() values. fCluster = 0.0, as in
+// testContinuousPopSpecSingleFeh, so clusters()/disruptedClusters()
+// are empty in both cases and lbol() comes entirely from whichever of
+// the two continuous-population code paths actually ran, isolating
+// the comparison to exactly the two paths this test means to check
+// against each other.
+static auto testContinuousPopLbolStandaloneMatchesSpec() -> int
+{
+    constexpr double relTolerance = 0.02; // both paths target the same SimControls::intRelTol() independently
+
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFile);
+        inputDeck.at_path("clusters").as_table()->insert("f_cluster", 0.0);
+        const io::SimControls controls(inputDeck);
+
+        utils::rng().seed(rngSeed);
+        core::Galaxy galaxyViaSpec(controls);
+        galaxyViaSpec.advance(t1);
+        static_cast<void>(galaxyViaSpec.spec()); // forces computeSpec(), which sets lbolCts_ as a byproduct
+        const double lbolViaSpec = galaxyViaSpec.lbol();
+
+        utils::rng().seed(rngSeed);
+        core::Galaxy galaxyStandalone(controls);
+        galaxyStandalone.advance(t1);
+        const double lbolStandalone = galaxyStandalone.lbol(); // spec() never called: forces the standalone computeLbolCts() path
+
+        if (!std::isfinite(lbolViaSpec) || !(lbolViaSpec > 0.0))
+        {
+            std::cerr << "testGalaxy: continuousPopLbolStandaloneMatchesSpec: "
+                "expected a finite, positive lbol() via the spec-computed path, "
+                "got " << lbolViaSpec << "\n";
+            return 1;
+        }
+        if (!std::isfinite(lbolStandalone) || !(lbolStandalone > 0.0))
+        {
+            std::cerr << "testGalaxy: continuousPopLbolStandaloneMatchesSpec: "
+                "expected a finite, positive lbol() via the standalone path, "
+                "got " << lbolStandalone << "\n";
+            return 1;
+        }
+        if (std::abs(lbolViaSpec - lbolStandalone) > relTolerance * lbolViaSpec)
+        {
+            std::cerr << "testGalaxy: continuousPopLbolStandaloneMatchesSpec: "
+                "lbol() via the spec-computed path (" << lbolViaSpec <<
+                " Lsun) deviates from the standalone path (" << lbolStandalone <<
+                " Lsun) by more than " << relTolerance * 100 << "%\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testGalaxy: continuousPopLbolStandaloneMatchesSpec test "
+            "failed: " << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
 // Verify that Galaxy::advance() correctly incorporates
 // SimControls::fCluster() into its own mass accounting: with
 // fCluster < 1, only fCluster of the target stellar mass should be
@@ -785,6 +853,7 @@ auto testGalaxy() -> int
     result += testContinuousPopSpecSingleFeh();
     result += testContinuousPopSpecMultiFeh();
     result += testContinuousPopSpecReferenceCheck();
+    result += testContinuousPopLbolStandaloneMatchesSpec();
 
     try
     {
