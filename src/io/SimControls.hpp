@@ -178,13 +178,14 @@ namespace io
 
         /**
          * @brief Return the absolute tolerance for PDF integration
-         * @return Absolute tolerance passed to PDFIntegrator (default 0)
+         * @return Absolute tolerance passed to PDFIntegrator (default 1e-3)
          */
         [[nodiscard]] auto intAbsTol() const { return intAbsTol_; }
 
         /**
          * @brief Return the maximum number of evaluations for PDF integration
-         * @return Max evaluations passed to PDFIntegrator (0 = unlimited, the default)
+         * @return Max evaluations passed to PDFIntegrator (0 = unlimited;
+         *   default 2^19 -- see intMaxIter_'s own comment for why)
          */
         [[nodiscard]] auto intMaxIter() const { return intMaxIter_; }
 
@@ -270,6 +271,18 @@ namespace io
          * @return Pointer to the simulation cluster lifetime function
          */
         [[nodiscard]] auto clf() const -> const auto& { return clf_; }
+
+        /**
+         * @brief Get the fraction of stellar mass formed in stochastically-treated clusters
+         * @return The fraction of a galaxy simulation's stellar mass
+         *   that forms in clusters treated stochastically (as
+         *   individual Cluster objects); the remaining (1 - fCluster())
+         *   is treated as a stellar population continuous in both mass
+         *   and time. Defaults to 1.0 (every star forms in a
+         *   stochastic cluster); only meaningful for, and only read
+         *   from, a galaxy-type simulation's own clusters.f_cluster.
+         */
+        [[nodiscard]] auto fCluster() const { return fCluster_; }
 
         /**
          * @brief Get simulation stellar tracks
@@ -418,6 +431,17 @@ namespace io
          * constructor's own galaxy.sfr handling.
          */
         void setSFR(const std::string& sfr);
+
+        /**
+         * @brief Set the fraction of stellar mass formed in stochastically-treated clusters
+         * @param fCluster New fraction; see fCluster()'s own comment
+         * @details
+         * Unlike setCLF()/setSFR(), fCluster_ is a plain double (not a
+         * pdfs::PDF), so this is a direct assignment, mirroring
+         * setZ()'s/setIntRelTol()'s own simple setters rather than
+         * setCLF()'s/setSFR()'s string-parsing ones.
+         */
+        void setFCluster(double fCluster) { fCluster_ = fCluster; }
 
         // Object-replacement setters: unlike the string-driven setters
         // above, these accept an already-built object -- e.g. from
@@ -569,8 +593,58 @@ namespace io
         std::vector<double> outTimes_;                 /**< Times to write output */
         pdfs::PDF outTimeDist_;                        /**< Distribution of output times */
         double intRelTol_ = 1e-2;                      /**< Relative tolerance for PDF integrator */
-        double intAbsTol_ = 0.0;                       /**< Absolute tolerance for PDF integrator */
-        std::size_t intMaxIter_ = 0;                   /**< Max evaluations for PDF integrator (0 = unlimited) */
+        /**
+         * @brief Absolute tolerance for PDF integrator
+         * @details
+         * Nonzero by default (unlike a bare relative tolerance) because
+         * a purely relative criterion is pathological wherever the
+         * integrand's own true value passes near zero -- e.g.
+         * Specsyn::continuousSpecIntegrand()'s per-wavelength flux,
+         * which can be genuinely tiny at wavelengths a given stellar
+         * population barely emits at -- forcing the integrator to keep
+         * refining indefinitely chasing relative precision on a
+         * near-zero quantity. 1e-3 was chosen alongside intMaxIter_'s
+         * own default (see its own comment) from the same benchmark:
+         * a sane floor at the same order as intRelTol_'s own default,
+         * not a value tuned to any specific integral.
+         */
+        double intAbsTol_ = 1e-3;
+        /**
+         * @brief Max evaluations for PDF integrator (0 = unlimited)
+         * @details
+         * 2^19 (524288) by default, not 0 (unlimited): with 0, an
+         * integrand that is slow to converge to the requested
+         * tolerance -- e.g. Specsyn::continuousSpecIntegrand()'s own
+         * dead-star discontinuity in (age, mass) space, whose exact
+         * effect on convergence rate isn't knowable in advance for an
+         * arbitrary track set/SFH -- has no cap on how long it can run
+         * or how much memory pAdaptive's own point cache can grow to
+         * (see Specsyn::specCtsHelper()'s own comment on the memory
+         * blowup this caused before intMaxIter_ had a real default).
+         * 2^19, not one further doubling to 2^20 (an earlier choice
+         * here, briefly): pAdaptive's own cache (see
+         * src/extern/cubature/pcubature.c) grows by attempting one
+         * more whole resolution *doubling*, in whichever dimension has
+         * the largest error, whenever the integral hasn't yet converged
+         * and max_iter hasn't yet been reached -- an inherently
+         * discontinuous jump in memory demand, not a gradual one, so
+         * "headroom above the largest benchmarked value" is not actually
+         * safer, since it can let one further such doubling be attempted
+         * that the benchmark itself never triggered. Confirmed
+         * empirically: the real, permanent
+         * testGalaxySpecsynFullNonStoch slow test's own curTime = 1e7 yr
+         * output time -- even reduced to the simplest possible case, a
+         * single [Fe/H] value and a single such doubling-prone 2D
+         * integral -- exceeded 6 GB of resident memory within a few
+         * seconds at max_iter = 2^20, but completed comfortably (peak
+         * well under that threshold) at max_iter = 2^19, the actual
+         * benchmarked-safe value from the original head-to-head
+         * benchmark of Specsyn::specCtsHelper()'s own continuous-
+         * population integral against CubatureMethod::hAdaptive at
+         * curTime up to 1e10 yr (every max_iter value tried, from 2^10
+         * up to 2^19, finished in a few seconds).
+         */
+        std::size_t intMaxIter_ = 1UL << 19;
         double z_ = 0.0;                               /**< Redshift, read live by every Specsyn/Extinct built from this SimControls */
 
         // Physics settings
@@ -579,6 +653,7 @@ namespace io
         pdfs::PDF fehDist_;        /**< [Fe/H] distribution */
         pdfs::PDF sfr_;            /**< Star formation rate */
         pdfs::PDF clf_;            /**< Cluster lifetime function */
+        double fCluster_ = 1.0;    /**< Fraction of stellar mass formed in stochastically-treated clusters (galaxy sims only) */
         tracks::Tracks3D tracks_;  /**< Stellar tracks */
         tracks::Tracks2D constFeHTracks_; /**< Tracks sliced at fehDist_'s value, if constFeH() */
         double minStochMass_ = 0.0;   /**< Minimum mass for fully stochastic treatment */

@@ -354,6 +354,64 @@ namespace {
         return 0; // Passed
     }
 
+    // Checks the explicit-pivot constructor: reflect(x) = 2 * pivot -
+    // x for a pivot that is deliberately NOT the wrapped PDF's own
+    // midpoint (the default-constructor case is already covered,
+    // exhaustively, by testPDFReflectEval()/testPDFReflectSampling()
+    // above), and that getMin()/getMax() stay equal to the wrapped
+    // PDF's own support regardless of pivot (see PDFReflect's own
+    // class comment for why).
+    auto testPDFReflectPivot(const pdfs::PDF& pdf,
+        const double sMin, const double sMax, const double alpha, const double pivot) -> int
+    {
+        const pdfs::PDFReflect pdfRPivot(pdf, pivot);
+
+        if (pdfRPivot.getMin() != sMin || pdfRPivot.getMax() != sMax)
+        {
+            std::cerr << "testPDFReflect: pivot: getMin()/getMax() should "
+                "stay equal to the wrapped PDF's own support regardless of "
+                "pivot; got [" << pdfRPivot.getMin() << ", " << pdfRPivot.getMax()
+                << "], expected [" << sMin << ", " << sMax << "]\n";
+            return 1;
+        }
+
+        const double norm = (alpha + 1) / (std::pow(sMax, alpha + 1) - std::pow(sMin, alpha + 1));
+        const auto reflect = [pivot](const double x) { return (2.0 * pivot) - x; };
+        const auto plPdf = [norm, alpha](const double x) { return norm * std::pow(x, alpha); };
+
+        // Interior points of [2*pivot - sMax, 2*pivot - sMin) -- the
+        // x-range whose reflection lands inside [sMin, sMax), where
+        // the wrapped PDF's own operator() is nonzero (see
+        // testPDFReflectEval()'s own comment on that half-open range)
+        const std::vector<double> interior = {
+            (2.0 * pivot) - sMax, 0.5 * ((2.0 * pivot) - sMax + (2.0 * pivot) - sMin), (2.0 * pivot) - sMin - 1.0
+        };
+        for (const double x : interior)
+        {
+            const double expected = plPdf(reflect(x));
+            if (!utils::approxEqual(pdfRPivot(x), expected))
+            {
+                std::cerr << "testPDFReflect: pivot: operator() at x=" << x
+                    << " (pivot=" << pivot << ") failed: expected " << expected
+                    << ", got " << pdfRPivot(x) << "\n";
+                return 1;
+            }
+        }
+        // Just outside that range: reflected point falls outside
+        // [sMin, sMax] entirely, so the wrapped PDF's own operator()
+        // is 0
+        const double outside = (2.0 * pivot) - sMin;
+        if (pdfRPivot(outside) != 0.0)
+        {
+            std::cerr << "testPDFReflect: pivot: operator() at x=" << outside
+                << " (pivot=" << pivot << ") should be 0 (reflects to sMin, "
+                "which the wrapped PDF excludes); got " << pdfRPivot(outside) << "\n";
+            return 1;
+        }
+
+        return 0; // Passed
+    }
+
 } // namespace
 
 auto testPDFReflect() -> int
@@ -391,6 +449,14 @@ auto testPDFReflect() -> int
     const double expectRangeExpected = reflect(plExpect(reflect(b), reflect(a)));
 
     if (testPDFReflectSampling(pdf, pdfR, sMin, sMax, a, b, expectRangeExpected) == 1) { return 1; }
+
+    // Explicit-pivot constructor, deliberately not the wrapped PDF's
+    // own midpoint ((sMin + sMax) / 2 == 10.5) -- this is the form
+    // Specsyn::specCtsHelper()/Galaxy::computeLbolCts() actually use,
+    // reflecting sfr about half the current simulation time rather
+    // than half of sfr's own (much larger) declared support.
+    const double pivot = 5.0;
+    if (testPDFReflectPivot(pdf, sMin, sMax, alpha, pivot) == 1) { return 1; }
 
     return 0; // Passed
 }

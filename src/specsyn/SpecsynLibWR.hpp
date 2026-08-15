@@ -395,6 +395,20 @@ namespace specsyn
          */
         [[nodiscard]] auto logTeff() const -> const std::vector<double>& { return logTeff_; }
 
+        /**
+         * @brief The minimum [Fe/H] this library has real spectral data for
+         * @return FeH_.front() -- see Specsyn::fehMin()'s own comment
+         *   for why this override exists
+         */
+        [[nodiscard]] auto fehMin() const -> double override { return FeH_.front(); }
+
+        /**
+         * @brief The maximum [Fe/H] this library has real spectral data for
+         * @return FeH_.back() -- see Specsyn::fehMin()'s own comment
+         *   for why this override exists
+         */
+        [[nodiscard]] auto fehMax() const -> double override { return FeH_.back(); }
+
     private:
 
         /**

@@ -380,6 +380,15 @@ Reading returns a PDF; assigning a str sets a new one via setSFR() --
 see its own docstring for the exact rules, which differ from
 imf/cmf/feH/clf's.)doc";
 
+static constexpr std::string_view fClusterPropertyDocstring = R"doc(The fraction of stellar mass formed in stochastically-treated clusters.
+
+The fraction of a galaxy simulation's stellar mass that forms in
+clusters treated stochastically (as individual Cluster objects); the
+remaining (1 - fCluster) is treated as a stellar population continuous
+in both mass and time. Defaults to 1.0 (every star forms in a
+stochastic cluster); only meaningful for, and only read from, a
+galaxy-type simulation's own clusters.f_cluster.)doc";
+
 static constexpr std::string_view computeLbolPropertyDocstring = R"doc(Whether the bolometric luminosity is computed as an output.
 
 True if "Lbol" was included in phot.filters in the input deck, or
@@ -602,6 +611,8 @@ void bindSimControls(py::module_& m)
                 intMaxIterPropertyDocstring.data(), py::arg("max_iter"))
         .def("setZ", &io::SimControls::setZ,
                 zPropertyDocstring.data(), py::arg("z"))
+        .def("setFCluster", &io::SimControls::setFCluster,
+                fClusterPropertyDocstring.data(), py::arg("f_cluster"))
         // Properties: alternative, attribute-style access to the same
         // getters/setters bound as plain methods above (e.g.
         // sc.imf = "20.0" instead of sc.setIMF("20.0")). Getters that
@@ -629,6 +640,10 @@ void bindSimControls(py::module_& m)
                 &io::SimControls::sfr,
                 [](io::SimControls& self, const std::string& sfr) { self.setSFR(sfr); },
                 sfrPropertyDocstring.data())
+        .def_property("fCluster",
+                &io::SimControls::fCluster,
+                &io::SimControls::setFCluster,
+                fClusterPropertyDocstring.data())
         .def_property("computeLbol",
                 &io::SimControls::computeLbol,
                 &io::SimControls::setComputeLbol,

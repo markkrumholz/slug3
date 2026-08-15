@@ -9,6 +9,7 @@
 #include "../src/core/Galaxy.hpp"
 #include "../src/io/SimControls.hpp"
 #include "../src/phot/FilterCollection.hpp"
+#include "../src/utils/Constants.hpp"
 #include "../src/utils/RngThread.hpp"
 #include "../src/utils/UniqueIDManager.hpp"
 #include "testGalaxy.hpp"
@@ -43,8 +44,8 @@ static constexpr double t2 = 1.2e6;
 // Loose enough to tolerate genuine Poisson-like scatter from a handful
 // of stochastically-drawn cluster masses (testGalaxyDynamicsCMF.toml
 // is a real power-law CMF, not a delta function -- see its own
-// comment), tight enough to catch a real bug in how mClusterNew/
-// newMasses/formTime are computed.
+// comment), tight enough to catch a real bug in how mNew/newMasses/
+// formTime are computed.
 static constexpr double massTolerance = 0.3;
 
 // Verify that a freshly-constructed Galaxy starts with curTime() == 0,
@@ -361,9 +362,498 @@ static auto testGalaxyBasics() -> int
     }
 }
 
+// Verify that Galaxy::computeSpec() correctly adds the continuously-
+// treated population's own spectral contribution (via
+// Specsyn::specCts()'s continuous-population overload) when
+// fCluster() < 1. Uses fCluster = 0.0 exactly (entirely continuous, no
+// stochastic clusters at all) so galaxy.spec() is guaranteed to come
+// *entirely* from the new code path, with no cluster-summed
+// contribution to confound it -- clusters()/disruptedClusters() are
+// both checked empty as a sanity check on that premise. inputFile's
+// own stars.FeH = 0.0 (a constant) exercises specCts()'s 2D (time,
+// mass) code path; testContinuousPopSpecMultiFeh below instead
+// overrides it with a real distribution, exercising the 3D (time,
+// feh, mass) path. See testContinuousPopSpecReferenceCheck for a
+// stronger, independent correctness check of the same 2D case (this
+// test only checks the result is finite, non-negative, and non-zero).
+static auto testContinuousPopSpecSingleFeh() -> int
+{
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFile);
+        inputDeck.at_path("clusters").as_table()->insert("f_cluster", 0.0);
+        const io::SimControls controls(inputDeck);
+
+        utils::rng().seed(rngSeed);
+        core::Galaxy galaxy(controls);
+        galaxy.advance(t1);
+
+        if (!galaxy.clusters().empty() || !galaxy.disruptedClusters().empty())
+        {
+            std::cerr << "testGalaxy: continuousPopSpecSingleFeh: test bug: "
+                "expected no stochastic clusters at all with f_cluster = 0\n";
+            return 1;
+        }
+
+        const auto& spec = galaxy.spec();
+        if (spec.size() != controls.specsyn()->wl().size())
+        {
+            std::cerr << "testGalaxy: continuousPopSpecSingleFeh: spec() size "
+                << spec.size() << " does not match wl() size "
+                << controls.specsyn()->wl().size() << "\n";
+            return 1;
+        }
+        double total = 0.0;
+        for (const double v : spec)
+        {
+            if (!std::isfinite(v) || v < 0.0)
+            {
+                std::cerr << "testGalaxy: continuousPopSpecSingleFeh: spec() "
+                    "contains a non-finite or negative value\n";
+                return 1;
+            }
+            total += v;
+        }
+        if (!(total > 0.0))
+        {
+            std::cerr << "testGalaxy: continuousPopSpecSingleFeh: expected a "
+                "non-trivial spectrum from the continuous population, got "
+                "all zeros\n";
+            return 1;
+        }
+
+        // With clusters()/disruptedClusters() both empty, specExtinct()
+        // comes entirely from the continuous population's own
+        // (unattenuated) contribution -- see Galaxy::computeSpec()'s own
+        // comment for why -- so specExtinct()[i] should exactly equal
+        // spec()[wlOffset + i], the same underlying contSpec value at the
+        // same wavelength, just offset by however many of spec()'s own
+        // leading elements fall outside the extinction curve's own
+        // narrower coverage (see Extinct::wlOffset()'s own comment).
+        const auto wlOffset = controls.extinct()->wlOffset();
+        const auto& specExtinct = galaxy.specExtinct();
+        if (specExtinct.size() != controls.extinct()->wl().size())
+        {
+            std::cerr << "testGalaxy: continuousPopSpecSingleFeh: specExtinct() "
+                "size does not match extinct()->wl() size\n";
+            return 1;
+        }
+        for (std::size_t i = 0; i < specExtinct.size(); ++i)
+        {
+            if (specExtinct.at(i) != spec.at(wlOffset + i))
+            {
+                std::cerr << "testGalaxy: continuousPopSpecSingleFeh: "
+                    "specExtinct()[" << i << "] does not exactly equal "
+                    "spec()[" << (wlOffset + i) << "]\n";
+                return 1;
+            }
+        }
+        if (galaxy.phot().empty() || galaxy.photExtinct().empty())
+        {
+            std::cerr << "testGalaxy: continuousPopSpecSingleFeh: expected "
+                "non-empty phot() and photExtinct()\n";
+            return 1;
+        }
+
+        // inputFile's own phot.filters includes "Lbol" (see
+        // io::SimControls::computeLbol()'s own comment), so this
+        // exercises Specsyn::specAndLbolCts() rather than plain
+        // specCts() -- see Galaxy::computeSpec()'s own comment. Lbol
+        // must be finite, positive, and at least as large as the
+        // luminosity already visible within spec()'s own covered
+        // wavelength range (a trapezoidal integral of spec() over
+        // wl(), converted from erg/s/Angstrom to erg/s): light outside
+        // that range can only add to the true bolometric total, never
+        // subtract from it, so this one-directional bound holds
+        // regardless of the exact SED shape, while still catching a
+        // badly broken Lbol calculation (e.g. wrong units, or Lbol not
+        // really being computed at all).
+        const double lbol = galaxy.lbol();
+        if (!std::isfinite(lbol) || !(lbol > 0.0))
+        {
+            std::cerr << "testGalaxy: continuousPopSpecSingleFeh: expected a "
+                "finite, positive lbol(), got " << lbol << "\n";
+            return 1;
+        }
+        const auto& wl = controls.specsyn()->wl();
+        double trapzErgS = 0.0;
+        for (std::size_t k = 0; k + 1 < spec.size(); ++k)
+        {
+            trapzErgS += 0.5 * (spec.at(k) + spec.at(k + 1)) * (wl.at(k + 1) - wl.at(k));
+        }
+        constexpr double lbolTolerance = 1e-6; // floating-point/quadrature-level slop only
+        if (lbol * utils::Lsun < trapzErgS * (1.0 - lbolTolerance))
+        {
+            std::cerr << "testGalaxy: continuousPopSpecSingleFeh: lbol() = "
+                << lbol << " Lsun (" << (lbol * utils::Lsun) << " erg/s) is "
+                "less than the luminosity already visible in spec()'s own "
+                "covered wavelength range (" << trapzErgS << " erg/s)\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testGalaxy: continuousPopSpecSingleFeh test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Same as testContinuousPopSpecSingleFeh, but overrides stars.FeH with
+// a real (non-degenerate) distribution -- flat over [-1, 0], well
+// within MIST_test's own [-1, 0.5] grid (see
+// tests/tracks/assets/tracks.toml) -- so specCts()'s 3D (time, feh,
+// mass) code path is exercised instead of its 2D one.
+static auto testContinuousPopSpecMultiFeh() -> int
+{
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFile);
+        inputDeck.at_path("clusters").as_table()->insert("f_cluster", 0.0);
+        inputDeck.at_path("stars").as_table()->insert_or_assign(
+            "FeH", "tests/core/assets/testClusterSpecsynFullFeHDist.toml");
+        const io::SimControls controls(inputDeck);
+
+        utils::rng().seed(rngSeed);
+        core::Galaxy galaxy(controls);
+        galaxy.advance(t1);
+
+        if (!galaxy.clusters().empty() || !galaxy.disruptedClusters().empty())
+        {
+            std::cerr << "testGalaxy: continuousPopSpecMultiFeh: test bug: "
+                "expected no stochastic clusters at all with f_cluster = 0\n";
+            return 1;
+        }
+
+        const auto& spec = galaxy.spec();
+        if (spec.size() != controls.specsyn()->wl().size())
+        {
+            std::cerr << "testGalaxy: continuousPopSpecMultiFeh: spec() size "
+                << spec.size() << " does not match wl() size "
+                << controls.specsyn()->wl().size() << "\n";
+            return 1;
+        }
+        double total = 0.0;
+        for (const double v : spec)
+        {
+            if (!std::isfinite(v) || v < 0.0)
+            {
+                std::cerr << "testGalaxy: continuousPopSpecMultiFeh: spec() "
+                    "contains a non-finite or negative value\n";
+                return 1;
+            }
+            total += v;
+        }
+        if (!(total > 0.0))
+        {
+            std::cerr << "testGalaxy: continuousPopSpecMultiFeh: expected a "
+                "non-trivial spectrum from the continuous population, got "
+                "all zeros\n";
+            return 1;
+        }
+
+        // See testContinuousPopSpecSingleFeh's own identical check for why
+        // specExtinct()[i] should exactly equal spec()[wlOffset + i] here.
+        const auto wlOffset = controls.extinct()->wlOffset();
+        const auto& specExtinct = galaxy.specExtinct();
+        if (specExtinct.size() != controls.extinct()->wl().size())
+        {
+            std::cerr << "testGalaxy: continuousPopSpecMultiFeh: specExtinct() "
+                "size does not match extinct()->wl() size\n";
+            return 1;
+        }
+        for (std::size_t i = 0; i < specExtinct.size(); ++i)
+        {
+            if (specExtinct.at(i) != spec.at(wlOffset + i))
+            {
+                std::cerr << "testGalaxy: continuousPopSpecMultiFeh: "
+                    "specExtinct()[" << i << "] does not exactly equal "
+                    "spec()[" << (wlOffset + i) << "]\n";
+                return 1;
+            }
+        }
+        if (galaxy.phot().empty() || galaxy.photExtinct().empty())
+        {
+            std::cerr << "testGalaxy: continuousPopSpecMultiFeh: expected "
+                "non-empty phot() and photExtinct()\n";
+            return 1;
+        }
+
+        // See testContinuousPopSpecSingleFeh's own identical check for
+        // the rationale.
+        const double lbol = galaxy.lbol();
+        if (!std::isfinite(lbol) || !(lbol > 0.0))
+        {
+            std::cerr << "testGalaxy: continuousPopSpecMultiFeh: expected a "
+                "finite, positive lbol(), got " << lbol << "\n";
+            return 1;
+        }
+        const auto& wl = controls.specsyn()->wl();
+        double trapzErgS = 0.0;
+        for (std::size_t k = 0; k + 1 < spec.size(); ++k)
+        {
+            trapzErgS += 0.5 * (spec.at(k) + spec.at(k + 1)) * (wl.at(k + 1) - wl.at(k));
+        }
+        constexpr double lbolTolerance = 1e-6; // floating-point/quadrature-level slop only
+        if (lbol * utils::Lsun < trapzErgS * (1.0 - lbolTolerance))
+        {
+            std::cerr << "testGalaxy: continuousPopSpecMultiFeh: lbol() = "
+                << lbol << " Lsun (" << (lbol * utils::Lsun) << " erg/s) is "
+                "less than the luminosity already visible in spec()'s own "
+                "covered wavelength range (" << trapzErgS << " erg/s)\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testGalaxy: continuousPopSpecMultiFeh test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Cross-checks the new joint (time, mass) integral -- exercised via
+// testContinuousPopSpecSingleFeh's own scenario (fCluster = 0,
+// constant FeH) -- against an independent brute-force reference: a
+// fixed-step Riemann sum over age, at each step calling the *other*,
+// already-established specCts() overload (single fixed-age isochrone,
+// integrated over mass alone) on that step's own isochrone, weighted
+// by the star-forming mass in that step (sfr().integral() over it),
+// exactly mirroring how a real continuous stellar population's light
+// is built up from stars of many different ages. This doesn't rely on
+// any of the new PDFIntegratorND/isochroneCache_ machinery at all, so
+// close agreement between the two is strong evidence the new code
+// path's own age/mass weighting and isochrone lookups are correct,
+// not just that it runs without crashing (which is all
+// testContinuousPopSpecSingleFeh itself checks).
+static auto testContinuousPopSpecReferenceCheck() -> int
+{
+    constexpr double relTolerance = 0.05; // the brute-force reference has its own O(1/nSteps) discretization error
+    constexpr int nSteps = 400;
+    constexpr double feh = 0.0; // matches inputFile's own stars.FeH
+
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFile);
+        inputDeck.at_path("clusters").as_table()->insert("f_cluster", 0.0);
+        const io::SimControls controls(inputDeck);
+
+        utils::rng().seed(rngSeed);
+        core::Galaxy galaxy(controls);
+        galaxy.advance(t1);
+        const auto& newSpec = galaxy.spec();
+
+        const auto* synth = controls.specsyn();
+        const auto& tracks2D = controls.tracks2D();
+        const auto& imf = controls.imf();
+        const auto& sfr = controls.sfr();
+
+        std::vector<double> refSpec(synth->wl().size(), 0.0);
+        const double dt = t1 / nSteps;
+        for (int i = 0; i < nSteps; ++i)
+        {
+            const double tLo = i * dt;
+            const double tHi = (i + 1) * dt;
+            const double mStep = sfr.integral(tLo, tHi);
+            if (mStep <= 0.0) { continue; }
+
+            const double age = t1 - (0.5 * (tLo + tHi));
+            const double logAge = std::max(std::log10(age), tracks2D.logTMin());
+            const auto isochrone = tracks2D.getIsochrone(logAge);
+
+            const auto stepSpec = synth->specCts(
+                isochrone, imf, mStep, imf.getMin(), imf.getMax(), feh);
+            for (std::size_t k = 0; k < refSpec.size(); ++k) { refSpec.at(k) += stepSpec.at(k); }
+        }
+
+        double newTotal = 0.0;
+        double refTotal = 0.0;
+        for (std::size_t k = 0; k < newSpec.size(); ++k)
+        {
+            newTotal += newSpec.at(k);
+            refTotal += refSpec.at(k);
+        }
+        if (!(refTotal > 0.0))
+        {
+            std::cerr << "testGalaxy: continuousPopSpecReferenceCheck: test bug: "
+                "brute-force reference spectrum is all zeros\n";
+            return 1;
+        }
+        if (std::abs(newTotal - refTotal) > relTolerance * refTotal)
+        {
+            std::cerr << "testGalaxy: continuousPopSpecReferenceCheck: total "
+                "flux from the new joint integral (" << newTotal << ") deviates "
+                "from the brute-force per-age reference (" << refTotal <<
+                ") by more than " << relTolerance * 100 << "%\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testGalaxy: continuousPopSpecReferenceCheck test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Verify that Galaxy::lbol()'s two different paths to the continuous
+// population's own Lbol -- as a byproduct of computing a spectrum
+// (Specsyn::specAndLbolCts(), via Galaxy::computeSpec()) versus
+// standalone (Galaxy::computeLbolCts()), used respectively when spec()
+// has or hasn't already been computed this step -- agree with each
+// other. Builds two separate Galaxy instances from the same input
+// deck and rng seed (so both draw an identical population), one where
+// spec() is called before lbol() (forcing the spec-computed path) and
+// one where lbol() alone is ever called (forcing the standalone path),
+// then compares the two lbol() values. fCluster = 0.0, as in
+// testContinuousPopSpecSingleFeh, so clusters()/disruptedClusters()
+// are empty in both cases and lbol() comes entirely from whichever of
+// the two continuous-population code paths actually ran, isolating
+// the comparison to exactly the two paths this test means to check
+// against each other.
+static auto testContinuousPopLbolStandaloneMatchesSpec() -> int
+{
+    constexpr double relTolerance = 0.02; // both paths target the same SimControls::intRelTol() independently
+
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFile);
+        inputDeck.at_path("clusters").as_table()->insert("f_cluster", 0.0);
+        const io::SimControls controls(inputDeck);
+
+        utils::rng().seed(rngSeed);
+        core::Galaxy galaxyViaSpec(controls);
+        galaxyViaSpec.advance(t1);
+        static_cast<void>(galaxyViaSpec.spec()); // forces computeSpec(), which sets lbolCts_ as a byproduct
+        const double lbolViaSpec = galaxyViaSpec.lbol();
+
+        utils::rng().seed(rngSeed);
+        core::Galaxy galaxyStandalone(controls);
+        galaxyStandalone.advance(t1);
+        const double lbolStandalone = galaxyStandalone.lbol(); // spec() never called: forces the standalone computeLbolCts() path
+
+        if (!std::isfinite(lbolViaSpec) || !(lbolViaSpec > 0.0))
+        {
+            std::cerr << "testGalaxy: continuousPopLbolStandaloneMatchesSpec: "
+                "expected a finite, positive lbol() via the spec-computed path, "
+                "got " << lbolViaSpec << "\n";
+            return 1;
+        }
+        if (!std::isfinite(lbolStandalone) || !(lbolStandalone > 0.0))
+        {
+            std::cerr << "testGalaxy: continuousPopLbolStandaloneMatchesSpec: "
+                "expected a finite, positive lbol() via the standalone path, "
+                "got " << lbolStandalone << "\n";
+            return 1;
+        }
+        if (std::abs(lbolViaSpec - lbolStandalone) > relTolerance * lbolViaSpec)
+        {
+            std::cerr << "testGalaxy: continuousPopLbolStandaloneMatchesSpec: "
+                "lbol() via the spec-computed path (" << lbolViaSpec <<
+                " Lsun) deviates from the standalone path (" << lbolStandalone <<
+                " Lsun) by more than " << relTolerance * 100 << "%\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testGalaxy: continuousPopLbolStandaloneMatchesSpec test "
+            "failed: " << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Verify that Galaxy::advance() correctly incorporates
+// SimControls::fCluster() into its own mass accounting: with
+// fCluster < 1, only fCluster of the target stellar mass should be
+// drawn into stochastic clusters (clusters.CMF), with the remaining
+// (1 - fCluster) folded directly into actualMass() as the continuous,
+// non-clustered population's own share -- see Galaxy::advance()'s own
+// comment for the exact formula this checks.
+static auto testFCluster() -> int
+{
+    constexpr double fClusterValue = 0.5;
+    constexpr double tightTol = 1e-9;
+
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFile);
+        inputDeck.at_path("clusters").as_table()->insert("f_cluster", fClusterValue);
+        const io::SimControls controls(inputDeck);
+        if (std::abs(controls.fCluster() - fClusterValue) > tightTol)
+        {
+            std::cerr << "testGalaxy: fCluster: test bug: expected "
+                "SimControls::fCluster() == " << fClusterValue << ", got "
+                << controls.fCluster() << "\n";
+            return 1;
+        }
+
+        utils::rng().seed(rngSeed);
+        core::Galaxy galaxy(controls);
+        galaxy.advance(t1);
+
+        // targetMass() should be unaffected by fCluster -- always the
+        // full SFR-integrated target, clustered and continuous together
+        const double expectedTargetMass = controls.sfr().integral(0.0, t1);
+        if (std::abs(galaxy.targetMass() - expectedTargetMass) >
+            tightTol * expectedTargetMass)
+        {
+            std::cerr << "testGalaxy: fCluster: targetMass() = " << galaxy.targetMass()
+                << ", expected sfr().integral(0, t1) = " << expectedTargetMass << "\n";
+            return 1;
+        }
+
+        // actualMass() should equal (1 - fCluster) * targetMass() (the
+        // continuous population's own share) plus the sum of every
+        // newly-formed cluster's own targetMass() -- an exact identity
+        // (not just approximate), since this is the very first (and
+        // only) advance() call
+        double clusterMass = 0.0;
+        for (const auto& c : galaxy.clusters()) { clusterMass += c.targetMass(); }
+        for (const auto& c : galaxy.disruptedClusters()) { clusterMass += c.targetMass(); }
+        const double expectedActualMass =
+            ((1.0 - fClusterValue) * galaxy.targetMass()) + clusterMass;
+        if (std::abs(galaxy.actualMass() - expectedActualMass) >
+            tightTol * expectedActualMass)
+        {
+            std::cerr << "testGalaxy: fCluster: actualMass() = " << galaxy.actualMass()
+                << ", expected (1 - fCluster) * targetMass() + cluster mass = "
+                << expectedActualMass << "\n";
+            return 1;
+        }
+
+        // The stochastic clusters' own total target mass should be
+        // close to fCluster * targetMass() -- loose tolerance, since
+        // CMF sampling is stochastic (see massTolerance's own comment)
+        const double expectedClusterMass = fClusterValue * galaxy.targetMass();
+        if (std::abs(clusterMass - expectedClusterMass) > massTolerance * expectedClusterMass)
+        {
+            std::cerr << "testGalaxy: fCluster: stochastic cluster mass "
+                << clusterMass << " deviates from fCluster * targetMass() = "
+                << expectedClusterMass << " by more than " << massTolerance * 100 << "%\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testGalaxy: fCluster test failed: " << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
 auto testGalaxy() -> int
 {
     int result = testGalaxyBasics();
+    result += testFCluster();
+    result += testContinuousPopSpecSingleFeh();
+    result += testContinuousPopSpecMultiFeh();
+    result += testContinuousPopSpecReferenceCheck();
+    result += testContinuousPopLbolStandaloneMatchesSpec();
 
     try
     {

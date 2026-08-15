@@ -482,6 +482,13 @@ static auto testSimControlsPhysicsCluster() -> int
             return 1;
         }
 
+        if (sim.fCluster() != 1.0)
+        {
+            std::cerr << "testSimControls: " << fileName
+                << ": expected default fCluster() == 1.0, got " << sim.fCluster() << "\n";
+            return 1;
+        }
+
         if (checkTracks(sim, fileName) != 0) { return 1; }
     }
     catch (const std::exception& error)
@@ -570,12 +577,72 @@ static auto testSimControlsPhysicsGalaxy() -> int
             return 1;
         }
 
+        if (sim.fCluster() != 1.0)
+        {
+            std::cerr << "testSimControls: " << fileName
+                << ": expected default fCluster() == 1.0, got " << sim.fCluster() << "\n";
+            return 1;
+        }
+
         if (checkTracks(sim, fileName) != 0) { return 1; }
     }
     catch (const std::exception& error)
     {
         std::cerr << "testSimControls: failed to parse valid galaxy input deck "
             << fileName << ": " << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Verify that clusters.f_cluster is read for a galaxy-type simulation
+// when given explicitly, and ignored (fCluster() stays at its default
+// of 1.0) when the same key is given on a cluster-type deck instead --
+// mirrors testSimControlsPhysicsCluster()/testSimControlsPhysicsGalaxy()'s
+// own default-value checks, but for an explicitly-set, non-default
+// value.
+static auto testSimControlsFCluster() -> int
+{
+    constexpr double fClusterValue = 0.6;
+
+    try
+    {
+        toml::table galaxyDeck = toml::parse_file("tests/core/assets/testGalaxy.in");
+        galaxyDeck.at_path("clusters").as_table()->insert("f_cluster", fClusterValue);
+        const io::SimControls galaxySim(galaxyDeck);
+        if (!utils::approxEqual(galaxySim.fCluster(), fClusterValue))
+        {
+            std::cerr << "testSimControls: fCluster: expected galaxy fCluster() == "
+                << fClusterValue << ", got " << galaxySim.fCluster() << "\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: fCluster: failed to parse valid galaxy "
+            "input deck: " << error.what() << "\n";
+        return 1;
+    }
+
+    try
+    {
+        toml::table clusterDeck = toml::parse_file("tests/core/assets/testCluster.in");
+        if (toml::table* clustersTbl = clusterDeck["clusters"].as_table())
+        { clustersTbl->insert("f_cluster", fClusterValue); }
+        else { clusterDeck.insert("clusters", toml::table{ { "f_cluster", fClusterValue } }); }
+        const io::SimControls clusterSim(clusterDeck);
+        if (clusterSim.fCluster() != 1.0)
+        {
+            std::cerr << "testSimControls: fCluster: expected fCluster() == 1.0 "
+                "(clusters.f_cluster is only read for a galaxy-type simulation), got "
+                << clusterSim.fCluster() << "\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: fCluster: failed to parse valid cluster "
+            "input deck: " << error.what() << "\n";
         return 1;
     }
     return 0;
@@ -717,6 +784,7 @@ auto testSimControls() -> int
     result += testSimControlsGalaxy();
     result += testSimControlsPhysicsCluster();
     result += testSimControlsPhysicsGalaxy();
+    result += testSimControlsFCluster();
     result += testSimControlsNoSpectraModel();
     result += testSimControlsInvalidSpectraModel();
     result += testSimControlsSpectraLibrary();

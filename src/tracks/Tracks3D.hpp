@@ -130,6 +130,16 @@ namespace tracks
        [[nodiscard]] auto liveMassRange(const double t, const double feh) const
        { return interp_->sliceConstZ(feh).yLim(t); }
 
+       /**
+        * @brief Check whether a star of a given mass is alive at a given time and [Fe/H]
+        * @param m Mass of the star
+        * @param logT log10(time / yr) at which to evaluate
+        * @param feh [Fe/H] value of the tracks to use
+        * @return True if a star of mass m is alive at logT and feh, false otherwise
+        */
+       [[nodiscard]] auto isAlive(const double m, const double logT, const double feh) const -> bool
+       { return interp_->sliceConstZ(feh).contains(logT, m); }
+
         /**
          * @brief Return the track for a star of a given mass and [Fe/H]
          * @param m Mass of the star whose track should be computed

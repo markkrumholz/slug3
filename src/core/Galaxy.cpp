@@ -7,12 +7,23 @@
 
 #include "Galaxy.hpp"
 #include "../extinct/Extinct.hpp"
+#include "../interpolation/Interpolator1D.hpp"
 #include "../io/SimControls.hpp"
+#include "../pdfs/PDF.hpp"
+#include "../pdfs/PDFReflect.hpp"
 #include "../phot/FilterCollection.hpp"
+#include "../tracks/TrackCommons.hpp"
+#include "../utils/PDFIntegratorND.hpp"
 #include "../utils/UniqueIDManager.hpp"
 #include "Cluster.hpp"
+#include <algorithm>
+#include <array>
+#include <cmath>
 #include <cstddef>
 #include <functional>
+#include <limits>
+#include <mdspan> // NOLINT(misc-include-cleaner) -- see the identical NOLINT on SpecsynLibWR.hpp's own <mdspan> include
+#include <memory>
 #include <numeric>
 #include <sstream>
 #include <stdexcept>
@@ -39,14 +50,20 @@ void core::Galaxy::advance(const double t)
     }
 
     const auto& sc = controls_.get();
+    const double fCluster = sc.fCluster();
 
-    // 1) Total mass of new clusters that should have formed between
-    // curTime_ and t, and 2) the individual cluster masses drawn from
-    // the CMF to reach that target
-    const double mClusterNew = sc.sfr().integral(curTime_, t);
-    const auto newMasses = sc.cmf().drawTarget(mClusterNew);
-    targetMass_ += mClusterNew;
-    actualMass_ += std::accumulate(newMasses.begin(), newMasses.end(), 0.0);
+    // 1) Total stellar mass that should have formed between curTime_
+    // and t, and 2) the individual cluster masses drawn from the CMF
+    // to reach the stochastically-treated fraction (fCluster) of that
+    // target -- the remaining (1 - fCluster) forms as a continuous
+    // (non-clustered) population, not represented by any individual
+    // Cluster object, so actualMass_ folds its own target mass in
+    // directly rather than via newMasses
+    const double mNew = sc.sfr().integral(curTime_, t);
+    const auto newMasses = sc.cmf().drawTarget(mNew * fCluster);
+    targetMass_ += mNew;
+    actualMass_ += ((1.0 - fCluster) * mNew) +
+        std::accumulate(newMasses.begin(), newMasses.end(), 0.0);
 
     // 3-4) For each new cluster, draw a formation time from the SFR
     // over (curTime_, t] and create it, with a unique ID from the uid
@@ -81,12 +98,13 @@ void core::Galaxy::advance(const double t)
     }
     clusters_ = std::move(stillAlive);
 
-    // 7) Mark spec_/specExtinct_/phot_/photExtinct_/lbol_ as stale;
-    // recomputed lazily, on demand, the next time spec()/specExtinct()/
-    // phot()/photExtinct()/lbol() is actually called
+    // 7) Mark spec_/specExtinct_/phot_/photExtinct_/lbol_/lbolCts_ as
+    // stale; recomputed lazily, on demand, the next time spec()/
+    // specExtinct()/phot()/photExtinct()/lbol() is actually called
     specCurrent_ = false;
     photCurrent_ = false;
     lbolCurrent_ = false;
+    lbolCtsCurrent_ = false;
 
     // 8) Update current time
     curTime_ = t;
@@ -94,7 +112,11 @@ void core::Galaxy::advance(const double t)
 
 // Sum spec_ (and specExtinct_) over every cluster in clusters_ and
 // disruptedClusters_ -- see this method's own header comment for the
-// null-guards this mirrors from Cluster::computeSpec()
+// null-guards this mirrors from Cluster::computeSpec() -- then, if
+// fCluster() < 1, add the continuously-treated (non-clustered) share
+// of the population's own spectrum (via Specsyn::specCts()'s
+// continuous-population overload) to both, unattenuated in
+// specExtinct_'s own case -- see that block's own comment for why
 void core::Galaxy::computeSpec()
 {
     const auto& sc = controls_.get();
@@ -128,6 +150,45 @@ void core::Galaxy::computeSpec()
         sumSpecExtinct(clusters_);
         sumSpecExtinct(disruptedClusters_);
     }
+
+    // Add the continuously-treated (non-clustered) share of the
+    // population's own spectrum, if any, to both spec_ and (if an
+    // extinction curve was requested) specExtinct_ -- unlike a bound
+    // cluster, which draws its own A_V, the continuous/field
+    // population is assumed negligibly extincted, so its own light
+    // passes into specExtinct_ unattenuated. If Lbol was also
+    // requested, gets it via specAndLbolCts() (a byproduct of the same
+    // integral) rather than paying for a second one via the standalone
+    // Lbol path -- see lbolCtsCurrent_'s own comment.
+    const double fCluster = sc.fCluster();
+    if (fCluster < 1.0)
+    {
+        std::vector<double> contSpec;
+        if (sc.computeLbol())
+        {
+            auto [s, l] = synth->specAndLbolCts(sc.sfr(), sc.imf(), sc.fehDist(), curTime_, fCluster);
+            contSpec = std::move(s);
+            lbolCts_ = l;
+            lbolCtsCurrent_ = true;
+        }
+        else
+        {
+            contSpec = synth->specCts(sc.sfr(), sc.imf(), sc.fehDist(), curTime_, fCluster);
+        }
+
+        for (std::size_t i = 0; i < spec_.size(); ++i) { spec_[i] += contSpec[i]; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- contSpec has size wl().size() by Specsyn::specCts()'s own contract, matching spec_'s size set just above
+        if (ext != nullptr)
+        {
+            // specExtinct_ sits on ext->wl(), a possibly-narrower,
+            // offset window of spec_'s own wavelength grid (see
+            // Extinct::applyExtinction()'s own wlOffset_ comment) --
+            // specExtinct_[i] lines up with contSpec[wlOffset + i], not
+            // contSpec[i], and (per this function's own comment) gets
+            // no exp(-A_V * extinct()) attenuation of its own.
+            const auto wlOffset = ext->wlOffset();
+            for (std::size_t i = 0; i < specExtinct_.size(); ++i) { specExtinct_[i] += contSpec[wlOffset + i]; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- specExtinct_.size() == wl_.size() <= contSpec.size() - wlOffset by Extinct's own constructor contract (wl_ is a sub-window of the wl originally passed to it, which matches contSpec's own grid)
+        }
+    }
 }
 
 // Update the galaxy's photometry (and, if an extinction curve was
@@ -152,7 +213,8 @@ void core::Galaxy::computePhot()
 }
 
 // Sum lbol_ over every cluster in clusters_ and disruptedClusters_,
-// unless Lbol was never requested (see this method's own header comment)
+// plus the continuous population's own share if already current, unless
+// Lbol was never requested (see this method's own header comment)
 void core::Galaxy::computeLbol()
 {
     const auto& sc = controls_.get();
@@ -161,4 +223,137 @@ void core::Galaxy::computeLbol()
     lbol_ = 0.0;
     for (auto& cluster : clusters_) { lbol_ += cluster.lbol(); }
     for (auto& cluster : disruptedClusters_) { lbol_ += cluster.lbol(); }
+
+    if (lbolCtsCurrent_)
+    {
+        lbol_ += lbolCts_;
+    }
+    else if (sc.fCluster() < 1.0)
+    {
+        // Lbol was requested and there is a continuous-population
+        // share to account for, but computeSpec() hasn't run since the
+        // last advance() to compute it as a byproduct -- e.g. a caller
+        // asked for lbol() without ever asking for spec(). Get it via
+        // the standalone path instead, which doesn't pay for a full
+        // spectrum it wasn't asked for.
+        computeLbolCts();
+        lbol_ += lbolCts_;
+    }
+}
+
+auto core::Galaxy::lbolCtsIntegrand(
+    const std::mdspan<double, std::extents<std::size_t, std::dynamic_extent, 2>> points, // NOLINT(misc-include-cleaner) -- see the identical NOLINT on the <mdspan> include above
+    const double feh
+) const -> std::vector<double>
+{
+    const auto& sc = controls_.get();
+
+    // Single-slot isochrone cache, keyed on age alone -- feh is fixed
+    // for this whole call -- see
+    // Specsyn::continuousSpecIntegrand()'s own identical comment for
+    // why a single slot, rather than a persistent map keyed on every
+    // distinct age a batch touches, is what keeps memory bounded
+    // regardless of how many distinct ages a batch spans.
+    double cachedAge = std::numeric_limits<double>::quiet_NaN();
+    std::unique_ptr<specsyn::Specsyn::Isochrone> cachedIsochrone;
+
+    const std::size_t npts = points.extent(0);
+    std::vector<double> resultFlat(npts, 0.0);
+    for (std::size_t i = 0; i < npts; ++i)
+    {
+        const double age = points[i, 0]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i < npts == points.extent(0) by this loop's own bound
+        const double mass = points[i, 1]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
+
+        if (cachedIsochrone == nullptr || age != cachedAge)
+        {
+            const double logAge = std::max(std::log10(age), sc.tracks().logTMin());
+            cachedIsochrone = std::make_unique<specsyn::Specsyn::Isochrone>(sc.tracks().getIsochrone(logAge, feh));
+            cachedAge = age;
+        }
+
+        const specsyn::Specsyn::Segment* seg = nullptr;
+        for (const auto& s : *cachedIsochrone)
+        {
+            if (mass >= s->xMin() && mass <= s->xMax()) { seg = s.get(); break; }
+        }
+        if (seg == nullptr) { continue; } // dead star: leave this point's own value at zero
+
+        const auto props = (*seg)(mass);
+        const double logL = props[static_cast<std::size_t>(tracks::FieldIdx::logL)]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- StarData is a fixed-size std::array, and logL is one of its compile-time-known indices
+        resultFlat[i] = std::pow(10.0, logL); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i < npts == resultFlat.size() by construction
+    }
+    return resultFlat;
+}
+
+void core::Galaxy::computeLbolCts()
+{
+    const auto& sc = controls_.get();
+    const auto& sfr = sc.sfr();
+    const auto& imf = sc.imf();
+    const auto& fehDist = sc.fehDist();
+    const double fCluster = sc.fCluster();
+
+    // See Specsyn::specCtsHelper()'s own comment for why this reflects
+    // sfr about curTime_ / 2 (so this dimension's own coordinate
+    // becomes age directly), why ageMin = min(1e4 yr, 1e-3 * curTime_)
+    // rather than anything derived from tracks().logTMin(), and
+    // log-transforms whenever curTime_ exceeds that floor; see
+    // computeLbolCts()'s own header comment for why absTol has no
+    // utils::Lsun factor here, unlike Specsyn::specCtsHelper()'s own.
+    const pdfs::PDFReflect sfrAge(sfr, 0.5 * curTime_);
+    const double ageMin = std::min(1e4, 1e-3 * curTime_);
+    const bool logAge = curTime_ > ageMin;
+
+    const bool singleFeh = (fehDist.getMin() == fehDist.getMax());
+    const double absTol = sc.intAbsTol() * sfr.integral(0.0, curTime_);
+
+    using IntegrandFn = std::vector<double> (Galaxy::*)(
+        std::mdspan<double, std::extents<std::size_t, std::dynamic_extent, 2>>, double) const; // NOLINT(misc-include-cleaner) -- see the identical NOLINT on the <mdspan> include above
+    const utils::PDFIntegratorND<IntegrandFn, 2, true, utils::CubatureMethod::hAdaptive> integrator(
+        std::array<std::reference_wrapper<const pdfs::PDF>, 2>{ std::cref(sfrAge), std::cref(imf) },
+        static_cast<IntegrandFn>(&Galaxy::lbolCtsIntegrand),
+        1,
+        std::array<bool, 2>{ logAge, true },
+        sc.intMaxIter(), absTol, sc.intRelTol());
+
+    double lbolRaw = 0.0;
+    if (singleFeh)
+    {
+        const auto result = integrator.integrate(
+            std::array<double, 2>{ ageMin, imf.getMin() },
+            std::array<double, 2>{ curTime_, imf.getMax() },
+            *this, fehDist.getMin());
+        lbolRaw = result[0]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- result has exactly 1 element, by construction (nInt == 1)
+    }
+    else
+    {
+        // Integrate over [Fe/H] by running the same 2D (age, mass)
+        // integral once at every grid point the tracks are actually
+        // defined at, then interpolating and integrating those
+        // discrete results over [Fe/H] -- see
+        // Specsyn::specCtsHelper()'s own comment for why, in place of
+        // a joint 3D (feh, age, mass) cubature integral.
+        const auto& fehGrid = sc.tracks().feH();
+        const std::size_t nFeh = fehGrid.size();
+
+        std::vector<double> lbolAtFeh(nFeh);
+        std::vector<double> fehWeight(nFeh);
+        for (std::size_t f = 0; f < nFeh; ++f)
+        {
+            const auto result = integrator.integrate(
+                std::array<double, 2>{ ageMin, imf.getMin() },
+                std::array<double, 2>{ curTime_, imf.getMax() },
+                *this, fehGrid[f]);
+            fehWeight[f] = fehDist(fehGrid[f]);
+            lbolAtFeh[f] = result[0] * fehWeight[f]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- result has exactly 1 element, by construction (nInt == 1)
+        }
+
+        const interp::Interpolator1D<1> weightInterp(fehGrid, fehWeight);
+        const double weightIntegral = weightInterp.integ(fehDist.getMin(), fehDist.getMax());
+        const interp::Interpolator1D<1> lbolInterp(fehGrid, lbolAtFeh);
+        lbolRaw = lbolInterp.integ(fehDist.getMin(), fehDist.getMax()) / weightIntegral;
+    }
+
+    lbolCts_ = lbolRaw * (1.0 - fCluster);
+    lbolCtsCurrent_ = true;
 }

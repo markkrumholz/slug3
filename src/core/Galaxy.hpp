@@ -9,8 +9,11 @@
 #define GALAXY_HPP
 
 #include "../io/SimControls.hpp"
+#include "../specsyn/Specsyn.hpp"
 #include "Cluster.hpp"
+#include <cstddef>
 #include <functional>
+#include <mdspan> // NOLINT(misc-include-cleaner) -- see the identical NOLINT on SpecsynLibWR.hpp's own <mdspan> include
 #include <vector>
 
 namespace core
@@ -175,21 +178,25 @@ namespace core
         }
 
         /**
-         * @brief Return the total target mass of clusters formed so far
+         * @brief Return the total target stellar mass formed so far
          * @return The sum, over every advance() call so far, of the
-         *   target mass (sfr().integral() over that call's own
-         *   (curTime(), t] step) of clusters that should have formed,
-         *   in Msun -- may differ from actualMass() due to stochastic
-         *   sampling from SimControls::cmf() (see Galaxy::advance())
+         *   total stellar mass (sfr().integral() over that call's own
+         *   (curTime(), t] step) that should have formed -- both the
+         *   stochastically-treated (clustered) and continuous
+         *   (non-clustered) parts together -- in Msun -- may differ
+         *   from actualMass() due to stochastic sampling from
+         *   SimControls::cmf() (see Galaxy::advance())
          */
         [[nodiscard]] auto targetMass() const { return targetMass_; }
 
         /**
-         * @brief Return the total actual mass of clusters formed so far
-         * @return The sum, over every advance() call so far, of the
-         *   target mass (Cluster::targetMass()) of every cluster
-         *   actually drawn from SimControls::cmf() during that call,
-         *   in Msun
+         * @brief Return the total actual stellar mass formed so far
+         * @return The sum, over every advance() call so far, of (1)
+         *   the target mass (Cluster::targetMass()) of every cluster
+         *   actually drawn from SimControls::cmf() during that call
+         *   and (2) that same call's own continuous (non-clustered)
+         *   population mass, (1 - SimControls::fCluster()) times that
+         *   call's own total target stellar mass, in Msun
          */
         [[nodiscard]] auto actualMass() const { return actualMass_; }
 
@@ -198,17 +205,23 @@ namespace core
          * @param t Time to which to advance, in yr; must be >= curTime()
          * @details
          * Draws and forms new clusters over (curTime(), t] from
-         * SimControls::sfr()/cmf(), accumulating the target and actual
-         * mass of that step's new clusters into targetMass()/
+         * SimControls::sfr()/cmf(), scaled down to the
+         * stochastically-treated fraction SimControls::fCluster() of
+         * the step's own total target mass (the remaining
+         * (1 - fCluster()) is folded directly into actualMass(), as
+         * the continuous, non-clustered population's own share, with
+         * no individual Cluster object of its own), accumulating the
+         * step's own target and actual mass into targetMass()/
          * actualMass(), advances every cluster formed so far (in
          * clusters() and disruptedClusters()) to t, moves any cluster
          * that disrupted during this step from clusters() to
          * disruptedClusters(), then marks spec_/specExtinct_/phot_/
-         * photExtinct_/lbol_ as stale (see specCurrent_/photCurrent_/
-         * lbolCurrent_'s own comments) rather than recomputing them
-         * itself -- they are instead recomputed lazily, on demand, the
-         * next time spec()/specExtinct()/phot()/photExtinct()/lbol() is
-         * actually called -- before finally updating curTime() to t.
+         * photExtinct_/lbol_/lbolCts_ as stale (see specCurrent_/
+         * photCurrent_/lbolCurrent_/lbolCtsCurrent_'s own comments)
+         * rather than recomputing them itself -- they are instead
+         * recomputed lazily, on demand, the next time spec()/
+         * specExtinct()/phot()/photExtinct()/lbol() is actually called
+         * -- before finally updating curTime() to t.
          */
         void advance(double t);
 
@@ -223,8 +236,8 @@ namespace core
         std::vector<double> phot_;         /**< Photometry of spec_ through each filter in SimControls::filters(), at the current time */
         std::vector<double> photExtinct_;  /**< Photometry of specExtinct_ through each filter in SimControls::filters(), at the current time */
         double lbol_ = 0.0;                /**< Sum of lbol() over every cluster in clusters_/disruptedClusters_, at the current time */
-        double targetMass_ = 0.0;          /**< Cumulative target mass of clusters formed so far, over every advance() call, in Msun */
-        double actualMass_ = 0.0;          /**< Cumulative actual mass of clusters formed so far, over every advance() call, in Msun */
+        double targetMass_ = 0.0;          /**< Cumulative total target stellar mass formed so far (clustered and continuous together), over every advance() call, in Msun */
+        double actualMass_ = 0.0;          /**< Cumulative total actual stellar mass formed so far (clustered and continuous together), over every advance() call, in Msun */
 
         /**
          * @brief Whether spec_/specExtinct_ are current as of curTime_
@@ -251,6 +264,42 @@ namespace core
         bool lbolCurrent_ = true;
 
         /**
+         * @brief The continuous population's own bolometric luminosity, in Lsun (matching lbol_'s own units)
+         * @details
+         * Set by computeSpec() whenever it computes a spectrum via
+         * Specsyn::specAndLbolCts() rather than plain specCts() (see
+         * lbolCtsCurrent_'s own comment for when that happens), as a
+         * byproduct of that same integral rather than a separate one
+         * -- see specAndLbolCts()'s own comment for why. Read by
+         * computeLbol(), which adds it into lbol_ when
+         * lbolCtsCurrent_ is true. Stays 0 whenever it was never set
+         * this way (fCluster() == 1, no spectral synthesizer, or Lbol
+         * was computed via the standalone computeLbolCts() path
+         * instead -- see lbolCtsCurrent_'s own comment).
+         */
+        double lbolCts_ = 0.0;
+
+        /**
+         * @brief Whether lbolCts_ is current as of curTime_
+         * @details
+         * Unlike specCurrent_/photCurrent_/lbolCurrent_ (all true at
+         * construction, since there is nothing yet to be stale), starts
+         * false: lbolCts_ itself starts at 0, which is both the
+         * "nothing computed yet" value and a value computeLbol() must
+         * not blindly trust without this flag. Set true by
+         * computeSpec() only when it actually took the
+         * Specsyn::specAndLbolCts() path (SimControls::computeLbol()
+         * true and fCluster() < 1); set false at the end of every
+         * advance() call, alongside specCurrent_/photCurrent_/
+         * lbolCurrent_. computeLbol() checks this before trusting
+         * lbolCts_: if false when Lbol is still wanted (Lbol requested
+         * but no spectrum was computed this step, e.g. only lbol() was
+         * called, not spec()), it instead falls back to the standalone
+         * computeLbolCts() path.
+         */
+        bool lbolCtsCurrent_ = false;
+
+        /**
          * @brief Simulation controls (physics and control-flow settings) this galaxy was built from
          * @details
          * See Cluster::controls_'s own comment: read live wherever a
@@ -270,6 +319,18 @@ namespace core
          * computed, if not already current); if SimControls::extinct()
          * is also non-null, also sets specExtinct_ to the sum of
          * specExtinct() over the same clusters.
+         *
+         * If fCluster() < 1, then adds the continuous population's own
+         * contribution to both spec_ and (if extinct() is non-null)
+         * specExtinct_ -- see the implementation's own comment for why
+         * specExtinct_'s own share goes in unattenuated, and at an
+         * offset from spec_'s own. Gets this contribution via
+         * Specsyn::specAndLbolCts() rather than plain specCts() -- also
+         * setting lbolCts_/lbolCtsCurrent_ from its own second return
+         * value -- whenever SimControls::computeLbol() is true, so Lbol
+         * comes along for free from the same integral; via plain
+         * specCts() otherwise, leaving lbolCts_/lbolCtsCurrent_
+         * untouched.
          */
         void computeSpec();
 
@@ -287,16 +348,97 @@ namespace core
         void computePhot();
 
         /**
-         * @brief Update lbol_ from the current cluster population
+         * @brief Update lbol_ from the current cluster population (and, if current, the continuous population)
          * @details
          * Does nothing if SimControls::computeLbol() is false (Lbol was
          * never requested), mirroring Cluster::computeLbol()'s own
          * null-guard. Otherwise sets lbol_ to the sum of lbol() over
          * every cluster in clusters_ and disruptedClusters_ (forcing
          * each cluster's own Lbol to be computed, if not already
-         * current).
+         * current), plus lbolCts_ if lbolCtsCurrent_ is true (i.e.
+         * computeSpec() already computed it this step, as a byproduct
+         * of computing spec() -- see lbolCtsCurrent_'s own comment).
+         *
+         * If lbolCtsCurrent_ is instead false -- Lbol was requested,
+         * fCluster() < 1, but computeSpec() hasn't run since the last
+         * advance() (e.g. a caller asked for lbol() without ever
+         * asking for spec()) -- the continuous population's own Lbol
+         * still needs computing, but not by paying for a full spectrum
+         * it was never asked for; calls computeLbolCts() for exactly
+         * that.
          */
         void computeLbol();
+
+        /**
+         * @brief The vectorized integrand for computeLbolCts()'s own standalone Lbol integral's 2D (age, mass) integral
+         * @param points An (npts, 2) view of the points to evaluate --
+         *   see Specsyn::continuousSpecIntegrand()'s own points
+         *   parameter for the exact column layout (points[i, 0] age,
+         *   points[i, 1] mass)
+         * @param feh The single [Fe/H] value shared by every point in
+         *   this call -- see Specsyn::continuousSpecIntegrand()'s own
+         *   feh parameter for why this is a fixed argument rather than
+         *   a column of points
+         * @return npts values, each point's own bolometric luminosity,
+         *   in Lsun -- unlike Specsyn::continuousSpecIntegrand()'s own
+         *   Lbol element, no further unit conversion is needed
+         *   afterward, since this integral's own absolute tolerance is
+         *   already specified directly in Lsun (see computeLbolCts()'s
+         *   own comment for why that differs from the shared-with-a-
+         *   spectrum case)
+         * @details
+         * Mirrors Specsyn::continuousSpecIntegrand()'s own single-slot
+         * isochrone cache (keyed on age alone -- feh is fixed for the
+         * whole call) and per-point logic exactly (see its own comment
+         * for why a single-slot cache, rather than one holding every
+         * isochrone a batch touches, is what keeps memory bounded), but
+         * only reads off each point's own log(L/Lsun) (leaving it at 0
+         * for a point whose mass falls in none of its own isochrone's
+         * segments, a star already dead at this age) -- there is no
+         * spectrum to also compute here, so no mdspan view of the
+         * result is needed either, unlike continuousSpecIntegrand()'s
+         * own resultView.
+         */
+        [[nodiscard]] auto lbolCtsIntegrand(
+            std::mdspan<double, std::extents<std::size_t, std::dynamic_extent, 2>> points, double feh) const -> std::vector<double>; // NOLINT(misc-include-cleaner) -- see the identical NOLINT on the <mdspan> include above
+
+        /**
+         * @brief Compute lbolCts_ directly, without going through a full spectrum
+         * @details
+         * Called by computeLbol() when Lbol is wanted but computeSpec()
+         * hasn't already computed lbolCts_ as a byproduct of computing
+         * a spectrum (lbolCtsCurrent_ is false) -- most notably when
+         * SimControls::specsyn() is null (no spectral synthesizer
+         * configured at all, so Galaxy::computeSpec() is a no-op and
+         * Specsyn::specAndLbolCts() never runs), but also whenever
+         * lbol() is requested without spec() ever having been
+         * requested first this step.
+         *
+         * Mirrors Specsyn::specCtsHelper()'s own construction and use of
+         * a PDFIntegratorND exactly (CubatureMethod::pAdaptive, the
+         * reflected-and-log-transformed age coordinate, and -- when
+         * fehDist is non-degenerate -- running the same 2D integral
+         * once per grid point in tracks().feH() and integrating those
+         * discrete results over [Fe/H] via interp::Interpolator1D,
+         * rather than a joint 3D cubature integral; see its own comment
+         * for why), just integrating a single quantity (Lbol alone, via
+         * lbolCtsIntegrand()) instead of a spectrum plus Lbol together,
+         * and directly in Lsun throughout: unlike specCtsHelper(), there
+         * is no spectral absolute tolerance for an erg/s-scale
+         * intermediate to share, so reqAbsError is simply intAbsTol() *
+         * sfr().integral(0, curTime()), with no utils::Lsun factor. Its
+         * own lbolCtsIntegrand() builds isochrones directly (see its own
+         * comment), independent of any Specsyn, since a Specsyn may not
+         * exist at all here.
+         *
+         * Sets lbolCts_ to the integral's own result, scaled by
+         * (1 - fCluster()) for the continuously-treated share of the
+         * population, matching Specsyn::specAndLbolCts()'s own
+         * identical scaling -- necessary for the two to agree when
+         * both are exercised for the same population. Sets
+         * lbolCtsCurrent_ to true afterward.
+         */
+        void computeLbolCts();
 
     };
 

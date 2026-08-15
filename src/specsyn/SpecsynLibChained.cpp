@@ -308,6 +308,64 @@ namespace specsyn
         }
 
         /**
+         * @brief Determine the common wavelength grid the constructor's own chained libraries all get resampled onto
+         * @param wlMin See the constructor's own wlMin parameter
+         * @param wlMax See the constructor's own wlMax parameter
+         * @param nWl See the constructor's own nWl parameter
+         * @param allLibs Every chained library, each still on its own
+         *   native wavelength grid at this point
+         * @return wlMin/wlMax/nWl directly (via utils::logspace), if
+         *   wlMin != 0.0; a logspace grid of nWl points spanning
+         *   allLibs' own combined native range, if only nWl was given;
+         *   or SpecsynLibChained::makeCommonWlGrid() of every library's
+         *   own native grid, if neither was given
+         * @details
+         * Factored out of the constructor purely to keep its own
+         * cognitive complexity down -- see
+         * SpecsynLibChained::propagateWNLTeffRanges()'s own identical
+         * rationale. A free function, rather than a private member
+         * like propagateWNLTeffRanges()/updateFeHRanges(), since it
+         * needs no access to any SpecsynLibChained member -- only
+         * allLibs, passed in directly -- and SpecsynLib<Policy> itself
+         * (unlike Specsyn, wrLibs_'s/wdLibs_'s/normalLibs_'s own
+         * element type) is only ever visible in this .cpp, not
+         * SpecsynLibChained.hpp.
+         */
+        template <OOBPolicy Policy>
+        auto buildChainedWlGrid( //NOLINT(llvm-prefer-static-over-anonymous-namespace)
+            const double wlMin, const double wlMax, const std::size_t nWl,
+            const std::vector<std::unique_ptr<SpecsynLib<Policy>>>& allLibs) -> std::vector<double>
+        {
+            if (wlMin != 0.0)
+            {
+                // The caller fully specified the output grid -- use it
+                // directly rather than deriving one from the
+                // individual libraries' own native grids at all
+                return utils::logspace(wlMin, wlMax, nWl);
+            }
+            if (nWl != 0)
+            {
+                // The caller requested a point count but not a range
+                // -- span the combined native range of every library
+                // in the chain at that many points
+                double globalWlMin = std::numeric_limits<double>::infinity();
+                double globalWlMax = -std::numeric_limits<double>::infinity();
+                for (const auto& lib : allLibs)
+                {
+                    globalWlMin = std::min(globalWlMin, lib->wl().front());
+                    globalWlMax = std::max(globalWlMax, lib->wl().back());
+                }
+                return utils::logspace(globalWlMin, globalWlMax, nWl);
+            }
+            // No output grid requested at all -- combine every
+            // library's own native grid into one that spans them all
+            std::vector<std::vector<double>> wlGrids;
+            wlGrids.reserve(allLibs.size());
+            for (const auto& lib : allLibs) { wlGrids.push_back(lib->wl()); }
+            return SpecsynLibChained::makeCommonWlGrid(wlGrids);
+        }
+
+        /**
          * @brief Classify a star into the GridType whose clamp should apply to it
          * @param props Stellar properties to classify
          * @param logg props' own log(g), from Specsyn::getSAandLogg;
@@ -427,7 +485,12 @@ namespace specsyn
             {std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::quiet_NaN()},
             {std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::quiet_NaN()},
             {std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::quiet_NaN()},
-        }})
+        }}),
+        // Unconditional, like logTeffMin_/logTeffMax_ above: every
+        // GridType entry starts at quiet_NaN(), overwritten below by
+        // updateFeHRange -- see fehMin_'s own comment.
+        fehMin_(filledArray<nGridType>(std::numeric_limits<double>::quiet_NaN())),
+        fehMax_(filledArray<nGridType>(std::numeric_limits<double>::quiet_NaN()))
     {
         if (spectraName.empty())
         {
@@ -508,39 +571,10 @@ namespace specsyn
         }
 
         // Determine the common wavelength grid every chained library
-        // will share, in one of three ways, then resample every
-        // library onto it exactly once
-        if (wlMin != 0.0)
-        {
-            // The caller fully specified the output grid -- use it
-            // directly rather than deriving one from the individual
-            // libraries' own native grids at all
-            wl_ = utils::logspace(wlMin, wlMax, nWl);
-        }
-        else if (nWl != 0)
-        {
-            // The caller requested a point count but not a range --
-            // span the combined native range of every library in the
-            // chain at that many points
-            double globalWlMin = std::numeric_limits<double>::infinity();
-            double globalWlMax = -std::numeric_limits<double>::infinity();
-            for (const auto& lib : allLibs)
-            {
-                globalWlMin = std::min(globalWlMin, lib->wl().front());
-                globalWlMax = std::max(globalWlMax, lib->wl().back());
-            }
-            wl_ = utils::logspace(globalWlMin, globalWlMax, nWl);
-        }
-        else
-        {
-            // No output grid requested at all -- combine every
-            // library's own native grid into one that spans them all
-            std::vector<std::vector<double>> wlGrids;
-            wlGrids.reserve(n);
-            for (const auto& lib : allLibs) { wlGrids.push_back(lib->wl()); }
-            wl_ = makeCommonWlGrid(wlGrids);
-        }
-
+        // will share, then resample every library onto it exactly
+        // once -- see buildChainedWlGrid's own comment for the three
+        // ways this grid can be determined
+        wl_ = buildChainedWlGrid<OOBPolicy::coerce>(wlMin, wlMax, nWl, allLibs);
         for (auto& lib : allLibs) { lib->resample(wl_); }
 
         // Widen logTeffMin_/logTeffMax_ and loggMin_/loggMax_, per
@@ -586,6 +620,12 @@ namespace specsyn
         // getWRType exactly as classifyGridType does -- see
         // wnlTeffRanges_'s own comment for why the two must agree.
         propagateWNLTeffRanges();
+
+        // fehMin_/fehMax_, per GridType, from whichever library is now
+        // chainFor(type).back() -- unconditionally (regardless of
+        // tClamp, like wnlTeffRanges_ above) -- see updateFeHRanges()'s
+        // own comment for exactly what this computes and why.
+        updateFeHRanges();
     }
 
     void SpecsynLibChained::propagateWNLTeffRanges()
@@ -596,6 +636,29 @@ namespace specsyn
             {
                 wr->setWNLTeffRanges(wnlTeffRanges_);
             }
+        }
+    }
+
+    void SpecsynLibChained::updateFeHRanges()
+    {
+        // Left at quiet_NaN() (set at the top of the constructor) for
+        // a GridType with no chained library at all (chain.empty()) or
+        // whose own last library has no [Fe/H] axis (SpecsynLibWD,
+        // whose base-class fehMin()/fehMax() are the unrestricted
+        // -infinity/+infinity, mapped back to quiet_NaN() here so
+        // specForIntegration()'s own isnan() check treats it the same
+        // as "no restriction"). Reads from chainFor(type).back() -- the
+        // one specForIntegration() ultimately falls back to via
+        // specForce() -- for each GridType.
+        for (const auto t : { GridType::wrGrid, GridType::wdGrid, GridType::normalGrid })
+        {
+            const auto& chain = chainFor(t);
+            if (chain.empty()) { continue; }
+            const auto ti = static_cast<std::size_t>(t);
+            const double lo = chain.back()->fehMin();
+            const double hi = chain.back()->fehMax();
+            if (std::isfinite(lo)) { fehMin_[ti] = lo; } // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- ti < nGridType by construction
+            if (std::isfinite(hi)) { fehMax_[ti] = hi; } // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- see above
         }
     }
 
@@ -628,6 +691,42 @@ namespace specsyn
             if (!result.empty()) { return result; }
         }
         return chain.back()->specForce(props, feh);
+    }
+
+    auto SpecsynLibChained::specForIntegration(const StarData& props, const double feh) const -> std::vector<double>
+    {
+        const double rawLogg = getSAandLogg(props).second;
+        const auto type = classifyGridType(props, rawLogg, logTeffMin_, logTeffMax_, loggMin_, loggMax_, wnlTeffRanges_);
+        const auto& chain = chainFor(type);
+
+        if (chain.empty())
+        {
+            throw std::runtime_error(
+                "SpecsynLibChained: no chained library of the required type "
+                "is available for this star");
+        }
+
+        // Clamp feh to this star's own chain's real [Fe/H] coverage
+        // (fehMin_[type]/fehMax_[type], quiet_NaN() -- left unclamped
+        // -- for a GridType with no [Fe/H] axis at all, i.e. wdGrid)
+        // before evaluating it: unlike ordinary spec()/specForce()
+        // (whose existing, deliberate no-rescue-for-feh behavior stays
+        // untouched -- see Specsyn::specForIntegration()'s own
+        // comment), this override exists specifically for
+        // Specsyn::continuousSpecIntegrand()'s own tracks-grid padding
+        // points, which can carry a real, wider-than-any-single-library
+        // [Fe/H] coverage.
+        const auto t = static_cast<std::size_t>(type);
+        double clampedFeh = feh;
+        if (!std::isnan(fehMin_[t])) { clampedFeh = std::max(clampedFeh, fehMin_[t]); } // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- t < gridTypeCount by construction
+        if (!std::isnan(fehMax_[t])) { clampedFeh = std::min(clampedFeh, fehMax_[t]); } // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- see above
+
+        for (const auto& lib : chain)
+        {
+            auto result = lib->spec(props, clampedFeh);
+            if (!result.empty()) { return result; }
+        }
+        return chain.back()->specForce(props, clampedFeh);
     }
 
     auto SpecsynLibChained::makeCommonWlGrid(
