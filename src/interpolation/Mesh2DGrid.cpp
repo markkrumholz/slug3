@@ -530,14 +530,377 @@ namespace interp
     }
 
     // Compute up to n intersections in the x direction, centered on y
-    auto Mesh2DGrid::xIntersectN( //NOLINT(readability-convert-member-functions-to-static)
-        const double /*x*/,
-        const double /*y*/,
-        const size_t /*n*/) const ->
+    auto Mesh2DGrid::xIntersectN( //NOLINT(readability-function-cognitive-complexity)
+        const double x,
+        const double y,
+        const size_t n) const ->
         std::vector<xIntersectionDescriptor>
     {
-        std::vector<xIntersectionDescriptor> intList; // Output holder
+        auto& iSaveLoc = iSave_();
+        auto& jSaveLoc = jSave_();
 
+        // Safety assertion
+        assert(contains(x, y));
+
+        // Up and down output holders
+        std::vector<xIntersectionDescriptor> intListUp, intListDown;
+
+        // Up and down search pointers and flags
+        double yUp = y;
+        double yDown = y;
+        size_t iUp = 0;
+        size_t iDown = 0;
+        size_t jUp = 0;
+        size_t jDown = 0;
+        bool lastIntersectLeftUp = false;
+        bool lastIntersectRightUp = false;
+        bool lastIntersectLeftDown = false;
+        bool lastIntersectRightDown = false;
+        bool continueUp = true;
+        bool continueDown = true;
+
+        // Check if the starting position is exactly on a rib or spine; this
+        // also sets the i and j caches
+        const auto [startOnMesh, d] = onMesh(x, y);
+        if (!startOnMesh)
+        {
+
+            // Start position is not on a rib or spine
+            iUp = iDown = iSaveLoc;
+            jUp = jDown = jSaveLoc;
+
+        }
+        else
+        {
+
+            // Yes, starting point is on a rib or spine, so push
+            // intersection onto the upper output holder
+            intListUp.push_back(d);
+
+            // Set starting indices based on whether the starting position
+            // is on a spine or a rib
+            if (d.t == IntersectionType::rib)
+            {
+
+                // On a rib
+                iUp = iDown = iSaveLoc;
+                jUp = jSaveLoc;
+                jDown = jSaveLoc - 1;
+
+                // Handle special case of starting on the bottom or top rib
+                if (y == y_[0])
+                {
+                    continueDown = false;
+                }
+                else if (y == y_[ny()-1])
+                {
+                    continueUp = false;
+                    jDown = ny() - 2;
+                }
+
+                // Handle special case of degenerate ribs
+                while (jUp < ny()-2 && continueUp)
+                {
+                    if (y_[jUp] != y_[jUp+1]) { break; }
+                    jUp++;
+                }
+                while (jDown > 0 && continueDown)
+                {
+                    if (y_[jDown] != y_[jDown-1]) { break; }
+                    jDown--;
+                }
+
+                // Check for termination of search up or down in case of
+                // degenerate ribs
+                if (jDown == 0 && y_[0] == y_[1]) { continueDown = false; }
+                if (jUp == ny()-2 && y_[ny()-2] == y_[ny()-1]) { continueUp = false; }
+
+                // Handle special case where starting search point is on a
+                // corner; if this happens, we may need to change the i
+                // search indices
+                while (x == x_[iUp,jSaveLoc] && m_[iUp,jSaveLoc] > 0)
+                {
+                    iUp--;
+                    lastIntersectLeftUp = false;
+                    lastIntersectRightUp = true;
+                    if (iUp == 0) { break; }
+                }
+                if (iUp == 0 && x == x_[iUp,jSaveLoc] && m_[iUp,jSaveLoc] > 0)
+                {
+                    continueUp = false;
+                }
+                while (x == x_[iDown,jSaveLoc] && m_[iDown,jSaveLoc] < 0)
+                {
+                    iDown--;
+                    lastIntersectLeftDown = false;
+                    lastIntersectRightDown = true;
+                    if (iDown == 0) { break; }
+                }
+                if (iDown == 0 && x == x_[iDown,jSaveLoc] && m_[iDown,jSaveLoc] < 0)
+                {
+                    continueDown = false;
+                }
+
+            }
+            else
+            {
+
+                // On a spine
+                jUp = jDown = jSaveLoc;
+
+                // Handle special case of starting on the rightmost spine
+                if ((x == x_[iSaveLoc+1,jSaveLoc] && m_[iSaveLoc+1,jSaveLoc] == bigNum) ||
+                    ((y - y_[jSaveLoc]) / (x - x_[iSaveLoc+1,jSaveLoc]) == m_[iSaveLoc+1,jSaveLoc]))
+                {
+                    if (m_[iSaveLoc+1,jSaveLoc] == bigNum)
+                    {
+                        // Vertical rightmost spine: both directions
+                        // stay within cell iSaveLoc, whose right edge
+                        // is the spine we started on, so both must
+                        // suppress that cell's own right-edge recheck
+                        iUp = iDown = iSaveLoc;
+                        lastIntersectLeftUp = lastIntersectLeftDown = true;
+                        lastIntersectRightUp = lastIntersectRightDown = false;
+                    }
+                    else if (m_[iSaveLoc+1,jSaveLoc] > 0)
+                    {
+                        // Positive slope: moving down along the
+                        // mesh's rightmost spine immediately exits the
+                        // mesh (there is nothing further right of it),
+                        // while up stays within cell iSaveLoc, whose
+                        // right edge is the starting spine
+                        continueDown = false;
+                        iUp = iSaveLoc;
+                        lastIntersectLeftUp = true;
+                        lastIntersectRightUp = false;
+                    }
+                    else
+                    {
+                        // Negative slope: the mirror image of the
+                        // m > 0 case above -- up exits immediately,
+                        // down stays within cell iSaveLoc
+                        continueUp = false;
+                        iDown = iSaveLoc;
+                        lastIntersectLeftDown = true;
+                        lastIntersectRightDown = false;
+                    }
+                }
+                else
+                {
+
+                    // Not on the rightmost spine; adjust indices, properly
+                    // accounting for degenerate tracks, and flagging if we
+                    // leave the mesh
+                    if (m_[iSaveLoc,jSaveLoc] > 0)
+                    {
+
+                        // Adjust up index
+                        if (iSaveLoc == 0)
+                        {
+                            continueUp = false;
+                        }
+                        else
+                        {
+                            iUp = iSaveLoc - 1;
+                            while (iUp > 0)
+                            {
+                                if (x_[iUp-1,jSaveLoc] != x_[iUp,jSaveLoc] ||
+                                    m_[iUp-1,jSaveLoc] != m_[iUp,jSaveLoc]) { break; }
+                                iUp--;
+                            }
+                            if (iUp == 0 &&
+                                x_[0,jSaveLoc] == x_[1,jSaveLoc] &&
+                                m_[0,jSaveLoc] == m_[1,jSaveLoc])
+                            {
+                                continueUp = false;
+                            }
+                        }
+
+                        // Adjust down index
+                        iDown = iSaveLoc;
+                        while (iDown < nx()-2)
+                        {
+                            if (x_[iDown,jSaveLoc] != x_[iDown+1,jSaveLoc] ||
+                                m_[iDown,jSaveLoc] != m_[iDown+1,jSaveLoc]) { break; }
+                            iDown++;
+                        }
+                        if (iDown == nx()-2 &&
+                            x_[iDown,jSaveLoc] == x_[iDown+1,jSaveLoc] &&
+                            m_[iDown,jSaveLoc] == m_[iDown+1,jSaveLoc])
+                        {
+                            continueDown = false;
+                        }
+
+                        // Set flags. Up moves to a different cell
+                        // (iSaveLoc - 1), which we enter via its right
+                        // edge -- the spine we started on -- so its
+                        // right-edge recheck must be suppressed, per
+                        // xIntersectSegStartInterior's identical m > 0
+                        // case. Down stays in the same cell (iSaveLoc),
+                        // whose left edge is that same starting spine,
+                        // so its left-edge recheck must be suppressed
+                        // instead.
+                        lastIntersectLeftUp = true;
+                        lastIntersectRightUp = false;
+                        lastIntersectLeftDown = false;
+                        lastIntersectRightDown = true;
+
+                    }
+                    else
+                    {
+
+                        // Adjust up index
+                        iUp = iSaveLoc;
+                        while (iUp < nx()-2)
+                        {
+                            if (x_[iUp,jSaveLoc] != x_[iUp+1,jSaveLoc] ||
+                                m_[iUp,jSaveLoc] != m_[iUp+1,jSaveLoc]) { break; }
+                            iUp++;
+                        }
+                        if (iUp == nx()-2 &&
+                            x_[iUp,jSaveLoc] == x_[iUp+1,jSaveLoc] &&
+                            m_[iUp,jSaveLoc] == m_[iUp+1,jSaveLoc])
+                        {
+                            continueUp = false;
+                        }
+
+                        // Adjust down index. This mirrors the up-index
+                        // guard in the m > 0 branch above: iSaveLoc == 0
+                        // means there is no cell to the left to move
+                        // into, so down must stop immediately rather
+                        // than underflow iSaveLoc - 1.
+                        if (iSaveLoc == 0)
+                        {
+                            continueDown = false;
+                        }
+                        else
+                        {
+                            iDown = iSaveLoc - 1;
+                            while (iDown > 0)
+                            {
+                                if (x_[iDown-1,jSaveLoc] != x_[iDown,jSaveLoc] ||
+                                    m_[iDown-1,jSaveLoc] != m_[iDown,jSaveLoc]) { break; }
+                                iDown--;
+                            }
+                            if (iDown == 0 &&
+                                x_[0,jSaveLoc] == x_[1,jSaveLoc] &&
+                                m_[0,jSaveLoc] == m_[1,jSaveLoc])
+                            {
+                                continueDown = false;
+                            }
+                        }
+
+                        // Set flags. Up stays in the same cell
+                        // (iSaveLoc), whose left edge is the spine we
+                        // started on, so its left-edge recheck must be
+                        // suppressed. Down moves to a different cell
+                        // (iSaveLoc - 1), entered via its right edge --
+                        // that same starting spine -- so its
+                        // right-edge recheck must be suppressed
+                        // instead. Mirrors xIntersectSegStartInterior's
+                        // m <= 0 case.
+                        lastIntersectLeftUp = false;
+                        lastIntersectRightUp = true;
+                        lastIntersectLeftDown = true;
+                        lastIntersectRightDown = false;
+
+                    }
+                }
+            }
+        }
+
+        // Correct the meshExit flag of the initial on-mesh point, if
+        // any. onMesh has no notion of search direction, so its own
+        // meshExit value isn't reliable here; continueUp is, though,
+        // since the setup logic above has already set it to false
+        // whenever there is no more mesh above this starting point --
+        // exactly what meshExit means for a point in the up list.
+        if (startOnMesh)
+        {
+            intListUp[0].meshExit = !continueUp;
+        }
+
+        // Now search up and down until we find the required number of
+        // points, or hit the mesh edge in both directions
+        while (continueUp || continueDown)
+        {
+
+            // Check if we have all the points we need
+            if (intListUp.size() + intListDown.size() == n) { break; }
+
+            // Search down
+            if (continueDown)
+            {
+                iSaveLoc = iDown;
+                jSaveLoc = jDown;
+                const auto [cont, dDown] = findNextIntersect(
+                    x, yDown, -bigNum, false,
+                    lastIntersectLeftDown, lastIntersectRightDown);
+                continueDown = cont;
+                if (dDown.t != IntersectionType::none) { intListDown.push_back(dDown); }
+                iDown = iSaveLoc;
+                jDown = jSaveLoc;
+            }
+
+            // Safety check: make sure the point we found is actually
+            // distinct from the previous one at > machine precision. If
+            // not, discard it and grab another point. For the very
+            // first point found going down, "the previous one" is the
+            // shared starting point at the front of intListUp, not
+            // anything in intListDown itself (which starts empty) --
+            // this matters when the search starts exactly on a spine,
+            // where the down search's first step can immediately
+            // rediscover that same spine at zero distance.
+            if (intListDown.size() > 1)
+            {
+                if (intListDown.back().y == intListDown[intListDown.size()-2].y)
+                {
+                    intListDown.pop_back();
+                }
+            }
+            else if (intListDown.size() == 1 && !intListUp.empty())
+            {
+                if (intListDown.back().y == intListUp.front().y)
+                {
+                    intListDown.pop_back();
+                }
+            }
+
+            // Check if we have all the points we need
+            if (intListUp.size() + intListDown.size() == n) { break; }
+
+            // Search up
+            if (continueUp)
+            {
+                iSaveLoc = iUp;
+                jSaveLoc = jUp;
+                const auto [cont, dUp] = findNextIntersect(
+                    x, yUp, bigNum, false,
+                    lastIntersectLeftUp, lastIntersectRightUp);
+                continueUp = cont;
+                if (dUp.t != IntersectionType::none) { intListUp.push_back(dUp); }
+                iUp = iSaveLoc;
+                jUp = jSaveLoc;
+            }
+
+            // Safety check as above, for the upward search
+            if (intListUp.size() > 1)
+            {
+                if (intListUp.back().y == intListUp[intListUp.size()-2].y)
+                {
+                    intListUp.pop_back();
+                }
+            }
+
+        }
+
+        // We now have all our points; combine them into the final output
+        // holder, with the downward points in ascending y order followed
+        // by the upward points
+        std::vector<xIntersectionDescriptor> intList;
+        intList.reserve(intListDown.size() + intListUp.size());
+        intList.insert(intList.end(), intListDown.rbegin(), intListDown.rend());
+        intList.insert(intList.end(), intListUp.begin(), intListUp.end());
         return intList;
     }
 
@@ -799,8 +1162,11 @@ namespace interp
         // Handle sign flips for up versus down search
         const double dir = searchUp ? 1.0 : -1.0;
 
-        // Distance to rib
-        dyY = dir * (y_[jSaveLoc+1] - y);
+        // Distance to rib: unlike the spine distances below, this isn't
+        // a sign flip of a single expression, since the rib we're
+        // approaching is the cell's top edge when searching up but its
+        // bottom edge when searching down
+        dyY = searchUp ? (y_[jSaveLoc+1] - y) : (y - y_[jSaveLoc]);
 
         // Distance to left spine
         if (m_[iSaveLoc,jSaveLoc] != bigNum && !lastIntersectRight)
@@ -845,8 +1211,8 @@ namespace interp
         // Get vertical distances to the horizontal edge and the
         // left and right vertical edges of this cell
         const auto [dyY, dyL, dyR] =
-            findIntersectDistance(x, y, searchUp, 
-                lastIntersectLeft, 
+            findIntersectDistance(x, y, searchUp,
+                lastIntersectLeft,
                 lastIntersectRight);
 
         // See which cell edge we hit
@@ -1248,11 +1614,17 @@ namespace interp
             }
         }
 
-        // Record the hit
+        // Record the hit. Note that this uses (y - y_[jSaveLoc]), the
+        // offset from this spine segment's own row base, rather than
+        // the dy parameter (the distance from wherever this search step
+        // started, which only coincides with the row-base offset when
+        // the search starts exactly on a rib -- true for every other
+        // caller of this traversal, but not for an interior starting
+        // point such as xIntersectN can pass in).
         const double s = s_[iSaveLoc,jSaveLoc] +
             std::sqrt(
                 std::pow(x - x_[iSaveLoc,jSaveLoc], 2) +
-                std::pow(dy, 2));
+                std::pow(y - y_[jSaveLoc], 2));
         d.y = y;
         d.xs = s;
         d.t = IntersectionType::spine;
@@ -1341,11 +1713,13 @@ namespace interp
             }
         }
 
-        // Record the hit
+        // Record the hit. See the analogous comment in
+        // handleNextIntersectLeftSpine for why this uses
+        // (y - y_[jSaveLoc]) rather than the dy parameter.
         const double s = s_[iSaveLoc+1,jSaveLoc] +
             std::sqrt(
                 std::pow(x - x_[iSaveLoc+1,jSaveLoc], 2) +
-                std::pow(dy, 2));
+                std::pow(y - y_[jSaveLoc], 2));
         d.y = y;
         d.xs = s;
         d.t = IntersectionType::spine;
