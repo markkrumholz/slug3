@@ -608,13 +608,17 @@ namespace utils
             // parameter would risk moving from an rvalue-bound argument
             // on its first use, leaving it in a moved-from state for
             // every later point -- std::apply instead hands every call
-            // the tuple's own lvalue elements.
-            const std::tuple<Args...> argsTuple(std::forward<Args>(args)...);
+            // the tuple's own elements, exactly as deduced (not const,
+            // so that invokeF()/invokeFMember() can still bind them to
+            // a non-const reference parameter when F's own signature --
+            // e.g. a member-function-pointer instantiation bound to a
+            // specific, concrete Args... -- demands one).
+            std::tuple<Args...> argsTuple(std::forward<Args>(args)...);
             std::vector<std::vector<double>> fVal(gknum);
             for (std::size_t i = 0; i < gknum; ++i)
             {
                 const auto val = std::apply(
-                    [this, &xk, i](const auto&... unpackedArgs) { return invokeF(xk[i], unpackedArgs...); }, // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i < gknum == xk.size() by construction
+                    [this, &xk, i](auto&... unpackedArgs) { return invokeF(xk[i], unpackedArgs...); }, // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i < gknum == xk.size() by construction
                     argsTuple);
                 fVal[i].assign(std::begin(val), std::end(val));
             }
@@ -721,14 +725,12 @@ namespace utils
         {
             // args is forwarded exactly once, into this tuple, for the
             // same reason quadSingle() itself does this -- see its own
-            // comment: integrate() calls quadSingle() repeatedly below,
-            // and each of those calls must see the same, still-valid
-            // arguments, not ones already moved from on a previous call.
-            const std::tuple<Args...> argsTuple(std::forward<Args>(args)...);
+            // comment (including for why this is not const).
+            std::tuple<Args...> argsTuple(std::forward<Args>(args)...);
             const auto callQuadSingle = [this, &argsTuple](const double lo, const double hi) -> GKIntegrationInterval
             {
                 return std::apply(
-                    [this, lo, hi](const auto&... unpackedArgs) { return quadSingle(lo, hi, unpackedArgs...); },
+                    [this, lo, hi](auto&... unpackedArgs) { return quadSingle(lo, hi, unpackedArgs...); },
                     argsTuple);
             };
 
