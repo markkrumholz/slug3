@@ -14,6 +14,7 @@
 #include <iostream>
 #include <mdspan>
 #include <ranges>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -334,6 +335,186 @@ testXIntersectNonConvex(const interp::Mesh2DGrid& m2dNC)
     return 0;  // Success
 }
 
+// Helper for testXIntersectN: check xIntersectN(x, y, n) against the
+// corresponding window of the already-tested xIntersect(x) list, for
+// every valid n and for both starting types of y -- exactly on an
+// intersection point (rib or spine), and strictly interior to the mesh
+// between two consecutive intersection points. The expected window is
+// computed by simulating the same down-first-alternating search the
+// real algorithm uses: each round, take one point below if available,
+// then check completion, then take one point above if available.
+//
+// This deliberately does not compare meshExit: that flag is direction-
+// dependent (it means "the search cannot continue past this point in
+// the direction it was searching"), and xIntersect always searches
+// upward from the bottom, so its meshExit values only reflect that one
+// direction. xIntersectN can reach the very same point via a downward
+// sub-search instead, where meshExit legitimately flips (e.g. the
+// mesh's lower-coverage boundary for this x is not an exit when
+// xIntersect starts there, but is a genuine exit when xIntersectN's
+// downward search terminates there) without either being wrong.
+// meshExit correctness is instead covered by the hand-verified
+// testXIntersectNDownwardSpine regression test below.
+static auto
+checkXIntersectNAgainstFull(
+    const interp::Mesh2DGrid& m,
+    const double x,
+    const std::string& label) -> int
+{
+    const auto full = m.xIntersect(x);
+    if (full.size() < 2)
+    {
+        std::cerr << "checkXIntersectNAgainstFull: " << label
+            << ": xIntersect(x = " << x << ") returned fewer than 2 "
+            "points, which is too few to exercise xIntersectN\n";
+        return 1;
+    }
+
+    const auto checkWindow = [&](
+        const double y,
+        const size_t nBelowAvail,
+        const size_t nAboveAvail,
+        const size_t startTotal,
+        const size_t startIdx0) -> int
+    {
+        for (size_t n = 1; n <= full.size() + 2; ++n)
+        {
+            const auto got = m.xIntersectN(x, y, n);
+
+            size_t nBelow = 0;
+            size_t nAbove = 0;
+            size_t total = startTotal;
+            bool contDown = true;
+            bool contUp = true;
+            while (contDown || contUp)
+            {
+                if (total == n) { break; }
+                if (contDown)
+                {
+                    if (nBelow < nBelowAvail) { nBelow++; total++; }
+                    else { contDown = false; }
+                }
+                if (total == n) { break; }
+                if (contUp)
+                {
+                    if (nAbove < nAboveAvail) { nAbove++; total++; }
+                    else { contUp = false; }
+                }
+            }
+
+            if (got.size() != total)
+            {
+                std::cerr << "checkXIntersectNAgainstFull: " << label
+                    << ": x = " << x << ", y = " << y << ", n = " << n
+                    << ": expected " << total << " points, got "
+                    << got.size() << "\n";
+                return 1;
+            }
+            const size_t windowStart = startIdx0 - nBelow;
+            for (size_t idx = 0; idx < got.size(); ++idx)
+            {
+                const auto& e = full[windowStart + idx];
+                const auto& r = got[idx];
+                if (!utils::approxEqual(r.y, e.y) ||
+                    !utils::approxEqual(r.xs, e.xs) ||
+                    r.t != e.t || r.idx != e.idx)
+                {
+                    std::cerr << "checkXIntersectNAgainstFull: " << label
+                        << ": x = " << x << ", y = " << y << ", n = " << n
+                        << ": point " << idx << " expected (y, xs, t, idx) = "
+                        << e.y << ", " << e.xs << ", "
+                        << static_cast<int>(e.t) << ", " << e.idx
+                        << ", instead found " << r.y << ", "
+                        << r.xs << ", " << static_cast<int>(r.t) << ", "
+                        << r.idx << "\n";
+                    return 1;
+                }
+            }
+        }
+        return 0;
+    };
+
+    // On a non-convex mesh, xIntersect's full list can span multiple
+    // disconnected segments (separated by a meshExit point where the
+    // line leaves and later re-enters the mesh). xIntersectN performs
+    // a single continuous search from its starting point and correctly
+    // stops at such a boundary rather than jumping the gap to a
+    // different segment. meshExit only ever marks the top of a segment
+    // (an entry point is always meshExit = false), so the two
+    // directions are not symmetric: walking up from startIdx, a
+    // meshExit point is still the reachable top of the current
+    // segment, so it counts before stopping; walking down, encountering
+    // any meshExit point at a lower index means that point belongs to
+    // an entirely different, disconnected segment, so it must be
+    // excluded rather than counted. And if startIdx itself is already a
+    // segment's top (meshExit = true), nothing above it is reachable at
+    // all, regardless of what a later, disconnected segment contains.
+    const auto countAvailBelow = [&](const size_t startIdx) -> size_t
+    {
+        size_t count = 0;
+        for (size_t idx = startIdx; idx-- > 0; )
+        {
+            if (full[idx].meshExit) { break; }
+            count++;
+        }
+        return count;
+    };
+    const auto countAvailAbove = [&](const size_t startIdx) -> size_t
+    {
+        if (full[startIdx].meshExit) { return 0; }
+        size_t count = 0;
+        for (size_t idx = startIdx + 1; idx < full.size(); ++idx)
+        {
+            count++;
+            if (full[idx].meshExit) { break; }
+        }
+        return count;
+    };
+
+    int result = 0;
+
+    // Starting exactly on each intersection point (rib and spine alike);
+    // the starting point itself always counts, so startTotal = 1
+    for (size_t k = 0; k < full.size(); ++k)
+    {
+        result += checkWindow(full[k].y, countAvailBelow(k), countAvailAbove(k), 1, k);
+        if (result != 0) { return result; }
+    }
+
+    // Starting strictly interior to the mesh, at the midpoint between
+    // each pair of consecutive intersection points; nothing is found at
+    // the start, so startTotal = 0. Skip pairs straddling a segment
+    // gap (full[k] itself a meshExit point): the midpoint there falls
+    // outside the mesh entirely, which xIntersectN does not accept.
+    for (size_t k = 0; k + 1 < full.size(); ++k)
+    {
+        if (full[k].meshExit) { continue; }
+        const double y = 0.5 * (full[k].y + full[k+1].y);
+        if (utils::approxEqual(y, full[k].y) ||
+            utils::approxEqual(y, full[k+1].y)) { continue; }
+        result += checkWindow(y, countAvailBelow(k + 1), countAvailAbove(k), 0, k + 1);
+        if (result != 0) { return result; }
+    }
+
+    return result;
+}
+
+// Test xIntersectN's ability to find up to n intersection points of
+// the mesh with a line of constant x, centered on a given y, by
+// differential testing against the already-tested xIntersect
+static auto
+testXIntersectN(
+    const interp::Mesh2DGrid& m2d,
+    const interp::Mesh2DGrid& m2dNC) -> int
+{
+    int result = 0;
+    result += checkXIntersectNAgainstFull(m2d, 0.05, "convex");
+    result += checkXIntersectNAgainstFull(m2d, 3.05, "convex");
+    result += checkXIntersectNAgainstFull(m2dNC, 0.05, "non-convex");
+    result += checkXIntersectNAgainstFull(m2dNC, 3.05, "non-convex");
+    return result;
+}
+
 // Test ability to find intersections with mesh at fixed y
 static auto
 testYIntersect(const interp::Mesh2DGrid& m2d,
@@ -492,6 +673,111 @@ testXIdxGridBoundary()
             std::cerr << "testMesh2DGrid: querying xIdx at grid point "
                 "k = " << k << " (x = " << xRow[k] << ") returned i = " // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- k is a loop index bounded by constexpr nx
                 << i << ", expected " << expected << "\n";
+            return 1;
+        }
+    }
+
+    return 0; // Success
+}
+
+// Regression test for a bug in findIntersectDistance, found while
+// implementing xIntersectN: the distance-to-rib calculation always
+// measured against the cell's top edge (y_[jSaveLoc+1]), which is
+// correct for upward searches but wrong for downward ones, where it
+// should measure against the cell's bottom edge (y_[jSaveLoc])
+// instead. This never surfaced before xIntersectN existed, because
+// every other caller of this traversal machinery (xIntersect) only
+// ever searches upward, from yMin_ to yMax_. This mesh has a single
+// cell whose right spine runs from (1, 0) to (3, 2) while its left
+// edge stays pinned at x = 0; querying x = 1.5 places the start point
+// outside the cell at the bottom (y = 0, where the cell only spans
+// x in [0, 1]) but inside it higher up (the right edge reaches x =
+// 1.5 at y = 0.5). A downward search from an interior y in (0.5, 2)
+// must therefore hit the right spine at y = 0.5 before it would ever
+// reach the bottom rib at y = 0; the buggy version instead jumped
+// straight past the spine to the bottom rib.
+static auto
+testXIntersectNDownwardSpine()
+{
+    using XInt = interp::Mesh2DGrid::xIntersectionDescriptor;
+    using XIntType = interp::Mesh2DGrid::IntersectionType;
+
+    constexpr size_t nx = 2;
+    constexpr size_t ny = 2;
+    std::array<double, nx*ny> xData = { 0 };
+    std::array<double, ny> yData = { 0.0, 2.0 };
+    const std::mdspan<double, std::extents<size_t, nx, ny>> x(xData.data());
+    const std::mdspan<double, std::extents<size_t, ny>> y(yData.data());
+    x[0,0] = 0.0; x[0,1] = 0.0; // Left edge: vertical at x = 0
+    x[1,0] = 1.0; x[1,1] = 3.0; // Right edge: from (1, 0) to (3, 2)
+    const interp::Mesh2DGrid m2d(x, y);
+
+    constexpr double xQuery = 1.5;
+    constexpr double ySpine = 0.5; // Where the right spine crosses xQuery
+    const double xsSpine = std::sqrt(std::pow(xQuery - 1.0, 2) +
+        std::pow(ySpine, 2)); // s along the right spine at (xQuery, ySpine)
+
+    const std::vector<XInt> expected = {
+        { .y = ySpine, .xs = xsSpine, .t = XIntType::spine,
+            .idx = 1, .meshExit = true },
+        { .y = 2.0, .xs = xQuery, .t = XIntType::rib,
+            .idx = 1, .meshExit = true }
+    };
+
+    // A downward-only search (n = 1) from an interior y above the
+    // spine crossing must find the spine, not the bottom rib
+    for (const double yQuery : { 0.6, 1.2, 1.9 })
+    {
+        const auto got1 = m2d.xIntersectN(xQuery, yQuery, 1);
+        if (got1.size() != 1 ||
+            !utils::approxEqual(got1[0].y, expected[0].y) ||
+            !utils::approxEqual(got1[0].xs, expected[0].xs) ||
+            got1[0].t != expected[0].t || got1[0].idx != expected[0].idx ||
+            got1[0].meshExit != expected[0].meshExit)
+        {
+            std::cerr << "testMesh2DGrid: xIntersectN(x = " << xQuery
+                << ", y = " << yQuery << ", n = 1) expected to find the "
+                "right spine crossing at y = " << expected[0].y
+                << ", instead got " << got1.size() << " points"
+                << (got1.empty() ? "" :
+                    (std::string(", first at y = ") +
+                    std::to_string(got1[0].y))) << "\n";
+            return 1;
+        }
+
+        // With n = 2, the search should also find the top rib above
+        const auto got2 = m2d.xIntersectN(xQuery, yQuery, 2);
+        if (got2.size() != 2)
+        {
+            std::cerr << "testMesh2DGrid: xIntersectN(x = " << xQuery
+                << ", y = " << yQuery << ", n = 2) expected 2 points, "
+                "got " << got2.size() << "\n";
+            return 1;
+        }
+        for (const auto& [r, e] : std::views::zip(got2, expected))
+        {
+            if (!utils::approxEqual(r.y, e.y) || !utils::approxEqual(r.xs, e.xs) ||
+                r.t != e.t || r.idx != e.idx || r.meshExit != e.meshExit)
+            {
+                std::cerr << "testMesh2DGrid: xIntersectN(x = " << xQuery
+                    << ", y = " << yQuery << ", n = 2): expected (y, xs, t, "
+                    "idx, exit) = " << e.y << ", " << e.xs << ", "
+                    << static_cast<int>(e.t) << ", " << e.idx << ", "
+                    << e.meshExit << ", instead found " << r.y << ", "
+                    << r.xs << ", " << static_cast<int>(r.t) << ", "
+                    << r.idx << ", " << r.meshExit << "\n";
+                return 1;
+            }
+        }
+
+        // n = 3 asks for more points than exist along this line; only
+        // the 2 that actually exist should come back
+        const auto got3 = m2d.xIntersectN(xQuery, yQuery, 3);
+        if (got3.size() != 2)
+        {
+            std::cerr << "testMesh2DGrid: xIntersectN(x = " << xQuery
+                << ", y = " << yQuery << ", n = 3) expected only the 2 "
+                "available points, got " << got3.size() << "\n";
             return 1;
         }
     }
@@ -702,11 +988,16 @@ auto testMesh2DGrid() -> int
     // Do intersection tests
     test += testXIntersectConvex(m2d, nx, fac);
     test += testXIntersectNonConvex(m2dNC);
+    test += testXIntersectN(m2d, m2dNC);
     test += testYIntersect(m2d, nx, fac);
 
     // Regression tests for the cached-index boundary bug in yIdx/xIdx
     test += testYIntersectGridBoundary();
     test += testXIdxGridBoundary();
+
+    // Regression test for the downward-search distance bug in
+    // findIntersectDistance, found while implementing xIntersectN
+    test += testXIntersectNDownwardSpine();
 
     // Regression tests for yIntersect/xIntersect at the exact
     // yMin_/yMax_ and xMin_/xMax_ boundaries
