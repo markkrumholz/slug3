@@ -13,7 +13,7 @@
 #include "../pdfs/PDFReflect.hpp"
 #include "../phot/FilterCollection.hpp"
 #include "../tracks/TrackCommons.hpp"
-#include "../utils/GKIntegrator.hpp"
+#include "../utils/GKIntegratorData.hpp"
 #include "../utils/PDFIntegrator.hpp"
 #include "../utils/UniqueIDManager.hpp"
 #include "Cluster.hpp"

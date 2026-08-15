@@ -11,7 +11,7 @@
 #include "../phot/FilterCollection.hpp"
 #include "../tracks/TrackCommons.hpp"
 #include "../tracks/Tracks2D.hpp"
-#include "../utils/GKIntegrator.hpp"
+#include "../utils/GKIntegratorData.hpp"
 #include "../utils/PDFIntegrator.hpp"
 #include "../utils/RngThread.hpp"
 #include <algorithm>

@@ -10,6 +10,7 @@
 
 #include "../pdfs/PDF.hpp"
 #include "GKIntegrator.hpp"
+#include "GKIntegratorData.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
