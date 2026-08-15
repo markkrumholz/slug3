@@ -10,8 +10,10 @@
 
 /**
  * @brief Full end-to-end test of a fully continuous (f_cluster = 0) galaxy simulation.
- * @return 0 if the test passes (including if it was skipped because the
- *   required data files are not present), 1 if it fails.
+ * @return 0 if both of this test's own two runs pass (including if
+ *   both were skipped because the required data files are not
+ *   present), 1 if either fails -- see the .cpp file's own comment
+ *   for why there are two.
  */
 auto testGalaxySpecsynFullNonStoch() -> int;
 

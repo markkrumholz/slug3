@@ -9,11 +9,11 @@
 #define GALAXY_HPP
 
 #include "../io/SimControls.hpp"
+#include "../pdfs/PDF.hpp"
 #include "../specsyn/Specsyn.hpp"
 #include "Cluster.hpp"
 #include <cstddef>
 #include <functional>
-#include <mdspan> // NOLINT(misc-include-cleaner) -- see the identical NOLINT on SpecsynLibWR.hpp's own <mdspan> include
 #include <vector>
 
 namespace core
@@ -370,37 +370,44 @@ namespace core
         void computeLbol();
 
         /**
-         * @brief The vectorized integrand for computeLbolCts()'s own standalone Lbol integral's 2D (age, mass) integral
-         * @param points An (npts, 2) view of the points to evaluate --
-         *   see Specsyn::continuousSpecIntegrand()'s own points
-         *   parameter for the exact column layout (points[i, 0] age,
-         *   points[i, 1] mass)
-         * @param feh The single [Fe/H] value shared by every point in
-         *   this call -- see Specsyn::continuousSpecIntegrand()'s own
-         *   feh parameter for why this is a fixed argument rather than
-         *   a column of points
-         * @return npts values, each point's own bolometric luminosity,
-         *   in Lsun -- unlike Specsyn::continuousSpecIntegrand()'s own
-         *   Lbol element, no further unit conversion is needed
-         *   afterward, since this integral's own absolute tolerance is
-         *   already specified directly in Lsun (see computeLbolCts()'s
-         *   own comment for why that differs from the shared-with-a-
-         *   spectrum case)
+         * @brief The integrand for computeLbolCts()'s own standalone Lbol integral's outer (age) integral
+         * @param age The stellar age, in yr, to evaluate at -- see
+         *   Specsyn::continuousSpecIntegrand()'s own age parameter for
+         *   the identical convention (not time -- computeLbolCts()
+         *   integrates this dimension via a pdfs::PDFReflect view of
+         *   sfr, pivoted so that the coordinate PDFIntegratorGK hands
+         *   back already is age)
+         * @param imf The initial mass function of the population --
+         *   see computeLbolCts()'s own imf parameter; used both as the
+         *   inner mass integral's own weighting PDF and, via
+         *   getMin()/getMax(), its own integration bounds
+         * @param feh The single [Fe/H] value this call is evaluated
+         *   at -- see Specsyn::continuousSpecIntegrand()'s own feh
+         *   parameter for the identical convention
+         * @return A single-element vector holding this age's own
+         *   integrated bolometric luminosity, in Lsun -- unlike
+         *   Specsyn::continuousSpecIntegrand()'s own Lbol element, no
+         *   further unit conversion is needed afterward, since this
+         *   integral's own absolute tolerance is already specified
+         *   directly in Lsun (see computeLbolCts()'s own comment for
+         *   why that differs from the shared-with-a-spectrum case)
          * @details
-         * Mirrors Specsyn::continuousSpecIntegrand()'s own single-slot
-         * isochrone cache (keyed on age alone -- feh is fixed for the
-         * whole call) and per-point logic exactly (see its own comment
-         * for why a single-slot cache, rather than one holding every
-         * isochrone a batch touches, is what keeps memory bounded), but
-         * only reads off each point's own log(L/Lsun) (leaving it at 0
-         * for a point whose mass falls in none of its own isochrone's
-         * segments, a star already dead at this age) -- there is no
-         * spectrum to also compute here, so no mdspan view of the
-         * result is needed either, unlike continuousSpecIntegrand()'s
-         * own resultView.
+         * Mirrors Specsyn::continuousSpecIntegrand()'s own structure
+         * exactly (see its own comment): floors log10(age), builds the
+         * isochrone at that (log age, feh), then integrates each of its
+         * segments' own bolometric luminosity against imf via a nested
+         * PDFIntegratorGK (GKOrder::GK15) -- a local, capture-free
+         * lambda mirroring Cluster::lbolStar()'s own role, rather than
+         * calling into any Specsyn (which may not exist at all when
+         * this runs -- see computeLbolCts()'s own comment), reading
+         * each star's own log(L/Lsun) directly off its isochrone
+         * segment and summing 10^that over the segments a star of that
+         * mass could belong to. No explicit live/dead mass check is
+         * needed: exactly as in continuousSpecIntegrand(), a dead mass
+         * is simply never visited, since it falls in none of the
+         * isochrone's own segment domains.
          */
-        [[nodiscard]] auto lbolCtsIntegrand(
-            std::mdspan<double, std::extents<std::size_t, std::dynamic_extent, 2>> points, double feh) const -> std::vector<double>; // NOLINT(misc-include-cleaner) -- see the identical NOLINT on the <mdspan> include above
+        [[nodiscard]] auto lbolCtsIntegrand(double age, const pdfs::PDF& imf, double feh) const -> std::vector<double>;
 
         /**
          * @brief Compute lbolCts_ directly, without going through a full spectrum
@@ -414,20 +421,23 @@ namespace core
          * lbol() is requested without spec() ever having been
          * requested first this step.
          *
-         * Mirrors Specsyn::specCtsHelper()'s own construction and use of
-         * a PDFIntegratorND exactly (CubatureMethod::pAdaptive, the
-         * reflected-and-log-transformed age coordinate, and -- when
-         * fehDist is non-degenerate -- running the same 2D integral
-         * once per grid point in tracks().feH() and integrating those
-         * discrete results over [Fe/H] via interp::Interpolator1D,
-         * rather than a joint 3D cubature integral; see its own comment
-         * for why), just integrating a single quantity (Lbol alone, via
-         * lbolCtsIntegrand()) instead of a spectrum plus Lbol together,
-         * and directly in Lsun throughout: unlike specCtsHelper(), there
-         * is no spectral absolute tolerance for an erg/s-scale
-         * intermediate to share, so reqAbsError is simply intAbsTol() *
-         * sfr().integral(0, curTime()), with no utils::Lsun factor. Its
-         * own lbolCtsIntegrand() builds isochrones directly (see its own
+         * Mirrors Specsyn::specCtsHelper()'s own nested-1D structure
+         * exactly (the reflected-and-log-transformed age coordinate, a
+         * PDFIntegratorGK over age alone whose own integrand --
+         * lbolCtsIntegrand() -- performs a complete inner 1D integral
+         * over mass via a fresh isochrone built at its own age, and --
+         * when fehDist is non-degenerate -- running that same nested
+         * integral once per grid point in tracks().feH() and
+         * integrating those discrete results over [Fe/H] via
+         * interp::Interpolator1D; see its own comment for the full
+         * rationale, which applies here unchanged), just integrating a
+         * single quantity (Lbol alone, via lbolCtsIntegrand()) instead
+         * of a spectrum plus Lbol together, and directly in Lsun
+         * throughout: unlike specCtsHelper(), there is no spectral
+         * absolute tolerance for an erg/s-scale intermediate to share,
+         * so reqAbsError is simply intAbsTol() * sfr().integral(0,
+         * curTime()), with no utils::Lsun factor. Its own
+         * lbolCtsIntegrand() builds isochrones directly (see its own
          * comment), independent of any Specsyn, since a Specsyn may not
          * exist at all here.
          *

@@ -11,7 +11,8 @@
 #include "../phot/FilterCollection.hpp"
 #include "../tracks/TrackCommons.hpp"
 #include "../tracks/Tracks2D.hpp"
-#include "../utils/PDFIntegrator.hpp"
+#include "../utils/GKIntegrator.hpp"
+#include "../utils/PDFIntegratorGK.hpp"
 #include "../utils/RngThread.hpp"
 #include <algorithm>
 #include <array>
@@ -354,13 +355,14 @@ void core::Cluster::computeLbol()
     // integrate lbolStar against the IMF over each isochrone segment,
     // mirroring Specsyn::specCts's own per-segment integration (see
     // its own comment for why -- an isochrone may have gaps between
-    // segments that pcubature has no way to know to avoid)
+    // segments that the quadrature routine has no way to know to
+    // avoid)
     if (birthNonStochMass_ > 0.0)
     {
         using LbolSegFn = std::array<double, 1> (*)(double, const Segment&);
-        const utils::PDFIntegrator integrator(
+        const utils::PDFIntegratorGK<LbolSegFn, utils::GKOrder::GK15> integrator(
             sc.imf(), static_cast<LbolSegFn>(&Cluster::lbolStar), 1,
-            std::array<bool, 1>{}, sc.intMaxIter(), sc.intAbsTol(), sc.intRelTol());
+            false, sc.intMaxIter(), sc.intAbsTol(), sc.intRelTol());
 
         const double mMin = sc.imf().getMin();
         const double mMax = sc.minStochMass();
