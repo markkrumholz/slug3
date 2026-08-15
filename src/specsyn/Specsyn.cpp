@@ -11,20 +11,19 @@
  */
 
 #include "Specsyn.hpp"
+#include "../interpolation/Interpolator1D.hpp"
 #include "../io/SimControls.hpp"
 #include "../pdfs/PDF.hpp"
 #include "../pdfs/PDFReflect.hpp"
 #include "../tracks/TrackCommons.hpp"
 #include "../tracks/Tracks3D.hpp"
 #include "../utils/Constants.hpp"
+#include "../utils/PDFIntegrator.hpp"
 #include "../utils/PDFIntegratorND.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
-#include <functional>
-#include <limits>
-#include <mdspan> // NOLINT(misc-include-cleaner) -- see the identical NOLINT on SpecsynLibWR.hpp's own <mdspan> include
 #include <memory>
 #include <utility>
 #include <vector>
@@ -44,16 +43,63 @@ auto specsyn::Specsyn::wlObs() const -> std::vector<double>
     return wlObs;
 }
 
-auto specsyn::Specsyn::specCts(
+auto specsyn::Specsyn::specCtsImpl(
     const Isochrone& isochrone,
     const pdfs::PDF& imf,
     const double mTot,
     const double mMin,
     const double mMax,
-    const double feh
+    const double feh,
+    const bool forIntegration,
+    const bool computeLbol
 ) const -> std::vector<double>
 {
-    // Integrate lambda * dL/dlambda (via specWl) rather than
+    const std::size_t nWl = wl_.size();
+    const std::size_t nQty = nWl + (computeLbol ? 1 : 0);
+
+    // Evaluate a single star's own row -- lambda * dL/dlambda (see
+    // specWl()) at each wavelength, plus -- only if computeLbol -- one
+    // further element, that star's own bolometric luminosity in erg/s
+    // (not Cluster::lbol()'s own Lsun -- see this function's own
+    // header comment for why). Dispatches to specWlForIntegration()
+    // rather than specWl() itself when forIntegration is true -- see
+    // that function's own comment for why continuousSpecIntegrand()
+    // needs it, in place of specWl()'s ordinary spec() call.
+    const auto evalPoint = [this, forIntegration, computeLbol, nWl, nQty](
+        const double m, const Segment& seg, const double fehArg) -> std::vector<double>
+    {
+        std::vector<double> row(nQty, 0.0);
+        std::vector<double> starSpecWl;
+        double logL = 0.0;
+        if (forIntegration)
+        {
+            // Evaluate the segment once, sharing it between the
+            // spectrum and (if requested) the Lbol contribution below,
+            // rather than evaluating it twice.
+            const auto props = seg(m);
+            starSpecWl = specWlForIntegration(props, fehArg);
+            if (computeLbol)
+            {
+                logL = props[static_cast<std::size_t>(tracks::FieldIdx::logL)]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- StarData is a fixed-size std::array, and logL is one of its compile-time-known indices
+            }
+        }
+        else
+        {
+            starSpecWl = specWl(m, seg, fehArg);
+        }
+        for (std::size_t k = 0; k < nWl; ++k)
+        {
+            row[k] = starSpecWl[k]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- starSpecWl has size wl_.size() == nWl by specWl()/specWlForIntegration()'s own contract, and k is bounded by nWl
+        }
+        if (computeLbol)
+        {
+            row[nWl] = std::pow(10.0, logL) * utils::Lsun; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- row has size nQty == nWl + 1 whenever computeLbol is true, so index nWl is always valid
+        }
+        return row;
+    };
+    using EvalFn = decltype(evalPoint);
+
+    // Integrate lambda * dL/dlambda (via evalPoint) rather than
     // dL/dlambda directly, and scale intAbsTol() (specified in units
     // of dL/dlambda's own natural scale) by utils::Lsun to match --
     // see specWl()'s own doc comment for why.
@@ -74,103 +120,62 @@ auto specsyn::Specsyn::specCts(
     // this integrand isn't sharply peaked enough near either edge of
     // its mass domain for the log transform to pay for the extra
     // nonlinearity it introduces.
-    using SpecSegFn = std::vector<double> (Specsyn::*)(double, const Segment&, double) const;
-    const utils::PDFIntegratorND<SpecSegFn, 1, false, utils::CubatureMethod::pAdaptive> integrator(
-        imf, static_cast<SpecSegFn>(&Specsyn::specWl), static_cast<unsigned>(wl_.size()),
+    const utils::PDFIntegratorND<EvalFn, 1, false, utils::CubatureMethod::pAdaptive> integrator(
+        imf, evalPoint, static_cast<unsigned>(nQty),
         std::array<bool, 1>{}, intMaxIter(), intAbsTol() * utils::Lsun, intRelTol());
 
-    std::vector<double> result(wl_.size(), 0.0);
+    std::vector<double> result(nQty, 0.0);
     for (const auto& seg : isochrone)
     {
         const double a = std::max(mMin, seg->xMin());
         const double b = std::min(mMax, seg->xMax());
         if (a >= b) { continue; } // empty intersection with [mMin, mMax]
 
-        const auto segResult = integrator.integrate(a, b, this, *seg, feh);
+        const auto segResult = integrator.integrate(a, b, *seg, feh);
         for (std::size_t i = 0; i < result.size(); ++i)
         {
-            result[i] += segResult[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- segResult has the same size as result (both sized to wl_.size()), and i is bounded by result.size()
+            result[i] += segResult[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- segResult has the same size as result (both sized to nQty), and i is bounded by result.size()
         }
     }
-    // Scale by mTot and divide back out by wl_ elementwise, undoing
-    // specWl()'s multiplication to recover dL/dlambda
-    for (std::size_t i = 0; i < result.size(); ++i)
+
+    if (!forIntegration)
     {
-        result[i] = result[i] * mTot / wl_[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- wl_ has the same size as result (both sized to wl_.size()), and i is bounded by result.size()
+        // Scale by mTot and divide back out by wl_ elementwise, undoing
+        // specWl()'s multiplication to recover dL/dlambda. Skipped when
+        // forIntegration is true: continuousSpecIntegrand()'s own
+        // caller (specCtsHelper()) does this exact division itself,
+        // once, after its own outer age integral is complete -- see
+        // specCtsImpl()'s own header comment.
+        for (std::size_t i = 0; i < nWl; ++i)
+        {
+            result[i] = result[i] * mTot / wl_[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- wl_ has size nWl, and i is bounded by nWl
+        }
     }
     return result;
 }
 
+auto specsyn::Specsyn::specCts(
+    const Isochrone& isochrone,
+    const pdfs::PDF& imf,
+    const double mTot,
+    const double mMin,
+    const double mMax,
+    const double feh
+) const -> std::vector<double>
+{
+    return specCtsImpl(isochrone, imf, mTot, mMin, mMax, feh, false, false);
+}
+
 auto specsyn::Specsyn::continuousSpecIntegrand(
-    const std::mdspan<double, std::extents<std::size_t, std::dynamic_extent, 2>> points, // NOLINT(misc-include-cleaner) -- see the identical NOLINT on the <mdspan> include above
+    const double age,
+    const pdfs::PDF& imf,
     const bool computeLbol,
     const double feh
 ) const -> std::vector<double>
 {
-    const std::size_t npts = points.extent(0);
-    const std::size_t nPerPoint = wl_.size() + (computeLbol ? 1 : 0);
-
-    // Evaluate each point's own spectrum -- lambda *
-    // dL/dlambda (via specWl()), matching the other specCts()
-    // overload's own convention -- against its own isochrone, leaving
-    // a point's row at zero (Lbol element included, if present) if its
-    // own mass falls in none of that isochrone's segments (a star
-    // already dead at this age); if computeLbol, also evaluates that
-    // same (mass, segment) directly to read off the star's own
-    // bolometric luminosity, storing it as the row's final element
-    // (see this function's own header comment for both)
-    std::vector<double> resultFlat(npts * nPerPoint, 0.0);
-    const std::mdspan<double, std::extents<std::size_t, std::dynamic_extent, std::dynamic_extent>> // NOLINT(misc-include-cleaner) -- see the identical NOLINT on the <mdspan> include above
-        resultView(resultFlat.data(), npts, nPerPoint);
-
-    // Single-slot isochrone cache, keyed on age alone -- feh is fixed
-    // for this whole call (see this function's own header comment) --
-    // see this function's own header comment for why a single slot,
-    // rather than a persistent map keyed on every distinct age a batch
-    // touches, is what keeps memory bounded regardless of how many
-    // distinct ages a batch spans.
-    double cachedAge = std::numeric_limits<double>::quiet_NaN();
-    std::unique_ptr<Isochrone> cachedIsochrone;
-
-    for (std::size_t i = 0; i < npts; ++i)
-    {
-        const double age = points[i, 0]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i < npts == points.extent(0) by this loop's own bound
-        const double mass = points[i, 1]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
-
-        if (cachedIsochrone == nullptr || age != cachedAge)
-        {
-            const double logAge = std::max(std::log10(age), controls_.tracks().logTMin());
-            cachedIsochrone = std::make_unique<Isochrone>(controls_.tracks().getIsochrone(logAge, feh));
-            cachedAge = age;
-        }
-
-        const Segment* seg = nullptr;
-        for (const auto& s : *cachedIsochrone)
-        {
-            if (mass >= s->xMin() && mass <= s->xMax()) { seg = s.get(); break; }
-        }
-        if (seg == nullptr) { continue; } // dead star: leave this row's zeros as-is
-
-        const auto starSpecWl = specWlForIntegration(mass, *seg, feh);
-        for (std::size_t k = 0; k < wl_.size(); ++k)
-        {
-            resultView[i, k] = starSpecWl[k]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- starSpecWl has size wl_.size() by specWl()'s own contract, matching k's own loop bound
-        }
-        if (computeLbol)
-        {
-            const auto props = (*seg)(mass);
-            const double logL = props[static_cast<std::size_t>(tracks::FieldIdx::logL)]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- StarData is a fixed-size std::array, and logL is one of its compile-time-known indices
-            // erg/s, not Lsun, despite Cluster::lbol()'s own Lsun
-            // convention: specCtsHelper()'s own absolute tolerance is
-            // in erg/s (like the spectral elements), so a Lbol value
-            // of order unity (Lsun) would look converged to that
-            // tolerance immediately, regardless of its actual
-            // accuracy -- specCtsHelper() itself divides this back
-            // down to Lsun once the integral is done.
-            resultView[i, wl_.size()] = std::pow(10.0, logL) * utils::Lsun;
-        }
-    }
-    return resultFlat;
+    const double logAge = std::max(std::log10(age), controls_.tracks().logTMin());
+    const auto isochrone = controls_.tracks().getIsochrone(logAge, feh);
+    return specCtsImpl(isochrone, imf, 1.0, imf.getMin(), imf.getMax(), feh, true, computeLbol);
 }
 
 auto specsyn::Specsyn::specCtsHelper(
@@ -183,8 +188,8 @@ auto specsyn::Specsyn::specCtsHelper(
 ) const -> std::vector<double>
 {
     // Reflect sfr about half the current time, so this dimension's
-    // own coordinate -- what continuousSpecIntegrand() reads as
-    // points[i, 0] -- becomes stellar age (curTime - time)
+    // own coordinate -- what continuousSpecIntegrand() reads as its
+    // own age parameter -- becomes stellar age (curTime - time)
     // directly, rather than time itself (see PDFReflect::reflect()'s
     // own comment: pivot = curTime / 2 makes reflect(x) = curTime - x).
     // The luminosity this integral is dominated by -- young, hot, blue
@@ -231,26 +236,31 @@ auto specsyn::Specsyn::specCtsHelper(
     const double absTol = intAbsTol() * utils::Lsun * sfr.integral(0.0, curTime);
     const auto nInt = static_cast<unsigned>(wl_.size()) + (computeLbol ? 1U : 0U);
 
+    // A plain 1D utils::PDFIntegrator over age alone -- its own default
+    // CubatureMethod::hAdaptive, non-vectorized -- whose integrand
+    // (continuousSpecIntegrand()) performs a complete nested 1D
+    // integral over mass internally, at each age point visited; see
+    // continuousSpecIntegrand()'s own comment and this class's own
+    // specCts() overload's header comment for why nesting two 1D
+    // integrals this way, rather than one joint 2D (age, mass)
+    // integral, is what actually fixes the cost-cliff problem that
+    // motivated this design.
     using IntegrandFn = std::vector<double> (Specsyn::*)(
-        std::mdspan<double, std::extents<std::size_t, std::dynamic_extent, 2>>, bool, double) const;
-    const utils::PDFIntegratorND<IntegrandFn, 2, true, utils::CubatureMethod::hAdaptive> integrator(
-        std::array<std::reference_wrapper<const pdfs::PDF>, 2>{ std::cref(sfrAge), std::cref(imf) },
-        static_cast<IntegrandFn>(&Specsyn::continuousSpecIntegrand),
-        nInt,
-        std::array<bool, 2>{ logAge, true },
+        double, const pdfs::PDF&, bool, double) const;
+    const utils::PDFIntegrator<IntegrandFn> integrator(
+        sfrAge, static_cast<IntegrandFn>(&Specsyn::continuousSpecIntegrand),
+        nInt, std::array<bool, 1>{ logAge },
         intMaxIter(), absTol, intRelTol());
 
     std::vector<double> result;
     if (singleFeh)
     {
         result = integrator.integrate(
-            std::array<double, 2>{ ageMin, imf.getMin() },
-            std::array<double, 2>{ curTime, imf.getMax() },
-            *this, computeLbol, fehDist.getMin());
+            ageMin, curTime, this, imf, computeLbol, fehDist.getMin());
     }
     else
     {
-        // Integrate over [Fe/H] by running the same 2D (age, mass)
+        // Integrate over [Fe/H] by running the same nested (age, mass)
         // integral once at every grid point the tracks are actually
         // defined at, then interpolating and integrating those
         // discrete results over [Fe/H] -- see this function's own
@@ -281,9 +291,7 @@ auto specsyn::Specsyn::specCtsHelper(
         for (std::size_t f = 0; f < nFeh; ++f)
         {
             rawResults[f] = integrator.integrate(
-                std::array<double, 2>{ ageMin, imf.getMin() },
-                std::array<double, 2>{ curTime, imf.getMax() },
-                *this, computeLbol, fehGrid[f]);
+                ageMin, curTime, this, imf, computeLbol, fehGrid[f]);
             fehWeight[f] = fehDist(fehGrid[f]);
         }
 
