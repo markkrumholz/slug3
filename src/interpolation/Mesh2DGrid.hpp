@@ -170,7 +170,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <limits>
-#include <mdspan>
+#include <mdspan> // NOLINT(misc-include-cleaner)
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -202,7 +202,7 @@ namespace interp
     public:
 
         // Shorten array types
-        using Array2D = std::mdspan<double, std::dextents<size_t, 2>>;
+        using Array2D = std::mdspan<double, std::dextents<size_t, 2>>; // NOLINT(misc-include-cleaner)
         using Array1D = std::mdspan<double, std::dextents<size_t, 1>>;
 
         // Shorthand for numeric limits
@@ -518,6 +518,35 @@ namespace interp
             double x,
             double yLo = std::numeric_limits<double>::lowest(),
             double yHi = std::numeric_limits<double>::max()
+        ) const -> std::vector<xIntersectionDescriptor>;
+
+        /**
+         * @brief Compute up to N intersections of mesh with line of
+         * constant x, centered on a given y coordinate
+         * @param x The x coordinate
+         * @param y The y coordinate to center the search on
+         * @param n The maximum number of intersection points to return
+         * @returns List of points where line crosses mesh, up to N of them
+         * @details
+         * This routine is similar to xIntersect, except that rather
+         * than returning every intersection point of the line of
+         * constant x with the mesh, it returns at most N of them,
+         * chosen to be the points closest to y. The points are evenly
+         * split between those above and below y if N is even, with
+         * one extra point below y if N is odd. If the search for
+         * points in one direction from y reaches the edge of the mesh
+         * before the requested number of points on that side have
+         * been found, the search in the other direction continues
+         * past its own quota in an attempt to bring the total number
+         * of points found up to N. The returned list may still contain
+         * fewer than N points if the mesh has fewer than N intersections
+         * with the line of constant x in total. The returned points are
+         * of type xIntersectionDescriptor.
+         */
+        auto xIntersectN(
+            double x,
+            double y,
+            size_t n
         ) const -> std::vector<xIntersectionDescriptor>;
 
         /**

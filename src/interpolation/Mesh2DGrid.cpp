@@ -529,8 +529,20 @@ namespace interp
         return intList;
     }
 
+    // Compute up to n intersections in the x direction, centered on y
+    auto Mesh2DGrid::xIntersectN( //NOLINT(readability-convert-member-functions-to-static)
+        const double /*x*/,
+        const double /*y*/,
+        const size_t /*n*/) const ->
+        std::vector<xIntersectionDescriptor>
+    {
+        std::vector<xIntersectionDescriptor> intList; // Output holder
+
+        return intList;
+    }
+
     // Helper function to find intersections with segments at constant x
-    auto Mesh2DGrid::xIntersectSeg(const double x, 
+    auto Mesh2DGrid::xIntersectSeg(const double x,
         const double yMin,
         const double yMax,
         const bool startInterior,
