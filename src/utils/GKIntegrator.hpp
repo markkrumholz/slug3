@@ -9,9 +9,13 @@
 #define GKINTEGRATOR_HPP
 
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
+#include <tuple>
 #include <utility>
+#include <vector>
 
 namespace utils
 {
@@ -501,6 +505,146 @@ namespace utils
             absTol_(absTol),
             relTol_(relTol)
         { }
+
+        /**
+         * @brief Apply a single, non-adaptive Gauss-Kronrod rule to one interval
+         * @param a Lower limit of the interval
+         * @param b Upper limit of the interval
+         * @param args Any additional arguments f_ requires, forwarded
+         *   to it unchanged after x at every point evaluated
+         * @return A pair of (1) the ngk-point Kronrod rule's own
+         *   estimate of the integral, one value per quantity f_
+         *   returns, and (2) an error estimate for each of those
+         *   values -- the absolute difference between the Kronrod
+         *   estimate and the embedded (lower-order) Gauss rule's own
+         *   estimate of the same integral, both length nInt_
+         * @details
+         * A direct translation of slug2's own
+         * slug_imf_integrator<T>::integrate_gk (src/utils/
+         * slug_imf_integrator.cpp), generalized from a single
+         * scalar-or-vector quantity T to an arbitrary, runtime-sized
+         * nInt_ of them, and with the IMF weighting integrate_gk
+         * itself folds in (imf_val) dropped entirely -- f_ is
+         * evaluated on its own here, unweighted; PDFIntegrator is
+         * where that weighting belongs instead, layered on top of this
+         * class, not inside it.
+         *
+         * Builds the symmetric grid of gknum = 2 * ngk - 1 abscissae
+         * spanning [a, b] from GKRule<Order>::xgk (see its own
+         * comment for the half-plus-center storage convention this
+         * mirrors), evaluates f_ at every one of them, then forms two
+         * weighted sums over those same nInt_-length values: the full
+         * Kronrod sum (all gknum points, weighted by
+         * GKRule<Order>::wgk) and the embedded Gauss sum (only the
+         * subset of points the lower-order Gauss rule itself uses,
+         * weighted by GKRule<Order>::wg) -- including the shared
+         * center point (x = (a + b) / 2) in the Gauss sum too,
+         * whenever GKRule<Order>::ngk is even (see GKRule's own
+         * comment for why that parity is exactly the right test).
+         * Both sums are scaled by the interval's own half-length to
+         * convert from the standard [-1, 1] quadrature domain to
+         * [a, b], and their absolute difference is returned as this
+         * call's own error estimate -- a cheap, standard proxy for the
+         * Kronrod estimate's own true error, since the embedded Gauss
+         * rule is enough lower-order that the two estimates should
+         * differ substantially only where the Kronrod one is itself
+         * unreliable.
+         */
+        template <class... Args>
+        [[nodiscard]] auto quadSingle(const double a, const double b, Args&&... args) const
+        -> std::pair<std::vector<double>, std::vector<double>>
+        {
+            using Rule = GKRule<Order>;
+            constexpr std::size_t ngk = Rule::ngk;
+            constexpr std::size_t gknum = (2 * ngk) - 1;
+
+            const double center = 0.5 * (a + b);
+            const double halfLength = 0.5 * (b - a);
+
+            std::array<double, gknum> xk{};
+            for (std::size_t i = 0; i < gknum / 2; ++i)
+            {
+                xk[i] = center - (halfLength * Rule::xgk[i]); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i < gknum / 2 == ngk - 1 < ngk == Rule::xgk.size() by construction
+                xk[gknum - i - 1] = center + (halfLength * Rule::xgk[i]); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- gknum - i - 1 >= gknum - gknum/2 > 0 and < gknum, and i < ngk as above
+            }
+            xk[gknum / 2] = center; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- gknum / 2 < gknum by construction
+
+            // Evaluate f_ at every point first, rather than
+            // interleaving evaluation with the summation loops below,
+            // to mirror integrate_gk's own structure -- each point's
+            // own nInt_ values are copied out of whatever contiguous
+            // container f_ returns (see this class's own @tparam F)
+            // into a plain std::vector<double>, since nInt_ itself is
+            // only known at runtime. args is forwarded exactly once,
+            // into this tuple, rather than at each of the gknum calls
+            // below: repeatedly forwarding the same forwarding-reference
+            // parameter would risk moving from an rvalue-bound argument
+            // on its first use, leaving it in a moved-from state for
+            // every later point -- std::apply instead hands every call
+            // the tuple's own lvalue elements.
+            const std::tuple<Args...> argsTuple(std::forward<Args>(args)...);
+            std::vector<std::vector<double>> fVal(gknum);
+            for (std::size_t i = 0; i < gknum; ++i)
+            {
+                const auto val = std::apply(
+                    [this, &xk, i](const auto&... unpackedArgs) { return std::invoke(f_, xk[i], unpackedArgs...); }, // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i < gknum == xk.size() by construction
+                    argsTuple);
+                fVal[i].assign(std::begin(val), std::end(val));
+            }
+
+            std::vector<double> result(nInt_, 0.0);
+            std::vector<double> gaussQuad(nInt_, 0.0);
+
+            // Central point: always part of the Kronrod sum (weight
+            // wgk[ngk - 1], the last stored weight -- see GKRule's own
+            // comment for why); part of the Gauss sum too only when
+            // ngk is even (see this function's own comment for why).
+            const std::size_t centerIdx = gknum / 2;
+            for (std::size_t k = 0; k < nInt_; ++k)
+            {
+                result[k] = fVal[centerIdx][k] * Rule::wgk[ngk - 1]; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- ngk - 1 < ngk == Rule::wgk.size() by construction
+            }
+            if constexpr (ngk % 2 == 0)
+            {
+                for (std::size_t k = 0; k < nInt_; ++k)
+                {
+                    gaussQuad[k] = fVal[centerIdx][k] * Rule::wg[(ngk / 2) - 1]; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- ngk / 2 - 1 < ng == Rule::wg.size() whenever ngk is even, by the Gauss/Kronrod pairing GKRule's own comment describes
+                }
+            }
+
+            // Points shared between the Gauss and Kronrod sums
+            for (std::size_t i = 0; i < (ngk - 1) / 2; ++i)
+            {
+                const std::size_t p1 = (2 * i) + 1;
+                const std::size_t p2 = gknum - (2 * i) - 2;
+                for (std::size_t k = 0; k < nInt_; ++k)
+                {
+                    const double sum = fVal[p1][k] + fVal[p2][k]; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- p1, p2 < gknum == fVal.size() by construction
+                    gaussQuad[k] += Rule::wg[i] * sum; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i < (ngk - 1) / 2 <= ng == Rule::wg.size(), by the Gauss/Kronrod pairing GKRule's own comment describes
+                    result[k] += Rule::wgk[p1] * sum; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- p1 < ngk == Rule::wgk.size() by construction
+                }
+            }
+
+            // Points that appear only in the Kronrod sum
+            for (std::size_t i = 0; i < ngk / 2; ++i)
+            {
+                const std::size_t p1 = 2 * i;
+                const std::size_t p2 = gknum - (2 * i) - 1;
+                for (std::size_t k = 0; k < nInt_; ++k)
+                {
+                    result[k] += Rule::wgk[p1] * (fVal[p1][k] + fVal[p2][k]); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- p1 < ngk == Rule::wgk.size(), and p1, p2 < gknum == fVal.size(), by construction
+                }
+            }
+
+            std::vector<double> err(nInt_);
+            for (std::size_t k = 0; k < nInt_; ++k)
+            {
+                result[k] *= halfLength;
+                gaussQuad[k] *= halfLength;
+                err[k] = std::abs(result[k] - gaussQuad[k]);
+            }
+            return { std::move(result), std::move(err) };
+        }
 
     private:
 
