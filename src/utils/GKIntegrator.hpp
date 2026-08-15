@@ -472,7 +472,6 @@ namespace utils
         double b_;                  /**< Upper limit of this interval */
         std::vector<double> quad_;  /**< The Kronrod rule's own quadrature estimate over [a_, b_], one value per quantity f_ returns */
         std::vector<double> err_;   /**< This interval's own error estimate, one value per quantity f_ returns -- see quadSingle()'s own comment for how */
-        double absErr_;             /**< The largest element of err_ -- this interval's own single worst-quantity absolute error */
     };
 
     /**
@@ -505,21 +504,22 @@ namespace utils
          * @brief Construct a GKIntegrator
          * @param f The integrand; see this class's own @tparam F
          * @param nInt Number of quantities f returns per point
-         * @param maxEval Maximum number of integrand evaluations
-         *   (0 = unlimited)
+         * @param maxIter Maximum number of integrate()'s own bisection
+         *   iterations (0 = unlimited) -- see its own comment; not a
+         *   count of raw evaluations of f_ itself
          * @param absTol Required absolute error
          * @param relTol Required relative error
          */
         GKIntegrator(
             F f,
             std::size_t nInt,
-            std::size_t maxEval = 0,
+            std::size_t maxIter = 0,
             double absTol = 0.0,
             double relTol = 1e-6
         ) :
             f_(std::move(f)),
             nInt_(nInt),
-            maxEval_(maxEval),
+            maxIter_(maxIter),
             absTol_(absTol),
             relTol_(relTol)
         { }
@@ -532,12 +532,11 @@ namespace utils
          *   to it unchanged after x at every point evaluated
          * @return A GKIntegrationInterval with a_/b_ set to a/b, quad_
          *   set to the ngk-point Kronrod rule's own estimate of the
-         *   integral (one value per quantity f_ returns), err_ set to
-         *   an error estimate for each of those same values -- the
+         *   integral (one value per quantity f_ returns), and err_ set
+         *   to an error estimate for each of those same values -- the
          *   absolute difference between the Kronrod estimate and the
          *   embedded (lower-order) Gauss rule's own estimate of the
-         *   same integral -- and absErr_ set to the largest element of
-         *   err_
+         *   same integral
          * @details
          * A direct translation of slug2's own
          * slug_imf_integrator<T>::integrate_gk (src/utils/
@@ -663,8 +662,7 @@ namespace utils
                 gaussQuad[k] *= halfLength;
                 err[k] = std::abs(result[k] - gaussQuad[k]);
             }
-            const double absErr = *std::ranges::max_element(err);
-            return { a, b, std::move(result), std::move(err), absErr };
+            return { a, b, std::move(result), std::move(err) };
         }
 
         /**
@@ -677,10 +675,11 @@ namespace utils
          *   returns (length nInt_)
          * @details
          * Starts from a single quadSingle() call over the whole
-         * [a, b] interval; if that single interval's own absErr_ is
-         * already below absTol_, or its own largest elementwise
-         * relative error (|err_[k]| / |quad_[k]|) is already below
-         * relTol_, returns immediately -- no bisection needed.
+         * [a, b] interval; if that single interval's own largest
+         * elementwise error (max_k |err_[k]|) is already below absTol_,
+         * or its own largest elementwise relative error
+         * (max_k |err_[k]| / |quad_[k]|) is already below relTol_,
+         * returns immediately -- no bisection needed.
          *
          * Otherwise, repeatedly bisects whichever interval currently
          * contributes the largest relative error to the running total
@@ -693,11 +692,10 @@ namespace utils
          * largest element of errSum drops below absTol_, or the
          * largest elementwise relative error (|errSum[k]| / |quadSum[k]|)
          * drops below relTol_, or the number of bisection iterations
-         * exceeds maxEval_ (0 = unlimited; despite its own name, which
-         * this function overloads to mean "iterations" here rather
-         * than "raw integrand evaluations" -- each iteration costs two
-         * further quadSingle() calls, i.e. 2 * (2 * ngk - 1) further
-         * evaluations of f_).
+         * exceeds maxIter_ (0 = unlimited) -- not a count of raw
+         * evaluations of f_ itself, which each iteration costs two
+         * further quadSingle() calls' worth of (2 * (2 * ngk - 1)
+         * further evaluations).
          *
          * Which interval to bisect next is decided by each interval's
          * own relative error against the *global* running total
@@ -729,7 +727,8 @@ namespace utils
             std::vector<GKIntegrationInterval> intervals;
             intervals.push_back(callQuadSingle(a, b));
 
-            if (intervals[0].absErr_ < absTol_) { return intervals[0].quad_; }
+            const double absErr = *std::ranges::max_element(intervals[0].err_);
+            if (absErr < absTol_) { return intervals[0].quad_; }
             {
                 double maxRelErr = 0.0;
                 for (std::size_t k = 0; k < nInt_; ++k)
@@ -767,7 +766,7 @@ namespace utils
                 }
 
                 ++itCounter;
-                if (maxEval_ != 0 && itCounter > maxEval_) { return quadSum; }
+                if (maxIter_ != 0 && itCounter > maxIter_) { return quadSum; }
 
                 double maxAbsErr = 0.0;
                 double maxRelErr = 0.0;
@@ -798,7 +797,7 @@ namespace utils
 
         F f_;                  /**< The integrand */
         std::size_t nInt_;     /**< Number of quantities f returns per point */
-        std::size_t maxEval_;  /**< Maximum number of integrand evaluations */
+        std::size_t maxIter_;  /**< Maximum number of integrate()'s own bisection iterations */
         double absTol_;        /**< Required absolute error */
         double relTol_;        /**< Required relative error */
     };
