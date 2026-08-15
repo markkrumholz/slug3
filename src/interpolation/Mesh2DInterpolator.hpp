@@ -15,7 +15,7 @@
 #include <array>
 #include <cstddef>
 #include <gsl/gsl_interp.h>
-#include <mdspan>
+#include <mdspan> // NOLINT(misc-include-cleaner)
 #include <memory>
 #include <stdexcept>
 #include <utility>
@@ -49,7 +49,7 @@ namespace interp
     public:
 
         // Shorten array types
-        using Array3D = std::mdspan<double, std::dextents<size_t, 3>>;
+        using Array3D = std::mdspan<double, std::dextents<size_t, 3>>; // NOLINT(misc-include-cleaner)
         using Array2D = std::mdspan<double, std::dextents<size_t, 2>>;
         using Array1D = std::mdspan<double, std::dextents<size_t, 1>>;
 
@@ -137,8 +137,8 @@ namespace interp
             const gsl_interp_type* interpType = gsl_interp_steffen,
             const bool monotonic = false
         ) requires (NF == 1) :
-        Mesh2DInterpolator(x, y, 
-            std::mdspan(f.data_handle(), f.extent(0), f.extent(1), 1),
+        Mesh2DInterpolator(x, y,
+            std::mdspan(f.data_handle(), f.extent(0), f.extent(1), 1), // NOLINT(misc-include-cleaner)
             interpType,
             monotonic)
         { }
@@ -373,8 +373,96 @@ namespace interp
             return std::make_unique<Interpolator1D<NF>>(x, f, interpType_);
         }
 
-        
-    
+        /**
+         * @brief Interpolate to a single point
+         * @param x x coordinate
+         * @param y y coordinate
+         * @param linear If true, force linear interpolation instead of
+         * this object's default interpolation type
+         * @returns The interpolated value(s)
+         * @details
+         * Return type is a double if NF = 1, and a std::array otherwise.
+         * This routine builds a local Interpolator1D from just enough
+         * points around (x, y) to support the requested interpolation
+         * type, then evaluates it at y; unlike interpConstX, it does
+         * not need to handle multiple disconnected segments, since
+         * xIntersectN only ever searches out from a single starting
+         * point. If xIntersectN cannot find enough points to support
+         * the requested type but still finds at least 2, this falls
+         * back to linear interpolation instead, mirroring interpConstX's
+         * handling of undersized segments. If it finds only a single
+         * point, (x, y) must be an isolated tangent point of the mesh,
+         * so there is nothing to interpolate and that point's own value
+         * is returned directly.
+         */
+        [[nodiscard]] auto operator()(double x, double y, bool linear = false) const
+        {
+            // Number of points needed to support the requested
+            // interpolation type
+            const size_t n = linear ?
+                gsl_interp_type_min_size(gsl_interp_linear) :
+                gsl_interp_type_min_size(interpType_);
+
+            // Grab list of intersection points
+            const auto intersect = mesh_.xIntersectN(x, y, n);
+
+            // A single point means (x, y) is an isolated tangent point
+            // of the mesh; there is nothing to interpolate, so just
+            // evaluate the appropriate rib or spine interpolator there
+            // directly and return
+            if (intersect.size() == 1)
+            {
+                const auto& pt = intersect.front();
+                const double s =
+                    (pt.t == Mesh2DGrid::IntersectionType::spine &&
+                    monotonic_) ? pt.y : pt.xs;
+                return pt.t == Mesh2DGrid::IntersectionType::rib ?
+                    (*(ribInterp_[pt.idx]))(s) :
+                    (*(spineInterp_[pt.idx]))(s);
+            }
+
+            // Accumulators
+            std::vector<double> yPts;
+            std::array<std::vector<double>, NF> f;
+
+            // Loop over intersection points
+            for (const auto& pt : intersect)
+            {
+
+                // Add y to accumulator
+                yPts.push_back(pt.y);
+
+                // Get point at which to evaluate spline
+                const double s =
+                    (pt.t == Mesh2DGrid::IntersectionType::spine &&
+                    monotonic_) ? pt.y : pt.xs;
+
+                // Evaluate spline and save
+                const auto fInterp = pt.t == Mesh2DGrid::IntersectionType::rib ?
+                    (*(ribInterp_[pt.idx]))(s) :
+                    (*(spineInterp_[pt.idx]))(s);
+                if constexpr (NF == 1) { f[0].push_back(fInterp); }
+                else
+                {
+                    for (size_t k = 0; k < NF; k++) { f[k].push_back(fInterp[k]); } // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- k is a loop index bounded by compile-time constant NF
+                }
+            }
+
+            // If fewer points were found than the requested type
+            // needs, fall back to linear interpolation
+            const gsl_interp_type* useType = interpType_;
+            if (linear || intersect.size() < gsl_interp_type_min_size(interpType_))
+            {
+                useType = gsl_interp_linear;
+            }
+
+            // Build interpolator and evaluate at y
+            const Interpolator1D<NF> pointInterp(yPts, f, useType);
+            return pointInterp(y);
+        }
+
+
+
     private:
 
         // Control parameters

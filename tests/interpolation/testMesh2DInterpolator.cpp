@@ -99,6 +99,127 @@ testXInterp(const interp::Mesh2DInterpolator<2>& m2d,
     return 0; // Success
 }
 
+// Test operator()(x, y[, linear]) against the same hand-verified
+// (x, y) -> f data already used to check interpConstX above. Since
+// m2d uses gsl_interp_linear as its own interpolation type throughout,
+// a piecewise-linear point query centered on y must reproduce exactly
+// the same value that the full constant-x segment interpolator does
+// at that y, regardless of how many additional points happen to be
+// loaded into either spline.
+static auto
+testOperatorCall(const interp::Mesh2DInterpolator<nF>& m2d,
+    const std::vector<double>& xTest,
+    const std::vector<std::vector<double>>& yPtXTest,
+    const std::vector<std::vector<std::array<double,nF>>>& fXTest) -> int
+{
+    for (auto [xt, ypt, fpt] : std::views::zip(xTest, yPtXTest, fXTest))
+    {
+        for (auto [yval, fval] : std::views::zip(ypt, fpt))
+        {
+            const auto finterp = m2d(xt, yval);
+            for (auto [fi, fv] : std::views::zip(finterp, fval))
+            {
+                if (!utils::approxEqual(fi, fv))
+                {
+                    std::cerr << "testMesh2DInterpolator: operator() at x = "
+                        << xt << ", y = " << yval << ", expected f = "
+                        << fv << ", found " << fi << "\n";
+                    return 1;
+                }
+            }
+
+            // linear = true should reproduce exactly the same result,
+            // since m2d's own type is already gsl_interp_linear
+            const auto finterpLin = m2d(xt, yval, true);
+            for (auto [fi, fv] : std::views::zip(finterpLin, fval))
+            {
+                if (!utils::approxEqual(fi, fv))
+                {
+                    std::cerr << "testMesh2DInterpolator: operator()(linear"
+                        "=true) at x = " << xt << ", y = " << yval
+                        << ", expected f = " << fv << ", found " << fi
+                        << "\n";
+                    return 1;
+                }
+            }
+        }
+    }
+    return 0; // Success
+}
+
+// Test operator()'s two special cases -- falling back to linear
+// interpolation when xIntersectN finds too few points for the
+// requested type but still at least 2, and returning a tangent
+// point's own value directly when xIntersectN finds only 1 -- plus
+// general correctness against the default (steffen) interpolation
+// type. This uses a mesh whose first field is f0 = x + y exactly at
+// every grid point, since any reasonable interpolant (steffen or
+// linear alike) reproduces a genuinely linear underlying function
+// exactly, making x + y a valid expected value everywhere inside the
+// mesh regardless of which of operator()'s internal paths is taken.
+static auto
+testOperatorSpecialCases(const interp::Mesh2DInterpolator<nF>& m2dSteffen)
+{
+    struct TestPt { double x, y; };
+
+    // General correctness with the default (steffen) type and with
+    // linear forced, at a variety of interior points
+    const std::vector<TestPt> interiorPts = {
+        { 0.5, 0.5 }, { 1.5, 1.0 }, { 2.2, 1.5 }, { 1.0, 1.0 },
+        { 2.0, 0.5 }, { 0.5, 1.5 }, { 3.05, 0.5 }
+    };
+    for (const auto& p : interiorPts)
+    {
+        const double expected = p.x + p.y;
+        const auto fDefault = m2dSteffen(p.x, p.y);
+        if (!utils::approxEqual(fDefault[0], expected))
+        {
+            std::cerr << "testMesh2DInterpolator: operator() (steffen "
+                "default) at x = " << p.x << ", y = " << p.y
+                << ", expected f0 = " << expected << ", found "
+                << fDefault[0] << "\n";
+            return 1;
+        }
+        const auto fLinear = m2dSteffen(p.x, p.y, true);
+        if (!utils::approxEqual(fLinear[0], expected))
+        {
+            std::cerr << "testMesh2DInterpolator: operator()(linear=true) "
+                "at x = " << p.x << ", y = " << p.y << ", expected f0 = "
+                << expected << ", found " << fLinear[0] << "\n";
+            return 1;
+        }
+    }
+
+    // Special case: too few points for steffen (needs 3), but at
+    // least 2 -- (0.05, 0.5) sits exactly on this mesh's non-convex
+    // segment boundary at x = 0.05, where only the bottom rib and
+    // this one spine crossing exist in that segment. This must fall
+    // back to linear interpolation rather than throwing.
+    const auto fFallback = m2dSteffen(0.05, 0.5);
+    if (!utils::approxEqual(fFallback[0], 0.55))
+    {
+        std::cerr << "testMesh2DInterpolator: operator() linear fallback "
+            "at x = 0.05, y = 0.5, expected f0 = 0.55, found "
+            << fFallback[0] << "\n";
+        return 1;
+    }
+
+    // Special case: exactly 1 point -- (3.0, 2.0) is this mesh's
+    // top-right corner, an isolated tangent point with no other mesh
+    // coverage nearby. This must return that point's own value
+    // directly rather than throwing.
+    const auto fTangent = m2dSteffen(3.0, 2.0);
+    if (!utils::approxEqual(fTangent[0], 5.0))
+    {
+        std::cerr << "testMesh2DInterpolator: operator() tangent point "
+            "at x = 3.0, y = 2.0, expected f0 = 5.0, found "
+            << fTangent[0] << "\n";
+        return 1;
+    }
+
+    return 0; // Success
+}
+
 auto testMesh2DInterpolator() -> int
 {
     // Construct a test data set of size (4, 3) where the data points are 
@@ -184,6 +305,13 @@ auto testMesh2DInterpolator() -> int
         return 1;
     }
 
+    // Test operator()(x, y[, linear]) against the same hand-verified
+    // data used to check interpConstX above
+    if (testOperatorCall(m2d, xTest, yPtXTest, fXTest) == 1)
+    {
+        return 1;
+    }
+
     // Test that y interpolators produce the correct number of segments
     // and limits on them, and that interpolation produces correct values
     const std::vector<double> yTest = { -0.5, 0.5 };
@@ -247,6 +375,17 @@ auto testMesh2DInterpolator() -> int
                 }
             }
         }
+    }
+
+    // Test operator()'s special-case handling (linear fallback for too
+    // few points, direct evaluation at an isolated tangent point) and
+    // general correctness, using this same mesh's data but with the
+    // default (steffen) interpolation type rather than the linear
+    // type used by m2d above
+    const interp::Mesh2DInterpolator<nF> m2dSteffen(x, y, f);
+    if (testOperatorSpecialCases(m2dSteffen) == 1)
+    {
+        return 1;
     }
 
     return 0; // Success
