@@ -246,6 +246,15 @@ namespace interp
          */
         [[nodiscard]] auto yLim(double x) const { return mesh_.yLim(x); }
 
+        /**
+         * @brief Check whether a point is contained in the mesh
+         * @param x x position
+         * @param y y position
+         * @returns True if the point is within the mesh
+         */
+        [[nodiscard]] auto contains(const double x, const double y) const
+        { return mesh_.contains(x, y); }
+
 
         // Interpolators
         /**

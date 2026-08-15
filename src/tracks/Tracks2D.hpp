@@ -145,6 +145,15 @@ namespace tracks
         */
        [[nodiscard]] auto liveMassRange(const double logT) const { return interp_->yLim(logT); }
 
+       /**
+        * @brief Check whether a star of a given mass is alive at a given time
+        * @param m Mass of the star
+        * @param logT log10(time / yr) at which to evaluate
+        * @return True if a star of mass m is alive at logT, false otherwise
+        */
+       [[nodiscard]] auto isAlive(const double m, const double logT) const -> bool
+       { return interp_->contains(logT, m); }
+
         /**
          * @brief Return the track for a star of a given mass
          * @param m Mass of the star whose track should be computed
