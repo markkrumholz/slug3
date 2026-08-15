@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <functional>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -477,12 +478,19 @@ namespace utils
     /**
      * @class GKIntegrator
      * @brief Adaptively integrate a vector-valued function of one variable
-     * @tparam F Type of the callable integrand: must be invocable as
-     *   f(x, ...), where x is the (scalar) integration variable and
-     *   ... is any number of additional arguments forwarded from
-     *   integrate(); must return a contiguous container of nInt
-     *   doubles (e.g. std::vector<double> or std::array<double, nInt>)
-     *   -- the value of the integrand at x.
+     * @tparam F Type of the callable integrand: either a standalone
+     *   callable, invocable as f(x, ...), where x is the (scalar)
+     *   integration variable and ... is any number of additional
+     *   arguments forwarded from integrate()/quadSingle(); or a
+     *   pointer to a member function, in which case the first of
+     *   those additional arguments must instead be an instance of the
+     *   class f is a member of (x is still passed as that member
+     *   function's own first ordinary argument, immediately after the
+     *   instance) -- see invokeF()'s own comment for how the two
+     *   cases are told apart and reordered as needed. Either way, f
+     *   must return a contiguous container of nInt doubles (e.g.
+     *   std::vector<double> or std::array<double, nInt>) -- the value
+     *   of the integrand at x.
      * @tparam Order Which Gauss-Kronrod pair to integrate each
      *   subinterval with -- see GKOrder's own comment; selected at
      *   compile time (rather than a runtime option) so the
@@ -606,7 +614,7 @@ namespace utils
             for (std::size_t i = 0; i < gknum; ++i)
             {
                 const auto val = std::apply(
-                    [this, &xk, i](const auto&... unpackedArgs) { return std::invoke(f_, xk[i], unpackedArgs...); }, // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i < gknum == xk.size() by construction
+                    [this, &xk, i](const auto&... unpackedArgs) { return invokeF(xk[i], unpackedArgs...); }, // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i < gknum == xk.size() by construction
                     argsTuple);
                 fVal[i].assign(std::begin(val), std::end(val));
             }
@@ -794,6 +802,53 @@ namespace utils
         }
 
     private:
+
+        /**
+         * @brief Evaluate f_ at x, transparently supporting F being a pointer to member function
+         * @param x The integration variable
+         * @param args Any additional arguments f_ requires -- if F is
+         *   a pointer to member function, the first of these must be
+         *   an instance of the class it is a member of (see this
+         *   class's own @tparam F)
+         * @return f_'s own return value at (x, args...)
+         * @details
+         * Dispatches on std::is_member_function_pointer_v<F> at
+         * compile time: for a standalone callable, just forwards
+         * straight to std::invoke(f_, x, args...); for a pointer to
+         * member function, hands off to invokeFMember() instead,
+         * which reorders arguments into the shape std::invoke's own
+         * INVOKE protocol requires -- see its own comment. Mirrors
+         * PDFIntegratorND::operator()'s own identical dispatch (see
+         * PDFIntegratorND.hpp), just without that class's further N/
+         * Vectorized-dependent fallback forms, which GKIntegrator (a
+         * fixed, scalar-x, non-vectorized integrand) has no analogue
+         * of.
+         */
+        template <class... CallArgs>
+        [[nodiscard]] auto invokeF(const double x, CallArgs&&... args) const
+        {
+            if constexpr (std::is_member_function_pointer_v<F>)
+            {
+                return invokeFMember(x, std::forward<CallArgs>(args)...);
+            }
+            else
+            {
+                return std::invoke(f_, x, std::forward<CallArgs>(args)...);
+            }
+        }
+
+        /**
+         * @brief Reorder (x, instance, rest...) into the (instance, x, rest...) order std::invoke's own INVOKE protocol requires for a pointer to member function
+         * @param x The integration variable
+         * @param obj Instance of the class f_ is a member of
+         * @param rest Any further arguments f_ requires, beyond x and obj
+         * @return f_'s own return value at (x, rest...), called on obj
+         */
+        template <class Obj, class... Rest>
+        [[nodiscard]] auto invokeFMember(const double x, Obj&& obj, Rest&&... rest) const
+        {
+            return std::invoke(f_, std::forward<Obj>(obj), x, std::forward<Rest>(rest)...);
+        }
 
         F f_;                  /**< The integrand */
         std::size_t nInt_;     /**< Number of quantities f returns per point */
