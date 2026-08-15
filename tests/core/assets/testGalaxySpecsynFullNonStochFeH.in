@@ -1,0 +1,64 @@
+# Full end-to-end test input deck for
+# tests/core/testGalaxySpecsynFullNonStoch.cpp: the "real [Fe/H]
+# distribution" half of that test's own two-deck split -- see its own
+# file comment for why. The Galaxy counterpart to
+# testClusterSpecsynFullNonStoch.in (see that file's own comments for
+# the shared rationale behind spectra.model, nwl, and the FeH
+# distribution), except sim_type is "galaxy" rather than "cluster",
+# clusters.f_cluster = 0.0 (rather than left at its default of 1.0)
+# drives the entire stellar population through
+# Galaxy::computeSpec()'s continuously-treated (Specsyn::
+# specAndLbolCts()) path, and stars.min_stoch_mass is omitted
+# entirely, since it has no effect at all when f_cluster is already 0
+# (no star ever gets drawn into an individual Cluster to begin with,
+# stochastically sampled or not). galaxy.sfr is a new addition with no
+# cluster-type counterpart -- a plain, round 1 Msun/yr, which has
+# little effect on this integral's own computational cost (dominated
+# by the age/mass/[Fe/H] domain's own complexity, not by the absolute
+# star formation rate).
+#
+# clusters.CMF/CLF are still required (SimControls parses them
+# unconditionally for a galaxy-type sim, regardless of f_cluster), but
+# -- with f_cluster = 0 -- are never actually drawn from, so their
+# exact values (matching the original cluster-type test's own CMF, a
+# delta function at 1e4 Msun; CLF borrowed from testGalaxyDynamics.in's
+# own, a delta function at 5e5 yr) are immaterial here.
+#
+# Uses a single output time (1e7 yr, an early one, chosen to keep
+# runtime modest) rather than testGalaxySpecsynFullNonStochTimes.in's
+# own 7 -- exercising the real, non-degenerate FeH distribution
+# instead means Specsyn::specCtsHelper() runs its own nested age/mass
+# integral once per [Fe/H] grid point the tracks are defined at (7, for
+# this deck's own tracks/FeH-distribution combination), then
+# interpolates over [Fe/H] -- multiplying this deck's own cost by that
+# same factor relative to a single-FeH run at the same output time, so
+# a single output time keeps the combination tractable while still
+# exercising that whole code path -- see specCtsHelper()'s own header
+# comment for the full [Fe/H]-grid-loop rationale.
+
+sim_type = "galaxy"
+n_trial = 1
+
+[stars]
+IMF = "chabrier.toml"
+tracks = "MIST"
+v_vcrit = 0.4
+alphaFe = 0.0
+FeH = "tests/core/assets/testClusterSpecsynFullFeHDist.toml"
+
+[spectra]
+model = "default"
+nwl = 1024
+wl_min = 500
+wl_max = 1e4
+
+[clusters]
+CMF = 1e4
+CLF = 5e5
+f_cluster = 0.0
+
+[galaxy]
+sfr = 1.0
+
+[output]
+output_times = [1e7]

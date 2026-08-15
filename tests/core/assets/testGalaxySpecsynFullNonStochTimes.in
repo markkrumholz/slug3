@@ -1,0 +1,40 @@
+# Full end-to-end test input deck for
+# tests/core/testGalaxySpecsynFullNonStoch.cpp: the "many output
+# times" half of that test's own two-deck split -- see its own file
+# comment for why. Identical to testGalaxySpecsynFullNonStochFeH.in
+# (see its own comment for the shared rationale behind sim_type,
+# clusters.f_cluster, stars.min_stoch_mass, spectra.model, nwl, and
+# galaxy.sfr) except FeH is pinned to a single value (0.0) rather than
+# drawn from the real distribution, and output_times lists all 7
+# entries -- so this half exercises Specsyn::specCtsHelper()'s
+# singleFeh branch (a single nested age/mass integral) once per output
+# time, rather than its non-degenerate-fehDist branch (one such
+# integral per [Fe/H] grid point, interpolated over) that
+# testGalaxySpecsynFullNonStochFeH.in exercises instead.
+
+sim_type = "galaxy"
+n_trial = 1
+
+[stars]
+IMF = "chabrier.toml"
+tracks = "MIST"
+v_vcrit = 0.4
+alphaFe = 0.0
+FeH = 0.0
+
+[spectra]
+model = "default"
+nwl = 1024
+wl_min = 500
+wl_max = 1e4
+
+[clusters]
+CMF = 1e4
+CLF = 5e5
+f_cluster = 0.0
+
+[galaxy]
+sfr = 1.0
+
+[output]
+output_times = [2e6, 3e6, 4e6, 1e7, 1e8, 1e9, 1e10]
