@@ -17,19 +17,27 @@ namespace pdfs {
 
     /**
      * @class PDFReflect
-     * @brief A non-owning view of a PDF, reflected about the midpoint of its support
+     * @brief A non-owning view of a PDF, reflected about a pivot point
      * @details
      * PDFReflect wraps a non-owning reference to another PDF and
-     * presents it, unmodified in shape, but reflected: a point x in
-     * [sMin_, sMax_] is mapped to reflect(x) = sMax_ - (x - sMin_)
-     * before being handed to (or after being returned from) the
-     * wrapped PDF. This is useful when an integrator or sampler needs
-     * to treat "distance from sMax_" as its natural coordinate (e.g.
-     * stellar age, when the underlying PDF is indexed by formation
-     * time) without having to construct a whole new PDF: a PDFReflect
-     * can be passed anywhere a `const PDF&` is expected (e.g.
+     * presents it, unmodified in shape, but reflected: a point x is
+     * mapped to reflect(x) = 2 * pivot - x before being handed to (or
+     * after being returned from) the wrapped PDF, where pivot defaults
+     * to the midpoint of the wrapped PDF's own support,
+     * (getMin() + getMax()) / 2, if not given explicitly. This is
+     * useful when an integrator or sampler needs to treat "distance
+     * from some reference point" as its natural coordinate (e.g.
+     * stellar age -- distance from the current simulation time --
+     * when the underlying PDF is indexed by formation time instead)
+     * without having to construct a whole new PDF: a PDFReflect can be
+     * passed anywhere a `const PDF&` is expected (e.g.
      * PDFIntegratorND's own p array), and every method below performs
-     * the appropriate coordinate flip transparently.
+     * the appropriate coordinate flip transparently. An explicit pivot
+     * need not be the midpoint of the wrapped PDF's own support (e.g.
+     * reflecting a star-formation-rate PDF about half of the current
+     * simulation time, rather than half of its own, typically much
+     * larger, declared support, to obtain an age coordinate) -- see
+     * the two-argument constructor below.
      *
      * Since PDFReflect derives from PDF but never populates seg_ or
      * wgt_ with its own segments (getWeights() returns wgt_, which is
@@ -37,7 +45,13 @@ namespace pdfs {
      * inherited, unmodified integral() -- see its own comment below --
      * still returns the correct total), valid() (which checks
      * seg_.empty()) always reports false for a PDFReflect; that is not
-     * meaningful for this view and should not be relied on.
+     * meaningful for this view and should not be relied on. Likewise,
+     * getMin()/getMax() always report the wrapped PDF's own support,
+     * unchanged, regardless of pivot -- not that support's own image
+     * under reflect() -- so that they remain useful as a safety clamp
+     * on integration bounds (see PDFIntegratorND::integrate()'s own
+     * clamp) rather than an increasingly extreme range as pivot moves
+     * away from the wrapped PDF's own midpoint.
      */
     class PDFReflect : public PDF {
     public:
@@ -50,19 +64,45 @@ namespace pdfs {
         using PDF::integral;
 
         /**
-         * @brief Construct a reflected view of an existing PDF
-         * @param pdf The PDF to view, reflected about the midpoint of
-         *   its support; stored by reference, so it must outlive this
-         *   PDFReflect
+         * @brief Construct a reflected view of an existing PDF, about the midpoint of its own support
+         * @param pdf The PDF to view, reflected about
+         *   (pdf.getMin() + pdf.getMax()) / 2; stored by reference, so
+         *   it must outlive this PDFReflect
          * @details
-         * Copies pdf's own sMin_/sMax_/weights so that getMin()/
+         * Delegates to the explicit-pivot constructor below with
+         * pivot = (pdf.getMin() + pdf.getMax()) / 2, which reduces
+         * reflect(x) = 2 * pivot - x to pdf.getMax() - (x - pdf.getMin()) --
+         * i.e. this constructor's own behavior is unchanged from
+         * reflecting about the midpoint of the wrapped PDF's own
+         * support.
+         */
+        explicit PDFReflect(const PDF& pdf) :
+            PDFReflect(pdf, 0.5 * (pdf.getMin() + pdf.getMax()))
+        { }
+
+        /**
+         * @brief Construct a reflected view of an existing PDF, about an explicit pivot
+         * @param pdf The PDF to view, reflected about pivot; stored by
+         *   reference, so it must outlive this PDFReflect
+         * @param pivot The point to reflect about: x maps to
+         *   2 * pivot - x. Need not be the midpoint of pdf's own
+         *   support, or even lie within it (e.g. reflecting about half
+         *   of a simulation's current time, to obtain an age
+         *   coordinate from a star-formation-rate PDF whose own
+         *   support is deliberately much larger than any realistic
+         *   simulation time -- see io::SimControls's own
+         *   buildConstantSFR()).
+         * @details
+         * Copies pdf's own sMin_/sMax_/weights, unmodified by pivot --
+         * see this class's own comment for why -- so that getMin()/
          * getMax() (unmodified, inherited) and the no-argument
          * integral() (also unmodified, inherited -- see its own
          * comment) report the correct values without needing to be
          * overridden.
          */
-        explicit PDFReflect(const PDF& pdf) :
-            pdf_(std::cref(pdf))
+        PDFReflect(const PDF& pdf, const double pivot) :
+            pdf_(std::cref(pdf)),
+            pivot_(pivot)
         {
             sMin_ = pdf.getMin();
             sMax_ = pdf.getMax();
@@ -173,16 +213,17 @@ namespace pdfs {
     private:
 
         /**
-         * @brief Reflect a point about the midpoint of [sMin_, sMax_]
+         * @brief Reflect a point about pivot_
          * @param x Point to reflect
-         * @return sMax_ - (x - sMin_)
+         * @return 2 * pivot_ - x
          */
         [[nodiscard]] auto reflect(const double x) const -> double
         {
-            return sMax_ - (x - sMin_);
+            return (2.0 * pivot_) - x;
         }
 
         std::reference_wrapper<const PDF> pdf_; /**< The PDF this object is a reflected view of */
+        double pivot_; /**< The point reflect() reflects about */
     };
 
 } // namespace pdfs

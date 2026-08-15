@@ -9,6 +9,7 @@
 #include "../extinct/Extinct.hpp"
 #include "../io/SimControls.hpp"
 #include "../pdfs/PDF.hpp"
+#include "../pdfs/PDFReflect.hpp"
 #include "../phot/FilterCollection.hpp"
 #include "../tracks/TrackCommons.hpp"
 #include "../utils/PDFIntegratorND.hpp"
@@ -18,8 +19,9 @@
 #include <cmath>
 #include <cstddef>
 #include <functional>
-#include <map>
+#include <limits>
 #include <mdspan> // NOLINT(misc-include-cleaner) -- see the identical NOLINT on SpecsynLibWR.hpp's own <mdspan> include
+#include <memory>
 #include <numeric>
 #include <sstream>
 #include <stdexcept>
@@ -237,31 +239,38 @@ void core::Galaxy::computeLbol()
     }
 }
 
-template <std::size_t Ndim>
 auto core::Galaxy::lbolCtsIntegrand(
-    const std::mdspan<double, std::extents<std::size_t, std::dynamic_extent, Ndim>> points, // NOLINT(misc-include-cleaner) -- see the identical NOLINT on the <mdspan> include above
-    std::map<std::pair<double, double>, specsyn::Specsyn::Isochrone>& cache,
-    const double curTime
+    const std::mdspan<double, std::extents<std::size_t, std::dynamic_extent, 2>> points, // NOLINT(misc-include-cleaner) -- see the identical NOLINT on the <mdspan> include above
+    const double feh
 ) const -> std::vector<double>
 {
-    static_assert(Ndim == 2 || Ndim == 3, "lbolCtsIntegrand only supports Ndim == 2 or 3");
-
     const auto& sc = controls_.get();
-    specsyn::Specsyn::cacheIsochrones<Ndim>(points, cache, curTime, sc);
+
+    // Single-slot isochrone cache, keyed on age alone -- feh is fixed
+    // for this whole call -- see
+    // Specsyn::continuousSpecIntegrand()'s own identical comment for
+    // why a single slot, rather than a persistent map keyed on every
+    // distinct age a batch touches, is what keeps memory bounded
+    // regardless of how many distinct ages a batch spans.
+    double cachedAge = std::numeric_limits<double>::quiet_NaN();
+    std::unique_ptr<specsyn::Specsyn::Isochrone> cachedIsochrone;
 
     const std::size_t npts = points.extent(0);
     std::vector<double> resultFlat(npts, 0.0);
     for (std::size_t i = 0; i < npts; ++i)
     {
-        const double age = curTime - points[i, 0]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i < npts == points.extent(0) by the loop bound
-        double feh = 0.0;
-        double mass = 0.0;
-        if constexpr (Ndim == 3) { feh = points[i, 1]; mass = points[i, 2]; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
-        else { feh = sc.fehDist().getMin(); mass = points[i, 1]; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
+        const double age = points[i, 0]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i < npts == points.extent(0) by this loop's own bound
+        const double mass = points[i, 1]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
 
-        const auto& isochrone = cache.at({ age, feh });
+        if (cachedIsochrone == nullptr || age != cachedAge)
+        {
+            const double logAge = std::max(std::log10(age), sc.tracks().logTMin());
+            cachedIsochrone = std::make_unique<specsyn::Specsyn::Isochrone>(sc.tracks().getIsochrone(logAge, feh));
+            cachedAge = age;
+        }
+
         const specsyn::Specsyn::Segment* seg = nullptr;
-        for (const auto& s : isochrone)
+        for (const auto& s : *cachedIsochrone)
         {
             if (mass >= s->xMin() && mass <= s->xMax()) { seg = s.get(); break; }
         }
@@ -274,15 +283,6 @@ auto core::Galaxy::lbolCtsIntegrand(
     return resultFlat;
 }
 
-// Explicit instantiation for the two dimensionalities this is ever
-// used with (2: time+mass, single feh; 3: time+feh+mass).
-template auto core::Galaxy::lbolCtsIntegrand<2>(
-    std::mdspan<double, std::extents<std::size_t, std::dynamic_extent, 2>>, // NOLINT(misc-include-cleaner) -- see the identical NOLINT on the <mdspan> include above
-    std::map<std::pair<double, double>, specsyn::Specsyn::Isochrone>&, double) const -> std::vector<double>;
-template auto core::Galaxy::lbolCtsIntegrand<3>(
-    std::mdspan<double, std::extents<std::size_t, std::dynamic_extent, 3>>, // NOLINT(misc-include-cleaner) -- see the identical NOLINT on the <mdspan> include above
-    std::map<std::pair<double, double>, specsyn::Specsyn::Isochrone>&, double) const -> std::vector<double>;
-
 void core::Galaxy::computeLbolCts()
 {
     const auto& sc = controls_.get();
@@ -291,49 +291,67 @@ void core::Galaxy::computeLbolCts()
     const auto& fehDist = sc.fehDist();
     const double fCluster = sc.fCluster();
 
-    // See Specsyn::specCts()'s own comment for why the time dimension
-    // is never log-transformed, while the mass dimension always is;
-    // see computeLbolCts()'s own header comment for why absTol has no
+    // See Specsyn::specCtsHelper()'s own comment for why this reflects
+    // sfr about curTime_ / 2 (so this dimension's own coordinate
+    // becomes age directly), why ageMin = min(1e4 yr, 1e-3 * curTime_)
+    // rather than anything derived from tracks().logTMin(), and
+    // log-transforms whenever curTime_ exceeds that floor; see
+    // computeLbolCts()'s own header comment for why absTol has no
     // utils::Lsun factor here, unlike Specsyn::specCtsHelper()'s own.
+    const pdfs::PDFReflect sfrAge(sfr, 0.5 * curTime_);
+    const double ageMin = std::min(1e4, 1e-3 * curTime_);
+    const bool logAge = curTime_ > ageMin;
+
     const bool singleFeh = (fehDist.getMin() == fehDist.getMax());
     const double absTol = sc.intAbsTol() * sfr.integral(0.0, curTime_);
 
-    std::vector<double> result;
+    using IntegrandFn = std::vector<double> (Galaxy::*)(
+        std::mdspan<double, std::extents<std::size_t, std::dynamic_extent, 2>>, double) const; // NOLINT(misc-include-cleaner) -- see the identical NOLINT on the <mdspan> include above
+    const utils::PDFIntegratorND<IntegrandFn, 2, true, utils::CubatureMethod::hAdaptive> integrator(
+        std::array<std::reference_wrapper<const pdfs::PDF>, 2>{ std::cref(sfrAge), std::cref(imf) },
+        static_cast<IntegrandFn>(&Galaxy::lbolCtsIntegrand),
+        1,
+        std::array<bool, 2>{ logAge, true },
+        sc.intMaxIter(), absTol, sc.intRelTol());
+
+    double lbolRaw = 0.0;
     if (singleFeh)
     {
-        using IntegrandFn = std::vector<double> (Galaxy::*)(
-            std::mdspan<double, std::extents<std::size_t, std::dynamic_extent, 2>>, // NOLINT(misc-include-cleaner) -- see the identical NOLINT on the <mdspan> include above
-            std::map<std::pair<double, double>, specsyn::Specsyn::Isochrone>&, double) const;
-        const utils::PDFIntegratorND<IntegrandFn, 2, true, utils::CubatureMethod::pAdaptive> integrator(
-            std::array<std::reference_wrapper<const pdfs::PDF>, 2>{ std::cref(sfr), std::cref(imf) },
-            static_cast<IntegrandFn>(&Galaxy::lbolCtsIntegrand<2>),
-            1,
-            std::array<bool, 2>{ false, true },
-            sc.intMaxIter(), absTol, sc.intRelTol());
-        result = integrator.integrate(
-            std::array<double, 2>{ 0.0, imf.getMin() },
+        const auto result = integrator.integrate(
+            std::array<double, 2>{ ageMin, imf.getMin() },
             std::array<double, 2>{ curTime_, imf.getMax() },
-            *this, isochroneCache_, curTime_);
+            *this, fehDist.getMin());
+        lbolRaw = result[0]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- result has exactly 1 element, by construction (nInt == 1)
     }
     else
     {
-        using IntegrandFn = std::vector<double> (Galaxy::*)(
-            std::mdspan<double, std::extents<std::size_t, std::dynamic_extent, 3>>, // NOLINT(misc-include-cleaner) -- see the identical NOLINT on the <mdspan> include above
-            std::map<std::pair<double, double>, specsyn::Specsyn::Isochrone>&, double) const;
-        const utils::PDFIntegratorND<IntegrandFn, 3, true, utils::CubatureMethod::pAdaptive> integrator(
-            std::array<std::reference_wrapper<const pdfs::PDF>, 3>{
-                std::cref(sfr), std::cref(fehDist), std::cref(imf) },
-            static_cast<IntegrandFn>(&Galaxy::lbolCtsIntegrand<3>),
-            1,
-            std::array<bool, 3>{ false, false, true },
-            sc.intMaxIter(), absTol, sc.intRelTol());
-        result = integrator.integrate(
-            std::array<double, 3>{ 0.0, fehDist.getMin(), imf.getMin() },
-            std::array<double, 3>{ curTime_, fehDist.getMax(), imf.getMax() },
-            *this, isochroneCache_, curTime_);
+        // Integrate over [Fe/H] by running the same 2D (age, mass)
+        // integral once at every grid point the tracks are actually
+        // defined at, then interpolating and integrating those
+        // discrete results over [Fe/H] -- see
+        // Specsyn::specCtsHelper()'s own comment for why, in place of
+        // a joint 3D (feh, age, mass) cubature integral.
+        const auto& fehGrid = sc.tracks().feH();
+        const std::size_t nFeh = fehGrid.size();
+
+        std::vector<double> lbolAtFeh(nFeh);
+        std::vector<double> fehWeight(nFeh);
+        for (std::size_t f = 0; f < nFeh; ++f)
+        {
+            const auto result = integrator.integrate(
+                std::array<double, 2>{ ageMin, imf.getMin() },
+                std::array<double, 2>{ curTime_, imf.getMax() },
+                *this, fehGrid[f]);
+            fehWeight[f] = fehDist(fehGrid[f]);
+            lbolAtFeh[f] = result[0] * fehWeight[f]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- result has exactly 1 element, by construction (nInt == 1)
+        }
+
+        const interp::Interpolator1D<1> weightInterp(fehGrid, fehWeight);
+        const double weightIntegral = weightInterp.integ(fehDist.getMin(), fehDist.getMax());
+        const interp::Interpolator1D<1> lbolInterp(fehGrid, lbolAtFeh);
+        lbolRaw = lbolInterp.integ(fehDist.getMin(), fehDist.getMax()) / weightIntegral;
     }
 
-    lbolCts_ = result[0] * (1.0 - fCluster); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- result has exactly 1 element, by construction (nInt == 1)
+    lbolCts_ = lbolRaw * (1.0 - fCluster);
     lbolCtsCurrent_ = true;
-    isochroneCache_.clear();
 }

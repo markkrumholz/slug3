@@ -250,10 +250,29 @@ void io::SimControls::initPhysics(const toml::table& inputDeck)
     cmf_ = utils::initPDFFromKey(inputDeck, "clusters.CMF");
     fehDist_ = utils::initPDFFromKey(inputDeck, "stars.FeH");
 
+    // Read the tracks. Needs fehDist_ (just set above) to pick the
+    // [Fe/H] range to load; done before readSpectra() (which used to
+    // come first here) because readSpectra() itself now needs
+    // tracks_.feH() -- see its own comment.
+    readTracks(inputDeck);
+
+    // Warn if the tracks don't extend down to the IMF's minimum mass:
+    // stars in that gap have no track data, so they end up being
+    // treated as having zero luminosity when spectra are computed
+    // (see Cluster::computeSpec)
+    if (tracks_.mMin() > imf_.getMin())
+    {
+        std::cout << "slug: warning: minimum mass in selected tracks is "
+            << tracks_.mMin() << " but IMF minimum mass is " << imf_.getMin()
+            << "; stars with masses from " << imf_.getMin() << " to "
+            << tracks_.mMin() << " will be treated as having zero luminosity\n";
+    }
+
     // Read the spectral synthesis model to use, if any -- spectra.model
     // is optional, since not every simulation needs spectra computed.
-    // Needs fehDist_ (just set above) to pick the [Fe/H] range a
-    // library-based model is loaded over.
+    // Needs tracks_ (just set above) to pick the [Fe/H] range a
+    // library-based model is loaded over -- see readSpectra()'s own
+    // comment for why that's tracks_.feH()'s own range, not fehDist_'s.
     readSpectra(inputDeck);
 
     // Read the photometric filter collection to use, if any --
@@ -306,21 +325,6 @@ void io::SimControls::initPhysics(const toml::table& inputDeck)
         const auto fClusterInput = utils::getTOMLKeyWithError<double>(
             inputDeck, "clusters.f_cluster");
         if (fClusterInput.has_value()) { fCluster_ = fClusterInput.value(); }
-    }
-
-    // Read the tracks
-    readTracks(inputDeck);
-
-    // Warn if the tracks don't extend down to the IMF's minimum mass:
-    // stars in that gap have no track data, so they end up being
-    // treated as having zero luminosity when spectra are computed
-    // (see Cluster::computeSpec)
-    if (tracks_.mMin() > imf_.getMin())
-    {
-        std::cout << "slug: warning: minimum mass in selected tracks is "
-            << tracks_.mMin() << " but IMF minimum mass is " << imf_.getMin()
-            << "; stars with masses from " << imf_.getMin() << " to "
-            << tracks_.mMin() << " will be treated as having zero luminosity\n";
     }
 
     // If this simulation has a fixed [Fe/H], precompute the slice at
@@ -503,6 +507,22 @@ void io::SimControls::readSpectra(const toml::table& inputDeck)
     const auto modelNode = inputDeck.at_path("spectra.model");
     if (!modelNode) { return; }
 
+    // Load every library-based model over tracks_.feH()'s own
+    // [min, max] range, not fehDist_'s own -- tracks_.feH() is always
+    // at least as wide as fehDist_ (see Tracks3D::Tracks3D()'s own
+    // comment: it pads a few grid points beyond
+    // [fehDist_.getMin(), fehDist_.getMax()] on each side, for
+    // Mesh3DInterpolator's own benefit), and
+    // Specsyn::specCtsHelper()'s [Fe/H] integration deliberately
+    // evaluates spectra at every one of those padding grid points too
+    // (not just the ones inside fehDist_'s own domain -- see its own
+    // comment for why), so every atmosphere grid needs to cover them as
+    // well, or spectral synthesis for a star at one of those padding
+    // metallicities throws instead of returning a spectrum.
+    const auto& fehGrid = tracks_.feH();
+    const double fehMin = fehGrid.front();
+    const double fehMax = fehGrid.back();
+
     // Optional user-requested output wavelength grid: spectra.wl_min
     // and spectra.wl_max (in Angstrom), and spectra.nwl (the number
     // of output wavelengths). All three are individually optional,
@@ -591,13 +611,13 @@ void io::SimControls::readSpectra(const toml::table& inputDeck)
             if (wrGrid)
             {
                 specsyn_ = std::make_unique<specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise>>(
-                    model.value(), fehDist_.getMin(), fehDist_.getMax(), registryName,
+                    model.value(), fehMin, fehMax, registryName,
                     wlMin_, wlMax_, nWl_, *this);
             }
             else
             {
                 specsyn_ = std::make_unique<specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::raise>>(
-                    model.value(), fehDist_.getMin(), fehDist_.getMax(),
+                    model.value(), fehMin, fehMax,
                     afe, cfe,
                     std::numeric_limits<double>::quiet_NaN(), specsyn::defaultR,
                     registryName, wlMin_, wlMax_, nWl_, *this);
@@ -624,7 +644,7 @@ void io::SimControls::readSpectra(const toml::table& inputDeck)
     }
 
     specsyn_ = std::make_unique<specsyn::SpecsynLibChained>(
-        models, fehDist_.getMin(), fehDist_.getMax(),
+        models, fehMin, fehMax,
         afe, cfe, std::vector<double>{},
         specsyn::defaultR, registryName, wlMin_, wlMax_, nWl_, true, *this);
 }

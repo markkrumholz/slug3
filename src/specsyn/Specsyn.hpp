@@ -15,7 +15,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
-#include <map>
+#include <limits>
 #include <mdspan> // NOLINT(misc-include-cleaner) -- see the identical NOLINT on SpecsynLibWR.hpp's own <mdspan> include
 #include <memory>
 #include <numbers>
@@ -97,6 +97,37 @@ namespace specsyn
         [[nodiscard]] auto wlObs() const -> std::vector<double>;
 
         /**
+         * @brief Return the minimum [Fe/H] this synthesizer has real spectral data for
+         * @return -infinity by default (no restriction) -- overridden
+         *   by SpecsynLibNoWind/SpecsynLibWR (their own FeH_.front())
+         * @details
+         * Unlike getMin() on a pdfs::PDF, this describes a hard data
+         * boundary, not a probability domain: a synthesizer with no
+         * [Fe/H] axis at all (SpecsynBlackbody, SpecsynLibWD) has
+         * nothing to restrict, so the base class default of -infinity
+         * (paired with fehMax()'s own +infinity) leaves any feh
+         * unclamped. Exists for SpecsynLibChained's own benefit, which
+         * scans every library it chains together via this (see its own
+         * fehMin_ member) to build a per-GridType [Fe/H] range,
+         * ultimately used by its own specForIntegration() override --
+         * see that function's own comment for why a single library's
+         * own fehMin()/fehMax() aren't clamped against directly by
+         * continuousSpecIntegrand() (which doesn't, in general, know
+         * which concrete Specsyn it's talking to).
+         */
+        [[nodiscard]] virtual auto fehMin() const -> double
+        { return -std::numeric_limits<double>::infinity(); }
+
+        /**
+         * @brief Return the maximum [Fe/H] this synthesizer has real spectral data for
+         * @return +infinity by default (no restriction) -- see
+         *   fehMin()'s own comment for the overriding classes and full
+         *   rationale, which applies here symmetrically
+         */
+        [[nodiscard]] virtual auto fehMax() const -> double
+        { return std::numeric_limits<double>::infinity(); }
+
+        /**
          * @brief Compute the spectrum of a single star
          * @param props Stellar properties, as produced by evaluating
          *   the Interpolator1D returned by Tracks2D::getIsochrone at
@@ -156,6 +187,43 @@ namespace specsyn
         }
 
         /**
+         * @brief Compute a star's spectrum for Specsyn::continuousSpecIntegrand()'s own benefit
+         * @param props See spec()'s own props parameter
+         * @param feh [Fe/H] value of the star -- unlike spec()'s/
+         *   specForce()'s own feh, not necessarily guaranteed to fall
+         *   within this synthesizer's own real data coverage; see this
+         *   function's own @details
+         * @return The star's spectrum -- see spec()'s own return value
+         * @details
+         * The default implementation here just calls spec(props, feh)
+         * unchanged -- correct for every Specsyn with a single, uniform
+         * notion of its own [Fe/H] coverage (SpecsynBlackbody,
+         * SpecsynLibWD, and a standalone SpecsynLibNoWind/SpecsynLibWR
+         * alike), which is exactly what spec()/specForce() already
+         * handle via their own existing OOBPolicy. Overridden only by
+         * SpecsynLibChained, whose own [Fe/H] coverage is not uniform
+         * (it varies by which chained library, of possibly several
+         * different real coverages, a given star's own GridType
+         * dispatches to) -- see its own override's comment for why
+         * that needs a real clamp, and why this exists as a separate
+         * function from spec()/specForce() rather than changing their
+         * own behavior: [Fe/H] deliberately has no forcing/rescue
+         * mechanism there (unlike log(Teff)/log(g)), since a genuinely
+         * out-of-range [Fe/H] request reflects a real physical
+         * difference no nearest-neighbor substitution can paper over
+         * -- a distinction this function exists specifically to
+         * preserve for every caller except
+         * Specsyn::continuousSpecIntegrand() (via specWlForIntegration()
+         * below), which alone needs the tracks' own [Fe/H] grid
+         * (padded beyond any single library's own real coverage, for
+         * interpolation purposes -- see Specsyn::specCtsHelper()'s own
+         * comment) to still produce a usable spectrum.
+         */
+        [[nodiscard]] virtual auto specForIntegration(const StarData& props, double feh) const
+        -> std::vector<double>
+        { return spec(props, feh); }
+
+        /**
          * @brief Compute the spectrum of a single star, given its mass and isochrone segment
          * @param m Stellar mass, in Msun; must lie within segment's
          *   valid domain (segment.xMin() <= m <= segment.xMax())
@@ -207,6 +275,31 @@ namespace specsyn
         [[nodiscard]] auto specWl(double m, const Segment& segment, double feh) const -> std::vector<double>
         {
             auto result = spec(m, segment, feh);
+            for (std::size_t i = 0; i < result.size(); ++i)
+            {
+                result[i] *= wl_[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- result has the same size as wl_ (one entry per wavelength), and i is bounded by result.size()
+            }
+            return result;
+        }
+
+        /**
+         * @brief Compute the wavelength-weighted spectrum of a single star, for Specsyn::continuousSpecIntegrand()'s own benefit
+         * @param m See specWl()'s own m parameter
+         * @param segment See specWl()'s own segment parameter
+         * @param feh See specForIntegration()'s own feh parameter --
+         *   unlike specWl()'s own feh, not necessarily within this
+         *   synthesizer's own real data coverage
+         * @return specForIntegration(segment(m), feh), multiplied
+         *   elementwise by wl() -- see specWl()'s own return value
+         * @details
+         * Identical to specWl(), except calling specForIntegration()
+         * in place of spec() -- see its own comment for why
+         * Specsyn::continuousSpecIntegrand() needs this, rather than
+         * specWl() itself.
+         */
+        [[nodiscard]] auto specWlForIntegration(double m, const Segment& segment, double feh) const -> std::vector<double>
+        {
+            auto result = specForIntegration(segment(m), feh);
             for (std::size_t i = 0; i < result.size(); ++i)
             {
                 result[i] *= wl_[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- result has the same size as wl_ (one entry per wavelength), and i is bounded by result.size()
@@ -280,40 +373,57 @@ namespace specsyn
          * fixed-age isochrone over mass alone, this one integrates
          * over age (equivalently, formation time) and metallicity as
          * well, so a different isochrone applies at different points
-         * in the integration domain, computed on demand and cached in
-         * isochroneCache_ (cleared again once this integral finishes).
+         * in the integration domain, computed on demand -- see
+         * continuousSpecIntegrand()'s own comment for how.
          *
          * Called by Galaxy::computeSpec() when fCluster() < 1, to
          * cover the star-forming mass Galaxy's own individual Cluster
          * objects don't -- see io::SimControls::fCluster()'s own
          * comment.
          *
-         * Uses a single PDFIntegratorND evaluation, either 2D (time,
-         * mass), weighted by (sfr, imf), if fehDist is degenerate
-         * (fehDist.getMin() == fehDist.getMax(), a single metallicity
-         * shared by every star), or 3D (time, feh, mass), weighted by
-         * (sfr, fehDist, imf), otherwise -- a genuine multi-dimensional
-         * integral, rather than nested 1D integrals, so the underlying
-         * cubature routine can refine wherever in the full joint domain
-         * it needs to in order to hit its own target accuracy, instead
-         * of a fixed, uniform refinement in each dimension separately.
+         * If fehDist is degenerate (fehDist.getMin() == fehDist.getMax(),
+         * a single metallicity shared by every star), uses a single 2D
+         * PDFIntegratorND evaluation (time, mass), weighted by
+         * (sfr, imf). Otherwise, rather than folding [Fe/H] into the
+         * cubature as a third continuous dimension, integrates over
+         * [Fe/H] via a separate mechanism entirely -- see
+         * specCtsHelper()'s own comment for why (in short: a genuinely
+         * 3D, vector-valued -- fdim == wl_.size() -- pAdaptive integral
+         * was found to have unbounded memory growth, a property of
+         * cubature's own tensor-product algorithm, not of this
+         * integral's own complexity) -- running the same 2D integral
+         * once at every [Fe/H] grid point the tracks are actually
+         * defined at (controls_.tracks().feH()), then interpolating
+         * and integrating those discrete results over [Fe/H] with
+         * interp::Interpolator1D.
+         *
          * Uses CubatureMethod::pAdaptive specifically because the
          * integrand's own dominant cost -- building an isochrone at a
-         * given (age, feh) -- is shareable across every mass evaluated
-         * at that same (age, feh): pAdaptive's nested-quadrature point
-         * cache guarantees every batch of points continuousSpecIntegrand()
-         * receives shares the same time coordinate (see its own
-         * comment), letting isochroneCache_ hit on every reuse.
+         * given age -- is shareable across every mass evaluated at
+         * that same age: pAdaptive's nested-quadrature point cache
+         * guarantees every batch of points continuousSpecIntegrand()
+         * receives shares the same age coordinate within a run (see its
+         * own comment), letting a single cached isochrone be reused
+         * across an entire run rather than rebuilt per point. Benchmarked head
+         * to head against CubatureMethod::hAdaptive on this same
+         * integral (real MIST tracks, curTime up to 1e10 yr, capped at
+         * a range of max_iter values): with the age dimension correctly
+         * log-transformed, the two methods converge to the same answer
+         * (agreeing to ~0.03% median / ~4% max relative difference by
+         * max_iter = 2^19 each) and both stay memory-safe, but
+         * pAdaptive is dramatically faster -- every max_iter tried, up
+         * to 2^19, finished in a few seconds, versus tens of seconds to
+         * a few minutes for hAdaptive at the same max_iter.
          *
-         * The time dimension is deliberately not log-transformed, even
-         * though the mass dimension is: the integral's own lower time
-         * bound is always exactly 0 (star formation begins at the
-         * start of the simulation), and sfr's own domain -- for the
-         * common constant-SFR case (see io::SimControls's own
-         * buildConstantSFR()) -- already starts at 0 too, so after
-         * PDFIntegratorND::integrate()'s own clamp to sfr's support,
-         * the log-transformed lower bound would be exactly log(0),
-         * which PDFIntegratorND::integrate() rejects outright.
+         * The time dimension is integrated as age instead, via a
+         * pdfs::PDFReflect view of sfr pivoted at curTime / 2 (so
+         * reflect(x) = curTime - x, i.e. this coordinate already is
+         * age), and log-transformed whenever curTime exceeds
+         * min(1e4 yr, 1e-3 * curTime) -- see specCtsHelper()'s own
+         * comment for why: the luminosity this integral is dominated by
+         * (young, hot, blue stars) is concentrated in a narrow sliver
+         * of age near 0, which a linear axis resolves increasingly
+         * poorly as curTime grows.
          *
          * As with the other specCts() overload, the actual quantity
          * integrated is lambda * dL/dlambda (via continuousSpecIntegrand(),
@@ -369,51 +479,6 @@ namespace specsyn
             double curTime,
             double fCluster
         ) const -> std::pair<std::vector<double>, double>;
-
-        /**
-         * @brief Find (or build, from tracks) the isochrones a batch of continuous-population integration points needs
-         * @tparam Ndim Dimensionality of the integral this is being
-         *   used for -- 2 (time, mass) or 3 (time, feh, mass)
-         * @param points An (npts, Ndim) view of the points to evaluate
-         *   -- see continuousSpecIntegrand()'s own points parameter for
-         *   the exact column layout
-         * @param cache The isochrone cache to look in (and add to) --
-         *   see isochroneCache_'s own comment for the usual case of
-         *   this being *this Specsyn's own isochroneCache_, though
-         *   nothing here actually requires that (see @details)
-         * @param curTime The current time, in yr -- see
-         *   continuousSpecIntegrand()'s own curTime parameter
-         * @param controls Simulation controls to read tracks()/
-         *   fehDist() from
-         * @details
-         * A static, standalone helper -- rather than a plain private
-         * member reading controls_ directly, the way the rest of this
-         * class's continuous-population machinery does -- specifically
-         * so it can be called even when no Specsyn instance exists at
-         * all: Galaxy::computeLbolCts() calls this (passing its own
-         * isochroneCache_, not any Specsyn's) to support computing the
-         * continuous population's own bolometric luminosity even when
-         * io::SimControls::specsyn() is null (no spectral synthesizer
-         * requested), the one case Galaxy::computeSpec()'s own
-         * Specsyn::specAndLbolCts() call can't cover.
-         *
-         * For each of the (up to points.extent(0)) distinct (age, feh)
-         * pairs represented in points (age computed from each point's
-         * own time coordinate, column 0; feh taken directly from
-         * points if Ndim == 3, column 1, or from controls.fehDist()'s
-         * own single value if Ndim == 2, where fehDist is necessarily
-         * degenerate), builds (or reuses, from cache) the isochrone at
-         * that (age, feh) via controls.tracks().getIsochrone(),
-         * flooring log(age) at controls.tracks().logTMin() first (as
-         * Cluster::advance() already does) to avoid taking log(0) for
-         * a point landing exactly at age == 0.
-         */
-        template <std::size_t Ndim>
-        static void cacheIsochrones(
-            std::mdspan<double, std::extents<std::size_t, std::dynamic_extent, Ndim>> points, // NOLINT(misc-include-cleaner) -- see the identical NOLINT on the <mdspan> include above
-            std::map<std::pair<double, double>, Isochrone>& cache,
-            double curTime,
-            const io::SimControls& controls);
 
         /**
          * @brief Return the relative tolerance for PDF integration
@@ -507,23 +572,67 @@ namespace specsyn
          *   Lsun -- specAndLbolCts() is the one that splits this back
          *   out into its own pair.
          * @details
-         * Everything specCts()'s own comment describes -- the 2D-vs-3D
-         * dimensionality choice, why CubatureMethod::pAdaptive, why the
-         * time dimension isn't log-transformed, the lambda * dL/dlambda
-         * convention -- applies here unchanged; computeLbol only
-         * changes nInt (wl_.size(), or wl_.size() + 1) and whether
-         * continuousSpecIntegrand() is asked to also fill in that extra
-         * element. The trailing Lbol element, when present, is a
-         * genuine luminosity, not a lambda-weighted flux, so it is
-         * excluded from this function's own dL/dlambda-recovering
-         * division by wl_ -- only scaled by (1 - fCluster), same as
-         * every other element. It does, however, get one further
-         * unit conversion of its own: continuousSpecIntegrand() reports
-         * it in erg/s, to stay on the same absolute scale as the
-         * spectral elements this function's own reqAbsError applies to
-         * (see its own comment for why), so this function divides it
-         * by utils::Lsun before returning, converting it to the Lsun
-         * Cluster::lbol() itself uses.
+         * Everything specCts()'s own comment describes -- the
+         * degenerate-vs-general [Fe/H] handling, why
+         * CubatureMethod::pAdaptive, the reflected-and-log-transformed
+         * age coordinate, the lambda * dL/dlambda convention -- applies
+         * here unchanged; computeLbol only changes nInt (wl_.size(),
+         * or wl_.size() + 1) and whether continuousSpecIntegrand() is
+         * asked to also fill in that extra element. The trailing Lbol
+         * element, when present, is a genuine luminosity, not a
+         * lambda-weighted flux, so it is excluded from this function's
+         * own dL/dlambda-recovering division by wl_ -- only scaled by
+         * (1 - fCluster), same as every other element. It does,
+         * however, get one further unit conversion of its own:
+         * continuousSpecIntegrand() reports it in erg/s, to stay on the
+         * same absolute scale as the spectral elements this function's
+         * own reqAbsError applies to (see its own comment for why), so
+         * this function divides it by utils::Lsun before returning,
+         * converting it to the Lsun Cluster::lbol() itself uses.
+         *
+         * In the general (non-degenerate fehDist) case, [Fe/H] is
+         * integrated by running the 2D (age, mass) integral once at
+         * every grid point in controls_.tracks().feH() -- rather than
+         * folding it into the cubature as a third continuous
+         * dimension. This was a deliberate change from an earlier,
+         * simpler design that did use a joint 3D (feh, age, mass)
+         * pAdaptive integral: that design was found, on the real,
+         * permanent slow test (7 output times, a real non-degenerate
+         * [Fe/H] distribution, the full nWl-element spectrum as the
+         * integrand's vector-valued output), to grow memory without
+         * bound at most output times, in some cases exceeding 6 GB in
+         * under a minute. The cause is intrinsic to cubature's own
+         * pAdaptive algorithm (see src/extern/cubature/pcubature.c):
+         * unlike hAdaptive, which subdivides the domain into
+         * independent boxes of bounded cost, pAdaptive is a single
+         * global tensor-product Clenshaw-Curtis rule that increases
+         * per-dimension resolution and permanently caches every
+         * function value it has ever computed, at every resolution
+         * level, until the whole integral converges. The size of one
+         * "add another resolution level" step scales as fdim (here,
+         * wl_.size(), often ~1e3) times the product of the *other*
+         * dimensions' current resolutions -- with three genuinely
+         * non-trivial dimensions (feh, age, mass) all needing
+         * refinement simultaneously, a single such step can require a
+         * multi-GB allocation. This risk was actually already latent
+         * with only 2 dimensions log-transformed correctly, but with
+         * only 2 dimensions ever refining simultaneously it stayed
+         * small enough in practice never to be observed.
+         *
+         * Decomposing the [Fe/H] direction into a discrete grid instead
+         * turns that single fragile 3D integral into nFeh independent
+         * 2D integrals -- each identical in character and cost to the
+         * already-robust, benchmarked degenerate-fehDist case above --
+         * plus cheap post-hoc 1D interpolation over [Fe/H]. Total cost
+         * is therefore nFeh times the cost of one 2D integral, plus
+         * interp::Interpolator1D's own small overhead; nFeh is
+         * typically modest (e.g. 7, for the real permanent slow test's
+         * own [Fe/H] distribution). controls_.tracks() is itself always
+         * constructed with fehMin/fehMax = fehDist.getMin()/getMax()
+         * (see io::SimControls::readTracks()), so controls_.tracks().feH()
+         * is guaranteed to bracket fehDist's own domain -- safe to use
+         * directly as the Interpolator1D x-grid, without further
+         * clamping, whenever fehDist is non-degenerate.
          */
         [[nodiscard]] auto specCtsHelper(
             const pdfs::PDF& sfr,
@@ -535,28 +644,37 @@ namespace specsyn
         ) const -> std::vector<double>;
 
         /**
-         * @brief The vectorized integrand for the continuous-population specCts() overload
-         * @tparam Ndim Dimensionality of the integral this is being
-         *   used for -- 2 (time, mass) or 3 (time, feh, mass); see
-         *   specCts()'s own comment for when each applies
-         * @param points An (npts, Ndim) view of the points to evaluate,
-         *   as handed by PDFIntegratorND's own vectorized (pAdaptive)
-         *   interface: points[i, 0] is the i-th point's time
-         *   coordinate, points[i, Ndim - 1] its mass coordinate, and
-         *   (if Ndim == 3) points[i, 1] its [Fe/H] coordinate
-         * @param cache The calling specCts() call's own isochroneCache_,
-         *   passed by reference (rather than read via *this directly)
-         *   so this stays a plain function of its own explicit
-         *   arguments, matching PDFIntegratorND's own vectorized F
-         *   contract
-         * @param curTime The current time, in yr, passed through from
-         *   specCts() unchanged -- needed to convert each point's own
-         *   time coordinate into an age (curTime - time) for isochrone
-         *   lookup, since PDFIntegratorND has no notion of this
-         *   function's own caller-side context beyond its arguments
+         * @brief The vectorized integrand for the continuous-population specCts() overload's 2D (age, mass) integral
+         * @param points An (npts, 2) view of the points to evaluate, as
+         *   handed by PDFIntegratorND's own vectorized (pAdaptive)
+         *   interface: points[i, 0] is the i-th point's own age
+         *   coordinate (not time -- specCtsHelper() integrates this
+         *   dimension via a pdfs::PDFReflect view of sfr, pivoted so
+         *   that the coordinate PDFIntegratorND hands back already is
+         *   age; see its own comment), and points[i, 1] is its own mass
+         *   coordinate.
          * @param computeLbol Whether to also compute, and append, each
          *   point's own bolometric luminosity -- see specCtsHelper()'s
          *   own comment for the outward effect of this
+         * @param feh The single [Fe/H] value shared by every point in
+         *   this call -- specCtsHelper() calls this once per grid point
+         *   in controls_.tracks().feH() when fehDist is non-degenerate
+         *   (see its own comment for why), or once, at fehDist.getMin()
+         *   == fehDist.getMax(), when it is degenerate. Either way,
+         *   [Fe/H] is fixed for the whole call, not read from points
+         *   itself. Used as-is both to locate the isochrone (via
+         *   controls_.tracks(), whose own [Fe/H] coverage this value is
+         *   always guaranteed to fall within) and, via
+         *   specWlForIntegration() rather than specWl() itself, to
+         *   evaluate the star's own spectrum -- see
+         *   Specsyn::specForIntegration()'s own comment for why that,
+         *   not specWl()'s ordinary spec() call, is what belongs here:
+         *   the tracks' own [Fe/H] coverage (padded for interpolation
+         *   purposes -- see specCtsHelper()'s own comment) can extend
+         *   slightly beyond a real spectral synthesizer's own tabulated
+         *   data, which specWl() itself has no way to accommodate
+         *   without changing spec()/specForce()'s own, deliberately
+         *   un-rescued, behavior for every other caller.
          * @return npts * (wl_.size() + computeLbol) values: for each
          *   point, lambda * dL/dlambda (see specWl()) at every one of
          *   wl_.size() wavelengths, then -- only if computeLbol -- one
@@ -567,61 +685,54 @@ namespace specsyn
          *   such value of the i-th point -- the layout
          *   PDFIntegratorND's own vectorized interface requires.
          * @details
-         * First calls cacheIsochrones() (passing controls_ and
-         * isochroneCache_) to ensure every (age, feh) pair points
-         * touches has a cached isochrone -- see its own comment for
-         * exactly how. Then, for each point, finds whichever of that
-         * point's own cached isochrone's segments (if any) contains
-         * its mass coordinate -- if none
-         * does, that point represents a star already dead at this age,
-         * so its own row is left at zero (including its own Lbol
-         * element, if present) -- and evaluates specWl() at that
-         * point's own (mass, segment, feh) otherwise, storing the
-         * result in that point's own row. If computeLbol, also
-         * evaluates that same segment at that same mass directly (a
-         * second, cheap Interpolator1D call -- specWl() doesn't expose
-         * the StarData it computes internally) to read off log(L/Lsun),
-         * and stores 10^that value times utils::Lsun -- the star's own
-         * bolometric luminosity, in erg/s, not the Lsun
-         * Cluster::lbol() itself returns -- as the row's own final
-         * element. erg/s, matching the scale of the spectral elements
-         * alongside it, because specCtsHelper()'s own reqAbsError is
-         * itself in erg/s (see its own comment): a Lbol value of order
-         * unity (Lsun) would look converged to that tolerance
-         * immediately regardless of its actual accuracy, so
-         * specCtsHelper() instead divides this back down to Lsun only
-         * after the integral itself is done.
+         * Builds at most one isochrone at a time, in a single-slot
+         * local cache (an (age, isochrone) pair, isochrone starting
+         * null): for each point, if its own age doesn't match what's
+         * currently in that slot, replaces the slot's isochrone with a
+         * freshly built one via controls_.tracks().getIsochrone()
+         * (log(age) floored at controls_.tracks().logTMin() first, as
+         * Cluster::advance() already does, to avoid taking log(0) for a
+         * point landing exactly at age == 0), then uses whatever is in
+         * the slot. PDFIntegratorND's pAdaptive interface hands points
+         * grouped into runs sharing the same age (time is deliberately
+         * the first/outermost integration dimension precisely so
+         * batches arrive already sorted this way -- see
+         * specCtsHelper()'s own comment), so consecutive points
+         * typically hit the same slot and reuse its isochrone rather
+         * than rebuilding one -- but never more than a single isochrone
+         * is resident at once, regardless of how many distinct ages a
+         * batch spans. An earlier design instead built every isochrone
+         * a whole batch needed up front, keyed in a persistent map:
+         * memory-safe only as long as a batch's own distinct-age count
+         * stayed modest, which measurably failed (tens of GB) once the
+         * age dimension's own log transform (see specCtsHelper()'s own
+         * comment) let a single batch span a very large number of
+         * distinct ages at large curTime.
          *
-         * Deliberately does not clear cache itself: a single specCts()
-         * integral typically calls this function many times (once per
-         * cubature refinement step), and cache is meant to accumulate
-         * isochrones across all of them, only cleared by specCtsHelper()
-         * itself once the whole integral is done.
+         * Once a point's own isochrone (freshly built or reused from
+         * the slot) is in hand, finds whichever of its segments (if
+         * any) contains that point's mass coordinate -- if none does,
+         * that point represents a star already dead at this age, so
+         * its own row is left at zero (including its own Lbol element,
+         * if present) -- and evaluates specWl() at that point's own
+         * (mass, segment, feh) otherwise, storing the result in that
+         * point's own row. If computeLbol, also evaluates that same
+         * segment at that same mass directly (a second, cheap
+         * Interpolator1D call -- specWl() doesn't expose the StarData
+         * it computes internally) to read off log(L/Lsun), and stores
+         * 10^that value times utils::Lsun -- the star's own bolometric
+         * luminosity, in erg/s, not the Lsun Cluster::lbol() itself
+         * returns -- as the row's own final element. erg/s, matching
+         * the scale of the spectral elements alongside it, because
+         * specCtsHelper()'s own reqAbsError is itself in erg/s (see its
+         * own comment): a Lbol value of order unity (Lsun) would look
+         * converged to that tolerance immediately regardless of its
+         * actual accuracy, so specCtsHelper() instead divides this back
+         * down to Lsun only after the integral itself is done.
          */
-        template <std::size_t Ndim>
         [[nodiscard]] auto continuousSpecIntegrand(
-            std::mdspan<double, std::extents<std::size_t, std::dynamic_extent, Ndim>> points, // NOLINT(misc-include-cleaner) -- see the identical NOLINT on the <mdspan> include above
-            std::map<std::pair<double, double>, Isochrone>& cache,
-            double curTime,
-            bool computeLbol) const -> std::vector<double>;
-
-        /**
-         * @brief Cache of isochrones built while evaluating the continuous-population specCts() overload
-         * @details
-         * Keyed by (age, feh) -- see continuousSpecIntegrand()'s own
-         * comment for how each entry is built and reused. Always empty
-         * outside of a specCtsHelper() call (i.e. one made via
-         * specCts()/specAndLbolCts()): populated as needed during that
-         * call, then cleared again once it returns. Never wrapped for
-         * thread safety (e.g. in a ThreadVec), since a single Specsyn is
-         * never evaluated from more than one thread at a time in
-         * practice (a Galaxy, and the Specsyn it reads from
-         * SimControls, are never shared across threads). Declared
-         * mutable so specCtsHelper() -- a const method, like every
-         * other Specsyn method that touches controls_ -- can still
-         * populate and clear it.
-         */
-        mutable std::map<std::pair<double, double>, Isochrone> isochroneCache_;
+            std::mdspan<double, std::extents<std::size_t, std::dynamic_extent, 2>> points, // NOLINT(misc-include-cleaner) -- see the identical NOLINT on the <mdspan> include above
+            bool computeLbol, double feh) const -> std::vector<double>;
     };
 
 } // namespace specsyn

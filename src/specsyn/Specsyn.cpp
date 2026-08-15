@@ -13,6 +13,7 @@
 #include "Specsyn.hpp"
 #include "../io/SimControls.hpp"
 #include "../pdfs/PDF.hpp"
+#include "../pdfs/PDFReflect.hpp"
 #include "../tracks/TrackCommons.hpp"
 #include "../tracks/Tracks3D.hpp"
 #include "../utils/Constants.hpp"
@@ -22,9 +23,9 @@
 #include <cmath>
 #include <cstddef>
 #include <functional>
-#include <map>
+#include <limits>
 #include <mdspan> // NOLINT(misc-include-cleaner) -- see the identical NOLINT on SpecsynLibWR.hpp's own <mdspan> include
-#include <set>
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -100,100 +101,57 @@ auto specsyn::Specsyn::specCts(
     return result;
 }
 
-template <std::size_t Ndim>
-void specsyn::Specsyn::cacheIsochrones(
-    const std::mdspan<double, std::extents<std::size_t, std::dynamic_extent, Ndim>> points, // NOLINT(misc-include-cleaner) -- see the identical NOLINT on the <mdspan> include above
-    std::map<std::pair<double, double>, Isochrone>& cache,
-    const double curTime,
-    const io::SimControls& controls
-)
-{
-    static_assert(Ndim == 2 || Ndim == 3, "cacheIsochrones only supports Ndim == 2 or 3");
-
-    const std::size_t npts = points.extent(0);
-
-    // Step 1: find the unique (age, feh) pairs represented in points --
-    // age = curTime - (each point's own time coordinate, column 0);
-    // feh is column 1 if Ndim == 3, or -- since Ndim == 2 means the
-    // caller's own fehDist was degenerate -- controls.fehDist()'s
-    // single value otherwise.
-    std::set<std::pair<double, double>> uniqueAgeFeh;
-    for (std::size_t i = 0; i < npts; ++i)
-    {
-        const double age = curTime - points[i, 0]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i < npts == points.extent(0) by the loop bound
-        double feh = 0.0;
-        if constexpr (Ndim == 3) { feh = points[i, 1]; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
-        else { feh = controls.fehDist().getMin(); }
-        uniqueAgeFeh.emplace(age, feh);
-    }
-
-    // Step 2: build (or reuse, from cache) the isochrone at every one
-    // of those (age, feh) pairs -- log(age) is floored at
-    // controls.tracks().logTMin(), mirroring Cluster::advance()'s own
-    // identical floor, so a point landing at (or numerically near)
-    // age == 0 doesn't take log(0)
-    for (const auto& ageFeh : uniqueAgeFeh)
-    {
-        if (cache.contains(ageFeh)) { continue; }
-        const auto& [age, feh] = ageFeh;
-        const double logAge = std::max(std::log10(age), controls.tracks().logTMin());
-        cache.emplace(ageFeh, controls.tracks().getIsochrone(logAge, feh));
-    }
-}
-
-// Explicit instantiation for the two dimensionalities this is ever
-// used with (2: time+mass, single feh; 3: time+feh+mass).
-template void specsyn::Specsyn::cacheIsochrones<2>(
-    std::mdspan<double, std::extents<std::size_t, std::dynamic_extent, 2>>,
-    std::map<std::pair<double, double>, Isochrone>&, double, const io::SimControls&);
-template void specsyn::Specsyn::cacheIsochrones<3>(
-    std::mdspan<double, std::extents<std::size_t, std::dynamic_extent, 3>>,
-    std::map<std::pair<double, double>, Isochrone>&, double, const io::SimControls&);
-
-template <std::size_t Ndim>
 auto specsyn::Specsyn::continuousSpecIntegrand(
-    const std::mdspan<double, std::extents<std::size_t, std::dynamic_extent, Ndim>> points, // NOLINT(misc-include-cleaner) -- see the identical NOLINT on the <mdspan> include above
-    std::map<std::pair<double, double>, Isochrone>& cache,
-    const double curTime,
-    const bool computeLbol
+    const std::mdspan<double, std::extents<std::size_t, std::dynamic_extent, 2>> points, // NOLINT(misc-include-cleaner) -- see the identical NOLINT on the <mdspan> include above
+    const bool computeLbol,
+    const double feh
 ) const -> std::vector<double>
 {
-    static_assert(Ndim == 2 || Ndim == 3, "continuousSpecIntegrand only supports Ndim == 2 or 3");
-
     const std::size_t npts = points.extent(0);
     const std::size_t nPerPoint = wl_.size() + (computeLbol ? 1 : 0);
 
-    cacheIsochrones<Ndim>(points, cache, curTime, controls_);
-
     // Evaluate each point's own spectrum -- lambda *
     // dL/dlambda (via specWl()), matching the other specCts()
-    // overload's own convention -- against its own cached isochrone,
-    // leaving a point's row at zero (Lbol element included, if
-    // present) if its own mass falls in none of that isochrone's
-    // segments (a star already dead at this age); if computeLbol, also
-    // evaluates that same (mass, segment) directly to read off the
-    // star's own bolometric luminosity, storing it as the row's final
-    // element (see this function's own header comment for both)
+    // overload's own convention -- against its own isochrone, leaving
+    // a point's row at zero (Lbol element included, if present) if its
+    // own mass falls in none of that isochrone's segments (a star
+    // already dead at this age); if computeLbol, also evaluates that
+    // same (mass, segment) directly to read off the star's own
+    // bolometric luminosity, storing it as the row's final element
+    // (see this function's own header comment for both)
     std::vector<double> resultFlat(npts * nPerPoint, 0.0);
     const std::mdspan<double, std::extents<std::size_t, std::dynamic_extent, std::dynamic_extent>> // NOLINT(misc-include-cleaner) -- see the identical NOLINT on the <mdspan> include above
         resultView(resultFlat.data(), npts, nPerPoint);
+
+    // Single-slot isochrone cache, keyed on age alone -- feh is fixed
+    // for this whole call (see this function's own header comment) --
+    // see this function's own header comment for why a single slot,
+    // rather than a persistent map keyed on every distinct age a batch
+    // touches, is what keeps memory bounded regardless of how many
+    // distinct ages a batch spans.
+    double cachedAge = std::numeric_limits<double>::quiet_NaN();
+    std::unique_ptr<Isochrone> cachedIsochrone;
+
     for (std::size_t i = 0; i < npts; ++i)
     {
-        const double age = curTime - points[i, 0]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i < npts == points.extent(0) by the loop bound
-        double feh = 0.0;
-        double mass = 0.0;
-        if constexpr (Ndim == 3) { feh = points[i, 1]; mass = points[i, 2]; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
-        else { feh = controls_.fehDist().getMin(); mass = points[i, 1]; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
+        const double age = points[i, 0]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i < npts == points.extent(0) by this loop's own bound
+        const double mass = points[i, 1]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
 
-        const auto& isochrone = cache.at({ age, feh });
+        if (cachedIsochrone == nullptr || age != cachedAge)
+        {
+            const double logAge = std::max(std::log10(age), controls_.tracks().logTMin());
+            cachedIsochrone = std::make_unique<Isochrone>(controls_.tracks().getIsochrone(logAge, feh));
+            cachedAge = age;
+        }
+
         const Segment* seg = nullptr;
-        for (const auto& s : isochrone)
+        for (const auto& s : *cachedIsochrone)
         {
             if (mass >= s->xMin() && mass <= s->xMax()) { seg = s.get(); break; }
         }
         if (seg == nullptr) { continue; } // dead star: leave this row's zeros as-is
 
-        const auto starSpecWl = specWl(mass, *seg, feh);
+        const auto starSpecWl = specWlForIntegration(mass, *seg, feh);
         for (std::size_t k = 0; k < wl_.size(); ++k)
         {
             resultView[i, k] = starSpecWl[k]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- starSpecWl has size wl_.size() by specWl()'s own contract, matching k's own loop bound
@@ -215,17 +173,6 @@ auto specsyn::Specsyn::continuousSpecIntegrand(
     return resultFlat;
 }
 
-// Explicit instantiation for the two dimensionalities specCtsHelper()
-// ever uses this with (2: time+mass, single feh; 3: time+feh+mass) --
-// keeps this template's implementation in this .cpp file, as with
-// every other template class/method in src/specsyn.
-template auto specsyn::Specsyn::continuousSpecIntegrand<2>(
-    std::mdspan<double, std::extents<std::size_t, std::dynamic_extent, 2>>,
-    std::map<std::pair<double, double>, Isochrone>&, double, bool) const -> std::vector<double>;
-template auto specsyn::Specsyn::continuousSpecIntegrand<3>(
-    std::mdspan<double, std::extents<std::size_t, std::dynamic_extent, 3>>,
-    std::map<std::pair<double, double>, Isochrone>&, double, bool) const -> std::vector<double>;
-
 auto specsyn::Specsyn::specCtsHelper(
     const pdfs::PDF& sfr,
     const pdfs::PDF& imf,
@@ -235,46 +182,128 @@ auto specsyn::Specsyn::specCtsHelper(
     const bool computeLbol
 ) const -> std::vector<double>
 {
-    // See specCts()'s own header comment for why the time dimension is
-    // never log-transformed (its lower bound is always exactly 0),
-    // while the mass dimension always is.
+    // Reflect sfr about half the current time, so this dimension's
+    // own coordinate -- what continuousSpecIntegrand() reads as
+    // points[i, 0] -- becomes stellar age (curTime - time)
+    // directly, rather than time itself (see PDFReflect::reflect()'s
+    // own comment: pivot = curTime / 2 makes reflect(x) = curTime - x).
+    // The luminosity this integral is dominated by -- young, hot, blue
+    // stars -- is concentrated in a narrow sliver of *age* near 0
+    // (equivalently, *time* near curTime); on a linear time axis, that
+    // sliver's width relative to the full [0, curTime] domain shrinks
+    // as curTime grows, needing on the order of curTime / (feature
+    // width) quadrature subdivisions to resolve at large curTime --
+    // catastrophically slow for pAdaptive's fixed-degree grid.
+    // Log-transforming age instead spreads that near-zero feature out
+    // relative to the quadrature's own sample spacing, the same way
+    // log-transforming mass helps resolve a sharply peaked mass
+    // function. sfr's own support can't be reflected about directly
+    // (see PDFReflect's own two-argument constructor comment): sfr's
+    // support is deliberately far larger than any realistic curTime
+    // (see io::SimControls's own buildConstantSFR()), so reflecting
+    // about its own midpoint would leave the age coordinate nowhere
+    // near 0 -- an explicit pivot of curTime / 2 is required instead.
+    //
+    // Floored at ageMin = min(1e4 yr, 1e-3 * curTime) -- not at
+    // tracks().logTMin(), which reports an extreme sentinel
+    // (std::numeric_limits<float>::lowest(), not a genuine log10(yr)
+    // floor) for every track set actually in use, real or test alike,
+    // making it useless as a positive lower bound here. 1e4 yr is a
+    // physical floor, not a numerical one: at ages that young, "the
+    // track" isn't really a well-defined single curve at all -- a
+    // star's properties still depend on its own detailed accretion
+    // history during formation, not just its age and mass -- so there
+    // is nothing more meaningful to resolve below it regardless of how
+    // finely the quadrature samples that end of the domain. The
+    // 1e-3 * curTime term instead guards the case where curTime itself
+    // is only a few times 1e4 yr (e.g. a pathologically early output
+    // time), so the floor never approaches curTime and leave nothing
+    // for the log-transformed dimension to span. If curTime doesn't
+    // exceed ageMin (only possible if curTime <= 0, since ageMin is
+    // always < curTime whenever curTime > 0), the age dimension falls
+    // back to a plain linear transform over [0, curTime], exactly as
+    // before.
+    const pdfs::PDFReflect sfrAge(sfr, 0.5 * curTime);
+    const double ageMin = std::min(1e4, 1e-3 * curTime);
+    const bool logAge = curTime > ageMin;
+
     const bool singleFeh = (fehDist.getMin() == fehDist.getMax());
     const double absTol = intAbsTol() * utils::Lsun * sfr.integral(0.0, curTime);
     const auto nInt = static_cast<unsigned>(wl_.size()) + (computeLbol ? 1U : 0U);
 
+    using IntegrandFn = std::vector<double> (Specsyn::*)(
+        std::mdspan<double, std::extents<std::size_t, std::dynamic_extent, 2>>, bool, double) const;
+    const utils::PDFIntegratorND<IntegrandFn, 2, true, utils::CubatureMethod::hAdaptive> integrator(
+        std::array<std::reference_wrapper<const pdfs::PDF>, 2>{ std::cref(sfrAge), std::cref(imf) },
+        static_cast<IntegrandFn>(&Specsyn::continuousSpecIntegrand),
+        nInt,
+        std::array<bool, 2>{ logAge, true },
+        intMaxIter(), absTol, intRelTol());
+
     std::vector<double> result;
     if (singleFeh)
     {
-        using IntegrandFn = std::vector<double> (Specsyn::*)(
-            std::mdspan<double, std::extents<std::size_t, std::dynamic_extent, 2>>,
-            std::map<std::pair<double, double>, Isochrone>&, double, bool) const;
-        const utils::PDFIntegratorND<IntegrandFn, 2, true, utils::CubatureMethod::pAdaptive> integrator(
-            std::array<std::reference_wrapper<const pdfs::PDF>, 2>{ std::cref(sfr), std::cref(imf) },
-            static_cast<IntegrandFn>(&Specsyn::continuousSpecIntegrand<2>),
-            nInt,
-            std::array<bool, 2>{ false, true },
-            intMaxIter(), absTol, intRelTol());
         result = integrator.integrate(
-            std::array<double, 2>{ 0.0, imf.getMin() },
+            std::array<double, 2>{ ageMin, imf.getMin() },
             std::array<double, 2>{ curTime, imf.getMax() },
-            *this, isochroneCache_, curTime, computeLbol);
+            *this, computeLbol, fehDist.getMin());
     }
     else
     {
-        using IntegrandFn = std::vector<double> (Specsyn::*)(
-            std::mdspan<double, std::extents<std::size_t, std::dynamic_extent, 3>>,
-            std::map<std::pair<double, double>, Isochrone>&, double, bool) const;
-        const utils::PDFIntegratorND<IntegrandFn, 3, true, utils::CubatureMethod::pAdaptive> integrator(
-            std::array<std::reference_wrapper<const pdfs::PDF>, 3>{
-                std::cref(sfr), std::cref(fehDist), std::cref(imf) },
-            static_cast<IntegrandFn>(&Specsyn::continuousSpecIntegrand<3>),
-            nInt,
-            std::array<bool, 3>{ false, false, true },
-            intMaxIter(), absTol, intRelTol());
-        result = integrator.integrate(
-            std::array<double, 3>{ 0.0, fehDist.getMin(), imf.getMin() },
-            std::array<double, 3>{ curTime, fehDist.getMax(), imf.getMax() },
-            *this, isochroneCache_, curTime, computeLbol);
+        // Integrate over [Fe/H] by running the same 2D (age, mass)
+        // integral once at every grid point the tracks are actually
+        // defined at, then interpolating and integrating those
+        // discrete results over [Fe/H] -- see this function's own
+        // header comment for why, in place of a joint 3D (feh, age,
+        // mass) cubature integral.
+        //
+        // Deliberately uses the tracks' own full (padded) grid, not
+        // just the points inside [fehDist.getMin(), fehDist.getMax()]:
+        // those padding points carry real information about how the
+        // spectrum varies with [Fe/H] near the domain edges (the slope
+        // Interpolator1D's spline needs to shape correctly right up to
+        // the true edges), not just filler. The spectral synthesis
+        // libraries themselves are guaranteed wide enough in [Fe/H] to
+        // cover this whole padded grid -- see
+        // io::SimControls::readSpectra()'s own comment for why -- so
+        // evaluating here never runs outside their own domain.
+        const auto& fehGrid = controls_.tracks().feH();
+        const std::size_t nFeh = fehGrid.size();
+        const auto nQty = static_cast<std::size_t>(nInt);
+
+        // rawResults[f] holds this call's nInt raw (lambda * dL/dlambda,
+        // plus optional Lbol in erg/s) integrator outputs at fehGrid[f];
+        // fehWeight[f] is fehDist evaluated at that same grid point (0
+        // for any padding grid points outside fehDist's own support --
+        // see pdfs::PDF::operator()'s own comment).
+        std::vector<std::vector<double>> rawResults(nFeh);
+        std::vector<double> fehWeight(nFeh);
+        for (std::size_t f = 0; f < nFeh; ++f)
+        {
+            rawResults[f] = integrator.integrate(
+                std::array<double, 2>{ ageMin, imf.getMin() },
+                std::array<double, 2>{ curTime, imf.getMax() },
+                *this, computeLbol, fehGrid[f]);
+            fehWeight[f] = fehDist(fehGrid[f]);
+        }
+
+        // Normalizing denominator: the integral of fehDist alone over
+        // its own domain (fehDist need not itself integrate to exactly
+        // 1 -- e.g. if given as an unnormalized weight function).
+        const interp::Interpolator1D<1> weightInterp(fehGrid, fehWeight);
+        const double weightIntegral = weightInterp.integ(fehDist.getMin(), fehDist.getMax());
+
+        result.assign(nQty, 0.0);
+        std::vector<double> quantityAtFeh(nFeh);
+        for (std::size_t k = 0; k < nQty; ++k)
+        {
+            for (std::size_t f = 0; f < nFeh; ++f)
+            {
+                quantityAtFeh[f] = rawResults[f][k] * fehWeight[f]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- rawResults[f] has size nInt == nQty by the integrator's own contract, and k is bounded by nQty
+            }
+            const interp::Interpolator1D<1> quantityInterp(fehGrid, quantityAtFeh);
+            result[k] = quantityInterp.integ(fehDist.getMin(), fehDist.getMax()) / weightIntegral; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- result has size nQty by the assign() just above, and k is bounded by nQty
+        }
     }
 
     // Undo continuousSpecIntegrand()'s own lambda * dL/dlambda
@@ -295,7 +324,6 @@ auto specsyn::Specsyn::specCtsHelper(
         // (1 - fCluster) scaling every other element gets.
         result[wl_.size()] *= (1.0 - fCluster) / utils::Lsun; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- result.size() == wl_.size() + 1 when computeLbol is true, by construction
     }
-    isochroneCache_.clear();
     return result;
 }
 

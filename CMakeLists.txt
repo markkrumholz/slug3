@@ -232,6 +232,7 @@ add_executable(slugTestCoreFull
     src/core/Cluster.cpp
     src/core/Galaxy.cpp
     src/core/SimCluster.cpp
+    src/core/SimGalaxy.cpp
     src/io/OutputManager.cpp
     src/io/OutputManagerAscii.cpp
     src/io/OutputManagerH5.cpp
@@ -269,6 +270,8 @@ add_executable(slugTestCoreFull
     tests/core/testClusterSpecsynFull.cpp
     tests/core/testClusterSpecsynFullAFe.cpp
     tests/core/testClusterSpecsynFullNonStoch.cpp
+    tests/core/testGalaxySpecsynFullCommon.cpp
+    tests/core/testGalaxySpecsynFullNonStoch.cpp
     tests/core/testCoreFullAll.cpp
 )
 # slugTestCoreFull drives a real end-to-end run (real MIST tracks, real
