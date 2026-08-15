@@ -903,7 +903,6 @@ namespace interp
          * @param y Starting y position
          * @param x x coordinate
          * @param yStop y coordinate at which to stop
-         * @param dy y distance to the intersection point
          * @param endInterior True if (x,yStop) is in the mesh interior and not on an edge
          * @param lastIntersectLeft True if last intersection found was on left of cell
          * @param lastIntersectRight True if last intersection found was on right of cell
@@ -924,7 +923,6 @@ namespace interp
             double& y,
             double x,
             double yStop,
-            double dy,
             bool endInterior,
             bool& lastIntersectLeft,
             bool& lastIntersectRight
@@ -935,7 +933,6 @@ namespace interp
          * @param y Starting y position
          * @param x x coordinate
          * @param yStop y coordinate at which to stop
-         * @param dy y distance to the intersection point
          * @param endInterior True if (x,yStop) is in the mesh interior and not on an edge
          * @param lastIntersectLeft True if last intersection found was on left of cell
          * @param lastIntersectRight True if last intersection found was on right of cell
@@ -956,7 +953,6 @@ namespace interp
             double& y,
             double x,
             double yStop,
-            double dy,
             bool endInterior,
             bool& lastIntersectLeft,
             bool& lastIntersectRight

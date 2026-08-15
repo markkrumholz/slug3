@@ -7,6 +7,7 @@
 
 #include "Mesh2DGrid.hpp"
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <cstdlib>
 #include <stdexcept>
@@ -543,7 +544,8 @@ namespace interp
         assert(contains(x, y));
 
         // Up and down output holders
-        std::vector<xIntersectionDescriptor> intListUp, intListDown;
+        std::vector<xIntersectionDescriptor> intListUp;
+        std::vector<xIntersectionDescriptor> intListDown;
 
         // Up and down search pointers and flags
         double yUp = y;
@@ -1242,7 +1244,7 @@ namespace interp
         {
             // Left spine
             return handleNextIntersectLeftSpine(
-                y, x, yStop, dyL,
+                y, x, yStop,
                 endInterior,
                 lastIntersectLeft,
                 lastIntersectRight);
@@ -1250,7 +1252,7 @@ namespace interp
 
         // Right spine
         return handleNextIntersectRightSpine(
-            y, x, yStop, dyR,
+            y, x, yStop,
             endInterior,
             lastIntersectLeft,
             lastIntersectRight);
@@ -1581,7 +1583,6 @@ namespace interp
         double& y,
         const double x,
         const double yStop,
-        const double dy,
         const bool endInterior,
         bool& lastIntersectLeft,
         bool& lastIntersectRight
@@ -1679,7 +1680,6 @@ namespace interp
         double& y,
         const double x,
         const double yStop,
-        const double dy,
         const bool endInterior,
         bool& lastIntersectLeft,
         bool& lastIntersectRight
