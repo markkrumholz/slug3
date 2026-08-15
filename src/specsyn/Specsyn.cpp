@@ -18,8 +18,8 @@
 #include "../tracks/TrackCommons.hpp"
 #include "../tracks/Tracks3D.hpp"
 #include "../utils/Constants.hpp"
-#include "../utils/PDFIntegrator.hpp"
-#include "../utils/PDFIntegratorND.hpp"
+#include "../utils/GKIntegrator.hpp"
+#include "../utils/PDFIntegratorGK.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -104,25 +104,18 @@ auto specsyn::Specsyn::specCtsImpl(
     // of dL/dlambda's own natural scale) by utils::Lsun to match --
     // see specWl()'s own doc comment for why.
     //
-    // Uses cubature's p-adaptive routine (CubatureMethod::pAdaptive),
-    // in linear (not log) mass space, rather than PDFIntegrator's own
-    // default of h-adaptive: benchmarked head to head against
-    // h-adaptive (linear and log) and p-adaptive-in-log-space on a
-    // full-scale, 100-output-time non-stochastic cluster run (real
-    // MIST tracks and spectral libraries, so the comparison reflects
-    // this integrand's actual cost -- a spectral flux that is smooth
-    // in mass but spans many orders of magnitude in value), p-adaptive
-    // in linear space was the clear winner: roughly 2x faster than
-    // h-adaptive at identical accuracy (integrated luminosity agreed
-    // to within ~0.1% across every configuration and output time
-    // checked), while log-transforming the mass coordinate under
-    // p-adaptive was instead slower than the old h-adaptive default --
-    // this integrand isn't sharply peaked enough near either edge of
-    // its mass domain for the log transform to pay for the extra
-    // nonlinearity it introduces.
-    const utils::PDFIntegratorND<EvalFn, 1, false, utils::CubatureMethod::pAdaptive> integrator(
-        imf, evalPoint, static_cast<unsigned>(nQty),
-        std::array<bool, 1>{}, intMaxIter(), intAbsTol() * utils::Lsun, intRelTol());
+    // Uses PDFIntegratorGK (GKOrder::GK15), in linear (not log) mass
+    // space, rather than the cubature-package-based PDFIntegratorND
+    // this integrator used previously: benchmarked head to head on a
+    // full-scale, 400-output-time non-stochastic cluster run (real
+    // MIST tracks and spectral libraries), GK15 was consistently
+    // ~3x faster than PDFIntegratorND's own best configuration
+    // (CubatureMethod::pAdaptive) at identical accuracy, with GK31
+    // essentially tied and GK61 slower (this integrand -- a spectral
+    // flux that is smooth in mass -- doesn't need GK61's own extra
+    // per-point accuracy enough to offset its higher per-point cost).
+    const utils::PDFIntegratorGK<EvalFn, utils::GKOrder::GK15> integrator(
+        imf, evalPoint, nQty, false, intMaxIter(), intAbsTol() * utils::Lsun, intRelTol());
 
     std::vector<double> result(nQty, 0.0);
     for (const auto& seg : isochrone)
@@ -198,7 +191,8 @@ auto specsyn::Specsyn::specCtsHelper(
     // sliver's width relative to the full [0, curTime] domain shrinks
     // as curTime grows, needing on the order of curTime / (feature
     // width) quadrature subdivisions to resolve at large curTime --
-    // catastrophically slow for pAdaptive's fixed-degree grid.
+    // catastrophically slow for any fixed-tolerance adaptive scheme
+    // that has to keep bisecting down to that same narrow sliver.
     // Log-transforming age instead spreads that near-zero feature out
     // relative to the quadrature's own sample spacing, the same way
     // log-transforming mass helps resolve a sharply peaked mass
@@ -236,21 +230,28 @@ auto specsyn::Specsyn::specCtsHelper(
     const double absTol = intAbsTol() * utils::Lsun * sfr.integral(0.0, curTime);
     const auto nInt = static_cast<unsigned>(wl_.size()) + (computeLbol ? 1U : 0U);
 
-    // A plain 1D utils::PDFIntegrator over age alone -- its own default
-    // CubatureMethod::hAdaptive, non-vectorized -- whose integrand
+    // A PDFIntegratorGK (GKOrder::GK15) over age alone, whose integrand
     // (continuousSpecIntegrand()) performs a complete nested 1D
-    // integral over mass internally, at each age point visited; see
+    // integral over mass internally (itself also a PDFIntegratorGK --
+    // see specCtsImpl()'s own comment), at each age point visited; see
     // continuousSpecIntegrand()'s own comment and this class's own
     // specCts() overload's header comment for why nesting two 1D
     // integrals this way, rather than one joint 2D (age, mass)
     // integral, is what actually fixes the cost-cliff problem that
-    // motivated this design.
+    // motivated this design. Was a plain 1D utils::PDFIntegrator
+    // (CubatureMethod::hAdaptive) until benchmarked head to head
+    // against PDFIntegratorGK on the same full-scale run described in
+    // specCtsImpl()'s own comment: swapping both this outer age
+    // integral and specCtsImpl()'s own inner mass integral to
+    // PDFIntegratorGK (GK15 for both) cut that run's total time from
+    // 449s to 37s -- a much larger win than the inner loop's own ~3x,
+    // since the old hAdaptive age integral was itself the larger
+    // remaining bottleneck.
     using IntegrandFn = std::vector<double> (Specsyn::*)(
         double, const pdfs::PDF&, bool, double) const;
-    const utils::PDFIntegrator<IntegrandFn> integrator(
+    const utils::PDFIntegratorGK<IntegrandFn, utils::GKOrder::GK15> integrator(
         sfrAge, static_cast<IntegrandFn>(&Specsyn::continuousSpecIntegrand),
-        nInt, std::array<bool, 1>{ logAge },
-        intMaxIter(), absTol, intRelTol());
+        nInt, logAge, intMaxIter(), absTol, intRelTol());
 
     std::vector<double> result;
     if (singleFeh)

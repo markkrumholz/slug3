@@ -236,14 +236,14 @@ namespace specsyn
          * @details
          * Evaluates segment at m to get m's stellar properties, and
          * returns spec() of those properties. This overload exists
-         * mainly so spec() can be handed to PDFIntegrator, which
+         * mainly so spec() can be handed to PDFIntegratorGK, which
          * expects a callable taking the integration variable (here,
          * mass) as its first argument. It takes a single segment,
          * rather than a full Isochrone, so that specCts() can
          * integrate each segment separately over its own valid
          * domain -- an Isochrone as a whole may have gaps where no
-         * segment is defined, and pcubature has no way to know to
-         * avoid evaluating there.
+         * segment is defined, and the quadrature routine has no way to
+         * know to avoid evaluating there.
          */
         [[nodiscard]] auto spec(double m, const Segment& segment, double feh) const -> std::vector<double>
         {
@@ -328,10 +328,10 @@ namespace specsyn
          * isochrone may consist of several disjoint segments (see
          * Tracks2D::getIsochrone), each valid only over its own
          * [segment.xMin(), segment.xMax()] range, with gaps possibly
-         * in between where no segment is defined. pcubature has no
-         * way to know to avoid evaluating in those gaps, so this
-         * integrates each segment separately, over the intersection
-         * of its own domain with [mMin, mMax], skipping segments
+         * in between where no segment is defined. The quadrature
+         * routine has no way to know to avoid evaluating in those
+         * gaps, so this integrates each segment separately, over the
+         * intersection of its own domain with [mMin, mMax], skipping segments
          * whose domain does not overlap [mMin, mMax] at all, and sums
          * the per-segment results -- this guarantees spec() is only
          * ever evaluated at masses where some segment is actually
@@ -382,9 +382,9 @@ namespace specsyn
          * comment.
          *
          * Structured as a pair of *nested* 1D integrals, not a single
-         * joint 2D (age, mass) one: a 1D utils::PDFIntegrator over age
-         * alone (CubatureMethod::hAdaptive, PDFIntegrator's own default),
-         * whose own integrand -- continuousSpecIntegrand() -- builds
+         * joint 2D (age, mass) one: a utils::PDFIntegratorGK
+         * (GKOrder::GK15) over age alone, whose own integrand --
+         * continuousSpecIntegrand() -- builds
          * the isochrone for its own age on demand and immediately hands
          * it to specCtsImpl() to perform a complete inner 1D integral
          * over mass, reusing the same proven mass integrator the
@@ -456,7 +456,7 @@ namespace specsyn
          * @details
          * Identical to specCts() in every respect but what it returns:
          * calls specCtsHelper() with computeLbol = true, so the same
-         * PDFIntegratorND evaluation -- the expensive part of which is
+         * PDFIntegratorGK evaluation -- the expensive part of which is
          * building an isochrone at every distinct (age, feh) the
          * integral visits, not the handful of extra scalar quantities
          * integrated alongside the spectrum at each of those isochrones
@@ -481,19 +481,19 @@ namespace specsyn
 
         /**
          * @brief Return the relative tolerance for PDF integration
-         * @return Relative tolerance passed to PDFIntegrator, read live from controls_
+         * @return Relative tolerance passed to PDFIntegratorGK, read live from controls_
          */
         [[nodiscard]] auto intRelTol() const -> double;
 
         /**
          * @brief Return the absolute tolerance for PDF integration
-         * @return Absolute tolerance passed to PDFIntegrator, read live from controls_
+         * @return Absolute tolerance passed to PDFIntegratorGK, read live from controls_
          */
         [[nodiscard]] auto intAbsTol() const -> double;
 
         /**
          * @brief Return the maximum number of evaluations for PDF integration
-         * @return Max evaluations passed to PDFIntegrator (0 = unlimited), read live from controls_
+         * @return Max bisection iterations passed to PDFIntegratorGK (0 = unlimited), read live from controls_
          */
         [[nodiscard]] auto intMaxIter() const -> std::size_t;
 
@@ -603,13 +603,13 @@ namespace specsyn
          * intersection of its own domain with [mMin, mMax], skipping
          * segments whose domain does not overlap [mMin, mMax] at all,
          * and sums the per-segment results -- see that overload's own
-         * comment for why (an isochrone may have gaps pcubature has no
-         * way to know to avoid). Uses CubatureMethod::pAdaptive in
-         * linear mass space, exactly as that overload's own benchmarked
-         * choice -- see its comment -- since the per-star evaluation
-         * cost this integrates over is the same either way, only which
-         * function (specWl() vs specWlForIntegration()) performs it
-         * differs.
+         * comment for why (an isochrone may have gaps the quadrature
+         * routine has no way to know to avoid). Uses PDFIntegratorGK
+         * (GKOrder::GK15) in linear mass space, exactly as that
+         * overload's own benchmarked choice -- see its comment -- since
+         * the per-star evaluation cost this integrates over is the same
+         * either way, only which function (specWl() vs
+         * specWlForIntegration()) performs it differs.
          */
         [[nodiscard]] auto specCtsImpl(
             const Isochrone& isochrone,
@@ -715,8 +715,8 @@ namespace specsyn
          * @param age The stellar age, in yr, to evaluate at (not time --
          *   specCtsHelper() integrates this dimension via a
          *   pdfs::PDFReflect view of sfr, pivoted so that the
-         *   coordinate PDFIntegrator hands back already is age; see its
-         *   own comment)
+         *   coordinate PDFIntegratorGK hands back already is age; see
+         *   its own comment)
          * @param imf The initial mass function of the population -- see
          *   specCtsHelper()'s own imf parameter; used both as the
          *   inner mass integral's own weighting PDF and, via
@@ -743,8 +743,8 @@ namespace specsyn
          * that isochrone straight to specCtsImpl() (forIntegration =
          * true) to perform the inner integral over mass, bounded to
          * [imf.getMin(), imf.getMax()] -- reusing the same proven,
-         * benchmarked pAdaptive-in-linear-mass-space mass integrator
-         * the isochrone specCts() overload itself uses, rather than a
+         * benchmarked PDFIntegratorGK-based mass integrator the
+         * isochrone specCts() overload itself uses, rather than a
          * second, independent implementation of the same integral. No
          * explicit live/dead mass check is needed here: the isochrone's
          * own segments, each only valid over their own

@@ -154,14 +154,35 @@ namespace utils
          * supports F being a pointer to member function -- see its
          * own comment), multiplies elementwise by p_(xReal), and, if
          * logTransform_, by xReal again (the Jacobian).
+         *
+         * Args&... here, not the more usual Args&&... forwarding
+         * reference: integrate() only ever names this function
+         * through &PDFIntegratorGK::template integrand<Args...>, with
+         * Args already fixed to its own deduced types -- at that
+         * point Args&& is no longer a forwarding reference at all,
+         * just an ordinary (possibly rvalue) reference type, and for
+         * any Args element integrate() deduced as a plain value (e.g.
+         * a pointer instance passed as a prvalue, as PDFIntegratorGK's
+         * own integrate() itself does when it is F for an *outer*
+         * GKIntegrator/PDFIntegratorGK -- see specsyn::Specsyn::
+         * specCtsHelper() for a real example, nesting one
+         * PDFIntegratorGK inside another this way), that becomes a
+         * genuine rvalue-reference parameter. But GKIntegrator's own
+         * internal machinery (see its quadSingle()/integrate() own
+         * comments on argsTuple) always hands every call an lvalue,
+         * to stay safe across the many repeated calls one adaptive
+         * integral makes -- so a plain lvalue reference is the only
+         * parameter type guaranteed to bind correctly here, regardless
+         * of what value category the original argument at
+         * integrate()'s own call site had.
          */
         template <class... Args>
-        [[nodiscard]] auto integrand(const double x, Args&&... args) const -> std::vector<double>
+        [[nodiscard]] auto integrand(const double x, Args&... args) const -> std::vector<double>
         {
             const double xReal = logTransform_ ? std::exp(x) : x;
             const double xClamped = std::clamp(xReal, aReal_, bReal_);
 
-            const auto val = invokeF(xClamped, std::forward<Args>(args)...);
+            const auto val = invokeF(xClamped, args...);
 
             double weight = p_(xClamped);
             if (logTransform_) { weight *= xClamped; }
