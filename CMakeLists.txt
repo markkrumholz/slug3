@@ -157,6 +157,7 @@ add_executable(slugTestPDFs
 add_executable(slugTestUtils
     tests/utils/testUtilsAll.cpp
     tests/utils/testPDFIntegrator.cpp
+    tests/utils/testPDFIntegratorGK.cpp
     tests/utils/testPDFIntegratorND.cpp
     src/pdfs/PDFFileParser.cpp
     src/pdfs/PDFSegment.cpp
