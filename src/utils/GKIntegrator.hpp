@@ -8,6 +8,7 @@
 #ifndef GKINTEGRATOR_HPP
 #define GKINTEGRATOR_HPP
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -458,6 +459,23 @@ namespace utils
     };
 
     /**
+     * @brief The outcome of applying a single Gauss-Kronrod rule to one interval
+     * @details
+     * What GKIntegrator::quadSingle() returns, and what
+     * GKIntegrator::integrate() bisects and re-integrates as it
+     * adaptively refines the overall integration domain -- see both
+     * of their own comments.
+     */
+    struct GKIntegrationInterval
+    {
+        double a_;                  /**< Lower limit of this interval */
+        double b_;                  /**< Upper limit of this interval */
+        std::vector<double> quad_;  /**< The Kronrod rule's own quadrature estimate over [a_, b_], one value per quantity f_ returns */
+        std::vector<double> err_;   /**< This interval's own error estimate, one value per quantity f_ returns -- see quadSingle()'s own comment for how */
+        double absErr_;             /**< The largest element of err_ -- this interval's own single worst-quantity absolute error */
+    };
+
+    /**
      * @class GKIntegrator
      * @brief Adaptively integrate a vector-valued function of one variable
      * @tparam F Type of the callable integrand: must be invocable as
@@ -512,12 +530,14 @@ namespace utils
          * @param b Upper limit of the interval
          * @param args Any additional arguments f_ requires, forwarded
          *   to it unchanged after x at every point evaluated
-         * @return A pair of (1) the ngk-point Kronrod rule's own
-         *   estimate of the integral, one value per quantity f_
-         *   returns, and (2) an error estimate for each of those
-         *   values -- the absolute difference between the Kronrod
-         *   estimate and the embedded (lower-order) Gauss rule's own
-         *   estimate of the same integral, both length nInt_
+         * @return A GKIntegrationInterval with a_/b_ set to a/b, quad_
+         *   set to the ngk-point Kronrod rule's own estimate of the
+         *   integral (one value per quantity f_ returns), err_ set to
+         *   an error estimate for each of those same values -- the
+         *   absolute difference between the Kronrod estimate and the
+         *   embedded (lower-order) Gauss rule's own estimate of the
+         *   same integral -- and absErr_ set to the largest element of
+         *   err_
          * @details
          * A direct translation of slug2's own
          * slug_imf_integrator<T>::integrate_gk (src/utils/
@@ -552,7 +572,7 @@ namespace utils
          */
         template <class... Args>
         [[nodiscard]] auto quadSingle(const double a, const double b, Args&&... args) const
-        -> std::pair<std::vector<double>, std::vector<double>>
+        -> GKIntegrationInterval
         {
             using Rule = GKRule<Order>;
             constexpr std::size_t ngk = Rule::ngk;
@@ -643,7 +663,135 @@ namespace utils
                 gaussQuad[k] *= halfLength;
                 err[k] = std::abs(result[k] - gaussQuad[k]);
             }
-            return { std::move(result), std::move(err) };
+            const double absErr = *std::ranges::max_element(err);
+            return { a, b, std::move(result), std::move(err), absErr };
+        }
+
+        /**
+         * @brief Adaptively integrate f_ over [a, b]
+         * @param a Lower limit of integration
+         * @param b Upper limit of integration
+         * @param args Any additional arguments f_ requires; see
+         *   quadSingle()'s own args parameter
+         * @return The integral estimate, one value per quantity f_
+         *   returns (length nInt_)
+         * @details
+         * Starts from a single quadSingle() call over the whole
+         * [a, b] interval; if that single interval's own absErr_ is
+         * already below absTol_, or its own largest elementwise
+         * relative error (|err_[k]| / |quad_[k]|) is already below
+         * relTol_, returns immediately -- no bisection needed.
+         *
+         * Otherwise, repeatedly bisects whichever interval currently
+         * contributes the largest relative error to the running total
+         * (quadSum, tracked incrementally: each iteration undoes one
+         * interval's own old contribution to quadSum/errSum, replaces
+         * that interval in place with a fresh quadSingle() over its
+         * own left half, appends a new interval for its own right
+         * half, and adds both halves' own contributions back in),
+         * stopping -- and returning quadSum -- as soon as either the
+         * largest element of errSum drops below absTol_, or the
+         * largest elementwise relative error (|errSum[k]| / |quadSum[k]|)
+         * drops below relTol_, or the number of bisection iterations
+         * exceeds maxEval_ (0 = unlimited; despite its own name, which
+         * this function overloads to mean "iterations" here rather
+         * than "raw integrand evaluations" -- each iteration costs two
+         * further quadSingle() calls, i.e. 2 * (2 * ngk - 1) further
+         * evaluations of f_).
+         *
+         * Which interval to bisect next is decided by each interval's
+         * own relative error against the *global* running total
+         * (|intervals[i].err_[k]| / |quadSum[k]|, maximized over k),
+         * not against that interval's own local quad_ -- so bisection
+         * effort concentrates on whichever interval's own uncertainty
+         * matters most to the overall answer, mirroring slug2's own
+         * identical convention in slug_imf_integrator<T>::
+         * integrate_range (see quadSingle()'s own comment for that
+         * function's sibling, integrate_gk, which this class's
+         * quadSingle() itself translates).
+         */
+        template <class... Args>
+        [[nodiscard]] auto integrate(const double a, const double b, Args&&... args) const -> std::vector<double>
+        {
+            // args is forwarded exactly once, into this tuple, for the
+            // same reason quadSingle() itself does this -- see its own
+            // comment: integrate() calls quadSingle() repeatedly below,
+            // and each of those calls must see the same, still-valid
+            // arguments, not ones already moved from on a previous call.
+            const std::tuple<Args...> argsTuple(std::forward<Args>(args)...);
+            const auto callQuadSingle = [this, &argsTuple](const double lo, const double hi) -> GKIntegrationInterval
+            {
+                return std::apply(
+                    [this, lo, hi](const auto&... unpackedArgs) { return quadSingle(lo, hi, unpackedArgs...); },
+                    argsTuple);
+            };
+
+            std::vector<GKIntegrationInterval> intervals;
+            intervals.push_back(callQuadSingle(a, b));
+
+            if (intervals[0].absErr_ < absTol_) { return intervals[0].quad_; }
+            {
+                double maxRelErr = 0.0;
+                for (std::size_t k = 0; k < nInt_; ++k)
+                {
+                    maxRelErr = std::max(maxRelErr,
+                        std::abs(intervals[0].err_[k] / intervals[0].quad_[k])); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- k < nInt_ == intervals[0].err_.size() == intervals[0].quad_.size() by construction
+                }
+                if (maxRelErr < relTol_) { return intervals[0].quad_; }
+            }
+
+            std::vector<double> quadSum = intervals[0].quad_;
+            std::vector<double> errSum = intervals[0].err_;
+            std::size_t itCounter = 1;
+            std::size_t intervalPtr = 0;
+
+            while (true)
+            {
+                const double xMid = 0.5 * (intervals[intervalPtr].a_ + intervals[intervalPtr].b_);
+                const double bOld = intervals[intervalPtr].b_; // intervals[intervalPtr] itself is about to be overwritten below, taking its own b_ with it -- the right half bisected off it still needs the original upper limit, not the new one
+                for (std::size_t k = 0; k < nInt_; ++k)
+                {
+                    quadSum[k] -= intervals[intervalPtr].quad_[k]; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- k < nInt_ == quadSum.size() == intervals[intervalPtr].quad_.size() by construction
+                    errSum[k] -= intervals[intervalPtr].err_[k]; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- see above, for errSum/err_
+                }
+
+                intervals[intervalPtr] = callQuadSingle(intervals[intervalPtr].a_, xMid);
+                intervals.push_back(callQuadSingle(xMid, bOld));
+
+                const auto& left = intervals[intervalPtr];
+                const auto& right = intervals.back();
+                for (std::size_t k = 0; k < nInt_; ++k)
+                {
+                    quadSum[k] += left.quad_[k] + right.quad_[k]; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- k < nInt_ == quadSum.size() == left.quad_.size() == right.quad_.size() by construction
+                    errSum[k] += left.err_[k] + right.err_[k]; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- see above, for errSum/err_
+                }
+
+                ++itCounter;
+                if (maxEval_ != 0 && itCounter > maxEval_) { return quadSum; }
+
+                double maxAbsErr = 0.0;
+                double maxRelErr = 0.0;
+                for (std::size_t k = 0; k < nInt_; ++k)
+                {
+                    maxAbsErr = std::max(maxAbsErr, std::abs(errSum[k])); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- k < nInt_ == errSum.size() by construction
+                    maxRelErr = std::max(maxRelErr, std::abs(errSum[k] / quadSum[k])); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- see above, for quadSum
+                }
+                if (maxAbsErr < absTol_ || maxRelErr < relTol_) { return quadSum; }
+
+                double bestRelErr = -1.0;
+                std::size_t best = 0;
+                for (std::size_t i = 0; i < intervals.size(); ++i)
+                {
+                    double relErr = 0.0;
+                    for (std::size_t k = 0; k < nInt_; ++k)
+                    {
+                        relErr = std::max(relErr,
+                            std::abs(intervals[i].err_[k] / quadSum[k])); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- k < nInt_ == intervals[i].err_.size() == quadSum.size() by construction
+                    }
+                    if (relErr > bestRelErr) { bestRelErr = relErr; best = i; }
+                }
+                intervalPtr = best;
+            }
         }
 
     private:
