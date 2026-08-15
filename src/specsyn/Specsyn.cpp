@@ -19,7 +19,7 @@
 #include "../tracks/Tracks3D.hpp"
 #include "../utils/Constants.hpp"
 #include "../utils/GKIntegrator.hpp"
-#include "../utils/PDFIntegratorGK.hpp"
+#include "../utils/PDFIntegrator.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -104,7 +104,7 @@ auto specsyn::Specsyn::specCtsImpl(
     // of dL/dlambda's own natural scale) by utils::Lsun to match --
     // see specWl()'s own doc comment for why.
     //
-    // Uses PDFIntegratorGK (GKOrder::GK15), in linear (not log) mass
+    // Uses PDFIntegrator (GKOrder::GK15), in linear (not log) mass
     // space, rather than the cubature-package-based PDFIntegratorND
     // this integrator used previously: benchmarked head to head on a
     // full-scale, 400-output-time non-stochastic cluster run (real
@@ -114,7 +114,7 @@ auto specsyn::Specsyn::specCtsImpl(
     // essentially tied and GK61 slower (this integrand -- a spectral
     // flux that is smooth in mass -- doesn't need GK61's own extra
     // per-point accuracy enough to offset its higher per-point cost).
-    const utils::PDFIntegratorGK<EvalFn, utils::GKOrder::GK15> integrator(
+    const utils::PDFIntegrator<EvalFn, utils::GKOrder::GK15> integrator(
         imf, evalPoint, nQty, false, intMaxIter(), intAbsTol() * utils::Lsun, intRelTol());
 
     std::vector<double> result(nQty, 0.0);
@@ -230,9 +230,9 @@ auto specsyn::Specsyn::specCtsHelper(
     const double absTol = intAbsTol() * utils::Lsun * sfr.integral(0.0, curTime);
     const auto nInt = static_cast<unsigned>(wl_.size()) + (computeLbol ? 1U : 0U);
 
-    // A PDFIntegratorGK (GKOrder::GK15) over age alone, whose integrand
+    // A PDFIntegrator (GKOrder::GK15) over age alone, whose integrand
     // (continuousSpecIntegrand()) performs a complete nested 1D
-    // integral over mass internally (itself also a PDFIntegratorGK --
+    // integral over mass internally (itself also a PDFIntegrator --
     // see specCtsImpl()'s own comment), at each age point visited; see
     // continuousSpecIntegrand()'s own comment and this class's own
     // specCts() overload's header comment for why nesting two 1D
@@ -240,16 +240,16 @@ auto specsyn::Specsyn::specCtsHelper(
     // integral, is what actually fixes the cost-cliff problem that
     // motivated this design. Was a plain 1D utils::PDFIntegrator
     // (CubatureMethod::hAdaptive) until benchmarked head to head
-    // against PDFIntegratorGK on the same full-scale run described in
+    // against PDFIntegrator on the same full-scale run described in
     // specCtsImpl()'s own comment: swapping both this outer age
     // integral and specCtsImpl()'s own inner mass integral to
-    // PDFIntegratorGK (GK15 for both) cut that run's total time from
+    // PDFIntegrator (GK15 for both) cut that run's total time from
     // 449s to 37s -- a much larger win than the inner loop's own ~3x,
     // since the old hAdaptive age integral was itself the larger
     // remaining bottleneck.
     using IntegrandFn = std::vector<double> (Specsyn::*)(
         double, const pdfs::PDF&, bool, double) const;
-    const utils::PDFIntegratorGK<IntegrandFn, utils::GKOrder::GK15> integrator(
+    const utils::PDFIntegrator<IntegrandFn, utils::GKOrder::GK15> integrator(
         sfrAge, static_cast<IntegrandFn>(&Specsyn::continuousSpecIntegrand),
         nInt, logAge, intMaxIter(), absTol, intRelTol());
 

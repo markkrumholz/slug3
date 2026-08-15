@@ -12,7 +12,7 @@
 #include "../tracks/TrackCommons.hpp"
 #include "../tracks/Tracks2D.hpp"
 #include "../utils/GKIntegrator.hpp"
-#include "../utils/PDFIntegratorGK.hpp"
+#include "../utils/PDFIntegrator.hpp"
 #include "../utils/RngThread.hpp"
 #include <algorithm>
 #include <array>
@@ -360,7 +360,7 @@ void core::Cluster::computeLbol()
     if (birthNonStochMass_ > 0.0)
     {
         using LbolSegFn = std::array<double, 1> (*)(double, const Segment&);
-        const utils::PDFIntegratorGK<LbolSegFn, utils::GKOrder::GK15> integrator(
+        const utils::PDFIntegrator<LbolSegFn, utils::GKOrder::GK15> integrator(
             sc.imf(), static_cast<LbolSegFn>(&Cluster::lbolStar), 1,
             false, sc.intMaxIter(), sc.intAbsTol(), sc.intRelTol());
 

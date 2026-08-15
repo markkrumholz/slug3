@@ -8,8 +8,6 @@
  */
 
 #include "testPDFIntegrator.hpp"
-#include "testPDFIntegratorGK.hpp"
-#include "testPDFIntegratorND.hpp"
 #include "testRngThread.hpp"
 #include "testUniqueIDManager.hpp"
 #include <exception>
@@ -22,8 +20,6 @@ auto main() -> int {
         result += testRngThread();
         result += testUniqueIDManager();
         result += testPDFIntegrator();
-        result += testPDFIntegratorND();
-        result += testPDFIntegratorGK();
         return result;
     }
     catch (const std::exception& error)

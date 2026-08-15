@@ -30,8 +30,8 @@ namespace pdfs {
      * stellar age -- distance from the current simulation time --
      * when the underlying PDF is indexed by formation time instead)
      * without having to construct a whole new PDF: a PDFReflect can be
-     * passed anywhere a `const PDF&` is expected (e.g.
-     * PDFIntegratorND's own p array), and every method below performs
+     * passed anywhere a `const PDF&` is expected (e.g. PDFIntegrator's
+     * own p parameter), and every method below performs
      * the appropriate coordinate flip transparently. An explicit pivot
      * need not be the midpoint of the wrapped PDF's own support (e.g.
      * reflecting a star-formation-rate PDF about half of the current
@@ -49,7 +49,7 @@ namespace pdfs {
      * getMin()/getMax() always report the wrapped PDF's own support,
      * unchanged, regardless of pivot -- not that support's own image
      * under reflect() -- so that they remain useful as a safety clamp
-     * on integration bounds (see PDFIntegratorND::integrate()'s own
+     * on integration bounds (see PDFIntegrator::integrate()'s own
      * clamp) rather than an increasingly extreme range as pivot moves
      * away from the wrapped PDF's own midpoint.
      */

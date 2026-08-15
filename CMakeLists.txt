@@ -114,8 +114,6 @@ add_executable(slug
     src/extinct/Extinct.cpp
     src/io/SimControls.cpp
     src/utils/ParseUtils.cpp
-    src/extern/cubature/pcubature.c
-    src/extern/cubature/hcubature.c
 )
 
 # Test executables
@@ -157,8 +155,6 @@ add_executable(slugTestPDFs
 add_executable(slugTestUtils
     tests/utils/testUtilsAll.cpp
     tests/utils/testPDFIntegrator.cpp
-    tests/utils/testPDFIntegratorGK.cpp
-    tests/utils/testPDFIntegratorND.cpp
     src/pdfs/PDFFileParser.cpp
     src/pdfs/PDFSegment.cpp
     src/pdfs/PDFSegmentDelta.cpp
@@ -168,8 +164,6 @@ add_executable(slugTestUtils
     src/pdfs/PDFSegmentPowerlaw.cpp
     src/pdfs/PDFSegmentSchechter.cpp
     src/utils/ParseUtils.cpp
-    src/extern/cubature/pcubature.c
-    src/extern/cubature/hcubature.c
 )
 add_executable(slugTestTracks
     src/interpolation/Mesh2DGrid.cpp
@@ -214,8 +208,6 @@ add_executable(slugTestCore
     src/tracks/Tracks2D.cpp
     src/tracks/Tracks3D.cpp
     src/utils/ParseUtils.cpp
-    src/extern/cubature/pcubature.c
-    src/extern/cubature/hcubature.c
     tests/core/testCluster.cpp
     tests/core/testCoreAll.cpp
     tests/core/testGalaxy.cpp
@@ -265,8 +257,6 @@ add_executable(slugTestCoreFull
     src/tracks/Tracks2D.cpp
     src/tracks/Tracks3D.cpp
     src/utils/ParseUtils.cpp
-    src/extern/cubature/pcubature.c
-    src/extern/cubature/hcubature.c
     tests/core/testClusterSpecsynFullCommon.cpp
     tests/core/testClusterSpecsynFull.cpp
     tests/core/testClusterSpecsynFullAFe.cpp
@@ -320,8 +310,6 @@ add_executable(slugTestIo
     src/tracks/Tracks2D.cpp
     src/tracks/Tracks3D.cpp
     src/utils/ParseUtils.cpp
-    src/extern/cubature/pcubature.c
-    src/extern/cubature/hcubature.c
     tests/io/testIoAll.cpp
     tests/io/testOutputManager.cpp
     tests/io/testSimControls.cpp
@@ -343,8 +331,6 @@ add_executable(slugTestSpecsyn
     tests/specsyn/testSpecsynLibWR.cpp
     tests/specsyn/testSpecsynLibWD.cpp
     tests/specsyn/testSpecsynLibChained.cpp
-    src/extern/cubature/pcubature.c
-    src/extern/cubature/hcubature.c
     src/extinct/Extinct.cpp
     src/io/SimControls.cpp
     src/interpolation/Mesh2DGrid.cpp
@@ -430,8 +416,6 @@ pybind11_add_module(slugPython
     src/tracks/Tracks2D.cpp
     src/tracks/Tracks3D.cpp
     src/utils/ParseUtils.cpp
-    src/extern/cubature/pcubature.c
-    src/extern/cubature/hcubature.c
 )
 set_target_properties(slugPython PROPERTIES
     OUTPUT_NAME _slug
@@ -446,19 +430,19 @@ set_target_properties(slugPython PROPERTIES
 target_compile_options(slugPython PRIVATE -O3)
 target_compile_definitions(slugPython PRIVATE NDEBUG)
 
-# Include directories: project headers as regular includes; pcg-cpp,
-# tomlplusplus, and cubature as system includes so clang-tidy and the
-# compiler suppress warnings from them. (pybind11's own include directory
-# is already added as SYSTEM automatically by pybind11_add_module below,
+# Include directories: project headers as regular includes; pcg-cpp
+# and tomlplusplus as system includes so clang-tidy and the compiler
+# suppress warnings from them. (pybind11's own include directory is
+# already added as SYSTEM automatically by pybind11_add_module below,
 # for slugPython.) This only takes effect for headers actually reached
 # via this search list (e.g. an angle-bracket include) -- a relative
 # "../extern/..." include resolves via the including file's own
 # directory first and never consults this list, so it would NOT be
 # treated as a system header despite living under a SYSTEM include path.
-# This is why the toml.hpp, pybind11, and cubature.h includes throughout
-# the codebase are written in angle-bracket form.
+# This is why the toml.hpp and pybind11 includes throughout the
+# codebase are written in angle-bracket form.
 target_include_directories(slug PRIVATE src ${CMAKE_BINARY_DIR}/generated)
-target_include_directories(slug SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus src/extern/cubature)
+target_include_directories(slug SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
 
 target_include_directories(slugTestInterpolation PRIVATE src)
 target_include_directories(slugTestInterpolation SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
@@ -474,25 +458,25 @@ target_include_directories(slugTestPDFs SYSTEM PRIVATE src/extern/pcg-cpp/includ
 
 
 target_include_directories(slugTestUtils PRIVATE src)
-target_include_directories(slugTestUtils SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus src/extern/cubature)
+target_include_directories(slugTestUtils SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
 
 target_include_directories(slugTestTracks PRIVATE src)
 target_include_directories(slugTestTracks SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
 
 target_include_directories(slugTestCore PRIVATE src ${CMAKE_BINARY_DIR}/generated)
-target_include_directories(slugTestCore SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus src/extern/cubature)
+target_include_directories(slugTestCore SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
 
 target_include_directories(slugTestCoreFull PRIVATE src ${CMAKE_BINARY_DIR}/generated)
-target_include_directories(slugTestCoreFull SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus src/extern/cubature)
+target_include_directories(slugTestCoreFull SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
 
 target_include_directories(slugTestIo PRIVATE src ${CMAKE_BINARY_DIR}/generated)
-target_include_directories(slugTestIo SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus src/extern/cubature)
+target_include_directories(slugTestIo SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
 
 target_include_directories(slugTestSpecsyn PRIVATE src)
-target_include_directories(slugTestSpecsyn SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus src/extern/cubature)
+target_include_directories(slugTestSpecsyn SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
 
 target_include_directories(slugPython PRIVATE src ${CMAKE_BINARY_DIR}/generated)
-target_include_directories(slugPython SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus src/extern/cubature)
+target_include_directories(slugPython SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
 
 target_include_directories(slug SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestInterpolation SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
@@ -563,9 +547,8 @@ add_test(NAME test_Extinct COMMAND slugTestExtinct
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 add_test(NAME test_Phot COMMAND slugTestPhot)
 add_test(NAME test_PDFs COMMAND slugTestPDFs)
-# test_Utils loads real IMF files (data/imfs/chabrier.toml,
-# data/imfs/salpeter.toml) directly by relative path for
-# testPDFIntegrator/testPDFIntegratorND, so it needs to run from the
+# test_Utils loads a real IMF file (data/imfs/chabrier.toml) directly
+# by relative path for testPDFIntegrator, so it needs to run from the
 # source tree root.
 add_test(NAME test_Utils COMMAND slugTestUtils
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
