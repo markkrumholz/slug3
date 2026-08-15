@@ -153,6 +153,24 @@ namespace tracks
         { return interp_->sliceConstZ(feh).interpConstX(logT); }
 
         /**
+         * @brief Return the properties of a star of a given mass, age, and [Fe/H]
+         * @param m Mass of the star
+         * @param logT log10(time / yr) at which to evaluate
+         * @param feh [Fe/H] value of the tracks to use
+         * @param linear If true, force linear interpolation instead of
+         * the default interpolation type
+         * @return An array of the nTrackQty properties of the star
+         * @details
+         * No safety checking is performed: it is an error to call this
+         * with an (m, logT) pair that does not correspond to a live
+         * star at that time and [Fe/H]. If it is uncertain whether the
+         * star is alive, check first by calling liveMassRange().
+         */
+        [[nodiscard]] auto getStar(const double m, const double logT,
+            const double feh, const bool linear = false) const
+        { return interp_->sliceConstZ(feh)(logT, m, linear); }
+
+        /**
          * @brief Construct a Tracks2D object for a slice at fixed [Fe/H]
          * @param feh [Fe/H] value at which to slice
          * @return A Tracks2D object representing the (mass, time) slice at the given [Fe/H]

@@ -163,6 +163,23 @@ namespace tracks
          */
         [[nodiscard]] auto getIsochrone(const double logT) const { return interp_->interpConstX(logT); }
 
+        /**
+         * @brief Return the properties of a star of a given mass and age
+         * @param m Mass of the star
+         * @param logT log10(time / yr) at which to evaluate
+         * @param linear If true, force linear interpolation instead of
+         * the default interpolation type
+         * @return An array of the nTrackQty properties of the star
+         * @details
+         * No safety checking is performed: it is an error to call this
+         * with an (m, logT) pair that does not correspond to a live
+         * star at that time. If it is uncertain whether the star is
+         * alive, check first by calling liveMassRange().
+         */
+        [[nodiscard]] auto getStar(const double m, const double logT,
+            const bool linear = false) const
+        { return (*interp_)(logT, m, linear); }
+
     private:
 
         // Track data

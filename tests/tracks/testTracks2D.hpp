@@ -275,6 +275,92 @@ inline auto testTracks2DFieldOrder() -> int
 }
 
 /**
+ * @brief Regression/unit test for getStar()'s field order and values
+ * @return 0 if the test passes, 1 if it fails.
+ * @details
+ * Uses the same ground truth and setup as testTracks2DFieldOrder(),
+ * but calls getStar(mass, log10(age)) directly instead of going
+ * through getTrack(). Since mass = 5.0 is on the mesh's mass grid and
+ * the query age is on that mass's own age grid, (mass, log10(age)) is
+ * an exact vertex of the underlying mesh, so getStar() should
+ * reproduce the raw row exactly (up to floating-point round-off),
+ * exercising the same on-mesh onMesh()/xIntersectN() path exactly.
+ */
+inline auto testTracks2DGetStar() -> int
+{
+    const std::string registryName = "tests/tracks/assets/tracks.toml";
+    const std::string trackName = "MIST_test";
+    const std::string h5Path = "tests/tracks/assets/MIST_test.h5";
+    const std::string groupName = "feh_0.00_afe_-0.2_vvcrit_0.00";
+    constexpr double feh = 0.0;
+    constexpr double vvcrit = 0.0;
+    constexpr double afe = -0.2;
+    constexpr double mass = 5.0;
+    constexpr size_t rowIdx = 500;
+
+    const hid_t file = H5Fopen(h5Path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+    if (file < 0)
+    {
+        std::cerr << "testTracks2DGetStar: unable to open file "
+            << h5Path << "\n";
+        return 1;
+    }
+    const hid_t grp = H5Gopen2(file, groupName.c_str(), H5P_DEFAULT);
+    if (grp < 0)
+    {
+        std::cerr << "testTracks2DGetStar: unable to open group "
+            << groupName << " in " << h5Path << "\n";
+        H5Fclose(file);
+        return 1;
+    }
+
+    int result = 0;
+    try
+    {
+        const auto [age, expected] = testutil::readRawFields(grp, mass, rowIdx);
+
+        const tracks::Tracks2D tracks2d(trackName, feh, vvcrit, afe, registryName);
+        const auto actual = tracks2d.getStar(mass, std::log10(age));
+        for (size_t k = 0; k < testutil::nQty; ++k)
+        {
+            if (!testutil::fieldsMatch(actual.at(k), expected.at(k)))
+            {
+                std::cerr << "testTracks2DGetStar: field "
+                    << tracks::fieldStr.at(k) << " (index " << k
+                    << ") mismatch: expected " << expected.at(k)
+                    << ", got " << actual.at(k) << "\n";
+                result = 1;
+            }
+        }
+
+        // Also check that linear = true doesn't throw and returns a
+        // result close to the default-type result at this same point
+        const auto actualLinear = tracks2d.getStar(mass, std::log10(age), true);
+        for (size_t k = 0; k < testutil::nQty; ++k)
+        {
+            if (!testutil::fieldsMatch(actualLinear.at(k), expected.at(k)))
+            {
+                std::cerr << "testTracks2DGetStar: (linear) field "
+                    << tracks::fieldStr.at(k) << " (index " << k
+                    << ") mismatch: expected " << expected.at(k)
+                    << ", got " << actualLinear.at(k) << "\n";
+                result = 1;
+            }
+        }
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "testTracks2DGetStar: unexpected exception: "
+            << e.what() << "\n";
+        result = 1;
+    }
+
+    H5Gclose(grp);
+    H5Fclose(file);
+    return result;
+}
+
+/**
  * @brief Unit test for the Tracks2D class.
  * @return 0 if the test passes, 1 if it fails.
  * @details
@@ -290,8 +376,10 @@ inline auto testTracks2DFieldOrder() -> int
  * of the files are found (since then nothing was actually tested), or
  * if any file that is found fails to produce a valid Tracks2D object.
  * It also tests the feH(), aFe(), and vVcrit() getters against the
- * known metadata of the MIST_test.h5 group, and that getTrack()
- * returns fields in the correct order (see testTracks2DFieldOrder()).
+ * known metadata of the MIST_test.h5 group, that getTrack() returns
+ * fields in the correct order (see testTracks2DFieldOrder()), and
+ * that getStar() reproduces the same ground truth directly (see
+ * testTracks2DGetStar()).
  */
 inline auto testTracks2D() -> int
 {
@@ -333,6 +421,7 @@ inline auto testTracks2D() -> int
     int result = anyFailed ? 1 : 0;
     if (testTracks2DGetters() != 0) { result = 1; }
     if (testTracks2DFieldOrder() != 0) { result = 1; }
+    if (testTracks2DGetStar() != 0) { result = 1; }
     return result;
 }
 
