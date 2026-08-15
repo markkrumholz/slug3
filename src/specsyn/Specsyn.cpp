@@ -18,7 +18,7 @@
 #include "../tracks/TrackCommons.hpp"
 #include "../tracks/Tracks3D.hpp"
 #include "../utils/Constants.hpp"
-#include "../utils/GKIntegrator.hpp"
+#include "../utils/GKIntegratorData.hpp"
 #include "../utils/PDFIntegrator.hpp"
 #include <algorithm>
 #include <array>
