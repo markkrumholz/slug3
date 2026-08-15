@@ -7,6 +7,7 @@
 
 #include "Galaxy.hpp"
 #include "../extinct/Extinct.hpp"
+#include "../interpolation/Interpolator1D.hpp"
 #include "../io/SimControls.hpp"
 #include "../pdfs/PDF.hpp"
 #include "../pdfs/PDFReflect.hpp"
@@ -15,6 +16,7 @@
 #include "../utils/PDFIntegratorND.hpp"
 #include "../utils/UniqueIDManager.hpp"
 #include "Cluster.hpp"
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>

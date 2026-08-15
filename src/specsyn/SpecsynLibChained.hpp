@@ -296,6 +296,17 @@ namespace specsyn
         void propagateWNLTeffRanges();
 
         /**
+         * @brief Set fehMin_/fehMax_ from each GridType's own chained library
+         * @details
+         * Factored out of the constructor purely to keep its own
+         * cognitive complexity down -- see propagateWNLTeffRanges()'s
+         * own identical rationale. Called once, after wrLibs_/wdLibs_/
+         * normalLibs_ have all been fully populated -- see fehMin_'s
+         * own comment for exactly what this computes and why.
+         */
+        void updateFeHRanges();
+
+        /**
          * @brief Return whichever of wrLibs_/wdLibs_/normalLibs_ matches type
          * @param type The GridType to look up
          * @return A const reference to that GridType's own chain
