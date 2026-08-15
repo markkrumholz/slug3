@@ -627,9 +627,29 @@ namespace interp
                     lastIntersectRightUp = true;
                     if (iUp == 0) { break; }
                 }
-                if (iUp == 0 && x == x_[iUp,jSaveLoc] && m_[iUp,jSaveLoc] > 0)
+                if (x == x_[iUp,jSaveLoc])
                 {
-                    continueUp = false;
+                    if (m_[iUp,jSaveLoc] > 0)
+                    {
+                        // The while loop above stopped only because it
+                        // reached the mesh's left edge (iUp == 0), not
+                        // because the slope condition failed: there is
+                        // no column further left to move into
+                        continueUp = false;
+                    }
+                    else
+                    {
+                        // Slope <= 0 at this corner: unlike the
+                        // positive-slope case, we stay in this same
+                        // column, but must still suppress its own
+                        // left-spine recheck, which trivially starts
+                        // at our exact position (the same self-
+                        // detection this guards against for m > 0,
+                        // just on the other side). Mirrors
+                        // xIntersectSegStartInterior's identical
+                        // corner-case handling.
+                        lastIntersectRightUp = true;
+                    }
                 }
                 while (x == x_[iDown,jSaveLoc] && m_[iDown,jSaveLoc] < 0)
                 {
@@ -638,9 +658,18 @@ namespace interp
                     lastIntersectRightDown = true;
                     if (iDown == 0) { break; }
                 }
-                if (iDown == 0 && x == x_[iDown,jSaveLoc] && m_[iDown,jSaveLoc] < 0)
+                if (x == x_[iDown,jSaveLoc])
                 {
-                    continueDown = false;
+                    if (m_[iDown,jSaveLoc] < 0)
+                    {
+                        continueDown = false;
+                    }
+                    else
+                    {
+                        // Mirrors the m > 0 case above, for the down
+                        // direction
+                        lastIntersectLeftDown = true;
+                    }
                 }
 
             }

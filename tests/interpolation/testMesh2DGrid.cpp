@@ -785,6 +785,81 @@ testXIntersectNDownwardSpine()
     return 0; // Success
 }
 
+// Regression test for a bug in xIntersectN's "on rib" corner-case
+// handling, found while hooking xIntersectN up to real stellar track
+// data. When a search starts exactly on a rib, at a column i whose
+// index exactly matches the query x (i.e. x == x_[i,jSaveLoc]), the
+// code needs to suppress that column's own spine recheck in whichever
+// direction it's searching, since that spine trivially starts at the
+// exact point being searched from and would otherwise be
+// re-"discovered" at zero distance. The existing code only did this
+// for a positive-sloped spine (decrementing into the next column and
+// setting the corresponding flag); for a spine sloping <= 0 at that
+// same column, neither flag was set, so the zero-distance spine won
+// the nearest-edge comparison and was reported as if the search had
+// jumped straight to the mass at its far end -- in the real-data case
+// that exposed this, a search from a live, present-day mass up to the
+// very next (much higher, much shorter-lived) mass in the grid
+// incorrectly reported that higher mass as still alive at a time long
+// after it had actually died, instead of the true intersection with
+// the mesh's edge somewhere in between. This mesh reproduces the same
+// shape as that real case in miniature: two masses (5 and 20), where
+// mass 5's "time" column keeps increasing (0, 2, 4, 6) while mass 20's
+// stops early and pads by repeating its final value (0, 1, 1, 1),
+// giving the column-2 spine connecting them a negative slope
+// (15 / (1 - 4) = -5) at the exact query point (x = 4, y = 5).
+static auto
+testXIntersectNRibCornerNegativeSlope()
+{
+    using XInt = interp::Mesh2DGrid::xIntersectionDescriptor;
+    using XIntType = interp::Mesh2DGrid::IntersectionType;
+
+    constexpr size_t nx = 4;
+    constexpr size_t ny = 2;
+    std::array<double, nx*ny> xData = { 0 };
+    std::array<double, ny> yData = { 5.0, 20.0 };
+    const std::mdspan<double, std::extents<size_t, nx, ny>> x(xData.data());
+    const std::mdspan<double, std::extents<size_t, ny>> y(yData.data());
+    for (size_t i = 0; i < nx; ++i) { x[i,0] = static_cast<double>(i) * 2.0; }
+    for (size_t i = 0; i < nx; ++i)
+    {
+        x[i,1] = static_cast<double>(std::min(i, size_t{1}));
+    }
+    const interp::Mesh2DGrid m2d(x, y);
+
+    const auto got = m2d.xIntersectN(4.0, 5.0, 2);
+
+    const std::vector<XInt> expected = {
+        { .y = 5.0, .xs = 4.0, .t = XIntType::rib,
+            .idx = 0, .meshExit = false },
+        { .y = 11.0, .xs = std::sqrt(40.0), .t = XIntType::spine,
+            .idx = 3, .meshExit = true }
+    };
+
+    if (got.size() != expected.size())
+    {
+        std::cerr << "testMesh2DGrid: xIntersectN(4.0, 5.0, 2) expected "
+            << expected.size() << " points, got " << got.size() << "\n";
+        return 1;
+    }
+    for (const auto& [r, e] : std::views::zip(got, expected))
+    {
+        if (!utils::approxEqual(r.y, e.y) || !utils::approxEqual(r.xs, e.xs) ||
+            r.t != e.t || r.idx != e.idx || r.meshExit != e.meshExit)
+        {
+            std::cerr << "testMesh2DGrid: xIntersectN(4.0, 5.0, 2): "
+                "expected (y, xs, t, idx, exit) = " << e.y << ", " << e.xs
+                << ", " << static_cast<int>(e.t) << ", " << e.idx << ", "
+                << e.meshExit << ", instead found " << r.y << ", " << r.xs
+                << ", " << static_cast<int>(r.t) << ", " << r.idx << ", "
+                << r.meshExit << "\n";
+            return 1;
+        }
+    }
+
+    return 0; // Success
+}
+
 // Regression test for yIntersect at the exact yMin_/yMax_ boundary.
 // yIdx's cell-index clamp (needed so it always returns a valid
 // cell-start index) forces a nonzero mass offset from the boundary
@@ -998,6 +1073,7 @@ auto testMesh2DGrid() -> int
     // Regression test for the downward-search distance bug in
     // findIntersectDistance, found while implementing xIntersectN
     test += testXIntersectNDownwardSpine();
+    test += testXIntersectNRibCornerNegativeSlope();
 
     // Regression tests for yIntersect/xIntersect at the exact
     // yMin_/yMax_ and xMin_/xMax_ boundaries

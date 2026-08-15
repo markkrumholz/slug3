@@ -151,6 +151,92 @@ inline auto testTracks3DFieldOrder() -> int
     return result;
 }
 
+/**
+ * @brief Regression/unit test for getStar()'s field order and values
+ * @return 0 if the test passes, 1 if it fails.
+ * @details
+ * Uses the same ground truth and setup as testTracks3DFieldOrder(),
+ * but calls getStar(mass, log10(age), feh) directly instead of going
+ * through getTrack(). Since mass = 5.0 is on the mesh's mass grid,
+ * feh = 0.0 is the mesh's only feh point, and the query age is on
+ * that mass's own age grid, (mass, log10(age)) is an exact vertex of
+ * the underlying feh = 0.0 slice's mesh, so getStar() should
+ * reproduce the raw row exactly (up to floating-point round-off).
+ */
+inline auto testTracks3DGetStar() -> int
+{
+    const std::string registryName = "tests/tracks/assets/tracks.toml";
+    const std::string trackName = "MIST_test";
+    const std::string h5Path = "tests/tracks/assets/MIST_test.h5";
+    const std::string groupName = "feh_0.00_afe_-0.2_vvcrit_0.00";
+    constexpr double feh = 0.0;
+    constexpr double mass = 5.0;
+    constexpr size_t rowIdx = 500;
+
+    const hid_t file = H5Fopen(h5Path.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+    if (file < 0)
+    {
+        std::cerr << "testTracks3DGetStar: unable to open file "
+            << h5Path << "\n";
+        return 1;
+    }
+    const hid_t grp = H5Gopen2(file, groupName.c_str(), H5P_DEFAULT);
+    if (grp < 0)
+    {
+        std::cerr << "testTracks3DGetStar: unable to open group "
+            << groupName << " in " << h5Path << "\n";
+        H5Fclose(file);
+        return 1;
+    }
+
+    int result = 0;
+    try
+    {
+        const auto [age, expected] = testutil::readRawFields(grp, mass, rowIdx);
+
+        const tracks::Tracks3D tracks3d(
+            trackName, feh, feh, 0.0, -0.2, registryName);
+        const auto actual = tracks3d.getStar(mass, std::log10(age), feh);
+        for (size_t k = 0; k < testutil::nQty; ++k)
+        {
+            if (!testutil::fieldsMatch(actual.at(k), expected.at(k)))
+            {
+                std::cerr << "testTracks3DGetStar: field "
+                    << tracks::fieldStr.at(k) << " (index " << k
+                    << ") mismatch: expected " << expected.at(k)
+                    << ", got " << actual.at(k) << "\n";
+                result = 1;
+            }
+        }
+
+        // Also check that linear = true doesn't throw and reproduces
+        // the same ground truth at this same exact-grid point
+        const auto actualLinear =
+            tracks3d.getStar(mass, std::log10(age), feh, true);
+        for (size_t k = 0; k < testutil::nQty; ++k)
+        {
+            if (!testutil::fieldsMatch(actualLinear.at(k), expected.at(k)))
+            {
+                std::cerr << "testTracks3DGetStar: (linear) field "
+                    << tracks::fieldStr.at(k) << " (index " << k
+                    << ") mismatch: expected " << expected.at(k)
+                    << ", got " << actualLinear.at(k) << "\n";
+                result = 1;
+            }
+        }
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "testTracks3DGetStar: unexpected exception: "
+            << e.what() << "\n";
+        result = 1;
+    }
+
+    H5Gclose(grp);
+    H5Fclose(file);
+    return result;
+}
+
 // NOLINTEND(misc-include-cleaner)
 
 #endif // TESTTRACKS3D_HPP

@@ -20,6 +20,7 @@ auto main() -> int {
         result += testTracks2D();
         result += testTracks3D();
         result += testTracks3DFieldOrder();
+        result += testTracks3DGetStar();
         result += testTrackUtils();
         return result;
     }
