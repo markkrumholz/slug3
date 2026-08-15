@@ -13,7 +13,8 @@
 #include "../pdfs/PDFReflect.hpp"
 #include "../phot/FilterCollection.hpp"
 #include "../tracks/TrackCommons.hpp"
-#include "../utils/PDFIntegratorND.hpp"
+#include "../utils/GKIntegrator.hpp"
+#include "../utils/PDFIntegratorGK.hpp"
 #include "../utils/UniqueIDManager.hpp"
 #include "Cluster.hpp"
 #include <algorithm>
@@ -21,9 +22,6 @@
 #include <cmath>
 #include <cstddef>
 #include <functional>
-#include <limits>
-#include <mdspan> // NOLINT(misc-include-cleaner) -- see the identical NOLINT on SpecsynLibWR.hpp's own <mdspan> include
-#include <memory>
 #include <numeric>
 #include <sstream>
 #include <stdexcept>
@@ -242,47 +240,42 @@ void core::Galaxy::computeLbol()
 }
 
 auto core::Galaxy::lbolCtsIntegrand(
-    const std::mdspan<double, std::extents<std::size_t, std::dynamic_extent, 2>> points, // NOLINT(misc-include-cleaner) -- see the identical NOLINT on the <mdspan> include above
+    const double age,
+    const pdfs::PDF& imf,
     const double feh
 ) const -> std::vector<double>
 {
     const auto& sc = controls_.get();
+    const double logAge = std::max(std::log10(age), sc.tracks().logTMin());
+    const auto isochrone = sc.tracks().getIsochrone(logAge, feh);
 
-    // Single-slot isochrone cache, keyed on age alone -- feh is fixed
-    // for this whole call -- see
-    // Specsyn::continuousSpecIntegrand()'s own identical comment for
-    // why a single slot, rather than a persistent map keyed on every
-    // distinct age a batch touches, is what keeps memory bounded
-    // regardless of how many distinct ages a batch spans.
-    double cachedAge = std::numeric_limits<double>::quiet_NaN();
-    std::unique_ptr<specsyn::Specsyn::Isochrone> cachedIsochrone;
-
-    const std::size_t npts = points.extent(0);
-    std::vector<double> resultFlat(npts, 0.0);
-    for (std::size_t i = 0; i < npts; ++i)
+    // Per-star Lbol, mirroring Cluster::lbolStar()'s own role for
+    // Cluster::computeLbol()'s identical inner mass integral -- a
+    // local, capture-free lambda rather than a call into any Specsyn,
+    // since a Specsyn may not exist at all here (see computeLbolCts()'s
+    // own comment).
+    const auto lbolStar = [](const double m, const specsyn::Specsyn::Segment& segment) -> std::array<double, 1>
     {
-        const double age = points[i, 0]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i < npts == points.extent(0) by this loop's own bound
-        const double mass = points[i, 1]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
-
-        if (cachedIsochrone == nullptr || age != cachedAge)
-        {
-            const double logAge = std::max(std::log10(age), sc.tracks().logTMin());
-            cachedIsochrone = std::make_unique<specsyn::Specsyn::Isochrone>(sc.tracks().getIsochrone(logAge, feh));
-            cachedAge = age;
-        }
-
-        const specsyn::Specsyn::Segment* seg = nullptr;
-        for (const auto& s : *cachedIsochrone)
-        {
-            if (mass >= s->xMin() && mass <= s->xMax()) { seg = s.get(); break; }
-        }
-        if (seg == nullptr) { continue; } // dead star: leave this point's own value at zero
-
-        const auto props = (*seg)(mass);
+        const auto props = segment(m);
         const double logL = props[static_cast<std::size_t>(tracks::FieldIdx::logL)]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- StarData is a fixed-size std::array, and logL is one of its compile-time-known indices
-        resultFlat[i] = std::pow(10.0, logL); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i < npts == resultFlat.size() by construction
+        return { std::pow(10.0, logL) };
+    };
+    using LbolSegFn = decltype(lbolStar);
+
+    const utils::PDFIntegratorGK<LbolSegFn, utils::GKOrder::GK15> integrator(
+        imf, lbolStar, 1, false, sc.intMaxIter(), sc.intAbsTol(), sc.intRelTol());
+
+    double lbolRaw = 0.0;
+    for (const auto& seg : isochrone)
+    {
+        const double a = std::max(imf.getMin(), seg->xMin());
+        const double b = std::min(imf.getMax(), seg->xMax());
+        if (a >= b) { continue; } // empty intersection with [imf.getMin(), imf.getMax()]
+
+        const auto segResult = integrator.integrate(a, b, *seg);
+        lbolRaw += segResult[0]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- segResult is a std::array<double, 1>, so index 0 is always valid
     }
-    return resultFlat;
+    return { lbolRaw };
 }
 
 void core::Galaxy::computeLbolCts()
@@ -307,27 +300,20 @@ void core::Galaxy::computeLbolCts()
     const bool singleFeh = (fehDist.getMin() == fehDist.getMax());
     const double absTol = sc.intAbsTol() * sfr.integral(0.0, curTime_);
 
-    using IntegrandFn = std::vector<double> (Galaxy::*)(
-        std::mdspan<double, std::extents<std::size_t, std::dynamic_extent, 2>>, double) const; // NOLINT(misc-include-cleaner) -- see the identical NOLINT on the <mdspan> include above
-    const utils::PDFIntegratorND<IntegrandFn, 2, true, utils::CubatureMethod::hAdaptive> integrator(
-        std::array<std::reference_wrapper<const pdfs::PDF>, 2>{ std::cref(sfrAge), std::cref(imf) },
-        static_cast<IntegrandFn>(&Galaxy::lbolCtsIntegrand),
-        1,
-        std::array<bool, 2>{ logAge, true },
-        sc.intMaxIter(), absTol, sc.intRelTol());
+    using IntegrandFn = std::vector<double> (Galaxy::*)(double, const pdfs::PDF&, double) const;
+    const utils::PDFIntegratorGK<IntegrandFn, utils::GKOrder::GK15> integrator(
+        sfrAge, static_cast<IntegrandFn>(&Galaxy::lbolCtsIntegrand),
+        1, logAge, sc.intMaxIter(), absTol, sc.intRelTol());
 
     double lbolRaw = 0.0;
     if (singleFeh)
     {
-        const auto result = integrator.integrate(
-            std::array<double, 2>{ ageMin, imf.getMin() },
-            std::array<double, 2>{ curTime_, imf.getMax() },
-            *this, fehDist.getMin());
+        const auto result = integrator.integrate(ageMin, curTime_, this, imf, fehDist.getMin());
         lbolRaw = result[0]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- result has exactly 1 element, by construction (nInt == 1)
     }
     else
     {
-        // Integrate over [Fe/H] by running the same 2D (age, mass)
+        // Integrate over [Fe/H] by running the same nested (age, mass)
         // integral once at every grid point the tracks are actually
         // defined at, then interpolating and integrating those
         // discrete results over [Fe/H] -- see
@@ -340,10 +326,7 @@ void core::Galaxy::computeLbolCts()
         std::vector<double> fehWeight(nFeh);
         for (std::size_t f = 0; f < nFeh; ++f)
         {
-            const auto result = integrator.integrate(
-                std::array<double, 2>{ ageMin, imf.getMin() },
-                std::array<double, 2>{ curTime_, imf.getMax() },
-                *this, fehGrid[f]);
+            const auto result = integrator.integrate(ageMin, curTime_, this, imf, fehGrid[f]);
             fehWeight[f] = fehDist(fehGrid[f]);
             lbolAtFeh[f] = result[0] * fehWeight[f]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- result has exactly 1 element, by construction (nInt == 1)
         }
