@@ -14,7 +14,7 @@
 #include "../phot/FilterCollection.hpp"
 #include "../tracks/TrackCommons.hpp"
 #include "../utils/GKIntegrator.hpp"
-#include "../utils/PDFIntegratorGK.hpp"
+#include "../utils/PDFIntegrator.hpp"
 #include "../utils/UniqueIDManager.hpp"
 #include "Cluster.hpp"
 #include <algorithm>
@@ -262,7 +262,7 @@ auto core::Galaxy::lbolCtsIntegrand(
     };
     using LbolSegFn = decltype(lbolStar);
 
-    const utils::PDFIntegratorGK<LbolSegFn, utils::GKOrder::GK15> integrator(
+    const utils::PDFIntegrator<LbolSegFn, utils::GKOrder::GK15> integrator(
         imf, lbolStar, 1, false, sc.intMaxIter(), sc.intAbsTol(), sc.intRelTol());
 
     double lbolRaw = 0.0;
@@ -301,7 +301,7 @@ void core::Galaxy::computeLbolCts()
     const double absTol = sc.intAbsTol() * sfr.integral(0.0, curTime_);
 
     using IntegrandFn = std::vector<double> (Galaxy::*)(double, const pdfs::PDF&, double) const;
-    const utils::PDFIntegratorGK<IntegrandFn, utils::GKOrder::GK15> integrator(
+    const utils::PDFIntegrator<IntegrandFn, utils::GKOrder::GK15> integrator(
         sfrAge, static_cast<IntegrandFn>(&Galaxy::lbolCtsIntegrand),
         1, logAge, sc.intMaxIter(), absTol, sc.intRelTol());
 

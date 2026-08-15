@@ -307,7 +307,7 @@ namespace core
          * @details
          * Read live wherever this cluster needs a physics setting or
          * an integrator tolerance (e.g. computeLbol()'s own
-         * utils::PDFIntegratorGK), rather than snapshotted at
+         * utils::PDFIntegrator), rather than snapshotted at
          * construction -- so a change to controls_'s own tolerances
          * after this Cluster is built takes effect the next time it
          * integrates, with no need to rebuild the Cluster.
@@ -419,7 +419,7 @@ namespace core
          * adds the continuously-sampled (non-stochastic) part of the
          * population's own contribution, integrated against the IMF
          * over each isochrone segment via lbolStar() and
-         * utils::PDFIntegratorGK -- the same per-segment integration
+         * utils::PDFIntegrator -- the same per-segment integration
          * Specsyn::specCts() uses, and for the same reason (an
          * isochrone may have gaps between segments that the quadrature
          * routine has no way to know to avoid).
@@ -436,7 +436,7 @@ namespace core
          * @return 10^logL at mass m, in Lsun, wrapped in a
          *   single-element array
          * @details
-         * Exists so computeLbol() can hand it to utils::PDFIntegratorGK,
+         * Exists so computeLbol() can hand it to utils::PDFIntegrator,
          * which expects a callable taking the integration variable
          * (here, mass) as its first argument and returning a fixed- or
          * dynamically-sized container of doubles -- mirroring
@@ -444,7 +444,7 @@ namespace core
          * std::array<double, 1> rather than a per-wavelength vector,
          * since there is only one quantity (Lbol) here, not one per
          * wavelength. Static since it needs no instance state, which
-         * lets computeLbol() hand PDFIntegratorGK a plain function
+         * lets computeLbol() hand PDFIntegrator a plain function
          * pointer rather than a pointer to member function.
          */
         [[nodiscard]] static auto lbolStar(double m, const Segment& segment) -> std::array<double, 1>;

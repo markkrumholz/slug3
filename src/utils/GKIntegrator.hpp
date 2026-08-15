@@ -819,12 +819,7 @@ namespace utils
          * straight to std::invoke(f_, x, args...); for a pointer to
          * member function, hands off to invokeFMember() instead,
          * which reorders arguments into the shape std::invoke's own
-         * INVOKE protocol requires -- see its own comment. Mirrors
-         * PDFIntegratorND::operator()'s own identical dispatch (see
-         * PDFIntegratorND.hpp), just without that class's further N/
-         * Vectorized-dependent fallback forms, which GKIntegrator (a
-         * fixed, scalar-x, non-vectorized integrand) has no analogue
-         * of.
+         * INVOKE protocol requires -- see its own comment.
          */
         template <class... CallArgs>
         [[nodiscard]] auto invokeF(const double x, CallArgs&&... args) const

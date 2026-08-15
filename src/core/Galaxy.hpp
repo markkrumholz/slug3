@@ -375,7 +375,7 @@ namespace core
          *   Specsyn::continuousSpecIntegrand()'s own age parameter for
          *   the identical convention (not time -- computeLbolCts()
          *   integrates this dimension via a pdfs::PDFReflect view of
-         *   sfr, pivoted so that the coordinate PDFIntegratorGK hands
+         *   sfr, pivoted so that the coordinate PDFIntegrator hands
          *   back already is age)
          * @param imf The initial mass function of the population --
          *   see computeLbolCts()'s own imf parameter; used both as the
@@ -396,7 +396,7 @@ namespace core
          * exactly (see its own comment): floors log10(age), builds the
          * isochrone at that (log age, feh), then integrates each of its
          * segments' own bolometric luminosity against imf via a nested
-         * PDFIntegratorGK (GKOrder::GK15) -- a local, capture-free
+         * PDFIntegrator (GKOrder::GK15) -- a local, capture-free
          * lambda mirroring Cluster::lbolStar()'s own role, rather than
          * calling into any Specsyn (which may not exist at all when
          * this runs -- see computeLbolCts()'s own comment), reading
@@ -423,7 +423,7 @@ namespace core
          *
          * Mirrors Specsyn::specCtsHelper()'s own nested-1D structure
          * exactly (the reflected-and-log-transformed age coordinate, a
-         * PDFIntegratorGK over age alone whose own integrand --
+         * PDFIntegrator over age alone whose own integrand --
          * lbolCtsIntegrand() -- performs a complete inner 1D integral
          * over mass via a fresh isochrone built at its own age, and --
          * when fehDist is non-degenerate -- running that same nested
