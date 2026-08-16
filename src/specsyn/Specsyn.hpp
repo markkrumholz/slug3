@@ -361,7 +361,15 @@ namespace specsyn
          * @param fCluster The fraction of star-forming mass treated
          *   stochastically, in individual Cluster objects (see
          *   io::SimControls::fCluster()); the result is scaled by
-         *   (1 - fCluster), the remaining continuously-treated share
+         *   (1 - fCluster) * (1 - controls_.fracStochMass()) -- see
+         *   this function's own comment for the second factor
+         * @param mMin Minimum stellar mass to integrate over, in Msun
+         *   -- see the isochrone specCts() overload's own mMin
+         *   parameter; passed straight through to the inner mass
+         *   integral (via specCtsImpl()), exactly like that overload's
+         *   own mMin
+         * @param mMax Maximum stellar mass to integrate over, in Msun
+         *   -- see mMin's own comment
          * @return The specific luminosity of the continuously-formed
          *   population, evaluated on the wavelength grid returned by
          *   wl(), in units of erg/s/Angstrom
@@ -428,7 +436,26 @@ namespace specsyn
          * integrated is lambda * dL/dlambda (via continuousSpecIntegrand(),
          * which mirrors specWl()'s own multiplication), undone by
          * dividing back out by wl_ elementwise once the integral
-         * itself is complete, before scaling by (1 - fCluster).
+         * itself is complete, before scaling by
+         * (1 - fCluster) * (1 - controls_.fracStochMass()): fCluster is
+         * the fraction of star-forming mass diverted to individual,
+         * stochastically-sampled Cluster objects (see fCluster's own
+         * comment); of the (1 - fCluster) that remains, mMin/mMax
+         * already restrict this call's own integral to whatever mass
+         * range the caller asked for (e.g. Galaxy::computeSpec()
+         * passes [imf.getMin(), controls_.minStochMass()], the purely
+         * continuous, sub-minStochMass share of the non-clustered
+         * population -- see its own comment), but controls_.fracStochMass()
+         * -- the IMF-integral fraction of mass at or above
+         * controls_.minStochMass() -- is what the caller's own mMax
+         * choice implicitly excludes, so it must be divided back out
+         * of the (1 - fCluster) share explicitly here, rather than
+         * folding it into mMax/mTot the way the isochrone specCts()
+         * overload's own mTot already does. In the historical case
+         * where mMax >= imf.getMax() (mMin/mMax cover the whole IMF,
+         * i.e. every non-clustered star is treated continuously, with
+         * no field-star population above minStochMass at all),
+         * fracStochMass() is exactly 0, and this factor is a no-op.
          *
          * A thin wrapper over specCtsHelper() (computeLbol = false) --
          * see specAndLbolCts() for the sibling that also returns the
@@ -440,7 +467,9 @@ namespace specsyn
             const pdfs::PDF& imf,
             const pdfs::PDF& fehDist,
             double curTime,
-            double fCluster
+            double fCluster,
+            double mMin,
+            double mMax
         ) const -> std::vector<double>;
 
         /**
@@ -450,6 +479,8 @@ namespace specsyn
          * @param fehDist See specCts()'s own fehDist parameter
          * @param curTime See specCts()'s own curTime parameter
          * @param fCluster See specCts()'s own fCluster parameter
+         * @param mMin See specCts()'s own mMin parameter
+         * @param mMax See specCts()'s own mMax parameter
          * @return A pair of (1) the same specific luminosity specCts()
          *   itself returns, and (2) the population's own bolometric
          *   luminosity, in Lsun (matching Cluster::lbol()'s own units)
@@ -476,7 +507,9 @@ namespace specsyn
             const pdfs::PDF& imf,
             const pdfs::PDF& fehDist,
             double curTime,
-            double fCluster
+            double fCluster,
+            double mMin,
+            double mMax
         ) const -> std::pair<std::vector<double>, double>;
 
         /**
@@ -629,6 +662,8 @@ namespace specsyn
          * @param fehDist See specCts()'s own fehDist parameter
          * @param curTime See specCts()'s own curTime parameter
          * @param fCluster See specCts()'s own fCluster parameter
+         * @param mMin See specCts()'s own mMin parameter
+         * @param mMax See specCts()'s own mMax parameter
          * @param computeLbol Whether to also integrate the population's
          *   bolometric luminosity alongside its spectrum
          * @return If computeLbol is false, exactly what specCts()
@@ -649,7 +684,9 @@ namespace specsyn
          * element, when present, is a genuine luminosity, not a
          * lambda-weighted flux, so it is excluded from this function's
          * own dL/dlambda-recovering division by wl_ -- only scaled by
-         * (1 - fCluster), same as every other element. It does,
+         * (1 - fCluster) * (1 - controls_.fracStochMass()), same as
+         * every other element (see specCts()'s own comment for why
+         * that second factor). It does,
          * however, get one further unit conversion of its own:
          * continuousSpecIntegrand() reports it in erg/s, to stay on the
          * same absolute scale as the spectral elements this function's
@@ -707,6 +744,8 @@ namespace specsyn
             const pdfs::PDF& fehDist,
             double curTime,
             double fCluster,
+            double mMin,
+            double mMax,
             bool computeLbol
         ) const -> std::vector<double>;
 
@@ -718,9 +757,13 @@ namespace specsyn
          *   coordinate PDFIntegrator hands back already is age; see
          *   its own comment)
          * @param imf The initial mass function of the population -- see
-         *   specCtsHelper()'s own imf parameter; used both as the
-         *   inner mass integral's own weighting PDF and, via
-         *   getMin()/getMax(), its own integration bounds
+         *   specCtsHelper()'s own imf parameter; used as the inner
+         *   mass integral's own weighting PDF
+         * @param mMin See specCtsHelper()'s own mMin parameter --
+         *   passed straight through as the inner mass integral's own
+         *   lower bound, in place of imf.getMin()
+         * @param mMax See mMin's own comment -- the inner mass
+         *   integral's own upper bound, in place of imf.getMax()
          * @param computeLbol Whether to also compute, and append, this
          *   age's own integrated bolometric luminosity -- see
          *   specCtsImpl()'s own computeLbol parameter
@@ -742,10 +785,10 @@ namespace specsyn
          * feh) via controls_.tracks().getIsochrone(), and then hands
          * that isochrone straight to specCtsImpl() (forIntegration =
          * true) to perform the inner integral over mass, bounded to
-         * [imf.getMin(), imf.getMax()] -- reusing the same proven,
-         * benchmarked PDFIntegrator-based mass integrator the
-         * isochrone specCts() overload itself uses, rather than a
-         * second, independent implementation of the same integral. No
+         * [mMin, mMax] -- reusing the same proven, benchmarked
+         * PDFIntegrator-based mass integrator the isochrone specCts()
+         * overload itself uses, rather than a second, independent
+         * implementation of the same integral. No
          * explicit live/dead mass check is needed here: the isochrone's
          * own segments, each only valid over their own
          * [xMin(), xMax()], already encode exactly which masses are
@@ -767,7 +810,8 @@ namespace specsyn
          * ordinary segment edge.
          */
         [[nodiscard]] auto continuousSpecIntegrand(
-            double age, const pdfs::PDF& imf, bool computeLbol, double feh) const -> std::vector<double>;
+            double age, const pdfs::PDF& imf, double mMin, double mMax,
+            bool computeLbol, double feh) const -> std::vector<double>;
     };
 
 } // namespace specsyn
