@@ -21,6 +21,7 @@
 #include <numbers>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <toml.hpp>
 #include <utility>
 #include <vector>
@@ -768,6 +769,131 @@ static auto testSimControlsSpectraChained() -> int
     return 0;
 }
 
+// Verify that SimControls::readExtinct() symmetrically defaults
+// whichever of avDist()/avDistField() was not given an explicit
+// distribution to a valid delta function PDF at 0, so the two are
+// always either both valid or both invalid, never just one -- see
+// readExtinct()'s own comment for why.
+static auto testSimControlsExtinctField() -> int
+{
+    constexpr double tightTol = 1e-9;
+    constexpr std::string_view baseDeck = "tests/core/assets/testGalaxy.in";
+
+    // Neither extinct.AV nor extinct.AV_field given: both invalid,
+    // extinct() null -- unchanged from before extinct.AV_field existed
+    try
+    {
+        const toml::table inputDeck = toml::parse_file(baseDeck);
+        const io::SimControls controls(inputDeck);
+        if (controls.avDist().valid() || controls.avDistField().valid() ||
+            controls.extinct() != nullptr)
+        {
+            std::cerr << "testSimControls: extinctField: expected avDist()/"
+                "avDistField() invalid and extinct() null when neither "
+                "extinct.AV nor extinct.AV_field is given\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: extinctField: neither-given case "
+            "failed: " << error.what() << "\n";
+        return 1;
+    }
+
+    // extinct.AV given, extinct.AV_field not: avDist() the real
+    // distribution, avDistField() a valid delta at 0
+    try
+    {
+        toml::table inputDeck = toml::parse_file(baseDeck);
+        inputDeck.insert("extinct", toml::table{
+            { "AV", 1.0 }, { "model", "Calzetti_starburst" } });
+        const io::SimControls controls(inputDeck);
+
+        if (controls.extinct() == nullptr)
+        {
+            std::cerr << "testSimControls: extinctField: expected extinct() "
+                "non-null when extinct.AV is given\n";
+            return 1;
+        }
+        if (!controls.avDist().valid() ||
+            std::abs(controls.avDist().draw() - 1.0) > tightTol)
+        {
+            std::cerr << "testSimControls: extinctField: expected avDist() "
+                "to always draw 1.0, got " << controls.avDist().draw() << "\n";
+            return 1;
+        }
+        if (!controls.avDistField().valid() ||
+            std::abs(controls.avDistField().draw()) > tightTol)
+        {
+            std::cerr << "testSimControls: extinctField: expected "
+                "avDistField() to be a valid delta at 0 when only "
+                "extinct.AV is given, got " << controls.avDistField().draw() << "\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: extinctField: AV-only case failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+
+    // extinct.AV_field given, extinct.AV not: avDistField() the real
+    // distribution, avDist() a valid delta at 0
+    try
+    {
+        toml::table inputDeck = toml::parse_file(baseDeck);
+        inputDeck.insert("extinct", toml::table{
+            { "AV_field", 2.0 }, { "model", "Calzetti_starburst" } });
+        const io::SimControls controls(inputDeck);
+
+        if (controls.extinct() == nullptr)
+        {
+            std::cerr << "testSimControls: extinctField: expected extinct() "
+                "non-null when extinct.AV_field is given\n";
+            return 1;
+        }
+        if (!controls.avDistField().valid() ||
+            std::abs(controls.avDistField().draw() - 2.0) > tightTol)
+        {
+            std::cerr << "testSimControls: extinctField: expected "
+                "avDistField() to always draw 2.0, got "
+                << controls.avDistField().draw() << "\n";
+            return 1;
+        }
+        if (!controls.avDist().valid() ||
+            std::abs(controls.avDist().draw()) > tightTol)
+        {
+            std::cerr << "testSimControls: extinctField: expected avDist() "
+                "to be a valid delta at 0 when only extinct.AV_field is "
+                "given, got " << controls.avDist().draw() << "\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: extinctField: AV_field-only case "
+            "failed: " << error.what() << "\n";
+        return 1;
+    }
+
+    // extinct.AV_field given without extinct.model should throw, exactly
+    // as extinct.AV given without extinct.model already does
+    try
+    {
+        toml::table inputDeck = toml::parse_file(baseDeck);
+        inputDeck.insert("extinct", toml::table{ { "AV_field", 1.0 } });
+        const io::SimControls controls(inputDeck);
+        std::cerr << "testSimControls: extinctField: expected an exception "
+            "when extinct.AV_field is given without extinct.model\n";
+        return 1;
+    }
+    catch (const std::runtime_error&) { /* expected */ }
+
+    return 0;
+}
+
 auto testSimControls() -> int
 {
     int result = 0;
@@ -789,5 +915,6 @@ auto testSimControls() -> int
     result += testSimControlsInvalidSpectraModel();
     result += testSimControlsSpectraLibrary();
     result += testSimControlsSpectraChained();
+    result += testSimControlsExtinctField();
     return result;
 }

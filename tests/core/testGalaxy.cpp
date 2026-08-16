@@ -10,6 +10,7 @@
 #include "../src/io/SimControls.hpp"
 #include "../src/phot/FilterCollection.hpp"
 #include "../src/utils/Constants.hpp"
+#include "../src/utils/MiscUtils.hpp"
 #include "../src/utils/RngThread.hpp"
 #include "../src/utils/UniqueIDManager.hpp"
 #include "testGalaxy.hpp"
@@ -1154,6 +1155,249 @@ static auto testFieldStarsSpec() -> int
     return 0;
 }
 
+// Verify that Galaxy::addFieldStarSpec()/addContinuousSpec() correctly
+// extinguish the field-star/continuous-population contributions to
+// specExtinct(): each field star by its own aV_ (drawn independently
+// from SimControls::avDistField(), via Extinct::applyExtinction()),
+// and the continuous population by the expectation value of
+// exp(-A_V * extinct()) over avDistField() (via Extinct::
+// applyExtinctionCts()) -- rather than the pre-field-star-extinction
+// behavior of passing both through unattenuated (still exercised,
+// unchanged, by testFieldStarsSpec's own use of inputFile's default
+// extinct.AV_field, which is absent and so defaults to a delta at 0 --
+// see io::SimControls::avDistField()'s own comment). fCluster = 0
+// isolates this from any cluster contribution (which uses its own,
+// unrelated avDist()); overrides galaxy.sfr for the same reason
+// testFieldStarsMassBudget's own identical override does, and sets
+// extinct.AV_field to a fixed value distinct from inputFile's own
+// clusters.AV, so field stars draw a genuinely different, independent
+// A_V than clusters would.
+static auto testFieldStarsExtinct() -> int
+{
+    constexpr double avFieldValue = 0.5; // NOLINT(readability-identifier-naming) -- see Extinct::applyExtinction()'s own identical NOLINT
+
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFile);
+        inputDeck.at_path("clusters").as_table()->insert("f_cluster", 0.0);
+        // See testFieldStarsMassBudget's own identical override for why.
+        inputDeck.at_path("galaxy").as_table()->insert_or_assign("sfr", 1.0);
+        inputDeck.at_path("extinct").as_table()->insert_or_assign("AV_field", avFieldValue);
+        const io::SimControls controls(inputDeck);
+
+        utils::rng().seed(rngSeed);
+        core::Galaxy galaxy(controls);
+        galaxy.advance(t1);
+
+        if (!galaxy.clusters().empty() || !galaxy.disruptedClusters().empty())
+        {
+            std::cerr << "testGalaxy: fieldStarsExtinct: test bug: expected no "
+                "stochastic clusters at all with f_cluster = 0\n";
+            return 1;
+        }
+        if (galaxy.fieldStars().empty())
+        {
+            std::cerr << "testGalaxy: fieldStarsExtinct: expected at least one "
+                "field star to have formed\n";
+            return 1;
+        }
+
+        const auto* ext = controls.extinct();
+        if (ext == nullptr)
+        {
+            std::cerr << "testGalaxy: fieldStarsExtinct: test bug: expected "
+                "extinct() non-null\n";
+            return 1;
+        }
+
+        // Every field star should have drawn aV_ == avFieldValue exactly,
+        // since avDistField() is a delta function at that value
+        for (const auto& fs : galaxy.fieldStars())
+        {
+            if (!utils::approxEqual(fs.aV_, avFieldValue))
+            {
+                std::cerr << "testGalaxy: fieldStarsExtinct: field star aV_ = "
+                    << fs.aV_ << ", expected " << avFieldValue << "\n";
+                return 1;
+            }
+        }
+
+        // Independently recompute the expected specExtinct(): the
+        // continuous population's own contribution (mirroring
+        // Galaxy::addContinuousSpec()) extinguished via
+        // applyExtinctionCts(), plus each field star's own spectrum
+        // (mirroring Galaxy::addFieldStarSpec()) extinguished via
+        // applyExtinction() at that star's own aV_
+        const auto* synth = controls.specsyn();
+        std::vector<double> expectedSpecExtinct(ext->wl().size(), 0.0);
+
+        std::vector<double> contSpec;
+        if (controls.computeLbol())
+        {
+            contSpec = synth->specAndLbolCts(controls.sfr(), controls.imf(),
+                controls.fehDist(), galaxy.curTime(), controls.fCluster(),
+                controls.imf().getMin(), controls.minStochMass()).first;
+        }
+        else
+        {
+            contSpec = synth->specCts(controls.sfr(), controls.imf(),
+                controls.fehDist(), galaxy.curTime(), controls.fCluster(),
+                controls.imf().getMin(), controls.minStochMass());
+        }
+        const auto contSpecExtinct = ext->applyExtinctionCts(contSpec);
+        for (std::size_t i = 0; i < expectedSpecExtinct.size(); ++i)
+        { expectedSpecExtinct.at(i) += contSpecExtinct.at(i); }
+
+        const auto& tracks2D = controls.tracks2D();
+        for (const auto& fs : galaxy.fieldStars())
+        {
+            const double logT = std::max(
+                std::log10(galaxy.curTime() - fs.formTime_), tracks2D.logTMin());
+            const auto props = tracks2D.getStar(fs.mass_, logT);
+            const auto starSpec = synth->spec(props, fs.feh_);
+            const auto starSpecExtinct = ext->applyExtinction(fs.aV_, starSpec);
+            for (std::size_t i = 0; i < expectedSpecExtinct.size(); ++i)
+            { expectedSpecExtinct.at(i) += starSpecExtinct.at(i); }
+        }
+
+        if (galaxy.specExtinct() != expectedSpecExtinct)
+        {
+            std::cerr << "testGalaxy: fieldStarsExtinct: specExtinct() does "
+                "not equal the independently-recomputed extinguished "
+                "continuous + field-star spectrum\n";
+            return 1;
+        }
+        if (std::reduce(expectedSpecExtinct.begin(), expectedSpecExtinct.end(), 0.0) <= 0.0)
+        {
+            std::cerr << "testGalaxy: fieldStarsExtinct: expected a non-zero "
+                "specExtinct()\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testGalaxy: fieldStarsExtinct test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Verify that Extinct::applyExtinctionCts() exactly reduces to
+// applyExtinction() at a fixed A_V when avDistField() is a delta
+// function (no variation to average over) -- extinct.AV_field given as
+// a plain number in the input deck creates exactly this. Lives here,
+// alongside the rest of this file's own field-star/extinction tests,
+// rather than in tests/extinct/testExtinct.hpp: unlike that file's own
+// tests, this one needs a full, TOML-deck-driven SimControls (to reach
+// a real, non-default avDistField() at all), which tests/extinct's own
+// slugTestExtinct target does not link -- mirroring testCluster.cpp's
+// own testClusterExtinct() for the identical reason.
+static auto testExtinctApplyExtinctionCtsDegenerate() -> int
+{
+    constexpr double avFieldValue = 1.5; // NOLINT(readability-identifier-naming) -- see Extinct::applyExtinction()'s own identical NOLINT
+
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFile);
+        inputDeck.at_path("extinct").as_table()->insert_or_assign("AV_field", avFieldValue);
+        const io::SimControls controls(inputDeck);
+        const auto* ext = controls.extinct();
+        if (ext == nullptr)
+        {
+            std::cerr << "testExtinctApplyExtinctionCtsDegenerate: test bug: "
+                "expected extinct() non-null\n";
+            return 1;
+        }
+
+        const std::vector<double> spec(controls.specsyn()->wl().size(), 1.0);
+        const auto expected = ext->applyExtinction(avFieldValue, spec);
+        const auto actual = ext->applyExtinctionCts(spec);
+        for (std::size_t i = 0; i < expected.size(); i++)
+        {
+            if (!utils::approxEqual(actual.at(i), expected.at(i)))
+            {
+                std::cerr << "testExtinctApplyExtinctionCtsDegenerate: "
+                    "applyExtinctionCts()[" << i << "] = " << actual.at(i)
+                    << ", expected applyExtinction(" << avFieldValue << ", ...)["
+                    << i << "] = " << expected.at(i) << "\n";
+                return 1;
+            }
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testExtinctApplyExtinctionCtsDegenerate test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Verify that Extinct::applyExtinctionCts() matches the closed-form
+// integral a uniform avDistField() admits: int_0^X exp(-A_V * k) / X
+// dA_V = (1 - exp(-k * X)) / (k * X), for k = extinct() at each
+// wavelength, computed independently here rather than via
+// utils::PDFIntegrator (the k = 0 limit of that expression is 1,
+// matching exp(0) = 1 -- no wavelength should ever actually hit that
+// in practice, since Extinct::normalize() only guarantees a
+// V-band-weighted average of 1, not a pointwise floor, but the limit
+// is included for robustness). See
+// testExtinctApplyExtinctionCtsDegenerate's own comment for why this
+// lives here rather than in tests/extinct/testExtinct.hpp.
+// tests/extinct/assets/testExtinctAVFieldUniform.toml gives
+// avDistField() a uniform distribution over [0, 2].
+static auto testExtinctApplyExtinctionCtsUniform() -> int
+{
+    constexpr double relTol = 1e-6; // GKIntegrator's own default relTol, at GK15
+    constexpr double avFieldMax = 2.0; // NOLINT(readability-identifier-naming) -- see Extinct::applyExtinction()'s own identical NOLINT
+
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFile);
+        inputDeck.at_path("extinct").as_table()->insert_or_assign(
+            "AV_field", "tests/extinct/assets/testExtinctAVFieldUniform.toml");
+        const io::SimControls controls(inputDeck);
+        const auto* ext = controls.extinct();
+        if (ext == nullptr)
+        {
+            std::cerr << "testExtinctApplyExtinctionCtsUniform: test bug: "
+                "expected extinct() non-null\n";
+            return 1;
+        }
+        if (!utils::approxEqual(controls.avDistField().getMin(), 0.0) ||
+            !utils::approxEqual(controls.avDistField().getMax(), avFieldMax))
+        {
+            std::cerr << "testExtinctApplyExtinctionCtsUniform: test bug: "
+                "expected avDistField() to span [0, " << avFieldMax << "]\n";
+            return 1;
+        }
+
+        const std::vector<double> spec(controls.specsyn()->wl().size(), 1.0);
+        const auto result = ext->applyExtinctionCts(spec);
+        for (std::size_t i = 0; i < ext->wl().size(); i++)
+        {
+            const double k = ext->extinct().at(i);
+            const double expected = (k == 0.0) ? 1.0 :
+                (1.0 - std::exp(-k * avFieldMax)) / (k * avFieldMax);
+            if (std::abs(result.at(i) - expected) > relTol * std::abs(expected))
+            {
+                std::cerr << "testExtinctApplyExtinctionCtsUniform: at wl "
+                    "index " << i << ", applyExtinctionCts() gives "
+                    << result.at(i) << ", expected closed-form " << expected << "\n";
+                return 1;
+            }
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testExtinctApplyExtinctionCtsUniform test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
 auto testGalaxy() -> int
 {
     int result = testGalaxyBasics();
@@ -1165,6 +1409,9 @@ auto testGalaxy() -> int
     result += testFieldStarsMassBudget();
     result += testFieldStarsCreationAndDeath();
     result += testFieldStarsSpec();
+    result += testFieldStarsExtinct();
+    result += testExtinctApplyExtinctionCtsDegenerate();
+    result += testExtinctApplyExtinctionCtsUniform();
 
     try
     {
