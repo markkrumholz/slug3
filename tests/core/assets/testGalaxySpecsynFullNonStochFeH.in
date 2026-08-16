@@ -8,10 +8,14 @@
 # clusters.f_cluster = 0.0 (rather than left at its default of 1.0)
 # drives the entire stellar population through
 # Galaxy::computeSpec()'s continuously-treated (Specsyn::
-# specAndLbolCts()) path, and stars.min_stoch_mass is omitted
-# entirely, since it has no effect at all when f_cluster is already 0
-# (no star ever gets drawn into an individual Cluster to begin with,
-# stochastically sampled or not). galaxy.sfr is a new addition with no
+# specAndLbolCts()) path, and stars.min_stoch_mass is set to
+# chabrier.toml's own IMF max mass (120) so that share stays entirely
+# continuous too, with no individual FieldStar ever drawn (see
+# Galaxy::FieldStar's own comment) -- otherwise, with f_cluster = 0,
+# the *entire* stellar population above min_stoch_mass would be drawn
+# as individual field stars rather than integrated directly, which
+# this deck's own age/mass/[Fe/H] domain is not sized for. galaxy.sfr
+# is a new addition with no
 # cluster-type counterpart -- a plain, round 1 Msun/yr, which has
 # little effect on this integral's own computational cost (dominated
 # by the age/mass/[Fe/H] domain's own complexity, not by the absolute
@@ -45,6 +49,7 @@ tracks = "MIST"
 v_vcrit = 0.4
 alphaFe = 0.0
 FeH = "tests/core/assets/testClusterSpecsynFullFeHDist.toml"
+min_stoch_mass = 120
 
 [spectra]
 model = "default"

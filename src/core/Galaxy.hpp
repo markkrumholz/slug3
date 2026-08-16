@@ -16,6 +16,11 @@
 #include <functional>
 #include <vector>
 
+namespace extinct
+{
+    class Extinct;
+} // namespace extinct
+
 namespace core
 {
 
@@ -35,6 +40,27 @@ namespace core
     public:
 
         /**
+         * @brief A single non-clustered, individually-tracked (field) star
+         * @details
+         * Represents one star drawn from the stochastically-treated
+         * share of the non-clustered population -- mass at or above
+         * SimControls::minStochMass(), but never folded into any
+         * individual Cluster object, since it formed outside
+         * SimControls::fCluster()'s own clustered fraction -- see
+         * Galaxy::advance()'s own comment for how these are drawn,
+         * alongside the purely continuous (below minStochMass) share
+         * Specsyn::specCts()/specAndLbolCts() integrate directly, with
+         * no individual FieldStar of its own.
+         */
+        struct FieldStar
+        {
+            double mass_;      /**< Initial (birth) mass, in Msun */
+            double feh_;       /**< [Fe/H] */
+            double formTime_;  /**< Formation time, in yr */
+            double deathTime_; /**< Time this star dies, in yr (formTime_ + SimControls::tracks()'s own starLifetime(mass_, feh_)) */
+        };
+
+        /**
          * @brief Initialize a galaxy
          * @param controls Simulation controls (physics settings and
          *   control-flow/integrator-tolerance settings together);
@@ -42,10 +68,10 @@ namespace core
          *   see controls_'s own comment
          * @details
          * curTime_, lbol_, targetMass_, and actualMass_ all start at 0,
-         * and clusters_/disruptedClusters_/spec_/specExtinct_/phot_/
-         * photExtinct_ all start empty -- no clusters exist, and no
-         * spectrum/photometry has been computed, until the first call
-         * to advance().
+         * and clusters_/disruptedClusters_/fieldStars_/deadFieldStars_/
+         * spec_/specExtinct_/phot_/photExtinct_ all start empty -- no
+         * clusters or field stars exist, and no spectrum/photometry has
+         * been computed, until the first call to advance().
          */
         explicit Galaxy(const io::SimControls& controls);
 
@@ -77,6 +103,29 @@ namespace core
          * Not const -- see clusters()'s own comment.
          */
         [[nodiscard]] auto disruptedClusters() -> auto& { return disruptedClusters_; }
+
+        /**
+         * @brief Return the galaxy's currently-alive field stars
+         * @return A const reference to the list of individually-tracked
+         *   (field) stars formed so far -- see FieldStar's own comment
+         *   -- that have not yet died, sorted by formTime_ (see
+         *   advance()'s own comment for why that ordering is
+         *   guaranteed)
+         * @details
+         * Const, unlike clusters()/disruptedClusters(): a FieldStar is
+         * a plain data struct with no lazily-computed getter of its
+         * own to trigger.
+         */
+        [[nodiscard]] auto fieldStars() const -> const auto& { return fieldStars_; }
+
+        /**
+         * @brief Return the galaxy's dead field stars
+         * @return A const reference to the list of individually-tracked
+         *   (field) stars that have died as of curTime() -- see
+         *   advance()'s own comment for how a field star moves from
+         *   fieldStars() to here
+         */
+        [[nodiscard]] auto deadFieldStars() const -> const auto& { return deadFieldStars_; }
 
         /**
          * @brief Return the galaxy's continuously-sampled spectrum
@@ -193,10 +242,14 @@ namespace core
          * @brief Return the total actual stellar mass formed so far
          * @return The sum, over every advance() call so far, of (1)
          *   the target mass (Cluster::targetMass()) of every cluster
-         *   actually drawn from SimControls::cmf() during that call
-         *   and (2) that same call's own continuous (non-clustered)
-         *   population mass, (1 - SimControls::fCluster()) times that
-         *   call's own total target stellar mass, in Msun
+         *   actually drawn from SimControls::cmf() during that call,
+         *   (2) that same call's own individually-drawn field-star
+         *   mass (see FieldStar's own comment), and (3) that same
+         *   call's own purely continuous (non-clustered, below
+         *   SimControls::minStochMass()) population mass,
+         *   (1 - SimControls::fCluster()) * (1 - SimControls::
+         *   fracStochMass()) times that call's own total target
+         *   stellar mass, in Msun
          */
         [[nodiscard]] auto actualMass() const { return actualMass_; }
 
@@ -207,21 +260,28 @@ namespace core
          * Draws and forms new clusters over (curTime(), t] from
          * SimControls::sfr()/cmf(), scaled down to the
          * stochastically-treated fraction SimControls::fCluster() of
-         * the step's own total target mass (the remaining
-         * (1 - fCluster()) is folded directly into actualMass(), as
-         * the continuous, non-clustered population's own share, with
-         * no individual Cluster object of its own), accumulating the
-         * step's own target and actual mass into targetMass()/
-         * actualMass(), advances every cluster formed so far (in
-         * clusters() and disruptedClusters()) to t, moves any cluster
-         * that disrupted during this step from clusters() to
-         * disruptedClusters(), then marks spec_/specExtinct_/phot_/
-         * photExtinct_/lbol_/lbolCts_ as stale (see specCurrent_/
-         * photCurrent_/lbolCurrent_/lbolCtsCurrent_'s own comments)
-         * rather than recomputing them itself -- they are instead
-         * recomputed lazily, on demand, the next time spec()/
-         * specExtinct()/phot()/photExtinct()/lbol() is actually called
-         * -- before finally updating curTime() to t.
+         * the step's own total target mass. Of the remaining
+         * (1 - fCluster()), the share at or above
+         * SimControls::minStochMass() -- SimControls::fracStochMass()
+         * of it -- is drawn individually too, from SimControls::imf()
+         * over [minStochMass(), imf().getMax()], as new FieldStar
+         * entries appended to fieldStars() (see FieldStar's own
+         * comment); the rest is folded directly into actualMass(), as
+         * the purely continuous, non-clustered population's own share,
+         * with no individual Cluster or FieldStar of its own.
+         * Accumulates the step's own target and actual mass into
+         * targetMass()/actualMass(), advances every cluster formed so
+         * far (in clusters() and disruptedClusters()) to t, moves any
+         * cluster that disrupted during this step from clusters() to
+         * disruptedClusters(), moves any field star that has died as
+         * of t from fieldStars() to deadFieldStars(), then marks
+         * spec_/specExtinct_/phot_/photExtinct_/lbol_/lbolCts_ as stale
+         * (see specCurrent_/photCurrent_/lbolCurrent_/
+         * lbolCtsCurrent_'s own comments) rather than recomputing them
+         * itself -- they are instead recomputed lazily, on demand, the
+         * next time spec()/specExtinct()/phot()/photExtinct()/lbol()
+         * is actually called -- before finally updating curTime() to
+         * t.
          */
         void advance(double t);
 
@@ -230,6 +290,8 @@ namespace core
         double curTime_ = 0.0;                  /**< Current simulation time */
         std::vector<Cluster> clusters_;          /**< Currently alive (non-disrupted) clusters */
         std::vector<Cluster> disruptedClusters_; /**< Disrupted clusters */
+        std::vector<FieldStar> fieldStars_;      /**< Currently alive field stars, sorted by formTime_ -- see advance()'s own comment */
+        std::vector<FieldStar> deadFieldStars_;  /**< Field stars that have died as of curTime_ */
 
         std::vector<double> spec_;         /**< Sum of spec() over every cluster in clusters_/disruptedClusters_, at the current time */
         std::vector<double> specExtinct_;  /**< Sum of specExtinct() over every cluster in clusters_/disruptedClusters_, at the current time */
@@ -320,8 +382,26 @@ namespace core
          * is also non-null, also sets specExtinct_ to the sum of
          * specExtinct() over the same clusters.
          *
-         * If fCluster() < 1, then adds the continuous population's own
-         * contribution to both spec_ and (if extinct() is non-null)
+         * If fCluster() < 1, hands off to addContinuousSpec() to add
+         * the purely continuous population's own contribution.
+         * Finally, if fieldStars_ is non-empty, hands off to
+         * addFieldStarSpec() to add every currently-alive field star's
+         * own contribution. Both are factored out into their own
+         * methods purely to keep this one's own cognitive complexity
+         * down, not for any reuse elsewhere.
+         */
+        void computeSpec();
+
+        /**
+         * @brief Add the purely continuous population's own contribution to spec_ (and specExtinct_)
+         * @param ext SimControls::extinct(), passed through from
+         *   computeSpec() rather than re-read here, since computeSpec()
+         *   already has it in hand
+         * @details
+         * Adds Specsyn::specCts()'s/specAndLbolCts()'s own
+         * [imf().getMin(), minStochMass()] mass range -- the purely
+         * continuous, below-minStochMass() share of the non-clustered
+         * population -- to both spec_ and (if ext is non-null)
          * specExtinct_ -- see the implementation's own comment for why
          * specExtinct_'s own share goes in unattenuated, and at an
          * offset from spec_'s own. Gets this contribution via
@@ -330,9 +410,28 @@ namespace core
          * value -- whenever SimControls::computeLbol() is true, so Lbol
          * comes along for free from the same integral; via plain
          * specCts() otherwise, leaving lbolCts_/lbolCtsCurrent_
-         * untouched.
+         * untouched. Split out of computeSpec() itself purely to keep
+         * that function's own cognitive complexity down.
          */
-        void computeSpec();
+        void addContinuousSpec(const extinct::Extinct* ext);
+
+        /**
+         * @brief Add every currently-alive field star's own contribution to spec_ (and specExtinct_)
+         * @param ext SimControls::extinct(), passed through from
+         *   computeSpec() rather than re-read here, since computeSpec()
+         *   already has it in hand
+         * @details
+         * Adds every entry of getFieldStarProps() (evaluated via
+         * Specsyn::spec() star by star, at that star's own feh_) to
+         * spec_, and -- unattenuated, for the same reason as the
+         * continuous population's own share in computeSpec() -- to
+         * specExtinct_ too, whenever ext is non-null. Each star's own
+         * spectrum is computed once and reused for both, rather than
+         * calling Specsyn::spec() twice. Split out of computeSpec()
+         * itself purely to keep that function's own cognitive
+         * complexity down.
+         */
+        void addFieldStarSpec(const extinct::Extinct* ext);
 
         /**
          * @brief Update phot_ (and photExtinct_) from the current spec_ (and specExtinct_)
@@ -366,6 +465,12 @@ namespace core
          * still needs computing, but not by paying for a full spectrum
          * it was never asked for; calls computeLbolCts() for exactly
          * that.
+         *
+         * Finally, adds every currently-alive field star's own
+         * contribution (10^logL, read directly off getFieldStarProps())
+         * -- independent of lbolCtsCurrent_/lbolCts_, since this is
+         * cheap and direct either way, unlike the continuous
+         * population's own Specsyn-mediated integral.
          */
         void computeLbol();
 
@@ -380,7 +485,8 @@ namespace core
          * @param imf The initial mass function of the population --
          *   see computeLbolCts()'s own imf parameter; used both as the
          *   inner mass integral's own weighting PDF and, via
-         *   getMin()/getMax(), its own integration bounds
+         *   getMin(), its own lower integration bound (see this
+         *   function's own comment for its own upper bound)
          * @param feh The single [Fe/H] value this call is evaluated
          *   at -- see Specsyn::continuousSpecIntegrand()'s own feh
          *   parameter for the identical convention
@@ -395,17 +501,22 @@ namespace core
          * Mirrors Specsyn::continuousSpecIntegrand()'s own structure
          * exactly (see its own comment): floors log10(age), builds the
          * isochrone at that (log age, feh), then integrates each of its
-         * segments' own bolometric luminosity against imf via a nested
-         * PDFIntegrator (GKOrder::GK15) -- a local, capture-free
-         * lambda mirroring Cluster::lbolStar()'s own role, rather than
-         * calling into any Specsyn (which may not exist at all when
-         * this runs -- see computeLbolCts()'s own comment), reading
-         * each star's own log(L/Lsun) directly off its isochrone
-         * segment and summing 10^that over the segments a star of that
-         * mass could belong to. No explicit live/dead mass check is
-         * needed: exactly as in continuousSpecIntegrand(), a dead mass
-         * is simply never visited, since it falls in none of the
-         * isochrone's own segment domains.
+         * segments' own bolometric luminosity against imf, over
+         * [imf.getMin(), controls_.minStochMass()] (the purely
+         * continuous share of the population -- see Specsyn::
+         * specCts()'s own comment for why controls_.minStochMass()
+         * rather than imf.getMax()), via a nested PDFIntegrator
+         * (GKOrder::GK15) --
+         * a local, capture-free lambda mirroring Cluster::lbolStar()'s
+         * own role, rather than calling into any Specsyn (which may
+         * not exist at all when this runs -- see computeLbolCts()'s
+         * own comment), reading each star's own log(L/Lsun) directly
+         * off its isochrone segment and summing 10^that over the
+         * segments a star of that mass could belong to. No explicit
+         * live/dead mass check is needed: exactly as in
+         * continuousSpecIntegrand(), a dead mass is simply never
+         * visited, since it falls in none of the isochrone's own
+         * segment domains.
          */
         [[nodiscard]] auto lbolCtsIntegrand(double age, const pdfs::PDF& imf, double feh) const -> std::vector<double>;
 
@@ -442,13 +553,59 @@ namespace core
          * exist at all here.
          *
          * Sets lbolCts_ to the integral's own result, scaled by
-         * (1 - fCluster()) for the continuously-treated share of the
-         * population, matching Specsyn::specAndLbolCts()'s own
-         * identical scaling -- necessary for the two to agree when
-         * both are exercised for the same population. Sets
-         * lbolCtsCurrent_ to true afterward.
+         * (1 - fCluster()) * (1 - fracStochMass()) for the purely
+         * continuously-treated share of the population, matching
+         * Specsyn::specAndLbolCts()'s own identical scaling --
+         * necessary for the two to agree when both are exercised for
+         * the same population (see testContinuousPopLbolStandaloneMatchesSpec
+         * in tests/core/testGalaxy.cpp). Sets lbolCtsCurrent_ to true
+         * afterward.
          */
         void computeLbolCts();
+
+        /**
+         * @brief Evaluate every currently-alive field star's stellar properties
+         * @return A vector, one element per entry in fieldStars() (same
+         *   order), of that star's properties at curTime() -- see
+         *   tracks::Tracks2D::getStar()/tracks::Tracks3D::getStar()'s
+         *   own comment for what a StarData holds
+         * @details
+         * If the simulation has a fixed [Fe/H] (SimControls::constFeH()),
+         * loops over fieldStars() directly, calling
+         * SimControls::tracks2D()'s own getStar(mass_, log10(curTime()
+         * - formTime_)) once per star -- cheap, since tracks2D() is a
+         * single, already-built Tracks2D slice shared across every
+         * call.
+         *
+         * Otherwise, evaluating SimControls::tracks()'s own
+         * getStar(mass_, logT, feh_) at each star's own (in general,
+         * distinct) feh_ directly would rebuild a fresh
+         * tracks::Tracks3D::sliceConstZ() slice on nearly every call
+         * (its own single-entry cache only helps when consecutive
+         * calls share the same feh -- see its own comment), which is
+         * prohibitively expensive for a field-star population of any
+         * size. Instead, rounds each star's own feh_ to the nearest
+         * multiple of 0.25, sorts the stars by that rounded value
+         * (mapping back to the original order once every star has
+         * been evaluated), and evaluates every star at its own rounded
+         * feh_ (not its raw, drawn value) -- consecutive stars sharing
+         * the same rounded feh_ then hit sliceConstZ()'s own cache, so
+         * the number of slices actually built is bounded by the number
+         * of distinct rounded feh_ values present, not the number of
+         * stars. This evaluates every field star at a [Fe/H] snapped
+         * to the nearest 0.25 dex grid point rather than its own exact
+         * drawn value -- a deliberate, small approximation traded for
+         * tractable cost.
+         *
+         * Either way, logT (log10 of the star's own age,
+         * curTime() - formTime_) is floored at
+         * SimControls::tracks()'s own logTMin(), mirroring
+         * Cluster::advance()'s and Specsyn::continuousSpecIntegrand()'s
+         * own identical floor, to avoid taking log10(0) for a field
+         * star whose formTime_ is exactly curTime_ (formed during the
+         * very advance() call that produced this evaluation).
+         */
+        [[nodiscard]] auto getFieldStarProps() const -> std::vector<specsyn::Specsyn::StarData>;
 
     };
 

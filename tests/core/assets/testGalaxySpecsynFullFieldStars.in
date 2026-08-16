@@ -1,0 +1,52 @@
+# Full end-to-end test input deck for
+# tests/core/testGalaxySpecsynFullFieldStars.cpp: exercises the
+# partially-stochastic non-clustered population -- individually-drawn
+# field stars above stars.min_stoch_mass, alongside the purely
+# continuous population below it -- against real tracks/spectral
+# libraries at full scale. The Galaxy counterpart to
+# testGalaxySpecsynFullNonStoch.in's own decks, but with
+# clusters.f_cluster set to a genuinely fractional value (0.5, rather
+# than the NonStoch decks' own 0.0 or 1.0) so clustered, purely
+# continuous, and individually-drawn field-star stars all form
+# together in the same run, and stars.min_stoch_mass set to 60
+# (rather than the IMF's own max, which would leave no field-star
+# population at all) so only chabrier.toml's own higher-mass tail
+# (and hence a modest number of individual stars, not thousands) is
+# drawn as field stars -- see Galaxy::FieldStar's own comment.
+#
+# galaxy.sfr = 1e-2 and a single, modest output time (1e6 yr) keep the
+# total field-star count (and hence this run's own cost, dominated by
+# per-star spectral synthesis calls rather than the continuous
+# population's own fixed-cost integral) tractable, matching
+# testGalaxySpecsynFullNonStochFeH.in's own single-output-time
+# rationale for the analogous reason (there, a non-degenerate [Fe/H]
+# distribution; here, a per-star cost that scales with population
+# size rather than staying fixed).
+
+sim_type = "galaxy"
+n_trial = 1
+
+[stars]
+IMF = "chabrier.toml"
+tracks = "MIST"
+v_vcrit = 0.4
+alphaFe = 0.0
+FeH = 0.0
+min_stoch_mass = 60
+
+[spectra]
+model = "default"
+nwl = 1024
+wl_min = 500
+wl_max = 1e4
+
+[clusters]
+CMF = 1e4
+CLF = 5e5
+f_cluster = 0.5
+
+[galaxy]
+sfr = 1e-2
+
+[output]
+output_times = [1e6]

@@ -21,6 +21,7 @@ tracks = "MIST"
 v_vcrit = 0.4
 alphaFe = 0.0
 FeH = 0.0
+min_stoch_mass = 120
 
 [spectra]
 model = "default"

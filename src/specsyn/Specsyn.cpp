@@ -162,13 +162,15 @@ auto specsyn::Specsyn::specCts(
 auto specsyn::Specsyn::continuousSpecIntegrand(
     const double age,
     const pdfs::PDF& imf,
+    const double mMin,
+    const double mMax,
     const bool computeLbol,
     const double feh
 ) const -> std::vector<double>
 {
     const double logAge = std::max(std::log10(age), controls_.tracks().logTMin());
     const auto isochrone = controls_.tracks().getIsochrone(logAge, feh);
-    return specCtsImpl(isochrone, imf, 1.0, imf.getMin(), imf.getMax(), feh, true, computeLbol);
+    return specCtsImpl(isochrone, imf, 1.0, mMin, mMax, feh, true, computeLbol);
 }
 
 auto specsyn::Specsyn::specCtsHelper(
@@ -177,6 +179,8 @@ auto specsyn::Specsyn::specCtsHelper(
     const pdfs::PDF& fehDist,
     const double curTime,
     const double fCluster,
+    const double mMin,
+    const double mMax,
     const bool computeLbol
 ) const -> std::vector<double>
 {
@@ -248,7 +252,7 @@ auto specsyn::Specsyn::specCtsHelper(
     // since the old hAdaptive age integral was itself the larger
     // remaining bottleneck.
     using IntegrandFn = std::vector<double> (Specsyn::*)(
-        double, const pdfs::PDF&, bool, double) const;
+        double, const pdfs::PDF&, double, double, bool, double) const;
     const utils::PDFIntegrator<IntegrandFn, utils::GKOrder::GK15> integrator(
         sfrAge, static_cast<IntegrandFn>(&Specsyn::continuousSpecIntegrand),
         nInt, logAge, intMaxIter(), absTol, intRelTol());
@@ -257,7 +261,7 @@ auto specsyn::Specsyn::specCtsHelper(
     if (singleFeh)
     {
         result = integrator.integrate(
-            ageMin, curTime, this, imf, computeLbol, fehDist.getMin());
+            ageMin, curTime, this, imf, mMin, mMax, computeLbol, fehDist.getMin());
     }
     else
     {
@@ -292,7 +296,7 @@ auto specsyn::Specsyn::specCtsHelper(
         for (std::size_t f = 0; f < nFeh; ++f)
         {
             rawResults[f] = integrator.integrate(
-                ageMin, curTime, this, imf, computeLbol, fehGrid[f]);
+                ageMin, curTime, this, imf, mMin, mMax, computeLbol, fehGrid[f]);
             fehWeight[f] = fehDist(fehGrid[f]);
         }
 
@@ -319,19 +323,23 @@ auto specsyn::Specsyn::specCtsHelper(
     // weighting over the spectral elements alone (the trailing Lbol
     // element, if present, is a genuine luminosity already, not a
     // lambda-weighted flux, so it's excluded from this division), and
-    // scale everything -- spectrum and Lbol alike -- by (1 - fCluster)
-    // for the continuously-treated share of the population.
+    // scale everything -- spectrum and Lbol alike -- by
+    // (1 - fCluster) * (1 - controls_.fracStochMass()) for the
+    // continuously-treated share of the population -- see specCts()'s
+    // own comment for why the second factor is needed alongside mMin/
+    // mMax already restricting the integral itself.
+    const double ctsFrac = (1.0 - fCluster) * (1.0 - controls_.fracStochMass());
     for (std::size_t i = 0; i < wl_.size(); ++i)
     {
-        result[i] = result[i] * (1.0 - fCluster) / wl_[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- wl_.size() <= result.size() by construction (result.size() == wl_.size() + computeLbol), and i is bounded by wl_.size()
+        result[i] = result[i] * ctsFrac / wl_[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- wl_.size() <= result.size() by construction (result.size() == wl_.size() + computeLbol), and i is bounded by wl_.size()
     }
     if (computeLbol)
     {
         // continuousSpecIntegrand() reports Lbol in erg/s, not Lsun --
         // see its own comment for why -- so convert back to Lsun here,
         // matching Cluster::lbol()'s own units, alongside the same
-        // (1 - fCluster) scaling every other element gets.
-        result[wl_.size()] *= (1.0 - fCluster) / utils::Lsun; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- result.size() == wl_.size() + 1 when computeLbol is true, by construction
+        // ctsFrac scaling every other element gets.
+        result[wl_.size()] *= ctsFrac / utils::Lsun; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- result.size() == wl_.size() + 1 when computeLbol is true, by construction
     }
     return result;
 }
@@ -341,10 +349,12 @@ auto specsyn::Specsyn::specCts(
     const pdfs::PDF& imf,
     const pdfs::PDF& fehDist,
     const double curTime,
-    const double fCluster
+    const double fCluster,
+    const double mMin,
+    const double mMax
 ) const -> std::vector<double>
 {
-    return specCtsHelper(sfr, imf, fehDist, curTime, fCluster, false);
+    return specCtsHelper(sfr, imf, fehDist, curTime, fCluster, mMin, mMax, false);
 }
 
 auto specsyn::Specsyn::specAndLbolCts(
@@ -352,10 +362,12 @@ auto specsyn::Specsyn::specAndLbolCts(
     const pdfs::PDF& imf,
     const pdfs::PDF& fehDist,
     const double curTime,
-    const double fCluster
+    const double fCluster,
+    const double mMin,
+    const double mMax
 ) const -> std::pair<std::vector<double>, double>
 {
-    auto spec = specCtsHelper(sfr, imf, fehDist, curTime, fCluster, true);
+    auto spec = specCtsHelper(sfr, imf, fehDist, curTime, fCluster, mMin, mMax, true);
     const double lBol = spec.back();
     spec.pop_back();
     return { std::move(spec), lBol };

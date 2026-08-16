@@ -22,6 +22,7 @@
 #include <cmath>
 #include <cstddef>
 #include <functional>
+#include <iterator>
 #include <numeric>
 #include <sstream>
 #include <stdexcept>
@@ -51,19 +52,29 @@ void core::Galaxy::advance(const double t)
     const double fCluster = sc.fCluster();
 
     // 1) Total stellar mass that should have formed between curTime_
-    // and t, and 2) the individual cluster masses drawn from the CMF
-    // to reach the stochastically-treated fraction (fCluster) of that
-    // target -- the remaining (1 - fCluster) forms as a continuous
-    // (non-clustered) population, not represented by any individual
-    // Cluster object, so actualMass_ folds its own target mass in
-    // directly rather than via newMasses
+    // and t; the individual cluster masses drawn from the CMF to
+    // reach the stochastically-treated fraction (fCluster) of that
+    // target; and, of the remaining (1 - fCluster), the individual
+    // field-star masses drawn from the IMF (over [minStochMass(),
+    // imf().getMax()]) to reach fracStochMass() of *that* -- the
+    // stochastically-treated share of the non-clustered population
+    // (see SimControls::minStochMass()/fracStochMass()'s own
+    // comments). What remains after both -- (1 - fCluster) *
+    // (1 - fracStochMass()) of mNew -- forms as a purely continuous
+    // population, not represented by any individual Cluster or
+    // FieldStar object, so actualMass_ folds its own share in
+    // directly rather than via newMasses/newFieldMasses.
     const double mNew = sc.sfr().integral(curTime_, t);
     const auto newMasses = sc.cmf().drawTarget(mNew * fCluster);
+    const auto newFieldMasses = sc.imf().drawTarget(
+        mNew * (1.0 - fCluster) * sc.fracStochMass(),
+        sc.minStochMass(), sc.imf().getMax());
     targetMass_ += mNew;
-    actualMass_ += ((1.0 - fCluster) * mNew) +
-        std::accumulate(newMasses.begin(), newMasses.end(), 0.0);
+    actualMass_ += ((1.0 - fCluster) * (1.0 - sc.fracStochMass()) * mNew) +
+        std::accumulate(newMasses.begin(), newMasses.end(), 0.0) +
+        std::accumulate(newFieldMasses.begin(), newFieldMasses.end(), 0.0);
 
-    // 3-4) For each new cluster, draw a formation time from the SFR
+    // 2) For each new cluster, draw a formation time from the SFR
     // over (curTime_, t] and create it, with a unique ID from the uid
     // service, appending it to clusters_
     for (const double mass : newMasses)
@@ -72,14 +83,36 @@ void core::Galaxy::advance(const double t)
         clusters_.emplace_back(utils::getID(), mass, formTime, sc);
     }
 
-    // 5) Advance every cluster formed so far -- both still-alive ones
+    // 3) For each new field star, draw a formation time from the same
+    // SFR distribution the clusters above draw from, and a [Fe/H]
+    // from fehDist(); its death time is then formTime + the tracks'
+    // own starLifetime() at that (mass, feh), both in yr. Sorting this
+    // step's own batch by formTime before appending it keeps
+    // fieldStars_ sorted by formTime_ overall: every previously-
+    // appended star's own formTime_ already falls at or before
+    // curTime_, and every new one falls in (curTime_, t], so appending
+    // a locally-sorted batch preserves the whole vector's own global
+    // order.
+    std::vector<FieldStar> newFieldStars;
+    newFieldStars.reserve(newFieldMasses.size());
+    for (const double mass : newFieldMasses)
+    {
+        const double formTime = sc.sfr().draw(curTime_, t);
+        const double feh = sc.fehDist().draw();
+        const double deathTime = formTime + sc.tracks().starLifetime(mass, feh);
+        newFieldStars.push_back({ mass, feh, formTime, deathTime });
+    }
+    std::ranges::sort(newFieldStars, {}, &FieldStar::formTime_);
+    fieldStars_.insert(fieldStars_.end(), newFieldStars.begin(), newFieldStars.end());
+
+    // 4) Advance every cluster formed so far -- both still-alive ones
     // (including the brand new ones just appended above) and
     // already-disrupted ones, since a disrupted cluster's stars keep
     // evolving even after it stops being counted as a bound cluster
     for (auto& cluster : clusters_) { cluster.advance(t); }
     for (auto& cluster : disruptedClusters_) { cluster.advance(t); }
 
-    // 6) Move any cluster that disrupted during this step from
+    // 5) Move any cluster that disrupted during this step from
     // clusters_ to disruptedClusters_
     std::vector<Cluster> stillAlive;
     stillAlive.reserve(clusters_.size());
@@ -95,6 +128,19 @@ void core::Galaxy::advance(const double t)
         }
     }
     clusters_ = std::move(stillAlive);
+
+    // 6) Move any field star that has died as of t from fieldStars_ to
+    // deadFieldStars_ -- deadFieldStars_ only ever holds the stars
+    // that died during *this* step (mirroring Cluster::mDead_'s own
+    // per-step convention), so it is cleared first. stable_partition
+    // (rather than plain partition/remove_if) preserves fieldStars_'s
+    // own formTime_ ordering among the survivors.
+    deadFieldStars_.clear();
+    const auto deadBegin = std::ranges::stable_partition(fieldStars_,
+        [t](const FieldStar& fs) { return fs.deathTime_ >= t; }).begin();
+    deadFieldStars_.assign(
+        std::make_move_iterator(deadBegin), std::make_move_iterator(fieldStars_.end()));
+    fieldStars_.erase(deadBegin, fieldStars_.end());
 
     // 7) Mark spec_/specExtinct_/phot_/photExtinct_/lbol_/lbolCts_ as
     // stale; recomputed lazily, on demand, the next time spec()/
@@ -149,42 +195,76 @@ void core::Galaxy::computeSpec()
         sumSpecExtinct(disruptedClusters_);
     }
 
-    // Add the continuously-treated (non-clustered) share of the
-    // population's own spectrum, if any, to both spec_ and (if an
-    // extinction curve was requested) specExtinct_ -- unlike a bound
-    // cluster, which draws its own A_V, the continuous/field
-    // population is assumed negligibly extincted, so its own light
-    // passes into specExtinct_ unattenuated. If Lbol was also
+    // Add the purely continuous (non-clustered, below minStochMass())
+    // share of the population's own spectrum, if any -- see
+    // addContinuousSpec()'s own comment. Skipped entirely (not just
+    // scaled to 0 afterward) whenever fracStochMass() == 1 (every
+    // non-clustered star is at or above minStochMass(), so there is
+    // no purely continuous share at all): addContinuousSpec()'s own
+    // integral is genuinely expensive, and its own final result would
+    // be multiplied by (1 - fracStochMass()) = 0 regardless of what it
+    // computes.
+    if (sc.fCluster() < 1.0 && sc.fracStochMass() < 1.0) { addContinuousSpec(ext); }
+
+    // Add every currently-alive field star's own contribution -- see
+    // addFieldStarSpec()'s own comment.
+    if (!fieldStars_.empty()) { addFieldStarSpec(ext); }
+}
+
+void core::Galaxy::addContinuousSpec(const extinct::Extinct* ext)
+{
+    // Unlike a bound cluster, which draws its own A_V, the continuous/
+    // field population is assumed negligibly extincted, so its own
+    // light passes into specExtinct_ unattenuated. If Lbol was also
     // requested, gets it via specAndLbolCts() (a byproduct of the same
     // integral) rather than paying for a second one via the standalone
     // Lbol path -- see lbolCtsCurrent_'s own comment.
+    const auto& sc = controls_.get();
+    const auto* synth = sc.specsyn();
     const double fCluster = sc.fCluster();
-    if (fCluster < 1.0)
-    {
-        std::vector<double> contSpec;
-        if (sc.computeLbol())
-        {
-            auto [s, l] = synth->specAndLbolCts(sc.sfr(), sc.imf(), sc.fehDist(), curTime_, fCluster);
-            contSpec = std::move(s);
-            lbolCts_ = l;
-            lbolCtsCurrent_ = true;
-        }
-        else
-        {
-            contSpec = synth->specCts(sc.sfr(), sc.imf(), sc.fehDist(), curTime_, fCluster);
-        }
 
-        for (std::size_t i = 0; i < spec_.size(); ++i) { spec_[i] += contSpec[i]; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- contSpec has size wl().size() by Specsyn::specCts()'s own contract, matching spec_'s size set just above
+    std::vector<double> contSpec;
+    if (sc.computeLbol())
+    {
+        auto [s, l] = synth->specAndLbolCts(sc.sfr(), sc.imf(), sc.fehDist(), curTime_,
+            fCluster, sc.imf().getMin(), sc.minStochMass());
+        contSpec = std::move(s);
+        lbolCts_ = l;
+        lbolCtsCurrent_ = true;
+    }
+    else
+    {
+        contSpec = synth->specCts(sc.sfr(), sc.imf(), sc.fehDist(), curTime_,
+            fCluster, sc.imf().getMin(), sc.minStochMass());
+    }
+
+    for (std::size_t i = 0; i < spec_.size(); ++i) { spec_[i] += contSpec[i]; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- contSpec has size wl().size() by Specsyn::specCts()'s own contract, matching spec_'s size set in computeSpec()
+    if (ext != nullptr)
+    {
+        // specExtinct_ sits on ext->wl(), a possibly-narrower, offset
+        // window of spec_'s own wavelength grid (see Extinct::
+        // applyExtinction()'s own wlOffset_ comment) -- specExtinct_[i]
+        // lines up with contSpec[wlOffset + i], not contSpec[i], and
+        // (per this function's own comment) gets no
+        // exp(-A_V * extinct()) attenuation of its own.
+        const auto wlOffset = ext->wlOffset();
+        for (std::size_t i = 0; i < specExtinct_.size(); ++i) { specExtinct_[i] += contSpec[wlOffset + i]; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- specExtinct_.size() == wl_.size() <= contSpec.size() - wlOffset by Extinct's own constructor contract (wl_ is a sub-window of the wl originally passed to it, which matches contSpec's own grid)
+    }
+}
+
+void core::Galaxy::addFieldStarSpec(const extinct::Extinct* ext)
+{
+    const auto& sc = controls_.get();
+    const auto* synth = sc.specsyn();
+    const auto props = getFieldStarProps();
+    const auto wlOffset = (ext != nullptr) ? ext->wlOffset() : std::size_t{ 0 };
+    for (std::size_t j = 0; j < fieldStars_.size(); ++j)
+    {
+        const auto starSpec = synth->spec(props[j], fieldStars_[j].feh_); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- props has size fieldStars_.size() by getFieldStarProps()'s own contract, and j is bounded by fieldStars_.size()
+        for (std::size_t i = 0; i < spec_.size(); ++i) { spec_[i] += starSpec[i]; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- starSpec has size wl().size() by Specsyn::spec()'s own contract, matching spec_'s size set in computeSpec()
         if (ext != nullptr)
         {
-            // specExtinct_ sits on ext->wl(), a possibly-narrower,
-            // offset window of spec_'s own wavelength grid (see
-            // Extinct::applyExtinction()'s own wlOffset_ comment) --
-            // specExtinct_[i] lines up with contSpec[wlOffset + i], not
-            // contSpec[i], and (per this function's own comment) gets
-            // no exp(-A_V * extinct()) attenuation of its own.
-            const auto wlOffset = ext->wlOffset();
-            for (std::size_t i = 0; i < specExtinct_.size(); ++i) { specExtinct_[i] += contSpec[wlOffset + i]; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- specExtinct_.size() == wl_.size() <= contSpec.size() - wlOffset by Extinct's own constructor contract (wl_ is a sub-window of the wl originally passed to it, which matches contSpec's own grid)
+            for (std::size_t i = 0; i < specExtinct_.size(); ++i) { specExtinct_[i] += starSpec[wlOffset + i]; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see computeSpec()'s own identical continuous-population specExtinct_ update for why this indexing is safe
         }
     }
 }
@@ -226,16 +306,28 @@ void core::Galaxy::computeLbol()
     {
         lbol_ += lbolCts_;
     }
-    else if (sc.fCluster() < 1.0)
+    else if (sc.fCluster() < 1.0 && sc.fracStochMass() < 1.0)
     {
         // Lbol was requested and there is a continuous-population
         // share to account for, but computeSpec() hasn't run since the
         // last advance() to compute it as a byproduct -- e.g. a caller
         // asked for lbol() without ever asking for spec(). Get it via
         // the standalone path instead, which doesn't pay for a full
-        // spectrum it wasn't asked for.
+        // spectrum it wasn't asked for. Skipped, like addContinuousSpec()'s
+        // own identical guard, whenever fracStochMass() == 1 -- see its
+        // own comment.
         computeLbolCts();
         lbol_ += lbolCts_;
+    }
+
+    // Add every currently-alive field star's own contribution -- 10^logL,
+    // read directly off getFieldStarProps() -- independent of
+    // lbolCtsCurrent_/lbolCts_ (see this method's own header comment
+    // for why).
+    for (const auto& props : getFieldStarProps())
+    {
+        const double logL = props[static_cast<std::size_t>(tracks::FieldIdx::logL)]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- StarData is a fixed-size std::array, and logL is one of its compile-time-known indices
+        lbol_ += std::pow(10.0, logL);
     }
 }
 
@@ -269,8 +361,8 @@ auto core::Galaxy::lbolCtsIntegrand(
     for (const auto& seg : isochrone)
     {
         const double a = std::max(imf.getMin(), seg->xMin());
-        const double b = std::min(imf.getMax(), seg->xMax());
-        if (a >= b) { continue; } // empty intersection with [imf.getMin(), imf.getMax()]
+        const double b = std::min(sc.minStochMass(), seg->xMax());
+        if (a >= b) { continue; } // empty intersection with [imf.getMin(), minStochMass()]
 
         const auto segResult = integrator.integrate(a, b, *seg);
         lbolRaw += segResult[0]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- segResult is a std::array<double, 1>, so index 0 is always valid
@@ -337,6 +429,52 @@ void core::Galaxy::computeLbolCts()
         lbolRaw = lbolInterp.integ(fehDist.getMin(), fehDist.getMax()) / weightIntegral;
     }
 
-    lbolCts_ = lbolRaw * (1.0 - fCluster);
+    lbolCts_ = lbolRaw * (1.0 - fCluster) * (1.0 - sc.fracStochMass());
     lbolCtsCurrent_ = true;
+}
+
+auto core::Galaxy::getFieldStarProps() const -> std::vector<specsyn::Specsyn::StarData>
+{
+    const auto& sc = controls_.get();
+    const std::size_t n = fieldStars_.size();
+    std::vector<specsyn::Specsyn::StarData> props(n);
+    const double logTMin = sc.tracks().logTMin();
+
+    if (sc.constFeH())
+    {
+        const auto& tracks2D = sc.tracks2D();
+        for (std::size_t i = 0; i < n; ++i)
+        {
+            const auto& fs = fieldStars_[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i < n == fieldStars_.size() by construction
+            const double logT = std::max(std::log10(curTime_ - fs.formTime_), logTMin);
+            props[i] = tracks2D.getStar(fs.mass_, logT); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- props has size n by construction, and i is bounded by n
+        }
+        return props;
+    }
+
+    // Non-degenerate [Fe/H]: sort by feh_ rounded to the nearest
+    // multiple of 0.25 first, so consecutive calls to
+    // tracks().getStar() -- which internally rebuilds a fresh
+    // tracks::Tracks3D::sliceConstZ() slice whenever its own
+    // single-entry cache misses -- mostly hit that cache instead,
+    // bounding the number of slices actually built by the number of
+    // distinct rounded feh_ values present rather than the number of
+    // stars -- see this method's own header comment.
+    constexpr double fehGridSpacing = 0.25;
+    std::vector<std::size_t> order(n);
+    std::iota(order.begin(), order.end(), 0);
+    const auto roundedFeh = [this](const std::size_t i)
+    {
+        return std::round(fieldStars_[i].feh_ / fehGridSpacing) * fehGridSpacing; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- only ever called with i < fieldStars_.size(), by construction below
+    };
+    std::ranges::sort(order, {}, roundedFeh);
+
+    const auto& tracks3D = sc.tracks();
+    for (const std::size_t i : order)
+    {
+        const auto& fs = fieldStars_[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i is an element of order, itself a permutation of [0, n), by construction
+        const double logT = std::max(std::log10(curTime_ - fs.formTime_), logTMin);
+        props[i] = tracks3D.getStar(fs.mass_, logT, roundedFeh(i)); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
+    }
+    return props;
 }

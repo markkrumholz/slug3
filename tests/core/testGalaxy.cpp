@@ -382,6 +382,12 @@ static auto testContinuousPopSpecSingleFeh() -> int
     {
         toml::table inputDeck = toml::parse_file(inputFile);
         inputDeck.at_path("clusters").as_table()->insert("f_cluster", 0.0);
+        // Overrides inputFile's own stars.min_stoch_mass = 10 up to
+        // chabrier.toml's own IMF max mass, so that every non-clustered
+        // star is treated as fully continuous, with no individual
+        // FieldStar of its own -- see Galaxy::FieldStar's own comment
+        // -- exactly preserving this test's own pre-field-star behavior.
+        inputDeck.at_path("stars").as_table()->insert_or_assign("min_stoch_mass", 120.0);
         const io::SimControls controls(inputDeck);
 
         utils::rng().seed(rngSeed);
@@ -511,6 +517,12 @@ static auto testContinuousPopSpecMultiFeh() -> int
     {
         toml::table inputDeck = toml::parse_file(inputFile);
         inputDeck.at_path("clusters").as_table()->insert("f_cluster", 0.0);
+        // Overrides inputFile's own stars.min_stoch_mass = 10 up to
+        // chabrier.toml's own IMF max mass, so that every non-clustered
+        // star is treated as fully continuous, with no individual
+        // FieldStar of its own -- see Galaxy::FieldStar's own comment
+        // -- exactly preserving this test's own pre-field-star behavior.
+        inputDeck.at_path("stars").as_table()->insert_or_assign("min_stoch_mass", 120.0);
         inputDeck.at_path("stars").as_table()->insert_or_assign(
             "FeH", "tests/core/assets/testClusterSpecsynFullFeHDist.toml");
         const io::SimControls controls(inputDeck);
@@ -638,6 +650,12 @@ static auto testContinuousPopSpecReferenceCheck() -> int
     {
         toml::table inputDeck = toml::parse_file(inputFile);
         inputDeck.at_path("clusters").as_table()->insert("f_cluster", 0.0);
+        // Overrides inputFile's own stars.min_stoch_mass = 10 up to
+        // chabrier.toml's own IMF max mass, so that every non-clustered
+        // star is treated as fully continuous, with no individual
+        // FieldStar of its own -- see Galaxy::FieldStar's own comment
+        // -- exactly preserving this test's own pre-field-star behavior.
+        inputDeck.at_path("stars").as_table()->insert_or_assign("min_stoch_mass", 120.0);
         const io::SimControls controls(inputDeck);
 
         utils::rng().seed(rngSeed);
@@ -722,6 +740,12 @@ static auto testContinuousPopLbolStandaloneMatchesSpec() -> int
     {
         toml::table inputDeck = toml::parse_file(inputFile);
         inputDeck.at_path("clusters").as_table()->insert("f_cluster", 0.0);
+        // Overrides inputFile's own stars.min_stoch_mass = 10 up to
+        // chabrier.toml's own IMF max mass, so that every non-clustered
+        // star is treated as fully continuous, with no individual
+        // FieldStar of its own -- see Galaxy::FieldStar's own comment
+        // -- exactly preserving this test's own pre-field-star behavior.
+        inputDeck.at_path("stars").as_table()->insert_or_assign("min_stoch_mass", 120.0);
         const io::SimControls controls(inputDeck);
 
         utils::rng().seed(rngSeed);
@@ -783,6 +807,11 @@ static auto testFCluster() -> int
     {
         toml::table inputDeck = toml::parse_file(inputFile);
         inputDeck.at_path("clusters").as_table()->insert("f_cluster", fClusterValue);
+        // See testContinuousPopSpecSingleFeh's own identical override
+        // for why: keeps this test's own expectedActualMass formula
+        // below exactly (1 - fCluster) * targetMass() + clusterMass,
+        // with no separate field-star mass term to account for.
+        inputDeck.at_path("stars").as_table()->insert_or_assign("min_stoch_mass", 120.0);
         const io::SimControls controls(inputDeck);
         if (std::abs(controls.fCluster() - fClusterValue) > tightTol)
         {
@@ -846,6 +875,285 @@ static auto testFCluster() -> int
     return 0;
 }
 
+// Verify that Galaxy::advance()'s field-star mass accounting is exact:
+// with fCluster < 1 and inputFile's own (non-degenerate)
+// stars.min_stoch_mass left as-is (unlike testFCluster's own
+// min_stoch_mass = 120 override), actualMass() should equal
+// (1 - fCluster) * (1 - fracStochMass()) * targetMass() (the purely
+// continuous share) plus the sum of every newly-formed cluster's own
+// targetMass() plus the sum of every newly-drawn field star's own
+// mass -- an exact identity, since this is the very first (and only)
+// advance() call, so fieldStars() + deadFieldStars() together hold
+// every field star drawn this step (deadFieldStars() only ever holds
+// *this* step's own deaths -- see Galaxy::advance()'s own comment).
+static auto testFieldStarsMassBudget() -> int
+{
+    constexpr double fClusterValue = 0.5;
+    constexpr double tightTol = 1e-9;
+
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFile);
+        inputDeck.at_path("clusters").as_table()->insert("f_cluster", fClusterValue);
+        // Overrides inputFile's own galaxy.sfr = 1e-2 up to 1.0: at the
+        // default rate, the expected number of field stars drawn by t1
+        // is only O(1) (comparable to a single star's own typical
+        // mass), so whether at least one actually gets drawn is a
+        // near-coin-flip -- sensitive enough to platform-dependent
+        // floating-point differences in the RNG/distribution chain
+        // (e.g. GCC/libstdc++ vs Clang/libc++) that this test was
+        // observed to flake on CI (ubuntu-latest/gcc) despite a fixed
+        // rng seed. A 100x higher sfr pushes the expected count into
+        // the dozens, comfortably far from that boundary.
+        inputDeck.at_path("galaxy").as_table()->insert_or_assign("sfr", 1.0);
+        const io::SimControls controls(inputDeck);
+
+        utils::rng().seed(rngSeed);
+        core::Galaxy galaxy(controls);
+        galaxy.advance(t1);
+
+        if (galaxy.fieldStars().empty() && galaxy.deadFieldStars().empty())
+        {
+            std::cerr << "testGalaxy: fieldStarsMassBudget: test bug: expected "
+                "at least one field star to have been drawn\n";
+            return 1;
+        }
+        for (const auto& fs : galaxy.fieldStars())
+        {
+            if (fs.mass_ < controls.minStochMass())
+            {
+                std::cerr << "testGalaxy: fieldStarsMassBudget: field star mass "
+                    << fs.mass_ << " is below minStochMass() = "
+                    << controls.minStochMass() << "\n";
+                return 1;
+            }
+        }
+
+        double clusterMass = 0.0;
+        for (const auto& c : galaxy.clusters()) { clusterMass += c.targetMass(); }
+        for (const auto& c : galaxy.disruptedClusters()) { clusterMass += c.targetMass(); }
+
+        double fieldStarMass = 0.0;
+        for (const auto& fs : galaxy.fieldStars()) { fieldStarMass += fs.mass_; }
+        for (const auto& fs : galaxy.deadFieldStars()) { fieldStarMass += fs.mass_; }
+
+        const double expectedActualMass =
+            ((1.0 - fClusterValue) * (1.0 - controls.fracStochMass()) * galaxy.targetMass()) +
+            clusterMass + fieldStarMass;
+        if (std::abs(galaxy.actualMass() - expectedActualMass) >
+            tightTol * expectedActualMass)
+        {
+            std::cerr << "testGalaxy: fieldStarsMassBudget: actualMass() = "
+                << galaxy.actualMass() << ", expected (1 - fCluster) * "
+                "(1 - fracStochMass()) * targetMass() + cluster mass + field "
+                "star mass = " << expectedActualMass << "\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testGalaxy: fieldStarsMassBudget test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Verify that field stars are both created and, given enough time,
+// destroyed: fieldStars() should be non-empty (every entry alive,
+// with mass_ >= minStochMass() and deathTime_ >= curTime()) shortly
+// after formation, and deadFieldStars() should be non-empty (every
+// entry with deathTime_ < curTime(), and every entry still in
+// fieldStars() with deathTime_ >= curTime()) once curTime() has
+// advanced far enough past every field star's own main-sequence
+// lifetime.
+static auto testFieldStarsCreationAndDeath() -> int
+{
+    // Empirically, at this deck/seed/sfr combination, the shortest-lived
+    // field star among those formed by t1 (the most massive one drawn)
+    // dies around 3.5e6 yr -- 4e6 gives a safe margin past that while
+    // keeping the additional star-forming mass over (t1, tDeath] (at
+    // the boosted sfr below) modest, rather than the much larger figure
+    // an earlier, far larger tDeath (1e8) produced, which made this
+    // step draw so many new stars/clusters that the test hung.
+    constexpr double tDeath = 4e6;
+
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFile);
+        inputDeck.at_path("clusters").as_table()->insert("f_cluster", 0.5);
+        // See testFieldStarsMassBudget's own identical override for why.
+        inputDeck.at_path("galaxy").as_table()->insert_or_assign("sfr", 1.0);
+        const io::SimControls controls(inputDeck);
+
+        utils::rng().seed(rngSeed);
+        core::Galaxy galaxy(controls);
+        galaxy.advance(t1);
+
+        if (galaxy.fieldStars().empty())
+        {
+            std::cerr << "testGalaxy: fieldStarsCreationAndDeath: expected at "
+                "least one field star to have formed by t1\n";
+            return 1;
+        }
+        for (const auto& fs : galaxy.fieldStars())
+        {
+            if (fs.mass_ < controls.minStochMass())
+            {
+                std::cerr << "testGalaxy: fieldStarsCreationAndDeath: field "
+                    "star mass " << fs.mass_ << " is below minStochMass()\n";
+                return 1;
+            }
+            if (fs.formTime_ < 0.0 || fs.formTime_ > t1)
+            {
+                std::cerr << "testGalaxy: fieldStarsCreationAndDeath: field "
+                    "star formTime_ " << fs.formTime_ << " outside [0, t1]\n";
+                return 1;
+            }
+            if (fs.deathTime_ < galaxy.curTime())
+            {
+                std::cerr << "testGalaxy: fieldStarsCreationAndDeath: a star "
+                    "in fieldStars() has deathTime_ " << fs.deathTime_ <<
+                    " < curTime() " << galaxy.curTime() << "\n";
+                return 1;
+            }
+        }
+
+        galaxy.advance(tDeath);
+        if (galaxy.deadFieldStars().empty())
+        {
+            std::cerr << "testGalaxy: fieldStarsCreationAndDeath: expected at "
+                "least one field star to have died by tDeath = " << tDeath << " yr\n";
+            return 1;
+        }
+        for (const auto& fs : galaxy.deadFieldStars())
+        {
+            if (fs.deathTime_ >= galaxy.curTime())
+            {
+                std::cerr << "testGalaxy: fieldStarsCreationAndDeath: a star "
+                    "in deadFieldStars() has deathTime_ " << fs.deathTime_ <<
+                    " >= curTime() " << galaxy.curTime() << "\n";
+                return 1;
+            }
+        }
+        for (const auto& fs : galaxy.fieldStars())
+        {
+            if (fs.deathTime_ < galaxy.curTime())
+            {
+                std::cerr << "testGalaxy: fieldStarsCreationAndDeath: a star "
+                    "in fieldStars() has deathTime_ " << fs.deathTime_ <<
+                    " < curTime() " << galaxy.curTime() << "\n";
+                return 1;
+            }
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testGalaxy: fieldStarsCreationAndDeath test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Verify that Galaxy::computeSpec() correctly adds every currently-
+// alive field star's own spectrum: independently recomputes the
+// expected spectrum as the sum of (1) Specsyn::specCts()'s own
+// continuous-population contribution (over [imf().getMin(),
+// minStochMass()], exactly as Galaxy::computeSpec() itself calls it)
+// and (2) each field star's own spectrum, evaluated via the same
+// tracks2D().getStar() + Specsyn::spec() path Galaxy::
+// getFieldStarProps()/computeSpec() use internally -- then checks
+// that galaxy.spec() matches bit for bit, mirroring checkSpecSum()'s
+// own exact-recomputation approach for clusters. fCluster = 0
+// isolates this from any cluster contribution, and inputFile's own
+// stars.FeH = 0.0 (constFeH()) makes tracks2D() valid to call
+// directly.
+static auto testFieldStarsSpec() -> int
+{
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFile);
+        inputDeck.at_path("clusters").as_table()->insert("f_cluster", 0.0);
+        // See testFieldStarsMassBudget's own identical override for why.
+        inputDeck.at_path("galaxy").as_table()->insert_or_assign("sfr", 1.0);
+        const io::SimControls controls(inputDeck);
+
+        utils::rng().seed(rngSeed);
+        core::Galaxy galaxy(controls);
+        galaxy.advance(t1);
+
+        if (!galaxy.clusters().empty() || !galaxy.disruptedClusters().empty())
+        {
+            std::cerr << "testGalaxy: fieldStarsSpec: test bug: expected no "
+                "stochastic clusters at all with f_cluster = 0\n";
+            return 1;
+        }
+        if (galaxy.fieldStars().empty())
+        {
+            std::cerr << "testGalaxy: fieldStarsSpec: expected at least one "
+                "field star to have formed\n";
+            return 1;
+        }
+
+        // Mirrors Galaxy::computeSpec()'s own branch on computeLbol()
+        // exactly (see its own comment): specAndLbolCts() and specCts()
+        // are not just related by dropping an extra return value --
+        // computeLbol changes specCtsHelper()'s own nInt (the number
+        // of quantities the adaptive age integrator tracks error
+        // against), which can change its own subdivision decisions
+        // and hence the converged result at the bit level, so this
+        // must call whichever overload Galaxy::computeSpec() itself
+        // would for an exact match below.
+        const auto* synth = controls.specsyn();
+        std::vector<double> expectedSpec;
+        if (controls.computeLbol())
+        {
+            expectedSpec = synth->specAndLbolCts(controls.sfr(), controls.imf(),
+                controls.fehDist(), galaxy.curTime(), controls.fCluster(),
+                controls.imf().getMin(), controls.minStochMass()).first;
+        }
+        else
+        {
+            expectedSpec = synth->specCts(controls.sfr(), controls.imf(),
+                controls.fehDist(), galaxy.curTime(), controls.fCluster(),
+                controls.imf().getMin(), controls.minStochMass());
+        }
+
+        const auto& tracks2D = controls.tracks2D();
+        for (const auto& fs : galaxy.fieldStars())
+        {
+            const double logT = std::max(
+                std::log10(galaxy.curTime() - fs.formTime_), tracks2D.logTMin());
+            const auto props = tracks2D.getStar(fs.mass_, logT);
+            const auto starSpec = synth->spec(props, fs.feh_);
+            for (std::size_t i = 0; i < expectedSpec.size(); ++i)
+            { expectedSpec.at(i) += starSpec.at(i); }
+        }
+
+        if (galaxy.spec() != expectedSpec)
+        {
+            std::cerr << "testGalaxy: fieldStarsSpec: spec() does not equal "
+                "the independently-recomputed continuous + field-star "
+                "spectrum\n";
+            return 1;
+        }
+        if (std::reduce(expectedSpec.begin(), expectedSpec.end(), 0.0) <= 0.0)
+        {
+            std::cerr << "testGalaxy: fieldStarsSpec: expected a non-zero "
+                "spectrum\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testGalaxy: fieldStarsSpec test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
 auto testGalaxy() -> int
 {
     int result = testGalaxyBasics();
@@ -854,6 +1162,9 @@ auto testGalaxy() -> int
     result += testContinuousPopSpecMultiFeh();
     result += testContinuousPopSpecReferenceCheck();
     result += testContinuousPopLbolStandaloneMatchesSpec();
+    result += testFieldStarsMassBudget();
+    result += testFieldStarsCreationAndDeath();
+    result += testFieldStarsSpec();
 
     try
     {

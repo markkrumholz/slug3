@@ -12,6 +12,7 @@
 #include "../interpolation/Mesh3DInterpolator.hpp"
 #include "TrackCommons.hpp"
 #include "Tracks2D.hpp"
+#include <cmath>
 #include <cstddef>
 #include <limits>
 #include <memory>
@@ -116,10 +117,13 @@ namespace tracks
          * @brief Return the lifetime of a star of specified mass and [Fe/H]
          * @param m Mass of the star whose lifetime should be returned
          * @param feh [Fe/H] value of the tracks to use
-         * @return The lifetime of a star of mass m at the given [Fe/H]
+         * @return The lifetime of a star of mass m at the given
+         *   [Fe/H], in yr -- see Tracks2D::starLifetime()'s own
+         *   comment for why this un-logs the mesh's own x-axis
+         *   maximum rather than returning it directly
          */
        [[nodiscard]] auto starLifetime(const double m, const double feh) const
-       { return interp_->sliceConstZ(feh).xMax(m); }
+       { return std::pow(10.0, interp_->sliceConstZ(feh).xMax(m)); }
 
        /**
         * @brief Return the range of stellar masses that are alive at a given time and [Fe/H]
