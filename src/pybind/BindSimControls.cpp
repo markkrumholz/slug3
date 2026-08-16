@@ -289,7 +289,35 @@ interpreted as a delta function, but as the normalization of a
 non-normalized PDF that is constant in time -- mirroring how
 galaxy.sfr itself is handled when parsing an input deck. Also unlike
 those four, a file name is not resolved relative to SLUG_DIR/REPO_DIR;
-it is used as given.)doc";
+it is used as given. Also clears sfrDist back to invalid/empty -- see
+setSFRDist()'s own docstring for why.)doc";
+
+static constexpr std::string_view setSFRDistDocstring = R"doc(Set the distribution from which a single, constant star formation rate is drawn.
+
+Parameters
+----------
+sfr_dist : str
+    A numerical value (interpreted as a delta function at that rate)
+    or the name of an SFR-distribution PDF file.
+
+Throws
+------
+RuntimeError
+    If sfr_dist is neither numeric nor names a file that can be found.
+
+Details
+-------
+Unlike setSFR(), this is a plain PDF-valued setter (a numerical value
+becomes a delta function, exactly as setCLF()/setCMF()/etc. already
+work): sfrDist() is a genuine distribution over a single, scalar rate
+value, not itself a rate as a function of time the way sfr is. Also
+clears sfr back to invalid/empty: only one of sfr/sfrDist is ever
+meant to be valid at a time (mirroring the exclusive-or rule the
+constructor enforces between galaxy.sfr/galaxy.sfr_dist when parsing a
+real input deck), so setting one via its own setter invalidates the
+other, regardless of which was set first. Each Galaxy built from a
+SimControls where sfrDist is the valid one draws its own, independent
+constant rate from it, once, at construction.)doc";
 
 static constexpr std::string_view setSpecsynDocstring = R"doc(Set the spectral synthesizer.
 
@@ -379,6 +407,11 @@ static constexpr std::string_view sfrPropertyDocstring = R"doc(The star formatio
 Reading returns a PDF; assigning a str sets a new one via setSFR() --
 see its own docstring for the exact rules, which differ from
 imf/cmf/feH/clf's.)doc";
+
+static constexpr std::string_view sfrDistPropertyDocstring = R"doc(The distribution from which a single, constant star formation rate is drawn.
+
+Reading returns a PDF; assigning a str sets a new one via
+setSFRDist() -- see its own docstring for the exact rules.)doc";
 
 static constexpr std::string_view fClusterPropertyDocstring = R"doc(The fraction of stellar mass formed in stochastically-treated clusters.
 
@@ -591,6 +624,8 @@ void bindSimControls(py::module_& m)
                 setCLFDocstring.data(), py::arg("clf"))
         .def("setSFR", &io::SimControls::setSFR,
                 setSFRDocstring.data(), py::arg("sfr"))
+        .def("setSFRDist", &io::SimControls::setSFRDist,
+                setSFRDistDocstring.data(), py::arg("sfr_dist"))
         .def("setSpecsyn", &io::SimControls::setSpecsyn,
                 setSpecsynDocstring.data(), py::arg("specsyn"))
         .def("setFilters", &io::SimControls::setFilters,
@@ -616,7 +651,7 @@ void bindSimControls(py::module_& m)
         // Properties: alternative, attribute-style access to the same
         // getters/setters bound as plain methods above (e.g.
         // sc.imf = "20.0" instead of sc.setIMF("20.0")). Getters that
-        // return a reference (imf, cmf, feH, clf, sfr, specsyn,
+        // return a reference (imf, cmf, feH, clf, sfr, sfrDist, specsyn,
         // filters, tracks) use def_property's own default
         // return_value_policy::reference_internal, tying the
         // returned object's lifetime to this SimControls.
@@ -640,6 +675,10 @@ void bindSimControls(py::module_& m)
                 &io::SimControls::sfr,
                 [](io::SimControls& self, const std::string& sfr) { self.setSFR(sfr); },
                 sfrPropertyDocstring.data())
+        .def_property("sfrDist",
+                &io::SimControls::sfrDist,
+                [](io::SimControls& self, const std::string& sfrDist) { self.setSFRDist(sfrDist); },
+                sfrDistPropertyDocstring.data())
         .def_property("fCluster",
                 &io::SimControls::fCluster,
                 &io::SimControls::setFCluster,

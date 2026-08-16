@@ -1398,9 +1398,91 @@ static auto testExtinctApplyExtinctionCtsUniform() -> int
     return 0;
 }
 
+// Verify Galaxy::sfr_'s own resolution logic (see SFRVar's header
+// comment): when controls.sfr() is valid (galaxy.sfr was given), it
+// should be used directly, as a live reference -- checked here via
+// pointer identity, so a mutation through controls would be visible
+// through galaxy.sfr() too. When controls.sfr() is invalid instead
+// (galaxy.sfr_dist was given), Galaxy::Galaxy() should draw once from
+// controls.sfrDist() and build an owned constant-in-time PDF from that
+// draw via SimControls::buildConstantSFR() -- exercised here with a
+// delta-function sfr_dist so the draw is deterministic, letting this
+// compare galaxy.sfr() bit-for-bit against an independently-built
+// buildConstantSFR() reference.
+static auto testGalaxySFRDistResolution() -> int
+{
+    // galaxy.sfr given: sfr() should be a live reference to
+    // controls.sfr() itself, not a copy
+    try
+    {
+        const toml::table inputDeck = toml::parse_file(inputFile);
+        const io::SimControls controls(inputDeck);
+        core::Galaxy galaxy(controls);
+        if (&galaxy.sfr() != &controls.sfr())
+        {
+            std::cerr << "testGalaxy: sfrDistResolution: expected sfr() to "
+                "be a live reference to controls.sfr() when galaxy.sfr "
+                "was given\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testGalaxy: sfrDistResolution: sfr-given case "
+            "failed: " << error.what() << "\n";
+        return 1;
+    }
+
+    // galaxy.sfr_dist given instead: sfr() should be an owned PDF, built
+    // by drawing once from sfrDist() and passing that draw through
+    // SimControls::buildConstantSFR() -- matched here against an
+    // independently-built reference, since sfrDist() is a delta
+    // function and so draws deterministically
+    constexpr double sfrDistValue = 5e-3;
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFile);
+        auto* galaxyTbl = inputDeck.at_path("galaxy").as_table();
+        galaxyTbl->erase("sfr");
+        galaxyTbl->insert("sfr_dist", sfrDistValue);
+        const io::SimControls controls(inputDeck);
+
+        if (controls.sfr().valid())
+        {
+            std::cerr << "testGalaxy: sfrDistResolution: test bug: "
+                "expected controls.sfr() invalid when galaxy.sfr_dist "
+                "is given\n";
+            return 1;
+        }
+
+        core::Galaxy galaxy(controls);
+        const auto expected = io::SimControls::buildConstantSFR(sfrDistValue);
+        if (!galaxy.sfr().valid() ||
+            galaxy.sfr().getMin() != expected.getMin() ||
+            galaxy.sfr().getMax() != expected.getMax() ||
+            !utils::approxEqual(
+                galaxy.sfr().integral(0.0, t1), expected.integral(0.0, t1)))
+        {
+            std::cerr << "testGalaxy: sfrDistResolution: expected sfr() to "
+                "match buildConstantSFR(sfrDist().draw()) when "
+                "galaxy.sfr_dist was given\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testGalaxy: sfrDistResolution: sfr_dist-given case "
+            "failed: " << error.what() << "\n";
+        return 1;
+    }
+
+    return 0;
+}
+
 auto testGalaxy() -> int
 {
     int result = testGalaxyBasics();
+    result += testGalaxySFRDistResolution();
     result += testFCluster();
     result += testContinuousPopSpecSingleFeh();
     result += testContinuousPopSpecMultiFeh();

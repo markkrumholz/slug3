@@ -262,9 +262,32 @@ namespace io
 
         /**
          * @brief Get simulation star formation rate
-         * @return Pointer to the simulation star formation rate
+         * @return A const reference to the star formation rate, in
+         *   Msun/yr as a function of time -- see buildConstantSFR()'s
+         *   own comment for the exact meaning; invalid/empty if
+         *   galaxy.sfr_dist was given instead of galaxy.sfr (see
+         *   sfrDist()'s own comment)
          */
         [[nodiscard]] auto sfr() const -> const auto& { return sfr_; }
+
+        /**
+         * @brief Get the distribution from which a single, constant star formation rate is drawn
+         * @return A const reference to the distribution requested via
+         *   galaxy.sfr_dist; invalid/empty if galaxy.sfr was given
+         *   instead (see sfr()'s own comment)
+         * @details
+         * Unlike sfr() itself (a rate as a function of time, in
+         * general), this is a distribution over a single, scalar rate
+         * value -- exactly one of galaxy.sfr/galaxy.sfr_dist is
+         * required for a galaxy-type simulation (see the constructor's
+         * own comment, in the .cpp file, for the exact rule). When
+         * sfr_dist is the one given, no
+         * SimControls-level rate exists at all: each Galaxy instead
+         * draws its own, independent constant rate from this
+         * distribution at construction, via buildConstantSFR() -- see
+         * Galaxy::Galaxy()'s own comment.
+         */
+        [[nodiscard]] auto sfrDist() const -> const auto& { return sfrDist_; }
 
         /**
          * @brief Get simulation cluster lifetime function
@@ -442,9 +465,55 @@ namespace io
          * name, unlike every setter above, is not resolved via
          * utils::getFilePath -- it is passed to
          * pdfs::parsePDFDescriptor() as-is, exactly mirroring the
-         * constructor's own galaxy.sfr handling.
+         * constructor's own galaxy.sfr handling. Also clears sfrDist_
+         * back to invalid -- see setSFRDist()'s own comment for why.
          */
         void setSFR(const std::string& sfr);
+
+        /**
+         * @brief Set the distribution from which a single, constant star formation rate is drawn
+         * @param sfrDist A numerical value (interpreted as a delta
+         *   function at that rate -- equivalent to just using setSFR()
+         *   directly, but supported for consistency with every other
+         *   PDF-valued setter) or the name of an SFR-distribution PDF
+         *   file
+         * @throws std::runtime_error if sfrDist is not numeric and
+         *   does not name a file that can be found
+         * @details
+         * Unlike setSFR(), this is a plain PDF-valued setter (a
+         * numerical value becomes a delta function, exactly as
+         * setCLF()/setCMF()/etc. already work) -- see sfrDist()'s own
+         * comment for why sfrDist_ is a genuine distribution, not
+         * itself a rate as a function of time the way sfr_ is. Also
+         * clears sfr_ back to invalid: only one of sfr_/sfrDist_ is
+         * ever meant to be valid at a time (mirroring the exclusive-or
+         * rule the constructor enforces between galaxy.sfr/
+         * galaxy.sfr_dist when parsing a real input deck), so setting
+         * one via its own setter invalidates the other, regardless of
+         * which was set first.
+         */
+        void setSFRDist(const std::string& sfrDist)
+        {
+            sfrDist_ = utils::initPDFFromString(sfrDist);
+            sfr_ = pdfs::PDF();
+        }
+
+        /**
+         * @brief Build a PDF representing a fixed star formation rate, constant in time
+         * @param sfr The (constant) star formation rate, in Msun/yr
+         * @return A PDF over time (in yr) whose integral over any
+         *   [a, b] gives sfr * (b - a) -- see the .cpp file's own
+         *   comment for the exact construction
+         * @details
+         * Exposed as a public static method (rather than a private
+         * implementation detail of the constructor's own galaxy.sfr
+         * handling and setSFR(), which both use it internally) so that
+         * Galaxy::Galaxy() can build the
+         * same kind of PDF itself, from a rate it draws from
+         * sfrDist() rather than one read directly from galaxy.sfr --
+         * see its own comment.
+         */
+        [[nodiscard]] static auto buildConstantSFR(double sfr) -> pdfs::PDF;
 
         /**
          * @brief Set the fraction of stellar mass formed in stochastically-treated clusters
@@ -672,7 +741,8 @@ namespace io
         pdfs::PDF imf_;            /**< The IMF to use for the simulation */
         pdfs::PDF cmf_;            /**< Cluster mass function */
         pdfs::PDF fehDist_;        /**< [Fe/H] distribution */
-        pdfs::PDF sfr_;            /**< Star formation rate */
+        pdfs::PDF sfr_;            /**< Star formation rate, as a function of time -- see sfr()'s own comment for when this is invalid */
+        pdfs::PDF sfrDist_;        /**< Distribution from which a single, constant star formation rate is drawn -- see sfrDist()'s own comment */
         pdfs::PDF clf_;            /**< Cluster lifetime function */
         double fCluster_ = 1.0;    /**< Fraction of stellar mass formed in stochastically-treated clusters (galaxy sims only) */
         tracks::Tracks3D tracks_;  /**< Stellar tracks */
