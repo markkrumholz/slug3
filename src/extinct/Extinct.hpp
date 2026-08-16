@@ -152,6 +152,9 @@ namespace extinct
 
             // Normalize the curve to a V-band extinction of 1 mag
             normalize(wl_, extinct_);
+
+            // Precompute extinctionFacCts_ -- see its own comment
+            computeExtinctionFacCts();
         }
 
         // Copyable (rebinding controls_ to the same referent) but not
@@ -239,7 +242,35 @@ namespace extinct
             std::vector<double> result(wl_.size());
             for (std::size_t i = 0; i < wl_.size(); i++)
             {
-                result.at(i) = spec.at(wlOffset_ + i) * std::exp(-A_V * extinct_.at(i));
+                result[i] = spec[wlOffset_ + i] * std::exp(-A_V * extinct_[i]); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- result and extinct_ both have size wl_.size(), and i is bounded by wl_.size(); spec has the same size as the wl originally passed to the constructor (this class's own contract), so wlOffset_ + i stays in bounds
+            }
+            return result;
+        }
+
+        /**
+         * @brief Apply this extinction curve's own expected attenuation to a continuously-distributed population's spectrum
+         * @param spec Spectrum to extinguish, tabulated on exactly the
+         *   same wavelength grid as the wl originally passed to the
+         *   constructor -- see applyExtinction()'s own spec parameter
+         * @returns The expected extinguished spectrum, on the
+         *   wavelength grid returned by wl()
+         * @details
+         * Unlike applyExtinction(), which attenuates a single star (or
+         * cluster) with one known A_V, this is for a population whose
+         * members are not individually tracked, so there is no single
+         * A_V to apply -- instead, each of spec's remaining wl().size()
+         * elements is multiplied by extinctionFacCts_ at the
+         * corresponding wavelength: the expectation value of
+         * exp(-A_V * extinct()) over the field-star A_V distribution
+         * (io::SimControls::avDistField()), precomputed once, at
+         * construction -- see extinctionFacCts_'s own comment.
+         */
+        [[nodiscard]] auto applyExtinctionCts(const std::vector<double>& spec) const -> std::vector<double>
+        {
+            std::vector<double> result(wl_.size());
+            for (std::size_t i = 0; i < wl_.size(); i++)
+            {
+                result[i] = spec[wlOffset_ + i] * extinctionFacCts_[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- result and extinctionFacCts_ both have size wl_.size() (extinctionFacCts_ by computeExtinctionFacCts()'s own contract), and i is bounded by wl_.size(); spec has the same size as the wl originally passed to the constructor, so wlOffset_ + i stays in bounds -- see applyExtinction()'s own identical indexing
             }
             return result;
         }
@@ -299,6 +330,38 @@ namespace extinct
         }
 
         /**
+         * @brief The per-wavelength attenuation factor for a single, known A_V
+         * @param A_V V-band extinction, in magnitudes
+         * @return exp(-A_V * extinct()) at each wavelength in wl()
+         * @details
+         * The same factor applyExtinction() itself multiplies a
+         * spectrum by, exposed as its own method so
+         * computeExtinctionFacCts() can hand it to utils::PDFIntegrator
+         * as the integrand of an integral over A_V, rather than
+         * duplicating this same exponential there.
+         */
+        [[nodiscard]] auto extinctFac(const double A_V) const -> std::vector<double> // NOLINT(readability-identifier-naming) -- see applyExtinction()'s own identical NOLINT
+        {
+            std::vector<double> result(wl_.size());
+            for (std::size_t i = 0; i < wl_.size(); i++)
+            {
+                result[i] = std::exp(-A_V * extinct_[i]); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- result and extinct_ both have size wl_.size(), and i is bounded by wl_.size()
+            }
+            return result;
+        }
+
+        /**
+         * @brief Compute extinctionFacCts_
+         * @details
+         * Defined out-of-line, in Extinct.cpp -- see that file's own
+         * comment for why (needs io::SimControls's complete type, to
+         * call controls_.avDistField()/intMaxIter()/intAbsTol()/
+         * intRelTol(); mirrors wlObs()'s identical situation). Called
+         * once, from the constructor, immediately after normalize().
+         */
+        void computeExtinctionFacCts();
+
+        /**
          * @brief Simulation controls this Extinct reads its redshift from
          * @details
          * Read live, not snapshotted, every time wlObs() is called --
@@ -317,6 +380,19 @@ namespace extinct
         std::vector<double> wl_;         /**< Interpolated wavelength grid, in Angstrom */
         std::vector<double> extinct_;    /**< Extinction curve interpolated onto wl_ */
         std::size_t wlOffset_ = 0;       /**< Number of leading elements of the constructor's own wl chopped off wl_'s front */
+
+        /**
+         * @brief The expected value of exp(-A_V * extinct()) over controls_.avDistField(), at each wavelength in wl()
+         * @details
+         * \f$\int \exp[-A_V \cdot \mathrm{extinct}(\lambda)]\, p(A_V)\, dA_V\f$,
+         * where \f$p\f$ is controls_.avDistField() -- the multiplicative
+         * factor applyExtinctionCts() itself applies to a continuously-
+         * distributed population's spectrum, since no single A_V
+         * applies to every member of that population. Computed once,
+         * by computeExtinctionFacCts(), at construction (avDistField()
+         * never changes after that, so neither does this).
+         */
+        std::vector<double> extinctionFacCts_;
     };
 
 } // namespace extinct
