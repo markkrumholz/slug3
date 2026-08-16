@@ -1,0 +1,9 @@
+# Cluster lifetime function for the QHIFUVstats example: a delta
+# function at 1e100 yr, effectively disabling cluster disruption --
+# every cluster stays bound for the full duration of any realistic
+# simulation.
+
+breakpoints = [1e100, 1e100]
+
+[segment1]
+type = "delta"

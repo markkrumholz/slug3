@@ -1,0 +1,66 @@
+# QHIFUVstats: an example input deck demonstrating a galaxy-type
+# simulation, with a stochastic star formation rate: each trial draws
+# its own constant SFR from galaxy.sfr_dist (rather than every trial
+# sharing one fixed galaxy.sfr), then forms a population of clusters
+# over the simulation's duration under that trial's own rate. Uses
+# MIST tracks and a full chained set of stellar atmosphere models
+# (spectra.model = "default"), with cluster mass drawn from a
+# Schechter distribution (dists/CMF.toml) and photometry pared down to
+# just the two filters (FUV flux and Q(HI)) this comparison needs --
+# stars/spectra/phot stanzas otherwise mirror examples/QHIstats's own.
+# Run this from within this directory (so the dists/*.toml paths below
+# resolve) with:
+#   slug QHIFUVstats.toml
+# It requires the real MIST tracks, spectral libraries, and filter/Vega
+# data referenced below to have been fetched locally (too large to
+# store in the repository -- see data/tools/*/fetch_*.py).
+
+# This is a galaxy (rather than cluster) simulation
+sim_type = "galaxy"
+
+# Number of trials to run
+n_trial = 10000
+
+# Base name of the output file(s) and time of output. Only galaxy
+# properties and galaxy photometry are written -- individual cluster
+# properties/photometry and every spectrum are all skipped, since
+# n_trial's own size (below) would otherwise make the output file far
+# too large to commit as an example.
+[output]
+model_name = "QHIFUVstats"
+output_times = 1e8
+write_cluster = false
+write_cluster_spec = false
+write_cluster_phot = false
+write_galaxy_spec = false
+
+# Input stanza to describe stellar models
+[stars]
+IMF = "chabrier.toml"     # Chabrier (2005) IMF
+tracks = "MIST"           # MIST stellar tracks
+v_vcrit = 0.4             # Rotating at 40% of breakup
+alphaFe = 0.0             # [alpha/Fe] = 0 (Solar alpha/Fe)
+FeH = 0.0                 # Solar metallicity
+
+# Input stanza to describe spectral synthesis
+[spectra]
+model = "default"         # Default spectral model
+wl_min = 200              # Wavelength grid starts at 200 Å
+wl_max = 2e5              # Wavelength grid ends at 2e5 Å
+nwl = 1024                # Wavelength grid has 1024 points
+
+# Input stanza to describe photometry
+# filters lists the filters to use: GALEX FUV flux, and an idealized
+# filter representing ionizing photon flux
+[phot]
+filters = ["GALEX.FUV", "Q(HI)"]
+system = "Flambda"        # Compute photometry as raw flux (no zero point)
+
+# Input stanza to describe star clusters
+[clusters]
+CMF = "dists/CMF.toml"    # Draw cluster masses from this distribution
+CLF = "dists/CLF.toml"    # Draw cluster lifetimes from this distribution
+
+# Input stanza to describe the galaxy's own star formation
+[galaxy]
+sfr_dist = "dists/sfr_dist.toml"  # Draw a single, constant SFR per trial from this distribution

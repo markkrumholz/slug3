@@ -1,0 +1,11 @@
+# Star formation rate distribution for the QHIFUVstats example: a
+# single powerlaw segment with slope alpha = -1, over [1e-4, 1e-1]
+# Msun/yr. Each trial draws a single, constant-for-that-trial SFR from
+# this distribution (see galaxy.sfr_dist's own documentation), rather
+# than every trial sharing one fixed rate the way galaxy.sfr would.
+
+breakpoints = [1e-4, 1e-1]
+
+[segment1]
+type = "powerlaw"
+slope = -1
