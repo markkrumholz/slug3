@@ -20,6 +20,7 @@
 #include "testClusterSpecsynFull.hpp"
 #include "testClusterSpecsynFullAFe.hpp"
 #include "testClusterSpecsynFullNonStoch.hpp"
+#include "testGalaxySpecsynFullFieldStars.hpp"
 #include "testGalaxySpecsynFullNonStoch.hpp"
 #include <exception>
 #include <iostream>
@@ -32,6 +33,7 @@ auto main() -> int {
         result += testClusterSpecsynFullAFe();
         result += testClusterSpecsynFullNonStoch();
         result += testGalaxySpecsynFullNonStoch();
+        result += testGalaxySpecsynFullFieldStars();
         return result;
     }
     catch (const std::exception& error)
