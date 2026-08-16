@@ -98,7 +98,7 @@ jobs:
         run: brew install gsl hdf5 ninja ccache
 
       - name: Cache ccache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ env.CCACHE_DIR }}
           key: ccache-${{ matrix.os }}-${{ matrix.compiler }}-${{ github.sha }}
@@ -220,7 +220,7 @@ jobs:
           python -m pip install pyright pytest h5py tomlkit astropy numpy
 
       - name: Cache ccache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ env.CCACHE_DIR }}
           key: ccache-pyright-${{ github.sha }}
