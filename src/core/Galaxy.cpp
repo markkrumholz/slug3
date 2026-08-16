@@ -30,10 +30,28 @@
 #include <vector>
 
 // Constructor: everything but controls_ takes its in-class default
-// (curTime_/lbol_ = 0, every vector empty)
+// (curTime_/lbol_ = 0, every vector empty); sfr_ is resolved in the
+// body below -- see this class's own constructor comment. SimControls
+// only guarantees exactly one of sfr()/sfrDist() valid for a
+// galaxy-type simulation -- a Galaxy can also legitimately be
+// constructed from a non-galaxy SimControls (e.g. the pybind default,
+// PyDefaults.toml, which is sim_type = "cluster" and never sets
+// either), so sfrDist() is only drawn from when it's actually valid;
+// otherwise sfr_ is left as the default-constructed (invalid) PDF,
+// exactly as sc.sfr() itself would have been before sfr_ existed --
+// any code that actually needs a valid sfr() (advance(), etc.) fails
+// the same way it always did in that case.
 core::Galaxy::Galaxy(const io::SimControls& controls) :
     controls_(std::cref(controls))
 {
+    if (controls.sfr().valid())
+    {
+        sfr_ = std::cref(controls.sfr());
+    }
+    else if (controls.sfrDist().valid())
+    {
+        sfr_ = io::SimControls::buildConstantSFR(controls.sfrDist().draw());
+    }
 }
 
 // Advance function
@@ -64,7 +82,7 @@ void core::Galaxy::advance(const double t)
     // population, not represented by any individual Cluster or
     // FieldStar object, so actualMass_ folds its own share in
     // directly rather than via newMasses/newFieldMasses.
-    const double mNew = sc.sfr().integral(curTime_, t);
+    const double mNew = sfr().integral(curTime_, t);
     const auto newMasses = sc.cmf().drawTarget(mNew * fCluster);
     const auto newFieldMasses = sc.imf().drawTarget(
         mNew * (1.0 - fCluster) * sc.fracStochMass(),
@@ -79,7 +97,7 @@ void core::Galaxy::advance(const double t)
     // service, appending it to clusters_
     for (const double mass : newMasses)
     {
-        const double formTime = sc.sfr().draw(curTime_, t);
+        const double formTime = sfr().draw(curTime_, t);
         clusters_.emplace_back(utils::getID(), mass, formTime, sc);
     }
 
@@ -101,7 +119,7 @@ void core::Galaxy::advance(const double t)
     newFieldStars.reserve(newFieldMasses.size());
     for (const double mass : newFieldMasses)
     {
-        const double formTime = sc.sfr().draw(curTime_, t);
+        const double formTime = sfr().draw(curTime_, t);
         const double feh = sc.fehDist().draw();
         const double deathTime = formTime + sc.tracks().starLifetime(mass, feh);
         const double aV = sc.avDistField().valid() ? sc.avDistField().draw() : 0.0;
@@ -229,7 +247,7 @@ void core::Galaxy::addContinuousSpec(const extinct::Extinct* ext)
     std::vector<double> contSpec;
     if (sc.computeLbol())
     {
-        auto [s, l] = synth->specAndLbolCts(sc.sfr(), sc.imf(), sc.fehDist(), curTime_,
+        auto [s, l] = synth->specAndLbolCts(sfr(), sc.imf(), sc.fehDist(), curTime_,
             fCluster, sc.imf().getMin(), sc.minStochMass());
         contSpec = std::move(s);
         lbolCts_ = l;
@@ -237,7 +255,7 @@ void core::Galaxy::addContinuousSpec(const extinct::Extinct* ext)
     }
     else
     {
-        contSpec = synth->specCts(sc.sfr(), sc.imf(), sc.fehDist(), curTime_,
+        contSpec = synth->specCts(sfr(), sc.imf(), sc.fehDist(), curTime_,
             fCluster, sc.imf().getMin(), sc.minStochMass());
     }
 
@@ -378,7 +396,7 @@ auto core::Galaxy::lbolCtsIntegrand(
 void core::Galaxy::computeLbolCts()
 {
     const auto& sc = controls_.get();
-    const auto& sfr = sc.sfr();
+    const auto& sfrPdf = sfr();
     const auto& imf = sc.imf();
     const auto& fehDist = sc.fehDist();
     const double fCluster = sc.fCluster();
@@ -390,12 +408,12 @@ void core::Galaxy::computeLbolCts()
     // log-transforms whenever curTime_ exceeds that floor; see
     // computeLbolCts()'s own header comment for why absTol has no
     // utils::Lsun factor here, unlike Specsyn::specCtsHelper()'s own.
-    const pdfs::PDFReflect sfrAge(sfr, 0.5 * curTime_);
+    const pdfs::PDFReflect sfrAge(sfrPdf, 0.5 * curTime_);
     const double ageMin = std::min(1e4, 1e-3 * curTime_);
     const bool logAge = curTime_ > ageMin;
 
     const bool singleFeh = (fehDist.getMin() == fehDist.getMax());
-    const double absTol = sc.intAbsTol() * sfr.integral(0.0, curTime_);
+    const double absTol = sc.intAbsTol() * sfrPdf.integral(0.0, curTime_);
 
     using IntegrandFn = std::vector<double> (Galaxy::*)(double, const pdfs::PDF&, double) const;
     const utils::PDFIntegrator<IntegrandFn, utils::GKOrder::GK15> integrator(

@@ -41,18 +41,19 @@
 
 // Build a constant-in-time PDF representing a fixed star formation
 // rate, used by both the constructor's own galaxy.sfr handling and
-// setSFR() below. Represented as a single flat (alpha = 0) powerlaw
-// segment spanning [0, tMax], with tMax fixed far larger than any
-// realistic simulation timescale so that every query [a, b] this PDF
-// ever sees (cluster formation times, sfr().integral() over an
-// advance() step) falls well inside the flat region, never clamped
-// against tMax. A flat segment's own normalized integral over [a, b]
-// is (b - a) / tMax (see PDFSegmentPowerlaw::integral()), so setting
-// the segment's PDF-level weight to sfr * tMax makes
-// PDF::integral(a, b) -- weight times that normalized integral --
-// come out to exactly sfr * (b - a), matching the physical
-// definition of a star formation rate.
-static auto buildConstantSFR(const double sfr) -> pdfs::PDF
+// setSFR() below (and, via its own public static declaration, by
+// Galaxy::Galaxy() -- see buildConstantSFR()'s own header comment).
+// Represented as a single flat (alpha = 0) powerlaw segment spanning
+// [0, tMax], with tMax fixed far larger than any realistic simulation
+// timescale so that every query [a, b] this PDF ever sees (cluster
+// formation times, sfr().integral() over an advance() step) falls
+// well inside the flat region, never clamped against tMax. A flat
+// segment's own normalized integral over [a, b] is (b - a) / tMax
+// (see PDFSegmentPowerlaw::integral()), so setting the segment's
+// PDF-level weight to sfr * tMax makes PDF::integral(a, b) -- weight
+// times that normalized integral -- come out to exactly sfr * (b - a),
+// matching the physical definition of a star formation rate.
+auto io::SimControls::buildConstantSFR(const double sfr) -> pdfs::PDF
 {
     constexpr double tMax = 1e15; // yr; far beyond any realistic simulation time
     const double wgt = sfr * tMax;
@@ -294,30 +295,59 @@ void io::SimControls::initPhysics(const toml::table& inputDeck)
         // CLF
         clf_ = utils::initPDFFromKey(inputDeck, "clusters.CLF");
 
-        // SFR -- this requires special handling because here
-        // a numerical value is not interpreted as a delta function
-        // but as the normalization for a non-normalized PDF that is
-        // constant in time -- see buildConstantSFR()'s own comment
-        const std::optional<double> sfr =
-            inputDeck.at_path("galaxy.sfr").value<double>();
-        if (sfr.has_value())
+        // SFR: exactly one of galaxy.sfr (a rate as a function of
+        // time -- possibly constant, possibly not, see below) or
+        // galaxy.sfr_dist (a distribution to draw a single, constant-
+        // for-the-whole-simulation rate from once per Galaxy -- see
+        // sfrDist()'s own comment) is required.
+        const auto sfrNode = inputDeck.at_path("galaxy.sfr");
+        const auto sfrDistNode = inputDeck.at_path("galaxy.sfr_dist");
+        if (sfrNode && sfrDistNode)
         {
-            sfr_ = buildConstantSFR(sfr.value());
+            throw std::runtime_error(
+                "SimControls: galaxy.sfr and galaxy.sfr_dist cannot "
+                "both be given");
         }
-        else
+        if (sfrNode)
         {
-            // We have been given a file
-            const std::optional<std::string> sfrFile =
-                inputDeck.at_path("galaxy.sfr").value<std::string>();
-            if (sfrFile.has_value())
+            // galaxy.sfr requires special handling because here a
+            // numerical value is not interpreted as a delta function
+            // but as the normalization for a non-normalized PDF that
+            // is constant in time -- see buildConstantSFR()'s own
+            // comment
+            const std::optional<double> sfr = sfrNode.value<double>();
+            if (sfr.has_value())
             {
-                sfr_ = pdfs::parsePDFDescriptor(sfrFile.value());
+                sfr_ = buildConstantSFR(sfr.value());
             }
             else
             {
-                throw std::runtime_error(
-                    "SimControls: invalid entry for galaxy.sfr");
+                // We have been given a file
+                const std::optional<std::string> sfrFile = sfrNode.value<std::string>();
+                if (sfrFile.has_value())
+                {
+                    sfr_ = pdfs::parsePDFDescriptor(sfrFile.value());
+                }
+                else
+                {
+                    throw std::runtime_error(
+                        "SimControls: invalid entry for galaxy.sfr");
+                }
             }
+        }
+        else if (sfrDistNode)
+        {
+            // galaxy.sfr_dist is a genuine distribution -- unlike
+            // galaxy.sfr, a numerical value here is interpreted as an
+            // ordinary delta function, via the same utils::
+            // initPDFFromKey() every other PDF-valued key uses
+            sfrDist_ = utils::initPDFFromKey(inputDeck, "galaxy.sfr_dist");
+        }
+        else
+        {
+            throw std::runtime_error(
+                "SimControls: a galaxy-type simulation requires either "
+                "galaxy.sfr or galaxy.sfr_dist to be given");
         }
 
         // Fraction of stellar mass formed in stochastically-treated
@@ -459,7 +489,10 @@ void io::SimControls::setTracks(tracks::Tracks3D tracks)
 // Set the star formation rate -- mirrors the galaxy.sfr handling in
 // the constructor above exactly, including not resolving a file name
 // through utils::getFilePath (unlike setIMF()/setCMF()/setFeH()/
-// setCLF(), which all go through utils::initPDFFromString())
+// setCLF(), which all go through utils::initPDFFromString()). Clears
+// sfrDist_ back to invalid, mirroring setSFRDist()'s own identical
+// clearing of sfr_ -- see either one's own header comment for why:
+// only one of sfr_/sfrDist_ is ever meant to be valid at a time.
 void io::SimControls::setSFR(const std::string& sfr)
 {
     try
@@ -472,6 +505,7 @@ void io::SimControls::setSFR(const std::string& sfr)
         // We have been given a file
         sfr_ = pdfs::parsePDFDescriptor(sfr);
     }
+    sfrDist_ = pdfs::PDF();
 }
 
 // Track reader

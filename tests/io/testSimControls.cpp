@@ -894,6 +894,169 @@ static auto testSimControlsExtinctField() -> int
     return 0;
 }
 
+// Verify galaxy.sfr/galaxy.sfr_dist's exclusive-or requirement and
+// galaxy.sfr_dist's own parsing: both given must throw, neither given
+// must throw, a plain number for galaxy.sfr_dist must become an
+// ordinary delta-function PDF (unlike galaxy.sfr's own special
+// buildConstantSFR() handling -- see sfrDist()'s own header comment),
+// and a file must be read via the same utils::initPDFFromKey() path
+// every other PDF-valued key uses. In every galaxy.sfr_dist case,
+// sfr() itself must remain invalid, since exactly one of the two is
+// ever meant to be valid at once.
+static auto testSimControlsSFRDist() -> int
+{
+    constexpr std::string_view baseDeck = "tests/core/assets/testGalaxy.in";
+
+    // Both galaxy.sfr and galaxy.sfr_dist given: must throw
+    try
+    {
+        toml::table inputDeck = toml::parse_file(baseDeck);
+        inputDeck.at_path("galaxy").as_table()->insert("sfr_dist", 2.0);
+        const io::SimControls controls(inputDeck);
+        std::cerr << "testSimControls: sfrDist: expected construction to "
+            "throw when both galaxy.sfr and galaxy.sfr_dist are given\n";
+        return 1;
+    }
+    catch (const std::runtime_error&) { /* expected */ }
+
+    // Neither galaxy.sfr nor galaxy.sfr_dist given: must throw
+    try
+    {
+        toml::table inputDeck = toml::parse_file(baseDeck);
+        inputDeck.at_path("galaxy").as_table()->erase("sfr");
+        const io::SimControls controls(inputDeck);
+        std::cerr << "testSimControls: sfrDist: expected construction to "
+            "throw when neither galaxy.sfr nor galaxy.sfr_dist is given\n";
+        return 1;
+    }
+    catch (const std::runtime_error&) { /* expected */ }
+
+    // galaxy.sfr_dist given as a plain number: unlike galaxy.sfr, this
+    // is an ordinary delta function (via utils::initPDFFromKey(), the
+    // same convention CMF/CLF/[Fe/H] already use), not a
+    // buildConstantSFR()-style non-normalized constant-in-time PDF
+    constexpr double sfrDistValue = 2.5;
+    try
+    {
+        toml::table inputDeck = toml::parse_file(baseDeck);
+        auto* galaxyTbl = inputDeck.at_path("galaxy").as_table();
+        galaxyTbl->erase("sfr");
+        galaxyTbl->insert("sfr_dist", sfrDistValue);
+        const io::SimControls controls(inputDeck);
+
+        if (controls.sfr().valid())
+        {
+            std::cerr << "testSimControls: sfrDist: expected sfr() to "
+                "remain invalid when galaxy.sfr_dist is given\n";
+            return 1;
+        }
+        if (!controls.sfrDist().valid() ||
+            controls.sfrDist().getMin() != sfrDistValue ||
+            controls.sfrDist().getMax() != sfrDistValue ||
+            !controls.sfrDist().normalized())
+        {
+            std::cerr << "testSimControls: sfrDist: expected sfrDist() to "
+                "be a valid delta function at " << sfrDistValue << "\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: sfrDist: numeric case failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+
+    // galaxy.sfr_dist given as a PDF descriptor file: reuses
+    // testExtinct's own uniform-over-[0,2] fixture, purely as a
+    // convenient, already-existing non-delta PDF descriptor
+    try
+    {
+        toml::table inputDeck = toml::parse_file(baseDeck);
+        auto* galaxyTbl = inputDeck.at_path("galaxy").as_table();
+        galaxyTbl->erase("sfr");
+        galaxyTbl->insert("sfr_dist",
+            std::string("tests/extinct/assets/testExtinctAVFieldUniform.toml"));
+        const io::SimControls controls(inputDeck);
+
+        if (controls.sfr().valid())
+        {
+            std::cerr << "testSimControls: sfrDist: expected sfr() to "
+                "remain invalid when galaxy.sfr_dist is given (file case)\n";
+            return 1;
+        }
+        if (!controls.sfrDist().valid() ||
+            !utils::approxEqual(controls.sfrDist().getMin(), 0.0) ||
+            !utils::approxEqual(controls.sfrDist().getMax(), 2.0))
+        {
+            std::cerr << "testSimControls: sfrDist: expected sfrDist() to "
+                "span [0, 2] when read from a file\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: sfrDist: file case failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+
+    // setSFR()/setSFRDist() must each clear the other back to invalid,
+    // so only one of sfr_/sfrDist_ is ever valid at once
+    constexpr double setSFRDistValue = 3.0;
+    constexpr double setSFRValue = 4.0;
+    constexpr double sfrTMax = 1e15; // matches buildConstantSFR()'s own tMax
+    try
+    {
+        const toml::table inputDeck = toml::parse_file(baseDeck);
+        io::SimControls controls(inputDeck);
+        if (!controls.sfr().valid() || controls.sfrDist().valid())
+        {
+            std::cerr << "testSimControls: sfrDist: test bug: expected "
+                "sfr() valid and sfrDist() invalid right after construction\n";
+            return 1;
+        }
+
+        controls.setSFRDist(std::to_string(setSFRDistValue));
+        if (controls.sfr().valid())
+        {
+            std::cerr << "testSimControls: sfrDist: expected setSFRDist() "
+                "to clear sfr() back to invalid\n";
+            return 1;
+        }
+        if (!controls.sfrDist().valid() ||
+            !utils::approxEqual(controls.sfrDist().draw(), setSFRDistValue))
+        {
+            std::cerr << "testSimControls: sfrDist: expected setSFRDist() "
+                "to leave sfrDist() drawing " << setSFRDistValue << "\n";
+            return 1;
+        }
+
+        controls.setSFR(std::to_string(setSFRValue));
+        if (controls.sfrDist().valid())
+        {
+            std::cerr << "testSimControls: sfrDist: expected setSFR() to "
+                "clear sfrDist() back to invalid\n";
+            return 1;
+        }
+        if (!controls.sfr().valid() ||
+            controls.sfr().getMin() != 0.0 || controls.sfr().getMax() != sfrTMax)
+        {
+            std::cerr << "testSimControls: sfrDist: expected setSFR() to "
+                "leave sfr() a valid constant-in-time PDF\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: sfrDist: setter mutual-exclusion "
+            "case failed: " << error.what() << "\n";
+        return 1;
+    }
+
+    return 0;
+}
+
 auto testSimControls() -> int
 {
     int result = 0;
@@ -916,5 +1079,6 @@ auto testSimControls() -> int
     result += testSimControlsSpectraLibrary();
     result += testSimControlsSpectraChained();
     result += testSimControlsExtinctField();
+    result += testSimControlsSFRDist();
     return result;
 }

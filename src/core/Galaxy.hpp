@@ -14,6 +14,7 @@
 #include "Cluster.hpp"
 #include <cstddef>
 #include <functional>
+#include <variant>
 #include <vector>
 
 namespace extinct
@@ -29,7 +30,7 @@ namespace core
      * @details
      * Unlike Cluster, which represents a single mono-age population,
      * a Galaxy represents an entire, continuously star-forming system:
-     * advance() draws new clusters from SimControls::sfr()/cmf() as
+     * advance() draws new clusters from sfr()/SimControls::cmf() as
      * time passes, advances every cluster formed so far (whether still
      * bound or already disrupted), and sums their individual spectra,
      * photometry, and bolometric luminosities into this Galaxy's own
@@ -38,6 +39,20 @@ namespace core
     class Galaxy
     {
     public:
+
+        /**
+         * @brief Holds this galaxy's own resolved star formation rate
+         * @details
+         * Either a reference to SimControls::sfr() itself (when
+         * galaxy.sfr was given, so every Galaxy built from the same
+         * SimControls shares the identical rate) or a PDF this Galaxy
+         * owns outright (when galaxy.sfr_dist was given instead, so
+         * each Galaxy draws its own, independent constant rate -- see
+         * the constructor's own comment). Mirrors Cluster::Track2DVar's
+         * identical shared-vs-owned pattern exactly -- see its own
+         * comment for the rationale.
+         */
+        using SFRVar = std::variant<pdfs::PDF, std::reference_wrapper<const pdfs::PDF>>;
 
         /**
          * @brief A single non-clustered, individually-tracked (field) star
@@ -73,10 +88,41 @@ namespace core
          * spec_/specExtinct_/phot_/photExtinct_ all start empty -- no
          * clusters or field stars exist, and no spectrum/photometry has
          * been computed, until the first call to advance().
+         *
+         * Also resolves sfr_ here, once, for the rest of this Galaxy's
+         * own lifetime: if controls.sfr() is valid (galaxy.sfr was
+         * given), sfr_ becomes a reference to that same PDF, read live
+         * exactly as every other SimControls-derived quantity is
+         * elsewhere in this class. Otherwise, if controls.sfrDist() is
+         * valid instead (galaxy.sfr_dist was given -- SimControls's own
+         * constructor guarantees exactly one of the two for a
+         * galaxy-type simulation), sfr_ instead becomes a PDF this
+         * Galaxy owns outright, built by SimControls::buildConstantSFR()
+         * from a single value drawn from controls.sfrDist() -- a
+         * constant rate, but an independent one per Galaxy, so
+         * multiple Galaxy instances built from the same SimControls
+         * (e.g. separate trials) each get their own draw. If neither is
+         * valid (a Galaxy built from a non-galaxy-type SimControls,
+         * e.g. the pybind default, sim_type = "cluster", which never
+         * sets either), sfr_ is simply left invalid, exactly as
+         * sc.sfr() itself would have been -- any code that actually
+         * needs a valid sfr() fails the same way it always did.
          */
         explicit Galaxy(const io::SimControls& controls);
 
         // Observers
+
+        /**
+         * @brief Return this galaxy's own resolved star formation rate
+         * @return A const reference to the PDF sfr_ holds -- see its
+         *   own comment for how this galaxy resolved it, once, at
+         *   construction
+         */
+        [[nodiscard]] auto sfr() const -> const pdfs::PDF&
+        {
+            if (const auto* owned = std::get_if<pdfs::PDF>(&sfr_)) { return *owned; }
+            return std::get<std::reference_wrapper<const pdfs::PDF>>(sfr_).get();
+        }
 
         /**
          * @brief Return the galaxy's current time
@@ -259,7 +305,7 @@ namespace core
          * @param t Time to which to advance, in yr; must be >= curTime()
          * @details
          * Draws and forms new clusters over (curTime(), t] from
-         * SimControls::sfr()/cmf(), scaled down to the
+         * sfr()/SimControls::cmf(), scaled down to the
          * stochastically-treated fraction SimControls::fCluster() of
          * the step's own total target mass. Of the remaining
          * (1 - fCluster()), the share at or above
@@ -296,6 +342,16 @@ namespace core
         std::vector<Cluster> disruptedClusters_; /**< Disrupted clusters */
         std::vector<FieldStar> fieldStars_;      /**< Currently alive field stars, sorted by formTime_ -- see advance()'s own comment */
         std::vector<FieldStar> deadFieldStars_;  /**< Field stars that have died as of curTime_ */
+
+        /**
+         * @brief This galaxy's own resolved star formation rate
+         * @details
+         * Set once, at construction, and never reseated afterward --
+         * use sfr() rather than this member directly. See SFRVar's own
+         * comment for what the two alternatives mean, and the
+         * constructor's own comment for exactly how this is resolved.
+         */
+        SFRVar sfr_;
 
         std::vector<double> spec_;         /**< Sum of spec() over every cluster in clusters_/disruptedClusters_, at the current time */
         std::vector<double> specExtinct_;  /**< Sum of specExtinct() over every cluster in clusters_/disruptedClusters_, at the current time */
