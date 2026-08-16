@@ -84,9 +84,13 @@ void core::Galaxy::advance(const double t)
     }
 
     // 3) For each new field star, draw a formation time from the same
-    // SFR distribution the clusters above draw from, and a [Fe/H]
-    // from fehDist(); its death time is then formTime + the tracks'
-    // own starLifetime() at that (mass, feh), both in yr. Sorting this
+    // SFR distribution the clusters above draw from, a [Fe/H] from
+    // fehDist(), and its own V-band extinction from avDistField() --
+    // an independent draw per star (unlike a bound cluster's own
+    // single, shared aV_), mirroring Cluster's own avDist().valid() ?
+    // draw() : 0.0 convention for when no extinction was requested at
+    // all. Its death time is then formTime + the tracks' own
+    // starLifetime() at that (mass, feh), both in yr. Sorting this
     // step's own batch by formTime before appending it keeps
     // fieldStars_ sorted by formTime_ overall: every previously-
     // appended star's own formTime_ already falls at or before
@@ -100,7 +104,8 @@ void core::Galaxy::advance(const double t)
         const double formTime = sc.sfr().draw(curTime_, t);
         const double feh = sc.fehDist().draw();
         const double deathTime = formTime + sc.tracks().starLifetime(mass, feh);
-        newFieldStars.push_back({ mass, feh, formTime, deathTime });
+        const double aV = sc.avDistField().valid() ? sc.avDistField().draw() : 0.0;
+        newFieldStars.push_back({ mass, feh, formTime, deathTime, aV });
     }
     std::ranges::sort(newFieldStars, {}, &FieldStar::formTime_);
     fieldStars_.insert(fieldStars_.end(), newFieldStars.begin(), newFieldStars.end());
@@ -213,12 +218,10 @@ void core::Galaxy::computeSpec()
 
 void core::Galaxy::addContinuousSpec(const extinct::Extinct* ext)
 {
-    // Unlike a bound cluster, which draws its own A_V, the continuous/
-    // field population is assumed negligibly extincted, so its own
-    // light passes into specExtinct_ unattenuated. If Lbol was also
-    // requested, gets it via specAndLbolCts() (a byproduct of the same
-    // integral) rather than paying for a second one via the standalone
-    // Lbol path -- see lbolCtsCurrent_'s own comment.
+    // If Lbol was also requested, gets it via specAndLbolCts() (a
+    // byproduct of the same integral) rather than paying for a second
+    // one via the standalone Lbol path -- see lbolCtsCurrent_'s own
+    // comment.
     const auto& sc = controls_.get();
     const auto* synth = sc.specsyn();
     const double fCluster = sc.fCluster();
@@ -241,14 +244,13 @@ void core::Galaxy::addContinuousSpec(const extinct::Extinct* ext)
     for (std::size_t i = 0; i < spec_.size(); ++i) { spec_[i] += contSpec[i]; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- contSpec has size wl().size() by Specsyn::specCts()'s own contract, matching spec_'s size set in computeSpec()
     if (ext != nullptr)
     {
-        // specExtinct_ sits on ext->wl(), a possibly-narrower, offset
-        // window of spec_'s own wavelength grid (see Extinct::
-        // applyExtinction()'s own wlOffset_ comment) -- specExtinct_[i]
-        // lines up with contSpec[wlOffset + i], not contSpec[i], and
-        // (per this function's own comment) gets no
-        // exp(-A_V * extinct()) attenuation of its own.
-        const auto wlOffset = ext->wlOffset();
-        for (std::size_t i = 0; i < specExtinct_.size(); ++i) { specExtinct_[i] += contSpec[wlOffset + i]; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- specExtinct_.size() == wl_.size() <= contSpec.size() - wlOffset by Extinct's own constructor contract (wl_ is a sub-window of the wl originally passed to it, which matches contSpec's own grid)
+        // Unlike a bound cluster or an individual field star, this
+        // share of the population is not individually tracked, so
+        // there is no single A_V to apply -- applyExtinctionCts()
+        // instead applies the *expected* attenuation over
+        // SimControls::avDistField() -- see its own comment.
+        const auto contSpecExtinct = ext->applyExtinctionCts(contSpec);
+        for (std::size_t i = 0; i < specExtinct_.size(); ++i) { specExtinct_[i] += contSpecExtinct[i]; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- contSpecExtinct has size specExtinct_.size() (wl_.size()) by Extinct::applyExtinctionCts()'s own contract, matching specExtinct_'s size set in computeSpec()
     }
 }
 
@@ -257,14 +259,17 @@ void core::Galaxy::addFieldStarSpec(const extinct::Extinct* ext)
     const auto& sc = controls_.get();
     const auto* synth = sc.specsyn();
     const auto props = getFieldStarProps();
-    const auto wlOffset = (ext != nullptr) ? ext->wlOffset() : std::size_t{ 0 };
     for (std::size_t j = 0; j < fieldStars_.size(); ++j)
     {
         const auto starSpec = synth->spec(props[j], fieldStars_[j].feh_); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- props has size fieldStars_.size() by getFieldStarProps()'s own contract, and j is bounded by fieldStars_.size()
         for (std::size_t i = 0; i < spec_.size(); ++i) { spec_[i] += starSpec[i]; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- starSpec has size wl().size() by Specsyn::spec()'s own contract, matching spec_'s size set in computeSpec()
         if (ext != nullptr)
         {
-            for (std::size_t i = 0; i < specExtinct_.size(); ++i) { specExtinct_[i] += starSpec[wlOffset + i]; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see computeSpec()'s own identical continuous-population specExtinct_ update for why this indexing is safe
+            // Attenuate by this star's own aV_, exactly as
+            // Cluster::computeSpec() attenuates a whole cluster by its
+            // own single aV_.
+            const auto starSpecExtinct = ext->applyExtinction(fieldStars_[j].aV_, starSpec); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- j is bounded by fieldStars_.size() by construction
+            for (std::size_t i = 0; i < specExtinct_.size(); ++i) { specExtinct_[i] += starSpecExtinct[i]; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- starSpecExtinct has size specExtinct_.size() (wl_.size()) by Extinct::applyExtinction()'s own contract, matching specExtinct_'s size set in computeSpec()
         }
     }
 }
