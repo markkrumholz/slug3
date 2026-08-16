@@ -895,6 +895,17 @@ static auto testFieldStarsMassBudget() -> int
     {
         toml::table inputDeck = toml::parse_file(inputFile);
         inputDeck.at_path("clusters").as_table()->insert("f_cluster", fClusterValue);
+        // Overrides inputFile's own galaxy.sfr = 1e-2 up to 1.0: at the
+        // default rate, the expected number of field stars drawn by t1
+        // is only O(1) (comparable to a single star's own typical
+        // mass), so whether at least one actually gets drawn is a
+        // near-coin-flip -- sensitive enough to platform-dependent
+        // floating-point differences in the RNG/distribution chain
+        // (e.g. GCC/libstdc++ vs Clang/libc++) that this test was
+        // observed to flake on CI (ubuntu-latest/gcc) despite a fixed
+        // rng seed. A 100x higher sfr pushes the expected count into
+        // the dozens, comfortably far from that boundary.
+        inputDeck.at_path("galaxy").as_table()->insert_or_assign("sfr", 1.0);
         const io::SimControls controls(inputDeck);
 
         utils::rng().seed(rngSeed);
@@ -958,12 +969,21 @@ static auto testFieldStarsMassBudget() -> int
 // lifetime.
 static auto testFieldStarsCreationAndDeath() -> int
 {
-    constexpr double tDeath = 1e8; // well past even a minStochMass() = 10 Msun star's own main-sequence lifetime
+    // Empirically, at this deck/seed/sfr combination, the shortest-lived
+    // field star among those formed by t1 (the most massive one drawn)
+    // dies around 3.5e6 yr -- 4e6 gives a safe margin past that while
+    // keeping the additional star-forming mass over (t1, tDeath] (at
+    // the boosted sfr below) modest, rather than the much larger figure
+    // an earlier, far larger tDeath (1e8) produced, which made this
+    // step draw so many new stars/clusters that the test hung.
+    constexpr double tDeath = 4e6;
 
     try
     {
         toml::table inputDeck = toml::parse_file(inputFile);
         inputDeck.at_path("clusters").as_table()->insert("f_cluster", 0.5);
+        // See testFieldStarsMassBudget's own identical override for why.
+        inputDeck.at_path("galaxy").as_table()->insert_or_assign("sfr", 1.0);
         const io::SimControls controls(inputDeck);
 
         utils::rng().seed(rngSeed);
@@ -1055,6 +1075,8 @@ static auto testFieldStarsSpec() -> int
     {
         toml::table inputDeck = toml::parse_file(inputFile);
         inputDeck.at_path("clusters").as_table()->insert("f_cluster", 0.0);
+        // See testFieldStarsMassBudget's own identical override for why.
+        inputDeck.at_path("galaxy").as_table()->insert_or_assign("sfr", 1.0);
         const io::SimControls controls(inputDeck);
 
         utils::rng().seed(rngSeed);
