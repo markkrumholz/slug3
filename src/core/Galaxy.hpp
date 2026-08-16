@@ -57,7 +57,7 @@ namespace core
             double mass_;      /**< Initial (birth) mass, in Msun */
             double feh_;       /**< [Fe/H] */
             double formTime_;  /**< Formation time, in yr */
-            double deathTime_; /**< Time this star dies, in yr (formTime_ + 10^(SimControls::tracks()'s own starLifetime(mass_, feh_)) -- starLifetime() itself reports log10(yr), not yr) */
+            double deathTime_; /**< Time this star dies, in yr (formTime_ + SimControls::tracks()'s own starLifetime(mass_, feh_)) */
         };
 
         /**

@@ -10,6 +10,7 @@
 
 #include "../interpolation/Mesh2DInterpolator.hpp"
 #include "TrackCommons.hpp"
+#include <cmath>
 #include <cstddef>
 #include <limits>
 #include <memory>
@@ -134,9 +135,12 @@ namespace tracks
         /**
          * @brief Return the lifetime of a star of specified mass
          * @param m Mass of the star whose lifetime should be returned
-         * @return The lifetime of a star of mass m
+         * @return The lifetime of a star of mass m, in yr -- note this
+         *   is the mesh's own x-axis maximum (always log10(time), by
+         *   convention throughout this codebase) un-logged back to
+         *   plain yr, not xMax(m) itself
          */
-       [[nodiscard]] auto starLifetime(const double m) const { return interp_->xMax(m); }
+       [[nodiscard]] auto starLifetime(const double m) const { return std::pow(10.0, interp_->xMax(m)); }
 
        /**
         * @brief Return the range of stellar masses that are alive at a given time

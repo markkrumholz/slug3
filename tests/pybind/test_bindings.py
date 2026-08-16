@@ -360,10 +360,12 @@ def test_tracks2d_isochrone_at_time_boundaries(tracks2d):
 
 @pytest.mark.parametrize("mass", GRID_MASSES)
 def test_tracks2d_starlifetime_matches_track_xmax(tracks2d, mass):
-    """starLifetime(m) should match xMax() of the track getTrack(m)
-    returns -- both report the same 'star ends its track here' time."""
+    """starLifetime(m) should match 10**xMax() of the track getTrack(m)
+    returns -- xMax() is log10(time) (this mesh's own x-axis
+    convention throughout), while starLifetime() reports the same
+    'star ends its track here' time un-logged, in yr."""
     track = tracks2d.getTrack(mass)
-    assert tracks2d.starLifetime(mass) == pytest.approx(track.xMax())
+    assert tracks2d.starLifetime(mass) == pytest.approx(10.0 ** track.xMax())
 
 
 def test_tracks2d_starlifetime_vectorized(tracks2d):
@@ -459,10 +461,10 @@ def test_tracks3d_isochrone_at_time_boundaries(tracks3d):
 
 @pytest.mark.parametrize("mass", GRID_MASSES)
 def test_tracks3d_starlifetime_matches_track_xmax(tracks3d, mass):
-    """starLifetime(m, feh) should match xMax() of the track
+    """starLifetime(m, feh) should match 10**xMax() of the track
     getTrack(m, feh) returns, same cross-check as Tracks2D's own."""
     track = tracks3d.getTrack(mass, KNOWN_FEH)
-    assert tracks3d.starLifetime(mass, KNOWN_FEH) == pytest.approx(track.xMax())
+    assert tracks3d.starLifetime(mass, KNOWN_FEH) == pytest.approx(10.0 ** track.xMax())
 
 
 def test_tracks3d_starlifetime_vectorized(tracks3d):

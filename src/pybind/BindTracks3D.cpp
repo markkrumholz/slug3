@@ -102,8 +102,8 @@ feh : float or array_like of float
 
 Returns
 -------
-logt : float or numpy.ndarray of float
-    log10(time / yr) at which a star of mass m ends this track.)doc";
+lifetime : float or numpy.ndarray of float
+    Time, in yr, at which a star of mass m ends this track.)doc";
 
 static constexpr std::string_view liveMassRangeDocstring = R"doc(Return the range(s) of stellar mass alive at a given time and [Fe/H].
 

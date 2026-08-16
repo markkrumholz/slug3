@@ -86,26 +86,20 @@ void core::Galaxy::advance(const double t)
     // 3) For each new field star, draw a formation time from the same
     // SFR distribution the clusters above draw from, and a [Fe/H]
     // from fehDist(); its death time is then formTime + the tracks'
-    // own starLifetime() at that (mass, feh) -- starLifetime() itself
-    // reports log10(lifetime / yr), not yr (it is exactly
-    // tracks::Tracks3D::getIsochrone()'s own x-axis maximum, and that
-    // axis is always log10(time), as tracks().logTMin()/getStar()'s
-    // own logT parameter are throughout the rest of this file), so it
-    // must be un-logged (10^...) before adding to formTime, which is
-    // in plain yr. Sorting this step's own batch by formTime before
-    // appending it keeps fieldStars_ sorted by formTime_ overall:
-    // every previously-appended star's own formTime_ already falls at
-    // or before curTime_, and every new one falls in (curTime_, t],
-    // so appending a locally-sorted batch preserves the whole
-    // vector's own global order.
+    // own starLifetime() at that (mass, feh), both in yr. Sorting this
+    // step's own batch by formTime before appending it keeps
+    // fieldStars_ sorted by formTime_ overall: every previously-
+    // appended star's own formTime_ already falls at or before
+    // curTime_, and every new one falls in (curTime_, t], so appending
+    // a locally-sorted batch preserves the whole vector's own global
+    // order.
     std::vector<FieldStar> newFieldStars;
     newFieldStars.reserve(newFieldMasses.size());
     for (const double mass : newFieldMasses)
     {
         const double formTime = sc.sfr().draw(curTime_, t);
         const double feh = sc.fehDist().draw();
-        const double lifetime = std::pow(10.0, sc.tracks().starLifetime(mass, feh));
-        const double deathTime = formTime + lifetime;
+        const double deathTime = formTime + sc.tracks().starLifetime(mass, feh);
         newFieldStars.push_back({ mass, feh, formTime, deathTime });
     }
     std::ranges::sort(newFieldStars, {}, &FieldStar::formTime_);
