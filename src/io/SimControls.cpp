@@ -9,6 +9,7 @@
 #include "../extinct/Extinct.hpp"
 #include "../pdfs/PDF.hpp"
 #include "../pdfs/PDFFileParser.hpp"
+#include "../pdfs/PDFSegmentDelta.hpp"
 #include "../pdfs/PDFSegmentPowerlaw.hpp"
 #include "../phot/FilterCollection.hpp"
 #include "../phot/FilterCommons.hpp"
@@ -746,18 +747,35 @@ void io::SimControls::readFilters(const toml::table& inputDeck)
         filterNames, photSystem, registryName);
 }
 
+// Build a valid PDF that always draws exactly 0 -- used by readExtinct()
+// below to fill in whichever of avDist_/avDistField_ was not given an
+// explicit distribution of its own, so the two are always either both
+// valid or both invalid, never just one
+static auto buildDeltaAV0() -> pdfs::PDF
+{
+    auto delta = std::make_unique<pdfs::PDFSegmentDelta>(0.0);
+    return pdfs::PDF(std::move(delta));
+}
+
 // Extinction curve reader
 void io::SimControls::readExtinct(const toml::table& inputDeck)
 {
-    // extinct.AV: optional; if absent, this simulation applies no
-    // extinction, and avDist_/extinct_ are left at their default/null
-    // state
+    // extinct.AV / extinct.AV_field: both optional; if neither is
+    // given, this simulation applies no extinction at all, and
+    // avDist_/avDistField_/extinct_ are left at their default/null
+    // state. If either is given, extinct.model becomes mandatory
+    // (below), and whichever of the two was not given is set to a
+    // delta function PDF at 0 instead of being left invalid -- see
+    // buildDeltaAV0()'s own comment for why.
     const auto avNode = inputDeck.at_path("extinct.AV");
-    if (!avNode) { return; }
-    avDist_ = utils::initPDFFromKey(inputDeck, "extinct.AV");
+    const auto avFieldNode = inputDeck.at_path("extinct.AV_field");
+    if (!avNode && !avFieldNode) { return; }
 
-    // extinct.model: required now that extinct.AV was given, names
-    // the extinction curve to use
+    avDist_ = avNode ? utils::initPDFFromKey(inputDeck, "extinct.AV") : buildDeltaAV0();
+    avDistField_ = avFieldNode ? utils::initPDFFromKey(inputDeck, "extinct.AV_field") : buildDeltaAV0();
+
+    // extinct.model: required now that extinct.AV or extinct.AV_field
+    // was given, names the extinction curve to use
     const auto model = utils::getTOMLKeyWithError<std::string>(
         inputDeck, "extinct.model", true);
 
@@ -772,9 +790,9 @@ void io::SimControls::readExtinct(const toml::table& inputDeck)
     if (specsyn_ == nullptr)
     {
         throw std::runtime_error(
-            "SimControls: extinct.AV was given but no spectral "
-            "synthesizer was requested (spectra.model was not set "
-            "in the input deck)");
+            "SimControls: extinct.AV or extinct.AV_field was given but "
+            "no spectral synthesizer was requested (spectra.model was "
+            "not set in the input deck)");
     }
 
     extinct_ = std::make_unique<extinct::Extinct>(

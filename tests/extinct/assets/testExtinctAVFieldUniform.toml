@@ -1,0 +1,11 @@
+# A uniform A_V distribution over [0, 2] mag, used by testExtinct's own
+# testExtinctApplyExtinctionCtsUniform() to cross-check
+# Extinct::applyExtinctionCts() against the closed-form integral a
+# uniform distribution admits: int_0^X exp(-A_V * k) / X dA_V =
+# (1 - exp(-k * X)) / (k * X).
+
+breakpoints 0.0 2.0
+
+segment
+type powerlaw
+slope 0

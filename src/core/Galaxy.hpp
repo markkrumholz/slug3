@@ -58,6 +58,7 @@ namespace core
             double feh_;       /**< [Fe/H] */
             double formTime_;  /**< Formation time, in yr */
             double deathTime_; /**< Time this star dies, in yr (formTime_ + SimControls::tracks()'s own starLifetime(mass_, feh_)) */
+            double aV_;        /**< V-band extinction, in magnitudes, drawn from SimControls::avDistField() at formation (see Galaxy::advance()'s own comment) -- unlike a bound cluster (Cluster::aV_, shared by every star in it), each field star draws its own, independent value, since field stars are not physically clustered together */
         };
 
         /**
@@ -265,10 +266,13 @@ namespace core
          * SimControls::minStochMass() -- SimControls::fracStochMass()
          * of it -- is drawn individually too, from SimControls::imf()
          * over [minStochMass(), imf().getMax()], as new FieldStar
-         * entries appended to fieldStars() (see FieldStar's own
-         * comment); the rest is folded directly into actualMass(), as
-         * the purely continuous, non-clustered population's own share,
-         * with no individual Cluster or FieldStar of its own.
+         * entries (mass_, feh_ from fehDist(), formTime_, deathTime_,
+         * and aV_ from SimControls::avDistField() -- an independent
+         * draw per star, unlike a bound cluster's own single, shared
+         * aV_) appended to fieldStars() (see FieldStar's own comment);
+         * the rest is folded directly into actualMass(), as the purely
+         * continuous, non-clustered population's own share, with no
+         * individual Cluster or FieldStar of its own.
          * Accumulates the step's own target and actual mass into
          * targetMass()/actualMass(), advances every cluster formed so
          * far (in clusters() and disruptedClusters()) to t, moves any
@@ -401,10 +405,15 @@ namespace core
          * Adds Specsyn::specCts()'s/specAndLbolCts()'s own
          * [imf().getMin(), minStochMass()] mass range -- the purely
          * continuous, below-minStochMass() share of the non-clustered
-         * population -- to both spec_ and (if ext is non-null)
-         * specExtinct_ -- see the implementation's own comment for why
-         * specExtinct_'s own share goes in unattenuated, and at an
-         * offset from spec_'s own. Gets this contribution via
+         * population -- to spec_ unconditionally, and (if ext is
+         * non-null) its own *expected* attenuation, via
+         * Extinct::applyExtinctionCts(), to specExtinct_: since this
+         * share is not individually tracked, there is no single A_V to
+         * apply the way a bound cluster or an individual field star
+         * has (applyExtinction()); applyExtinctionCts() instead applies
+         * the expectation value of exp(-A_V * extinct()) over
+         * SimControls::avDistField(), precomputed once at Extinct's
+         * own construction. Gets this contribution via
          * Specsyn::specAndLbolCts() rather than plain specCts() -- also
          * setting lbolCts_/lbolCtsCurrent_ from its own second return
          * value -- whenever SimControls::computeLbol() is true, so Lbol
@@ -423,13 +432,15 @@ namespace core
          * @details
          * Adds every entry of getFieldStarProps() (evaluated via
          * Specsyn::spec() star by star, at that star's own feh_) to
-         * spec_, and -- unattenuated, for the same reason as the
-         * continuous population's own share in computeSpec() -- to
-         * specExtinct_ too, whenever ext is non-null. Each star's own
-         * spectrum is computed once and reused for both, rather than
-         * calling Specsyn::spec() twice. Split out of computeSpec()
-         * itself purely to keep that function's own cognitive
-         * complexity down.
+         * spec_ unconditionally, and -- attenuated by that same star's
+         * own aV_, via Extinct::applyExtinction(), exactly as
+         * Cluster::computeSpec() attenuates a whole cluster by its own
+         * single aV_ -- to specExtinct_ too, whenever ext is non-null.
+         * Each star's own spectrum is computed once and reused for
+         * both (spec_'s own share, and the input to applyExtinction()
+         * for specExtinct_'s own share), rather than calling
+         * Specsyn::spec() twice. Split out of computeSpec() itself
+         * purely to keep that function's own cognitive complexity down.
          */
         void addFieldStarSpec(const extinct::Extinct* ext);
 

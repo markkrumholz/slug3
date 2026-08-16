@@ -331,17 +331,31 @@ namespace io
         [[nodiscard]] auto filters() const -> const auto& { return filters_; }
 
         /**
-         * @brief Get the distribution of V-band extinction, if any
+         * @brief Get the distribution of V-band extinction for clustered stars, if any
          * @return A const reference to the A_V distribution requested
-         *   via extinct.AV, or an invalid/empty PDF if extinct.AV was
-         *   not given
+         *   via extinct.AV; if neither extinct.AV nor extinct.AV_field
+         *   was given, an invalid/empty PDF. If extinct.AV_field was
+         *   given but extinct.AV was not, a valid delta function PDF
+         *   at 0 (see readExtinct()'s own comment for why) -- so
+         *   avDist()/avDistField() are always either both valid or
+         *   both invalid, never just one.
          */
         [[nodiscard]] auto avDist() const -> const auto& { return avDist_; }
 
         /**
+         * @brief Get the distribution of V-band extinction for field stars, if any
+         * @return A const reference to the A_V distribution requested
+         *   via extinct.AV_field -- see avDist()'s own comment for the
+         *   identical validity rules this mirrors (with extinct.AV_field/
+         *   extinct.AV's own roles swapped)
+         */
+        [[nodiscard]] auto avDistField() const -> const auto& { return avDistField_; }
+
+        /**
          * @brief Get the extinction curve, if any
          * @return A pointer to the extinction curve requested via
-         *   extinct.model, or nullptr if extinct.AV was not given
+         *   extinct.model, or nullptr if neither extinct.AV nor
+         *   extinct.AV_field was given
          */
         [[nodiscard]] auto extinct() const -> const extinct::Extinct* { return extinct_.get(); }
 
@@ -573,13 +587,20 @@ namespace io
          * @brief Load the extinction curve specified by input deck
          * @param inputDeck A toml table holding the input deck
          * @details
-         * Reads extinct.AV, extinct.model, and extinct.registry, and
-         * sets avDist_/extinct_ accordingly; see the .cpp file for the
-         * exact rules. extinct.AV is optional, so avDist_/extinct_ are
-         * left at their default/null state if it is absent. Requires a
-         * spectral synthesizer to already be set (see readSpectra()),
-         * since the extinction curve is interpolated onto its own
-         * wavelength grid.
+         * Reads extinct.AV, extinct.AV_field, extinct.model, and
+         * extinct.registry, and sets avDist_/avDistField_/extinct_
+         * accordingly; see the .cpp file for the exact rules. Both
+         * extinct.AV and extinct.AV_field are optional, and
+         * avDist_/avDistField_/extinct_ are all left at their default/
+         * null state if neither is given. If either is given,
+         * extinct.model becomes mandatory, and whichever of the two
+         * was not given is set to a valid delta function PDF at 0
+         * (rather than left invalid) -- so avDist_/avDistField_ are
+         * always either both valid or both invalid, and callers never
+         * need to check one without the other. Requires a spectral
+         * synthesizer to already be set (see readSpectra()), since the
+         * extinction curve is interpolated onto its own wavelength
+         * grid.
          */
         void readExtinct(const toml::table& inputDeck);
 
@@ -661,8 +682,9 @@ namespace io
         std::unique_ptr<specsyn::Specsyn> specsyn_; /**< Spectral synthesizer, or nullptr if spectra.model was not given */
         std::unique_ptr<phot::FilterCollection> filters_; /**< Photometric filters requested via phot.filters, or nullptr if none were given */
         bool computeLbol_ = false; /**< True if "Lbol" was included in phot.filters; see Cluster::computeLbol() for where it is actually computed */
-        pdfs::PDF avDist_; /**< Distribution of V-band extinction (A_V), requested via extinct.AV; invalid/empty if extinct.AV was not given */
-        std::unique_ptr<extinct::Extinct> extinct_; /**< Extinction curve requested via extinct.model, or nullptr if extinct.AV was not given */
+        pdfs::PDF avDist_; /**< Distribution of V-band extinction (A_V) for clustered stars -- see avDist()'s own comment for exactly when this is valid/a delta at 0/invalid */
+        pdfs::PDF avDistField_; /**< Distribution of V-band extinction (A_V) for field stars -- see avDistField()'s own comment */
+        std::unique_ptr<extinct::Extinct> extinct_; /**< Extinction curve requested via extinct.model, or nullptr if neither extinct.AV nor extinct.AV_field was given */
 
         // Output wavelength grid (spectra.wl_min, spectra.wl_max,
         // spectra.nwl), read by readSpectra and passed through to

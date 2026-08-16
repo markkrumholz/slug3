@@ -224,4 +224,51 @@ auto testExtinctNormalization() -> int
     return 0; // Passed
 }
 
+/**
+ * @brief Unit test for Extinct::applyExtinctionCts() with an invalid avDistField()
+ * @returns 0 if the test passes, 1 if it fails
+ * @details
+ * A bare default-constructed SimControls (as testExtinct()'s own
+ * construction above uses) has an invalid avDistField() -- see
+ * io::SimControls::avDistField()'s own comment. computeExtinctionFacCts()
+ * treats this as a delta at A_V = 0, so applyExtinctionCts() should
+ * leave an unattenuated spectrum completely unchanged (exp(0) = 1
+ * everywhere), rather than either throwing (PDFSegmentDelta::operator()
+ * cannot be evaluated at a point) or hanging (a NaN-bounded
+ * utils::PDFIntegrator call would never satisfy its own convergence
+ * checks).
+ */
+auto testExtinctApplyExtinctionCtsInvalid() -> int
+{
+    const phot::FilterTabulated vFilt("Generic", "Johnson", "V", "data/filters/V_filter.toml");
+    const io::SimControls testControls;
+    const extinct::Extinct ext("Calzetti_starburst", vFilt.wl(), testControls);
+
+    if (testControls.avDistField().valid())
+    {
+        std::cerr << "testExtinctApplyExtinctionCtsInvalid: test bug: expected "
+            "a bare default-constructed SimControls to have an invalid "
+            "avDistField()\n";
+        return 1;
+    }
+
+    // vFilt.wl() falls entirely within the Calzetti curve's own native
+    // coverage (see testExtinctNormalization()'s own identical
+    // assumption), so ext.wl() == vFilt.wl() and wlOffset() == 0 here
+    const std::vector<double> spec(ext.wl().size(), 1.0);
+    const auto result = ext.applyExtinctionCts(spec);
+    for (std::size_t i = 0; i < result.size(); i++)
+    {
+        if (!utils::approxEqual(result.at(i), 1.0))
+        {
+            std::cerr << "testExtinctApplyExtinctionCtsInvalid: expected "
+                "applyExtinctionCts() to leave an unattenuated spectrum "
+                "unchanged (A_V = 0) when avDistField() is invalid, got "
+                << result.at(i) << " at index " << i << "\n";
+            return 1;
+        }
+    }
+    return 0; // Passed
+}
+
 #endif // TESTEXTINCT_HPP
