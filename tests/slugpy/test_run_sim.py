@@ -84,14 +84,27 @@ def test_run_sim_accepts_literal_toml_content(tmp_path, monkeypatch):
     assert list(cast(u.Quantity, data.clusters["target_mass"]).value) == [1000.0]
 
 
-def test_run_sim_galaxy_deck_is_a_noop(tmp_path, monkeypatch):
-    """A galaxy-type deck still produces a valid, readable output file
-    (matching main.cpp's own current behavior), but with no clusters
-    written, since the galaxy branch is not yet implemented."""
+def test_run_sim_galaxy_deck(tmp_path, monkeypatch):
+    """A galaxy-type deck runs to completion and returns a slug_reader
+    with the expected data: one row per output time in galaxy (GALAXY_DECK's
+    own n_trial default of 1 times its three output times), with
+    target_mass matching sfr * time exactly (GALAXY_DECK's own
+    galaxy.sfr = 1.0 Msun/yr). GALAXY_DECK's own clusters.CMF = 1e3
+    Msun is far above the target stellar mass reached by its own short
+    output times (at most sfr * 10 yr = 10 Msun), so no whole cluster
+    ever actually forms -- clusters["uid"] is checked empty for that
+    physical reason, not because the galaxy branch didn't run (unlike
+    this test's own prior form, before the galaxy branch was
+    implemented, where the same assertion held for the opposite
+    reason -- see galaxy's own row count above for what actually
+    distinguishes the two)."""
     monkeypatch.chdir(tmp_path)
     data = run_sim(GALAXY_DECK)
 
     assert isinstance(data, slug_reader)
+    assert data.galaxy is not None
+    assert len(data.galaxy["trial"]) == 3
+    assert cast(u.Quantity, data.galaxy["target_mass"]).value == pytest.approx([0.0, 5.0, 10.0])
     assert data.clusters is not None
     assert len(data.clusters["uid"]) == 0
 
