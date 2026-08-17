@@ -200,6 +200,8 @@ void io::SimControls::initControlFlow(const toml::table& inputDeck)
     {
         if (outputMode.value() == "h5" || outputMode.value() == "hdf5")
         { outputMode_ = OutputMode::h5; }
+        else if (outputMode.value() == "h5divided" || outputMode.value() == "hdf5divided")
+        { outputMode_ = OutputMode::h5divided; }
         else if (outputMode.value() == "ascii" || outputMode.value() == "txt")
         { outputMode_ = OutputMode::ascii; }
         else
