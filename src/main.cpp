@@ -48,7 +48,8 @@ auto main(int argc, char *argv[]) -> int
 
     // Construct the output manager
     std::unique_ptr<io::OutputManager> outputManager;
-    if (simControls.outputMode() == io::SimControls::OutputMode::h5)
+    if (simControls.outputMode() == io::SimControls::OutputMode::h5 ||
+        simControls.outputMode() == io::SimControls::OutputMode::h5divided)
     {
         outputManager = std::make_unique<io::OutputManagerH5>(simControls, inputDeck);
     }

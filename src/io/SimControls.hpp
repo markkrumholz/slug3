@@ -65,8 +65,9 @@ namespace io
          * @brief An enum to hold output modes
          */
         enum class OutputMode : std::uint8_t {
-            h5,      /**< HDF5 output */
-            ascii   /**< ASCII output */
+            h5,         /**< HDF5 output, consolidated into a single file (see OutputManagerH5's own header comment on what this means when built with OpenMP) */
+            h5divided,  /**< Same as h5, but skips the final consolidation step when built with OpenMP, leaving one HDF5 file per thread -- preferable for very large runs where consolidating into a single file would itself be costly */
+            ascii       /**< ASCII output */
         };
 
         /**

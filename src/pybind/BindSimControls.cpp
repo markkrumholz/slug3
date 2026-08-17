@@ -531,6 +531,9 @@ void bindSimControls(py::module_& m)
     py::enum_<io::SimControls::OutputMode>(simControlsClass, "OutputMode",
             "The format this SimControls's own output will be written in.")
         .value("h5", io::SimControls::OutputMode::h5, "HDF5 output")
+        .value("h5divided", io::SimControls::OutputMode::h5divided,
+                "Same as h5, but skips the final consolidation step when "
+                "built with OpenMP, leaving one HDF5 file per thread")
         .value("ascii", io::SimControls::OutputMode::ascii, "ASCII output");
 
     simControlsClass
