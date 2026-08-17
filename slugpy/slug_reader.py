@@ -56,6 +56,18 @@ class slug_reader:
         Lazy reader for the cluster_phot group's per-filter photometry
         (indexable by filter name, e.g. cluster_phot["Lbol"]), or None
         if this file has no cluster_phot group (read-only).
+    galaxy : slug_group_reader or None
+        Lazy reader for the galaxy group's datasets (target_mass,
+        actual_mass, ...), or None if this file has no galaxy group --
+        only a galaxy-type simulation ever has one (read-only).
+    galaxy_spectra : slug_group_reader or None
+        Lazy reader for the galaxy_spectra group's datasets (wl,
+        spec, ...), or None if this file has no galaxy_spectra group
+        (read-only).
+    galaxy_phot : slug_phot_reader or None
+        Lazy reader for the galaxy_phot group's per-filter photometry
+        (indexable by filter name, e.g. galaxy_phot["Lbol"]), or None
+        if this file has no galaxy_phot group (read-only).
     filters : list of str or None
         Alias for cluster_phot.filters, or None if this file has no
         cluster_phot group (read-only).
@@ -155,6 +167,62 @@ class slug_reader:
     @cluster_phot.setter
     def cluster_phot(self, value: Any) -> None:
         raise AttributeError("cluster_phot is read-only")
+
+    @property
+    def galaxy(self) -> slug_group_reader | None:
+        """
+        slug_group_reader or None : lazy reader for the galaxy
+        group's datasets, built the first time this property is
+        accessed and cached thereafter, or None if this file has no
+        galaxy group (only a galaxy-type simulation ever has one).
+        """
+        if "galaxy" not in self._groups:
+            return None
+        if self._groups["galaxy"] is None:
+            self._groups["galaxy"] = slug_group_reader(self._file, "galaxy")
+        return self._groups["galaxy"]
+
+    @galaxy.setter
+    def galaxy(self, value: Any) -> None:
+        raise AttributeError("galaxy is read-only")
+
+    @property
+    def galaxy_spectra(self) -> slug_group_reader | None:
+        """
+        slug_group_reader or None : lazy reader for the
+        galaxy_spectra group's datasets, built the first time this
+        property is accessed and cached thereafter, or None if this
+        file has no galaxy_spectra group.
+        """
+        if "galaxy_spectra" not in self._groups:
+            return None
+        if self._groups["galaxy_spectra"] is None:
+            self._groups["galaxy_spectra"] = slug_group_reader(self._file, "galaxy_spectra")
+        return self._groups["galaxy_spectra"]
+
+    @galaxy_spectra.setter
+    def galaxy_spectra(self, value: Any) -> None:
+        raise AttributeError("galaxy_spectra is read-only")
+
+    @property
+    def galaxy_phot(self) -> slug_phot_reader | None:
+        """
+        slug_phot_reader or None : lazy reader for the galaxy_phot
+        group's per-filter photometry, built the first time this
+        property is accessed and cached thereafter, or None if this
+        file has no galaxy_phot group.
+        """
+        if "galaxy_phot" not in self._groups:
+            return None
+        if self._groups["galaxy_phot"] is None:
+            registry_name = self.input_deck.get("phot", {}).get("registry")
+            self._groups["galaxy_phot"] = slug_phot_reader(
+                self._file, "galaxy_phot", registry_name=registry_name)
+        return cast(slug_phot_reader, self._groups["galaxy_phot"])
+
+    @galaxy_phot.setter
+    def galaxy_phot(self, value: Any) -> None:
+        raise AttributeError("galaxy_phot is read-only")
 
     @property
     def filters(self) -> list[str] | None:

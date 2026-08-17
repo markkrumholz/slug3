@@ -10,7 +10,7 @@ import gc
 import pathlib
 import warnings
 
-from ._slug import OutputManagerAscii, OutputManagerH5, SimCluster, SimControls
+from ._slug import OutputManagerAscii, OutputManagerH5, SimCluster, SimControls, SimGalaxy
 from .read import read
 from .slug_reader import slug_reader
 
@@ -39,11 +39,9 @@ def run_sim(input_deck: str) -> slug_reader | None:
     -------
     Mirrors main.cpp's own control flow: builds a SimControls from
     input_deck, an OutputManagerH5 or OutputManagerAscii from it
-    (matching sim_controls.outputMode()), and -- if
-    sim_controls.simType() is SimControls.SimType.cluster -- a
-    SimCluster, which it then runs. Galaxy-type simulations are not
-    yet supported, matching main.cpp's own current state (that branch
-    is intentionally left empty here too).
+    (matching sim_controls.outputMode()), and -- depending on
+    sim_controls.simType() -- a SimCluster or SimGalaxy, which it then
+    runs.
 
     ASCII output is meant for small, human-readable output rather than
     batch processing, so there is no ASCII counterpart to slug_reader
@@ -65,14 +63,16 @@ def run_sim(input_deck: str) -> slug_reader | None:
         sim.run()
         del sim
     elif sim_controls.simType() == SimControls.SimType.galaxy:
-        pass  # Galaxy simulation support will be added in a future PR
+        sim = SimGalaxy(sim_controls, output_manager)
+        sim.run()
+        del sim
 
     # Drop the only Python-side reference to output_manager (whether or
-    # not it was actually consumed by a SimCluster above) so its
-    # destructor -- which closes the underlying output file(s) -- runs
-    # now, before the read() below tries to reopen the same file for
-    # reading; HDF5 otherwise refuses a second open while the first
-    # (write) handle is still live.
+    # not it was actually consumed by a SimCluster/SimGalaxy above) so
+    # its destructor -- which closes the underlying output file(s) --
+    # runs now, before the read() below tries to reopen the same file
+    # for reading; HDF5 otherwise refuses a second open while the
+    # first (write) handle is still live.
     del output_manager
     gc.collect()
 

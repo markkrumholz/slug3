@@ -163,6 +163,100 @@ def test_cluster_phot_is_phot_reader(cluster_phot):
 
 
 # ---------------------------------------------------------------------
+# slug_reader.galaxy / galaxy_spectra / galaxy_phot
+#
+# clusterlib.h5 is a cluster-type simulation's output, so it has none
+# of these groups; the "properties are None" case is checked directly
+# against it below. There is no committed galaxy-type output file to
+# mirror clusterlib.h5's own real-data role for the "properties are
+# populated" case, so that case instead uses a small synthetic fixture
+# built by hand, mirroring _make_phot_convert_test_file's own pattern
+# elsewhere in this file -- the underlying slug_group_reader/
+# slug_phot_reader classes these three properties build on are
+# entirely unchanged (already exhaustively tested above, via clusters/
+# cluster_spectra/cluster_phot), so this only needs to check the new
+# accessor plumbing itself, not re-derive that same coverage.
+# ---------------------------------------------------------------------
+
+@pytest.mark.parametrize("attr", ["galaxy", "galaxy_spectra", "galaxy_phot"])
+def test_galaxy_group_property_none_for_cluster_sim(reader, attr):
+    """galaxy/galaxy_spectra/galaxy_phot are all None for a cluster-type file."""
+    assert getattr(reader, attr) is None
+
+
+def _make_galaxy_test_file(tmp_path):
+    """A minimal galaxy-type output file, with galaxy, galaxy_spectra, and galaxy_phot groups."""
+    path = tmp_path / "galaxy_test.h5"
+    with h5py.File(path, "w") as f:
+        f.attrs["slug-hash"] = "deadbeef"
+        f.attrs["date"] = "2026-01-01"
+        f.attrs["time"] = "00:00:00"
+        f.attrs["rng_state"] = "x"
+        f.create_group("input_deck").create_dataset("toml", data="n_trial = 1\nsim_type = \"galaxy\"\n")
+
+        g = f.create_group("galaxy")
+        trial = g.create_dataset("trial", data=np.array([0], dtype="u8"))
+        trial.attrs["units"] = ""
+        target_mass = g.create_dataset("target_mass", data=np.array([1e4]))
+        target_mass.attrs["units"] = "Msun"
+
+        gs = f.create_group("galaxy_spectra")
+        wl = gs.create_dataset("wl", data=np.array([1000.0, 2000.0]))
+        wl.attrs["units"] = "Angstrom"
+        spec = gs.create_dataset("spec", data=np.array([[1.0, 2.0]]))
+        spec.attrs["units"] = "erg/s/Angstrom"
+
+        gp = f.create_group("galaxy_phot")
+        gp.attrs["filters"] = ["Q(HI)"]
+        phot = gp.create_dataset("phot", data=np.array([[1e47]]))
+        phot.attrs["units"] = ["photon/s"]
+        gp_trial = gp.create_dataset("trial", data=np.array([0], dtype="u8"))
+        gp_trial.attrs["units"] = ""
+    return path
+
+
+def test_galaxy_group_property_present_and_cached(tmp_path):
+    """galaxy is a slug_group_reader (not the phot subclass), cached across accesses."""
+    reader = slug_reader(str(_make_galaxy_test_file(tmp_path)))
+    first = reader.galaxy
+    assert first is not None
+    assert isinstance(first, slug_group_reader)
+    assert not isinstance(first, slug_phot_reader)
+    assert reader.galaxy is first
+    assert cast(u.Quantity, first["target_mass"]).value == pytest.approx([1e4])
+
+
+def test_galaxy_spectra_property_present_and_cached(tmp_path):
+    """galaxy_spectra is a slug_group_reader, cached across accesses."""
+    reader = slug_reader(str(_make_galaxy_test_file(tmp_path)))
+    first = reader.galaxy_spectra
+    assert first is not None
+    assert isinstance(first, slug_group_reader)
+    assert reader.galaxy_spectra is first
+    assert cast(u.Quantity, first["wl"]).unit == u.AA
+
+
+def test_galaxy_phot_property_present_and_cached(tmp_path):
+    """galaxy_phot is specifically a slug_phot_reader, cached across accesses."""
+    reader = slug_reader(str(_make_galaxy_test_file(tmp_path)))
+    first = reader.galaxy_phot
+    assert first is not None
+    assert isinstance(first, slug_phot_reader)
+    assert reader.galaxy_phot is first
+    assert first.filters == ["Q(HI)"]
+    phot = cast(u.Quantity, first["Q(HI)"])
+    assert phot.unit.is_equivalent(u.photon / u.s)
+
+
+@pytest.mark.parametrize("attr", ["galaxy", "galaxy_spectra", "galaxy_phot"])
+def test_galaxy_group_property_readonly(tmp_path, attr):
+    """Assigning to galaxy/galaxy_spectra/galaxy_phot raises AttributeError."""
+    reader = slug_reader(str(_make_galaxy_test_file(tmp_path)))
+    with pytest.raises(AttributeError):
+        setattr(reader, attr, None)
+
+
+# ---------------------------------------------------------------------
 # slug_group_reader, via clusters
 # ---------------------------------------------------------------------
 
