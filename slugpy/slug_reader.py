@@ -69,11 +69,13 @@ class slug_reader:
         (indexable by filter name, e.g. galaxy_phot["Lbol"]), or None
         if this file has no galaxy_phot group (read-only).
     filters : list of str or None
-        Alias for cluster_phot.filters, or None if this file has no
-        cluster_phot group (read-only).
+        Alias for cluster_phot.filters if this file has a cluster_phot
+        group, else for galaxy_phot.filters if this file has a
+        galaxy_phot group, else None (read-only).
     filter_units : list of str or None
-        Alias for cluster_phot.filter_units, or None if this file has
-        no cluster_phot group (read-only).
+        Alias for cluster_phot.filter_units if this file has a
+        cluster_phot group, else for galaxy_phot.filter_units if this
+        file has a galaxy_phot group, else None (read-only).
     controls : SimControls
         Simulation controls parsed from this file's own input_deck,
         built the first time this property is accessed and cached
@@ -227,13 +229,14 @@ class slug_reader:
     @property
     def filters(self) -> list[str] | None:
         """
-        list of str or None : alias for cluster_phot.filters, or None
-        if this file has no cluster_phot group (read-only).
+        list of str or None : alias for cluster_phot.filters if this
+        file has a cluster_phot group, else for galaxy_phot.filters if
+        this file has a galaxy_phot group, else None (read-only).
         """
-        cluster_phot = self.cluster_phot
-        if cluster_phot is None:
+        phot = self.cluster_phot if self.cluster_phot is not None else self.galaxy_phot
+        if phot is None:
             return None
-        return cluster_phot.filters
+        return phot.filters
 
     @filters.setter
     def filters(self, value: Any) -> None:
@@ -242,13 +245,15 @@ class slug_reader:
     @property
     def filter_units(self) -> list[str] | None:
         """
-        list of str or None : alias for cluster_phot.filter_units, or
-        None if this file has no cluster_phot group (read-only).
+        list of str or None : alias for cluster_phot.filter_units if
+        this file has a cluster_phot group, else for
+        galaxy_phot.filter_units if this file has a galaxy_phot group,
+        else None (read-only).
         """
-        cluster_phot = self.cluster_phot
-        if cluster_phot is None:
+        phot = self.cluster_phot if self.cluster_phot is not None else self.galaxy_phot
+        if phot is None:
             return None
-        return cluster_phot.filter_units
+        return phot.filter_units
 
     @filter_units.setter
     def filter_units(self, value: Any) -> None:
