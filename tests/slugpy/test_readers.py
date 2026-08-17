@@ -343,7 +343,8 @@ def test_cluster_phot_filters_match_input_deck(cluster_phot, reader):
 
 
 # ---------------------------------------------------------------------
-# slug_reader.filters / filter_units: aliases for cluster_phot's own
+# slug_reader.filters / filter_units: aliases for cluster_phot's own,
+# falling back to galaxy_phot's own when there is no cluster_phot
 # ---------------------------------------------------------------------
 
 def test_reader_filters_alias(reader, cluster_phot):
@@ -361,6 +362,33 @@ def test_reader_filters_readonly(reader, attr):
     """Assigning to reader.filters/filter_units raises AttributeError."""
     with pytest.raises(AttributeError):
         setattr(reader, attr, None)
+
+
+@pytest.mark.parametrize("attr", ["filters", "filter_units"])
+def test_reader_filters_falls_back_to_galaxy_phot(tmp_path, attr):
+    """When a file has no cluster_phot group (as for a galaxy-type sim
+    with cluster output disabled), reader.filters/filter_units fall
+    back to galaxy_phot's own, rather than returning None."""
+    galaxy_reader = slug_reader(str(_make_galaxy_test_file(tmp_path)))
+    assert galaxy_reader.cluster_phot is None
+    galaxy_phot = galaxy_reader.galaxy_phot
+    assert galaxy_phot is not None
+    assert getattr(galaxy_reader, attr) is getattr(galaxy_phot, attr)
+
+
+def test_reader_filters_none_without_any_phot_group(tmp_path):
+    """reader.filters/filter_units are None when a file has neither a
+    cluster_phot nor a galaxy_phot group."""
+    path = tmp_path / "no_phot.h5"
+    with h5py.File(path, "w") as f:
+        f.attrs["slug-hash"] = "deadbeef"
+        f.attrs["date"] = "2026-01-01"
+        f.attrs["time"] = "00:00:00"
+        f.attrs["rng_state"] = "x"
+        f.create_group("input_deck").create_dataset("toml", data="n_trial = 1\nsim_type = \"galaxy\"\n")
+    no_phot_reader = slug_reader(str(path))
+    assert no_phot_reader.filters is None
+    assert no_phot_reader.filter_units is None
 
 
 def test_cluster_phot_magnitude_filter(cluster_phot):
