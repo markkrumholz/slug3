@@ -75,10 +75,13 @@ namespace phot
          * 2. Q(<spec>), where <spec> is an atomic symbol followed by a
          *    Roman numeral giving the ionization state in astronomical
          *    notation (e.g. Q(HI) = photons that ionize neutral
-         *    hydrogen, Q(CII) = photons that ionize C+ to C++).  The
-         *    filter is set to wlMin = h*c/IP (the ionization-threshold
-         *    wavelength in Angstrom, sourced from CRC data), wlMax =
-         *    infinity, and photCount = true.
+         *    hydrogen, Q(CII) = photons that ionize C+ to C++).
+         *    Ionizing photons have energy above the ionization
+         *    potential IP, i.e. wavelength below the threshold
+         *    lambda = h*c/IP, so the filter is set to wlMin = 0
+         *    (no lower bound), wlMax = h*c/IP (the ionization-threshold
+         *    wavelength in Angstrom, sourced from CRC data), and
+         *    photCount = true.
          *
          * @throws std::runtime_error if name does not match either
          *   recognized convention, or if the requested ionization
@@ -108,13 +111,17 @@ namespace phot
 
         /**
          * @brief Get this filter's pivot wavelength
-         * @return The midpoint of [wlMin, wlMax], or wlMin if wlMax
-         *   is infinite (as for a Q(*) ionization-threshold filter,
-         *   whose passband has no finite upper end)
+         * @return The midpoint of [wlMin, wlMax]; wlMax if wlMin is 0
+         *   (as for a Q(*) ionization-threshold filter, whose passband
+         *   has no finite lower end), or wlMin if wlMax is infinite
+         *   (as for an ideal_phot_X_inf filter, whose passband has no
+         *   finite upper end)
          */
         [[nodiscard]] auto wlPivot() const -> double override
         {
-            return std::isinf(wlMax_) ? wlMin_ : 0.5 * (wlMin_ + wlMax_);
+            if (std::isinf(wlMax_)) { return wlMin_; }
+            if (wlMin_ <= 0.0) { return wlMax_; }
+            return 0.5 * (wlMin_ + wlMax_);
         }
 
         /**

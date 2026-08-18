@@ -17,7 +17,6 @@
 #include <cmath>
 #include <cstddef>
 #include <exception>
-#include <limits>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -86,9 +85,11 @@ phot::FilterIdeal::FilterIdeal(std::string name) : Filter(name) // NOLINT(perfor
                 sym + " ionization state " + roman);
         }
 
-        // Threshold wavelength: lambda = h*c / IP, converted to Angstrom
-        wlMin_ = (utils::h * utils::c) / (ip * utils::eV) / utils::Angstrom;
-        wlMax_ = std::numeric_limits<double>::infinity();
+        // Ionizing photons have energy above IP, i.e. wavelength BELOW
+        // the threshold lambda = h*c / IP (converted to Angstrom) --
+        // so the passband is [0, threshold], not [threshold, inf)
+        wlMin_ = 0.0;
+        wlMax_ = (utils::h * utils::c) / (ip * utils::eV) / utils::Angstrom;
         photCount_ = true;
         return;
     }
