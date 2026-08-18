@@ -25,14 +25,28 @@ phot::VegaSpectrum::VegaSpectrum(const std::string& vegaName)
         throw std::runtime_error(
             "VegaSpectrum: Vega reference spectrum " + vegaName + " not found");
     }
-    const hid_t file = H5Fopen(vegaPath.string().c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
-    if (file < 0)
+
+    // This constructor runs the first time vegaSpectrum() is called
+    // anywhere in the program (see VegaSpectrum.hpp's own comment) --
+    // with OpenMP, that can be from any worker thread, concurrently
+    // with OutputManagerH5's own HDF5 calls on other threads. The HDF5
+    // build linked here is not safe to call from two threads at once
+    // AT ALL, even across entirely separate files (see
+    // OutputManagerH5::openOutputFile()'s own comment for the full
+    // story), so this shares that same global critical section.
+#ifdef _OPENMP
+#pragma omp critical(h5ThreadSafety)
+#endif
     {
-        throw std::runtime_error(
-            "VegaSpectrum: unable to open HDF5 file " + vegaPath.string());
+        const hid_t file = H5Fopen(vegaPath.string().c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+        if (file < 0)
+        {
+            throw std::runtime_error(
+                "VegaSpectrum: unable to open HDF5 file " + vegaPath.string());
+        }
+        wl_ = utils::readDataset1D(file, "wl", "VegaSpectrum");
+        flux_ = utils::readDataset1D(file, "flux", "VegaSpectrum");
+        H5Fclose(file);
     }
-    wl_ = utils::readDataset1D(file, "wl", "VegaSpectrum");
-    flux_ = utils::readDataset1D(file, "flux", "VegaSpectrum");
-    H5Fclose(file);
 }
 // NOLINTEND(misc-include-cleaner)
