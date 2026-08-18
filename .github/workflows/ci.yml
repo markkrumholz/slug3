@@ -76,7 +76,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install Python test dependencies
-        run: python -m pip install pytest numpy h5py tomlkit astropy
+        run: python -m pip install pytest numpy h5py tomlkit astropy scipy
 
       - name: Install dependencies (Ubuntu)
         if: runner.os == 'Linux'
@@ -217,7 +217,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y clang-18 libc++-18-dev libc++abi-18-dev libgsl-dev libhdf5-dev ninja-build ccache
-          python -m pip install pyright pytest h5py tomlkit astropy numpy
+          python -m pip install pyright pytest h5py tomlkit astropy numpy scipy
 
       - name: Cache ccache
         uses: actions/cache@v6
