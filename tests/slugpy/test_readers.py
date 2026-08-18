@@ -307,8 +307,11 @@ def test_clusters_getitem_unknown_key(clusters):
 # ---------------------------------------------------------------------
 
 def test_cluster_spectra_keys(cluster_spectra):
-    """keys() lists every dataset actually written to the cluster_spectra group."""
-    expected = {"trial", "time", "uid", "wl", "spec", "spec_extinct"}
+    """keys() lists every dataset actually written to the cluster_spectra group.
+
+    clusterlib.toml enables extinction, so wl_extinct is written
+    alongside spec_extinct (see OutputManagerH5::openClusterSpectraGroup())."""
+    expected = {"trial", "time", "uid", "wl", "wl_extinct", "spec", "spec_extinct"}
     assert set(cluster_spectra.keys()) == expected
 
 
