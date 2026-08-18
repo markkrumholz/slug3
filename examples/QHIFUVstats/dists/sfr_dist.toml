@@ -1,14 +1,14 @@
 # Star formation rate distribution for the QHIFUVstats example: a
-# single powerlaw segment with slope alpha = -1, over [1e-4, 1e-2]
+# single powerlaw segment with slope alpha = -1, over [1e-6, 1e-2]
 # Msun/yr. Each trial draws a single, constant-for-that-trial SFR from
 # this distribution (see galaxy.sfr_dist's own documentation), rather
 # than every trial sharing one fixed rate the way galaxy.sfr would.
-# Capped an order of magnitude below the original 1e-1 upper bound:
-# the highest-SFR trials drive peak per-trial memory usage (far more
-# clusters/stars to draw and track), and 1e-1 was observed to push a
-# single trial's own RSS into the multi-GB range.
+# The upper bound stays capped an order of magnitude below the
+# original 1e-1: the highest-SFR trials drive peak per-trial memory
+# usage (far more clusters/stars to draw and track), and 1e-1 was
+# observed to push a single trial's own RSS into the multi-GB range.
 
-breakpoints = [1e-4, 1e-2]
+breakpoints = [1e-6, 1e-2]
 
 [segment1]
 type = "powerlaw"

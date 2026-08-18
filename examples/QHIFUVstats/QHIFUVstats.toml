@@ -28,7 +28,7 @@ n_trial = 10000
 # too large to commit as an example.
 [output]
 model_name = "QHIFUVstats"
-output_times = 1e8
+output_times = 2e8
 write_cluster = false
 write_cluster_spec = false
 write_cluster_phot = false

@@ -70,7 +70,7 @@ def _(binned_statistic, l_fuv, np, q_hi, sfr, u):
     q_hi_norm = (q_hi / sfr).to(u.ph/u.s / (u.Msun/u.yr))
 
     # Set up binning in log(sfr)
-    log_sfr_range = [-4, -2]
+    log_sfr_range = [-6, -2]
     nbin = 16
     log_sfr = np.log10(sfr / (u.Msun/u.yr))
 
@@ -82,10 +82,10 @@ def _(binned_statistic, l_fuv, np, q_hi, sfr, u):
                                            statistic='mean', 
                                            range=log_sfr_range, bins=nbin)
     l_fuv_norm_25, *_ = binned_statistic(log_sfr, l_fuv_norm.value,
-                                        statistic=lambda x: np.percentile(x, 5),
+                                        statistic=lambda x: np.percentile(x, 25),
                                         range=log_sfr_range, bins=nbin)
     l_fuv_norm_75, *_ = binned_statistic(log_sfr, l_fuv_norm.value,
-                                        statistic=lambda x: np.percentile(x, 95),
+                                        statistic=lambda x: np.percentile(x, 75),
                                         range=log_sfr_range, bins=nbin)
 
     # Repeat for qhi
@@ -96,10 +96,10 @@ def _(binned_statistic, l_fuv, np, q_hi, sfr, u):
                                           statistic='mean', 
                                           range=log_sfr_range, bins=nbin)
     q_hi_norm_25, *_ = binned_statistic(log_sfr, q_hi_norm.value,
-                                        statistic=lambda x: np.percentile(x, 5),
+                                        statistic=lambda x: np.percentile(x, 25),
                                         range=log_sfr_range, bins=nbin)
     q_hi_norm_75, *_ = binned_statistic(log_sfr, q_hi_norm.value,
-                                        statistic=lambda x: np.percentile(x, 95),
+                                        statistic=lambda x: np.percentile(x, 75),
                                         range=log_sfr_range, bins=nbin)
 
     # Compute overall means
@@ -112,6 +112,7 @@ def _(binned_statistic, l_fuv, np, q_hi, sfr, u):
         l_fuv_norm_mean_tot,
         l_fuv_norm_med,
         log_sfr_edges,
+        log_sfr_range,
         q_hi_norm_25,
         q_hi_norm_75,
         q_hi_norm_mean,
@@ -128,6 +129,8 @@ def _(
     l_fuv_norm_mean_tot,
     l_fuv_norm_med,
     log_sfr_edges,
+    log_sfr_range,
+    np,
     plt,
     q_hi_norm_25,
     q_hi_norm_75,
@@ -138,35 +141,34 @@ def _(
     sfr_bin_ctr = 10.**((log_sfr_edges[1:] + log_sfr_edges[:-1]) / 2)
 
     # FUV
-    plt.plot(sfr_bin_ctr, l_fuv_norm_med/l_fuv_norm_mean_tot, color='C0')
-    plt.plot(sfr_bin_ctr, l_fuv_norm_mean/l_fuv_norm_mean_tot, color='C0', ls='--')
+    plt.plot(sfr_bin_ctr, l_fuv_norm_mean/l_fuv_norm_mean_tot, color='C0', ls='--', label='mean(FUV)')
+    plt.plot(sfr_bin_ctr, l_fuv_norm_med/l_fuv_norm_mean_tot, color='C0', label='med(FUV)')
     plt.fill_between(sfr_bin_ctr, 
                      l_fuv_norm_25/l_fuv_norm_mean_tot.value, 
                      l_fuv_norm_75/l_fuv_norm_mean_tot.value,
-                     alpha=0.3, color='C0', lw=0)
+                     alpha=0.3, color='C0', lw=0, label='IQR(FUV)')
 
     # Q(HI)
-    plt.plot(sfr_bin_ctr, q_hi_norm_med/q_hi_norm_mean_tot, color='C1')
-    plt.plot(sfr_bin_ctr, q_hi_norm_mean/q_hi_norm_mean_tot, color='C1', ls='--')
+    plt.plot(sfr_bin_ctr, q_hi_norm_mean/q_hi_norm_mean_tot, color='C1', ls='--', label='mean(Q(HI))')
+    plt.plot(sfr_bin_ctr, q_hi_norm_med/q_hi_norm_mean_tot, color='C1', label='med(Q(HI))')
     plt.fill_between(sfr_bin_ctr, 
                      q_hi_norm_25/q_hi_norm_mean_tot.value, 
                      q_hi_norm_75/q_hi_norm_mean_tot.value,
-                     alpha=0.3, color='C1', lw=0)
+                     alpha=0.3, color='C1', lw=0, label='IQR(Q(HI))')
 
+    # Adjust scales, add axis labels
+    plt.xlim(10.**np.array(log_sfr_range))
+    plt.ylim([1e-2,2])
     plt.xscale('log')
     plt.yscale('log')
+    plt.xlabel('SFR [M$_\odot$ yr$^{-1}$]')
+    plt.ylabel(r'$L/\mathrm{SFR} / \left\langle L/\mathrm{SFR}\right\rangle$')
+
+    # Add legend
+    plt.legend(loc='lower right', ncol=2)
+
+    # Show
     plt.show()
-    return
-
-
-@app.cell
-def _(q_hi_norm_mean_tot):
-    1/q_hi_norm_mean_tot
-    return
-
-
-@app.cell
-def _():
     return
 
 
