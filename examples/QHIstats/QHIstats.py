@@ -89,7 +89,7 @@ def _(binned_statistic, mass, np, plt, qHI, u):
     qHI_norm_mean, *_ = binned_statistic(logm, qHI_norm, statistic='mean', bins=nbin)
 
     # Plot median, mean, and interquartile range
-    norm_fac = 1e47
+    norm_fac = 1e46
     logm_cen = (logm_edges[:-1] + logm_edges[1:])/2
     plt.plot(logm_cen, qHI_norm_med/norm_fac, label='Median')
     plt.fill_between(logm_cen, qHI_norm_75/norm_fac, qHI_norm_25/norm_fac, 
@@ -99,11 +99,11 @@ def _(binned_statistic, mass, np, plt, qHI, u):
 
     # Adjust axes
     plt.xlim([logm_cen[0], logm_cen[-1]])
-    plt.ylim([0, 2.5])
+    plt.ylim([0, 8])
 
     # Add axis labels
     plt.xlabel(r'$\log(M/\mathrm{M}_\odot)$')
-    plt.ylabel(r'$Q(\mathrm{HI})/M$ [$10^{47}$ ph s$^{-1}$ M$_\odot^{-1}$]')
+    plt.ylabel(r'$Q(\mathrm{HI})/M$ [$10^{46}$ ph s$^{-1}$ M$_\odot^{-1}$]')
 
     # Add legend
     plt.legend()
@@ -150,6 +150,11 @@ def _(Ryd, lspec, mass, np, plt, u, wl):
 
     # Show image
     plt.show()
+    return
+
+
+@app.cell
+def _():
     return
 
 
