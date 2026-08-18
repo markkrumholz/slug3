@@ -131,10 +131,15 @@ inline auto testFilterIdealPhotMode() -> int
  * @return 0 on pass, 1 on failure
  * @details
  * Checks Q(HI) and Q(HeII) by verifying:
- * (1) photCount() is true and wlMax() is infinity;
- * (2) wlMin() matches h·c/(IP·eV)/Å computed directly from elem::elemData;
+ * (1) photCount() is true and wlMin() is 0 (no lower bound -- ionizing
+ *     photons have no minimum energy);
+ * (2) wlMax() matches h·c/(IP·eV)/Å computed directly from elem::elemData
+ *     (the ionization-threshold wavelength: ionizing photons have
+ *     wavelength BELOW this threshold, not above it -- see
+ *     testFilterIdealQDirection for a regression test targeted
+ *     directly at this direction);
  * (3) phot() on the linear test spectrum matches the analytical photon-count
- *     integral from wlMin() to the spectrum's upper bound (2000 Å) to
+ *     integral from the spectrum's lower bound (500 Å) to wlMax() to
  *     within 1e-8 relative tolerance.
  */
 inline auto testFilterIdealQMode() -> int
@@ -154,26 +159,26 @@ inline auto testFilterIdealQMode() -> int
         std::cerr << "testFilterIdealQMode: Q(HI) photCount() should be true\n";
         return 1;
     }
-    if (!std::isinf(fHI.wlMax()))
+    if (fHI.wlMin() != 0.0)
     {
-        std::cerr << "testFilterIdealQMode: Q(HI) wlMax() should be infinity\n";
+        std::cerr << "testFilterIdealQMode: Q(HI) wlMin() should be 0\n";
         return 1;
     }
 
     const double wlH1 = (utils::h * utils::c)
         / (elem::elemData[0].ionPot()[0] * utils::eV) / utils::Angstrom;
-    if (std::abs(fHI.wlMin() - wlH1) > wlTol)
+    if (std::abs(fHI.wlMax() - wlH1) > wlTol)
     {
-        std::cerr << "testFilterIdealQMode: Q(HI) wlMin() = " << fHI.wlMin()
+        std::cerr << "testFilterIdealQMode: Q(HI) wlMax() = " << fHI.wlMax()
                   << " Ang, expected " << wlH1 << " Ang\n";
         return 1;
     }
 
-    // wlMax = inf is clamped to spectrum end; wlMin is clamped to spectrum
-    // start if the threshold falls below it -- mirror both clamps in the
-    // expected value so the comparison is against the same effective range
+    // wlMin = 0 is clamped to spectrum start (500 Å); the threshold
+    // (~912 Å for HI) falls within the spectrum's own range, so it
+    // clamps wlMax() unchanged
     const double gotHI  = fHI.phot(wl, spec);
-    const double expHI  = photExact(a, b, std::max(wlH1, wlLo), wlHi);
+    const double expHI  = photExact(a, b, wlLo, wlH1);
     const double relHI  = std::abs(gotHI - expHI) / std::abs(expHI);
     if (relHI > tol)
     {
@@ -185,7 +190,9 @@ inline auto testFilterIdealQMode() -> int
 
     // --- Q(HeII): singly-ionized helium, second ionization ---
     // The threshold (~228 Å) lies below the spectrum's lower bound (500 Å),
-    // so the effective integration range is [500, 2000] Å
+    // so [0, 228] doesn't overlap [500, 2000] at all -- phot() should
+    // return exactly 0, the same as testFilterIdealOutOfRange's own
+    // out-of-range filters
     const phot::FilterIdeal fHeII("Q(HeII)");
     if (!fHeII.photCount())
     {
@@ -195,22 +202,91 @@ inline auto testFilterIdealQMode() -> int
 
     const double wlHeII = (utils::h * utils::c)
         / (elem::elemData[1].ionPot()[1] * utils::eV) / utils::Angstrom;
-    if (std::abs(fHeII.wlMin() - wlHeII) > wlTol)
+    if (std::abs(fHeII.wlMax() - wlHeII) > wlTol)
     {
-        std::cerr << "testFilterIdealQMode: Q(HeII) wlMin() = " << fHeII.wlMin()
+        std::cerr << "testFilterIdealQMode: Q(HeII) wlMax() = " << fHeII.wlMax()
                   << " Ang, expected " << wlHeII << " Ang\n";
         return 1;
     }
 
     const double gotHeII = fHeII.phot(wl, spec);
-    const double expHeII = photExact(a, b, std::max(wlHeII, wlLo), wlHi);
-    const double relHeII = std::abs(gotHeII - expHeII) / std::abs(expHeII);
-    if (relHeII > tol)
+    if (gotHeII != 0.0)
     {
         std::cerr << "testFilterIdealQMode: Q(HeII) phot got " << gotHeII
-                  << ", expected " << expHeII
-                  << " (rel err " << relHeII << ", tol " << tol << ")\n";
+                  << ", expected exactly 0 (threshold " << wlHeII
+                  << " Ang is below the spectrum's own range [" << wlLo
+                  << ", " << wlHi << "])\n";
         return 1;
+    }
+
+    return 0;
+}
+
+/**
+ * @brief Regression test for the wlMin_/wlMax_ direction bug in Q(*) filters
+ * @return 0 on pass, 1 on failure
+ * @details
+ * Q(HI)'s threshold (~912 Å for H) must mark the UPPER end of its
+ * passband, not the lower end: ionizing photons have wavelength BELOW
+ * the threshold. This is checked with two spectra that each sit
+ * entirely on one side of the threshold, so neither case depends on
+ * how phot() interpolates across the threshold itself:
+ *
+ * (1) A spectrum spanning [100, 800] Å -- entirely shortward of the
+ *     threshold, i.e. entirely ionizing -- must return the full,
+ *     positive, analytically-exact photon-count integral.
+ * (2) A spectrum spanning [1000, 5000] Å -- entirely longward of the
+ *     threshold, i.e. entirely non-ionizing -- must return exactly 0,
+ *     via phot()'s own x0 >= x1 early return (wlMin_ = 0 clamps to
+ *     1000, wlMax_ = threshold stays ~912, so x0 >= x1 deterministically).
+ *
+ * The originally-reported bug had wlMin_/wlMax_ swapped (passband
+ * [threshold, inf) instead of [0, threshold]), which would fail both
+ * checks simultaneously: case (1) would wrongly return 0 (its entire
+ * domain lies below the swapped filter's wlMin_), and case (2) would
+ * wrongly return the full non-ionizing flux (its entire domain lies
+ * inside the swapped filter's [threshold, inf) passband) -- exactly
+ * backwards from what's asserted below.
+ */
+inline auto testFilterIdealQDirection() -> int
+{
+    constexpr double a = 2.0, b = 1.0e-3;
+    const phot::FilterIdeal fHI("Q(HI)");
+
+    // Case 1: spectrum entirely shortward of the threshold (ionizing)
+    {
+        constexpr double wlLo = 100.0, wlHi = 800.0;
+        constexpr std::size_t n = 501;
+        const auto [wl, spec] = makeLinearSpec(wlLo, wlHi, n, a, b);
+
+        const double got      = fHI.phot(wl, spec);
+        const double expected = photExact(a, b, wlLo, wlHi);
+        const double relErr   = std::abs(got - expected) / std::abs(expected);
+        constexpr double tol  = 1e-8;
+        if (relErr > tol)
+        {
+            std::cerr << "testFilterIdealQDirection: spectrum entirely "
+                         "shortward of Q(HI)'s threshold: got " << got
+                      << ", expected " << expected << " (rel err " << relErr
+                      << ", tol " << tol << ")\n";
+            return 1;
+        }
+    }
+
+    // Case 2: spectrum entirely longward of the threshold (non-ionizing)
+    {
+        constexpr double wlLo = 1000.0, wlHi = 5000.0;
+        constexpr std::size_t n = 501;
+        const auto [wl, spec] = makeLinearSpec(wlLo, wlHi, n, a, b);
+
+        const double got = fHI.phot(wl, spec);
+        if (got != 0.0)
+        {
+            std::cerr << "testFilterIdealQDirection: spectrum entirely "
+                         "longward of Q(HI)'s threshold should return "
+                         "exactly 0, got " << got << "\n";
+            return 1;
+        }
     }
 
     return 0;
@@ -331,6 +407,7 @@ inline auto testFilterIdeal() -> int
     result += testFilterIdealEnergyMode();
     result += testFilterIdealPhotMode();
     result += testFilterIdealQMode();
+    result += testFilterIdealQDirection();
     result += testFilterIdealOutOfRange();
     result += testFilterIdealErrors();
     return result;

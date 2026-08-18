@@ -1428,14 +1428,17 @@ def test_filterideal_phot_filter():
 
 
 def test_filterideal_ionization_threshold():
-    """A Q(<elem><ion>) filter should have wlMax() == inf and a finite,
-    positive wlMin() set from the ionization threshold, with
+    """A Q(<elem><ion>) filter should have wlMin() == 0.0 (no lower
+    bound -- ionizing photons have no minimum energy) and a finite,
+    positive wlMax() set from the ionization threshold (ionizing
+    photons have wavelength BELOW the threshold, not above it), with
     photCount() == True."""
     filt = slug.FilterIdeal("Q(HI)")
     assert filt.photCount()
-    assert filt.wlMin() > 0.0
-    assert np.isinf(filt.wlMax())
-    assert filt.wlPivot() == pytest.approx(filt.wlMin())
+    assert filt.wlMin() == 0.0
+    assert filt.wlMax() > 0.0
+    assert not np.isinf(filt.wlMax())
+    assert filt.wlPivot() == pytest.approx(filt.wlMax())
 
 
 def test_filterideal_invalid_name_raises():

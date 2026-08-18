@@ -32,9 +32,11 @@ name : str
        photon-counting filter, photCount() is True).
     2. Q(<spec>), where <spec> is an atomic symbol followed by a Roman
        numeral giving the ionization state in astronomical notation
-       (e.g. Q(HI) = photons that ionize neutral hydrogen). The filter
-       is set to wlMin() = h*c/IP (the ionization-threshold
-       wavelength), wlMax() = infinity, and photCount() = True.
+       (e.g. Q(HI) = photons that ionize neutral hydrogen). Ionizing
+       photons have wavelength below the ionization threshold
+       lambda = h*c/IP, so the filter is set to wlMin() = 0 (no lower
+       bound), wlMax() = h*c/IP (the ionization-threshold wavelength),
+       and photCount() = True.
 
 Throws
 ------
@@ -61,9 +63,11 @@ static constexpr std::string_view wlPivotDocstring = R"doc(Get this filter's piv
 Returns
 -------
 wl_pivot : float
-    The midpoint of [wlMin(), wlMax()], or wlMin() if wlMax() is
-    infinite (as for a Q(*) ionization-threshold filter, whose
-    passband has no finite upper end).)doc";
+    The midpoint of [wlMin(), wlMax()]; wlMax() if wlMin() is 0 (as
+    for a Q(*) ionization-threshold filter, whose passband has no
+    finite lower end), or wlMin() if wlMax() is infinite (as for an
+    ideal_phot_X_inf filter, whose passband has no finite upper
+    end).)doc";
 
 static constexpr std::string_view photDocstring = R"doc(Compute the photometric response of this filter to a spectrum.
 
