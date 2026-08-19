@@ -2,8 +2,9 @@
 cloudy_output.py
 
 Implements the machinery to write cloudy run results (the physical
-conditions used, and -- where available -- the emergent continuum)
-into a slug HDF5 output file's own cluster_cloudy/galaxy_cloudy group.
+conditions used, and -- where available -- the emergent continuum and
+emission lines) into a slug HDF5 output file's own cluster_cloudy/
+galaxy_cloudy group.
 
 :copyright: Copyright (c) 2026 Mark Krumholz
 """
@@ -43,6 +44,10 @@ class CloudyRunResult:
         (wl, inc, trans, emit, trans_emit), as returned by
         read_cloudy_continuum, or None if this run's deck had no
         "save last continuum" output.
+    lines : tuple, optional
+        (line_wl, line_label, line_lum), as returned by
+        read_cloudy_linearr, or None if this run's deck had no "save
+        last line array" output.
     """
 
     id_val: int
@@ -54,6 +59,7 @@ class CloudyRunResult:
     U0: u.Quantity
     Omega: u.Quantity
     continuum: tuple[u.Quantity, u.Quantity, u.Quantity, u.Quantity, u.Quantity] | None
+    lines: tuple[u.Quantity, list[str], u.Quantity] | None
 
 
 def write_cloudy_h5_results(h5_path: str | Path, group_name: str, id_key: str,
@@ -93,6 +99,16 @@ def write_cloudy_h5_results(h5_path: str | Path, group_name: str, id_key: str,
     instead longer than what's already stored, the wavelength grid and
     every already-stored row are rewritten to the new, longer grid
     (zero-padded the same way) before appending.
+
+    If any result (in this call, or an earlier one) has line data, the
+    group also gets line_start and line_count -- one entry per result,
+    aligned with the datasets above -- plus flat, append-only
+    line_wl/line_label/line_lum arrays holding every kept line from
+    every result with line data, in order; a given result's own lines
+    are the slice line_wl[line_start:line_start + line_count] (etc.).
+    This is a ragged (variable count per result) format, unlike
+    continuum's fixed-width one, so it needs no padding or rewriting:
+    a result with no line data of its own simply gets line_count = 0.
     """
     if not results:
         return
@@ -118,6 +134,11 @@ def write_cloudy_h5_results(h5_path: str | Path, group_name: str, id_key: str,
         any_new_continuum = any(r.continuum is not None for r in results)
         if has_continuum_group or any_new_continuum:
             _append_continuum(group, results, n_old_rows)
+
+        has_lines_group = "line_start" in group
+        any_new_lines = any(r.lines is not None for r in results)
+        if has_lines_group or any_new_lines:
+            _append_lines(group, results, n_old_rows)
 
 
 def _append_scalar(group: h5py.Group, name: str, values: np.ndarray, units: str) -> None:
@@ -198,3 +219,59 @@ def _grow_wavelength_grid(group: h5py.Group, new_wl: u.Quantity, old_len: int) -
             padded = np.zeros((n_rows, new_len))
             padded[:, offset:] = old_data
             dset[:, :] = padded
+
+
+def _append_lines(group: h5py.Group, results: Sequence[CloudyRunResult], n_old_rows: int) -> None:
+    """Append one (line_start, line_count) index entry per result, plus that result's own kept lines onto the group's flat, append-only line_wl/line_label/line_lum arrays."""
+    if "line_wl" not in group:
+        wl_dset = group.create_dataset("line_wl", shape=(0,), maxshape=(None,), chunks=True, dtype="f8")
+        wl_dset.attrs["units"] = str(u.AA)
+        group.create_dataset("line_label", shape=(0,), maxshape=(None,),
+            chunks=True, dtype=h5py.string_dtype(encoding="ascii", length=4))
+        lum_dset = group.create_dataset("line_lum", shape=(0,), maxshape=(None,), chunks=True, dtype="f8")
+        lum_dset.attrs["units"] = str(u.erg / u.s)
+    if "line_start" not in group:
+        # Backfill a zero-count index entry for any rows already
+        # written before line data was ever introduced, so line_start/
+        # line_count stay aligned with the scalar datasets
+        start_dset = group.create_dataset(
+            "line_start", shape=(n_old_rows,), maxshape=(None,), chunks=True, dtype=np.uint64)
+        count_dset = group.create_dataset(
+            "line_count", shape=(n_old_rows,), maxshape=(None,), chunks=True, dtype=np.uint64)
+        start_dset.attrs["units"] = ""
+        count_dset.attrs["units"] = ""
+
+    wl_dset = group["line_wl"]
+    label_dset = group["line_label"]
+    lum_dset = group["line_lum"]
+    flat_old_len = wl_dset.shape[0]
+
+    starts = np.empty(len(results), dtype=np.uint64)
+    counts = np.empty(len(results), dtype=np.uint64)
+    all_wl: list[float] = []
+    all_label: list[str] = []
+    all_lum: list[float] = []
+    running = flat_old_len
+    for i, r in enumerate(results):
+        starts[i] = running
+        if r.lines is None:
+            counts[i] = 0
+            continue
+        wl_r, label_r, lum_r = r.lines
+        counts[i] = len(label_r)
+        running += len(label_r)
+        all_wl.extend(wl_r.to_value(u.AA))
+        all_label.extend(label_r)
+        all_lum.extend(lum_r.to_value(u.erg / u.s))
+
+    flat_new_len = flat_old_len + len(all_wl)
+    wl_dset.resize((flat_new_len,))
+    label_dset.resize((flat_new_len,))
+    lum_dset.resize((flat_new_len,))
+    if all_wl:
+        wl_dset[flat_old_len:flat_new_len] = all_wl
+        label_dset[flat_old_len:flat_new_len] = all_label
+        lum_dset[flat_old_len:flat_new_len] = all_lum
+
+    _append_scalar(group, "line_start", starts, "")
+    _append_scalar(group, "line_count", counts, "")

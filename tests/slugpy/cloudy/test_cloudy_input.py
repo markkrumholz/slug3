@@ -68,7 +68,7 @@ def test_output_filename_substitution(tmp_path, spectrum, hp):
     text = path.read_text()
 
     assert 'save last continuum "my_model.con"' in text
-    assert 'save last hydrogen conditions "my_model.hcon"' in text
+    assert 'save last line array units Angstrom "my_model.linearr"' in text
     assert "$OUTPUT_FILENAME" not in text
 
 

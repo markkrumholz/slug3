@@ -17,12 +17,13 @@ from astropy import units as u
 from slugpy.cloudy.cloudy_output import CloudyRunResult, write_cloudy_h5_results
 
 
-def _result(id_val, time, nII=100.0, r0=1e18, r1=2e18, U=1e-3, U0=2e-3, Omega=0.5, continuum=None):
+def _result(id_val, time, nII=100.0, r0=1e18, r1=2e18, U=1e-3, U0=2e-3, Omega=0.5,
+    continuum=None, lines=None):
     return CloudyRunResult(
         id_val=id_val, time=time,
         nII=nII / u.cm ** 3, r0=r0 * u.cm, r1=r1 * u.cm,
         U=U * u.dimensionless_unscaled, U0=U0 * u.dimensionless_unscaled,
-        Omega=Omega * u.dimensionless_unscaled, continuum=continuum)
+        Omega=Omega * u.dimensionless_unscaled, continuum=continuum, lines=lines)
 
 
 def _continuum(wl_aa, inc, trans=None, emit=None, trans_emit=None):
@@ -34,6 +35,10 @@ def _continuum(wl_aa, inc, trans=None, emit=None, trans_emit=None):
     trans_emit = zeros if trans_emit is None else np.asarray(trans_emit, dtype=float)
     unit = u.erg / u.s / u.AA
     return (wl_aa * u.AA, inc * unit, trans * unit, emit * unit, trans_emit * unit)
+
+
+def _lines(wl_aa, labels, lum):
+    return (np.asarray(wl_aa, dtype=float) * u.AA, list(labels), np.asarray(lum, dtype=float) * u.erg / u.s)
 
 
 @pytest.fixture
@@ -204,3 +209,79 @@ def test_grid_growth_within_a_single_batch(h5_path):
         assert g["wl"][()] == pytest.approx([100.0, 200.0, 300.0])
         assert g["spec_inc"][0, :] == pytest.approx([0.0, 1.0, 2.0])
         assert g["spec_inc"][1, :] == pytest.approx([7.0, 8.0, 9.0])
+
+
+# ---------------------------------------------------------------------
+# Lines: ragged flat-array + start/count index storage
+# ---------------------------------------------------------------------
+
+def test_lines_created_with_index(h5_path):
+    lines = _lines([1000.0, 2000.0, 3000.0], ["H  1", "He 2", "O  3"], [1e40, 2e40, 3e40])
+    write_cloudy_h5_results(h5_path, "cluster_cloudy", "uid", [_result(1, 1e6, lines=lines)])
+    with h5py.File(h5_path, "r") as f:
+        g = f["cluster_cloudy"]
+        assert g["line_start"][()].tolist() == [0]
+        assert g["line_count"][()].tolist() == [3]
+        assert g["line_wl"][()] == pytest.approx([1000.0, 2000.0, 3000.0])
+        assert [x.decode() for x in g["line_label"][()]] == ["H  1", "He 2", "O  3"]
+        assert g["line_lum"][()] == pytest.approx([1e40, 2e40, 3e40])
+        assert u.Unit(g["line_wl"].attrs["units"]) == u.AA
+        assert u.Unit(g["line_lum"].attrs["units"]) == u.erg / u.s
+
+
+def test_lines_result_without_lines_gets_zero_count(h5_path):
+    lines1 = _lines([1000.0], ["H  1"], [1e40])
+    write_cloudy_h5_results(h5_path, "cluster_cloudy", "uid",
+        [_result(1, 1e6, lines=lines1), _result(2, 2e6, lines=None)])
+    with h5py.File(h5_path, "r") as f:
+        g = f["cluster_cloudy"]
+        assert g["line_start"][()].tolist() == [0, 1]
+        assert g["line_count"][()].tolist() == [1, 0]
+        assert g["line_wl"].shape == (1,)
+
+
+def test_lines_no_lines_in_any_result_creates_no_line_datasets(h5_path):
+    write_cloudy_h5_results(h5_path, "cluster_cloudy", "uid", [_result(1, 1e6), _result(2, 2e6)])
+    with h5py.File(h5_path, "r") as f:
+        g = f["cluster_cloudy"]
+        assert "line_wl" not in g
+        assert "line_start" not in g
+
+
+def test_lines_backfill_when_introduced_on_a_later_call(h5_path):
+    """Rows written before line data existed get a zero-count index entry once a later call introduces it."""
+    write_cloudy_h5_results(h5_path, "cluster_cloudy", "uid", [_result(1, 1e6), _result(2, 2e6)])
+    lines = _lines([500.0, 600.0], ["Ne 3", "S  2"], [5e39, 6e39])
+    write_cloudy_h5_results(h5_path, "cluster_cloudy", "uid", [_result(3, 3e6, lines=lines)])
+
+    with h5py.File(h5_path, "r") as f:
+        g = f["cluster_cloudy"]
+        assert g["line_start"][()].tolist() == [0, 0, 0]
+        assert g["line_count"][()].tolist() == [0, 0, 2]
+        assert g["line_wl"][()] == pytest.approx([500.0, 600.0])
+
+
+def test_lines_appended_across_multiple_calls_keeps_correct_offsets(h5_path):
+    """The flat arrays keep accumulating, and each new row's own line_start correctly reflects the running total, across separate write_cloudy_h5_results calls."""
+    lines1 = _lines([100.0, 200.0], ["H  1", "He 2"], [1e40, 2e40])
+    write_cloudy_h5_results(h5_path, "cluster_cloudy", "uid", [_result(1, 1e6, lines=lines1)])
+    lines2 = _lines([300.0], ["O  3"], [3e40])
+    write_cloudy_h5_results(h5_path, "cluster_cloudy", "uid", [_result(2, 2e6, lines=lines2)])
+
+    with h5py.File(h5_path, "r") as f:
+        g = f["cluster_cloudy"]
+        assert g["line_start"][()].tolist() == [0, 2]
+        assert g["line_count"][()].tolist() == [2, 1]
+        assert g["line_wl"][()] == pytest.approx([100.0, 200.0, 300.0])
+        assert [x.decode() for x in g["line_label"][()]] == ["H  1", "He 2", "O  3"]
+
+
+def test_lines_mixed_batch_within_one_call(h5_path):
+    """Within one call, one result with lines and one without still get correctly offset, non-overlapping index entries."""
+    lines1 = _lines([100.0, 200.0], ["H  1", "He 2"], [1e40, 2e40])
+    write_cloudy_h5_results(h5_path, "cluster_cloudy", "uid",
+        [_result(1, 1e6, lines=lines1), _result(2, 2e6, lines=None)])
+    with h5py.File(h5_path, "r") as f:
+        g = f["cluster_cloudy"]
+        assert g["line_start"][()].tolist() == [0, 2]
+        assert g["line_count"][()].tolist() == [2, 0]

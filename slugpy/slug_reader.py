@@ -17,6 +17,7 @@ from astropy import units as u
 from ._slug import Cluster, Filter, FilterIdeal, SimControls, parsePDFDescriptor
 from .cloudy.cloudy_continuum import read_cloudy_continuum
 from .cloudy.cloudy_input import write_cloudy_input
+from .cloudy.cloudy_lines import read_cloudy_linearr
 from .cloudy.cloudy_output import CloudyRunResult, write_cloudy_h5_results
 from .cloudy.cloudy_process import (
     cloudy_run_succeeded,
@@ -519,16 +520,19 @@ class slug_reader:
         Every successful run's own physical conditions (nII, r0, r1,
         U, U0, Omega) and, where its own deck produced one, emergent
         continuum (wavelength grid plus incident/transmitted/emitted/
-        transmitted+emitted luminosity) are appended as new rows to
-        this file's own cluster_cloudy (spec_type "cluster") or
-        galaxy_cloudy (spec_type "galaxy") group, creating it on first
-        use. Writing this requires briefly closing and reopening the
-        HDF5 file this reader is attached to (any of this reader's own
-        lazily-cached group readers -- clusters, cluster_spectra, ...
-        -- are invalidated and rebuilt against the reopened file on
-        their next access); this only happens if at least one run in
-        this call succeeded, so a call where every run fails leaves
-        the file untouched.
+        transmitted+emitted luminosity) and emission lines (wavelength,
+        4-character label, and observable luminosity of every line
+        with emergent luminosity above 1e10 erg/s -- see
+        read_cloudy_linearr) are appended as new rows to this file's
+        own cluster_cloudy (spec_type "cluster") or galaxy_cloudy
+        (spec_type "galaxy") group, creating it on first use. Writing
+        this requires briefly closing and reopening the HDF5 file this
+        reader is attached to (any of this reader's own lazily-cached
+        group readers -- clusters, cluster_spectra, ... -- are
+        invalidated and rebuilt against the reopened file on their
+        next access); this only happens if at least one run in this
+        call succeeded, so a call where every run fails leaves the
+        file untouched.
         """
         if spec_type == "cluster" and trial is not None:
             raise ValueError("run_cloudy: trial is only meaningful for spec_type='galaxy'")
@@ -642,8 +646,12 @@ class slug_reader:
             con_path = deck.with_suffix(".con")
             if con_path.is_file() and con_path.stat().st_size > 0:
                 continuum = read_cloudy_continuum(con_path)
+            lines = None
+            linearr_path = deck.with_suffix(".linearr")
+            if linearr_path.is_file() and linearr_path.stat().st_size > 0:
+                lines = read_cloudy_linearr(linearr_path)
             results.append(CloudyRunResult(
-                this_id, this_time, hp.nII, hp.r0, hp.r1, hp.U, hp.U0, hp.Omega, continuum))
+                this_id, this_time, hp.nII, hp.r0, hp.r1, hp.U, hp.U0, hp.Omega, continuum, lines))
 
         if results:
             cloudy_group = "cluster_cloudy" if spec_type == "cluster" else "galaxy_cloudy"
