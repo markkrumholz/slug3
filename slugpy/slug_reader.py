@@ -483,9 +483,9 @@ class slug_reader:
         "galaxy", [Fe/H] is instead the expectation value of this
         file's own stars.FeH distribution (or its fixed value, if
         stars.FeH is not a distribution) -- a single population-level
-        value used for every matching galaxy spectrum, since [Fe/H]
-        is not itself tracked per output time/trial the way it is
-        per cluster.
+        value used for every matching galaxy spectrum, since there
+        is no single [Fe/H] value for a galaxy the way there is for
+        a cluster.
         """
         if spec_type == "cluster" and trial is not None:
             raise ValueError("run_cloudy: trial is only meaningful for spec_type='galaxy'")
