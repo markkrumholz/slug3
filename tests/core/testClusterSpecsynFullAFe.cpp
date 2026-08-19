@@ -13,6 +13,7 @@
  * branch) against real BOSZ data, across the same flat
  * [Fe/H] = [-1, 0] distribution testClusterSpecsynFull uses.
  * @date 2026-07-30
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #include "testClusterSpecsynFullAFe.hpp"

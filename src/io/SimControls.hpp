@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Implements a class to control simulation flow and physics settings
  * @date 16-07-2026
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef SIMCONTROLS_HPP

@@ -3,6 +3,8 @@ slug_group_reader.py
 
 Implements slug_group_reader, a lazy reader for a single group within
 a slug HDF5 output file.
+
+:copyright: Copyright (c) 2026 Mark Krumholz
 """
 
 from collections.abc import KeysView

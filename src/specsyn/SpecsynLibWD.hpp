@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief A SpecsynLib2D for white dwarf atmosphere grids
  * @date 2026-08-07
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef SPECSYNLIBWD_HPP

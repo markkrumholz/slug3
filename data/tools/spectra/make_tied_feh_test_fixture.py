@@ -13,6 +13,8 @@ inside either group: findMatchingSpectra only ever reads a group's own
 attributes, never its contents.
 
 Run from the repository root: python3 data/tools/spectra/make_tied_feh_test_fixture.py
+
+:copyright: Copyright (c) 2026 Mark Krumholz
 """
 import h5py
 

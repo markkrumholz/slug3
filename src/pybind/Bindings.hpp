@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Shared declarations for slug's Python bindings
  * @date 2026-07-20
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  * @details
  * Binding code for each bound class lives in its own translation
  * unit (BindInterpolator1D.cpp, BindTracks2D.cpp, BindTracks3D.cpp,

@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief A non-owning, reflected view of another PDF.
  * @date 2026-08-14
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef PDFREFLECT_HPP

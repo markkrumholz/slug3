@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Implements thread-safe random number generation
  * @date 2024-06-17
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef RNGUTILS_HPP

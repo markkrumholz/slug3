@@ -2,6 +2,7 @@
  * @file SimControls.cpp
  * @author Mark Krumholz
  * @date 2026-07-16
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  * @brief Implementation of SimControls
  */
 

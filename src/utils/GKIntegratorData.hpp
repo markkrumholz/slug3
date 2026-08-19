@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Gauss-Kronrod rule selector and tabulated abscissae/weights for GKIntegrator
  * @date 2026-08-16
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef GKINTEGRATORDATA_HPP

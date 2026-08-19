@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Implementation of Extinct
  * @date 2026-08-04
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  * @details
  * Out-of-line so this file, not Extinct.hpp, is the one that needs
  * io::SimControls's complete type -- SimControls.hpp itself includes

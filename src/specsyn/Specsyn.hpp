@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Defines the common interface for stellar spectral synthesis
  * @date 2026-07-18
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef SPECSYN_HPP

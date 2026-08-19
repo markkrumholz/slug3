@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Ascii-output specialization of OutputManager
  * @date 2026-07-17
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef OUTPUTMANAGERASCII_HPP

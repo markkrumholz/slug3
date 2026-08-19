@@ -6,6 +6,7 @@
  * This file contains unit tests for the PDFSegmentSchechter class defined
  * in the src/pdfs directory.
  * @date 2024-06-12
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef TESTPDFSEGMENTSCHECHTER_HPP

@@ -2,6 +2,8 @@
 This is a script to fetch MIST (MESA Isochrones and Stellar Tracks)
 tracks from the official MIST website, extract the data needed by
 slug, and write it out in slug's HDF5 track format.
+
+:copyright: Copyright (c) 2026 Mark Krumholz
 """
 
 # Imports

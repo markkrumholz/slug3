@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Implement Python bindings for slug
  * @date 2026-07-11
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  * @details
  * This module creates Python bindings that expose some of
  * the functionality of slug. The bindings for each class live in

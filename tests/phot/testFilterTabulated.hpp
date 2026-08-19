@@ -10,6 +10,7 @@
  * data/tools/filters/make_filter_test_fixture.py for how that fixture was
  * generated.
  * @date 2026-07-27
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef TESTFILTERTABULATED_HPP

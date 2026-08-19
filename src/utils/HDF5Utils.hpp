@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Shared utility functions for reading data out of HDF5 files
  * @date 2026-08-01
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef HDF5UTILS_HPP

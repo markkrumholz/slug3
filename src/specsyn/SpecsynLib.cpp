@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Implementation of SpecsynLib.hpp
  * @date 2026-07-20
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #include "SpecsynLib.hpp"

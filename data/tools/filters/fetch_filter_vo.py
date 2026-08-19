@@ -29,6 +29,8 @@ facility/instrument/filter matches every value at that level -- e.g.
 --facility HST --instrument ACS_WFC (no --filter) fetches every
 ACS_WFC filter; omitting --facility entirely fetches every filter
 from every facility, which is a very large, slow download.
+
+:copyright: Copyright (c) 2026 Mark Krumholz
 """
 
 # Imports

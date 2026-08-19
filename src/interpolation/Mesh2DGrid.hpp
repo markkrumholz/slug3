@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Machinery to do interpolation on a semi-tensor mesh
  * @date 2024-06-19
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  * @details
  * The classes in this module and a few others solve a generic
  * mathematical problem. We have a function whose value is specified

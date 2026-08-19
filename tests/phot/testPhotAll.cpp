@@ -5,6 +5,7 @@
  * @details
  * This file runs unit tests for all the classes in src/phot.
  * @date 2026-07-26
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #include "testFilterCollection.hpp"

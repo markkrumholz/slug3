@@ -6,6 +6,8 @@ slug, and write it out in slug's HDF5 track format.
 Note: this script requires the third-party "gdown" package (pip install
 gdown), since the tracks are hosted as Google Drive folders rather than a
 plain HTTP directory listing.
+
+:copyright: Copyright (c) 2026 Mark Krumholz
 """
 
 # Imports

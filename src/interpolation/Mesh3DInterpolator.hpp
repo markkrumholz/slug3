@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Machinery to do interpolation on a 3D mesh
  * @date 2024-06-19
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  * @details
  * A class to interpolate on a 3D semi-tensor mesh
  */
@@ -19,7 +20,7 @@
 #include <cstddef>
 #include <gsl/gsl_interp.h>
 #include <limits>
-#include <mdspan>
+#include <mdspan> // NOLINT(misc-include-cleaner)
 #include <memory>
 #include <stdexcept>
 #include <vector>
@@ -53,7 +54,7 @@ namespace interp
     public:
 
         // Shorten array types
-        using Array4D = std::mdspan<double, std::dextents<size_t, 4>>;
+        using Array4D = std::mdspan<double, std::dextents<size_t, 4>>; // NOLINT(misc-include-cleaner)
         using Array3D = std::mdspan<double, std::dextents<size_t, 3>>;
         using Array1D = std::mdspan<double, std::dextents<size_t, 1>>;
 
@@ -137,7 +138,7 @@ namespace interp
             const bool monotonic = false
         ) requires (NF == 1) :
         Mesh3DInterpolator(x, y, z,
-            std::mdspan(f.data_handle(), f.extent(0), f.extent(1), f.extent(2), 1),
+            std::mdspan(f.data_handle(), f.extent(0), f.extent(1), f.extent(2), 1), // NOLINT(misc-include-cleaner)
             interpType,
             monotonic)
         { }
@@ -734,7 +735,7 @@ namespace interp
             // No exact match; find the bracketing y planes via binary
             // search and interpolate
             const size_t j0 = static_cast<size_t>(
-                std::ranges::upper_bound(yData_, y0) - yData_.begin()) - 1;
+                std::ranges::upper_bound(yData_, y0) - yData_.begin()) - 1; // NOLINT(misc-include-cleaner)
             const double t = (y0 - yData_[j0]) / (yData_[j0 + 1] - yData_[j0]);
 
             auto syView = sy();

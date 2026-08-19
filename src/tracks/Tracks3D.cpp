@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Implementation of Tracks3D.hpp
  * @date 2024-07-10
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #include "Tracks3D.hpp"

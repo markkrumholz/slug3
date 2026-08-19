@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Class to represent a dust extinction curve.
  * @date 2026-08-03
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef EXTINCT_HPP

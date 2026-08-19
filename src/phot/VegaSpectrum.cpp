@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Implementation of VegaSpectrum.hpp
  * @date 2026-08-02
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #include "VegaSpectrum.hpp"

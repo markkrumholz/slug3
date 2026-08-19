@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Implementation of the testMesh2DGrid function
  * @date 2024-06-19
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #include "../src/interpolation/Mesh2DGrid.hpp"

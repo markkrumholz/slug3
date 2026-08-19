@@ -8,6 +8,7 @@
  * the RngThread class, the generation of random numbers, and the seeding of
  * the random number generator.
  * @date 2024-07-03
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef TESTRNGTHREAD_HPP

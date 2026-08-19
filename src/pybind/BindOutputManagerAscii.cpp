@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Python bindings for io::OutputManagerAscii
  * @date 2026-08-09
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #include "Bindings.hpp"

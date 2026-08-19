@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Test helper for reading raw track field data directly from HDF5
  * @date 2026-07-11
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  * @details
  * This header provides a way to read a single row of raw track data
  * from an HDF5 track file, independently of the (fixed, but

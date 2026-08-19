@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief A class to represent a mono-age star cluster
  * @date 2026-07-13
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef CLUSTER_HPP

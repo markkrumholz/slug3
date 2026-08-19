@@ -10,6 +10,7 @@
  * full-size BOSZ library under data/spectra, which is too large to
  * store in the repository.
  * @date 2026-07-20
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #include "../../src/specsyn/SpecsynUtils.hpp"

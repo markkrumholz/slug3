@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Implementation of SimGalaxy
  * @date 2026-08-10
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #include "SimGalaxy.hpp"

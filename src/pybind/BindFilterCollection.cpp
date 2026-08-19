@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Python bindings for phot::FilterCollection and phot::PhotSystem
  * @date 2026-08-02
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #include "Bindings.hpp"

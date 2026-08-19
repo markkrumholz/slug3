@@ -28,6 +28,7 @@
  *     exercise SpecsynLib2D::spec()'s unpopulated-neighbor handling
  *     under all three OOBPolicy variants.
  * @date 2026-08-07
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #include "../../src/io/SimControls.hpp"

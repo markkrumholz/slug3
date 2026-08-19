@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief A SpecsynLib for stars without optically thick winds
  * @date 2026-07-22
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef SPECSYNLIBNOWIND_HPP

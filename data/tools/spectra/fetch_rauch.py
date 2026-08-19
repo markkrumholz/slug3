@@ -50,6 +50,8 @@ References
 ----------
   Rauch, T. 2003, A&A, 403, 709.
   Rauch, T., Demleitner, M., Hoyer, D., et al. 2018, MNRAS, 475, 3896.
+
+:copyright: Copyright (c) 2026 Mark Krumholz
 """
 
 # Imports

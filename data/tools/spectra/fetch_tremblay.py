@@ -48,6 +48,8 @@ Main references (grid_ir):
 Main reference (grid_elm_new):
   Claret A., Cukanovaite E., Burdge K., Tremblay P.-E. et al. (2020)
   A&A, 634, A93.
+
+:copyright: Copyright (c) 2026 Mark Krumholz
 """
 
 # Imports

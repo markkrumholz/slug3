@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Python bindings for phot::Filter
  * @date 2026-08-02
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  * @details
  * Filter is abstract (wlPivot() and phot() are pure virtual), so no
  * constructor is exposed here -- Python code only ever encounters a

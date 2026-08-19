@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Holds the Vega reference spectrum, and a lazy global accessor for it
  * @date 2026-08-02
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef VEGASPECTRUM_HPP

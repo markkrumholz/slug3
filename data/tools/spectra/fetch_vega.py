@@ -8,6 +8,8 @@ Unlike the other fetch_*.py scripts in this directory, this is not a
 stellar atmosphere model grid: it is a single reference spectrum, so
 there is no spectra.toml registry entry to update, and no [Fe/H]/Teff/
 log g axes to iterate over.
+
+:copyright: Copyright (c) 2026 Mark Krumholz
 """
 
 # Imports

@@ -12,6 +12,8 @@ This file is run via pytest, invoked as a CTest test from
 CMakeLists.txt (see the test_Slugpy target), with WORKING_DIRECTORY
 set to the repo root, so CLUSTERLIB_H5 below resolves without needing
 SLUG_DIR or any other environment variable.
+
+:copyright: Copyright (c) 2026 Mark Krumholz
 """
 
 import pathlib

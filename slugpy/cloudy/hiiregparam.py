@@ -11,6 +11,8 @@ http://adsabs.harvard.edu/abs/2015MNRAS.452.1447K.
 The characteristic radius/timescale used by rch(), zeta(), and rKM()
 follows Krumholz & Matzner (2009, ApJ, 703, 1352):
 https://ui.adsabs.harvard.edu/abs/2009ApJ...703.1352K/abstract.
+
+:copyright: Copyright (c) 2026 Mark Krumholz
 """
 
 import warnings

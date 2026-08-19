@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief A spectral synthesizer that chains together several SpecsynLib libraries
  * @date 2026-07-21
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef SPECSYNLIBCHAINED_HPP

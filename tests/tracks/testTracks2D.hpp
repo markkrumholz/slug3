@@ -8,6 +8,7 @@
  * cover construction of a Tracks2D object from one group of each of
  * the supported track files.
  * @date 2024-07-09
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef TESTTRACKS2D_HPP

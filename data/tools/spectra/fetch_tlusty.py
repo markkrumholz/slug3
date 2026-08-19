@@ -24,6 +24,8 @@ To get a Box developer token:
   1. Log in at https://developer.box.com/
   2. Create or open an app -> Configuration -> Developer Token -> Generate
   3. Tokens expire after 60 min; regenerate as needed.
+
+:copyright: Copyright (c) 2026 Mark Krumholz
 """
 
 # Imports

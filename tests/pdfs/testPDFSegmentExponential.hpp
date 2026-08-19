@@ -9,6 +9,7 @@
  * calculation of expectation values and integrals over specified
  * ranges, and the sampling of random values from the distribution.
  * @date 2024-06-12
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef TESTPDFSEGMENTEXPONENTIAL_HPP

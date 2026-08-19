@@ -13,6 +13,8 @@ absolute paths at collection time (while cwd is still the repo root),
 since SimControls's own path argument has no SLUG_DIR/REPO_DIR
 fallback the way paths *inside* a deck do (see test_readers.py's
 identical CLUSTERLIB_DIR/get_cluster comment for the same rule).
+
+:copyright: Copyright (c) 2026 Mark Krumholz
 """
 
 import pathlib

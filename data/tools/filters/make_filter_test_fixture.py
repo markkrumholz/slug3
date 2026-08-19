@@ -18,6 +18,8 @@ linear interpolation for a too-small input) internally, matching the
 shape of a real, many-point tabulated response curve.
 
 Run from the repository root: python3 data/tools/filters/make_filter_test_fixture.py
+
+:copyright: Copyright (c) 2026 Mark Krumholz
 """
 import h5py
 import numpy as np

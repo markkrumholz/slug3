@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Python bindings for the Specsyn class hierarchy
  * @date 2026-07-30
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  * @details
  * Binds the abstract Specsyn base and all four concrete subclasses:
  * SpecsynBlackbody, SpecsynLibNoWind, SpecsynLibWR, and

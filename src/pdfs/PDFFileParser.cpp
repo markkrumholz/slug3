@@ -6,6 +6,7 @@
  * This file provides a method to parse PDF files
  * and construct PDF objects based on them.
  * @date 2024-06-14
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #include "../utils/ParseUtils.hpp"

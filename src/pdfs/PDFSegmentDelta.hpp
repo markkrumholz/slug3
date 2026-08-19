@@ -6,6 +6,7 @@
  * This class represents a delta-function segment of a PDF, defined by a single value. It implements the interface defined by the PDFSegment class, providing
  * methods to evaluate the PDF at a given point and to sample a random value from the PDF segment according to the delta-function distribution.
  * @date 2024-06-12
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef PDFSEGMENTDELTA_HPP

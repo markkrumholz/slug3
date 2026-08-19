@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Utility functions for file and string parsing
  * @date 2024-06-12
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef PARSEUTILS_HPP

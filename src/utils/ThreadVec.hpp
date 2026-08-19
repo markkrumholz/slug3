@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Utility class for handling multithreaded runs
  * @date 2024-06-17
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef THREADVEC_HPP

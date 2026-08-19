@@ -11,6 +11,7 @@
  * from what were originally two separate classes, SimControls and
  * SimPhysics.
  * @date 2026-07-16
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef TESTSIMCONTROLS_HPP

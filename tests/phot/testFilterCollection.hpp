@@ -15,6 +15,7 @@
  * output against directly-constructed reference Filter objects and
  * (for photometric-system conversion) direct calls to PhotConvert.
  * @date 2026-07-31
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef TESTFILTERCOLLECTION_HPP

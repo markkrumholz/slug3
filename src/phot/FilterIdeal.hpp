@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief A class representing an idealized, top-hat photometric filter
  * @date 2026-07-31
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef FILTERIDEAL_HPP

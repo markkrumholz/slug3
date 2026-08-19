@@ -5,6 +5,7 @@
  * @details
  * This file contains unit tests for the utility functions defined in the src/utils directory.
  * @date 2024-07-03
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #include "testPDFIntegrator.hpp"

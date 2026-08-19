@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Python bindings for phot::PhotConvert
  * @date 2026-08-02
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #include "Bindings.hpp"

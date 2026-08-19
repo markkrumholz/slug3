@@ -15,6 +15,8 @@ splices the two together at a given mass, for every [Fe/H] value present
 in the non-rotating (v/vcrit = 0) subset of the rotating grid and also
 present in the VMS grid, producing a single composite HDF5 file formatted
 exactly like the VMS file (same group naming and attribute conventions).
+
+:copyright: Copyright (c) 2026 Mark Krumholz
 """
 
 # Imports

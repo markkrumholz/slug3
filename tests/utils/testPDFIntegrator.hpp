@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Unit tests for the PDFIntegrator class.
  * @date 2026-07-19
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef TESTPDFINTEGRATOR_HPP

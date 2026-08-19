@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief A class to manage writing simulation outputs to disk
  * @date 2026-07-16
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef OUTPUTMANAGER_HPP

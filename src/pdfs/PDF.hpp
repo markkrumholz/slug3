@@ -9,6 +9,7 @@
  * provides methods for sampling from the PDF and computing
  * various integrals and expectation values from it.
  * @date 2024-06-12
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef PDF_HPP

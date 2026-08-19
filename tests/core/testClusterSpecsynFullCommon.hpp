@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Shared helpers for the full end-to-end cluster-spectral-synthesis tests.
  * @date 2026-07-30
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef TESTCLUSTERSPECSYNFULLCOMMON_HPP

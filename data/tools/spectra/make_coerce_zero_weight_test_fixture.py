@@ -34,6 +34,8 @@ by that sum produced NaN/Inf instead of a clean out-of-bounds result.
 
 Run from the repository root:
     python3 data/tools/spectra/make_coerce_zero_weight_test_fixture.py
+
+:copyright: Copyright (c) 2026 Mark Krumholz
 """
 import h5py
 import numpy as np

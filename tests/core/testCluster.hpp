@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Unit tests for the Cluster class.
  * @date 2026-07-15
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef TESTCLUSTER_HPP

@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Adaptive Gauss-Kronrod integration of vector-valued integrands
  * @date 2026-08-15
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef GKINTEGRATOR_HPP

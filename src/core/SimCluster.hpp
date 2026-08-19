@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief A class to drive a cluster-type simulation end to end
  * @date 2026-07-17
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef SIMCLUSTER_HPP

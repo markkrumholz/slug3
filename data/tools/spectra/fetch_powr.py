@@ -35,6 +35,8 @@ luminosities (multiplied by 4 pi (10 pc)^2) before storage.
 Each spectrum's own wavelength grid is stored alongside it, since (verified
 empirically) no two models -- not even within the same grid -- share a
 wavelength grid.
+
+:copyright: Copyright (c) 2026 Mark Krumholz
 """
 
 import argparse

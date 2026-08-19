@@ -5,6 +5,7 @@
  * @details
  * This file runs unit tests for all the classes in src/tracks.
  * @date 2024-07-09
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #include "testTrackUtils.hpp"

@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Python bindings for pdfs::PDF
  * @date 2026-08-02
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  * @details
  * No constructor is exposed on PDF itself: a PDF is only ever obtained
  * from Python either by way of another bound object that owns one

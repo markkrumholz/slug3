@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief A SpecsynLib specialization for spectral libraries with no first axis
  * @date 2026-08-07
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef SPECSYNLIB2D_HPP
