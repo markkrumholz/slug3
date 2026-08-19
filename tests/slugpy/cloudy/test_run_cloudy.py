@@ -10,6 +10,7 @@ committed example happens to contain.
 """
 
 import re
+from pathlib import Path
 
 import astropy.units as u
 import h5py
@@ -31,6 +32,22 @@ def _extract_float(text: str, pattern: str) -> float:
     match = re.search(pattern, text, re.MULTILINE)
     assert match is not None, f"pattern {pattern!r} not found"
     return float(match.group(1))
+
+
+@pytest.fixture(scope="session")
+def _fake_cloudy_dir(tmp_path_factory) -> Path:
+    """A directory containing a tiny stand-in for cloudy.exe: it echoes a marker line, then copies its own stdin to stdout, so tests can verify both that it ran and what was piped into it."""
+    d = tmp_path_factory.mktemp("fake_cloudy")
+    script = d / "cloudy.exe"
+    script.write_text('#!/bin/sh\nsleep "${FAKE_CLOUDY_SLEEP:-0}"\necho FAKE_CLOUDY_RAN\ncat\n')
+    script.chmod(0o755)
+    return d
+
+
+@pytest.fixture(autouse=True)
+def _cloudy_dir_env(monkeypatch, _fake_cloudy_dir):
+    """Point every test's own run_cloudy() calls at the fake cloudy executable, so tests don't depend on a real cloudy installation."""
+    monkeypatch.setenv("CLOUDY_DIR", str(_fake_cloudy_dir))
 
 
 def _write_common_attrs(f: h5py.File, sim_type: str, model_name: str = "testmodel") -> None:
@@ -262,3 +279,61 @@ def test_explicit_nebular_conditions(tmp_path):
         "cluster", uid=1, time=1e6, nII=500.0 / u.cm ** 3, U=1e-3, output_dir=tmp_path / "out")[0]
     hden = _extract_float(path.read_text(), r"^hden (\S+)$")
     assert hden == pytest.approx(np.log10(500.0))
+
+
+# ---------------------------------------------------------------------
+# Actually running cloudy
+# ---------------------------------------------------------------------
+
+def test_cloudy_is_run_on_every_deck(tmp_path):
+    """Every written deck gets its own .out file, with the fake cloudy's own stdout marker in it -- proving cloudy was actually launched, not just that the deck was written."""
+    reader = slug_reader(_make_cluster_test_file(tmp_path, "c1.h5", qhi_in_phot=True))
+    paths = reader.run_cloudy("cluster", output_dir=tmp_path / "out")
+    assert len(paths) == 3
+    for deck in paths:
+        out_file = deck.with_suffix(".out")
+        assert out_file.is_file()
+        assert "FAKE_CLOUDY_RAN" in out_file.read_text()
+
+
+def test_cloudy_deck_content_piped_to_stdin(tmp_path):
+    """The fake cloudy echoes its own stdin back after the marker line; check the deck's own content shows up there, confirming the right file was piped in."""
+    reader = slug_reader(_make_cluster_test_file(tmp_path, "c1.h5", qhi_in_phot=True))
+    path = reader.run_cloudy("cluster", uid=1, time=1e6, output_dir=tmp_path / "out")[0]
+    out_text = path.with_suffix(".out").read_text()
+    assert path.read_text() in out_text
+
+
+def test_cloudy_path_override_takes_precedence(tmp_path, monkeypatch):
+    """An explicit cloudy_path is used even if CLOUDY_DIR points somewhere else."""
+    other_dir = tmp_path / "other_cloudy"
+    other_dir.mkdir()
+    other_exe = other_dir / "cloudy.exe"
+    other_exe.write_text('#!/bin/sh\necho OTHER_CLOUDY_RAN\n')
+    other_exe.chmod(0o755)
+
+    reader = slug_reader(_make_cluster_test_file(tmp_path, "c1.h5", qhi_in_phot=True))
+    path = reader.run_cloudy(
+        "cluster", uid=1, time=1e6, output_dir=tmp_path / "out", cloudy_path=other_exe)[0]
+    out_text = path.with_suffix(".out").read_text()
+    assert "OTHER_CLOUDY_RAN" in out_text
+    assert "FAKE_CLOUDY_RAN" not in out_text
+
+
+def test_missing_cloudy_executable_raises(tmp_path, monkeypatch):
+    """If neither cloudy_path nor CLOUDY_DIR resolve to a real executable, run_cloudy raises before writing anything."""
+    monkeypatch.delenv("CLOUDY_DIR", raising=False)
+    reader = slug_reader(_make_cluster_test_file(tmp_path, "c1.h5", qhi_in_phot=True))
+    out_dir = tmp_path / "out"
+    with pytest.raises(RuntimeError, match="cloudy"):
+        reader.run_cloudy("cluster", uid=1, time=1e6, output_dir=out_dir)
+    assert not out_dir.exists()
+
+
+def test_max_workers_is_passed_through(tmp_path):
+    """max_workers is accepted and doesn't break a multi-deck run (concurrency itself is exercised more directly in test_cloudy_process.py)."""
+    reader = slug_reader(_make_cluster_test_file(tmp_path, "c1.h5", qhi_in_phot=True))
+    paths = reader.run_cloudy("cluster", output_dir=tmp_path / "out", max_workers=1)
+    assert len(paths) == 3
+    for deck in paths:
+        assert deck.with_suffix(".out").is_file()
