@@ -16,6 +16,7 @@ from astropy import units as u
 
 from ._slug import Cluster, Filter, FilterIdeal, SimControls, parsePDFDescriptor
 from .cloudy.cloudy_input import write_cloudy_input
+from .cloudy.cloudy_process import find_cloudy_executable, run_cloudy_decks
 from .cloudy.hiiregparam import hiiregparam
 from .slug_group_reader import slug_group_reader
 from .slug_phot_reader import slug_phot_reader
@@ -414,9 +415,11 @@ class slug_reader:
         model_name: str | None = None, output_dir: str | Path = ".",
         template: str | Path | None = None, warn: bool = True,
         fix_quantity: Literal["nII", "r0", "r1", "U", "U0", "Omega"] | None = None,
-        r0safety: float = 0.01) -> list[Path]:
+        r0safety: float = 0.01, cloudy_path: str | Path | None = None,
+        max_workers: int | None = None) -> list[Path]:
         """
-        Write cloudy input decks for one or more of this file's own spectra.
+        Write cloudy input decks for one or more of this file's own
+        spectra, then run cloudy on each of them.
 
         Parameters
         ----------
@@ -455,12 +458,24 @@ class slug_reader:
             Passed through to hiiregparam.
         r0safety : float, default 0.01
             Passed through to hiiregparam.
+        cloudy_path : str or pathlib.Path, optional
+            Path to the cloudy executable. If omitted, it is looked up
+            as $CLOUDY_DIR/cloudy.exe (see find_cloudy_executable).
+        max_workers : int, optional
+            Maximum number of cloudy processes to run at once.
+            Defaults to the number of available CPUs; pass a smaller
+            value to leave some cores free.
 
         Returns
         -------
         list of pathlib.Path
             The cloudy input deck(s) written, one per matching
-            spectrum.
+            spectrum. cloudy is run on each of them before this
+            method returns; its stdout/stderr are captured to a
+            sibling file with the same base name and a ".out"
+            extension, and its own output files (.con/.lines/
+            .linearr/.hcon, per the input deck's own "save" commands)
+            are written alongside each deck (see run_cloudy_deck).
 
         Raises
         ------
@@ -471,6 +486,9 @@ class slug_reader:
             cluster is found in the clusters group; or if this file's
             own stars.FeH entry (for spec_type "galaxy") is neither a
             number nor a PDF file path.
+        RuntimeError
+            If the cloudy executable cannot be located (see
+            find_cloudy_executable).
 
         Notes
         -----
@@ -485,12 +503,20 @@ class slug_reader:
         stars.FeH is not a distribution) -- a single population-level
         value used for every matching galaxy spectrum, since there
         is no single [Fe/H] value for a galaxy the way there is for
-        a cluster.
+        a cluster. Cloudy input decks for every matching spectrum are
+        written before any of them are run, and the cloudy executable
+        is located before any decks are written, so a missing
+        executable is reported without writing partial output.
         """
         if spec_type == "cluster" and trial is not None:
             raise ValueError("run_cloudy: trial is only meaningful for spec_type='galaxy'")
         if spec_type == "galaxy" and uid is not None:
             raise ValueError("run_cloudy: uid is only meaningful for spec_type='cluster'")
+
+        # Locate the cloudy executable before doing any other work, so
+        # a missing executable is reported before we bother writing
+        # any input decks
+        cloudy_exe = find_cloudy_executable(cloudy_path)
 
         spectra = self.cluster_spectra if spec_type == "cluster" else self.galaxy_spectra
         if spectra is None:
@@ -576,4 +602,5 @@ class slug_reader:
             output_path = output_dir / f"{model_name}_{suffix}_t{this_time:.6e}.in"
             written.append(write_cloudy_input(wl, spec, qH0, hp, feh, output_path, template=template))
 
+        run_cloudy_decks(written, cloudy_exe, max_workers=max_workers)
         return written

@@ -8,6 +8,14 @@ ingesting its output live in their own modules under this subpackage.
 """
 
 from .cloudy_input import DEFAULT_TEMPLATE, write_cloudy_input
+from .cloudy_process import find_cloudy_executable, run_cloudy_deck, run_cloudy_decks
 from .hiiregparam import hiiregparam
 
-__all__ = ["DEFAULT_TEMPLATE", "hiiregparam", "write_cloudy_input"]
+__all__ = [
+    "DEFAULT_TEMPLATE",
+    "find_cloudy_executable",
+    "hiiregparam",
+    "run_cloudy_deck",
+    "run_cloudy_decks",
+    "write_cloudy_input",
+]
