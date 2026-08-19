@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief A class to represent a galaxy, built from a time-evolving population of star clusters
  * @date 2026-08-10
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef GALAXY_HPP

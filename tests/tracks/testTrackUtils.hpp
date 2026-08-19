@@ -10,6 +10,7 @@
  * full-size track files under data/tracks, which are too large to
  * store in the repository.
  * @date 2024-07-10
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef TESTTRACKUTILS_HPP

@@ -37,6 +37,8 @@ this weighted average, making the expected result trivial to check
 exactly rather than only approximately.
 
 Run from the repository root: python3 data/tools/spectra/make_rauch_test_fixture.py
+
+:copyright: Copyright (c) 2026 Mark Krumholz
 """
 import h5py
 import numpy as np

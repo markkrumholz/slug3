@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief A class holding the set of photometric filters used in a simulation
  * @date 2026-07-31
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef FILTERCOLLECTION_HPP

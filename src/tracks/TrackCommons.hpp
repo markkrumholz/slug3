@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Common definitions used by track classes
  * @date 2024-07-09
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef TRACKCOMMONS_HPP

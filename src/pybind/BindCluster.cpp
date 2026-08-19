@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Python bindings for core::Cluster
  * @date 2026-07-21
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #include "Bindings.hpp"

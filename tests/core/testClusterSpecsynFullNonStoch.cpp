@@ -16,6 +16,7 @@
  * individually-sampled path testClusterSpecsynFull/AFe both exercise
  * instead.
  * @date 2026-07-30
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #include "testClusterSpecsynFullNonStoch.hpp"

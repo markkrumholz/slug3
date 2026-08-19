@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief A SpecsynLib for Wolf-Rayet stars (stars with optically thick winds)
  * @date 2026-07-22
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef SPECSYNLIBWR_HPP

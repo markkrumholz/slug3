@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Python bindings for io::SimControls
  * @date 2026-07-30
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  * @details
  * io::SimControls holds both simulation control-flow settings (IO,
  * trial count, output timing) and physics settings (IMF, tracks,

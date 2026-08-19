@@ -6,6 +6,7 @@
  * This file provides common definitions of enums and namespaces
  * used by modules for handlng PDFs.
  * @date 2024-06-12
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef PDFCOMMONS_HPP

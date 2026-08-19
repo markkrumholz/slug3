@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Common definitions used by spectral synthesis classes
  * @date 2026-07-20
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef SPECSYNCOMMONS_HPP

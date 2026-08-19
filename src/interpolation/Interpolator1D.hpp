@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Provides a class to represent a single 1D interpolator
  * @date 2024-06-27
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
 */
 
 #ifndef INTERPOLATOR1D_HPP

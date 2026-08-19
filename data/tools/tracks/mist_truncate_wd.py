@@ -39,6 +39,8 @@ Run standalone against an existing MIST HDF5 track file:
 or import mist_truncate_wd() to call it as part of another script
 (see fetch_mist.py, which calls this automatically after fetching new
 tracks, unless run with --no_truncate).
+
+:copyright: Copyright (c) 2026 Mark Krumholz
 """
 
 import argparse

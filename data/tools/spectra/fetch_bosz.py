@@ -2,6 +2,8 @@
 This is a script to fetch the BOSZ spectra (https://archive.stsci.edu/hlsp/bosz)
 from the offical STScI website, extract data from them, and write them into a
 gzip'ed HDF5 file that slug can read.
+
+:copyright: Copyright (c) 2026 Mark Krumholz
 """
 
 # Imports

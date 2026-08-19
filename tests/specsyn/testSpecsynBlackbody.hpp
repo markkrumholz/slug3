@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Unit tests for the SpecsynBlackbody class.
  * @date 2026-07-18
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef TESTSPECSYNBLACKBODY_HPP

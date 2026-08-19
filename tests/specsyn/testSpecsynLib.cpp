@@ -19,6 +19,7 @@
  * resolves to each library's own micro_default registry entry (0 for
  * BOSZ_test, 10 for TLUSTY_test) rather than one shared constant.
  * @date 2026-07-20
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #include "../../src/io/SimControls.hpp"

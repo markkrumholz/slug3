@@ -9,6 +9,7 @@
  * providing methods to evaluate the PDF at a given point and to sample a
  * random value from the PDF segment according to the lognormal distribution.
  * @date 2024-06-12
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef PDFSEGMENTLOGNORMAL_HPP

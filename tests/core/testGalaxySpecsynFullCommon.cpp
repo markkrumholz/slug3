@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Implementation of testGalaxySpecsynFullCommon.hpp
  * @date 2026-08-14
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #include "testGalaxySpecsynFullCommon.hpp"

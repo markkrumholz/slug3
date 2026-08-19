@@ -13,6 +13,8 @@ _slug submodule directly.
 Pure-Python additions -- reading and post-processing slug output files
 -- live in their own modules under this package and are imported
 below explicitly.
+
+:copyright: Copyright (c) 2026 Mark Krumholz
 """
 
 from ._slug import *  # noqa: F401,F403

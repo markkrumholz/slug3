@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Shared helpers for the full end-to-end galaxy-spectral-synthesis tests.
  * @date 2026-08-14
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef TESTGALAXYSPECSYNFULLCOMMON_HPP

@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Abstract base for a spectral synthesizer backed by a 3D tensor-grid library
  * @date 2026-07-20
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef SPECSYNLIB_HPP

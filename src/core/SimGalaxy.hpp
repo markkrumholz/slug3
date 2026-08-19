@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief A class to drive a galaxy-type simulation end to end
  * @date 2026-08-10
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef SIMGALAXY_HPP

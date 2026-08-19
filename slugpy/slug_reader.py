@@ -2,6 +2,8 @@
 slug_reader.py
 
 Implements slug_reader, a lazy reader for slug HDF5 output files.
+
+:copyright: Copyright (c) 2026 Mark Krumholz
 """
 
 from typing import Any, cast

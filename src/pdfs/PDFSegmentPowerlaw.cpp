@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Implementations of PDFSegmentPowerlaw routines
  * @date 2024-06-14
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #include "PDFCommons.hpp"

@@ -11,6 +11,8 @@ bug that motivated hiiregparam's internal design (solving every
 combination through a single verified (nII, Omega) core, rather than
 13 separate closed-form shortcuts) -- an earlier, more direct port
 reproduced this way would have failed 9 of the 13 combinations.
+
+:copyright: Copyright (c) 2026 Mark Krumholz
 """
 
 import itertools

@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Evaluate integrals of the form int_a^b p(x) f(x) dx, using GKIntegrator
  * @date 2026-08-15
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef PDFINTEGRATOR_HPP

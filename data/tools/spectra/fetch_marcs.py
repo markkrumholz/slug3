@@ -10,6 +10,8 @@ the whole grid is distributed as a handful of large tarballs, one per
 composition variant (see MARCS_COMPOSITIONS below). This script
 therefore has no --feh/--afe/--cfe-style per-model filters, just a
 choice of which composition tarball(s) to fetch.
+
+:copyright: Copyright (c) 2026 Mark Krumholz
 """
 
 # Imports

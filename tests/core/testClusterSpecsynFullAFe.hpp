@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Optional full end-to-end test of a cluster simulation at alphaFe = 0.2.
  * @date 2026-07-30
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef TESTCLUSTERSPECSYNFULLAFE_HPP

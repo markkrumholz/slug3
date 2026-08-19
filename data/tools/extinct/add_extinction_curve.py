@@ -26,6 +26,8 @@ Run from the repository root, e.g.:
         --reference "Calzetti, D., Armus, L., Bohlin, R., et al. 2000, ApJ, 533, 682" \\
         --reference-url "https://ui.adsabs.harvard.edu/abs/2000ApJ...533..682C/abstract" \\
         --description "Calzetti starburst attenuation curve"
+
+:copyright: Copyright (c) 2026 Mark Krumholz
 """
 import argparse
 import pathlib

@@ -30,6 +30,7 @@
  * product, and each one actually finishes and gets checked to
  * completion, unlike the combined version.
  * @date 2026-08-14
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #include "testGalaxySpecsynFullNonStoch.hpp"

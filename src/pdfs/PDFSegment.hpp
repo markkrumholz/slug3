@@ -8,6 +8,7 @@
  * functions on PDF segments that must be implemented by derived
  * classes representing segments with particular functional forms. 
  * @date 2024-06-12
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef PDFSEGMENT_HPP

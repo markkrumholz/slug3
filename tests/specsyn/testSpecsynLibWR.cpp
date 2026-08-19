@@ -25,6 +25,7 @@
  * testSpecWNLSuccess confirm a WNL star's own hSurf-derived H-bucket
  * (see getWRType) actually selects that bucket's own file.
  * @date 2026-07-23
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #include "../../src/io/SimControls.hpp"

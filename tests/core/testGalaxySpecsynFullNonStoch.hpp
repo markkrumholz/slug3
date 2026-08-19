@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Full end-to-end test of a fully continuous (f_cluster = 0) galaxy simulation.
  * @date 2026-08-14
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef TESTGALAXYSPECSYNFULLNONSTOCH_HPP

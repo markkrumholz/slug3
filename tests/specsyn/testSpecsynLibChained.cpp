@@ -61,6 +61,7 @@
  * utils::logspace grid spanning the combined native range of every
  * library in the chain).
  * @date 2026-07-21
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #include "../../src/io/SimControls.hpp"

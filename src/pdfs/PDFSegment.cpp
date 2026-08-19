@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Implementations of PDFSegment routines
  * @date 2024-06,014
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #include "../utils/ParseUtils.hpp"

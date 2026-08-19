@@ -6,6 +6,7 @@
  * This file contains unit tests for the Mesh3DInterpolator
  * class.
  * @date 2026-07-03
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef TESTMESH3DINTERPOLATOR_HPP

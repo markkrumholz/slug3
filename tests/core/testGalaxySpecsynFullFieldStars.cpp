@@ -14,6 +14,7 @@
  * time keeps the resulting field-star count (and hence this run's own
  * per-star spectral synthesis cost) tractable.
  * @date 2026-08-16
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #include "testGalaxySpecsynFullFieldStars.hpp"

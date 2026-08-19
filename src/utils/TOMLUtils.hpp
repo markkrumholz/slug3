@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Shared utility functions for locating, parsing, and reading TOML registry files
  * @date 2026-08-01
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef TOMLUTILS_HPP

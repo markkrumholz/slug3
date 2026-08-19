@@ -10,6 +10,7 @@
  * building a Tracks3D from the full-size track files in data/tracks
  * would be far too slow for a unit test.
  * @date 2024-07-10
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef TESTTRACKS3D_HPP

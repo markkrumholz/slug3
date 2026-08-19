@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Implementations for TrackUtils.hpp
  * @date 2024-07-10
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #include "TrackUtils.hpp"

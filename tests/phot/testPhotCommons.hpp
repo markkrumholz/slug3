@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Unit tests for the definitions in PhotCommons.hpp.
  * @date 2026-07-26
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef TESTPHOTCOMMONS_HPP

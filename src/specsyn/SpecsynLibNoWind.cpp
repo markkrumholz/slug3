@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Implementation of SpecsynLibNoWind.hpp
  * @date 2026-07-22
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #include "SpecsynLibNoWind.hpp"

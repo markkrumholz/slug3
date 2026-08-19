@@ -44,6 +44,8 @@ Gaps (both kinds) fall into two cases:
 Interpolated tracks are written back into the same HDF5 file with the same
 dataset layout as the original tracks, plus a boolean attribute
 'interpolated = True' to distinguish them.
+
+:copyright: Copyright (c) 2026 Mark Krumholz
 """
 
 import argparse

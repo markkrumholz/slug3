@@ -16,6 +16,8 @@ same format fetch_filter_vo.py's own update_registry() writes,
 containing only this one facility/instrument/filter.
 
 Run from the repository root: python3 data/tools/filters/make_v_filter_fixture.py
+
+:copyright: Copyright (c) 2026 Mark Krumholz
 """
 import h5py
 import tomlkit

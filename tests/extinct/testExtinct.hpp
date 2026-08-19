@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Unit tests for the Extinct class
  * @date 2026-08-03
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef TESTEXTINCT_HPP

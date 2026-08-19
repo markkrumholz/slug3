@@ -5,6 +5,7 @@
  * @details
  * This file runs unit tests for all the classes in interpolation.
  * @date 2024-06-19
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #include "testInterpolator1D.hpp"

@@ -9,6 +9,7 @@
  * point and to sample a random value from the PDF segment according to the
  * power-law distribution.
  * @date 2024-06-12
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef PDFSEGMENTPOWERLAW_HPP

@@ -3,6 +3,8 @@ slug_phot_reader.py
 
 Implements slug_phot_reader, a lazy reader for the photometry
 (cluster_phot) group of a slug HDF5 output file.
+
+:copyright: Copyright (c) 2026 Mark Krumholz
 """
 
 from typing import Any, cast

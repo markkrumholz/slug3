@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Miscellaneous utility functions
  * @date 2024-06-19
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef MISCUTILS_HPP

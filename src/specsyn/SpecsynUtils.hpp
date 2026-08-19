@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Utility methods for dealing with spectral library files
  * @date 2026-07-20
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef SPECSYNUTILS_HPP

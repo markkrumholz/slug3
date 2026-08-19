@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief This is the main routine that drives slug.
  * @date 14-07-2026
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #include "core/SimCluster.hpp"

@@ -9,6 +9,8 @@ Unlike BOSZ, this grid has no alpha/Fe, C/Fe, or microturbulence axes
 -- each (Teff, log g, [Fe/H]) point has exactly one model -- so this
 script (and the registry entry it writes) has no --afe/--cfe/--micro
 filters or micro_default to go with them.
+
+:copyright: Copyright (c) 2026 Mark Krumholz
 """
 
 # Imports

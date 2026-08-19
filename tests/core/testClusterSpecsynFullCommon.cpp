@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Implementation of testClusterSpecsynFullCommon.hpp
  * @date 2026-07-30
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #include "testClusterSpecsynFullCommon.hpp"

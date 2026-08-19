@@ -6,6 +6,7 @@
  * This file contains unit tests for the Mesh2DInterpolator
  * class.
  * @date 2024-06-27
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef TESTMESH2DINTERPOLATOR_HPP

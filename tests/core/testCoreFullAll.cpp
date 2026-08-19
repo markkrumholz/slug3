@@ -15,6 +15,7 @@
  * files missing. Add future slow, full-scale core tests here as this
  * grows, following the same pattern as testCoreAll.cpp.
  * @date 2026-07-26
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #include "testClusterSpecsynFull.hpp"

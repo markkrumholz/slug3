@@ -10,6 +10,8 @@ stay a "quick" test alongside test_readers.py -- see the test_Slugpy
 CMakeLists.txt target, which runs this file too. Like test_readers.py,
 run via pytest with WORKING_DIRECTORY set to the repo root, so
 V_FILTER_REGISTRY below resolves without needing SLUG_DIR.
+
+:copyright: Copyright (c) 2026 Mark Krumholz
 """
 
 import numpy as np

@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Utility methods for dealing with track files
  * @date 2024-07-10
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef TRACKUTILS_HPP

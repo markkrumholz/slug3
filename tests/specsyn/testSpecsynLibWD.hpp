@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Unit tests for the SpecsynLibWD class.
  * @date 2026-08-07
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef TESTSPECSYNLIBWD_HPP

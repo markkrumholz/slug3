@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Python bindings for tracks::Tracks2D
  * @date 2026-07-20
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #include "Bindings.hpp"

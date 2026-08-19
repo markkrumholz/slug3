@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Implementation of FilterTabulated.hpp
  * @date 2026-07-27
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  * @details
  * phot() evaluates \f$\int F_\lambda(\lambda) R(\lambda)\, d\ln\lambda
  * \big/ \int R(\lambda)\, d\ln\lambda\f$ rather than integrating

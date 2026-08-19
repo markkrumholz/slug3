@@ -6,6 +6,7 @@
  * This file contains unit tests for the Mesh2DGrid
  * class.
  * @date 2024-06-19
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef TESTMESH2DGRID_HPP

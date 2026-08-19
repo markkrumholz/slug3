@@ -3,6 +3,8 @@ This is a script to fetch the very-massive-star (VMS) branch of PARSEC
 (PAdova and TRieste Stellar Evolution Code) tracks from the official
 PARSEC database, extract the data needed by slug, and write it out in
 slug's HDF5 track format.
+
+:copyright: Copyright (c) 2026 Mark Krumholz
 """
 
 # Imports

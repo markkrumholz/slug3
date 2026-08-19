@@ -4,6 +4,8 @@ phot_convert.py
 Implements phot_convert, a convenience wrapper around the compiled
 PhotConvert binding that deduces the source photometric system from
 an astropy Quantity's own unit.
+
+:copyright: Copyright (c) 2026 Mark Krumholz
 """
 
 from typing import cast

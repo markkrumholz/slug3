@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief End-to-end test of a spectra.model library chain built through SimPhysics.
  * @date 2026-07-24
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef TESTSPECSYNCHAIN_HPP

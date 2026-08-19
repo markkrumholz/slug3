@@ -4,6 +4,8 @@ run_sim.py
 Implements run_sim, a convenience function that runs an entire slug
 simulation end to end from Python, exactly as the slug command-line
 executable does.
+
+:copyright: Copyright (c) 2026 Mark Krumholz
 """
 
 import gc

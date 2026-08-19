@@ -30,6 +30,8 @@ separate files/registry entries (one per WRType::WNLH20/WNLH40/WNLH60),
 with no xh axis or per-group xh attribute at all (see fetch_powr.py).
 
 Run from the repository root: python3 data/tools/spectra/make_powr_test_fixture.py
+
+:copyright: Copyright (c) 2026 Mark Krumholz
 """
 import h5py
 import numpy as np

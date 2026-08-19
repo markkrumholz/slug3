@@ -2,6 +2,8 @@
 read.py
 
 Implements read, a thin convenience wrapper around slug_reader.
+
+:copyright: Copyright (c) 2026 Mark Krumholz
 """
 
 from .slug_reader import slug_reader

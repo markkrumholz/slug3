@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Unit tests for the PDF class.
  * @date 2024-06-12
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #include "../src/pdfs/PDF.hpp"

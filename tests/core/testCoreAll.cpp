@@ -8,6 +8,7 @@
  * (e.g. testClusterSpecsynFull), kept in a separate executable/CTest
  * entry specifically so it can be skipped independently of this one.
  * @date 2026-07-13
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #include "testCluster.hpp"

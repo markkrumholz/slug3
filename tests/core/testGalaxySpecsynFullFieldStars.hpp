@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief Full end-to-end test of a partially-stochastic (field-star) galaxy simulation.
  * @date 2026-08-16
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef TESTGALAXYSPECSYNFULLFIELDSTARS_HPP

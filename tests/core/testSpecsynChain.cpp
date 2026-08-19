@@ -37,6 +37,7 @@
  * dispatch path without depending on fixture coverage this test
  * doesn't control.
  * @date 2026-07-24
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #include "../src/io/SimControls.hpp"

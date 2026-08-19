@@ -82,6 +82,8 @@ C++ and Python sides of the test suite. It requires the SLUG_DIR
 environment variable to be set to the repo root (see the
 test_PythonBindings target in CMakeLists.txt), since SimControls
 resolves stars.IMF = "chabrier.toml" via SLUG_DIR + "data/imfs".
+
+:copyright: Copyright (c) 2026 Mark Krumholz
 """
 
 import gc

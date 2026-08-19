@@ -3,6 +3,7 @@
  * @author Mark Krumholz
  * @brief A class to represent a 2D set of stellar tracks
  * @date 2024-07-09
+ * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
 #ifndef TRACKS2D_HPP
