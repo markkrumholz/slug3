@@ -4,6 +4,22 @@ __generated_with = "0.23.16"
 app = marimo.App(width="medium")
 
 
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    Copyright (c) 2026 Mark Krumholz. All rights reserved.
+    """)
+    return
+
+
+@app.cell
+def _():
+    # Import marimo for markdown rendering
+    import marimo as mo
+
+    return (mo,)
+
+
 @app.cell
 def _():
     # Add slugpy to path, and import the simulation runner
