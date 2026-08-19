@@ -94,7 +94,7 @@ def _mixed_cloudy_exe(tmp_path_factory) -> Path:
 
 @pytest.fixture(scope="session")
 def _continuum_cloudy_exe(tmp_path_factory) -> Path:
-    """A fake cloudy.exe that also writes a small canned "save last continuum"-format file at the name the deck itself requests, so the continuum-reading path can be exercised end-to-end without a real cloudy run."""
+    """A fake cloudy.exe that also writes small canned "save last continuum"- and "save last line array"-format files at the names the deck itself requests, so both output-reading paths can be exercised end-to-end without a real cloudy run."""
     d = tmp_path_factory.mktemp("fake_cloudy_continuum")
     script = d / "cloudy.exe"
     script.write_text(
@@ -108,6 +108,13 @@ def _continuum_cloudy_exe(tmp_path_factory) -> Path:
         '        f.write("1.0000e-02\\t1.000e+30\\t0.000e+00\\t1.000e+30\\t1.000e+30\\n")\n'
         '        f.write("5.0000e-02\\t2.000e+30\\t0.000e+00\\t2.000e+30\\t2.000e+30\\n")\n'
         '        f.write("1.0000e-01\\t3.000e+30\\t0.000e+00\\t3.000e+30\\t3.000e+30\\n")\n'
+        'm2 = re.search(r\'save last line array units Angstrom "([^"]+)"\', deck)\n'
+        'if m2:\n'
+        '    with open(m2.group(1), "w") as f:\n'
+        '        f.write("#enr\\tID\\tI(intrinsic)\\tI(emergent)\\ttype\\n")\n'
+        '        f.write(" 1.00000e+03\\tH  1                1.00000A \\t  40.000\\t  41.000 \\ti\\n")\n'
+        '        f.write(" 2.00000e+03\\tH  1 Coll           2.00000A \\t  40.000\\t  41.000 \\ti\\n")\n'
+        '        f.write(" 3.00000e+03\\tHe 2                3.00000A \\t   4.000\\t   4.000 \\ti\\n")\n'
         'print("FAKE_CLOUDY_RAN")\n'
         'print("[Stop in cdMain at maincl.cpp:590, Cloudy exited OK]")\n'
     )
@@ -522,3 +529,20 @@ def test_continuum_written_when_available(tmp_path, _continuum_cloudy_exe):
         assert np.all(g["spec_inc"][0] > 0)
         assert g["spec_trans"].shape == (1, 3)
         assert np.all(g["spec_trans"][0] == pytest.approx(0.0))
+
+
+def test_lines_written_when_available(tmp_path, _continuum_cloudy_exe):
+    """When a run's own deck produces a "save last line array" file, only the lines passing both filters (blank label suffix, emergent luminosity > 1e10 erg/s) are written into cluster_cloudy."""
+    h5_path = _make_cluster_test_file(tmp_path, "c1.h5", qhi_in_phot=True)
+    reader = slug_reader(h5_path)
+    result = reader.run_cloudy(
+        "cluster", uid=1, time=1e6, output_dir=tmp_path / "out", cloudy_path=_continuum_cloudy_exe)
+    assert result is True
+
+    with h5py.File(h5_path, "r") as f:
+        g = f["cluster_cloudy"]
+        assert g["line_start"][()].tolist() == [0]
+        assert g["line_count"][()].tolist() == [1]
+        assert g["line_wl"][()] == pytest.approx([1000.0])
+        assert [x.decode() for x in g["line_label"][()]] == ["H  1"]
+        assert g["line_lum"][()] == pytest.approx([10.0 ** 41.0])

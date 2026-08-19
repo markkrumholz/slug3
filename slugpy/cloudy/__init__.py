@@ -9,6 +9,7 @@ ingesting its output live in their own modules under this subpackage.
 
 from .cloudy_continuum import read_cloudy_continuum
 from .cloudy_input import DEFAULT_TEMPLATE, write_cloudy_input
+from .cloudy_lines import read_cloudy_linearr
 from .cloudy_output import CloudyRunResult, write_cloudy_h5_results
 from .cloudy_process import (
     cloudy_run_succeeded,
@@ -25,6 +26,7 @@ __all__ = [
     "find_cloudy_executable",
     "hiiregparam",
     "read_cloudy_continuum",
+    "read_cloudy_linearr",
     "run_cloudy_deck",
     "run_cloudy_decks",
     "write_cloudy_h5_results",

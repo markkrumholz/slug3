@@ -70,8 +70,8 @@ def run_cloudy_deck(input_path: str | Path, cloudy_exe: str | Path) -> Path:
     pathlib.Path
         Path to the file that cloudy's own stdout/stderr were
         captured into: input_path with its suffix replaced by ".out".
-        Cloudy's own output files (.con/.lines/.linearr/.hcon, as
-        requested by the input deck's own "save" commands) are written
+        Cloudy's own output files (e.g. .con/.linearr, as requested by
+        the input deck's own "save" commands) are written
         alongside input_path, since cloudy is run with input_path's
         own parent directory as its working directory.
 
