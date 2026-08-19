@@ -2,19 +2,57 @@
 slug_reader.py
 
 Implements slug_reader, a lazy reader for slug HDF5 output files.
+
+:copyright: Copyright (c) 2026 Mark Krumholz
 """
 
-from typing import Any, cast
+from pathlib import Path
+from typing import Any, Literal, cast
 
 import h5py
 import numpy as np
 import tomlkit
+from astropy import units as u
 
-from ._slug import Cluster, Filter, SimControls
+from ._slug import Cluster, Filter, FilterIdeal, SimControls, parsePDFDescriptor
+from .cloudy.cloudy_input import write_cloudy_input
+from .cloudy.hiiregparam import hiiregparam
 from .slug_group_reader import slug_group_reader
 from .slug_phot_reader import slug_phot_reader
 
 AnyGroupReader = slug_group_reader | slug_phot_reader
+
+# The six hiiregparam nebular-condition keyword names, in the order
+# run_cloudy's own signature lists them
+_HII_REG_PARAMS = ("nII", "r0", "r1", "U", "U0", "Omega")
+
+
+def _find_index(id_arr: np.ndarray, time_arr: u.Quantity | np.ndarray,
+    id_val: int, time_val: float) -> int | None:
+    """
+    Find the row index in id_arr/time_arr matching (id_val, time_val).
+
+    Parameters
+    ----------
+    id_arr : numpy.ndarray
+        Array of uid or trial numbers.
+    time_arr : astropy.units.Quantity or numpy.ndarray
+        Array of output times, same length as id_arr.
+    id_val : int
+        The uid or trial number to match.
+    time_val : float
+        The output time to match, in the same units as time_arr (if
+        time_arr is a Quantity, its own .value is compared against).
+
+    Returns
+    -------
+    int or None
+        The index of the first matching row, or None if there is no
+        match.
+    """
+    time_val_arr = cast(u.Quantity, time_arr).value if isinstance(time_arr, u.Quantity) else time_arr
+    matches = np.nonzero((id_arr == id_val) & (time_val_arr == time_val))[0]
+    return int(matches[0]) if len(matches) > 0 else None
 
 
 class slug_reader:
@@ -367,3 +405,175 @@ class slug_reader:
         cluster_phot = self.cluster_phot
         if cluster_phot is not None:
             cluster_phot.phot_convert(phot_to)
+
+    def run_cloudy(self, spec_type: Literal["cluster", "galaxy"],
+        uid: int | None = None, trial: int | None = None, time: float | u.Quantity | None = None,
+        nII: u.Quantity | float | None = None, r0: u.Quantity | float | None = None,
+        r1: u.Quantity | float | None = None, U: u.Quantity | float | None = None,
+        U0: u.Quantity | float | None = None, Omega: u.Quantity | float | None = None,
+        model_name: str | None = None, output_dir: str | Path = ".",
+        template: str | Path | None = None, warn: bool = True,
+        fix_quantity: Literal["nII", "r0", "r1", "U", "U0", "Omega"] | None = None,
+        r0safety: float = 0.01) -> list[Path]:
+        """
+        Write cloudy input decks for one or more of this file's own spectra.
+
+        Parameters
+        ----------
+        spec_type : {"cluster", "galaxy"}
+            Which kind of spectrum to use.
+        uid : int, optional
+            Unique ID of the cluster spectrum to use; only meaningful
+            if spec_type is "cluster". If omitted, every cluster
+            matching time (or every cluster, if time is also omitted)
+            is used.
+        trial : int, optional
+            Trial number of the galaxy spectrum to use; only
+            meaningful if spec_type is "galaxy". If omitted, every
+            trial matching time (or every trial, if time is also
+            omitted) is used.
+        time : float or astropy.units.Quantity, optional
+            Output time to use, in yr if a bare float. If omitted,
+            every output time matching uid/trial (or every output
+            time, if those are also omitted) is used.
+        nII, r0, r1, U, U0, Omega : astropy.units.Quantity or float, optional
+            Two of these six must be given to fully specify the
+            physical conditions of the HII region (see hiiregparam);
+            if none are given, nII = 100 cm^-3 and U = 10^-2.5 are
+            used as reasonable defaults.
+        model_name : str, optional
+            Base name for the written input deck(s); defaults to this
+            file's own output.model_name.
+        output_dir : str or pathlib.Path, default "."
+            Directory to write the input deck(s) into.
+        template : str or pathlib.Path, optional
+            Path to the cloudy input template to use; see
+            write_cloudy_input's own default.
+        warn : bool, default True
+            Passed through to hiiregparam.
+        fix_quantity : {"nII", "r0", "r1", "U", "U0", "Omega"}, optional
+            Passed through to hiiregparam.
+        r0safety : float, default 0.01
+            Passed through to hiiregparam.
+
+        Returns
+        -------
+        list of pathlib.Path
+            The cloudy input deck(s) written, one per matching
+            spectrum.
+
+        Raises
+        ------
+        ValueError
+            If spec_type is "cluster" and trial is given, or spec_type
+            is "galaxy" and uid is given; if no spectrum matches
+            uid/trial/time; if spec_type is "cluster" and no matching
+            cluster is found in the clusters group; or if this file's
+            own stars.FeH entry (for spec_type "galaxy") is neither a
+            number nor a PDF file path.
+
+        Notes
+        -----
+        For each matching spectrum, the ionizing photon rate Q(HI) is
+        taken directly from this file's own cluster_phot/galaxy_phot
+        group if it has a "Q(HI)" filter; otherwise it is computed
+        from the spectrum itself via FilterIdeal("Q(HI)").phot(). For
+        spec_type "cluster", [Fe/H] is taken from the matching
+        cluster's own entry in the clusters group. For spec_type
+        "galaxy", [Fe/H] is instead the expectation value of this
+        file's own stars.FeH distribution (or its fixed value, if
+        stars.FeH is not a distribution) -- a single population-level
+        value used for every matching galaxy spectrum, since [Fe/H]
+        is not itself tracked per output time/trial the way it is
+        per cluster.
+        """
+        if spec_type == "cluster" and trial is not None:
+            raise ValueError("run_cloudy: trial is only meaningful for spec_type='galaxy'")
+        if spec_type == "galaxy" and uid is not None:
+            raise ValueError("run_cloudy: uid is only meaningful for spec_type='cluster'")
+
+        spectra = self.cluster_spectra if spec_type == "cluster" else self.galaxy_spectra
+        if spectra is None:
+            raise ValueError(f"run_cloudy: this file has no {spec_type}_spectra group")
+        phot = self.cluster_phot if spec_type == "cluster" else self.galaxy_phot
+
+        id_key = "uid" if spec_type == "cluster" else "trial"
+        id_val = uid if spec_type == "cluster" else trial
+        ids = cast(np.ndarray, spectra[id_key])
+        times = cast(u.Quantity, spectra["time"])
+        time_val = cast(u.Quantity, time).to_value(u.yr) if isinstance(time, u.Quantity) else time
+
+        mask = np.ones(len(ids), dtype=bool)
+        if id_val is not None:
+            mask &= (ids == id_val)
+        if time_val is not None:
+            mask &= (times.value == time_val)
+        indices = np.nonzero(mask)[0]
+        if len(indices) == 0:
+            raise ValueError(
+                f"run_cloudy: no {spec_type} spectra match "
+                f"{id_key} = {id_val!r}, time = {time!r}")
+
+        nebular_kwargs = {k: v for k, v in
+            zip(_HII_REG_PARAMS, (nII, r0, r1, U, U0, Omega), strict=True) if v is not None}
+        if not nebular_kwargs:
+            nebular_kwargs = {"nII": 100.0 / u.cm ** 3, "U": 10.0 ** -2.5}
+
+        if model_name is None:
+            model_name = str(self.input_deck.get("output", {}).get("model_name", "cloudy"))
+        output_dir = Path(output_dir)
+
+        # [Fe/H] for a galaxy spectrum is a single population-level
+        # value (the expectation value of stars.FeH's own
+        # distribution, or its fixed value), computed once here rather
+        # than per matching spectrum
+        galaxy_feh: float | None = None
+        if spec_type == "galaxy":
+            feh_entry = self.input_deck.get("stars", {}).get("FeH")
+            if isinstance(feh_entry, (int, float)):
+                galaxy_feh = float(feh_entry)
+            elif isinstance(feh_entry, str):
+                galaxy_feh = parsePDFDescriptor(feh_entry).expectationValue()
+            else:
+                raise ValueError(
+                    "run_cloudy: this file's own stars.FeH entry is neither "
+                    f"a number nor a PDF file path: {feh_entry!r}")
+
+        wl = cast(u.Quantity, spectra["wl"])
+        all_spec = cast(u.Quantity, spectra["spec"])
+
+        written: list[Path] = []
+        for idx in indices:
+            this_id = int(ids[idx])
+            this_time = float(times.value[idx])
+            spec = all_spec[idx, :]
+
+            if spec_type == "cluster":
+                clusters = self.clusters
+                if clusters is None:
+                    raise ValueError("run_cloudy: this file has no clusters group")
+                cluster_matches = np.nonzero(cast(np.ndarray, clusters["uid"]) == this_id)[0]
+                if len(cluster_matches) == 0:
+                    raise ValueError(f"run_cloudy: no cluster found with uid = {this_id}")
+                feh = float(cast(np.ndarray, clusters["feh"])[int(cluster_matches[0])])
+            else:
+                feh = cast(float, galaxy_feh)
+
+            qH0: u.Quantity | None = None
+            if phot is not None and "Q(HI)" in phot.filters:
+                phot_idx = _find_index(cast(np.ndarray, phot[id_key]), cast(u.Quantity, phot["time"]),
+                    this_id, this_time)
+                if phot_idx is not None:
+                    qH0 = cast(u.Quantity, phot["Q(HI)"])[phot_idx]
+            if qH0 is None:
+                filt = FilterIdeal("Q(HI)")
+                value = filt.phot(wl.to_value(u.AA).tolist(), spec.to_value(u.erg / u.s / u.AA).tolist())
+                qH0 = value * u.photon / u.s
+
+            hp = hiiregparam(qH0, warn=warn, fix_quantity=fix_quantity, r0safety=r0safety, **nebular_kwargs)
+
+            suffix = f"uid{this_id:09d}" if spec_type == "cluster" else f"trial{this_id:05d}"
+            output_path = output_dir / f"{model_name}_{suffix}_t{this_time:.6e}.in"
+            written.append(write_cloudy_input(wl, spec, qH0, hp, feh, output_path, template=template))
+
+        return written

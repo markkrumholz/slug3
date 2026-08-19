@@ -1,0 +1,12 @@
+abundances HII region
+sphere expanding
+constant density
+iterate to convergence
+cosmic rays background
+cmb redshift 0
+stop temperature 1000
+stop efrac 0.1
+save last continuum "$OUTPUT_FILENAME.con"
+save last line list emergent absolute column "$OUTPUT_FILENAME.lines" "LineList_HII.dat"
+save last line array units Angstrom "$OUTPUT_FILENAME.linearr" "LineList_HII.dat"
+save last hydrogen conditions "$OUTPUT_FILENAME.hcon"
