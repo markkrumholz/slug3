@@ -19,6 +19,7 @@ import numpy as np
 import pytest
 from slugpy._slug import FilterIdeal, parsePDFDescriptor
 
+from slugpy.slug_group_reader import slug_group_reader
 from slugpy.slug_reader import slug_reader
 
 # A spectrum with real flux shortward of the H ionization edge
@@ -546,3 +547,56 @@ def test_lines_written_when_available(tmp_path, _continuum_cloudy_exe):
         assert g["line_wl"][()] == pytest.approx([1000.0])
         assert [x.decode() for x in g["line_label"][()]] == ["H  1"]
         assert g["line_lum"][()] == pytest.approx([10.0 ** 41.0])
+
+
+# ---------------------------------------------------------------------
+# cluster_cloudy / galaxy_cloudy reader properties
+# ---------------------------------------------------------------------
+
+def test_cluster_cloudy_none_before_run_cloudy(tmp_path):
+    """A freshly-opened reader has no cluster_cloudy group until run_cloudy has been called."""
+    reader = slug_reader(_make_cluster_test_file(tmp_path, "c1.h5", qhi_in_phot=True))
+    assert reader.cluster_cloudy is None
+
+
+def test_cluster_cloudy_populated_after_run_cloudy(tmp_path):
+    """After run_cloudy creates the group on this same reader, cluster_cloudy becomes a working slug_group_reader over it -- exercising the _groups key-set refresh on reopen, not just the property itself."""
+    reader = slug_reader(_make_cluster_test_file(tmp_path, "c1.h5", qhi_in_phot=True))
+    assert reader.cluster_cloudy is None
+
+    reader.run_cloudy("cluster", uid=1, time=1e6, output_dir=tmp_path / "out")
+
+    cluster_cloudy = reader.cluster_cloudy
+    assert isinstance(cluster_cloudy, slug_group_reader)
+    assert cluster_cloudy["uid"].tolist() == [1]
+    assert cluster_cloudy["time"].to_value(u.yr) == pytest.approx([1e6])
+    # cached: the same object is returned on a second access
+    assert reader.cluster_cloudy is cluster_cloudy
+
+
+def test_galaxy_cloudy_none_before_run_cloudy(tmp_path):
+    reader = slug_reader(_make_galaxy_test_file(tmp_path, "g1.h5", "0.0"))
+    assert reader.galaxy_cloudy is None
+
+
+def test_galaxy_cloudy_populated_after_run_cloudy(tmp_path):
+    reader = slug_reader(_make_galaxy_test_file(tmp_path, "g1.h5", "0.0"))
+    reader.run_cloudy("galaxy", trial=0, output_dir=tmp_path / "out")
+
+    galaxy_cloudy = reader.galaxy_cloudy
+    assert isinstance(galaxy_cloudy, slug_group_reader)
+    assert galaxy_cloudy["trial"].tolist() == [0]
+
+
+def test_cluster_cloudy_does_not_leak_into_galaxy_cloudy(tmp_path):
+    """A cluster-mode run populates cluster_cloudy but not galaxy_cloudy."""
+    reader = slug_reader(_make_cluster_test_file(tmp_path, "c1.h5", qhi_in_phot=True))
+    reader.run_cloudy("cluster", uid=1, time=1e6, output_dir=tmp_path / "out")
+    assert reader.cluster_cloudy is not None
+    assert reader.galaxy_cloudy is None
+
+
+def test_cluster_cloudy_is_read_only(tmp_path):
+    reader = slug_reader(_make_cluster_test_file(tmp_path, "c1.h5", qhi_in_phot=True))
+    with pytest.raises(AttributeError):
+        reader.cluster_cloudy = None

@@ -114,6 +114,14 @@ class slug_reader:
         Lazy reader for the galaxy_phot group's per-filter photometry
         (indexable by filter name, e.g. galaxy_phot["Lbol"]), or None
         if this file has no galaxy_phot group (read-only).
+    cluster_cloudy : slug_group_reader or None
+        Lazy reader for the cluster_cloudy group's datasets (uid,
+        time, nII, ...), written by run_cloudy(spec_type="cluster"),
+        or None if this file has no cluster_cloudy group (read-only).
+    galaxy_cloudy : slug_group_reader or None
+        Lazy reader for the galaxy_cloudy group's datasets (trial,
+        time, nII, ...), written by run_cloudy(spec_type="galaxy"), or
+        None if this file has no galaxy_cloudy group (read-only).
     filters : list of str or None
         Alias for cluster_phot.filters if this file has a cluster_phot
         group, else for galaxy_phot.filters if this file has a
@@ -271,6 +279,47 @@ class slug_reader:
     @galaxy_phot.setter
     def galaxy_phot(self, value: Any) -> None:
         raise AttributeError("galaxy_phot is read-only")
+
+    @property
+    def cluster_cloudy(self) -> slug_group_reader | None:
+        """
+        slug_group_reader or None : lazy reader for the cluster_cloudy
+        group's datasets (uid, time, nII, ..., and -- where available
+        -- the continuum and line data run_cloudy wrote), built the
+        first time this property is accessed and cached thereafter, or
+        None if this file has no cluster_cloudy group (e.g. run_cloudy
+        has never been called with spec_type="cluster" on this file).
+        """
+        if "cluster_cloudy" not in self._groups:
+            return None
+        if self._groups["cluster_cloudy"] is None:
+            self._groups["cluster_cloudy"] = slug_group_reader(self._file, "cluster_cloudy")
+        return self._groups["cluster_cloudy"]
+
+    @cluster_cloudy.setter
+    def cluster_cloudy(self, value: Any) -> None:
+        raise AttributeError("cluster_cloudy is read-only")
+
+    @property
+    def galaxy_cloudy(self) -> slug_group_reader | None:
+        """
+        slug_group_reader or None : lazy reader for the galaxy_cloudy
+        group's datasets (trial, time, nII, ..., and -- where
+        available -- the continuum and line data run_cloudy wrote),
+        built the first time this property is accessed and cached
+        thereafter, or None if this file has no galaxy_cloudy group
+        (e.g. run_cloudy has never been called with spec_type="galaxy"
+        on this file).
+        """
+        if "galaxy_cloudy" not in self._groups:
+            return None
+        if self._groups["galaxy_cloudy"] is None:
+            self._groups["galaxy_cloudy"] = slug_group_reader(self._file, "galaxy_cloudy")
+        return self._groups["galaxy_cloudy"]
+
+    @galaxy_cloudy.setter
+    def galaxy_cloudy(self, value: Any) -> None:
+        raise AttributeError("galaxy_cloudy is read-only")
 
     @property
     def filters(self) -> list[str] | None:
@@ -659,7 +708,12 @@ class slug_reader:
             self._file.close()
             write_cloudy_h5_results(filename, cloudy_group, id_key, results)
             self._file = h5py.File(filename, "r")
-            for key in self._groups:
-                self._groups[key] = None
+            # Rebuild the group-name set (not just reset cached values):
+            # this call may have just created cluster_cloudy/
+            # galaxy_cloudy for the first time, and those wouldn't be
+            # discoverable via their own properties otherwise, since
+            # self._groups's key set was previously fixed at __init__
+            self._groups = {name: None for name in self._file
+                if isinstance(self._file[name], h5py.Group)}
 
         return successes[0] if len(successes) == 1 else successes
