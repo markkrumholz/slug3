@@ -15,8 +15,14 @@ import tomlkit
 from astropy import units as u
 
 from ._slug import Cluster, Filter, FilterIdeal, SimControls, parsePDFDescriptor
+from .cloudy.cloudy_continuum import read_cloudy_continuum
 from .cloudy.cloudy_input import write_cloudy_input
-from .cloudy.cloudy_process import find_cloudy_executable, run_cloudy_decks
+from .cloudy.cloudy_output import CloudyRunResult, write_cloudy_h5_results
+from .cloudy.cloudy_process import (
+    cloudy_run_succeeded,
+    find_cloudy_executable,
+    run_cloudy_decks,
+)
 from .cloudy.hiiregparam import hiiregparam
 from .slug_group_reader import slug_group_reader
 from .slug_phot_reader import slug_phot_reader
@@ -416,10 +422,12 @@ class slug_reader:
         template: str | Path | None = None, warn: bool = True,
         fix_quantity: Literal["nII", "r0", "r1", "U", "U0", "Omega"] | None = None,
         r0safety: float = 0.01, cloudy_path: str | Path | None = None,
-        max_workers: int | None = None) -> list[Path]:
+        max_workers: int | None = None) -> bool | list[bool]:
         """
         Write cloudy input decks for one or more of this file's own
-        spectra, then run cloudy on each of them.
+        spectra, run cloudy on each of them, and save the results of
+        every successful run into this file's own cluster_cloudy or
+        galaxy_cloudy group.
 
         Parameters
         ----------
@@ -468,14 +476,14 @@ class slug_reader:
 
         Returns
         -------
-        list of pathlib.Path
-            The cloudy input deck(s) written, one per matching
-            spectrum. cloudy is run on each of them before this
-            method returns; its stdout/stderr are captured to a
-            sibling file with the same base name and a ".out"
-            extension, and its own output files (.con/.lines/
-            .linearr/.hcon, per the input deck's own "save" commands)
-            are written alongside each deck (see run_cloudy_deck).
+        bool or list of bool
+            Whether each matching spectrum's cloudy run succeeded
+            (its own captured stdout's last non-blank line contains
+            "Cloudy exited OK" -- see cloudy_run_succeeded). A single
+            bool if exactly one spectrum matched, otherwise a list of
+            bool in the same order as the matched spectra were
+            processed. This call blocks until every matching
+            spectrum's cloudy run has completed.
 
         Raises
         ------
@@ -507,6 +515,20 @@ class slug_reader:
         written before any of them are run, and the cloudy executable
         is located before any decks are written, so a missing
         executable is reported without writing partial output.
+
+        Every successful run's own physical conditions (nII, r0, r1,
+        U, U0, Omega) and, where its own deck produced one, emergent
+        continuum (wavelength grid plus incident/transmitted/emitted/
+        transmitted+emitted luminosity) are appended as new rows to
+        this file's own cluster_cloudy (spec_type "cluster") or
+        galaxy_cloudy (spec_type "galaxy") group, creating it on first
+        use. Writing this requires briefly closing and reopening the
+        HDF5 file this reader is attached to (any of this reader's own
+        lazily-cached group readers -- clusters, cluster_spectra, ...
+        -- are invalidated and rebuilt against the reopened file on
+        their next access); this only happens if at least one run in
+        this call succeeded, so a call where every run fails leaves
+        the file untouched.
         """
         if spec_type == "cluster" and trial is not None:
             raise ValueError("run_cloudy: trial is only meaningful for spec_type='galaxy'")
@@ -569,6 +591,9 @@ class slug_reader:
         all_spec = cast(u.Quantity, spectra["spec"])
 
         written: list[Path] = []
+        run_ids: list[int] = []
+        run_times: list[float] = []
+        run_hps: list[hiiregparam] = []
         for idx in indices:
             this_id = int(ids[idx])
             this_time = float(times.value[idx])
@@ -601,6 +626,32 @@ class slug_reader:
             suffix = f"uid{this_id:09d}" if spec_type == "cluster" else f"trial{this_id:05d}"
             output_path = output_dir / f"{model_name}_{suffix}_t{this_time:.6e}.in"
             written.append(write_cloudy_input(wl, spec, qH0, hp, feh, output_path, template=template))
+            run_ids.append(this_id)
+            run_times.append(this_time)
+            run_hps.append(hp)
 
-        run_cloudy_decks(written, cloudy_exe, max_workers=max_workers)
-        return written
+        out_paths = run_cloudy_decks(written, cloudy_exe, max_workers=max_workers)
+        successes = [cloudy_run_succeeded(p) for p in out_paths]
+
+        results: list[CloudyRunResult] = []
+        for deck, this_id, this_time, hp, success in zip(
+            written, run_ids, run_times, run_hps, successes, strict=True):
+            if not success:
+                continue
+            continuum = None
+            con_path = deck.with_suffix(".con")
+            if con_path.is_file() and con_path.stat().st_size > 0:
+                continuum = read_cloudy_continuum(con_path)
+            results.append(CloudyRunResult(
+                this_id, this_time, hp.nII, hp.r0, hp.r1, hp.U, hp.U0, hp.Omega, continuum))
+
+        if results:
+            cloudy_group = "cluster_cloudy" if spec_type == "cluster" else "galaxy_cloudy"
+            filename = self._file.filename
+            self._file.close()
+            write_cloudy_h5_results(filename, cloudy_group, id_key, results)
+            self._file = h5py.File(filename, "r")
+            for key in self._groups:
+                self._groups[key] = None
+
+        return successes[0] if len(successes) == 1 else successes

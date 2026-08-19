@@ -126,3 +126,30 @@ def run_cloudy_decks(input_paths: Sequence[str | Path], cloudy_exe: str | Path,
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = [executor.submit(run_cloudy_deck, path, cloudy_exe) for path in input_paths]
         return [future.result() for future in futures]
+
+
+def cloudy_run_succeeded(out_path: str | Path) -> bool:
+    """
+    Determine whether a cloudy run completed successfully.
+
+    Parameters
+    ----------
+    out_path : str or pathlib.Path
+        Path to the file cloudy's own stdout/stderr were captured
+        into (see run_cloudy_deck).
+
+    Returns
+    -------
+    bool
+        True if the last non-blank line of out_path contains "Cloudy
+        exited OK" (cloudy's own success message, e.g. "[Stop in
+        cdMain at maincl.cpp:590, Cloudy exited OK]"), False
+        otherwise -- including if out_path doesn't exist or is empty.
+    """
+    out_path = Path(out_path)
+    if not out_path.is_file():
+        return False
+    for line in reversed(out_path.read_text().splitlines()):
+        if line.strip():
+            return "Cloudy exited OK" in line
+    return False
