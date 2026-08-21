@@ -542,11 +542,9 @@ def test_lines_written_when_available(tmp_path, _continuum_cloudy_exe):
 
     with h5py.File(h5_path, "r") as f:
         g = f["cluster_cloudy"]
-        assert g["line_start"][()].tolist() == [0]
-        assert g["line_count"][()].tolist() == [1]
         assert g["line_wl"][()] == pytest.approx([1000.0])
         assert [x.decode() for x in g["line_label"][()]] == ["H  1"]
-        assert g["line_lum"][()] == pytest.approx([10.0 ** 41.0])
+        assert g["line_lum"][()] == pytest.approx(np.array([[10.0 ** 41.0]]))
 
 
 # ---------------------------------------------------------------------

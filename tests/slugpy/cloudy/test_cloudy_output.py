@@ -212,32 +212,41 @@ def test_grid_growth_within_a_single_batch(h5_path):
 
 
 # ---------------------------------------------------------------------
-# Lines: ragged flat-array + start/count index storage
+# Lines: shared, sorted wavelength list + padded 2-D luminosity matrix
 # ---------------------------------------------------------------------
 
-def test_lines_created_with_index(h5_path):
+def test_lines_created_with_padded_matrix(h5_path):
     lines = _lines([1000.0, 2000.0, 3000.0], ["H  1", "He 2", "O  3"], [1e40, 2e40, 3e40])
     write_cloudy_h5_results(h5_path, "cluster_cloudy", "uid", [_result(1, 1e6, lines=lines)])
     with h5py.File(h5_path, "r") as f:
         g = f["cluster_cloudy"]
-        assert g["line_start"][()].tolist() == [0]
-        assert g["line_count"][()].tolist() == [3]
         assert g["line_wl"][()] == pytest.approx([1000.0, 2000.0, 3000.0])
         assert [x.decode() for x in g["line_label"][()]] == ["H  1", "He 2", "O  3"]
-        assert g["line_lum"][()] == pytest.approx([1e40, 2e40, 3e40])
+        assert g["line_lum"][()] == pytest.approx(np.array([[1e40, 2e40, 3e40]]))
         assert u.Unit(g["line_wl"].attrs["units"]) == u.AA
         assert u.Unit(g["line_lum"].attrs["units"]) == u.erg / u.s
 
 
-def test_lines_result_without_lines_gets_zero_count(h5_path):
+def test_lines_sorted_by_wavelength_even_if_input_is_not(h5_path):
+    """A single run's own lines are sorted by wavelength before being stored, whatever order the parser returned them in."""
+    lines = _lines([3000.0, 1000.0, 2000.0], ["O  3", "H  1", "He 2"], [3e40, 1e40, 2e40])
+    write_cloudy_h5_results(h5_path, "cluster_cloudy", "uid", [_result(1, 1e6, lines=lines)])
+    with h5py.File(h5_path, "r") as f:
+        g = f["cluster_cloudy"]
+        assert g["line_wl"][()] == pytest.approx([1000.0, 2000.0, 3000.0])
+        assert [x.decode() for x in g["line_label"][()]] == ["H  1", "He 2", "O  3"]
+        assert g["line_lum"][()] == pytest.approx(np.array([[1e40, 2e40, 3e40]]))
+
+
+def test_lines_result_without_lines_in_batch_gets_zero_row(h5_path):
+    """Within one call, a result with no lines of its own still gets a same-shape all-zero row, staying aligned with the scalar datasets."""
     lines1 = _lines([1000.0], ["H  1"], [1e40])
     write_cloudy_h5_results(h5_path, "cluster_cloudy", "uid",
         [_result(1, 1e6, lines=lines1), _result(2, 2e6, lines=None)])
     with h5py.File(h5_path, "r") as f:
         g = f["cluster_cloudy"]
-        assert g["line_start"][()].tolist() == [0, 1]
-        assert g["line_count"][()].tolist() == [1, 0]
         assert g["line_wl"].shape == (1,)
+        assert g["line_lum"][()] == pytest.approx(np.array([[1e40], [0.0]]))
 
 
 def test_lines_no_lines_in_any_result_creates_no_line_datasets(h5_path):
@@ -245,24 +254,24 @@ def test_lines_no_lines_in_any_result_creates_no_line_datasets(h5_path):
     with h5py.File(h5_path, "r") as f:
         g = f["cluster_cloudy"]
         assert "line_wl" not in g
-        assert "line_start" not in g
+        assert "line_lum" not in g
 
 
 def test_lines_backfill_when_introduced_on_a_later_call(h5_path):
-    """Rows written before line data existed get a zero-count index entry once a later call introduces it."""
+    """Rows written before line data existed get an all-zero row once a later call introduces it, so line_lum stays aligned with the scalar datasets."""
     write_cloudy_h5_results(h5_path, "cluster_cloudy", "uid", [_result(1, 1e6), _result(2, 2e6)])
     lines = _lines([500.0, 600.0], ["Ne 3", "S  2"], [5e39, 6e39])
     write_cloudy_h5_results(h5_path, "cluster_cloudy", "uid", [_result(3, 3e6, lines=lines)])
 
     with h5py.File(h5_path, "r") as f:
         g = f["cluster_cloudy"]
-        assert g["line_start"][()].tolist() == [0, 0, 0]
-        assert g["line_count"][()].tolist() == [0, 0, 2]
         assert g["line_wl"][()] == pytest.approx([500.0, 600.0])
+        assert g["line_lum"].shape == (3, 2)
+        assert g["line_lum"][()] == pytest.approx(np.array([[0.0, 0.0], [0.0, 0.0], [5e39, 6e39]]))
 
 
-def test_lines_appended_across_multiple_calls_keeps_correct_offsets(h5_path):
-    """The flat arrays keep accumulating, and each new row's own line_start correctly reflects the running total, across separate write_cloudy_h5_results calls."""
+def test_lines_disjoint_wavelengths_across_calls_grow_and_pad(h5_path):
+    """A later call whose lines don't overlap the ones already stored grows line_wl to their union, zero-padding both the already-stored row and the new one at the columns each doesn't have."""
     lines1 = _lines([100.0, 200.0], ["H  1", "He 2"], [1e40, 2e40])
     write_cloudy_h5_results(h5_path, "cluster_cloudy", "uid", [_result(1, 1e6, lines=lines1)])
     lines2 = _lines([300.0], ["O  3"], [3e40])
@@ -270,18 +279,35 @@ def test_lines_appended_across_multiple_calls_keeps_correct_offsets(h5_path):
 
     with h5py.File(h5_path, "r") as f:
         g = f["cluster_cloudy"]
-        assert g["line_start"][()].tolist() == [0, 2]
-        assert g["line_count"][()].tolist() == [2, 1]
         assert g["line_wl"][()] == pytest.approx([100.0, 200.0, 300.0])
         assert [x.decode() for x in g["line_label"][()]] == ["H  1", "He 2", "O  3"]
+        assert g["line_lum"].shape == (2, 3)
+        assert g["line_lum"][()] == pytest.approx(np.array([[1e40, 2e40, 0.0], [0.0, 0.0, 3e40]]))
+
+
+def test_lines_overlapping_wavelength_reuses_the_same_column(h5_path):
+    """A wavelength shared between two calls lands in the same column rather than being duplicated."""
+    lines1 = _lines([100.0, 200.0], ["H  1", "He 2"], [1e40, 2e40])
+    write_cloudy_h5_results(h5_path, "cluster_cloudy", "uid", [_result(1, 1e6, lines=lines1)])
+    lines2 = _lines([200.0, 300.0], ["He 2", "O  3"], [9e40, 3e40])
+    write_cloudy_h5_results(h5_path, "cluster_cloudy", "uid", [_result(2, 2e6, lines=lines2)])
+
+    with h5py.File(h5_path, "r") as f:
+        g = f["cluster_cloudy"]
+        assert g["line_wl"][()] == pytest.approx([100.0, 200.0, 300.0])
+        assert g["line_lum"].shape == (2, 3)
+        assert g["line_lum"][()] == pytest.approx(np.array([[1e40, 2e40, 0.0], [0.0, 9e40, 3e40]]))
 
 
 def test_lines_mixed_batch_within_one_call(h5_path):
-    """Within one call, one result with lines and one without still get correctly offset, non-overlapping index entries."""
+    """Within one call, results with different (and partly overlapping) line sets each land in their own row, correctly padded against the union of every wavelength in the batch."""
     lines1 = _lines([100.0, 200.0], ["H  1", "He 2"], [1e40, 2e40])
+    lines2 = _lines([200.0, 300.0], ["He 2", "O  3"], [9e40, 3e40])
     write_cloudy_h5_results(h5_path, "cluster_cloudy", "uid",
-        [_result(1, 1e6, lines=lines1), _result(2, 2e6, lines=None)])
+        [_result(1, 1e6, lines=lines1), _result(2, 2e6, lines=lines2), _result(3, 3e6, lines=None)])
     with h5py.File(h5_path, "r") as f:
         g = f["cluster_cloudy"]
-        assert g["line_start"][()].tolist() == [0, 2]
-        assert g["line_count"][()].tolist() == [2, 0]
+        assert g["line_wl"][()] == pytest.approx([100.0, 200.0, 300.0])
+        assert g["line_lum"].shape == (3, 3)
+        assert g["line_lum"][()] == pytest.approx(
+            np.array([[1e40, 2e40, 0.0], [0.0, 9e40, 3e40], [0.0, 0.0, 0.0]]))

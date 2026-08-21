@@ -101,14 +101,18 @@ def write_cloudy_h5_results(h5_path: str | Path, group_name: str, id_key: str,
     (zero-padded the same way) before appending.
 
     If any result (in this call, or an earlier one) has line data, the
-    group also gets line_start and line_count -- one entry per result,
-    aligned with the datasets above -- plus flat, append-only
-    line_wl/line_label/line_lum arrays holding every kept line from
-    every result with line data, in order; a given result's own lines
-    are the slice line_wl[line_start:line_start + line_count] (etc.).
-    This is a ragged (variable count per result) format, unlike
-    continuum's fixed-width one, so it needs no padding or rewriting:
-    a result with no line data of its own simply gets line_count = 0.
+    group also gets line_wl and line_label (the shared, ascending-
+    sorted list of every distinct line wavelength seen from any result
+    with line data, one label per wavelength) and line_lum (one row
+    per result, aligned with the datasets above, giving that result's
+    own luminosity at every wavelength in line_wl -- zero at any
+    wavelength that result's own run didn't report, including an
+    all-zero row for a result with no line data of its own). Different
+    cloudy runs need not report the same set of lines, so -- exactly
+    like the wavelength grid in _grow_wavelength_grid -- if a result's
+    own lines include a wavelength not already in line_wl, line_wl (and
+    every already-stored line_lum row) is grown and remapped onto the
+    new, merged wavelength list before appending.
     """
     if not results:
         return
@@ -135,7 +139,7 @@ def write_cloudy_h5_results(h5_path: str | Path, group_name: str, id_key: str,
         if has_continuum_group or any_new_continuum:
             _append_continuum(group, results, n_old_rows)
 
-        has_lines_group = "line_start" in group
+        has_lines_group = "line_wl" in group
         any_new_lines = any(r.lines is not None for r in results)
         if has_lines_group or any_new_lines:
             _append_lines(group, results, n_old_rows)
@@ -222,56 +226,81 @@ def _grow_wavelength_grid(group: h5py.Group, new_wl: u.Quantity, old_len: int) -
 
 
 def _append_lines(group: h5py.Group, results: Sequence[CloudyRunResult], n_old_rows: int) -> None:
-    """Append one (line_start, line_count) index entry per result, plus that result's own kept lines onto the group's flat, append-only line_wl/line_label/line_lum arrays."""
-    if "line_wl" not in group:
-        wl_dset = group.create_dataset("line_wl", shape=(0,), maxshape=(None,), chunks=True, dtype="f8")
-        wl_dset.attrs["units"] = str(u.AA)
-        group.create_dataset("line_label", shape=(0,), maxshape=(None,),
-            chunks=True, dtype=h5py.string_dtype(encoding="ascii", length=4))
-        lum_dset = group.create_dataset("line_lum", shape=(0,), maxshape=(None,), chunks=True, dtype="f8")
-        lum_dset.attrs["units"] = str(u.erg / u.s)
-    if "line_start" not in group:
-        # Backfill a zero-count index entry for any rows already
-        # written before line data was ever introduced, so line_start/
-        # line_count stay aligned with the scalar datasets
-        start_dset = group.create_dataset(
-            "line_start", shape=(n_old_rows,), maxshape=(None,), chunks=True, dtype=np.uint64)
-        count_dset = group.create_dataset(
-            "line_count", shape=(n_old_rows,), maxshape=(None,), chunks=True, dtype=np.uint64)
-        start_dset.attrs["units"] = ""
-        count_dset.attrs["units"] = ""
-
-    wl_dset = group["line_wl"]
-    label_dset = group["line_label"]
-    lum_dset = group["line_lum"]
-    flat_old_len = wl_dset.shape[0]
-
-    starts = np.empty(len(results), dtype=np.uint64)
-    counts = np.empty(len(results), dtype=np.uint64)
-    all_wl: list[float] = []
-    all_label: list[str] = []
-    all_lum: list[float] = []
-    running = flat_old_len
-    for i, r in enumerate(results):
-        starts[i] = running
+    """Append (or backfill with zero) one line-luminosity row per result, growing and remapping the shared, sorted line_wl/line_label list first if needed."""
+    # This call's own combined line table: the union of every new
+    # result's own (wavelength, label) pairs, sorted by wavelength,
+    # plus a matching per-result luminosity matrix (one row per
+    # result, zero in any column that result's own run didn't report)
+    new_lines: dict[float, str] = {}
+    for r in results:
         if r.lines is None:
-            counts[i] = 0
             continue
-        wl_r, label_r, lum_r = r.lines
-        counts[i] = len(label_r)
-        running += len(label_r)
-        all_wl.extend(wl_r.to_value(u.AA))
-        all_label.extend(label_r)
-        all_lum.extend(lum_r.to_value(u.erg / u.s))
+        wl_r, label_r, _ = r.lines
+        for wl_val, label_val in zip(wl_r.to_value(u.AA), label_r, strict=True):
+            new_lines.setdefault(wl_val, label_val)
+    new_wl = np.array(sorted(new_lines), dtype=np.float64)
+    new_label = [new_lines[w] for w in new_wl]
+    new_col = {w: i for i, w in enumerate(new_wl)}
 
-    flat_new_len = flat_old_len + len(all_wl)
-    wl_dset.resize((flat_new_len,))
-    label_dset.resize((flat_new_len,))
-    lum_dset.resize((flat_new_len,))
-    if all_wl:
-        wl_dset[flat_old_len:flat_new_len] = all_wl
-        label_dset[flat_old_len:flat_new_len] = all_label
-        lum_dset[flat_old_len:flat_new_len] = all_lum
+    n_new = len(results)
+    new_lum = np.zeros((n_new, len(new_wl)), dtype=np.float64)
+    for i, r in enumerate(results):
+        if r.lines is None:
+            continue
+        wl_r, _, lum_r = r.lines
+        for wl_val, lum_val in zip(wl_r.to_value(u.AA), lum_r.to_value(u.erg / u.s), strict=True):
+            new_lum[i, new_col[wl_val]] = lum_val
 
-    _append_scalar(group, "line_start", starts, "")
-    _append_scalar(group, "line_count", counts, "")
+    if "line_wl" not in group:
+        wl_dset = group.create_dataset("line_wl", shape=(len(new_wl),), maxshape=(None,), chunks=True, dtype="f8")
+        wl_dset.attrs["units"] = str(u.AA)
+        wl_dset[:] = new_wl
+
+        label_dset = group.create_dataset("line_label", shape=(len(new_label),), maxshape=(None,),
+            chunks=True, dtype=h5py.string_dtype(encoding="ascii", length=4))
+        label_dset[:] = new_label
+
+        lum_dset = group.create_dataset("line_lum", shape=(n_old_rows + n_new, len(new_wl)),
+            maxshape=(None, None), chunks=True, dtype="f8")
+        lum_dset.attrs["units"] = str(u.erg / u.s)
+        if n_old_rows > 0:
+            # Backfill an all-zero row for any result written before
+            # line data was ever introduced, so line_lum stays aligned
+            # with the scalar datasets
+            lum_dset[:n_old_rows, :] = 0.0
+        lum_dset[n_old_rows:, :] = new_lum
+        return
+
+    # Line data already exists: merge the stored wavelength/label list
+    # with this call's own, remapping both the already-stored
+    # luminosity rows and this call's new rows onto the merged list
+    old_wl_dset = group["line_wl"]
+    old_label_dset = group["line_label"]
+    old_lum_dset = group["line_lum"]
+
+    old_wl = old_wl_dset[()]
+    old_label = [lbl.decode() if isinstance(lbl, bytes) else lbl for lbl in old_label_dset[()]]
+    old_lum = old_lum_dset[()]
+
+    merged: dict[float, str] = dict(zip(old_wl, old_label, strict=True))
+    for w, lbl in zip(new_wl, new_label, strict=True):
+        merged.setdefault(w, lbl)
+    merged_wl = np.array(sorted(merged), dtype=np.float64)
+    merged_label = [merged[w] for w in merged_wl]
+    merged_col = {w: i for i, w in enumerate(merged_wl)}
+
+    old_wl_dset.resize((len(merged_wl),))
+    old_wl_dset[:] = merged_wl
+    old_label_dset.resize((len(merged_wl),))
+    old_label_dset[:] = merged_label
+
+    old_lum_padded = np.zeros((old_lum.shape[0], len(merged_wl)), dtype=np.float64)
+    for j, w in enumerate(old_wl):
+        old_lum_padded[:, merged_col[w]] = old_lum[:, j]
+    new_lum_padded = np.zeros((n_new, len(merged_wl)), dtype=np.float64)
+    for j, w in enumerate(new_wl):
+        new_lum_padded[:, merged_col[w]] = new_lum[:, j]
+
+    old_lum_dset.resize((old_lum.shape[0] + n_new, len(merged_wl)))
+    old_lum_dset[:old_lum.shape[0], :] = old_lum_padded
+    old_lum_dset[old_lum.shape[0]:, :] = new_lum_padded
