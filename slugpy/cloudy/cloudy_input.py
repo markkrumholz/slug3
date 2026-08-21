@@ -105,9 +105,14 @@ def write_cloudy_input(
     grains/Q(H) commands are appended, followed by the spectrum itself
     as an "interpolate"/"continue" table in log10(frequency [Hz]),
     log10(L_nu [erg/s/Hz]) pairs, padded at both ends with a flux
-    floor (4 dex below the spectrum's own minimum) so cloudy treats
-    everything outside the spectrum's own wavelength range as
-    negligible rather than undefined.
+    floor so cloudy treats everything outside the spectrum's own
+    wavelength range as negligible rather than undefined. The floor is
+    set per padding frequency so that nu*L_nu there -- the actual
+    characteristic energy at that frequency, not L_nu alone -- is 4
+    dex below the real spectrum's own minimum nu*L_nu; a
+    frequency-independent L_nu floor would leave nu*L_nu at the
+    padding points (~6 dex in frequency from the real data) large
+    enough to dominate the total energy budget.
     """
     template_path = Path(template) if template is not None else DEFAULT_TEMPLATE
     template_lines = template_path.read_text().splitlines()
@@ -127,7 +132,20 @@ def write_cloudy_input(
         raise ValueError("write_cloudy_input: spectrum is all zero or negative")
     specclean[specclean <= 0] = np.amin(positive) * 1e-4
     logL_nu = np.log10(specclean * _c / freq ** 2)
-    floor = np.amin(logL_nu) - 4.0
+
+    # Padding points sit ~6 dex in frequency away from the real
+    # spectrum's own edges, so a frequency-independent L_nu floor
+    # leaves nu*L_nu (the actual characteristic energy at frequency
+    # nu, not L_nu alone) at those padding points many orders of
+    # magnitude above the real spectrum's own minimum nu*L_nu -- large
+    # enough to dominate cloudy's total energy budget. Instead, floor
+    # each padding point so that nu*L_nu there equals 1e-4 times the
+    # real spectrum's own minimum nu*L_nu, i.e. floor(nu) = 1e-4 *
+    # min(nu*L_nu) / nu.
+    log_nuLnu_floor = np.amin(logfreq + logL_nu) - 4.0
+
+    def floor(logfreq_pad: float) -> float:
+        return log_nuLnu_floor - logfreq_pad
 
     lines: list[str] = []
     for line in template_lines:
@@ -145,8 +163,8 @@ def write_cloudy_input(
     lines.append(f"Q(H) = {np.log10(qH0_cgs):f}")
 
     spec_line = "interpolate"
-    spec_line += f" ({7.51:15.12f} {floor:f})"
-    spec_line += f" ({logfreq[-1] - 0.01:15.12f} {floor:f})"
+    spec_line += f" ({7.51:15.12f} {floor(7.51):f})"
+    spec_line += f" ({logfreq[-1] - 0.01:15.12f} {floor(logfreq[-1] - 0.01):f})"
     n = len(logL_nu)
     for i in range(n):
         if i % 4 == 0:
@@ -154,8 +172,8 @@ def write_cloudy_input(
         if logfreq[-i - 1] == logfreq[-(i - 1) - 1]:
             continue
         spec_line += f" ({logfreq[-i - 1]:15.12f} {logL_nu[-i - 1]:f})"
-    spec_line += f"\ncontinue ({logfreq[0] + 0.01:15.12f} {floor:f})"
-    spec_line += f" ({22.4:f} {floor:f})"
+    spec_line += f"\ncontinue ({logfreq[0] + 0.01:15.12f} {floor(logfreq[0] + 0.01):f})"
+    spec_line += f" ({22.4:f} {floor(22.4):f})"
     lines.append(spec_line)
 
     output_path.write_text("\n".join(lines) + "\n")
