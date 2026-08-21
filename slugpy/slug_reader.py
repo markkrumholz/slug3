@@ -6,6 +6,7 @@ Implements slug_reader, a lazy reader for slug HDF5 output files.
 :copyright: Copyright (c) 2026 Mark Krumholz
 """
 
+import shutil
 from pathlib import Path
 from typing import Any, Literal, cast
 
@@ -519,11 +520,12 @@ class slug_reader:
         nII: u.Quantity | float | None = None, r0: u.Quantity | float | None = None,
         r1: u.Quantity | float | None = None, U: u.Quantity | float | None = None,
         U0: u.Quantity | float | None = None, Omega: u.Quantity | float | None = None,
-        model_name: str | None = None, output_dir: str | Path = ".",
+        model_name: str | None = None, temp_dir: str | Path = "cloudy_tmp",
         template: str | Path | None = None, warn: bool = True,
         fix_quantity: Literal["nII", "r0", "r1", "U", "U0", "Omega"] | None = None,
         r0safety: float = 0.01, cloudy_path: str | Path | None = None,
-        max_workers: int | None = None, overwrite: bool = False) -> bool | list[bool]:
+        max_workers: int | None = None, overwrite: bool = False,
+        save_temp: bool = False) -> bool | list[bool]:
         """
         Write cloudy input decks for one or more of this file's own
         spectra, run cloudy on each of them, and save the results of
@@ -556,8 +558,14 @@ class slug_reader:
         model_name : str, optional
             Base name for the written input deck(s); defaults to this
             file's own output.model_name.
-        output_dir : str or pathlib.Path, default "."
-            Directory to write the input deck(s) into.
+        temp_dir : str or pathlib.Path, default "cloudy_tmp"
+            Directory to write the input deck(s) and cloudy's own
+            output into. A relative path (the default) is resolved
+            against this file's own directory, not the current working
+            directory, so cloudy's scratch files never land alongside
+            (or get confused with) the HDF5 output itself; pass an
+            absolute path to place it somewhere else entirely. See
+            save_temp below for whether this directory is kept.
         template : str or pathlib.Path, optional
             Path to the cloudy input template to use; see
             write_cloudy_input's own default.
@@ -583,6 +591,13 @@ class slug_reader:
             stored. Pass True to instead always rerun cloudy for every
             matching spectrum, replacing any such already-stored row
             with the new run's results.
+        save_temp : bool, default False
+            By default, temp_dir (input decks, and every file cloudy
+            itself wrote into it) is deleted once every matching
+            spectrum has been processed and its results (if any)
+            written to this file, regardless of whether any individual
+            run succeeded or failed. Pass True to keep temp_dir
+            instead, e.g. to inspect a failed run's own cloudy output.
 
         Returns
         -------
@@ -654,6 +669,11 @@ class slug_reader:
         than a duplicate. With overwrite=True, a matched row is only
         actually replaced once its own rerun succeeds: a failed rerun
         leaves the previously-stored row untouched.
+
+        temp_dir is only ever deleted if this call actually wrote at
+        least one deck into it -- a call where every match was skipped
+        as an already-stored duplicate never creates or touches
+        temp_dir at all.
         """
         if spec_type == "cluster" and trial is not None:
             raise ValueError("run_cloudy: trial is only meaningful for spec_type='galaxy'")
@@ -694,7 +714,9 @@ class slug_reader:
 
         if model_name is None:
             model_name = str(self.input_deck.get("output", {}).get("model_name", "cloudy"))
-        output_dir = Path(output_dir)
+        temp_dir_path = Path(temp_dir)
+        if not temp_dir_path.is_absolute():
+            temp_dir_path = Path(self._file.filename).resolve().parent / temp_dir_path
 
         # [Fe/H] for a galaxy spectrum is a single population-level
         # value (the expectation value of stars.FeH's own
@@ -761,7 +783,7 @@ class slug_reader:
             skipped.append(None)
 
             suffix = f"uid{this_id:09d}" if spec_type == "cluster" else f"trial{this_id:05d}"
-            output_path = output_dir / f"{model_name}_{suffix}_t{this_time:.6e}.in"
+            output_path = temp_dir_path / f"{model_name}_{suffix}_t{this_time:.6e}.in"
             written.append(write_cloudy_input(wl, spec, qH0, hp, feh, output_path, template=template))
             run_ids.append(this_id)
             run_times.append(this_time)
@@ -805,6 +827,9 @@ class slug_reader:
             # self._groups's key set was previously fixed at __init__
             self._groups = {name: None for name in self._file
                 if isinstance(self._file[name], h5py.Group)}
+
+        if written and not save_temp:
+            shutil.rmtree(temp_dir_path, ignore_errors=True)
 
         # Merge the skipped-duplicate successes (True, no cloudy run)
         # back in among the ones actually run, preserving indices' own

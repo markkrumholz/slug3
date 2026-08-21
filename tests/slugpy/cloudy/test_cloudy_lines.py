@@ -12,7 +12,7 @@ and checked exactly.
 import astropy.units as u
 import pytest
 
-from slugpy.cloudy.cloudy_lines import read_cloudy_linearr
+from slugpy.cloudy.cloudy_lines import MAX_LINE_LABEL_LENGTH, read_cloudy_linearr
 
 _HEADER = "#enr\tID\tI(intrinsic)\tI(emergent)\ttype\n"
 
@@ -42,7 +42,7 @@ def test_keeps_only_blank_suffix_and_above_threshold(tmp_path):
     path = _make_linearr_file(tmp_path, rows)
     line_wl, line_label, line_lum = read_cloudy_linearr(path)
 
-    assert line_label == ["H  1", "O  3"]
+    assert line_label == ["HI", "OIII"]
     assert line_wl.to_value(u.AA) == pytest.approx([1000.0, 4000.0])
     assert line_lum.to_value(u.erg / u.s) == pytest.approx([10.0 ** 41.0, 10.0 ** 42.0])
 
@@ -55,13 +55,12 @@ def test_luminosity_is_delogged_from_emergent_column(tmp_path):
     assert line_lum.to_value(u.erg / u.s) == pytest.approx([10.0 ** 15.5])
 
 
-def test_label_is_first_four_characters_only(tmp_path):
-    """The saved label is exactly the first 4 characters of the 9-character field, not the padded 9 or the human-readable wavelength that follows it."""
+def test_label_is_derived_from_first_four_characters_only(tmp_path):
+    """The saved label is derived from exactly the first 4 characters of the 9-character field, not the padded 9 or the human-readable wavelength that follows it."""
     rows = [_row(1000.0, "Ne 3     ", 40.0, 41.0)]
     path = _make_linearr_file(tmp_path, rows)
     _, line_label, _ = read_cloudy_linearr(path)
-    assert line_label == ["Ne 3"]
-    assert all(len(lbl) == 4 for lbl in line_label)
+    assert line_label == ["NeIII"]
 
 
 def test_pseudo_lines_are_discarded(tmp_path):
@@ -82,7 +81,7 @@ def test_pseudo_lines_are_discarded(tmp_path):
     ]
     path = _make_linearr_file(tmp_path, rows)
     _, line_label, _ = read_cloudy_linearr(path)
-    assert line_label == ["H  1", "Fe12", "K 10"]
+    assert line_label == ["HI", "FeXII", "KX"]
 
 
 def test_threshold_is_strict(tmp_path):
@@ -93,8 +92,44 @@ def test_threshold_is_strict(tmp_path):
     ]
     path = _make_linearr_file(tmp_path, rows)
     _, line_label, line_lum = read_cloudy_linearr(path)
-    assert line_label == ["H  1"]
+    assert line_label == ["HI"]
     assert line_lum.to_value(u.erg / u.s) == pytest.approx([10.0 ** 10.001])
+
+
+# ---------------------------------------------------------------------
+# Roman-numeral label translation
+# ---------------------------------------------------------------------
+
+def test_two_letter_element_symbol_kept_unpadded(tmp_path):
+    """A 2-letter element symbol is kept as-is, with no space before the Roman numeral."""
+    rows = [_row(1000.0, "Fe 2     ", 40.0, 41.0)]
+    path = _make_linearr_file(tmp_path, rows)
+    _, line_label, _ = read_cloudy_linearr(path)
+    assert line_label == ["FeII"]
+
+
+def test_double_digit_ionization_stage(tmp_path):
+    """A double-digit ionization stage (no padding space in the mnemonic's last two characters) also converts correctly."""
+    rows = [_row(1000.0, "Fe12     ", 40.0, 41.0)]
+    path = _make_linearr_file(tmp_path, rows)
+    _, line_label, _ = read_cloudy_linearr(path)
+    assert line_label == ["FeXII"]
+
+
+def test_widest_roman_numeral_fits_max_line_label_length(tmp_path):
+    """Ionization stage 38 (XXXVIII) is the widest Roman numeral in [1, 50]; a 2-letter element symbol plus it must still fit within MAX_LINE_LABEL_LENGTH."""
+    rows = [_row(1000.0, "Fe38     ", 40.0, 41.0)]
+    path = _make_linearr_file(tmp_path, rows)
+    _, line_label, _ = read_cloudy_linearr(path)
+    assert line_label == ["FeXXXVIII"]
+    assert len(line_label[0]) == MAX_LINE_LABEL_LENGTH
+
+
+def test_stage_50_converts_to_l(tmp_path):
+    rows = [_row(1000.0, "Fe50     ", 40.0, 41.0)]
+    path = _make_linearr_file(tmp_path, rows)
+    _, line_label, _ = read_cloudy_linearr(path)
+    assert line_label == ["FeL"]
 
 
 def test_empty_file_returns_empty(tmp_path):
