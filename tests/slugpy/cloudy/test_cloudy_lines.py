@@ -64,6 +64,27 @@ def test_label_is_first_four_characters_only(tmp_path):
     assert all(len(lbl) == 4 for lbl in line_label)
 
 
+def test_pseudo_lines_are_discarded(tmp_path):
+    """Rows whose 4-character mnemonic isn't the true "XXNN" atomic-line form (element symbol + ionization stage) are dropped, even with a blank suffix and above-threshold luminosity -- drawn from real pseudo-lines cloudy's own line array reports alongside true lines."""
+    rows = [
+        _row(1000.0, "H  1     ", 40.0, 41.0),   # kept: real line, 1-letter element + single-digit stage
+        _row(2000.0, "Fe12     ", 40.0, 41.0),   # kept: real line, 2-letter element + double-digit stage
+        _row(3000.0, "K 10     ", 40.0, 41.0),   # kept: real line, 1-letter element + double-digit stage
+        _row(4000.0, "Bac      ", 40.0, 41.0),   # dropped: Balmer continuum pseudo-line
+        _row(5000.0, "FIR      ", 40.0, 41.0),   # dropped: far-IR band pseudo-line
+        _row(6000.0, "F100     ", 40.0, 41.0),   # dropped: broadband-flux pseudo-line
+        _row(7000.0, "Unit     ", 40.0, 41.0),   # dropped: cloudy bookkeeping pseudo-line
+        _row(8000.0, "H-CT     ", 40.0, 41.0),   # dropped: charge-transfer pseudo-line
+        _row(9000.0, "N 1C     ", 40.0, 41.0),   # dropped: process-breakdown row, not a clean 2-digit stage
+        _row(10000.0, "Q(H)     ", 40.0, 41.0),  # dropped: ionizing-photon-rate pseudo-line
+        _row(11000.0, "^13C     ", 40.0, 41.0),  # dropped: isotope pseudo-line
+        _row(12000.0, "OH+      ", 40.0, 41.0),  # dropped: molecular-ion pseudo-line
+    ]
+    path = _make_linearr_file(tmp_path, rows)
+    _, line_label, _ = read_cloudy_linearr(path)
+    assert line_label == ["H  1", "Fe12", "K 10"]
+
+
 def test_threshold_is_strict(tmp_path):
     """Exactly 1e10 erg/s (log10 = 10.0) is not kept -- the threshold is a strict '>'."""
     rows = [
