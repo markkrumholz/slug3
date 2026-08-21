@@ -17,6 +17,8 @@ import h5py
 import numpy as np
 from astropy import units as u
 
+from .cloudy_lines import MAX_LINE_LABEL_LENGTH
+
 # The four continuum fields, in the order cloudy's own "save last
 # continuum" output lists them
 _CONTINUUM_FIELDS = ("spec_inc", "spec_trans", "spec_emit", "spec_trans_emit")
@@ -321,7 +323,7 @@ def _append_lines(group: h5py.Group, results: Sequence[CloudyRunResult], n_old_r
         wl_dset[:] = new_wl
 
         label_dset = group.create_dataset("line_label", shape=(len(new_label),), maxshape=(None,),
-            chunks=True, dtype=h5py.string_dtype(encoding="ascii", length=4))
+            chunks=True, dtype=h5py.string_dtype(encoding="ascii", length=MAX_LINE_LABEL_LENGTH))
         label_dset[:] = new_label
 
         lum_dset = group.create_dataset("line_lum", shape=(n_old_rows + n_new, len(new_wl)),
