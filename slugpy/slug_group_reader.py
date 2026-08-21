@@ -60,8 +60,8 @@ class slug_group_reader:
         astropy.units.Quantity or numpy.ndarray
             The requested dataset, read from disk (and cached) on
             first access: a Quantity if it has a single physical unit,
-            or a plain array if its "units" attribute is empty or is
-            not a single string.
+            or a plain array if its "units" attribute is absent, empty,
+            or not a single string.
 
         Raises
         ------
@@ -76,7 +76,7 @@ class slug_group_reader:
 
         dset = self._file[self._group_name][key]
         arr = dset[()]
-        unit = dset.attrs["units"]
+        unit = dset.attrs.get("units")
         has_unit = isinstance(unit, str) and unit != ""
         result: Dataset = arr * u.Unit(unit) if has_unit else arr
         self._datasets[key] = result

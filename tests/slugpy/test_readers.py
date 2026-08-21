@@ -293,6 +293,21 @@ def test_clusters_non_numeric_dataset(clusters):
     assert rng.dtype.kind == "S"
 
 
+def test_getitem_missing_units_attribute_comes_back_as_plain_array(tmp_path):
+    """A dataset with no "units" attribute at all (e.g. cloudy's own line_label) comes back as a plain array rather than raising KeyError."""
+    path = tmp_path / "no_units.h5"
+    with h5py.File(path, "w") as f:
+        g = f.create_group("g")
+        g.create_dataset("no_units", data=np.array([1.0, 2.0, 3.0]))
+
+    with h5py.File(path, "r") as f:
+        reader = slug_group_reader(f, "g")
+        arr = reader["no_units"]
+        assert isinstance(arr, np.ndarray)
+        assert not isinstance(arr, u.Quantity)
+        assert arr.tolist() == [1.0, 2.0, 3.0]
+
+
 def test_clusters_getitem_cached(clusters):
     """Repeated access to the same dataset returns the identical cached object."""
     assert clusters["target_mass"] is clusters["target_mass"]
