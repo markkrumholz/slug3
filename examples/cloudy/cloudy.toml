@@ -1,0 +1,55 @@
+# cloudy_example: a small example input deck demonstrating slug output
+# meant to be fed into the new cloudy photoionization post-processing
+# functionality (slugpy.cloudy). Like examples/QHIstats
+# (examples/QHIstats/QHIstats.toml), this uses MIST tracks and a full
+# chained set of stellar atmosphere models (spectra.model = "default"),
+# with cluster mass drawn from its own distribution and a fixed
+# (rather than stochastic) metallicity, no dust extinction, and
+# photometry pared down to just the single filter (Q(HI), the ionizing
+# photon rate that cloudy needs as its input) this example needs. Only
+# a handful of trials are run, and each trial's output time is drawn
+# from its own uniform distribution rather than sharing one fixed
+# time, so the resulting clusters span a modest range of ages.
+# Run this from within this directory (so the dists/*.toml paths below
+# resolve) with:
+#   slug cloudy.toml
+# It requires the real MIST tracks, spectral libraries, and filter/Vega
+# data referenced below to have been fetched locally (too large to
+# store in the repository -- see data/tools/*/fetch_*.py).
+
+# This is a cluster (rather than galaxy) simulation
+sim_type = "cluster"
+
+# Number of trials to run
+n_trial = 10
+
+# Base name of the output file(s) and time of output
+[output]
+model_name = "cloudy_example"
+output_times = "dists/output_time.toml"  # Draw each trial's output time uniformly from [1e6, 4e6] yr
+
+# Input stanza to describe stellar models
+[stars]
+IMF = "chabrier.toml"     # Chabrier (2005) IMF
+tracks = "MIST"           # MIST stellar tracks
+v_vcrit = 0.4             # Rotating at 40% of breakup
+alphaFe = 0.0             # [alpha/Fe] = 0 (Solar alpha/Fe)
+FeH = 0.0                 # Solar metallicity
+
+# Input stanza to describe spectral synthesis
+[spectra]
+model = "default"         # Default spectral model
+wl_min = 200              # Wavelength grid starts at 200 Å
+wl_max = 2e5              # Wavelength grid ends at 2e5 Å
+nwl = 1024                # Wavelength grid has 1024 points
+
+# Input stanza to describe photometry
+# filters lists the filters to use: an idealized filter representing
+# ionizing photon flux, the quantity cloudy needs as its own input
+[phot]
+filters = ["Q(HI)"]
+system = "Flambda"        # Compute photometry as raw flux (no zero point)
+
+# Input stanza to describe star clusters
+[clusters]
+CMF = "dists/CMF.toml"    # Draw cluster masses from this distribution
