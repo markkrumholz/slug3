@@ -95,22 +95,25 @@ def test_spectrum_table_matches_hand_computed_values(tmp_path, spectrum, hp):
     freq = _C / (wl_aa * 1e-8)
     logfreq = np.log10(freq)
     logL_nu = np.log10(spec_val * _C / freq ** 2)
-    floor = np.amin(logL_nu) - 4.0
+    log_nuLnu_floor = np.amin(logfreq + logL_nu) - 4.0
+
+    def floor(logfreq_pad):
+        return log_nuLnu_floor - logfreq_pad
 
     # Extract every (freq, lum) pair actually written, in order
     pairs = [(float(a), float(b)) for a, b in
         re.findall(r"\(\s*([\d.eE+-]+)\s+([\d.eE+-]+)\s*\)", text)]
 
     # First pair: low-frequency padding at 10**7.51 Hz
-    assert pairs[0] == pytest.approx((7.51, floor), rel=1e-6)
+    assert pairs[0] == pytest.approx((7.51, floor(7.51)), rel=1e-6)
     # Second pair: just below the spectrum's own lowest frequency
-    assert pairs[1] == pytest.approx((logfreq[-1] - 0.01, floor), rel=1e-6)
+    assert pairs[1] == pytest.approx((logfreq[-1] - 0.01, floor(logfreq[-1] - 0.01)), rel=1e-6)
     # Real spectrum points, in ascending-frequency order
     for k in range(5):
         assert pairs[2 + k] == pytest.approx((logfreq[-1 - k], logL_nu[-1 - k]), rel=1e-6)
     # Last two pairs: high-frequency padding
-    assert pairs[7] == pytest.approx((logfreq[0] + 0.01, floor), rel=1e-6)
-    assert pairs[8] == pytest.approx((22.4, floor), rel=1e-6)
+    assert pairs[7] == pytest.approx((logfreq[0] + 0.01, floor(logfreq[0] + 0.01)), rel=1e-6)
+    assert pairs[8] == pytest.approx((22.4, floor(22.4)), rel=1e-6)
     assert len(pairs) == 9
 
 
