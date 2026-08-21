@@ -233,6 +233,22 @@ def test_cluster_uid_only_matches_all_times(tmp_path):
     assert len(_decks_in(tmp_path / "out")) == 2
 
 
+def test_cluster_uid_list_matches_every_listed_uid(tmp_path):
+    """uid as a list matches every output time for every uid in the list."""
+    reader = slug_reader(_make_cluster_test_file(tmp_path, "c1.h5", qhi_in_phot=True))
+    result = reader.run_cloudy("cluster", uid=[2, 1], output_dir=tmp_path / "out")
+    assert result == [True, True, True]
+    assert len(_decks_in(tmp_path / "out")) == 3
+
+
+def test_cluster_uid_list_excludes_unlisted_uids(tmp_path):
+    """uid as a list only matches the listed uids, not every uid in the file."""
+    reader = slug_reader(_make_cluster_test_file(tmp_path, "c1.h5", qhi_in_phot=True))
+    result = reader.run_cloudy("cluster", uid=[2], output_dir=tmp_path / "out")
+    assert result is True
+    assert len(_decks_in(tmp_path / "out")) == 1
+
+
 def test_cluster_no_selector_matches_everything(tmp_path):
     """Neither uid nor time given matches every (uid, time) spectrum in the file."""
     reader = slug_reader(_make_cluster_test_file(tmp_path, "c1.h5", qhi_in_phot=True))
@@ -322,6 +338,14 @@ def test_galaxy_pdf_feh_uses_expectation_value(tmp_path):
     metals = _extract_float(path.read_text(), r"^metals and grains (\S+)$")
     assert metals == pytest.approx(10.0 ** expected_feh)
     assert expected_feh == pytest.approx(0.0)  # symmetric range, sanity check
+
+
+def test_galaxy_trial_list_matches_every_listed_trial(tmp_path):
+    """trial as a list matches every listed trial, same as uid does for cluster mode."""
+    reader = slug_reader(_make_galaxy_test_file(tmp_path, "g1.h5", "0.0"))
+    result = reader.run_cloudy("galaxy", trial=[1, 0], output_dir=tmp_path / "out")
+    assert result == [True, True]
+    assert len(_decks_in(tmp_path / "out")) == 2
 
 
 def test_galaxy_feh_same_for_every_matching_trial(tmp_path):
@@ -502,6 +526,85 @@ def test_repeated_calls_append_rows_and_reader_stays_usable(tmp_path):
     clusters = reader.clusters
     assert clusters is not None
     assert clusters["uid"].tolist() == [1, 2]
+
+
+# ---------------------------------------------------------------------
+# Duplicate detection and overwrite
+# ---------------------------------------------------------------------
+
+def test_repeated_call_with_same_conditions_is_skipped_by_default(tmp_path):
+    """Calling run_cloudy again for the same uid/time with the same (default) nebular conditions skips the actual cloudy run and reports success, without writing a deck or adding a duplicate row."""
+    h5_path = _make_cluster_test_file(tmp_path, "c1.h5", qhi_in_phot=True)
+    reader = slug_reader(h5_path)
+    reader.run_cloudy("cluster", uid=1, time=1e6, output_dir=tmp_path / "out1")
+    result = reader.run_cloudy("cluster", uid=1, time=1e6, output_dir=tmp_path / "out2")
+    assert result is True
+    assert len(_decks_in(tmp_path / "out2")) == 0
+    with h5py.File(h5_path, "r") as f:
+        assert f["cluster_cloudy"]["uid"][()].tolist() == [1]
+
+
+def test_batch_with_one_duplicate_only_reruns_the_new_one(tmp_path):
+    """In a uid list spanning one already-stored spectrum and one new one, only the new one is actually run, but both report success in the right order."""
+    h5_path = _make_cluster_test_file(tmp_path, "c1.h5", qhi_in_phot=True)
+    reader = slug_reader(h5_path)
+    reader.run_cloudy("cluster", uid=1, time=1e6, output_dir=tmp_path / "out1")
+    result = reader.run_cloudy("cluster", uid=[1, 2], time=1e6, output_dir=tmp_path / "out2")
+    assert result == [True, True]
+    assert len(_decks_in(tmp_path / "out2")) == 1  # only uid 2 actually ran
+    with h5py.File(h5_path, "r") as f:
+        assert f["cluster_cloudy"]["uid"][()].tolist() == [1, 2]
+
+
+def test_repeated_call_with_different_conditions_is_not_a_duplicate(tmp_path):
+    """A rerun with different nebular conditions is a genuinely new run, not a duplicate -- it's actually run and appended as its own new row."""
+    h5_path = _make_cluster_test_file(tmp_path, "c1.h5", qhi_in_phot=True)
+    reader = slug_reader(h5_path)
+    reader.run_cloudy("cluster", uid=1, time=1e6, output_dir=tmp_path / "out1")
+    result = reader.run_cloudy(
+        "cluster", uid=1, time=1e6, nII=1.0 / u.cm ** 3, U=1e-2, output_dir=tmp_path / "out2")
+    assert result is True
+    assert len(_decks_in(tmp_path / "out2")) == 1
+    with h5py.File(h5_path, "r") as f:
+        g = f["cluster_cloudy"]
+        assert g["uid"][()].tolist() == [1, 1]
+        assert g["nII"][()] == pytest.approx([100.0, 1.0])
+
+
+def test_overwrite_reruns_and_replaces_the_stored_row(tmp_path):
+    """overwrite=True reruns what would otherwise be a skipped duplicate, and replaces its stored row instead of skipping or duplicating it."""
+    h5_path = _make_cluster_test_file(tmp_path, "c1.h5", qhi_in_phot=True)
+    reader = slug_reader(h5_path)
+    reader.run_cloudy("cluster", uid=1, time=1e6, output_dir=tmp_path / "out1")
+    result = reader.run_cloudy(
+        "cluster", uid=1, time=1e6, output_dir=tmp_path / "out2", overwrite=True)
+    assert result is True
+    assert len(_decks_in(tmp_path / "out2")) == 1  # actually reran, not skipped
+    with h5py.File(h5_path, "r") as f:
+        assert f["cluster_cloudy"]["uid"][()].tolist() == [1]  # replaced, not duplicated
+
+
+def test_overwrite_without_an_existing_match_just_appends(tmp_path):
+    """overwrite=True has no special effect when there's nothing already stored to overwrite -- it's a plain new run and append."""
+    h5_path = _make_cluster_test_file(tmp_path, "c1.h5", qhi_in_phot=True)
+    reader = slug_reader(h5_path)
+    result = reader.run_cloudy("cluster", uid=1, time=1e6, output_dir=tmp_path / "out", overwrite=True)
+    assert result is True
+    with h5py.File(h5_path, "r") as f:
+        assert f["cluster_cloudy"]["uid"][()].tolist() == [1]
+
+
+def test_overwrite_does_not_delete_on_a_failed_rerun(tmp_path, _mixed_cloudy_exe):
+    """If overwrite=True but the rerun itself fails, the previously-stored row is left untouched rather than being deleted."""
+    h5_path = _make_cluster_test_file(tmp_path, "c1.h5", qhi_in_phot=True)
+    reader = slug_reader(h5_path)
+    reader.run_cloudy("cluster", uid=2, time=1e6, output_dir=tmp_path / "out1")
+    result = reader.run_cloudy(
+        "cluster", uid=2, time=1e6, output_dir=tmp_path / "out2",
+        cloudy_path=_mixed_cloudy_exe, overwrite=True)
+    assert result is False
+    with h5py.File(h5_path, "r") as f:
+        assert f["cluster_cloudy"]["uid"][()].tolist() == [2]  # still there, untouched
 
 
 def test_galaxy_run_recorded_in_galaxy_cloudy_group(tmp_path):

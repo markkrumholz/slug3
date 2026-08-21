@@ -23,6 +23,14 @@ _CONTINUUM_FIELDS = ("spec_inc", "spec_trans", "spec_emit", "spec_trans_emit")
 
 _FLUX_UNIT = u.erg / u.s / u.AA
 
+# Every dataset in a cluster_cloudy/galaxy_cloudy group that's aligned
+# one-entry-per-row with id_key/time (as opposed to a shared column
+# header like wl or line_wl/line_label), split by dimensionality --
+# id_key itself is handled separately since its name ("uid" or
+# "trial") varies by group
+_ROW_ALIGNED_1D = ("time", "nII", "r0", "r1", "U", "U0", "Omega")
+_ROW_ALIGNED_2D = (*_CONTINUUM_FIELDS, "line_lum")
+
 
 @dataclass
 class CloudyRunResult:
@@ -143,6 +151,62 @@ def write_cloudy_h5_results(h5_path: str | Path, group_name: str, id_key: str,
         any_new_lines = any(r.lines is not None for r in results)
         if has_lines_group or any_new_lines:
             _append_lines(group, results, n_old_rows)
+
+
+def delete_cloudy_h5_rows(h5_path: str | Path, group_name: str, id_key: str,
+    row_indices: Sequence[int]) -> None:
+    """
+    Permanently remove one or more rows (by absolute row index) from
+    an HDF5 file's own cluster_cloudy or galaxy_cloudy group.
+
+    Parameters
+    ----------
+    h5_path : str or pathlib.Path
+        Path to the slug HDF5 output file to modify. Opened and closed
+        by this function -- the caller is responsible for not holding
+        its own handle to the same file open at the same time.
+    group_name : str
+        Name of the group to modify: "cluster_cloudy" or
+        "galaxy_cloudy".
+    id_key : str
+        Name of the id dataset: "uid" or "trial".
+    row_indices : sequence of int
+        Absolute row indices to remove. A no-op if empty.
+
+    Details
+    -------
+    Every dataset aligned one-entry-per-row with id_key/time --
+    id_key/time/nII/r0/r1/U/U0/Omega and, where present,
+    spec_inc/spec_trans/spec_emit/spec_trans_emit/line_lum -- is
+    shrunk to drop exactly those rows, shifting every later row down
+    to close the gap. Shared column-header datasets (wl, line_wl,
+    line_label) are left untouched: removing a row never removes a
+    wavelength or line other rows still reference.
+    """
+    if not row_indices:
+        return
+
+    with h5py.File(h5_path, "a") as f:
+        group = f[group_name]
+        n_rows = group[id_key].shape[0]
+        keep = np.ones(n_rows, dtype=bool)
+        keep[list(row_indices)] = False
+
+        for name in (id_key, *_ROW_ALIGNED_1D):
+            if name not in group:
+                continue
+            dset = group[name]
+            new_data = dset[()][keep]
+            dset.resize((len(new_data),))
+            dset[:] = new_data
+
+        for name in _ROW_ALIGNED_2D:
+            if name not in group:
+                continue
+            dset = group[name]
+            new_data = dset[()][keep, :]
+            dset.resize(new_data.shape)
+            dset[:] = new_data
 
 
 def _append_scalar(group: h5py.Group, name: str, values: np.ndarray, units: str) -> None:

@@ -14,7 +14,7 @@ import numpy as np
 import pytest
 from astropy import units as u
 
-from slugpy.cloudy.cloudy_output import CloudyRunResult, write_cloudy_h5_results
+from slugpy.cloudy.cloudy_output import CloudyRunResult, delete_cloudy_h5_rows, write_cloudy_h5_results
 
 
 def _result(id_val, time, nII=100.0, r0=1e18, r1=2e18, U=1e-3, U0=2e-3, Omega=0.5,
@@ -311,3 +311,62 @@ def test_lines_mixed_batch_within_one_call(h5_path):
         assert g["line_lum"].shape == (3, 3)
         assert g["line_lum"][()] == pytest.approx(
             np.array([[1e40, 2e40, 0.0], [0.0, 9e40, 3e40], [0.0, 0.0, 0.0]]))
+
+
+# ---------------------------------------------------------------------
+# delete_cloudy_h5_rows
+# ---------------------------------------------------------------------
+
+def test_delete_removes_scalar_row_and_shifts_the_rest(h5_path):
+    """Deleting a middle row removes exactly that row from every scalar dataset, shifting later rows down."""
+    write_cloudy_h5_results(h5_path, "cluster_cloudy", "uid",
+        [_result(1, 1e6), _result(2, 2e6), _result(3, 3e6)])
+    delete_cloudy_h5_rows(h5_path, "cluster_cloudy", "uid", [1])
+    with h5py.File(h5_path, "r") as f:
+        g = f["cluster_cloudy"]
+        assert g["uid"][()].tolist() == [1, 3]
+        assert g["time"][()] == pytest.approx([1e6, 3e6])
+
+
+def test_delete_is_a_noop_for_empty_row_indices(h5_path):
+    write_cloudy_h5_results(h5_path, "cluster_cloudy", "uid", [_result(1, 1e6)])
+    delete_cloudy_h5_rows(h5_path, "cluster_cloudy", "uid", [])
+    with h5py.File(h5_path, "r") as f:
+        assert f["cluster_cloudy"]["uid"][()].tolist() == [1]
+
+
+def test_delete_shrinks_continuum_rows_without_touching_shared_wl(h5_path):
+    """Deleting a row also removes that row from every row-aligned continuum field, but leaves the shared wl grid untouched."""
+    c1 = _continuum([100.0, 200.0], [1.0, 2.0])
+    c2 = _continuum([100.0, 200.0], [3.0, 4.0])
+    write_cloudy_h5_results(h5_path, "cluster_cloudy", "uid",
+        [_result(1, 1e6, continuum=c1), _result(2, 2e6, continuum=c2)])
+    delete_cloudy_h5_rows(h5_path, "cluster_cloudy", "uid", [0])
+    with h5py.File(h5_path, "r") as f:
+        g = f["cluster_cloudy"]
+        assert g["uid"][()].tolist() == [2]
+        assert g["wl"][()] == pytest.approx([100.0, 200.0])
+        assert g["spec_inc"][()] == pytest.approx(np.array([[3.0, 4.0]]))
+
+
+def test_delete_shrinks_line_lum_without_touching_shared_line_wl(h5_path):
+    """Deleting a row also removes that row from line_lum, but leaves the shared line_wl/line_label list untouched."""
+    lines1 = _lines([100.0, 200.0], ["H  1", "He 2"], [1e40, 2e40])
+    lines2 = _lines([100.0, 200.0], ["H  1", "He 2"], [3e40, 4e40])
+    write_cloudy_h5_results(h5_path, "cluster_cloudy", "uid",
+        [_result(1, 1e6, lines=lines1), _result(2, 2e6, lines=lines2)])
+    delete_cloudy_h5_rows(h5_path, "cluster_cloudy", "uid", [0])
+    with h5py.File(h5_path, "r") as f:
+        g = f["cluster_cloudy"]
+        assert g["uid"][()].tolist() == [2]
+        assert g["line_wl"][()] == pytest.approx([100.0, 200.0])
+        assert g["line_lum"][()] == pytest.approx(np.array([[3e40, 4e40]]))
+
+
+def test_delete_multiple_rows_at_once(h5_path):
+    """Deleting several row indices in one call removes exactly those rows, regardless of order given."""
+    write_cloudy_h5_results(h5_path, "cluster_cloudy", "uid",
+        [_result(1, 1e6), _result(2, 2e6), _result(3, 3e6), _result(4, 4e6)])
+    delete_cloudy_h5_rows(h5_path, "cluster_cloudy", "uid", [2, 0])
+    with h5py.File(h5_path, "r") as f:
+        assert f["cluster_cloudy"]["uid"][()].tolist() == [2, 4]

@@ -18,7 +18,7 @@ from ._slug import Cluster, Filter, FilterIdeal, SimControls, parsePDFDescriptor
 from .cloudy.cloudy_continuum import read_cloudy_continuum
 from .cloudy.cloudy_input import write_cloudy_input
 from .cloudy.cloudy_lines import read_cloudy_linearr
-from .cloudy.cloudy_output import CloudyRunResult, write_cloudy_h5_results
+from .cloudy.cloudy_output import CloudyRunResult, delete_cloudy_h5_rows, write_cloudy_h5_results
 from .cloudy.cloudy_process import (
     cloudy_run_succeeded,
     find_cloudy_executable,
@@ -60,6 +60,56 @@ def _find_index(id_arr: np.ndarray, time_arr: u.Quantity | np.ndarray,
     """
     time_val_arr = cast(u.Quantity, time_arr).value if isinstance(time_arr, u.Quantity) else time_arr
     matches = np.nonzero((id_arr == id_val) & (time_val_arr == time_val))[0]
+    return int(matches[0]) if len(matches) > 0 else None
+
+
+def _find_matching_cloudy_row(group: slug_group_reader | None, id_key: str, id_val: int,
+    time_val: float, hp: hiiregparam) -> int | None:
+    """
+    Find the row already stored in a cluster_cloudy/galaxy_cloudy
+    group whose id/time and all six hiiregparam values exactly match.
+
+    Parameters
+    ----------
+    group : slug_group_reader or None
+        The cluster_cloudy or galaxy_cloudy group reader to search, or
+        None if that group doesn't exist yet (e.g. no cloudy run has
+        ever been written to this file).
+    id_key : str
+        Name of the id dataset: "uid" or "trial".
+    id_val : int
+        The uid or trial number to match.
+    time_val : float
+        The output time to match, in yr.
+    hp : hiiregparam
+        The physical conditions (nII, r0, r1, U, U0, Omega) a
+        candidate row must also match exactly.
+
+    Returns
+    -------
+    int or None
+        The index of the first row whose id, time, and all six
+        hiiregparam values all match, or None if group is None or no
+        such row exists.
+    """
+    if group is None:
+        return None
+    ids = cast(np.ndarray, group[id_key])
+    times = cast(u.Quantity, group["time"]).value
+    mask = (ids == id_val) & (times == time_val)
+    if not np.any(mask):
+        return None
+    for name, unit, hp_val in (
+        ("nII", u.cm ** -3, hp.nII), ("r0", u.cm, hp.r0), ("r1", u.cm, hp.r1),
+        ("U", u.dimensionless_unscaled, hp.U), ("U0", u.dimensionless_unscaled, hp.U0),
+        ("Omega", u.dimensionless_unscaled, hp.Omega)):
+        stored_raw = group[name]
+        if isinstance(stored_raw, u.Quantity):
+            stored = cast(Any, stored_raw).to_value(unit)
+        else:
+            stored = np.asarray(stored_raw)
+        mask &= (stored == hp_val.to_value(unit))
+    matches = np.nonzero(mask)[0]
     return int(matches[0]) if len(matches) > 0 else None
 
 
@@ -464,7 +514,8 @@ class slug_reader:
             cluster_phot.phot_convert(phot_to)
 
     def run_cloudy(self, spec_type: Literal["cluster", "galaxy"],
-        uid: int | None = None, trial: int | None = None, time: float | u.Quantity | None = None,
+        uid: int | list[int] | None = None, trial: int | list[int] | None = None,
+        time: float | u.Quantity | None = None,
         nII: u.Quantity | float | None = None, r0: u.Quantity | float | None = None,
         r1: u.Quantity | float | None = None, U: u.Quantity | float | None = None,
         U0: u.Quantity | float | None = None, Omega: u.Quantity | float | None = None,
@@ -472,7 +523,7 @@ class slug_reader:
         template: str | Path | None = None, warn: bool = True,
         fix_quantity: Literal["nII", "r0", "r1", "U", "U0", "Omega"] | None = None,
         r0safety: float = 0.01, cloudy_path: str | Path | None = None,
-        max_workers: int | None = None) -> bool | list[bool]:
+        max_workers: int | None = None, overwrite: bool = False) -> bool | list[bool]:
         """
         Write cloudy input decks for one or more of this file's own
         spectra, run cloudy on each of them, and save the results of
@@ -483,15 +534,15 @@ class slug_reader:
         ----------
         spec_type : {"cluster", "galaxy"}
             Which kind of spectrum to use.
-        uid : int, optional
-            Unique ID of the cluster spectrum to use; only meaningful
-            if spec_type is "cluster". If omitted, every cluster
-            matching time (or every cluster, if time is also omitted)
-            is used.
-        trial : int, optional
-            Trial number of the galaxy spectrum to use; only
-            meaningful if spec_type is "galaxy". If omitted, every
-            trial matching time (or every trial, if time is also
+        uid : int or list of int, optional
+            Unique ID(s) of the cluster spectrum/spectra to use; only
+            meaningful if spec_type is "cluster". If omitted, every
+            cluster matching time (or every cluster, if time is also
+            omitted) is used.
+        trial : int or list of int, optional
+            Trial number(s) of the galaxy spectrum/spectra to use;
+            only meaningful if spec_type is "galaxy". If omitted,
+            every trial matching time (or every trial, if time is also
             omitted) is used.
         time : float or astropy.units.Quantity, optional
             Output time to use, in yr if a bare float. If omitted,
@@ -523,17 +574,29 @@ class slug_reader:
             Maximum number of cloudy processes to run at once.
             Defaults to the number of available CPUs; pass a smaller
             value to leave some cores free.
+        overwrite : bool, default False
+            By default, a matching spectrum whose id/time and all six
+            hiiregparam values (nII, r0, r1, U, U0, Omega) exactly
+            match an already-stored cluster_cloudy/galaxy_cloudy row
+            is skipped -- no deck is written and cloudy is not run for
+            it -- and counted as a success, since its data are already
+            stored. Pass True to instead always rerun cloudy for every
+            matching spectrum, replacing any such already-stored row
+            with the new run's results.
 
         Returns
         -------
         bool or list of bool
-            Whether each matching spectrum's cloudy run succeeded
-            (its own captured stdout's last non-blank line contains
-            "Cloudy exited OK" -- see cloudy_run_succeeded). A single
-            bool if exactly one spectrum matched, otherwise a list of
-            bool in the same order as the matched spectra were
-            processed. This call blocks until every matching
-            spectrum's cloudy run has completed.
+            Whether each matching spectrum's cloudy run succeeded: a
+            skipped duplicate (see overwrite above) counts as a
+            success without cloudy having been run at all, and
+            everything else is judged by whether its own captured
+            stdout's last non-blank line contains "Cloudy exited OK"
+            (see cloudy_run_succeeded). A single bool if exactly one
+            spectrum matched, otherwise a list of bool in the same
+            order as the matched spectra were processed. This call
+            blocks until every matching spectrum's cloudy run (skipped
+            duplicates aside) has completed.
 
         Raises
         ------
@@ -582,6 +645,15 @@ class slug_reader:
         next access); this only happens if at least one run in this
         call succeeded, so a call where every run fails leaves the
         file untouched.
+
+        Duplicate detection (and, with overwrite=True, replacement) is
+        keyed on an exact match of id/time and all six hiiregparam
+        values against what's already stored -- not just id/time alone
+        -- so the same spectrum rerun with different physical
+        conditions is always treated as a new, independent run rather
+        than a duplicate. With overwrite=True, a matched row is only
+        actually replaced once its own rerun succeeds: a failed rerun
+        leaves the previously-stored row untouched.
         """
         if spec_type == "cluster" and trial is not None:
             raise ValueError("run_cloudy: trial is only meaningful for spec_type='galaxy'")
@@ -606,7 +678,7 @@ class slug_reader:
 
         mask = np.ones(len(ids), dtype=bool)
         if id_val is not None:
-            mask &= (ids == id_val)
+            mask &= np.isin(ids, id_val) if isinstance(id_val, list) else (ids == id_val)
         if time_val is not None:
             mask &= (times.value == time_val)
         indices = np.nonzero(mask)[0]
@@ -642,11 +714,17 @@ class slug_reader:
 
         wl = cast(u.Quantity, spectra["wl"])
         all_spec = cast(u.Quantity, spectra["spec"])
+        existing_group = self.cluster_cloudy if spec_type == "cluster" else self.galaxy_cloudy
 
         written: list[Path] = []
         run_ids: list[int] = []
         run_times: list[float] = []
         run_hps: list[hiiregparam] = []
+        run_overwrite_rows: list[int | None] = []
+        # Aligned with indices: True for a spectrum skipped as an
+        # already-stored duplicate (see overwrite above), None for one
+        # that got a deck written and was actually run
+        skipped: list[bool | None] = []
         for idx in indices:
             this_id = int(ids[idx])
             this_time = float(times.value[idx])
@@ -676,19 +754,27 @@ class slug_reader:
 
             hp = hiiregparam(qH0, warn=warn, fix_quantity=fix_quantity, r0safety=r0safety, **nebular_kwargs)
 
+            existing_row = _find_matching_cloudy_row(existing_group, id_key, this_id, this_time, hp)
+            if existing_row is not None and not overwrite:
+                skipped.append(True)
+                continue
+            skipped.append(None)
+
             suffix = f"uid{this_id:09d}" if spec_type == "cluster" else f"trial{this_id:05d}"
             output_path = output_dir / f"{model_name}_{suffix}_t{this_time:.6e}.in"
             written.append(write_cloudy_input(wl, spec, qH0, hp, feh, output_path, template=template))
             run_ids.append(this_id)
             run_times.append(this_time)
             run_hps.append(hp)
+            run_overwrite_rows.append(existing_row)
 
-        out_paths = run_cloudy_decks(written, cloudy_exe, max_workers=max_workers)
-        successes = [cloudy_run_succeeded(p) for p in out_paths]
+        out_paths = run_cloudy_decks(written, cloudy_exe, max_workers=max_workers) if written else []
+        ran_successes = [cloudy_run_succeeded(p) for p in out_paths]
 
         results: list[CloudyRunResult] = []
-        for deck, this_id, this_time, hp, success in zip(
-            written, run_ids, run_times, run_hps, successes, strict=True):
+        rows_to_delete: set[int] = set()
+        for deck, this_id, this_time, hp, overwrite_row, success in zip(
+            written, run_ids, run_times, run_hps, run_overwrite_rows, ran_successes, strict=True):
             if not success:
                 continue
             continuum = None
@@ -701,11 +787,15 @@ class slug_reader:
                 lines = read_cloudy_linearr(linearr_path)
             results.append(CloudyRunResult(
                 this_id, this_time, hp.nII, hp.r0, hp.r1, hp.U, hp.U0, hp.Omega, continuum, lines))
+            if overwrite_row is not None:
+                rows_to_delete.add(overwrite_row)
 
         if results:
             cloudy_group = "cluster_cloudy" if spec_type == "cluster" else "galaxy_cloudy"
             filename = self._file.filename
             self._file.close()
+            if rows_to_delete:
+                delete_cloudy_h5_rows(filename, cloudy_group, id_key, sorted(rows_to_delete))
             write_cloudy_h5_results(filename, cloudy_group, id_key, results)
             self._file = h5py.File(filename, "r")
             # Rebuild the group-name set (not just reset cached values):
@@ -715,5 +805,11 @@ class slug_reader:
             # self._groups's key set was previously fixed at __init__
             self._groups = {name: None for name in self._file
                 if isinstance(self._file[name], h5py.Group)}
+
+        # Merge the skipped-duplicate successes (True, no cloudy run)
+        # back in among the ones actually run, preserving indices' own
+        # order
+        ran_iter = iter(ran_successes)
+        successes = [flag if flag is not None else next(ran_iter) for flag in skipped]
 
         return successes[0] if len(successes) == 1 else successes
