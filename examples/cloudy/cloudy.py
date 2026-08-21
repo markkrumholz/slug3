@@ -11,8 +11,9 @@ def _():
     import numpy as np
     import matplotlib.pyplot as plt
     import astropy.units as u
+    from astropy.constants import h, c
 
-    return np, plt, u
+    return c, h, np, plt, u
 
 
 @app.cell
@@ -83,16 +84,26 @@ def _(plt, sim_output):
 
 
 @app.cell
-def _(np, sim_output):
-    idx = np.argsort(sim_output.cluster_cloudy['line_lum'])[::-1]
+def _(c, h, np, sim_output, u):
+    idx = np.argsort(sim_output.cluster_cloudy['line_lum'][0])[::-1]
     for i in range(10):
-        print(sim_output.cluster_cloudy['line_label'][0])
+        print("{:s} {:f} {:f} {:e}".format(
+            sim_output.cluster_cloudy['line_label'][idx[i]],
+            sim_output.cluster_cloudy['line_wl'][idx[i]],
+            (h*c/sim_output.cluster_cloudy['line_wl'][idx[i]]).to(u.eV),
+            sim_output.cluster_cloudy['line_lum'][0,idx[i]]))
     return
 
 
 @app.cell
 def _(sim_output):
-    sim_output.cluster_cloudy['spec_trans_emit'].shape
+    sim_output.cluster_cloudy['line_label']
+    return
+
+
+@app.cell
+def _(sim_output):
+    sim_output.cluster_cloudy['U']
     return
 
 
