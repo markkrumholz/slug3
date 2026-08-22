@@ -1,0 +1,8 @@
+# Cluster mass function for the cloudy_example example: a single
+# powerlaw segment with slope -1, from 1e3 to 1e6 Msun.
+
+breakpoints = [1e3, 1e6]
+
+[segment1]
+type = "powerlaw"
+slope = -1

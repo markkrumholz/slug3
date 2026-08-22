@@ -1,0 +1,9 @@
+# Output time distribution for the cloudy_example example: each
+# trial's single output time is drawn uniformly from [1e6, 4e6] yr.
+# A uniform distribution is just a powerlaw with slope 0.
+
+breakpoints = [1e6, 4e6]
+
+[segment1]
+type = "powerlaw"
+slope = 0
