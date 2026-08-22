@@ -22,9 +22,9 @@ def _():
     import sys
     import os
     sys.path = [os.path.join('..', '..')] + sys.path
-    from slugpy import read
+    from slugpy import read, run_sim
 
-    return os, read
+    return os, read, run_sim
 
 
 @app.cell
@@ -70,7 +70,7 @@ def _(np, sim_output):
 
 @app.cell
 def _(QHI, c, h, idx_phot, np, sim_output, u):
-    # Print the luminosity per ionizing photon for the 10 brightest lines for clusters 0 and 1
+    # Print the luminosity per ionizing photon for the 10 brightest lines for the two clusters
     idx_cloudy = [np.where(sim_output.cluster_cloudy['uid']==0)[0], np.where(sim_output.cluster_cloudy['uid']==1)[0]]
     idx_line = np.argsort(np.squeeze(sim_output.cluster_cloudy['line_lum'][idx_cloudy[0]]))[::-1]
     print("{:4s}   {:15s}   {:15s}   {:18s}   {:15s}".format(
@@ -113,9 +113,6 @@ def _(QHI, c, h, idx_cloudy, np, plt, sim_output, u):
                    color='C0'.format(j),
                    label='Transmitted stellar + nebular') 
 
-        # Annotate lines
-    
-    
         # Adjust range
         wl_lim = np.array([100,1e8])*u.Angstrom
         plt.xlim(wl_lim.value)
@@ -142,11 +139,6 @@ def _(QHI, c, h, idx_cloudy, np, plt, sim_output, u):
 
     # Show plot
     plt.show()
-    return
-
-
-@app.cell
-def _():
     return
 
 
