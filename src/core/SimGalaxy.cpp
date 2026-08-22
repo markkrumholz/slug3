@@ -10,6 +10,7 @@
 #include "../io/OutputManager.hpp"
 #include "../io/SimControls.hpp"
 #include "Galaxy.hpp"
+#include <atomic>
 #include <iostream>
 #include <memory>
 #include <utility>
@@ -65,6 +66,8 @@ void core::SimGalaxy::run()
             outputManager_->writeGalaxySpec(trialNum, outTime, galaxy);
             outputManager_->writeGalaxyPhot(trialNum, outTime, galaxy);
         }
+
+        trialsCompleted_.fetch_add(1, std::memory_order_relaxed);
     }
 
     if (simControls_.verbosity() > 0)

@@ -176,6 +176,12 @@ out_dir : str
     default) means output will be written into the current working
     directory.)doc";
 
+static constexpr std::string_view nTrialGetterDocstring = R"doc(Return the number of trials this simulation will run.
+
+Returns
+-------
+n_trial : int)doc";
+
 static constexpr std::string_view wlObsDocstring = R"doc(Return the observed-frame wavelength grid of the spectral synthesizer.
 
 Returns
@@ -616,6 +622,8 @@ void bindSimControls(py::module_& m)
                 modelNameGetterDocstring.data())
         .def("outDir", &io::SimControls::outDir,
                 outDirGetterDocstring.data())
+        .def("nTrial", &io::SimControls::nTrial,
+                nTrialGetterDocstring.data())
         .def("setComputeLbol", &io::SimControls::setComputeLbol,
                 setComputeLbolDocstring.data(), py::arg("value"))
         .def("setIMF", &io::SimControls::setIMF,

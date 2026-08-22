@@ -525,7 +525,7 @@ class slug_reader:
         fix_quantity: Literal["nII", "r0", "r1", "U", "U0", "Omega"] | None = None,
         r0safety: float = 0.01, cloudy_path: str | Path | None = None,
         max_workers: int | None = None, overwrite: bool = False,
-        save_temp: bool = False) -> bool | list[bool]:
+        save_temp: bool = False, progress: bool = True) -> bool | list[bool]:
         """
         Write cloudy input decks for one or more of this file's own
         spectra, run cloudy on each of them, and save the results of
@@ -598,6 +598,11 @@ class slug_reader:
             written to this file, regardless of whether any individual
             run succeeded or failed. Pass True to keep temp_dir
             instead, e.g. to inspect a failed run's own cloudy output.
+        progress : bool, default True
+            Whether to show a progress bar (see slugpy.progress)
+            tracking decks completed. A no-op if every matching
+            spectrum is skipped as an already-stored duplicate (see
+            overwrite above).
 
         Returns
         -------
@@ -790,7 +795,8 @@ class slug_reader:
             run_hps.append(hp)
             run_overwrite_rows.append(existing_row)
 
-        out_paths = run_cloudy_decks(written, cloudy_exe, max_workers=max_workers) if written else []
+        out_paths = run_cloudy_decks(
+            written, cloudy_exe, max_workers=max_workers, progress=progress) if written else []
         ran_successes = [cloudy_run_succeeded(p) for p in out_paths]
 
         results: list[CloudyRunResult] = []

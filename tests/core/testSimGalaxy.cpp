@@ -17,6 +17,7 @@
 #include <filesystem>
 #include <iostream>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <toml.hpp>
 #include <utility>
@@ -68,7 +69,16 @@ static void runEndToEnd(const toml::table& inputDeck)
 #endif // _OPENMP
 
     core::SimGalaxy simGalaxy(simControls, std::move(outputManager));
+    if (simGalaxy.trialsCompleted() != 0)
+    {
+        throw std::runtime_error("testSimGalaxy: trialsCompleted() should start at 0");
+    }
     simGalaxy.run();
+    if (simGalaxy.trialsCompleted() != simControls.nTrial())
+    {
+        throw std::runtime_error(
+            "testSimGalaxy: trialsCompleted() should equal nTrial() after run() completes");
+    }
 }
 
 // There is no output to check yet -- SimGalaxy::run() only updates

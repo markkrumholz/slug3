@@ -180,7 +180,16 @@ static auto runEndToEnd(const toml::table& inputDeck) -> bool
 
     const bool constFeH = simControls.constFeH();
     core::SimCluster simCluster(simControls, std::move(outputManager));
+    if (simCluster.trialsCompleted() != 0)
+    {
+        throw std::runtime_error("testSimCluster: trialsCompleted() should start at 0");
+    }
     simCluster.run();
+    if (simCluster.trialsCompleted() != simControls.nTrial())
+    {
+        throw std::runtime_error(
+            "testSimCluster: trialsCompleted() should equal nTrial() after run() completes");
+    }
     return constFeH;
 }
 

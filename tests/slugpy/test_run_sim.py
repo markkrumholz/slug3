@@ -17,6 +17,7 @@ identical CLUSTERLIB_DIR/get_cluster comment for the same rule).
 :copyright: Copyright (c) 2026 Mark Krumholz
 """
 
+import importlib
 import pathlib
 from typing import cast
 
@@ -25,6 +26,13 @@ from astropy import units as u
 
 from slugpy import run_sim
 from slugpy.slug_reader import slug_reader
+
+# slugpy/__init__.py's own "from .run_sim import run_sim" overwrites the
+# slugpy.run_sim *attribute* with the function it imports (both share
+# the name "run_sim"), so "import slugpy.run_sim as run_sim_module"
+# would resolve to that function, not the actual module -- fetch the
+# module directly instead, to monkeypatch ProgressWatcher on it below.
+run_sim_module = importlib.import_module("slugpy.run_sim")
 
 REPO_ROOT = pathlib.Path.cwd()
 CLUSTER_DECK = str(REPO_ROOT / "tests" / "core" / "assets" / "testCluster.in")
@@ -65,7 +73,7 @@ def test_run_sim_cluster_deck(tmp_path, monkeypatch):
     with the expected data (one cluster, at CLUSTER_DECK's own fixed
     clusters.CMF, advanced through its own three output times)."""
     monkeypatch.chdir(tmp_path)
-    data = run_sim(CLUSTER_DECK)
+    data = run_sim(CLUSTER_DECK, progress=False)
 
     assert isinstance(data, slug_reader)
     assert data.clusters is not None
@@ -79,7 +87,7 @@ def test_run_sim_accepts_literal_toml_content(tmp_path, monkeypatch):
     same rule as SimControls's own constructor."""
     deck_text = pathlib.Path(CLUSTER_DECK).read_text()
     monkeypatch.chdir(tmp_path)
-    data = run_sim(deck_text)
+    data = run_sim(deck_text, progress=False)
 
     assert isinstance(data, slug_reader)
     assert data.clusters is not None
@@ -101,7 +109,7 @@ def test_run_sim_galaxy_deck(tmp_path, monkeypatch):
     reason -- see galaxy's own row count above for what actually
     distinguishes the two)."""
     monkeypatch.chdir(tmp_path)
-    data = run_sim(GALAXY_DECK)
+    data = run_sim(GALAXY_DECK, progress=False)
 
     assert isinstance(data, slug_reader)
     assert data.galaxy is not None
@@ -118,8 +126,43 @@ def test_run_sim_ascii_deck_warns_and_returns_none(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 
     with pytest.warns(UserWarning, match="ASCII output"):
-        result = run_sim(ASCII_DECK)
+        result = run_sim(ASCII_DECK, progress=False)
 
     assert result is None
     assert (tmp_path / "slug_sim_summary.txt").exists()
     assert (tmp_path / "slug_sim_clusters.txt").exists()
+
+
+# ---------------------------------------------------------------------
+# progress
+# ---------------------------------------------------------------------
+
+def test_progress_true_drives_a_progress_watcher(tmp_path, monkeypatch):
+    """progress=True (the default) wraps sim.run() in a ProgressWatcher tracking trialsCompleted() against nTrial()."""
+    monkeypatch.chdir(tmp_path)
+    calls = []
+    real_watcher = run_sim_module.ProgressWatcher
+
+    class _SpyWatcher(real_watcher):
+        def __init__(self, get_current, total, desc, **kwargs):
+            calls.append((total, desc))
+            super().__init__(get_current, total, desc, **kwargs)
+
+    monkeypatch.setattr(run_sim_module, "ProgressWatcher", _SpyWatcher)
+    data = run_sim(CLUSTER_DECK, progress=True)
+
+    assert isinstance(data, slug_reader)
+    assert len(calls) == 1
+    assert calls[0] == (1, "Running trials")  # testCluster.in has no n_trial, so SimControls's own default (1)
+
+
+def test_progress_false_skips_the_progress_watcher(tmp_path, monkeypatch):
+    """progress=False never constructs a ProgressWatcher at all."""
+    monkeypatch.chdir(tmp_path)
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("ProgressWatcher should not be constructed when progress=False")
+
+    monkeypatch.setattr(run_sim_module, "ProgressWatcher", _boom)
+    data = run_sim(CLUSTER_DECK, progress=False)
+    assert isinstance(data, slug_reader)

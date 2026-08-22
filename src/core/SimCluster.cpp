@@ -11,6 +11,7 @@
 #include "../io/SimControls.hpp"
 #include "../utils/UniqueIDManager.hpp"
 #include "Cluster.hpp"
+#include <atomic>
 #include <iostream>
 #include <memory>
 #include <utility>
@@ -60,6 +61,8 @@ void core::SimCluster::run()
             outputManager_->writeClusterSpec(trialNum, outTime, cluster);
             outputManager_->writeClusterPhot(trialNum, outTime, cluster);
         }
+
+        trialsCompleted_.fetch_add(1, std::memory_order_relaxed);
     }
 
     if (simControls_.verbosity() > 0)
