@@ -39,9 +39,13 @@
  * Wolf-Rayet star far outside every chained library's own log(Teff)
  * range is now rescued the same way regardless of tClamp, via
  * SpecsynLibWR::specForce() searching for the nearest populated
- * (log(R_t), log(Teff)) point); testClassifyWRFehOutOfRangeThrows
- * checks the one case that rescue can't cover -- feh itself entirely
- * outside every chained WR library's own range. testNormalLoggSpecForce checks that a
+ * (log(R_t), log(Teff)) point); testClassifyWRFehOutOfRangeClamps
+ * checks that feh itself, entirely outside every chained WR library's
+ * own range, is clamped to that range rather than thrown on (both
+ * sub- and super-solar), since spec() clamps feh before dispatching
+ * for a WR-classified star specifically -- unlike a normal-grid star
+ * with an equally out-of-range feh, which testChainOOBThrows confirms
+ * still throws. testNormalLoggSpecForce checks that a
  * star well within a normal library's own log(Teff) range, but with a
  * log(g) far outside its range, is still rescued by
  * SpecsynLibNoWind::specForce(). testChainWithSparseWD checks that a
@@ -473,30 +477,45 @@ static auto testClassifyWRRescue() -> int
 }
 
 // Check that a WR-classified star whose feh is entirely outside every
-// wrLibs_ library's own Fe_H range still throws, even after
-// specForce() -- unlike log(R_t)/log(Teff) (searched regardless of how
-// far out of range they start -- see testClassifyWRRescue), feh has no
-// rescue: SpecsynLibWR::specForce() can't even bracket it, so there is
-// no (log(R_t), log(Teff)) point to search at all -- see its own
-// comment.
-static auto testClassifyWRFehOutOfRangeThrows() -> int
+// wrLibs_ library's own Fe_H range is clamped to that range (both
+// sub- and super-solar), rather than throwing -- SpecsynLibChained::
+// spec() now clamps feh to fehMin_[wrGrid]/fehMax_[wrGrid] before
+// calling into the chain (see its own comment), specifically because
+// no super-solar (or very sub-solar) WR atmosphere grids currently
+// exist, so a WR star at either extreme should still get the nearest
+// available WR spectrum rather than fail outright. Only WR stars are
+// clamped this way -- testChainOOBThrows checks a normal-grid star
+// with an equally out-of-range feh still throws, unchanged.
+static auto testClassifyWRFehOutOfRangeClamps() -> int
 {
-    // feh = -5.0 is far outside POWR_WNE_test's own [-1.0, 0.0] range
     const auto props = makeWRStarData(20.0, 5.7, 4.7, 3e-5);
-    constexpr double outOfRangeFeh = -5.0;
+    constexpr double wrLuminosity = 501187.23362727246 * solarLuminosity; // 10^5.7 Lsun
 
     const specsyn::SpecsynLibChained chain(
         { "POWR_WNE_test", "TLUSTY_test", "WD_test" }, -3.0, 1.0, 0.0, 0.0,
         {}, specsyn::defaultR, registryName, 0.0, 0.0, 0, true, testControls);
-    try
+
+    int result = 0;
+    // feh = -5.0 and feh = 5.0 are both far outside POWR_WNE_test's
+    // own [-1.0, 0.0] range, on opposite sides of it
+    for (const double outOfRangeFeh : { -5.0, 5.0 })
     {
-        [[maybe_unused]] const auto spec = chain.spec(props, outOfRangeFeh);
-        std::cerr << "testSpecsynLibChained: expected a WR star with feh "
-            "entirely outside POWR_WNE_test's own range to throw, but it did not\n";
-        return 1;
+        try
+        {
+            const auto spec = chain.spec(props, outOfRangeFeh);
+            result += checkSpectrum(spec, chain.wl(), wrLuminosity,
+                "a WR star with feh = " + std::to_string(outOfRangeFeh) +
+                ", entirely outside POWR_WNE_test's own range, clamped rather than rescued");
+        }
+        catch (const std::exception& e)
+        {
+            std::cerr << "testSpecsynLibChained: unexpected exception for a WR star "
+                "with feh = " << outOfRangeFeh << " (should have been clamped, not "
+                "thrown): " << e.what() << "\n";
+            result += 1;
+        }
     }
-    catch (const std::runtime_error&) { /* expected */ }
-    return 0;
+    return result;
 }
 
 // Check that a star classified GridType::wdGrid by classifyGridType
@@ -892,7 +911,7 @@ auto testSpecsynLibChained() -> int
     result += testChainWithWD();
     result += testChainWithSparseWD();
     result += testClassifyWRRescue();
-    result += testClassifyWRFehOutOfRangeThrows();
+    result += testClassifyWRFehOutOfRangeClamps();
     result += testClassifyWD();
     result += testNormalLoggSpecForce();
     result += testChainOOBThrows();

@@ -686,12 +686,33 @@ namespace specsyn
                 "is available for this star");
         }
 
+        // WR stars specifically are clamped to the chained WR
+        // library's own real [Fe/H] coverage (fehMin_/fehMax_[wrGrid],
+        // already computed by updateFeHRanges()) before evaluating --
+        // no super-solar, or symmetrically very sub-solar, WR
+        // atmosphere grids currently exist, so without this a WR star
+        // whose actual [Fe/H] falls outside that coverage would
+        // otherwise throw (via specForce()) rather than degrade
+        // gracefully to the nearest available WR metallicity. WD/
+        // normal-grid stars keep their existing, deliberate
+        // no-rescue-for-feh behavior -- this mirrors
+        // specForIntegration()'s own identical clamp, applied there to
+        // every GridType for a different reason (tracks-grid padding
+        // points), restricted here to wrGrid alone.
+        double queryFeh = feh;
+        if (type == GridType::wrGrid)
+        {
+            const auto t = static_cast<std::size_t>(type);
+            if (!std::isnan(fehMin_[t])) { queryFeh = std::max(queryFeh, fehMin_[t]); } // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- t < gridTypeCount by construction
+            if (!std::isnan(fehMax_[t])) { queryFeh = std::min(queryFeh, fehMax_[t]); } // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- see above
+        }
+
         for (const auto& lib : chain)
         {
-            auto result = lib->spec(props, feh);
+            auto result = lib->spec(props, queryFeh);
             if (!result.empty()) { return result; }
         }
-        return chain.back()->specForce(props, feh);
+        return chain.back()->specForce(props, queryFeh);
     }
 
     auto SpecsynLibChained::specForIntegration(const StarData& props, const double feh) const -> std::vector<double>
