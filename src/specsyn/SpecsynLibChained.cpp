@@ -707,12 +707,17 @@ namespace specsyn
             if (!std::isnan(fehMax_[t])) { queryFeh = std::min(queryFeh, fehMax_[t]); } // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- see above
         }
 
+        // Normal-grid stars specifically are also clamped up to the
+        // chain's own combined lower log(Teff) floor, if they fall
+        // below it -- see clampNormalLogTeffFloor()'s own comment.
+        const StarData queryProps = clampNormalLogTeffFloor(props, type);
+
         for (const auto& lib : chain)
         {
-            auto result = lib->spec(props, queryFeh);
+            auto result = lib->spec(queryProps, queryFeh);
             if (!result.empty()) { return result; }
         }
-        return chain.back()->specForce(props, queryFeh);
+        return chain.back()->specForce(queryProps, queryFeh);
     }
 
     auto SpecsynLibChained::specForIntegration(const StarData& props, const double feh) const -> std::vector<double>
@@ -743,12 +748,38 @@ namespace specsyn
         if (!std::isnan(fehMin_[t])) { clampedFeh = std::max(clampedFeh, fehMin_[t]); } // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- t < gridTypeCount by construction
         if (!std::isnan(fehMax_[t])) { clampedFeh = std::min(clampedFeh, fehMax_[t]); } // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- see above
 
+        // Normal-grid stars are also clamped up to the chain's own
+        // combined lower log(Teff) floor, if they fall below it -- see
+        // clampNormalLogTeffFloor()'s own comment. This matters here
+        // in particular: continuousSpecIntegrand()'s own low-mass,
+        // non-stochastically-treated population is exactly where a
+        // track-grid point just barely cooler than the coolest
+        // chained library's own floor (e.g. MARCS's 2500 K) is most
+        // likely to actually turn up.
+        const StarData queryProps = clampNormalLogTeffFloor(props, type);
+
         for (const auto& lib : chain)
         {
-            auto result = lib->spec(props, clampedFeh);
+            auto result = lib->spec(queryProps, clampedFeh);
             if (!result.empty()) { return result; }
         }
-        return chain.back()->specForce(props, clampedFeh);
+        return chain.back()->specForce(queryProps, clampedFeh);
+    }
+
+    auto SpecsynLibChained::clampNormalLogTeffFloor(StarData props, const GridType type) const -> StarData
+    {
+        if (type == GridType::normalGrid)
+        {
+            const auto t = static_cast<std::size_t>(type);
+            const auto logTeIdx = static_cast<std::size_t>(tracks::FieldIdx::logTe);
+            // NOLINTBEGIN(cppcoreguidelines-pro-bounds-constant-array-index) -- t < gridTypeCount, logTeIdx < StarData::size() by construction
+            if (!std::isnan(logTeffMin_[t]) && props[logTeIdx] < logTeffMin_[t])
+            {
+                props[logTeIdx] = logTeffMin_[t];
+            }
+            // NOLINTEND(cppcoreguidelines-pro-bounds-constant-array-index)
+        }
+        return props;
     }
 
     auto SpecsynLibChained::makeCommonWlGrid(

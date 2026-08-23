@@ -209,6 +209,18 @@ namespace specsyn
          * different reason (tracks-grid padding points), restricted
          * here to WR stars alone.
          *
+         * Separately, if (and only if) the star is normal-grid, its
+         * own log(Teff) is clamped up to logTeffMin_[normalGrid] --
+         * the coolest floor among every chained normal library -- if
+         * it falls below that floor, since normal libraries have no
+         * rescue of their own for an out-of-range log(Teff) the way
+         * they do for log(g) (see SpecsynLibNoWind::specForce()). Only
+         * the lower bound is clamped: a normal-grid star exceeding the
+         * upper log(Teff) bound should already have been routed to
+         * wdGrid or wrGrid above, so if one still reaches here, that
+         * is a genuine gap worth throwing on rather than silently
+         * clamping away.
+         *
          * Then calls spec() on each library in that chain, in priority
          * order, stopping at and returning the first non-empty result
          * -- exactly as before this class's refactor to per-type
@@ -236,8 +248,10 @@ namespace specsyn
          *   never empty
          * @throws std::runtime_error under the same conditions as
          *   spec()/specForce() -- see spec()'s own comment -- except
-         *   that a feh outside the classified chain's own coverage no
-         *   longer causes one, since it is clamped first
+         *   that a feh outside the classified chain's own coverage, or
+         *   a normal-grid star's own log(Teff) below the chain's
+         *   combined floor, no longer causes one, since both are
+         *   clamped first
          * @details
          * Overrides Specsyn::specForIntegration() -- see its own
          * comment for why this exists at all and why it -- not
@@ -251,7 +265,14 @@ namespace specsyn
          * GridType::wdGrid, which has no [Fe/H] axis at all), so a feh
          * from a wider source (e.g. the tracks' own padded grid) than
          * this specific chain's own real coverage never reaches
-         * spec()/specForce() out of range.
+         * spec()/specForce() out of range, and also clamps a normal-
+         * grid star's own log(Teff) up to logTeffMin_[normalGrid] if
+         * needed (see clampNormalLogTeffFloor()) -- this matters here
+         * in particular, since continuousSpecIntegrand()'s own
+         * low-mass, non-stochastically-treated population is exactly
+         * where a track-grid point just barely cooler than the coolest
+         * chained library's own floor is most likely to actually turn
+         * up.
          */
         [[nodiscard]] auto specForIntegration(const StarData& props, double feh) const
         -> std::vector<double> override;
@@ -331,6 +352,28 @@ namespace specsyn
          * GridType needs to be turned into its own chain.
          */
         [[nodiscard]] auto chainFor(GridType type) const -> const std::vector<std::unique_ptr<Specsyn>>&;
+
+        /**
+         * @brief Clamp a normal-grid star's own log(Teff) up to the chain's combined lower floor, if needed
+         * @param props Stellar properties to (possibly) adjust; passed
+         *   by value, so the caller's own copy is never modified
+         * @param type The GridType props was already classified as
+         * @return props, with its own log(Teff) entry raised to
+         *   logTeffMin_[normalGrid] if type is GridType::normalGrid
+         *   and it was below that floor; unchanged for every other
+         *   GridType, or if it was already at or above the floor
+         * @details
+         * Shared by both spec() and specForIntegration() -- see
+         * spec()'s own comment for the full rationale (in short: no
+         * rescue of its own exists for an out-of-range log(Teff), the
+         * way SpecsynLibNoWind::specForce() has for log(g), and this
+         * is deliberately one-sided -- only the lower bound is
+         * clamped, since a star exceeding the upper bound should
+         * already have been routed to wdGrid/wrGrid by
+         * classifyGridType(), and if it wasn't, that's a real gap
+         * worth throwing on rather than silently clamping away).
+         */
+        [[nodiscard]] auto clampNormalLogTeffFloor(StarData props, GridType type) const -> StarData;
 
         /**
          * @brief The chained Wolf-Rayet (GridType::wrGrid) libraries, in priority order

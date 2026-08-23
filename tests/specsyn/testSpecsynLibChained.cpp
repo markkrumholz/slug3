@@ -48,7 +48,11 @@
  * still throws. testNormalLoggSpecForce checks that a
  * star well within a normal library's own log(Teff) range, but with a
  * log(g) far outside its range, is still rescued by
- * SpecsynLibNoWind::specForce(). testChainWithSparseWD checks that a
+ * SpecsynLibNoWind::specForce(). testNormalTeffFloorClamp checks that
+ * a normal-grid star just below the chain's own combined log(Teff)
+ * floor is instead clamped up to it (via both spec() and
+ * specForIntegration() independently), rather than thrown on the way
+ * an equally out-of-range feh still is. testChainWithSparseWD checks that a
  * WD_grid entry backed by a partially-filled grid (RAUCH_test)
  * dispatches correctly through the full chain, not just standalone
  * (see testSpecsynLibWD.cpp's own sparse-grid tests for that).
@@ -618,6 +622,56 @@ static auto testNormalLoggSpecForce() -> int
     return 0;
 }
 
+// Check that a normal-grid star just below the chain's own combined
+// log(Teff) floor (BOSZ_test's own 5750 K, the coolest point in this
+// two-library chain) is clamped up to it -- via both spec() and
+// specForIntegration() independently, since each has its own separate
+// clamp call (see clampNormalLogTeffFloor()'s own comment) -- rather
+// than throwing the way SpecsynLibNoWind::specForce() otherwise would
+// (it has no rescue of its own for an out-of-range log(Teff), unlike
+// log(g); see testNormalLoggSpecForce above).
+static auto testNormalTeffFloorClamp() -> int
+{
+    const auto props = makeStarData(1.0, 0.0, std::log10(5700.0));
+
+    const specsyn::SpecsynLibChained chain(
+        { "BOSZ_test", "TLUSTY_test" }, -3.0, 1.0, 0.0, 0.0,
+        {}, specsyn::defaultR, registryName, 0.0, 0.0, 0, true, testControls);
+
+    int result = 0;
+    try
+    {
+        const auto spec = chain.spec(props, solarFeh);
+        result += checkSpectrum(spec, chain.wl(), solarLuminosity,
+            "a normal-grid star just below the chain's own combined log(Teff) "
+            "floor, via spec(), clamped up to it");
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "testSpecsynLibChained: unexpected exception from spec() for "
+            "a normal-grid star just below the chain's own Teff floor (should have "
+            "been clamped): " << e.what() << "\n";
+        result += 1;
+    }
+
+    try
+    {
+        const auto spec = chain.specForIntegration(props, solarFeh);
+        result += checkSpectrum(spec, chain.wl(), solarLuminosity,
+            "a normal-grid star just below the chain's own combined log(Teff) "
+            "floor, via specForIntegration(), clamped up to it");
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "testSpecsynLibChained: unexpected exception from "
+            "specForIntegration() for a normal-grid star just below the chain's "
+            "own Teff floor (should have been clamped): " << e.what() << "\n";
+        result += 1;
+    }
+
+    return result;
+}
+
 // Check that a star outside every chained library's grid throws,
 // since the last library in the chain is always constructed with
 // OOBPolicy::raise regardless of chain order
@@ -914,6 +968,7 @@ auto testSpecsynLibChained() -> int
     result += testClassifyWRFehOutOfRangeClamps();
     result += testClassifyWD();
     result += testNormalLoggSpecForce();
+    result += testNormalTeffFloorClamp();
     result += testChainOOBThrows();
     result += testChainConstructorValidation();
     result += testChainUsesCommonGrid();
