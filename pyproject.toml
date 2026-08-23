@@ -1,0 +1,42 @@
+# pyproject.toml
+#
+# Documents slugpy's own Python dependencies -- there is deliberately
+# no [build-system] table here, so this file does not make `pip
+# install .` work. slugpy's compiled half (the _slug extension module,
+# wrapping src/pybind) is built by CMake directly into the slugpy/
+# directory alongside its pure-Python half, with no separate
+# packaging/install step (see AGENTS.md's own Building section); a
+# setuptools-style build here would only see the pure-Python files and
+# produce a package missing _slug entirely. This file exists purely so
+# tooling (dependabot, IDEs, `pip install -r <(python -c
+# "import tomllib,sys; ...")`-style scripts, etc.) has one place to
+# read slugpy's actual runtime requirements from.
+#
+# :copyright: Copyright (c) 2026 Mark Krumholz
+
+[project]
+name = "slugpy"
+description = "Python frontend for slug3 -- stellar population synthesis, and slug cluster/galaxy simulation output analysis."
+license = { file = "LICENSE" }
+requires-python = ">=3.12"
+version = "0.1"
+dependencies = [
+    "astropy",
+    "h5py",
+    "numpy",
+    "scipy",
+    "tomlkit",
+    "tqdm",
+]
+
+[project.optional-dependencies]
+# Only needed to run slugpy inside a marimo notebook (see
+# slugpy/progress.py); its import is wrapped in try/except elsewhere
+# in slugpy, so nothing else requires it.
+notebook = ["marimo"]
+# Needed to run the Python test suite (tests/slugpy, tests/pybind) --
+# see AGENTS.md's own Testing section.
+test = ["pytest"]
+# Needed for local type checking against pyrightconfig.json -- see
+# AGENTS.md's own Coding style section.
+dev = ["pyright"]
