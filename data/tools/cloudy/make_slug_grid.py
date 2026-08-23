@@ -10,10 +10,10 @@ mirroring slug2's own make_grid.py/process_grid.py two-stage design
 
 1. make_slug_grid.py (this script): for each (track set, [Fe/H])
    combination in the grid, write and run a cluster-type and a
-   galaxy-type slug input deck, producing the stellar spectra cloudy
-   needs as its own input.
-2. A not-yet-written script to run cloudy on every spectrum this
-   script produces.
+   galaxy-type slug input deck, producing the stellar spectra (and
+   Q(HI) photometry) cloudy needs as its own input.
+2. run_cloudy_grid.py: runs cloudy on every spectrum this script
+   produces.
 3. A not-yet-written script to post-process cloudy's own output into
    the final nebular emission lookup table.
 
@@ -29,15 +29,17 @@ For each (track set, [Fe/H]) pair, this writes two decks:
 
 - A cluster-type deck: a single fixed-mass (1e4 Msun) Chabrier-IMF
   cluster at that [Fe/H], spectral synthesis via the "default" chained
-  model over a 200-2e5 Angstrom, 1024-point grid, no photometry, no
-  extinction, output every 0.25 Myr from 0 to 10 Myr, one trial with
-  stars above 120 Msun treated non-stochastically (min_stoch_mass;
-  keeps the rare, ionizing-dominant high-mass end of the IMF from
-  being all-or-nothing across a single trial).
-- A galaxy-type deck: identical stellar/spectral settings, but a
-  galaxy forming stars at a fixed 1 Msun/yr with f_cluster = 0 (so
-  every star forms as part of the smooth field population, not in a
-  resolved cluster) and a single output at t = 100 Myr, once the
+  model over a 200-2e5 Angstrom, 1024-point grid, Q(HI) as the only
+  photometric filter (run_cloudy_grid.py's own way of picking which
+  output times are still worth running cloudy on), no extinction,
+  output every 0.25 Myr from 0 to 10 Myr, one trial with stars above
+  120 Msun treated non-stochastically (min_stoch_mass; keeps the rare,
+  ionizing-dominant high-mass end of the IMF from being all-or-nothing
+  across a single trial).
+- A galaxy-type deck: identical stellar/spectral/photometric settings,
+  but a galaxy forming stars at a fixed 1 Msun/yr with f_cluster = 0
+  (so every star forms as part of the smooth field population, not in
+  a resolved cluster) and a single output at t = 100 Myr, once the
   galaxy's own stellar population has reached a quasi-equilibrium
   luminosity.
 
@@ -200,6 +202,9 @@ nwl = {NWL}
 [clusters]
 CMF = {CLUSTER_MASS}
 
+[phot]
+filters = ["Q(HI)"]
+
 [output]
 model_name = "{model_name}"
 start_time = 0.0
@@ -259,6 +264,9 @@ nwl = {NWL}
 CMF = {CLUSTER_MASS}
 CLF = {CLUSTER_LIFETIME}
 f_cluster = 0.0
+
+[phot]
+filters = ["Q(HI)"]
 
 [galaxy]
 sfr = {SFR}
