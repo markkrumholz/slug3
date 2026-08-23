@@ -11,6 +11,7 @@
 
 #include "../io/OutputManager.hpp"
 #include "../io/SimControls.hpp"
+#include <atomic>
 #include <memory>
 
 namespace core
@@ -53,10 +54,26 @@ namespace core
          */
         void run();
 
+        /**
+         * @brief Get the number of trials completed so far
+         * @return Number of trials this simulation has finished
+         *   running, out of simControls.nTrial() total
+         * @details
+         * Reads a relaxed atomic, so this is safe to call from another
+         * thread while run() is still executing (e.g. to drive a
+         * progress bar) without blocking on, or being blocked by, the
+         * OpenMP worker threads run() itself uses.
+         */
+        [[nodiscard]] auto trialsCompleted() const -> unsigned long
+        {
+            return trialsCompleted_.load(std::memory_order_relaxed);
+        }
+
     private:
 
         const io::SimControls& simControls_; /**< Simulation controls (physics and control-flow settings) */
         std::unique_ptr<io::OutputManager> outputManager_; /**< Output manager */
+        std::atomic<unsigned long> trialsCompleted_{0}; /**< Number of trials completed so far (see trialsCompleted()) */
     };
 
 } // namespace core

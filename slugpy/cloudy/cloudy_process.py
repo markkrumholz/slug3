@@ -14,6 +14,8 @@ import subprocess
 from collections.abc import Sequence
 from pathlib import Path
 
+from ..progress import make_progress_bar
+
 
 def find_cloudy_executable(cloudy_path: str | Path | None = None) -> Path:
     """
@@ -91,7 +93,7 @@ def run_cloudy_deck(input_path: str | Path, cloudy_exe: str | Path) -> Path:
 
 
 def run_cloudy_decks(input_paths: Sequence[str | Path], cloudy_exe: str | Path,
-    max_workers: int | None = None) -> list[Path]:
+    max_workers: int | None = None, progress: bool = True) -> list[Path]:
     """
     Run cloudy concurrently on multiple input decks.
 
@@ -105,6 +107,9 @@ def run_cloudy_decks(input_paths: Sequence[str | Path], cloudy_exe: str | Path,
     max_workers : int, optional
         Maximum number of cloudy processes to run at once. Defaults to
         the number of available CPUs.
+    progress : bool, default True
+        Whether to show a progress bar (see slugpy.progress) tracking
+        decks completed. A no-op if input_paths is empty.
 
     Returns
     -------
@@ -123,8 +128,14 @@ def run_cloudy_decks(input_paths: Sequence[str | Path], cloudy_exe: str | Path,
     """
     if max_workers is None:
         max_workers = os.cpu_count() or 1
+    input_paths = list(input_paths)
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = [executor.submit(run_cloudy_deck, path, cloudy_exe) for path in input_paths]
+        if progress and futures:
+            bar = make_progress_bar(total=len(futures), desc="Running cloudy")
+            for _ in concurrent.futures.as_completed(futures):
+                bar.update(1)
+            bar.close()
         return [future.result() for future in futures]
 
 

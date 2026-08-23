@@ -13,11 +13,20 @@ import pathlib
 import warnings
 
 from ._slug import OutputManagerAscii, OutputManagerH5, SimCluster, SimControls, SimGalaxy
+from .progress import run_with_progress
 from .read import read
 from .slug_reader import slug_reader
 
 
-def run_sim(input_deck: str) -> slug_reader | None:
+def _run(sim: SimCluster | SimGalaxy, sim_controls: SimControls, progress: bool) -> None:
+    """Run sim (a SimCluster or SimGalaxy), optionally tracking sim.trialsCompleted() against sim_controls.nTrial() via a progress bar."""
+    if progress:
+        run_with_progress(sim.run, sim.trialsCompleted, sim_controls.nTrial(), "Running trials")
+    else:
+        sim.run()
+
+
+def run_sim(input_deck: str, progress: bool = True) -> slug_reader | None:
     """
     Run a slug simulation end to end, exactly as the slug command-line
     executable does.
@@ -27,6 +36,9 @@ def run_sim(input_deck: str) -> slug_reader | None:
     input_deck : str
         Either the text of a slug TOML input deck, or a path to one on
         disk (see SimControls's own constructor for the exact rule).
+    progress : bool, default True
+        Whether to show a progress bar (see slugpy.progress) tracking
+        trials completed while the simulation runs.
 
     Returns
     -------
@@ -45,6 +57,18 @@ def run_sim(input_deck: str) -> slug_reader | None:
     sim_controls.simType() -- a SimCluster or SimGalaxy, which it then
     runs.
 
+    The progress bar (when enabled) is driven by run_with_progress:
+    run() itself executes on a background thread, while this calling
+    thread polls the running SimCluster/SimGalaxy's own
+    trialsCompleted() against nTrial() every 0.2s (see
+    run_with_progress's own docstring for why the polling has to
+    happen on this thread rather than a separate watcher thread). This
+    is safe because run() releases the GIL for its own entire duration
+    (see SimCluster.run/SimGalaxy.run's own pybind docstrings), so
+    polling this thread is never blocked by it, and the OpenMP worker
+    threads run() uses internally never touch Python or the GIL at
+    all.
+
     ASCII output is meant for small, human-readable output rather than
     batch processing, so there is no ASCII counterpart to slug_reader
     (yet -- this may change in the future). A deck requesting it still
@@ -62,11 +86,11 @@ def run_sim(input_deck: str) -> slug_reader | None:
 
     if sim_controls.simType() == SimControls.SimType.cluster:
         sim = SimCluster(sim_controls, output_manager)
-        sim.run()
+        _run(sim, sim_controls, progress)
         del sim
     elif sim_controls.simType() == SimControls.SimType.galaxy:
         sim = SimGalaxy(sim_controls, output_manager)
-        sim.run()
+        _run(sim, sim_controls, progress)
         del sim
 
     # Drop the only Python-side reference to output_manager (whether or

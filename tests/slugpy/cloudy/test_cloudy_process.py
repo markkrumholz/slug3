@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pytest
 
+import slugpy.cloudy.cloudy_process as cloudy_process_module
 from slugpy.cloudy.cloudy_process import (
     find_cloudy_executable,
     run_cloudy_deck,
@@ -125,7 +126,7 @@ def test_run_cloudy_decks_runs_all_and_preserves_order(fake_cloudy_exe, tmp_path
         deck.write_text(f"hden {i}.0\n")
         decks.append(deck)
 
-    out_paths = run_cloudy_decks(decks, fake_cloudy_exe, max_workers=2)
+    out_paths = run_cloudy_decks(decks, fake_cloudy_exe, max_workers=2, progress=False)
     assert out_paths == [d.with_suffix(".out") for d in decks]
     for out_path in out_paths:
         assert "FAKE_CLOUDY_RAN" in out_path.read_text()
@@ -139,7 +140,7 @@ def test_run_cloudy_decks_defaults_max_workers_to_cpu_count(fake_cloudy_exe, tmp
         deck = tmp_path / f"deck{i}.in"
         deck.write_text(f"hden {i}.0\n")
         decks.append(deck)
-    out_paths = run_cloudy_decks(decks, fake_cloudy_exe)
+    out_paths = run_cloudy_decks(decks, fake_cloudy_exe, progress=False)
     assert len(out_paths) == 3
 
 
@@ -153,10 +154,66 @@ def test_run_cloudy_decks_runs_concurrently(fake_cloudy_exe, tmp_path, monkeypat
         decks.append(deck)
 
     start = time.perf_counter()
-    run_cloudy_decks(decks, fake_cloudy_exe, max_workers=4)
+    run_cloudy_decks(decks, fake_cloudy_exe, max_workers=4, progress=False)
     elapsed = time.perf_counter() - start
 
     # Sequential execution would take >= 4 * 0.5 = 2.0s; concurrent
     # execution should take well under that (allow generous slack for
     # process-launch overhead and a loaded CI machine)
     assert elapsed < 1.5
+
+
+# ---------------------------------------------------------------------
+# progress
+# ---------------------------------------------------------------------
+
+def test_progress_true_shows_a_progress_bar(fake_cloudy_exe, tmp_path, monkeypatch):
+    """progress=True (the default) drives a progress bar, updated once per completed deck."""
+    calls = []
+
+    class _FakeBar:
+        def __init__(self):
+            self.updates = []
+
+        def update(self, n=1):
+            self.updates.append(n)
+
+        def close(self):
+            calls.append("closed")
+
+    def _fake_make_progress_bar(total, desc):
+        calls.append(("made", total, desc))
+        return _FakeBar()
+
+    monkeypatch.setattr(cloudy_process_module, "make_progress_bar", _fake_make_progress_bar)
+
+    decks = []
+    for i in range(3):
+        deck = tmp_path / f"deck{i}.in"
+        deck.write_text(f"hden {i}.0\n")
+        decks.append(deck)
+    run_cloudy_decks(decks, fake_cloudy_exe, max_workers=2, progress=True)
+
+    assert calls[0] == ("made", 3, "Running cloudy")
+    assert calls[-1] == "closed"
+
+
+def test_progress_false_never_builds_a_progress_bar(fake_cloudy_exe, tmp_path, monkeypatch):
+    def _boom(*args, **kwargs):
+        raise AssertionError("make_progress_bar should not be called when progress=False")
+
+    monkeypatch.setattr(cloudy_process_module, "make_progress_bar", _boom)
+
+    deck = tmp_path / "deck0.in"
+    deck.write_text("hden 0.0\n")
+    out_paths = run_cloudy_decks([deck], fake_cloudy_exe, progress=False)
+    assert len(out_paths) == 1
+
+
+def test_progress_is_a_noop_for_empty_input(fake_cloudy_exe, monkeypatch):
+    """progress=True with no decks to run never builds a progress bar (nothing to track)."""
+    def _boom(*args, **kwargs):
+        raise AssertionError("make_progress_bar should not be called for an empty deck list")
+
+    monkeypatch.setattr(cloudy_process_module, "make_progress_bar", _boom)
+    assert run_cloudy_decks([], fake_cloudy_exe, progress=True) == []

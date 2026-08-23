@@ -45,6 +45,20 @@ so this does not block other Python threads, and so the OpenMP
 parallelization this loop uses internally (if slug was built with
 OpenMP support) can actually make use of multiple cores.)doc";
 
+static constexpr std::string_view trialsCompletedDocstring = R"doc(Return the number of trials completed so far.
+
+Returns
+-------
+int
+    Number of trials this simulation has finished running, out of
+    sim_controls.nTrial() total.
+
+Details
+-------
+Safe to call from another thread while run() is still executing (e.g.
+to drive a progress bar), since run() releases the GIL for its own
+entire duration and this itself is a fast, non-blocking read.)doc";
+
 // Disable linting for includes -- the pybind macro magic seems to confuse
 // the linter
 // NOLINTBEGIN(misc-include-cleaner)
@@ -75,6 +89,8 @@ void bindSimCluster(py::module_& m)
                 py::keep_alive<1, 2>())
         .def("run", &core::SimCluster::run,
                 runDocstring.data(),
-                py::call_guard<py::gil_scoped_release>());
+                py::call_guard<py::gil_scoped_release>())
+        .def("trialsCompleted", &core::SimCluster::trialsCompleted,
+                trialsCompletedDocstring.data());
 }
 // NOLINTEND(misc-include-cleaner)
