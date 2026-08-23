@@ -195,6 +195,20 @@ namespace specsyn
          * normal) -- and selects that GridType's own chain (wrLibs_,
          * wdLibs_, or normalLibs_).
          *
+         * If (and only if) the star is a WR star, feh is then clamped
+         * to fehMin_[wrGrid]/fehMax_[wrGrid] -- the chained WR
+         * library's own real [Fe/H] coverage -- before being evaluated
+         * against it: no super-solar, or symmetrically very sub-solar,
+         * WR atmosphere grids currently exist, so without this a WR
+         * star whose actual [Fe/H] falls outside that coverage would
+         * otherwise throw rather than degrade gracefully to the
+         * nearest available WR metallicity. WD/normal-grid stars keep
+         * their existing, deliberate no-rescue-for-feh behavior
+         * unclamped -- this mirrors specForIntegration()'s own
+         * identical clamp, applied there to every GridType for a
+         * different reason (tracks-grid padding points), restricted
+         * here to WR stars alone.
+         *
          * Then calls spec() on each library in that chain, in priority
          * order, stopping at and returning the first non-empty result
          * -- exactly as before this class's refactor to per-type
