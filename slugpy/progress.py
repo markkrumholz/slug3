@@ -21,9 +21,13 @@ from typing import Any
 # plain command-line Python session, a Jupyter notebook, or a script
 # regardless of whether marimo happens to be installed at all --
 # marimo's own presence is only relevant when actually running inside
-# one of its notebooks (see running_in_marimo() below).
+# one of its notebooks (see running_in_marimo() below). It's
+# deliberately not installed in CI's own pyright environment, so
+# pyright can't resolve this import there either -- suppress that
+# specific diagnostic rather than installing an optional dependency
+# just to satisfy the type checker.
 try:
-    import marimo as _marimo
+    import marimo as _marimo  # pyright: ignore[reportMissingImports]
 except ImportError:
     _marimo = None
 
