@@ -31,7 +31,7 @@ from slugpy.slug_reader import slug_reader
 # slugpy.run_sim *attribute* with the function it imports (both share
 # the name "run_sim"), so "import slugpy.run_sim as run_sim_module"
 # would resolve to that function, not the actual module -- fetch the
-# module directly instead, to monkeypatch ProgressWatcher on it below.
+# module directly instead, to monkeypatch run_with_progress on it below.
 run_sim_module = importlib.import_module("slugpy.run_sim")
 
 REPO_ROOT = pathlib.Path.cwd()
@@ -137,18 +137,17 @@ def test_run_sim_ascii_deck_warns_and_returns_none(tmp_path, monkeypatch):
 # progress
 # ---------------------------------------------------------------------
 
-def test_progress_true_drives_a_progress_watcher(tmp_path, monkeypatch):
-    """progress=True (the default) wraps sim.run() in a ProgressWatcher tracking trialsCompleted() against nTrial()."""
+def test_progress_true_drives_run_with_progress(tmp_path, monkeypatch):
+    """progress=True (the default) runs sim.run() via run_with_progress, tracking trialsCompleted() against nTrial()."""
     monkeypatch.chdir(tmp_path)
     calls = []
-    real_watcher = run_sim_module.ProgressWatcher
+    real_run_with_progress = run_sim_module.run_with_progress
 
-    class _SpyWatcher(real_watcher):
-        def __init__(self, get_current, total, desc, **kwargs):
-            calls.append((total, desc))
-            super().__init__(get_current, total, desc, **kwargs)
+    def _spy(fn, get_current, total, desc, **kwargs):
+        calls.append((total, desc))
+        real_run_with_progress(fn, get_current, total, desc, **kwargs)
 
-    monkeypatch.setattr(run_sim_module, "ProgressWatcher", _SpyWatcher)
+    monkeypatch.setattr(run_sim_module, "run_with_progress", _spy)
     data = run_sim(CLUSTER_DECK, progress=True)
 
     assert isinstance(data, slug_reader)
@@ -156,13 +155,13 @@ def test_progress_true_drives_a_progress_watcher(tmp_path, monkeypatch):
     assert calls[0] == (1, "Running trials")  # testCluster.in has no n_trial, so SimControls's own default (1)
 
 
-def test_progress_false_skips_the_progress_watcher(tmp_path, monkeypatch):
-    """progress=False never constructs a ProgressWatcher at all."""
+def test_progress_false_skips_run_with_progress(tmp_path, monkeypatch):
+    """progress=False never calls run_with_progress at all."""
     monkeypatch.chdir(tmp_path)
 
     def _boom(*args, **kwargs):
-        raise AssertionError("ProgressWatcher should not be constructed when progress=False")
+        raise AssertionError("run_with_progress should not be called when progress=False")
 
-    monkeypatch.setattr(run_sim_module, "ProgressWatcher", _boom)
+    monkeypatch.setattr(run_sim_module, "run_with_progress", _boom)
     data = run_sim(CLUSTER_DECK, progress=False)
     assert isinstance(data, slug_reader)

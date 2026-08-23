@@ -5,11 +5,10 @@ A thin progress-bar factory that picks the right implementation for
 the current environment: marimo's own native progress bar when
 running inside a marimo notebook (tqdm's widgets don't render there),
 tqdm otherwise (which auto-detects a Jupyter notebook vs. a plain
-terminal on its own, via tqdm.auto). Also implements ProgressWatcher,
-which drives a progress bar from a background thread polling a
-counter callback -- for tracking a call (like SimCluster.run()) whose
-own progress can only be observed by querying some other object while
-that call is still executing.
+terminal on its own, via tqdm.auto). Also implements
+run_with_progress, which drives a progress bar while running a call
+(like SimCluster.run()) whose own progress can only be observed by
+polling some other object while that call is still executing.
 
 :copyright: Copyright (c) 2026 Mark Krumholz
 """
@@ -86,56 +85,69 @@ def make_progress_bar(total: int, desc: str) -> Any:
     return tqdm(total=total, desc=desc)
 
 
-class ProgressWatcher:
+def run_with_progress(fn: Callable[[], None], get_current: Callable[[], int], total: int,
+    desc: str, poll_interval: float = 0.2) -> None:
     """
-    Context manager that drives a progress bar from a background
-    thread polling a counter callback, for wrapping a call that blocks
-    (typically because it releases the GIL) while some other thread or
-    native code advances that counter -- e.g. SimCluster/SimGalaxy's
-    own run(), whose progress can only be observed via
-    trialsCompleted() while it executes.
+    Run fn to completion while showing a progress bar tracking
+    get_current() against total.
 
     Parameters
     ----------
+    fn : callable
+        Zero-argument callable to run to completion -- typically one
+        that blocks (releasing the GIL) while some other thread or
+        native code advances the count get_current() reports, e.g.
+        SimCluster.run().
     get_current : callable
         Zero-argument callable returning the current count so far.
     total : int
-        Total count expected once the wrapped call completes.
+        Total count expected once fn completes.
     desc : str
         Short label describing what's being tracked.
     poll_interval : float, default 0.2
         Seconds between successive polls of get_current.
 
-    Examples
-    --------
-    >>> with ProgressWatcher(sim.trialsCompleted, n_trial, "Running trials"):
-    ...     sim.run()
+    Raises
+    ------
+    BaseException
+        Whatever fn itself raised, re-raised here once fn's own
+        background thread has finished.
+
+    Details
+    -------
+    fn runs on a background thread; the progress bar is created and
+    updated entirely on the calling thread, which instead just polls
+    get_current() while periodically joining that background thread.
+    This -- not the reverse -- is required for marimo's own progress
+    bar: marimo tracks, in genuine thread-local state, which thread
+    owns a given notebook cell's execution context, and silently drops
+    any UI update made from another thread, so every bar.update() call
+    must happen on the same thread that called run_with_progress in
+    the first place, not a separate watcher thread polling while fn
+    itself runs on the calling thread.
     """
+    bar = make_progress_bar(total=total, desc=desc)
+    error: list[BaseException] = []
 
-    def __init__(self, get_current: Callable[[], int], total: int, desc: str,
-        poll_interval: float = 0.2) -> None:
-        self._get_current = get_current
-        self._bar = make_progress_bar(total=total, desc=desc)
-        self._poll_interval = poll_interval
-        self._stop = threading.Event()
-        self._thread = threading.Thread(target=self._watch, daemon=True)
+    def _target() -> None:
+        try:
+            fn()
+        except BaseException as exc:  # noqa: BLE001 -- re-raised on the calling thread below
+            error.append(exc)
 
-    def _watch(self) -> None:
-        last = 0
-        while True:
-            stopped = self._stop.wait(self._poll_interval)
-            current = self._get_current()
-            if current > last:
-                self._bar.update(current - last)
-                last = current
-            if stopped:
-                return
+    thread = threading.Thread(target=_target, daemon=True)
+    thread.start()
 
-    def __enter__(self) -> "ProgressWatcher":
-        self._thread.start()
-        return self
+    last = 0
+    while True:
+        thread.join(poll_interval)
+        current = get_current()
+        if current > last:
+            bar.update(current - last)
+            last = current
+        if not thread.is_alive():
+            break
 
-    def __exit__(self, exc_type: object, exc_value: object, traceback: object) -> None:
-        self._stop.set()
-        self._thread.join()
-        self._bar.close()
+    bar.close()
+    if error:
+        raise error[0]

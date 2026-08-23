@@ -1,6 +1,6 @@
 """
 Unit tests for slugpy.progress (running_in_marimo, make_progress_bar,
-ProgressWatcher).
+run_with_progress).
 
 Uses small hand-built fakes for both tqdm and marimo's own APIs,
 rather than depending on marimo actually being installed (it's an
@@ -11,6 +11,7 @@ the environment they happen to run in.
 :copyright: Copyright (c) 2026 Mark Krumholz
 """
 
+import threading
 import time
 
 import pytest
@@ -108,7 +109,7 @@ def test_make_progress_bar_uses_marimo_when_running_in_notebook(monkeypatch):
 
 
 # ---------------------------------------------------------------------
-# ProgressWatcher
+# run_with_progress
 # ---------------------------------------------------------------------
 
 class _FakeBar:
@@ -123,39 +124,70 @@ class _FakeBar:
         self.closed = True
 
 
-def test_progress_watcher_polls_and_reports_final_count(monkeypatch):
-    """A counter advanced from the main thread while the watcher's own background thread is polling ends up fully reflected once the context manager exits, even between polls."""
+def test_run_with_progress_polls_and_reports_final_count(monkeypatch):
+    """A counter advanced by fn (on its own background thread) while the calling thread polls ends up fully reflected once fn completes, even between polls."""
     fake_bar = _FakeBar()
     monkeypatch.setattr(progress, "make_progress_bar", lambda total, desc: fake_bar)
 
     state = {"n": 0}
-    with progress.ProgressWatcher(lambda: state["n"], total=3, desc="trials", poll_interval=0.01):
+
+    def fn():
         state["n"] = 1
         time.sleep(0.05)
         state["n"] = 3
+
+    progress.run_with_progress(fn, lambda: state["n"], total=3, desc="trials", poll_interval=0.01)
 
     assert sum(fake_bar.updates) == 3
     assert fake_bar.closed is True
 
 
-def test_progress_watcher_no_updates_when_counter_never_advances(monkeypatch):
+def test_run_with_progress_no_updates_when_counter_never_advances(monkeypatch):
     fake_bar = _FakeBar()
     monkeypatch.setattr(progress, "make_progress_bar", lambda total, desc: fake_bar)
 
-    with progress.ProgressWatcher(lambda: 0, total=3, desc="trials", poll_interval=0.01):
-        time.sleep(0.03)
+    progress.run_with_progress(lambda: time.sleep(0.03), lambda: 0, total=3, desc="trials",
+        poll_interval=0.01)
 
     assert fake_bar.updates == []
     assert fake_bar.closed is True
 
 
-def test_progress_watcher_propagates_exceptions_from_the_wrapped_block(monkeypatch):
-    """An exception raised inside the with-block still stops and closes the watcher cleanly, and propagates as normal."""
+def test_run_with_progress_propagates_exceptions_from_fn(monkeypatch):
+    """An exception raised inside fn (on its own background thread) still stops and closes the bar cleanly, and is re-raised on the calling thread."""
     fake_bar = _FakeBar()
     monkeypatch.setattr(progress, "make_progress_bar", lambda total, desc: fake_bar)
 
+    def fn():
+        raise RuntimeError("boom")
+
     with pytest.raises(RuntimeError, match="boom"):
-        with progress.ProgressWatcher(lambda: 0, total=1, desc="trials", poll_interval=0.01):
-            raise RuntimeError("boom")
+        progress.run_with_progress(fn, lambda: 0, total=1, desc="trials", poll_interval=0.01)
 
     assert fake_bar.closed is True
+
+
+def test_run_with_progress_updates_happen_on_the_calling_thread(monkeypatch):
+    """Every bar.update() call happens on the thread that called run_with_progress, not on fn's own background thread -- this is what makes the progress bar actually work under marimo, whose runtime context is genuine thread-local state (see progress.py's own comment)."""
+    update_threads: list[threading.Thread] = []
+
+    class _TrackingBar(_FakeBar):
+        def update(self, n: int = 1) -> None:
+            update_threads.append(threading.current_thread())
+            super().update(n)
+
+    tracking_bar = _TrackingBar()
+    monkeypatch.setattr(progress, "make_progress_bar", lambda total, desc: tracking_bar)
+
+    state = {"n": 0}
+
+    def fn():
+        state["n"] = 1
+        time.sleep(0.03)
+        state["n"] = 2
+
+    calling_thread = threading.current_thread()
+    progress.run_with_progress(fn, lambda: state["n"], total=2, desc="trials", poll_interval=0.01)
+
+    assert update_threads
+    assert all(t is calling_thread for t in update_threads)
