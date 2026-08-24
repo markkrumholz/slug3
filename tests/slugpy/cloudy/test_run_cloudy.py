@@ -249,6 +249,24 @@ def test_cluster_uid_list_excludes_unlisted_uids(tmp_path):
     assert len(_decks_in(tmp_path / "out")) == 1
 
 
+def test_cluster_time_list_matches_every_listed_time(tmp_path):
+    """time as a list matches every listed output time for the given uid."""
+    reader = slug_reader(_make_cluster_test_file(tmp_path, "c1.h5", qhi_in_phot=True))
+    result = reader.run_cloudy(
+        "cluster", uid=1, time=[1e6, 2e6], save_temp=True, temp_dir=tmp_path / "out", progress=False)
+    assert result == [True, True]
+    assert len(_decks_in(tmp_path / "out")) == 2
+
+
+def test_cluster_time_list_excludes_unlisted_times(tmp_path):
+    """time as a list only matches the listed times, not every time for that uid."""
+    reader = slug_reader(_make_cluster_test_file(tmp_path, "c1.h5", qhi_in_phot=True))
+    result = reader.run_cloudy(
+        "cluster", uid=1, time=[1e6], save_temp=True, temp_dir=tmp_path / "out", progress=False)
+    assert result is True
+    assert len(_decks_in(tmp_path / "out")) == 1
+
+
 def test_cluster_no_selector_matches_everything(tmp_path):
     """Neither uid nor time given matches every (uid, time) spectrum in the file."""
     reader = slug_reader(_make_cluster_test_file(tmp_path, "c1.h5", qhi_in_phot=True))

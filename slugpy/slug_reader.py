@@ -516,7 +516,7 @@ class slug_reader:
 
     def run_cloudy(self, spec_type: Literal["cluster", "galaxy"],
         uid: int | list[int] | None = None, trial: int | list[int] | None = None,
-        time: float | u.Quantity | None = None,
+        time: float | u.Quantity | list[float | u.Quantity] | None = None,
         nII: u.Quantity | float | None = None, r0: u.Quantity | float | None = None,
         r1: u.Quantity | float | None = None, U: u.Quantity | float | None = None,
         U0: u.Quantity | float | None = None, Omega: u.Quantity | float | None = None,
@@ -546,8 +546,8 @@ class slug_reader:
             only meaningful if spec_type is "galaxy". If omitted,
             every trial matching time (or every trial, if time is also
             omitted) is used.
-        time : float or astropy.units.Quantity, optional
-            Output time to use, in yr if a bare float. If omitted,
+        time : float, astropy.units.Quantity, or list of either, optional
+            Output time(s) to use, in yr if a bare float. If omitted,
             every output time matching uid/trial (or every output
             time, if those are also omitted) is used.
         nII, r0, r1, U, U0, Omega : astropy.units.Quantity or float, optional
@@ -699,13 +699,16 @@ class slug_reader:
         id_val = uid if spec_type == "cluster" else trial
         ids = cast(np.ndarray, spectra[id_key])
         times = cast(u.Quantity, spectra["time"])
-        time_val = cast(u.Quantity, time).to_value(u.yr) if isinstance(time, u.Quantity) else time
+        if isinstance(time, list):
+            time_val = [cast(u.Quantity, t).to_value(u.yr) if isinstance(t, u.Quantity) else t for t in time]
+        else:
+            time_val = cast(u.Quantity, time).to_value(u.yr) if isinstance(time, u.Quantity) else time
 
         mask = np.ones(len(ids), dtype=bool)
         if id_val is not None:
             mask &= np.isin(ids, id_val) if isinstance(id_val, list) else (ids == id_val)
         if time_val is not None:
-            mask &= (times.value == time_val)
+            mask &= np.isin(times.value, time_val) if isinstance(time_val, list) else (times.value == time_val)
         indices = np.nonzero(mask)[0]
         if len(indices) == 0:
             raise ValueError(
