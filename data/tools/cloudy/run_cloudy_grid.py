@@ -17,17 +17,17 @@ they end up with very different numbers of cloudy runs to do:
   pool (each one blocks on its own external cloudy subprocess and
   releases the GIL while doing so, so threads are enough).
 - A cluster-type file has one cluster but many output times (see
-  make_slug_grid.py's own 0-10 Myr, 0.25 Myr cadence), most of which
-  are not worth running cloudy on: once the cluster's own ionizing
-  luminosity Q(HI) has dropped well below its own peak, the resulting
-  nebular emission is negligible. This script reads each cluster
-    file's own Q(HI) photometry (see make_slug_grid.py's own
+  make_slug_grid.py's own 0.25-10 Myr, 0.25 Myr cadence), most of
+  which are not worth running cloudy on: once the cluster's own
+  ionizing luminosity Q(HI) has dropped well below its own peak, the
+  resulting nebular emission is negligible. This script reads each
+  cluster file's own Q(HI) photometry (see make_slug_grid.py's own
   Q(HI)-only [phot] stanza) and only requests cloudy runs for output
   times where Q(HI) exceeds --qhi-fraction (default 1%) of Q(HI) at
-  t = 0 -- passed to a single run_cloudy() call as a list of times, so
-  slugpy's own run_cloudy_decks thread pool parallelizes across them
-  internally, rather than this script managing that concurrency
-  itself.
+  the earliest output time -- passed to a single run_cloudy() call as
+  a list of times, so slugpy's own run_cloudy_decks thread pool
+  parallelizes across them internally, rather than this script
+  managing that concurrency itself.
 
 Every qualifying spectrum (every qualifying output time for a cluster
 file, the single output time for a galaxy file) is run through cloudy
@@ -113,16 +113,15 @@ def qualifying_cluster_times(reader: slug_reader, qhi_fraction: float) -> list[f
         Q(HI)-only cluster_phot group (see make_slug_grid.py).
     qhi_fraction : float
         An output time qualifies if its own Q(HI) exceeds this
-        fraction of Q(HI) at t = 0 (the first, i.e. earliest, output
-        time).
+        fraction of Q(HI) at the earliest output time.
 
     Returns
     -------
     list of float
         The qualifying output times, in yr, in ascending order --
-        possibly empty, if even t = 0's own Q(HI) is 0 (t = 0 itself
-        never qualifies against its own value, since the comparison is
-        strict).
+        possibly empty, if even the earliest output time's own Q(HI)
+        is 0 (that time never qualifies against its own value, since
+        the comparison is strict).
 
     Raises
     ------
@@ -183,7 +182,7 @@ def process_cluster_file(path: Path, qhi_fraction: float, log_u_values: list[flo
     reader = slug_reader(str(path))
     times = qualifying_cluster_times(reader, qhi_fraction)
     if not times:
-        print(f"  {path.name}: no output times with Q(HI) > {qhi_fraction:.0%} of t=0's own value; skipping")
+        print(f"  {path.name}: no output times with Q(HI) > {qhi_fraction:.0%} of the earliest time's own value; skipping")
         return True
 
     all_ok = True
@@ -283,7 +282,7 @@ def parse_args() -> argparse.Namespace:
             "($CLOUDY_DIR/cloudy.exe) applies.")
     parser.add_argument("--qhi-fraction", type=float, default=QHI_FRACTION,
         help=f"A cluster output time is only run through cloudy if its own Q(HI) exceeds "
-            f"this fraction of Q(HI) at t=0 (default: {QHI_FRACTION}).")
+            f"this fraction of Q(HI) at the earliest output time (default: {QHI_FRACTION}).")
     parser.add_argument("--log-u", type=float, nargs="+", default=list(LOG_U_VALUES),
         help="log10 of the ionization parameter(s) U to run cloudy at, at the fixed density "
             f"{NII_DEFAULT.value:g} cm^-3 (default: {list(LOG_U_VALUES)}).")

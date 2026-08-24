@@ -20,22 +20,31 @@ mirroring slug2's own make_grid.py/process_grid.py two-stage design
 Unlike slug2, where a single nebular model existed per track set,
 slug3 supports far more track-set/rotation/[alpha/Fe] combinations
 than is practical to build a full grid for, so this deliberately
-starts from a narrow slice: the non-rotating (v/vcrit = 0),
-[alpha/Fe] = 0 subset of the MIST, Stromlo, and PARSEC_comp track
-sets, at every [Fe/H] value each one's own registry entry lists (see
-TRACK_SETS and data/tracks/tracks.toml).
+starts from a narrow slice: the [alpha/Fe] = 0 subset of the MIST,
+Stromlo, and PARSEC_comp track sets, at every [Fe/H] value and (for
+the track sets that have a rotation axis at all) every v/vcrit value
+each one's own registry entry lists, optionally narrowed further by
+--feh-min/--feh-max and --v-vcrit-min/--v-vcrit-max (see TRACK_SETS,
+get_feh_grid, get_vvcrit_grid, and data/tracks/tracks.toml).
 
-For each (track set, [Fe/H]) pair, this writes two decks:
+For each (track set, [Fe/H], v/vcrit) triple, this writes two decks:
 
 - A cluster-type deck: a single fixed-mass (1e4 Msun) Chabrier-IMF
   cluster at that [Fe/H], spectral synthesis via the "default" chained
   model over a 200-2e5 Angstrom, 1024-point grid, Q(HI) as the only
   photometric filter (run_cloudy_grid.py's own way of picking which
   output times are still worth running cloudy on), no extinction,
-  output every 0.25 Myr from 0 to 10 Myr, one trial with stars above
-  120 Msun treated non-stochastically (min_stoch_mass; keeps the rare,
-  ionizing-dominant high-mass end of the IMF from being all-or-nothing
-  across a single trial).
+  output every 0.25 Myr from 0.25 to 10 Myr, one trial with stars
+  above 120 Msun treated non-stochastically (min_stoch_mass; keeps the
+  rare, ionizing-dominant high-mass end of the IMF from being
+  all-or-nothing across a single trial). The grid deliberately omits
+  t = 0: at t = 0 every star is still at its (purely artificial, since
+  it depends on accretion history the tracks don't model) pre-main-
+  sequence contraction radius, and massive stars reach the main
+  sequence in far less than the 0.25 Myr step used here, so a t = 0
+  output would just be linearly interpolated against a physically
+  meaningless endpoint. Consumers of this grid should instead treat
+  every t < 0.25 Myr as equal to the t = 0.25 Myr values.
 - A galaxy-type deck: identical stellar/spectral/photometric settings,
   but a galaxy forming stars at a fixed 1 Msun/yr with f_cluster = 0
   (so every star forms as part of the smooth field population, not in
@@ -49,6 +58,14 @@ concurrency instead comes from running many single-trial slug
 subprocesses at once via a thread pool -- exactly mirroring
 slugpy.cloudy.cloudy_process.run_cloudy_decks's own reasoning for
 running cloudy itself as external subprocesses rather than in-process.
+
+A (track, [Fe/H], v/vcrit, sim_type) combination whose own output
+HDF5 file already exists in --work-dir is skipped entirely -- no deck is
+written and slug is not run for it -- mirroring run_cloudy_grid.py's
+own skip-existing-results behavior (there, via slug_reader.run_cloudy's
+own duplicate detection). This makes a partially-completed or
+re-run invocation cheap to resume; delete an output file to force
+that combination to be regenerated.
 
 This whole pipeline is far too computationally expensive to run in
 full on a laptop -- the intended workflow is to verify each stage
@@ -66,15 +83,15 @@ import subprocess
 import tomllib
 from pathlib import Path
 
-# Track sets this grid covers -- the non-rotating (v/vcrit = 0),
-# [alpha/Fe] = 0 slice of each one's own [Fe/H] grid, read from
-# data/tracks/tracks.toml at run time (see get_feh_grid). v_vcrit = 0
-# and alphaFe = 0 are slug's own library defaults, and are also valid
-# regardless of whether a given track set even has those axes at all:
-# TrackUtils treats a track group with no vvcrit/afe attribute of its
-# own as matching any requested value (see
-# src/tracks/TrackUtils.cpp's own comment) -- true of PARSEC_comp,
-# which has neither axis.
+# Track sets this grid covers -- the [alpha/Fe] = 0 slice of each
+# one's own [Fe/H] and v/vcrit grid, read from data/tracks/tracks.toml
+# at run time (see get_feh_grid, get_vvcrit_grid). alphaFe = 0 is
+# slug's own library default, and is also valid regardless of whether
+# a given track set even has that axis at all: TrackUtils treats a
+# track group with no vvcrit/afe attribute of its own as matching any
+# requested value (see src/tracks/TrackUtils.cpp's own comment) --
+# true of PARSEC_comp, which has neither axis (get_vvcrit_grid treats
+# it as a single v/vcrit = 0.0 entry accordingly).
 TRACK_SETS = ("MIST", "Stromlo", "PARSEC_comp")
 
 # This script's own directory, and the repo's data/tracks/tracks.toml
@@ -95,8 +112,10 @@ MIN_STOCH_MASS = 120.0    # Msun
 WL_MIN = 200.0            # Angstrom
 WL_MAX = 2e5              # Angstrom
 NWL = 1024
+CLUSTER_START_TIME = 2.5e5  # yr (0.25 Myr); see this module's own docstring
+                             # for why the grid starts here rather than at 0
 CLUSTER_END_TIME = 1e7    # yr (10 Myr)
-CLUSTER_NTIME = 41        # 0 to 10 Myr in 0.25 Myr steps
+CLUSTER_NTIME = 40        # 0.25 to 10 Myr in 0.25 Myr steps
 GALAXY_TIME = 1e8         # yr (100 Myr)
 
 
@@ -130,10 +149,44 @@ def get_feh_grid(track_registry: dict, track: str,
     return feh_values
 
 
-def deck_name(track: str, feh: float, sim_type: str) -> str:
+def get_vvcrit_grid(track_registry: dict, track: str,
+    vvcrit_min: float | None, vvcrit_max: float | None) -> list[float]:
+    """
+    Get one track set's own v/vcrit grid, optionally restricted to a range.
+
+    Parameters
+    ----------
+    track_registry : dict
+        Parsed contents of a data/tracks/tracks.toml-format registry
+        (see DEFAULT_TRACK_REGISTRY).
+    track : str
+        Name of the track set to look up, e.g. "MIST".
+    vvcrit_min, vvcrit_max : float, optional
+        If given, only v/vcrit values >= vvcrit_min and/or <= vvcrit_max
+        (inclusive) are returned; otherwise the full grid is used.
+
+    Returns
+    -------
+    list of float
+        track's own v_vcrit grid, in registry order, filtered to
+        [vvcrit_min, vvcrit_max] if either bound was given -- [0.0] if
+        track's own registry entry has no v_vcrit axis at all (see
+        TRACK_SETS's own comment), unless that single value is itself
+        filtered out by vvcrit_min/vvcrit_max.
+    """
+    vvcrit_values = track_registry[track].get("v_vcrit", [0.0])
+    if vvcrit_min is not None:
+        vvcrit_values = [v for v in vvcrit_values if v >= vvcrit_min]
+    if vvcrit_max is not None:
+        vvcrit_values = [v for v in vvcrit_values if v <= vvcrit_max]
+    return vvcrit_values
+
+
+def deck_name(track: str, feh: float, vvcrit: float, sim_type: str) -> str:
     """
     Build the base name (no extension) shared by a (track, feh,
-    sim_type) combination's own deck file and output model_name.
+    vvcrit, sim_type) combination's own deck file and output
+    model_name.
 
     Parameters
     ----------
@@ -141,21 +194,24 @@ def deck_name(track: str, feh: float, sim_type: str) -> str:
         Name of the track set, e.g. "MIST".
     feh : float
         [Fe/H] value.
+    vvcrit : float
+        v/vcrit value.
     sim_type : {"cluster", "galaxy"}
         Which kind of deck this is.
 
     Returns
     -------
     str
-        e.g. "MIST_FeH+0.0000_cluster". [Fe/H] is formatted to 4
-        decimal places, sign-prefixed -- enough to keep every value in
-        every track set's own grid distinct (checked directly against
-        data/tracks/tracks.toml), while keeping the name readable.
+        e.g. "MIST_FeH+0.0000_vvcrit0.00_cluster". [Fe/H] is formatted
+        to 4 decimal places, sign-prefixed, and v/vcrit to 2 decimal
+        places -- enough to keep every value in every track set's own
+        grid distinct (checked directly against data/tracks/
+        tracks.toml), while keeping the name readable.
     """
-    return f"{track}_FeH{feh:+.4f}_{sim_type}"
+    return f"{track}_FeH{feh:+.4f}_vvcrit{vvcrit:.2f}_{sim_type}"
 
 
-def build_cluster_deck(track: str, feh: float, work_dir: Path) -> str:
+def build_cluster_deck(track: str, feh: float, vvcrit: float, work_dir: Path) -> str:
     """
     Build the text of a cluster-type slug input deck.
 
@@ -167,6 +223,10 @@ def build_cluster_deck(track: str, feh: float, work_dir: Path) -> str:
         [Fe/H] to run at; must be one of track's own registry [Fe/H]
         grid values (see get_feh_grid) for the deck to describe an
         on-grid, non-interpolated point.
+    vvcrit : float
+        v/vcrit to run at; must be one of track's own registry
+        v_vcrit grid values (see get_vvcrit_grid) for the deck to
+        describe an on-grid, non-interpolated point.
     work_dir : pathlib.Path
         Directory this deck's own HDF5 output should be written into
         (written as an absolute outputs.out_dir, so the deck resolves
@@ -178,9 +238,9 @@ def build_cluster_deck(track: str, feh: float, work_dir: Path) -> str:
     str
         The deck's own TOML text, ready to write to a file.
     """
-    model_name = deck_name(track, feh, "cluster")
+    model_name = deck_name(track, feh, vvcrit, "cluster")
     return f'''# Auto-generated by data/tools/cloudy/make_slug_grid.py -- do not edit by hand
-# Cluster-type deck: track = {track}, [Fe/H] = {feh}
+# Cluster-type deck: track = {track}, [Fe/H] = {feh}, v/vcrit = {vvcrit}
 
 sim_type = "cluster"
 n_trial = 1
@@ -188,7 +248,7 @@ n_trial = 1
 [stars]
 IMF = "chabrier.toml"
 tracks = "{track}"
-v_vcrit = 0.0
+v_vcrit = {vvcrit}
 alphaFe = 0.0
 FeH = {feh!r}
 min_stoch_mass = {MIN_STOCH_MASS}
@@ -207,7 +267,7 @@ filters = ["Q(HI)"]
 
 [output]
 model_name = "{model_name}"
-start_time = 0.0
+start_time = {CLUSTER_START_TIME}
 end_time = {CLUSTER_END_TIME}
 ntime = {CLUSTER_NTIME}
 
@@ -216,7 +276,7 @@ out_dir = "{work_dir.resolve()}"
 '''
 
 
-def build_galaxy_deck(track: str, feh: float, work_dir: Path) -> str:
+def build_galaxy_deck(track: str, feh: float, vvcrit: float, work_dir: Path) -> str:
     """
     Build the text of a galaxy-type slug input deck.
 
@@ -228,6 +288,10 @@ def build_galaxy_deck(track: str, feh: float, work_dir: Path) -> str:
         [Fe/H] to run at; must be one of track's own registry [Fe/H]
         grid values (see get_feh_grid) for the deck to describe an
         on-grid, non-interpolated point.
+    vvcrit : float
+        v/vcrit to run at; must be one of track's own registry
+        v_vcrit grid values (see get_vvcrit_grid) for the deck to
+        describe an on-grid, non-interpolated point.
     work_dir : pathlib.Path
         Directory this deck's own HDF5 output should be written into
         (written as an absolute outputs.out_dir, so the deck resolves
@@ -239,9 +303,9 @@ def build_galaxy_deck(track: str, feh: float, work_dir: Path) -> str:
     str
         The deck's own TOML text, ready to write to a file.
     """
-    model_name = deck_name(track, feh, "galaxy")
+    model_name = deck_name(track, feh, vvcrit, "galaxy")
     return f'''# Auto-generated by data/tools/cloudy/make_slug_grid.py -- do not edit by hand
-# Galaxy-type deck: track = {track}, [Fe/H] = {feh}
+# Galaxy-type deck: track = {track}, [Fe/H] = {feh}, v/vcrit = {vvcrit}
 
 sim_type = "galaxy"
 n_trial = 1
@@ -249,7 +313,7 @@ n_trial = 1
 [stars]
 IMF = "chabrier.toml"
 tracks = "{track}"
-v_vcrit = 0.0
+v_vcrit = {vvcrit}
 alphaFe = 0.0
 FeH = {feh!r}
 min_stoch_mass = {MIN_STOCH_MASS}
@@ -398,8 +462,8 @@ def parse_args() -> argparse.Namespace:
             f"(default: {DEFAULT_WORK_DIR}). Point this at a scratch "
             "filesystem when running the full grid on a cluster.")
     parser.add_argument("--track-registry", type=Path, default=DEFAULT_TRACK_REGISTRY,
-        help=f"Path to the track registry to read TRACK_SETS's own [Fe/H] "
-            f"grids from (default: {DEFAULT_TRACK_REGISTRY}).")
+        help=f"Path to the track registry to read TRACK_SETS's own [Fe/H] and "
+            f"v/vcrit grids from (default: {DEFAULT_TRACK_REGISTRY}).")
     parser.add_argument("--slug-path", type=Path, default=None,
         help="Path to the slug executable (see find_slug_executable for "
             "the fallback lookup order if this is omitted).")
@@ -409,6 +473,12 @@ def parse_args() -> argparse.Namespace:
             "value per track set, for a fast local test run.")
     parser.add_argument("--feh-max", type=float, default=None,
         help="If given, only run [Fe/H] values <= this (inclusive).")
+    parser.add_argument("--v-vcrit-min", type=float, default=None,
+        help="If given, only run v/vcrit values >= this (inclusive). "
+            "Combine with --v-vcrit-max to narrow the grid down to a single "
+            "value per track set, for a fast local test run.")
+    parser.add_argument("--v-vcrit-max", type=float, default=None,
+        help="If given, only run v/vcrit values <= this (inclusive).")
     parser.add_argument("--max-workers", type=int, default=None,
         help="Maximum number of slug processes to run at once "
             "(default: os.cpu_count()).")
@@ -427,17 +497,28 @@ def main() -> None:
     slug_exe = find_slug_executable(args.slug_path)
 
     deck_paths: list[Path] = []
+    n_skipped = 0
     for track in TRACK_SETS:
         feh_grid = get_feh_grid(track_registry, track, args.feh_min, args.feh_max)
+        vvcrit_grid = get_vvcrit_grid(track_registry, track, args.v_vcrit_min, args.v_vcrit_max)
         for feh in feh_grid:
-            for sim_type, build_deck in (("cluster", build_cluster_deck), ("galaxy", build_galaxy_deck)):
-                deck_text = build_deck(track, feh, work_dir)
-                deck_path = work_dir / f"{deck_name(track, feh, sim_type)}.toml"
-                deck_path.write_text(deck_text)
-                deck_paths.append(deck_path)
+            for vvcrit in vvcrit_grid:
+                for sim_type, build_deck in (("cluster", build_cluster_deck), ("galaxy", build_galaxy_deck)):
+                    output_path = work_dir / f"{deck_name(track, feh, vvcrit, sim_type)}.h5"
+                    if output_path.exists():
+                        n_skipped += 1
+                        continue
+                    deck_text = build_deck(track, feh, vvcrit, work_dir)
+                    deck_path = work_dir / f"{deck_name(track, feh, vvcrit, sim_type)}.toml"
+                    deck_path.write_text(deck_text)
+                    deck_paths.append(deck_path)
+
+    if n_skipped:
+        print(f"Skipping {n_skipped} deck(s) whose own output file already exists in {work_dir}.")
 
     if not deck_paths:
-        print("No (track, [Fe/H]) combinations matched --feh-min/--feh-max; nothing to run.")
+        print("Nothing left to run: every matching (track, [Fe/H], v/vcrit) combination's own "
+            "output already exists, or none matched --feh-min/--feh-max/--v-vcrit-min/--v-vcrit-max.")
         return
 
     max_workers = args.max_workers or (os.cpu_count() or 1)

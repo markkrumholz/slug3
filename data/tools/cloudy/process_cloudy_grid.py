@@ -39,15 +39,19 @@ Output layout (cloudy_table.h5, default name):
 - Top-level datasets: wl (Angstrom, the common continuum grid),
   line_wl/line_label (Angstrom / cloudy's own line label, the common
   line list), and time (yr, every distinct cluster output time found
-  -- the same 0-10 Myr, 0.25 Myr grid make_slug_grid.py's cluster decks
-  use).
+  -- the same 0.25-10 Myr, 0.25 Myr grid make_slug_grid.py's cluster
+  decks use; consumers should treat any t < 0.25 Myr as equal to the
+  t = 0.25 Myr row -- see make_slug_grid.py's own module docstring for
+  why the grid starts there instead of at t = 0).
 - One group per track set found (e.g. "MIST"; attrs["track"] records
   the name), containing one group per [Fe/H] value found within it
   (e.g. "FeH+0.0000"; attrs["FeH"] records the value), containing one
-  group per log10(U) value found within that (e.g. "logU-2.50";
-  attrs["logU"] records the value; see _nearest_log_u for how each
-  row's own, possibly hiiregparam-adjusted, U is matched back to one
-  of --log-u's nominal values).
+  group per v/vcrit value found within that (e.g. "vvcrit0.00";
+  attrs["v_vcrit"] records the value), containing one group per
+  log10(U) value found within that (e.g. "logU-2.50"; attrs["logU"]
+  records the value; see _nearest_log_u for how each row's own,
+  possibly hiiregparam-adjusted, U is matched back to one of
+  --log-u's nominal values).
 - Within each logU group: a "galaxy" group (if that combination has
   galaxy data) with 1-D "spec" (erg/Angstrom/photon, on the common
   wavelength grid, zero where that grid extends past what this
@@ -72,7 +76,7 @@ and run_cloudy_grid.py were run with.
 import argparse
 import sys
 from pathlib import Path
-from typing import cast
+from typing import NamedTuple, cast
 
 import astropy.units as u
 import h5py
@@ -206,9 +210,19 @@ def _nearest_log_u(u_val: float, log_u_values: list[float]) -> float:
     return log_u_values[int(np.argmin(diffs))]
 
 
-def discover_files(work_dir: Path) -> list[tuple[Path, str, str, float]]:
+class FileEntry(NamedTuple):
+    """One discovered slug HDF5 output file, classified by simulation type, track set, [Fe/H], and v/vcrit."""
+
+    path: Path
+    sim_type: str
+    track: str
+    feh: float
+    vvcrit: float
+
+
+def discover_files(work_dir: Path) -> list[FileEntry]:
     """
-    Classify every slug HDF5 output file in a working directory by simulation type, track set, and [Fe/H].
+    Classify every slug HDF5 output file in a working directory by simulation type, track set, [Fe/H], and v/vcrit.
 
     Parameters
     ----------
@@ -219,40 +233,41 @@ def discover_files(work_dir: Path) -> list[tuple[Path, str, str, float]]:
 
     Returns
     -------
-    list of (pathlib.Path, str, str, float)
-        (path, sim_type, track, feh) for every "*.h5" file found, where
-        sim_type is "cluster" or "galaxy", track is this file's own
-        input_deck stars.tracks entry, and feh is its stars.FeH entry.
+    list of FileEntry
+        One entry per "*.h5" file found, with track/feh/vvcrit read
+        from that file's own input_deck stars.tracks/FeH/v_vcrit
+        entries.
 
     Raises
     ------
     ValueError
         If any file's own input deck is missing sim_type, stars.tracks,
-        or stars.FeH, or has a sim_type other than "cluster"/"galaxy".
+        stars.FeH, or stars.v_vcrit, or has a sim_type other than
+        "cluster"/"galaxy".
     """
-    entries: list[tuple[Path, str, str, float]] = []
+    entries: list[FileEntry] = []
     for path in find_h5_files(work_dir):
         deck = slug_reader(str(path)).input_deck
         sim_type = deck.get("sim_type")
         track = deck.get("stars", {}).get("tracks")
         feh = deck.get("stars", {}).get("FeH")
-        if sim_type not in ("cluster", "galaxy") or track is None or feh is None:
+        vvcrit = deck.get("stars", {}).get("v_vcrit")
+        if sim_type not in ("cluster", "galaxy") or track is None or feh is None or vvcrit is None:
             raise ValueError(
                 f"discover_files: {path} has an unexpected input deck "
-                f"(sim_type={sim_type!r}, stars.tracks={track!r}, stars.FeH={feh!r})")
-        entries.append((path, cast(str, sim_type), str(track), float(feh)))
+                f"(sim_type={sim_type!r}, stars.tracks={track!r}, "
+                f"stars.FeH={feh!r}, stars.v_vcrit={vvcrit!r})")
+        entries.append(FileEntry(path, cast(str, sim_type), str(track), float(feh), float(vvcrit)))
     return entries
 
 
-def compute_global_grids(
-    entries: list[tuple[Path, str, str, float]],
-) -> tuple[u.Quantity, np.ndarray, list[str], np.ndarray]:
+def compute_global_grids(entries: list[FileEntry]) -> tuple[u.Quantity, np.ndarray, list[str], np.ndarray]:
     """
     Build the common wavelength grid, line list, and cluster output-time list shared by the whole table.
 
     Parameters
     ----------
-    entries : list of (pathlib.Path, str, str, float)
+    entries : list of FileEntry
         As returned by discover_files.
 
     Returns
@@ -284,7 +299,7 @@ def compute_global_grids(
     line_table: dict[float, str] = {}
     time_set: set[float] = set()
 
-    for path, sim_type, _track, _feh in entries:
+    for path, sim_type, _track, _feh, _vvcrit in entries:
         reader = slug_reader(str(path))
         group = reader.cluster_cloudy if sim_type == "cluster" else reader.galaxy_cloudy
         if group is not None:
@@ -545,13 +560,13 @@ def _write_normalized_group(parent: h5py.Group, name: str, data: dict[str, np.nd
     line_dset.attrs["units"] = str(_LINE_NORM_UNIT)
 
 
-def build_table(entries: list[tuple[Path, str, str, float]], output_path: Path, log_u_values: list[float]) -> None:
+def build_table(entries: list[FileEntry], output_path: Path, log_u_values: list[float]) -> None:
     """
     Build the full nebular emission lookup table from every discovered slug output file.
 
     Parameters
     ----------
-    entries : list of (pathlib.Path, str, str, float)
+    entries : list of FileEntry
         As returned by discover_files.
     output_path : pathlib.Path
         Path to write the table to (overwritten if it already exists).
@@ -564,14 +579,14 @@ def build_table(entries: list[tuple[Path, str, str, float]], output_path: Path, 
     line_index = {w: i for i, w in enumerate(global_line_wl)}
     time_index = {t: i for i, t in enumerate(global_time)}
 
-    by_track_feh: dict[tuple[str, float], dict[str, Path]] = {}
-    for path, sim_type, track, feh in entries:
-        by_track_feh.setdefault((track, feh), {})[sim_type] = path
+    by_track_feh_vvcrit: dict[tuple[str, float, float], dict[str, Path]] = {}
+    for path, sim_type, track, feh, vvcrit in entries:
+        by_track_feh_vvcrit.setdefault((track, feh, vvcrit), {})[sim_type] = path
 
     with h5py.File(output_path, "w") as fout:
         _write_top_level(fout, global_wl_q, global_line_wl, global_line_label, global_time)
 
-        for (track, feh), paths in sorted(by_track_feh.items()):
+        for (track, feh, vvcrit), paths in sorted(by_track_feh_vvcrit.items()):
             cluster_path = paths.get("cluster")
             galaxy_path = paths.get("galaxy")
 
@@ -582,16 +597,19 @@ def build_table(entries: list[tuple[Path, str, str, float]], output_path: Path, 
 
             log_us = sorted(set(cluster_data) | set(galaxy_data))
             if not log_us:
-                print(f"  {track} FeH={feh:+.4f}: no cloudy results found; skipping", file=sys.stderr)
+                print(f"  {track} FeH={feh:+.4f} vvcrit={vvcrit:.2f}: no cloudy results found; "
+                    "skipping", file=sys.stderr)
                 continue
 
             track_group = fout.require_group(track)
             track_group.attrs["track"] = track
             feh_group = track_group.require_group(f"FeH{feh:+.4f}")
             feh_group.attrs["FeH"] = feh
+            vvcrit_group = feh_group.require_group(f"vvcrit{vvcrit:.2f}")
+            vvcrit_group.attrs["v_vcrit"] = vvcrit
 
             for log_u in log_us:
-                logu_group = feh_group.require_group(f"logU{log_u:+.2f}")
+                logu_group = vvcrit_group.require_group(f"logU{log_u:+.2f}")
                 logu_group.attrs["logU"] = log_u
                 if log_u in galaxy_data:
                     _write_normalized_group(logu_group, "galaxy", galaxy_data[log_u])
