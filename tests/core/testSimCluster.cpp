@@ -164,6 +164,17 @@ static auto runEndToEnd(const toml::table& inputDeck) -> bool
 {
     const io::SimControls simControls(inputDeck);
 
+    // Must happen before OutputManagerH5 is constructed below: its
+    // constructor opens one HDF5 file per OpenMP thread by running its
+    // own "#pragma omp parallel" region, so the team size it sees has
+    // to already be nThreads, matching the team size SimCluster::run()
+    // will later use -- otherwise threads that only show up in run()'s
+    // parallel for never get a file/group of their own, and silently
+    // drop every trial they process.
+#ifdef _OPENMP
+    omp_set_num_threads(nThreads);
+#endif // _OPENMP
+
     std::unique_ptr<io::OutputManager> outputManager;
     if (simControls.outputMode() == io::SimControls::OutputMode::h5)
     {
@@ -173,10 +184,6 @@ static auto runEndToEnd(const toml::table& inputDeck) -> bool
     {
         outputManager = std::make_unique<io::OutputManagerAscii>(simControls, inputDeck);
     }
-
-#ifdef _OPENMP
-    omp_set_num_threads(nThreads);
-#endif // _OPENMP
 
     const bool constFeH = simControls.constFeH();
     core::SimCluster simCluster(simControls, std::move(outputManager));
