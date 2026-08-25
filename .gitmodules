@@ -8,3 +8,6 @@
 	path = src/extern/pybind11
 	url = ../../pybind/pybind11
 	branch = stable
+[submodule "src/extern/mdspan"]
+	path = src/extern/mdspan
+	url = https://github.com/kokkos/mdspan.git
