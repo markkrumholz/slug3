@@ -9,6 +9,7 @@ stdin/stdout redirection, working directory, and concurrency -- can be
 exercised quickly and deterministically.
 """
 
+import concurrent.futures
 import os
 import time
 from pathlib import Path
@@ -161,6 +162,69 @@ def test_run_cloudy_decks_runs_concurrently(fake_cloudy_exe, tmp_path, monkeypat
     # execution should take well under that (allow generous slack for
     # process-launch overhead and a loaded CI machine)
     assert elapsed < 1.5
+
+
+# ---------------------------------------------------------------------
+# executor
+# ---------------------------------------------------------------------
+
+def test_given_executor_is_used_and_left_running(fake_cloudy_exe, tmp_path):
+    """A caller-supplied executor is used instead of a private pool, and is left running afterward, not shut down."""
+    deck = tmp_path / "deck0.in"
+    deck.write_text("hden 0.0\n")
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        out_paths = run_cloudy_decks([deck], fake_cloudy_exe, max_workers=99, progress=False, executor=executor)
+        assert out_paths == [deck.with_suffix(".out")]
+        assert "FAKE_CLOUDY_RAN" in out_paths[0].read_text()
+        # Still usable: submitting more work after run_cloudy_decks
+        # returns doesn't raise (a shut-down executor raises
+        # RuntimeError on submit), confirming run_cloudy_decks did not
+        # call executor.shutdown() -- max_workers=99 above is also
+        # ignored without error, since executor's own size governs
+        # concurrency once given.
+        assert executor.submit(lambda: 42).result() == 42
+
+
+def test_shared_executor_bounds_concurrency_across_calls(fake_cloudy_exe, tmp_path, monkeypatch):
+    """Two run_cloudy_decks calls sharing one executor are bounded by that executor's own size together, not each getting an independent max_workers-worth of concurrency of its own."""
+    monkeypatch.setenv("FAKE_CLOUDY_SLEEP", "0.3")
+
+    def _make_decks(prefix, n):
+        decks = []
+        for i in range(n):
+            deck = tmp_path / f"{prefix}{i}.in"
+            deck.write_text(f"hden {i}.0\n")
+            decks.append(deck)
+        return decks
+
+    decks_a = _make_decks("a", 4)
+    decks_b = _make_decks("b", 4)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as shared:
+        start = time.perf_counter()
+        # Two "driver" threads, mirroring how run_cloudy_grid.py calls
+        # slug_reader.run_cloudy for different files concurrently,
+        # each passing the same shared executor through.
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as drivers:
+            fut_a = drivers.submit(run_cloudy_decks, decks_a, fake_cloudy_exe, progress=False, executor=shared)
+            fut_b = drivers.submit(run_cloudy_decks, decks_b, fake_cloudy_exe, progress=False, executor=shared)
+            results_a = fut_a.result()
+            results_b = fut_b.result()
+        elapsed = time.perf_counter() - start
+
+    assert len(results_a) == 4
+    assert len(results_b) == 4
+
+    # 8 decks total sharing 2 workers, 0.3s each, run in 4 sequential
+    # rounds -> ~1.2s. If each call instead got its own private
+    # 2-worker pool (the behavior this executor argument replaces),
+    # both calls' own 4 decks would run in 2 rounds each -- ~0.6s --
+    # fully in parallel with each other, since they'd be on
+    # independent pools. The threshold below sits well above that
+    # 0.6s alternative and comfortably below the ~1.2s ideal, so this
+    # only passes if concurrency is really bounded by the one shared
+    # pool.
+    assert elapsed > 0.9
 
 
 # ---------------------------------------------------------------------

@@ -10,6 +10,7 @@ being written -- can be exercised and checked exactly, independent of
 what any particular committed example happens to contain.
 """
 
+import concurrent.futures
 import re
 from pathlib import Path
 
@@ -524,6 +525,19 @@ def test_max_workers_is_passed_through(tmp_path):
     assert result == [True, True, True]
     for deck in _decks_in(tmp_path / "out"):
         assert deck.with_suffix(".out").is_file()
+
+
+def test_executor_is_passed_through_and_left_running(tmp_path):
+    """A caller-supplied executor is used instead of a private pool, and is left running afterward (see test_cloudy_process.py for the actual pool-sharing behavior this enables)."""
+    reader = slug_reader(_make_cluster_test_file(tmp_path, "c1.h5", qhi_in_phot=True))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        result = reader.run_cloudy("cluster", save_temp=True, temp_dir=tmp_path / "out",
+            executor=executor, progress=False)
+        assert result == [True, True, True]
+        for deck in _decks_in(tmp_path / "out"):
+            assert deck.with_suffix(".out").is_file()
+        # Still usable: a shut-down executor raises RuntimeError on submit
+        assert executor.submit(lambda: 42).result() == 42
 
 
 # ---------------------------------------------------------------------
