@@ -8,14 +8,14 @@ for users willing to trade some accuracy for speed. The three stages,
 mirroring slug2's own make_grid.py/process_grid.py two-stage design
 (extended here to three, since cloudy is a separate step in slug3):
 
-1. make_slug_grid.py (this script): for each (track set, [Fe/H])
-   combination in the grid, write and run a cluster-type and a
-   galaxy-type slug input deck, producing the stellar spectra (and
+1. make_slug_grid.py (this script): for each (track set, [Fe/H],
+   v/vcrit) combination in the grid, write and run a cluster-type and
+   a galaxy-type slug input deck, producing the stellar spectra (and
    Q(HI) photometry) cloudy needs as its own input.
 2. run_cloudy_grid.py: runs cloudy on every spectrum this script
    produces.
-3. A not-yet-written script to post-process cloudy's own output into
-   the final nebular emission lookup table.
+3. process_cloudy_grid.py: post-processes cloudy's own output into the
+   final nebular emission lookup table, cloudy_table.h5.
 
 Unlike slug2, where a single nebular model existed per track set,
 slug3 supports far more track-set/rotation/[alpha/Fe] combinations
@@ -67,6 +67,19 @@ own duplicate detection). This makes a partially-completed or
 re-run invocation cheap to resume; delete an output file to force
 that combination to be regenerated.
 
+--output-table takes this further: pointed at an existing
+process_cloudy_grid.py output table (e.g. cloudy_table.h5), a (track,
+[Fe/H], v/vcrit) combination already fully present there (every
+--check-log-u value, each with both a cluster and a galaxy group) is
+skipped entirely, without even checking whether its own slug output
+files exist in --work-dir. This is for the workflow of building the
+grid one track set (or [Fe/H]/v/vcrit slice) at a time on a shared
+cluster, cleaning up each slice's own intermediate slug output once
+process_cloudy_grid.py has folded it into the table -- rerunning this
+script later (e.g. to add a newly-available track set) then only
+regenerates what the table doesn't already have, instead of redoing
+everything already-cleaned-up slices once produced.
+
 This whole pipeline is far too computationally expensive to run in
 full on a laptop -- the intended workflow is to verify each stage
 against a deliberately narrow slice locally (see --feh-min/--feh-max
@@ -80,8 +93,11 @@ import argparse
 import concurrent.futures
 import os
 import subprocess
+import sys
 import tomllib
 from pathlib import Path
+
+import h5py
 
 # Track sets this grid covers -- the [alpha/Fe] = 0 slice of each
 # one's own [Fe/H] and v/vcrit grid, read from data/tracks/tracks.toml
@@ -98,6 +114,14 @@ TRACK_SETS = ("MIST", "Stromlo", "PARSEC_comp")
 # registry relative to it (data/tools/cloudy -> data/tools -> data)
 _SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_TRACK_REGISTRY = _SCRIPT_DIR.parents[1] / "tracks" / "tracks.toml"
+
+# run_cloudy_grid.py is a sibling script (not a package), reached via
+# sys.path directly, so its own LOG_U_VALUES stays the single source of
+# truth for the default log10(U) grid (see --check-log-u below).
+if str(_SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPT_DIR))
+from run_cloudy_grid import LOG_U_VALUES  # noqa: E402 -- see sys.path setup above
+
 DEFAULT_WORK_DIR = _SCRIPT_DIR / "slug_grid_work"
 
 # Fixed physical parameters shared by every deck this script writes
@@ -180,6 +204,50 @@ def get_vvcrit_grid(track_registry: dict, track: str,
     if vvcrit_max is not None:
         vvcrit_values = [v for v in vvcrit_values if v <= vvcrit_max]
     return vvcrit_values
+
+
+def combo_complete_in_table(output_table: Path | None, track: str, feh: float, vvcrit: float,
+    log_u_values: list[float]) -> bool:
+    """
+    Check whether a (track, feh, vvcrit) combination is already fully present in an output table.
+
+    Parameters
+    ----------
+    output_table : pathlib.Path, optional
+        Path to an existing process_cloudy_grid.py output table (e.g.
+        cloudy_table.h5) to check. If None, or the file doesn't exist
+        yet, this always returns False.
+    track : str
+        Name of the track set, e.g. "MIST".
+    feh : float
+        [Fe/H] value.
+    vvcrit : float
+        v/vcrit value.
+    log_u_values : list of float
+        The log10(U) grid this combination must have every value of
+        (each with both a cluster and a galaxy group) to count as
+        complete; should match process_cloudy_grid.py's own --log-u
+        (see --check-log-u).
+
+    Returns
+    -------
+    bool
+        True iff output_table has a track/FeH{feh}/vvcrit{vvcrit} group
+        containing a logU{log_u}/cluster and a logU{log_u}/galaxy group
+        for every entry in log_u_values -- the exact group layout
+        process_cloudy_grid.py's own build_table writes.
+    """
+    if output_table is None or not output_table.exists():
+        return False
+
+    with h5py.File(output_table, "r") as f:
+        vvcrit_group = f.get(f"{track}/FeH{feh:+.4f}/vvcrit{vvcrit:.2f}")
+        if vvcrit_group is None:
+            return False
+        return all(
+            f"logU{log_u:+.2f}/cluster" in vvcrit_group and f"logU{log_u:+.2f}/galaxy" in vvcrit_group
+            for log_u in log_u_values
+        )
 
 
 def deck_name(track: str, feh: float, vvcrit: float, sim_type: str) -> str:
@@ -479,6 +547,15 @@ def parse_args() -> argparse.Namespace:
             "value per track set, for a fast local test run.")
     parser.add_argument("--v-vcrit-max", type=float, default=None,
         help="If given, only run v/vcrit values <= this (inclusive).")
+    parser.add_argument("--output-table", type=Path, default=None,
+        help="Path to an existing process_cloudy_grid.py output table (e.g. cloudy_table.h5) to "
+            "check: a (track, [Fe/H], v/vcrit) combination already fully present there for every "
+            "--check-log-u value is skipped entirely, without even checking whether its own slug "
+            "output files exist in --work-dir. Omit to always (re)run every matching combination.")
+    parser.add_argument("--check-log-u", type=float, nargs="+", default=list(LOG_U_VALUES),
+        help="log10(U) grid a combination must have every value of (each with both a cluster and "
+            f"a galaxy group) to count as already done in --output-table (default: {list(LOG_U_VALUES)}); "
+            "should match process_cloudy_grid.py's own --log-u.")
     parser.add_argument("--max-workers", type=int, default=None,
         help="Maximum number of slug processes to run at once "
             "(default: os.cpu_count()).")
@@ -498,11 +575,15 @@ def main() -> None:
 
     deck_paths: list[Path] = []
     n_skipped = 0
+    n_skipped_table = 0
     for track in TRACK_SETS:
         feh_grid = get_feh_grid(track_registry, track, args.feh_min, args.feh_max)
         vvcrit_grid = get_vvcrit_grid(track_registry, track, args.v_vcrit_min, args.v_vcrit_max)
         for feh in feh_grid:
             for vvcrit in vvcrit_grid:
+                if combo_complete_in_table(args.output_table, track, feh, vvcrit, args.check_log_u):
+                    n_skipped_table += 1
+                    continue
                 for sim_type, build_deck in (("cluster", build_cluster_deck), ("galaxy", build_galaxy_deck)):
                     output_path = work_dir / f"{deck_name(track, feh, vvcrit, sim_type)}.h5"
                     if output_path.exists():
@@ -513,12 +594,16 @@ def main() -> None:
                     deck_path.write_text(deck_text)
                     deck_paths.append(deck_path)
 
+    if n_skipped_table:
+        print(f"Skipping {n_skipped_table} (track, [Fe/H], v/vcrit) combination(s) already fully "
+            f"present in {args.output_table}.")
     if n_skipped:
         print(f"Skipping {n_skipped} deck(s) whose own output file already exists in {work_dir}.")
 
     if not deck_paths:
         print("Nothing left to run: every matching (track, [Fe/H], v/vcrit) combination's own "
-            "output already exists, or none matched --feh-min/--feh-max/--v-vcrit-min/--v-vcrit-max.")
+            "output already exists (in --work-dir or --output-table), or none matched "
+            "--feh-min/--feh-max/--v-vcrit-min/--v-vcrit-max.")
         return
 
     max_workers = args.max_workers or (os.cpu_count() or 1)
