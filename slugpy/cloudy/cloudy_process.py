@@ -92,8 +92,21 @@ def run_cloudy_deck(input_path: str | Path, cloudy_exe: str | Path) -> Path:
     return output_path
 
 
+def _submit_and_gather(executor: concurrent.futures.Executor, input_paths: list[str | Path],
+    cloudy_exe: str | Path, progress: bool) -> list[Path]:
+    """Submit one run_cloudy_deck call per input path onto executor, then wait for and return their results."""
+    futures = [executor.submit(run_cloudy_deck, path, cloudy_exe) for path in input_paths]
+    if progress and futures:
+        bar = make_progress_bar(total=len(futures), desc="Running cloudy")
+        for _ in concurrent.futures.as_completed(futures):
+            bar.update(1)
+        bar.close()
+    return [future.result() for future in futures]
+
+
 def run_cloudy_decks(input_paths: Sequence[str | Path], cloudy_exe: str | Path,
-    max_workers: int | None = None, progress: bool = True) -> list[Path]:
+    max_workers: int | None = None, progress: bool = True,
+    executor: concurrent.futures.Executor | None = None) -> list[Path]:
     """
     Run cloudy concurrently on multiple input decks.
 
@@ -106,10 +119,24 @@ def run_cloudy_decks(input_paths: Sequence[str | Path], cloudy_exe: str | Path,
         find_cloudy_executable).
     max_workers : int, optional
         Maximum number of cloudy processes to run at once. Defaults to
-        the number of available CPUs.
+        the number of available CPUs. Ignored if executor is given.
     progress : bool, default True
         Whether to show a progress bar (see slugpy.progress) tracking
         decks completed. A no-op if input_paths is empty.
+    executor : concurrent.futures.Executor, optional
+        An already-running executor to submit this call's own runs
+        into, instead of creating (and, once this call returns,
+        shutting down) a private max_workers-sized
+        ThreadPoolExecutor. Pass this to share one pool's own worker
+        threads across multiple run_cloudy_decks calls -- e.g. several
+        slug_reader.run_cloudy calls for different files, run
+        concurrently from different driver threads -- so an idle
+        worker immediately picks up whichever call's work is next,
+        rather than each call's own private pool leaving workers idle
+        once its own input_paths run out while other calls' work is
+        still queued elsewhere. This call still blocks until its own
+        input_paths have all completed; executor itself is left
+        running for the caller to manage.
 
     Returns
     -------
@@ -126,17 +153,13 @@ def run_cloudy_decks(input_paths: Sequence[str | Path], cloudy_exe: str | Path,
     At most max_workers decks run at once; as each finishes, the next
     queued one is launched, until all of input_paths have been run.
     """
+    input_paths = list(input_paths)
+    if executor is not None:
+        return _submit_and_gather(executor, input_paths, cloudy_exe, progress)
     if max_workers is None:
         max_workers = os.cpu_count() or 1
-    input_paths = list(input_paths)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = [executor.submit(run_cloudy_deck, path, cloudy_exe) for path in input_paths]
-        if progress and futures:
-            bar = make_progress_bar(total=len(futures), desc="Running cloudy")
-            for _ in concurrent.futures.as_completed(futures):
-                bar.update(1)
-            bar.close()
-        return [future.result() for future in futures]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as owned_executor:
+        return _submit_and_gather(owned_executor, input_paths, cloudy_exe, progress)
 
 
 def cloudy_run_succeeded(out_path: str | Path) -> bool:

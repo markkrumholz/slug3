@@ -6,6 +6,7 @@ Implements slug_reader, a lazy reader for slug HDF5 output files.
 :copyright: Copyright (c) 2026 Mark Krumholz
 """
 
+import concurrent.futures
 import shutil
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -525,7 +526,8 @@ class slug_reader:
         fix_quantity: Literal["nII", "r0", "r1", "U", "U0", "Omega"] | None = None,
         r0safety: float = 0.01, cloudy_path: str | Path | None = None,
         max_workers: int | None = None, overwrite: bool = False,
-        save_temp: bool = False, progress: bool = True) -> bool | list[bool]:
+        save_temp: bool = False, progress: bool = True,
+        executor: concurrent.futures.Executor | None = None) -> bool | list[bool]:
         """
         Write cloudy input decks for one or more of this file's own
         spectra, run cloudy on each of them, and save the results of
@@ -581,7 +583,8 @@ class slug_reader:
         max_workers : int, optional
             Maximum number of cloudy processes to run at once.
             Defaults to the number of available CPUs; pass a smaller
-            value to leave some cores free.
+            value to leave some cores free. Ignored if executor is
+            given.
         overwrite : bool, default False
             By default, a matching spectrum whose id/time and all six
             hiiregparam values (nII, r0, r1, U, U0, Omega) exactly
@@ -603,6 +606,20 @@ class slug_reader:
             tracking decks completed. A no-op if every matching
             spectrum is skipped as an already-stored duplicate (see
             overwrite above).
+        executor : concurrent.futures.Executor, optional
+            An already-running executor to submit this call's own
+            cloudy runs into, instead of a private max_workers-sized
+            pool of this call's own (see run_cloudy_decks). Pass this
+            to share one pool's own worker threads across multiple
+            run_cloudy calls -- e.g. concurrent calls on different
+            slug_reader instances for different files, each run from
+            its own driver thread -- so an idle worker immediately
+            picks up whichever file's work is next, rather than each
+            call's own private pool leaving workers idle once its own
+            matching spectra run out while other files' work is still
+            queued elsewhere. This call still blocks until every
+            matching spectrum here has completed; executor itself is
+            left running for the caller to manage.
 
         Returns
         -------
@@ -799,7 +816,8 @@ class slug_reader:
             run_overwrite_rows.append(existing_row)
 
         out_paths = run_cloudy_decks(
-            written, cloudy_exe, max_workers=max_workers, progress=progress) if written else []
+            written, cloudy_exe, max_workers=max_workers, progress=progress,
+            executor=executor) if written else []
         ran_successes = [cloudy_run_succeeded(p) for p in out_paths]
 
         results: list[CloudyRunResult] = []
