@@ -32,7 +32,14 @@ the wavelength grid is the longest "wl" grid found across every
 processed file (cloudy's own grid always shares the same maximum
 wavelength and spacing across runs, so a shorter grid is always a
 right-aligned subset of a longer one); the line list is the union of
-every distinct line wavelength seen anywhere, sorted ascending.
+every distinct line wavelength seen anywhere, sorted ascending -- but
+first restricted, row by row, to the --nline brightest lines that row
+itself reported (default 100; see _row_top_lines), since a full,
+unrestricted line list runs to ~10,000 entries and makes the table
+much larger than it needs to be. Because the brightest lines differ
+somewhat from one row to the next, the table's own overall line count
+can still end up well above --nline once every row's own top-nline
+set is unioned together -- just far short of the unrestricted total.
 
 Output layout (cloudy_table.h5, default name):
 
@@ -103,6 +110,7 @@ from run_cloudy_grid import LOG_U_VALUES, find_h5_files  # noqa: E402 -- sibling
 
 DEFAULT_WORK_DIR = _SCRIPT_DIR / "slug_grid_work"
 DEFAULT_OUTPUT = _SCRIPT_DIR / "cloudy_table.h5"
+DEFAULT_NLINE = 100
 
 _LINE_FILTER_PASSES = 3
 _LINE_FILTER_THRESH = 0.01
@@ -210,6 +218,48 @@ def _nearest_log_u(u_val: float, log_u_values: list[float]) -> float:
     return log_u_values[int(np.argmin(diffs))]
 
 
+def _row_top_lines(wl: np.ndarray, label: list[str], lum_row: np.ndarray,
+    nline: int) -> tuple[np.ndarray, list[str], np.ndarray]:
+    """
+    Get one row's own reported lines, restricted to the nline brightest.
+
+    Parameters
+    ----------
+    wl : numpy.ndarray
+        The shared line-wavelength list lum_row is aligned with, in
+        Angstrom (typically a group's own "line_wl" dataset -- a union
+        across every row in that group, so most entries are 0 for any
+        given row).
+    label : list of str
+        Cloudy's own label for each wavelength in wl, same order.
+    lum_row : numpy.ndarray
+        One row's own line luminosity at each wavelength in wl -- 0
+        wherever that row's own cloudy run didn't report a line.
+    nline : int
+        Maximum number of lines to keep, ranked by luminosity
+        descending. A value <= 0 means "keep every line this row
+        reported" (no brightness cut at all).
+
+    Returns
+    -------
+    wl, label, lum : as above, restricted to this row's own nonzero
+        entries, then (if nline > 0) further restricted to the nline
+        brightest of those. Since which lines are brightest generally
+        differs from one row to the next, applying this same cut to
+        every row and then taking the union (as compute_global_grids
+        and process_cluster_file/process_galaxy_file both do) can
+        still end up with more than nline distinct lines overall.
+    """
+    nz = lum_row > 0
+    row_wl = wl[nz]
+    row_label = [label[i] for i in np.nonzero(nz)[0]]
+    row_lum = lum_row[nz]
+    if nline <= 0 or len(row_wl) <= nline:
+        return row_wl, row_label, row_lum
+    order = np.argsort(row_lum)[::-1][:nline]
+    return row_wl[order], [row_label[i] for i in order], row_lum[order]
+
+
 class FileEntry(NamedTuple):
     """One discovered slug HDF5 output file, classified by simulation type, track set, [Fe/H], and v/vcrit."""
 
@@ -261,7 +311,9 @@ def discover_files(work_dir: Path) -> list[FileEntry]:
     return entries
 
 
-def compute_global_grids(entries: list[FileEntry]) -> tuple[u.Quantity, np.ndarray, list[str], np.ndarray]:
+def compute_global_grids(
+    entries: list[FileEntry], nline: int,
+) -> tuple[u.Quantity, np.ndarray, list[str], np.ndarray]:
     """
     Build the common wavelength grid, line list, and cluster output-time list shared by the whole table.
 
@@ -269,6 +321,12 @@ def compute_global_grids(entries: list[FileEntry]) -> tuple[u.Quantity, np.ndarr
     ----------
     entries : list of FileEntry
         As returned by discover_files.
+    nline : int
+        Maximum number of lines to keep per row, ranked by luminosity
+        (see _row_top_lines); a value <= 0 keeps every line. The union
+        of every row's own top-nline lines, across every processed
+        file, can still exceed nline overall, since the brightest
+        lines generally differ from one row to the next.
 
     Returns
     -------
@@ -278,8 +336,9 @@ def compute_global_grids(entries: list[FileEntry]) -> tuple[u.Quantity, np.ndarr
         module's own docstring for why the longest grid is always a
         superset of every shorter one).
     global_line_wl : numpy.ndarray
-        Ascending-sorted union of every distinct line wavelength (in
-        Angstrom) found across every processed file.
+        Ascending-sorted union of every row's own top-nline distinct
+        line wavelengths (in Angstrom) found across every processed
+        file.
     global_line_label : list of str
         Cloudy's own label for each wavelength in global_line_wl, in
         the same order.
@@ -310,8 +369,11 @@ def compute_global_grids(entries: list[FileEntry]) -> tuple[u.Quantity, np.ndarr
             if "line_wl" in group.keys():
                 line_wl = cast(u.Quantity, group["line_wl"]).to_value(u.AA)
                 line_label = [lbl.decode() if isinstance(lbl, bytes) else lbl for lbl in group["line_label"]]
-                for w, lbl in zip(line_wl, line_label, strict=True):
-                    line_table.setdefault(w, lbl)
+                line_lum = cast(u.Quantity, group["line_lum"]).to_value(_LINE_UNIT)
+                for row in range(line_lum.shape[0]):
+                    top_wl, top_label, _ = _row_top_lines(line_wl, line_label, line_lum[row, :], nline)
+                    for w, lbl in zip(top_wl, top_label, strict=True):
+                        line_table.setdefault(w, lbl)
 
         if sim_type == "cluster":
             spectra = reader.cluster_spectra
@@ -345,6 +407,9 @@ class _GroupArrays:
     file_line_wl : numpy.ndarray or None
         This group's own line wavelength list, in Angstrom, or None if
         the group has no line data at all.
+    file_line_label : list of str or None
+        Cloudy's own label for each wavelength in file_line_wl, same
+        order; None iff file_line_wl is None.
     spec_emit : numpy.ndarray or None
         This group's own emitted continuum, one row per entry in
         row_time/row_u, in erg/s/Angstrom, aligned with file_wl; None
@@ -365,6 +430,8 @@ class _GroupArrays:
         self.row_u = cast(np.ndarray, group["U"])
         self.file_wl = cast(u.Quantity, group["wl"]).to_value(u.AA) if has_spec else None
         self.file_line_wl = cast(u.Quantity, group["line_wl"]).to_value(u.AA) if has_lines else None
+        self.file_line_label = ([lbl.decode() if isinstance(lbl, bytes) else lbl for lbl in group["line_label"]]
+            if has_lines else None)
         self.spec_emit = cast(u.Quantity, group["spec_emit"]).to_value(_FLUX_UNIT) if has_spec else None
         self.line_lum = cast(u.Quantity, group["line_lum"]).to_value(_LINE_UNIT) if has_lines else None
 
@@ -377,7 +444,7 @@ def _qhi_by_time(phot: slug_phot_reader) -> dict[float, float]:
 
 
 def _normalize_row(arrays: _GroupArrays, row: int, qhi: float, global_wl: np.ndarray,
-    line_index: dict[float, int], nline: int) -> tuple[np.ndarray, np.ndarray]:
+    line_index: dict[float, int], n_line_total: int, nline: int) -> tuple[np.ndarray, np.ndarray]:
     """
     Build one row's own line-stripped continuum and line luminosities, normalized by Q(HI).
 
@@ -394,8 +461,14 @@ def _normalize_row(arrays: _GroupArrays, row: int, qhi: float, global_wl: np.nda
     line_index : dict mapping float to int
         wavelength (Angstrom) -> column index into the table's own
         common line list.
-    nline : int
+    n_line_total : int
         Number of entries in the table's own common line list.
+    nline : int
+        Maximum number of this row's own lines to keep, ranked by
+        luminosity (see _row_top_lines); a value <= 0 keeps every line
+        this row reported. Must match the value compute_global_grids
+        was called with, so every line this row keeps is guaranteed to
+        already be in line_index.
 
     Returns
     -------
@@ -404,24 +477,26 @@ def _normalize_row(arrays: _GroupArrays, row: int, qhi: float, global_wl: np.nda
         (0 where global_wl extends past arrays.file_wl's own range, or
         if arrays has no continuum data at all).
     line_lum : numpy.ndarray
-        Line luminosities on the table's own common line list, in
-        erg/photon (0 for any line this row didn't report, or if
-        arrays has no line data at all).
+        This row's own top-nline line luminosities, on the table's own
+        common line list, in erg/photon (0 for any line not among
+        those, or if arrays has no line data at all).
     """
     spec = np.zeros(len(global_wl))
     if arrays.file_wl is not None and arrays.spec_emit is not None:
         spec[:] = line_filter_interp(arrays.file_wl, arrays.spec_emit[row, :], global_wl) / qhi
 
-    line_lum = np.zeros(nline)
-    if arrays.file_line_wl is not None and arrays.line_lum is not None:
-        for j, w in enumerate(arrays.file_line_wl):
-            line_lum[line_index[w]] = arrays.line_lum[row, j] / qhi
+    line_lum = np.zeros(n_line_total)
+    if arrays.file_line_wl is not None and arrays.file_line_label is not None and arrays.line_lum is not None:
+        top_wl, _, top_lum = _row_top_lines(arrays.file_line_wl, arrays.file_line_label,
+            arrays.line_lum[row, :], nline)
+        for w, lum in zip(top_wl, top_lum, strict=True):
+            line_lum[line_index[w]] = lum / qhi
 
     return spec, line_lum
 
 
 def process_cluster_file(path: Path, global_wl: np.ndarray, line_index: dict[float, int],
-    time_index: dict[float, int], log_u_values: list[float]) -> dict[float, dict[str, np.ndarray]]:
+    time_index: dict[float, int], log_u_values: list[float], nline: int) -> dict[float, dict[str, np.ndarray]]:
     """
     Normalize every row of one cluster-type file's own cluster_cloudy group.
 
@@ -439,6 +514,10 @@ def process_cluster_file(path: Path, global_wl: np.ndarray, line_index: dict[flo
         cluster output-time list.
     log_u_values : list of float
         Nominal log10(U) grid to sort rows into (see _nearest_log_u).
+    nline : int
+        Maximum number of lines to keep per row (see _row_top_lines);
+        must match the value compute_global_grids built line_index
+        with.
 
     Returns
     -------
@@ -461,7 +540,7 @@ def process_cluster_file(path: Path, global_wl: np.ndarray, line_index: dict[flo
 
     arrays = _GroupArrays(group)
     qhi_by_time = _qhi_by_time(phot)
-    ntime, nwl, nline = len(time_index), len(global_wl), len(line_index)
+    ntime, nwl, n_line_total = len(time_index), len(global_wl), len(line_index)
 
     result: dict[float, dict[str, np.ndarray]] = {}
     for i in range(len(arrays.row_time)):
@@ -474,9 +553,9 @@ def process_cluster_file(path: Path, global_wl: np.ndarray, line_index: dict[flo
         log_u = _nearest_log_u(arrays.row_u[i], log_u_values)
         bucket = result.setdefault(log_u, {
             "spec": np.zeros((ntime, nwl)),
-            "line_lum": np.zeros((ntime, nline)),
+            "line_lum": np.zeros((ntime, n_line_total)),
         })
-        spec, line_lum = _normalize_row(arrays, i, qhi, global_wl, line_index, nline)
+        spec, line_lum = _normalize_row(arrays, i, qhi, global_wl, line_index, n_line_total, nline)
         bucket["spec"][t_idx, :] = spec
         bucket["line_lum"][t_idx, :] = line_lum
 
@@ -484,7 +563,7 @@ def process_cluster_file(path: Path, global_wl: np.ndarray, line_index: dict[flo
 
 
 def process_galaxy_file(path: Path, global_wl: np.ndarray, line_index: dict[float, int],
-    log_u_values: list[float]) -> dict[float, dict[str, np.ndarray]]:
+    log_u_values: list[float], nline: int) -> dict[float, dict[str, np.ndarray]]:
     """
     Normalize every row of one galaxy-type file's own galaxy_cloudy group.
 
@@ -499,6 +578,10 @@ def process_galaxy_file(path: Path, global_wl: np.ndarray, line_index: dict[floa
         common line list.
     log_u_values : list of float
         Nominal log10(U) grid to sort rows into (see _nearest_log_u).
+    nline : int
+        Maximum number of lines to keep per row (see _row_top_lines);
+        must match the value compute_global_grids built line_index
+        with.
 
     Returns
     -------
@@ -520,7 +603,7 @@ def process_galaxy_file(path: Path, global_wl: np.ndarray, line_index: dict[floa
 
     arrays = _GroupArrays(group)
     qhi_by_time = _qhi_by_time(phot)
-    nline = len(line_index)
+    n_line_total = len(line_index)
 
     result: dict[float, dict[str, np.ndarray]] = {}
     for i in range(len(arrays.row_time)):
@@ -528,7 +611,7 @@ def process_galaxy_file(path: Path, global_wl: np.ndarray, line_index: dict[floa
         if qhi is None or qhi <= 0:
             continue
         log_u = _nearest_log_u(arrays.row_u[i], log_u_values)
-        spec, line_lum = _normalize_row(arrays, i, qhi, global_wl, line_index, nline)
+        spec, line_lum = _normalize_row(arrays, i, qhi, global_wl, line_index, n_line_total, nline)
         result[log_u] = {"spec": spec, "line_lum": line_lum}
 
     return result
@@ -560,7 +643,7 @@ def _write_normalized_group(parent: h5py.Group, name: str, data: dict[str, np.nd
     line_dset.attrs["units"] = str(_LINE_NORM_UNIT)
 
 
-def build_table(entries: list[FileEntry], output_path: Path, log_u_values: list[float]) -> None:
+def build_table(entries: list[FileEntry], output_path: Path, log_u_values: list[float], nline: int) -> None:
     """
     Build the full nebular emission lookup table from every discovered slug output file.
 
@@ -573,8 +656,11 @@ def build_table(entries: list[FileEntry], output_path: Path, log_u_values: list[
     log_u_values : list of float
         Nominal log10(U) grid to sort rows into (see _nearest_log_u);
         should match run_cloudy_grid.py's own --log-u.
+    nline : int
+        Maximum number of lines to keep per row, ranked by luminosity
+        (see _row_top_lines); a value <= 0 keeps every line.
     """
-    global_wl_q, global_line_wl, global_line_label, global_time = compute_global_grids(entries)
+    global_wl_q, global_line_wl, global_line_label, global_time = compute_global_grids(entries, nline)
     global_wl = global_wl_q.to_value(u.AA)
     line_index = {w: i for i, w in enumerate(global_line_wl)}
     time_index = {t: i for i, t in enumerate(global_time)}
@@ -590,9 +676,9 @@ def build_table(entries: list[FileEntry], output_path: Path, log_u_values: list[
             cluster_path = paths.get("cluster")
             galaxy_path = paths.get("galaxy")
 
-            cluster_data = (process_cluster_file(cluster_path, global_wl, line_index, time_index, log_u_values)
-                if cluster_path is not None else {})
-            galaxy_data = (process_galaxy_file(galaxy_path, global_wl, line_index, log_u_values)
+            cluster_data = (process_cluster_file(cluster_path, global_wl, line_index, time_index,
+                log_u_values, nline) if cluster_path is not None else {})
+            galaxy_data = (process_galaxy_file(galaxy_path, global_wl, line_index, log_u_values, nline)
                 if galaxy_path is not None else {})
 
             log_us = sorted(set(cluster_data) | set(galaxy_data))
@@ -631,6 +717,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--log-u", type=float, nargs="+", default=list(LOG_U_VALUES),
         help=f"Nominal log10(U) grid to sort rows into (default: {list(LOG_U_VALUES)}); "
             "should match run_cloudy_grid.py's own --log-u.")
+    parser.add_argument("--nline", type=int, default=DEFAULT_NLINE,
+        help="Maximum number of lines to keep per row, ranked by luminosity (default: "
+            f"{DEFAULT_NLINE}); a value <= 0 keeps every line. Since the brightest lines "
+            "generally differ from one row to the next, the table's own overall line count can "
+            "still exceed this (see _row_top_lines).")
     return parser.parse_args()
 
 
@@ -642,7 +733,7 @@ def main() -> None:
         print(f"No .h5 files found in {args.work_dir}")
         return
 
-    build_table(entries, args.output, args.log_u)
+    build_table(entries, args.output, args.log_u, args.nline)
     print(f"Wrote {args.output}")
 
 
