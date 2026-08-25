@@ -42,6 +42,10 @@ if(NOT OpenMP_CXX_FOUND)
     message(WARNING "OpenMP not found: building without threading support")
 endif()
 
+# Find (or build) an implementation of C++23's <mdspan>; see that file's
+# own comment for the native/package/submodule priority this uses.
+include(cmake/Mdspan.cmake)
+
 # Determine the current git commit hash, so it can be embedded in output
 # files to record exactly which version of slug produced them. Falls back
 # to "unknown" if git isn't available or this isn't a git checkout (e.g.
@@ -505,6 +509,20 @@ target_link_libraries(slugTestCoreFull PRIVATE GSL::gsl)
 target_link_libraries(slugTestIo PRIVATE GSL::gsl)
 target_link_libraries(slugTestSpecsyn PRIVATE GSL::gsl)
 target_link_libraries(slugPython PRIVATE GSL::gsl)
+
+# Link to mdspan (see cmake/Mdspan.cmake)
+target_link_libraries(slug PRIVATE slug_mdspan)
+target_link_libraries(slugTestInterpolation PRIVATE slug_mdspan)
+target_link_libraries(slugTestExtinct PRIVATE slug_mdspan)
+target_link_libraries(slugTestPhot PRIVATE slug_mdspan)
+target_link_libraries(slugTestPDFs PRIVATE slug_mdspan)
+target_link_libraries(slugTestUtils PRIVATE slug_mdspan)
+target_link_libraries(slugTestTracks PRIVATE slug_mdspan)
+target_link_libraries(slugTestCore PRIVATE slug_mdspan)
+target_link_libraries(slugTestCoreFull PRIVATE slug_mdspan)
+target_link_libraries(slugTestIo PRIVATE slug_mdspan)
+target_link_libraries(slugTestSpecsyn PRIVATE slug_mdspan)
+target_link_libraries(slugPython PRIVATE slug_mdspan)
 
 # Link to HDF5
 target_link_libraries(slug PRIVATE ${HDF5_CXX_LIBRARIES})
