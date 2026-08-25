@@ -10,11 +10,27 @@
 #define THREADVEC_HPP
 
 #ifdef _OPENMP
+#   include <algorithm>
 #   include <omp.h>
+#   include <thread>
 #endif
+#include <cassert>
+#include <cstddef>
 #include <vector>
 
 namespace utils {
+
+#ifdef _OPENMP
+    // Multiplier applied to std::thread::hardware_concurrency() when
+    // clamping ThreadVec's own construction-time size -- see
+    // ThreadVec::ThreadVec()'s own comment for why this exists at
+    // all. Generous on purpose: every T ThreadVec is instantiated
+    // with in this codebase is a small handle (pointer-sized or
+    // smaller), so erring on the large side here costs negligible
+    // memory, while erring small risks the out-of-bounds access this
+    // whole mechanism exists to prevent.
+    inline constexpr int threadVecCapOversubscription = 8;
+#endif
 
     /**
      * @class ThreadVec
@@ -23,8 +39,9 @@ namespace utils {
      * @details
      * This class is a container to automate the process of each thread
      * having its own private copy of an object. It is a vector that on
-     * creation automatically resizes itself to the number of threads in
-     * the openMP threadpool, and when accessed by a thread
+     * creation automatically resizes itself large enough for the
+     * program's own maximum possible OpenMP team size (see the
+     * constructor's own comment), and when accessed by a thread
      * automatically returns the element of the vector that is private
      * to that thread.
      */
@@ -35,25 +52,41 @@ namespace utils {
         /**
          * @brief Construct an empty ThreadVec
          * @details
-         * Sized via omp_get_max_threads() rather than by spawning a
-         * parallel region and reading omp_get_num_threads() from
-         * inside it: a ThreadVec can be constructed from inside an
-         * already-active parallel region (e.g. one built fresh by
-         * some per-thread work item), in which case that inner region
-         * would be nested and, since nested parallelism is inactive
-         * by default, would collapse to a team of one, sizing this
-         * ThreadVec for a single thread. Every later access is keyed
-         * by omp_get_thread_num() relative to the outer (real) team,
-         * so that undersized ThreadVec would then be indexed out of
-         * bounds. omp_get_max_threads() needs no parallel region of
-         * its own and reflects the team size any (non-nested)
-         * parallel region will actually use, so it stays correct
-         * regardless of whether construction happens inside or
-         * outside one.
+         * Sized via omp_get_thread_limit() rather than
+         * omp_get_max_threads(): the latter only reflects the
+         * *default* team size at the moment of construction, and two
+         * things can raise the real team size above that later --
+         * omp_set_num_threads() called after this ThreadVec already
+         * exists, or a parallel region with an explicit
+         * num_threads(n) clause requesting more threads than
+         * omp_get_max_threads() currently reports. Every access below
+         * is keyed by the real omp_get_thread_num() of whichever team
+         * ends up running, so an undersized ThreadVec would then be
+         * indexed out of bounds. omp_get_thread_limit() instead
+         * reflects the program-wide ceiling on OpenMP threads
+         * (bounded by OMP_THREAD_LIMIT if set), which is stable
+         * regardless of any of that -- it also needs no parallel
+         * region of its own, so it stays correct regardless of
+         * whether construction happens inside or outside one (a
+         * concern for omp_get_max_threads() too: constructing from
+         * inside an already-active parallel region makes a fresh,
+         * nested one collapse to a team of one by default, sizing
+         * this ThreadVec for a single thread against the *outer*
+         * team's own larger omp_get_thread_num() range).
+         *
+         * Most runtimes report a very large (effectively unbounded)
+         * sentinel for omp_get_thread_limit() when OMP_THREAD_LIMIT
+         * isn't set, so the result is clamped against a
+         * hardware_concurrency-based cap (see
+         * threadVecCapOversubscription) to avoid allocating an
+         * enormous vector in the common case.
          */
         ThreadVec() {
 #ifdef _OPENMP
-            obj_.resize(omp_get_max_threads());
+            const int limit = omp_get_thread_limit();
+            const int cap = static_cast<int>(std::max<unsigned>(1, std::thread::hardware_concurrency()))
+                * threadVecCapOversubscription;
+            obj_.resize(static_cast<std::size_t>(limit > 0 && limit < cap ? limit : cap));
 #else
             obj_.resize(1);
 #endif
@@ -83,7 +116,8 @@ namespace utils {
 #else
             const int ithread = 0;
 #endif
-            return obj_[ithread]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- hot path, must stay unchecked for performance
+            assert(ithread >= 0 && static_cast<std::size_t>(ithread) < obj_.size());
+            return obj_[ithread]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- hot path, must stay unchecked for performance; bounds asserted just above
         }
 
         /**
@@ -97,7 +131,8 @@ namespace utils {
 #else
             const int ithread = 0;
 #endif
-            return obj_[ithread]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- hot path, must stay unchecked for performance
+            assert(ithread >= 0 && static_cast<std::size_t>(ithread) < obj_.size());
+            return obj_[ithread]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- hot path, must stay unchecked for performance; bounds asserted just above
         }
 
         /**
@@ -107,7 +142,8 @@ namespace utils {
          * @return The object belonging to thread i
          */
         auto operator[] (const int i) -> auto& {
-            return obj_[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- hot path, must stay unchecked for performance
+            assert(i >= 0 && static_cast<std::size_t>(i) < obj_.size());
+            return obj_[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- hot path, must stay unchecked for performance; bounds asserted just above
         }
 
         /**
@@ -117,7 +153,8 @@ namespace utils {
          * @return The object belonging to thread i
          */
         auto operator[] (const int i) const -> const auto& {
-            return obj_[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- hot path, must stay unchecked for performance
+            assert(i >= 0 && static_cast<std::size_t>(i) < obj_.size());
+            return obj_[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- hot path, must stay unchecked for performance; bounds asserted just above
         }
 
         /**
