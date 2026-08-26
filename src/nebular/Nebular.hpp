@@ -48,6 +48,9 @@ namespace nebular
 
         /**
          * @brief Construct a Nebular object
+         * @param tableName Path to the nebular emission table (see
+         *   nebular::defaultTable) to load this track set's own grid
+         *   from; used only during construction, not retained afterward
          * @param trackName Name of the track set this nebular grid is
          *   for; used only during construction (to locate this track
          *   set's own cloudy grid data), not retained afterward
@@ -57,8 +60,8 @@ namespace nebular
          *   ultimately be resampled onto (simControls.specsyn()->wl()),
          *   so that grid need not be passed in separately
          * @param vvcrit Rotation rate v/vcrit of the track set; like
-         *   trackName, used only during construction, not retained
-         *   afterward
+         *   tableName and trackName, used only during construction,
+         *   not retained afterward
          * @details
          * simControls is stored by reference, so the object passed in
          * must outlive this Nebular. This constructor does not yet
@@ -67,6 +70,7 @@ namespace nebular
          * default-constructed (empty) for now.
          */
         Nebular(
+            [[maybe_unused]] const std::string& tableName,
             [[maybe_unused]] const std::string& trackName,
             const io::SimControls& simControls,
             [[maybe_unused]] double vvcrit = tracks::defaultVVcrit) :

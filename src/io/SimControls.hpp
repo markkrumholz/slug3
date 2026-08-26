@@ -10,6 +10,8 @@
 #define SIMCONTROLS_HPP
 
 #include "../extinct/Extinct.hpp"
+#include "../nebular/Nebular.hpp"
+#include "../nebular/NebularCommons.hpp"
 #include "../pdfs/PDF.hpp"
 #include "../phot/FilterCollection.hpp"
 #include "../specsyn/Specsyn.hpp"
@@ -105,9 +107,11 @@ namespace io
         // specsyn_/filters_ are held by unique_ptr, so this class was
         // already implicitly non-copyable. It is additionally made
         // non-movable here, since the spectral synthesizer readSpectra()
-        // builds stores a live reference back to *this (see Specsyn's
-        // own controls_ member) -- this object's address must never
-        // change after construction for that reference to stay valid.
+        // builds, and the nebular emission grid readNebular() builds,
+        // each store a live reference back to *this (see Specsyn's own
+        // controls_ member, and Nebular's own simControls_ member) --
+        // this object's address must never change after construction
+        // for those references to stay valid.
         SimControls(const SimControls&) = delete;
         auto operator=(const SimControls&) -> SimControls& = delete;
         SimControls(SimControls&&) = delete;
@@ -385,6 +389,15 @@ namespace io
         [[nodiscard]] auto extinct() const -> const extinct::Extinct* { return extinct_.get(); }
 
         /**
+         * @brief Get the nebular emission control parameters
+         * @return A const reference to the control parameters
+         *   populated from the input deck's own [nebular] stanza (see
+         *   readNebular()), or their own defaults for any key that
+         *   was not given
+         */
+        [[nodiscard]] auto nebControls() const -> const nebular::NebularControls& { return nebControls_; }
+
+        /**
          * @brief Check whether the bolometric luminosity was requested as an output
          * @return True if "Lbol" was included in phot.filters
          */
@@ -527,6 +540,16 @@ namespace io
          * setCLF()'s/setSFR()'s string-parsing ones.
          */
         void setFCluster(double fCluster) { fCluster_ = fCluster; }
+
+        /**
+         * @brief Set the nebular emission control parameters
+         * @param nebControls New control parameters; see nebControls()'s own comment
+         * @details
+         * Like setFCluster(), a plain direct assignment: NebularControls
+         * is a small value-type aggregate, not a polymorphic/heap-
+         * allocated object, so there is no ownership to transfer.
+         */
+        void setNebControls(const nebular::NebularControls& nebControls) { nebControls_ = nebControls; }
 
         // Object-replacement setters: unlike the string-driven setters
         // above, these accept an already-built object -- e.g. from
@@ -675,6 +698,23 @@ namespace io
          */
         void readExtinct(const toml::table& inputDeck);
 
+        /**
+         * @brief Load the nebular emission controls and grid specified by input deck
+         * @param inputDeck A toml table holding the input deck
+         * @details
+         * Reads nebular.log_U, nebular.cov_fac, nebular.line_width,
+         * nebular.n_grid_line, and nebular.line_extent into
+         * nebControls_, each left at its own nebular::defaultXxx value
+         * (already NebularControls's own default member initializers)
+         * if its key was not given -- so, unlike readSpectra()'s or
+         * readExtinct()'s own all-or-nothing stanzas, every key here
+         * is independently optional. Also reads nebular.table (falling
+         * back to nebular::defaultTable), and stars.tracks/
+         * stars.v_vcrit -- the same keys, read the same way, as
+         * readTracks() -- and uses them to construct nebular_.
+         */
+        void readNebular(const toml::table& inputDeck);
+
         // Simulation control parameters
         SimType simType_ = SimType::none;              /**< Simulation type */
         unsigned int verbosity_ = 0;                   /**< Level of verbosity */
@@ -757,6 +797,8 @@ namespace io
         pdfs::PDF avDist_; /**< Distribution of V-band extinction (A_V) for clustered stars -- see avDist()'s own comment for exactly when this is valid/a delta at 0/invalid */
         pdfs::PDF avDistField_; /**< Distribution of V-band extinction (A_V) for field stars -- see avDistField()'s own comment */
         std::unique_ptr<extinct::Extinct> extinct_; /**< Extinction curve requested via extinct.model, or nullptr if neither extinct.AV nor extinct.AV_field was given */
+        nebular::NebularControls nebControls_; /**< Nebular emission control parameters, see nebControls() */
+        std::unique_ptr<nebular::Nebular> nebular_; /**< Nebular emission grid requested via the [nebular] stanza */
 
         // Output wavelength grid (spectra.wl_min, spectra.wl_max,
         // spectra.nwl), read by readSpectra and passed through to

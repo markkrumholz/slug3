@@ -8,6 +8,8 @@
 
 #include "SimControls.hpp"
 #include "../extinct/Extinct.hpp"
+#include "../nebular/Nebular.hpp"
+#include "../nebular/NebularCommons.hpp"
 #include "../pdfs/PDF.hpp"
 #include "../pdfs/PDFFileParser.hpp"
 #include "../pdfs/PDFSegmentDelta.hpp"
@@ -290,6 +292,14 @@ void io::SimControls::initPhysics(const toml::table& inputDeck)
     // optional. Needs specsyn_ (just set above) to provide the
     // wavelength grid the extinction curve is interpolated onto.
     readExtinct(inputDeck);
+
+    // Read the nebular emission controls and grid to use. Unlike
+    // readSpectra/readFilters/readExtinct, nothing here is gated on
+    // any input-deck key being present -- every nebular.* control
+    // parameter independently falls back to its own default, and a
+    // Nebular is always constructed (stars.tracks is already
+    // mandatory, via readTracks() above).
+    readNebular(inputDeck);
 
     // In a galaxy simulation, read CLF, SFR, and the stochastic
     // cluster mass fraction
@@ -834,4 +844,49 @@ void io::SimControls::readExtinct(const toml::table& inputDeck)
 
     extinct_ = std::make_unique<extinct::Extinct>(
         model.value(), specsyn_->wl(), *this, registryName); // NOLINT(bugprone-unchecked-optional-access) -- required=true above guarantees model has a value or getTOMLKeyWithError already threw
+}
+
+// Nebular emission controls and grid reader
+void io::SimControls::readNebular(const toml::table& inputDeck)
+{
+    // Every nebular.* control parameter is independently optional --
+    // unlike readSpectra()'s/readExtinct()'s own all-or-nothing
+    // stanzas, there is no single key whose absence should skip the
+    // rest of this stanza. Each one left absent simply leaves
+    // nebControls_'s own field at whatever NebularControls's own
+    // default member initializer already set it to.
+    const auto logU = utils::getTOMLKeyWithError<double>(inputDeck, "nebular.log_U");
+    if (logU) { nebControls_.logU_ = logU.value(); }
+
+    const auto covFac = utils::getTOMLKeyWithError<double>(inputDeck, "nebular.cov_fac");
+    if (covFac) { nebControls_.covFac_ = covFac.value(); }
+
+    const auto lineWidth = utils::getTOMLKeyWithError<double>(inputDeck, "nebular.line_width");
+    if (lineWidth) { nebControls_.lineWidth_ = lineWidth.value(); }
+
+    // nebular.n_grid_line is read as unsigned long, the only unsigned
+    // integer type getTOMLKeyWithError is explicitly instantiated for
+    // (see ParseUtils.cpp), then narrowed to nGridLine_'s own size_t
+    const auto nGridLine = utils::getTOMLKeyWithError<unsigned long>(inputDeck, "nebular.n_grid_line");
+    if (nGridLine) { nebControls_.nGridLine_ = static_cast<std::size_t>(nGridLine.value()); }
+
+    const auto lineExtent = utils::getTOMLKeyWithError<double>(inputDeck, "nebular.line_extent");
+    if (lineExtent) { nebControls_.lineExtent_ = lineExtent.value(); }
+
+    // nebular.table: optional override of the default nebular
+    // emission table to load this track set's own grid from
+    const auto tableInput = utils::getTOMLKeyWithError<std::string>(inputDeck, "nebular.table");
+    const std::string tableName = tableInput.value_or(nebular::defaultTable);
+
+    // stars.tracks/stars.v_vcrit: the same keys, read the same way, as
+    // readTracks() above -- Tracks3D itself does not retain its own
+    // track name after construction, so there is no way to recover it
+    // from tracks_ here; stars.tracks is already mandatory (readTracks()
+    // would have thrown before this method ever ran if it were absent),
+    // so re-reading it here as required is always safe.
+    const auto trackName = utils::getTOMLKeyWithError<std::string>(inputDeck, "stars.tracks", true);
+    const auto vvcrit = utils::getTOMLKeyWithError<double>(inputDeck, "stars.v_vcrit");
+
+    nebular_ = std::make_unique<nebular::Nebular>(
+        tableName, trackName.value(), *this, vvcrit.value_or(tracks::defaultVVcrit)); // NOLINT(bugprone-unchecked-optional-access) -- required=true above guarantees trackName has a value or getTOMLKeyWithError already threw
 }
