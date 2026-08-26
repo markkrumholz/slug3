@@ -67,9 +67,10 @@ namespace nebular
          * must outlive this Nebular. This constructor builds this
          * object's own nebular spectral grid (wl_, see that member's
          * own comment) and, from it, ctmLumPerQCluster_/
-         * ctmLumPerQGalaxy_; lineLumPerQCluster_/lineLumPerQGalaxy_
-         * are left default-constructed (empty) for now, a future
-         * commit's job.
+         * ctmLumPerQGalaxy_ (resampled onto wl_ via Interpolator1D)
+         * and lineLumPerQCluster_/lineLumPerQGalaxy_ (selected
+         * directly, without resampling, for whichever of the table's
+         * own lines survived into lineWl_/lineLabel_).
          * @throws std::runtime_error if tableName cannot be found (via
          *   utils::getFilePath), trackName has no group of its own in
          *   it, or -- for any of that group's own [Fe/H] values -- no

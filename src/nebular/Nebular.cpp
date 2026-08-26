@@ -34,6 +34,7 @@ namespace
         std::vector<double> wl_;
         std::vector<double> lineWl_;
         std::vector<std::string> lineLabel_;
+        std::vector<size_t> lineIndex_; /**< Each kept line's own index into the table's full, global line list (lineWlAll/lineLabelAll) */
     };
 
     auto buildWavelengthGrid(const std::vector<double>& specsynWl,
@@ -60,6 +61,7 @@ namespace
 
             result.lineWl_.push_back(lambda0);
             result.lineLabel_.push_back(lineLabelAll.at(i));
+            result.lineIndex_.push_back(i);
 
             const double lo = lambda0 * (1.0 - fracHalfWidth);
             const double hi = lambda0 * (1.0 + fracHalfWidth);
@@ -73,6 +75,25 @@ namespace
         }
 
         std::sort(result.wl_.begin(), result.wl_.end());
+        return result;
+    }
+
+    // From a flat, row-major array shaped (nRows, nColsIn), extract
+    // only the columns listed in colIndices, producing a flat
+    // (nRows, colIndices.size()) array -- used to pick this object's
+    // own in-range lines (colIndices = lineIndex_) out of a
+    // "line_lum" dataset's full, global line list
+    auto selectColumns(const std::vector<double>& flat, const size_t nRows,
+        const size_t nColsIn, const std::vector<size_t>& colIndices) -> std::vector<double>
+    {
+        std::vector<double> result(nRows * colIndices.size());
+        for (size_t r = 0; r < nRows; ++r)
+        {
+            for (size_t c = 0; c < colIndices.size(); ++c)
+            {
+                result.at((r * colIndices.size()) + c) = flat.at((r * nColsIn) + colIndices.at(c));
+            }
+        }
         return result;
     }
 
@@ -143,25 +164,26 @@ namespace
         return result;
     }
 
-    // Read a flat "spec" dataset out of a cluster/galaxy subtype
-    // group -- galaxy's own spec is already 1D (nwl,); cluster's own
-    // is 2D (ntime, nwl), read here as the same flattened,
+    // Read a flat dataset (either "spec" or "line_lum") out of a
+    // cluster/galaxy subtype group -- galaxy's own copy of either is
+    // already 1D (nwl,)/(nline,); cluster's own is 2D
+    // (ntime, nwl)/(ntime, nline), read here as the same flattened,
     // row-major layout
-    auto readFlatSpec(const hid_t subGrp, const bool is2D,
-        const std::string& context) -> std::vector<double>
+    auto readFlatDataset(const hid_t subGrp, const std::string& datasetName,
+        const bool is2D, const std::string& context) -> std::vector<double>
     {
-        if (is2D) { return utils::readDataset2D(subGrp, "spec", context).first; }
-        return utils::readDataset1D(subGrp, "spec", context);
+        if (is2D) { return utils::readDataset2D(subGrp, datasetName, context).first; }
+        return utils::readDataset1D(subGrp, datasetName, context);
     }
 
     // Linearly blend (or, on an exact hit, select) the logU-bracketing
-    // "spec" data closest to requestedLogU among candidates, closing
-    // every one of candidates' own group handles exactly once before
-    // returning. Throws if candidates is empty, or requestedLogU
-    // falls outside the range of logU values candidates actually
-    // covers.
-    auto blendSpecByLogU(std::vector<std::pair<double, hid_t>> candidates,
-        const bool is2D, const double requestedLogU,
+    // datasetName data closest to requestedLogU among candidates,
+    // closing every one of candidates' own group handles exactly once
+    // before returning. Throws if candidates is empty, or
+    // requestedLogU falls outside the range of logU values candidates
+    // actually covers.
+    auto blendByLogU(std::vector<std::pair<double, hid_t>> candidates,
+        const std::string& datasetName, const bool is2D, const double requestedLogU,
         const std::string& context) -> std::vector<double>
     {
         if (candidates.empty())
@@ -183,14 +205,14 @@ namespace
 
         if (utils::approxEqual(candidates.at(hiIdx).first, requestedLogU))
         {
-            result = readFlatSpec(candidates.at(hiIdx).second, is2D, context);
+            result = readFlatDataset(candidates.at(hiIdx).second, datasetName, is2D, context);
         }
         else
         {
             const auto& lo = candidates.at(hiIdx - 1);
             const auto& hi = candidates.at(hiIdx);
-            const auto loData = readFlatSpec(lo.second, is2D, context);
-            const auto hiData = readFlatSpec(hi.second, is2D, context);
+            const auto loData = readFlatDataset(lo.second, datasetName, is2D, context);
+            const auto hiData = readFlatDataset(hi.second, datasetName, is2D, context);
             const double frac = (requestedLogU - lo.first) / (hi.first - lo.first);
             result.resize(loData.size());
             for (size_t k = 0; k < result.size(); ++k)
@@ -270,6 +292,8 @@ nebular::Nebular::Nebular(
         wl_ = std::move(grid.wl_);
         lineWl_ = std::move(grid.lineWl_);
         lineLabel_ = std::move(grid.lineLabel_);
+        const auto lineIndex = std::move(grid.lineIndex_);
+        const size_t nLineTotal = lineWlAll.size();
 
         const hid_t trackGrp = H5Gopen2(file, trackName.c_str(), H5P_DEFAULT);
         if (trackGrp < 0)
@@ -286,9 +310,12 @@ nebular::Nebular::Nebular(
         for (const auto& [feh, grp] : fehGroups) { feH_.push_back(feh); }
 
         const size_t nWl = wl_.size();
+        const size_t nLine = lineWl_.size();
         const size_t nTimeNative = clusterAge_.size();
         ctmLumPerQGalaxyData_.assign(feH_.size() * nWl, 0.0);
         ctmLumPerQClusterData_.assign(feH_.size() * nTimeNative * nWl, 0.0);
+        lineLumPerQGalaxyData_.assign(feH_.size() * nLine, 0.0);
+        lineLumPerQClusterData_.assign(feH_.size() * nTimeNative * nLine, 0.0);
 
         const double logURequested = simControls_.nebControls().logU_;
 
@@ -311,14 +338,14 @@ nebular::Nebular::Nebular(
             }
             const hid_t vvcritGrp = vvcritMatch->second;
 
-            const auto galaxySpec = blendSpecByLogU(
-                logUCandidates(vvcritGrp, "galaxy", context), false, logURequested, context);
+            const auto galaxySpec = blendByLogU(
+                logUCandidates(vvcritGrp, "galaxy", context), "spec", false, logURequested, context);
             const auto galaxyResampled = resampleZeroPad(nativeWl, galaxySpec, wl_);
             std::copy(galaxyResampled.begin(), galaxyResampled.end(),
                 ctmLumPerQGalaxyData_.begin() + static_cast<std::ptrdiff_t>(i * nWl));
 
-            const auto clusterSpec = blendSpecByLogU(
-                logUCandidates(vvcritGrp, "cluster", context), true, logURequested, context);
+            const auto clusterSpec = blendByLogU(
+                logUCandidates(vvcritGrp, "cluster", context), "spec", true, logURequested, context);
             for (size_t t = 0; t < nTimeNative; ++t)
             {
                 const std::vector<double> row(
@@ -330,6 +357,23 @@ nebular::Nebular::Nebular(
                         static_cast<std::ptrdiff_t>(((i * nTimeNative) + t) * nWl));
             }
 
+            // Lines: no wavelength resampling needed (unlike the
+            // continuum above) -- just pick out this object's own
+            // in-range lines (lineIndex, into the table's full,
+            // global line list) from the blended line_lum data
+            const auto galaxyLineLum = blendByLogU(
+                logUCandidates(vvcritGrp, "galaxy", context), "line_lum", false, logURequested, context);
+            const auto galaxySelected = selectColumns(galaxyLineLum, 1, nLineTotal, lineIndex);
+            std::copy(galaxySelected.begin(), galaxySelected.end(),
+                lineLumPerQGalaxyData_.begin() + static_cast<std::ptrdiff_t>(i * nLine));
+
+            const auto clusterLineLum = blendByLogU(
+                logUCandidates(vvcritGrp, "cluster", context), "line_lum", true, logURequested, context);
+            const auto clusterSelected = selectColumns(clusterLineLum, nTimeNative, nLineTotal, lineIndex);
+            std::copy(clusterSelected.begin(), clusterSelected.end(),
+                lineLumPerQClusterData_.begin() +
+                    static_cast<std::ptrdiff_t>(i * nTimeNative * nLine));
+
             for (const auto& [vc, grp] : vvcritGroups) { H5Gclose(grp); }
         }
 
@@ -339,6 +383,8 @@ nebular::Nebular::Nebular(
 
         ctmLumPerQGalaxy_ = Grid2D(ctmLumPerQGalaxyData_.data(), feH_.size(), nWl);
         ctmLumPerQCluster_ = Grid3D(ctmLumPerQClusterData_.data(), feH_.size(), nTimeNative, nWl);
+        lineLumPerQGalaxy_ = Grid2D(lineLumPerQGalaxyData_.data(), feH_.size(), nLine);
+        lineLumPerQCluster_ = Grid3D(lineLumPerQClusterData_.data(), feH_.size(), nTimeNative, nLine);
     }
 }
 
