@@ -15,6 +15,8 @@
 #include <exception> // NOLINT(misc-include-cleaner) -- correct header for std::exception_ptr/current_exception/rethrow_exception; clang-tidy-18's own header-mapping data doesn't yet attribute these symbols to it
 #include <iostream>
 #include <memory>
+#include <stdexcept>
+#include <string>
 #include <utility>
 
 core::SimCluster::SimCluster(const io::SimControls& simControls,
@@ -40,16 +42,36 @@ void core::SimCluster::runTrial(const unsigned long trialNum)
     // Create cluster for this trial
     Cluster cluster(utils::getID(), simControls_.cmf().draw(), 0, simControls_);
 
-    // Write time-invariant cluster properties to output
-    outputManager_->writeCluster(trialNum, cluster);
-
-    // Loop over output times
-    const auto outTimes = simControls_.outTimes();
-    for (const auto outTime : outTimes)
+    try
     {
-        cluster.advance(outTime);
-        outputManager_->writeClusterSpec(trialNum, outTime, cluster);
-        outputManager_->writeClusterPhot(trialNum, outTime, cluster);
+        // Write time-invariant cluster properties to output
+        outputManager_->writeCluster(trialNum, cluster);
+
+        // Loop over output times
+        const auto outTimes = simControls_.outTimes();
+        for (const auto outTime : outTimes)
+        {
+            cluster.advance(outTime);
+            outputManager_->writeClusterSpec(trialNum, outTime, cluster);
+            outputManager_->writeClusterPhot(trialNum, outTime, cluster);
+        }
+    }
+    catch (const std::exception& error)
+    {
+        // Append this cluster's own birth-time rng state (and the
+        // uid/mass/time needed alongside it) to the error message, so
+        // even a run with no output file to recover it from (e.g. a
+        // non-HDF5 OutputManager, or a crash before writeCluster()'s
+        // own flush -- see OutputManagerH5::writeCluster()'s comment)
+        // still leaves enough in this trial's own error message to
+        // deterministically reconstruct the exact failing cluster
+        // afterward, via Cluster's rng-state constructor overload.
+        throw std::runtime_error(
+            std::string(error.what()) +
+            " (cluster uid=" + std::to_string(cluster.uid()) +
+            ", target_mass=" + std::to_string(cluster.targetMass()) +
+            ", form_time=" + std::to_string(cluster.formTime()) +
+            ", rng=\"" + cluster.rngState().data() + "\")");
     }
 
     trialsCompleted_.fetch_add(1, std::memory_order_relaxed);
