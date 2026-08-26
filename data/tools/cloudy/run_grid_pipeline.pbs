@@ -81,6 +81,15 @@ export SLUG_DIR="$SLUG_DATA_DIR"
 export SLUG_EXE
 export CLOUDY_DIR="$CLOUDY_HOME"
 
+# OUT_ROOT/WORK_DIR live on /scratch, which is Lustre: HDF5's default
+# file locking (flock) is unreliable there, and spuriously fails with
+# "unable to lock file, errno = 11" under the heavy concurrent
+# open/close traffic run_cloudy_grid.py's many driver threads put on
+# their own per-file *.h5 outputs -- even though each file is only
+# ever touched by one thread at a time. Disabling it is the standard
+# workaround for this Lustre/HDF5 interaction.
+export HDF5_USE_FILE_LOCKING=FALSE
+
 # Every slug deck this pipeline runs has n_trial = 1, so there is no
 # per-simulation OpenMP work for a single slug process to exploit;
 # concurrency instead comes entirely from make_slug_grid.py/
