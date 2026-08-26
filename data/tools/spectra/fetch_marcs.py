@@ -73,6 +73,23 @@ MARCS_DOWNSAMPLE = 20
 # making 2 km/s the more representative default here.
 MARCS_MICRO_DEFAULT = 2
 
+# (feh, afe) points to exclude entirely, regardless of composition
+# tarball or --feh/--afe filters. The "standard" tarball includes a
+# handful of models at intermediate afe values (0.1, 0.2, 0.3) each
+# tied to a single specific feh (-0.25, -0.5, -0.75 respectively) --
+# a chemical-evolution-motivated relation, not a real grid point.
+# SpecsynLibNoWind's afe interpolation expects every afe value it
+# sees to have real feh coverage to interpolate/rescue a star's own
+# feh against; a single-feh afe value breaks that assumption, and
+# with real afe=0.0/0.4 grids fully covering feh on either side of
+# these three points, there is no reason to keep them. See
+# testClusterSpecsynFullAFe's own crash investigation this excludes.
+MARCS_EXCLUDE_FEH_AFE = {
+    (-0.25, 0.1),
+    (-0.5, 0.2),
+    (-0.75, 0.3),
+}
+
 # Parse command line arguments
 parser = argparse.ArgumentParser(
     description="Fetch the MARCS stellar atmosphere model grid")
@@ -327,6 +344,14 @@ if not args.registry_only:
                 "nfe": float(match.group("nfe")),
                 "ofe": float(match.group("ofe")),
             }
+            if any(math.isclose(rec["feh"], feh, abs_tol=1e-6) and
+                    math.isclose(rec["afe"], afe, abs_tol=1e-6)
+                    for feh, afe in MARCS_EXCLUDE_FEH_AFE):
+                if args.verbose:
+                    print(f"  Skipping {fname}: (feh, afe) = "
+                          f"({rec['feh']}, {rec['afe']}) is excluded "
+                          "(see MARCS_EXCLUDE_FEH_AFE).")
+                continue
             grp_key = (rec["feh"], rec["afe"], rec["cfe"], rec["micro"])
             tl_key = (rec["teff"], rec["logg"])
             grid_groups.setdefault(grp_key, {}).setdefault(tl_key, []).append(rec)
