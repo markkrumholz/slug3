@@ -343,11 +343,18 @@ def main() -> None:
             })
             for future in concurrent.futures.as_completed(futures):
                 path = futures[future]
-                ok = future.result()
-                all_ok &= ok
-                print(f"  {path.name}: {'OK' if ok else 'FAILED (see cloudy_tmp/*.log if --save-temp was used)'}")
+                try:
+                    ok = future.result()
+                except Exception as exc:  # noqa: BLE001 -- report every file's outcome, however it failed
+                    all_ok = False
+                    print(f"  {path.name}: FAILED ({exc!r})")
+                else:
+                    all_ok &= ok
+                    print(f"  {path.name}: {'OK' if ok else 'FAILED (see cloudy_tmp/*.log if --save-temp was used)'}")
 
     print("All cloudy runs succeeded." if all_ok else "Some cloudy runs failed -- see above.")
+    if not all_ok:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
