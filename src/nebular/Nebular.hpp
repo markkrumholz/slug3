@@ -13,7 +13,6 @@
 #include <cstddef>
 #include <mdspan> // NOLINT(misc-include-cleaner)
 #include <string>
-#include <utility>
 #include <vector>
 
 namespace io
@@ -49,28 +48,29 @@ namespace nebular
 
         /**
          * @brief Construct a Nebular object
-         * @param trackName Name of the track set this nebular grid is for
-         * @param wl Simulation wavelength grid the continuum luminosity
-         *   grids should ultimately be resampled onto
-         * @param simControls Simulation controls (physics and control-flow settings)
-         * @param vvcrit Rotation rate v/vcrit of the track set
+         * @param trackName Name of the track set this nebular grid is
+         *   for; used only during construction (to locate this track
+         *   set's own cloudy grid data), not retained afterward
+         * @param simControls Simulation controls (physics and
+         *   control-flow settings); also the source of the simulation
+         *   wavelength grid the continuum luminosity grids should
+         *   ultimately be resampled onto (simControls.specsyn()->wl()),
+         *   so that grid need not be passed in separately
+         * @param vvcrit Rotation rate v/vcrit of the track set; like
+         *   trackName, used only during construction, not retained
+         *   afterward
          * @details
          * simControls is stored by reference, so the object passed in
-         * must outlive this Nebular. trackName and wl are each stored
-         * as an owned copy (taken by value and moved from, rather than
-         * by const reference, per this project's own enforced
-         * modernize-pass-by-value style). This constructor only stores
-         * its own arguments; it does not yet load or populate any of
-         * this class's own nebular emission grids (lineLumPerQCluster_
-         * etc), which are left default-constructed (empty) for now.
+         * must outlive this Nebular. This constructor does not yet
+         * load or populate any of this class's own nebular emission
+         * grids (lineLumPerQCluster_ etc), which are left
+         * default-constructed (empty) for now.
          */
         Nebular(
-            std::string trackName,
-            std::vector<double> wl,
+            [[maybe_unused]] const std::string& trackName,
             const io::SimControls& simControls,
-            double vvcrit = tracks::defaultVVcrit) :
-            trackName_(std::move(trackName)), wl_(std::move(wl)),
-            simControls_(simControls), vvcrit_(vvcrit)
+            [[maybe_unused]] double vvcrit = tracks::defaultVVcrit) :
+            simControls_(simControls)
         { }
 
         ~Nebular() = default;
@@ -88,10 +88,7 @@ namespace nebular
 
     private:
 
-        std::string trackName_;              /**< Name of the track set this nebular grid is for */
-        std::vector<double> wl_;             /**< Simulation wavelength grid */
         const io::SimControls& simControls_; /**< Simulation controls (physics and control-flow settings) */
-        double vvcrit_;                      /**< Rotation rate v/vcrit of the track set */
 
         std::vector<std::string> lineLabel_; /**< Label of each nebular emission line */
         std::vector<double> lineWl_;         /**< Wavelength of each nebular emission line */
