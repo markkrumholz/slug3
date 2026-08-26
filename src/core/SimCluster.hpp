@@ -71,6 +71,22 @@ namespace core
 
     private:
 
+        /**
+         * @brief Run a single trial
+         * @param trialNum Trial number to run
+         * @details
+         * Factored out of run() so its own OpenMP loop body can be a
+         * single call wrapped in a try/catch: an uncaught exception
+         * escaping an "#pragma omp parallel for" loop body cannot be
+         * caught outside it (OpenMP requires catching within the same
+         * thread, inside the structured block, or the program
+         * terminates via std::terminate()), so run() catches around
+         * this call instead, letting every other thread's own trials
+         * finish normally rather than losing the whole run to one bad
+         * trial.
+         */
+        void runTrial(unsigned long trialNum);
+
         const io::SimControls& simControls_; /**< Simulation controls (physics and control-flow settings) */
         std::unique_ptr<io::OutputManager> outputManager_; /**< Output manager */
         std::atomic<unsigned long> trialsCompleted_{0}; /**< Number of trials completed so far (see trialsCompleted()) */

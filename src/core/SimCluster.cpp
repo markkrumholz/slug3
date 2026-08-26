@@ -12,6 +12,7 @@
 #include "../utils/UniqueIDManager.hpp"
 #include "Cluster.hpp"
 #include <atomic>
+#include <exception> // NOLINT(misc-include-cleaner) -- correct header for std::exception_ptr/current_exception/rethrow_exception; clang-tidy-18's own header-mapping data doesn't yet attribute these symbols to it
 #include <iostream>
 #include <memory>
 #include <utility>
@@ -23,6 +24,37 @@ core::SimCluster::SimCluster(const io::SimControls& simControls,
 {
 }
 
+void core::SimCluster::runTrial(const unsigned long trialNum)
+{
+    if (simControls_.verbosity() > 1)
+    {
+#ifdef _OPENMP
+#pragma omp critical
+#endif
+        {
+            std::cout << "slug: starting trial " << trialNum << " / "
+                << simControls_.nTrial() << "\n";
+        }
+    }
+
+    // Create cluster for this trial
+    Cluster cluster(utils::getID(), simControls_.cmf().draw(), 0, simControls_);
+
+    // Write time-invariant cluster properties to output
+    outputManager_->writeCluster(trialNum, cluster);
+
+    // Loop over output times
+    const auto outTimes = simControls_.outTimes();
+    for (const auto outTime : outTimes)
+    {
+        cluster.advance(outTime);
+        outputManager_->writeClusterSpec(trialNum, outTime, cluster);
+        outputManager_->writeClusterPhot(trialNum, outTime, cluster);
+    }
+
+    trialsCompleted_.fetch_add(1, std::memory_order_relaxed);
+}
+
 void core::SimCluster::run()
 {
     if (simControls_.verbosity() > 0)
@@ -32,38 +64,38 @@ void core::SimCluster::run()
     }
 
 #ifdef _OPENMP
+    // See runTrial()'s own comment for why each trial is individually
+    // wrapped in a try/catch here, rather than letting an exception
+    // propagate out of the "#pragma omp parallel for" loop body
+    // directly: every trial still runs (so one bad trial does not
+    // lose every other thread's own in-flight work), and the first
+    // exception caught is remembered and rethrown once the whole
+    // parallel region has finished, so run()'s own caller sees the
+    // same kind of failure it always has.
+    std::exception_ptr firstError;
 #pragma omp parallel for schedule(dynamic)
-#endif
     for (unsigned long trialNum = 0; trialNum < simControls_.nTrial(); ++trialNum)
     {
-        if (simControls_.verbosity() > 1)
+        try
         {
-#ifdef _OPENMP
+            runTrial(trialNum);
+        }
+        catch (const std::exception& error)
+        {
 #pragma omp critical
-#endif
             {
-                std::cout << "slug: starting trial " << trialNum << " / "
-                    << simControls_.nTrial() << "\n";
+                std::cerr << "slug: trial " << trialNum << " failed: " << error.what() << "\n";
+                if (!firstError) { firstError = std::current_exception(); }
             }
         }
-
-        // Create cluster for this trial
-        Cluster cluster(utils::getID(), simControls_.cmf().draw(), 0, simControls_);
-
-        // Write time-invariant cluster properties to output
-        outputManager_->writeCluster(trialNum, cluster);
-
-        // Loop over output times
-        const auto outTimes = simControls_.outTimes();
-        for (const auto outTime : outTimes)
-        {
-            cluster.advance(outTime);
-            outputManager_->writeClusterSpec(trialNum, outTime, cluster);
-            outputManager_->writeClusterPhot(trialNum, outTime, cluster);
-        }
-
-        trialsCompleted_.fetch_add(1, std::memory_order_relaxed);
     }
+    if (firstError) { std::rethrow_exception(firstError); }
+#else
+    for (unsigned long trialNum = 0; trialNum < simControls_.nTrial(); ++trialNum)
+    {
+        runTrial(trialNum);
+    }
+#endif
 
     if (simControls_.verbosity() > 0)
     {
