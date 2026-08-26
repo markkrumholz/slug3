@@ -33,3 +33,6 @@ sfr = 1.0
 start_time = 0.0
 end_time = 5e4
 ntime = 3
+
+[nebular]
+compute_neb = false

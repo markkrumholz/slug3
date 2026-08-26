@@ -116,6 +116,7 @@ add_executable(slug
     src/tracks/Tracks3D.cpp
     src/tracks/TrackUtils.cpp
     src/extinct/Extinct.cpp
+    src/nebular/Nebular.cpp
     src/io/SimControls.cpp
     src/utils/ParseUtils.cpp
 )
@@ -185,6 +186,7 @@ add_executable(slugTestCore
     src/io/OutputManagerAscii.cpp
     src/io/OutputManagerH5.cpp
     src/extinct/Extinct.cpp
+    src/nebular/Nebular.cpp
     src/io/SimControls.cpp
     src/interpolation/Mesh2DGrid.cpp
     src/pdfs/PDFFileParser.cpp
@@ -234,6 +236,7 @@ add_executable(slugTestCoreFull
     src/io/OutputManagerAscii.cpp
     src/io/OutputManagerH5.cpp
     src/extinct/Extinct.cpp
+    src/nebular/Nebular.cpp
     src/io/SimControls.cpp
     src/interpolation/Mesh2DGrid.cpp
     src/pdfs/PDFFileParser.cpp
@@ -289,6 +292,7 @@ add_executable(slugTestIo
     src/io/OutputManagerAscii.cpp
     src/io/OutputManagerH5.cpp
     src/extinct/Extinct.cpp
+    src/nebular/Nebular.cpp
     src/io/SimControls.cpp
     src/interpolation/Mesh2DGrid.cpp
     src/pdfs/PDFFileParser.cpp
@@ -338,6 +342,7 @@ add_executable(slugTestSpecsyn
     tests/specsyn/testSpecsynLibWD.cpp
     tests/specsyn/testSpecsynLibChained.cpp
     src/extinct/Extinct.cpp
+    src/nebular/Nebular.cpp
     src/io/SimControls.cpp
     src/interpolation/Mesh2DGrid.cpp
     src/phot/FilterCollection.cpp
@@ -392,6 +397,7 @@ pybind11_add_module(slugPython
     src/core/SimCluster.cpp
     src/core/SimGalaxy.cpp
     src/extinct/Extinct.cpp
+    src/nebular/Nebular.cpp
     src/io/SimControls.cpp
     src/io/OutputManager.cpp
     src/io/OutputManagerAscii.cpp

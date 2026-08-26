@@ -14,3 +14,6 @@ CMF = 1e3
 
 [output]
 output_times = [1.0, 2.5, 9.0]
+
+[nebular]
+compute_neb = false

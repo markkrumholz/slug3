@@ -398,6 +398,15 @@ namespace io
         [[nodiscard]] auto nebControls() const -> const nebular::NebularControls& { return nebControls_; }
 
         /**
+         * @brief Get the nebular emission grid, if any
+         * @return A pointer to the nebular emission grid built from
+         *   nebControls() and the [nebular] stanza's own table/track
+         *   settings (see readNebular()), or nullptr if
+         *   nebControls().computeNeb_ is false
+         */
+        [[nodiscard]] auto nebular() const -> const nebular::Nebular* { return nebular_.get(); }
+
+        /**
          * @brief Check whether the bolometric luminosity was requested as an output
          * @return True if "Lbol" was included in phot.filters
          */

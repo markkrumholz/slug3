@@ -17,3 +17,6 @@ start_time = 1.0
 end_time = 100.0
 ntime = 3
 log_time = true
+
+[nebular]
+compute_neb = false

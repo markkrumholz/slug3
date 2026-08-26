@@ -16,3 +16,6 @@ CMF = 1e3
 [output]
 start_time = 0.0
 end_time = 10.0
+
+[nebular]
+compute_neb = false

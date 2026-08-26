@@ -24,6 +24,7 @@ namespace nebular
     inline constexpr double defaultLineWidth = 20.0;    /**< Default assumed emission line width, in km/s */
     inline constexpr std::size_t defaultNGridLine = 17; /**< Default number of grid points representing an emission line's own shape */
     inline constexpr double defaultLineExtent = 5.0;    /**< Default number of line widths spanned by nGridLine_ points, in each direction */
+    inline constexpr bool defaultComputeNeb = true;     /**< Default for whether nebular emission is computed at all */
 
     inline static const std::string defaultTable = // NOLINT(bugprone-throwing-static-initialization,cert-err58-cpp) -- built from fixed string literals, so the (theoretically throwing) path conversion can never actually throw here
         (std::filesystem::path("data") / std::filesystem::path("nebular")
@@ -46,6 +47,7 @@ namespace nebular
         double lineWidth_ = defaultLineWidth;       /**< Assumed width of emission lines, in km/s */
         std::size_t nGridLine_ = defaultNGridLine;  /**< Number of grid points used to represent the shape of an emission line */
         double lineExtent_ = defaultLineExtent;     /**< Number of line widths spanned by the nGridLine_ points, in each direction */
+        bool computeNeb_ = defaultComputeNeb;       /**< Whether nebular emission is computed at all; if false, SimControls::nebular() is left null */
     };
 
 } // namespace nebular

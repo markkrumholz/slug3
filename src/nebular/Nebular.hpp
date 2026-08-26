@@ -64,18 +64,25 @@ namespace nebular
          *   not retained afterward
          * @details
          * simControls is stored by reference, so the object passed in
-         * must outlive this Nebular. This constructor does not yet
-         * load or populate any of this class's own nebular emission
-         * grids (lineLumPerQCluster_ etc), which are left
-         * default-constructed (empty) for now.
+         * must outlive this Nebular. This constructor builds this
+         * object's own nebular spectral grid (wl_, see that member's
+         * own comment) and, from it, ctmLumPerQCluster_/
+         * ctmLumPerQGalaxy_; lineLumPerQCluster_/lineLumPerQGalaxy_
+         * are left default-constructed (empty) for now, a future
+         * commit's job.
+         * @throws std::runtime_error if tableName cannot be found (via
+         *   utils::getFilePath), trackName has no group of its own in
+         *   it, or -- for any of that group's own [Fe/H] values -- no
+         *   v/vcrit subgroup matches vvcrit exactly, or
+         *   simControls.nebControls().logU_ falls outside the range of
+         *   logU values actually tabulated for a given [Fe/H]/v/vcrit
+         *   combination
          */
         Nebular(
-            [[maybe_unused]] const std::string& tableName,
-            [[maybe_unused]] const std::string& trackName,
+            const std::string& tableName,
+            const std::string& trackName,
             const io::SimControls& simControls,
-            [[maybe_unused]] double vvcrit = tracks::defaultVVcrit) :
-            simControls_(simControls)
-        { }
+            double vvcrit = tracks::defaultVVcrit);
 
         ~Nebular() = default;
 
@@ -94,8 +101,24 @@ namespace nebular
 
         const io::SimControls& simControls_; /**< Simulation controls (physics and control-flow settings) */
 
-        std::vector<std::string> lineLabel_; /**< Label of each nebular emission line */
-        std::vector<double> lineWl_;         /**< Wavelength of each nebular emission line */
+        /**
+         * @brief This object's own nebular spectral grid
+         * @details
+         * Built once, at construction, from simControls_.specsyn()->
+         * wl() (the base) plus, for every line in lineWl_, nGridLine_
+         * points uniformly spanning +-lineExtent_ line-widths around
+         * it -- see Nebular.cpp's own buildWavelengthGrid() for the
+         * exact algorithm. This is the wavelength axis every
+         * ctmLumPerQCluster_/ctmLumPerQGalaxy_ entry is resampled
+         * onto, and so defines the size of their own final dimension.
+         */
+        std::vector<double> wl_;
+
+        std::vector<std::string> lineLabel_; /**< Label of each nebular emission line kept in wl_'s own line windows */
+        std::vector<double> lineWl_;         /**< Wavelength of each nebular emission line kept in wl_'s own line windows */
+
+        std::vector<double> feH_;        /**< [Fe/H] grid this track's own nebular data is tabulated at, ascending */
+        std::vector<double> clusterAge_; /**< Cluster age grid (yr) ctmLumPerQCluster_'s own age axis is tabulated at, from the table's own top-level "time" dataset */
 
         /** @brief Cluster line luminosity per ionizing photon, shaped ([Fe/H], age, line) */
         Grid3D lineLumPerQCluster_;
@@ -105,11 +128,11 @@ namespace nebular
         Grid2D lineLumPerQGalaxy_;
         std::vector<double> lineLumPerQGalaxyData_; /**< Data holder for lineLumPerQGalaxy_ */
 
-        /** @brief Cluster continuum luminosity per ionizing photon, shaped ([Fe/H], age, wavelength) */
+        /** @brief Cluster continuum luminosity per ionizing photon, shaped (feH_, clusterAge_, wl_) */
         Grid3D ctmLumPerQCluster_;
         std::vector<double> ctmLumPerQClusterData_; /**< Data holder for ctmLumPerQCluster_ */
 
-        /** @brief Galaxy continuum luminosity per ionizing photon, shaped ([Fe/H], wavelength) */
+        /** @brief Galaxy continuum luminosity per ionizing photon, shaped (feH_, wl_) */
         Grid2D ctmLumPerQGalaxy_;
         std::vector<double> ctmLumPerQGalaxyData_; /**< Data holder for ctmLumPerQGalaxy_ */
     };

@@ -849,12 +849,23 @@ void io::SimControls::readExtinct(const toml::table& inputDeck)
 // Nebular emission controls and grid reader
 void io::SimControls::readNebular(const toml::table& inputDeck)
 {
-    // Every nebular.* control parameter is independently optional --
-    // unlike readSpectra()'s/readExtinct()'s own all-or-nothing
-    // stanzas, there is no single key whose absence should skip the
-    // rest of this stanza. Each one left absent simply leaves
-    // nebControls_'s own field at whatever NebularControls's own
-    // default member initializer already set it to.
+    // nebular.compute_neb: whether nebular emission is computed at
+    // all, defaulting to true. If explicitly set false, every other
+    // nebular.* key is skipped (their defaults are irrelevant, since
+    // nebular_ is left null either way) -- mirrors readExtinct()'s own
+    // early return when neither extinct.AV nor extinct.AV_field was
+    // given.
+    const auto computeNeb = utils::getTOMLKeyWithError<bool>(inputDeck, "nebular.compute_neb");
+    nebControls_.computeNeb_ = computeNeb.value_or(nebular::defaultComputeNeb);
+    if (!nebControls_.computeNeb_) { return; }
+
+    // Every remaining nebular.* control parameter is independently
+    // optional -- unlike readSpectra()'s/readExtinct()'s own
+    // all-or-nothing stanzas, there is no single key whose absence
+    // should skip the rest of this stanza. Each one left absent
+    // simply leaves nebControls_'s own field at whatever
+    // NebularControls's own default member initializer already set
+    // it to.
     const auto logU = utils::getTOMLKeyWithError<double>(inputDeck, "nebular.log_U");
     if (logU) { nebControls_.logU_ = logU.value(); }
 

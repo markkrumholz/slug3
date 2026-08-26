@@ -51,3 +51,6 @@ max_iter = 2000
 start_time = 0.0
 end_time = 10.0
 ntime = 3
+
+[nebular]
+compute_neb = false
