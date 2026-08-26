@@ -252,11 +252,17 @@ auto runClusterSpecsynFull(const std::string& inputFile, const std::string& mode
         const auto nTrial = simControls.nTrial(); // read back rather than assumed, since not every caller's deck uses the same n_trial
         const auto nTime = simControls.outTimes().size(); // read back rather than assumed, since not every caller's deck uses the same number of output_times
 
-        std::unique_ptr<io::OutputManager> outputManager =
-            std::make_unique<io::OutputManagerH5>(simControls, inputDeck);
+        {
+            // Scoped so simCluster -- and the OutputManagerH5 it owns --
+            // is destroyed, and its OpenMP per-thread files thereby
+            // consolidated into h5Path (see OutputManagerH5's own
+            // destructor comment), before the reopen attempt below
+            std::unique_ptr<io::OutputManager> outputManager =
+                std::make_unique<io::OutputManagerH5>(simControls, inputDeck);
 
-        core::SimCluster simCluster(simControls, std::move(outputManager));
-        simCluster.run();
+            core::SimCluster simCluster(simControls, std::move(outputManager));
+            simCluster.run();
+        }
 
         // NOLINTBEGIN(misc-include-cleaner)
         const hid_t file = H5Fopen(h5Path.string().c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);

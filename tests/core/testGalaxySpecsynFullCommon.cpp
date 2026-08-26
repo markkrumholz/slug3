@@ -120,11 +120,17 @@ auto runGalaxySpecsynFull(const std::string& inputFile, const std::string& model
         const auto nTrial = simControls.nTrial();
         const auto nTime = simControls.outTimes().size();
 
-        std::unique_ptr<io::OutputManager> outputManager =
-            std::make_unique<io::OutputManagerH5>(simControls, inputDeck);
+        {
+            // Scoped so simGalaxy -- and the OutputManagerH5 it owns --
+            // is destroyed, and its OpenMP per-thread files thereby
+            // consolidated into h5Path (see OutputManagerH5's own
+            // destructor comment), before the reopen attempt below
+            std::unique_ptr<io::OutputManager> outputManager =
+                std::make_unique<io::OutputManagerH5>(simControls, inputDeck);
 
-        core::SimGalaxy simGalaxy(simControls, std::move(outputManager));
-        simGalaxy.run();
+            core::SimGalaxy simGalaxy(simControls, std::move(outputManager));
+            simGalaxy.run();
+        }
 
         // NOLINTBEGIN(misc-include-cleaner)
         const hid_t file = H5Fopen(h5Path.string().c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
