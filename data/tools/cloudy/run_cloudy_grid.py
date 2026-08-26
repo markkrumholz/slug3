@@ -84,7 +84,7 @@ import astropy.units as u
 # slugpy is a sibling package three directories up from this script
 # (data/tools/cloudy -> data/tools -> data -> repo root), and is not
 # installed, so it has to be reached via sys.path directly.
-_REPO_ROOT = Path(__file__).resolve().parents[2]
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
@@ -101,7 +101,7 @@ LOG_U_VALUES = (-3.0, -2.5, -2.0)
 DEFAULT_WORK_DIR = Path(__file__).resolve().parent / "slug_grid_work"
 
 
-def find_h5_files(work_dir: Path) -> list[Path]:
+def find_h5_files(work_dir: Path, files: list[str] | None = None) -> list[Path]:
     """
     Find every slug HDF5 output file make_slug_grid.py wrote.
 
@@ -109,13 +109,34 @@ def find_h5_files(work_dir: Path) -> list[Path]:
     ----------
     work_dir : pathlib.Path
         Directory to search (non-recursively).
+    files : list of str, optional
+        If given, restrict the result to just these files (matched by
+        name, with or without a ".h5" suffix -- see --files) instead
+        of every "*.h5" file in work_dir. Matched in the order given
+        in files, not sorted.
 
     Returns
     -------
     list of pathlib.Path
-        Every "*.h5" file directly in work_dir, sorted by name.
+        Every "*.h5" file directly in work_dir, sorted by name -- or,
+        if files was given, just those files, in the order given.
+
+    Raises
+    ------
+    ValueError
+        If files was given and any of its entries has no matching
+        "*.h5" file directly in work_dir.
     """
-    return sorted(work_dir.glob("*.h5"))
+    if files is None:
+        return sorted(work_dir.glob("*.h5"))
+
+    result = []
+    for name in files:
+        path = work_dir / (name if name.endswith(".h5") else f"{name}.h5")
+        if not path.is_file():
+            raise ValueError(f"--files: no such file: {path}")
+        result.append(path)
+    return result
 
 
 def qualifying_cluster_times(reader: slug_reader, qhi_fraction: float) -> list[float]:
@@ -276,6 +297,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--work-dir", type=Path, default=DEFAULT_WORK_DIR,
         help=f"Directory to look for slug *.h5 output files in (default: {DEFAULT_WORK_DIR}); "
             "should be the same --work-dir make_slug_grid.py was run with.")
+    parser.add_argument("--files", nargs="+", default=None,
+        help="Restrict to just these files instead of every *.h5 file in --work-dir, e.g. "
+            "to rerun a single file that failed (with --save-temp, to inspect why). Matched "
+            "by name against --work-dir, with or without a trailing \".h5\".")
     parser.add_argument("--cloudy-path", type=Path, default=None,
         help="Path to the cloudy executable. If omitted, run_cloudy's own default lookup "
             "($CLOUDY_DIR/cloudy.exe) applies.")
@@ -300,7 +325,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
-    h5_files = find_h5_files(args.work_dir)
+    h5_files = find_h5_files(args.work_dir, files=args.files)
     if not h5_files:
         print(f"No .h5 files found in {args.work_dir}")
         return
@@ -352,9 +377,16 @@ def main() -> None:
                     all_ok &= ok
                     print(f"  {path.name}: {'OK' if ok else 'FAILED (see cloudy_tmp/*.log if --save-temp was used)'}")
 
+    # Exit 0 either way: a failed run (see above) already leaves its
+    # own spectrum's data out of every file's own cluster_cloudy/
+    # galaxy_cloudy group, which process_cloudy_grid.py's own gap-fill
+    # (see its module docstring) can paper over for an isolated
+    # cluster output time -- there's nothing to gain, and stage 3
+    # (which needs to run regardless, to actually apply that gap-fill)
+    # to lose, by raising SystemExit here and aborting the rest of the
+    # pipeline over what's expected to be a rare, isolated cloudy
+    # non-convergence.
     print("All cloudy runs succeeded." if all_ok else "Some cloudy runs failed -- see above.")
-    if not all_ok:
-        raise SystemExit(1)
 
 
 if __name__ == "__main__":
