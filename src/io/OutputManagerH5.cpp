@@ -1008,6 +1008,20 @@ void io::OutputManagerH5::writeCluster(
             const double aV = cluster.aV();
             appendToDataset(clustersGroup_(), "A_V", H5T_NATIVE_DOUBLE, &aV);
         }
+
+        // Flush this thread's own file now, rather than waiting for
+        // its eventual H5Fclose() (in this class's own destructor):
+        // the cluster's own rng state, just written above, is what a
+        // later crash (e.g. an uncaught exception from spectral
+        // synthesis below, which aborts the whole process before any
+        // destructor can run) needs to be recoverable from disk, to
+        // deterministically reproduce that exact cluster afterward
+        // (see Cluster's own second constructor overload, which
+        // replays a cluster's stochastic draws from a saved rng
+        // state). Costs extra I/O on every cluster write, deemed
+        // worth it for making every future crash like this one
+        // investigable from the output file alone.
+        H5Fflush(file_(), H5F_SCOPE_LOCAL);
         // NOLINTEND(misc-include-cleaner)
     }
 }
