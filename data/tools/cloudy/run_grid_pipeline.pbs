@@ -1,0 +1,149 @@
+#!/bin/bash
+#
+# run_grid_pipeline.pbs
+#
+# Runs the full three-stage "quick and dirty" nebular emission grid
+# pipeline (make_slug_grid.py -> run_cloudy_grid.py ->
+# process_cloudy_grid.py; see make_slug_grid.py's own module docstring
+# for the pipeline description) as a single PBS job on Gadi's rsaa
+# queue.
+#
+# Submit with (from anywhere -- every path below is absolute):
+#   qsub run_grid_pipeline.pbs
+#
+# Large inputs/outputs deliberately do not live on the home
+# filesystem (quota): slug's own large data files (tracks, spectra,
+# filters) are read from SLUG_DATA_DIR on /scratch (see
+# src/utils/MiscUtils.hpp's getFilePath -- SLUG_DIR is checked before
+# falling back to the repo's own data/ directory, which does not carry
+# these gitignored files at all on this checkout), cloudy is run from
+# CLOUDY_HOME on /scratch, and every intermediate/final output of this
+# pipeline is written under OUT_ROOT on /scratch.
+#
+#PBS -N slug_cloudy_grid
+#PBS -P mk27
+#PBS -q rsaa
+#PBS -l ncpus=104
+#PBS -l mem=512GB
+#PBS -l jobfs=400GB
+#PBS -l walltime=48:00:00
+#PBS -l storage=scratch/mk27
+#PBS -l wd
+#PBS -j oe
+
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# Paths -- adjust here if the checkout, scratch layout, or cloudy build move.
+# ---------------------------------------------------------------------------
+
+REPO_ROOT=/home/120/mrk120/slug3
+BUILD_DIR="$REPO_ROOT/build"
+SLUG_EXE="$BUILD_DIR/slug"
+
+# Mirrors REPO_ROOT/data's own subdirectory layout (tracks/, spectra/,
+# filters/, imfs/, extinct/), including the *.toml registries -- those
+# are gitignored (data/tracks/*.toml etc.) alongside the large *.h5
+# files they index, so they only exist here, not in REPO_ROOT/data.
+SLUG_DATA_DIR=/scratch/mk27/mrk120/slug3
+TRACK_REGISTRY="$SLUG_DATA_DIR/data/tracks/tracks.toml"
+
+# Directory holding cloudy.exe (slug_reader.run_cloudy's own default
+# lookup is $CLOUDY_DIR/cloudy.exe).
+CLOUDY_HOME=/scratch/mk27/mrk120/cloudy/source
+
+# Working directory for every slug/cloudy output this pipeline
+# produces (stage 1 and 2 both read/write here; stage 3 reads it and
+# writes the final table alongside it).
+OUT_ROOT=/scratch/mk27/mrk120/slug3/grid_run
+WORK_DIR="$OUT_ROOT/slug_grid_work"
+OUTPUT_TABLE="$OUT_ROOT/cloudy_table.h5"
+
+PIPELINE_DIR="$REPO_ROOT/data/tools/cloudy"
+
+# ---------------------------------------------------------------------------
+# Environment
+# ---------------------------------------------------------------------------
+
+module purge
+module load gcc/15.1.0 python3/3.12.13 gsl/2.7.1 hdf5/1.10.7
+module list
+
+# PYTHONPATH points at the repo root (not slugpy/ itself), so
+# `import slugpy` resolves to the package whose compiled _slug
+# extension CMake built directly into slugpy/ alongside its pure-
+# Python half (see AGENTS.md's own Code structure section) -- the
+# same convention CMakeLists.txt uses for test_PythonBindings/
+# test_Slugpy's own ENVIRONMENT settings.
+export PYTHONPATH="$REPO_ROOT"
+
+export SLUG_DIR="$SLUG_DATA_DIR"
+export SLUG_EXE
+export CLOUDY_DIR="$CLOUDY_HOME"
+
+# Every slug deck this pipeline runs has n_trial = 1, so there is no
+# per-simulation OpenMP work for a single slug process to exploit;
+# concurrency instead comes entirely from make_slug_grid.py/
+# run_cloudy_grid.py's own thread pools running many single-trial
+# slug/cloudy subprocesses at once (see make_slug_grid.py's own module
+# docstring). Leaving OMP_NUM_THREADS unset would let each of those
+# subprocesses default to spawning one OpenMP thread per core on its
+# own, oversubscribing the node by roughly (worker count) x (cores);
+# pinning it to 1 here keeps each subprocess single-threaded so the
+# thread pool's own worker count is the only source of parallelism.
+export OMP_NUM_THREADS=1
+
+echo "=== $(date) : starting on $(hostname), repo at $(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown) ==="
+
+for f in "$SLUG_EXE" "$TRACK_REGISTRY" "$CLOUDY_HOME/cloudy.exe"; do
+    if [[ ! -e "$f" ]]; then
+        echo "ERROR: required path does not exist: $f" >&2
+        exit 1
+    fi
+done
+
+mkdir -p "$WORK_DIR"
+
+# ---------------------------------------------------------------------------
+# Stage 1: build the slug spectra/photometry grid
+# ---------------------------------------------------------------------------
+
+echo "=== $(date) : stage 1/3 -- make_slug_grid.py ==="
+# --output-table points stage 1 at stage 3's own final output, so a
+# resubmission after a walltime timeout skips combinations a prior run
+# already carried all the way through the pipeline (combo_complete_in_table
+# is a no-op the first time, before the table exists).
+python3 "$PIPELINE_DIR/make_slug_grid.py" \
+    --work-dir "$WORK_DIR" \
+    --track-registry "$TRACK_REGISTRY" \
+    --slug-path "$SLUG_EXE" \
+    --output-table "$OUTPUT_TABLE"
+
+# ---------------------------------------------------------------------------
+# Stage 2: run cloudy on every qualifying spectrum
+# ---------------------------------------------------------------------------
+
+echo "=== $(date) : stage 2/3 -- run_cloudy_grid.py ==="
+# --max-workers is passed explicitly, matching the #PBS -l ncpus=104
+# above, rather than relying on run_cloudy_grid.py's own os.cpu_count()
+# default: on this queue's shared rsaa nodes, os.cpu_count() reports
+# the node's full 208 logical CPUs regardless of how many this job was
+# actually allocated, which would oversubscribe 104 real cores 2x.
+# Memory is not the binding constraint here -- a saturation test at
+# 100 concurrent cloudy.exe processes (the full default --log-u grid,
+# including its heaviest-footprint value) peaked at ~70GB of node
+# memory used, against this node's 512GB.
+python3 "$PIPELINE_DIR/run_cloudy_grid.py" \
+    --work-dir "$WORK_DIR" \
+    --max-workers 104
+
+# ---------------------------------------------------------------------------
+# Stage 3: post-process into the final lookup table
+# ---------------------------------------------------------------------------
+
+echo "=== $(date) : stage 3/3 -- process_cloudy_grid.py ==="
+python3 "$PIPELINE_DIR/process_cloudy_grid.py" \
+    --work-dir "$WORK_DIR" \
+    --output "$OUTPUT_TABLE"
+
+echo "=== $(date) : done; table written to $OUTPUT_TABLE ==="
