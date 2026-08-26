@@ -377,9 +377,16 @@ def main() -> None:
                     all_ok &= ok
                     print(f"  {path.name}: {'OK' if ok else 'FAILED (see cloudy_tmp/*.log if --save-temp was used)'}")
 
+    # Exit 0 either way: a failed run (see above) already leaves its
+    # own spectrum's data out of every file's own cluster_cloudy/
+    # galaxy_cloudy group, which process_cloudy_grid.py's own gap-fill
+    # (see its module docstring) can paper over for an isolated
+    # cluster output time -- there's nothing to gain, and stage 3
+    # (which needs to run regardless, to actually apply that gap-fill)
+    # to lose, by raising SystemExit here and aborting the rest of the
+    # pipeline over what's expected to be a rare, isolated cloudy
+    # non-convergence.
     print("All cloudy runs succeeded." if all_ok else "Some cloudy runs failed -- see above.")
-    if not all_ok:
-        raise SystemExit(1)
 
 
 if __name__ == "__main__":

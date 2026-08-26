@@ -68,7 +68,19 @@ Output layout (cloudy_table.h5, default name):
   two datasets but 2-D, one row per entry in the top-level time
   dataset, zero for any output time this combination has no cloudy run
   for (including times excluded by run_cloudy_grid.py's own
-  --qhi-fraction cut).
+  --qhi-fraction cut) -- except for an isolated missing output time
+  with a real cloudy run immediately before and after it in this same
+  combination's own rows (see _fill_bounded_gaps): that row is instead
+  filled in by averaging its two neighbors' own continua outright, and
+  averaging their line luminosities for whichever lines both neighbors
+  report (any line only one of them reports, or neither does, is left
+  at 0 for the filled row, same as an ordinary missing line). This
+  covers the case of a single cloudy run genuinely failing (as opposed
+  to being skipped for falling under --qhi-fraction, which run_cloudy_
+  grid.py's own report distinguishes from a failure, but which this
+  script has no way to tell apart after the fact) -- run_cloudy_grid.py
+  does not stop the pipeline over such a failure, precisely so this
+  gap-fill gets a chance to paper over it.
 
 Like the two earlier stages, this is cheap to run compared to the
 cloudy runs it post-processes, but only meaningful once run against a
@@ -523,10 +535,14 @@ def process_cluster_file(path: Path, global_wl: np.ndarray, line_index: dict[flo
     -------
     dict mapping float to dict
         {log10(U): {"spec": (ntime, nwl) array, "line_lum": (ntime, nline)
-        array}}, one entry per log10(U) value actually found, each
-        array zero in any row for an output time this combination has
-        no cloudy run for. Empty if this file has no cluster_cloudy
-        group, or no matching cluster_phot Q(HI) photometry.
+        array, "has_data": (ntime,) bool array}}, one entry per log10(U)
+        value actually found. "spec"/"line_lum" are zero in any row for
+        an output time this combination has no cloudy run for;
+        "has_data" is True at exactly the rows that aren't -- see
+        _fill_bounded_gaps, which callers should run over each bucket
+        before "has_data" is discarded and "spec"/"line_lum" written
+        out. Empty if this file has no cluster_cloudy group, or no
+        matching cluster_phot Q(HI) photometry.
     """
     reader = slug_reader(str(path))
     group = reader.cluster_cloudy
@@ -554,12 +570,64 @@ def process_cluster_file(path: Path, global_wl: np.ndarray, line_index: dict[flo
         bucket = result.setdefault(log_u, {
             "spec": np.zeros((ntime, nwl)),
             "line_lum": np.zeros((ntime, n_line_total)),
+            "has_data": np.zeros(ntime, dtype=bool),
         })
         spec, line_lum = _normalize_row(arrays, i, qhi, global_wl, line_index, n_line_total, nline)
         bucket["spec"][t_idx, :] = spec
         bucket["line_lum"][t_idx, :] = line_lum
+        bucket["has_data"][t_idx] = True
 
     return result
+
+
+def _fill_bounded_gaps(bucket: dict[str, np.ndarray]) -> None:
+    """
+    Fill in an isolated missing output time bounded by real cloudy runs on both sides.
+
+    One cluster/log10(U) combination's own "spec"/"line_lum" rows (see
+    process_cluster_file) are zero for any output time index this
+    combination has no cloudy run for -- most commonly a trailing block
+    of the latest output times, once Q(HI) has fallen under run_cloudy_
+    grid.py's own --qhi-fraction cut, but occasionally a single time
+    sandwiched between two others where cloudy itself simply failed to
+    converge (see run_cloudy_grid.py's own module docstring). This
+    function papers over the latter case -- a row with no data of its
+    own, but with the immediately preceding and following row (by
+    output-time index, i.e. this combination's own nearest earlier/
+    later entries in the table's shared time grid, not necessarily
+    adjacent in real time if this combination is missing other rows
+    too) both already having data -- by filling it in from those two
+    neighbors: their continua averaged outright, and their line
+    luminosities averaged wherever both report a nonzero value for the
+    same line (any line only one of them reports, or neither does, is
+    left at 0, exactly like an ordinary missing line elsewhere in the
+    table).
+
+    A run of two or more consecutive missing rows is left untouched --
+    only a single missing row has both an immediately preceding and
+    immediately following row with data -- as is a missing row at
+    either end of the time grid, which can only ever have a neighbor on
+    one side.
+
+    Parameters
+    ----------
+    bucket : dict
+        One log10(U) entry of process_cluster_file's own return value,
+        with "spec" ((ntime, nwl) array), "line_lum" ((ntime, nline)
+        array), and "has_data" ((ntime,) bool array) all aligned by
+        output-time row index. Modifies "spec" and "line_lum" in place;
+        "has_data" is read but left as found, so a just-filled row is
+        never itself treated as a bound for another gap.
+    """
+    has_data = bucket["has_data"]
+    spec = bucket["spec"]
+    line_lum = bucket["line_lum"]
+    for i in range(1, len(has_data) - 1):
+        if has_data[i] or not has_data[i - 1] or not has_data[i + 1]:
+            continue
+        spec[i, :] = 0.5 * (spec[i - 1, :] + spec[i + 1, :])
+        both_nonzero = (line_lum[i - 1, :] != 0) & (line_lum[i + 1, :] != 0)
+        line_lum[i, both_nonzero] = 0.5 * (line_lum[i - 1, both_nonzero] + line_lum[i + 1, both_nonzero])
 
 
 def process_galaxy_file(path: Path, global_wl: np.ndarray, line_index: dict[float, int],
@@ -678,6 +746,8 @@ def build_table(entries: list[FileEntry], output_path: Path, log_u_values: list[
 
             cluster_data = (process_cluster_file(cluster_path, global_wl, line_index, time_index,
                 log_u_values, nline) if cluster_path is not None else {})
+            for bucket in cluster_data.values():
+                _fill_bounded_gaps(bucket)
             galaxy_data = (process_galaxy_file(galaxy_path, global_wl, line_index, log_u_values, nline)
                 if galaxy_path is not None else {})
 
