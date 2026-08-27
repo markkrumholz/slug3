@@ -14,6 +14,9 @@
 #include "../utils/MiscUtils.hpp"
 #include "hdf5.h" // NOLINT(misc-include-cleaner)
 #include <algorithm>
+#include <cmath>
+#include <cstddef>
+#include <numbers>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -26,77 +29,6 @@
 
 namespace
 {
-    // This object's own nebular spectral grid, and the subset of the
-    // table's own line list that falls inside it -- see
-    // Nebular.hpp's own wl_ comment for the algorithm this implements
-    struct WavelengthGridResult
-    {
-        std::vector<double> wl_;
-        std::vector<double> lineWl_;
-        std::vector<std::string> lineLabel_;
-        std::vector<size_t> lineIndex_; /**< Each kept line's own index into the table's full, global line list (lineWlAll/lineLabelAll) */
-    };
-
-    auto buildWavelengthGrid(const std::vector<double>& specsynWl,
-        const std::vector<double>& lineWlAll,
-        const std::vector<std::string>& lineLabelAll,
-        const nebular::NebularControls& nebControls) -> WavelengthGridResult
-    {
-        WavelengthGridResult result;
-        result.wl_ = specsynWl;
-
-        const double wlMin = specsynWl.front();
-        const double wlMax = specsynWl.back();
-
-        // lineWidth_ is in km/s; utils::c is in cm/s -- convert
-        // lineWidth_ to cm/s before dividing so the ratio (and so
-        // fracHalfWidth below) comes out dimensionless
-        const double lineWidthCgs = nebControls.lineWidth_ * 1.0e5;
-        const double fracHalfWidth = nebControls.lineExtent_ * lineWidthCgs / utils::c;
-
-        for (size_t i = 0; i < lineWlAll.size(); ++i)
-        {
-            const double lambda0 = lineWlAll.at(i);
-            if (lambda0 < wlMin || lambda0 > wlMax) { continue; }
-
-            result.lineWl_.push_back(lambda0);
-            result.lineLabel_.push_back(lineLabelAll.at(i));
-            result.lineIndex_.push_back(i);
-
-            const double lo = lambda0 * (1.0 - fracHalfWidth);
-            const double hi = lambda0 * (1.0 + fracHalfWidth);
-            for (size_t k = 0; k < nebControls.nGridLine_; ++k)
-            {
-                const double frac = (nebControls.nGridLine_ > 1)
-                    ? static_cast<double>(k) / static_cast<double>(nebControls.nGridLine_ - 1)
-                    : 0.0;
-                result.wl_.push_back(lo + (frac * (hi - lo)));
-            }
-        }
-
-        std::sort(result.wl_.begin(), result.wl_.end());
-        return result;
-    }
-
-    // From a flat, row-major array shaped (nRows, nColsIn), extract
-    // only the columns listed in colIndices, producing a flat
-    // (nRows, colIndices.size()) array -- used to pick this object's
-    // own in-range lines (colIndices = lineIndex_) out of a
-    // "line_lum" dataset's full, global line list
-    auto selectColumns(const std::vector<double>& flat, const size_t nRows,
-        const size_t nColsIn, const std::vector<size_t>& colIndices) -> std::vector<double>
-    {
-        std::vector<double> result(nRows * colIndices.size());
-        for (size_t r = 0; r < nRows; ++r)
-        {
-            for (size_t c = 0; c < colIndices.size(); ++c)
-            {
-                result.at((r * colIndices.size()) + c) = flat.at((r * nColsIn) + colIndices.at(c));
-            }
-        }
-        return result;
-    }
-
     // Every child group of parent that has an attribute called
     // attrName, as (value, open group handle) pairs sorted ascending
     // by that value. Every returned handle is the caller's own to
@@ -248,6 +180,100 @@ namespace
         }
         return result;
     }
+
+    // Threshold below which a line's own deposited power fraction in a
+    // wavelength bin is treated as negligible -- see
+    // computeLineDepositWindows()'s own comment for how this bounds
+    // the width of each line's own deposit window
+    constexpr double lineDepositThreshold = 1.0e-3;
+
+    // For every line in lineWl (in the same order), the precomputed
+    // data Nebular's own line-deposition step (implemented in a future
+    // commit) will need to add that line's power into wl's own bins --
+    // see Nebular.hpp's own lineCenterIdx_/lineDepositFrac_ comments
+    struct LineDepositWindows
+    {
+        std::vector<size_t> centerIdx_;         /**< Each line's own index into wl of the bin its central wavelength falls into; 0 (with an empty frac_ entry) for a line whose central wavelength falls outside wl's own range */
+        std::vector<std::vector<double>> frac_; /**< Each line's own fraction of power landing in each bin of the window (odd length, centered on centerIdx_) around its own central bin; empty for a line whose central wavelength falls outside wl's own range */
+    };
+
+    // For a line with central wavelength wlCen and, expressed as a
+    // wavelength, standard deviation deltaWl (a Gaussian line profile
+    // is assumed), the fraction of that line's own power landing in
+    // wl's own bin binIdx -- whose own edges are the geometric mean of
+    // wl's own bracketing pairs of central wavelengths (boundaries.at(i)
+    // is the edge shared by bins i and i+1), except at the two ends of
+    // wl, which are treated as open (extending to -/+ infinity)
+    auto binPowerFraction(const std::vector<double>& boundaries, const size_t nWl,
+        const size_t binIdx, const double wlCen, const double deltaWl) -> double
+    {
+        const double erfLo = (binIdx == 0)
+            ? -1.0
+            : std::erf((boundaries.at(binIdx - 1) - wlCen) / (deltaWl * std::numbers::sqrt2));
+        const double erfHi = (binIdx == nWl - 1)
+            ? 1.0
+            : std::erf((boundaries.at(binIdx) - wlCen) / (deltaWl * std::numbers::sqrt2));
+        return 0.5 * (erfHi - erfLo);
+    }
+
+    // Build, for every line in lineWl whose own central wavelength
+    // falls within wl's own range, the window of wl bins its own power
+    // should be deposited into -- starting from that line's own
+    // central bin and expanding outward, one bin at a time on each
+    // side, until the newly added bin on both sides would receive less
+    // than lineDepositThreshold of that line's own power (a bin beyond
+    // wl's own edge is treated as receiving zero power, rather than
+    // stopping the expansion outright, so the window can still grow on
+    // its in-range side)
+    auto computeLineDepositWindows(const std::vector<double>& wl,
+        const std::vector<double>& lineWl, const double lineWidthKms) -> LineDepositWindows
+    {
+        const size_t nWl = wl.size();
+        const size_t nLine = lineWl.size();
+
+        // boundaries.at(i) is the edge shared by bins i and i+1
+        std::vector<double> boundaries(nWl - 1);
+        for (size_t i = 0; i < nWl - 1; ++i) { boundaries.at(i) = std::sqrt(wl.at(i) * wl.at(i + 1)); }
+
+        // lineWidthKms is in km/s; utils::c is in cm/s -- convert
+        // lineWidthKms to cm/s before dividing so the ratio (and so
+        // deltaWl below) comes out dimensionless, leaving deltaWl in
+        // wl's own units
+        const double lineWidthCgs = lineWidthKms * 1.0e5;
+
+        LineDepositWindows result;
+        result.centerIdx_.assign(nLine, 0);
+        result.frac_.assign(nLine, {});
+
+        for (size_t ell = 0; ell < nLine; ++ell)
+        {
+            const double wlCen = lineWl.at(ell);
+            if (wlCen < wl.front() || wlCen > wl.back()) { continue; }
+
+            const double deltaWl = wlCen * lineWidthCgs / utils::c;
+
+            const size_t centerIdx = static_cast<size_t>(std::distance(boundaries.begin(),
+                std::upper_bound(boundaries.begin(), boundaries.end(), wlCen)));
+            result.centerIdx_.at(ell) = centerIdx;
+
+            std::vector<double> frac{binPowerFraction(boundaries, nWl, centerIdx, wlCen, deltaWl)};
+            for (size_t step = 1;; ++step)
+            {
+                const bool hasLo = centerIdx >= step;
+                const bool hasHi = centerIdx + step <= nWl - 1;
+                const double fracLo =
+                    hasLo ? binPowerFraction(boundaries, nWl, centerIdx - step, wlCen, deltaWl) : 0.0;
+                const double fracHi =
+                    hasHi ? binPowerFraction(boundaries, nWl, centerIdx + step, wlCen, deltaWl) : 0.0;
+                if (fracLo < lineDepositThreshold && fracHi < lineDepositThreshold) { break; }
+                frac.insert(frac.begin(), fracLo);
+                frac.push_back(fracHi);
+            }
+            result.frac_.at(ell) = std::move(frac);
+        }
+
+        return result;
+    }
 } // namespace
 
 nebular::Nebular::Nebular(
@@ -255,7 +281,7 @@ nebular::Nebular::Nebular(
     const std::string& trackName,
     const io::SimControls& simControls,
     const double vvcrit) :
-    simControls_(simControls)
+    simControls_(simControls), qhiFilter_("Q(HI)")
 {
     static constexpr auto context = "Nebular";
 
@@ -284,16 +310,35 @@ nebular::Nebular::Nebular(
         }
 
         const auto nativeWl = utils::readDataset1D(file, "wl", context);
-        const auto lineWlAll = utils::readDataset1D(file, "line_wl", context);
-        const auto lineLabelAll = utils::readStringDataset1D(file, "line_label", context);
+        wl_ = specsynWl;
+        lineWl_ = utils::readDataset1D(file, "line_wl", context);
+        lineLabel_ = utils::readStringDataset1D(file, "line_label", context);
         clusterAge_ = utils::readDataset1D(file, "time", context);
 
-        auto grid = buildWavelengthGrid(specsynWl, lineWlAll, lineLabelAll, simControls_.nebControls());
-        wl_ = std::move(grid.wl_);
-        lineWl_ = std::move(grid.lineWl_);
-        lineLabel_ = std::move(grid.lineLabel_);
-        const auto lineIndex = std::move(grid.lineIndex_);
-        const size_t nLineTotal = lineWlAll.size();
+        auto lineDeposit =
+            computeLineDepositWindows(wl_, lineWl_, simControls_.nebControls().lineWidth_);
+        lineCenterIdx_ = std::move(lineDeposit.centerIdx_);
+
+        size_t depositWidth = 1;
+        for (const auto& frac : lineDeposit.frac_) { depositWidth = std::max(depositWidth, frac.size()); }
+
+        // Every line's own frac_ window is centered within the
+        // depositWidth-wide row allotted to it here, zero-padded on
+        // both sides out to depositWidth -- so a line with a narrower
+        // window than depositWidth (or none at all, for a line whose
+        // central wavelength fell outside wl_'s own range) simply
+        // contributes zero power outside its own window
+        lineDepositFracData_.assign(depositWidth * lineWl_.size(), 0.0);
+        for (size_t ell = 0; ell < lineWl_.size(); ++ell)
+        {
+            const auto& frac = lineDeposit.frac_.at(ell);
+            const size_t offset = (depositWidth - frac.size()) / 2;
+            for (size_t k = 0; k < frac.size(); ++k)
+            {
+                lineDepositFracData_.at(((offset + k) * lineWl_.size()) + ell) = frac.at(k);
+            }
+        }
+        lineDepositFrac_ = Grid2D(lineDepositFracData_.data(), depositWidth, lineWl_.size());
 
         const hid_t trackGrp = H5Gopen2(file, trackName.c_str(), H5P_DEFAULT);
         if (trackGrp < 0)
@@ -358,19 +403,17 @@ nebular::Nebular::Nebular(
             }
 
             // Lines: no wavelength resampling needed (unlike the
-            // continuum above) -- just pick out this object's own
-            // in-range lines (lineIndex, into the table's full,
-            // global line list) from the blended line_lum data
+            // continuum above) -- the blended line_lum data already
+            // covers the table's full, global line list, matching
+            // lineWl_/lineLabel_ exactly
             const auto galaxyLineLum = blendByLogU(
                 logUCandidates(vvcritGrp, "galaxy", context), "line_lum", false, logURequested, context);
-            const auto galaxySelected = selectColumns(galaxyLineLum, 1, nLineTotal, lineIndex);
-            std::copy(galaxySelected.begin(), galaxySelected.end(),
+            std::copy(galaxyLineLum.begin(), galaxyLineLum.end(),
                 lineLumPerQGalaxyData_.begin() + static_cast<std::ptrdiff_t>(i * nLine));
 
             const auto clusterLineLum = blendByLogU(
                 logUCandidates(vvcritGrp, "cluster", context), "line_lum", true, logURequested, context);
-            const auto clusterSelected = selectColumns(clusterLineLum, nTimeNative, nLineTotal, lineIndex);
-            std::copy(clusterSelected.begin(), clusterSelected.end(),
+            std::copy(clusterLineLum.begin(), clusterLineLum.end(),
                 lineLumPerQClusterData_.begin() +
                     static_cast<std::ptrdiff_t>(i * nTimeNative * nLine));
 

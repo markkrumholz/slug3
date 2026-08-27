@@ -875,15 +875,6 @@ void io::SimControls::readNebular(const toml::table& inputDeck)
     const auto lineWidth = utils::getTOMLKeyWithError<double>(inputDeck, "nebular.line_width");
     if (lineWidth) { nebControls_.lineWidth_ = lineWidth.value(); }
 
-    // nebular.n_grid_line is read as unsigned long, the only unsigned
-    // integer type getTOMLKeyWithError is explicitly instantiated for
-    // (see ParseUtils.cpp), then narrowed to nGridLine_'s own size_t
-    const auto nGridLine = utils::getTOMLKeyWithError<unsigned long>(inputDeck, "nebular.n_grid_line");
-    if (nGridLine) { nebControls_.nGridLine_ = static_cast<std::size_t>(nGridLine.value()); }
-
-    const auto lineExtent = utils::getTOMLKeyWithError<double>(inputDeck, "nebular.line_extent");
-    if (lineExtent) { nebControls_.lineExtent_ = lineExtent.value(); }
-
     // nebular.table: optional override of the default nebular
     // emission table to load this track set's own grid from
     const auto tableInput = utils::getTOMLKeyWithError<std::string>(inputDeck, "nebular.table");

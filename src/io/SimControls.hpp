@@ -711,9 +711,8 @@ namespace io
          * @brief Load the nebular emission controls and grid specified by input deck
          * @param inputDeck A toml table holding the input deck
          * @details
-         * Reads nebular.log_U, nebular.cov_fac, nebular.line_width,
-         * nebular.n_grid_line, and nebular.line_extent into
-         * nebControls_, each left at its own nebular::defaultXxx value
+         * Reads nebular.log_U, nebular.cov_fac, and nebular.line_width
+         * into nebControls_, each left at its own nebular::defaultXxx value
          * (already NebularControls's own default member initializers)
          * if its key was not given -- so, unlike readSpectra()'s or
          * readExtinct()'s own all-or-nothing stanzas, every key here

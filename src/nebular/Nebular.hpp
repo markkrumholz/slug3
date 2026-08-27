@@ -9,6 +9,7 @@
 #ifndef NEBULAR_HPP
 #define NEBULAR_HPP
 
+#include "../phot/FilterIdeal.hpp"
 #include "../tracks/TrackCommons.hpp"
 #include <cstddef>
 #include <mdspan> // NOLINT(misc-include-cleaner)
@@ -64,13 +65,13 @@ namespace nebular
          *   not retained afterward
          * @details
          * simControls is stored by reference, so the object passed in
-         * must outlive this Nebular. This constructor builds this
-         * object's own nebular spectral grid (wl_, see that member's
-         * own comment) and, from it, ctmLumPerQCluster_/
-         * ctmLumPerQGalaxy_ (resampled onto wl_ via Interpolator1D)
-         * and lineLumPerQCluster_/lineLumPerQGalaxy_ (selected
-         * directly, without resampling, for whichever of the table's
-         * own lines survived into lineWl_/lineLabel_).
+         * must outlive this Nebular. This constructor takes wl_
+         * directly from simControls.specsyn()->wl() and, from it,
+         * builds ctmLumPerQCluster_/ctmLumPerQGalaxy_ (the table's own
+         * continuum data, resampled onto wl_ via Interpolator1D) and
+         * lineLumPerQCluster_/lineLumPerQGalaxy_ (the table's own line
+         * luminosities, read directly, for the table's full line list
+         * in lineWl_/lineLabel_).
          * @throws std::runtime_error if tableName cannot be found (via
          *   utils::getFilePath), trackName has no group of its own in
          *   it, or -- for any of that group's own [Fe/H] values -- no
@@ -103,20 +104,56 @@ namespace nebular
         const io::SimControls& simControls_; /**< Simulation controls (physics and control-flow settings) */
 
         /**
+         * @brief Ideal filter used to extract Q(HI), the H-ionizing photon rate, from an input stellar spectrum
+         * @details
+         * Built once, at construction, as phot::FilterIdeal("Q(HI)") --
+         * see that constructor overload's own comment for how the
+         * "Q(<spec>)" name is parsed. Not yet used for anything (this
+         * is the tool nebular emission scaling will use, added in a
+         * future commit).
+         */
+        phot::FilterIdeal qhiFilter_;
+
+        /**
          * @brief This object's own nebular spectral grid
          * @details
-         * Built once, at construction, from simControls_.specsyn()->
-         * wl() (the base) plus, for every line in lineWl_, nGridLine_
-         * points uniformly spanning +-lineExtent_ line-widths around
-         * it -- see Nebular.cpp's own buildWavelengthGrid() for the
-         * exact algorithm. This is the wavelength axis every
+         * Set once, at construction, directly from
+         * simControls_.specsyn()->wl() -- this class does not build a
+         * grid of its own. This is the wavelength axis every
          * ctmLumPerQCluster_/ctmLumPerQGalaxy_ entry is resampled
          * onto, and so defines the size of their own final dimension.
          */
         std::vector<double> wl_;
 
-        std::vector<std::string> lineLabel_; /**< Label of each nebular emission line kept in wl_'s own line windows */
-        std::vector<double> lineWl_;         /**< Wavelength of each nebular emission line kept in wl_'s own line windows */
+        std::vector<std::string> lineLabel_; /**< Label of each of the table's own nebular emission lines */
+        std::vector<double> lineWl_;         /**< Wavelength of each of the table's own nebular emission lines */
+
+        /**
+         * @brief Each of lineWl_'s own lines' index into wl_ of the bin its central wavelength falls into
+         * @details
+         * 0 for a line whose central wavelength falls outside wl_'s
+         * own range -- such a line's own lineDepositFrac_ column is
+         * all zero, so which index is recorded for it here is
+         * otherwise immaterial. Set once, at construction, by
+         * Nebular.cpp's own computeLineDepositWindows(); not yet used
+         * for anything (line deposition itself is implemented in a
+         * future commit).
+         */
+        std::vector<size_t> lineCenterIdx_;
+
+        /**
+         * @brief Fraction of each of lineWl_'s own lines' power to deposit in each wl_ bin of a window around lineCenterIdx_, shaped (window, line)
+         * @details
+         * Every line's own column is centered on its lineCenterIdx_
+         * within the shared window (sized to the widest of every
+         * line's own individually computed window -- see
+         * computeLineDepositWindows()), zero-padded on both sides out
+         * to that width. Set once, at construction; not yet used for
+         * anything (line deposition itself is implemented in a future
+         * commit).
+         */
+        Grid2D lineDepositFrac_;
+        std::vector<double> lineDepositFracData_; /**< Data holder for lineDepositFrac_ */
 
         std::vector<double> feH_;        /**< [Fe/H] grid this track's own nebular data is tabulated at, ascending */
         std::vector<double> clusterAge_; /**< Cluster age grid (yr) ctmLumPerQCluster_'s own age axis is tabulated at, from the table's own top-level "time" dataset */
