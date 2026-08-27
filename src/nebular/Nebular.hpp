@@ -99,6 +99,22 @@ namespace nebular
         auto operator=(const Nebular&) -> Nebular& = delete;
         auto operator=(Nebular&&) -> Nebular& = delete;
 
+        // Observers
+
+        /**
+         * @brief Get the label of each of this Nebular's own nebular emission lines
+         * @return lineLabel_, in the same order as lineWl() -- see
+         *   lineWl_'s own comment for that order's own source
+         */
+        [[nodiscard]] auto lineLabel() const -> const std::vector<std::string>& { return lineLabel_; }
+
+        /**
+         * @brief Get the wavelength of each of this Nebular's own nebular emission lines
+         * @return lineWl_, in Angstrom, in the table's own line
+         *   ordering (the same order as lineLabel())
+         */
+        [[nodiscard]] auto lineWl() const -> const std::vector<double>& { return lineWl_; }
+
     private:
 
         const io::SimControls& simControls_; /**< Simulation controls (physics and control-flow settings) */
