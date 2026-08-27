@@ -512,7 +512,10 @@ auto nebular::Nebular::getGalaxy(const std::vector<double>& spec, const double f
     static constexpr auto context = "Nebular::getGalaxy";
 
     const auto feHBracket = bracketGrid(feH_, feH, context, "[Fe/H]");
-    const double qhi = qhiFilter_.phot(wl_, spec);
+    // covFac_ discounts Q(HI) for ionizing photons lost to dust-grain
+    // absorption or escape outside the observational aperture, before
+    // any of it is attributed to nebular emission below
+    const double qhi = simControls_.nebControls().covFac_ * qhiFilter_.phot(wl_, spec);
 
     const size_t nLine = lineWl_.size();
     std::vector<double> lineLum(nLine);
@@ -557,7 +560,10 @@ auto nebular::Nebular::getCluster(const std::vector<double>& spec, const double 
     const double ageClamped = std::max(age, clusterAge_.front());
     const auto ageBracket = bracketGrid(clusterAge_, ageClamped, context, "cluster age");
 
-    const double qhi = qhiFilter_.phot(wl_, spec);
+    // covFac_ discounts Q(HI) for ionizing photons lost to dust-grain
+    // absorption or escape outside the observational aperture, before
+    // any of it is attributed to nebular emission below
+    const double qhi = simControls_.nebControls().covFac_ * qhiFilter_.phot(wl_, spec);
 
     const size_t nLine = lineWl_.size();
     std::vector<double> lineLum(nLine);

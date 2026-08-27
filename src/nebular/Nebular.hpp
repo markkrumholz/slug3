@@ -130,7 +130,11 @@ namespace nebular
          * @throws std::runtime_error if feH falls outside feH_'s own tabulated range
          * @details
          * Q(HI) (the H-ionizing photon rate) is read off spec via
-         * qhiFilter_; every quantity added below scales with it.
+         * qhiFilter_, then discounted by simControls_.nebControls().
+         * covFac_ (the fraction of ionizing photons actually absorbed
+         * by the nebula, rather than lost to dust grains or escaping
+         * the observational aperture); every quantity added below
+         * scales with that discounted rate.
          * Every per-[Fe/H] quantity (lineLumPerQGalaxy_,
          * ctmLumPerQGalaxy_) is linearly interpolated between the two
          * tabulated [Fe/H] values bracketing feH. The continuum is
