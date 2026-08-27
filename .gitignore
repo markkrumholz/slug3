@@ -96,6 +96,8 @@ data/spectra/*.toml
 data/spectra/*.h5
 data/filters/*.toml
 data/filters/*.h5
+data/nebular/*.toml
+data/nebular/*.h5
 # vega.h5 is a single small reference spectrum (not an interpolatable
 # library grid like the rest of data/spectra/*.h5), so it's committed
 # rather than fetched on demand
