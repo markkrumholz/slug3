@@ -16,6 +16,7 @@ import shutil
 import tomlkit
 import urllib3
 import zipfile
+from truncate_parsec_vms import truncate_parsec_vms
 
 # Magic strings
 PARSEC_version = "v2.0"
@@ -55,6 +56,9 @@ parser.add_argument("--overwrite", action="store_true",
                     help="Overwrite existing output file")
 parser.add_argument("--feh", type=float, nargs="+", default=[],
                     help="List of [Fe/H] values to fetch; if unspecified, fetch all")
+parser.add_argument("--no_truncate", action="store_true",
+                    help="Do not truncate every [Fe/H] group down to the mass "
+                         "range common to all of them (see truncate_parsec_vms.py)")
 parser.add_argument("--verbose", action="store_true",
                     help="Print verbose output")
 args = parser.parse_args()
@@ -278,6 +282,15 @@ for filename, feh_ in zip(files_avail, feh):
 
 # Clean up all downloads
 shutil.rmtree(temp_dir, ignore_errors=True)
+
+# Truncate every [Fe/H] group down to the mass range common to all of
+# them, unless disabled -- see truncate_parsec_vms.py's own docstring
+# for why this is necessary (Tracks3D requires a single, shared mass
+# grid across every group a query matches)
+if not args.no_truncate:
+    if args.verbose:
+        print(f"Truncating {args.output} to a common mass grid across every [Fe/H] group...")
+    truncate_parsec_vms(args.output)
 
 # Read existing registry file if it exists, otherwise create a new one
 if shutil.os.path.exists(args.registry):
