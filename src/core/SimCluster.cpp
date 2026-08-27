@@ -11,13 +11,31 @@
 #include "../io/SimControls.hpp"
 #include "../utils/UniqueIDManager.hpp"
 #include "Cluster.hpp"
+#include <array>
 #include <atomic>
+#include <charconv>
 #include <exception> // NOLINT(misc-include-cleaner) -- correct header for std::exception_ptr/current_exception/rethrow_exception; clang-tidy-18's own header-mapping data doesn't yet attribute these symbols to it
 #include <iostream>
 #include <memory>
 #include <stdexcept>
 #include <string>
 #include <utility>
+
+// Round-trip-safe double -> string conversion: std::to_string(double)
+// only ever prints a fixed 6 fractional digits, which is not enough
+// to recover an arbitrary double's own exact bit pattern. Used below
+// to serialize a failing cluster's own target_mass/form_time, so
+// reconstructing it later (via Cluster's rng-state constructor
+// overload) starts from the exact same values, not
+// std::to_string()'s own rounded-off ones -- see runTrial()'s own
+// comment for why that matters.
+static auto toRoundTripString(const double value) -> std::string
+{
+    std::array<char, 32> buf{};
+    const auto result = std::to_chars(buf.data(),
+        buf.data() + buf.size(), value); // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic) -- buf is a fixed-size stack array, its own end pointer is always in-bounds
+    return { buf.data(), result.ptr };
+}
 
 core::SimCluster::SimCluster(const io::SimControls& simControls,
     std::unique_ptr<io::OutputManager> outputManager) :
@@ -69,8 +87,8 @@ void core::SimCluster::runTrial(const unsigned long trialNum)
         throw std::runtime_error(
             std::string(error.what()) +
             " (cluster uid=" + std::to_string(cluster.uid()) +
-            ", target_mass=" + std::to_string(cluster.targetMass()) +
-            ", form_time=" + std::to_string(cluster.formTime()) +
+            ", target_mass=" + toRoundTripString(cluster.targetMass()) +
+            ", form_time=" + toRoundTripString(cluster.formTime()) +
             ", rng=\"" + cluster.rngState().data() + "\")");
     }
 
