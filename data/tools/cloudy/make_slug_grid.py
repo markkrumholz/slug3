@@ -67,6 +67,23 @@ own duplicate detection). This makes a partially-completed or
 re-run invocation cheap to resume; delete an output file to force
 that combination to be regenerated.
 
+A combination that is about to be (re)run also has its own bare-name
+staging directory cleared first, if one exists (see
+clear_stale_output_dir): OutputManagerH5's own OpenMP output path
+(src/io/OutputManagerH5.cpp) writes each thread's output into
+outDir/modelName/thread_NNNN.h5, only consolidating those into the
+final outDir/modelName.h5 -- and removing the directory -- once the
+run completes; if slug is interrupted before that point (a crash, a
+walltime kill, ...), the directory survives with nothing but partial
+thread_NNNN.h5 files in it, and OutputManagerH5's own constructor then
+refuses to start a new run for that combination at all, throwing
+"output ... already exists" instantly on every subsequent attempt --
+a permanent deadlock, since nothing else in this pipeline ever cleans
+that directory up. Since this cleanup only runs immediately before
+this script writes a fresh deck for a combination whose own final .h5
+does not exist, a leftover directory found there can only be wreckage
+from an earlier, incomplete attempt.
+
 --output-table takes this further: pointed at an existing
 process_cloudy_grid.py output table (e.g. cloudy_table.h5), a (track,
 [Fe/H], v/vcrit) combination already fully present there (every
@@ -92,6 +109,7 @@ below), then run the full grid on a shared cluster.
 import argparse
 import concurrent.futures
 import os
+import shutil
 import subprocess
 import sys
 import tomllib
@@ -277,6 +295,41 @@ def deck_name(track: str, feh: float, vvcrit: float, sim_type: str) -> str:
         tracks.toml), while keeping the name readable.
     """
     return f"{track}_FeH{feh:+.4f}_vvcrit{vvcrit:.2f}_{sim_type}"
+
+
+def clear_stale_output_dir(path: Path) -> bool:
+    """
+    Remove a leftover OutputManagerH5 staging directory, if one is there.
+
+    Parameters
+    ----------
+    path : pathlib.Path
+        The bare (no ".h5") output path a (track, feh, vvcrit, sim_type)
+        combination's own deck resolves to -- work_dir / deck_name(...).
+
+    Returns
+    -------
+    bool
+        True if a staging directory was found (and removed), False if
+        there was nothing to clean up.
+
+    Details
+    -------
+    See this module's own docstring for why a directory found here is
+    always wreckage from an earlier, incomplete slug run, never one a
+    still-running slug process depends on -- the caller only reaches
+    this function for a combination whose own final .h5 does not yet
+    exist, and this script is not meant to be run concurrently with
+    itself against the same --work-dir (exactly like the skip-if-.h5-
+    exists check this complements). Removing it here, before writing a
+    fresh deck and rerunning slug, is what lets that rerun actually
+    succeed instead of hitting OutputManagerH5's own "already exists"
+    check immediately.
+    """
+    if not path.is_dir():
+        return False
+    shutil.rmtree(path)
+    return True
 
 
 def build_cluster_deck(track: str, feh: float, vvcrit: float, work_dir: Path) -> str:
@@ -576,6 +629,7 @@ def main() -> None:
     deck_paths: list[Path] = []
     n_skipped = 0
     n_skipped_table = 0
+    n_cleaned = 0
     for track in TRACK_SETS:
         feh_grid = get_feh_grid(track_registry, track, args.feh_min, args.feh_max)
         vvcrit_grid = get_vvcrit_grid(track_registry, track, args.v_vcrit_min, args.v_vcrit_max)
@@ -585,12 +639,15 @@ def main() -> None:
                     n_skipped_table += 1
                     continue
                 for sim_type, build_deck in (("cluster", build_cluster_deck), ("galaxy", build_galaxy_deck)):
-                    output_path = work_dir / f"{deck_name(track, feh, vvcrit, sim_type)}.h5"
+                    base_name = deck_name(track, feh, vvcrit, sim_type)
+                    output_path = work_dir / f"{base_name}.h5"
                     if output_path.exists():
                         n_skipped += 1
                         continue
+                    if clear_stale_output_dir(work_dir / base_name):
+                        n_cleaned += 1
                     deck_text = build_deck(track, feh, vvcrit, work_dir)
-                    deck_path = work_dir / f"{deck_name(track, feh, vvcrit, sim_type)}.toml"
+                    deck_path = work_dir / f"{base_name}.toml"
                     deck_path.write_text(deck_text)
                     deck_paths.append(deck_path)
 
@@ -599,6 +656,9 @@ def main() -> None:
             f"present in {args.output_table}.")
     if n_skipped:
         print(f"Skipping {n_skipped} deck(s) whose own output file already exists in {work_dir}.")
+    if n_cleaned:
+        print(f"Removed {n_cleaned} stale OutputManagerH5 staging director{'y' if n_cleaned == 1 else 'ies'} "
+            f"left behind by an earlier interrupted run (see this module's own docstring).")
 
     if not deck_paths:
         print("Nothing left to run: every matching (track, [Fe/H], v/vcrit) combination's own "
