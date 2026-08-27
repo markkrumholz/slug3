@@ -274,6 +274,35 @@ namespace
 
         return result;
     }
+
+    // (lo_, hi_, frac_) bracketing value within grid (ascending), such
+    // that value == grid.at(lo_) + frac_ * (grid.at(hi_) - grid.at(lo_));
+    // lo_ == hi_ (frac_ = 0) on an exact match, including at either
+    // end of grid. Throws if value falls outside [grid.front(), grid.back()].
+    struct GridBracket
+    {
+        size_t lo_;
+        size_t hi_;
+        double frac_;
+    };
+
+    auto bracketGrid(const std::vector<double>& grid, const double value,
+        const std::string& context, const std::string& gridName) -> GridBracket
+    {
+        if (value < grid.front() || value > grid.back())
+        {
+            throw std::runtime_error(
+                context + ": requested " + gridName + " is outside the tabulated range");
+        }
+
+        size_t hi = 0;
+        while (hi + 1 < grid.size() && grid.at(hi) < value) { ++hi; }
+
+        if (utils::approxEqual(grid.at(hi), value)) { return {hi, hi, 0.0}; }
+
+        const double frac = (value - grid.at(hi - 1)) / (grid.at(hi) - grid.at(hi - 1));
+        return {hi - 1, hi, frac};
+    }
 } // namespace
 
 nebular::Nebular::Nebular(
@@ -429,6 +458,137 @@ nebular::Nebular::Nebular(
         lineLumPerQGalaxy_ = Grid2D(lineLumPerQGalaxyData_.data(), feH_.size(), nLine);
         lineLumPerQCluster_ = Grid3D(lineLumPerQClusterData_.data(), feH_.size(), nTimeNative, nLine);
     }
+}
+
+auto nebular::Nebular::stellarAboveEdge(const std::vector<double>& spec) const -> std::vector<double>
+{
+    const double edgeWl = qhiFilter_.wlMax();
+    std::vector<double> result(spec.size(), 0.0);
+    for (size_t k = 0; k < spec.size(); ++k)
+    {
+        if (wl_.at(k) > edgeWl) { result.at(k) = spec.at(k); }
+    }
+    return result;
+}
+
+void nebular::Nebular::depositLines(
+    const std::vector<double>& lineLum, std::vector<double>& spec) const
+{
+    const size_t nWl = wl_.size();
+    const size_t depositWidth = lineDepositFrac_.extent(0);
+    const auto centerRow = static_cast<ptrdiff_t>((depositWidth - 1) / 2);
+    const auto n = static_cast<ptrdiff_t>(depositWidth / 2) - 1;
+
+    for (size_t ell = 0; ell < lineLum.size(); ++ell)
+    {
+        if (lineLum.at(ell) == 0.0) { continue; }
+
+        const auto centerIdx = static_cast<ptrdiff_t>(lineCenterIdx_.at(ell));
+        for (ptrdiff_t offset = -n; offset <= n; ++offset)
+        {
+            const ptrdiff_t binIdx = centerIdx + offset;
+
+            // A bin's own width (below) needs its own left and right
+            // neighbors, so bin 0 (no left neighbor) and bin nWl-1 (no
+            // right neighbor) -- and anything further off the grid --
+            // are skipped rather than read out of bounds
+            if (binIdx < 1 || binIdx >= static_cast<ptrdiff_t>(nWl) - 1) { continue; }
+
+            const auto bin = static_cast<size_t>(binIdx);
+            const double binWidth = std::sqrt(wl_.at(bin + 1) * wl_.at(bin)) -
+                std::sqrt(wl_.at(bin - 1) * wl_.at(bin));
+
+            const auto row = static_cast<size_t>(centerRow + offset);
+            const double powerFrac = lineDepositFrac_[row, ell];
+
+            spec.at(bin) += lineLum.at(ell) * powerFrac / binWidth;
+        }
+    }
+}
+
+auto nebular::Nebular::getGalaxy(const std::vector<double>& spec, const double feH) const
+    -> std::pair<std::vector<double>, std::vector<double>>
+{
+    static constexpr auto context = "Nebular::getGalaxy";
+
+    const auto feHBracket = bracketGrid(feH_, feH, context, "[Fe/H]");
+    const double qhi = qhiFilter_.phot(wl_, spec);
+
+    const size_t nLine = lineWl_.size();
+    std::vector<double> lineLum(nLine);
+    for (size_t ell = 0; ell < nLine; ++ell)
+    {
+        const double lo = lineLumPerQGalaxy_[feHBracket.lo_, ell];
+        const double hi = lineLumPerQGalaxy_[feHBracket.hi_, ell];
+        lineLum.at(ell) = qhi * (lo + (feHBracket.frac_ * (hi - lo)));
+    }
+
+    auto outSpec = stellarAboveEdge(spec);
+
+    const size_t nWl = wl_.size();
+    for (size_t k = 0; k < nWl; ++k)
+    {
+        const double lo = ctmLumPerQGalaxy_[feHBracket.lo_, k];
+        const double hi = ctmLumPerQGalaxy_[feHBracket.hi_, k];
+        outSpec.at(k) += qhi * (lo + (feHBracket.frac_ * (hi - lo)));
+    }
+
+    depositLines(lineLum, outSpec);
+
+    return { std::move(outSpec), std::move(lineLum) };
+}
+
+auto nebular::Nebular::getCluster(const std::vector<double>& spec, const double feH,
+    const double age) const -> std::pair<std::vector<double>, std::vector<double>>
+{
+    static constexpr auto context = "Nebular::getCluster";
+
+    // No cloudy grid data exists for a cluster this old -- return the
+    // stellar spectrum alone (still edge-zeroed, per getGalaxy()'s own
+    // convention) with no nebular continuum or line emission added
+    if (age > clusterAge_.back())
+    {
+        return { stellarAboveEdge(spec), std::vector<double>(lineWl_.size(), 0.0) };
+    }
+
+    const auto feHBracket = bracketGrid(feH_, feH, context, "[Fe/H]");
+    // Ages below clusterAge_'s own minimum are pinned to that minimum
+    // rather than treated as an error, unlike an out-of-range [Fe/H]
+    const double ageClamped = std::max(age, clusterAge_.front());
+    const auto ageBracket = bracketGrid(clusterAge_, ageClamped, context, "cluster age");
+
+    const double qhi = qhiFilter_.phot(wl_, spec);
+
+    const size_t nLine = lineWl_.size();
+    std::vector<double> lineLum(nLine);
+    for (size_t ell = 0; ell < nLine; ++ell)
+    {
+        const double loFloT = lineLumPerQCluster_[feHBracket.lo_, ageBracket.lo_, ell];
+        const double loFhiT = lineLumPerQCluster_[feHBracket.lo_, ageBracket.hi_, ell];
+        const double hiFloT = lineLumPerQCluster_[feHBracket.hi_, ageBracket.lo_, ell];
+        const double hiFhiT = lineLumPerQCluster_[feHBracket.hi_, ageBracket.hi_, ell];
+        const double loF = loFloT + (ageBracket.frac_ * (loFhiT - loFloT));
+        const double hiF = hiFloT + (ageBracket.frac_ * (hiFhiT - hiFloT));
+        lineLum.at(ell) = qhi * (loF + (feHBracket.frac_ * (hiF - loF)));
+    }
+
+    auto outSpec = stellarAboveEdge(spec);
+
+    const size_t nWl = wl_.size();
+    for (size_t k = 0; k < nWl; ++k)
+    {
+        const double loFloT = ctmLumPerQCluster_[feHBracket.lo_, ageBracket.lo_, k];
+        const double loFhiT = ctmLumPerQCluster_[feHBracket.lo_, ageBracket.hi_, k];
+        const double hiFloT = ctmLumPerQCluster_[feHBracket.hi_, ageBracket.lo_, k];
+        const double hiFhiT = ctmLumPerQCluster_[feHBracket.hi_, ageBracket.hi_, k];
+        const double loF = loFloT + (ageBracket.frac_ * (loFhiT - loFloT));
+        const double hiF = hiFloT + (ageBracket.frac_ * (hiFhiT - hiFloT));
+        outSpec.at(k) += qhi * (loF + (feHBracket.frac_ * (hiF - loF)));
+    }
+
+    depositLines(lineLum, outSpec);
+
+    return { std::move(outSpec), std::move(lineLum) };
 }
 
 // NOLINTEND(misc-include-cleaner)
