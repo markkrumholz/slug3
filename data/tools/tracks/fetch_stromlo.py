@@ -14,6 +14,7 @@ plain HTTP directory listing.
 import argparse
 import gdown
 import h5py
+import math
 import numpy as np
 import re
 import shutil
@@ -34,6 +35,23 @@ STROMLO_reference_URLs = [
     "https://ui.adsabs.harvard.edu/abs/2021ApJ...908..241G/abstract",
     "https://ui.adsabs.harvard.edu/abs/2020MNRAS.494.3861R/abstract"
 ]
+
+# (feh, vvcrit) points to exclude entirely, regardless of --feh/--vvcrit
+# filters. Stromlo's metal-rich grid endpoint (feh=+0.6) was only ever
+# computed at v/vcrit=0.4; v/vcrit=0.0 and 0.2 stop one grid step lower,
+# at feh=+0.5, with no +0.6 data to fetch. Tracks3D requires a single,
+# uniform [Fe/H] grid across whatever v/vcrit values a query brackets,
+# so a +0.6 track present at only one of Stromlo's three v/vcrit values
+# makes slug crash outright the moment a simulation requests exactly
+# [Fe/H]=+0.6 at v/vcrit=0.0 or 0.2 (see
+# cloudy_grid_genuine_slug_failures_report.txt's "FAILURE CLASS B" for
+# the reproduction and root-cause trace). With no data to interpolate
+# or borrow from to fill v/vcrit=0.0/0.2 at +0.6, the only sound fix is
+# to drop the lone v/vcrit=0.4 model too, so Stromlo's own grid ends at
+# feh=+0.5 uniformly across every v/vcrit.
+STROMLO_EXCLUDE_FEH_VVCRIT = {
+    (0.6, 0.4),
+}
 
 # Parse command line arguments
 parser = argparse.ArgumentParser(description="Fetch Stromlo tracks")
@@ -112,6 +130,21 @@ for url in args.url:
            for f in files_avail ]
     vvcrit = [ stromlo_to_float(re.findall(r'_vvcrit_(.*?)_gc', f.path)[0])
               for f in files_avail ]
+
+    # Drop any (feh, vvcrit) pair in STROMLO_EXCLUDE_FEH_VVCRIT, regardless
+    # of --feh/--vvcrit filters (see its own comment for why)
+    keep_idx = [ i for i, (feh_, vvcrit_) in enumerate(zip(feh, vvcrit))
+                if not any(math.isclose(feh_, ex_feh, abs_tol=1e-6) and
+                           math.isclose(vvcrit_, ex_vvcrit, abs_tol=1e-6)
+                           for ex_feh, ex_vvcrit in STROMLO_EXCLUDE_FEH_VVCRIT) ]
+    if len(keep_idx) != len(files_avail):
+        if args.verbose:
+            print(f"Excluding {len(files_avail) - len(keep_idx)} file(s) "
+                  "matching STROMLO_EXCLUDE_FEH_VVCRIT.")
+        files_avail = [ files_avail[i] for i in keep_idx ]
+        feh = [ feh[i] for i in keep_idx ]
+        afe = [ afe[i] for i in keep_idx ]
+        vvcrit = [ vvcrit[i] for i in keep_idx ]
 
     # If we were given lists of Fe/H, alpha/Fe, or v/vcrit values to fetch,
     # filter the list of files accordingly
