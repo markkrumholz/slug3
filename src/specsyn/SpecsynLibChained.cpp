@@ -487,12 +487,13 @@ namespace specsyn
             {std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::quiet_NaN()},
             {std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::quiet_NaN()},
             {std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::quiet_NaN()},
-        }}),
-        // Unconditional, like logTeffMin_/logTeffMax_ above: every
-        // GridType entry starts at quiet_NaN(), overwritten below by
-        // updateFeHRange -- see fehMin_'s own comment.
-        fehMin_(filledArray<nGridType>(std::numeric_limits<double>::quiet_NaN())),
-        fehMax_(filledArray<nGridType>(std::numeric_limits<double>::quiet_NaN()))
+        }})
+        // fehMin_/fehMax_/libNames_ each default-construct to nGridType
+        // empty vectors, which is exactly what they need to start as --
+        // updateFeHRanges() (via the sort loop just before it) resizes
+        // and fills each GridType's own three vectors together, since
+        // their eventual length isn't known until then. See fehMin_'s
+        // own comment.
     {
         if (spectraName.empty())
         {
@@ -603,13 +604,18 @@ namespace specsyn
 
         // Sort every library, still in its own original relative
         // order within spectraName, into whichever of wrLibs_/wdLibs_/
-        // normalLibs_ matches its own already-known GridType
+        // normalLibs_ matches its own already-known GridType, carrying
+        // its own spectraName entry along into the matching libNames_
+        // bucket in the same pass -- see libNames_'s own comment for
+        // why.
         wrLibs_.reserve(n);
         wdLibs_.reserve(n);
         normalLibs_.reserve(n);
         for (size_t i = 0; i < n; ++i)
         {
-            switch (allTypes[i]) // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i < n == allTypes.size() by construction
+            const auto ti = static_cast<std::size_t>(allTypes[i]); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i < n == allTypes.size() by construction
+            libNames_[ti].push_back(spectraName[i]); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- ti < nGridType by construction
+            switch (allTypes[i]) // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
             {
                 case GridType::wrGrid: wrLibs_.push_back(std::move(allLibs[i])); break; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
                 case GridType::wdGrid: wdLibs_.push_back(std::move(allLibs[i])); break; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
@@ -623,16 +629,16 @@ namespace specsyn
         // wnlTeffRanges_'s own comment for why the two must agree.
         propagateWNLTeffRanges();
 
-        // fehMin_/fehMax_, per GridType, from whichever library is now
-        // chainFor(type).back() -- unconditionally (regardless of
-        // tClamp, like wnlTeffRanges_ above) -- see updateFeHRanges()'s
-        // own comment for exactly what this computes and why.
+        // fehMin_/fehMax_/libNames_, per individual chained library --
+        // unconditionally (regardless of tClamp, like wnlTeffRanges_
+        // above) -- see updateFeHRanges()'s own comment for exactly
+        // what this computes and why.
         updateFeHRanges();
 
-        // Warn (once, up front) if a WR star anywhere in the requested
-        // [Fe/H] range would actually get silently clamped -- see
-        // warnIfWRFeHClamped()'s own comment.
-        warnIfWRFeHClamped(fehMin, fehMax);
+        // Warn (once, up front) for every chained library whose own
+        // [Fe/H] coverage the requested range exceeds -- see
+        // warnIfFeHClamped()'s own comment.
+        warnIfFeHClamped(fehMin, fehMax);
     }
 
     void SpecsynLibChained::propagateWNLTeffRanges()
@@ -648,38 +654,63 @@ namespace specsyn
 
     void SpecsynLibChained::updateFeHRanges()
     {
-        // Left at quiet_NaN() (set at the top of the constructor) for
-        // a GridType with no chained library at all (chain.empty()) or
-        // whose own last library has no [Fe/H] axis (SpecsynLibWD,
-        // whose base-class fehMin()/fehMax() are the unrestricted
-        // -infinity/+infinity, mapped back to quiet_NaN() here so
-        // specForIntegration()'s own isnan() check treats it the same
-        // as "no restriction"). Reads from chainFor(type).back() -- the
-        // one specForIntegration() ultimately falls back to via
-        // specForce() -- for each GridType.
+        // Each GridType's own three vectors (fehMin_[t]/fehMax_[t] --
+        // libNames_[t] is already filled, by the sort loop just above
+        // this call in the constructor) are sized to chainFor(t)'s own
+        // length and filled one entry per chained library, in the same
+        // order. An entry is left at quiet_NaN() if that specific
+        // library has no [Fe/H] axis at all (SpecsynLibWD; its
+        // base-class fehMin()/fehMax() are the unrestricted
+        // -infinity/+infinity, not copied through, so downstream
+        // isnan() checks treat it the same as "no restriction").
         for (const auto t : { GridType::wrGrid, GridType::wdGrid, GridType::normalGrid })
         {
             const auto& chain = chainFor(t);
-            if (chain.empty()) { continue; }
             const auto ti = static_cast<std::size_t>(t);
-            const double lo = chain.back()->fehMin();
-            const double hi = chain.back()->fehMax();
-            if (std::isfinite(lo)) { fehMin_[ti] = lo; } // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- ti < nGridType by construction
-            if (std::isfinite(hi)) { fehMax_[ti] = hi; } // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- see above
+            fehMin_[ti].assign(chain.size(), std::numeric_limits<double>::quiet_NaN()); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- ti < nGridType by construction
+            fehMax_[ti].assign(chain.size(), std::numeric_limits<double>::quiet_NaN()); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- see above
+            for (std::size_t i = 0; i < chain.size(); ++i)
+            {
+                const double lo = chain[i]->fehMin();
+                const double hi = chain[i]->fehMax();
+                if (std::isfinite(lo)) { fehMin_[ti][i] = lo; } // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- see above
+                if (std::isfinite(hi)) { fehMax_[ti][i] = hi; } // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- see above
+            }
         }
     }
 
-    void SpecsynLibChained::warnIfWRFeHClamped(const double fehMin, const double fehMax) const
+    auto SpecsynLibChained::clampFehForLibrary(
+        const double feh, const GridType type, const std::size_t libIdx) const -> double
     {
-        const auto wrIdx = static_cast<std::size_t>(GridType::wrGrid);
-        if (std::isnan(fehMin_[wrIdx])) { return; } // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- wrIdx < nGridType by construction; no chained WR library at all
-        if (fehMin < fehMin_[wrIdx] || fehMax > fehMax_[wrIdx]) // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- see above
+        const auto ti = static_cast<std::size_t>(type);
+        double clamped = feh;
+        const double lo = fehMin_[ti][libIdx]; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- ti < nGridType, libIdx < chainFor(type).size() by construction
+        const double hi = fehMax_[ti][libIdx]; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- see above
+        if (!std::isnan(lo)) { clamped = std::max(clamped, lo); }
+        if (!std::isnan(hi)) { clamped = std::min(clamped, hi); }
+        return clamped;
+    }
+
+    void SpecsynLibChained::warnIfFeHClamped(const double fehMin, const double fehMax) const
+    {
+        for (const auto t : { GridType::wrGrid, GridType::wdGrid, GridType::normalGrid })
         {
-            std::cout << "slug: warning: chained WR spectral library covers only "
-                "[Fe/H] = [" << fehMin_[wrIdx] << ", " << fehMax_[wrIdx] << // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- see above
-                "], narrower than the requested [Fe/H] = [" << fehMin << ", " << fehMax <<
-                "]; WR stars outside that range will be clamped to the nearest "
-                "available [Fe/H]\n";
+            const auto ti = static_cast<std::size_t>(t);
+            const auto& mins = fehMin_[ti]; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- ti < nGridType by construction
+            const auto& maxs = fehMax_[ti]; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- see above
+            const auto& names = libNames_[ti]; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- see above
+            for (std::size_t i = 0; i < mins.size(); ++i)
+            {
+                if (std::isnan(mins[i])) { continue; } // no [Fe/H] axis on this library
+                if (fehMin < mins[i] || fehMax > maxs[i])
+                {
+                    std::cout << "slug: warning: chained spectral library " << names[i] <<
+                        " covers only [Fe/H] = [" << mins[i] << ", " << maxs[i] <<
+                        "], narrower than the requested [Fe/H] = [" << fehMin << ", " << fehMax <<
+                        "]; stars outside that range will be clamped to " << names[i] <<
+                        "'s nearest available [Fe/H] when it is tried\n";
+                }
+            }
         }
     }
 
@@ -706,84 +737,31 @@ namespace specsyn
                 "is available for this star");
         }
 
-        // WR stars specifically are clamped to the chained WR
-        // library's own real [Fe/H] coverage (fehMin_/fehMax_[wrGrid],
-        // already computed by updateFeHRanges()) before evaluating --
-        // no super-solar, or symmetrically very sub-solar, WR
-        // atmosphere grids currently exist, so without this a WR star
-        // whose actual [Fe/H] falls outside that coverage would
-        // otherwise throw (via specForce()) rather than degrade
-        // gracefully to the nearest available WR metallicity. WD/
-        // normal-grid stars keep their existing, deliberate
-        // no-rescue-for-feh behavior -- this mirrors
-        // specForIntegration()'s own identical clamp, applied there to
-        // every GridType for a different reason (tracks-grid padding
-        // points), restricted here to wrGrid alone.
-        double queryFeh = feh;
-        if (type == GridType::wrGrid)
-        {
-            const auto t = static_cast<std::size_t>(type);
-            if (!std::isnan(fehMin_[t])) { queryFeh = std::max(queryFeh, fehMin_[t]); } // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- t < gridTypeCount by construction
-            if (!std::isnan(fehMax_[t])) { queryFeh = std::min(queryFeh, fehMax_[t]); } // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- see above
-        }
-
         // Normal-grid stars specifically are also clamped up to the
         // chain's own combined lower log(Teff) floor, if they fall
         // below it -- see clampNormalLogTeffFloor()'s own comment.
         const StarData queryProps = clampNormalLogTeffFloor(props, type);
 
-        for (const auto& lib : chain)
+        // Each library is tried with feh clamped to *that library's
+        // own* real [Fe/H] coverage, not once for the whole chain --
+        // see this function's own header comment for why. No
+        // atmosphere library actually has uniform [Fe/H] coverage
+        // across its own kind of chain in practice (a hot O/B star
+        // metal-poor enough to fall outside TLUSTY_O/TLUSTY_B's own
+        // narrower range needs the same kind of per-library rescue a
+        // WR star metal-poor enough to fall outside the chained WR
+        // library's own range already did).
+        for (std::size_t i = 0; i < chain.size(); ++i)
         {
-            auto result = lib->spec(queryProps, queryFeh);
+            auto result = chain[i]->spec(queryProps, clampFehForLibrary(feh, type, i));
             if (!result.empty()) { return result; }
         }
-        return chain.back()->specForce(queryProps, queryFeh);
+        return chain.back()->specForce(queryProps, clampFehForLibrary(feh, type, chain.size() - 1));
     }
 
     auto SpecsynLibChained::specForIntegration(const StarData& props, const double feh) const -> std::vector<double>
     {
-        const double rawLogg = getSAandLogg(props).second;
-        const auto type = classifyGridType(props, rawLogg, logTeffMin_, logTeffMax_, loggMin_, loggMax_, wnlTeffRanges_);
-        const auto& chain = chainFor(type);
-
-        if (chain.empty())
-        {
-            throw std::runtime_error(
-                "SpecsynLibChained: no chained library of the required type "
-                "is available for this star");
-        }
-
-        // Clamp feh to this star's own chain's real [Fe/H] coverage
-        // (fehMin_[type]/fehMax_[type], quiet_NaN() -- left unclamped
-        // -- for a GridType with no [Fe/H] axis at all, i.e. wdGrid)
-        // before evaluating it: unlike ordinary spec()/specForce()
-        // (whose existing, deliberate no-rescue-for-feh behavior stays
-        // untouched -- see Specsyn::specForIntegration()'s own
-        // comment), this override exists specifically for
-        // Specsyn::continuousSpecIntegrand()'s own tracks-grid padding
-        // points, which can carry a real, wider-than-any-single-library
-        // [Fe/H] coverage.
-        const auto t = static_cast<std::size_t>(type);
-        double clampedFeh = feh;
-        if (!std::isnan(fehMin_[t])) { clampedFeh = std::max(clampedFeh, fehMin_[t]); } // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- t < gridTypeCount by construction
-        if (!std::isnan(fehMax_[t])) { clampedFeh = std::min(clampedFeh, fehMax_[t]); } // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- see above
-
-        // Normal-grid stars are also clamped up to the chain's own
-        // combined lower log(Teff) floor, if they fall below it -- see
-        // clampNormalLogTeffFloor()'s own comment. This matters here
-        // in particular: continuousSpecIntegrand()'s own low-mass,
-        // non-stochastically-treated population is exactly where a
-        // track-grid point just barely cooler than the coolest
-        // chained library's own floor (e.g. MARCS's 2500 K) is most
-        // likely to actually turn up.
-        const StarData queryProps = clampNormalLogTeffFloor(props, type);
-
-        for (const auto& lib : chain)
-        {
-            auto result = lib->spec(queryProps, clampedFeh);
-            if (!result.empty()) { return result; }
-        }
-        return chain.back()->specForce(queryProps, clampedFeh);
+        return spec(props, feh);
     }
 
     auto SpecsynLibChained::clampNormalLogTeffFloor(StarData props, const GridType type) const -> StarData

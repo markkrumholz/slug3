@@ -178,14 +178,14 @@ namespace specsyn
          *   the Interpolator1D returned by Tracks2D::getIsochrone at
          *   this star's mass
          * @param feh [Fe/H] value of the star; needed because it is
-         *   not carried by props itself
+         *   not carried by props itself, and not necessarily within
+         *   any single chained library's own real coverage -- see this
+         *   function's own @details
          * @return The star's spectrum, evaluated on the wavelength
          *   grid returned by wl(), in units of erg/s/Angstrom -- never
          *   a size-0 vector
          * @throws std::runtime_error if this star's own GridType has
-         *   no chained library at all, or if every library in that
-         *   chain fails it (via ordinary spec()) and the last one also
-         *   fails to force a match (via specForce())
+         *   no chained library at all
          * @details
          * First decides which GridType this star belongs to -- see
          * classifyGridType's own comment for the exact rule (in short:
@@ -195,84 +195,67 @@ namespace specsyn
          * normal) -- and selects that GridType's own chain (wrLibs_,
          * wdLibs_, or normalLibs_).
          *
-         * If (and only if) the star is a WR star, feh is then clamped
-         * to fehMin_[wrGrid]/fehMax_[wrGrid] -- the chained WR
-         * library's own real [Fe/H] coverage -- before being evaluated
-         * against it: no super-solar, or symmetrically very sub-solar,
-         * WR atmosphere grids currently exist, so without this a WR
-         * star whose actual [Fe/H] falls outside that coverage would
-         * otherwise throw rather than degrade gracefully to the
-         * nearest available WR metallicity. WD/normal-grid stars keep
-         * their existing, deliberate no-rescue-for-feh behavior
-         * unclamped -- this mirrors specForIntegration()'s own
-         * identical clamp, applied there to every GridType for a
-         * different reason (tracks-grid padding points), restricted
-         * here to WR stars alone.
+         * If (and only if) the star is normal-grid, its own log(Teff)
+         * is clamped up to logTeffMin_[normalGrid] -- the coolest
+         * floor among every chained normal library -- if it falls
+         * below that floor, since normal libraries have no rescue of
+         * their own for an out-of-range log(Teff) the way they do for
+         * log(g) (see SpecsynLibNoWind::specForce()). Only the lower
+         * bound is clamped: a normal-grid star exceeding the upper
+         * log(Teff) bound should already have been routed to wdGrid or
+         * wrGrid above, so if one still reaches here, that is a
+         * genuine gap worth throwing on rather than silently clamping
+         * away.
          *
-         * Separately, if (and only if) the star is normal-grid, its
-         * own log(Teff) is clamped up to logTeffMin_[normalGrid] --
-         * the coolest floor among every chained normal library -- if
-         * it falls below that floor, since normal libraries have no
-         * rescue of their own for an out-of-range log(Teff) the way
-         * they do for log(g) (see SpecsynLibNoWind::specForce()). Only
-         * the lower bound is clamped: a normal-grid star exceeding the
-         * upper log(Teff) bound should already have been routed to
-         * wdGrid or wrGrid above, so if one still reaches here, that
-         * is a genuine gap worth throwing on rather than silently
-         * clamping away.
-         *
-         * Then calls spec() on each library in that chain, in priority
-         * order, stopping at and returning the first non-empty result
-         * -- exactly as before this class's refactor to per-type
-         * chains, except a star's own GridType now decides which
-         * libraries are even tried at all, rather than only how much
-         * of a pre-dispatch clamp to apply before trying every chained
-         * library regardless of type. If every library in the chain
-         * returns empty, calls specForce() (see Specsyn's own comment)
-         * on the last one, which either returns a genuine spectrum
-         * (forcing a match, e.g. by moving log(g) to the nearest
-         * populated grid value -- see SpecsynLibNoWind::specForce()/
-         * SpecsynLibWD::specForce()) or throws.
+         * Then tries each library in that chain, in priority order,
+         * stopping at and returning the first non-empty spec() result
+         * -- but unlike before this class's per-library [Fe/H]-clamp
+         * fix, feh is now clamped to *that one library's own* real
+         * [Fe/H] coverage (fehMin_[type][i]/fehMax_[type][i], see
+         * clampFehForLibrary()) immediately before each individual
+         * spec() call, not once for the whole chain: a library earlier
+         * in the chain with wider coverage than a later one should
+         * still see the star's own true feh if that is within its
+         * reach, and a library whose own coverage doesn't reach it at
+         * all should still be given its best (clamped) shot rather
+         * than being skipped outright, exactly mirroring how
+         * SpecsynLibNoWind::specForce() itself moves log(g) to the
+         * nearest populated grid value rather than giving up. No
+         * atmosphere-grid library actually has uniform coverage across
+         * its own [Fe/H] range in practice (e.g. MARCS's afe=0.0
+         * models stop well short of its afe=0.4 models' own reach; a
+         * hot O/B star metal-poor enough to fall outside TLUSTY_O/
+         * TLUSTY_B's own narrower [Fe/H] range needs the same kind of
+         * rescue BOSZ/CK04/MARCS already need for other reasons) --
+         * see warnIfFeHClamped()'s own comment for how this is
+         * surfaced up front rather than left silent. If every library
+         * in the chain still returns empty even after this clamp,
+         * calls specForce() (see Specsyn's own comment) on the last
+         * one, clamped to its own coverage the same way, which either
+         * returns a genuine spectrum (forcing a match, e.g. by moving
+         * log(g) to the nearest populated grid value -- see
+         * SpecsynLibNoWind::specForce()/SpecsynLibWD::specForce()) or
+         * throws for a reason other than [Fe/H] alone (e.g. log(Teff)
+         * genuinely outside every chained library's own grid).
          */
         [[nodiscard]] auto spec(const StarData& props, double feh) const
         -> std::vector<double> override;
 
         /**
-         * @brief Compute a star's spectrum for Specsyn::continuousSpecIntegrand()'s own benefit, clamping feh to whichever chain applies
+         * @brief Compute a star's spectrum for Specsyn::continuousSpecIntegrand()'s own benefit
          * @param props See spec()'s own props parameter
-         * @param feh [Fe/H] value of the star; unlike spec()/
-         *   specForce(), not necessarily within any single chained
-         *   library's own real coverage -- see this function's own
-         *   @details
-         * @return The star's spectrum -- see spec()'s own return value;
-         *   never empty
-         * @throws std::runtime_error under the same conditions as
-         *   spec()/specForce() -- see spec()'s own comment -- except
-         *   that a feh outside the classified chain's own coverage, or
-         *   a normal-grid star's own log(Teff) below the chain's
-         *   combined floor, no longer causes one, since both are
-         *   clamped first
+         * @param feh See spec()'s own feh parameter
+         * @return See spec()'s own return value
+         * @throws std::runtime_error under the same conditions as spec()
          * @details
-         * Overrides Specsyn::specForIntegration() -- see its own
-         * comment for why this exists at all and why it -- not
-         * spec()/specForce(), whose existing behavior stays untouched
-         * -- is what Specsyn::continuousSpecIntegrand() calls.
-         * Otherwise identical to spec(): classifies the star, via the
-         * exact same classifyGridType() call, into whichever of
-         * wrLibs_/wdLibs_/normalLibs_ applies, and dispatches to it the
-         * same way -- but first clamps feh to fehMin_[type]/
-         * fehMax_[type] (left unclamped if quiet_NaN(), i.e.
-         * GridType::wdGrid, which has no [Fe/H] axis at all), so a feh
-         * from a wider source (e.g. the tracks' own padded grid) than
-         * this specific chain's own real coverage never reaches
-         * spec()/specForce() out of range, and also clamps a normal-
-         * grid star's own log(Teff) up to logTeffMin_[normalGrid] if
-         * needed (see clampNormalLogTeffFloor()) -- this matters here
-         * in particular, since continuousSpecIntegrand()'s own
-         * low-mass, non-stochastically-treated population is exactly
-         * where a track-grid point just barely cooler than the coolest
-         * chained library's own floor is most likely to actually turn
-         * up.
+         * Overrides Specsyn::specForIntegration() only to keep the
+         * override itself documented and present (the base class's own
+         * default already just calls spec() unchanged -- see its own
+         * comment) -- now that spec() itself clamps feh per-library
+         * rather than leaving normal-/WD-grid stars deliberately
+         * un-rescued (see spec()'s own comment for why that distinction
+         * no longer applies), there is nothing left for this override
+         * to do differently, so it simply is spec().
          */
         [[nodiscard]] auto specForIntegration(const StarData& props, double feh) const
         -> std::vector<double> override;
@@ -332,7 +315,7 @@ namespace specsyn
         void propagateWNLTeffRanges();
 
         /**
-         * @brief Set fehMin_/fehMax_ from each GridType's own chained library
+         * @brief Set fehMin_/fehMax_/libNames_ from every chained library, individually
          * @details
          * Factored out of the constructor purely to keep its own
          * cognitive complexity down -- see propagateWNLTeffRanges()'s
@@ -343,26 +326,55 @@ namespace specsyn
         void updateFeHRanges();
 
         /**
-         * @brief Warn if the requested [Fe/H] range exceeds the chained WR library's own coverage
+         * @brief Return the [Fe/H] to actually query library i of type's own chain with
+         * @param feh The star's own true [Fe/H]
+         * @param type The GridType whose chain library i belongs to
+         * @param libIdx Index into chainFor(type) (and fehMin_[type]/
+         *   fehMax_[type]/libNames_[type], which all share that same
+         *   per-library indexing)
+         * @return feh, clamped into
+         *   [fehMin_[type][libIdx], fehMax_[type][libIdx]] -- unchanged
+         *   on whichever side is quiet_NaN() (a library with no [Fe/H]
+         *   axis at all, i.e. SpecsynLibWD)
+         * @details
+         * Factored out of spec() purely so both the ordinary per-
+         * library dispatch loop and its final specForce() fallback can
+         * share one place to compute this -- see spec()'s own comment
+         * for why the clamp is per-library rather than once for the
+         * whole chain.
+         */
+        [[nodiscard]] auto clampFehForLibrary(double feh, GridType type, std::size_t libIdx) const -> double;
+
+        /**
+         * @brief Warn for every chained library whose own [Fe/H] coverage the requested range exceeds
          * @param fehMin Minimum [Fe/H] this SpecsynLibChained was constructed to cover
          * @param fehMax Maximum [Fe/H] this SpecsynLibChained was constructed to cover
          * @details
          * Factored out of the constructor purely to keep its own
          * cognitive complexity down -- see propagateWNLTeffRanges()'s
          * own identical rationale. Called once, after updateFeHRanges()
-         * has populated fehMin_[wrGrid]/fehMax_[wrGrid] with the
-         * chained WR library's own real [Fe/H] coverage. If
-         * [fehMin, fehMax] extends beyond that range, a WR star
-         * landing in the excluded portion is silently clamped to the
-         * chain's own nearest available [Fe/H] rather than throwing
-         * (see spec()'s own comment for why); this surfaces that up
-         * front instead, mirroring the warning
+         * has populated fehMin_/fehMax_/libNames_. Loops over every
+         * library of every GridType (chainFor(wrGrid) +
+         * chainFor(wdGrid) + chainFor(normalGrid), in that per-type
+         * chain order); a library with no [Fe/H] axis at all
+         * (fehMin_[type][i] left at quiet_NaN() by updateFeHRanges(),
+         * i.e. any SpecsynLibWD) is skipped, since there is nothing to
+         * clamp. For every other library whose own real [Fe/H]
+         * coverage does not fully contain [fehMin, fehMax], prints one
+         * warning naming that specific library -- since spec() now
+         * clamps feh to *that* library's own coverage individually
+         * before ever calling it (see spec()'s own comment), any star
+         * landing in the excluded portion when that library is tried
+         * is silently clamped to its nearest available [Fe/H] rather
+         * than being skipped or throwing; this surfaces that up front,
+         * library by library, mirroring the warning
          * SpecsynLibNoWind's own afe-nudge rescue prints for its
-         * analogous [Fe/H]-coverage gap. A no-op if there is no
-         * chained WR library at all (fehMin_[wrGrid] left at
-         * quiet_NaN() by updateFeHRanges() in that case).
+         * analogous [Fe/H]-coverage gap. A library whose own coverage
+         * already fully contains [fehMin, fehMax] is silent, exactly
+         * as before this per-library generalization for the single
+         * chained WR library that used to be the only case checked.
          */
-        void warnIfWRFeHClamped(double fehMin, double fehMax) const;
+        void warnIfFeHClamped(double fehMin, double fehMax) const;
 
         /**
          * @brief Return whichever of wrLibs_/wdLibs_/normalLibs_ matches type
@@ -490,45 +502,56 @@ namespace specsyn
         std::array<std::pair<double, double>, 3> wnlTeffRanges_;
 
         /**
-         * @brief The [Fe/H] range of the last (specForce()-fallback) library in each kind of chain, indexed by GridType
+         * @brief The [Fe/H] range of each individual chained library, indexed by GridType then chain position
          * @details
-         * Filled with quiet_NaN() unconditionally at the top of the
-         * constructor, then unconditionally (regardless of tClamp --
-         * unlike logTeffMin_/logTeffMax_/loggMin_/loggMax_ above, this
-         * is a correctness fix, not an optional coercion clamp)
-         * overwritten, once wrLibs_/wdLibs_/normalLibs_ are populated,
-         * with chainFor(type).back()'s own fehMin()/fehMax() -- the
-         * specific library specForIntegration() (below) ultimately
-         * falls back to via specForce() for that GridType -- for each
-         * of the three GridTypes with a non-empty chain. Left at
-         * quiet_NaN() for a GridType with no chained library at all, or
-         * whose own last library has no [Fe/H] axis (SpecsynLibWD; its
-         * base-class fehMin()/fehMax() are the unrestricted
-         * -infinity/+infinity, which is not overwritten here, per the
-         * same "only finite bounds count" rule fehMin()'s own comment
-         * describes).
+         * Each of the nGridType entries starts as an empty vector
+         * (there being no meaningful "unconditional" fill value for a
+         * not-yet-known chain length, unlike logTeffMin_/logTeffMax_/
+         * loggMin_/loggMax_ above), then unconditionally (regardless of
+         * tClamp -- this is a correctness fix, not an optional
+         * coercion clamp) resized and filled by updateFeHRanges(),
+         * once wrLibs_/wdLibs_/normalLibs_ are populated, to
+         * chainFor(type).size() entries: fehMin_[type][i]/
+         * fehMax_[type][i] hold chainFor(type)[i]'s own fehMin()/
+         * fehMax(), i.e. libNames_[type][i]'s own real coverage. An
+         * entry is left at quiet_NaN() if that specific library has no
+         * [Fe/H] axis at all (SpecsynLibWD; its base-class fehMin()/
+         * fehMax() are the unrestricted -infinity/+infinity, not
+         * copied through here, per the same "only finite bounds count"
+         * rule fehMin()'s own comment describes).
          *
-         * Deliberately the *last* chained library's own range, not the
-         * union across every chained library of that GridType: an
-         * earlier version of this fix used that wider union, reasoning
-         * that any one chained library succeeding would be enough --
-         * but specForIntegration() only ever reaches specForce() (the
-         * one call that can actually throw for an out-of-range feh)
-         * on chain.back() specifically, once every earlier library's
-         * own ordinary spec() has already returned empty. A union
-         * spanning an earlier, wider-coverage library in the same
-         * chain therefore clamped too loosely for chain.back()'s own
-         * narrower real coverage, reproducing the exact same throw the
-         * clamp exists to prevent. A deliberately per-GridType range in
-         * the first place (not a single value spanning every chained
-         * library of every type together) for the same underlying
-         * reason: a genuinely WR-classified star's own real coverage
-         * is not the same as some chained SpecsynLibNoWind's, so a
-         * single global range would need to be even more conservative
-         * still.
+         * Deliberately per-library, not a single value per GridType
+         * (as an earlier version of this fix used, taken from
+         * whichever library was chainFor(type).back()): different
+         * libraries chained under the same GridType commonly have
+         * genuinely different [Fe/H] reach from one another (e.g.
+         * TLUSTY_O/TLUSTY_B's own [Fe/H] range is narrower than BOSZ/
+         * CK04/MARCS's, all four still normalGrid), so a single
+         * combined value -- whether the narrowest, the widest, or
+         * chain.back()'s own -- would either clamp a star too
+         * aggressively for an earlier library that could have covered
+         * it unclamped, or not aggressively enough for a later one
+         * that can't. See spec()'s own comment for how this is used:
+         * a star's feh is clamped to *that specific library's own*
+         * fehMin_[type][i]/fehMax_[type][i] immediately before each
+         * individual library in the chain is tried, not once for the
+         * whole chain.
          */
-        std::array<double, nGridType> fehMin_;
-        std::array<double, nGridType> fehMax_; /**< See fehMin_ */
+        std::array<std::vector<double>, nGridType> fehMin_;
+        std::array<std::vector<double>, nGridType> fehMax_; /**< See fehMin_ */
+
+        /**
+         * @brief The registry name of each individual chained library, indexed the same way as fehMin_/fehMax_
+         * @details
+         * Filled alongside wrLibs_/wdLibs_/normalLibs_ themselves, in
+         * the constructor's own sort of allLibs into those three
+         * chains -- libNames_[type][i] is chainFor(type)[i]'s own
+         * spectraName entry, purely so warnIfFeHClamped() can name a
+         * specific library in its warning rather than only saying
+         * "the chained WR library" generically, as the single-library
+         * WR-only version of that check used to.
+         */
+        std::array<std::vector<std::string>, nGridType> libNames_;
     };
 
 } // namespace specsyn
