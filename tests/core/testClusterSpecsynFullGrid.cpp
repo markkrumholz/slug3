@@ -22,6 +22,7 @@
 #include <iostream>
 #include <memory>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <toml.hpp>
 #include <utility>
@@ -115,10 +116,15 @@ namespace
             if (vvcritVals.empty()) { vvcritVals.push_back(0.0); }
             if (fehVals.empty())
             {
-                std::cerr << "testClusterSpecsynFullGrid: track set " << track
-                    << " has an empty Fe_H array in the registry; "
-                    "skipping it entirely\n";
-                continue;
+                // A required track set with no valid Fe_H values (the
+                // key is absent, empty, or every entry is
+                // non-numeric) is a registry problem, not a track set
+                // to skip -- silently continuing here would silently
+                // shrink this test's own coverage to less than it
+                // claims, defeating its whole purpose.
+                throw std::runtime_error(
+                    "testClusterSpecsynFullGrid: track set " + std::string(track) +
+                    " has no valid Fe_H values in the registry");
             }
             for (const double feh : fehVals)
             {
