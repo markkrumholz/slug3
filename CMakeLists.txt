@@ -265,6 +265,7 @@ add_executable(slugTestCoreFull
     tests/core/testClusterSpecsynFull.cpp
     tests/core/testClusterSpecsynFullAFe.cpp
     tests/core/testClusterSpecsynFullNonStoch.cpp
+    tests/core/testClusterSpecsynFullGrid.cpp
     tests/core/testGalaxySpecsynFullCommon.cpp
     tests/core/testGalaxySpecsynFullNonStoch.cpp
     tests/core/testGalaxySpecsynFullFieldStars.cpp
