@@ -339,10 +339,41 @@ namespace specsyn
     // Returns true if feh (a candidate library's own sorted [Fe/H]
     // coordinate list) actually spans all the way across
     // [fehMin, fehMax], rather than merely containing some points near
-    // it.
+    // it. A cheap pre-filter only: feh values straight from
+    // findMatchingSpectra always correspond to a real, populated group,
+    // but a GridBuildResult's own feh_ can still list a coordinate with
+    // no populated cell behind it at all (see gridCoversRange below for
+    // why), so this alone is not sufficient to accept a finished grid.
     static auto rangeCovered(const std::vector<double>& feh, const double fehMin, const double fehMax) -> bool
     {
         return !feh.empty() && feh.front() <= fehMin && feh.back() >= fehMax;
+    }
+
+    // Returns true if every [Fe/H] row of result within [fehMin, fehMax]
+    // has at least one populated (logg, logTeff) cell. Necessary in
+    // addition to rangeCovered(result.feh_, ...): buildInterpolatedGrid
+    // builds its feh_ axis as the *union* of its two bracketing afe
+    // groups' own feh values (see its own comment), but only fills in
+    // cells present in *both* groups, leaving a feh row present in only
+    // one of them listed in feh_ yet entirely empty. Accepting such a
+    // grid would just move today's silent-gap problem from the [Fe/H]
+    // axis into individual rows of it, rather than actually fixing it.
+    static auto gridCoversRange(const GridBuildResult& result, const double fehMin, const double fehMax) -> bool
+    {
+        if (!rangeCovered(result.feh_, fehMin, fehMax)) { return false; }
+        const size_t nlogg = result.logg_.size();
+        const size_t nteff = result.logTeff_.size();
+        for (size_t f = 0; f < result.feh_.size(); ++f)
+        {
+            if (result.feh_[f] < fehMin || result.feh_[f] > fehMax) { continue; }
+            const size_t rowStart = f * nlogg * nteff;
+            const auto rowBegin = result.spectra_.begin() + static_cast<std::ptrdiff_t>(rowStart);
+            const auto rowEnd = rowBegin + static_cast<std::ptrdiff_t>(nlogg * nteff);
+            const bool anyPopulated = std::any_of(rowBegin, rowEnd,
+                [](const std::vector<double>& cell) { return !cell.empty(); });
+            if (!anyPopulated) { return false; }
+        }
+        return true;
     }
 
     // If the requested afe's own [Fe/H] coverage doesn't reach all the
@@ -385,15 +416,14 @@ namespace specsyn
             if (utils::approxEqual(candidate, afe)) { continue; }
             auto [candFehVals, candGroupNames] = findMatchingSpectra(
                 spectraName, fehMin, fehMax, candidate, cfe, microTurb, r, registryName);
-            if (rangeCovered(candFehVals, fehMin, fehMax))
-            {
-                std::cout << "slug: warning: spectral library " << spectraName <<
-                    " has no [alpha/Fe] = " << afe << " data covering [Fe/H] = [" <<
-                    fehMin << ", " << fehMax << "]; using nearest available " <<
-                    "[alpha/Fe] = " << candidate << " instead\n";
-                return std::make_pair(candidate,
-                    buildExactMatchGrid(file, std::move(candFehVals), candGroupNames));
-            }
+            if (!rangeCovered(candFehVals, fehMin, fehMax)) { continue; }
+            auto candResult = buildExactMatchGrid(file, std::move(candFehVals), candGroupNames);
+            if (!gridCoversRange(candResult, fehMin, fehMax)) { continue; }
+            std::cout << "slug: warning: spectral library " << spectraName <<
+                " has no [alpha/Fe] = " << afe << " data covering [Fe/H] = [" <<
+                fehMin << ", " << fehMax << "]; using nearest available " <<
+                "[alpha/Fe] = " << candidate << " instead\n";
+            return std::make_pair(candidate, std::move(candResult));
         }
         return std::nullopt;
     }
@@ -526,7 +556,7 @@ namespace specsyn
             // possible) is preferable to nudging to a single nearest
             // afe, since it actually uses the requested afe rather than
             // substituting a different one outright.
-            if (!result || !rangeCovered(result->feh_, fehMin, fehMax))
+            if (!result || !gridCoversRange(*result, fehMin, fehMax))
             {
                 auto nudged = tryNudgeAfe(file, spectraName, fehMin, fehMax,
                     afe, cfe, microTurb_, r, registryName);
