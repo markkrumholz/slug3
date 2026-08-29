@@ -247,33 +247,49 @@ auto testClusterSpecsynFullGrid() -> int
     if (!allRequiredDataFilesExist()) { return 0; }
     if (!extraRequiredDataFilesExist()) { return 0; }
 
-    const toml::table baseDeck = toml::parse_file("tests/core/assets/testClusterSpecsynFullGrid.in");
-    const auto outDir = std::filesystem::temp_directory_path() / "slugTestClusterSpecsynFullGrid";
-    const auto h5Path = outDir / "grid_test.h5";
-
-    const auto combos = allCombos();
-    std::cout << "testClusterSpecsynFullGrid: running " << combos.size()
-        << " (track, [Fe/H], v/vcrit) combinations\n";
-
-    std::vector<std::string> failures;
-    for (const auto& combo : combos)
+    // Every exception below (including allCombos() throwing on a
+    // registry with no valid Fe_H values for a required track set) is
+    // caught and reported as a plain failing return value, not left
+    // to propagate -- testCoreFullAll()'s own main() runs this
+    // alongside several other slow tests in one uninterrupted
+    // sequence (result += testX() for each), so an uncaught exception
+    // here would abort every later test in that sequence rather than
+    // just this one.
+    try
     {
-        const auto message = runOneCombo(baseDeck, combo, outDir, h5Path);
-        if (!message.empty())
+        const toml::table baseDeck = toml::parse_file("tests/core/assets/testClusterSpecsynFullGrid.in");
+        const auto outDir = std::filesystem::temp_directory_path() / "slugTestClusterSpecsynFullGrid";
+        const auto h5Path = outDir / "grid_test.h5";
+
+        const auto combos = allCombos();
+        std::cout << "testClusterSpecsynFullGrid: running " << combos.size()
+            << " (track, [Fe/H], v/vcrit) combinations\n";
+
+        std::vector<std::string> failures;
+        for (const auto& combo : combos)
         {
-            std::ostringstream line;
-            line << "track=" << combo.track_ << " FeH=" << combo.feh_
-                << " v_vcrit=" << combo.vvcrit_ << ": " << message;
-            failures.push_back(line.str());
+            const auto message = runOneCombo(baseDeck, combo, outDir, h5Path);
+            if (!message.empty())
+            {
+                std::ostringstream line;
+                line << "track=" << combo.track_ << " FeH=" << combo.feh_
+                    << " v_vcrit=" << combo.vvcrit_ << ": " << message;
+                failures.push_back(line.str());
+            }
         }
-    }
 
-    if (!failures.empty())
+        if (!failures.empty())
+        {
+            std::cerr << "testClusterSpecsynFullGrid: " << failures.size() << " of "
+                << combos.size() << " combinations failed:\n";
+            for (const auto& failure : failures) { std::cerr << "  " << failure << "\n"; }
+            return 1;
+        }
+        return 0;
+    }
+    catch (const std::exception& error)
     {
-        std::cerr << "testClusterSpecsynFullGrid: " << failures.size() << " of "
-            << combos.size() << " combinations failed:\n";
-        for (const auto& failure : failures) { std::cerr << "  " << failure << "\n"; }
+        std::cerr << "testClusterSpecsynFullGrid: uncaught exception: " << error.what() << "\n";
         return 1;
     }
-    return 0;
 }
