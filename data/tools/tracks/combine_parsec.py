@@ -251,6 +251,14 @@ parsec_tab["download_urls"] = download_urls
 with h5py.File(args.output, 'r') as h5file:
     fehs = sorted({ float(h5file[grp].attrs['feh']) for grp in h5file.keys() })
 parsec_tab["Fe_H"] = fehs
+# Every group in the composite file is built from the rotating grid's
+# own v/vcrit=0 subset (below mass_break) spliced with the
+# non-rotating VMS grid (at/above it), so v/vcrit is always 0.0 here --
+# written explicitly (rather than left absent) so consumers that key
+# off the registry's own v_vcrit field directly, rather than falling
+# back to [0.0] the way make_slug_grid.py's own get_vvcrit_grid()
+# does, see a complete entry.
+parsec_tab["v_vcrit"] = [0.0]
 registry["PARSEC_comp"] = parsec_tab
 
 # Write registry back to file

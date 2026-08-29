@@ -1,0 +1,53 @@
+# Shared base deck for tests/core/testClusterSpecsynFullGrid.cpp, which
+# runs one full end-to-end cluster simulation per (track, [Fe/H],
+# v/vcrit) combination in the tracks registry, checking only that each
+# one runs to completion and produces finite, non-trivial spectra --
+# see that file's own comment for why (in short: a systematic sweep
+# for spectral-synthesis coverage gaps like the one found in
+# cloudy_grid_genuine_slug_failures_report.txt, rather than any single
+# hand-picked repro deck). The test code parses this file fresh for
+# every combination and overwrites [stars] tracks/FeH/v_vcrit itself
+# (deliberately left unset here), so this only holds the settings
+# every combination shares.
+#
+# Like testClusterSpecsynFullNonStoch.in (see its own comment for the
+# full rationale), min_stoch_mass = 120 -- chabrier.toml's own maximum
+# mass -- forces every trial's entire population through
+# Cluster::computeSpec()'s continuously-sampled (Specsyn::specCts())
+# path, so a single trial deterministically exercises the *whole* IMF
+# mass range (and therefore the whole Teff/logg range a track can
+# produce) for each combination, rather than depending on which few
+# masses a stochastic draw happens to land on. n_trial = 1 for the
+# same reason: FeH is now fixed (not drawn from a distribution) per
+# combination, so every trial would just repeat the same exercise.
+#
+# nwl is reduced to 64 (from 1024/2048 elsewhere) and
+# integrator.rel_tol loosened to 0.1 (from PDFIntegrator's own default
+# 1e-2) specifically so this sweep -- one full population integration
+# per combination, well over a hundred combinations across MIST/
+# Stromlo/PARSEC_comp -- converges as fast as possible: this test's
+# goal is coverage, not accuracy, so a coarse spectrum and a loose
+# integration tolerance lose nothing it actually checks.
+
+sim_type = "cluster"
+n_trial = 1
+
+[stars]
+IMF = "chabrier.toml"
+alphaFe = 0.0
+min_stoch_mass = 120
+
+[spectra]
+model = "default"
+nwl = 64
+wl_min = 500
+wl_max = 1e4
+
+[clusters]
+CMF = 1e4
+
+[integrator]
+rel_tol = 0.1
+
+[output]
+output_times = [2e6, 3e6, 4e6, 1e7, 1e8, 1e9, 1e10]
