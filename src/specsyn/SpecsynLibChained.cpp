@@ -742,15 +742,36 @@ namespace specsyn
         // below it -- see clampNormalLogTeffFloor()'s own comment.
         const StarData queryProps = clampNormalLogTeffFloor(props, type);
 
-        // Each library is tried with feh clamped to *that library's
-        // own* real [Fe/H] coverage, not once for the whole chain --
-        // see this function's own header comment for why. No
-        // atmosphere library actually has uniform [Fe/H] coverage
-        // across its own kind of chain in practice (a hot O/B star
-        // metal-poor enough to fall outside TLUSTY_O/TLUSTY_B's own
-        // narrower range needs the same kind of per-library rescue a
-        // WR star metal-poor enough to fall outside the chained WR
-        // library's own range already did).
+        // First pass: try every library in the chain, in priority
+        // order, at the star's true (unclamped) feh. Chain order
+        // encodes physical reliability, not just [Fe/H] coverage
+        // (e.g. TLUSTY's NLTE hot-star models are preferred over
+        // CK04's older, coarser physics even where both cover the
+        // same [Fe/H]) -- so a library later in the chain that
+        // happens to cover the true feh natively must not preempt an
+        // earlier, more reliable library that also covers it.
+        for (const auto& lib : chain)
+        {
+            auto result = lib->spec(queryProps, feh);
+            if (!result.empty()) { return result; }
+        }
+
+        // Second pass, only reached if no library in the chain covers
+        // the true feh at all: retry each library with feh clamped to
+        // *that library's own* real [Fe/H] coverage -- see this
+        // function's own header comment for why per-library, not
+        // chain-wide. No atmosphere library actually has uniform
+        // [Fe/H] coverage across its own kind of chain in practice (a
+        // hot O/B star metal-poor enough to fall outside
+        // TLUSTY_O/TLUSTY_B's own narrower range needs the same kind
+        // of per-library rescue a WR star metal-poor enough to fall
+        // outside the chained WR library's own range already did). A
+        // clamped-but-otherwise-preferred library is still tried
+        // before an unclamped-but-less-reliable one, since a modest
+        // clamp from a physically better library can outperform an
+        // exact match from a worse one -- whether that tradeoff is
+        // actually favorable depends on how far the clamp reaches,
+        // which this two-pass approach does not attempt to weigh.
         for (std::size_t i = 0; i < chain.size(); ++i)
         {
             auto result = chain[i]->spec(queryProps, clampFehForLibrary(feh, type, i));

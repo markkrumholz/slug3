@@ -209,18 +209,30 @@ namespace specsyn
          *
          * Then tries each library in that chain, in priority order,
          * stopping at and returning the first non-empty spec() result
-         * -- but unlike before this class's per-library [Fe/H]-clamp
-         * fix, feh is now clamped to *that one library's own* real
-         * [Fe/H] coverage (fehMin_[type][i]/fehMax_[type][i], see
+         * -- in two passes. The first pass queries every library at
+         * the star's own true feh, unclamped: chain order encodes
+         * each library's physical reliability, not just its [Fe/H]
+         * reach (e.g. TLUSTY's NLTE hot-star models are preferred over
+         * CK04's older, coarser physics even on [Fe/H] both cover), so
+         * a library later in the chain that happens to reach the true
+         * feh natively must not preempt an earlier, more reliable
+         * library that also reaches it. Only if every library rejects
+         * the true feh does a second pass retry each library with feh
+         * clamped to *that one library's own* real [Fe/H] coverage
+         * (fehMin_[type][i]/fehMax_[type][i], see
          * clampFehForLibrary()) immediately before each individual
-         * spec() call, not once for the whole chain: a library earlier
-         * in the chain with wider coverage than a later one should
-         * still see the star's own true feh if that is within its
-         * reach, and a library whose own coverage doesn't reach it at
-         * all should still be given its best (clamped) shot rather
-         * than being skipped outright, exactly mirroring how
-         * SpecsynLibNoWind::specForce() itself moves log(g) to the
-         * nearest populated grid value rather than giving up. No
+         * spec() call, not once for the whole chain: a library whose
+         * own coverage doesn't reach the true feh at all should still
+         * be given its best (clamped) shot rather than being skipped
+         * outright, exactly mirroring how SpecsynLibNoWind::
+         * specForce() itself moves log(g) to the nearest populated
+         * grid value rather than giving up -- and, per this same
+         * priority ordering, a clamped result from an earlier,
+         * more-reliable library is preferred over an unclamped one
+         * from a later, less-reliable library, on the (unverified per
+         * star) assumption that a modest clamp costs less accuracy
+         * than falling back to worse atmosphere physics; how far the
+         * clamp reaches is not weighed against that tradeoff. No
          * atmosphere-grid library actually has uniform coverage across
          * its own [Fe/H] range in practice (e.g. MARCS's afe=0.0
          * models stop well short of its afe=0.4 models' own reach; a
@@ -229,11 +241,11 @@ namespace specsyn
          * rescue BOSZ/CK04/MARCS already need for other reasons) --
          * see warnIfFeHClamped()'s own comment for how this is
          * surfaced up front rather than left silent. If every library
-         * in the chain still returns empty even after this clamp,
-         * calls specForce() (see Specsyn's own comment) on the last
-         * one, clamped to its own coverage the same way, which either
-         * returns a genuine spectrum (forcing a match, e.g. by moving
-         * log(g) to the nearest populated grid value -- see
+         * in the chain still returns empty even after the clamped
+         * pass, calls specForce() (see Specsyn's own comment) on the
+         * last one, clamped to its own coverage the same way, which
+         * either returns a genuine spectrum (forcing a match, e.g. by
+         * moving log(g) to the nearest populated grid value -- see
          * SpecsynLibNoWind::specForce()/SpecsynLibWD::specForce()) or
          * throws for a reason other than [Fe/H] alone (e.g. log(Teff)
          * genuinely outside every chained library's own grid).
@@ -315,7 +327,7 @@ namespace specsyn
         void propagateWNLTeffRanges();
 
         /**
-         * @brief Set fehMin_/fehMax_/libNames_ from every chained library, individually
+         * @brief Set fehMin_/fehMax_ from every chained library, individually
          * @details
          * Factored out of the constructor purely to keep its own
          * cognitive complexity down -- see propagateWNLTeffRanges()'s
@@ -352,8 +364,9 @@ namespace specsyn
          * @details
          * Factored out of the constructor purely to keep its own
          * cognitive complexity down -- see propagateWNLTeffRanges()'s
-         * own identical rationale. Called once, after updateFeHRanges()
-         * has populated fehMin_/fehMax_/libNames_. Loops over every
+         * own identical rationale. Called once, after the constructor's
+         * own sort loop has populated libNames_ and updateFeHRanges()
+         * has populated fehMin_/fehMax_. Loops over every
          * library of every GridType (chainFor(wrGrid) +
          * chainFor(wdGrid) + chainFor(normalGrid), in that per-type
          * chain order); a library with no [Fe/H] axis at all
