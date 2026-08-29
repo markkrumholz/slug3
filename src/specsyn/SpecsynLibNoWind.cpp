@@ -20,6 +20,8 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <exception>
+#include <iostream>
 #include <iterator>
 #include <limits>
 #include <map>
@@ -334,6 +336,69 @@ namespace specsyn
     }
     // NOLINTEND(misc-include-cleaner)
 
+    // Returns true if feh (a candidate library's own sorted [Fe/H]
+    // coordinate list) actually spans all the way across
+    // [fehMin, fehMax], rather than merely containing some points near
+    // it.
+    static auto rangeCovered(const std::vector<double>& feh, const double fehMin, const double fehMax) -> bool
+    {
+        return !feh.empty() && feh.front() <= fehMin && feh.back() >= fehMax;
+    }
+
+    // If the requested afe's own [Fe/H] coverage doesn't reach all the
+    // way across [fehMin, fehMax], search for the closest *different*
+    // afe value -- but only among those within the library's own afe
+    // range, since a request outside that range entirely is a distinct,
+    // pre-existing error condition (see findAfeBracket) this is not
+    // meant to paper over -- whose own exact-match [Fe/H] coverage does
+    // span the full range. On success, prints a warning (mirroring the
+    // one SimControls::initPhysics() prints when the tracks' own
+    // minimum mass falls short of the IMF's) and returns the afe used
+    // together with the exact-match grid built from it; returns
+    // std::nullopt if no afe value rescues the gap.
+    //
+    // This is a real, physically-motivated pattern in at least MARCS:
+    // its afe=0.0 coverage stops at [Fe/H]=-2.5, well short of its
+    // afe=0.4 coverage down to -5.0, since very metal-poor MARCS models
+    // are only tabulated alpha-enhanced (see
+    // cloudy_grid_genuine_slug_failures_report.txt's investigation this
+    // was found from).
+    // NOLINTBEGIN(misc-include-cleaner)
+    static auto tryNudgeAfe(
+        const hid_t file,
+        const std::string& spectraName,
+        const double fehMin, const double fehMax,
+        const double afe, const double cfe, const double microTurb,
+        const double r, const std::string& registryName)
+        -> std::optional<std::pair<double, GridBuildResult>>
+    {
+        auto afeCandidates = findAfeValues(spectraName, cfe, microTurb, r, registryName);
+        if (afeCandidates.empty() || afe < afeCandidates.front() || afe > afeCandidates.back())
+        {
+            return std::nullopt;
+        }
+
+        std::ranges::sort(afeCandidates, {},
+            [afe](const double a) { return std::abs(a - afe); });
+        for (const double candidate : afeCandidates)
+        {
+            if (utils::approxEqual(candidate, afe)) { continue; }
+            auto [candFehVals, candGroupNames] = findMatchingSpectra(
+                spectraName, fehMin, fehMax, candidate, cfe, microTurb, r, registryName);
+            if (rangeCovered(candFehVals, fehMin, fehMax))
+            {
+                std::cout << "slug: warning: spectral library " << spectraName <<
+                    " has no [alpha/Fe] = " << afe << " data covering [Fe/H] = [" <<
+                    fehMin << ", " << fehMax << "]; using nearest available " <<
+                    "[alpha/Fe] = " << candidate << " instead\n";
+                return std::make_pair(candidate,
+                    buildExactMatchGrid(file, std::move(candFehVals), candGroupNames));
+            }
+        }
+        return std::nullopt;
+    }
+    // NOLINTEND(misc-include-cleaner)
+
     template <OOBPolicy Policy>
     SpecsynLibNoWind<Policy>::SpecsynLibNoWind(
         const std::string& spectraName,
@@ -437,15 +502,66 @@ namespace specsyn
             // nearest available values and linearly interpolates. See
             // buildExactMatchGrid and buildInterpolatedGrid above for
             // the details of each.
-            auto result = !fehVals.empty() ?
-                buildExactMatchGrid(file, std::move(fehVals), groupNames) :
-                buildInterpolatedGrid(file, spectraName, fehMin, fehMax, afe,
-                    cfe, microTurb_, r, registryName);
+            std::optional<GridBuildResult> result;
+            std::exception_ptr originalError;
+            try
+            {
+                result = !fehVals.empty() ?
+                    buildExactMatchGrid(file, std::move(fehVals), groupNames) :
+                    buildInterpolatedGrid(file, spectraName, fehMin, fehMax, afe,
+                        cfe, microTurb_, r, registryName);
+            }
+            catch (...)
+            {
+                originalError = std::current_exception();
+            }
 
-            FeH_ = std::move(result.feh_);         //NOLINT(cppcoreguidelines-prefer-member-initializer)
-            logg_ = std::move(result.logg_);       //NOLINT(cppcoreguidelines-prefer-member-initializer)
-            logTeff_ = std::move(result.logTeff_); //NOLINT(cppcoreguidelines-prefer-member-initializer)
-            this->spectra_ = std::move(result.spectra_);
+            // If that didn't fully cover [fehMin, fehMax] (whether it
+            // threw above, or merely built a grid narrower than
+            // requested), try nudging afe to a different value that
+            // does -- see tryNudgeAfe's own comment for why and when.
+            // Tried only as this last resort, after the ordinary exact-
+            // match/interpolated-AFe attempt above has already had its
+            // chance: a genuine two-value AFe interpolation (when
+            // possible) is preferable to nudging to a single nearest
+            // afe, since it actually uses the requested afe rather than
+            // substituting a different one outright.
+            if (!result || !rangeCovered(result->feh_, fehMin, fehMax))
+            {
+                auto nudged = tryNudgeAfe(file, spectraName, fehMin, fehMax,
+                    afe, cfe, microTurb_, r, registryName);
+                if (nudged)
+                {
+                    AFe_ = nudged->first; //NOLINT(cppcoreguidelines-prefer-member-initializer)
+                    result = std::move(nudged->second);
+                }
+                else if (originalError)
+                {
+                    // No candidate afe rescues this either; surface
+                    // whatever error the original attempt hit. If the
+                    // original attempt instead succeeded with a grid
+                    // merely narrower than requested, that grid is left
+                    // as-is below, matching today's existing behavior.
+                    std::rethrow_exception(originalError);
+                }
+            }
+            if (!result)
+            {
+                // Unreachable: the branch above either fills result via
+                // a successful nudge or rethrows originalError, and
+                // originalError is only unset when the original attempt
+                // above already set result. Guarded explicitly anyway,
+                // both for clang-tidy's bugprone-unchecked-optional-
+                // access and because "unreachable" is a claim, not a
+                // guarantee.
+                throw std::runtime_error(
+                    "SpecsynLibNoWind: internal error building the spectral grid");
+            }
+
+            FeH_ = std::move(result->feh_);         //NOLINT(cppcoreguidelines-prefer-member-initializer)
+            logg_ = std::move(result->logg_);       //NOLINT(cppcoreguidelines-prefer-member-initializer)
+            logTeff_ = std::move(result->logTeff_); //NOLINT(cppcoreguidelines-prefer-member-initializer)
+            this->spectra_ = std::move(result->spectra_);
             using SpectraGrid = typename SpecsynLib<Policy>::SpectraGrid;
             this->grid_ = SpectraGrid(
                 this->spectra_.data(), FeH_.size(), logg_.size(), logTeff_.size());
