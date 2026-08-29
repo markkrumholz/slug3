@@ -343,6 +343,28 @@ namespace specsyn
         void updateFeHRanges();
 
         /**
+         * @brief Warn if the requested [Fe/H] range exceeds the chained WR library's own coverage
+         * @param fehMin Minimum [Fe/H] this SpecsynLibChained was constructed to cover
+         * @param fehMax Maximum [Fe/H] this SpecsynLibChained was constructed to cover
+         * @details
+         * Factored out of the constructor purely to keep its own
+         * cognitive complexity down -- see propagateWNLTeffRanges()'s
+         * own identical rationale. Called once, after updateFeHRanges()
+         * has populated fehMin_[wrGrid]/fehMax_[wrGrid] with the
+         * chained WR library's own real [Fe/H] coverage. If
+         * [fehMin, fehMax] extends beyond that range, a WR star
+         * landing in the excluded portion is silently clamped to the
+         * chain's own nearest available [Fe/H] rather than throwing
+         * (see spec()'s own comment for why); this surfaces that up
+         * front instead, mirroring the warning
+         * SpecsynLibNoWind's own afe-nudge rescue prints for its
+         * analogous [Fe/H]-coverage gap. A no-op if there is no
+         * chained WR library at all (fehMin_[wrGrid] left at
+         * quiet_NaN() by updateFeHRanges() in that case).
+         */
+        void warnIfWRFeHClamped(double fehMin, double fehMax) const;
+
+        /**
          * @brief Return whichever of wrLibs_/wdLibs_/normalLibs_ matches type
          * @param type The GridType to look up
          * @return A const reference to that GridType's own chain

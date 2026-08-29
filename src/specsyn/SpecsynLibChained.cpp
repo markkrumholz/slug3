@@ -25,6 +25,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <iostream>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -627,6 +628,11 @@ namespace specsyn
         // tClamp, like wnlTeffRanges_ above) -- see updateFeHRanges()'s
         // own comment for exactly what this computes and why.
         updateFeHRanges();
+
+        // Warn (once, up front) if a WR star anywhere in the requested
+        // [Fe/H] range would actually get silently clamped -- see
+        // warnIfWRFeHClamped()'s own comment.
+        warnIfWRFeHClamped(fehMin, fehMax);
     }
 
     void SpecsynLibChained::propagateWNLTeffRanges()
@@ -660,6 +666,20 @@ namespace specsyn
             const double hi = chain.back()->fehMax();
             if (std::isfinite(lo)) { fehMin_[ti] = lo; } // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- ti < nGridType by construction
             if (std::isfinite(hi)) { fehMax_[ti] = hi; } // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- see above
+        }
+    }
+
+    void SpecsynLibChained::warnIfWRFeHClamped(const double fehMin, const double fehMax) const
+    {
+        const auto wrIdx = static_cast<std::size_t>(GridType::wrGrid);
+        if (std::isnan(fehMin_[wrIdx])) { return; } // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- wrIdx < nGridType by construction; no chained WR library at all
+        if (fehMin < fehMin_[wrIdx] || fehMax > fehMax_[wrIdx]) // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- see above
+        {
+            std::cout << "slug: warning: chained WR spectral library covers only "
+                "[Fe/H] = [" << fehMin_[wrIdx] << ", " << fehMax_[wrIdx] << // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- see above
+                "], narrower than the requested [Fe/H] = [" << fehMin << ", " << fehMax <<
+                "]; WR stars outside that range will be clamped to the nearest "
+                "available [Fe/H]\n";
         }
     }
 
