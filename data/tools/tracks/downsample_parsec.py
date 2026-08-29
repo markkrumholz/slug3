@@ -33,6 +33,7 @@ or import downsample_parsec() to call it as part of another script.
 """
 
 import argparse
+import math
 import os
 
 import h5py
@@ -325,6 +326,11 @@ if __name__ == "__main__":
                         help="print the point-count reduction for every track")
     args = parser.parse_args()
 
+    for tol_name in ("mass_tol", "mdot_tol", "logl_tol", "logteff_tol", "surf_tol"):
+        tol_val = getattr(args, tol_name)
+        if not math.isfinite(tol_val) or tol_val < 0.0:
+            parser.error(f"--{tol_name} must be a non-negative, finite number, got {tol_val}")
+
     stats = downsample_parsec(
         args.h5file,
         mass_tol=args.mass_tol,
@@ -335,6 +341,10 @@ if __name__ == "__main__":
         verbose=args.verbose,
     )
     before, after = stats["n_points_before"], stats["n_points_after"]
-    print(f"Downsampled {stats['n_tracks']} tracks in {args.h5file}: "
-          f"{before} -> {after} points "
-          f"({100.0 * (1.0 - after / before):.1f}% reduction)")
+    if before == 0:
+        print(f"Downsampled {stats['n_tracks']} tracks in {args.h5file}: "
+              f"{before} -> {after} points")
+    else:
+        print(f"Downsampled {stats['n_tracks']} tracks in {args.h5file}: "
+              f"{before} -> {after} points "
+              f"({100.0 * (1.0 - after / before):.1f}% reduction)")
