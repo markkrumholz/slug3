@@ -476,7 +476,7 @@ namespace specsyn
         const double heSurf = props[static_cast<size_t>(tracks::FieldIdx::heSurf)];
         const double logTeff = props[static_cast<size_t>(tracks::FieldIdx::logTe)];
         const double mass = props[static_cast<size_t>(tracks::FieldIdx::mass)];
-        constexpr double massMin = 8.0; // Msun -- see this function's own comment
+        constexpr double massMin = 5.0; // Msun -- see this function's own comment
         if (mass < massMin) { return WRType::None; }
 
         if (heSurf >= 0.4 && heSurf <= 0.9)

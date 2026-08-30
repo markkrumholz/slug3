@@ -328,9 +328,31 @@ namespace specsyn
          * low-mass post-AGB stars this hot-Teff escape hatch would
          * otherwise misclassify never exceed ~1.1 Msun at this phase --
          * a wide, clean gap (up to the next mass at which a genuine,
-         * massive He-depleted WC/WO star appears, ~13 Msun) that an
-         * 8 Msun floor sits comfortably inside. Checked sequentially:
-         *   1) Mass < 8 Msun: not a Wolf-Rayet star at all
+         * massive He-depleted WC/WO star appears, ~13 Msun).
+         *
+         * The floor was originally set to 8 Msun, calibrated against
+         * MIST alone -- but PARSEC's own most extreme mass-losing very
+         * massive stars can produce a genuinely WC/WO-composition star
+         * (surface H mass fraction 0, dominated by C/O) whose current
+         * mass has *already* dropped below 8 Msun while it is still
+         * actively losing mass at a WR-like rate (mdot ~2e-5 Msun/yr,
+         * nothing like a quiescent remnant's), unlike anything MIST's
+         * own tracks produce at comparable masses. Such a star, missed
+         * by the 8 Msun floor, was misclassified as an ordinary star
+         * (never even reaching wdGrid's own log(Teff)/log(g) coverage
+         * check, since ~196000 K so wildly exceeds every chained
+         * library's own real range that it fell through to wdGrid's
+         * specForce() fallback and threw outright -- see
+         * SpecsynLibWD::specForce()'s own comment). Lowered to 5 Msun
+         * to catch this: still comfortably above the ~1.1 Msun ceiling
+         * of the post-AGB stars this floor exists to exclude, and
+         * verified (via testClusterSpecsynFullGrid's own full sweep
+         * over every registered (track, [Fe/H], v/vcrit) combination)
+         * to introduce no new misclassification among MIST's own
+         * tracks, which have nothing between the post-AGB ~1.1 Msun
+         * ceiling and the genuine-WR ~17 Msun floor to begin with.
+         * Checked sequentially:
+         *   1) Mass < 5 Msun: not a Wolf-Rayet star at all
          *      (WRType::None) -- see the mass-floor discussion above.
          *   2) Surface He mass fraction in [0.4, 0.9] and log(Teff)
          *      within the log(Teff) range of the WNL bucket implied by
