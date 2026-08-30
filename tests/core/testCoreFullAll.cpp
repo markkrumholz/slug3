@@ -21,6 +21,7 @@
 #include "testClusterSpecsynFull.hpp"
 #include "testClusterSpecsynFullAFe.hpp"
 #include "testClusterSpecsynFullGrid.hpp"
+#include "testClusterSpecsynFullNebular.hpp"
 #include "testClusterSpecsynFullNonStoch.hpp"
 #include "testGalaxySpecsynFullFieldStars.hpp"
 #include "testGalaxySpecsynFullNonStoch.hpp"
@@ -35,6 +36,7 @@ auto main() -> int {
         result += testClusterSpecsynFullAFe();
         result += testClusterSpecsynFullNonStoch();
         result += testClusterSpecsynFullGrid();
+        result += testClusterSpecsynFullNebular();
         result += testGalaxySpecsynFullNonStoch();
         result += testGalaxySpecsynFullFieldStars();
         return result;

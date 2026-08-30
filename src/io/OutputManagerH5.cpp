@@ -344,6 +344,68 @@ static void appendPhotNebRows(const io::SimControls& simControls, const hid_t gr
     appendRowToDataset2d(group, "phot_neb_extinct", H5T_NATIVE_DOUBLE, photNebExtinct.data());
 }
 
+// Create the "line_wl"/"line_label" fixed datasets and the
+// "neb_lines" (and, if extinction was also requested,
+// "neb_lines_extinct") extensible 2D datasets in the given spectra
+// group, if a nebular emission grid was requested -- a no-op
+// otherwise. line_label is written as a fixed-length string dataset
+// (see utils::readStringDataset1D's own comment), sized to the
+// longest of SimControls::nebular()'s own lineLabel() strings plus a
+// null terminator -- computed fresh here each time, since Nebular
+// itself does not retain whatever fixed length its own source table
+// used. Factored out of openClusterSpectraGroup()/
+// openGalaxySpectraGroup() to keep each within its cognitive-
+// complexity budget.
+static void createNebLinesDatasets(const io::SimControls& simControls, const hid_t group)
+{
+    const auto* neb = simControls.nebular();
+    if (neb == nullptr) { return; }
+
+    const auto& lineWl = neb->lineWl();
+    const auto& lineLabel = neb->lineLabel();
+    const auto nLines = static_cast<hsize_t>(lineWl.size());
+
+    writeFixed1dDataset(group, "line_wl", H5T_NATIVE_DOUBLE, lineWl.data(), nLines, "Angstrom");
+
+    std::size_t maxLabelLen = 0;
+    for (const auto& label : lineLabel) { maxLabelLen = std::max(maxLabelLen, label.size()); }
+    const std::size_t labelStrSize = maxLabelLen + 1;
+    std::vector<char> labelBuf(lineLabel.size() * labelStrSize, '\0');
+    for (std::size_t ell = 0; ell < lineLabel.size(); ++ell)
+    {
+        std::ranges::copy(lineLabel.at(ell), labelBuf.begin() + static_cast<std::ptrdiff_t>(ell * labelStrSize));
+    }
+    const hid_t labelType = fixedStrType(labelStrSize);
+    writeFixed1dDataset(group, "line_label", labelType, labelBuf.data(), nLines, "");
+    H5Tclose(labelType);
+
+    const hid_t linesDset = createExtensible2dDataset(group, "neb_lines", H5T_NATIVE_DOUBLE, nLines);
+    writeStringAttr(linesDset, "units", "erg/s");
+    H5Dclose(linesDset);
+
+    if (simControls.extinct() == nullptr) { return; }
+    const hid_t linesExtinctDset = createExtensible2dDataset(group, "neb_lines_extinct", H5T_NATIVE_DOUBLE, nLines);
+    writeStringAttr(linesExtinctDset, "units", "erg/s");
+    H5Dclose(linesExtinctDset);
+}
+
+// Append one row to the "neb_lines" and (if extinction was also
+// requested) "neb_lines_extinct" datasets in the given spectra group,
+// if a nebular emission grid was requested -- a no-op otherwise. Must
+// be called from inside the same critical section as the caller's
+// other appendRowToDataset2d() calls. Factored out of
+// writeClusterSpec()/writeGalaxySpec() to keep each within its
+// cognitive-complexity budget.
+static void appendNebLinesRow(const io::SimControls& simControls, const hid_t group,
+    const std::vector<double>& lineLum, const std::vector<double>& lineLumExtinct)
+{
+    if (simControls.nebular() == nullptr) { return; }
+    appendRowToDataset2d(group, "neb_lines", H5T_NATIVE_DOUBLE, lineLum.data());
+
+    if (simControls.extinct() == nullptr) { return; }
+    appendRowToDataset2d(group, "neb_lines_extinct", H5T_NATIVE_DOUBLE, lineLumExtinct.data());
+}
+
 // Return the name of the idx-th direct child link of the HDF5 group
 // (or file, which is itself a group) loc
 static auto childNameByIdx(const hid_t loc, const hsize_t idx) -> std::string
@@ -696,6 +758,7 @@ void io::OutputManagerH5::openClusterSpectraGroup()
     // specNeb (if requested) lives on the same wl grid as spec -- no
     // separate wavelength dataset is needed
     createSpecNebDataset(simControls_, clusterSpectraGroup_(), nWl);
+    createNebLinesDatasets(simControls_, clusterSpectraGroup_());
 
     if (simControls_.extinct() != nullptr)
     {
@@ -879,6 +942,7 @@ void io::OutputManagerH5::openGalaxySpectraGroup()
     // specNeb (if requested) lives on the same wl grid as spec -- see
     // openClusterSpectraGroup()'s own identical comment
     createSpecNebDataset(simControls_, galaxySpectraGroup_(), nWl);
+    createNebLinesDatasets(simControls_, galaxySpectraGroup_());
 
     if (simControls_.extinct() != nullptr)
     {
@@ -1149,6 +1213,8 @@ void io::OutputManagerH5::writeClusterSpec(
     const auto& specExtinct = cluster.specExtinct();
     const auto& specNeb = cluster.specNeb();
     const auto& specNebExtinct = cluster.specNebExtinct();
+    const auto& lineLum = cluster.lineLum();
+    const auto& lineLumExtinct = cluster.lineLumExtinct();
 
 #ifdef _OPENMP
 #pragma omp critical(h5ThreadSafety)
@@ -1174,6 +1240,7 @@ void io::OutputManagerH5::writeClusterSpec(
                     H5T_NATIVE_DOUBLE, specNebExtinct.data());
             }
         }
+        appendNebLinesRow(simControls_, clusterSpectraGroup_(), lineLum, lineLumExtinct);
         // NOLINTEND(misc-include-cleaner)
     }
 }
@@ -1265,6 +1332,8 @@ void io::OutputManagerH5::writeGalaxySpec(
     const auto& specExtinct = galaxy.specExtinct();
     const auto& specNeb = galaxy.specNeb();
     const auto& specNebExtinct = galaxy.specNebExtinct();
+    const auto& lineLum = galaxy.lineLum();
+    const auto& lineLumExtinct = galaxy.lineLumExtinct();
 
     // See writeGalaxy's own comment on this critical section
 #ifdef _OPENMP
@@ -1290,6 +1359,7 @@ void io::OutputManagerH5::writeGalaxySpec(
                     H5T_NATIVE_DOUBLE, specNebExtinct.data());
             }
         }
+        appendNebLinesRow(simControls_, galaxySpectraGroup_(), lineLum, lineLumExtinct);
         // NOLINTEND(misc-include-cleaner)
     }
 

@@ -1,0 +1,38 @@
+# Full end-to-end test input deck for
+# tests/core/testClusterSpecsynFullNebular.cpp: combines the real MIST
+# tracks + full chained spectral synthesis (spectra.model = "default")
+# with the real cloudy-grid nebular emission table
+# (data/nebular/nebular.h5, the default), to verify that nebular
+# reprocessing produces reasonable stellar+nebular spectra and line
+# luminosities against a real, non-trivial ionizing population -- see
+# testClusterSpecsynFullNebular.cpp's own comment for the specific
+# checks. Uses a single large (10^5 Msun), fixed-mass (not distributed)
+# cluster at 1 Myr, well within late-O/early-B main-sequence
+# lifetimes, so massive, strongly ionizing stars are all but
+# guaranteed to be present; FeH = 0.0 and v_vcrit = 0.4 match one of
+# the real nebular table's own tabulated (track, FeH, v_vcrit) points
+# exactly, avoiding any extra interpolation uncertainty beyond logU
+# (which also defaults to the table's own tabulated -2.5).
+
+sim_type = "cluster"
+n_trial = 1
+
+[stars]
+IMF = "chabrier.toml"
+tracks = "MIST"
+v_vcrit = 0.4
+alphaFe = 0.0
+FeH = 0.0
+
+[spectra]
+model = "default"
+nwl = 2048
+
+[clusters]
+CMF = 1e5
+
+[output]
+output_times = [1e6]
+
+[nebular]
+compute_neb = true

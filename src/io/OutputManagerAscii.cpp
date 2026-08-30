@@ -175,6 +175,21 @@ static auto computePhotColWidths(const std::vector<std::string>& filterNames,
     return widths;
 }
 
+// Compute the column width to use for the "line_label" column in the
+// cluster- and galaxy-nebular-line-luminosity files: numWidth unless
+// some line's own label is longer than that, in which case the column
+// is widened to fit it (plus photColPad blank characters) -- mirrors
+// computePhotColWidths()'s own single-column logic
+static auto computeLineLabelWidth(const std::vector<std::string>& lineLabels) -> int
+{
+    int width = numWidth;
+    for (const auto& label : lineLabels)
+    {
+        width = std::max(width, static_cast<int>(label.size()) + photColPad);
+    }
+    return width;
+}
+
 // Build the "<filter>_ex" column names/units for the
 // cluster-photometry file's extincted-filter columns: one per real
 // filter, named after Filter::name() with "_ex" appended and using
@@ -442,6 +457,66 @@ static void writeGalaxyPhotHeader(std::ofstream& file,
     file << std::string(totalWidth, '-') << "\n";
 }
 
+// Write the cluster-nebular-line-luminosity ascii header (column
+// names, a row of units, and a dashed rule) to file. Like the
+// cluster-spectra file, this is laid out one row per (line, at one
+// output time for one cluster) rather than one cluster per line, since
+// there can be many lines -- but unlike it, each row also carries its
+// own "line_label" column (width lineLabelWidth -- see
+// computeLineLabelWidth()) identifying which line that row belongs to,
+// since (unlike wavelength) a line's own position in the table is not
+// self-describing. hasExtinct adds a "line_lum_ex" column (same units
+// as "line_lum") when SimControls::extinct() is set.
+static void writeClusterNebLinesHeader(std::ofstream& file, const int lineLabelWidth, const bool hasExtinct)
+{
+    file << std::right << std::setw(uidWidth) << "trial"
+         << std::setw(numWidth) << "time"
+         << std::setw(uidWidth) << "uid"
+         << std::setw(lineLabelWidth) << "line_label"
+         << std::setw(numWidth) << "wl"
+         << std::setw(numWidth) << "line_lum";
+    if (hasExtinct) { file << std::setw(numWidth) << "line_lum_ex"; }
+    file << "\n";
+    file << std::right << std::setw(uidWidth) << "none"
+         << std::setw(numWidth) << "yr"
+         << std::setw(uidWidth) << "none"
+         << std::setw(lineLabelWidth) << "none"
+         << std::setw(numWidth) << "Angstrom"
+         << std::setw(numWidth) << "erg/s";
+    if (hasExtinct) { file << std::setw(numWidth) << "erg/s"; }
+    file << "\n";
+    const int numColumns = hasExtinct ? 4 : 3;
+    file << std::string(static_cast<std::string::size_type>(2) * uidWidth, '-')
+         << std::string(static_cast<std::string::size_type>(lineLabelWidth), '-')
+         << std::string(static_cast<std::string::size_type>(numColumns) * numWidth, '-') << "\n";
+}
+
+// Write the galaxy-nebular-line-luminosity ascii header (column names,
+// a row of units, and a dashed rule) to file. Mirrors
+// writeClusterNebLinesHeader()'s own layout, but with no "uid" column,
+// since a galaxy (unlike a cluster) has no individual identity.
+static void writeGalaxyNebLinesHeader(std::ofstream& file, const int lineLabelWidth, const bool hasExtinct)
+{
+    file << std::right << std::setw(uidWidth) << "trial"
+         << std::setw(numWidth) << "time"
+         << std::setw(lineLabelWidth) << "line_label"
+         << std::setw(numWidth) << "wl"
+         << std::setw(numWidth) << "line_lum";
+    if (hasExtinct) { file << std::setw(numWidth) << "line_lum_ex"; }
+    file << "\n";
+    file << std::right << std::setw(uidWidth) << "none"
+         << std::setw(numWidth) << "yr"
+         << std::setw(lineLabelWidth) << "none"
+         << std::setw(numWidth) << "Angstrom"
+         << std::setw(numWidth) << "erg/s";
+    if (hasExtinct) { file << std::setw(numWidth) << "erg/s"; }
+    file << "\n";
+    const int numColumns = hasExtinct ? 4 : 3;
+    file << std::string(static_cast<std::string::size_type>(uidWidth), '-')
+         << std::string(static_cast<std::string::size_type>(lineLabelWidth), '-')
+         << std::string(static_cast<std::string::size_type>(numColumns) * numWidth, '-') << "\n";
+}
+
 // Ascii constructor: open the summary file, write the header
 // (slug-hash, date, time), then dump the toml input deck, and close
 // the file. If the simulation outputs individual clusters, also
@@ -479,9 +554,11 @@ io::OutputManagerAscii::OutputManagerAscii(
 
     openClustersFile();
     openClusterSpectraFile();
+    openClusterNebLinesFile();
     openClusterPhotFile();
     openGalaxyFile();
     openGalaxySpectraFile();
+    openGalaxyNebLinesFile();
     openGalaxyPhotFile();
 }
 
@@ -537,6 +614,34 @@ void io::OutputManagerAscii::openClusterSpectraFile()
     }
     writeClusterSpectraHeader(clusterSpectraFile_, simControls_.extinct() != nullptr,
         simControls_.nebular() != nullptr);
+}
+
+// Open the cluster-nebular-line-luminosity output file and write its
+// header, if a nebular emission grid was requested -- see this
+// method's own header comment for the specsyn()/write_cluster_spec
+// gating it mirrors from openClusterSpectraFile()
+void io::OutputManagerAscii::openClusterNebLinesFile()
+{
+    if (simControls_.nebular() == nullptr) { return; }
+    if (simControls_.specsyn() == nullptr) { return; }
+    if (!writeClusterSpec_) { return; }
+
+    const auto clusterNebLinesPath = std::filesystem::path(simControls_.outDir()) /
+        (simControls_.modelName() + "_cluster_neb_lines.txt");
+    if (std::filesystem::exists(clusterNebLinesPath))
+    {
+        throw std::runtime_error(
+            "OutputManagerAscii: output file " + clusterNebLinesPath.string() + " already exists");
+    }
+
+    clusterNebLinesFile_.open(clusterNebLinesPath);
+    if (!clusterNebLinesFile_)
+    {
+        throw std::runtime_error(
+            "OutputManagerAscii: unable to open output file " + clusterNebLinesPath.string());
+    }
+    lineLabelWidth_ = computeLineLabelWidth(simControls_.nebular()->lineLabel());
+    writeClusterNebLinesHeader(clusterNebLinesFile_, lineLabelWidth_, simControls_.extinct() != nullptr);
 }
 
 // Open the cluster-photometry output file and write its header, if a
@@ -640,6 +745,36 @@ void io::OutputManagerAscii::openGalaxySpectraFile()
         simControls_.nebular() != nullptr);
 }
 
+// Open the galaxy-nebular-line-luminosity output file and write its
+// header, for a galaxy-type simulation with a nebular emission grid
+// requested -- see openClusterNebLinesFile()'s own comment for the
+// specsyn()/write_galaxy_spec gating it mirrors from
+// openGalaxySpectraFile()
+void io::OutputManagerAscii::openGalaxyNebLinesFile()
+{
+    if (simControls_.simType() != SimControls::SimType::galaxy) { return; }
+    if (simControls_.nebular() == nullptr) { return; }
+    if (simControls_.specsyn() == nullptr) { return; }
+    if (!writeGalaxySpec_) { return; }
+
+    const auto galaxyNebLinesPath = std::filesystem::path(simControls_.outDir()) /
+        (simControls_.modelName() + "_galaxy_neb_lines.txt");
+    if (std::filesystem::exists(galaxyNebLinesPath))
+    {
+        throw std::runtime_error(
+            "OutputManagerAscii: output file " + galaxyNebLinesPath.string() + " already exists");
+    }
+
+    galaxyNebLinesFile_.open(galaxyNebLinesPath);
+    if (!galaxyNebLinesFile_)
+    {
+        throw std::runtime_error(
+            "OutputManagerAscii: unable to open output file " + galaxyNebLinesPath.string());
+    }
+    lineLabelWidth_ = computeLineLabelWidth(simControls_.nebular()->lineLabel());
+    writeGalaxyNebLinesHeader(galaxyNebLinesFile_, lineLabelWidth_, simControls_.extinct() != nullptr);
+}
+
 // Open the galaxy-photometry output file and write its header, for a
 // galaxy-type simulation with a filter collection or the bolometric
 // luminosity requested -- mirrors openClusterPhotFile()'s own
@@ -694,9 +829,11 @@ io::OutputManagerAscii::~OutputManagerAscii()
 {
     if (clustersFile_.is_open()) { clustersFile_.close(); }
     if (clusterSpectraFile_.is_open()) { clusterSpectraFile_.close(); }
+    if (clusterNebLinesFile_.is_open()) { clusterNebLinesFile_.close(); }
     if (clusterPhotFile_.is_open()) { clusterPhotFile_.close(); }
     if (galaxyFile_.is_open()) { galaxyFile_.close(); }
     if (galaxySpectraFile_.is_open()) { galaxySpectraFile_.close(); }
+    if (galaxyNebLinesFile_.is_open()) { galaxyNebLinesFile_.close(); }
     if (galaxyPhotFile_.is_open()) { galaxyPhotFile_.close(); }
 }
 
@@ -785,6 +922,54 @@ void io::OutputManagerAscii::writeClusterSpec(
             }
             writeSpecNebColumns(clusterSpectraFile_, simControls_, i, wlOffset, specNeb, specNebExtinct);
             clusterSpectraFile_ << "\n";
+        }
+    }
+
+    writeClusterNebLines(trial, time, cluster);
+}
+
+// Write one row per nebular emission line (trial, time, uid, line
+// label, line wavelength, and line luminosity, plus -- if extinction
+// was also requested -- the extincted line luminosity) to the
+// cluster-nebular-line-luminosity output file. A no-op if that file
+// was not opened (see openClusterNebLinesFile()) -- in particular, if
+// no nebular emission grid was requested. Called from writeClusterSpec()
+// after it finishes writing the cluster's own spectrum; cluster.lineLum()/
+// lineLumExtinct() are already current by then (writeClusterSpec() has
+// already forced a current spectrum via cluster.spec()), so no separate
+// "fetch outside the critical section" step is needed here, unlike
+// writeClusterSpec()'s own spec()/specExtinct() fetch.
+void io::OutputManagerAscii::writeClusterNebLines(
+    const unsigned long trial, const double time, core::Cluster& cluster)
+{
+    if (!clusterNebLinesFile_.is_open()) { return; }
+
+    const auto* neb = simControls_.nebular();
+    const auto* ext = simControls_.extinct();
+    const auto& lineWl = neb->lineWl();
+    const auto& lineLabel = neb->lineLabel();
+    const auto& lineLum = cluster.lineLum();
+    const auto& lineLumExtinct = cluster.lineLumExtinct();
+    const unsigned long uid = cluster.uid();
+
+#ifdef _OPENMP
+#pragma omp critical(clusterNebLinesOutputWrite)
+#endif
+    {
+        for (std::size_t i = 0; i < lineWl.size(); ++i)
+        {
+            clusterNebLinesFile_ << std::right
+                                  << std::setw(uidWidth) << formatUid(trial)
+                                  << std::setw(numWidth) << formatSci(time)
+                                  << std::setw(uidWidth) << formatUid(uid)
+                                  << std::setw(lineLabelWidth_) << lineLabel.at(i)
+                                  << std::setw(numWidth) << formatSci(lineWl.at(i))
+                                  << std::setw(numWidth) << formatSci(lineLum.at(i));
+            if (ext != nullptr)
+            {
+                clusterNebLinesFile_ << std::setw(numWidth) << formatSci(lineLumExtinct.at(i));
+            }
+            clusterNebLinesFile_ << "\n";
         }
     }
 }
@@ -928,7 +1113,53 @@ void io::OutputManagerAscii::writeGalaxySpec(
         }
     }
 
+    writeGalaxyNebLines(trial, time, galaxy);
+
     for (auto& cluster : galaxy.clusters()) { writeClusterSpec(trial, time, cluster); }
+}
+
+// Write one row per nebular emission line (trial, time, line label,
+// line wavelength, and line luminosity, plus -- if extinction was also
+// requested -- the extincted line luminosity) to the
+// galaxy-nebular-line-luminosity output file. A no-op if that file was
+// not opened (see openGalaxyNebLinesFile()) -- in particular, if no
+// nebular emission grid was requested. Called from writeGalaxySpec(),
+// after it finishes writing the galaxy's own spectrum but before it
+// recurses into writeClusterSpec() for each cluster -- see
+// writeClusterNebLines()'s own comment for why galaxy.lineLum()/
+// lineLumExtinct() need no separate "fetch outside the critical
+// section" step here either.
+void io::OutputManagerAscii::writeGalaxyNebLines(
+    const unsigned long trial, const double time, core::Galaxy& galaxy)
+{
+    if (!galaxyNebLinesFile_.is_open()) { return; }
+
+    const auto* neb = simControls_.nebular();
+    const auto* ext = simControls_.extinct();
+    const auto& lineWl = neb->lineWl();
+    const auto& lineLabel = neb->lineLabel();
+    const auto& lineLum = galaxy.lineLum();
+    const auto& lineLumExtinct = galaxy.lineLumExtinct();
+
+#ifdef _OPENMP
+#pragma omp critical(galaxyNebLinesOutputWrite)
+#endif
+    {
+        for (std::size_t i = 0; i < lineWl.size(); ++i)
+        {
+            galaxyNebLinesFile_ << std::right
+                                 << std::setw(uidWidth) << formatUid(trial)
+                                 << std::setw(numWidth) << formatSci(time)
+                                 << std::setw(lineLabelWidth_) << lineLabel.at(i)
+                                 << std::setw(numWidth) << formatSci(lineWl.at(i))
+                                 << std::setw(numWidth) << formatSci(lineLum.at(i));
+            if (ext != nullptr)
+            {
+                galaxyNebLinesFile_ << std::setw(numWidth) << formatSci(lineLumExtinct.at(i));
+            }
+            galaxyNebLinesFile_ << "\n";
+        }
+    }
 }
 
 // Write one line (trial, time, then one column per filter) to the
