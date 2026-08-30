@@ -22,6 +22,7 @@
 #include <iostream>
 #include <limits>
 #include <numeric>
+#include <string>
 #include <string_view>
 #include <toml.hpp>
 #include <vector>
@@ -1403,6 +1404,126 @@ static auto testExtinctApplyExtinctionCtsUniform() -> int
     return 0;
 }
 
+// Verify that Galaxy's own specNeb()/specNebExtinct()/lineLum() equal
+// the independently-summed per-cluster specNeb()/specNebExtinct()/
+// lineLum() -- mirrors checkSpecSum()'s own exact style, but for
+// nebular emission rather than plain spec()/specExtinct() -- and that
+// photNeb()/photNebExtinct() equal filters->phot() applied directly
+// to specNeb()/specNebExtinct(), exactly as Galaxy::computePhot()
+// itself computes them (unlike checkPhotSum()'s own phot()/
+// photExtinct() check, which cross-checks two genuinely different
+// computation paths -- summed-then-photometered vs photometered-then-
+// summed -- only approximately, this is the same single path
+// Galaxy::computePhot() takes, so an exact match is expected).
+// inputFile (testGalaxyDynamics.in) defaults fCluster() to 1.0 (not
+// overridden here), so every star forms in a stochastic cluster and
+// Galaxy::addContinuousSpec() never runs, letting this test check
+// pure cluster summation without also needing to reproduce that
+// function's own continuous-population/field-star contribution.
+// Reuses testGalaxyDynamics.in, overriding its own [nebular] table to
+// point at tests/nebular/assets/nebular_test.h5 (see that fixture's
+// own generator, data/tools/cloudy/make_nebular_test_fixture.py, for
+// its schema), exactly as testFieldStarsExtinct() overrides [extinct]
+// on the same base deck.
+static auto testGalaxyNebular() -> int
+{
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFile);
+        inputDeck.at_path("nebular").as_table()->insert_or_assign("compute_neb", true);
+        inputDeck.at_path("nebular").as_table()->insert_or_assign(
+            "table", std::string("tests/nebular/assets/nebular_test.h5"));
+        const io::SimControls controls(inputDeck);
+
+        if (controls.nebular() == nullptr)
+        {
+            std::cerr << "testGalaxy: nebular: expected SimControls::nebular() "
+                "to be non-null\n";
+            return 1;
+        }
+        if (!utils::approxEqual(controls.fCluster(), 1.0))
+        {
+            std::cerr << "testGalaxy: nebular: test bug: expected fCluster() == 1\n";
+            return 1;
+        }
+
+        utils::rng().seed(rngSeed);
+        core::Galaxy galaxy(controls);
+        galaxy.advance(t1);
+
+        if (galaxy.clusters().empty() && galaxy.disruptedClusters().empty())
+        {
+            std::cerr << "testGalaxy: nebular: test bug: expected at least one "
+                "cluster to have formed\n";
+            return 1;
+        }
+
+        std::vector<double> expectedSpecNeb(controls.specsyn()->wl().size(), 0.0);
+        std::vector<double> expectedLineLum(controls.nebular()->lineWl().size(), 0.0);
+        std::vector<double> expectedSpecNebExtinct(controls.extinct()->wl().size(), 0.0);
+        const auto accumulate = [&](std::vector<core::Cluster>& list)
+        {
+            for (auto& c : list)
+            {
+                const auto& s = c.specNeb();
+                for (std::size_t i = 0; i < expectedSpecNeb.size(); ++i) { expectedSpecNeb.at(i) += s.at(i); }
+                const auto& l = c.lineLum();
+                for (std::size_t i = 0; i < expectedLineLum.size(); ++i) { expectedLineLum.at(i) += l.at(i); }
+                const auto& se = c.specNebExtinct();
+                for (std::size_t i = 0; i < expectedSpecNebExtinct.size(); ++i) { expectedSpecNebExtinct.at(i) += se.at(i); }
+            }
+        };
+        accumulate(galaxy.clusters());
+        accumulate(galaxy.disruptedClusters());
+
+        if (galaxy.specNeb() != expectedSpecNeb)
+        {
+            std::cerr << "testGalaxy: nebular: specNeb() does not equal the "
+                "independently-summed per-cluster specNeb()\n";
+            return 1;
+        }
+        if (galaxy.lineLum() != expectedLineLum)
+        {
+            std::cerr << "testGalaxy: nebular: lineLum() does not equal the "
+                "independently-summed per-cluster lineLum()\n";
+            return 1;
+        }
+        if (galaxy.specNebExtinct() != expectedSpecNebExtinct)
+        {
+            std::cerr << "testGalaxy: nebular: specNebExtinct() does not equal "
+                "the independently-summed per-cluster specNebExtinct()\n";
+            return 1;
+        }
+        if (std::reduce(expectedSpecNeb.begin(), expectedSpecNeb.end(), 0.0) <= 0.0)
+        {
+            std::cerr << "testGalaxy: nebular: expected a non-zero specNeb()\n";
+            return 1;
+        }
+
+        const auto expectedPhotNeb = controls.filters()->phot(controls.specsyn()->wlObs(), galaxy.specNeb());
+        if (galaxy.photNeb() != expectedPhotNeb)
+        {
+            std::cerr << "testGalaxy: nebular: photNeb() does not match "
+                "filters->phot(wlObs(), specNeb())\n";
+            return 1;
+        }
+        const auto expectedPhotNebExtinct =
+            controls.filters()->phot(controls.extinct()->wlObs(), galaxy.specNebExtinct());
+        if (galaxy.photNebExtinct() != expectedPhotNebExtinct)
+        {
+            std::cerr << "testGalaxy: nebular: photNebExtinct() does not match "
+                "filters->phot(ext->wlObs(), specNebExtinct())\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testGalaxy: nebular test failed: " << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
 // Verify Galaxy::sfr_'s own resolution logic (see SFRVar's header
 // comment): when controls.sfr() is valid (galaxy.sfr was given), it
 // should be used directly, as a live reference -- checked here via
@@ -1499,6 +1620,7 @@ auto testGalaxy() -> int
     result += testFieldStarsExtinct();
     result += testExtinctApplyExtinctionCtsDegenerate();
     result += testExtinctApplyExtinctionCtsUniform();
+    result += testGalaxyNebular();
 
     try
     {

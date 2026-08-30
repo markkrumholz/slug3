@@ -566,6 +566,113 @@ static auto testClusterLbol() -> int
     return 0;
 }
 
+// Verify that Cluster's own specNeb()/specNebExtinct()/lineLum()/
+// photNeb()/photNebExtinct() agree, bit-for-bit, with an independent
+// recomputation via SimControls::nebular()'s own public getCluster(),
+// applied to cluster.spec() at cluster.feH() and this test's own known
+// age -- mirrors testClusterExtinct()'s own general shape, but for
+// nebular emission rather than dust extinction. Reuses
+// testClusterExtinct.in (already combining phot + extinct), overriding
+// its own [nebular] table to point at tests/nebular/assets/
+// nebular_test.h5 (see that fixture's own generator,
+// data/tools/cloudy/make_nebular_test_fixture.py, for its schema),
+// exactly as testGalaxy.cpp's own testFieldStarsExtinct() overrides
+// [extinct] on its own base deck.
+static auto testClusterNebular() -> int
+{
+    constexpr double ageYr = 1e7; // an exact hit on the fixture's own tabulated cluster ages
+
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFileExtinct);
+        inputDeck.at_path("nebular").as_table()->insert_or_assign("compute_neb", true);
+        inputDeck.at_path("nebular").as_table()->insert_or_assign(
+            "table", std::string("tests/nebular/assets/nebular_test.h5"));
+        const io::SimControls controls(inputDeck);
+
+        if (controls.nebular() == nullptr)
+        {
+            std::cerr << "testCluster: nebular: expected SimControls::nebular() "
+                "to be non-null\n";
+            return 1;
+        }
+
+        utils::rng().seed(rngSeed);
+        core::Cluster cluster(0, 1e4, 0.0, controls);
+        cluster.advance(ageYr);
+
+        // Force spec()/specExtinct() current before independently
+        // recomputing from them, exactly as Cluster::computeSpec()
+        // itself does internally (spec_ before specNeb_/specNebExtinct_)
+        const auto& spec = cluster.spec();
+        const auto [expectedSpecNeb, expectedLineLum] =
+            controls.nebular()->getCluster(spec, cluster.feH(), ageYr);
+
+        if (cluster.specNeb() != expectedSpecNeb)
+        {
+            std::cerr << "testCluster: nebular: specNeb() does not match the "
+                "independently-recomputed getCluster() result\n";
+            return 1;
+        }
+        if (cluster.lineLum() != expectedLineLum)
+        {
+            std::cerr << "testCluster: nebular: lineLum() does not match the "
+                "independently-recomputed getCluster() result\n";
+            return 1;
+        }
+        if (std::reduce(expectedSpecNeb.begin(), expectedSpecNeb.end(), 0.0) <= 0.0)
+        {
+            std::cerr << "testCluster: nebular: expected a non-zero specNeb()\n";
+            return 1;
+        }
+
+        const auto* ext = controls.extinct();
+        if (ext == nullptr)
+        {
+            std::cerr << "testCluster: nebular: test bug: expected "
+                "extinct() non-null\n";
+            return 1;
+        }
+        const auto expectedSpecNebExtinct = ext->applyExtinction(cluster.aV(), cluster.specNeb());
+        if (cluster.specNebExtinct() != expectedSpecNebExtinct)
+        {
+            std::cerr << "testCluster: nebular: specNebExtinct() does not match "
+                "ext->applyExtinction(aV(), specNeb())\n";
+            return 1;
+        }
+
+        if (controls.filters() == nullptr)
+        {
+            std::cerr << "testCluster: nebular: test bug: expected "
+                "filters() non-null\n";
+            return 1;
+        }
+        const auto expectedPhotNeb =
+            controls.filters()->phot(controls.specsyn()->wlObs(), cluster.specNeb());
+        if (cluster.photNeb() != expectedPhotNeb)
+        {
+            std::cerr << "testCluster: nebular: photNeb() does not match "
+                "filters->phot(wlObs(), specNeb())\n";
+            return 1;
+        }
+        const auto expectedPhotNebExtinct =
+            controls.filters()->phot(ext->wlObs(), cluster.specNebExtinct());
+        if (cluster.photNebExtinct() != expectedPhotNebExtinct)
+        {
+            std::cerr << "testCluster: nebular: photNebExtinct() does not match "
+                "filters->phot(ext->wlObs(), specNebExtinct())\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testCluster: nebular test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
 auto testCluster() -> int
 {
     int result = 0;
@@ -578,5 +685,6 @@ auto testCluster() -> int
     result += testClusterPhotAbsent();
     result += testClusterExtinct();
     result += testClusterLbol();
+    result += testClusterNebular();
     return result;
 }
