@@ -210,21 +210,23 @@ namespace specsyn
          * Then tries each library in that chain, in priority order,
          * stopping at and returning the first non-empty spec() result
          * -- in two passes. The first pass queries every library at
-         * the star's own true feh, unclamped: chain order encodes
-         * each library's physical reliability, not just its [Fe/H]
-         * reach (e.g. TLUSTY's NLTE hot-star models are preferred over
-         * CK04's older, coarser physics even on [Fe/H] both cover), so
-         * a library later in the chain that happens to reach the true
-         * feh natively must not preempt an earlier, more reliable
-         * library that also reaches it. Only if every library rejects
-         * the true feh does a second pass retry each library with feh
-         * clamped to *that one library's own* real [Fe/H] coverage
-         * (fehMin_[type][i]/fehMax_[type][i], see
+         * the star's own true feh and log(g), unclamped: chain order
+         * encodes each library's physical reliability, not just its
+         * [Fe/H]/log(g) reach (e.g. TLUSTY's NLTE hot-star models are
+         * preferred over CK04's older, coarser physics even where both
+         * cover the same star), so a library later in the chain that
+         * happens to reach the true feh/log(g) natively must not
+         * preempt an earlier, more reliable library that also reaches
+         * it. Only if every library rejects the true feh/log(g) does a
+         * second pass retry each library with feh and log(g) each
+         * clamped to *that one library's own* real coverage
+         * (fehMin_[type][i]/fehMax_[type][i] and
+         * loggLibMin_[type][i]/loggLibMax_[type][i], see
          * clampFehForLibrary()) immediately before each individual
          * spec() call, not once for the whole chain: a library whose
-         * own coverage doesn't reach the true feh at all should still
-         * be given its best (clamped) shot rather than being skipped
-         * outright, exactly mirroring how SpecsynLibNoWind::
+         * own coverage doesn't reach the true feh/log(g) at all should
+         * still be given its best (clamped) shot rather than being
+         * skipped outright, exactly mirroring how SpecsynLibNoWind::
          * specForce() itself moves log(g) to the nearest populated
          * grid value rather than giving up -- and, per this same
          * priority ordering, a clamped result from an earlier,
@@ -234,21 +236,32 @@ namespace specsyn
          * than falling back to worse atmosphere physics; how far the
          * clamp reaches is not weighed against that tradeoff. No
          * atmosphere-grid library actually has uniform coverage across
-         * its own [Fe/H] range in practice (e.g. MARCS's afe=0.0
-         * models stop well short of its afe=0.4 models' own reach; a
-         * hot O/B star metal-poor enough to fall outside TLUSTY_O/
-         * TLUSTY_B's own narrower [Fe/H] range needs the same kind of
-         * rescue BOSZ/CK04/MARCS already need for other reasons) --
-         * see warnIfFeHClamped()'s own comment for how this is
-         * surfaced up front rather than left silent. If every library
-         * in the chain still returns empty even after the clamped
-         * pass, calls specForce() (see Specsyn's own comment) on the
-         * last one, clamped to its own coverage the same way, which
-         * either returns a genuine spectrum (forcing a match, e.g. by
-         * moving log(g) to the nearest populated grid value -- see
-         * SpecsynLibNoWind::specForce()/SpecsynLibWD::specForce()) or
-         * throws for a reason other than [Fe/H] alone (e.g. log(Teff)
-         * genuinely outside every chained library's own grid).
+         * its own [Fe/H] or log(g) range in practice (e.g. MARCS's
+         * afe=0.0 models stop well short of its afe=0.4 models' own
+         * [Fe/H] reach; a hot O/B star metal-poor enough to fall
+         * outside TLUSTY_O/TLUSTY_B's own narrower [Fe/H] range needs
+         * the same kind of rescue BOSZ/CK04/MARCS already need for
+         * other reasons; a very metal-poor massive MIST star compact
+         * enough to exceed TLUSTY_O's/CK04's own log(g) ceiling needs
+         * the same kind of rescue on that axis instead) -- see
+         * warnIfFeHClamped()'s own comment for how the [Fe/H] side of
+         * this is surfaced up front rather than left silent (log(g)
+         * has no equivalent up-front warning, since -- unlike [Fe/H]
+         * -- there is no single requested log(g) range fixed at
+         * construction time to check a library's own coverage
+         * against: log(g) is only known per star, at spec() call
+         * time). log(g) is clamped by rescaling queryProps' own mass,
+         * not by passing a separately clamped value -- see
+         * propsWithClampedLogg()'s own comment for why. If every
+         * library in the chain still returns empty even after the
+         * clamped pass, calls specForce() (see Specsyn's own comment)
+         * on the last one, clamped to its own coverage the same way,
+         * which either returns a genuine spectrum (forcing a match,
+         * e.g. by moving log(g) to the nearest populated grid value --
+         * see SpecsynLibNoWind::specForce()/SpecsynLibWD::specForce())
+         * or throws for a reason other than [Fe/H]/log(g) alone (e.g.
+         * log(Teff) genuinely outside every chained library's own
+         * grid).
          */
         [[nodiscard]] auto spec(const StarData& props, double feh) const
         -> std::vector<double> override;
@@ -338,24 +351,86 @@ namespace specsyn
         void updateFeHRanges();
 
         /**
-         * @brief Return the [Fe/H] to actually query library i of type's own chain with
+         * @brief Set loggLibMin_/loggLibMax_ from every chained library, individually
+         * @details
+         * Mirrors updateFeHRanges() exactly, but for log(g) rather than
+         * [Fe/H] -- factored out of the constructor for the same
+         * cognitive-complexity reason, called immediately alongside it
+         * (order between the two doesn't matter; each only touches its
+         * own arrays). See loggLibMin_'s own comment for exactly what
+         * this computes and why.
+         */
+        void updateLoggRanges();
+
+        /**
+         * @brief Return the [Fe/H] and log(g) to actually query library i of type's own chain with
          * @param feh The star's own true [Fe/H]
+         * @param logg The star's own true log(g) (from Specsyn::getSAandLogg,
+         *   evaluated on the same props about to be passed to library i --
+         *   see spec()'s own comment for why that isn't necessarily
+         *   props' own raw, unclamped log(g))
          * @param type The GridType whose chain library i belongs to
          * @param libIdx Index into chainFor(type) (and fehMin_[type]/
-         *   fehMax_[type]/libNames_[type], which all share that same
-         *   per-library indexing)
-         * @return feh, clamped into
-         *   [fehMin_[type][libIdx], fehMax_[type][libIdx]] -- unchanged
-         *   on whichever side is quiet_NaN() (a library with no [Fe/H]
-         *   axis at all, i.e. SpecsynLibWD)
+         *   fehMax_[type]/loggLibMin_[type]/loggLibMax_[type]/
+         *   libNames_[type], which all share that same per-library
+         *   indexing)
+         * @return {feh, logg}, each independently clamped into
+         *   [fehMin_[type][libIdx], fehMax_[type][libIdx]] and
+         *   [loggLibMin_[type][libIdx], loggLibMax_[type][libIdx]]
+         *   respectively -- either value is left unchanged on whichever
+         *   side is quiet_NaN() (a library with no [Fe/H] axis at all,
+         *   i.e. SpecsynLibWD, or no log(g) axis at all, i.e. any
+         *   SpecsynLibWR)
          * @details
          * Factored out of spec() purely so both the ordinary per-
          * library dispatch loop and its final specForce() fallback can
          * share one place to compute this -- see spec()'s own comment
          * for why the clamp is per-library rather than once for the
-         * whole chain.
+         * whole chain. Unlike feh (an independent parameter spec()
+         * already takes), the returned logg can't be handed to library
+         * i directly -- see propsWithClampedLogg()'s own comment for
+         * how the caller turns it back into a StarData that library i's
+         * own internal Specsyn::getSAandLogg() will re-derive this same
+         * clamped value from.
          */
-        [[nodiscard]] auto clampFehForLibrary(double feh, GridType type, std::size_t libIdx) const -> double;
+        [[nodiscard]] auto clampFehForLibrary(
+            double feh, double logg, GridType type, std::size_t libIdx) const -> std::pair<double, double>;
+
+        /**
+         * @brief Return props with its own mass rescaled so that Specsyn::getSAandLogg() derives clampedLogg from it
+         * @param props Stellar properties to rescale; taken and
+         *   returned by value, mirroring clampNormalLogTeffFloor()'s
+         *   own by-value in/out convention
+         * @param currentLogg props' own log(g), as already computed by
+         *   the caller (Specsyn::getSAandLogg(props).second) -- passed
+         *   in rather than recomputed here purely to avoid computing it
+         *   twice, once per library, inside spec()'s own per-library loop
+         * @param clampedLogg The log(g) props should yield when
+         *   Specsyn::getSAandLogg() is next called on it -- normally
+         *   clampFehForLibrary()'s own second return value
+         * @return props unchanged if clampedLogg == currentLogg;
+         *   otherwise props with its own mass field scaled by
+         *   10^(clampedLogg - currentLogg), leaving every other field
+         *   (in particular log(L) and log(Teff), and hence the star's
+         *   own radius/surface area) untouched
+         * @details
+         * log(g) = log10(G M / R^2) (see Specsyn::getSAandLogg()), with
+         * R derived from log(L) and log(Teff) alone -- mass is the only
+         * field of props that affects log(g) without also affecting R
+         * (and hence the synthesized spectrum's own amplitude, via
+         * area). Rescaling mass to hit a target log(g) therefore moves
+         * exactly one degree of freedom -- which populated (feh,
+         * log(Teff), log(g)) grid cell a chained library selects -- and
+         * leaves the star's own actual luminosity and effective
+         * temperature (and so the physical shape and amplitude of its
+         * spectrum) exactly as isochrone-predicted. This mirrors
+         * clampNormalLogTeffFloor()'s own precedent of directly
+         * overriding one StarData field to force a clamp target, using
+         * mass here (log(g)'s only side-effect-free lever) in place of
+         * log(Teff) there.
+         */
+        [[nodiscard]] static auto propsWithClampedLogg(
+            StarData props, double currentLogg, double clampedLogg) -> StarData;
 
         /**
          * @brief Warn for every chained library whose own [Fe/H] coverage the requested range exceeds
@@ -552,6 +627,32 @@ namespace specsyn
          */
         std::array<std::vector<double>, nGridType> fehMin_;
         std::array<std::vector<double>, nGridType> fehMax_; /**< See fehMin_ */
+
+        /**
+         * @brief The log(g) range of each individual chained library, indexed the same way as fehMin_/fehMax_
+         * @details
+         * Mirrors fehMin_ exactly, but for log(g) rather than [Fe/H]:
+         * unconditionally (regardless of tClamp) resized and filled by
+         * updateLoggRanges(), once wrLibs_/wdLibs_/normalLibs_ are
+         * populated, to chainFor(type).size() entries -- an entry is
+         * left at quiet_NaN() if that specific library has no log(g)
+         * axis at all (any SpecsynLibWR; its base-class loggMin()/
+         * loggMax() are the unrestricted -infinity/+infinity, not
+         * copied through here).
+         *
+         * Not to be confused with loggMin_/loggMax_ above: those are a
+         * single combined value per GridType, used by classifyGridType()
+         * to decide which GridType a star belongs to in the first
+         * place; loggLibMin_/loggLibMax_ are per-library, used only
+         * afterward by clampFehForLibrary() to decide how far a given
+         * chained library's own log(g) coverage falls short of an
+         * already-classified normal-/WD-grid star's own true log(g) --
+         * the same distinction fehMin_/fehMax_ already draws relative
+         * to any per-GridType [Fe/H] range (there being no such
+         * combined value for [Fe/H] to confuse this with).
+         */
+        std::array<std::vector<double>, nGridType> loggLibMin_;
+        std::array<std::vector<double>, nGridType> loggLibMax_; /**< See loggLibMin_ */
 
         /**
          * @brief The registry name of each individual chained library, indexed the same way as fehMin_/fehMax_

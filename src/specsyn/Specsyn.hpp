@@ -128,6 +128,33 @@ namespace specsyn
         { return std::numeric_limits<double>::infinity(); }
 
         /**
+         * @brief Return the minimum log(g) this synthesizer has real spectral data for
+         * @return -infinity by default (no restriction) -- overridden
+         *   by SpecsynLibNoWind/SpecsynLibWD (their own logg().front());
+         *   SpecsynLibWR keeps the base default, since Wolf-Rayet
+         *   atmospheres aren't parameterized by log(g) at all
+         * @details
+         * Mirrors fehMin()'s own rationale exactly, for SpecsynLibChained's
+         * per-library log(g) clamp rather than its per-library [Fe/H]
+         * one -- see clampFehForLibrary()'s own comment for why a star
+         * whose own log(g) falls outside every chained library's real
+         * coverage needs the same kind of per-library rescue a star
+         * outside every chained library's [Fe/H] coverage already
+         * gets.
+         */
+        [[nodiscard]] virtual auto loggMin() const -> double
+        { return -std::numeric_limits<double>::infinity(); }
+
+        /**
+         * @brief Return the maximum log(g) this synthesizer has real spectral data for
+         * @return +infinity by default (no restriction) -- see
+         *   loggMin()'s own comment for the overriding classes and full
+         *   rationale, which applies here symmetrically
+         */
+        [[nodiscard]] virtual auto loggMax() const -> double
+        { return std::numeric_limits<double>::infinity(); }
+
+        /**
          * @brief Compute the spectrum of a single star
          * @param props Stellar properties, as produced by evaluating
          *   the Interpolator1D returned by Tracks2D::getIsochrone at

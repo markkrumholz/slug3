@@ -192,6 +192,20 @@ namespace specsyn
          */
         [[nodiscard]] auto logg() const -> const std::vector<double>& { return logg_; }
 
+        /**
+         * @brief The minimum log(g) this library has real spectral data for
+         * @return logg_.front() -- see Specsyn::loggMin()'s own comment
+         *   for why this override exists
+         */
+        [[nodiscard]] auto loggMin() const -> double override { return logg_.front(); }
+
+        /**
+         * @brief The maximum log(g) this library has real spectral data for
+         * @return logg_.back() -- see Specsyn::loggMin()'s own comment
+         *   for why this override exists
+         */
+        [[nodiscard]] auto loggMax() const -> double override { return logg_.back(); }
+
     private:
 
         // References into the parent class's dim2_/dim3_, named for

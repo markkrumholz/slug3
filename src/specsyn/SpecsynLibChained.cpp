@@ -488,10 +488,11 @@ namespace specsyn
             {std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::quiet_NaN()},
             {std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::quiet_NaN()},
         }})
-        // fehMin_/fehMax_/libNames_ each default-construct to nGridType
-        // empty vectors, which is exactly what they need to start as --
-        // updateFeHRanges() (via the sort loop just before it) resizes
-        // and fills each GridType's own three vectors together, since
+        // fehMin_/fehMax_/loggLibMin_/loggLibMax_/libNames_ each
+        // default-construct to nGridType empty vectors, which is
+        // exactly what they need to start as -- updateFeHRanges()/
+        // updateLoggRanges() (via the sort loop just before them)
+        // resize and fill each GridType's own vectors together, since
         // their eventual length isn't known until then. See fehMin_'s
         // own comment.
     {
@@ -635,6 +636,11 @@ namespace specsyn
         // what this computes and why.
         updateFeHRanges();
 
+        // loggLibMin_/loggLibMax_, per individual chained library --
+        // see updateLoggRanges()'s own comment for exactly what this
+        // computes and why.
+        updateLoggRanges();
+
         // Warn (once, up front) for every chained library whose own
         // [Fe/H] coverage the requested range exceeds -- see
         // warnIfFeHClamped()'s own comment.
@@ -679,16 +685,58 @@ namespace specsyn
         }
     }
 
+    void SpecsynLibChained::updateLoggRanges()
+    {
+        // Mirrors updateFeHRanges() exactly -- see its own comment --
+        // but reads loggMin()/loggMax() instead of fehMin()/fehMax():
+        // an entry is left at quiet_NaN() if that specific library has
+        // no log(g) axis at all (any SpecsynLibWR).
+        for (const auto t : { GridType::wrGrid, GridType::wdGrid, GridType::normalGrid })
+        {
+            const auto& chain = chainFor(t);
+            const auto ti = static_cast<std::size_t>(t);
+            loggLibMin_[ti].assign(chain.size(), std::numeric_limits<double>::quiet_NaN()); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- ti < nGridType by construction
+            loggLibMax_[ti].assign(chain.size(), std::numeric_limits<double>::quiet_NaN()); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- see above
+            for (std::size_t i = 0; i < chain.size(); ++i)
+            {
+                const double lo = chain[i]->loggMin();
+                const double hi = chain[i]->loggMax();
+                if (std::isfinite(lo)) { loggLibMin_[ti][i] = lo; } // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- see above
+                if (std::isfinite(hi)) { loggLibMax_[ti][i] = hi; } // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- see above
+            }
+        }
+    }
+
     auto SpecsynLibChained::clampFehForLibrary(
-        const double feh, const GridType type, const std::size_t libIdx) const -> double
+        const double feh, const double logg, const GridType type, const std::size_t libIdx) const
+        -> std::pair<double, double>
     {
         const auto ti = static_cast<std::size_t>(type);
-        double clamped = feh;
-        const double lo = fehMin_[ti][libIdx]; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- ti < nGridType, libIdx < chainFor(type).size() by construction
-        const double hi = fehMax_[ti][libIdx]; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- see above
-        if (!std::isnan(lo)) { clamped = std::max(clamped, lo); }
-        if (!std::isnan(hi)) { clamped = std::min(clamped, hi); }
-        return clamped;
+
+        double clampedFeh = feh;
+        const double fehLo = fehMin_[ti][libIdx]; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- ti < nGridType, libIdx < chainFor(type).size() by construction
+        const double fehHi = fehMax_[ti][libIdx]; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- see above
+        if (!std::isnan(fehLo)) { clampedFeh = std::max(clampedFeh, fehLo); }
+        if (!std::isnan(fehHi)) { clampedFeh = std::min(clampedFeh, fehHi); }
+
+        double clampedLogg = logg;
+        const double loggLo = loggLibMin_[ti][libIdx]; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- see above
+        const double loggHi = loggLibMax_[ti][libIdx]; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- see above
+        if (!std::isnan(loggLo)) { clampedLogg = std::max(clampedLogg, loggLo); }
+        if (!std::isnan(loggHi)) { clampedLogg = std::min(clampedLogg, loggHi); }
+
+        return { clampedFeh, clampedLogg };
+    }
+
+    auto SpecsynLibChained::propsWithClampedLogg(
+        StarData props, const double currentLogg, const double clampedLogg) -> StarData
+    {
+        if (clampedLogg != currentLogg)
+        {
+            const auto massIdx = static_cast<std::size_t>(tracks::FieldIdx::mass);
+            props[massIdx] *= std::pow(10.0, clampedLogg - currentLogg); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- massIdx < StarData::size() by construction
+        }
+        return props;
     }
 
     void SpecsynLibChained::warnIfFeHClamped(const double fehMin, const double fehMax) const
@@ -741,14 +789,15 @@ namespace specsyn
         // chain's own combined lower log(Teff) floor, if they fall
         // below it -- see clampNormalLogTeffFloor()'s own comment.
         const StarData queryProps = clampNormalLogTeffFloor(props, type);
+        const double queryLogg = getSAandLogg(queryProps).second;
 
         // First pass: try every library in the chain, in priority
-        // order, at the star's true (unclamped) feh. Chain order
-        // encodes physical reliability, not just [Fe/H] coverage
-        // (e.g. TLUSTY's NLTE hot-star models are preferred over
-        // CK04's older, coarser physics even where both cover the
-        // same [Fe/H]) -- so a library later in the chain that
-        // happens to cover the true feh natively must not preempt an
+        // order, at the star's true (unclamped) feh and log(g). Chain
+        // order encodes physical reliability, not just [Fe/H]/log(g)
+        // coverage (e.g. TLUSTY's NLTE hot-star models are preferred
+        // over CK04's older, coarser physics even where both cover the
+        // same star) -- so a library later in the chain that happens
+        // to cover the true feh/log(g) natively must not preempt an
         // earlier, more reliable library that also covers it.
         for (const auto& lib : chain)
         {
@@ -757,27 +806,39 @@ namespace specsyn
         }
 
         // Second pass, only reached if no library in the chain covers
-        // the true feh at all: retry each library with feh clamped to
-        // *that library's own* real [Fe/H] coverage -- see this
-        // function's own header comment for why per-library, not
+        // the true feh/log(g) at all: retry each library with feh and
+        // log(g) clamped to *that library's own* real coverage -- see
+        // this function's own header comment for why per-library, not
         // chain-wide. No atmosphere library actually has uniform
-        // [Fe/H] coverage across its own kind of chain in practice (a
-        // hot O/B star metal-poor enough to fall outside
-        // TLUSTY_O/TLUSTY_B's own narrower range needs the same kind
-        // of per-library rescue a WR star metal-poor enough to fall
-        // outside the chained WR library's own range already did). A
-        // clamped-but-otherwise-preferred library is still tried
-        // before an unclamped-but-less-reliable one, since a modest
-        // clamp from a physically better library can outperform an
-        // exact match from a worse one -- whether that tradeoff is
-        // actually favorable depends on how far the clamp reaches,
-        // which this two-pass approach does not attempt to weigh.
+        // coverage across its own kind of chain in practice (a hot O/B
+        // star metal-poor enough to fall outside TLUSTY_O/TLUSTY_B's
+        // own narrower [Fe/H] range needs the same kind of per-library
+        // rescue a WR star metal-poor enough to fall outside the
+        // chained WR library's own range already did; a very
+        // metal-poor massive MIST star compact enough to exceed every
+        // hot-atmosphere library's own log(g) ceiling needs the same
+        // kind of rescue on that axis instead). A clamped-but-
+        // otherwise-preferred library is still tried before an
+        // unclamped-but-less-reliable one, since a modest clamp from a
+        // physically better library can outperform an exact match from
+        // a worse one -- whether that tradeoff is actually favorable
+        // depends on how far the clamp reaches, which this two-pass
+        // approach does not attempt to weigh. log(g) is clamped by
+        // rescaling queryProps' own mass -- see propsWithClampedLogg()'s
+        // own comment for why that, uniquely among props' fields, moves
+        // log(g) alone, leaving the star's real luminosity and
+        // temperature (and so its spectrum's own physical shape and
+        // amplitude) untouched.
         for (std::size_t i = 0; i < chain.size(); ++i)
         {
-            auto result = chain[i]->spec(queryProps, clampFehForLibrary(feh, type, i));
+            const auto [clampedFeh, clampedLogg] = clampFehForLibrary(feh, queryLogg, type, i);
+            const StarData libProps = propsWithClampedLogg(queryProps, queryLogg, clampedLogg);
+            auto result = chain[i]->spec(libProps, clampedFeh);
             if (!result.empty()) { return result; }
         }
-        return chain.back()->specForce(queryProps, clampFehForLibrary(feh, type, chain.size() - 1));
+        const auto [finalFeh, finalLogg] = clampFehForLibrary(feh, queryLogg, type, chain.size() - 1);
+        const StarData finalProps = propsWithClampedLogg(queryProps, queryLogg, finalLogg);
+        return chain.back()->specForce(finalProps, finalFeh);
     }
 
     auto SpecsynLibChained::specForIntegration(const StarData& props, const double feh) const -> std::vector<double>
