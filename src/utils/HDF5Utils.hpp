@@ -15,10 +15,10 @@
 #include "hdf5.h"
 #include <array>
 #include <cstddef>
-#include <cstring>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -204,7 +204,8 @@ namespace utils
         for (hsize_t i = 0; i < dims; ++i)
         {
             const char* start = buf.data() + (i * strSize); // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
-            result.emplace_back(start, strnlen(start, strSize));
+            const std::string_view bounded(start, strSize);
+            result.emplace_back(bounded.substr(0, bounded.find('\0')));
         }
         return result;
     }

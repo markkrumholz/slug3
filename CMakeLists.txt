@@ -131,7 +131,9 @@ add_executable(slugTestInterpolation
 )
 add_executable(slugTestExtinct
     src/extinct/Extinct.cpp
+    src/nebular/Nebular.cpp
     src/phot/FilterTabulated.cpp
+    src/phot/FilterIdeal.cpp
     tests/extinct/testExtinctAll.cpp
 )
 add_executable(slugTestPhot

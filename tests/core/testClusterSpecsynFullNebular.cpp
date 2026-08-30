@@ -49,7 +49,114 @@
 #include <filesystem>
 #include <iostream>
 #include <memory>
+#include <string>
 #include <toml.hpp>
+#include <vector>
+
+// Construct SimControls from inputDeck, treating a known real-grid-
+// coverage gap (Nebular's own "no logU data"/"outside the tabulated
+// range"/"no exact v/vcrit match" errors -- see this file's own
+// header comment) as an expected, temporary skip rather than a
+// failure. Returns the constructed SimControls, or nullptr if
+// construction failed (having already printed the appropriate
+// message); wasSkip is set to true only for a known grid-coverage gap
+// (the caller should return 0, treating this as skipped), left false
+// for any other failure (a real test failure -- the caller should
+// return 1) or on success. Factored out of
+// testClusterSpecsynFullNebular() to keep it within its cognitive-
+// complexity budget.
+auto buildControlsOrReportFailure(const toml::table& inputDeck, bool& wasSkip)
+    -> std::unique_ptr<io::SimControls>
+{
+    wasSkip = false;
+    try
+    {
+        return std::make_unique<io::SimControls>(inputDeck);
+    }
+    catch (const std::exception& error)
+    {
+        // Nebular's own constructor eagerly loads spec/line_lum data
+        // for *every* FeH group under the requested track (not just
+        // the one [Fe/H] value this test's own deck actually asks
+        // for -- see Nebular.cpp's own constructor, which loops over
+        // every childrenByAttr(trackGrp, "FeH", ...) result), so a
+        // hole anywhere in MIST's own [Fe/H]/v_vcrit coverage throws
+        // right here, at SimControls construction -- not lazily
+        // later, when getCluster() is actually called for this deck's
+        // own [Fe/H] = 0. Anything else (a malformed deck, a missing
+        // track, or a genuine defect in Nebular's own loading logic)
+        // is a real test failure, not a known gap, and must not be
+        // silently swallowed here.
+        const std::string what = error.what();
+        const bool isKnownGridHole =
+            what.find("no logU data available to interpolate") != std::string::npos ||
+            what.find("outside the tabulated range") != std::string::npos ||
+            what.find("no exact v/vcrit match") != std::string::npos;
+        if (!isKnownGridHole)
+        {
+            std::cerr << "testClusterSpecsynFullNebular: SimControls construction "
+                "failed with an error that does not match any known real-grid-"
+                "coverage gap: " << what << "\n";
+            return nullptr;
+        }
+        std::cout << "testClusterSpecsynFullNebular: skipping -- the "
+            "real nebular grid does not (yet) fully cover the MIST "
+            "track's own [Fe/H]/v_vcrit range (" << what << ")\n";
+        wasSkip = true;
+        return nullptr;
+    }
+}
+
+// Check that specNeb's integrated (trapezoidal) luminosity over wl is
+// within an order of magnitude of spec's own, while still differing
+// from it somewhere pointwise -- see this file's own header comment
+// for why that is the "reasonable" bar for real-grid nebular
+// reprocessing rather than a bit-exact comparison. Prints its own
+// diagnostic and returns false on any violation; true otherwise.
+// Factored out of testClusterSpecsynFullNebular() to keep it within
+// its own cognitive-complexity budget.
+auto checkSpecVsSpecNebReasonable(const std::vector<double>& spec,
+    const std::vector<double>& specNeb, const std::vector<double>& wl) -> bool
+{
+    double trapzStellar = 0.0;
+    double trapzNeb = 0.0;
+    bool anyDifferent = false;
+    for (std::size_t i = 0; i + 1 < wl.size(); ++i)
+    {
+        trapzStellar += 0.5 * (spec.at(i) + spec.at(i + 1)) * (wl.at(i + 1) - wl.at(i));
+        trapzNeb += 0.5 * (specNeb.at(i) + specNeb.at(i + 1)) * (wl.at(i + 1) - wl.at(i));
+    }
+    for (std::size_t i = 0; i < spec.size(); ++i)
+    {
+        if (spec.at(i) != specNeb.at(i)) { anyDifferent = true; break; }
+    }
+
+    if (!std::isfinite(trapzStellar) || !std::isfinite(trapzNeb) ||
+        trapzStellar <= 0.0 || trapzNeb <= 0.0)
+    {
+        std::cerr << "testClusterSpecsynFullNebular: expected finite, "
+            "positive integrated stellar and stellar+nebular luminosities, "
+            "got " << trapzStellar << " and " << trapzNeb << "\n";
+        return false;
+    }
+    if (!anyDifferent)
+    {
+        std::cerr << "testClusterSpecsynFullNebular: expected specNeb() to "
+            "differ from spec() somewhere, but they are identical\n";
+        return false;
+    }
+    constexpr double orderOfMagnitudeFactor = 10.0;
+    const double ratio = trapzNeb / trapzStellar;
+    if (ratio < (1.0 / orderOfMagnitudeFactor) || ratio > orderOfMagnitudeFactor)
+    {
+        std::cerr << "testClusterSpecsynFullNebular: integrated "
+            "stellar+nebular luminosity (" << trapzNeb <<
+            ") is not within an order of magnitude of the integrated "
+            "stellar-only luminosity (" << trapzStellar << ")\n";
+        return false;
+    }
+    return true;
+}
 
 // Run the full simulation described by
 // tests/core/assets/testClusterSpecsynFullNebular.in (real MIST
@@ -81,18 +188,10 @@ auto testClusterSpecsynFullNebular() -> int
         // still being regenerated to plug exactly such holes (see this
         // file's own header comment), so treat any exception here as
         // one of those known, temporary gaps and skip rather than fail.
-        std::unique_ptr<io::SimControls> controlsPtr;
-        try
-        {
-            controlsPtr = std::make_unique<io::SimControls>(inputDeck);
-        }
-        catch (const std::exception& error)
-        {
-            std::cout << "testClusterSpecsynFullNebular: skipping -- the "
-                "real nebular grid does not (yet) fully cover the MIST "
-                "track's own [Fe/H]/v_vcrit range (" << error.what() << ")\n";
-            return 0;
-        }
+        bool wasSkip = false;
+        const std::unique_ptr<io::SimControls> controlsPtr =
+            buildControlsOrReportFailure(inputDeck, wasSkip);
+        if (controlsPtr == nullptr) { return wasSkip ? 0 : 1; }
         const io::SimControls& controls = *controlsPtr;
 
         if (controls.nebular() == nullptr)
@@ -116,50 +215,13 @@ auto testClusterSpecsynFullNebular() -> int
             return 1;
         }
 
-        // Integrated (trapezoidal) luminosity of each, over the shared
-        // wavelength grid -- "same order of magnitude" is checked on
-        // this bolometric-like summary rather than pointwise, since
-        // nebular reprocessing can locally swing a narrow bin (e.g. a
-        // strong line-deposit window) by orders of magnitude while
-        // leaving the overall SED comparable
+        // "Same order of magnitude" is checked on the bolometric-like
+        // integrated luminosity rather than pointwise, since nebular
+        // reprocessing can locally swing a narrow bin (e.g. a strong
+        // line-deposit window) by orders of magnitude while leaving
+        // the overall SED comparable
         const auto& wl = controls.specsyn()->wl();
-        double trapzStellar = 0.0;
-        double trapzNeb = 0.0;
-        bool anyDifferent = false;
-        for (std::size_t i = 0; i + 1 < wl.size(); ++i)
-        {
-            trapzStellar += 0.5 * (spec.at(i) + spec.at(i + 1)) * (wl.at(i + 1) - wl.at(i));
-            trapzNeb += 0.5 * (specNeb.at(i) + specNeb.at(i + 1)) * (wl.at(i + 1) - wl.at(i));
-        }
-        for (std::size_t i = 0; i < spec.size(); ++i)
-        {
-            if (spec.at(i) != specNeb.at(i)) { anyDifferent = true; break; }
-        }
-
-        if (!std::isfinite(trapzStellar) || !std::isfinite(trapzNeb) ||
-            trapzStellar <= 0.0 || trapzNeb <= 0.0)
-        {
-            std::cerr << "testClusterSpecsynFullNebular: expected finite, "
-                "positive integrated stellar and stellar+nebular luminosities, "
-                "got " << trapzStellar << " and " << trapzNeb << "\n";
-            return 1;
-        }
-        if (!anyDifferent)
-        {
-            std::cerr << "testClusterSpecsynFullNebular: expected specNeb() to "
-                "differ from spec() somewhere, but they are identical\n";
-            return 1;
-        }
-        constexpr double orderOfMagnitudeFactor = 10.0;
-        const double ratio = trapzNeb / trapzStellar;
-        if (ratio < (1.0 / orderOfMagnitudeFactor) || ratio > orderOfMagnitudeFactor)
-        {
-            std::cerr << "testClusterSpecsynFullNebular: integrated "
-                "stellar+nebular luminosity (" << trapzNeb <<
-                ") is not within an order of magnitude of the integrated "
-                "stellar-only luminosity (" << trapzStellar << ")\n";
-            return 1;
-        }
+        if (!checkSpecVsSpecNebReasonable(spec, specNeb, wl)) { return 1; }
 
         // Cross-check the total line luminosity against the ionizing
         // photon power budget: Q(HI) (independently computed here via

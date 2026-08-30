@@ -554,11 +554,30 @@ namespace io
          * @brief Set the nebular emission control parameters
          * @param nebControls New control parameters; see nebControls()'s own comment
          * @details
-         * Like setFCluster(), a plain direct assignment: NebularControls
-         * is a small value-type aggregate, not a polymorphic/heap-
-         * allocated object, so there is no ownership to transfer.
+         * Like setFCluster(), a plain direct assignment for
+         * logU_/covFac_/lineWidth_ -- all three are read live, so
+         * updating them here takes effect the next time
+         * Nebular::getCluster()/getGalaxy() runs, with no need to
+         * rebuild anything. computeNeb_ is deliberately excluded from
+         * that assignment and left at whatever this SimControls was
+         * actually constructed with: unlike the other three fields,
+         * computeNeb_ only ever takes effect once, at construction (it
+         * decides whether readNebular() builds nebular_ at all --
+         * see nebular()'s own comment), so nebular()'s own null-ness
+         * cannot be changed after the fact by assigning here. Setting
+         * it here without also rebuilding/discarding nebular_ would
+         * silently desynchronize nebControls().computeNeb_ from
+         * nebular() itself (e.g. reporting computeNeb_ == false while
+         * nebular() stays non-null and Cluster/Galaxy keep computing
+         * nebular products from it, since they gate on nebular() being
+         * non-null, not on this flag).
          */
-        void setNebControls(const nebular::NebularControls& nebControls) { nebControls_ = nebControls; }
+        void setNebControls(const nebular::NebularControls& nebControls)
+        {
+            auto updated = nebControls;
+            updated.computeNeb_ = nebControls_.computeNeb_;
+            nebControls_ = updated;
+        }
 
         // Object-replacement setters: unlike the string-driven setters
         // above, these accept an already-built object -- e.g. from

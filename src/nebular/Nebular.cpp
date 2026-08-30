@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <exception>
 #include <numbers>
 #include <stdexcept>
 #include <string>
@@ -108,6 +109,23 @@ namespace
         return utils::readDataset1D(subGrp, datasetName, context);
     }
 
+    // Throw if a just-blended dataset's own size doesn't match what
+    // the constructor is about to slice/copy it as -- e.g. a
+    // malformed table whose "cluster"/"spec" dataset isn't exactly
+    // (ntime, nwl) for the ntime/nwl this Nebular otherwise expects.
+    // Factored out of Nebular's own constructor, where this same check
+    // is needed after every blendByLogU() call, to keep it within its
+    // cognitive-complexity budget.
+    void checkDatasetSize(const std::string& context, const std::string& label,
+        const size_t actual, const size_t expected)
+    {
+        if (actual != expected)
+        {
+            throw std::runtime_error(context + ": " + label + " dataset has " +
+                std::to_string(actual) + " elements, expected " + std::to_string(expected));
+        }
+    }
+
     // Linearly blend (or, on an exact hit, select) the logU-bracketing
     // datasetName data closest to requestedLogU among candidates,
     // closing every one of candidates' own group handles exactly once
@@ -179,6 +197,91 @@ namespace
             }
         }
         return result;
+    }
+
+    // Best-effort close of whatever HDF5 group/file handles
+    // Nebular::loadTable() had open when an exception interrupted it.
+    // Factored out purely to keep loadTable() within its own
+    // cognitive-complexity budget.
+    void closeLoadTableHandles(const std::vector<std::pair<double, hid_t>>& vvcritGroups,
+        const std::vector<std::pair<double, hid_t>>& fehGroups, const hid_t trackGrp, const hid_t file)
+    {
+        for (const auto& [vc, grp] : vvcritGroups) { if (grp >= 0) { H5Gclose(grp); } }
+        for (const auto& [feh, grp] : fehGroups) { if (grp >= 0) { H5Gclose(grp); } }
+        if (trackGrp >= 0) { H5Gclose(trackGrp); }
+        if (file >= 0) { H5Fclose(file); }
+    }
+
+    // Load one [Fe/H] group's own galaxy/cluster spec/line_lum data
+    // into index i of every ctmLumPerQ*/lineLumPerQ* output array.
+    // Finds fehGrp's own v_vcrit child matching vvcrit exactly
+    // (throwing if none exists), then blends/validates/copies its
+    // galaxy and cluster spec/line_lum data -- see
+    // Nebular::loadTable()'s own comment for why validation happens
+    // here rather than trusting the table. vvcritGroups is scratch
+    // storage the caller owns (so its own catch block can close it if
+    // this function throws partway through); assigned here, and left
+    // empty again on successful return. Factored out of
+    // Nebular::loadTable() to keep it within its own cognitive-
+    // complexity budget, not for any reuse elsewhere.
+    void processFehGroup(const hid_t fehGrp, const double vvcrit, const std::string& trackName,
+        const std::vector<double>& nativeWl, const std::vector<double>& wl, const std::string& context,
+        const double logURequested, const size_t i, const size_t nWl, const size_t nLine,
+        const size_t nTimeNative, const double feh, std::vector<std::pair<double, hid_t>>& vvcritGroups,
+        std::vector<double>& ctmLumPerQGalaxyData, std::vector<double>& ctmLumPerQClusterData,
+        std::vector<double>& lineLumPerQGalaxyData, std::vector<double>& lineLumPerQClusterData)
+    {
+        vvcritGroups = childrenByAttr(fehGrp, "v_vcrit", context);
+        const auto vvcritMatch = std::find_if(vvcritGroups.begin(), vvcritGroups.end(),
+            [vvcrit](const auto& entry) { return utils::approxEqual(entry.first, vvcrit); });
+        if (vvcritMatch == vvcritGroups.end())
+        {
+            throw std::runtime_error(
+                std::string(context) + ": no exact v/vcrit match for track " + trackName +
+                " at [Fe/H] = " + std::to_string(feh));
+        }
+        const hid_t vvcritGrp = vvcritMatch->second;
+
+        const auto galaxySpec = blendByLogU(
+            logUCandidates(vvcritGrp, "galaxy", context), "spec", false, logURequested, context);
+        checkDatasetSize(context, "galaxy spec", galaxySpec.size(), nativeWl.size());
+        const auto galaxyResampled = resampleZeroPad(nativeWl, galaxySpec, wl);
+        std::copy(galaxyResampled.begin(), galaxyResampled.end(),
+            ctmLumPerQGalaxyData.begin() + static_cast<std::ptrdiff_t>(i * nWl));
+
+        const auto clusterSpec = blendByLogU(
+            logUCandidates(vvcritGrp, "cluster", context), "spec", true, logURequested, context);
+        checkDatasetSize(context, "cluster spec", clusterSpec.size(), nTimeNative * nativeWl.size());
+        for (size_t t = 0; t < nTimeNative; ++t)
+        {
+            const std::vector<double> row(
+                clusterSpec.begin() + static_cast<std::ptrdiff_t>(t * nativeWl.size()),
+                clusterSpec.begin() + static_cast<std::ptrdiff_t>((t + 1) * nativeWl.size()));
+            const auto rowResampled = resampleZeroPad(nativeWl, row, wl);
+            std::copy(rowResampled.begin(), rowResampled.end(),
+                ctmLumPerQClusterData.begin() +
+                    static_cast<std::ptrdiff_t>(((i * nTimeNative) + t) * nWl));
+        }
+
+        // Lines: no wavelength resampling needed (unlike the continuum
+        // above) -- the blended line_lum data already covers the
+        // table's full, global line list, matching lineWl_/lineLabel_
+        // exactly
+        const auto galaxyLineLum = blendByLogU(
+            logUCandidates(vvcritGrp, "galaxy", context), "line_lum", false, logURequested, context);
+        checkDatasetSize(context, "galaxy line_lum", galaxyLineLum.size(), nLine);
+        std::copy(galaxyLineLum.begin(), galaxyLineLum.end(),
+            lineLumPerQGalaxyData.begin() + static_cast<std::ptrdiff_t>(i * nLine));
+
+        const auto clusterLineLum = blendByLogU(
+            logUCandidates(vvcritGrp, "cluster", context), "line_lum", true, logURequested, context);
+        checkDatasetSize(context, "cluster line_lum", clusterLineLum.size(), nLine * nTimeNative);
+        std::copy(clusterLineLum.begin(), clusterLineLum.end(),
+            lineLumPerQClusterData.begin() +
+                static_cast<std::ptrdiff_t>(i * nTimeNative * nLine));
+
+        for (const auto& [vc, grp] : vvcritGroups) { H5Gclose(grp); }
+        vvcritGroups.clear();
     }
 
     // Threshold below which a line's own deposited power fraction in a
@@ -326,17 +429,54 @@ nebular::Nebular::Nebular(
             std::string(context) + ": nebular emission table " + tableName + " not found");
     }
 
-    const auto& specsynWl = simControls_.specsyn()->wl();
-
     // The HDF5 build linked here is not safe to call from two threads
     // at once at all, even across entirely separate files -- see
     // OutputManagerH5::openOutputFile()'s own comment for the full
-    // story -- so this shares that same global critical section
+    // story -- so this shares that same global critical section.
+    // Letting an exception escape a #pragma omp critical block is not
+    // something the OpenMP runtime reliably unwinds cleanly -- the
+    // lock's own release can be skipped, permanently blocking every
+    // other thread's own h5ThreadSafety-guarded HDF5 I/O (e.g.
+    // OutputManagerH5's own row-writing) for the rest of the run --
+    // so any exception loadTable() raises (e.g. a malformed or
+    // incomplete table -- see blendByLogU()'s own "no logU data"/
+    // "outside the tabulated range" throws) is instead caught here,
+    // captured into caught (declared outside the critical block,
+    // before it even opens), and only actually rethrown once this
+    // block -- and so the critical section itself -- has exited
+    // normally. loadTable() itself is responsible for cleaning up
+    // every HDF5 handle it opens before letting an exception escape
+    // it, so there is nothing further to clean up here.
+    std::exception_ptr caught;
 #ifdef _OPENMP
 #pragma omp critical(h5ThreadSafety)
 #endif
     {
-        const hid_t file = H5Fopen(tablePath.string().c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+        try
+        {
+            loadTable(trackName, vvcrit, tablePath);
+        }
+        catch (...)
+        {
+            caught = std::current_exception();
+        }
+    }
+    if (caught) { std::rethrow_exception(caught); }
+}
+
+void nebular::Nebular::loadTable(const std::string& trackName, const double vvcrit,
+    const std::filesystem::path& tablePath)
+{
+    static constexpr auto context = "Nebular";
+    const auto& specsynWl = simControls_.specsyn()->wl();
+
+    hid_t file = -1;
+    hid_t trackGrp = -1;
+    std::vector<std::pair<double, hid_t>> fehGroups;
+    std::vector<std::pair<double, hid_t>> vvcritGroups;
+    try
+    {
+        file = H5Fopen(tablePath.string().c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
         if (file < 0)
         {
             throw std::runtime_error(
@@ -347,6 +487,12 @@ nebular::Nebular::Nebular(
         wl_ = specsynWl;
         lineWl_ = utils::readDataset1D(file, "line_wl", context);
         lineLabel_ = utils::readStringDataset1D(file, "line_label", context);
+        if (lineLabel_.size() != lineWl_.size())
+        {
+            throw std::runtime_error(
+                std::string(context) + ": line_label has " + std::to_string(lineLabel_.size()) +
+                " entries, but line_wl has " + std::to_string(lineWl_.size()));
+        }
         clusterAge_ = utils::readDataset1D(file, "time", context);
 
         auto lineDeposit =
@@ -374,16 +520,25 @@ nebular::Nebular::Nebular(
         }
         lineDepositFrac_ = Grid2D(lineDepositFracData_.data(), depositWidth, lineWl_.size());
 
-        const hid_t trackGrp = H5Gopen2(file, trackName.c_str(), H5P_DEFAULT);
+        trackGrp = H5Gopen2(file, trackName.c_str(), H5P_DEFAULT);
         if (trackGrp < 0)
         {
-            H5Fclose(file);
             throw std::runtime_error(
                 std::string(context) + ": track " + trackName + " not found in table " +
                 tablePath.string());
         }
 
-        auto fehGroups = childrenByAttr(trackGrp, "FeH", context);
+        fehGroups = childrenByAttr(trackGrp, "FeH", context);
+        if (fehGroups.empty())
+        {
+            throw std::runtime_error(
+                std::string(context) + ": track " + trackName + " has no [Fe/H] groups");
+        }
+        if (clusterAge_.empty())
+        {
+            throw std::runtime_error(
+                std::string(context) + ": table has no cluster ages (empty 'time' dataset)");
+        }
         feH_.clear();
         feH_.reserve(fehGroups.size());
         for (const auto& [feh, grp] : fehGroups) { feH_.push_back(feh); }
@@ -400,68 +555,33 @@ nebular::Nebular::Nebular(
 
         for (size_t i = 0; i < fehGroups.size(); ++i)
         {
-            const hid_t fehGrp = fehGroups.at(i).second;
-
-            auto vvcritGroups = childrenByAttr(fehGrp, "v_vcrit", context);
-            const auto vvcritMatch = std::find_if(vvcritGroups.begin(), vvcritGroups.end(),
-                [vvcrit](const auto& entry) { return utils::approxEqual(entry.first, vvcrit); });
-            if (vvcritMatch == vvcritGroups.end())
-            {
-                for (const auto& [vc, grp] : vvcritGroups) { H5Gclose(grp); }
-                for (const auto& [feh, grp] : fehGroups) { H5Gclose(grp); }
-                H5Gclose(trackGrp);
-                H5Fclose(file);
-                throw std::runtime_error(
-                    std::string(context) + ": no exact v/vcrit match for track " + trackName +
-                    " at [Fe/H] = " + std::to_string(feH_.at(i)));
-            }
-            const hid_t vvcritGrp = vvcritMatch->second;
-
-            const auto galaxySpec = blendByLogU(
-                logUCandidates(vvcritGrp, "galaxy", context), "spec", false, logURequested, context);
-            const auto galaxyResampled = resampleZeroPad(nativeWl, galaxySpec, wl_);
-            std::copy(galaxyResampled.begin(), galaxyResampled.end(),
-                ctmLumPerQGalaxyData_.begin() + static_cast<std::ptrdiff_t>(i * nWl));
-
-            const auto clusterSpec = blendByLogU(
-                logUCandidates(vvcritGrp, "cluster", context), "spec", true, logURequested, context);
-            for (size_t t = 0; t < nTimeNative; ++t)
-            {
-                const std::vector<double> row(
-                    clusterSpec.begin() + static_cast<std::ptrdiff_t>(t * nativeWl.size()),
-                    clusterSpec.begin() + static_cast<std::ptrdiff_t>((t + 1) * nativeWl.size()));
-                const auto rowResampled = resampleZeroPad(nativeWl, row, wl_);
-                std::copy(rowResampled.begin(), rowResampled.end(),
-                    ctmLumPerQClusterData_.begin() +
-                        static_cast<std::ptrdiff_t>(((i * nTimeNative) + t) * nWl));
-            }
-
-            // Lines: no wavelength resampling needed (unlike the
-            // continuum above) -- the blended line_lum data already
-            // covers the table's full, global line list, matching
-            // lineWl_/lineLabel_ exactly
-            const auto galaxyLineLum = blendByLogU(
-                logUCandidates(vvcritGrp, "galaxy", context), "line_lum", false, logURequested, context);
-            std::copy(galaxyLineLum.begin(), galaxyLineLum.end(),
-                lineLumPerQGalaxyData_.begin() + static_cast<std::ptrdiff_t>(i * nLine));
-
-            const auto clusterLineLum = blendByLogU(
-                logUCandidates(vvcritGrp, "cluster", context), "line_lum", true, logURequested, context);
-            std::copy(clusterLineLum.begin(), clusterLineLum.end(),
-                lineLumPerQClusterData_.begin() +
-                    static_cast<std::ptrdiff_t>(i * nTimeNative * nLine));
-
-            for (const auto& [vc, grp] : vvcritGroups) { H5Gclose(grp); }
+            processFehGroup(fehGroups.at(i).second, vvcrit, trackName, nativeWl, wl_, context,
+                logURequested, i, nWl, nLine, nTimeNative, feH_.at(i), vvcritGroups,
+                ctmLumPerQGalaxyData_, ctmLumPerQClusterData_,
+                lineLumPerQGalaxyData_, lineLumPerQClusterData_);
         }
 
         for (const auto& [feh, grp] : fehGroups) { H5Gclose(grp); }
+        fehGroups.clear();
         H5Gclose(trackGrp);
+        trackGrp = -1;
         H5Fclose(file);
+        file = -1;
 
         ctmLumPerQGalaxy_ = Grid2D(ctmLumPerQGalaxyData_.data(), feH_.size(), nWl);
         ctmLumPerQCluster_ = Grid3D(ctmLumPerQClusterData_.data(), feH_.size(), nTimeNative, nWl);
         lineLumPerQGalaxy_ = Grid2D(lineLumPerQGalaxyData_.data(), feH_.size(), nLine);
         lineLumPerQCluster_ = Grid3D(lineLumPerQClusterData_.data(), feH_.size(), nTimeNative, nLine);
+    }
+    catch (...)
+    {
+        // Best-effort cleanup of whatever the try block above left
+        // open, then rethrow -- the exception itself must propagate
+        // out of loadTable() so the constructor's own critical-section
+        // wrapper (see its own comment) can catch and re-raise it once
+        // that section has exited.
+        closeLoadTableHandles(vvcritGroups, fehGroups, trackGrp, file);
+        throw;
     }
 }
 
@@ -485,7 +605,6 @@ void nebular::Nebular::depositLines(
     const size_t nWl = wl_.size();
     const size_t depositWidth = lineDepositFrac_.extent(0);
     const auto centerRow = static_cast<ptrdiff_t>((depositWidth - 1) / 2);
-    const auto n = static_cast<ptrdiff_t>(depositWidth / 2) - 1;
 
     for (size_t ell = 0; ell < lineLum.size(); ++ell)
     {
@@ -495,7 +614,12 @@ void nebular::Nebular::depositLines(
         if (lineLum[ell] == 0.0) { continue; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
 
         const auto centerIdx = static_cast<ptrdiff_t>(lineCenterIdx_[ell]); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
-        for (ptrdiff_t offset = -n; offset <= n; ++offset)
+        // Offsets range over the deposit window's own full half-width,
+        // centerRow on each side of the center bin (offset = 0), so
+        // every row lineDepositFrac_ actually stores -- including the
+        // lo/hi neighbor bins computeLineDepositWindows() computed --
+        // gets deposited, not just the center bin.
+        for (ptrdiff_t offset = -centerRow; offset <= centerRow; ++offset)
         {
             const ptrdiff_t binIdx = centerIdx + offset;
 

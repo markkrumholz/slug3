@@ -12,8 +12,10 @@
 #include "../phot/FilterIdeal.hpp"
 #include "../tracks/TrackCommons.hpp"
 #include <cstddef>
+#include <filesystem>
 #include <mdspan> // NOLINT(misc-include-cleaner)
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace io
@@ -197,6 +199,31 @@ namespace nebular
          * rather than crossing that edge.
          */
         void depositLines(const std::vector<double>& lineLum, std::vector<double>& spec) const;
+
+        /**
+         * @brief Open tablePath and load every member this class reads from it
+         * @param trackName Name of the track group to load, as passed to the constructor
+         * @param vvcrit v/vcrit to load, as passed to the constructor
+         * @param tablePath Resolved path to the nebular emission table,
+         *   as returned by utils::getFilePath() in the constructor
+         * @details
+         * Does everything the constructor's own header comment
+         * describes -- reading wl_/lineWl_/lineLabel_/clusterAge_,
+         * computing the line-deposit windows, and blending/validating/
+         * copying every [Fe/H] group's own galaxy/cluster spec/
+         * line_lum data -- except opening the h5ThreadSafety critical
+         * section and file/track/group cleanup on failure isn't
+         * partial: this method closes every HDF5 handle it itself
+         * opened before letting any exception it can't recover from
+         * propagate out, so the constructor's own catch (which must
+         * live inside the critical section, but must not let the
+         * actual throw happen there -- see its own comment) has
+         * nothing further to clean up. Split out of the constructor
+         * itself purely to keep it within its own cognitive-complexity
+         * budget, not for any reuse elsewhere.
+         */
+        void loadTable(const std::string& trackName, double vvcrit,
+            const std::filesystem::path& tablePath);
 
         const io::SimControls& simControls_; /**< Simulation controls (physics and control-flow settings) */
 

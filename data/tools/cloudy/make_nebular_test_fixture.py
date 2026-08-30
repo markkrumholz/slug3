@@ -29,6 +29,8 @@ Run from the repository root: python3 data/tools/cloudy/make_nebular_test_fixtur
 
 :copyright: Copyright (c) 2026 Mark Krumholz
 """
+import argparse
+
 import h5py
 import numpy as np
 
@@ -82,7 +84,11 @@ def cluster_line(feh: float) -> np.ndarray:
 
 
 def main() -> None:
-    path = "tests/nebular/assets/nebular_test.h5"
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument(
+        "-o", "--output", default="tests/nebular/assets/nebular_test.h5",
+        help="path of the HDF5 fixture to write")
+    path = parser.parse_args().output
     with h5py.File(path, "w") as fout:
         fout.create_dataset("wl", data=WL_NATIVE)
         fout.create_dataset("line_wl", data=LINE_WL)

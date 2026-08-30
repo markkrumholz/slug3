@@ -23,9 +23,9 @@ namespace nebular
     inline constexpr double defaultLineWidth = 20.0; /**< Default assumed emission line width, in km/s */
     inline constexpr bool defaultComputeNeb = true;  /**< Default for whether nebular emission is computed at all */
 
-    inline static const std::string defaultTable = // NOLINT(bugprone-throwing-static-initialization,cert-err58-cpp) -- built from fixed string literals, so the (theoretically throwing) path conversion can never actually throw here
+    inline const std::string defaultTable = // NOLINT(bugprone-throwing-static-initialization,cert-err58-cpp) -- built from fixed string literals, so the (theoretically throwing) path conversion can never actually throw here
         (std::filesystem::path("data") / std::filesystem::path("nebular")
-        / std::filesystem::path("nebular.h5")); /**< Default nebular emission table */
+        / std::filesystem::path("nebular.h5")).string(); /**< Default nebular emission table */
 
     /**
      * @struct NebularControls
