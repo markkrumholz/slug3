@@ -91,7 +91,7 @@ namespace core
          * @details
          * curTime_, lbol_, targetMass_, and actualMass_ all start at 0,
          * and clusters_/disruptedClusters_/fieldStars_/deadFieldStars_/
-         * spec_/specExtinct_/specNeb_/specNebExtinct_/lineLum_/phot_/
+         * spec_/specExtinct_/specNeb_/specNebExtinct_/lineLum_/lineLumExtinct_/phot_/
          * photExtinct_/photNeb_/photNebExtinct_ all start empty -- no
          * clusters or field stars exist, and no spectrum/photometry has
          * been computed, until the first call to advance().
@@ -191,7 +191,7 @@ namespace core
          * @details
          * Computed lazily: if advance() has run since spec_/specExtinct_
          * were last computed, this triggers computeSpec() (which
-         * computes spec_/specExtinct_/specNeb_/specNebExtinct_/lineLum_
+         * computes spec_/specExtinct_/specNeb_/specNebExtinct_/lineLum_/lineLumExtinct_
          * together) before returning, so the result is always current
          * as of the last advance() -- see specCurrent_'s own comment.
          * Not const, since it may need to run that computation.
@@ -275,7 +275,7 @@ namespace core
          * @details
          * Computed lazily -- see spec()'s own comment; shares the same
          * specCurrent_ flag, since a single computeSpec() call computes
-         * spec_/specExtinct_/specNeb_/specNebExtinct_/lineLum_ together.
+         * spec_/specExtinct_/specNeb_/specNebExtinct_/lineLum_/lineLumExtinct_ together.
          */
         [[nodiscard]] auto specNeb() -> const auto&
         {
@@ -317,6 +317,22 @@ namespace core
         {
             if (!specCurrent_) { computeSpec(); specCurrent_ = true; }
             return lineLum_;
+        }
+
+        /**
+         * @brief Return the galaxy's extincted nebular emission line luminosities
+         * @return A const reference to lineLum(), attenuated by
+         *   extinction; an empty vector if no extinction curve was
+         *   requested (SimControls::extinct() is null) or lineLum()
+         *   itself is empty (no nebular emission grid or no spectral
+         *   synthesizer was requested)
+         * @details
+         * Computed lazily -- see lineLum()'s own comment.
+         */
+        [[nodiscard]] auto lineLumExtinct() -> const auto&
+        {
+            if (!specCurrent_) { computeSpec(); specCurrent_ = true; }
+            return lineLumExtinct_;
         }
 
         /**
@@ -427,15 +443,15 @@ namespace core
          * cluster that disrupted during this step from clusters() to
          * disruptedClusters(), moves any field star that has died as
          * of t from fieldStars() to deadFieldStars(), then marks
-         * spec_/specExtinct_/specNeb_/specNebExtinct_/lineLum_/phot_/
+         * spec_/specExtinct_/specNeb_/specNebExtinct_/lineLum_/lineLumExtinct_/phot_/
          * photExtinct_/photNeb_/photNebExtinct_/lbol_/lbolCts_ as stale
          * (see specCurrent_/photCurrent_/lbolCurrent_/
          * lbolCtsCurrent_'s own comments) rather than recomputing them
          * itself -- they are instead recomputed lazily, on demand, the
          * next time spec()/specExtinct()/specNeb()/specNebExtinct()/
-         * lineLum()/phot()/photExtinct()/photNeb()/photNebExtinct()/
-         * lbol() is actually called -- before finally updating
-         * curTime() to t.
+         * lineLum()/lineLumExtinct()/phot()/photExtinct()/photNeb()/
+         * photNebExtinct()/lbol() is actually called -- before finally
+         * updating curTime() to t.
          */
         void advance(double t);
 
@@ -462,6 +478,7 @@ namespace core
         std::vector<double> specNeb_;      /**< Sum of specNeb() over every cluster in clusters_/disruptedClusters_, plus the continuous population's own nebular-reprocessed contribution, at the current time */
         std::vector<double> specNebExtinct_; /**< Sum of specNebExtinct() over every cluster in clusters_/disruptedClusters_, plus the continuous population's own extincted, nebular-reprocessed contribution, at the current time */
         std::vector<double> lineLum_;      /**< Sum of lineLum() over every cluster in clusters_/disruptedClusters_, plus the continuous population's own contribution, at the current time */
+        std::vector<double> lineLumExtinct_; /**< Sum of lineLumExtinct() over every cluster in clusters_/disruptedClusters_, plus the continuous population's own extincted contribution, at the current time */
         std::vector<double> phot_;         /**< Photometry of spec_ through each filter in SimControls::filters(), at the current time */
         std::vector<double> photExtinct_;  /**< Photometry of specExtinct_ through each filter in SimControls::filters(), at the current time */
         std::vector<double> photNeb_;      /**< Photometry of specNeb_ through each filter in SimControls::filters(), at the current time */
@@ -471,12 +488,13 @@ namespace core
         double actualMass_ = 0.0;          /**< Cumulative total actual stellar mass formed so far (clustered and continuous together), over every advance() call, in Msun */
 
         /**
-         * @brief Whether spec_/specExtinct_/specNeb_/specNebExtinct_/lineLum_ are current as of curTime_
+         * @brief Whether spec_/specExtinct_/specNeb_/specNebExtinct_/lineLum_/lineLumExtinct_ are current as of curTime_
          * @details
          * Mirrors Cluster::specCurrent_'s own comment: true at
          * construction, set false at the end of every advance() call,
          * and back to true by spec()/specExtinct()/specNeb()/
-         * specNebExtinct()/lineLum() after recomputing them.
+         * specNebExtinct()/lineLum()/lineLumExtinct() after recomputing
+         * them.
          */
         bool specCurrent_ = true;
 
@@ -541,7 +559,7 @@ namespace core
         std::reference_wrapper<const io::SimControls> controls_;
 
         /**
-         * @brief Update spec_/specExtinct_/specNeb_/specNebExtinct_/lineLum_ from the current cluster population
+         * @brief Update spec_/specExtinct_/specNeb_/specNebExtinct_/lineLum_/lineLumExtinct_ from the current cluster population
          * @details
          * Mirrors Cluster::computeSpec()'s own null-guard, but sums
          * over clusters rather than stars: does nothing if
@@ -552,7 +570,7 @@ namespace core
          * is also non-null, also sets specExtinct_ to the sum of
          * specExtinct() over the same clusters. If SimControls::nebular()
          * is also non-null, hands off to addClusterSpecNeb() to set
-         * specNeb_/specNebExtinct_/lineLum_ the same way.
+         * specNeb_/specNebExtinct_/lineLum_/lineLumExtinct_ the same way.
          *
          * If fCluster() < 1, hands off to addContinuousSpec() to add
          * the purely continuous population's own contribution together
@@ -566,7 +584,7 @@ namespace core
         void computeSpec();
 
         /**
-         * @brief Set specNeb_/specNebExtinct_/lineLum_ from the current cluster population
+         * @brief Set specNeb_/specNebExtinct_/lineLum_/lineLumExtinct_ from the current cluster population
          * @param ext SimControls::extinct(), passed through from
          *   computeSpec() rather than re-read here, since computeSpec()
          *   already has it in hand
@@ -576,16 +594,17 @@ namespace core
          * @details
          * Mirrors computeSpec()'s own spec_/specExtinct_ summing
          * exactly, but for specNeb_/lineLum_ (unconditionally) and
-         * specNebExtinct_ (if ext is non-null), from specNeb()/
-         * lineLum()/specNebExtinct() over every cluster in clusters_
-         * and disruptedClusters_. Split out of computeSpec() itself
+         * specNebExtinct_/lineLumExtinct_ (if ext is non-null), from
+         * specNeb()/lineLum()/specNebExtinct()/lineLumExtinct() over
+         * every cluster in clusters_ and disruptedClusters_. Split out
+         * of computeSpec() itself
          * purely to keep that function's own cognitive complexity
          * down, not for any reuse elsewhere.
          */
         void addClusterSpecNeb(const extinct::Extinct* ext, const nebular::Nebular* neb);
 
         /**
-         * @brief Add the purely continuous population's and every field star's own contribution to spec_/specExtinct_/specNeb_/specNebExtinct_/lineLum_
+         * @brief Add the purely continuous population's and every field star's own contribution to spec_/specExtinct_/specNeb_/specNebExtinct_/lineLum_/lineLumExtinct_
          * @param ext SimControls::extinct(), passed through from
          *   computeSpec() rather than re-read here, since computeSpec()
          *   already has it in hand
@@ -634,15 +653,35 @@ namespace core
          * attempting a full nebular emission integral over [Fe/H] --
          * adding the resulting stellar + nebular spectrum to specNeb_
          * and its own line luminosities to lineLum_; if ext is also
-         * non-null, extinguishes that same nebular-reprocessed
-         * contribution via applyExtinctionCts(), exactly as the plain
-         * (non-nebular) contribution is, and adds it to
-         * specNebExtinct_.
+         * non-null, extinguishes that same nebular-reprocessed spectrum
+         * via applyExtinctionCts(), exactly as the plain (non-nebular)
+         * contribution is, and adds it to specNebExtinct_, and
+         * likewise extinguishes those same line luminosities via
+         * applyExtinctionCtsLines(), adding the result to
+         * lineLumExtinct_.
          *
          * Split out of computeSpec() itself purely to keep that
          * function's own cognitive complexity down.
          */
         void addContinuousSpec(const extinct::Extinct* ext, const nebular::Nebular* neb);
+
+        /**
+         * @brief Add contSpec's own nebular-reprocessed contribution to specNeb_/lineLum_/specNebExtinct_/lineLumExtinct_
+         * @param ext SimControls::extinct(), passed through from
+         *   addContinuousSpec() rather than re-read here
+         * @param neb SimControls::nebular(), passed through from
+         *   addContinuousSpec() likewise; must be non-null
+         *   (addContinuousSpec() only calls this when it is)
+         * @param contSpec The purely continuous population's and every
+         *   field star's own combined, unattenuated spectrum, as built
+         *   by addContinuousSpec() itself
+         * @details
+         * See addContinuousSpec()'s own comment for exactly what this
+         * does -- split out purely to keep that function's own
+         * cognitive complexity down, not for any reuse elsewhere.
+         */
+        void addContinuousNebSpec(const extinct::Extinct* ext, const nebular::Nebular* neb,
+            const std::vector<double>& contSpec);
 
         /**
          * @brief Update phot_/photExtinct_/photNeb_/photNebExtinct_ from the current spec_/specExtinct_/specNeb_/specNebExtinct_

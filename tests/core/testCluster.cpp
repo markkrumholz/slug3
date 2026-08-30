@@ -570,7 +570,7 @@ static auto testClusterLbol() -> int
 }
 
 // Verify that Cluster's own specNeb()/specNebExtinct()/lineLum()/
-// photNeb()/photNebExtinct() agree, bit-for-bit, with an independent
+// lineLumExtinct()/photNeb()/photNebExtinct() agree, bit-for-bit, with an independent
 // recomputation via SimControls::nebular()'s own public getCluster(),
 // applied to cluster.spec() at cluster.feH() and this test's own known
 // age -- mirrors testClusterExtinct()'s own general shape, but for
@@ -641,6 +641,13 @@ static auto testClusterNebular() -> int
         {
             std::cerr << "testCluster: nebular: specNebExtinct() does not match "
                 "ext->applyExtinction(aV(), specNeb())\n";
+            return 1;
+        }
+        const auto expectedLineLumExtinct = ext->applyExtinctionLines(cluster.aV(), cluster.lineLum());
+        if (cluster.lineLumExtinct() != expectedLineLumExtinct)
+        {
+            std::cerr << "testCluster: nebular: lineLumExtinct() does not match "
+                "ext->applyExtinctionLines(aV(), lineLum())\n";
             return 1;
         }
 

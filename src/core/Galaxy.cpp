@@ -180,8 +180,8 @@ void core::Galaxy::advance(const double t)
 }
 
 // Sum spec_/specExtinct_ (and, if a nebular emission grid was
-// requested, specNeb_/specNebExtinct_/lineLum_) over every cluster in
-// clusters_ and disruptedClusters_ -- see this method's own header
+// requested, specNeb_/specNebExtinct_/lineLum_/lineLumExtinct_) over
+// every cluster in clusters_ and disruptedClusters_ -- see this method's own header
 // comment for the null-guards this mirrors from Cluster::computeSpec()
 // -- then, if fCluster() < 1, hands off to addContinuousSpec() to add
 // the continuously-treated (non-clustered) share of the population's
@@ -220,8 +220,8 @@ void core::Galaxy::computeSpec()
         sumSpecExtinct(disruptedClusters_);
     }
 
-    // Sum specNeb_/specNebExtinct_/lineLum_ over the same clusters,
-    // exactly as spec_/specExtinct_ are above, if a nebular emission
+    // Sum specNeb_/specNebExtinct_/lineLum_/lineLumExtinct_ over the
+    // same clusters, exactly as spec_/specExtinct_ are above, if a nebular emission
     // grid was requested -- see addClusterSpecNeb()'s own comment.
     const auto* neb = sc.nebular();
     if (neb != nullptr) { addClusterSpecNeb(ext, neb); }
@@ -239,8 +239,8 @@ void core::Galaxy::computeSpec()
     if (sc.fCluster() < 1.0) { addContinuousSpec(ext, neb); }
 }
 
-// Sum specNeb_/lineLum_ (and specNebExtinct_) over every cluster in
-// clusters_ and disruptedClusters_, exactly mirroring computeSpec()'s
+// Sum specNeb_/lineLum_ (and specNebExtinct_/lineLumExtinct_) over
+// every cluster in clusters_ and disruptedClusters_, exactly mirroring computeSpec()'s
 // own spec_/specExtinct_ summing -- split out purely to keep
 // computeSpec()'s own cognitive complexity down, not for any reuse
 // elsewhere. Field stars' own nebular contribution is folded in
@@ -265,12 +265,15 @@ void core::Galaxy::addClusterSpecNeb(const extinct::Extinct* ext, const nebular:
     if (ext != nullptr)
     {
         specNebExtinct_.assign(ext->wl().size(), 0.0);
+        lineLumExtinct_.assign(neb->lineWl().size(), 0.0);
         const auto sumSpecNebExtinct = [this](std::vector<Cluster>& clusterList)
         {
             for (auto& cluster : clusterList)
             {
                 const auto& clusterSpecNebExtinct = cluster.specNebExtinct();
                 for (std::size_t i = 0; i < specNebExtinct_.size(); ++i) { specNebExtinct_[i] += clusterSpecNebExtinct[i]; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- clusterSpecNebExtinct has size extinct()->wl().size() by Cluster::computeSpec()'s own contract, matching specNebExtinct_'s size set just above
+                const auto& clusterLineLumExtinct = cluster.lineLumExtinct();
+                for (std::size_t i = 0; i < lineLumExtinct_.size(); ++i) { lineLumExtinct_[i] += clusterLineLumExtinct[i]; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- clusterLineLumExtinct has size neb->lineWl().size() by Cluster::computeSpec()'s own contract, matching lineLumExtinct_'s size set just above
             }
         };
         sumSpecNebExtinct(clusters_);
@@ -338,21 +341,28 @@ void core::Galaxy::addContinuousSpec(const extinct::Extinct* ext, const nebular:
     }
 
     // Add this same combined contribution's own nebular-reprocessed
-    // share, if a nebular emission grid was requested -- see this
-    // method's own header comment for why sc.fehDist().expectationValue()
-    // stands in for the full [Fe/H] distribution getGalaxy() itself
-    // can't take directly.
-    if (neb != nullptr)
-    {
-        auto [nebContSpec, nebContLineLum] = neb->getGalaxy(contSpec, sc.fehDist().expectationValue());
-        for (std::size_t i = 0; i < specNeb_.size(); ++i) { specNeb_[i] += nebContSpec[i]; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- nebContSpec has size wl().size() by Nebular::getGalaxy()'s own contract, matching specNeb_'s size set in computeSpec()
-        for (std::size_t i = 0; i < lineLum_.size(); ++i) { lineLum_[i] += nebContLineLum[i]; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- nebContLineLum has size neb->lineWl().size() by Nebular::getGalaxy()'s own contract, matching lineLum_'s size set in computeSpec()
-        if (ext != nullptr)
-        {
-            const auto nebContSpecExtinct = ext->applyExtinctionCts(nebContSpec);
-            for (std::size_t i = 0; i < specNebExtinct_.size(); ++i) { specNebExtinct_[i] += nebContSpecExtinct[i]; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- nebContSpecExtinct has size specNebExtinct_.size() (wl_.size()) by Extinct::applyExtinctionCts()'s own contract, matching specNebExtinct_'s size set in computeSpec()
-        }
-    }
+    // share, if a nebular emission grid was requested -- see
+    // addContinuousNebSpec()'s own comment.
+    if (neb != nullptr) { addContinuousNebSpec(ext, neb, contSpec); }
+}
+
+// See Galaxy.hpp's own header comment for this method's exact
+// contract. sc.fehDist().expectationValue() stands in for the full
+// [Fe/H] distribution getGalaxy() itself can't take directly -- see
+// addContinuousSpec()'s own header comment for why.
+void core::Galaxy::addContinuousNebSpec(const extinct::Extinct* ext, const nebular::Nebular* neb,
+    const std::vector<double>& contSpec)
+{
+    const auto& sc = controls_.get();
+    auto [nebContSpec, nebContLineLum] = neb->getGalaxy(contSpec, sc.fehDist().expectationValue());
+    for (std::size_t i = 0; i < specNeb_.size(); ++i) { specNeb_[i] += nebContSpec[i]; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- nebContSpec has size wl().size() by Nebular::getGalaxy()'s own contract, matching specNeb_'s size set in computeSpec()
+    for (std::size_t i = 0; i < lineLum_.size(); ++i) { lineLum_[i] += nebContLineLum[i]; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- nebContLineLum has size neb->lineWl().size() by Nebular::getGalaxy()'s own contract, matching lineLum_'s size set in computeSpec()
+    if (ext == nullptr) { return; }
+
+    const auto nebContSpecExtinct = ext->applyExtinctionCts(nebContSpec);
+    for (std::size_t i = 0; i < specNebExtinct_.size(); ++i) { specNebExtinct_[i] += nebContSpecExtinct[i]; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- nebContSpecExtinct has size specNebExtinct_.size() (wl_.size()) by Extinct::applyExtinctionCts()'s own contract, matching specNebExtinct_'s size set in computeSpec()
+    const auto nebContLineLumExtinct = ext->applyExtinctionCtsLines(nebContLineLum);
+    for (std::size_t i = 0; i < lineLumExtinct_.size(); ++i) { lineLumExtinct_[i] += nebContLineLumExtinct[i]; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- nebContLineLumExtinct has size lineLumExtinct_.size() (neb->lineWl().size()) by Extinct::applyExtinctionCtsLines()'s own contract, matching lineLumExtinct_'s size set in addClusterSpecNeb()
 }
 
 // Update the galaxy's photometry (and, if an extinction curve and/or

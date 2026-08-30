@@ -188,7 +188,7 @@ namespace core
          * @details
          * Computed lazily: if advance() has run since spec_/specExtinct_
          * were last computed, this triggers computeSpec() (which
-         * computes spec_/specExtinct_/specNeb_/specNebExtinct_/lineLum_
+         * computes spec_/specExtinct_/specNeb_/specNebExtinct_/lineLum_/lineLumExtinct_
          * together) before returning, so the result is always current
          * as of the last advance() -- see specCurrent_'s own comment.
          * Not const, since it may need to run that computation.
@@ -268,7 +268,7 @@ namespace core
          * @details
          * Computed lazily -- see spec()'s own comment; shares the same
          * specCurrent_ flag, since a single computeSpec() call computes
-         * spec_/specExtinct_/specNeb_/specNebExtinct_/lineLum_ together.
+         * spec_/specExtinct_/specNeb_/specNebExtinct_/lineLum_/lineLumExtinct_ together.
          */
         [[nodiscard]] auto specNeb() -> const auto&
         {
@@ -309,6 +309,22 @@ namespace core
         {
             if (!specCurrent_) { computeSpec(); specCurrent_ = true; }
             return lineLum_;
+        }
+
+        /**
+         * @brief Return the cluster's extincted nebular emission line luminosities
+         * @return A const reference to lineLum(), attenuated by aV()
+         *   through SimControls::extinct(); an empty vector if no
+         *   extinction curve was requested (SimControls::extinct() is
+         *   null) or lineLum() itself is empty (no nebular emission
+         *   grid or no spectral synthesizer was requested)
+         * @details
+         * Computed lazily -- see lineLum()'s own comment.
+         */
+        [[nodiscard]] auto lineLumExtinct() -> const auto&
+        {
+            if (!specCurrent_) { computeSpec(); specCurrent_ = true; }
+            return lineLumExtinct_;
         }
 
         /**
@@ -378,13 +394,14 @@ namespace core
          * @details
          * Updates the living/dead star lists and the isochrone for the
          * new time, then marks spec_/specExtinct_/specNeb_/
-         * specNebExtinct_/lineLum_/phot_/photExtinct_/photNeb_/
+         * specNebExtinct_/lineLum_/lineLumExtinct_/phot_/photExtinct_/photNeb_/
          * photNebExtinct_/lbol_ as stale (see specCurrent_/
          * photCurrent_/lbolCurrent_'s own comments) rather than
          * recomputing them itself -- they are instead recomputed
          * lazily, on demand, the next time spec()/specExtinct()/
-         * specNeb()/specNebExtinct()/lineLum()/phot()/photExtinct()/
-         * photNeb()/photNebExtinct()/lbol() is actually called.
+         * specNeb()/specNebExtinct()/lineLum()/lineLumExtinct()/phot()/
+         * photExtinct()/photNeb()/photNebExtinct()/lbol() is actually
+         * called.
          */
         void advance(double t);
         
@@ -429,6 +446,7 @@ namespace core
         std::vector<double> specNeb_; /**< spec_ plus nebular continuum and line emission, via SimControls::nebular()'s own getCluster(), at the current time */
         std::vector<double> specNebExtinct_; /**< specNeb_ attenuated by aV_ through SimControls::extinct(), at the current time */
         std::vector<double> lineLum_; /**< Luminosity of each of SimControls::nebular()'s own lineWl() lines, in erg/s, at the current time */
+        std::vector<double> lineLumExtinct_; /**< lineLum_ attenuated by aV_ through SimControls::extinct(), at the current time */
         std::vector<double> phot_;  /**< Photometry of spec_ through each filter in SimControls::filters(), at the current time */
         std::vector<double> photExtinct_; /**< Photometry of specExtinct_ through each filter in SimControls::filters(), at the current time */
         std::vector<double> photNeb_; /**< Photometry of specNeb_ through each filter in SimControls::filters(), at the current time */
@@ -436,13 +454,14 @@ namespace core
         double lbol_ = 0.0;         /**< Bolometric luminosity of the population, in Lsun, at the current time */
 
         /**
-         * @brief Whether spec_/specExtinct_/specNeb_/specNebExtinct_/lineLum_ are current as of curTime_
+         * @brief Whether spec_/specExtinct_/specNeb_/specNebExtinct_/lineLum_/lineLumExtinct_ are current as of curTime_
          * @details
          * True at construction (spec_/specExtinct_/specNeb_/
-         * specNebExtinct_/lineLum_'s own empty in-class defaults are
+         * specNebExtinct_/lineLum_/lineLumExtinct_'s own empty in-class defaults are
          * already the correct, current value before advance() has ever
          * run), and after every spec()/specExtinct()/specNeb()/
-         * specNebExtinct()/lineLum() call recomputes them; set back to
+         * specNebExtinct()/lineLum()/lineLumExtinct() call recomputes
+         * them; set back to
          * false at the end of every advance() call, so the next such
          * call recomputes them lazily -- see advance()'s and spec()'s
          * own comments. Letting spec()/phot()/lbol() compute only when
@@ -486,7 +505,7 @@ namespace core
         void updateLivingStars(double logAge);
 
         /**
-         * @brief Update spec_/specExtinct_/specNeb_/specNebExtinct_/lineLum_ from the current isochrone and star lists
+         * @brief Update spec_/specExtinct_/specNeb_/specNebExtinct_/lineLum_/lineLumExtinct_ from the current isochrone and star lists
          * @details
          * Does nothing if SimControls::specsyn() is null (no spectral
          * synthesizer was requested). Otherwise sets spec_ to the sum
@@ -498,8 +517,10 @@ namespace core
          * cluster's own feH_ and age (curTime_ - formTime_). If
          * SimControls::extinct() is also non-null, sets specExtinct_
          * from spec_, and -- if a nebular emission grid was requested
-         * -- specNebExtinct_ from specNeb_, both via
-         * SimControls::extinct()'s own applyExtinction().
+         * -- specNebExtinct_ from specNeb_ via
+         * SimControls::extinct()'s own applyExtinction(), and
+         * lineLumExtinct_ from lineLum_ via its own
+         * applyExtinctionLines().
          */
         void computeSpec();
 

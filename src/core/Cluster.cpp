@@ -317,6 +317,7 @@ void core::Cluster::computeSpec()
         if (neb != nullptr)
         {
             specNebExtinct_ = ext->applyExtinction(aV_, specNeb_);
+            lineLumExtinct_ = ext->applyExtinctionLines(aV_, lineLum_);
         }
     }
 }
