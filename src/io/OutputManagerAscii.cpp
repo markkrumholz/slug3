@@ -92,6 +92,27 @@ static void writeClustersHeader(std::ofstream& file, const bool hasExtinct)
          << std::string(static_cast<std::string::size_type>(rngWidth), '-') << "\n";
 }
 
+// Write the "spec_neb" and (if extinction was also requested)
+// "spec_neb_extinct" columns, if a nebular emission grid was
+// requested, for wavelength index i of one spectrum row -- a no-op
+// otherwise. Factored out of writeClusterSpec()/writeGalaxySpec() to
+// keep each within its cognitive-complexity budget. wlOffset/
+// specNebExtinct share those methods' own wlOffset()-based
+// fallback-to-0 handling for specNebExtinct's restricted coverage --
+// see their callers' own comments.
+static void writeSpecNebColumns(std::ofstream& file, const io::SimControls& simControls,
+    const std::size_t i, const std::size_t wlOffset,
+    const std::vector<double>& specNeb, const std::vector<double>& specNebExtinct)
+{
+    if (simControls.nebular() == nullptr) { return; }
+    file << std::setw(numWidth) << formatSci(specNeb.at(i));
+
+    if (simControls.extinct() == nullptr) { return; }
+    const double specNebEx = (i >= wlOffset && (i - wlOffset) < specNebExtinct.size()) ?
+        specNebExtinct.at(i - wlOffset) : 0.0;
+    file << std::setw(numWidth) << formatSci(specNebEx);
+}
+
 // Write the cluster-spectra ascii header (column names, a row of
 // units, and a dashed rule) to file. Unlike the cluster output file,
 // this file is laid out one (wavelength, specific luminosity) pair
@@ -101,7 +122,10 @@ static void writeClustersHeader(std::ofstream& file, const bool hasExtinct)
 // column (same units as "spec") when SimControls::extinct() is set --
 // see writeClusterSpec's own comment for how its value is filled in
 // at wavelengths outside the extincted spectrum's own coverage.
-static void writeClusterSpectraHeader(std::ofstream& file, const bool hasExtinct)
+// hasNebular likewise adds a "spec_neb" column when
+// SimControls::nebular() is set, and (if both hasExtinct and
+// hasNebular) a further "spec_neb_ex" column.
+static void writeClusterSpectraHeader(std::ofstream& file, const bool hasExtinct, const bool hasNebular)
 {
     file << std::right << std::setw(uidWidth) << "trial"
          << std::setw(numWidth) << "time"
@@ -109,6 +133,8 @@ static void writeClusterSpectraHeader(std::ofstream& file, const bool hasExtinct
          << std::setw(numWidth) << "wl"
          << std::setw(numWidth) << "spec";
     if (hasExtinct) { file << std::setw(numWidth) << "spec_ex"; }
+    if (hasNebular) { file << std::setw(numWidth) << "spec_neb"; }
+    if (hasExtinct && hasNebular) { file << std::setw(numWidth) << "spec_neb_ex"; }
     file << "\n";
     file << std::right << std::setw(uidWidth) << "none"
          << std::setw(numWidth) << "yr"
@@ -116,8 +142,11 @@ static void writeClusterSpectraHeader(std::ofstream& file, const bool hasExtinct
          << std::setw(numWidth) << "Angstrom"
          << std::setw(numWidth) << "erg/s/Angstrom";
     if (hasExtinct) { file << std::setw(numWidth) << "erg/s/Angstrom"; }
+    if (hasNebular) { file << std::setw(numWidth) << "erg/s/Angstrom"; }
+    if (hasExtinct && hasNebular) { file << std::setw(numWidth) << "erg/s/Angstrom"; }
     file << "\n";
-    const int numColumns = hasExtinct ? 4 : 3;
+    const int numColumns = 3 + (hasExtinct ? 1 : 0) + (hasNebular ? 1 : 0) +
+        ((hasExtinct && hasNebular) ? 1 : 0);
     file << std::string(static_cast<std::string::size_type>(2) * uidWidth, '-')
          << std::string(static_cast<std::string::size_type>(numColumns) * numWidth, '-') << "\n";
 }
@@ -169,6 +198,47 @@ static auto buildExtinctFilterColumns(const io::SimControls& simControls)
     return { extinctFilterNames, simControls.filters()->filterUnits() };
 }
 
+// Build the "<filter>_neb" column names/units for the
+// cluster-photometry file's nebular-inclusive filter columns -- one
+// per real filter, mirroring buildExtinctFilterColumns's own
+// "_ex"-suffix convention. Both vectors come back empty if nebular
+// emission was not requested, or no filter collection exists.
+static auto buildNebularFilterColumns(const io::SimControls& simControls)
+    -> std::pair<std::vector<std::string>, std::vector<std::string>>
+{
+    if (simControls.nebular() == nullptr || simControls.filters() == nullptr)
+    {
+        return {};
+    }
+    std::vector<std::string> nebFilterNames;
+    for (const auto& name : simControls.filters()->filterNames())
+    {
+        nebFilterNames.push_back(name + "_neb");
+    }
+    return { nebFilterNames, simControls.filters()->filterUnits() };
+}
+
+// Build the "<filter>_neb_ex" column names/units for the
+// cluster-photometry file's extincted-and-nebular-inclusive filter
+// columns -- one per real filter. Both vectors come back empty unless
+// both nebular emission and extinction were requested, and a filter
+// collection exists.
+static auto buildNebularExtinctFilterColumns(const io::SimControls& simControls)
+    -> std::pair<std::vector<std::string>, std::vector<std::string>>
+{
+    if (simControls.nebular() == nullptr || simControls.extinct() == nullptr ||
+        simControls.filters() == nullptr)
+    {
+        return {};
+    }
+    std::vector<std::string> nebExtinctFilterNames;
+    for (const auto& name : simControls.filters()->filterNames())
+    {
+        nebExtinctFilterNames.push_back(name + "_neb_ex");
+    }
+    return { nebExtinctFilterNames, simControls.filters()->filterUnits() };
+}
+
 // Write the cluster-photometry ascii header (column names, a row of
 // units, and a dashed rule) to file. Like the cluster output file,
 // this is laid out one cluster (at one output time) per line, with
@@ -183,13 +253,25 @@ static auto buildExtinctFilterColumns(const io::SimControls& simControls)
 // column per real filter (excluding "Lbol", which has no extincted
 // counterpart) after the ordinary filter columns, when
 // SimControls::extinct() is set; all three are empty otherwise.
+// nebFilterNames/nebFilterUnits/nebColWidths and
+// nebExtinctFilterNames/nebExtinctFilterUnits/nebExtinctColWidths
+// likewise lay out "<filter>_neb" and "<filter>_neb_ex" columns (see
+// buildNebularFilterColumns()/buildNebularExtinctFilterColumns())
+// after the extincted-filter columns, when SimControls::nebular() (and,
+// for the "_neb_ex" columns, also SimControls::extinct()) is set.
 static void writeClusterPhotHeader(std::ofstream& file,
     const std::vector<std::string>& filterNames,
     const std::vector<std::string>& filterUnits,
     const std::vector<int>& colWidths,
     const std::vector<std::string>& extinctFilterNames,
     const std::vector<std::string>& extinctFilterUnits,
-    const std::vector<int>& extinctColWidths)
+    const std::vector<int>& extinctColWidths,
+    const std::vector<std::string>& nebFilterNames,
+    const std::vector<std::string>& nebFilterUnits,
+    const std::vector<int>& nebColWidths,
+    const std::vector<std::string>& nebExtinctFilterNames,
+    const std::vector<std::string>& nebExtinctFilterUnits,
+    const std::vector<int>& nebExtinctColWidths)
 {
     file << std::right << std::setw(uidWidth) << "trial"
          << std::setw(numWidth) << "time"
@@ -201,6 +283,14 @@ static void writeClusterPhotHeader(std::ofstream& file,
     for (std::size_t i = 0; i < extinctFilterNames.size(); ++i)
     {
         file << std::setw(extinctColWidths.at(i)) << extinctFilterNames.at(i);
+    }
+    for (std::size_t i = 0; i < nebFilterNames.size(); ++i)
+    {
+        file << std::setw(nebColWidths.at(i)) << nebFilterNames.at(i);
+    }
+    for (std::size_t i = 0; i < nebExtinctFilterNames.size(); ++i)
+    {
+        file << std::setw(nebExtinctColWidths.at(i)) << nebExtinctFilterNames.at(i);
     }
     file << "\n";
     file << std::right << std::setw(uidWidth) << "none"
@@ -214,11 +304,21 @@ static void writeClusterPhotHeader(std::ofstream& file,
     {
         file << std::setw(extinctColWidths.at(i)) << extinctFilterUnits.at(i);
     }
+    for (std::size_t i = 0; i < nebFilterUnits.size(); ++i)
+    {
+        file << std::setw(nebColWidths.at(i)) << nebFilterUnits.at(i);
+    }
+    for (std::size_t i = 0; i < nebExtinctFilterUnits.size(); ++i)
+    {
+        file << std::setw(nebExtinctColWidths.at(i)) << nebExtinctFilterUnits.at(i);
+    }
     file << "\n";
     auto totalWidth = (static_cast<std::string::size_type>(2) * uidWidth) +
         static_cast<std::string::size_type>(numWidth);
     for (const int w : colWidths) { totalWidth += static_cast<std::string::size_type>(w); }
     for (const int w : extinctColWidths) { totalWidth += static_cast<std::string::size_type>(w); }
+    for (const int w : nebColWidths) { totalWidth += static_cast<std::string::size_type>(w); }
+    for (const int w : nebExtinctColWidths) { totalWidth += static_cast<std::string::size_type>(w); }
     file << std::string(totalWidth, '-') << "\n";
 }
 
@@ -245,23 +345,28 @@ static void writeGalaxyHeader(std::ofstream& file)
 // Write the galaxy-spectra ascii header (column names, a row of
 // units, and a dashed rule) to file. Mirrors writeClusterSpectraHeader's
 // own one-(wavelength, specific luminosity)-pair-per-line layout and
-// "spec_ex" naming, but with no "uid" column, since a galaxy (unlike a
-// cluster) has no individual identity.
-static void writeGalaxySpectraHeader(std::ofstream& file, const bool hasExtinct)
+// "spec_ex"/"spec_neb"/"spec_neb_ex" naming, but with no "uid" column,
+// since a galaxy (unlike a cluster) has no individual identity.
+static void writeGalaxySpectraHeader(std::ofstream& file, const bool hasExtinct, const bool hasNebular)
 {
     file << std::right << std::setw(uidWidth) << "trial"
          << std::setw(numWidth) << "time"
          << std::setw(numWidth) << "wl"
          << std::setw(numWidth) << "spec";
     if (hasExtinct) { file << std::setw(numWidth) << "spec_ex"; }
+    if (hasNebular) { file << std::setw(numWidth) << "spec_neb"; }
+    if (hasExtinct && hasNebular) { file << std::setw(numWidth) << "spec_neb_ex"; }
     file << "\n";
     file << std::right << std::setw(uidWidth) << "none"
          << std::setw(numWidth) << "yr"
          << std::setw(numWidth) << "Angstrom"
          << std::setw(numWidth) << "erg/s/Angstrom";
     if (hasExtinct) { file << std::setw(numWidth) << "erg/s/Angstrom"; }
+    if (hasNebular) { file << std::setw(numWidth) << "erg/s/Angstrom"; }
+    if (hasExtinct && hasNebular) { file << std::setw(numWidth) << "erg/s/Angstrom"; }
     file << "\n";
-    const int numColumns = hasExtinct ? 4 : 3;
+    const int numColumns = 3 + (hasExtinct ? 1 : 0) + (hasNebular ? 1 : 0) +
+        ((hasExtinct && hasNebular) ? 1 : 0);
     file << std::string(static_cast<std::string::size_type>(uidWidth), '-')
          << std::string(static_cast<std::string::size_type>(numColumns) * numWidth, '-') << "\n";
 }
@@ -271,16 +376,24 @@ static void writeGalaxySpectraHeader(std::ofstream& file, const bool hasExtinct)
 // own one-row-per-(trial, time)-with-one-column-per-filter layout, but
 // with no "uid" column, since a galaxy (unlike a cluster) has no
 // individual identity. colWidths/extinctFilterNames/extinctFilterUnits/
-// extinctColWidths carry exactly the same meaning as in
-// writeClusterPhotHeader -- and, in practice, the same values, since
-// both are built from the same SimControls::filters().
+// extinctColWidths/nebFilterNames/nebFilterUnits/nebColWidths/
+// nebExtinctFilterNames/nebExtinctFilterUnits/nebExtinctColWidths carry
+// exactly the same meaning as in writeClusterPhotHeader -- and, in
+// practice, the same values, since both are built from the same
+// SimControls::filters().
 static void writeGalaxyPhotHeader(std::ofstream& file,
     const std::vector<std::string>& filterNames,
     const std::vector<std::string>& filterUnits,
     const std::vector<int>& colWidths,
     const std::vector<std::string>& extinctFilterNames,
     const std::vector<std::string>& extinctFilterUnits,
-    const std::vector<int>& extinctColWidths)
+    const std::vector<int>& extinctColWidths,
+    const std::vector<std::string>& nebFilterNames,
+    const std::vector<std::string>& nebFilterUnits,
+    const std::vector<int>& nebColWidths,
+    const std::vector<std::string>& nebExtinctFilterNames,
+    const std::vector<std::string>& nebExtinctFilterUnits,
+    const std::vector<int>& nebExtinctColWidths)
 {
     file << std::right << std::setw(uidWidth) << "trial"
          << std::setw(numWidth) << "time";
@@ -291,6 +404,14 @@ static void writeGalaxyPhotHeader(std::ofstream& file,
     for (std::size_t i = 0; i < extinctFilterNames.size(); ++i)
     {
         file << std::setw(extinctColWidths.at(i)) << extinctFilterNames.at(i);
+    }
+    for (std::size_t i = 0; i < nebFilterNames.size(); ++i)
+    {
+        file << std::setw(nebColWidths.at(i)) << nebFilterNames.at(i);
+    }
+    for (std::size_t i = 0; i < nebExtinctFilterNames.size(); ++i)
+    {
+        file << std::setw(nebExtinctColWidths.at(i)) << nebExtinctFilterNames.at(i);
     }
     file << "\n";
     file << std::right << std::setw(uidWidth) << "none"
@@ -303,11 +424,21 @@ static void writeGalaxyPhotHeader(std::ofstream& file,
     {
         file << std::setw(extinctColWidths.at(i)) << extinctFilterUnits.at(i);
     }
+    for (std::size_t i = 0; i < nebFilterUnits.size(); ++i)
+    {
+        file << std::setw(nebColWidths.at(i)) << nebFilterUnits.at(i);
+    }
+    for (std::size_t i = 0; i < nebExtinctFilterUnits.size(); ++i)
+    {
+        file << std::setw(nebExtinctColWidths.at(i)) << nebExtinctFilterUnits.at(i);
+    }
     file << "\n";
     auto totalWidth = static_cast<std::string::size_type>(uidWidth) +
         static_cast<std::string::size_type>(numWidth);
     for (const int w : colWidths) { totalWidth += static_cast<std::string::size_type>(w); }
     for (const int w : extinctColWidths) { totalWidth += static_cast<std::string::size_type>(w); }
+    for (const int w : nebColWidths) { totalWidth += static_cast<std::string::size_type>(w); }
+    for (const int w : nebExtinctColWidths) { totalWidth += static_cast<std::string::size_type>(w); }
     file << std::string(totalWidth, '-') << "\n";
 }
 
@@ -404,7 +535,8 @@ void io::OutputManagerAscii::openClusterSpectraFile()
         throw std::runtime_error(
             "OutputManagerAscii: unable to open output file " + clusterSpectraPath.string());
     }
-    writeClusterSpectraHeader(clusterSpectraFile_, simControls_.extinct() != nullptr);
+    writeClusterSpectraHeader(clusterSpectraFile_, simControls_.extinct() != nullptr,
+        simControls_.nebular() != nullptr);
 }
 
 // Open the cluster-photometry output file and write its header, if a
@@ -444,8 +576,14 @@ void io::OutputManagerAscii::openClusterPhotFile()
 
     const auto [extinctFilterNames, extinctFilterUnits] = buildExtinctFilterColumns(simControls_);
     photExtinctColWidths_ = computePhotColWidths(extinctFilterNames, extinctFilterUnits);
+    const auto [nebFilterNames, nebFilterUnits] = buildNebularFilterColumns(simControls_);
+    photNebColWidths_ = computePhotColWidths(nebFilterNames, nebFilterUnits);
+    const auto [nebExtinctFilterNames, nebExtinctFilterUnits] = buildNebularExtinctFilterColumns(simControls_);
+    photNebExtinctColWidths_ = computePhotColWidths(nebExtinctFilterNames, nebExtinctFilterUnits);
     writeClusterPhotHeader(clusterPhotFile_, filterNames, filterUnits, photColWidths_,
-        extinctFilterNames, extinctFilterUnits, photExtinctColWidths_);
+        extinctFilterNames, extinctFilterUnits, photExtinctColWidths_,
+        nebFilterNames, nebFilterUnits, photNebColWidths_,
+        nebExtinctFilterNames, nebExtinctFilterUnits, photNebExtinctColWidths_);
 }
 
 // Open the galaxy output file and write its header, for a galaxy-type
@@ -498,7 +636,8 @@ void io::OutputManagerAscii::openGalaxySpectraFile()
         throw std::runtime_error(
             "OutputManagerAscii: unable to open output file " + galaxySpectraPath.string());
     }
-    writeGalaxySpectraHeader(galaxySpectraFile_, simControls_.extinct() != nullptr);
+    writeGalaxySpectraHeader(galaxySpectraFile_, simControls_.extinct() != nullptr,
+        simControls_.nebular() != nullptr);
 }
 
 // Open the galaxy-photometry output file and write its header, for a
@@ -541,8 +680,14 @@ void io::OutputManagerAscii::openGalaxyPhotFile()
 
     const auto [extinctFilterNames, extinctFilterUnits] = buildExtinctFilterColumns(simControls_);
     photExtinctColWidths_ = computePhotColWidths(extinctFilterNames, extinctFilterUnits);
+    const auto [nebFilterNames, nebFilterUnits] = buildNebularFilterColumns(simControls_);
+    photNebColWidths_ = computePhotColWidths(nebFilterNames, nebFilterUnits);
+    const auto [nebExtinctFilterNames, nebExtinctFilterUnits] = buildNebularExtinctFilterColumns(simControls_);
+    photNebExtinctColWidths_ = computePhotColWidths(nebExtinctFilterNames, nebExtinctFilterUnits);
     writeGalaxyPhotHeader(galaxyPhotFile_, filterNames, filterUnits, photColWidths_,
-        extinctFilterNames, extinctFilterUnits, photExtinctColWidths_);
+        extinctFilterNames, extinctFilterUnits, photExtinctColWidths_,
+        nebFilterNames, nebFilterUnits, photNebColWidths_,
+        nebExtinctFilterNames, nebExtinctFilterUnits, photNebExtinctColWidths_);
 }
 
 io::OutputManagerAscii::~OutputManagerAscii()
@@ -607,6 +752,12 @@ void io::OutputManagerAscii::writeClusterSpec(
     // extincted value, so spec_ex reads 0 there rather than the
     // (nonsensical) unextincted spec value
     const std::size_t wlOffset = (ext != nullptr) ? ext->wlOffset() : 0;
+    // specNeb is tabulated on the full wlObs_ grid, same as spec, so
+    // needs no offset handling of its own; specNebExtinct, like
+    // specExtinct, is restricted to the extinction curve's own
+    // coverage and so shares wlOffset with it
+    const auto& specNeb = cluster.specNeb();
+    const auto& specNebExtinct = cluster.specNebExtinct();
 
     // Guard the actual writes against concurrent callers from other
     // threads; unlike the constructor, this method is expected to be
@@ -632,6 +783,7 @@ void io::OutputManagerAscii::writeClusterSpec(
                     specExtinct.at(i - wlOffset) : 0.0;
                 clusterSpectraFile_ << std::setw(numWidth) << formatSci(specEx);
             }
+            writeSpecNebColumns(clusterSpectraFile_, simControls_, i, wlOffset, specNeb, specNebExtinct);
             clusterSpectraFile_ << "\n";
         }
     }
@@ -657,6 +809,8 @@ void io::OutputManagerAscii::writeClusterPhot(
     auto phot = cluster.phot();
     if (simControls_.computeLbol()) { phot.push_back(cluster.lbol()); }
     const auto& photExtinct = cluster.photExtinct();
+    const auto& photNeb = cluster.photNeb();
+    const auto& photNebExtinct = cluster.photNebExtinct();
 
     // Guard the actual writes against concurrent callers from other
     // threads; unlike the constructor, this method is expected to be
@@ -681,6 +835,20 @@ void io::OutputManagerAscii::writeClusterPhot(
             for (std::size_t i = 0; i < photExtinct.size(); ++i)
             {
                 clusterPhotFile_ << std::setw(photExtinctColWidths_.at(i)) << formatSci(photExtinct.at(i));
+            }
+        }
+        if (simControls_.nebular() != nullptr && simControls_.filters() != nullptr)
+        {
+            for (std::size_t i = 0; i < photNeb.size(); ++i)
+            {
+                clusterPhotFile_ << std::setw(photNebColWidths_.at(i)) << formatSci(photNeb.at(i));
+            }
+            if (simControls_.extinct() != nullptr)
+            {
+                for (std::size_t i = 0; i < photNebExtinct.size(); ++i)
+                {
+                    clusterPhotFile_ << std::setw(photNebExtinctColWidths_.at(i)) << formatSci(photNebExtinct.at(i));
+                }
             }
         }
         clusterPhotFile_ << "\n";
@@ -731,6 +899,8 @@ void io::OutputManagerAscii::writeGalaxySpec(
         // See writeClusterSpec's own comment on wlOffset()/spec_ex's
         // fallback to 0 outside the extinction curve's own coverage
         const std::size_t wlOffset = (ext != nullptr) ? ext->wlOffset() : 0;
+        const auto& specNeb = galaxy.specNeb();
+        const auto& specNebExtinct = galaxy.specNebExtinct();
 
         // Guard the actual writes against concurrent callers from
         // other threads; uses its own critical section, distinct from
@@ -752,6 +922,7 @@ void io::OutputManagerAscii::writeGalaxySpec(
                         specExtinct.at(i - wlOffset) : 0.0;
                     galaxySpectraFile_ << std::setw(numWidth) << formatSci(specEx);
                 }
+                writeSpecNebColumns(galaxySpectraFile_, simControls_, i, wlOffset, specNeb, specNebExtinct);
                 galaxySpectraFile_ << "\n";
             }
         }
@@ -775,6 +946,8 @@ void io::OutputManagerAscii::writeGalaxyPhot(
         auto phot = galaxy.phot();
         if (simControls_.computeLbol()) { phot.push_back(galaxy.lbol()); }
         const auto& photExtinct = galaxy.photExtinct();
+        const auto& photNeb = galaxy.photNeb();
+        const auto& photNebExtinct = galaxy.photNebExtinct();
 
         // Guard the actual writes against concurrent callers from
         // other threads; uses its own critical section, distinct from
@@ -796,6 +969,20 @@ void io::OutputManagerAscii::writeGalaxyPhot(
                 for (std::size_t i = 0; i < photExtinct.size(); ++i)
                 {
                     galaxyPhotFile_ << std::setw(photExtinctColWidths_.at(i)) << formatSci(photExtinct.at(i));
+                }
+            }
+            if (simControls_.nebular() != nullptr && simControls_.filters() != nullptr)
+            {
+                for (std::size_t i = 0; i < photNeb.size(); ++i)
+                {
+                    galaxyPhotFile_ << std::setw(photNebColWidths_.at(i)) << formatSci(photNeb.at(i));
+                }
+                if (simControls_.extinct() != nullptr)
+                {
+                    for (std::size_t i = 0; i < photNebExtinct.size(); ++i)
+                    {
+                        galaxyPhotFile_ << std::setw(photNebExtinctColWidths_.at(i)) << formatSci(photNebExtinct.at(i));
+                    }
                 }
             }
             galaxyPhotFile_ << "\n";

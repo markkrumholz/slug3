@@ -74,7 +74,9 @@ namespace io
          * (the cluster-spectra file was not opened), or the cluster
          * has disrupted, this is a no-op. Otherwise writes one line
          * per wavelength, each holding trial, time, uid, wavelength,
-         * and specific luminosity, to the cluster-spectra file.
+         * and specific luminosity (plus, if requested, extincted
+         * and/or nebular-inclusive specific luminosity), to the
+         * cluster-spectra file.
          */
         void writeClusterSpec(unsigned long trial, double time,
             core::Cluster& cluster) override;
@@ -90,7 +92,8 @@ namespace io
          * was not opened), or the cluster has disrupted, this is a
          * no-op. Otherwise writes one line, holding trial, time, uid,
          * one column per filter, and (if requested) a final "Lbol"
-         * column, to the cluster-photometry file.
+         * column, followed by extincted and/or nebular-inclusive
+         * filter columns if requested, to the cluster-photometry file.
          */
         void writeClusterPhot(unsigned long trial, double time,
             core::Cluster& cluster) override;
@@ -118,9 +121,11 @@ namespace io
          * If spectral synthesis was not enabled for this simulation
          * (the galaxy-spectra file was not opened), this is a no-op.
          * Otherwise writes one line per wavelength, each holding
-         * trial, time, wavelength, and specific luminosity, to the
-         * galaxy-spectra file, then calls writeClusterSpec() on every
-         * currently-alive (non-disrupted) cluster in galaxy.
+         * trial, time, wavelength, and specific luminosity (plus, if
+         * requested, extincted and/or nebular-inclusive specific
+         * luminosity), to the galaxy-spectra file, then calls
+         * writeClusterSpec() on every currently-alive (non-disrupted)
+         * cluster in galaxy.
          */
         void writeGalaxySpec(unsigned long trial, double time,
             core::Galaxy& galaxy) override;
@@ -135,9 +140,10 @@ namespace io
          * requested for this simulation (the galaxy-photometry file
          * was not opened), this is a no-op. Otherwise writes one
          * line, holding trial, time, one column per filter, and (if
-         * requested) a final "Lbol" column, to the galaxy-photometry
-         * file, then calls writeClusterPhot() on every currently-alive
-         * (non-disrupted) cluster in galaxy.
+         * requested) a final "Lbol" column, followed by extincted
+         * and/or nebular-inclusive filter columns if requested, to the
+         * galaxy-photometry file, then calls writeClusterPhot() on
+         * every currently-alive (non-disrupted) cluster in galaxy.
          */
         void writeGalaxyPhot(unsigned long trial, double time,
             core::Galaxy& galaxy) override;
@@ -210,6 +216,8 @@ namespace io
         std::vector<double> wlObs_; /**< Observed-frame wavelength grid, if spectral synthesis is enabled -- shared by both the cluster- and galaxy-spectra files, since both are drawn from the same SimControls::specsyn() */
         std::vector<int> photColWidths_; /**< Column width used for each filter in the cluster- and galaxy-photometry files -- see computePhotColWidths() */
         std::vector<int> photExtinctColWidths_; /**< Column width used for each "<filter>_ex" column in the cluster- and galaxy-photometry files, if SimControls::extinct() is set -- see computePhotColWidths() */
+        std::vector<int> photNebColWidths_; /**< Column width used for each "<filter>_neb" column in the cluster- and galaxy-photometry files, if SimControls::nebular() is set -- see computePhotColWidths() */
+        std::vector<int> photNebExtinctColWidths_; /**< Column width used for each "<filter>_neb_ex" column in the cluster- and galaxy-photometry files, if both SimControls::nebular() and SimControls::extinct() are set -- see computePhotColWidths() */
     };
 
 } // namespace io
