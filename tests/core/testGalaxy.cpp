@@ -1156,15 +1156,17 @@ static auto testFieldStarsSpec() -> int
     return 0;
 }
 
-// Verify that Galaxy::addFieldStarSpec()/addContinuousSpec() correctly
-// extinguish the field-star/continuous-population contributions to
-// specExtinct(): each field star by its own aV_ (drawn independently
-// from SimControls::avDistField(), via Extinct::applyExtinction()),
-// and the continuous population by the expectation value of
+// Verify that Galaxy::addContinuousSpec() correctly extinguishes the
+// combined field-star + continuous-population contribution to
+// specExtinct(): both together, by the expectation value of
 // exp(-A_V * extinct()) over avDistField() (via Extinct::
-// applyExtinctionCts()) -- rather than the pre-field-star-extinction
-// behavior of passing both through unattenuated (still exercised,
-// unchanged, by testFieldStarsSpec's own use of inputFile's default
+// applyExtinctionCts()) -- field stars are folded directly into the
+// same contSpec the continuous population's own share occupies before
+// either is extinguished, so a field star's own individually-drawn
+// aV_ is not read for this purpose at all (see FieldStar::aV_'s own
+// comment) -- rather than the pre-field-star-extinction behavior of
+// passing both through unattenuated (still exercised, unchanged, by
+// testFieldStarsSpec's own use of inputFile's default
 // extinct.AV_field, which is absent and so defaults to a delta at 0 --
 // see io::SimControls::avDistField()'s own comment). fCluster = 0
 // isolates this from any cluster contribution (which uses its own,
@@ -1172,7 +1174,8 @@ static auto testFieldStarsSpec() -> int
 // testFieldStarsMassBudget's own identical override does, and sets
 // extinct.AV_field to a fixed value distinct from inputFile's own
 // clusters.AV, so field stars draw a genuinely different, independent
-// A_V than clusters would.
+// A_V than clusters would -- exercised here only to confirm it plays
+// no role in specExtinct(), via the exact-aV_ check below.
 static auto testFieldStarsExtinct() -> int
 {
     constexpr double avFieldValue = 0.5; // NOLINT(readability-identifier-naming) -- see Extinct::applyExtinction()'s own identical NOLINT
@@ -1223,14 +1226,17 @@ static auto testFieldStarsExtinct() -> int
             }
         }
 
-        // Independently recompute the expected specExtinct(): the
-        // continuous population's own contribution (mirroring
-        // Galaxy::addContinuousSpec()) extinguished via
-        // applyExtinctionCts(), plus each field star's own spectrum
-        // (mirroring Galaxy::addFieldStarSpec()) extinguished via
-        // applyExtinction() at that star's own aV_
+        // Independently recompute the expected specExtinct(): builds
+        // contSpec exactly as Galaxy::addContinuousSpec() now does --
+        // the continuous population's own contribution, then every
+        // field star's own spectrum added directly into it, in that
+        // same order -- then extinguishes the combined result via
+        // applyExtinctionCts() once, matching the real implementation
+        // bit-for-bit (rather than extinguishing each piece separately
+        // and summing the results, which would not generally agree at
+        // the bit level, since floating-point addition is not
+        // associative).
         const auto* synth = controls.specsyn();
-        std::vector<double> expectedSpecExtinct(ext->wl().size(), 0.0);
 
         std::vector<double> contSpec;
         if (controls.computeLbol())
@@ -1245,9 +1251,6 @@ static auto testFieldStarsExtinct() -> int
                 controls.fehDist(), galaxy.curTime(), controls.fCluster(),
                 controls.imf().getMin(), controls.minStochMass());
         }
-        const auto contSpecExtinct = ext->applyExtinctionCts(contSpec);
-        for (std::size_t i = 0; i < expectedSpecExtinct.size(); ++i)
-        { expectedSpecExtinct.at(i) += contSpecExtinct.at(i); }
 
         const auto& tracks2D = controls.tracks2D();
         for (const auto& fs : galaxy.fieldStars())
@@ -1256,10 +1259,11 @@ static auto testFieldStarsExtinct() -> int
                 std::log10(galaxy.curTime() - fs.formTime_), tracks2D.logTMin());
             const auto props = tracks2D.getStar(fs.mass_, logT);
             const auto starSpec = synth->spec(props, fs.feh_);
-            const auto starSpecExtinct = ext->applyExtinction(fs.aV_, starSpec);
-            for (std::size_t i = 0; i < expectedSpecExtinct.size(); ++i)
-            { expectedSpecExtinct.at(i) += starSpecExtinct.at(i); }
+            for (std::size_t i = 0; i < contSpec.size(); ++i)
+            { contSpec.at(i) += starSpec.at(i); }
         }
+
+        const auto expectedSpecExtinct = ext->applyExtinctionCts(contSpec);
 
         if (galaxy.specExtinct() != expectedSpecExtinct)
         {
@@ -1418,7 +1422,7 @@ static auto testGalaxySFRDistResolution() -> int
     {
         const toml::table inputDeck = toml::parse_file(inputFile);
         const io::SimControls controls(inputDeck);
-        core::Galaxy galaxy(controls);
+        const core::Galaxy galaxy(controls);
         if (&galaxy.sfr() != &controls.sfr())
         {
             std::cerr << "testGalaxy: sfrDistResolution: expected sfr() to "
@@ -1456,7 +1460,7 @@ static auto testGalaxySFRDistResolution() -> int
             return 1;
         }
 
-        core::Galaxy galaxy(controls);
+        const core::Galaxy galaxy(controls);
         const auto expected = io::SimControls::buildConstantSFR(sfrDistValue);
         if (!galaxy.sfr().valid() ||
             galaxy.sfr().getMin() != expected.getMin() ||
