@@ -288,18 +288,23 @@ void io::SimControls::initPhysics(const toml::table& inputDeck)
     // building a filter collection that will need one.
     readFilters(inputDeck);
 
-    // Read the extinction curve to apply, if any -- extinct.AV is
-    // optional. Needs specsyn_ (just set above) to provide the
-    // wavelength grid the extinction curve is interpolated onto.
-    readExtinct(inputDeck);
-
     // Read the nebular emission controls and grid to use. Unlike
     // readSpectra/readFilters/readExtinct, nothing here is gated on
     // any input-deck key being present -- every nebular.* control
     // parameter independently falls back to its own default, and a
     // Nebular is always constructed (stars.tracks is already
-    // mandatory, via readTracks() above).
+    // mandatory, via readTracks() above). Done before readExtinct()
+    // (which used to come first here) because readExtinct() itself
+    // now needs nebular_ -- see Extinct's own constructor comment on
+    // extinctLines_.
     readNebular(inputDeck);
+
+    // Read the extinction curve to apply, if any -- extinct.AV is
+    // optional. Needs specsyn_ (set above) to provide the wavelength
+    // grid the extinction curve is interpolated onto, and nebular_
+    // (just set above) to provide the line wavelengths extinctLines_
+    // is interpolated onto.
+    readExtinct(inputDeck);
 
     // In a galaxy simulation, read CLF, SFR, and the stochastic
     // cluster mass fraction

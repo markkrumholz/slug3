@@ -7,10 +7,13 @@
  */
 
 #include "../src/core/Cluster.hpp"
+#include "../src/interpolation/Interpolator1D.hpp"
 #include "../src/io/SimControls.hpp"
 #include "../src/phot/FilterCollection.hpp"
+#include "../src/utils/HDF5Utils.hpp"
 #include "../src/utils/MiscUtils.hpp"
 #include "../src/utils/RngThread.hpp"
+#include "hdf5.h" // NOLINT(misc-include-cleaner) -- see HDF5Utils.hpp's own comment on including hdf5.h wholesale
 #include "testCluster.hpp"
 #include <algorithm>
 #include <cmath>
@@ -673,6 +676,140 @@ static auto testClusterNebular() -> int
     return 0;
 }
 
+// Unit test for Extinct's own line-luminosity extinction support
+// (extinctLines_/applyExtinctionLines()/applyExtinctionCtsLines()),
+// exercised through controls.extinct() directly rather than through
+// Cluster (which does not yet apply extinction to line luminosities
+// itself). Reuses the same testClusterExtinct.in + nebular-fixture-
+// override combination as testClusterNebular() above, so both
+// extinct() and nebular() are non-null. Independently re-derives the
+// expected per-line extinction from the extinction curve's own raw
+// HDF5 data (bypassing Extinct entirely, mirroring
+// tests/extinct/testExtinct.hpp's own ground-truth strategy): both
+// Extinct's internal interpolator and this test's own rawInterp are
+// the exact same Interpolator1D<1> built from the exact same
+// (wlRaw, kappaRaw), so they agree at any shared query point, not
+// just the native grid's own nodes -- letting norm (the V-band
+// normalization factor Extinct's own normalize() applies internally,
+// otherwise unobservable) be recovered from a single reference point
+// on controls.extinct()->wl()/extinct(), with no need to hit an exact
+// native-grid wavelength.
+static auto testClusterExtinctLines() -> int
+{
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFileExtinct);
+        inputDeck.at_path("nebular").as_table()->insert_or_assign("compute_neb", true);
+        inputDeck.at_path("nebular").as_table()->insert_or_assign(
+            "table", std::string("tests/nebular/assets/nebular_test.h5"));
+        const io::SimControls controls(inputDeck);
+
+        const auto* ext = controls.extinct();
+        if (ext == nullptr)
+        {
+            std::cerr << "testCluster: extinct lines: test bug: expected "
+                "SimControls::extinct() to be non-null\n";
+            return 1;
+        }
+        if (controls.nebular() == nullptr)
+        {
+            std::cerr << "testCluster: extinct lines: test bug: expected "
+                "SimControls::nebular() to be non-null\n";
+            return 1;
+        }
+
+        // Ground truth: the same curve's raw (wavelength, kappa) data,
+        // read directly from the HDF5 file -- see
+        // tests/extinct/testExtinct.hpp's own identical read, for the
+        // same "Calzetti_starburst" curve testClusterExtinct.in itself
+        // names as extinct.model
+        // NOLINTBEGIN(misc-include-cleaner) -- see HDF5Utils.hpp's own comment
+        const hid_t file = H5Fopen("data/extinct/extinct.h5", H5F_ACC_RDONLY, H5P_DEFAULT);
+        const hid_t grp = H5Gopen2(file, "Calzetti_starburst", H5P_DEFAULT);
+        const auto wlRaw = utils::readDataset1D(grp, "wavelength", "testCluster");
+        const auto kappaRaw = utils::readDataset1D(grp, "kappa", "testCluster");
+        H5Gclose(grp);
+        H5Fclose(file);
+        // NOLINTEND(misc-include-cleaner)
+        const interp::Interpolator1D<1> rawInterp(wlRaw, kappaRaw);
+
+        // Recover normalize()'s own scale factor from a single
+        // reference point already on ext.wl()/ext.extinct() -- see
+        // this function's own docstring for why any point works
+        const double refWl = ext->wl().front();
+        const double norm = ext->extinct().front() / rawInterp(refWl);
+
+        const auto& lineWl = controls.nebular()->lineWl();
+        std::vector<double> expectedExtinctLines(lineWl.size());
+        std::vector<double> lineLum(lineWl.size());
+        for (std::size_t ell = 0; ell < lineWl.size(); ++ell)
+        {
+            expectedExtinctLines.at(ell) =
+                (lineWl.at(ell) >= rawInterp.xMin() && lineWl.at(ell) <= rawInterp.xMax()) ?
+                norm * rawInterp(lineWl.at(ell)) : 0.0;
+            lineLum.at(ell) = 1.0 + static_cast<double>(ell); // varied, easy-to-check values
+        }
+
+        // applyExtinctionLines(): each line multiplied by
+        // exp(-A_V * expectedExtinctLines) at a known, single A_V
+        constexpr double AV = 1.3; // NOLINT(readability-identifier-naming) -- see Extinct::applyExtinction()'s own identical NOLINT
+        const auto result = ext->applyExtinctionLines(AV, lineLum);
+        if (result.size() != lineWl.size())
+        {
+            std::cerr << "testCluster: extinct lines: applyExtinctionLines() "
+                "returned " << result.size() << " lines, expected "
+                << lineWl.size() << "\n";
+            return 1;
+        }
+        for (std::size_t ell = 0; ell < lineWl.size(); ++ell)
+        {
+            const double expected = lineLum.at(ell) *
+                std::exp(-AV * expectedExtinctLines.at(ell));
+            if (!utils::approxEqual(result.at(ell), expected))
+            {
+                std::cerr << "testCluster: extinct lines: applyExtinctionLines() "
+                    "line " << ell << " = " << result.at(ell) << ", expected "
+                    << expected << "\n";
+                return 1;
+            }
+        }
+
+        // applyExtinctionCtsLines(): testClusterExtinct.in sets
+        // extinct.AV but not extinct.AV_field, so avDistField() is a
+        // valid delta at A_V = 0 (see SimControls::readExtinct()'s own
+        // comment) -- computeExtinctionFacCtsLines() treats this as
+        // the degenerate case A_V = 0, so every line should come back
+        // completely unattenuated (exp(0) = 1), exactly like
+        // testExtinctApplyExtinctionCtsInvalid()'s own analogous
+        // finding for the spectral (non-line) case
+        const auto ctsResult = ext->applyExtinctionCtsLines(lineLum);
+        if (ctsResult.size() != lineWl.size())
+        {
+            std::cerr << "testCluster: extinct lines: applyExtinctionCtsLines() "
+                "returned " << ctsResult.size() << " lines, expected "
+                << lineWl.size() << "\n";
+            return 1;
+        }
+        for (std::size_t ell = 0; ell < lineWl.size(); ++ell)
+        {
+            if (!utils::approxEqual(ctsResult.at(ell), lineLum.at(ell)))
+            {
+                std::cerr << "testCluster: extinct lines: applyExtinctionCtsLines() "
+                    "line " << ell << " = " << ctsResult.at(ell) << ", expected "
+                    "unattenuated " << lineLum.at(ell) << "\n";
+                return 1;
+            }
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testCluster: extinct lines test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
 auto testCluster() -> int
 {
     int result = 0;
@@ -686,5 +823,6 @@ auto testCluster() -> int
     result += testClusterExtinct();
     result += testClusterLbol();
     result += testClusterNebular();
+    result += testClusterExtinctLines();
     return result;
 }

@@ -703,7 +703,11 @@ namespace io
          * need to check one without the other. Requires a spectral
          * synthesizer to already be set (see readSpectra()), since the
          * extinction curve is interpolated onto its own wavelength
-         * grid.
+         * grid, and the nebular emission grid to already be set (see
+         * readNebular(), called before this method for exactly that
+         * reason), since the extinction curve is also interpolated
+         * onto its own line wavelengths, if any (see Extinct's own
+         * extinctLines_ member).
          */
         void readExtinct(const toml::table& inputDeck);
 

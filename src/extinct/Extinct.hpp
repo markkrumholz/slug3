@@ -151,11 +151,23 @@ namespace extinct
                 extinct_.push_back(interp(*it));
             }
 
-            // Normalize the curve to a V-band extinction of 1 mag
-            normalize(wl_, extinct_);
+            // Interpolate the curve onto every nebular emission line's
+            // own wavelength too, if a nebular emission grid was
+            // requested -- see initExtinctLines()'s own comment. Needs
+            // io::SimControls's complete type (to call
+            // controls_.nebular()), so is defined out-of-line, in
+            // Extinct.cpp, exactly like computeExtinctionFacCts()
+            // below -- see that method's own comment for why.
+            initExtinctLines(interp);
 
-            // Precompute extinctionFacCts_ -- see its own comment
+            // Normalize the curve (and, if any, the line-wavelength
+            // curve above) to a V-band extinction of 1 mag
+            normalize(wl_, extinct_, extinctLines_);
+
+            // Precompute extinctionFacCts_/extinctionFacCtsLines_ --
+            // see their own comments
             computeExtinctionFacCts();
+            computeExtinctionFacCtsLines();
         }
 
         // Copyable (rebinding controls_ to the same referent) but not
@@ -276,6 +288,61 @@ namespace extinct
             return result;
         }
 
+        /**
+         * @brief Apply this extinction curve to a set of nebular emission line luminosities
+         * @param A_V V-band extinction to apply, in magnitudes
+         * @param lineLum Luminosity of each of
+         *   controls_.nebular()->lineWl()'s own lines, in erg/s
+         * @returns The extinguished line luminosities, in the same
+         *   order as lineLum/controls_.nebular()->lineWl()
+         * @details
+         * Line-luminosity analog of applyExtinction(): each element of
+         * lineLum is multiplied by exp(-A_V * extinctLines_) at the
+         * corresponding line. Unlike applyExtinction(), no elements are
+         * dropped -- extinctLines_ already reads 0 (rather than being
+         * absent) for any line outside the native curve's own coverage
+         * -- so lineLum and the result share the same size and
+         * indexing as extinctLines_/controls_.nebular()->lineWl(), with
+         * no analog of wlOffset_.
+         */
+        [[nodiscard]] auto applyExtinctionLines(const double A_V, // NOLINT(readability-identifier-naming) -- see applyExtinction()'s own identical NOLINT
+            const std::vector<double>& lineLum) const -> std::vector<double>
+        {
+            std::vector<double> result(extinctLines_.size());
+            for (std::size_t i = 0; i < extinctLines_.size(); i++)
+            {
+                result[i] = lineLum[i] * std::exp(-A_V * extinctLines_[i]); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- result and extinctLines_ both have size extinctLines_.size(), and i is bounded by extinctLines_.size(); lineLum has the same size, by this method's own contract
+            }
+            return result;
+        }
+
+        /**
+         * @brief Apply this extinction curve's own expected attenuation to a continuously-distributed population's line luminosities
+         * @param lineLum Luminosity of each of
+         *   controls_.nebular()->lineWl()'s own lines, in erg/s -- see
+         *   applyExtinctionLines()'s own lineLum parameter
+         * @returns The expected extinguished line luminosities, in the
+         *   same order as lineLum/controls_.nebular()->lineWl()
+         * @details
+         * Line-luminosity analog of applyExtinctionCts(): each element
+         * of lineLum is multiplied by extinctionFacCtsLines_ at the
+         * corresponding line -- the expectation value of
+         * exp(-A_V * extinctLines_) over the field-star A_V
+         * distribution (io::SimControls::avDistField()), precomputed
+         * once, at construction -- see extinctionFacCtsLines_'s own
+         * comment. See applyExtinctionLines()'s own comment for why
+         * there is no analog of wlOffset_ here.
+         */
+        [[nodiscard]] auto applyExtinctionCtsLines(const std::vector<double>& lineLum) const -> std::vector<double>
+        {
+            std::vector<double> result(extinctLines_.size());
+            for (std::size_t i = 0; i < extinctLines_.size(); i++)
+            {
+                result[i] = lineLum[i] * extinctionFacCtsLines_[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- result and extinctionFacCtsLines_ both have size extinctLines_.size() (extinctionFacCtsLines_ by computeExtinctionFacCtsLines()'s own contract), and i is bounded by extinctLines_.size(); lineLum has the same size, by this method's own contract
+            }
+            return result;
+        }
+
     private:
 
         /**
@@ -283,6 +350,11 @@ namespace extinct
          * @param wl Wavelength grid, in Angstrom, that extinct is defined on
          * @param extinct Extinction curve; rescaled in place so that it
          *   corresponds to a V-band extinction A_V = 1 mag
+         * @param extinctLines Line-wavelength extinction curve (see
+         *   extinctLines_'s own comment); rescaled in place by the same
+         *   normalization factor as extinct, so that A_V continues to
+         *   mean the same thing for both. Empty (a no-op) if no nebular
+         *   emission grid was requested.
          * @param vRegistry Name of the V-band filter registry file
          * @details
          * The mean V-band opacity is defined as
@@ -299,6 +371,7 @@ namespace extinct
          */
         static void normalize(const std::vector<double>& wl,
             std::vector<double>& extinct,
+            std::vector<double>& extinctLines,
             const std::string& vRegistry = defaultVRegistry)
         {
             const phot::FilterTabulated vFilt("Generic", "Johnson", "V", vRegistry);
@@ -328,6 +401,7 @@ namespace extinct
                 respInterp.integ(extInterp, respInterp.xMin(), respInterp.xMax());
 
             for (double& e : extinct) { e *= norm; }
+            for (double& e : extinctLines) { e *= norm; }
         }
 
         /**
@@ -352,6 +426,52 @@ namespace extinct
         }
 
         /**
+         * @brief The per-line attenuation factor for a single, known A_V
+         * @param A_V V-band extinction, in magnitudes
+         * @return exp(-A_V * extinctLines_) at each of
+         *   controls_.nebular()->lineWl()'s own lines
+         * @details
+         * Line-luminosity analog of extinctFac() -- the same factor
+         * applyExtinctionLines() itself multiplies a set of line
+         * luminosities by, exposed as its own method so
+         * computeExtinctionFacCtsLines() can hand it to
+         * utils::PDFIntegrator as the integrand of an integral over
+         * A_V, rather than duplicating this same exponential there.
+         */
+        [[nodiscard]] auto extinctFacLines(const double A_V) const -> std::vector<double> // NOLINT(readability-identifier-naming) -- see applyExtinction()'s own identical NOLINT
+        {
+            std::vector<double> result(extinctLines_.size());
+            for (std::size_t i = 0; i < extinctLines_.size(); i++)
+            {
+                result[i] = std::exp(-A_V * extinctLines_[i]); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- result and extinctLines_ both have size extinctLines_.size(), and i is bounded by extinctLines_.size()
+            }
+            return result;
+        }
+
+        /**
+         * @brief Initialize extinctLines_ from the native curve's own interpolator
+         * @param interp Interpolator built (in the constructor) from
+         *   wlDat_/extinctDat_ -- the same one wl_/extinct_ are
+         *   themselves interpolated from
+         * @details
+         * A no-op (extinctLines_ left empty) if no nebular emission
+         * grid was requested (controls_.nebular() == nullptr).
+         * Otherwise resizes extinctLines_ to
+         * controls_.nebular()->lineWl().size() and, for each line,
+         * evaluates interp at that line's own wavelength if it falls
+         * within interp's own [xMin(), xMax()] coverage, or sets that
+         * line's entry to 0 (no attenuation) otherwise -- see
+         * extinctLines_'s own comment for why lines are never dropped
+         * the way wl_/extinct_'s own out-of-coverage leading/trailing
+         * elements are. Needs io::SimControls's complete type (to call
+         * controls_.nebular()), so is defined out-of-line, in
+         * Extinct.cpp -- see computeExtinctionFacCts()'s own comment
+         * for why. Called once, from the constructor, immediately
+         * after the wl_/extinct_ loop, before normalize().
+         */
+        void initExtinctLines(const interp::Interpolator1D<1>& interp);
+
+        /**
          * @brief Compute extinctionFacCts_
          * @details
          * Defined out-of-line, in Extinct.cpp -- see that file's own
@@ -361,6 +481,22 @@ namespace extinct
          * once, from the constructor, immediately after normalize().
          */
         void computeExtinctionFacCts();
+
+        /**
+         * @brief Compute extinctionFacCtsLines_
+         * @details
+         * Line-luminosity analog of computeExtinctionFacCts() -- see
+         * its own comment; identical in every respect except that it
+         * integrates extinctFacLines() (over extinctLines_.size()
+         * quantities) rather than extinctFac(), storing the result
+         * into extinctionFacCtsLines_ rather than extinctionFacCts_. A
+         * no-op (an empty extinctionFacCtsLines_) if extinctLines_ is
+         * itself empty, i.e. no nebular emission grid was requested.
+         * Defined out-of-line, in Extinct.cpp, for the same reason as
+         * computeExtinctionFacCts(). Called once, from the
+         * constructor, immediately after computeExtinctionFacCts().
+         */
+        void computeExtinctionFacCtsLines();
 
         /**
          * @brief Simulation controls this Extinct reads its redshift from
@@ -383,6 +519,22 @@ namespace extinct
         std::size_t wlOffset_ = 0;       /**< Number of leading elements of the constructor's own wl chopped off wl_'s front */
 
         /**
+         * @brief Extinction curve interpolated onto controls_.nebular()->lineWl()
+         * @details
+         * One entry per line in controls_.nebular()->lineWl(), in the
+         * same order -- unlike extinct_ (interpolated onto wl_, a
+         * chopped-down copy of the constructor's own wl), no line is
+         * ever dropped here: a line falling outside the native curve's
+         * own [wlDat_.front(), wlDat_.back()] coverage simply reads an
+         * extinction of 0 (no attenuation) rather than being excluded,
+         * since a nebular emission line, unlike a point on a
+         * continuous wavelength grid, cannot simply be left out of the
+         * output. Left empty if no nebular emission grid was requested
+         * (controls_.nebular() == nullptr).
+         */
+        std::vector<double> extinctLines_;
+
+        /**
          * @brief The expected value of exp(-A_V * extinct()) over controls_.avDistField(), at each wavelength in wl()
          * @details
          * \f$\int \exp[-A_V \cdot \mathrm{extinct}(\lambda)]\, p(A_V)\, dA_V\f$,
@@ -394,6 +546,19 @@ namespace extinct
          * never changes after that, so neither does this).
          */
         std::vector<double> extinctionFacCts_;
+
+        /**
+         * @brief The expected value of exp(-A_V * extinctLines_) over controls_.avDistField(), at each line in controls_.nebular()->lineWl()
+         * @details
+         * Line-luminosity analog of extinctionFacCts_ -- the
+         * multiplicative factor applyExtinctionCtsLines() itself
+         * applies to a continuously-distributed population's line
+         * luminosities. Computed once, by
+         * computeExtinctionFacCtsLines(), at construction. Left empty
+         * if extinctLines_ is itself empty, i.e. no nebular emission
+         * grid was requested.
+         */
+        std::vector<double> extinctionFacCtsLines_;
     };
 
 } // namespace extinct
