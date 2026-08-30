@@ -116,6 +116,7 @@ add_executable(slug
     src/tracks/Tracks3D.cpp
     src/tracks/TrackUtils.cpp
     src/extinct/Extinct.cpp
+    src/nebular/Nebular.cpp
     src/io/SimControls.cpp
     src/utils/ParseUtils.cpp
 )
@@ -130,7 +131,9 @@ add_executable(slugTestInterpolation
 )
 add_executable(slugTestExtinct
     src/extinct/Extinct.cpp
+    src/nebular/Nebular.cpp
     src/phot/FilterTabulated.cpp
+    src/phot/FilterIdeal.cpp
     tests/extinct/testExtinctAll.cpp
 )
 add_executable(slugTestPhot
@@ -185,6 +188,7 @@ add_executable(slugTestCore
     src/io/OutputManagerAscii.cpp
     src/io/OutputManagerH5.cpp
     src/extinct/Extinct.cpp
+    src/nebular/Nebular.cpp
     src/io/SimControls.cpp
     src/interpolation/Mesh2DGrid.cpp
     src/pdfs/PDFFileParser.cpp
@@ -234,6 +238,7 @@ add_executable(slugTestCoreFull
     src/io/OutputManagerAscii.cpp
     src/io/OutputManagerH5.cpp
     src/extinct/Extinct.cpp
+    src/nebular/Nebular.cpp
     src/io/SimControls.cpp
     src/interpolation/Mesh2DGrid.cpp
     src/pdfs/PDFFileParser.cpp
@@ -266,6 +271,7 @@ add_executable(slugTestCoreFull
     tests/core/testClusterSpecsynFullAFe.cpp
     tests/core/testClusterSpecsynFullNonStoch.cpp
     tests/core/testClusterSpecsynFullGrid.cpp
+    tests/core/testClusterSpecsynFullNebular.cpp
     tests/core/testGalaxySpecsynFullCommon.cpp
     tests/core/testGalaxySpecsynFullNonStoch.cpp
     tests/core/testGalaxySpecsynFullFieldStars.cpp
@@ -289,6 +295,7 @@ add_executable(slugTestIo
     src/io/OutputManagerAscii.cpp
     src/io/OutputManagerH5.cpp
     src/extinct/Extinct.cpp
+    src/nebular/Nebular.cpp
     src/io/SimControls.cpp
     src/interpolation/Mesh2DGrid.cpp
     src/pdfs/PDFFileParser.cpp
@@ -320,6 +327,38 @@ add_executable(slugTestIo
     tests/io/testOutputManager.cpp
     tests/io/testSimControls.cpp
 )
+add_executable(slugTestNebular
+    src/extinct/Extinct.cpp
+    src/nebular/Nebular.cpp
+    src/io/SimControls.cpp
+    src/interpolation/Mesh2DGrid.cpp
+    src/pdfs/PDFFileParser.cpp
+    src/pdfs/PDFSegment.cpp
+    src/pdfs/PDFSegmentDelta.cpp
+    src/pdfs/PDFSegmentExponential.cpp
+    src/pdfs/PDFSegmentLognormal.cpp
+    src/pdfs/PDFSegmentNormal.cpp
+    src/pdfs/PDFSegmentPowerlaw.cpp
+    src/pdfs/PDFSegmentSchechter.cpp
+    src/phot/FilterCollection.cpp
+    src/phot/VegaSpectrum.cpp
+    src/phot/FilterIdeal.cpp
+    src/phot/FilterTabulated.cpp
+    src/specsyn/SpecsynBlackbody.cpp
+    src/specsyn/Specsyn.cpp
+    src/specsyn/SpecsynUtils.cpp
+    src/specsyn/SpecsynLib.cpp
+    src/specsyn/SpecsynLibNoWind.cpp
+    src/specsyn/SpecsynLib2D.cpp
+    src/specsyn/SpecsynLibWD.cpp
+    src/specsyn/SpecsynLibWR.cpp
+    src/specsyn/SpecsynLibChained.cpp
+    src/tracks/TrackUtils.cpp
+    src/tracks/Tracks2D.cpp
+    src/tracks/Tracks3D.cpp
+    src/utils/ParseUtils.cpp
+    tests/nebular/testNebularAll.cpp
+)
 add_executable(slugTestSpecsyn
     src/specsyn/SpecsynBlackbody.cpp
     src/specsyn/Specsyn.cpp
@@ -338,6 +377,7 @@ add_executable(slugTestSpecsyn
     tests/specsyn/testSpecsynLibWD.cpp
     tests/specsyn/testSpecsynLibChained.cpp
     src/extinct/Extinct.cpp
+    src/nebular/Nebular.cpp
     src/io/SimControls.cpp
     src/interpolation/Mesh2DGrid.cpp
     src/phot/FilterCollection.cpp
@@ -392,6 +432,7 @@ pybind11_add_module(slugPython
     src/core/SimCluster.cpp
     src/core/SimGalaxy.cpp
     src/extinct/Extinct.cpp
+    src/nebular/Nebular.cpp
     src/io/SimControls.cpp
     src/io/OutputManager.cpp
     src/io/OutputManagerAscii.cpp
@@ -478,6 +519,9 @@ target_include_directories(slugTestCoreFull SYSTEM PRIVATE src/extern/pcg-cpp/in
 target_include_directories(slugTestIo PRIVATE src ${CMAKE_BINARY_DIR}/generated)
 target_include_directories(slugTestIo SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
 
+target_include_directories(slugTestNebular PRIVATE src)
+target_include_directories(slugTestNebular SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
+
 target_include_directories(slugTestSpecsyn PRIVATE src)
 target_include_directories(slugTestSpecsyn SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
 
@@ -494,6 +538,7 @@ target_include_directories(slugTestTracks SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestCore SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestCoreFull SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestIo SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
+target_include_directories(slugTestNebular SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestSpecsyn SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugPython SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 
@@ -508,6 +553,7 @@ target_link_libraries(slugTestTracks PRIVATE GSL::gsl)
 target_link_libraries(slugTestCore PRIVATE GSL::gsl)
 target_link_libraries(slugTestCoreFull PRIVATE GSL::gsl)
 target_link_libraries(slugTestIo PRIVATE GSL::gsl)
+target_link_libraries(slugTestNebular PRIVATE GSL::gsl)
 target_link_libraries(slugTestSpecsyn PRIVATE GSL::gsl)
 target_link_libraries(slugPython PRIVATE GSL::gsl)
 
@@ -522,6 +568,7 @@ target_link_libraries(slugTestTracks PRIVATE slug_mdspan)
 target_link_libraries(slugTestCore PRIVATE slug_mdspan)
 target_link_libraries(slugTestCoreFull PRIVATE slug_mdspan)
 target_link_libraries(slugTestIo PRIVATE slug_mdspan)
+target_link_libraries(slugTestNebular PRIVATE slug_mdspan)
 target_link_libraries(slugTestSpecsyn PRIVATE slug_mdspan)
 target_link_libraries(slugPython PRIVATE slug_mdspan)
 
@@ -536,6 +583,7 @@ target_link_libraries(slugTestTracks PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugTestCore PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugTestCoreFull PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugTestIo PRIVATE ${HDF5_CXX_LIBRARIES})
+target_link_libraries(slugTestNebular PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugTestSpecsyn PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugPython PRIVATE ${HDF5_CXX_LIBRARIES})
 
@@ -551,6 +599,7 @@ if(OpenMP_CXX_FOUND)
     target_link_libraries(slugTestCore PRIVATE OpenMP::OpenMP_CXX)
     target_link_libraries(slugTestCoreFull PRIVATE OpenMP::OpenMP_CXX)
     target_link_libraries(slugTestIo PRIVATE OpenMP::OpenMP_CXX)
+    target_link_libraries(slugTestNebular PRIVATE OpenMP::OpenMP_CXX)
     target_link_libraries(slugTestSpecsyn PRIVATE OpenMP::OpenMP_CXX)
     target_link_libraries(slugPython PRIVATE OpenMP::OpenMP_CXX)
 endif()
@@ -594,6 +643,13 @@ add_test(NAME test_Io COMMAND slugTestIo
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 set_tests_properties(test_Io PROPERTIES
     ENVIRONMENT "SLUG_DIR=${CMAKE_SOURCE_DIR}")
+
+# test_Nebular loads its own small nebular emission fixture (tests/
+# nebular/assets/nebular_test.h5) and IMF/track files by relative
+# path, so it needs to run from the source tree root, mirroring
+# test_Specsyn/test_Tracks above.
+add_test(NAME test_Nebular COMMAND slugTestNebular
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 # test_CoreFull is the slow, full-scale end-to-end counterpart to
 # test_Core -- see testCoreFullAll.cpp and slugTestCoreFull's own
@@ -650,7 +706,7 @@ set_tests_properties(test_Slugpy PROPERTIES
 # executable would make it impossible to skip on its own.
 set_tests_properties(
     test_Interpolation test_Extinct test_Phot test_PDFs test_Utils test_Specsyn test_Tracks
-    test_Core test_Io test_PythonBindings test_Slugpy
+    test_Core test_Io test_Nebular test_PythonBindings test_Slugpy
     PROPERTIES LABELS "quick")
 set_tests_properties(test_CoreFull PROPERTIES LABELS "slow")
 

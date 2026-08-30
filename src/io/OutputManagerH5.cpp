@@ -273,6 +273,139 @@ static void appendRowToDataset2d(const hid_t loc, const std::string& name,
     H5Dclose(dset);
 }
 
+// Create the "spec_neb" 2D dataset in the given spectra group (sized
+// nWl, the same wavelength grid as the group's own "spec" dataset), if
+// a nebular emission grid was requested -- a no-op otherwise. Factored
+// out of openClusterSpectraGroup()/openGalaxySpectraGroup() to keep
+// each within its cognitive-complexity budget.
+static void createSpecNebDataset(const io::SimControls& simControls, const hid_t group, const hsize_t nWl)
+{
+    if (simControls.nebular() == nullptr) { return; }
+    const hid_t dset = createExtensible2dDataset(group, "spec_neb", H5T_NATIVE_DOUBLE, nWl);
+    writeStringAttr(dset, "units", "erg/(s Angstrom)");
+    H5Dclose(dset);
+}
+
+// Create the "spec_neb_extinct" 2D dataset in the given spectra group
+// (sized nWlExtinct, the same restricted grid as the group's own
+// "spec_extinct" dataset), if a nebular emission grid was requested --
+// a no-op otherwise. Must only be called when SimControls::extinct()
+// is already known to be non-null (specNebExtinct() has no meaning
+// without an extinction curve). Factored out of
+// openClusterSpectraGroup()/openGalaxySpectraGroup() to keep each
+// within its cognitive-complexity budget.
+static void createSpecNebExtinctDataset(const io::SimControls& simControls, const hid_t group,
+    const hsize_t nWlExtinct)
+{
+    if (simControls.nebular() == nullptr) { return; }
+    const hid_t dset = createExtensible2dDataset(group, "spec_neb_extinct", H5T_NATIVE_DOUBLE, nWlExtinct);
+    writeStringAttr(dset, "units", "erg/(s Angstrom)");
+    H5Dclose(dset);
+}
+
+// Create the "phot_neb" and (if extinction was also requested)
+// "phot_neb_extinct" 2D datasets (each sized nRealFilters, excluding
+// any appended "Lbol" entry -- see this function's callers' own
+// comments) in the given photometry group, if a nebular emission grid
+// was requested -- a no-op otherwise. Must only be called when
+// SimControls::filters() is already known to be non-null. Factored out
+// of openClusterPhotGroup()/openGalaxyPhotGroup() to keep each within
+// its cognitive-complexity budget.
+static void createPhotNebDatasets(const io::SimControls& simControls, const hid_t group,
+    const hsize_t nRealFilters, const std::vector<std::string>& realFilterUnits)
+{
+    if (simControls.nebular() == nullptr) { return; }
+    const hid_t photNebDset = createExtensible2dDataset(group, "phot_neb", H5T_NATIVE_DOUBLE, nRealFilters);
+    writeStringArrayAttr(photNebDset, "units", realFilterUnits);
+    H5Dclose(photNebDset);
+
+    if (simControls.extinct() == nullptr) { return; }
+    const hid_t photNebExtinctDset = createExtensible2dDataset(
+        group, "phot_neb_extinct", H5T_NATIVE_DOUBLE, nRealFilters);
+    writeStringArrayAttr(photNebExtinctDset, "units", realFilterUnits);
+    H5Dclose(photNebExtinctDset);
+}
+
+// Append one row to the "phot_neb" and (if extinction was also
+// requested) "phot_neb_extinct" datasets in the given photometry
+// group, if a nebular emission grid was requested -- a no-op
+// otherwise. Must only be called when SimControls::filters() is
+// already known to be non-null, and from inside the same critical
+// section as the caller's other appendRowToDataset2d() calls.
+// Factored out of writeClusterPhot()/writeGalaxyPhot() to keep each
+// within its cognitive-complexity budget.
+static void appendPhotNebRows(const io::SimControls& simControls, const hid_t group,
+    const std::vector<double>& photNeb, const std::vector<double>& photNebExtinct)
+{
+    if (simControls.nebular() == nullptr || simControls.filters() == nullptr) { return; }
+    appendRowToDataset2d(group, "phot_neb", H5T_NATIVE_DOUBLE, photNeb.data());
+
+    if (simControls.extinct() == nullptr) { return; }
+    appendRowToDataset2d(group, "phot_neb_extinct", H5T_NATIVE_DOUBLE, photNebExtinct.data());
+}
+
+// Create the "line_wl"/"line_label" fixed datasets and the
+// "neb_lines" (and, if extinction was also requested,
+// "neb_lines_extinct") extensible 2D datasets in the given spectra
+// group, if a nebular emission grid was requested -- a no-op
+// otherwise. line_label is written as a fixed-length string dataset
+// (see utils::readStringDataset1D's own comment), sized to the
+// longest of SimControls::nebular()'s own lineLabel() strings plus a
+// null terminator -- computed fresh here each time, since Nebular
+// itself does not retain whatever fixed length its own source table
+// used. Factored out of openClusterSpectraGroup()/
+// openGalaxySpectraGroup() to keep each within its cognitive-
+// complexity budget.
+static void createNebLinesDatasets(const io::SimControls& simControls, const hid_t group)
+{
+    const auto* neb = simControls.nebular();
+    if (neb == nullptr) { return; }
+
+    const auto& lineWl = neb->lineWl();
+    const auto& lineLabel = neb->lineLabel();
+    const auto nLines = static_cast<hsize_t>(lineWl.size());
+
+    writeFixed1dDataset(group, "line_wl", H5T_NATIVE_DOUBLE, lineWl.data(), nLines, "Angstrom");
+
+    std::size_t maxLabelLen = 0;
+    for (const auto& label : lineLabel) { maxLabelLen = std::max(maxLabelLen, label.size()); }
+    const std::size_t labelStrSize = maxLabelLen + 1;
+    std::vector<char> labelBuf(lineLabel.size() * labelStrSize, '\0');
+    for (std::size_t ell = 0; ell < lineLabel.size(); ++ell)
+    {
+        std::ranges::copy(lineLabel.at(ell), labelBuf.begin() + static_cast<std::ptrdiff_t>(ell * labelStrSize));
+    }
+    const hid_t labelType = fixedStrType(labelStrSize);
+    writeFixed1dDataset(group, "line_label", labelType, labelBuf.data(), nLines, "");
+    H5Tclose(labelType);
+
+    const hid_t linesDset = createExtensible2dDataset(group, "neb_lines", H5T_NATIVE_DOUBLE, nLines);
+    writeStringAttr(linesDset, "units", "erg/s");
+    H5Dclose(linesDset);
+
+    if (simControls.extinct() == nullptr) { return; }
+    const hid_t linesExtinctDset = createExtensible2dDataset(group, "neb_lines_extinct", H5T_NATIVE_DOUBLE, nLines);
+    writeStringAttr(linesExtinctDset, "units", "erg/s");
+    H5Dclose(linesExtinctDset);
+}
+
+// Append one row to the "neb_lines" and (if extinction was also
+// requested) "neb_lines_extinct" datasets in the given spectra group,
+// if a nebular emission grid was requested -- a no-op otherwise. Must
+// be called from inside the same critical section as the caller's
+// other appendRowToDataset2d() calls. Factored out of
+// writeClusterSpec()/writeGalaxySpec() to keep each within its
+// cognitive-complexity budget.
+static void appendNebLinesRow(const io::SimControls& simControls, const hid_t group,
+    const std::vector<double>& lineLum, const std::vector<double>& lineLumExtinct)
+{
+    if (simControls.nebular() == nullptr) { return; }
+    appendRowToDataset2d(group, "neb_lines", H5T_NATIVE_DOUBLE, lineLum.data());
+
+    if (simControls.extinct() == nullptr) { return; }
+    appendRowToDataset2d(group, "neb_lines_extinct", H5T_NATIVE_DOUBLE, lineLumExtinct.data());
+}
+
 // Return the name of the idx-th direct child link of the HDF5 group
 // (or file, which is itself a group) loc
 static auto childNameByIdx(const hid_t loc, const hsize_t idx) -> std::string
@@ -622,6 +755,11 @@ void io::OutputManagerH5::openClusterSpectraGroup()
     writeStringAttr(specDset, "units", "erg/(s Angstrom)");
     H5Dclose(specDset);
 
+    // specNeb (if requested) lives on the same wl grid as spec -- no
+    // separate wavelength dataset is needed
+    createSpecNebDataset(simControls_, clusterSpectraGroup_(), nWl);
+    createNebLinesDatasets(simControls_, clusterSpectraGroup_());
+
     if (simControls_.extinct() != nullptr)
     {
         const std::vector<double> wlExtinctObs = simControls_.extinct()->wlObs();
@@ -632,6 +770,11 @@ void io::OutputManagerH5::openClusterSpectraGroup()
             clusterSpectraGroup_(), "spec_extinct", H5T_NATIVE_DOUBLE, nWlExtinct);
         writeStringAttr(specExtinctDset, "units", "erg/(s Angstrom)");
         H5Dclose(specExtinctDset);
+
+        // specNebExtinct (if requested) lives on the same
+        // (extinction-curve-restricted) grid as specExtinct -- reuses
+        // wl_extinct
+        createSpecNebExtinctDataset(simControls_, clusterSpectraGroup_(), nWlExtinct);
     }
     // NOLINTEND(misc-include-cleaner)
 }
@@ -692,22 +835,29 @@ void io::OutputManagerH5::openClusterPhotGroup()
     writeStringArrayAttr(photDset, "units", filterUnits);
     H5Dclose(photDset);
 
-    // phot_extinct only ever covers real filters, never Lbol -- Lbol is
-    // a separate bolometric quantity computed directly from the
-    // stellar tracks (see Cluster::computeLbol()), not from the
-    // (extincted or otherwise) spectrum, so it has no extincted
-    // counterpart; sized independently of nFilters/phot above rather
-    // than reusing them, since those may include the "Lbol" entry
-    // appended earlier in this function
-    if (simControls_.extinct() != nullptr && simControls_.filters() != nullptr)
+    // phot_extinct/phot_neb/phot_neb_extinct only ever cover real
+    // filters, never Lbol -- Lbol is a separate bolometric quantity
+    // computed directly from the stellar tracks (see
+    // Cluster::computeLbol()), not from the (extincted/nebular-
+    // inclusive or otherwise) spectrum, so it has no extincted or
+    // nebular-inclusive counterpart; sized independently of
+    // nFilters/phot above rather than reusing them, since those may
+    // include the "Lbol" entry appended earlier in this function
+    if (simControls_.filters() != nullptr)
     {
         const auto& realFilterNames = simControls_.filters()->filterNames();
         const auto& realFilterUnits = simControls_.filters()->filterUnits();
         const auto nRealFilters = static_cast<hsize_t>(realFilterNames.size());
-        const hid_t photExtinctDset = createExtensible2dDataset(
-            clusterPhotGroup_(), "phot_extinct", H5T_NATIVE_DOUBLE, nRealFilters);
-        writeStringArrayAttr(photExtinctDset, "units", realFilterUnits);
-        H5Dclose(photExtinctDset);
+
+        if (simControls_.extinct() != nullptr)
+        {
+            const hid_t photExtinctDset = createExtensible2dDataset(
+                clusterPhotGroup_(), "phot_extinct", H5T_NATIVE_DOUBLE, nRealFilters);
+            writeStringArrayAttr(photExtinctDset, "units", realFilterUnits);
+            H5Dclose(photExtinctDset);
+        }
+
+        createPhotNebDatasets(simControls_, clusterPhotGroup_(), nRealFilters, realFilterUnits);
     }
     // NOLINTEND(misc-include-cleaner)
 }
@@ -789,6 +939,11 @@ void io::OutputManagerH5::openGalaxySpectraGroup()
     writeStringAttr(specDset, "units", "erg/(s Angstrom)");
     H5Dclose(specDset);
 
+    // specNeb (if requested) lives on the same wl grid as spec -- see
+    // openClusterSpectraGroup()'s own identical comment
+    createSpecNebDataset(simControls_, galaxySpectraGroup_(), nWl);
+    createNebLinesDatasets(simControls_, galaxySpectraGroup_());
+
     if (simControls_.extinct() != nullptr)
     {
         const std::vector<double> wlExtinctObs = simControls_.extinct()->wlObs();
@@ -799,6 +954,8 @@ void io::OutputManagerH5::openGalaxySpectraGroup()
             galaxySpectraGroup_(), "spec_extinct", H5T_NATIVE_DOUBLE, nWlExtinct);
         writeStringAttr(specExtinctDset, "units", "erg/(s Angstrom)");
         H5Dclose(specExtinctDset);
+
+        createSpecNebExtinctDataset(simControls_, galaxySpectraGroup_(), nWlExtinct);
     }
     // NOLINTEND(misc-include-cleaner)
 }
@@ -854,17 +1011,24 @@ void io::OutputManagerH5::openGalaxyPhotGroup()
     writeStringArrayAttr(photDset, "units", filterUnits);
     H5Dclose(photDset);
 
-    // phot_extinct only ever covers real filters, never Lbol -- see
-    // openClusterPhotGroup()'s own identical comment
-    if (simControls_.extinct() != nullptr && simControls_.filters() != nullptr)
+    // phot_extinct/phot_neb/phot_neb_extinct only ever cover real
+    // filters, never Lbol -- see openClusterPhotGroup()'s own
+    // identical comment
+    if (simControls_.filters() != nullptr)
     {
         const auto& realFilterNames = simControls_.filters()->filterNames();
         const auto& realFilterUnits = simControls_.filters()->filterUnits();
         const auto nRealFilters = static_cast<hsize_t>(realFilterNames.size());
-        const hid_t photExtinctDset = createExtensible2dDataset(
-            galaxyPhotGroup_(), "phot_extinct", H5T_NATIVE_DOUBLE, nRealFilters);
-        writeStringArrayAttr(photExtinctDset, "units", realFilterUnits);
-        H5Dclose(photExtinctDset);
+
+        if (simControls_.extinct() != nullptr)
+        {
+            const hid_t photExtinctDset = createExtensible2dDataset(
+                galaxyPhotGroup_(), "phot_extinct", H5T_NATIVE_DOUBLE, nRealFilters);
+            writeStringArrayAttr(photExtinctDset, "units", realFilterUnits);
+            H5Dclose(photExtinctDset);
+        }
+
+        createPhotNebDatasets(simControls_, galaxyPhotGroup_(), nRealFilters, realFilterUnits);
     }
     // NOLINTEND(misc-include-cleaner)
 }
@@ -1047,6 +1211,10 @@ void io::OutputManagerH5::writeClusterSpec(
     const unsigned long uid = cluster.uid();
     const auto& spec = cluster.spec();
     const auto& specExtinct = cluster.specExtinct();
+    const auto& specNeb = cluster.specNeb();
+    const auto& specNebExtinct = cluster.specNebExtinct();
+    const auto& lineLum = cluster.lineLum();
+    const auto& lineLumExtinct = cluster.lineLumExtinct();
 
 #ifdef _OPENMP
 #pragma omp critical(h5ThreadSafety)
@@ -1057,11 +1225,22 @@ void io::OutputManagerH5::writeClusterSpec(
         appendToDataset(clusterSpectraGroup_(), "time", H5T_NATIVE_DOUBLE, &time);
         appendToDataset(clusterSpectraGroup_(), "uid", H5T_NATIVE_ULONG, &uid);
         appendRowToDataset2d(clusterSpectraGroup_(), "spec", H5T_NATIVE_DOUBLE, spec.data());
+        if (simControls_.nebular() != nullptr)
+        {
+            appendRowToDataset2d(clusterSpectraGroup_(), "spec_neb",
+                H5T_NATIVE_DOUBLE, specNeb.data());
+        }
         if (simControls_.extinct() != nullptr)
         {
             appendRowToDataset2d(clusterSpectraGroup_(), "spec_extinct",
                 H5T_NATIVE_DOUBLE, specExtinct.data());
+            if (simControls_.nebular() != nullptr)
+            {
+                appendRowToDataset2d(clusterSpectraGroup_(), "spec_neb_extinct",
+                    H5T_NATIVE_DOUBLE, specNebExtinct.data());
+            }
         }
+        appendNebLinesRow(simControls_, clusterSpectraGroup_(), lineLum, lineLumExtinct);
         // NOLINTEND(misc-include-cleaner)
     }
 }
@@ -1083,6 +1262,8 @@ void io::OutputManagerH5::writeClusterPhot(
     auto phot = cluster.phot();
     if (simControls_.computeLbol()) { phot.push_back(cluster.lbol()); }
     const auto& photExtinct = cluster.photExtinct();
+    const auto& photNeb = cluster.photNeb();
+    const auto& photNebExtinct = cluster.photNebExtinct();
 
 #ifdef _OPENMP
 #pragma omp critical(h5ThreadSafety)
@@ -1098,6 +1279,7 @@ void io::OutputManagerH5::writeClusterPhot(
             appendRowToDataset2d(clusterPhotGroup_(), "phot_extinct",
                 H5T_NATIVE_DOUBLE, photExtinct.data());
         }
+        appendPhotNebRows(simControls_, clusterPhotGroup_(), photNeb, photNebExtinct);
         // NOLINTEND(misc-include-cleaner)
     }
 }
@@ -1148,6 +1330,10 @@ void io::OutputManagerH5::writeGalaxySpec(
     // section below -- see writeClusterSpec's own comment
     const auto& spec = galaxy.spec();
     const auto& specExtinct = galaxy.specExtinct();
+    const auto& specNeb = galaxy.specNeb();
+    const auto& specNebExtinct = galaxy.specNebExtinct();
+    const auto& lineLum = galaxy.lineLum();
+    const auto& lineLumExtinct = galaxy.lineLumExtinct();
 
     // See writeGalaxy's own comment on this critical section
 #ifdef _OPENMP
@@ -1158,11 +1344,22 @@ void io::OutputManagerH5::writeGalaxySpec(
         appendToDataset(galaxySpectraGroup_(), "trial", H5T_NATIVE_ULONG, &trial);
         appendToDataset(galaxySpectraGroup_(), "time", H5T_NATIVE_DOUBLE, &time);
         appendRowToDataset2d(galaxySpectraGroup_(), "spec", H5T_NATIVE_DOUBLE, spec.data());
+        if (simControls_.nebular() != nullptr)
+        {
+            appendRowToDataset2d(galaxySpectraGroup_(), "spec_neb",
+                H5T_NATIVE_DOUBLE, specNeb.data());
+        }
         if (simControls_.extinct() != nullptr)
         {
             appendRowToDataset2d(galaxySpectraGroup_(), "spec_extinct",
                 H5T_NATIVE_DOUBLE, specExtinct.data());
+            if (simControls_.nebular() != nullptr)
+            {
+                appendRowToDataset2d(galaxySpectraGroup_(), "spec_neb_extinct",
+                    H5T_NATIVE_DOUBLE, specNebExtinct.data());
+            }
         }
+        appendNebLinesRow(simControls_, galaxySpectraGroup_(), lineLum, lineLumExtinct);
         // NOLINTEND(misc-include-cleaner)
     }
 
@@ -1184,6 +1381,8 @@ void io::OutputManagerH5::writeGalaxyPhot(
     auto phot = galaxy.phot();
     if (simControls_.computeLbol()) { phot.push_back(galaxy.lbol()); }
     const auto& photExtinct = galaxy.photExtinct();
+    const auto& photNeb = galaxy.photNeb();
+    const auto& photNebExtinct = galaxy.photNebExtinct();
 
     // See writeGalaxy's own comment on this critical section
 #ifdef _OPENMP
@@ -1199,6 +1398,7 @@ void io::OutputManagerH5::writeGalaxyPhot(
             appendRowToDataset2d(galaxyPhotGroup_(), "phot_extinct",
                 H5T_NATIVE_DOUBLE, photExtinct.data());
         }
+        appendPhotNebRows(simControls_, galaxyPhotGroup_(), photNeb, photNebExtinct);
         // NOLINTEND(misc-include-cleaner)
     }
 

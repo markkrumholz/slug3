@@ -9,6 +9,7 @@
 #include "Cluster.hpp"
 #include "../extinct/Extinct.hpp"
 #include "../io/SimControls.hpp"
+#include "../nebular/Nebular.hpp"
 #include "../phot/FilterCollection.hpp"
 #include "../tracks/TrackCommons.hpp"
 #include "../tracks/Tracks2D.hpp"
@@ -24,6 +25,7 @@
 #include <numeric>
 #include <sstream>
 #include <stdexcept>
+#include <utility>
 #include <variant>
 
 // Constructor
@@ -259,8 +261,9 @@ void core::Cluster::updateLivingStars(const double logAge)
 }
 // NOLINTEND(misc-include-cleaner)
 
-// Compute the population spectrum at the current isochrone, if a
-// spectral synthesizer was requested
+// Compute the population spectrum (and, if requested, nebular
+// emission and/or extinction) at the current isochrone, if a spectral
+// synthesizer was requested
 void core::Cluster::computeSpec()
 {
     const auto& sc = controls_.get();
@@ -295,19 +298,36 @@ void core::Cluster::computeSpec()
         }
     }
 
-    // Extinguish the spectrum just computed, if an extinction curve
+    // Add nebular continuum and line emission, if a nebular emission
+    // grid was requested
+    const auto* neb = sc.nebular();
+    if (neb != nullptr)
+    {
+        auto [nebSpec, nebLineLum] = neb->getCluster(spec_, feH_, curTime_ - formTime_);
+        specNeb_ = std::move(nebSpec);
+        lineLum_ = std::move(nebLineLum);
+    }
+
+    // Extinguish the spectrum(s) just computed, if an extinction curve
     // was requested
     const auto* ext = sc.extinct();
     if (ext != nullptr)
     {
         specExtinct_ = ext->applyExtinction(aV_, spec_);
+        if (neb != nullptr)
+        {
+            specNebExtinct_ = ext->applyExtinction(aV_, specNeb_);
+            lineLumExtinct_ = ext->applyExtinctionLines(aV_, lineLum_);
+        }
     }
 }
 
-// Update the population photometry (and, if an extinction curve was
-// requested, extincted photometry) from the current spec_/specExtinct_
-// -- via spec()/specExtinct(), not the raw members, so this computes a
-// current spectrum first if needed, regardless of call order (see this
+// Update the population photometry (and, if an extinction curve
+// and/or nebular emission grid was requested, extincted and/or
+// nebular photometry) from the current spec_/specExtinct_/specNeb_/
+// specNebExtinct_ -- via spec()/specExtinct()/specNeb()/
+// specNebExtinct(), not the raw members, so this computes a current
+// spectrum first if needed, regardless of call order (see this
 // method's own header comment)
 void core::Cluster::computePhot()
 {
@@ -321,6 +341,15 @@ void core::Cluster::computePhot()
     if (ext != nullptr)
     {
         photExtinct_ = filters->phot(ext->wlObs(), specExtinct());
+    }
+
+    if (sc.nebular() != nullptr)
+    {
+        photNeb_ = filters->phot(sc.specsyn()->wlObs(), specNeb());
+        if (ext != nullptr)
+        {
+            photNebExtinct_ = filters->phot(ext->wlObs(), specNebExtinct());
+        }
     }
 }
 

@@ -22,6 +22,7 @@
 #include <iostream>
 #include <limits>
 #include <numeric>
+#include <string>
 #include <string_view>
 #include <toml.hpp>
 #include <vector>
@@ -1156,15 +1157,17 @@ static auto testFieldStarsSpec() -> int
     return 0;
 }
 
-// Verify that Galaxy::addFieldStarSpec()/addContinuousSpec() correctly
-// extinguish the field-star/continuous-population contributions to
-// specExtinct(): each field star by its own aV_ (drawn independently
-// from SimControls::avDistField(), via Extinct::applyExtinction()),
-// and the continuous population by the expectation value of
+// Verify that Galaxy::addContinuousSpec() correctly extinguishes the
+// combined field-star + continuous-population contribution to
+// specExtinct(): both together, by the expectation value of
 // exp(-A_V * extinct()) over avDistField() (via Extinct::
-// applyExtinctionCts()) -- rather than the pre-field-star-extinction
-// behavior of passing both through unattenuated (still exercised,
-// unchanged, by testFieldStarsSpec's own use of inputFile's default
+// applyExtinctionCts()) -- field stars are folded directly into the
+// same contSpec the continuous population's own share occupies before
+// either is extinguished, so a field star's own individually-drawn
+// aV_ is not read for this purpose at all (see FieldStar::aV_'s own
+// comment) -- rather than the pre-field-star-extinction behavior of
+// passing both through unattenuated (still exercised, unchanged, by
+// testFieldStarsSpec's own use of inputFile's default
 // extinct.AV_field, which is absent and so defaults to a delta at 0 --
 // see io::SimControls::avDistField()'s own comment). fCluster = 0
 // isolates this from any cluster contribution (which uses its own,
@@ -1172,7 +1175,8 @@ static auto testFieldStarsSpec() -> int
 // testFieldStarsMassBudget's own identical override does, and sets
 // extinct.AV_field to a fixed value distinct from inputFile's own
 // clusters.AV, so field stars draw a genuinely different, independent
-// A_V than clusters would.
+// A_V than clusters would -- exercised here only to confirm it plays
+// no role in specExtinct(), via the exact-aV_ check below.
 static auto testFieldStarsExtinct() -> int
 {
     constexpr double avFieldValue = 0.5; // NOLINT(readability-identifier-naming) -- see Extinct::applyExtinction()'s own identical NOLINT
@@ -1223,14 +1227,17 @@ static auto testFieldStarsExtinct() -> int
             }
         }
 
-        // Independently recompute the expected specExtinct(): the
-        // continuous population's own contribution (mirroring
-        // Galaxy::addContinuousSpec()) extinguished via
-        // applyExtinctionCts(), plus each field star's own spectrum
-        // (mirroring Galaxy::addFieldStarSpec()) extinguished via
-        // applyExtinction() at that star's own aV_
+        // Independently recompute the expected specExtinct(): builds
+        // contSpec exactly as Galaxy::addContinuousSpec() now does --
+        // the continuous population's own contribution, then every
+        // field star's own spectrum added directly into it, in that
+        // same order -- then extinguishes the combined result via
+        // applyExtinctionCts() once, matching the real implementation
+        // bit-for-bit (rather than extinguishing each piece separately
+        // and summing the results, which would not generally agree at
+        // the bit level, since floating-point addition is not
+        // associative).
         const auto* synth = controls.specsyn();
-        std::vector<double> expectedSpecExtinct(ext->wl().size(), 0.0);
 
         std::vector<double> contSpec;
         if (controls.computeLbol())
@@ -1245,9 +1252,6 @@ static auto testFieldStarsExtinct() -> int
                 controls.fehDist(), galaxy.curTime(), controls.fCluster(),
                 controls.imf().getMin(), controls.minStochMass());
         }
-        const auto contSpecExtinct = ext->applyExtinctionCts(contSpec);
-        for (std::size_t i = 0; i < expectedSpecExtinct.size(); ++i)
-        { expectedSpecExtinct.at(i) += contSpecExtinct.at(i); }
 
         const auto& tracks2D = controls.tracks2D();
         for (const auto& fs : galaxy.fieldStars())
@@ -1256,10 +1260,11 @@ static auto testFieldStarsExtinct() -> int
                 std::log10(galaxy.curTime() - fs.formTime_), tracks2D.logTMin());
             const auto props = tracks2D.getStar(fs.mass_, logT);
             const auto starSpec = synth->spec(props, fs.feh_);
-            const auto starSpecExtinct = ext->applyExtinction(fs.aV_, starSpec);
-            for (std::size_t i = 0; i < expectedSpecExtinct.size(); ++i)
-            { expectedSpecExtinct.at(i) += starSpecExtinct.at(i); }
+            for (std::size_t i = 0; i < contSpec.size(); ++i)
+            { contSpec.at(i) += starSpec.at(i); }
         }
+
+        const auto expectedSpecExtinct = ext->applyExtinctionCts(contSpec);
 
         if (galaxy.specExtinct() != expectedSpecExtinct)
         {
@@ -1399,6 +1404,253 @@ static auto testExtinctApplyExtinctionCtsUniform() -> int
     return 0;
 }
 
+// Verify that Galaxy's own specNeb()/specNebExtinct()/lineLum()/
+// lineLumExtinct() equal the independently-summed per-cluster
+// specNeb()/specNebExtinct()/lineLum()/lineLumExtinct() -- mirrors
+// checkSpecSum()'s own exact style, but for
+// nebular emission rather than plain spec()/specExtinct() -- and that
+// photNeb()/photNebExtinct() equal filters->phot() applied directly
+// to specNeb()/specNebExtinct(), exactly as Galaxy::computePhot()
+// itself computes them (unlike checkPhotSum()'s own phot()/
+// photExtinct() check, which cross-checks two genuinely different
+// computation paths -- summed-then-photometered vs photometered-then-
+// summed -- only approximately, this is the same single path
+// Galaxy::computePhot() takes, so an exact match is expected).
+// inputFile (testGalaxyDynamics.in) defaults fCluster() to 1.0 (not
+// overridden here), so every star forms in a stochastic cluster and
+// Galaxy::addContinuousSpec() never runs, letting this test check
+// pure cluster summation without also needing to reproduce that
+// function's own continuous-population/field-star contribution.
+// Reuses testGalaxyDynamics.in, overriding its own [nebular] table to
+// point at tests/nebular/assets/nebular_test.h5 (see that fixture's
+// own generator, data/tools/cloudy/make_nebular_test_fixture.py, for
+// its schema), exactly as testFieldStarsExtinct() overrides [extinct]
+// on the same base deck.
+// Independently sum specNeb()/lineLum()/specNebExtinct()/
+// lineLumExtinct() over every cluster in galaxy's own clusters()/
+// disruptedClusters() and compare against galaxy's own summed values
+// -- factored out of testGalaxyNebular() to keep it within its
+// cognitive-complexity budget.
+static auto checkGalaxyNebularSums(const io::SimControls& controls, core::Galaxy& galaxy) -> int
+{
+    std::vector<double> expectedSpecNeb(controls.specsyn()->wl().size(), 0.0);
+    std::vector<double> expectedLineLum(controls.nebular()->lineWl().size(), 0.0);
+    std::vector<double> expectedSpecNebExtinct(controls.extinct()->wl().size(), 0.0);
+    std::vector<double> expectedLineLumExtinct(controls.nebular()->lineWl().size(), 0.0);
+    const auto accumulate = [&](std::vector<core::Cluster>& list)
+    {
+        for (auto& c : list)
+        {
+            const auto& s = c.specNeb();
+            for (std::size_t i = 0; i < expectedSpecNeb.size(); ++i) { expectedSpecNeb.at(i) += s.at(i); }
+            const auto& l = c.lineLum();
+            for (std::size_t i = 0; i < expectedLineLum.size(); ++i) { expectedLineLum.at(i) += l.at(i); }
+            const auto& se = c.specNebExtinct();
+            for (std::size_t i = 0; i < expectedSpecNebExtinct.size(); ++i) { expectedSpecNebExtinct.at(i) += se.at(i); }
+            const auto& le = c.lineLumExtinct();
+            for (std::size_t i = 0; i < expectedLineLumExtinct.size(); ++i) { expectedLineLumExtinct.at(i) += le.at(i); }
+        }
+    };
+    accumulate(galaxy.clusters());
+    accumulate(galaxy.disruptedClusters());
+
+    if (galaxy.specNeb() != expectedSpecNeb)
+    {
+        std::cerr << "testGalaxy: nebular: specNeb() does not equal the "
+            "independently-summed per-cluster specNeb()\n";
+        return 1;
+    }
+    if (galaxy.lineLum() != expectedLineLum)
+    {
+        std::cerr << "testGalaxy: nebular: lineLum() does not equal the "
+            "independently-summed per-cluster lineLum()\n";
+        return 1;
+    }
+    if (galaxy.specNebExtinct() != expectedSpecNebExtinct)
+    {
+        std::cerr << "testGalaxy: nebular: specNebExtinct() does not equal "
+            "the independently-summed per-cluster specNebExtinct()\n";
+        return 1;
+    }
+    if (galaxy.lineLumExtinct() != expectedLineLumExtinct)
+    {
+        std::cerr << "testGalaxy: nebular: lineLumExtinct() does not equal "
+            "the independently-summed per-cluster lineLumExtinct()\n";
+        return 1;
+    }
+    if (std::reduce(expectedSpecNeb.begin(), expectedSpecNeb.end(), 0.0) <= 0.0)
+    {
+        std::cerr << "testGalaxy: nebular: expected a non-zero specNeb()\n";
+        return 1;
+    }
+    return 0;
+}
+
+static auto testGalaxyNebular() -> int
+{
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFile);
+        inputDeck.at_path("nebular").as_table()->insert_or_assign("compute_neb", true);
+        inputDeck.at_path("nebular").as_table()->insert_or_assign(
+            "table", std::string("tests/nebular/assets/nebular_test.h5"));
+        const io::SimControls controls(inputDeck);
+
+        if (controls.nebular() == nullptr)
+        {
+            std::cerr << "testGalaxy: nebular: expected SimControls::nebular() "
+                "to be non-null\n";
+            return 1;
+        }
+        if (!utils::approxEqual(controls.fCluster(), 1.0))
+        {
+            std::cerr << "testGalaxy: nebular: test bug: expected fCluster() == 1\n";
+            return 1;
+        }
+
+        utils::rng().seed(rngSeed);
+        core::Galaxy galaxy(controls);
+        galaxy.advance(t1);
+
+        if (galaxy.clusters().empty() && galaxy.disruptedClusters().empty())
+        {
+            std::cerr << "testGalaxy: nebular: test bug: expected at least one "
+                "cluster to have formed\n";
+            return 1;
+        }
+
+        if (checkGalaxyNebularSums(controls, galaxy) != 0) { return 1; }
+
+        const auto expectedPhotNeb = controls.filters()->phot(controls.specsyn()->wlObs(), galaxy.specNeb());
+        if (galaxy.photNeb() != expectedPhotNeb)
+        {
+            std::cerr << "testGalaxy: nebular: photNeb() does not match "
+                "filters->phot(wlObs(), specNeb())\n";
+            return 1;
+        }
+        const auto expectedPhotNebExtinct =
+            controls.filters()->phot(controls.extinct()->wlObs(), galaxy.specNebExtinct());
+        if (galaxy.photNebExtinct() != expectedPhotNebExtinct)
+        {
+            std::cerr << "testGalaxy: nebular: photNebExtinct() does not match "
+                "filters->phot(ext->wlObs(), specNebExtinct())\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testGalaxy: nebular test failed: " << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Verify that Galaxy::addContinuousSpec() correctly extinguishes the
+// continuous population's own nebular-reprocessed line luminosities
+// into lineLumExtinct() -- the code path testGalaxyNebular() above
+// deliberately does not exercise, since it keeps fCluster() == 1
+// (no continuous population at all) to isolate pure cluster summation
+// instead. Mirrors testContinuousPopSpecSingleFeh's own f_cluster = 0,
+// min_stoch_mass = 120.0 combination (entirely continuous, no
+// stochastic clusters and no individual field stars either) so
+// contSpec is guaranteed to come *only* from Specsyn::specCts()'s/
+// specAndLbolCts()'s own continuous-population overload, with no
+// cluster- or field-star-summed contribution to confound it --
+// clusters()/disruptedClusters()/fieldStars() are all checked empty as
+// a sanity check on that premise. Independently rebuilds contSpec the
+// same way, passes it through Nebular::getGalaxy() at
+// SimControls::fehDist()'s own expectationValue() (exactly as
+// addContinuousSpec() itself does) to get the expected nebular line
+// luminosities, then extinguishes those via Extinct::
+// applyExtinctionCtsLines() -- since there are no clusters at all here,
+// this alone should exactly equal galaxy.lineLumExtinct(), with no
+// cluster-summed term added on top. Reuses testGalaxyDynamics.in,
+// overriding its own [nebular] table to point at tests/nebular/assets/
+// nebular_test.h5, exactly as testGalaxyNebular() above does.
+static auto testContinuousPopNebularExtinct() -> int
+{
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFile);
+        inputDeck.at_path("clusters").as_table()->insert("f_cluster", 0.0);
+        inputDeck.at_path("stars").as_table()->insert_or_assign("min_stoch_mass", 120.0);
+        inputDeck.at_path("nebular").as_table()->insert_or_assign("compute_neb", true);
+        inputDeck.at_path("nebular").as_table()->insert_or_assign(
+            "table", std::string("tests/nebular/assets/nebular_test.h5"));
+        const io::SimControls controls(inputDeck);
+
+        if (controls.nebular() == nullptr)
+        {
+            std::cerr << "testGalaxy: continuousPopNebularExtinct: expected "
+                "SimControls::nebular() to be non-null\n";
+            return 1;
+        }
+        const auto* ext = controls.extinct();
+        if (ext == nullptr)
+        {
+            std::cerr << "testGalaxy: continuousPopNebularExtinct: test bug: "
+                "expected extinct() non-null\n";
+            return 1;
+        }
+
+        utils::rng().seed(rngSeed);
+        core::Galaxy galaxy(controls);
+        galaxy.advance(t1);
+
+        if (!galaxy.clusters().empty() || !galaxy.disruptedClusters().empty() ||
+            !galaxy.fieldStars().empty())
+        {
+            std::cerr << "testGalaxy: continuousPopNebularExtinct: test bug: "
+                "expected no stochastic clusters or field stars at all with "
+                "f_cluster = 0 and min_stoch_mass = 120\n";
+            return 1;
+        }
+
+        // Independently rebuild contSpec exactly as
+        // Galaxy::addContinuousSpec() itself does -- see
+        // testFieldStarsExtinct's own identical construction
+        const auto* synth = controls.specsyn();
+        std::vector<double> contSpec;
+        if (controls.computeLbol())
+        {
+            contSpec = synth->specAndLbolCts(controls.sfr(), controls.imf(),
+                controls.fehDist(), galaxy.curTime(), controls.fCluster(),
+                controls.imf().getMin(), controls.minStochMass()).first;
+        }
+        else
+        {
+            contSpec = synth->specCts(controls.sfr(), controls.imf(),
+                controls.fehDist(), galaxy.curTime(), controls.fCluster(),
+                controls.imf().getMin(), controls.minStochMass());
+        }
+
+        const auto [nebContSpec, nebContLineLum] =
+            controls.nebular()->getGalaxy(contSpec, controls.fehDist().expectationValue());
+        const auto expectedLineLumExtinct = ext->applyExtinctionCtsLines(nebContLineLum);
+
+        if (galaxy.lineLumExtinct() != expectedLineLumExtinct)
+        {
+            std::cerr << "testGalaxy: continuousPopNebularExtinct: "
+                "lineLumExtinct() does not equal the independently-recomputed "
+                "extinguished continuous-population line luminosities\n";
+            return 1;
+        }
+        if (std::reduce(expectedLineLumExtinct.begin(), expectedLineLumExtinct.end(), 0.0) <= 0.0)
+        {
+            std::cerr << "testGalaxy: continuousPopNebularExtinct: expected a "
+                "non-zero lineLumExtinct()\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testGalaxy: continuousPopNebularExtinct test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
 // Verify Galaxy::sfr_'s own resolution logic (see SFRVar's header
 // comment): when controls.sfr() is valid (galaxy.sfr was given), it
 // should be used directly, as a live reference -- checked here via
@@ -1418,7 +1670,7 @@ static auto testGalaxySFRDistResolution() -> int
     {
         const toml::table inputDeck = toml::parse_file(inputFile);
         const io::SimControls controls(inputDeck);
-        core::Galaxy galaxy(controls);
+        const core::Galaxy galaxy(controls);
         if (&galaxy.sfr() != &controls.sfr())
         {
             std::cerr << "testGalaxy: sfrDistResolution: expected sfr() to "
@@ -1456,7 +1708,7 @@ static auto testGalaxySFRDistResolution() -> int
             return 1;
         }
 
-        core::Galaxy galaxy(controls);
+        const core::Galaxy galaxy(controls);
         const auto expected = io::SimControls::buildConstantSFR(sfrDistValue);
         if (!galaxy.sfr().valid() ||
             galaxy.sfr().getMin() != expected.getMin() ||
@@ -1495,6 +1747,8 @@ auto testGalaxy() -> int
     result += testFieldStarsExtinct();
     result += testExtinctApplyExtinctionCtsDegenerate();
     result += testExtinctApplyExtinctionCtsUniform();
+    result += testGalaxyNebular();
+    result += testContinuousPopNebularExtinct();
 
     try
     {

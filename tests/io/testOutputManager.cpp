@@ -11,6 +11,7 @@
 #include "../src/io/OutputManagerAscii.hpp"
 #include "../src/io/OutputManagerH5.hpp"
 #include "../src/io/SimControls.hpp"
+#include "../src/utils/HDF5Utils.hpp"
 #include "../src/utils/RngThread.hpp"
 #include "hdf5.h" // NOLINT(misc-include-cleaner)
 #include "io/SlugVersion.hpp"
@@ -320,6 +321,352 @@ static auto testWriteClusterAsciiExtinct() -> int
     catch (const std::exception& error)
     {
         std::cerr << "testOutputManager: ascii extinct test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Check cluster_spectra.txt's header for spec_neb/spec_neb_ex columns
+// (read after the existing spec/spec_ex columns) and their values
+// against cluster.specNeb()/specNebExtinct() (specNebExtinct falling
+// back to 0 outside extinct()->wl()'s own coverage, exactly like
+// spec_ex) -- factored out of testWriteClusterAsciiNebular() to keep
+// it within its cognitive-complexity budget.
+static auto checkClusterSpectraNebularAscii(const std::filesystem::path& outDir,
+    const std::string& modelName, const io::SimControls& controls,
+    core::Cluster& cluster) -> int
+{
+    constexpr double tol = 1e-5;
+    std::ifstream file(outDir / (modelName + "_cluster_spectra.txt"));
+    std::string headerLine;
+    std::string unitsLine;
+    std::string ruleLine;
+    std::getline(file, headerLine);
+    std::getline(file, unitsLine);
+    std::getline(file, ruleLine);
+
+    if (!headerLine.contains("spec_neb") || !headerLine.contains("spec_neb_ex"))
+    {
+        std::cerr << "testOutputManager: ascii nebular: cluster_spectra.txt "
+            "header is missing the expected spec_neb/spec_neb_ex columns\n";
+        return 1;
+    }
+
+    const auto& specNeb = cluster.specNeb();
+    const auto& specNebExtinct = cluster.specNebExtinct();
+    const auto wlOffset = controls.extinct()->wlOffset();
+
+    std::string dataLine;
+    std::size_t i = 0;
+    while (std::getline(file, dataLine))
+    {
+        unsigned long readTrial = 0;
+        double readTime = 0.0;
+        unsigned long readUid = 0;
+        double readWl = 0.0;
+        double readSpec = 0.0;
+        double readSpecEx = 0.0;
+        double readSpecNeb = 0.0;
+        double readSpecNebEx = 0.0;
+        std::istringstream lineStream(dataLine);
+        lineStream >> readTrial >> readTime >> readUid >> readWl
+            >> readSpec >> readSpecEx >> readSpecNeb >> readSpecNebEx;
+
+        const double expectedSpecNeb = specNeb.at(i);
+        const double denomNeb = std::max(std::abs(expectedSpecNeb), 1.0);
+        if (std::abs(readSpecNeb - expectedSpecNeb) > tol * denomNeb)
+        {
+            std::cerr << "testOutputManager: ascii nebular: "
+                "cluster_spectra.txt row " << i << ": spec_neb = "
+                << readSpecNeb << ", expected " << expectedSpecNeb << "\n";
+            return 1;
+        }
+
+        const double expectedSpecNebEx =
+            (i >= wlOffset && (i - wlOffset) < specNebExtinct.size()) ?
+            specNebExtinct.at(i - wlOffset) : 0.0;
+        const double denomNebEx = std::max(std::abs(expectedSpecNebEx), 1.0);
+        if (std::abs(readSpecNebEx - expectedSpecNebEx) > tol * denomNebEx)
+        {
+            std::cerr << "testOutputManager: ascii nebular: "
+                "cluster_spectra.txt row " << i << ": spec_neb_ex = "
+                << readSpecNebEx << ", expected " << expectedSpecNebEx << "\n";
+            return 1;
+        }
+        ++i;
+    }
+    if (i != controls.specsyn()->wlObs().size())
+    {
+        std::cerr << "testOutputManager: ascii nebular: cluster_spectra.txt "
+            "has " << i << " data rows, expected "
+            << controls.specsyn()->wlObs().size() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Check cluster_phot.txt's header for a "<filter>_neb" and
+// "<filter>_neb_ex" column per real filter (not Lbol), and the data
+// row's trailing columns (read after the existing phot/phot_ex
+// columns) against cluster.photNeb()/photNebExtinct() -- factored out
+// of testWriteClusterAsciiNebular() to keep it within its
+// cognitive-complexity budget.
+static auto checkClusterPhotNebularAscii(const std::filesystem::path& outDir,
+    const std::string& modelName, const io::SimControls& controls,
+    core::Cluster& cluster) -> int
+{
+    constexpr double tol = 1e-5;
+    std::ifstream file(outDir / (modelName + "_cluster_phot.txt"));
+    std::string headerLine;
+    std::string unitsLine;
+    std::string ruleLine;
+    std::string dataLine;
+    std::getline(file, headerLine);
+    std::getline(file, unitsLine);
+    std::getline(file, ruleLine);
+    std::getline(file, dataLine);
+
+    const auto& realFilterNames = controls.filters()->filterNames();
+    for (const auto& name : realFilterNames)
+    {
+        if (!headerLine.contains(name + "_neb") || !headerLine.contains(name + "_neb_ex"))
+        {
+            std::cerr << "testOutputManager: ascii nebular: cluster_phot.txt "
+                "header is missing the expected " << name
+                << "_neb/_neb_ex columns\n";
+            return 1;
+        }
+    }
+
+    std::istringstream lineStream(dataLine);
+    unsigned long readTrial = 0;
+    double readTime = 0.0;
+    unsigned long readUid = 0;
+    lineStream >> readTrial >> readTime >> readUid;
+    // Column order: real filters + Lbol, then _ex, then _neb, then
+    // _neb_ex, per writeClusterPhot()'s own appending order
+    const std::size_t nPhotCols = realFilterNames.size() +
+        (controls.computeLbol() ? 1 : 0);
+    std::vector<double> readPhot(nPhotCols);
+    for (double& v : readPhot) { lineStream >> v; }
+    std::vector<double> readPhotExtinct(cluster.photExtinct().size());
+    for (double& v : readPhotExtinct) { lineStream >> v; }
+    std::vector<double> readPhotNeb(cluster.photNeb().size());
+    for (double& v : readPhotNeb) { lineStream >> v; }
+    std::vector<double> readPhotNebExtinct(cluster.photNebExtinct().size());
+    for (double& v : readPhotNebExtinct) { lineStream >> v; }
+
+    for (std::size_t i = 0; i < readPhotNeb.size(); ++i)
+    {
+        const double expected = cluster.photNeb().at(i);
+        const double denom = std::max(std::abs(expected), 1.0);
+        if (std::abs(readPhotNeb.at(i) - expected) > tol * denom)
+        {
+            std::cerr << "testOutputManager: ascii nebular: cluster_phot.txt "
+                "neb column " << i << " = " << readPhotNeb.at(i)
+                << ", expected " << expected << "\n";
+            return 1;
+        }
+    }
+    for (std::size_t i = 0; i < readPhotNebExtinct.size(); ++i)
+    {
+        const double expected = cluster.photNebExtinct().at(i);
+        const double denom = std::max(std::abs(expected), 1.0);
+        if (std::abs(readPhotNebExtinct.at(i) - expected) > tol * denom)
+        {
+            std::cerr << "testOutputManager: ascii nebular: cluster_phot.txt "
+                "neb_ex column " << i << " = " << readPhotNebExtinct.at(i)
+                << ", expected " << expected << "\n";
+            return 1;
+        }
+    }
+    return 0;
+}
+
+// Analogous to testWriteClusterAsciiExtinct() above, but for
+// SimControls::nebular()'s own spec_neb/spec_neb_ex column (cluster-
+// spectra file) and "<filter>_neb"/"<filter>_neb_ex" columns (cluster-
+// photometry file) rather than dust extinction's own spec_ex/a_v/
+// "<filter>_ex" -- see checkClusterSpectraNebularAscii()/
+// checkClusterPhotNebularAscii() for the actual per-file checks.
+// Reuses the same testClusterExtinct.in deck (already combining
+// extinct + phot), overriding its own [nebular] table to point at
+// tests/nebular/assets/nebular_test.h5, exactly as testCluster.cpp's
+// own testClusterNebular() does -- so extinction and nebular emission
+// are both active at once, exercising the "_neb_ex" columns too.
+static auto testWriteClusterAsciiNebular() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() / "slugTestOutputManagerAsciiNebular";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+    const std::string modelName = "test_model";
+    toml::table inputDeck = makeClusterPhysicsInputDeck(
+        modelName, outDir, "tests/core/assets/testClusterExtinct.in");
+    inputDeck.at_path("nebular").as_table()->insert_or_assign("compute_neb", true);
+    inputDeck.at_path("nebular").as_table()->insert_or_assign(
+        "table", std::string("tests/nebular/assets/nebular_test.h5"));
+
+    try
+    {
+        const io::SimControls controls(inputDeck);
+        if (controls.nebular() == nullptr)
+        {
+            std::cerr << "testOutputManager: ascii nebular: test bug: "
+                "expected SimControls::nebular() to be non-null\n";
+            return 1;
+        }
+
+        utils::rng().seed(42);
+        constexpr unsigned long uid = 23;
+        constexpr double targetMass = 1e4;
+        constexpr double formTime = 0.0;
+        core::Cluster cluster(uid, targetMass, formTime, controls);
+        constexpr double ageYr = 1e6;
+        cluster.advance(ageYr);
+        constexpr unsigned long trial = 4;
+
+        {
+            io::OutputManagerAscii manager(controls, inputDeck);
+            manager.writeCluster(trial, cluster);
+            manager.writeClusterSpec(trial, ageYr, cluster);
+            manager.writeClusterPhot(trial, ageYr, cluster);
+        }
+
+        if (checkClusterSpectraNebularAscii(outDir, modelName, controls, cluster) != 0) { return 1; }
+        if (checkClusterPhotNebularAscii(outDir, modelName, controls, cluster) != 0) { return 1; }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testOutputManager: ascii nebular test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Verify that OutputManagerAscii's cluster-nebular-line-luminosity
+// file (<model>_cluster_neb_lines.txt) is written iff
+// SimControls::nebular() is non-null, with a header naming
+// line_label/line_lum/line_lum_ex, and one row per
+// SimControls::nebular()'s own line matching lineWl()/lineLabel() and
+// cluster.lineLum()/lineLumExtinct() -- mirrors
+// testWriteClusterAsciiNebular's own general shape and reuses the same
+// deck (extinct + nebular fixture both active), so the line_lum_ex
+// column is exercised too.
+static auto testWriteClusterAsciiNebLines() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() / "slugTestOutputManagerAsciiNebLines";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+    const std::string modelName = "test_model";
+    toml::table inputDeck = makeClusterPhysicsInputDeck(
+        modelName, outDir, "tests/core/assets/testClusterExtinct.in");
+    inputDeck.at_path("nebular").as_table()->insert_or_assign("compute_neb", true);
+    inputDeck.at_path("nebular").as_table()->insert_or_assign(
+        "table", std::string("tests/nebular/assets/nebular_test.h5"));
+
+    try
+    {
+        const io::SimControls controls(inputDeck);
+        if (controls.nebular() == nullptr)
+        {
+            std::cerr << "testOutputManager: ascii neb lines: test bug: "
+                "expected SimControls::nebular() to be non-null\n";
+            return 1;
+        }
+
+        utils::rng().seed(42);
+        constexpr unsigned long uid = 37;
+        constexpr double targetMass = 1e4;
+        constexpr double formTime = 0.0;
+        core::Cluster cluster(uid, targetMass, formTime, controls);
+        constexpr double ageYr = 1e6;
+        cluster.advance(ageYr);
+        constexpr unsigned long trial = 8;
+
+        {
+            io::OutputManagerAscii manager(controls, inputDeck);
+            manager.writeCluster(trial, cluster);
+            manager.writeClusterSpec(trial, ageYr, cluster);
+        }
+
+        constexpr double tol = 1e-5;
+        std::ifstream file(outDir / (modelName + "_cluster_neb_lines.txt"));
+        std::string headerLine;
+        std::string unitsLine;
+        std::string ruleLine;
+        std::getline(file, headerLine);
+        std::getline(file, unitsLine);
+        std::getline(file, ruleLine);
+
+        if (!headerLine.contains("line_label") || !headerLine.contains("line_lum") ||
+            !headerLine.contains("line_lum_ex"))
+        {
+            std::cerr << "testOutputManager: ascii neb lines: header is missing "
+                "the expected line_label/line_lum/line_lum_ex columns\n";
+            return 1;
+        }
+
+        const auto& lineWl = controls.nebular()->lineWl();
+        const auto& lineLabel = controls.nebular()->lineLabel();
+        const auto& lineLum = cluster.lineLum();
+        const auto& lineLumExtinct = cluster.lineLumExtinct();
+
+        std::string dataLine;
+        std::size_t i = 0;
+        while (std::getline(file, dataLine))
+        {
+            unsigned long readTrial = 0;
+            double readTime = 0.0;
+            unsigned long readUid = 0;
+            std::string readLabel;
+            double readWl = 0.0;
+            double readLineLum = 0.0;
+            double readLineLumEx = 0.0;
+            std::istringstream lineStream(dataLine);
+            lineStream >> readTrial >> readTime >> readUid >> readLabel
+                >> readWl >> readLineLum >> readLineLumEx;
+
+            if (readLabel != lineLabel.at(i))
+            {
+                std::cerr << "testOutputManager: ascii neb lines: row " << i
+                    << " label = " << readLabel << ", expected " << lineLabel.at(i) << "\n";
+                return 1;
+            }
+            if (std::abs(readWl - lineWl.at(i)) > tol * std::max(std::abs(lineWl.at(i)), 1.0))
+            {
+                std::cerr << "testOutputManager: ascii neb lines: row " << i
+                    << " wl = " << readWl << ", expected " << lineWl.at(i) << "\n";
+                return 1;
+            }
+            const double denom = std::max(std::abs(lineLum.at(i)), 1.0);
+            if (std::abs(readLineLum - lineLum.at(i)) > tol * denom)
+            {
+                std::cerr << "testOutputManager: ascii neb lines: row " << i
+                    << " line_lum = " << readLineLum << ", expected " << lineLum.at(i) << "\n";
+                return 1;
+            }
+            const double denomEx = std::max(std::abs(lineLumExtinct.at(i)), 1.0);
+            if (std::abs(readLineLumEx - lineLumExtinct.at(i)) > tol * denomEx)
+            {
+                std::cerr << "testOutputManager: ascii neb lines: row " << i
+                    << " line_lum_ex = " << readLineLumEx << ", expected "
+                    << lineLumExtinct.at(i) << "\n";
+                return 1;
+            }
+            ++i;
+        }
+        if (i != lineWl.size())
+        {
+            std::cerr << "testOutputManager: ascii neb lines: file has " << i
+                << " data rows, expected " << lineWl.size() << "\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testOutputManager: ascii neb lines test failed: "
             << error.what() << "\n";
         return 1;
     }
@@ -654,6 +1001,318 @@ static auto testWriteClusterSpecPhotH5Extinct() -> int
     catch (const std::exception& error)
     {
         std::cerr << "testOutputManager: h5 spec/phot extinct test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Analogous to testWriteClusterSpecPhotH5Extinct() above, but for
+// SimControls::nebular()'s own spec_neb/spec_neb_extinct/phot_neb/
+// phot_neb_extinct datasets rather than dust extinction's own
+// spec_extinct/phot_extinct/A_V. Reuses the same testClusterExtinct.in
+// deck (already combining extinct + phot), overriding its own
+// [nebular] table to point at tests/nebular/assets/nebular_test.h5,
+// exactly as testCluster.cpp's own testClusterNebular() does -- so
+// extinction and nebular emission are both active at once, exercising
+// the "_neb_extinct" datasets too. The values written are just
+// cluster.specNeb()/specNebExtinct()/photNeb()/photNebExtinct() copied
+// verbatim, so the round trip should be bitwise exact.
+static auto testWriteClusterSpecPhotH5Nebular() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() / "slugTestOutputManagerSpecPhotNebular";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+    const std::string modelName = "test_model";
+    const auto expectedPath = outDir / (modelName + ".h5");
+    toml::table inputDeck = makeClusterPhysicsInputDeck(
+        modelName, outDir, "tests/core/assets/testClusterExtinct.in");
+    inputDeck.at_path("nebular").as_table()->insert_or_assign("compute_neb", true);
+    inputDeck.at_path("nebular").as_table()->insert_or_assign(
+        "table", std::string("tests/nebular/assets/nebular_test.h5"));
+
+    try
+    {
+        const io::SimControls controls(inputDeck);
+        if (controls.nebular() == nullptr)
+        {
+            std::cerr << "testOutputManager: h5 spec/phot nebular: test bug: "
+                "expected SimControls::nebular() to be non-null\n";
+            return 1;
+        }
+
+        utils::rng().seed(42);
+        constexpr unsigned long uid = 17;
+        constexpr double targetMass = 1e4;
+        constexpr double formTime = 0.0;
+        core::Cluster cluster(uid, targetMass, formTime, controls);
+        constexpr double ageYr = 1e6;
+        cluster.advance(ageYr);
+        constexpr unsigned long trial = 2;
+
+        {
+            io::OutputManagerH5 manager(controls, inputDeck);
+            manager.writeCluster(trial, cluster);
+            manager.writeClusterSpec(trial, ageYr, cluster);
+            manager.writeClusterPhot(trial, ageYr, cluster);
+        }
+
+        // NOLINTBEGIN(misc-include-cleaner)
+        const hid_t file = H5Fopen(expectedPath.string().c_str(),
+            H5F_ACC_RDONLY, H5P_DEFAULT);
+        if (file < 0)
+        {
+            std::cerr << "testOutputManager: h5 spec/phot nebular: unable to reopen "
+                << expectedPath.string() << "\n";
+            return 1;
+        }
+
+        const auto readRow = [](const hid_t grp, const char* name,
+            const std::size_t expectedLen) -> std::vector<double>
+        {
+            const hid_t dset = H5Dopen2(grp, name, H5P_DEFAULT);
+            if (dset < 0)
+            {
+                throw std::runtime_error(
+                    std::string("missing expected dataset ") + name);
+            }
+            const hid_t space = H5Dget_space(dset);
+            std::array<hsize_t, 2> dims{};
+            H5Sget_simple_extent_dims(space, dims.data(), nullptr);
+            H5Sclose(space);
+            if (dims.at(0) != 1 || dims.at(1) != expectedLen)
+            {
+                H5Dclose(dset);
+                throw std::runtime_error(
+                    std::string(name) + " has shape (" + std::to_string(dims.at(0)) +
+                    ", " + std::to_string(dims.at(1)) + "), expected (1, " +
+                    std::to_string(expectedLen) + ")");
+            }
+            std::vector<double> row(expectedLen);
+            H5Dread(dset, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, row.data());
+            H5Dclose(dset);
+            return row;
+        };
+
+        std::vector<double> readSpecNeb;
+        std::vector<double> readSpecNebExtinct;
+        std::vector<double> readPhotNeb;
+        std::vector<double> readPhotNebExtinct;
+        try
+        {
+            const hid_t specGrp = H5Gopen2(file, "cluster_spectra", H5P_DEFAULT);
+            readSpecNeb = readRow(specGrp, "spec_neb", cluster.specNeb().size());
+            readSpecNebExtinct = readRow(specGrp, "spec_neb_extinct", cluster.specNebExtinct().size());
+            H5Gclose(specGrp);
+
+            const hid_t photGrp = H5Gopen2(file, "cluster_phot", H5P_DEFAULT);
+            readPhotNeb = readRow(photGrp, "phot_neb", cluster.photNeb().size());
+            readPhotNebExtinct = readRow(photGrp, "phot_neb_extinct", cluster.photNebExtinct().size());
+            H5Gclose(photGrp);
+        }
+        catch (const std::runtime_error& error)
+        {
+            H5Fclose(file);
+            std::cerr << "testOutputManager: h5 spec/phot nebular: " << error.what() << "\n";
+            return 1;
+        }
+        H5Fclose(file);
+        // NOLINTEND(misc-include-cleaner)
+
+        if (!std::ranges::equal(readSpecNeb, cluster.specNeb()))
+        {
+            std::cerr << "testOutputManager: h5 spec/phot nebular: spec_neb "
+                "row does not match cluster.specNeb()\n";
+            return 1;
+        }
+        if (!std::ranges::equal(readSpecNebExtinct, cluster.specNebExtinct()))
+        {
+            std::cerr << "testOutputManager: h5 spec/phot nebular: spec_neb_extinct "
+                "row does not match cluster.specNebExtinct()\n";
+            return 1;
+        }
+        if (!std::ranges::equal(readPhotNeb, cluster.photNeb()))
+        {
+            std::cerr << "testOutputManager: h5 spec/phot nebular: phot_neb "
+                "row does not match cluster.photNeb()\n";
+            return 1;
+        }
+        if (!std::ranges::equal(readPhotNebExtinct, cluster.photNebExtinct()))
+        {
+            std::cerr << "testOutputManager: h5 spec/phot nebular: phot_neb_extinct "
+                "row does not match cluster.photNebExtinct()\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testOutputManager: h5 spec/phot nebular test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Verify that OutputManagerH5's line_wl/line_label fixed datasets and
+// neb_lines/neb_lines_extinct extensible datasets (cluster_spectra
+// group) are written iff SimControls::nebular() is non-null, and match
+// SimControls::nebular()'s own lineWl()/lineLabel() and
+// cluster.lineLum()/lineLumExtinct() -- mirrors
+// testWriteClusterSpecPhotH5Nebular's own general shape and reuses the
+// same deck (extinct + nebular fixture both active), so
+// neb_lines_extinct is exercised too.
+static auto testWriteClusterSpecPhotH5NebLines() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() / "slugTestOutputManagerSpecNebLines";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+    const std::string modelName = "test_model";
+    const auto expectedPath = outDir / (modelName + ".h5");
+    toml::table inputDeck = makeClusterPhysicsInputDeck(
+        modelName, outDir, "tests/core/assets/testClusterExtinct.in");
+    inputDeck.at_path("nebular").as_table()->insert_or_assign("compute_neb", true);
+    inputDeck.at_path("nebular").as_table()->insert_or_assign(
+        "table", std::string("tests/nebular/assets/nebular_test.h5"));
+
+    try
+    {
+        const io::SimControls controls(inputDeck);
+        if (controls.nebular() == nullptr)
+        {
+            std::cerr << "testOutputManager: h5 neb lines: test bug: expected "
+                "SimControls::nebular() to be non-null\n";
+            return 1;
+        }
+
+        utils::rng().seed(42);
+        constexpr unsigned long uid = 31;
+        constexpr double targetMass = 1e4;
+        constexpr double formTime = 0.0;
+        core::Cluster cluster(uid, targetMass, formTime, controls);
+        constexpr double ageYr = 1e6;
+        cluster.advance(ageYr);
+        constexpr unsigned long trial = 6;
+
+        {
+            io::OutputManagerH5 manager(controls, inputDeck);
+            manager.writeCluster(trial, cluster);
+            manager.writeClusterSpec(trial, ageYr, cluster);
+        }
+
+        // NOLINTBEGIN(misc-include-cleaner)
+        const hid_t file = H5Fopen(expectedPath.string().c_str(),
+            H5F_ACC_RDONLY, H5P_DEFAULT);
+        if (file < 0)
+        {
+            std::cerr << "testOutputManager: h5 neb lines: unable to reopen "
+                << expectedPath.string() << "\n";
+            return 1;
+        }
+
+        const auto readFixed1d = [](const hid_t grp, const char* name,
+            const std::size_t expectedLen) -> std::vector<double>
+        {
+            const hid_t dset = H5Dopen2(grp, name, H5P_DEFAULT);
+            if (dset < 0)
+            {
+                throw std::runtime_error(
+                    std::string("missing expected dataset ") + name);
+            }
+            const hid_t space = H5Dget_space(dset);
+            hsize_t len = 0;
+            H5Sget_simple_extent_dims(space, &len, nullptr);
+            H5Sclose(space);
+            if (len != expectedLen)
+            {
+                H5Dclose(dset);
+                throw std::runtime_error(
+                    std::string(name) + " has length " + std::to_string(len) +
+                    ", expected " + std::to_string(expectedLen));
+            }
+            std::vector<double> data(expectedLen);
+            H5Dread(dset, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, data.data());
+            H5Dclose(dset);
+            return data;
+        };
+
+        const auto readRow = [](const hid_t grp, const char* name,
+            const std::size_t expectedLen) -> std::vector<double>
+        {
+            const hid_t dset = H5Dopen2(grp, name, H5P_DEFAULT);
+            if (dset < 0)
+            {
+                throw std::runtime_error(
+                    std::string("missing expected dataset ") + name);
+            }
+            const hid_t space = H5Dget_space(dset);
+            std::array<hsize_t, 2> dims{};
+            H5Sget_simple_extent_dims(space, dims.data(), nullptr);
+            H5Sclose(space);
+            if (dims.at(0) != 1 || dims.at(1) != expectedLen)
+            {
+                H5Dclose(dset);
+                throw std::runtime_error(
+                    std::string(name) + " has shape (" + std::to_string(dims.at(0)) +
+                    ", " + std::to_string(dims.at(1)) + "), expected (1, " +
+                    std::to_string(expectedLen) + ")");
+            }
+            std::vector<double> row(expectedLen);
+            H5Dread(dset, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, row.data());
+            H5Dclose(dset);
+            return row;
+        };
+
+        std::vector<double> readLineWl;
+        std::vector<std::string> readLineLabel;
+        std::vector<double> readNebLines;
+        std::vector<double> readNebLinesExtinct;
+        try
+        {
+            const hid_t specGrp = H5Gopen2(file, "cluster_spectra", H5P_DEFAULT);
+            const auto nLines = controls.nebular()->lineWl().size();
+            readLineWl = readFixed1d(specGrp, "line_wl", nLines);
+            readLineLabel = utils::readStringDataset1D(specGrp, "line_label", "testOutputManager");
+            readNebLines = readRow(specGrp, "neb_lines", cluster.lineLum().size());
+            readNebLinesExtinct = readRow(specGrp, "neb_lines_extinct", cluster.lineLumExtinct().size());
+            H5Gclose(specGrp);
+        }
+        catch (const std::runtime_error& error)
+        {
+            H5Fclose(file);
+            std::cerr << "testOutputManager: h5 neb lines: " << error.what() << "\n";
+            return 1;
+        }
+        H5Fclose(file);
+        // NOLINTEND(misc-include-cleaner)
+
+        if (!std::ranges::equal(readLineWl, controls.nebular()->lineWl()))
+        {
+            std::cerr << "testOutputManager: h5 neb lines: line_wl does not "
+                "match nebular()->lineWl()\n";
+            return 1;
+        }
+        if (readLineLabel != controls.nebular()->lineLabel())
+        {
+            std::cerr << "testOutputManager: h5 neb lines: line_label does not "
+                "match nebular()->lineLabel()\n";
+            return 1;
+        }
+        if (!std::ranges::equal(readNebLines, cluster.lineLum()))
+        {
+            std::cerr << "testOutputManager: h5 neb lines: neb_lines row does "
+                "not match cluster.lineLum()\n";
+            return 1;
+        }
+        if (!std::ranges::equal(readNebLinesExtinct, cluster.lineLumExtinct()))
+        {
+            std::cerr << "testOutputManager: h5 neb lines: neb_lines_extinct "
+                "row does not match cluster.lineLumExtinct()\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testOutputManager: h5 neb lines test failed: "
             << error.what() << "\n";
         return 1;
     }
@@ -2305,9 +2964,13 @@ auto testOutputManager() -> int
     result += testOutputManagerH5();
     result += testWriteClusterAscii();
     result += testWriteClusterAsciiExtinct();
+    result += testWriteClusterAsciiNebular();
+    result += testWriteClusterAsciiNebLines();
     result += testWriteClusterH5();
     result += testWriteReadClusterRngRoundTrip();
     result += testWriteClusterSpecPhotH5Extinct();
+    result += testWriteClusterSpecPhotH5Nebular();
+    result += testWriteClusterSpecPhotH5NebLines();
     result += testOptOutClusterSpecOutput();
     result += testGalaxyGroupsH5();
     result += testGalaxyGroupsAbsentH5();

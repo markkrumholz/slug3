@@ -11,3 +11,6 @@ alphaFe = -0.2
 
 [clusters]
 CMF = 1e3
+
+[nebular]
+compute_neb = false

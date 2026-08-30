@@ -67,3 +67,6 @@ sfr = 1.0
 
 [output]
 output_times = [1e7]
+
+[nebular]
+compute_neb = false

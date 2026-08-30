@@ -13,10 +13,12 @@
  */
 
 #include "Extinct.hpp"
+#include "../interpolation/Interpolator1D.hpp"
 #include "../io/SimControls.hpp"
 #include "../utils/GKIntegratorData.hpp"
 #include "../utils/PDFIntegrator.hpp"
 #include <algorithm>
+#include <cstddef>
 #include <vector>
 
 auto extinct::Extinct::wlObs() const -> std::vector<double>
@@ -26,6 +28,21 @@ auto extinct::Extinct::wlObs() const -> std::vector<double>
     std::ranges::transform(wl_, wlObs.begin(),
         [z](const double wl) -> double { return wl * (1.0 + z); });
     return wlObs;
+}
+
+void extinct::Extinct::initExtinctLines(const interp::Interpolator1D<1>& interp)
+{
+    const auto* neb = controls_.nebular();
+    if (neb == nullptr) { return; }
+
+    const auto& lineWl = neb->lineWl();
+    extinctLines_.resize(lineWl.size());
+    for (std::size_t ell = 0; ell < lineWl.size(); ++ell)
+    {
+        extinctLines_.at(ell) =
+            (lineWl.at(ell) >= interp.xMin() && lineWl.at(ell) <= interp.xMax()) ?
+            interp(lineWl.at(ell)) : 0.0;
+    }
 }
 
 void extinct::Extinct::computeExtinctionFacCts()
@@ -68,4 +85,32 @@ void extinct::Extinct::computeExtinctionFacCts()
         avDistField, static_cast<ExtinctFacFn>(&Extinct::extinctFac),
         wl_.size(), false, controls_.intMaxIter(), controls_.intAbsTol(), controls_.intRelTol());
     extinctionFacCts_ = integrator.integrate(avDistField.getMin(), avDistField.getMax(), this);
+}
+
+void extinct::Extinct::computeExtinctionFacCtsLines()
+{
+    // No nebular emission grid was requested, so there are no lines
+    // to compute this for -- leave extinctionFacCtsLines_ empty,
+    // matching extinctLines_ itself
+    if (extinctLines_.empty()) { return; }
+
+    const auto& avDistField = controls_.avDistField();
+
+    // See computeExtinctionFacCts()'s own comment on this degenerate/
+    // invalid avDistField() handling -- identical here, just for
+    // extinctFacLines()/extinctionFacCtsLines_ rather than
+    // extinctFac()/extinctionFacCts_
+    if (!avDistField.valid() || avDistField.getMin() == avDistField.getMax())
+    {
+        const double A_V = avDistField.valid() ? avDistField.getMin() : 0.0; // NOLINT(readability-identifier-naming) -- see applyExtinction()'s own identical NOLINT
+        extinctionFacCtsLines_ = extinctFacLines(A_V);
+        return;
+    }
+
+    // General case -- see computeExtinctionFacCts()'s own comment
+    using ExtinctFacLinesFn = std::vector<double> (Extinct::*)(double) const;
+    const utils::PDFIntegrator<ExtinctFacLinesFn, utils::GKOrder::GK15> integrator(
+        avDistField, static_cast<ExtinctFacLinesFn>(&Extinct::extinctFacLines),
+        extinctLines_.size(), false, controls_.intMaxIter(), controls_.intAbsTol(), controls_.intRelTol());
+    extinctionFacCtsLines_ = integrator.integrate(avDistField.getMin(), avDistField.getMax(), this);
 }

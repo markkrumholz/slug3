@@ -19,6 +19,7 @@ auto main() -> int {
         result += testExtinct();
         result += testExtinctNormalization();
         result += testExtinctApplyExtinctionCtsInvalid();
+        result += testExtinctLinesEmpty();
         return result;
     }
     catch (const std::exception& error)

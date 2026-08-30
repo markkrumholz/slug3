@@ -74,7 +74,11 @@ namespace io
          * (the cluster-spectra file was not opened), or the cluster
          * has disrupted, this is a no-op. Otherwise writes one line
          * per wavelength, each holding trial, time, uid, wavelength,
-         * and specific luminosity, to the cluster-spectra file.
+         * and specific luminosity (plus, if requested, extincted
+         * and/or nebular-inclusive specific luminosity), to the
+         * cluster-spectra file, then calls writeClusterNebLines() to do
+         * the same for each nebular emission line's own luminosity, if
+         * a nebular emission grid was requested.
          */
         void writeClusterSpec(unsigned long trial, double time,
             core::Cluster& cluster) override;
@@ -90,7 +94,8 @@ namespace io
          * was not opened), or the cluster has disrupted, this is a
          * no-op. Otherwise writes one line, holding trial, time, uid,
          * one column per filter, and (if requested) a final "Lbol"
-         * column, to the cluster-photometry file.
+         * column, followed by extincted and/or nebular-inclusive
+         * filter columns if requested, to the cluster-photometry file.
          */
         void writeClusterPhot(unsigned long trial, double time,
             core::Cluster& cluster) override;
@@ -118,8 +123,12 @@ namespace io
          * If spectral synthesis was not enabled for this simulation
          * (the galaxy-spectra file was not opened), this is a no-op.
          * Otherwise writes one line per wavelength, each holding
-         * trial, time, wavelength, and specific luminosity, to the
-         * galaxy-spectra file, then calls writeClusterSpec() on every
+         * trial, time, wavelength, and specific luminosity (plus, if
+         * requested, extincted and/or nebular-inclusive specific
+         * luminosity), to the galaxy-spectra file, then calls
+         * writeGalaxyNebLines() to do the same for each nebular
+         * emission line's own luminosity, if a nebular emission grid
+         * was requested, then calls writeClusterSpec() on every
          * currently-alive (non-disrupted) cluster in galaxy.
          */
         void writeGalaxySpec(unsigned long trial, double time,
@@ -135,9 +144,10 @@ namespace io
          * requested for this simulation (the galaxy-photometry file
          * was not opened), this is a no-op. Otherwise writes one
          * line, holding trial, time, one column per filter, and (if
-         * requested) a final "Lbol" column, to the galaxy-photometry
-         * file, then calls writeClusterPhot() on every currently-alive
-         * (non-disrupted) cluster in galaxy.
+         * requested) a final "Lbol" column, followed by extincted
+         * and/or nebular-inclusive filter columns if requested, to the
+         * galaxy-photometry file, then calls writeClusterPhot() on
+         * every currently-alive (non-disrupted) cluster in galaxy.
          */
         void writeGalaxyPhot(unsigned long trial, double time,
             core::Galaxy& galaxy) override;
@@ -201,15 +211,77 @@ namespace io
          */
         void openGalaxyPhotFile();
 
+        /**
+         * @brief Open the cluster-nebular-line-luminosity output file and write its header, if a nebular emission grid was requested
+         * @details
+         * A no-op if no spectral synthesizer was requested (mirroring
+         * openClusterSpectraFile()'s own gate -- a nebular emission
+         * grid can be built independently of a spectral synthesizer,
+         * but Cluster never computes any line luminosities without
+         * one), or if output.write_cluster_spec (optional, defaults to
+         * true) is set to false, since this file is a sibling of the
+         * cluster-spectra file, gated the same way.
+         */
+        void openClusterNebLinesFile();
+
+        /**
+         * @brief Open the galaxy-nebular-line-luminosity output file and write its header, if a nebular emission grid was requested
+         * @details
+         * A no-op unless SimControls::simType() is SimType::galaxy, if
+         * no spectral synthesizer was requested, or if
+         * output.write_galaxy_spec (optional, defaults to true) is set
+         * to false -- see openClusterNebLinesFile()'s own comment.
+         */
+        void openGalaxyNebLinesFile();
+
+        /**
+         * @brief Write one row per nebular emission line for a cluster's spectrum
+         * @param trial Trial number to which this cluster belongs
+         * @param time The output time at which the cluster's spectrum was computed, in yr
+         * @param cluster The cluster whose line luminosities should be written
+         * @details
+         * A no-op if the cluster-nebular-line-luminosity file was not
+         * opened (see openClusterNebLinesFile()). Otherwise writes one
+         * line per SimControls::nebular() line, each holding trial,
+         * time, uid, line label, line wavelength, and line luminosity
+         * (plus, if requested, the extincted line luminosity), to the
+         * cluster-nebular-line-luminosity file. Called from
+         * writeClusterSpec(), after it finishes writing the cluster's
+         * own spectrum.
+         */
+        void writeClusterNebLines(unsigned long trial, double time, core::Cluster& cluster);
+
+        /**
+         * @brief Write one row per nebular emission line for a galaxy's spectrum
+         * @param trial Trial number to which this galaxy belongs
+         * @param time The output time at which the galaxy's spectrum was computed, in yr
+         * @param galaxy The galaxy whose line luminosities should be written
+         * @details
+         * A no-op if the galaxy-nebular-line-luminosity file was not
+         * opened (see openGalaxyNebLinesFile()). Otherwise writes one
+         * line per SimControls::nebular() line, each holding trial,
+         * time, line label, line wavelength, and line luminosity
+         * (plus, if requested, the extincted line luminosity), to the
+         * galaxy-nebular-line-luminosity file. Called from
+         * writeGalaxySpec(), after it finishes writing the galaxy's
+         * own spectrum.
+         */
+        void writeGalaxyNebLines(unsigned long trial, double time, core::Galaxy& galaxy);
+
         std::ofstream clustersFile_; /**< Handle to the open cluster output file */
         std::ofstream clusterSpectraFile_; /**< Handle to the open cluster-spectra output file, if any */
         std::ofstream clusterPhotFile_; /**< Handle to the open cluster-photometry output file, if any */
+        std::ofstream clusterNebLinesFile_; /**< Handle to the open cluster-nebular-line-luminosity output file, if any */
         std::ofstream galaxyFile_; /**< Handle to the open galaxy output file, if any (galaxy-type simulations only) */
         std::ofstream galaxySpectraFile_; /**< Handle to the open galaxy-spectra output file, if any */
         std::ofstream galaxyPhotFile_; /**< Handle to the open galaxy-photometry output file, if any */
+        std::ofstream galaxyNebLinesFile_; /**< Handle to the open galaxy-nebular-line-luminosity output file, if any */
         std::vector<double> wlObs_; /**< Observed-frame wavelength grid, if spectral synthesis is enabled -- shared by both the cluster- and galaxy-spectra files, since both are drawn from the same SimControls::specsyn() */
         std::vector<int> photColWidths_; /**< Column width used for each filter in the cluster- and galaxy-photometry files -- see computePhotColWidths() */
         std::vector<int> photExtinctColWidths_; /**< Column width used for each "<filter>_ex" column in the cluster- and galaxy-photometry files, if SimControls::extinct() is set -- see computePhotColWidths() */
+        std::vector<int> photNebColWidths_; /**< Column width used for each "<filter>_neb" column in the cluster- and galaxy-photometry files, if SimControls::nebular() is set -- see computePhotColWidths() */
+        std::vector<int> photNebExtinctColWidths_; /**< Column width used for each "<filter>_neb_ex" column in the cluster- and galaxy-photometry files, if both SimControls::nebular() and SimControls::extinct() are set -- see computePhotColWidths() */
+        int lineLabelWidth_ = 0; /**< Column width used for the "line_label" column in the cluster- and galaxy-nebular-line-luminosity files, if SimControls::nebular() is set -- see computeLineLabelWidth() */
     };
 
 } // namespace io

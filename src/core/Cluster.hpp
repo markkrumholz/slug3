@@ -188,10 +188,10 @@ namespace core
          * @details
          * Computed lazily: if advance() has run since spec_/specExtinct_
          * were last computed, this triggers computeSpec() (which
-         * computes both together) before returning, so the result is
-         * always current as of the last advance() -- see specCurrent_'s
-         * own comment. Not const, since it may need to run that
-         * computation.
+         * computes spec_/specExtinct_/specNeb_/specNebExtinct_/lineLum_/lineLumExtinct_
+         * together) before returning, so the result is always current
+         * as of the last advance() -- see specCurrent_'s own comment.
+         * Not const, since it may need to run that computation.
          */
         [[nodiscard]] auto spec() -> const auto&
         {
@@ -208,9 +208,9 @@ namespace core
          *   (SimControls::extinct() is null) or spec() itself is
          *   empty (no spectral synthesizer was requested)
          * @details
-         * Computed lazily -- see spec()'s own comment; both share the
+         * Computed lazily -- see spec()'s own comment; all share the
          * same specCurrent_ flag, since a single computeSpec() call
-         * computes both together.
+         * computes them together.
          */
         [[nodiscard]] auto specExtinct() -> const auto&
         {
@@ -247,14 +247,122 @@ namespace core
          *   (SimControls::extinct() is null) or no filter collection
          *   was requested (SimControls::filters() is null)
          * @details
-         * Computed lazily -- see phot()'s own comment; both share the
+         * Computed lazily -- see phot()'s own comment; all share the
          * same photCurrent_ flag, since a single computePhot() call
-         * computes both together.
+         * computes them together.
          */
         [[nodiscard]] auto photExtinct() -> const auto&
         {
             if (!photCurrent_) { computePhot(); photCurrent_ = true; }
             return photExtinct_;
+        }
+
+        /**
+         * @brief Return the cluster's stellar + nebular spectrum
+         * @return A const reference to spec(), with nebular continuum
+         *   and line emission added via SimControls::nebular()'s own
+         *   getCluster(), on the same wavelength grid as spec(); an
+         *   empty vector if no nebular emission grid was requested
+         *   (SimControls::nebular() is null) or spec() itself is empty
+         *   (no spectral synthesizer was requested)
+         * @details
+         * Computed lazily -- see spec()'s own comment; shares the same
+         * specCurrent_ flag, since a single computeSpec() call computes
+         * spec_/specExtinct_/specNeb_/specNebExtinct_/lineLum_/lineLumExtinct_ together.
+         */
+        [[nodiscard]] auto specNeb() -> const auto&
+        {
+            if (!specCurrent_) { computeSpec(); specCurrent_ = true; }
+            return specNeb_;
+        }
+
+        /**
+         * @brief Return the cluster's extincted stellar + nebular spectrum
+         * @return A const reference to specNeb(), attenuated by aV()
+         *   through SimControls::extinct(), on the wavelength grid
+         *   returned by SimControls::extinct()'s own wl(); an empty
+         *   vector if no extinction curve was requested
+         *   (SimControls::extinct() is null) or specNeb() itself is
+         *   empty (no nebular emission grid or no spectral synthesizer
+         *   was requested)
+         * @details
+         * Computed lazily -- see specNeb()'s own comment.
+         */
+        [[nodiscard]] auto specNebExtinct() -> const auto&
+        {
+            if (!specCurrent_) { computeSpec(); specCurrent_ = true; }
+            return specNebExtinct_;
+        }
+
+        /**
+         * @brief Return the cluster's nebular emission line luminosities
+         * @return A const reference to the luminosity of each of
+         *   SimControls::nebular()'s own lineWl() lines, in erg/s, in
+         *   the same order; an empty vector if no nebular emission
+         *   grid was requested (SimControls::nebular() is null) or
+         *   spec() itself is empty (no spectral synthesizer was
+         *   requested)
+         * @details
+         * Computed lazily -- see specNeb()'s own comment.
+         */
+        [[nodiscard]] auto lineLum() -> const auto&
+        {
+            if (!specCurrent_) { computeSpec(); specCurrent_ = true; }
+            return lineLum_;
+        }
+
+        /**
+         * @brief Return the cluster's extincted nebular emission line luminosities
+         * @return A const reference to lineLum(), attenuated by aV()
+         *   through SimControls::extinct(); an empty vector if no
+         *   extinction curve was requested (SimControls::extinct() is
+         *   null) or lineLum() itself is empty (no nebular emission
+         *   grid or no spectral synthesizer was requested)
+         * @details
+         * Computed lazily -- see lineLum()'s own comment.
+         */
+        [[nodiscard]] auto lineLumExtinct() -> const auto&
+        {
+            if (!specCurrent_) { computeSpec(); specCurrent_ = true; }
+            return lineLumExtinct_;
+        }
+
+        /**
+         * @brief Return the cluster's stellar + nebular photometry
+         * @return A const reference to the photometric value computed
+         *   from specNeb() by each filter in SimControls::filters(),
+         *   in the same order as phot(); an empty vector if no nebular
+         *   emission grid was requested (SimControls::nebular() is
+         *   null) or no filter collection was requested
+         *   (SimControls::filters() is null)
+         * @details
+         * Computed lazily -- see phot()'s own comment; shares the same
+         * photCurrent_ flag, since a single computePhot() call computes
+         * phot_/photExtinct_/photNeb_/photNebExtinct_ together.
+         */
+        [[nodiscard]] auto photNeb() -> const auto&
+        {
+            if (!photCurrent_) { computePhot(); photCurrent_ = true; }
+            return photNeb_;
+        }
+
+        /**
+         * @brief Return the cluster's extincted stellar + nebular photometry
+         * @return A const reference to the photometric value computed
+         *   from specNebExtinct() by each filter in
+         *   SimControls::filters(), in the same order as phot(); an
+         *   empty vector if no extinction curve was requested
+         *   (SimControls::extinct() is null), no nebular emission grid
+         *   was requested (SimControls::nebular() is null), or no
+         *   filter collection was requested (SimControls::filters() is
+         *   null)
+         * @details
+         * Computed lazily -- see photNeb()'s own comment.
+         */
+        [[nodiscard]] auto photNebExtinct() -> const auto&
+        {
+            if (!photCurrent_) { computePhot(); photCurrent_ = true; }
+            return photNebExtinct_;
         }
 
         /**
@@ -285,11 +393,15 @@ namespace core
          * @param t Time to which to advance, in yr
          * @details
          * Updates the living/dead star lists and the isochrone for the
-         * new time, then marks spec_/specExtinct_/phot_/photExtinct_/
-         * lbol_ as stale (see specCurrent_/photCurrent_/lbolCurrent_'s
-         * own comments) rather than recomputing them itself -- they are
-         * instead recomputed lazily, on demand, the next time spec()/
-         * specExtinct()/phot()/photExtinct()/lbol() is actually called.
+         * new time, then marks spec_/specExtinct_/specNeb_/
+         * specNebExtinct_/lineLum_/lineLumExtinct_/phot_/photExtinct_/photNeb_/
+         * photNebExtinct_/lbol_ as stale (see specCurrent_/
+         * photCurrent_/lbolCurrent_'s own comments) rather than
+         * recomputing them itself -- they are instead recomputed
+         * lazily, on demand, the next time spec()/specExtinct()/
+         * specNeb()/specNebExtinct()/lineLum()/lineLumExtinct()/phot()/
+         * photExtinct()/photNeb()/photNebExtinct()/lbol() is actually
+         * called.
          */
         void advance(double t);
         
@@ -331,18 +443,26 @@ namespace core
         Interp1dPtr isochrone_;     /**< Isochrone for the current time */
         std::vector<double> spec_;  /**< Spectrum of the continuously-sampled part of the population at the current time */
         std::vector<double> specExtinct_; /**< spec_ attenuated by aV_ through SimControls::extinct(), at the current time */
+        std::vector<double> specNeb_; /**< spec_ plus nebular continuum and line emission, via SimControls::nebular()'s own getCluster(), at the current time */
+        std::vector<double> specNebExtinct_; /**< specNeb_ attenuated by aV_ through SimControls::extinct(), at the current time */
+        std::vector<double> lineLum_; /**< Luminosity of each of SimControls::nebular()'s own lineWl() lines, in erg/s, at the current time */
+        std::vector<double> lineLumExtinct_; /**< lineLum_ attenuated by aV_ through SimControls::extinct(), at the current time */
         std::vector<double> phot_;  /**< Photometry of spec_ through each filter in SimControls::filters(), at the current time */
         std::vector<double> photExtinct_; /**< Photometry of specExtinct_ through each filter in SimControls::filters(), at the current time */
+        std::vector<double> photNeb_; /**< Photometry of specNeb_ through each filter in SimControls::filters(), at the current time */
+        std::vector<double> photNebExtinct_; /**< Photometry of specNebExtinct_ through each filter in SimControls::filters(), at the current time */
         double lbol_ = 0.0;         /**< Bolometric luminosity of the population, in Lsun, at the current time */
 
         /**
-         * @brief Whether spec_/specExtinct_ are current as of curTime_
+         * @brief Whether spec_/specExtinct_/specNeb_/specNebExtinct_/lineLum_/lineLumExtinct_ are current as of curTime_
          * @details
-         * True at construction (spec_/specExtinct_'s own empty
-         * in-class defaults are already the correct, current value
-         * before advance() has ever run), and after every spec()/
-         * specExtinct() call recomputes them; set back to false at the
-         * end of every advance() call, so the next spec()/specExtinct()
+         * True at construction (spec_/specExtinct_/specNeb_/
+         * specNebExtinct_/lineLum_/lineLumExtinct_'s own empty in-class defaults are
+         * already the correct, current value before advance() has ever
+         * run), and after every spec()/specExtinct()/specNeb()/
+         * specNebExtinct()/lineLum()/lineLumExtinct() call recomputes
+         * them; set back to
+         * false at the end of every advance() call, so the next such
          * call recomputes them lazily -- see advance()'s and spec()'s
          * own comments. Letting spec()/phot()/lbol() compute only when
          * actually requested, rather than unconditionally inside
@@ -355,9 +475,10 @@ namespace core
         bool specCurrent_ = true;
 
         /**
-         * @brief Whether phot_/photExtinct_ are current as of curTime_
+         * @brief Whether phot_/photExtinct_/photNeb_/photNebExtinct_ are current as of curTime_
          * @details
-         * Mirrors specCurrent_'s own comment, for phot()/photExtinct().
+         * Mirrors specCurrent_'s own comment, for phot()/photExtinct()/
+         * photNeb()/photNebExtinct().
          */
         bool photCurrent_ = true;
 
@@ -384,18 +505,27 @@ namespace core
         void updateLivingStars(double logAge);
 
         /**
-         * @brief Update spec_ from the current isochrone and star lists
+         * @brief Update spec_/specExtinct_/specNeb_/specNebExtinct_/lineLum_/lineLumExtinct_ from the current isochrone and star lists
          * @details
          * Does nothing if SimControls::specsyn() is null (no spectral
          * synthesizer was requested). Otherwise sets spec_ to the sum
          * of the continuously-sampled (non-stochastic) part of the
          * population, if any, and each individually-sampled
-         * (stochastic) star in m_.
+         * (stochastic) star in m_. If SimControls::nebular() is
+         * non-null, then sets specNeb_/lineLum_ from spec_ via
+         * SimControls::nebular()'s own getCluster(), passing this
+         * cluster's own feH_ and age (curTime_ - formTime_). If
+         * SimControls::extinct() is also non-null, sets specExtinct_
+         * from spec_, and -- if a nebular emission grid was requested
+         * -- specNebExtinct_ from specNeb_ via
+         * SimControls::extinct()'s own applyExtinction(), and
+         * lineLumExtinct_ from lineLum_ via its own
+         * applyExtinctionLines().
          */
         void computeSpec();
 
         /**
-         * @brief Update phot_ (and photExtinct_) from the current spec_ (and specExtinct_)
+         * @brief Update phot_/photExtinct_/photNeb_/photNebExtinct_ from the current spec_/specExtinct_/specNeb_/specNebExtinct_
          * @details
          * Does nothing if SimControls::filters() is null (no filter
          * collection was requested). Otherwise sets phot_ from spec()
@@ -403,7 +533,10 @@ namespace core
          * alone -- with no prior call to spec() -- still computes a
          * current spectrum first, regardless of call order); if
          * SimControls::extinct() is also non-null, also sets
-         * photExtinct_ from specExtinct() likewise.
+         * photExtinct_ from specExtinct() likewise. If
+         * SimControls::nebular() is non-null, likewise sets photNeb_
+         * from specNeb(), and -- if SimControls::extinct() is also
+         * non-null -- photNebExtinct_ from specNebExtinct().
          */
         void computePhot();
 

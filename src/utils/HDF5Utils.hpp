@@ -18,6 +18,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -169,6 +170,44 @@ namespace utils
         H5Sclose(space);
         H5Dclose(dset);
         return { std::move(data), { dims[0], dims[1] } }; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+    }
+
+    /**
+     * @brief Read a 1D fixed-length string dataset from an HDF5 group (or file)
+     * @param grp Handle to the group (or already-open file) containing the dataset
+     * @param name Name of the dataset
+     * @param context Prefix used in thrown error messages (typically the
+     *   name of the calling class or function)
+     * @returns The dataset's strings, each trimmed at its own first null byte
+     */
+    inline auto readStringDataset1D(const hid_t grp, const std::string& name,
+        const std::string& context) -> std::vector<std::string>
+    {
+        const hid_t dset = H5Dopen2(grp, name.c_str(), H5P_DEFAULT);
+        if (dset < 0)
+        {
+            throw std::runtime_error(context + ": unable to open dataset " + name);
+        }
+        const hid_t space = H5Dget_space(dset);
+        hsize_t dims = 0;
+        H5Sget_simple_extent_dims(space, &dims, nullptr);
+        const hid_t dtype = H5Dget_type(dset);
+        const size_t strSize = H5Tget_size(dtype);
+        std::vector<char> buf(dims * strSize);
+        H5Dread(dset, dtype, H5S_ALL, H5S_ALL, H5P_DEFAULT, buf.data());
+        H5Tclose(dtype);
+        H5Sclose(space);
+        H5Dclose(dset);
+
+        std::vector<std::string> result;
+        result.reserve(dims);
+        for (hsize_t i = 0; i < dims; ++i)
+        {
+            const char* start = buf.data() + (i * strSize); // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+            const std::string_view bounded(start, strSize);
+            result.emplace_back(bounded.substr(0, bounded.find('\0')));
+        }
+        return result;
     }
 
     /**

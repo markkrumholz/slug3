@@ -19,3 +19,6 @@ ntime = 3
 
 [outputs]
 output_mode = "bogus"
+
+[nebular]
+compute_neb = false

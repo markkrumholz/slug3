@@ -65,6 +65,15 @@ ntime = 3
 
 [outputs]
 output_mode = "ascii"
+
+# nebular.compute_neb defaults to true, which would otherwise require
+# the real (multi-hundred-MB, gitignored) data/nebular/nebular.h5
+# cloudy grid to be present -- CLUSTER_DECK/GALAXY_DECK above get this
+# from testCluster.in/testGalaxy.in themselves (both already set it),
+# but ASCII_DECK is a literal string, not one of those files, so it
+# needs its own explicit override.
+[nebular]
+compute_neb = false
 """
 
 

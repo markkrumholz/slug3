@@ -1,0 +1,30 @@
+# Test input deck for standalone Nebular class tests -- Nebular's own
+# constructor needs a full SimControls (for specsyn()->wl() and
+# nebControls()), so this is otherwise a minimal cluster deck (mirrors
+# tests/core/assets/testCluster.in), with nebular.table pointing at
+# the small synthetic fixture built by
+# data/tools/cloudy/make_nebular_test_fixture.py.
+
+sim_type = "cluster"
+
+[stars]
+IMF = "chabrier.toml"
+track_registry = "tests/tracks/assets/tracks.toml"
+tracks = "MIST_test"
+FeH = 0.0
+alphaFe = -0.2
+
+[spectra]
+model = "blackbody"
+
+[clusters]
+CMF = 1e3
+
+[output]
+start_time = 0.0
+end_time = 10.0
+ntime = 3
+
+[nebular]
+compute_neb = true
+table = "tests/nebular/assets/nebular_test.h5"

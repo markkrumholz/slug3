@@ -272,4 +272,51 @@ auto testExtinctApplyExtinctionCtsInvalid() -> int
     return 0; // Passed
 }
 
+/**
+ * @brief Unit test for Extinct's line-luminosity extinction support with no nebular emission grid
+ * @returns 0 if the test passes, 1 if it fails
+ * @details
+ * A bare default-constructed SimControls (as testExtinct()'s own
+ * construction above uses) has SimControls::nebular() == nullptr, so
+ * Extinct's own extinctLines_/extinctionFacCtsLines_ should both stay
+ * empty, and applyExtinctionLines()/applyExtinctionCtsLines() should
+ * both return an empty vector regardless of A_V -- there are no lines
+ * to extinguish. See tests/core/testCluster.cpp's own
+ * testClusterExtinctLines() for the positive-path check, with a real
+ * nebular emission grid present, since building one needs
+ * SimControls's full toml-deck constructor (and the tracks/spectra it
+ * depends on), not available in this minimal test target.
+ */
+auto testExtinctLinesEmpty() -> int
+{
+    const phot::FilterTabulated vFilt("Generic", "Johnson", "V", "data/filters/V_filter.toml");
+    const io::SimControls testControls;
+    if (testControls.nebular() != nullptr)
+    {
+        std::cerr << "testExtinctLinesEmpty: test bug: expected a bare "
+            "default-constructed SimControls to have a null nebular()\n";
+        return 1;
+    }
+
+    const extinct::Extinct ext("Calzetti_starburst", vFilt.wl(), testControls);
+
+    const std::vector<double> noLines;
+    if (!ext.applyExtinctionLines(1.0, noLines).empty())
+    {
+        std::cerr << "testExtinctLinesEmpty: expected applyExtinctionLines() "
+            "to return an empty vector when no nebular emission grid was "
+            "requested\n";
+        return 1;
+    }
+    if (!ext.applyExtinctionCtsLines(noLines).empty())
+    {
+        std::cerr << "testExtinctLinesEmpty: expected applyExtinctionCtsLines() "
+            "to return an empty vector when no nebular emission grid was "
+            "requested\n";
+        return 1;
+    }
+
+    return 0; // Passed
+}
+
 #endif // TESTEXTINCT_HPP

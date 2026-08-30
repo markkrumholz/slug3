@@ -24,3 +24,6 @@ ntime = 3
 [outputs]
 output_mode = "ascii"
 out_dir = "my_test_outdir"
+
+[nebular]
+compute_neb = false
