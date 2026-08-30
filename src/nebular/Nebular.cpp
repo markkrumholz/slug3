@@ -252,7 +252,7 @@ namespace
 
             const double deltaWl = wlCen * lineWidthCgs / utils::c;
 
-            const size_t centerIdx = static_cast<size_t>(std::distance(boundaries.begin(),
+            const auto centerIdx = static_cast<size_t>(std::distance(boundaries.begin(),
                 std::upper_bound(boundaries.begin(), boundaries.end(), wlCen)));
             result.centerIdx_.at(ell) = centerIdx;
 
@@ -296,11 +296,16 @@ namespace
         }
 
         size_t hi = 0;
-        while (hi + 1 < grid.size() && grid.at(hi) < value) { ++hi; }
+        while (hi + 1 < grid.size() && grid[hi] < value) { ++hi; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- hi + 1 < grid.size() already checked by the loop condition itself, so hi < grid.size()
 
-        if (utils::approxEqual(grid.at(hi), value)) { return {hi, hi, 0.0}; }
+        if (utils::approxEqual(grid[hi], value)) { return {hi, hi, 0.0}; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- hi < grid.size() by construction: it starts at 0 and only ever increments while hi + 1 < grid.size()
 
-        const double frac = (value - grid.at(hi - 1)) / (grid.at(hi) - grid.at(hi - 1));
+        // hi >= 1 here: hi == 0 would already have matched grid.front()
+        // exactly above (value >= grid.front() by the range check at
+        // the top of this function, and the loop above only stops at
+        // hi == 0 when grid[0] >= value, so the two sandwich grid[0]
+        // == value exactly)
+        const double frac = (value - grid[hi - 1]) / (grid[hi] - grid[hi - 1]); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
         return {hi - 1, hi, frac};
     }
 } // namespace
@@ -466,7 +471,10 @@ auto nebular::Nebular::stellarAboveEdge(const std::vector<double>& spec) const -
     std::vector<double> result(spec.size(), 0.0);
     for (size_t k = 0; k < spec.size(); ++k)
     {
-        if (wl_.at(k) > edgeWl) { result.at(k) = spec.at(k); }
+        // spec is always on wl_'s own grid (see this function's own
+        // callers' shared contract), so k < spec.size() == wl_.size();
+        // result was constructed with spec.size() elements above
+        if (wl_[k] > edgeWl) { result[k] = spec[k]; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
     }
     return result;
 }
@@ -481,9 +489,12 @@ void nebular::Nebular::depositLines(
 
     for (size_t ell = 0; ell < lineLum.size(); ++ell)
     {
-        if (lineLum.at(ell) == 0.0) { continue; }
+        // lineCenterIdx_ has one entry per line, the same nLine as
+        // lineLum always has (see getGalaxy()'s/getCluster()'s own
+        // construction of it), so ell < lineLum.size() == lineCenterIdx_.size()
+        if (lineLum[ell] == 0.0) { continue; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
 
-        const auto centerIdx = static_cast<ptrdiff_t>(lineCenterIdx_.at(ell));
+        const auto centerIdx = static_cast<ptrdiff_t>(lineCenterIdx_[ell]); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
         for (ptrdiff_t offset = -n; offset <= n; ++offset)
         {
             const ptrdiff_t binIdx = centerIdx + offset;
@@ -494,14 +505,18 @@ void nebular::Nebular::depositLines(
             // are skipped rather than read out of bounds
             if (binIdx < 1 || binIdx >= static_cast<ptrdiff_t>(nWl) - 1) { continue; }
 
+            // bin is in [1, nWl - 2] here (the skip above), so bin - 1
+            // and bin + 1 both stay within [0, nWl - 1] == wl_'s own
+            // valid range, and spec (always on wl_'s own grid, per
+            // stellarAboveEdge()'s own contract) has the same size
             const auto bin = static_cast<size_t>(binIdx);
-            const double binWidth = std::sqrt(wl_.at(bin + 1) * wl_.at(bin)) -
-                std::sqrt(wl_.at(bin - 1) * wl_.at(bin));
+            const double binWidth = std::sqrt(wl_[bin + 1] * wl_[bin]) - // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
+                std::sqrt(wl_[bin - 1] * wl_[bin]); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
 
             const auto row = static_cast<size_t>(centerRow + offset);
             const double powerFrac = lineDepositFrac_[row, ell];
 
-            spec.at(bin) += lineLum.at(ell) * powerFrac / binWidth;
+            spec[bin] += lineLum[ell] * powerFrac / binWidth; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
         }
     }
 }
@@ -523,7 +538,7 @@ auto nebular::Nebular::getGalaxy(const std::vector<double>& spec, const double f
     {
         const double lo = lineLumPerQGalaxy_[feHBracket.lo_, ell];
         const double hi = lineLumPerQGalaxy_[feHBracket.hi_, ell];
-        lineLum.at(ell) = qhi * (lo + (feHBracket.frac_ * (hi - lo)));
+        lineLum[ell] = qhi * (lo + (feHBracket.frac_ * (hi - lo))); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- ell < nLine == lineLum.size() by construction above
     }
 
     auto outSpec = stellarAboveEdge(spec);
@@ -533,7 +548,7 @@ auto nebular::Nebular::getGalaxy(const std::vector<double>& spec, const double f
     {
         const double lo = ctmLumPerQGalaxy_[feHBracket.lo_, k];
         const double hi = ctmLumPerQGalaxy_[feHBracket.hi_, k];
-        outSpec.at(k) += qhi * (lo + (feHBracket.frac_ * (hi - lo)));
+        outSpec[k] += qhi * (lo + (feHBracket.frac_ * (hi - lo))); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- k < nWl == wl_.size() == outSpec.size() (stellarAboveEdge() sizes its own result to spec.size(), and spec is always on wl_'s own grid)
     }
 
     depositLines(lineLum, outSpec);
@@ -575,7 +590,7 @@ auto nebular::Nebular::getCluster(const std::vector<double>& spec, const double 
         const double hiFhiT = lineLumPerQCluster_[feHBracket.hi_, ageBracket.hi_, ell];
         const double loF = loFloT + (ageBracket.frac_ * (loFhiT - loFloT));
         const double hiF = hiFloT + (ageBracket.frac_ * (hiFhiT - hiFloT));
-        lineLum.at(ell) = qhi * (loF + (feHBracket.frac_ * (hiF - loF)));
+        lineLum[ell] = qhi * (loF + (feHBracket.frac_ * (hiF - loF))); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- ell < nLine == lineLum.size() by construction above
     }
 
     auto outSpec = stellarAboveEdge(spec);
@@ -589,7 +604,7 @@ auto nebular::Nebular::getCluster(const std::vector<double>& spec, const double 
         const double hiFhiT = ctmLumPerQCluster_[feHBracket.hi_, ageBracket.hi_, k];
         const double loF = loFloT + (ageBracket.frac_ * (loFhiT - loFloT));
         const double hiF = hiFloT + (ageBracket.frac_ * (hiFhiT - hiFloT));
-        outSpec.at(k) += qhi * (loF + (feHBracket.frac_ * (hiF - loF)));
+        outSpec[k] += qhi * (loF + (feHBracket.frac_ * (hiF - loF))); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- k < nWl == wl_.size() == outSpec.size() (stellarAboveEdge() sizes its own result to spec.size(), and spec is always on wl_'s own grid)
     }
 
     depositLines(lineLum, outSpec);
