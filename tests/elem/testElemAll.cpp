@@ -11,6 +11,7 @@
 #include "testElemData.hpp"
 #include "testIonizationData.hpp"
 #include "testIsotopeData.hpp"
+#include "testIsotopeTable.hpp"
 #include <exception>
 #include <iostream>
 
@@ -21,6 +22,7 @@ auto main() -> int {
         result += testElemData();
         result += testIonizationData();
         result += testIsotopeData();
+        result += testIsotopeTable();
         return result;
     }
     catch (const std::exception& error)

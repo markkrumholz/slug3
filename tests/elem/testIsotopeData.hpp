@@ -101,11 +101,13 @@ inline auto testIsotopeDataConstructionUnstable() -> int
  * @brief Unit test for IsotopeData's constructor validation
  * @return 0 if the test passes, 1 if it fails.
  * @details
- * A negative lifetime, or a positive lifetime with no daughters,
- * should both throw std::runtime_error. A stable isotope (lifetime ==
- * 0) is allowed to carry a nonempty daughters() list -- the
- * constructor only requires daughters when lifetime is strictly
- * positive -- so that case is checked as well, and should not throw.
+ * A negative lifetime should throw std::runtime_error. Two other
+ * cases are checked as NOT throwing: a stable isotope (lifetime == 0)
+ * carrying a nonempty daughters() list, and -- the case this test is
+ * really guarding -- an unstable isotope (lifetime > 0) with an empty
+ * daughters() list, which is common in the real isotope data (e.g.
+ * exotic, very short-lived nuclides whose decay channel isn't
+ * tabulated) and must be representable without throwing.
  */
 inline auto testIsotopeDataValidation() -> int
 {
@@ -114,15 +116,6 @@ inline auto testIsotopeDataValidation() -> int
         const elem::IsotopeData bad({'X', 'X'}, 99U, 1U, -1.0);
         std::cerr << "testIsotopeDataValidation: negative lifetime should "
             "have thrown\n";
-        return 1;
-    }
-    catch (const std::runtime_error&) { /* expected */ }
-
-    try
-    {
-        const elem::IsotopeData bad({'X', 'X'}, 99U, 1U, 1.0);
-        std::cerr << "testIsotopeDataValidation: positive lifetime with no "
-            "daughters should have thrown\n";
         return 1;
     }
     catch (const std::runtime_error&) { /* expected */ }
@@ -140,6 +133,29 @@ inline auto testIsotopeDataValidation() -> int
     catch (const std::runtime_error& e)
     {
         std::cerr << "testIsotopeDataValidation: lifetime == 0 with nonempty "
+            "daughters should not throw, but got: " << e.what() << "\n";
+        return 1;
+    }
+
+    try
+    {
+        const elem::IsotopeData ok({'X', 'X'}, 99U, 1U, 1.0);
+        if (ok.stable())
+        {
+            std::cerr << "testIsotopeDataValidation: lifetime > 0 with no "
+                "daughters should still report stable() == false\n";
+            return 1;
+        }
+        if (!ok.daughters().empty())
+        {
+            std::cerr << "testIsotopeDataValidation: test bug: expected an "
+                "empty daughters() list\n";
+            return 1;
+        }
+    }
+    catch (const std::runtime_error& e)
+    {
+        std::cerr << "testIsotopeDataValidation: lifetime > 0 with no "
             "daughters should not throw, but got: " << e.what() << "\n";
         return 1;
     }

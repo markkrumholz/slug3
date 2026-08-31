@@ -119,6 +119,7 @@ add_executable(slug
     src/nebular/Nebular.cpp
     src/io/SimControls.cpp
     src/utils/ParseUtils.cpp
+    src/elem/IsotopeTable.cpp
 )
 
 # Test executables
@@ -130,6 +131,7 @@ add_executable(slugTestInterpolation
     tests/interpolation/testMesh3DInterpolator.cpp
 )
 add_executable(slugTestElem
+    src/elem/IsotopeTable.cpp
     tests/elem/testElemAll.cpp
 )
 add_executable(slugTestExtinct
@@ -622,7 +624,10 @@ enable_testing()
 
 # Define tests
 add_test(NAME test_Interpolation COMMAND slugTestInterpolation)
-add_test(NAME test_Elem COMMAND slugTestElem)
+# test_Elem loads the isotope data table (data/elem/isotopes.h5) by
+# relative path, so it needs to run from the source tree root.
+add_test(NAME test_Elem COMMAND slugTestElem
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 # test_Extinct loads the extinction curve registry (data/extinct/
 # extinct.toml/.h5) by relative path, so it needs to run from the
 # source tree root.

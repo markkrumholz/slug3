@@ -46,9 +46,10 @@ namespace elem
          * @param z Atomic number
          * @param a Mass number
          * @param lifetime Radioactive decay lifetime; 0 indicates a stable isotope
-         * @param daughters List of decay channels (daughter nuclide and branching ratio)
-         * @throws std::runtime_error if lifetime is negative, or if lifetime is
-         *   positive but daughters is empty
+         * @param daughters List of decay channels (daughter nuclide and branching
+         *   ratio). May be empty even for an unstable isotope (lifetime > 0): some
+         *   isotopes are known to decay, but their decay channel isn't tabulated.
+         * @throws std::runtime_error if lifetime is negative
          */
         IsotopeData(std::array<char, 2> symbol, unsigned int z, unsigned int a,
             double lifetime = 0.0, std::vector<IsotopeDecayData> daughters = {})
@@ -59,12 +60,6 @@ namespace elem
                 throw std::runtime_error(
                     "IsotopeData: lifetime must be non-negative, got " +
                     std::to_string(lifetime_));
-            }
-            if (lifetime_ > 0.0 && daughters_.empty())
-            {
-                throw std::runtime_error(
-                    "IsotopeData: unstable isotope (lifetime > 0) must have at "
-                    "least one decay daughter");
             }
         }
 
