@@ -9,7 +9,7 @@
 #ifndef TESTFILTERIDEAL_HPP
 #define TESTFILTERIDEAL_HPP
 
-#include "../../src/elem/ElemData.hpp"
+#include "../../src/elem/IonizationData.hpp"
 #include "../../src/phot/FilterIdeal.hpp"
 #include "../../src/utils/Constants.hpp"
 #include <cmath>
@@ -134,7 +134,7 @@ inline auto testFilterIdealPhotMode() -> int
  * Checks Q(HI) and Q(HeII) by verifying:
  * (1) photCount() is true and wlMin() is 0 (no lower bound -- ionizing
  *     photons have no minimum energy);
- * (2) wlMax() matches h·c/(IP·eV)/Å computed directly from elem::elemData
+ * (2) wlMax() matches h·c/(IP·eV)/Å computed directly from elem::ionizationData
  *     (the ionization-threshold wavelength: ionizing photons have
  *     wavelength BELOW this threshold, not above it -- see
  *     testFilterIdealQDirection for a regression test targeted
@@ -167,7 +167,7 @@ inline auto testFilterIdealQMode() -> int
     }
 
     const double wlH1 = (utils::h * utils::c)
-        / (elem::elemData[0].ionPot()[0] * utils::eV) / utils::Angstrom;
+        / (elem::ionizationData[0].ionPot()[0] * utils::eV) / utils::Angstrom;
     if (std::abs(fHI.wlMax() - wlH1) > wlTol)
     {
         std::cerr << "testFilterIdealQMode: Q(HI) wlMax() = " << fHI.wlMax()
@@ -202,7 +202,7 @@ inline auto testFilterIdealQMode() -> int
     }
 
     const double wlHeII = (utils::h * utils::c)
-        / (elem::elemData[1].ionPot()[1] * utils::eV) / utils::Angstrom;
+        / (elem::ionizationData[1].ionPot()[1] * utils::eV) / utils::Angstrom;
     if (std::abs(fHeII.wlMax() - wlHeII) > wlTol)
     {
         std::cerr << "testFilterIdealQMode: Q(HeII) wlMax() = " << fHeII.wlMax()

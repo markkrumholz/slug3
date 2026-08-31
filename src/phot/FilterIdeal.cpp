@@ -7,7 +7,7 @@
  */
 
 #include "FilterIdeal.hpp"
-#include "../elem/ElemData.hpp"
+#include "../elem/IonizationData.hpp"
 #include "../interpolation/Interpolator1D.hpp"
 #include "../utils/Constants.hpp"
 #include "../utils/MiscUtils.hpp"
@@ -24,18 +24,18 @@
 
 namespace
 {
-    // Return the index into elem::elemData whose symbol matches sym
-    // (a 1- or 2-character string), or elem::elemData.size() if not found
+    // Return the index into elem::ionizationData whose symbol matches sym
+    // (a 1- or 2-character string), or elem::ionizationData.size() if not found
     auto findElement(const std::string& sym) -> std::size_t
     {
-        for (std::size_t i = 0; i < elem::elemData.size(); ++i)
+        for (std::size_t i = 0; i < elem::ionizationData.size(); ++i)
         {
-            const auto& s = elem::elemData[i].symbol(); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i bounded by elemData.size() loop guard
+            const auto& s = elem::ionizationData[i].symbol(); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i bounded by ionizationData.size() loop guard
             if (s[0] != sym[0]) { continue; }
             if (sym.size() == 1 && s[1] == '\0') { return i; }
             if (sym.size() == 2 && s[1] == sym[1]) { return i; }
         }
-        return elem::elemData.size();
+        return elem::ionizationData.size();
     }
 } // namespace
 
@@ -60,7 +60,7 @@ phot::FilterIdeal::FilterIdeal(std::string name) : Filter(name) // NOLINT(perfor
         const std::string roman = inner.substr(symLen);
 
         const std::size_t elemIdx = findElement(sym);
-        if (elemIdx >= elem::elemData.size())
+        if (elemIdx >= elem::ionizationData.size())
         {
             throw std::runtime_error(
                 "FilterIdeal: in filter name '" + name + "', '" + sym +
@@ -77,7 +77,7 @@ phot::FilterIdeal::FilterIdeal(std::string name) : Filter(name) // NOLINT(perfor
         }
 
         const double ip =
-            elem::elemData[elemIdx].ionPot()[static_cast<std::size_t>(ionState - 1)]; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- index validated to be in [0, maxIP) by the romanToInt range check above
+            elem::ionizationData[elemIdx].ionPot()[static_cast<std::size_t>(ionState - 1)]; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- index validated to be in [0, maxIP) by the romanToInt range check above
         if (std::isnan(ip))
         {
             throw std::runtime_error(
