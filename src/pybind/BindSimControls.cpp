@@ -14,6 +14,7 @@
  */
 
 #include "Bindings.hpp"
+#include "../extinct/Extinct.hpp"
 #include "../io/SimControls.hpp"
 #include "../phot/FilterCollection.hpp"
 #include "../specsyn/Specsyn.hpp"
@@ -448,6 +449,14 @@ None if phot.filters was not given). Assigning a FilterCollection
 transfers its ownership to this SimControls, so it is no longer usable
 from Python after assignment -- see setFilters()'s own docstring.)doc";
 
+static constexpr std::string_view extinctPropertyDocstring = R"doc(The extinction curve, or None if none was requested.
+
+Read-only: reading returns the Extinct requested via extinct.model (or
+None if neither extinct.AV nor extinct.AV_field was given in the input
+deck), built once, at construction. There is no setter -- unlike
+specsyn/filters/tracks, this SimControls's own extinction curve is not
+reassignable from Python.)doc";
+
 static constexpr std::string_view tracksPropertyDocstring = R"doc(The stellar tracks.
 
 Assigning a Tracks3D transfers its ownership to this SimControls, so
@@ -707,6 +716,9 @@ void bindSimControls(py::module_& m)
                 &io::SimControls::filters,
                 &io::SimControls::setFilters,
                 filtersPropertyDocstring.data())
+        .def_property_readonly("extinct",
+                &io::SimControls::extinct,
+                extinctPropertyDocstring.data())
         .def_property("tracks",
                 &io::SimControls::tracks,
                 [](io::SimControls& self, std::unique_ptr<tracks::Tracks3D> tracks)

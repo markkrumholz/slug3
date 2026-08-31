@@ -413,6 +413,7 @@ pybind11_add_module(slugPython
     src/pybind/BindTracks2D.cpp
     src/pybind/BindTracks3D.cpp
     src/pybind/BindSimControls.cpp
+    src/pybind/BindExtinct.cpp
     src/pybind/BindSpecsyn.cpp
     src/pybind/BindCluster.cpp
     src/pybind/BindGalaxy.cpp
