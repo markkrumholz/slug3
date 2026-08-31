@@ -79,6 +79,16 @@ void bindTracks3D(py::module_& m);
 void bindSimControls(py::module_& m);
 
 /**
+ * @brief Bind extinct::Extinct as Extinct
+ */
+void bindExtinct(py::module_& m);
+
+/**
+ * @brief Bind nebular::Nebular as Nebular
+ */
+void bindNebular(py::module_& m);
+
+/**
  * @brief Bind Specsyn and its concrete subclasses
  */
 void bindSpecsyn(py::module_& m);
