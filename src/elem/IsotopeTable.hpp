@@ -90,6 +90,22 @@ namespace elem
         }
     }
 
+    /**
+     * @brief Look up a single isotope's data by (Z, A) in the global isotope table
+     * @param z Atomic number
+     * @param a Mass number
+     * @returns A const reference to the isotope's IsotopeData record
+     * @throws std::out_of_range if no isotope with this (Z, A) exists in the table
+     * @details
+     * Shorthand for isotopeTable().table().at({z, a}), so callers
+     * elsewhere in the codebase can just write isotopeTable(z, a)
+     * rather than spelling out the map lookup themselves each time.
+     */
+    inline auto isotopeTable(unsigned int z, unsigned int a) -> const IsotopeData&
+    {
+        return isotopeTable().table().at({z, a});
+    }
+
 } // namespace elem
 
 #endif // ISOTOPETABLE_HPP

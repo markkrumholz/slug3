@@ -12,6 +12,7 @@
 #include "../../src/elem/IsotopeTable.hpp"
 #include "../../src/utils/MiscUtils.hpp"
 #include <iostream>
+#include <stdexcept>
 #include <utility>
 
 /**
@@ -221,6 +222,46 @@ inline auto testIsotopeTableGlobalSingleton() -> int
 }
 
 /**
+ * @brief Unit test for the isotopeTable(z, a) lookup shorthand
+ * @return 0 if the test passes, 1 if it fails.
+ * @details
+ * Checks isotopeTable(z, a) against isotopeTable().table().at({z, a})
+ * for a present (Z, A) pair (tritium, reusing
+ * testIsotopeTableUnstableEntry's own H-3 reference values), and that
+ * it throws std::out_of_range for a (Z, A) pair with no entry in the
+ * table (Z=0 is not a valid atomic number, so it can never collide
+ * with a real isotope).
+ */
+inline auto testIsotopeTableLookup() -> int
+{
+    const auto& h3 = elem::isotopeTable(1U, 3U);
+    const auto& h3Ref = elem::isotopeTable().table().at({1U, 3U});
+    if (&h3 != &h3Ref)
+    {
+        std::cerr << "testIsotopeTableLookup: isotopeTable(1, 3) did not "
+            "return the same record as isotopeTable().table().at({1, 3})\n";
+        return 1;
+    }
+    if (h3.Z() != 1U || h3.A() != 3U)
+    {
+        std::cerr << "testIsotopeTableLookup: isotopeTable(1, 3) has Z()/A() "
+            "= (" << h3.Z() << ", " << h3.A() << "), expected (1, 3)\n";
+        return 1;
+    }
+
+    try
+    {
+        (void)elem::isotopeTable(0U, 0U);
+        std::cerr << "testIsotopeTableLookup: isotopeTable(0, 0) should "
+            "have thrown (no such isotope)\n";
+        return 1;
+    }
+    catch (const std::out_of_range&) { /* expected */ }
+
+    return 0;
+}
+
+/**
  * @brief Unit tests for elem::IsotopeTable
  * @return 0 if the test passes, 1 if it fails.
  */
@@ -232,6 +273,7 @@ inline auto testIsotopeTable() -> int
     result += testIsotopeTableUnstableEntry();
     result += testIsotopeTableUnstableNoDaughterEntry();
     result += testIsotopeTableGlobalSingleton();
+    result += testIsotopeTableLookup();
     return result;
 }
 
