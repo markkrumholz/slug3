@@ -129,6 +129,9 @@ add_executable(slugTestInterpolation
     tests/interpolation/testMesh2DInterpolator.cpp
     tests/interpolation/testMesh3DInterpolator.cpp
 )
+add_executable(slugTestElem
+    tests/elem/testElemAll.cpp
+)
 add_executable(slugTestExtinct
     src/extinct/Extinct.cpp
     src/nebular/Nebular.cpp
@@ -496,6 +499,9 @@ target_include_directories(slug SYSTEM PRIVATE src/extern/pcg-cpp/include src/ex
 target_include_directories(slugTestInterpolation PRIVATE src)
 target_include_directories(slugTestInterpolation SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
 
+target_include_directories(slugTestElem PRIVATE src)
+target_include_directories(slugTestElem SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
+
 target_include_directories(slugTestExtinct PRIVATE src)
 target_include_directories(slugTestExtinct SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
 
@@ -532,6 +538,7 @@ target_include_directories(slugPython SYSTEM PRIVATE src/extern/pcg-cpp/include 
 
 target_include_directories(slug SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestInterpolation SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
+target_include_directories(slugTestElem SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestExtinct SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestPhot SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestPDFs SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
@@ -547,6 +554,7 @@ target_include_directories(slugPython SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 # Link to GSL
 target_link_libraries(slug PRIVATE GSL::gsl)
 target_link_libraries(slugTestInterpolation PRIVATE GSL::gsl)
+target_link_libraries(slugTestElem PRIVATE GSL::gsl)
 target_link_libraries(slugTestExtinct PRIVATE GSL::gsl)
 target_link_libraries(slugTestPhot PRIVATE GSL::gsl)
 target_link_libraries(slugTestPDFs PRIVATE GSL::gsl)
@@ -562,6 +570,7 @@ target_link_libraries(slugPython PRIVATE GSL::gsl)
 # Link to mdspan (see cmake/Mdspan.cmake)
 target_link_libraries(slug PRIVATE slug_mdspan)
 target_link_libraries(slugTestInterpolation PRIVATE slug_mdspan)
+target_link_libraries(slugTestElem PRIVATE slug_mdspan)
 target_link_libraries(slugTestExtinct PRIVATE slug_mdspan)
 target_link_libraries(slugTestPhot PRIVATE slug_mdspan)
 target_link_libraries(slugTestPDFs PRIVATE slug_mdspan)
@@ -577,6 +586,7 @@ target_link_libraries(slugPython PRIVATE slug_mdspan)
 # Link to HDF5
 target_link_libraries(slug PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugTestInterpolation PRIVATE ${HDF5_CXX_LIBRARIES})
+target_link_libraries(slugTestElem PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugTestExtinct PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugTestPhot PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugTestPDFs PRIVATE ${HDF5_CXX_LIBRARIES})
@@ -593,6 +603,7 @@ target_link_libraries(slugPython PRIVATE ${HDF5_CXX_LIBRARIES})
 if(OpenMP_CXX_FOUND)
     target_link_libraries(slug PRIVATE OpenMP::OpenMP_CXX)
     target_link_libraries(slugTestInterpolation PRIVATE OpenMP::OpenMP_CXX)
+    target_link_libraries(slugTestElem PRIVATE OpenMP::OpenMP_CXX)
     target_link_libraries(slugTestExtinct PRIVATE OpenMP::OpenMP_CXX)
     target_link_libraries(slugTestPhot PRIVATE OpenMP::OpenMP_CXX)
     target_link_libraries(slugTestPDFs PRIVATE OpenMP::OpenMP_CXX)
@@ -611,6 +622,7 @@ enable_testing()
 
 # Define tests
 add_test(NAME test_Interpolation COMMAND slugTestInterpolation)
+add_test(NAME test_Elem COMMAND slugTestElem)
 # test_Extinct loads the extinction curve registry (data/extinct/
 # extinct.toml/.h5) by relative path, so it needs to run from the
 # source tree root.
@@ -707,7 +719,7 @@ set_tests_properties(test_Slugpy PROPERTIES
 # inside one, so bundling a slow test into an otherwise-fast
 # executable would make it impossible to skip on its own.
 set_tests_properties(
-    test_Interpolation test_Extinct test_Phot test_PDFs test_Utils test_Specsyn test_Tracks
+    test_Interpolation test_Elem test_Extinct test_Phot test_PDFs test_Utils test_Specsyn test_Tracks
     test_Core test_Io test_Nebular test_PythonBindings test_Slugpy
     PROPERTIES LABELS "quick")
 set_tests_properties(test_CoreFull PROPERTIES LABELS "slow")
