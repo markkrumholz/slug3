@@ -1,13 +1,13 @@
 /**
- * @file ElemData.hpp
+ * @file IonizationData.hpp
  * @author Mark Krumholz
  * @brief Elemental data class and compile-time table of ionization potentials
  * @date 2026-07-31
  * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
-#ifndef ELEMDATA_HPP
-#define ELEMDATA_HPP
+#ifndef IONIZATIONDATA_HPP
+#define IONIZATIONDATA_HPP
 
 #include "ElemCommons.hpp"
 #include <array>
@@ -246,4 +246,4 @@ namespace elem
 
 } // namespace elem
 
-#endif // ELEMDATA_HPP
+#endif // IONIZATIONDATA_HPP

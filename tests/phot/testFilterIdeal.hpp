@@ -9,7 +9,7 @@
 #ifndef TESTFILTERIDEAL_HPP
 #define TESTFILTERIDEAL_HPP
 
-#include "../../src/elem/ElemData.hpp"
+#include "../../src/elem/IonizationData.hpp"
 #include "../../src/phot/FilterIdeal.hpp"
 #include "../../src/utils/Constants.hpp"
 #include <cmath>

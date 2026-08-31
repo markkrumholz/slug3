@@ -7,7 +7,7 @@
  */
 
 #include "FilterIdeal.hpp"
-#include "../elem/ElemData.hpp"
+#include "../elem/IonizationData.hpp"
 #include "../interpolation/Interpolator1D.hpp"
 #include "../utils/Constants.hpp"
 #include "../utils/MiscUtils.hpp"
