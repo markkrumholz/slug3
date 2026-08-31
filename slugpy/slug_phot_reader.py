@@ -25,11 +25,19 @@ class slug_phot_reader(slug_group_reader):
     by a filter name (e.g. "HST.WFC3_UVIS1.F555W") returns that
     filter's photometry as an astropy Quantity, read from the phot
     dataset's column for that filter on first access and cached
-    thereafter; appending "_ex" to the filter name (e.g.
-    "HST.WFC3_UVIS1.F555W_ex") returns the same filter's extincted
-    photometry from phot_extinct instead. Any other key falls through
-    to slug_group_reader's own __getitem__ (e.g. "trial", "time",
-    "uid").
+    thereafter. Three suffixes select the same filter's photometry
+    from a different dataset instead: "_ex" (e.g.
+    "HST.WFC3_UVIS1.F555W_ex") for the extincted photometry, from
+    phot_extinct; "_neb" for photometry that includes nebular
+    emission, from phot_neb; and "_neb_ex" for nebular emission with
+    extinction also applied, from phot_neb_extinct. phot_neb/
+    phot_neb_extinct exist only if this file's own simulation
+    requested nebular emission (see SimControls.nebular); like
+    phot_extinct, they cover only "real" filters, not the synthetic
+    "Lbol" entry phot itself may also carry -- requesting a suffixed
+    key for a filter absent from the underlying dataset raises
+    IndexError, not KeyError. Any other key falls through to
+    slug_group_reader's own __getitem__ (e.g. "trial", "time", "uid").
 
     Parameters
     ----------
@@ -68,6 +76,12 @@ class slug_phot_reader(slug_group_reader):
         self._phot_extinct: dict[str, Dataset | None] | None = None
         if "phot_extinct" in self._datasets:
             self._phot_extinct = {name: None for name in self._filters}
+        self._phot_neb: dict[str, Dataset | None] | None = None
+        if "phot_neb" in self._datasets:
+            self._phot_neb = {name: None for name in self._filters}
+        self._phot_neb_extinct: dict[str, Dataset | None] | None = None
+        if "phot_neb_extinct" in self._datasets:
+            self._phot_neb_extinct = {name: None for name in self._filters}
 
         self._registry_name = registry_name
         self._filter_collection: FilterCollection = (
@@ -113,9 +127,11 @@ class slug_phot_reader(slug_group_reader):
         ----------
         key : str
             A filter name (e.g. "HST.WFC3_UVIS1.F555W"); that same
-            name with "_ex" appended for its extincted counterpart
-            (e.g. "HST.WFC3_UVIS1.F555W_ex"); or any dataset name
-            from the underlying group (e.g. "trial", "time", "uid").
+            name with "_ex", "_neb", or "_neb_ex" appended for its
+            extincted, nebular-inclusive, or nebular-inclusive-and-
+            extincted counterpart (e.g. "HST.WFC3_UVIS1.F555W_neb_ex");
+            or any dataset name from the underlying group (e.g.
+            "trial", "time", "uid").
 
         Returns
         -------
@@ -127,22 +143,37 @@ class slug_phot_reader(slug_group_reader):
         ------
         KeyError
             If key is neither a known filter name (with or without a
-            trailing "_ex") nor a dataset name in this group.
+            trailing "_ex"/"_neb"/"_neb_ex") nor a dataset name in
+            this group.
+        IndexError
+            If key names a known filter name plus a suffix, but the
+            underlying dataset (phot_extinct/phot_neb/
+            phot_neb_extinct) has no column for that filter -- e.g.
+            the synthetic "Lbol" entry phot itself may carry, which
+            none of the other three datasets cover.
         """
-        extinct = key.endswith("_ex")
-        name = key[:-len("_ex")] if extinct else key
+        if key.endswith("_neb_ex"):
+            suffix, name = "_neb_ex", key[:-len("_neb_ex")]
+        elif key.endswith("_neb"):
+            suffix, name = "_neb", key[:-len("_neb")]
+        elif key.endswith("_ex"):
+            suffix, name = "_ex", key[:-len("_ex")]
+        else:
+            suffix, name = "", key
 
         if name not in self._filters:
             return super().__getitem__(key)
 
-        phot = self._phot_extinct if extinct else self._phot
+        phot = {"": self._phot, "_ex": self._phot_extinct,
+            "_neb": self._phot_neb, "_neb_ex": self._phot_neb_extinct}[suffix]
         assert phot is not None
         cached = phot[name]
         if cached is not None:
             return cached
 
         index = self._filters.index(name)
-        dataset_name = "phot_extinct" if extinct else "phot"
+        dataset_name = {"": "phot", "_ex": "phot_extinct",
+            "_neb": "phot_neb", "_neb_ex": "phot_neb_extinct"}[suffix]
         arr = self._file[self._group_name][dataset_name][:, index]
         unit = self._filter_units[index]
         result: Dataset = arr if unit == "" else arr * u.Unit(unit)
@@ -242,18 +273,24 @@ class slug_phot_reader(slug_group_reader):
 
         Details
         -------
-        Every entry of _phot and _phot_extinct is read (triggering its
-        usual lazy load from disk, if not already cached) and, if its
-        current unit is one phot_convert.phot_convert() recognizes,
-        replaced with its own conversion to phot_to -- so subsequent
-        __getitem__ calls for that filter return the converted value.
-        Entries with a non-photometric unit (Lbol's Lsun, or an
-        idealized filter's photon/s) are left untouched, as is any
-        entry already in phot_to's own system. A conversion that needs
-        a wavelength or a Vega zero point gets it from
-        get_filter(filter_name) -- see its own docstring on how (and
-        from where) that filter gets built.
+        Every entry of _phot, _phot_extinct, _phot_neb, and
+        _phot_neb_extinct (whichever of the latter three exist for
+        this file) is read (triggering its usual lazy load from disk,
+        if not already cached) and, if its current unit is one
+        phot_convert.phot_convert() recognizes, replaced with its own
+        conversion to phot_to -- so subsequent __getitem__ calls for
+        that filter return the converted value. Entries with a
+        non-photometric unit (Lbol's Lsun, or an idealized filter's
+        photon/s) are left untouched, as is any entry already in
+        phot_to's own system. A conversion that needs a wavelength or
+        a Vega zero point gets it from get_filter(filter_name) -- see
+        its own docstring on how (and from where) that filter gets
+        built.
         """
         self._convert_phot_dict(self._phot, "", phot_to)
         if self._phot_extinct is not None:
             self._convert_phot_dict(self._phot_extinct, "_ex", phot_to)
+        if self._phot_neb is not None:
+            self._convert_phot_dict(self._phot_neb, "_neb", phot_to)
+        if self._phot_neb_extinct is not None:
+            self._convert_phot_dict(self._phot_neb_extinct, "_neb_ex", phot_to)

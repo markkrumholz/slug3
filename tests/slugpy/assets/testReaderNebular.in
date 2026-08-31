@@ -1,0 +1,40 @@
+# Test input deck for slugpy's own reader tests (test_reader_nebular.py):
+# a cluster simulation with photometry, extinction, and nebular
+# emission (from the small, committed tests/nebular/assets/
+# nebular_test.h5 fixture) all enabled together, so a single run
+# exercises every nebular-related HDF5 dataset the reader needs to
+# handle: spec_neb/spec_neb_extinct, line_wl/line_label/neb_lines/
+# neb_lines_extinct, and phot_neb/phot_neb_extinct. Otherwise mirrors
+# tests/core/assets/testClusterExtinct.in.
+
+sim_type = "cluster"
+
+[stars]
+IMF = "chabrier.toml"
+track_registry = "tests/tracks/assets/tracks.toml"
+tracks = "MIST_test"
+FeH = 0.0
+alphaFe = -0.2
+
+[spectra]
+model = "blackbody"
+
+[phot]
+filters = ["SLUGTEST.CAM1.G500", "ideal_phot_700_1500", "Lbol"]
+registry = "tests/phot/assets/filters_test.toml"
+
+[extinct]
+AV = 1.0
+model = "Calzetti_starburst"
+
+[clusters]
+CMF = 1e3
+
+[output]
+start_time = 0.0
+end_time = 10.0
+ntime = 3
+
+[nebular]
+compute_neb = true
+table = "tests/nebular/assets/nebular_test.h5"
