@@ -29,8 +29,9 @@ from .cloudy.cloudy_process import (
 from .cloudy.hiiregparam import hiiregparam
 from .slug_group_reader import slug_group_reader
 from .slug_phot_reader import slug_phot_reader
+from .slug_spectra_reader import slug_spectra_reader
 
-AnyGroupReader = slug_group_reader | slug_phot_reader
+AnyGroupReader = slug_group_reader | slug_phot_reader | slug_spectra_reader
 
 # The six hiiregparam nebular-condition keyword names, in the order
 # run_cloudy's own signature lists them
@@ -146,26 +147,36 @@ class slug_reader:
         Lazy reader for the clusters group's datasets (target_mass,
         birth_mass, ...), or None if this file has no clusters group
         (read-only).
-    cluster_spectra : slug_group_reader or None
+    cluster_spectra : slug_spectra_reader or None
         Lazy reader for the cluster_spectra group's datasets (wl,
-        spec, ...), or None if this file has no cluster_spectra group
-        (read-only).
+        spec, ...), including nebular emission data (spec_neb,
+        line_labels, neb_lines, ...) if this file's own simulation
+        requested it -- see slug_spectra_reader's own docstring -- or
+        None if this file has no cluster_spectra group (read-only).
     cluster_phot : slug_phot_reader or None
         Lazy reader for the cluster_phot group's per-filter photometry
-        (indexable by filter name, e.g. cluster_phot["Lbol"]), or None
-        if this file has no cluster_phot group (read-only).
+        (indexable by filter name, e.g. cluster_phot["Lbol"]; "_ex",
+        "_neb", and "_neb_ex" suffixes select extincted, nebular-
+        inclusive, and nebular-inclusive-and-extincted variants --
+        see slug_phot_reader's own docstring), or None if this file
+        has no cluster_phot group (read-only).
     galaxy : slug_group_reader or None
         Lazy reader for the galaxy group's datasets (target_mass,
         actual_mass, ...), or None if this file has no galaxy group --
         only a galaxy-type simulation ever has one (read-only).
-    galaxy_spectra : slug_group_reader or None
+    galaxy_spectra : slug_spectra_reader or None
         Lazy reader for the galaxy_spectra group's datasets (wl,
-        spec, ...), or None if this file has no galaxy_spectra group
-        (read-only).
+        spec, ...), including nebular emission data (spec_neb,
+        line_labels, neb_lines, ...) if this file's own simulation
+        requested it -- see slug_spectra_reader's own docstring -- or
+        None if this file has no galaxy_spectra group (read-only).
     galaxy_phot : slug_phot_reader or None
         Lazy reader for the galaxy_phot group's per-filter photometry
-        (indexable by filter name, e.g. galaxy_phot["Lbol"]), or None
-        if this file has no galaxy_phot group (read-only).
+        (indexable by filter name, e.g. galaxy_phot["Lbol"]; "_ex",
+        "_neb", and "_neb_ex" suffixes select extincted, nebular-
+        inclusive, and nebular-inclusive-and-extincted variants --
+        see slug_phot_reader's own docstring), or None if this file
+        has no galaxy_phot group (read-only).
     cluster_cloudy : slug_group_reader or None
         Lazy reader for the cluster_cloudy group's datasets (uid,
         time, nII, ...), written by run_cloudy(spec_type="cluster"),
@@ -239,18 +250,21 @@ class slug_reader:
         raise AttributeError("clusters is read-only")
 
     @property
-    def cluster_spectra(self) -> slug_group_reader | None:
+    def cluster_spectra(self) -> slug_spectra_reader | None:
         """
-        slug_group_reader or None : lazy reader for the
-        cluster_spectra group's datasets, built the first time this
-        property is accessed and cached thereafter, or None if this
-        file has no cluster_spectra group.
+        slug_spectra_reader or None : lazy reader for the
+        cluster_spectra group's datasets (including nebular emission
+        data -- spec_neb, line_labels, neb_lines, ... -- if this
+        file's own simulation requested it; see slug_spectra_reader's
+        own docstring), built the first time this property is
+        accessed and cached thereafter, or None if this file has no
+        cluster_spectra group.
         """
         if "cluster_spectra" not in self._groups:
             return None
         if self._groups["cluster_spectra"] is None:
-            self._groups["cluster_spectra"] = slug_group_reader(self._file, "cluster_spectra")
-        return self._groups["cluster_spectra"]
+            self._groups["cluster_spectra"] = slug_spectra_reader(self._file, "cluster_spectra")
+        return cast(slug_spectra_reader, self._groups["cluster_spectra"])
 
     @cluster_spectra.setter
     def cluster_spectra(self, value: Any) -> None:
@@ -295,18 +309,21 @@ class slug_reader:
         raise AttributeError("galaxy is read-only")
 
     @property
-    def galaxy_spectra(self) -> slug_group_reader | None:
+    def galaxy_spectra(self) -> slug_spectra_reader | None:
         """
-        slug_group_reader or None : lazy reader for the
-        galaxy_spectra group's datasets, built the first time this
-        property is accessed and cached thereafter, or None if this
-        file has no galaxy_spectra group.
+        slug_spectra_reader or None : lazy reader for the
+        galaxy_spectra group's datasets (including nebular emission
+        data -- spec_neb, line_labels, neb_lines, ... -- if this
+        file's own simulation requested it; see slug_spectra_reader's
+        own docstring), built the first time this property is
+        accessed and cached thereafter, or None if this file has no
+        galaxy_spectra group.
         """
         if "galaxy_spectra" not in self._groups:
             return None
         if self._groups["galaxy_spectra"] is None:
-            self._groups["galaxy_spectra"] = slug_group_reader(self._file, "galaxy_spectra")
-        return self._groups["galaxy_spectra"]
+            self._groups["galaxy_spectra"] = slug_spectra_reader(self._file, "galaxy_spectra")
+        return cast(slug_spectra_reader, self._groups["galaxy_spectra"])
 
     @galaxy_spectra.setter
     def galaxy_spectra(self, value: Any) -> None:
