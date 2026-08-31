@@ -37,14 +37,28 @@ namespace elem
                 "IsotopeTable: unable to open HDF5 file " + filePath.string());
         }
 
-        const auto zData = utils::readDataset1D(file, "Z", "IsotopeTable");
-        const auto aData = utils::readDataset1D(file, "A", "IsotopeTable");
-        const auto lifetimeData = utils::readDataset1D(file, "lifetime", "IsotopeTable");
-        const auto offsetData = utils::readDataset1D(file, "daughterOffset", "IsotopeTable");
-        const auto daughterZData = utils::readDataset1D(file, "daughterZ", "IsotopeTable");
-        const auto daughterAData = utils::readDataset1D(file, "daughterA", "IsotopeTable");
-        const auto branchData = utils::readDataset1D(file, "branchingRatio", "IsotopeTable");
-
+        std::vector<double> zData;
+        std::vector<double> aData;
+        std::vector<double> lifetimeData;
+        std::vector<double> offsetData;
+        std::vector<double> daughterZData;
+        std::vector<double> daughterAData;
+        std::vector<double> branchData;
+        try
+        {
+            zData = utils::readDataset1D(file, "Z", "IsotopeTable");
+            aData = utils::readDataset1D(file, "A", "IsotopeTable");
+            lifetimeData = utils::readDataset1D(file, "lifetime", "IsotopeTable");
+            offsetData = utils::readDataset1D(file, "daughterOffset", "IsotopeTable");
+            daughterZData = utils::readDataset1D(file, "daughterZ", "IsotopeTable");
+            daughterAData = utils::readDataset1D(file, "daughterA", "IsotopeTable");
+            branchData = utils::readDataset1D(file, "branchingRatio", "IsotopeTable");
+        }
+        catch (...)
+        {
+            H5Fclose(file);
+            throw;
+        }
         H5Fclose(file);
         // NOLINTEND(misc-include-cleaner)
 
@@ -79,8 +93,14 @@ namespace elem
             // canonical Z -> symbol mapping in this namespace, so reuse
             // it here rather than duplicating symbols in the isotope
             // data file
-            table_.emplace(std::make_pair(z, a),
-                IsotopeData(ionizationData.at(z - 1).symbol(), z, a, lifetime, std::move(daughters)));
+            const bool inserted = table_.emplace(std::make_pair(z, a),
+                IsotopeData(ionizationData.at(z - 1).symbol(), z, a, lifetime, std::move(daughters))).second;
+            if (!inserted)
+            {
+                throw std::runtime_error(
+                    "IsotopeTable: duplicate isotope entry (Z=" + std::to_string(z) +
+                    ", A=" + std::to_string(a) + ") in " + filePath.string());
+            }
         }
     }
 
