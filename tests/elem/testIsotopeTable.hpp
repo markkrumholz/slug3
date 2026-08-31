@@ -182,6 +182,45 @@ inline auto testIsotopeTableUnstableNoDaughterEntry() -> int
 }
 
 /**
+ * @brief Unit test for elem::isotopeTable()'s global-singleton behavior
+ * @return 0 if the test passes, 1 if it fails.
+ * @details
+ * isotopeTable() is a function-local static (mirroring utils::rng()
+ * in RngThread.hpp), so every call anywhere in the program must
+ * return a reference to the exact same instance -- checked here both
+ * by address and by content (looking up the same H-1 entry through
+ * both references).
+ */
+inline auto testIsotopeTableGlobalSingleton() -> int
+{
+    auto& first = elem::isotopeTable();
+    auto& second = elem::isotopeTable();
+
+    if (&first != &second)
+    {
+        std::cerr << "testIsotopeTableGlobalSingleton: isotopeTable() "
+            "returned two different instances\n";
+        return 1;
+    }
+    if (first.size() != second.size())
+    {
+        std::cerr << "testIsotopeTableGlobalSingleton: test bug: two "
+            "references to the same instance disagree on size()\n";
+        return 1;
+    }
+
+    const auto it = first.table().find({1U, 1U});
+    if (it == first.table().end() || !it->second.stable())
+    {
+        std::cerr << "testIsotopeTableGlobalSingleton: global instance is "
+            "missing the expected stable H-1 entry\n";
+        return 1;
+    }
+
+    return 0;
+}
+
+/**
  * @brief Unit tests for elem::IsotopeTable
  * @return 0 if the test passes, 1 if it fails.
  */
@@ -192,6 +231,7 @@ inline auto testIsotopeTable() -> int
     result += testIsotopeTableStableEntry();
     result += testIsotopeTableUnstableEntry();
     result += testIsotopeTableUnstableNoDaughterEntry();
+    result += testIsotopeTableGlobalSingleton();
     return result;
 }
 

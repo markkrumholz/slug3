@@ -11,6 +11,9 @@
 
 #include "IsotopeData.hpp"
 #include <cstddef>
+#include <cstdlib>
+#include <exception>
+#include <iostream>
 #include <map>
 #include <string>
 #include <utility>
@@ -54,6 +57,38 @@ namespace elem
     private:
         std::map<std::pair<unsigned int, unsigned int>, IsotopeData> table_;
     };
+
+    /**
+     * @brief Return a reference to the global isotope table
+     * @details
+     * The instance is a function-local static, so it is constructed on
+     * first use (reading data/elem/isotopes.h5) rather than before
+     * main() begins; this ensures that any exception thrown during
+     * construction (e.g. the data file can't be found) is caught here
+     * rather than escaping before main() can run. There is no
+     * reasonable way for isotope/yield code to continue without a
+     * working isotope table, so a construction failure is treated as
+     * fatal: it is reported and the program exits immediately, rather
+     * than letting the exception propagate to callers that have no
+     * better way to handle it either. Being a local static in an inline
+     * function also guarantees a single, program-wide instance, rather
+     * than one per translation unit. Mirrors utils::rng()'s identical
+     * pattern in RngThread.hpp.
+     */
+    inline auto isotopeTable() -> IsotopeTable&
+    {
+        try
+        {
+            static IsotopeTable instance;
+            return instance;
+        }
+        catch (const std::exception& error)
+        {
+            std::cerr << "FATAL: isotope table initialization failed: "
+                << error.what() << "\n";
+            std::exit(1); // NOLINT(concurrency-mt-unsafe) -- the program is terminating regardless; thread-safety of the shutdown path doesn't matter
+        }
+    }
 
 } // namespace elem
 
