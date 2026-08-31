@@ -95,7 +95,7 @@ namespace elem
      * unavailable, are quiet_NaN().
      */
     inline constexpr std::array<IonizationData,
-        static_cast<std::size_t>(Symbols::nElem)> elemData = {
+        static_cast<std::size_t>(Symbols::nElem)> ionizationData = {
         // Z=1-10
         IonizationData({'H', '\0'}, 1U, detail::makeIonPot({13.59844})),
         IonizationData({'H', 'e'}, 2U, detail::makeIonPot({24.58738, 54.41776})),

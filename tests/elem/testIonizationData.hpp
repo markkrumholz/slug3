@@ -1,7 +1,7 @@
 /**
  * @file testIonizationData.hpp
  * @author Mark Krumholz
- * @brief Unit tests for elem::IonizationData and the elem::elemData table
+ * @brief Unit tests for elem::IonizationData and the elem::ionizationData table
  * @date 2026-08-31
  * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
@@ -106,7 +106,7 @@ inline auto testIonizationDataComparisons() -> int
 }
 
 /**
- * @brief Sanity check on the compile-time elem::elemData table
+ * @brief Sanity check on the compile-time elem::ionizationData table
  * @return 0 if the test passes, 1 if it fails.
  * @details
  * Checks the table's size against Symbols::nElem, that it is sorted
@@ -116,36 +116,36 @@ inline auto testIonizationDataComparisons() -> int
  */
 inline auto testIonizationDataTable() -> int
 {
-    if (elem::elemData.size() != static_cast<std::size_t>(elem::Symbols::nElem))
+    if (elem::ionizationData.size() != static_cast<std::size_t>(elem::Symbols::nElem))
     {
-        std::cerr << "testIonizationDataTable: elemData.size() = "
-            << elem::elemData.size() << ", expected "
+        std::cerr << "testIonizationDataTable: ionizationData.size() = "
+            << elem::ionizationData.size() << ", expected "
             << static_cast<std::size_t>(elem::Symbols::nElem) << "\n";
         return 1;
     }
 
-    for (std::size_t i = 0; i < elem::elemData.size(); ++i)
+    for (std::size_t i = 0; i < elem::ionizationData.size(); ++i)
     {
         const auto expectedZ = static_cast<unsigned int>(i + 1);
-        if (elem::elemData[i].Z() != expectedZ)
+        if (elem::ionizationData[i].Z() != expectedZ)
         {
-            std::cerr << "testIonizationDataTable: elemData[" << i
-                << "].Z() = " << elem::elemData[i].Z() << ", expected "
+            std::cerr << "testIonizationDataTable: ionizationData[" << i
+                << "].Z() = " << elem::ionizationData[i].Z() << ", expected "
                 << expectedZ << " (table should be indexed by Z-1)\n";
             return 1;
         }
     }
 
     // Spot-check: hydrogen's single ionization potential
-    if (elem::elemData[0].symbol()[0] != 'H' || elem::elemData[0].symbol()[1] != '\0')
+    if (elem::ionizationData[0].symbol()[0] != 'H' || elem::ionizationData[0].symbol()[1] != '\0')
     {
-        std::cerr << "testIonizationDataTable: elemData[0] is not hydrogen\n";
+        std::cerr << "testIonizationDataTable: ionizationData[0] is not hydrogen\n";
         return 1;
     }
-    if (elem::elemData[0].ionPot()[0] != 13.59844)
+    if (elem::ionizationData[0].ionPot()[0] != 13.59844)
     {
         std::cerr << "testIonizationDataTable: hydrogen's first ionization "
-            "potential is " << elem::elemData[0].ionPot()[0]
+            "potential is " << elem::ionizationData[0].ionPot()[0]
             << ", expected 13.59844 eV\n";
         return 1;
     }
@@ -154,7 +154,7 @@ inline auto testIonizationDataTable() -> int
 }
 
 /**
- * @brief Unit tests for elem::IonizationData and the elem::elemData table
+ * @brief Unit tests for elem::IonizationData and the elem::ionizationData table
  * @return 0 if the test passes, 1 if it fails.
  */
 inline auto testIonizationData() -> int

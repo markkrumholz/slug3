@@ -75,12 +75,12 @@ namespace elem
                 });
             }
 
-            // elemData (the ionization-potential table) is already the
+            // ionizationData (the ionization-potential table) is already the
             // canonical Z -> symbol mapping in this namespace, so reuse
             // it here rather than duplicating symbols in the isotope
             // data file
             table_.emplace(std::make_pair(z, a),
-                IsotopeData(elemData.at(z - 1).symbol(), z, a, lifetime, std::move(daughters)));
+                IsotopeData(ionizationData.at(z - 1).symbol(), z, a, lifetime, std::move(daughters)));
         }
     }
 
