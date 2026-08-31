@@ -11,6 +11,8 @@
 
 #include "ElemData.hpp"
 #include <array>
+#include <stdexcept>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -45,10 +47,26 @@ namespace elem
          * @param a Mass number
          * @param lifetime Radioactive decay lifetime; 0 indicates a stable isotope
          * @param daughters List of decay channels (daughter nuclide and branching ratio)
+         * @throws std::runtime_error if lifetime is negative, or if lifetime is
+         *   positive but daughters is empty
          */
         IsotopeData(std::array<char, 2> symbol, unsigned int z, unsigned int a,
             double lifetime = 0.0, std::vector<IsotopeDecayData> daughters = {})
-        : ElemData(symbol, z), A_(a), lifetime_(lifetime), daughters_(std::move(daughters)) {}
+        : ElemData(symbol, z), A_(a), lifetime_(lifetime), daughters_(std::move(daughters))
+        {
+            if (lifetime_ < 0.0)
+            {
+                throw std::runtime_error(
+                    "IsotopeData: lifetime must be non-negative, got " +
+                    std::to_string(lifetime_));
+            }
+            if (lifetime_ > 0.0 && daughters_.empty())
+            {
+                throw std::runtime_error(
+                    "IsotopeData: unstable isotope (lifetime > 0) must have at "
+                    "least one decay daughter");
+            }
+        }
 
         IsotopeData(const IsotopeData&) = default;
         auto operator=(const IsotopeData&) -> IsotopeData& = default;
@@ -66,6 +84,33 @@ namespace elem
         /** @brief Return the list of decay channels (daughter nuclide and branching ratio) */
         [[nodiscard]] auto daughters() const noexcept
             -> const std::vector<IsotopeDecayData>& { return daughters_; }
+
+        /** @brief Return true if this isotope is stable (lifetime_ == 0) */
+        [[nodiscard]] auto stable() const noexcept -> bool { return lifetime_ == 0.0; }
+
+        /** @brief Equality: true iff both Z and A match */
+        [[nodiscard]] auto operator==(const IsotopeData& o) const noexcept -> bool
+            { return Z_ == o.Z_ && A_ == o.A_; }
+
+        /** @brief Inequality: true iff Z or A differ */
+        [[nodiscard]] auto operator!=(const IsotopeData& o) const noexcept -> bool
+            { return !(*this == o); }
+
+        /** @brief Ordering: compares Z first, then A as a tiebreaker */
+        [[nodiscard]] auto operator<(const IsotopeData& o) const noexcept -> bool
+            { return Z_ != o.Z_ ? Z_ < o.Z_ : A_ < o.A_; }
+
+        /** @brief Ordering: compares Z first, then A as a tiebreaker */
+        [[nodiscard]] auto operator>(const IsotopeData& o) const noexcept -> bool
+            { return Z_ != o.Z_ ? Z_ > o.Z_ : A_ > o.A_; }
+
+        /** @brief Ordering: compares Z first, then A as a tiebreaker */
+        [[nodiscard]] auto operator<=(const IsotopeData& o) const noexcept -> bool
+            { return Z_ != o.Z_ ? Z_ < o.Z_ : A_ <= o.A_; }
+
+        /** @brief Ordering: compares Z first, then A as a tiebreaker */
+        [[nodiscard]] auto operator>=(const IsotopeData& o) const noexcept -> bool
+            { return Z_ != o.Z_ ? Z_ > o.Z_ : A_ >= o.A_; }
 
     protected:
         unsigned int A_; // NOLINT(readability-identifier-naming) -- physics naming convention
