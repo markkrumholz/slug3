@@ -10,6 +10,7 @@
 #define IONIZATIONDATA_HPP
 
 #include "ElemCommons.hpp"
+#include "ElemData.hpp"
 #include <array>
 #include <cstddef>
 #include <limits>
@@ -21,12 +22,13 @@ namespace elem
 
     /**
      * @class IonizationData
-     * @brief Compile-time elemental data: symbol, atomic number, and ionization potentials
-     * @details All members, the constructor, observer methods, and comparison operators
-     * are constexpr, allowing compile-time construction and use.  Comparison operators
-     * compare on atomic number Z, enabling sorting of element lists by Z.
+     * @brief Compile-time elemental data: ionization potentials, keyed on ElemData's
+     *   atomic symbol and atomic number
+     * @details All members, the constructor, and observer methods are constexpr,
+     * allowing compile-time construction and use.  Comparison operators are inherited
+     * from ElemData and compare on atomic number Z.
      */
-    class IonizationData
+    class IonizationData : public ElemData
     {
     public:
 
@@ -40,7 +42,7 @@ namespace elem
          */
         constexpr IonizationData(std::array<char, 2> symbol, unsigned int z,
             std::array<double, maxIP> ionPot) noexcept
-        : symbol_(symbol), Z_(z), ionPot_(ionPot) {}
+        : ElemData(symbol, z), ionPot_(ionPot) {}
 
         IonizationData(const IonizationData&) = default;
         auto operator=(const IonizationData&) -> IonizationData& = default;
@@ -48,29 +50,12 @@ namespace elem
         auto operator=(IonizationData&&) -> IonizationData& = default;
         ~IonizationData() = default;
 
-        /** @brief Return the two-character atomic symbol */
-        [[nodiscard]] constexpr auto symbol() const noexcept
-            -> const std::array<char, 2>& { return symbol_; }
-
-        /** @brief Return the atomic number */
-        [[nodiscard]] constexpr auto Z() const noexcept // NOLINT(readability-identifier-naming)
-            -> unsigned int { return Z_; }
-
         /** @brief Return the array of ionization potentials in eV; entries beyond
          *   the element's count are quiet_NaN() */
         [[nodiscard]] constexpr auto ionPot() const noexcept
             -> const std::array<double, maxIP>& { return ionPot_; }
 
-        constexpr auto operator==(const IonizationData& o) const noexcept -> bool { return Z_ == o.Z_; }
-        constexpr auto operator!=(const IonizationData& o) const noexcept -> bool { return Z_ != o.Z_; }
-        constexpr auto operator< (const IonizationData& o) const noexcept -> bool { return Z_ <  o.Z_; }
-        constexpr auto operator> (const IonizationData& o) const noexcept -> bool { return Z_ >  o.Z_; }
-        constexpr auto operator<=(const IonizationData& o) const noexcept -> bool { return Z_ <= o.Z_; }
-        constexpr auto operator>=(const IonizationData& o) const noexcept -> bool { return Z_ >= o.Z_; }
-
     protected:
-        std::array<char, 2> symbol_; /**< Two-character atomic symbol */
-        unsigned int Z_; // NOLINT(readability-identifier-naming) -- physics naming convention
         std::array<double, maxIP> ionPot_; /**< Ionization potentials in eV */
     };
 
