@@ -144,7 +144,13 @@ class slug_phot_reader(slug_group_reader):
         KeyError
             If key is neither a known filter name (with or without a
             trailing "_ex"/"_neb"/"_neb_ex") nor a dataset name in
-            this group.
+            this group; also if key names a known filter name plus a
+            suffix whose underlying dataset does not exist for this
+            file at all (e.g. "_neb" when this file's own simulation
+            did not request nebular emission, so there is no phot_neb
+            dataset at all -- as opposed to IndexError below, where
+            that dataset exists but has no column for this particular
+            filter).
         IndexError
             If key names a known filter name plus a suffix, but the
             underlying dataset (phot_extinct/phot_neb/
@@ -166,7 +172,8 @@ class slug_phot_reader(slug_group_reader):
 
         phot = {"": self._phot, "_ex": self._phot_extinct,
             "_neb": self._phot_neb, "_neb_ex": self._phot_neb_extinct}[suffix]
-        assert phot is not None
+        if phot is None:
+            raise KeyError(key)
         cached = phot[name]
         if cached is not None:
             return cached

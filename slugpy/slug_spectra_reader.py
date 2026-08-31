@@ -144,7 +144,8 @@ class slug_spectra_reader(slug_group_reader):
             index = self.line_index(base_label, wl)
 
             cache = self._line_lum_extinct if extinct else self._line_lum
-            assert cache is not None
+            if cache is None:
+                raise KeyError((label, wl))
             if index in cache:
                 return cache[index]
 

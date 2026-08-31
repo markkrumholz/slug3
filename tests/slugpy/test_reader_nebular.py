@@ -33,6 +33,7 @@ from slugpy.slug_spectra_reader import slug_spectra_reader
 REPO_ROOT = pathlib.Path.cwd()
 NEBULAR_DECK = str(REPO_ROOT / "tests" / "slugpy" / "assets" / "testReaderNebular.in")
 CLUSTER_EXTINCT_DECK = str(REPO_ROOT / "tests" / "core" / "assets" / "testClusterExtinct.in")
+NEBULAR_NO_EXTINCT_DECK = str(REPO_ROOT / "tests" / "nebular" / "assets" / "testNebular.in")
 
 
 @pytest.fixture
@@ -49,6 +50,15 @@ def no_nebular_reader(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -
     """A slug_reader for a fresh run of CLUSTER_EXTINCT_DECK (phot + extinct, but no nebular emission)."""
     monkeypatch.chdir(tmp_path)
     reader = run_sim(CLUSTER_EXTINCT_DECK, progress=False)
+    assert reader is not None
+    return reader
+
+
+@pytest.fixture
+def nebular_no_extinct_reader(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> slug_reader:
+    """A slug_reader for a fresh run of NEBULAR_NO_EXTINCT_DECK (nebular emission on, but no extinction curve)."""
+    monkeypatch.chdir(tmp_path)
+    reader = run_sim(NEBULAR_NO_EXTINCT_DECK, progress=False)
     assert reader is not None
     return reader
 
@@ -221,6 +231,28 @@ def test_phot_neb_lbol_raises_indexerror(nebular_reader: slug_reader):
         cp["Lbol_neb"]
     with pytest.raises(IndexError):
         cp["Lbol_neb_ex"]
+
+
+def test_phot_neb_on_file_without_nebular_data_raises_keyerror(no_nebular_reader: slug_reader):
+    """"_neb"/"_neb_ex" on a file with no phot_neb dataset at all raises KeyError, not AssertionError."""
+    cp = cast(slug_phot_reader, no_nebular_reader.cluster_phot)
+    filter_name = "SLUGTEST.CAM1.G500"
+    assert filter_name in cp.filters
+    with pytest.raises(KeyError):
+        cp[filter_name + "_neb"]
+    with pytest.raises(KeyError):
+        cp[filter_name + "_neb_ex"]
+
+
+def test_line_luminosity_extinct_without_extinction_curve_raises_keyerror(
+        nebular_no_extinct_reader: slug_reader):
+    """extinct=True raises KeyError, not AssertionError, when there is nebular data but no extinction curve."""
+    cs = cast(slug_spectra_reader, nebular_no_extinct_reader.cluster_spectra)
+    assert cs.line_labels is not None
+    with pytest.raises(KeyError):
+        cs.line_luminosity("LINE1", 4000.0, extinct=True)
+    with pytest.raises(KeyError):
+        cs["LINE1_ex", 4000.0]
 
 
 def test_phot_convert_also_converts_neb_variants(nebular_reader: slug_reader):
