@@ -507,7 +507,18 @@ def find_slug_executable(slug_path: str | Path | None) -> Path:
         + ". Pass --slug-path, or set the SLUG_EXE environment variable.")
 
 
-def run_slug_deck(deck_path: Path, slug_exe: Path) -> bool:
+# Default --timeout: generous relative to the handful of seconds a
+# normal deck in this grid takes (even the largest galaxy decks), but
+# still bounded -- a deck that hits a genuine non-terminating (or just
+# pathologically slow) edge case in slug's own spectral synthesis
+# should fail this one deck rather than wedge run_slug_decks's own
+# executor.shutdown()/future.result() wait forever, taking the whole
+# pipeline down with it (see this module's own docstring's "Details"
+# section on why one hung deck currently blocks every other stage).
+DEFAULT_SLUG_TIMEOUT = 1800.0  # seconds
+
+
+def run_slug_deck(deck_path: Path, slug_exe: Path, timeout: float | None = None) -> bool:
     """
     Run slug on a single input deck.
 
@@ -518,24 +529,49 @@ def run_slug_deck(deck_path: Path, slug_exe: Path) -> bool:
         build_cluster_deck/build_galaxy_deck).
     slug_exe : pathlib.Path
         Path to the slug executable to run (see find_slug_executable).
+    timeout : float, optional
+        Maximum number of seconds to let this deck's slug process run
+        before it is killed and treated as a failure (see
+        DEFAULT_SLUG_TIMEOUT). None disables the timeout entirely.
 
     Returns
     -------
     bool
-        True if slug exited with status 0, False otherwise (including
-        if it crashed or raised). Either way, slug's own captured
-        stdout/stderr is written to deck_path with its suffix replaced
-        by ".log".
+        True if slug exited with status 0 within timeout seconds,
+        False otherwise (including if it crashed, raised, was killed
+        for exceeding timeout, or never even started). Either way,
+        whatever slug's own captured stdout/stderr this deck got (plus
+        a trailing note on a timeout or start failure) is written to
+        deck_path with its suffix replaced by ".log".
     """
     log_path = deck_path.with_suffix(".log")
     with open(log_path, "wb") as fout:
-        result = subprocess.run([str(slug_exe), str(deck_path)],
-            stdout=fout, stderr=subprocess.STDOUT, check=False)
+        try:
+            result = subprocess.run([str(slug_exe), str(deck_path)],
+                stdout=fout, stderr=subprocess.STDOUT, check=False, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            # subprocess.run already killed the child (and waited for
+            # it to actually exit) before raising this -- any output
+            # it had written before that point is already in fout.
+            fout.write(
+                f"\nmake_slug_grid.py: killed after exceeding --timeout of {timeout}s\n".encode())
+            return False
+        except OSError as error:
+            # subprocess.run can still raise (rather than just setting
+            # a nonzero returncode) if slug_exe could never even be
+            # started -- e.g. it was removed/replaced mid-run, or a
+            # transient fork/exec resource failure on a heavily
+            # oversubscribed node. Left uncaught, this would propagate
+            # out of the worker thread and blow up future.result() in
+            # run_slug_decks, losing every other future's own
+            # already-collected result along with it.
+            fout.write(f"\nmake_slug_grid.py: failed to start {slug_exe}: {error}\n".encode())
+            return False
     return result.returncode == 0
 
 
 def run_slug_decks(deck_paths: list[Path], slug_exe: Path,
-    max_workers: int | None = None) -> list[bool]:
+    max_workers: int | None = None, timeout: float | None = None) -> list[bool]:
     """
     Run slug concurrently on multiple input decks.
 
@@ -548,6 +584,9 @@ def run_slug_decks(deck_paths: list[Path], slug_exe: Path,
     max_workers : int, optional
         Maximum number of slug processes to run at once. Defaults to
         the number of available CPUs.
+    timeout : float, optional
+        Per-deck timeout in seconds, passed straight through to
+        run_slug_deck (see DEFAULT_SLUG_TIMEOUT). None disables it.
 
     Returns
     -------
@@ -565,11 +604,18 @@ def run_slug_decks(deck_paths: list[Path], slug_exe: Path,
     are enough -- mirrors
     slugpy.cloudy.cloudy_process.run_cloudy_decks's own identical
     reasoning for cloudy itself).
+
+    Without timeout, a single deck that never terminates blocks its
+    own worker's future.result() forever, and since every deck is
+    submitted up front, the other workers simply run out of decks and
+    go idle -- the whole call (and everything after it in main())
+    waits on that one future indefinitely, however many of the other
+    deck_paths already finished.
     """
     if max_workers is None:
         max_workers = os.cpu_count() or 1
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = [executor.submit(run_slug_deck, deck_path, slug_exe) for deck_path in deck_paths]
+        futures = [executor.submit(run_slug_deck, deck_path, slug_exe, timeout) for deck_path in deck_paths]
         return [future.result() for future in futures]
 
 
@@ -612,11 +658,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-workers", type=int, default=None,
         help="Maximum number of slug processes to run at once "
             "(default: os.cpu_count()).")
+    parser.add_argument("--timeout", type=float, default=DEFAULT_SLUG_TIMEOUT,
+        help="Maximum number of seconds to let a single deck's slug process run "
+            f"before killing it and treating it as failed (default: {DEFAULT_SLUG_TIMEOUT}; "
+            "see --no-timeout to disable). Bounds how long a deck stuck in a genuine "
+            "non-terminating (or just pathologically slow) edge case can block every other "
+            "deck from being reported as done (see run_slug_decks's own docstring).")
+    parser.add_argument("--no-timeout", action="store_true",
+        help="Disable --timeout entirely, restoring the old unbounded-wait behavior.")
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+    timeout = None if args.no_timeout else args.timeout
 
     with open(args.track_registry, "rb") as f:
         track_registry = tomllib.load(f)
@@ -668,9 +723,9 @@ def main() -> None:
 
     max_workers = args.max_workers or (os.cpu_count() or 1)
     print(f"Wrote {len(deck_paths)} decks to {work_dir}; "
-        f"running slug on each (max_workers={max_workers})...")
+        f"running slug on each (max_workers={max_workers}, timeout={timeout})...")
 
-    successes = run_slug_decks(deck_paths, slug_exe, max_workers=max_workers)
+    successes = run_slug_decks(deck_paths, slug_exe, max_workers=max_workers, timeout=timeout)
 
     n_ok = sum(successes)
     n_fail = len(successes) - n_ok
