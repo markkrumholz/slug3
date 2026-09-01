@@ -34,11 +34,16 @@ For each (track set, [Fe/H], v/vcrit) triple, this writes two decks:
   model over a 200-2e5 Angstrom, 1024-point grid, Q(HI) as the only
   photometric filter (run_cloudy_grid.py's own way of picking which
   output times are still worth running cloudy on), no extinction,
-  output every 0.25 Myr from 0.25 to 10 Myr, one trial with stars
-  above 120 Msun treated non-stochastically (min_stoch_mass; keeps the
-  rare, ionizing-dominant high-mass end of the IMF from being
-  all-or-nothing across a single trial). The grid deliberately omits
-  t = 0: at t = 0 every star is still at its (purely artificial, since
+  nebular emission explicitly disabled (nebular.compute_neb = false --
+  this pipeline exists to build the nebular emission lookup table in
+  the first place, so slug has no table to consult yet at this stage;
+  the raw stellar spectra/Q(HI) this writes are exactly what
+  run_cloudy_grid.py feeds to cloudy instead), output every 0.25 Myr
+  from 0.25 to 10 Myr, one trial with stars above 120 Msun treated
+  non-stochastically (min_stoch_mass; keeps the rare, ionizing-
+  dominant high-mass end of the IMF from being all-or-nothing across a
+  single trial). The grid deliberately omits t = 0: at t = 0 every
+  star is still at its (purely artificial, since
   it depends on accretion history the tracks don't model) pre-main-
   sequence contraction radius, and massive stars reach the main
   sequence in far less than the 0.25 Myr step used here, so a t = 0
@@ -386,6 +391,9 @@ CMF = {CLUSTER_MASS}
 [phot]
 filters = ["Q(HI)"]
 
+[nebular]
+compute_neb = false
+
 [output]
 model_name = "{model_name}"
 start_time = {CLUSTER_START_TIME}
@@ -452,6 +460,9 @@ f_cluster = 0.0
 
 [phot]
 filters = ["Q(HI)"]
+
+[nebular]
+compute_neb = false
 
 [galaxy]
 sfr = {SFR}
