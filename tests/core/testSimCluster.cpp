@@ -154,6 +154,26 @@ static auto readStringArrayAttr(const hid_t loc, const char* name) // NOLINT(mis
     return values;
 }
 
+// Read a scalar unsigned long attribute called name on the HDF5
+// object loc -- used to check the "trials_completed" attribute
+// closeOutputFile() writes on each checkpoint's own top-level file,
+// independently of the writing code itself
+static auto readULongAttr(const hid_t loc, const char* name) -> unsigned long // NOLINT(misc-include-cleaner)
+{
+    // NOLINTBEGIN(misc-include-cleaner)
+    const hid_t attr = H5Aopen(loc, name, H5P_DEFAULT);
+    if (attr < 0)
+    {
+        throw std::runtime_error(
+            "testSimCluster: unable to open attribute " + std::string(name));
+    }
+    unsigned long value = 0;
+    H5Aread(attr, H5T_NATIVE_ULONG, static_cast<void*>(&value));
+    H5Aclose(attr);
+    // NOLINTEND(misc-include-cleaner)
+    return value;
+}
+
 // Parse the deck, build SimControls/OutputManager/SimCluster
 // (mirroring main.cpp's end-to-end setup), and run, forcing real
 // multi-threaded execution so SimCluster::run's parallel for loop
@@ -769,10 +789,13 @@ static auto checkpointH5Path(const std::filesystem::path& outDir,
 // evenly-divided ones. Checks that exactly the expected set of
 // modelName_chkNNNNN.h5 files exists (no more, no fewer), that each
 // one's own trial numbers fall within the range that checkpoint was
-// supposed to cover, and -- pooling every checkpoint file's own rows
-// together -- that every trial from 0 to nTrial - 1 appears exactly
-// once with a unique uid, mirroring runScenario()'s own completeness/
-// uniqueness check for the unchunked case.
+// supposed to cover, that each one's own top-level "trials_completed"
+// attribute (see OutputManagerH5::closeOutputFile()) matches the
+// cumulative trial count that checkpoint was closed at, and --
+// pooling every checkpoint file's own rows together -- that every
+// trial from 0 to nTrial - 1 appears exactly once with a unique uid,
+// mirroring runScenario()'s own completeness/uniqueness check for the
+// unchunked case.
 static auto testSimClusterCheckpointedH5() -> int
 {
     const auto outDir = std::filesystem::temp_directory_path() / "slugTestSimClusterCheckpointedH5";
@@ -807,6 +830,20 @@ static auto testSimClusterCheckpointedH5() -> int
             const unsigned long expectedLo = chk * checkpointInterval;
             const unsigned long expectedHi = // exclusive
                 std::min((chk + 1) * checkpointInterval, nTrial);
+
+            // NOLINTBEGIN(misc-include-cleaner)
+            const hid_t file = H5Fopen(h5Path.string().c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+            const auto trialsCompleted = readULongAttr(file, "trials_completed");
+            H5Fclose(file);
+            // NOLINTEND(misc-include-cleaner)
+            if (trialsCompleted != expectedHi)
+            {
+                std::cerr << "testSimCluster: checkpointedH5: "
+                    << h5Path.string() << " has trials_completed="
+                    << trialsCompleted << ", expected " << expectedHi << "\n";
+                return 1;
+            }
+
             for (std::size_t i = 0; i < cols.trial_.size(); ++i)
             {
                 const auto trial = cols.trial_.at(i);

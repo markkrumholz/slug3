@@ -138,10 +138,14 @@ void core::SimGalaxy::run()
         // roll over to a new checkpoint now, unless this was the
         // final batch (in which case the current checkpoint is simply
         // left open for the destructor to close/consolidate, exactly
-        // as when checkpointing is disabled entirely)
+        // as when checkpointing is disabled entirely). batchEnd is
+        // also exactly the number of trials completed so far in the
+        // run (batches start at 0 and this one's own trials are all
+        // done), which is what checkpoint() records into the
+        // checkpoint's own output for a later restart to pick up from.
         if (simControls_.checkpointInterval() != 0 && batchEnd < simControls_.nTrial())
         {
-            outputManager_->checkpoint();
+            outputManager_->checkpoint(batchEnd);
         }
     }
 

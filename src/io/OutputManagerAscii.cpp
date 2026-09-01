@@ -1225,7 +1225,7 @@ void io::OutputManagerAscii::writeGalaxyPhot(
 
 // See this method's own header comment: checkpointing is only ever
 // supported with HDF5 output, so this always throws.
-void io::OutputManagerAscii::checkpoint()
+void io::OutputManagerAscii::checkpoint(unsigned long /*trialsCompleted*/)
 {
     throw std::runtime_error(
         "OutputManagerAscii::checkpoint: checkpointing is not supported "

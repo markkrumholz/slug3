@@ -179,6 +179,10 @@ namespace io
 
         /**
          * @brief Roll over to a new checkpoint
+         * @param trialsCompleted Number of trials completed so far in
+         *   the run, across every checkpoint including the one just
+         *   closed -- see closeOutputFile()'s own comment for what
+         *   this is used for
          * @details
          * Only meaningful if SimControls::checkpointInterval() is
          * non-zero. Closes every thread's own currently-open output
@@ -218,7 +222,7 @@ namespace io
          * is concurrently touching any thread's own handles at that
          * moment.
          */
-        void checkpoint() override;
+        void checkpoint(unsigned long trialsCompleted) override;
 
     private:
 
@@ -282,13 +286,24 @@ namespace io
 
         /**
          * @brief Close whichever of this thread's own groups are open, then its file
+         * @param trialsCompleted Number of trials completed so far in
+         *   the run; written as this thread's own file's
+         *   "trials_completed" top-level attribute before it is
+         *   closed, so a later restart can tell how far the run had
+         *   gotten as of the checkpoint this file belongs to. The
+         *   destructor passes SimControls::nTrial() (every trial in
+         *   the run must already be complete if this is being
+         *   destroyed at all); checkpoint() passes on whatever count
+         *   its own caller (SimCluster::run()/SimGalaxy::run()) gave
+         *   it, i.e. how many trials had completed as of the batch
+         *   boundary that triggered this checkpoint.
          * @details
          * Called once per thread from inside the destructor's own
          * OpenMP parallel region when built with OpenMP, or once,
          * directly, otherwise; also called by checkpoint(), on just
          * the one thread rolling over to a new checkpoint.
          */
-        void closeOutputFile();
+        void closeOutputFile(unsigned long trialsCompleted);
 
         /**
          * @brief Merge every thread_NNNN.h5 file in a directory into a single sibling HDF5 file

@@ -163,7 +163,7 @@ namespace io
          * comment for why this still needs to exist (and fail loudly)
          * rather than simply not being overridden here at all.
          */
-        void checkpoint() override;
+        void checkpoint(unsigned long trialsCompleted) override;
 
     private:
 

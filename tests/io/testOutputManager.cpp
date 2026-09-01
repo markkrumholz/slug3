@@ -2740,7 +2740,7 @@ static auto testOutputManagerAsciiCheckpointThrows() -> int
         io::SimControls controls(inputDeck);
         controls.setCheckpointInterval(5);
         io::OutputManagerAscii manager(controls, inputDeck);
-        manager.checkpoint();
+        manager.checkpoint(5);
         std::cerr << "testOutputManager: ascii checkpoint: expected "
             "checkpoint() to throw, but it succeeded\n";
         return 1;

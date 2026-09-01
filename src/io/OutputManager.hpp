@@ -169,15 +169,21 @@ namespace io
 
         /**
          * @brief Roll over to a new checkpoint
+         * @param trialsCompleted Number of trials completed so far in
+         *   the run, i.e. across every checkpoint including the one
+         *   just closed, not just this checkpoint's own share of them
          * @details
-         * Closes whatever output is currently open and opens a fresh
-         * one for the next checkpoint, so the current checkpoint's
-         * output is fully flushed to disk before more trials are
-         * written to it -- bounding how much work a crash or a
-         * walltime kill can lose, at the cost of one more output file
-         * to eventually consolidate. See OutputManagerH5::checkpoint()
-         * for the real implementation, and its own class header
-         * comment for the full checkpointing design.
+         * Closes whatever output is currently open -- writing
+         * trialsCompleted as a top-level attribute on it first, so a
+         * later restart can tell how far the run had gotten as of
+         * this checkpoint -- and opens a fresh one for the next
+         * checkpoint, so the current checkpoint's output is fully
+         * flushed to disk before more trials are written to it --
+         * bounding how much work a crash or a walltime kill can lose,
+         * at the cost of one more output file to eventually
+         * consolidate. See OutputManagerH5::checkpoint() for the real
+         * implementation, and its own class header comment for the
+         * full checkpointing design.
          *
          * Only meaningful with HDF5 output. OutputManagerAscii's own
          * implementation just throws (see its own comment):
@@ -191,7 +197,7 @@ namespace io
          * constructor's own check, so this still needs to fail safely
          * if it is ever actually called.
          */
-        virtual void checkpoint() = 0;
+        virtual void checkpoint(unsigned long trialsCompleted) = 0;
 
     protected:
 

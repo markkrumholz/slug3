@@ -79,6 +79,25 @@ static void writeStringAttr(const hid_t loc, const std::string& name,
     H5Tclose(strType);
 }
 
+// Write a scalar unsigned long attribute called name, with the given
+// value, on the HDF5 object loc
+static void writeULongAttr(const hid_t loc, const std::string& name,
+    const unsigned long value)
+{
+    const hid_t space = H5Screate(H5S_SCALAR);
+    const hid_t attr = H5Acreate2(loc, name.c_str(), H5T_NATIVE_ULONG, space,
+        H5P_DEFAULT, H5P_DEFAULT);
+    if (attr < 0)
+    {
+        H5Sclose(space);
+        throw std::runtime_error(
+            "OutputManagerH5: unable to create attribute " + name);
+    }
+    H5Awrite(attr, H5T_NATIVE_ULONG, static_cast<const void*>(&value));
+    H5Aclose(attr);
+    H5Sclose(space);
+}
+
 // Write a scalar string dataset called name, with the given value,
 // into the HDF5 group loc
 static void writeStringDataset(const hid_t loc, const std::string& name,
@@ -552,15 +571,15 @@ io::OutputManagerH5::OutputManagerH5(
 // See this method's own header comment for the full design, in
 // particular the guarantees it relies on its caller to have already
 // established before calling this
-void io::OutputManagerH5::checkpoint()
+void io::OutputManagerH5::checkpoint(const unsigned long trialsCompleted)
 {
 #ifdef _OPENMP
 #pragma omp parallel
     {
-        closeOutputFile();
+        closeOutputFile(trialsCompleted);
     }
 #else
-    closeOutputFile();
+    closeOutputFile(trialsCompleted);
 #endif
     ++checkpointNumber_;
     openNewOutputFiles();
@@ -1086,7 +1105,11 @@ io::OutputManagerH5::~OutputManagerH5()
 #pragma omp parallel
 #endif
     {
-        closeOutputFile();
+        // If we're being destroyed at all, every trial in the run
+        // must already be complete -- there is no partial-run
+        // trialsCompleted to pass on here the way checkpoint() has,
+        // just simControls_.nTrial() itself
+        closeOutputFile(simControls_.nTrial());
     }
 
 #ifdef _OPENMP
@@ -1112,7 +1135,7 @@ io::OutputManagerH5::~OutputManagerH5()
 // Close whichever of this thread's own groups are open, then its
 // file -- see openOutputFile()'s own comment for why this shares its
 // critical section
-void io::OutputManagerH5::closeOutputFile()
+void io::OutputManagerH5::closeOutputFile(const unsigned long trialsCompleted)
 {
 #ifdef _OPENMP
 #pragma omp critical(h5ThreadSafety)
@@ -1125,6 +1148,7 @@ void io::OutputManagerH5::closeOutputFile()
         if (galaxyGroup_() >= 0) { H5Gclose(galaxyGroup_()); }
         if (galaxySpectraGroup_() >= 0) { H5Gclose(galaxySpectraGroup_()); }
         if (galaxyPhotGroup_() >= 0) { H5Gclose(galaxyPhotGroup_()); }
+        writeULongAttr(file_(), "trials_completed", trialsCompleted);
         H5Fclose(file_());
         // NOLINTEND(misc-include-cleaner)
     }
