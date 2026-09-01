@@ -66,11 +66,17 @@ For Python code (the `data/tools` fetch/fixture scripts, the `pybind` test suite
 * Dependencies: CMake >= 3.15, GSL, and HDF5 (with its C++ component). OpenMP is optional; code that depends on it must guard itself with `#ifdef _OPENMP`, and the build falls back to single-threaded with a warning if no OpenMP implementation is found.
 * `pybind11`, used for the Python bindings, is vendored as a git submodule under `src/extern/pybind11`. After cloning, run `git submodule update --init --recursive` before configuring, or the build will fail with missing pybind11 headers.
 * The code uses C++23's `<mdspan>`. `cmake/Mdspan.cmake` picks a provider automatically, in priority order: the compiler's own native `<mdspan>` (GCC >= 16, or Clang linked against a recent `libc++`; detected with a real compile check, not a version guess), then an externally-installed `mdspan` CONFIG package (`find_package(mdspan)` -- e.g. one a cluster's module system or Spack provides, possibly a vendor-tuned build), then the Kokkos reference implementation vendored as a git submodule at `src/extern/mdspan` (run `git submodule update --init --recursive` if this path fires and the build fails with a missing-submodule error). Application code never needs to care which provider is active -- `#include <mdspan>` and `std::mdspan`/`std::extents`/`std::dextents` work unconditionally regardless. Override the auto-detection with `-DSLUG_MDSPAN_PROVIDER=NATIVE|PACKAGE|SUBMODULE` (default `AUTO`) to force a specific provider or fail loudly if it's unavailable -- useful for exercising the fallback path in CI, or getting a hard error instead of a silent fallback when a specific provider is expected.
-* Typical configure/build:
+* Typical configure/build: prefer [Ninja](https://ninja-build.org/) as the generator when it's installed (`ninja --version` to check) -- it parallelizes the build automatically and matches what CI itself uses (`CMAKE_GENERATOR: Ninja` in `.github/workflows/ci.yml`), so local builds stay closer to CI behavior and incremental rebuilds (e.g. after touching a widely-included header) are noticeably faster than with the plain-CMake default:
+    ```
+    cmake -S . -B build -G Ninja
+    cmake --build build
+    ```
+    Without Ninja installed, CMake falls back to its own platform default (Unix Makefiles on Linux/macOS), which still works but builds serially by default:
     ```
     cmake -B build
     cmake --build build
     ```
+    Either way, `cmake --build build [--target ...]` is the same afterward regardless of which generator configured `build/`. A build directory's generator is fixed at configure time -- switching an existing directory from Makefiles to Ninja (or back) requires wiping and reconfiguring it (`rm -rf build && cmake -S . -B build -G Ninja`), not just re-running `cmake -B build -G Ninja` in place.
 
 ## Testing guidelines
 
