@@ -11,14 +11,13 @@
  * testClusterSpecsynFull's own comment for that shared rationale), so
  * it runs only if both sets of data files are present locally --
  * otherwise it is skipped, returning an automatic pass. The real grid
- * is, as of this writing, still being regenerated to plug known holes
- * in its own [Fe/H]/v_vcrit coverage -- and Nebular's own constructor
- * eagerly loads every [Fe/H] group under the requested track, not just
- * the one this test's own deck asks for (see Nebular.cpp's own
- * constructor), so such a hole throws at SimControls construction --
- * this test treats that as a (temporary, expected) gap and skips
- * rather than fails; see the try/catch around the SimControls
- * construction below.
+ * now fully covers every [Fe/H]/v_vcrit combination the tracks it's
+ * built against actually offer, so SimControls construction failing
+ * here -- Nebular's own constructor eagerly loads every [Fe/H] group
+ * under the requested track, not just the one this test's own deck
+ * asks for (see Nebular.cpp's own constructor) -- is a real test
+ * failure (a genuine coverage regression in the grid, or a defect in
+ * Nebular's own loading logic), not an expected, tolerated gap.
  *
  * There is no independently-computed expected spectrum or line
  * luminosity to check bit-for-bit against here (that is exactly what
@@ -48,64 +47,8 @@
 #include <exception>
 #include <filesystem>
 #include <iostream>
-#include <memory>
-#include <string>
 #include <toml.hpp>
 #include <vector>
-
-// Construct SimControls from inputDeck, treating a known real-grid-
-// coverage gap (Nebular's own "no logU data"/"outside the tabulated
-// range"/"no exact v/vcrit match" errors -- see this file's own
-// header comment) as an expected, temporary skip rather than a
-// failure. Returns the constructed SimControls, or nullptr if
-// construction failed (having already printed the appropriate
-// message); wasSkip is set to true only for a known grid-coverage gap
-// (the caller should return 0, treating this as skipped), left false
-// for any other failure (a real test failure -- the caller should
-// return 1) or on success. Factored out of
-// testClusterSpecsynFullNebular() to keep it within its cognitive-
-// complexity budget.
-auto buildControlsOrReportFailure(const toml::table& inputDeck, bool& wasSkip)
-    -> std::unique_ptr<io::SimControls>
-{
-    wasSkip = false;
-    try
-    {
-        return std::make_unique<io::SimControls>(inputDeck);
-    }
-    catch (const std::exception& error)
-    {
-        // Nebular's own constructor eagerly loads spec/line_lum data
-        // for *every* FeH group under the requested track (not just
-        // the one [Fe/H] value this test's own deck actually asks
-        // for -- see Nebular.cpp's own constructor, which loops over
-        // every childrenByAttr(trackGrp, "FeH", ...) result), so a
-        // hole anywhere in MIST's own [Fe/H]/v_vcrit coverage throws
-        // right here, at SimControls construction -- not lazily
-        // later, when getCluster() is actually called for this deck's
-        // own [Fe/H] = 0. Anything else (a malformed deck, a missing
-        // track, or a genuine defect in Nebular's own loading logic)
-        // is a real test failure, not a known gap, and must not be
-        // silently swallowed here.
-        const std::string what = error.what();
-        const bool isKnownGridHole =
-            what.find("no logU data available to interpolate") != std::string::npos ||
-            what.find("outside the tabulated range") != std::string::npos ||
-            what.find("no exact v/vcrit match") != std::string::npos;
-        if (!isKnownGridHole)
-        {
-            std::cerr << "testClusterSpecsynFullNebular: SimControls construction "
-                "failed with an error that does not match any known real-grid-"
-                "coverage gap: " << what << "\n";
-            return nullptr;
-        }
-        std::cout << "testClusterSpecsynFullNebular: skipping -- the "
-            "real nebular grid does not (yet) fully cover the MIST "
-            "track's own [Fe/H]/v_vcrit range (" << what << ")\n";
-        wasSkip = true;
-        return nullptr;
-    }
-}
 
 // Check that specNeb's integrated (trapezoidal) luminosity over wl is
 // within an order of magnitude of spec's own, while still differing
@@ -181,18 +124,14 @@ auto testClusterSpecsynFullNebular() -> int
         // the one [Fe/H] value this test's own deck actually asks
         // for -- see Nebular.cpp's own constructor, which loops over
         // every childrenByAttr(trackGrp, "FeH", ...) result), so a
-        // hole anywhere in MIST's own [Fe/H]/v_vcrit coverage throws
-        // right here, at SimControls construction -- not lazily later,
-        // when getCluster() is actually called for this deck's own
-        // [Fe/H] = 0. The real cloudy grid is, as of this writing,
-        // still being regenerated to plug exactly such holes (see this
-        // file's own header comment), so treat any exception here as
-        // one of those known, temporary gaps and skip rather than fail.
-        bool wasSkip = false;
-        const std::unique_ptr<io::SimControls> controlsPtr =
-            buildControlsOrReportFailure(inputDeck, wasSkip);
-        if (controlsPtr == nullptr) { return wasSkip ? 0 : 1; }
-        const io::SimControls& controls = *controlsPtr;
+        // hole anywhere in MIST's own [Fe/H]/v_vcrit coverage would
+        // throw right here, at SimControls construction -- not lazily
+        // later, when getCluster() is actually called for this deck's
+        // own [Fe/H] = 0. The real cloudy grid now fully covers every
+        // such combination (see this file's own header comment), so
+        // this is allowed to throw straight out to the catch below,
+        // like any other genuine test failure.
+        const io::SimControls controls(inputDeck);
 
         if (controls.nebular() == nullptr)
         {
