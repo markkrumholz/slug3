@@ -59,15 +59,30 @@ auto main(int argc, char *argv[]) -> int
         outputManager = std::make_unique<io::OutputManagerAscii>(simControls, inputDeck);
     }
 
-    // Run the simulation
-    if (simControls.simType() == io::SimControls::SimType::cluster)
+    // Run the simulation. Wrapped in its own try/catch (mirroring the
+    // toml::parse_file one above) so a genuine simulation failure --
+    // e.g. SimCluster::run()/SimGalaxy::run() rethrowing a per-trial
+    // exception once every OpenMP trial has finished -- exits cleanly
+    // with a message and a nonzero status instead of propagating
+    // uncaught out of main() and calling std::terminate()/abort().
+    try
     {
-        core::SimCluster simCluster(simControls, std::move(outputManager));
-        simCluster.run();
+        if (simControls.simType() == io::SimControls::SimType::cluster)
+        {
+            core::SimCluster simCluster(simControls, std::move(outputManager));
+            simCluster.run();
+        }
+        else if (simControls.simType() == io::SimControls::SimType::galaxy)
+        {
+            core::SimGalaxy simGalaxy(simControls, std::move(outputManager));
+            simGalaxy.run();
+        }
     }
-    else if (simControls.simType() == io::SimControls::SimType::galaxy)
+    catch (const std::exception& e)
     {
-        core::SimGalaxy simGalaxy(simControls, std::move(outputManager));
-        simGalaxy.run();
+        std::cerr << "slug: simulation failed: " << e.what() << '\n';
+        return 1;
     }
+
+    return 0;
 }
