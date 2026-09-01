@@ -529,16 +529,6 @@ static void appendFileContents(const hid_t srcFile, const hid_t dstFile)
 
 // NOLINTEND(misc-include-cleaner)
 
-// Set every element of a ThreadVec<hid_t> to -1, the "not open"
-// sentinel every hid_t handle in this class starts from -- ThreadVec's
-// own default constructor value-initializes each thread's element to
-// 0 instead, which this class's own "< 0" / ">= 0" open/closed checks
-// would misread as an open handle
-static void resetThreadVec(utils::ThreadVec<hid_t>& handles)
-{
-    for (auto& handle : handles) { handle = -1; }
-}
-
 // H5 constructor: see this class's own header comment for what "the
 // output file(s)" means here. Without OpenMP, this opens a single
 // outDir/modelName.h5, exactly as before. With OpenMP, each thread
@@ -548,25 +538,48 @@ static void resetThreadVec(utils::ThreadVec<hid_t>& handles)
 // thread-safety support (see this class's own header comment) -- and
 // the destructor consolidates them back into a single
 // outDir/modelName.h5 once the run completes, unless
-// SimControls::outputMode() is OutputMode::h5divided.
+// SimControls::outputMode() is OutputMode::h5divided. See
+// openNewOutputFiles()'s own comment for the full detail of what
+// happens below.
 io::OutputManagerH5::OutputManagerH5(
     const SimControls& simControls,
     const toml::table& inputDeck) :
     OutputManager(simControls, inputDeck)
 {
-    resetThreadVec(file_);
-    resetThreadVec(clustersGroup_);
-    resetThreadVec(clusterSpectraGroup_);
-    resetThreadVec(clusterPhotGroup_);
-    resetThreadVec(galaxyGroup_);
-    resetThreadVec(galaxySpectraGroup_);
-    resetThreadVec(galaxyPhotGroup_);
+    openNewOutputFiles();
+}
+
+// See this method's own header comment for the full design
+void io::OutputManagerH5::checkpoint()
+{
+#ifdef _OPENMP
+#pragma omp critical(checkpointRollover)
+#endif
+    {
+        closeOutputFile();
+        ++checkpointNumber_;
+        openNewOutputFiles();
+    }
+}
+
+// See this method's own header comment
+auto io::OutputManagerH5::checkpointModelName(const unsigned long checkpointNum) const -> std::string
+{
+    std::ostringstream name;
+    name << simControls_.modelName() << "_chk" <<
+        std::setfill('0') << std::setw(5) << checkpointNum;
+    return name.str();
+}
+
+// See this method's own header comment for the full design
+void io::OutputManagerH5::openNewOutputFiles()
+{
+    const std::string modelName = (simControls_.checkpointInterval() != 0) ?
+        checkpointModelName(checkpointNumber_) : simControls_.modelName();
 
 #ifdef _OPENMP
-    const auto threadDir = std::filesystem::path(simControls_.outDir()) /
-        simControls_.modelName();
-    const auto finalPath = std::filesystem::path(simControls_.outDir()) /
-        (simControls_.modelName() + ".h5");
+    const auto threadDir = std::filesystem::path(simControls_.outDir()) / modelName;
+    const auto finalPath = std::filesystem::path(simControls_.outDir()) / (modelName + ".h5");
     if (std::filesystem::exists(threadDir) || std::filesystem::exists(finalPath))
     {
         throw std::runtime_error(
@@ -575,16 +588,26 @@ io::OutputManagerH5::OutputManagerH5(
     }
     std::filesystem::create_directory(threadDir);
 
-#pragma omp parallel
+    const auto openForThisThread = [this, &threadDir]()
     {
         std::ostringstream threadFile;
         threadFile << "thread_" << std::setfill('0') << std::setw(4) <<
             omp_get_thread_num() << ".h5";
         openOutputFile(threadDir / threadFile.str());
+    };
+    if (omp_in_parallel())
+    {
+        openForThisThread();
+    }
+    else
+    {
+#pragma omp parallel
+        {
+            openForThisThread();
+        }
     }
 #else
-    const auto finalPath = std::filesystem::path(simControls_.outDir()) /
-        (simControls_.modelName() + ".h5");
+    const auto finalPath = std::filesystem::path(simControls_.outDir()) / (modelName + ".h5");
     if (std::filesystem::exists(finalPath))
     {
         throw std::runtime_error(
@@ -602,6 +625,23 @@ io::OutputManagerH5::OutputManagerH5(
 // comment
 void io::OutputManagerH5::openOutputFile(const std::filesystem::path& path)
 {
+    // Reset this thread's own handles to -1 (the "not open" sentinel
+    // every hid_t handle in this class starts from) before opening
+    // its file: openClustersGroup()/etc. below each leave their own
+    // handle untouched, rather than explicitly setting it to -1, when
+    // the corresponding output.write_* flag is false, relying on it
+    // already being -1 here -- see openNewOutputFiles()'s own comment
+    // for why this happens per-thread, right here, rather than as a
+    // separate, whole-ThreadVec reset up front the way earlier,
+    // pre-checkpointing code did.
+    file_() = -1;
+    clustersGroup_() = -1;
+    clusterSpectraGroup_() = -1;
+    clusterPhotGroup_() = -1;
+    galaxyGroup_() = -1;
+    galaxySpectraGroup_() = -1;
+    galaxyPhotGroup_() = -1;
+
     // The HDF5 build linked here is not configured with its own
     // (opt-in) thread-safety support (see this class's own header
     // comment), which turns out to mean it is not safe to call from
@@ -1035,11 +1075,18 @@ void io::OutputManagerH5::openGalaxyPhotGroup()
 
 // Close every thread's own file(s) -- see this class's own header
 // comment -- then, with OpenMP, consolidate them back into a single
-// outDir/modelName.h5 unless SimControls::outputMode() is
+// outDir/modelName.h5 (or, per checkpoint, outDir/modelName_chkNNNNN.h5
+// -- see checkpointModelName()) unless SimControls::outputMode() is
 // OutputMode::h5divided, in which case they are left as-is.
-// Consolidation happens once, single-threaded, after every thread has
+// Consolidation happens once per checkpoint (or once, unchecked, if
+// checkpointing is disabled), single-threaded, after every thread has
 // closed its own file, since it needs every thread_NNNN.h5 file
 // closed (and so fully flushed to disk) before reading them back in.
+// Every checkpoint from 0 to checkpointNumber_ is consolidated here,
+// not just the last: checkpoint() itself deliberately never
+// consolidates (see its own comment), so every earlier checkpoint's
+// own thread_NNNN.h5 files are still sitting there, unmerged, until
+// this runs.
 io::OutputManagerH5::~OutputManagerH5()
 {
 #ifdef _OPENMP
@@ -1052,8 +1099,19 @@ io::OutputManagerH5::~OutputManagerH5()
 #ifdef _OPENMP
     if (simControls_.outputMode() == SimControls::OutputMode::h5)
     {
-        consolidateFiles(std::filesystem::path(simControls_.outDir()) /
-            simControls_.modelName());
+        if (simControls_.checkpointInterval() != 0)
+        {
+            for (unsigned long chk = 0; chk <= checkpointNumber_; ++chk)
+            {
+                consolidateFiles(std::filesystem::path(simControls_.outDir()) /
+                    checkpointModelName(chk));
+            }
+        }
+        else
+        {
+            consolidateFiles(std::filesystem::path(simControls_.outDir()) /
+                simControls_.modelName());
+        }
     }
 #endif
 }

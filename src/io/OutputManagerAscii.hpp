@@ -152,6 +152,19 @@ namespace io
         void writeGalaxyPhot(unsigned long trial, double time,
             core::Galaxy& galaxy) override;
 
+        /**
+         * @brief Not supported for ascii output
+         * @throws std::runtime_error always
+         * @details
+         * Ascii output has no way to reopen/append to a file it has
+         * already finished writing the way OutputManagerH5 rolls over
+         * to a new HDF5 file, so checkpointing is only ever supported
+         * with HDF5 output -- see OutputManager::checkpoint()'s own
+         * comment for why this still needs to exist (and fail loudly)
+         * rather than simply not being overridden here at all.
+         */
+        void checkpoint() override;
+
     private:
 
         /**

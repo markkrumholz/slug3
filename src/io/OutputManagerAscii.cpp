@@ -1222,3 +1222,12 @@ void io::OutputManagerAscii::writeGalaxyPhot(
 
     for (auto& cluster : galaxy.clusters()) { writeClusterPhot(trial, time, cluster); }
 }
+
+// See this method's own header comment: checkpointing is only ever
+// supported with HDF5 output, so this always throws.
+void io::OutputManagerAscii::checkpoint()
+{
+    throw std::runtime_error(
+        "OutputManagerAscii::checkpoint: checkpointing is not supported "
+        "with ascii output");
+}

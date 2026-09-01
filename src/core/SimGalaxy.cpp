@@ -83,6 +83,15 @@ void core::SimGalaxy::run()
     {
         try
         {
+            // Roll over to a new checkpoint every checkpointInterval()
+            // trials, if checkpointing is enabled -- see
+            // OutputManagerH5::checkpoint()'s own comment for what
+            // this actually does and why
+            if (simControls_.checkpointInterval() != 0 && trialNum != 0 &&
+                trialNum % simControls_.checkpointInterval() == 0)
+            {
+                outputManager_->checkpoint();
+            }
             runTrial(trialNum);
         }
         catch (const std::exception& error)
@@ -98,6 +107,11 @@ void core::SimGalaxy::run()
 #else
     for (unsigned long trialNum = 0; trialNum < simControls_.nTrial(); ++trialNum)
     {
+        if (simControls_.checkpointInterval() != 0 && trialNum != 0 &&
+            trialNum % simControls_.checkpointInterval() == 0)
+        {
+            outputManager_->checkpoint();
+        }
         runTrial(trialNum);
     }
 #endif

@@ -167,6 +167,32 @@ namespace io
         virtual void writeGalaxyPhot(unsigned long trial, double time,
             core::Galaxy& galaxy) = 0;
 
+        /**
+         * @brief Roll over to a new checkpoint
+         * @details
+         * Closes whatever output is currently open and opens a fresh
+         * one for the next checkpoint, so the current checkpoint's
+         * output is fully flushed to disk before more trials are
+         * written to it -- bounding how much work a crash or a
+         * walltime kill can lose, at the cost of one more output file
+         * to eventually consolidate. See OutputManagerH5::checkpoint()
+         * for the real implementation, and its own class header
+         * comment for the full checkpointing design.
+         *
+         * Only meaningful with HDF5 output. OutputManagerAscii's own
+         * implementation just throws (see its own comment):
+         * SimControls's own constructor already rejects the
+         * combination of ascii output and a non-zero
+         * checkpointInterval() up front when parsing a real input
+         * deck, so this should never actually be reached from the
+         * CLI -- but a caller building a SimControls directly (e.g.
+         * from Python) could set up that same illegal combination via
+         * setCheckpointInterval() without going through the
+         * constructor's own check, so this still needs to fail safely
+         * if it is ever actually called.
+         */
+        virtual void checkpoint() = 0;
+
     protected:
 
         /**

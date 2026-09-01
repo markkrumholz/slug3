@@ -22,6 +22,7 @@
 #include <exception>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <map>
 #include <memory>
@@ -743,6 +744,120 @@ static auto testSimClusterPhotAscii() -> int
     return 0;
 }
 
+// Format outDir/modelName_chkNNNNN.h5, NNNNN being checkpointNum
+// zero-padded to 5 digits -- mirrors
+// OutputManagerH5::checkpointModelName()'s own format exactly, so
+// tests can predict the path a given checkpoint's consolidated output
+// ends up at.
+static auto checkpointH5Path(const std::filesystem::path& outDir,
+    const std::string& modelName, const unsigned long checkpointNum) -> std::filesystem::path
+{
+    std::ostringstream name;
+    name << modelName << "_chk" << std::setfill('0') << std::setw(5) << checkpointNum;
+    return outDir / (name.str() + ".h5");
+}
+
+// End-to-end check of checkpointed HDF5 output: with
+// outputs.checkpoint_interval set, SimCluster::run() should roll over
+// to a new modelName_chkNNNNN.h5 file every checkpointInterval trials
+// (see SimControls::checkpointInterval()/OutputManagerH5::checkpoint()),
+// and the destructor's consolidateFiles() should merge every one of
+// them (not just the last -- see its own comment) once the run
+// completes. nTrial (23) is deliberately not an exact multiple of
+// checkpointInterval (5), so the final checkpoint is deliberately
+// partial (3 trials, not 5) -- exercises that case too, not just
+// evenly-divided ones. Checks that exactly the expected set of
+// modelName_chkNNNNN.h5 files exists (no more, no fewer), that each
+// one's own trial numbers fall within the range that checkpoint was
+// supposed to cover, and -- pooling every checkpoint file's own rows
+// together -- that every trial from 0 to nTrial - 1 appears exactly
+// once with a unique uid, mirroring runScenario()'s own completeness/
+// uniqueness check for the unchunked case.
+static auto testSimClusterCheckpointedH5() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() / "slugTestSimClusterCheckpointedH5";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+    const std::string modelName = "test_sim_cluster_checkpointed_h5";
+
+    constexpr unsigned long checkpointInterval = 5;
+    const unsigned long nCheckpoints =
+        (nTrial + checkpointInterval - 1) / checkpointInterval; // ceiling division
+
+    try
+    {
+        toml::table inputDeck = makeInputDeck(modelName, outDir);
+        inputDeck.at_path("outputs").as_table()->insert(
+            "checkpoint_interval", static_cast<int64_t>(checkpointInterval));
+
+        runEndToEnd(inputDeck);
+
+        TrialMap rowsByTrial;
+        for (unsigned long chk = 0; chk < nCheckpoints; ++chk)
+        {
+            const auto h5Path = checkpointH5Path(outDir, modelName, chk);
+            if (!std::filesystem::exists(h5Path))
+            {
+                std::cerr << "testSimCluster: checkpointedH5: missing "
+                    << h5Path.string() << "\n";
+                return 1;
+            }
+            const auto cols = readOutputColumns(h5Path);
+
+            const unsigned long expectedLo = chk * checkpointInterval;
+            const unsigned long expectedHi = // exclusive
+                std::min((chk + 1) * checkpointInterval, nTrial);
+            for (std::size_t i = 0; i < cols.trial_.size(); ++i)
+            {
+                const auto trial = cols.trial_.at(i);
+                if (trial < expectedLo || trial >= expectedHi)
+                {
+                    std::cerr << "testSimCluster: checkpointedH5: "
+                        << h5Path.string() << " has trial " << trial
+                        << ", expected in [" << expectedLo << ", "
+                        << expectedHi << ")\n";
+                    return 1;
+                }
+                rowsByTrial[trial].push_back(cols.uid_.at(i));
+            }
+        }
+
+        // No checkpoint beyond nCheckpoints should have been created
+        const auto extraPath = checkpointH5Path(outDir, modelName, nCheckpoints);
+        if (std::filesystem::exists(extraPath))
+        {
+            std::cerr << "testSimCluster: checkpointedH5: unexpected extra "
+                "checkpoint file " << extraPath.string() << "\n";
+            return 1;
+        }
+
+        // The unchunked modelName.h5 should never have been created --
+        // checkpointing replaces it entirely with modelName_chkNNNNN.h5
+        if (std::filesystem::exists(outDir / (modelName + ".h5")))
+        {
+            std::cerr << "testSimCluster: checkpointedH5: unexpected "
+                "unchunked output file " << (outDir / (modelName + ".h5")).string()
+                << "\n";
+            return 1;
+        }
+
+        if (rowsByTrial.size() != nTrial)
+        {
+            std::cerr << "testSimCluster: checkpointedH5: expected " << nTrial
+                << " distinct trial numbers across every checkpoint, got "
+                << rowsByTrial.size() << "\n";
+            return 1;
+        }
+        return checkTrialsAndUids(rowsByTrial);
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimCluster: checkpointedH5 test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+}
+
 auto testSimCluster() -> int
 {
     const auto outDir = std::filesystem::temp_directory_path() / "slugTestSimCluster";
@@ -776,6 +891,7 @@ auto testSimCluster() -> int
     result += testSimClusterSpectraAscii();
     result += testSimClusterPhotH5();
     result += testSimClusterPhotAscii();
+    result += testSimClusterCheckpointedH5();
 
     return result;
 }
