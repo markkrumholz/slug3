@@ -684,18 +684,22 @@ namespace specsyn
         // bracketed -- log(g) is never checked against its own range
         // here, since the whole point of this function is to search
         // for a populated log(g) value regardless of how far out of
-        // range this star's own log(g) starts.
+        // range this star's own log(g) starts. log(g) is still
+        // computed up front (rather than after this check, as spec()
+        // does) purely so it can be reported in the message below --
+        // it plays no part in the check itself.
         const double logTeff = props[static_cast<std::size_t>(tracks::FieldIdx::logTe)]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- StarData is a fixed-size std::array, and logTe is one of its compile-time-known indices
+        const auto [area, logg] = this->getSAandLogg(props);
         if (feh < FeH_.front() || feh > FeH_.back() ||
             logTeff < logTeff_.front() || logTeff > logTeff_.back())
         {
             throw std::runtime_error(
                 "SpecsynLibNoWind::specForce: star with feh = " + std::to_string(feh) +
                 ", log(Teff) = " + std::to_string(logTeff) +
+                ", log(g) = " + std::to_string(logg) +
                 " is entirely outside this library's grid");
         }
 
-        const auto [area, logg] = this->getSAandLogg(props);
         std::size_t fehCache = 0;
         std::size_t teffCache = 0;
         const auto bFeh = detail::findBracket(FeH_, feh, fehCache);
