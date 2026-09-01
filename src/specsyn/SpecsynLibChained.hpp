@@ -410,9 +410,10 @@ namespace specsyn
          *   clampFehForLibrary()'s own second return value
          * @return props unchanged if clampedLogg == currentLogg;
          *   otherwise props with its own mass field scaled by
-         *   10^(clampedLogg - currentLogg), leaving every other field
-         *   (in particular log(L) and log(Teff), and hence the star's
-         *   own radius/surface area) untouched
+         *   10^(clampedLogg - currentLogg) * (1 +/- loggClampEps),
+         *   leaving every other field (in particular log(L) and
+         *   log(Teff), and hence the star's own radius/surface area)
+         *   untouched
          * @details
          * log(g) = log10(G M / R^2) (see Specsyn::getSAandLogg()), with
          * R derived from log(L) and log(Teff) alone -- mass is the only
@@ -428,6 +429,23 @@ namespace specsyn
          * overriding one StarData field to force a clamp target, using
          * mass here (log(g)'s only side-effect-free lever) in place of
          * log(Teff) there.
+         *
+         * The extra (1 +/- loggClampEps) factor exists because this
+         * rescaled mass only takes effect once the caller's own library
+         * re-derives log(g) from it via its own Specsyn::getSAandLogg()
+         * call -- a pow()/log10() round trip that does not invert
+         * bit-exactly. Clamping exactly to a library's own boundary
+         * (e.g. clampedLogg == that library's logg_.back()) can
+         * therefore come back a few ULPs on the wrong side of it,
+         * spuriously failing that library's own strict bounds check
+         * even though the clamp was, in exact arithmetic, precisely at
+         * the boundary. loggClampEps nudges the rescaling factor by a
+         * small relative amount -- signed so the round-tripped log(g)
+         * lands a hair further inside the clamped boundary rather than
+         * risk landing outside it -- which is large enough to swamp
+         * that roundoff (many orders of magnitude smaller) while being
+         * physically negligible next to these grids' own log(g) node
+         * spacing (0.25-0.5 dex).
          */
         [[nodiscard]] static auto propsWithClampedLogg(
             StarData props, double currentLogg, double clampedLogg) -> StarData;

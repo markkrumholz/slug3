@@ -733,8 +733,15 @@ namespace specsyn
     {
         if (clampedLogg != currentLogg)
         {
+            // See this function's own header comment for why this nudge
+            // is needed at all: +eps when clamping up to a floor (so the
+            // round-tripped log(g) lands safely at/above it), -eps when
+            // clamping down to a ceiling (so it lands safely at/below it).
+            constexpr double loggClampEps = 1e-6;
+            const double sign = (clampedLogg > currentLogg) ? 1.0 : -1.0;
             const auto massIdx = static_cast<std::size_t>(tracks::FieldIdx::mass);
-            props[massIdx] *= std::pow(10.0, clampedLogg - currentLogg); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- massIdx < StarData::size() by construction
+            props[massIdx] *= std::pow(10.0, clampedLogg - currentLogg) *
+                (1.0 + (sign * loggClampEps)); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- massIdx < StarData::size() by construction
         }
         return props;
     }
