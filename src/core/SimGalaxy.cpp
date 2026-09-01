@@ -10,6 +10,7 @@
 #include "../io/OutputManager.hpp"
 #include "../io/SimControls.hpp"
 #include "Galaxy.hpp"
+#include <algorithm>
 #include <atomic>
 #include <exception> // NOLINT(misc-include-cleaner) -- correct header for std::exception_ptr/current_exception/rethrow_exception; clang-tidy-18's own header-mapping data doesn't yet attribute these symbols to it
 #include <iostream>
@@ -68,53 +69,81 @@ void core::SimGalaxy::run()
             << simControls_.nTrial() << " trials\n";
     }
 
-#ifdef _OPENMP
-    // See runTrial()'s own comment for why each trial is individually
-    // wrapped in a try/catch here, rather than letting an exception
-    // propagate out of the "#pragma omp parallel for" loop body
-    // directly: every trial still runs (so one bad trial does not
-    // lose every other thread's own in-flight work), and the first
-    // exception caught is remembered and rethrown once the whole
-    // parallel region has finished, so run()'s own caller sees the
-    // same kind of failure it always has.
-    std::exception_ptr firstError;
-#pragma omp parallel for schedule(dynamic)
-    for (unsigned long trialNum = 0; trialNum < simControls_.nTrial(); ++trialNum)
+    // Trials run in batches of checkpointInterval() at a time (or, if
+    // checkpointing is disabled, one batch covering every trial, i.e.
+    // today's original, unbatched behavior) -- each batch its own
+    // "#pragma omp parallel for", so its own implicit barrier
+    // guarantees every thread has finished every trial in the batch
+    // (writeGalaxy/writeGalaxySpec/writeGalaxyPhot for every output
+    // time, not just started it) before this reaches the checkpoint()
+    // call below, and that this runs on a single thread, from outside
+    // any active parallel region, exactly as OutputManagerH5::
+    // checkpoint() itself requires (see its own comment). Without this
+    // batching, checkpoint() was instead called per-thread, the
+    // instant that thread's own assigned trial number happened to be
+    // a multiple of checkpointInterval() -- under dynamic scheduling,
+    // a different thread's own in-flight trial could straddle that
+    // same moment, with no guarantee its own output was fully written
+    // before the checkpoint closed, and no guarantee a lagging thread
+    // would even reach an exact multiple soon (or at all) to roll over
+    // on its own. Batching costs every thread idling until the
+    // batch's own slowest trial finishes, once per checkpoint --
+    // deliberately traded for that correctness guarantee.
+    const unsigned long batchSize = (simControls_.checkpointInterval() != 0) ?
+        simControls_.checkpointInterval() : simControls_.nTrial();
+
+    for (unsigned long batchStart = 0; batchStart < simControls_.nTrial();
+        batchStart += batchSize)
     {
-        try
+        const unsigned long batchEnd =
+            std::min(batchStart + batchSize, simControls_.nTrial());
+
+#ifdef _OPENMP
+        // See runTrial()'s own comment for why each trial is
+        // individually wrapped in a try/catch here, rather than
+        // letting an exception propagate out of the "#pragma omp
+        // parallel for" loop body directly: every trial in this batch
+        // still runs (so one bad trial does not lose every other
+        // thread's own in-flight work), and the first exception
+        // caught is remembered and rethrown once the whole batch's
+        // own parallel region has finished, so run()'s own caller
+        // sees the same kind of failure it always has.
+        std::exception_ptr firstError;
+#pragma omp parallel for schedule(dynamic)
+        for (unsigned long trialNum = batchStart; trialNum < batchEnd; ++trialNum)
         {
-            // Roll over to a new checkpoint every checkpointInterval()
-            // trials, if checkpointing is enabled -- see
-            // OutputManagerH5::checkpoint()'s own comment for what
-            // this actually does and why
-            if (simControls_.checkpointInterval() != 0 && trialNum != 0 &&
-                trialNum % simControls_.checkpointInterval() == 0)
+            try
             {
-                outputManager_->checkpoint();
+                runTrial(trialNum);
             }
+            catch (const std::exception& error)
+            {
+#pragma omp critical
+                {
+                    std::cerr << "slug: trial " << trialNum << " failed: " << error.what() << "\n";
+                    if (!firstError) { firstError = std::current_exception(); }
+                }
+            }
+        }
+        if (firstError) { std::rethrow_exception(firstError); }
+#else
+        for (unsigned long trialNum = batchStart; trialNum < batchEnd; ++trialNum)
+        {
             runTrial(trialNum);
         }
-        catch (const std::exception& error)
-        {
-#pragma omp critical
-            {
-                std::cerr << "slug: trial " << trialNum << " failed: " << error.what() << "\n";
-                if (!firstError) { firstError = std::current_exception(); }
-            }
-        }
-    }
-    if (firstError) { std::rethrow_exception(firstError); }
-#else
-    for (unsigned long trialNum = 0; trialNum < simControls_.nTrial(); ++trialNum)
-    {
-        if (simControls_.checkpointInterval() != 0 && trialNum != 0 &&
-            trialNum % simControls_.checkpointInterval() == 0)
+#endif
+
+        // Every trial in [batchStart, batchEnd) is now fully written
+        // -- see this method's own comment above -- so it is safe to
+        // roll over to a new checkpoint now, unless this was the
+        // final batch (in which case the current checkpoint is simply
+        // left open for the destructor to close/consolidate, exactly
+        // as when checkpointing is disabled entirely)
+        if (simControls_.checkpointInterval() != 0 && batchEnd < simControls_.nTrial())
         {
             outputManager_->checkpoint();
         }
-        runTrial(trialNum);
     }
-#endif
 
     if (simControls_.verbosity() > 0)
     {

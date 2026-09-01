@@ -181,11 +181,9 @@ namespace io
          * @brief Roll over to a new checkpoint
          * @details
          * Only meaningful if SimControls::checkpointInterval() is
-         * non-zero (see SimCluster::run()'s/SimGalaxy::run()'s own
-         * comment for when this is actually called). Closes the
-         * calling thread's own currently-open output file
-         * (closeOutputFile()), increments checkpointNumber_, then
-         * opens a fresh one for the new checkpoint
+         * non-zero. Closes every thread's own currently-open output
+         * file (closeOutputFile()), increments checkpointNumber_, then
+         * opens a fresh one for the new checkpoint for every thread
          * (openNewOutputFiles()) -- so the checkpoint just finished is
          * fully flushed to disk (closing an HDF5 file forces this)
          * before any more trials are written, bounding how much work a
@@ -197,33 +195,28 @@ namespace io
          * no benefit, since nothing needs the checkpoints merged until
          * the whole run is over.
          *
-         * All of close + increment + open happens inside a single
-         * critical section, "checkpointRollover" -- distinct from
-         * openOutputFile()'s/closeOutputFile()'s own "h5ThreadSafety"
-         * one (which this still enters, from inside this one, via each
-         * of those calls -- OpenMP critical sections are not
-         * reentrant, so reusing the same name here would deadlock).
-         * Despite being a different lock, this does not reopen the
-         * concurrent-HDF5-access hazard closeOutputFile()'s/
-         * openOutputFile()'s own header comments warn about: a
-         * *different* thread's own write*() call (e.g. writeCluster())
-         * running concurrently with this method still cannot overlap
-         * any actual HDF5 call this method makes, because every
-         * write*() method, exactly like closeOutputFile()/
-         * openOutputFile(), independently wraps its own HDF5 work in
-         * "h5ThreadSafety" too -- and an OpenMP named critical section
-         * excludes every other entry to that same name globally,
-         * regardless of what other, differently-named critical section
-         * (like this one) either thread might also currently hold.
-         * checkpointRollover's own job is narrower: checkpointNumber_
-         * is the only state this method actually shares across threads
-         * (every open/close below acts on the calling thread's own
-         * handles alone, in ThreadVec slots no other thread's own
-         * write*()/checkpoint() call ever touches), so this only needs
-         * to serialize concurrent checkpoint() calls -- specifically
-         * the shared increment, and this thread's own close-then-
-         * reopen as one coherent unit -- against each other, not
-         * against every other HDF5 call this class makes.
+         * Requires the caller to already have ensured that no thread
+         * is concurrently writing output when this runs -- specifically,
+         * that every trial belonging to the checkpoint being closed has
+         * already been written in full (not, say, one thread partway
+         * through a trial's own later output times/photometry while
+         * another has already moved on and rolled over) -- and that
+         * this itself is called on exactly one thread, from outside any
+         * active parallel region. SimCluster::run()'s/SimGalaxy::run()'s
+         * own comment explains how they guarantee that: trials run in
+         * batches of checkpointInterval() at a time, each batch its own
+         * "#pragma omp parallel for", so the implicit barrier at the end
+         * of that construct -- every thread has finished every trial in
+         * the batch before any of them proceeds past it -- has already
+         * elapsed by the time either of them calls this, and neither is
+         * still inside a parallel region when it does. This method
+         * relies on both of those guarantees rather than re-deriving
+         * them itself (e.g. via its own locking): closeOutputFile()
+         * below runs once per thread via its own fresh "#pragma omp
+         * parallel" spawn, exactly mirroring the destructor's own
+         * identical pattern, which is only correct because nothing else
+         * is concurrently touching any thread's own handles at that
+         * moment.
          */
         void checkpoint() override;
 
@@ -232,57 +225,27 @@ namespace io
         /**
          * @brief Reset this run's output state and open a fresh output file (or set of files)
          * @details
-         * Refactored out of the constructor so checkpoint() can call
-         * it again each time a new checkpoint begins. Computes
-         * outDir_/modelName -- or, if SimControls::checkpointInterval()
-         * is non-zero, outDir_/modelName_chkNNNNN (see
-         * checkpointModelName()), where NNNNN is checkpointNumber_ --
-         * checks that neither it nor its ".h5" sibling already exists,
-         * and (with OpenMP) creates the directory each thread's own
-         * thread_NNNN.h5 will live in, then opens each thread's own
-         * file there (openOutputFile()) -- or, without OpenMP, opens
-         * the single resulting file directly.
+         * Refactored out of the constructor so checkpoint() can call it
+         * again each time a new checkpoint begins -- both callers run
+         * this from outside any active parallel region (see
+         * checkpoint()'s own comment for how it guarantees that), so
+         * this can always spawn its own fresh "#pragma omp parallel"
+         * team the same way the original, pre-checkpointing constructor
+         * always did, with no need to detect or special-case being
+         * called from an already-parallel context.
          *
-         * The existence-check/directory-creation step above, and the
-         * decision of whether to open a file for every thread or just
-         * the calling one, both need to happen exactly once per call,
-         * not once per thread: two threads racing on the existence
-         * check concurrently could either spuriously see each other's
-         * own (perfectly legitimate) fresh directory as a conflict, or
-         * -- for a genuinely stale one -- both attempt to throw from
-         * inside a parallel region at once, which is undefined
-         * behavior (an exception must never propagate out of a
-         * "#pragma omp parallel" block). So, with OpenMP, this method
-         * uses omp_in_parallel() to tell which of its two callers is
-         * responsible for opening every thread's own file: the
-         * constructor's own call happens before any parallel region
-         * exists, so this spawns one itself here (mirroring the
-         * constructor's own original "#pragma omp parallel" block, and
-         * so opening one file per thread); checkpoint()'s own call
-         * instead already runs on exactly one thread, inside
-         * SimCluster::run()'s/SimGalaxy::run()'s own "#pragma omp
-         * parallel for" region -- spawning a *nested* parallel region
-         * there would silently collapse to a team of one whose own
-         * omp_get_thread_num() is always 0, not the outer, real
-         * thread's own (nested parallelism is disabled by default --
-         * see utils::ThreadVec's own constructor comment for the
-         * identical hazard), misdirecting the checkpointing thread's
-         * own rollover into thread_0000.h5 regardless of which real
-         * thread it is -- so this instead just opens that one, real
-         * thread's own file directly.
+         * Computes outDir_/modelName -- or, if
+         * SimControls::checkpointInterval() is non-zero,
+         * outDir_/modelName_chkNNNNN (see checkpointModelName()), where
+         * NNNNN is checkpointNumber_ -- checks that neither it nor its
+         * ".h5" sibling already exists, and (with OpenMP) creates the
+         * directory each thread's own thread_NNNN.h5 will live in, then
+         * opens each thread's own file there (openOutputFile()) -- or,
+         * without OpenMP, opens the single resulting file directly.
          *
          * openOutputFile() itself resets the calling thread's own
-         * handles to -1 before opening its file (not, say, a
-         * standalone reset of every thread's own handles beforehand,
-         * the way the original, pre-checkpointing constructor did):
-         * checkpoint() runs on exactly one thread at a time, while
-         * every other thread may still have its own file legitimately
-         * open under the checkpoint this call is rolling *away* from
-         * -- resetting their handles here too would silently detach
-         * this class's own bookkeeping from their still-open HDF5
-         * handles (a write silently skipped, or a handle never closed
-         * at their own next checkpoint/at the destructor), not just
-         * race with them.
+         * handles to -1 before opening its file, once per thread, from
+         * inside the "#pragma omp parallel" spawned below.
          */
         void openNewOutputFiles();
 
@@ -432,12 +395,15 @@ namespace io
         // Number of times checkpoint() has rolled over to a new
         // checkpoint; 0 until the first call. Only meaningful if
         // SimControls::checkpointInterval() is non-zero -- see
-        // checkpointModelName()/openNewOutputFiles(). Shared across
-        // every thread (unlike the ThreadVec handles below): every
-        // checkpoint() call, from any thread, increments this same
-        // counter, inside its own critical section -- see
-        // checkpoint()'s own comment for why that is safe despite
-        // being shared.
+        // checkpointModelName()/openNewOutputFiles(). Not a ThreadVec
+        // like the handles below, despite (like them) being read/
+        // written from inside a "#pragma omp parallel" region: unlike
+        // those, this is one single, shared value describing the
+        // whole checkpoint set every thread's own file currently
+        // belongs to, not a separate value per thread -- and it is
+        // only ever mutated between parallel regions (see
+        // checkpoint()'s own comment for why), never concurrently, so
+        // it needs no locking of its own either.
         unsigned long checkpointNumber_ = 0;
 
         // Each thread's own copy of every HDF5 handle below is

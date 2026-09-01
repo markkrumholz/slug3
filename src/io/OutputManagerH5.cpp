@@ -549,17 +549,21 @@ io::OutputManagerH5::OutputManagerH5(
     openNewOutputFiles();
 }
 
-// See this method's own header comment for the full design
+// See this method's own header comment for the full design, in
+// particular the guarantees it relies on its caller to have already
+// established before calling this
 void io::OutputManagerH5::checkpoint()
 {
 #ifdef _OPENMP
-#pragma omp critical(checkpointRollover)
-#endif
+#pragma omp parallel
     {
         closeOutputFile();
-        ++checkpointNumber_;
-        openNewOutputFiles();
     }
+#else
+    closeOutputFile();
+#endif
+    ++checkpointNumber_;
+    openNewOutputFiles();
 }
 
 // See this method's own header comment
@@ -588,23 +592,12 @@ void io::OutputManagerH5::openNewOutputFiles()
     }
     std::filesystem::create_directory(threadDir);
 
-    const auto openForThisThread = [this, &threadDir]()
+#pragma omp parallel
     {
         std::ostringstream threadFile;
         threadFile << "thread_" << std::setfill('0') << std::setw(4) <<
             omp_get_thread_num() << ".h5";
         openOutputFile(threadDir / threadFile.str());
-    };
-    if (omp_in_parallel())
-    {
-        openForThisThread();
-    }
-    else
-    {
-#pragma omp parallel
-        {
-            openForThisThread();
-        }
     }
 #else
     const auto finalPath = std::filesystem::path(simControls_.outDir()) / (modelName + ".h5");
