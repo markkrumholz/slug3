@@ -26,7 +26,7 @@ def _run(sim: SimCluster | SimGalaxy, sim_controls: SimControls, progress: bool)
         sim.run()
 
 
-def run_sim(input_deck: str, progress: bool = True) -> slug_reader | None:
+def run_sim(input_deck: str, progress: bool = True, restart: bool = False) -> slug_reader | None:
     """
     Run a slug simulation end to end, exactly as the slug command-line
     executable does.
@@ -39,6 +39,16 @@ def run_sim(input_deck: str, progress: bool = True) -> slug_reader | None:
     progress : bool, default True
         Whether to show a progress bar (see slugpy.progress) tracking
         trials completed while the simulation runs.
+    restart : bool, default False
+        Whether this run should resume a previous, interrupted run of
+        the same model_name/out_dir from its most recent checkpoint,
+        rather than starting a new one from trial 0 (see
+        OutputManagerH5's own docstring for the full detail, and
+        SimCluster.run/SimGalaxy.run's own docstrings for how the
+        starting trial is chosen). Only valid with HDF5 output and a
+        non-zero outputs.checkpoint_interval in input_deck -- passing
+        True with ASCII output raises RuntimeError, mirroring the
+        slug command-line executable's own --restart/-R check.
 
     Returns
     -------
@@ -67,7 +77,10 @@ def run_sim(input_deck: str, progress: bool = True) -> slug_reader | None:
     (see SimCluster.run/SimGalaxy.run's own pybind docstrings), so
     polling this thread is never blocked by it, and the OpenMP worker
     threads run() uses internally never touch Python or the GIL at
-    all.
+    all. Note that when restart is True, trialsCompleted() only counts
+    trials run by this call, not ones a previous, resumed run already
+    completed -- so the progress bar's own denominator (nTrial()) can
+    look larger than what this call alone will actually run.
 
     ASCII output is meant for small, human-readable output rather than
     batch processing, so there is no ASCII counterpart to slug_reader
@@ -79,17 +92,22 @@ def run_sim(input_deck: str, progress: bool = True) -> slug_reader | None:
     """
     sim_controls = SimControls(input_deck)
 
-    if sim_controls.outputMode() == SimControls.OutputMode.h5:
-        output_manager = OutputManagerH5(sim_controls, input_deck)
+    if restart and sim_controls.outputMode() == SimControls.OutputMode.ascii:
+        raise RuntimeError(
+            "run_sim: restart is True, but sim_controls.outputMode() is "
+            "ascii -- restarting is only supported with HDF5 output")
+
+    if sim_controls.outputMode() in (SimControls.OutputMode.h5, SimControls.OutputMode.h5divided):
+        output_manager = OutputManagerH5(sim_controls, input_deck, restart)
     else:
         output_manager = OutputManagerAscii(sim_controls, input_deck)
 
     if sim_controls.simType() == SimControls.SimType.cluster:
-        sim = SimCluster(sim_controls, output_manager)
+        sim = SimCluster(sim_controls, output_manager, restart)
         _run(sim, sim_controls, progress)
         del sim
     elif sim_controls.simType() == SimControls.SimType.galaxy:
-        sim = SimGalaxy(sim_controls, output_manager)
+        sim = SimGalaxy(sim_controls, output_manager, restart)
         _run(sim, sim_controls, progress)
         del sim
 
