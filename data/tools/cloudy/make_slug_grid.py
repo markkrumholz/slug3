@@ -538,11 +538,11 @@ def run_slug_deck(deck_path: Path, slug_exe: Path, timeout: float | None = None)
     -------
     bool
         True if slug exited with status 0 within timeout seconds,
-        False otherwise (including if it crashed, raised, or was
-        killed for exceeding timeout). Either way, slug's own captured
-        stdout/stderr (plus, on a timeout, a trailing note recording
-        that) is written to deck_path with its suffix replaced by
-        ".log".
+        False otherwise (including if it crashed, raised, was killed
+        for exceeding timeout, or never even started). Either way,
+        whatever slug's own captured stdout/stderr this deck got (plus
+        a trailing note on a timeout or start failure) is written to
+        deck_path with its suffix replaced by ".log".
     """
     log_path = deck_path.with_suffix(".log")
     with open(log_path, "wb") as fout:
@@ -555,6 +555,17 @@ def run_slug_deck(deck_path: Path, slug_exe: Path, timeout: float | None = None)
             # it had written before that point is already in fout.
             fout.write(
                 f"\nmake_slug_grid.py: killed after exceeding --timeout of {timeout}s\n".encode())
+            return False
+        except OSError as error:
+            # subprocess.run can still raise (rather than just setting
+            # a nonzero returncode) if slug_exe could never even be
+            # started -- e.g. it was removed/replaced mid-run, or a
+            # transient fork/exec resource failure on a heavily
+            # oversubscribed node. Left uncaught, this would propagate
+            # out of the worker thread and blow up future.result() in
+            # run_slug_decks, losing every other future's own
+            # already-collected result along with it.
+            fout.write(f"\nmake_slug_grid.py: failed to start {slug_exe}: {error}\n".encode())
             return False
     return result.returncode == 0
 
