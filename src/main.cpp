@@ -20,15 +20,30 @@
 #include <toml.hpp>
 #include <utility>
 
-auto main(int argc, char *argv[]) -> int 
+auto main(int argc, char *argv[]) -> int
 {
-    // Check arguments
-    if (argc != 2)
+    // Check arguments: either just the input deck, or an optional
+    // --restart/-R flag ahead of it, requesting that this run resume
+    // a previous, interrupted run from its most recent checkpoint
+    // (see io::OutputManagerH5::restartSetup()'s own comment) rather
+    // than starting over from trial 0
+    if (argc != 2 && argc != 3)
     {
-        std::cerr << "Usage: slug slug.in\n";
+        std::cerr << "Usage: slug [--restart|-R] slug.in\n";
         return 1;
     }
     auto args = std::span(argv, static_cast<size_t>(argc));
+    bool restart = false;
+    if (argc == 3)
+    {
+        const std::string flag = args[1];
+        if (flag == "--restart" || flag == "-R") { restart = true; }
+        else
+        {
+            std::cerr << "Usage: slug [--restart|-R] slug.in\n";
+            return 1;
+        }
+    }
 
     // Parse input file
     toml::table inputDeck;
@@ -38,7 +53,7 @@ auto main(int argc, char *argv[]) -> int
     }
     catch(const std::exception& e)
     {
-        std::cerr << "Failed to parse input file " 
+        std::cerr << "Failed to parse input file "
             << args.back() << ": " << e.what() << '\n';
         return 1;
     }
@@ -47,12 +62,29 @@ auto main(int argc, char *argv[]) -> int
     // flow and physics settings together)
     const io::SimControls simControls(inputDeck);
 
+    // Restarting only makes sense with HDF5 output, since only HDF5
+    // output ever produces the checkpoints a restart resumes from
+    // (see io::OutputManagerAscii::checkpoint()'s own comment).
+    // Checked here, before constructing the output manager or
+    // SimCluster/SimGalaxy, so the illegal combination is always
+    // caught by this one check rather than relying on
+    // io::OutputManagerH5's own constructor-time check (never
+    // reached, since outputMode() == ascii routes to
+    // io::OutputManagerAscii below instead) or on
+    // io::OutputManagerAscii::restartTrialsDone()'s own throw (never
+    // reached either, precisely because of this check).
+    if (restart && simControls.outputMode() == io::SimControls::OutputMode::ascii)
+    {
+        std::cerr << "slug: --restart/-R is not supported with ascii output\n";
+        return 1;
+    }
+
     // Construct the output manager
     std::unique_ptr<io::OutputManager> outputManager;
     if (simControls.outputMode() == io::SimControls::OutputMode::h5 ||
         simControls.outputMode() == io::SimControls::OutputMode::h5divided)
     {
-        outputManager = std::make_unique<io::OutputManagerH5>(simControls, inputDeck);
+        outputManager = std::make_unique<io::OutputManagerH5>(simControls, inputDeck, restart);
     }
     else
     {
@@ -69,12 +101,12 @@ auto main(int argc, char *argv[]) -> int
     {
         if (simControls.simType() == io::SimControls::SimType::cluster)
         {
-            core::SimCluster simCluster(simControls, std::move(outputManager));
+            core::SimCluster simCluster(simControls, std::move(outputManager), restart);
             simCluster.run();
         }
         else if (simControls.simType() == io::SimControls::SimType::galaxy)
         {
-            core::SimGalaxy simGalaxy(simControls, std::move(outputManager));
+            core::SimGalaxy simGalaxy(simControls, std::move(outputManager), restart);
             simGalaxy.run();
         }
     }

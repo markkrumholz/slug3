@@ -199,6 +199,32 @@ namespace io
          */
         virtual void checkpoint(unsigned long trialsCompleted) = 0;
 
+        /**
+         * @brief Return the number of trials already completed by the run being restarted
+         * @return The number of trials the run being restarted had
+         *   already completed, as of the most recent checkpoint it
+         *   left behind -- see OutputManagerH5::restartSetup()'s own
+         *   comment for how that is determined
+         * @details
+         * Only meaningful when this OutputManager was itself
+         * constructed to resume a previous, interrupted run; a caller
+         * that did not request that (see OutputManagerH5's own
+         * constructor) should never call this.
+         *
+         * Only meaningful with HDF5 output, for the same reason
+         * checkpoint() is: restarting requires a checkpoint to restart
+         * from, and only HDF5 output produces checkpoints at all.
+         * OutputManagerAscii's own implementation just throws (see its
+         * own comment): main.cpp already rejects the combination of
+         * ascii output and a restart request before ever constructing
+         * SimCluster/SimGalaxy (and, transitively, before either of
+         * them could call this), so this should never actually be
+         * reached from the CLI -- but, exactly as with checkpoint(),
+         * still needs to fail safely if it is ever actually called by
+         * a caller building these objects directly.
+         */
+        [[nodiscard]] virtual auto restartTrialsDone() const -> unsigned long = 0;
+
     protected:
 
         /**

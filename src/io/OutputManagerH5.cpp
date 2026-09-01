@@ -19,9 +19,12 @@
 #include "io/SlugVersion.hpp"
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <cstddef>
 #include <filesystem>
 #include <iomanip> // NOLINT(misc-include-cleaner) -- used for std::setw/std::setfill in the constructor's own thread_NNNN.h5 filename construction
+#include <iostream>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -96,6 +99,24 @@ static void writeULongAttr(const hid_t loc, const std::string& name,
     H5Awrite(attr, H5T_NATIVE_ULONG, static_cast<const void*>(&value));
     H5Aclose(attr);
     H5Sclose(space);
+}
+
+// Read a scalar unsigned long attribute called name from the HDF5
+// object loc -- the inverse of writeULongAttr(), used by
+// restartSetup() to read back the "trials_completed" attribute
+// closeOutputFile() writes on every checkpoint file
+static auto readULongAttr(const hid_t loc, const std::string& name) -> unsigned long
+{
+    const hid_t attr = H5Aopen(loc, name.c_str(), H5P_DEFAULT);
+    if (attr < 0)
+    {
+        throw std::runtime_error(
+            "OutputManagerH5: unable to open attribute " + name);
+    }
+    unsigned long value = 0;
+    H5Aread(attr, H5T_NATIVE_ULONG, static_cast<void*>(&value));
+    H5Aclose(attr);
+    return value;
 }
 
 // Write a scalar string dataset called name, with the given value,
@@ -562,10 +583,178 @@ static void appendFileContents(const hid_t srcFile, const hid_t dstFile)
 // happens below.
 io::OutputManagerH5::OutputManagerH5(
     const SimControls& simControls,
-    const toml::table& inputDeck) :
+    const toml::table& inputDeck, const bool restart) :
     OutputManager(simControls, inputDeck)
 {
+    // See this constructor's own header comment for why this is
+    // unreachable from the CLI in practice, but still worth guarding
+    // against directly
+    if (restart && simControls_.outputMode() == SimControls::OutputMode::ascii)
+    {
+        throw std::runtime_error(
+            "OutputManagerH5: restart is true, but simControls.outputMode() "
+            "is OutputMode::ascii -- restarting is only supported with "
+            "HDF5 output");
+    }
+    if (restart) { restartSetup(); }
     openNewOutputFiles();
+}
+
+// See this method's own header comment for the full design
+void io::OutputManagerH5::restartSetup()
+{
+    const std::string prefix = simControls_.modelName() + "_chk";
+    std::optional<unsigned long> maxCheckpoint;
+
+    if (std::filesystem::exists(simControls_.outDir()))
+    {
+        for (const auto& entry : std::filesystem::directory_iterator(simControls_.outDir()))
+        {
+            std::string suffix;
+            if (entry.is_regular_file() && entry.path().extension() == ".h5")
+            {
+                const auto stem = entry.path().stem().string();
+                if (!stem.starts_with(prefix)) { continue; }
+                suffix = stem.substr(prefix.size());
+            }
+            else if (entry.is_directory())
+            {
+                const auto dirName = entry.path().filename().string();
+                if (!dirName.starts_with(prefix)) { continue; }
+                suffix = dirName.substr(prefix.size());
+            }
+            else { continue; }
+
+            // suffix must be exactly the 5-digit, zero-padded
+            // checkpoint number checkpointModelName() itself always
+            // produces -- anything else (wrong width, non-digits) is
+            // not actually one of this run's own checkpoints, so is
+            // silently skipped rather than treated as an error
+            if (suffix.size() != 5) { continue; }
+            unsigned long checkpointNum = 0;
+            const auto* const suffixEnd = suffix.data() + suffix.size(); // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic) -- suffix's own end pointer is always in-bounds
+            const auto parseResult = std::from_chars(suffix.data(), suffixEnd, checkpointNum);
+            if (parseResult.ec != std::errc{} || parseResult.ptr != suffixEnd) { continue; }
+
+            if (!maxCheckpoint.has_value() || checkpointNum > *maxCheckpoint)
+            { maxCheckpoint = checkpointNum; }
+        }
+    }
+
+    if (!maxCheckpoint.has_value())
+    {
+        if (simControls_.verbosity() > 0)
+        {
+            std::cout << "slug: restart requested, but no checkpoint found in "
+                << simControls_.outDir() << " -- starting from trial 0\n";
+        }
+        return;
+    }
+
+    checkpointNumber_ = *maxCheckpoint + 1;
+    const std::string name = checkpointModelName(*maxCheckpoint);
+    const auto h5Path = std::filesystem::path(simControls_.outDir()) / (name + ".h5");
+    const auto dirPath = std::filesystem::path(simControls_.outDir()) / name;
+
+    std::string source;
+    if (std::filesystem::is_regular_file(h5Path))
+    {
+        // NOLINTBEGIN(misc-include-cleaner)
+        const hid_t file = H5Fopen(h5Path.string().c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+        if (file < 0)
+        {
+            throw std::runtime_error(
+                "OutputManagerH5::restartSetup: unable to open " + h5Path.string());
+        }
+        try
+        {
+            restartTrialsDone_ = readULongAttr(file, "trials_completed");
+        }
+        catch (const std::exception&)
+        {
+            H5Fclose(file);
+            throw std::runtime_error(
+                "OutputManagerH5::restartSetup: " + h5Path.string() +
+                " has no trials_completed attribute -- it may still have "
+                "been open when the run being restarted stopped; if so, "
+                "delete it (and its own thread_NNNN.h5 files, if it is a "
+                "directory rather than a single file) and restart again");
+        }
+        H5Fclose(file);
+        // NOLINTEND(misc-include-cleaner)
+        source = h5Path.string();
+    }
+    else if (std::filesystem::is_directory(dirPath))
+    {
+        std::vector<std::filesystem::path> threadFiles;
+        for (const auto& entry : std::filesystem::directory_iterator(dirPath))
+        {
+            if (!entry.is_regular_file()) { continue; }
+            const auto& fname = entry.path().filename().string();
+            if (fname.starts_with("thread_") && entry.path().extension() == ".h5")
+            { threadFiles.push_back(entry.path()); }
+        }
+        if (threadFiles.empty())
+        {
+            throw std::runtime_error(
+                "OutputManagerH5::restartSetup: no thread_*.h5 files found in " +
+                dirPath.string());
+        }
+
+        std::optional<unsigned long> commonTrialsCompleted;
+        for (const auto& threadFile : threadFiles)
+        {
+            // NOLINTBEGIN(misc-include-cleaner)
+            const hid_t file = H5Fopen(threadFile.string().c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+            if (file < 0)
+            {
+                throw std::runtime_error(
+                    "OutputManagerH5::restartSetup: unable to open " + threadFile.string());
+            }
+            unsigned long trialsCompleted = 0;
+            try
+            {
+                trialsCompleted = readULongAttr(file, "trials_completed");
+            }
+            catch (const std::exception&)
+            {
+                H5Fclose(file);
+                throw std::runtime_error(
+                    "OutputManagerH5::restartSetup: " + threadFile.string() +
+                    " has no trials_completed attribute -- it may still have "
+                    "been open when the run being restarted stopped; if so, "
+                    "delete " + dirPath.string() + " (its own directory) and "
+                    "restart again");
+            }
+            H5Fclose(file);
+            // NOLINTEND(misc-include-cleaner)
+
+            if (!commonTrialsCompleted.has_value()) { commonTrialsCompleted = trialsCompleted; }
+            else if (trialsCompleted != *commonTrialsCompleted)
+            {
+                throw std::runtime_error(
+                    "OutputManagerH5::restartSetup: thread output files in " +
+                    dirPath.string() + " disagree on trials_completed (" +
+                    std::to_string(*commonTrialsCompleted) + " vs " +
+                    std::to_string(trialsCompleted) + ")");
+            }
+        }
+        restartTrialsDone_ = *commonTrialsCompleted;
+        source = dirPath.string();
+    }
+    else
+    {
+        throw std::runtime_error(
+            "OutputManagerH5::restartSetup: found checkpoint number " +
+            std::to_string(*maxCheckpoint) + ", but neither " + h5Path.string() +
+            " nor " + dirPath.string() + " exists");
+    }
+
+    if (simControls_.verbosity() > 0)
+    {
+        std::cout << "slug: restarting from checkpoint " << source << ", "
+            << restartTrialsDone_ << " trials completed\n";
+    }
 }
 
 // See this method's own header comment for the full design, in
@@ -1119,8 +1308,27 @@ io::OutputManagerH5::~OutputManagerH5()
         {
             for (unsigned long chk = 0; chk <= checkpointNumber_; ++chk)
             {
-                consolidateFiles(std::filesystem::path(simControls_.outDir()) /
-                    checkpointModelName(chk));
+                const auto chkPath = std::filesystem::path(simControls_.outDir()) /
+                    checkpointModelName(chk);
+
+                // A restarted run (see restartSetup()'s own comment)
+                // can inherit checkpoint numbers below its own
+                // checkpointNumber_ that a *previous* run's own
+                // destructor already consolidated (and, per
+                // consolidateFiles()'s own comment, already deleted
+                // the thread_NNNN.h5 directory for) before this run
+                // ever began -- skip those rather than trying to
+                // consolidate a directory that no longer exists. Every
+                // checkpoint number below checkpointNumber_ that was
+                // instead left behind by a run that never reached its
+                // own destructor (e.g. an actual crash -- the
+                // ordinary case restarting exists for) is still
+                // exactly the not-yet-consolidated directory
+                // consolidateFiles() expects, so this only ever skips
+                // checkpoints that a previous run's own destructor has
+                // already fully consolidated.
+                if (!std::filesystem::is_directory(chkPath)) { continue; }
+                consolidateFiles(chkPath);
             }
         }
         else

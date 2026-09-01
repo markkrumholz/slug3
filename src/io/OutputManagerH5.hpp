@@ -78,14 +78,36 @@ namespace io
          * @param simControls Simulation controls (physics settings and
          *   control-flow settings together)
          * @param inputDeck The simulation's toml input deck
+         * @param restart Whether this run is resuming a previous,
+         *   interrupted run from its most recent checkpoint (see
+         *   restartSetup()'s own comment); defaults to false
+         * @throws std::runtime_error if restart is true and
+         *   simControls.outputMode() is OutputMode::ascii --
+         *   restarting is only ever supported with HDF5 output. In
+         *   practice this can only be reached by a caller building an
+         *   OutputManagerH5 directly (e.g. from Python) with an ascii
+         *   SimControls, since the CLI itself (main.cpp) checks for
+         *   this same illegal combination before ever constructing an
+         *   OutputManagerH5, and always builds an OutputManagerAscii
+         *   instead when outputMode() is ascii -- kept here anyway as
+         *   a second line of defense, mirroring the same
+         *   defense-in-depth pattern SimControls::initControlFlow()'s
+         *   own checkpointInterval()/ascii check and
+         *   OutputManagerAscii::checkpoint()'s own throw already use.
          * @details
          * simControls and inputDeck are stored by reference, so the
          * objects passed in must outlive this OutputManagerH5. See
          * this class's own header comment for what "the output
          * file(s)" means when built with OpenMP.
+         *
+         * If restart is true, calls restartSetup() before
+         * openNewOutputFiles(), so checkpointNumber_ (and, via it,
+         * openNewOutputFiles()'s own choice of output path) already
+         * reflects where the run being restarted left off by the time
+         * the first file is actually opened.
          */
         OutputManagerH5(const SimControls& simControls,
-            const toml::table& inputDeck);
+            const toml::table& inputDeck, bool restart = false);
 
         /**
          * @brief Close the output file
@@ -224,7 +246,93 @@ namespace io
          */
         void checkpoint(unsigned long trialsCompleted) override;
 
+        /**
+         * @brief Return the number of trials already completed by the run being restarted
+         * @return restartTrialsDone_, as set by restartSetup() when
+         *   this OutputManagerH5 was constructed with restart = true
+         *   (0 if it was not, or if restartSetup() found no existing
+         *   checkpoint to resume from)
+         * @details
+         * Only meaningful when this OutputManagerH5 was itself
+         * constructed with restart = true -- SimCluster::run()/
+         * SimGalaxy::run() only ever call this when they were
+         * themselves given restart = true, which the CLI (main.cpp)
+         * only ever does alongside the same restart argument this
+         * object's own constructor received, so the two stay in sync
+         * in practice, but nothing here enforces that a caller
+         * constructing these objects directly always pairs them
+         * consistently.
+         */
+        [[nodiscard]] auto restartTrialsDone() const -> unsigned long override
+        { return restartTrialsDone_; }
+
     private:
+
+        /**
+         * @brief Find the most recent checkpoint on disk and resume from it
+         * @details
+         * Only called by the constructor, and only when it was passed
+         * restart = true, before openNewOutputFiles() -- so
+         * checkpointNumber_ already names the correct next checkpoint
+         * by the time openNewOutputFiles() opens the first output
+         * file of this (resumed) run.
+         *
+         * Scans simControls_.outDir() for entries whose name matches
+         * this run's own checkpoint naming pattern (see
+         * checkpointModelName()): either a file, modelName_chkNNNNN.h5
+         * (the shape a checkpoint ends up in only without OpenMP, or
+         * once fully consolidated -- see this class's own header
+         * comment and consolidateFiles()'s own comment; consolidation
+         * only ever happens once, from the destructor, once an entire
+         * run has completed normally, so in practice a checkpoint
+         * being restarted from will essentially always still be in
+         * the unconsolidated, per-thread shape below), or a directory,
+         * modelName_chkNNNNN, holding one thread_NNNN.h5 file per
+         * OpenMP thread that was writing at the time the checkpoint
+         * was closed. Whichever of the two exists for the largest
+         * NNNNN found is the checkpoint being resumed from;
+         * checkpointNumber_ is set to that NNNNN + 1 (the next
+         * checkpoint openNewOutputFiles() should create), and
+         * restartTrialsDone_ to the "trials_completed" attribute
+         * closeOutputFile() wrote on that checkpoint's own file (or,
+         * for the per-thread-directory shape, on every one of its own
+         * thread_NNNN.h5 files -- read from each in turn and checked
+         * to all agree, since closeOutputFile() always wrote them the
+         * same value in the first place (see its own comment) and a
+         * mismatch here can only mean the on-disk checkpoint itself is
+         * corrupt or was tampered with; throws std::runtime_error if
+         * so, or if a directory found this way turns out to hold no
+         * thread_NNNN.h5 files at all).
+         *
+         * If no entry matching the checkpoint naming pattern exists at
+         * all, checkpointNumber_ and restartTrialsDone_ are simply
+         * left at their own default-constructed values of 0 -- so a
+         * restart of a run that never actually got as far as its first
+         * checkpoint (or was never checkpointed to begin with) just
+         * starts over from trial 0, exactly like an ordinary,
+         * non-restart run would.
+         *
+         * If SimControls::verbosity() is non-zero, prints which
+         * checkpoint (if any) this restarted from, and how many trials
+         * it reports already completed, to stdout.
+         *
+         * Caveat: the largest NNNNN found on disk is not necessarily
+         * one that finished closing before the run being restarted
+         * stopped -- checkpoint()/openNewOutputFiles() create a new
+         * checkpoint's own file(s) at the *start* of the batch that
+         * checkpoint will hold, not once it finishes, so a checkpoint
+         * that was still being written when the process was killed
+         * looks, on disk, exactly like one whose files simply don't
+         * exist yet elsewhere -- present, but with no
+         * "trials_completed" attribute written on it (see
+         * closeOutputFile()'s own comment: that attribute is only
+         * ever written right before a file is closed). This method
+         * does not silently fall back to an earlier, complete
+         * checkpoint in that case -- it throws, with a message naming
+         * the incomplete checkpoint and suggesting it be deleted
+         * before restarting again.
+         */
+        void restartSetup();
 
         /**
          * @brief Reset this run's output state and open a fresh output file (or set of files)
@@ -420,6 +528,18 @@ namespace io
         // checkpoint()'s own comment for why), never concurrently, so
         // it needs no locking of its own either.
         unsigned long checkpointNumber_ = 0;
+
+        // Number of trials the run being restarted had already
+        // completed, as of the checkpoint restartSetup() found and
+        // resumed from -- 0 if this OutputManagerH5 was not
+        // constructed with restart = true, or if restartSetup() found
+        // no checkpoint to resume from. Set once, by restartSetup(),
+        // before openNewOutputFiles() is ever called, and never
+        // written again afterward, so (like checkpointNumber_ above)
+        // it needs no locking of its own despite being read from
+        // inside a "#pragma omp parallel" region by restartTrialsDone()'s
+        // own callers.
+        unsigned long restartTrialsDone_ = 0;
 
         // Each thread's own copy of every HDF5 handle below is
         // private to it -- see this class's own header comment on why

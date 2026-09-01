@@ -178,10 +178,14 @@ static auto readULongAttr(const hid_t loc, const char* name) -> unsigned long //
 // (mirroring main.cpp's end-to-end setup), and run, forcing real
 // multi-threaded execution so SimCluster::run's parallel for loop
 // actually spans multiple threads. The output manager type (h5 or
-// ascii) is chosen from the deck's own outputs.output_mode. Returns
-// the resulting SimControls::constFeH(), so callers can confirm the
-// deck actually exercised the code path they intended.
-static auto runEndToEnd(const toml::table& inputDeck) -> bool
+// ascii) is chosen from the deck's own outputs.output_mode (h5 and
+// h5divided both route to OutputManagerH5, exactly as main.cpp itself
+// does). restart is threaded through to both OutputManagerH5's and
+// SimCluster's own constructors -- see testSimClusterRestartFromCheckpoint()
+// for the only caller that passes true. Returns the resulting
+// SimControls::constFeH(), so callers can confirm the deck actually
+// exercised the code path they intended.
+static auto runEndToEnd(const toml::table& inputDeck, const bool restart = false) -> bool
 {
     const io::SimControls simControls(inputDeck);
 
@@ -197,26 +201,37 @@ static auto runEndToEnd(const toml::table& inputDeck) -> bool
 #endif // _OPENMP
 
     std::unique_ptr<io::OutputManager> outputManager;
-    if (simControls.outputMode() == io::SimControls::OutputMode::h5)
+    if (simControls.outputMode() == io::SimControls::OutputMode::h5 ||
+        simControls.outputMode() == io::SimControls::OutputMode::h5divided)
     {
-        outputManager = std::make_unique<io::OutputManagerH5>(simControls, inputDeck);
+        outputManager = std::make_unique<io::OutputManagerH5>(simControls, inputDeck, restart);
     }
     else
     {
         outputManager = std::make_unique<io::OutputManagerAscii>(simControls, inputDeck);
     }
 
+    // Captured before outputManager is moved into simCluster below,
+    // since restartTrialsDone() is only meaningful when restart is
+    // true (see OutputManager::restartTrialsDone()'s own comment) --
+    // used only to compute the expected post-run() trialsCompleted()
+    // below, mirroring exactly what SimCluster::run() itself does
+    // with it internally.
+    const unsigned long startTrial = restart ? outputManager->restartTrialsDone() : 0;
+
     const bool constFeH = simControls.constFeH();
-    core::SimCluster simCluster(simControls, std::move(outputManager));
+    core::SimCluster simCluster(simControls, std::move(outputManager), restart);
     if (simCluster.trialsCompleted() != 0)
     {
         throw std::runtime_error("testSimCluster: trialsCompleted() should start at 0");
     }
     simCluster.run();
-    if (simCluster.trialsCompleted() != simControls.nTrial())
+    const unsigned long expectedTrialsCompleted = simControls.nTrial() - startTrial;
+    if (simCluster.trialsCompleted() != expectedTrialsCompleted)
     {
         throw std::runtime_error(
-            "testSimCluster: trialsCompleted() should equal nTrial() after run() completes");
+            "testSimCluster: trialsCompleted() should equal nTrial() - startTrial "
+            "after run() completes");
     }
     return constFeH;
 }
@@ -895,6 +910,100 @@ static auto testSimClusterCheckpointedH5() -> int
     }
 }
 
+// End-to-end check of restarting from a checkpoint. Phase 1 is an
+// ordinary (non-restart) run that only covers the first
+// firstPhaseTrials trials (a whole number of checkpointInterval-sized
+// batches), leaving behind checkpointH5Path()'s own modelName_chkNNNNN.h5
+// files -- built directly at that path without OpenMP (as this test
+// itself always runs; see readOutputColumns()'s own usage elsewhere in
+// this file), or consolidated there by phase 1's own destructor if
+// built with OpenMP, either way leaving the same, single-file-per-
+// checkpoint shape restartSetup() reads via its own h5Path branch (see
+// its own comment; the alternative, per-thread-directory branch is
+// only ever reached with OpenMP, mid-run, before a checkpoint's own
+// files have been consolidated -- not exercised by this test). Phase 2
+// then restarts: a *new* SimControls (with n_trial back up to the real
+// total nTrial), OutputManagerH5(..., restart = true), and
+// SimCluster(..., restart = true), built and run exactly the way
+// main.cpp itself builds and runs them for a real --restart
+// invocation.
+//
+// Checks (via runEndToEnd()'s own restart-aware assertion, for both
+// phases) that each phase's own SimCluster::trialsCompleted() only
+// counts the trials it actually ran itself, and that pooling every
+// checkpoint's own rows together, across both phases, yields every
+// trial from 0 to nTrial - 1 exactly once with a unique uid -- i.e.
+// that restarting produces the exact same complete, non-overlapping
+// coverage a single, uninterrupted run would.
+static auto testSimClusterRestartFromCheckpoint() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() /
+        "slugTestSimClusterRestartFromCheckpoint";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+    const std::string modelName = "test_sim_cluster_restart";
+
+    constexpr unsigned long checkpointInterval = 5;
+    constexpr unsigned long firstPhaseTrials = 15; // 3 whole batches of checkpointInterval
+    const unsigned long totalCheckpoints =
+        (nTrial + checkpointInterval - 1) / checkpointInterval; // ceiling division
+
+    try
+    {
+        toml::table deck = makeInputDeck(modelName, outDir);
+        deck.at_path("outputs").as_table()->insert(
+            "checkpoint_interval", static_cast<int64_t>(checkpointInterval));
+
+        // Phase 1: run only the first firstPhaseTrials trials
+        deck.insert_or_assign("n_trial", static_cast<int64_t>(firstPhaseTrials));
+        runEndToEnd(deck);
+
+        // Phase 2: restart, with n_trial back up to the real total
+        deck.insert_or_assign("n_trial", static_cast<int64_t>(nTrial));
+        runEndToEnd(deck, /* restart = */ true);
+
+        // Pool every checkpoint's own rows together and check
+        // completeness/uniqueness across both phases combined
+        TrialMap rowsByTrial;
+        for (unsigned long chk = 0; chk < totalCheckpoints; ++chk)
+        {
+            const auto h5Path = checkpointH5Path(outDir, modelName, chk);
+            if (!std::filesystem::exists(h5Path))
+            {
+                std::cerr << "testSimCluster: restart: missing "
+                    << h5Path.string() << "\n";
+                return 1;
+            }
+            const auto cols = readOutputColumns(h5Path);
+            for (std::size_t i = 0; i < cols.trial_.size(); ++i)
+            { rowsByTrial[cols.trial_.at(i)].push_back(cols.uid_.at(i)); }
+        }
+
+        // No checkpoint beyond totalCheckpoints should have been created
+        const auto extraPath = checkpointH5Path(outDir, modelName, totalCheckpoints);
+        if (std::filesystem::exists(extraPath))
+        {
+            std::cerr << "testSimCluster: restart: unexpected extra "
+                "checkpoint file " << extraPath.string() << "\n";
+            return 1;
+        }
+
+        if (rowsByTrial.size() != nTrial)
+        {
+            std::cerr << "testSimCluster: restart: expected " << nTrial
+                << " distinct trial numbers across every checkpoint, got "
+                << rowsByTrial.size() << "\n";
+            return 1;
+        }
+        return checkTrialsAndUids(rowsByTrial);
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimCluster: restart test failed: " << error.what() << "\n";
+        return 1;
+    }
+}
+
 auto testSimCluster() -> int
 {
     const auto outDir = std::filesystem::temp_directory_path() / "slugTestSimCluster";
@@ -929,6 +1038,7 @@ auto testSimCluster() -> int
     result += testSimClusterPhotH5();
     result += testSimClusterPhotAscii();
     result += testSimClusterCheckpointedH5();
+    result += testSimClusterRestartFromCheckpoint();
 
     return result;
 }

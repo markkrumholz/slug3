@@ -1231,3 +1231,12 @@ void io::OutputManagerAscii::checkpoint(unsigned long /*trialsCompleted*/)
         "OutputManagerAscii::checkpoint: checkpointing is not supported "
         "with ascii output");
 }
+
+// See this method's own header comment: restarting is only ever
+// supported with HDF5 output, so this always throws.
+auto io::OutputManagerAscii::restartTrialsDone() const -> unsigned long
+{
+    throw std::runtime_error(
+        "OutputManagerAscii::restartTrialsDone: restarting is not "
+        "supported with ascii output");
+}

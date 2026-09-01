@@ -39,9 +39,10 @@ static auto toRoundTripString(const double value) -> std::string
 }
 
 core::SimCluster::SimCluster(const io::SimControls& simControls,
-    std::unique_ptr<io::OutputManager> outputManager) :
+    std::unique_ptr<io::OutputManager> outputManager, const bool restart) :
     simControls_(simControls),
-    outputManager_(std::move(outputManager))
+    outputManager_(std::move(outputManager)),
+    restart_(restart)
 {
 }
 
@@ -98,10 +99,21 @@ void core::SimCluster::runTrial(const unsigned long trialNum)
 
 void core::SimCluster::run()
 {
+    // If this run is resuming a previous, interrupted run, start from
+    // the trial number it had already reached rather than from trial
+    // 0 -- see the constructor's own comment. outputManager_'s own
+    // restartTrialsDone() is 0 if restart_ is true but no checkpoint
+    // was actually found to resume from (see
+    // OutputManagerH5::restartSetup()'s own comment), so this still
+    // behaves like an ordinary run from trial 0 in that case.
+    const unsigned long startTrial = restart_ ? outputManager_->restartTrialsDone() : 0;
+
     if (simControls_.verbosity() > 0)
     {
         std::cout << "slug: cluster simulation starting with "
-            << simControls_.nTrial() << " trials\n";
+            << simControls_.nTrial() << " trials";
+        if (startTrial != 0) { std::cout << " (resuming from trial " << startTrial << ")"; }
+        std::cout << "\n";
     }
 
     // Trials run in batches of checkpointInterval() at a time (or, if
@@ -127,7 +139,7 @@ void core::SimCluster::run()
     const unsigned long batchSize = (simControls_.checkpointInterval() != 0) ?
         simControls_.checkpointInterval() : simControls_.nTrial();
 
-    for (unsigned long batchStart = 0; batchStart < simControls_.nTrial();
+    for (unsigned long batchStart = startTrial; batchStart < simControls_.nTrial();
         batchStart += batchSize)
     {
         const unsigned long batchEnd =

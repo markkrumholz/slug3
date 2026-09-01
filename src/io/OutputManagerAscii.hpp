@@ -165,6 +165,18 @@ namespace io
          */
         void checkpoint(unsigned long trialsCompleted) override;
 
+        /**
+         * @brief Not supported for ascii output
+         * @throws std::runtime_error always
+         * @details
+         * Restarting resumes from a checkpoint, and ascii output never
+         * produces checkpoints in the first place (see checkpoint()'s
+         * own comment) -- see OutputManager::restartTrialsDone()'s own
+         * comment for why this still needs to exist (and fail loudly)
+         * rather than simply not being overridden here at all.
+         */
+        [[nodiscard]] auto restartTrialsDone() const -> unsigned long override;
+
     private:
 
         /**

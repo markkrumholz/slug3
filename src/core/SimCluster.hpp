@@ -32,12 +32,22 @@ namespace core
          * @param outputManager Output manager to which simulation
          *   results should be written; ownership is transferred to
          *   this SimCluster
+         * @param restart Whether this run is resuming a previous,
+         *   interrupted run from its most recent checkpoint; defaults
+         *   to false. If true, run() asks outputManager for the
+         *   number of trials the run being restarted had already
+         *   completed (OutputManager::restartTrialsDone()) and starts
+         *   from there instead of from trial 0 -- see run()'s own
+         *   comment. outputManager must itself have already been
+         *   constructed with its own equivalent restart flag set (see
+         *   OutputManagerH5's own constructor); nothing here enforces
+         *   that the two agree.
          * @details
          * simControls is stored by reference, so the object passed in
          * must outlive this SimCluster.
          */
         SimCluster(const io::SimControls& simControls,
-            std::unique_ptr<io::OutputManager> outputManager);
+            std::unique_ptr<io::OutputManager> outputManager, bool restart = false);
 
         // Disallow copying and moving: this object owns the output
         // manager exclusively, so duplicating or relocating it makes
@@ -90,6 +100,7 @@ namespace core
         const io::SimControls& simControls_; /**< Simulation controls (physics and control-flow settings) */
         std::unique_ptr<io::OutputManager> outputManager_; /**< Output manager */
         std::atomic<unsigned long> trialsCompleted_{0}; /**< Number of trials completed so far (see trialsCompleted()) */
+        bool restart_ = false; /**< Whether this run is resuming a previous, interrupted run (see the constructor's own comment) */
     };
 
 } // namespace core
