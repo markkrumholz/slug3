@@ -288,7 +288,7 @@ def test_never_more_than_one_file_open_at_once(tmp_path: Path, monkeypatch: pyte
     open_count = 0
     max_open_count = 0
 
-    def _tracking_init(self, *args, **kwargs):
+    def _tracking_init(self: h5py.File, *args: object, **kwargs: object) -> None:
         nonlocal open_count, max_open_count
         real_file_init(self, *args, **kwargs)
         if args and isinstance(args[0], (str, Path)):
@@ -297,7 +297,7 @@ def test_never_more_than_one_file_open_at_once(tmp_path: Path, monkeypatch: pyte
 
     real_file_close = h5py.File.close
 
-    def _tracking_close(self, *args, **kwargs):
+    def _tracking_close(self: h5py.File, *args: object, **kwargs: object) -> None:
         nonlocal open_count
         open_count -= 1
         real_file_close(self, *args, **kwargs)

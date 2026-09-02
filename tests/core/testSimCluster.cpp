@@ -1070,10 +1070,21 @@ static auto testSimClusterRestartFromCheckpoint() -> int
 // call -- long enough after run() starts that its own SigtermGuard has
 // certainly already installed its handler (that happens in
 // microseconds), but short relative to localNTrial's own total
-// runtime (this deck's own per-trial cost is on the order of 100+ ms,
-// so localNTrial trials take at least a couple of seconds run to
-// completion) that the run is nowhere near finished when SIGTERM
-// actually arrives.
+// runtime that the run is nowhere near finished when SIGTERM actually
+// arrives. localNTrial is deliberately generous here (comfortably
+// more than sigtermDelay's own worth of trials even in the fastest
+// plausible case -- this deck's own per-trial cost is on the order of
+// 100+ ms, but run() only processes checkpointInterval trials at a
+// time in parallel across nThreads threads, with a real, if small,
+// checkpoint()-driven file close/reopen between each such batch, so
+// the margin between total runtime and sigtermDelay is smaller than a
+// naive localNTrial / nThreads * per-trial-cost estimate would
+// suggest): a tighter margin risks exactly the flakiness this test
+// exists to avoid, either the run finishing before SIGTERM ever
+// arrives (failing the completed < localNTrial check below on a fast
+// or lightly-loaded machine) or SIGTERM landing so early so little
+// progress has been made that this stops meaningfully exercising the
+// mid-run case at all.
 //
 // Checks that: run() returns SimCluster::sigtermExitCode rather than
 // 0; trialsCompleted() is strictly between 0 and localNTrial (some
@@ -1102,7 +1113,7 @@ static auto testSimClusterSigtermGracefulExit() -> int
     const std::string modelName = "test_sim_cluster_sigterm";
 
     constexpr unsigned long checkpointInterval = 3;
-    constexpr unsigned long localNTrial = 15;
+    constexpr unsigned long localNTrial = 40;
     constexpr auto sigtermDelay = std::chrono::milliseconds(400);
 
     try
