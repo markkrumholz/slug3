@@ -39,9 +39,16 @@ namespace core
         sigtermReceived = 1;
     }
 
-    // See sigtermReceived's own comment for why this is a "#pragma omp
-    // atomic read" rather than a plain read of a volatile
-    // sig_atomic_t, despite that alone already being signal-handler-safe
+    /**
+     * @brief Check whether a SIGTERM has been caught since the currently-installed SigtermGuard was constructed
+     * @return true if signalHandler() has run since the currently-
+     *   installed SigtermGuard reset sigtermReceived to 0, false
+     *   otherwise
+     * @details
+     * See sigtermReceived's own comment for why this is a "#pragma omp
+     * atomic read" rather than a plain read of a volatile
+     * sig_atomic_t, despite that alone already being signal-handler-safe
+     */
     inline auto sigtermWasReceived() -> bool
     {
         std::sig_atomic_t value = 0;
@@ -110,6 +117,9 @@ namespace core
             }
         }
 
+        /**
+         * @brief Restore whatever SIGTERM disposition was in place before construction
+         */
         ~SigtermGuard()
         {
             // Best-effort restore -- this runs from a destructor, so
