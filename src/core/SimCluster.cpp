@@ -9,9 +9,9 @@
 #include "SimCluster.hpp"
 #include "../io/OutputManager.hpp"
 #include "../io/SimControls.hpp"
+#include "../utils/SigtermGuard.hpp"
 #include "../utils/UniqueIDManager.hpp"
 #include "Cluster.hpp"
-#include "SigtermGuard.hpp"
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -62,7 +62,7 @@ void core::SimCluster::runTrial(const unsigned long trialNum)
     // to trial number, specifically because run() never treats
     // trialsCompleted_ as if it meant "trials [0, trialsCompleted_)
     // are done" -- see run()'s own comment for why.
-    if (sigtermWasReceived()) { return; }
+    if (utils::sigtermWasReceived()) { return; }
 
     if (simControls_.verbosity() > 1)
     {
@@ -118,7 +118,7 @@ auto core::SimCluster::run() -> int
     // See this method's own header comment: covers every exit path
     // below (normal completion, the early SIGTERM return, or firstError
     // being rethrown) uniformly, via its own destructor
-    const SigtermGuard sigtermGuard("SimCluster::run: unable to install a SIGTERM handler");
+    const utils::SigtermGuard sigtermGuard("SimCluster::run: unable to install a SIGTERM handler");
 
     // Trial *numbering* and trial *counting* are deliberately tracked
     // separately here, and must not be conflated -- see
@@ -275,7 +275,7 @@ auto core::SimCluster::run() -> int
         // count of its own (see notifyEarlyTermination()'s own
         // comment) -- and return sigtermExitCode instead of continuing
         // on to any later, not-yet-started batches.
-        if (sigtermWasReceived())
+        if (utils::sigtermWasReceived())
         {
             const auto cumulativeCompleted =
                 priorTrialsCompleted + trialsCompleted_.load(std::memory_order_relaxed);

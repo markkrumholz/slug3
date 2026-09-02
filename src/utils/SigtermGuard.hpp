@@ -13,7 +13,7 @@
 #include <stdexcept>
 #include <string>
 
-namespace core
+namespace utils
 {
 
     // Set (only) by signalHandler() below; read by sigtermWasReceived().
@@ -138,6 +138,6 @@ namespace core
         Handler previousHandler_ = nullptr;
     };
 
-} // namespace core
+} // namespace utils
 
 #endif // SIGTERMGUARD_HPP

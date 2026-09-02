@@ -9,8 +9,8 @@
 #include "SimGalaxy.hpp"
 #include "../io/OutputManager.hpp"
 #include "../io/SimControls.hpp"
+#include "../utils/SigtermGuard.hpp"
 #include "Galaxy.hpp"
-#include "SigtermGuard.hpp"
 #include <algorithm>
 #include <atomic>
 #include <exception> // NOLINT(misc-include-cleaner) -- correct header for std::exception_ptr/current_exception/rethrow_exception; clang-tidy-18's own header-mapping data doesn't yet attribute these symbols to it
@@ -29,7 +29,7 @@ core::SimGalaxy::SimGalaxy(const io::SimControls& simControls,
 void core::SimGalaxy::runTrial(const unsigned long trialNum)
 {
     // See SimCluster::runTrial()'s own identical comment
-    if (sigtermWasReceived()) { return; }
+    if (utils::sigtermWasReceived()) { return; }
 
     if (simControls_.verbosity() > 1)
     {
@@ -69,7 +69,7 @@ void core::SimGalaxy::runTrial(const unsigned long trialNum)
 auto core::SimGalaxy::run() -> int
 {
     // See SimCluster::run()'s own identical comment
-    const SigtermGuard sigtermGuard("SimGalaxy::run: unable to install a SIGTERM handler");
+    const utils::SigtermGuard sigtermGuard("SimGalaxy::run: unable to install a SIGTERM handler");
 
     // See SimCluster::run()'s own identical comment for the full
     // rationale behind tracking numbering and counting separately
@@ -172,7 +172,7 @@ auto core::SimGalaxy::run() -> int
 #endif
 
         // See SimCluster::run()'s own identical comment
-        if (sigtermWasReceived())
+        if (utils::sigtermWasReceived())
         {
             const auto cumulativeCompleted =
                 priorTrialsCompleted + trialsCompleted_.load(std::memory_order_relaxed);
