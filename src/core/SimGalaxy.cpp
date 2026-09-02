@@ -10,76 +10,13 @@
 #include "../io/OutputManager.hpp"
 #include "../io/SimControls.hpp"
 #include "Galaxy.hpp"
+#include "SigtermGuard.hpp"
 #include <algorithm>
 #include <atomic>
-#include <csignal>
 #include <exception> // NOLINT(misc-include-cleaner) -- correct header for std::exception_ptr/current_exception/rethrow_exception; clang-tidy-18's own header-mapping data doesn't yet attribute these symbols to it
 #include <iostream>
 #include <memory>
-#include <stdexcept>
 #include <utility>
-
-namespace
-{
-    // See SimCluster.cpp's own identical anonymous namespace for the
-    // full rationale behind every piece of this -- duplicated here
-    // (rather than shared) since SimCluster and SimGalaxy are
-    // otherwise independent, never-both-running-at-once drivers, each
-    // with its own run()/runTrial() to guard.
-    volatile std::sig_atomic_t sigtermReceived = 0; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables) -- a signal handler can only communicate through global/static state; see this variable's own comment
-
-    void signalHandler(int /*signum*/)
-    {
-        sigtermReceived = 1;
-    }
-
-    auto sigtermWasReceived() -> bool
-    {
-        std::sig_atomic_t value = 0;
-#ifdef _OPENMP
-#pragma omp atomic read
-#endif
-        value = sigtermReceived;
-        return value != 0;
-    }
-
-    class SigtermGuard
-    {
-    public:
-        SigtermGuard()
-        {
-            // See SimCluster.cpp's own identical constructor for why
-            // the flag is reset before the handler is installed, not
-            // after (and so deliberately not via a member initializer
-            // for previousHandler_, despite what clang-tidy's
-            // cppcoreguidelines-prefer-member-initializer suggests)
-            sigtermReceived = 0;
-            previousHandler_ = std::signal(SIGTERM, signalHandler); // NOLINT(cppcoreguidelines-prefer-member-initializer)
-            if (previousHandler_ == SIG_ERR)
-            {
-                throw std::runtime_error(
-                    "SimGalaxy::run: unable to install a SIGTERM handler");
-            }
-        }
-
-        ~SigtermGuard()
-        {
-            // Best-effort restore -- this runs from a destructor, so
-            // it must not throw, and there is nothing more useful to
-            // do with a failure here anyway
-            (void)std::signal(SIGTERM, previousHandler_); // NOLINT(cert-err33-c)
-        }
-
-        SigtermGuard(const SigtermGuard&) = delete;
-        auto operator=(const SigtermGuard&) -> SigtermGuard& = delete;
-        SigtermGuard(SigtermGuard&&) = delete;
-        auto operator=(SigtermGuard&&) -> SigtermGuard& = delete;
-
-    private:
-        using Handler = void (*)(int);
-        Handler previousHandler_ = nullptr;
-    };
-} // namespace
 
 core::SimGalaxy::SimGalaxy(const io::SimControls& simControls,
     std::unique_ptr<io::OutputManager> outputManager, const bool restart) :
@@ -132,7 +69,7 @@ void core::SimGalaxy::runTrial(const unsigned long trialNum)
 auto core::SimGalaxy::run() -> int
 {
     // See SimCluster::run()'s own identical comment
-    const SigtermGuard sigtermGuard;
+    const SigtermGuard sigtermGuard("SimGalaxy::run: unable to install a SIGTERM handler");
 
     // See SimCluster::run()'s own identical comment for the full
     // rationale behind tracking numbering and counting separately
