@@ -7,6 +7,7 @@ Implements slug_reader, a lazy reader for slug HDF5 output files.
 """
 
 import concurrent.futures
+import re
 import shutil
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -116,29 +117,204 @@ def _find_matching_cloudy_row(group: slug_group_reader | None, id_key: str, id_v
     return int(matches[0]) if len(matches) > 0 else None
 
 
-class slug_reader:
+def _thread_files_in_dir(dir_path: Path) -> list[str]:
     """
-    A lazy reader for a slug HDF5 output file. Metadata is read on
-    construction; the output data itself (cluster properties, spectra,
-    photometry, ...) is only read from disk when a caller actually
-    asks for it.
+    Sorted thread_NNNN.h5 files directly inside dir_path -- one
+    OpenMP thread's own output file, in a checkpoint (or, without
+    checkpointing, the whole run's own) directory that OutputManagerH5
+    has not consolidated -- mirrors OutputManagerH5::consolidateFiles's
+    own C++ file-matching rule (name starts with "thread_", suffix
+    ".h5"), and its own sort-by-name (equivalent to numeric order,
+    since the thread number is zero-padded to a fixed width).
+
+    Raises
+    ------
+    FileNotFoundError
+        If dir_path holds no matching files.
+    """
+    files = sorted(
+        p for p in dir_path.iterdir()
+        if p.is_file() and p.name.startswith("thread_") and p.suffix == ".h5")
+    if not files:
+        raise FileNotFoundError(f"no thread_*.h5 files found in {dir_path}")
+    return [str(p) for p in files]
+
+
+def _checkpoint_files(prefix: Path, checkpoint_num: int) -> list[str]:
+    """
+    The file(s) belonging to one checkpoint of prefix (prefix.parent /
+    (prefix.name + "_chkNNNNN")).
+
+    Returns
+    -------
+    list of str
+        [prefix.parent / (name + ".h5")] if that consolidated file
+        exists, else every thread_NNNN.h5 file in prefix.parent /
+        name -- mirrors OutputManagerH5::restartSetup()'s own
+        precedence between the two shapes a checkpoint can be in (see
+        its own comment).
+
+    Raises
+    ------
+    FileNotFoundError
+        If neither shape exists.
+    """
+    name = f"{prefix.name}_chk{checkpoint_num:05d}"
+    h5_path = prefix.parent / f"{name}.h5"
+    if h5_path.is_file():
+        return [str(h5_path)]
+    dir_path = prefix.parent / name
+    if dir_path.is_dir():
+        return _thread_files_in_dir(dir_path)
+    raise FileNotFoundError(
+        f"checkpoint {checkpoint_num} of {prefix} found, but neither "
+        f"{h5_path} nor {dir_path} exists")
+
+
+def _find_output_files(filename: str) -> tuple[list[str], list[str]]:
+    """
+    Resolve filename to the underlying HDF5 file(s) making up one
+    slug_reader's own output.
 
     Parameters
     ----------
     filename : str
-        Path to the slug HDF5 output file to open.
+        Either a path to a single HDF5 file (if it ends in ".h5" or
+        ".hdf5"), or a slug run's own model name -- really, outDir/
+        model_name together, e.g. the same string SimControls.outDir()
+        + "/" + SimControls.modelName() would give, with no extension
+        -- in which case this searches outDir for every checkpoint
+        this run left behind: either model_name_chkNNNNN.h5 (a
+        consolidated checkpoint) or model_name_chkNNNNN/ (holding that
+        checkpoint's own, not-yet-consolidated thread_NNNN.h5 files) --
+        see OutputManagerH5::restartSetup()'s own comment, which this
+        mirrors. If no checkpoints are found at all, falls back to a
+        plain, non-checkpointed run's own output instead: model_name.h5
+        if it exists, else model_name/ (holding that run's own
+        thread_NNNN.h5 files, if it used h5divided output without
+        checkpointing).
+
+    Returns
+    -------
+    (all_files, last_checkpoint_files) : tuple of list of str
+        all_files : every underlying HDF5 file, in ascending
+        checkpoint order (or, within one checkpoint, in
+        _checkpoint_files()'s own order) -- pass to the group readers
+        for data aggregation; row order across files is not meaningful
+        (see OutputManagerH5::consolidateFiles's own comment), so this
+        order is only for determinism, not correctness.
+        last_checkpoint_files : just the file(s) belonging to the
+        most recent (highest-numbered) checkpoint -- the same as
+        all_files if there is no checkpointing at all -- the files to
+        read trials_completed/restart_uid from (see slug_reader's own
+        docstring for why those, unlike slug-hash/date/time/rng_state,
+        are not safe to read from just any one file).
+
+    Raises
+    ------
+    FileNotFoundError
+        If filename ends in ".h5"/".hdf5" but does not exist, or if it
+        names a model with no matching output found at all.
+    """
+    # Resolved to an absolute path immediately, before anything below
+    # ever gets stored: every path this returns is later reopened on
+    # demand rather than held open (see slug_reader.__init__'s own
+    # comment), so a relative path captured here would silently break
+    # once the caller's own working directory ever changed, even
+    # though the file itself never moved
+    if filename.endswith(".h5") or filename.endswith(".hdf5"):
+        path = Path(filename).resolve()
+        if not path.is_file():
+            raise FileNotFoundError(filename)
+        return [str(path)], [str(path)]
+
+    prefix = Path(filename).resolve()
+    chk_re = re.compile(re.escape(prefix.name) + r"_chk(\d{5})$")
+
+    checkpoints: dict[int, list[str]] = {}
+    if prefix.parent.is_dir():
+        for entry in prefix.parent.iterdir():
+            if entry.is_file() and entry.suffix == ".h5":
+                candidate = entry.stem
+            elif entry.is_dir():
+                candidate = entry.name
+            else:
+                continue
+            match = chk_re.fullmatch(candidate)
+            if match is None:
+                continue
+            checkpoint_num = int(match.group(1))
+            checkpoints[checkpoint_num] = _checkpoint_files(prefix, checkpoint_num)
+
+    if checkpoints:
+        all_files: list[str] = []
+        for checkpoint_num in sorted(checkpoints):
+            all_files.extend(checkpoints[checkpoint_num])
+        return all_files, checkpoints[max(checkpoints)]
+
+    plain_h5 = prefix.parent / f"{prefix.name}.h5"
+    if plain_h5.is_file():
+        return [str(plain_h5)], [str(plain_h5)]
+    if prefix.is_dir():
+        files = _thread_files_in_dir(prefix)
+        return files, files
+
+    raise FileNotFoundError(
+        f"no slug output found matching model name {filename!r} -- looked "
+        f"for {plain_h5}, {prefix} as a thread directory, and "
+        f"{prefix.name}_chkNNNNN.h5/{prefix.name}_chkNNNNN/ checkpoints in "
+        f"{prefix.parent}")
+
+
+class slug_reader:
+    """
+    A lazy reader for slug HDF5 output, spread across one file or many
+    (checkpointed and/or h5divided output -- see filename below).
+    Metadata is read on construction; the output data itself (cluster
+    properties, spectra, photometry, ...) is only read from disk when
+    a caller actually asks for it, and only ever one underlying file
+    at a time -- see slug_group_reader's own docstring.
+
+    Parameters
+    ----------
+    filename : str
+        Either a path to a single slug HDF5 output file (if it ends in
+        ".h5" or ".hdf5"), or a run's own model name (really, outDir/
+        model_name together, with no extension) to search for and
+        aggregate every checkpoint (and, within each, every OpenMP
+        thread's own file, if not yet consolidated) that run left
+        behind -- see _find_output_files's own docstring for the exact
+        search rule, which mirrors OutputManagerH5::restartSetup()'s
+        own.
 
     Attributes
     ----------
     slug_hash : str
-        Git commit hash of the slug build that produced this file.
+        Git commit hash of the slug build that produced this output.
     date : str
-        Date the run that produced this file started, as YYYY-MM-DD.
+        Date the run that produced this output started, as YYYY-MM-DD.
     time : str
-        Time of day the run that produced this file started.
+        Time of day the run that produced this output started.
     rng_state : str
         Serialized state of the random number generator at the start
         of the run, one space-separated pcg64 state per thread.
+    trials_completed : int or None
+        Number of trials the run that produced this output had
+        completed as of its own most recent checkpoint (see
+        OutputManagerH5::closeOutputFile()'s own "trials_completed"
+        attribute) -- unlike slug_hash/date/time/rng_state above, this
+        (and restart_uid below) is read from the *last* checkpoint
+        specifically, not just any one file, since -- unlike those --
+        it differs from one checkpoint to the next. None if this
+        output predates checkpointing (no such attribute at all), or
+        if its own most recent checkpoint was still open (being
+        written to) when this was read, rather than already closed
+        (read-only).
+    restart_uid : int or None
+        The utils::uniqueID() value a restart of this run would resume
+        from, as of the same checkpoint trials_completed was read from
+        (see OutputManagerH5::closeOutputFile()'s own "restart_uid"
+        attribute) -- same None cases as trials_completed (read-only).
     input_deck : tomlkit.TOMLDocument
         The input deck used to produce this file, read from the
         input_deck group's toml dataset and parsed on first access
@@ -201,15 +377,40 @@ class slug_reader:
     """
 
     def __init__(self, filename: str) -> None:
-        self._file: h5py.File = h5py.File(filename, "r")
+        # self._file is always a list of underlying file paths, even
+        # for the ordinary, single-file case -- never a list of open
+        # handles: every read below (and in slug_group_reader/
+        # slug_phot_reader/slug_spectra_reader, which share this same
+        # list) opens whichever file(s) it actually needs just for the
+        # duration of that one read, so this reader never holds more
+        # than one file open at a time, no matter how many files it
+        # spans (a checkpointed and/or h5divided run can easily span
+        # thousands).
+        self._file, last_checkpoint_files = _find_output_files(filename)
 
-        self.slug_hash: str = self._file.attrs["slug-hash"]
-        self.date: str = self._file.attrs["date"]
-        self.time: str = self._file.attrs["time"]
-        self.rng_state: str = self._file.attrs["rng_state"]
+        with h5py.File(self._file[0], "r") as f:
+            self.slug_hash: str = f.attrs["slug-hash"]
+            self.date: str = f.attrs["date"]
+            self.time: str = f.attrs["time"]
+            self.rng_state: str = f.attrs["rng_state"]
+            self._groups: dict[str, AnyGroupReader | None] = {
+                name: None for name in f if isinstance(f[name], h5py.Group)}
 
-        self._groups: dict[str, AnyGroupReader | None] = {name: None for name in self._file
-            if isinstance(self._file[name], h5py.Group)}
+        # trials_completed/restart_uid differ from one checkpoint to
+        # the next (see this class's own docstring), so -- unlike the
+        # four attributes above -- these come from the *last*
+        # checkpoint specifically, not just self._file[0]; .attrs.get()
+        # (not simple indexing) so a still-open last checkpoint (no
+        # such attribute written yet -- see
+        # OutputManagerH5::closeOutputFile()'s own comment) reads back
+        # as None rather than raising
+        with h5py.File(last_checkpoint_files[0], "r") as f:
+            raw_trials_completed = f.attrs.get("trials_completed")
+            raw_restart_uid = f.attrs.get("restart_uid")
+            self.trials_completed: int | None = (
+                None if raw_trials_completed is None else int(raw_trials_completed))
+            self.restart_uid: int | None = (
+                None if raw_restart_uid is None else int(raw_restart_uid))
 
         self._input_deck: tomlkit.TOMLDocument | None = None
         self._controls: SimControls | None = None
@@ -218,12 +419,14 @@ class slug_reader:
     def input_deck(self) -> tomlkit.TOMLDocument:
         """
         tomlkit.TOMLDocument : the input deck used to produce this
-        file, parsed from the input_deck group's toml dataset the
-        first time this property is accessed, and cached thereafter.
+        output, parsed from the first file's own input_deck group's
+        toml dataset the first time this property is accessed, and
+        cached thereafter.
         """
         if self._input_deck is not None:
             return self._input_deck
-        toml_str = self._file["input_deck"]["toml"][()]
+        with h5py.File(self._file[0], "r") as f:
+            toml_str = f["input_deck"]["toml"][()]
         self._input_deck = tomlkit.parse(toml_str)
         return self._input_deck
 
@@ -663,7 +866,12 @@ class slug_reader:
             number nor a PDF file path.
         RuntimeError
             If the cloudy executable cannot be located (see
-            find_cloudy_executable).
+            find_cloudy_executable), or if this reader spans more than
+            one underlying HDF5 file (checkpointed and/or h5divided
+            output -- see this class's own docstring): there is no
+            single file to write new cluster_cloudy/galaxy_cloudy rows
+            into in that case, so this refuses up front rather than
+            guessing one.
 
         Notes
         -----
@@ -691,14 +899,12 @@ class slug_reader:
         with emergent luminosity above 1e10 erg/s -- see
         read_cloudy_linearr) are appended as new rows to this file's
         own cluster_cloudy (spec_type "cluster") or galaxy_cloudy
-        (spec_type "galaxy") group, creating it on first use. Writing
-        this requires briefly closing and reopening the HDF5 file this
-        reader is attached to (any of this reader's own lazily-cached
-        group readers -- clusters, cluster_spectra, ... -- are
-        invalidated and rebuilt against the reopened file on their
-        next access); this only happens if at least one run in this
-        call succeeded, so a call where every run fails leaves the
-        file untouched.
+        (spec_type "galaxy") group, creating it on first use (this
+        reader's own self._groups is refreshed afterward, so a newly-
+        created group is discoverable through cluster_cloudy/
+        galaxy_cloudy right away); this only happens if at least one
+        run in this call succeeded, so a call where every run fails
+        leaves the file untouched.
 
         Duplicate detection (and, with overwrite=True, replacement) is
         keyed on an exact match of id/time and all six hiiregparam
@@ -714,6 +920,12 @@ class slug_reader:
         as an already-stored duplicate never creates or touches
         temp_dir at all.
         """
+        if len(self._file) > 1:
+            raise RuntimeError(
+                "run_cloudy: this reader spans more than one underlying "
+                "HDF5 file (checkpointed and/or h5divided output); there "
+                "is no single file to write new cluster_cloudy/"
+                "galaxy_cloudy rows into")
         if spec_type == "cluster" and trial is not None:
             raise ValueError("run_cloudy: trial is only meaningful for spec_type='galaxy'")
         if spec_type == "galaxy" and uid is not None:
@@ -758,7 +970,7 @@ class slug_reader:
             model_name = str(self.input_deck.get("output", {}).get("model_name", "cloudy"))
         temp_dir_path = Path(temp_dir)
         if not temp_dir_path.is_absolute():
-            temp_dir_path = Path(self._file.filename).resolve().parent / temp_dir_path
+            temp_dir_path = Path(self._file[0]).resolve().parent / temp_dir_path
 
         # [Fe/H] for a galaxy spectrum is a single population-level
         # value (the expectation value of stars.FeH's own
@@ -858,19 +1070,24 @@ class slug_reader:
 
         if results:
             cloudy_group = "cluster_cloudy" if spec_type == "cluster" else "galaxy_cloudy"
-            filename = self._file.filename
-            self._file.close()
+            filename = self._file[0]  # the guard at the top of this method guarantees len(self._file) == 1
             if rows_to_delete:
                 delete_cloudy_h5_rows(filename, cloudy_group, id_key, sorted(rows_to_delete))
             write_cloudy_h5_results(filename, cloudy_group, id_key, results)
-            self._file = h5py.File(filename, "r")
             # Rebuild the group-name set (not just reset cached values):
             # this call may have just created cluster_cloudy/
             # galaxy_cloudy for the first time, and those wouldn't be
             # discoverable via their own properties otherwise, since
-            # self._groups's key set was previously fixed at __init__
-            self._groups = {name: None for name in self._file
-                if isinstance(self._file[name], h5py.Group)}
+            # self._groups's key set was previously fixed at __init__.
+            # No need to close/reopen anything first, the way this used
+            # to -- self._file is just a path, never an open handle
+            # held between reads (see __init__'s own comment), so
+            # write_cloudy_h5_results()/delete_cloudy_h5_rows() opening
+            # and closing filename themselves for writing, above, never
+            # conflicted with a handle of this reader's own to begin
+            # with.
+            with h5py.File(filename, "r") as f:
+                self._groups = {name: None for name in f if isinstance(f[name], h5py.Group)}
 
         if written and not save_temp:
             shutil.rmtree(temp_dir_path, ignore_errors=True)

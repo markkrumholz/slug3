@@ -42,10 +42,11 @@ class slug_spectra_reader(slug_group_reader):
 
     Parameters
     ----------
-    file : h5py.File
-        The open slug HDF5 output file containing this group.
+    file_paths : list of str
+        Path(s) to the open slug HDF5 output file(s) containing this
+        group -- see slug_group_reader's own docstring.
     group_name : str
-        Name of the group within file to read.
+        Name of the group within each file to read.
 
     Attributes
     ----------
@@ -63,12 +64,17 @@ class slug_spectra_reader(slug_group_reader):
         and __getitem__'s own (label, wl)-tuple indexing key on.
     """
 
-    def __init__(self, file: h5py.File, group_name: str) -> None:
-        super().__init__(file, group_name)
+    def __init__(self, file_paths: list[str], group_name: str) -> None:
+        super().__init__(file_paths, group_name)
 
+        # line_label is fixed, shared metadata (not extensible -- see
+        # slug_group_reader's own docstring), so read from the first
+        # file alone, the same as super().__getitem__() would do for
+        # any other fixed dataset
         self._line_labels: list[str] | None = None
         if "line_label" in self._datasets:
-            raw = self._file[self._group_name]["line_label"][()]
+            with h5py.File(file_paths[0], "r") as f:
+                raw = f[self._group_name]["line_label"][()]
             self._line_labels = [lbl.decode() if isinstance(lbl, bytes) else lbl for lbl in raw]
 
         # Per-line luminosity caches for __getitem__'s own (label, wl)
