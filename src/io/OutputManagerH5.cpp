@@ -13,6 +13,7 @@
 #include "../specsyn/Specsyn.hpp"
 #include "../utils/RngThread.hpp"
 #include "../utils/ThreadVec.hpp"
+#include "../utils/UniqueIDManager.hpp"
 #include "OutputManager.hpp"
 #include "SimControls.hpp"
 #include "hdf5.h" // NOLINT(misc-include-cleaner)
@@ -656,6 +657,7 @@ void io::OutputManagerH5::restartSetup()
     const auto h5Path = std::filesystem::path(simControls_.outDir()) / (name + ".h5");
     const auto dirPath = std::filesystem::path(simControls_.outDir()) / name;
 
+    unsigned long restartUid = 0;
     std::string source;
     if (std::filesystem::is_regular_file(h5Path))
     {
@@ -669,16 +671,18 @@ void io::OutputManagerH5::restartSetup()
         try
         {
             restartTrialsDone_ = readULongAttr(file, "trials_completed");
+            restartUid = readULongAttr(file, "restart_uid");
         }
         catch (const std::exception&)
         {
             H5Fclose(file);
             throw std::runtime_error(
                 "OutputManagerH5::restartSetup: " + h5Path.string() +
-                " has no trials_completed attribute -- it may still have "
-                "been open when the run being restarted stopped; if so, "
-                "delete it (and its own thread_NNNN.h5 files, if it is a "
-                "directory rather than a single file) and restart again");
+                " has no trials_completed/restart_uid attribute -- it may "
+                "still have been open when the run being restarted stopped; "
+                "if so, delete it (and its own thread_NNNN.h5 files, if it "
+                "is a directory rather than a single file) and restart "
+                "again");
         }
         H5Fclose(file);
         // NOLINTEND(misc-include-cleaner)
@@ -702,6 +706,7 @@ void io::OutputManagerH5::restartSetup()
         }
 
         std::optional<unsigned long> commonTrialsCompleted;
+        std::optional<unsigned long> commonRestartUid;
         for (const auto& threadFile : threadFiles)
         {
             // NOLINTBEGIN(misc-include-cleaner)
@@ -712,19 +717,21 @@ void io::OutputManagerH5::restartSetup()
                     "OutputManagerH5::restartSetup: unable to open " + threadFile.string());
             }
             unsigned long trialsCompleted = 0;
+            unsigned long uid = 0;
             try
             {
                 trialsCompleted = readULongAttr(file, "trials_completed");
+                uid = readULongAttr(file, "restart_uid");
             }
             catch (const std::exception&)
             {
                 H5Fclose(file);
                 throw std::runtime_error(
                     "OutputManagerH5::restartSetup: " + threadFile.string() +
-                    " has no trials_completed attribute -- it may still have "
-                    "been open when the run being restarted stopped; if so, "
-                    "delete " + dirPath.string() + " (its own directory) and "
-                    "restart again");
+                    " has no trials_completed/restart_uid attribute -- it "
+                    "may still have been open when the run being restarted "
+                    "stopped; if so, delete " + dirPath.string() +
+                    " (its own directory) and restart again");
             }
             H5Fclose(file);
             // NOLINTEND(misc-include-cleaner)
@@ -738,8 +745,18 @@ void io::OutputManagerH5::restartSetup()
                     std::to_string(*commonTrialsCompleted) + " vs " +
                     std::to_string(trialsCompleted) + ")");
             }
+            if (!commonRestartUid.has_value()) { commonRestartUid = uid; }
+            else if (uid != *commonRestartUid)
+            {
+                throw std::runtime_error(
+                    "OutputManagerH5::restartSetup: thread output files in " +
+                    dirPath.string() + " disagree on restart_uid (" +
+                    std::to_string(*commonRestartUid) + " vs " +
+                    std::to_string(uid) + ")");
+            }
         }
         restartTrialsDone_ = *commonTrialsCompleted;
+        restartUid = *commonRestartUid;
         source = dirPath.string();
     }
     else
@@ -750,10 +767,17 @@ void io::OutputManagerH5::restartSetup()
             " nor " + dirPath.string() + " exists");
     }
 
+    // Resume ID generation from exactly where the run being restarted
+    // left off -- see closeOutputFile()'s own comment for why this is
+    // the correct value to resume from, rather than either 0 (this
+    // process's own uniqueID() starting fresh) or leaving it alone
+    utils::uniqueID().set(restartUid);
+
     if (simControls_.verbosity() > 0)
     {
         std::cout << "slug: restarting from checkpoint " << source << ", "
-            << restartTrialsDone_ << " trials completed\n";
+            << restartTrialsDone_ << " trials completed, next uid " <<
+            restartUid << "\n";
     }
 }
 
@@ -1357,6 +1381,7 @@ void io::OutputManagerH5::closeOutputFile(const unsigned long trialsCompleted)
         if (galaxySpectraGroup_() >= 0) { H5Gclose(galaxySpectraGroup_()); }
         if (galaxyPhotGroup_() >= 0) { H5Gclose(galaxyPhotGroup_()); }
         writeULongAttr(file_(), "trials_completed", trialsCompleted);
+        writeULongAttr(file_(), "restart_uid", utils::uniqueID().read());
         H5Fclose(file_());
         // NOLINTEND(misc-include-cleaner)
     }

@@ -91,12 +91,12 @@ static auto checkConstruction(const io::SimControls& controls) -> int
 // this step has a formTime() lying within the step's own time range.
 // "Formed during this step" is identified by uid: uid values are
 // handed out in strictly increasing order by the shared
-// utils::getID() service, so any cluster whose uid exceeds a marker
+// utils::uniqueID() service, so any cluster whose uid exceeds a marker
 // captured immediately before advance() must have been created by it.
 static auto advanceAndCheckMassAge(core::Galaxy& galaxy,
     const io::SimControls& controls, const double prevTime, const double t) -> int
 {
-    const auto marker = utils::getID();
+    const auto marker = utils::uniqueID().get();
     galaxy.advance(t);
 
     std::vector<const core::Cluster*> newClusters;

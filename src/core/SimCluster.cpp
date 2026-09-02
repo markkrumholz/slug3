@@ -60,7 +60,7 @@ void core::SimCluster::runTrial(const unsigned long trialNum)
     }
 
     // Create cluster for this trial
-    Cluster cluster(utils::getID(), simControls_.cmf().draw(), 0, simControls_);
+    Cluster cluster(utils::uniqueID().get(), simControls_.cmf().draw(), 0, simControls_);
 
     try
     {

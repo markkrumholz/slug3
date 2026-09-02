@@ -13,6 +13,7 @@
 #include "../src/io/SimControls.hpp"
 #include "../src/specsyn/SpecsynBlackbody.hpp"
 #include "../src/specsyn/SpecsynCommons.hpp"
+#include "../src/utils/UniqueIDManager.hpp"
 #include "hdf5.h" // NOLINT(misc-include-cleaner)
 #include "testSimCluster.hpp"
 #include <array>
@@ -304,8 +305,8 @@ static auto checkRowsAndGroupByTrial(const OutputColumns& cols, TrialMap& rowsBy
 // cluster formation), and that no uid is reused across trials -- this
 // would fail if the dynamic schedule dropped or duplicated a trial,
 // if the omp critical guard around the output writes let two
-// threads' rows corrupt each other, or if utils::getID() handed out
-// a duplicate ID under concurrent use
+// threads' rows corrupt each other, or if utils::uniqueID() handed
+// out a duplicate ID under concurrent use
 static auto checkTrialsAndUids(const TrialMap& rowsByTrial) -> int
 {
     std::set<unsigned long> seenUids;
@@ -329,7 +330,7 @@ static auto checkTrialsAndUids(const TrialMap& rowsByTrial) -> int
         {
             std::cerr << "testSimCluster: uid " << uids.front()
                 << " (trial " << trial << ") was already used by another "
-                "trial -- utils::getID() handed out a duplicate\n";
+                "trial -- utils::uniqueID() handed out a duplicate\n";
             return 1;
         }
     }
@@ -930,11 +931,20 @@ static auto testSimClusterCheckpointedH5() -> int
 //
 // Checks (via runEndToEnd()'s own restart-aware assertion, for both
 // phases) that each phase's own SimCluster::trialsCompleted() only
-// counts the trials it actually ran itself, and that pooling every
+// counts the trials it actually ran itself, that pooling every
 // checkpoint's own rows together, across both phases, yields every
 // trial from 0 to nTrial - 1 exactly once with a unique uid -- i.e.
 // that restarting produces the exact same complete, non-overlapping
-// coverage a single, uninterrupted run would.
+// coverage a single, uninterrupted run would -- and, deliberately
+// clobbering utils::uniqueID() between the two phases to simulate a
+// genuinely separate process's own fresh counter, that restartSetup()
+// actually restores it from the checkpoint's own "restart_uid"
+// attribute rather than either colliding with phase 1's own already-
+// used uids or leaving a gap (see closeOutputFile()'s/restartSetup()'s
+// own comments for why this matters: phase 1 and phase 2 being two
+// calls in the same process, as below, would otherwise mask exactly
+// this failure mode, since utils::uniqueID()'s own counter would
+// already, coincidentally, carry over correctly on its own).
 static auto testSimClusterRestartFromCheckpoint() -> int
 {
     const auto outDir = std::filesystem::temp_directory_path() /
@@ -957,6 +967,21 @@ static auto testSimClusterRestartFromCheckpoint() -> int
         // Phase 1: run only the first firstPhaseTrials trials
         deck.insert_or_assign("n_trial", static_cast<int64_t>(firstPhaseTrials));
         runEndToEnd(deck);
+
+        // The uid utils::uniqueID() would hand out next, right where
+        // phase 1 left off -- what phase 2's own restartSetup() is
+        // expected to restore, via the checkpoint's own restart_uid
+        // attribute, once it is clobbered below
+        const auto uidAtPhase1End = utils::uniqueID().read();
+
+        // Deliberately reset the shared counter to a value well below
+        // uidAtPhase1End, mimicking what a genuinely separate
+        // process's own fresh utils::uniqueID() would look like at the
+        // start of phase 2 if restartSetup() did *not* restore it --
+        // if restoration were broken, phase 2 would instead just keep
+        // counting up from here, handing out uids that collide with
+        // phase 1's own already-used ones
+        utils::uniqueID().set(0);
 
         // Phase 2: restart, with n_trial back up to the real total
         deck.insert_or_assign("n_trial", static_cast<int64_t>(nTrial));
@@ -995,7 +1020,33 @@ static auto testSimClusterRestartFromCheckpoint() -> int
                 << rowsByTrial.size() << "\n";
             return 1;
         }
-        return checkTrialsAndUids(rowsByTrial);
+        if (const int result = checkTrialsAndUids(rowsByTrial); result != 0)
+        { return result; }
+
+        // checkTrialsAndUids() above already confirmed every trial has
+        // exactly one row and every uid across both phases is unique;
+        // the smallest uid among phase 2's own trials (trial >=
+        // firstPhaseTrials) -- whichever one happened to run first
+        // under dynamic scheduling -- should be exactly uidAtPhase1End,
+        // confirming restartSetup() actually restored
+        // utils::uniqueID() from the checkpoint's own restart_uid
+        // attribute, rather than continuing from the clobbered value
+        // set above
+        unsigned long minPhase2Uid = rowsByTrial.at(firstPhaseTrials).front();
+        for (unsigned long trial = firstPhaseTrials + 1; trial < nTrial; ++trial)
+        { minPhase2Uid = std::min(minPhase2Uid, rowsByTrial.at(trial).front()); }
+        if (minPhase2Uid != uidAtPhase1End)
+        {
+            std::cerr << "testSimCluster: restart: expected the smallest uid "
+                "among phase 2's own trials to be " << uidAtPhase1End <<
+                " (utils::uniqueID()'s own value when phase 1 ended), got " <<
+                minPhase2Uid << " -- restartSetup() did not correctly "
+                "restore utils::uniqueID() from the checkpoint's own "
+                "restart_uid attribute\n";
+            return 1;
+        }
+
+        return 0;
     }
     catch (const std::exception& error)
     {

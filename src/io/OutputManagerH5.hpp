@@ -302,19 +302,27 @@ namespace io
          * mismatch here can only mean the on-disk checkpoint itself is
          * corrupt or was tampered with; throws std::runtime_error if
          * so, or if a directory found this way turns out to hold no
-         * thread_NNNN.h5 files at all).
+         * thread_NNNN.h5 files at all). Also reads that same
+         * checkpoint's own "restart_uid" attribute the same way, and
+         * calls utils::uniqueID().set() with it, so this process's own
+         * cluster/galaxy IDs resume exactly where the run being
+         * restarted left off, rather than either colliding with IDs it
+         * already used (a fresh process's own utils::uniqueID()
+         * otherwise starts back at 0) or leaving a gap (see
+         * closeOutputFile()'s own comment for the full detail).
          *
          * If no entry matching the checkpoint naming pattern exists at
          * all, checkpointNumber_ and restartTrialsDone_ are simply
-         * left at their own default-constructed values of 0 -- so a
-         * restart of a run that never actually got as far as its first
-         * checkpoint (or was never checkpointed to begin with) just
-         * starts over from trial 0, exactly like an ordinary,
-         * non-restart run would.
+         * left at their own default-constructed values of 0, and
+         * utils::uniqueID() is left untouched -- so a restart of a run
+         * that never actually got as far as its first checkpoint (or
+         * was never checkpointed to begin with) just starts over from
+         * trial 0, exactly like an ordinary, non-restart run would.
          *
          * If SimControls::verbosity() is non-zero, prints which
-         * checkpoint (if any) this restarted from, and how many trials
-         * it reports already completed, to stdout.
+         * checkpoint (if any) this restarted from, how many trials it
+         * reports already completed, and the next uid it resumed from,
+         * to stdout.
          *
          * Caveat: the largest NNNNN found on disk is not necessarily
          * one that finished closing before the run being restarted
@@ -406,6 +414,22 @@ namespace io
          *   it, i.e. how many trials had completed as of the batch
          *   boundary that triggered this checkpoint.
          * @details
+         * Also writes utils::uniqueID().read() as this thread's own
+         * file's "restart_uid" top-level attribute, right after
+         * trials_completed -- the next ID utils::uniqueID().get()
+         * would have handed out, had this checkpoint's own last trial
+         * not yet finished, so a later restart can resume ID
+         * generation from exactly that point (see restartSetup()'s own
+         * comment) rather than either colliding with IDs already used
+         * by the run being resumed (were it to start over from 0, in
+         * a fresh process) or leaving gaps for IDs a since-abandoned,
+         * never-closed later checkpoint's own in-flight trials had
+         * already been handed (were it to just keep whatever a fresh
+         * process's own counter already reached on its own, which is
+         * always fewer than what the resumed run had actually reached
+         * -- e.g. immediately after this file's own process starts,
+         * before it has generated any IDs of its own at all).
+         *
          * Called once per thread from inside the destructor's own
          * OpenMP parallel region when built with OpenMP, or once,
          * directly, otherwise; also called by checkpoint(), on just
