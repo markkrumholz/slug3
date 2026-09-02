@@ -167,6 +167,133 @@ namespace io
         virtual void writeGalaxyPhot(unsigned long trial, double time,
             core::Galaxy& galaxy) = 0;
 
+        /**
+         * @brief Roll over to a new checkpoint
+         * @param trialsCompleted Number of trials completed so far in
+         *   the run, i.e. across every checkpoint including the one
+         *   just closed, not just this checkpoint's own share of them
+         * @details
+         * Closes whatever output is currently open -- writing
+         * trialsCompleted as a top-level attribute on it first, so a
+         * later restart can tell how far the run had gotten as of
+         * this checkpoint -- and opens a fresh one for the next
+         * checkpoint, so the current checkpoint's output is fully
+         * flushed to disk before more trials are written to it --
+         * bounding how much work a crash or a walltime kill can lose,
+         * at the cost of one more output file to eventually
+         * consolidate. See OutputManagerH5::checkpoint() for the real
+         * implementation, and its own class header comment for the
+         * full checkpointing design.
+         *
+         * Only meaningful with HDF5 output. OutputManagerAscii's own
+         * implementation just throws (see its own comment):
+         * SimControls's own constructor already rejects the
+         * combination of ascii output and a non-zero
+         * checkpointInterval() up front when parsing a real input
+         * deck, so this should never actually be reached from the
+         * CLI -- but a caller building a SimControls directly (e.g.
+         * from Python) could set up that same illegal combination via
+         * setCheckpointInterval() without going through the
+         * constructor's own check, so this still needs to fail safely
+         * if it is ever actually called.
+         */
+        virtual void checkpoint(unsigned long trialsCompleted) = 0;
+
+        /**
+         * @brief Return the number of trials already completed by the run being restarted
+         * @return The number of trials the run being restarted had
+         *   already completed, as of the most recent checkpoint it
+         *   left behind -- see OutputManagerH5::restartSetup()'s own
+         *   comment for how that is determined
+         * @details
+         * Only meaningful when this OutputManager was itself
+         * constructed to resume a previous, interrupted run; a caller
+         * that did not request that (see OutputManagerH5's own
+         * constructor) should never call this.
+         *
+         * Only meaningful with HDF5 output, for the same reason
+         * checkpoint() is: restarting requires a checkpoint to restart
+         * from, and only HDF5 output produces checkpoints at all.
+         * OutputManagerAscii's own implementation just throws (see its
+         * own comment): main.cpp already rejects the combination of
+         * ascii output and a restart request before ever constructing
+         * SimCluster/SimGalaxy (and, transitively, before either of
+         * them could call this), so this should never actually be
+         * reached from the CLI -- but, exactly as with checkpoint(),
+         * still needs to fail safely if it is ever actually called by
+         * a caller building these objects directly.
+         */
+        [[nodiscard]] virtual auto restartTrialsDone() const -> unsigned long = 0;
+
+        /**
+         * @brief Return the largest trial number the run being restarted ever actually wrote
+         * @return The highest trial number the run being restarted had
+         *   actually written output for, as of the most recent
+         *   checkpoint it left behind -- see
+         *   OutputManagerH5::restartSetup()'s own comment for how that
+         *   is determined
+         * @details
+         * Only meaningful under the same conditions as
+         * restartTrialsDone() (only after a restart-constructed
+         * OutputManager, only with HDF5 output -- OutputManagerAscii's
+         * own implementation throws for the identical reason).
+         *
+         * Deliberately distinct from restartTrialsDone(), even though
+         * both describe "how far did the run being restarted get":
+         * under dynamic OpenMP scheduling, a batch that stopped
+         * partway through (a caught SIGTERM, or a per-trial exception)
+         * can finish with some higher-numbered trial done while a
+         * lower-numbered one is not (whichever thread happened to
+         * still be mid-flight when the others stopped taking on new
+         * work) -- restartTrialsDone() (a plain count of how many
+         * trials finished) stays accurate even then, but "trials
+         * [0, restartTrialsDone()) are done" stops being a safe
+         * assumption once that can happen, so a restart cannot safely
+         * resume trial *numbering* from restartTrialsDone() alone. It
+         * can always safely resume at restartMaxTrial() + 1, since
+         * that is defined as the largest number ever actually written
+         * -- guaranteed never to collide with one already on disk --
+         * independently of restartTrialsDone() itself, which still
+         * correctly says how many *more* trials are needed to reach
+         * SimControls::nTrial(). SimCluster::run()'s/SimGalaxy::run()'s
+         * own comment has the full detail of how the two combine.
+         */
+        [[nodiscard]] virtual auto restartMaxTrial() const -> unsigned long = 0;
+
+        /**
+         * @brief Record that this run is ending early, having only actually completed trialsCompleted trials
+         * @param trialsCompleted Number of trials actually completed
+         *   before this run stopped short of SimControls::nTrial() --
+         *   either because a per-trial exception was thrown and
+         *   rethrown out of SimCluster::run()/SimGalaxy::run(), or
+         *   because a SIGTERM was caught and handled gracefully (see
+         *   their own comments)
+         * @details
+         * Does not itself close or otherwise touch any output --
+         * OutputManagerH5's own implementation just remembers
+         * trialsCompleted, for its destructor to write as the
+         * currently-open file's own final "trials_completed" (and,
+         * where relevant, "restart_uid") attribute instead of
+         * SimControls::nTrial(), which the destructor would otherwise
+         * assume (see OutputManagerH5::closeOutputFile()'s own
+         * comment) -- an assumption only ever true when run() actually
+         * completed every trial, which stopping early specifically
+         * means it did not. Deliberately does not roll over to a new
+         * checkpoint the way checkpoint() does: there is nothing left
+         * to write into one, so doing so would just leave an empty,
+         * never-closed checkpoint behind for the destructor to
+         * eventually close with a wrong trial count of its own.
+         *
+         * OutputManagerAscii's own implementation is a no-op, not a
+         * throw (unlike checkpoint()/restartTrialsDone()): ascii
+         * output has no trials_completed attribute (or any other
+         * summary of how many trials it holds) to correct in the
+         * first place, so there is nothing wrong to leave uncorrected
+         * -- every row already written is already exactly as valid on
+         * an early exit as a normal one.
+         */
+        virtual void notifyEarlyTermination(unsigned long trialsCompleted) = 0;
+
     protected:
 
         /**

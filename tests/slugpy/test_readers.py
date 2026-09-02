@@ -300,12 +300,11 @@ def test_getitem_missing_units_attribute_comes_back_as_plain_array(tmp_path):
         g = f.create_group("g")
         g.create_dataset("no_units", data=np.array([1.0, 2.0, 3.0]))
 
-    with h5py.File(path, "r") as f:
-        reader = slug_group_reader(f, "g")
-        arr = reader["no_units"]
-        assert isinstance(arr, np.ndarray)
-        assert not isinstance(arr, u.Quantity)
-        assert arr.tolist() == [1.0, 2.0, 3.0]
+    reader = slug_group_reader([str(path)], "g")
+    arr = reader["no_units"]
+    assert isinstance(arr, np.ndarray)
+    assert not isinstance(arr, u.Quantity)
+    assert arr.tolist() == [1.0, 2.0, 3.0]
 
 
 def test_clusters_getitem_cached(clusters):

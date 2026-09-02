@@ -502,6 +502,17 @@ built by this SimControls reads this value live, not a snapshot, so
 assigning a new value takes effect the next time wlObs() is called --
 no need to rebuild anything.)doc";
 
+static constexpr std::string_view checkpointIntervalPropertyDocstring =
+R"doc(The number of trials between checkpoints.
+
+0 (the default) disables checkpointing. Only supported with HDF5
+output (output_mode "h5" or "h5divided"), not ascii: assigning a
+non-zero value here does not itself check output_mode the way
+setting outputs.checkpoint_interval in an input deck does, so a
+SimControls built with ascii output that later has this set to a
+non-zero value here will raise a RuntimeError the first time a
+checkpoint is actually attempted, rather than immediately.)doc";
+
 // Apply each property-named constructor keyword argument that was
 // actually given (not py::none()) to an already-built sc, via the
 // same setter its property uses -- factored out of the constructor
@@ -680,6 +691,8 @@ void bindSimControls(py::module_& m)
                 zPropertyDocstring.data(), py::arg("z"))
         .def("setFCluster", &io::SimControls::setFCluster,
                 fClusterPropertyDocstring.data(), py::arg("f_cluster"))
+        .def("setCheckpointInterval", &io::SimControls::setCheckpointInterval,
+                checkpointIntervalPropertyDocstring.data(), py::arg("interval"))
         // Properties: alternative, attribute-style access to the same
         // getters/setters bound as plain methods above (e.g.
         // sc.imf = "20.0" instead of sc.setIMF("20.0")). Getters that
@@ -757,6 +770,10 @@ void bindSimControls(py::module_& m)
         .def_property("z",
                 &io::SimControls::z,
                 &io::SimControls::setZ,
-                zPropertyDocstring.data());
+                zPropertyDocstring.data())
+        .def_property("checkpointInterval",
+                &io::SimControls::checkpointInterval,
+                &io::SimControls::setCheckpointInterval,
+                checkpointIntervalPropertyDocstring.data());
 }
 // NOLINTEND(misc-include-cleaner)

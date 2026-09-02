@@ -29,7 +29,7 @@ auto testUniqueIDManager() -> int
 
     // Each thread writes its own nRepeat-element slice of ids, so
     // there is no need for any additional synchronization beyond
-    // getID() itself
+    // uniqueID().get() itself
     std::vector<unsigned long> ids(static_cast<size_t>(nThreads) * nRepeat);
     #pragma omp parallel num_threads(nThreads)
     {
@@ -40,7 +40,7 @@ auto testUniqueIDManager() -> int
 #endif // _OPENMP
         for (int r = 0; r < nRepeat; ++r)
         {
-            ids[static_cast<size_t>((threadNum * nRepeat) + r)] = utils::getID();
+            ids[static_cast<size_t>((threadNum * nRepeat) + r)] = utils::uniqueID().get();
         }
     }
 
@@ -57,6 +57,53 @@ auto testUniqueIDManager() -> int
                 "found " << ids[i] << " at sorted position " << i << "\n";
             return 1;
         }
+    }
+
+    return 0; // Success
+}
+
+// Checks set()/read() in isolation from get()'s own concurrent-use
+// behavior above: set() unconditionally overwrites the shared
+// counter, so this is self-contained regardless of whatever value
+// testUniqueIDManager() itself left it at.
+auto testUniqueIDManagerSetRead() -> int
+{
+    constexpr unsigned long restoredValue = 424242;
+    utils::uniqueID().set(restoredValue);
+
+    // read() reports exactly the value just set, and -- called twice
+    // in a row -- does not itself advance the counter the way get()
+    // does
+    if (utils::uniqueID().read() != restoredValue)
+    {
+        std::cerr << "testUniqueIDManagerSetRead: expected read() == "
+            << restoredValue << " right after set(), got "
+            << utils::uniqueID().read() << "\n";
+        return 1;
+    }
+    if (utils::uniqueID().read() != restoredValue)
+    {
+        std::cerr << "testUniqueIDManagerSetRead: a second read() in a row "
+            "should still be " << restoredValue << ", got "
+            << utils::uniqueID().read() << "\n";
+        return 1;
+    }
+
+    // get() returns exactly what read() just reported, and (unlike
+    // read()) consumes it, advancing the counter by one
+    const auto got = utils::uniqueID().get();
+    if (got != restoredValue)
+    {
+        std::cerr << "testUniqueIDManagerSetRead: expected get() == "
+            << restoredValue << ", got " << got << "\n";
+        return 1;
+    }
+    if (utils::uniqueID().read() != restoredValue + 1)
+    {
+        std::cerr << "testUniqueIDManagerSetRead: expected read() == "
+            << (restoredValue + 1) << " after that get(), got "
+            << utils::uniqueID().read() << "\n";
+        return 1;
     }
 
     return 0; // Success

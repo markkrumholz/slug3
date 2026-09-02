@@ -142,6 +142,23 @@ def test_run_sim_ascii_deck_warns_and_returns_none(tmp_path, monkeypatch):
     assert (tmp_path / "slug_sim_clusters.txt").exists()
 
 
+def test_run_sim_restart_with_ascii_raises(tmp_path, monkeypatch):
+    """restart=True with an ASCII-output deck raises RuntimeError before
+    ever constructing an output manager or SimCluster/SimGalaxy --
+    mirroring the slug command-line executable's own --restart/-R +
+    ascii check in main.cpp, and OutputManagerH5's own constructor-time
+    check for a caller that bypasses this one (see run_sim's own
+    docstring)."""
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(RuntimeError, match="restart"):
+        run_sim(ASCII_DECK, progress=False, restart=True)
+
+    # Nothing should have been written -- the check happens before any
+    # output manager (or its files) is ever constructed
+    assert not (tmp_path / "slug_sim_summary.txt").exists()
+
+
 # ---------------------------------------------------------------------
 # progress
 # ---------------------------------------------------------------------
@@ -154,7 +171,7 @@ def test_progress_true_drives_run_with_progress(tmp_path, monkeypatch):
 
     def _spy(fn, get_current, total, desc, **kwargs):
         calls.append((total, desc))
-        real_run_with_progress(fn, get_current, total, desc, **kwargs)
+        return real_run_with_progress(fn, get_current, total, desc, **kwargs)
 
     monkeypatch.setattr(run_sim_module, "run_with_progress", _spy)
     data = run_sim(CLUSTER_DECK, progress=True)

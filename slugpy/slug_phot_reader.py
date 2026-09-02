@@ -10,6 +10,7 @@ Implements slug_phot_reader, a lazy reader for the photometry
 from typing import Any, cast
 
 import h5py
+import numpy as np
 from astropy import units as u
 
 from ._slug import Filter, FilterCollection, PhotSystem
@@ -41,10 +42,11 @@ class slug_phot_reader(slug_group_reader):
 
     Parameters
     ----------
-    file : h5py.File
-        The open slug HDF5 output file containing this group.
+    file_paths : list of str
+        Path(s) to the open slug HDF5 output file(s) containing this
+        group -- see slug_group_reader's own docstring.
     group_name : str
-        Name of the group within file to read.
+        Name of the group within each file to read.
     registry_name : str, optional
         Name of the filter registry file to resolve tabulated filter
         names against (see get_filter()); if omitted, uses
@@ -64,13 +66,14 @@ class slug_phot_reader(slug_group_reader):
         get_filter() lazily adds filters to on request (read-only).
     """
 
-    def __init__(self, file: h5py.File, group_name: str,
+    def __init__(self, file_paths: list[str], group_name: str,
         registry_name: str | None = None) -> None:
-        super().__init__(file, group_name)
+        super().__init__(file_paths, group_name)
 
-        group = self._file[self._group_name]
-        self._filters: list[str] = list(group.attrs["filters"])
-        self._filter_units: list[str] = list(group["phot"].attrs["units"])
+        with h5py.File(file_paths[0], "r") as f:
+            group = f[self._group_name]
+            self._filters: list[str] = list(group.attrs["filters"])
+            self._filter_units: list[str] = list(group["phot"].attrs["units"])
 
         self._phot: dict[str, Dataset | None] = {name: None for name in self._filters}
         self._phot_extinct: dict[str, Dataset | None] | None = None
@@ -181,7 +184,12 @@ class slug_phot_reader(slug_group_reader):
         index = self._filters.index(name)
         dataset_name = {"": "phot", "_ex": "phot_extinct",
             "_neb": "phot_neb", "_neb_ex": "phot_neb_extinct"}[suffix]
-        arr = self._file[self._group_name][dataset_name][:, index]
+        paths = self._file_paths if self._extensible[dataset_name] else self._file_paths[:1]
+        arrs = []
+        for path in paths:
+            with h5py.File(path, "r") as f:
+                arrs.append(f[self._group_name][dataset_name][:, index])
+        arr = arrs[0] if len(arrs) == 1 else np.concatenate(arrs, axis=0)
         unit = self._filter_units[index]
         result: Dataset = arr if unit == "" else arr * u.Unit(unit)
         phot[name] = result

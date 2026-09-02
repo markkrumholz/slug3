@@ -203,6 +203,15 @@ namespace io
         [[nodiscard]] auto z() const { return z_; }
 
         /**
+         * @brief Return the checkpoint interval, in trials
+         * @return The number of trials between checkpoints; 0 (the
+         *   default) means checkpointing is disabled. See
+         *   OutputManagerH5::checkpoint()'s own comment for what a
+         *   non-zero value actually does.
+         */
+        [[nodiscard]] auto checkpointInterval() const { return checkpointInterval_; }
+
+        /**
          * @brief Set the relative tolerance for PDF integration
          * @param tol New relative tolerance
          * @details
@@ -240,6 +249,22 @@ namespace io
          * no need to rebuild them.
          */
         void setZ(double z) { z_ = z; }
+
+        /**
+         * @brief Set the checkpoint interval, in trials
+         * @param interval New checkpoint interval; 0 disables
+         *   checkpointing
+         * @details
+         * Unlike setting outputs.checkpoint_interval in an input deck,
+         * this plain setter does not check outputMode() -- a caller
+         * (e.g. from Python) could use it to set up the same illegal
+         * combination (a non-zero interval with ascii output) the
+         * constructor rejects when parsing a real input deck. That
+         * combination is instead caught defensively where it would
+         * actually matter, by OutputManagerAscii::checkpoint()
+         * throwing (see its own comment), rather than here.
+         */
+        void setCheckpointInterval(unsigned long interval) { checkpointInterval_ = interval; }
 
         // Getters for the physics settings
         /**
@@ -809,6 +834,7 @@ namespace io
          */
         std::size_t intMaxIter_ = 1UL << 19;
         double z_ = 0.0;                               /**< Redshift, read live by every Specsyn/Extinct built from this SimControls */
+        unsigned long checkpointInterval_ = 0;         /**< Number of trials between checkpoints (0 = disabled); see checkpointInterval() */
 
         // Physics settings
         pdfs::PDF imf_;            /**< The IMF to use for the simulation */

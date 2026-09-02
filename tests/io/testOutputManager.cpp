@@ -2712,6 +2712,57 @@ static auto testAllOutputsFalseThrows() -> int
     }
 }
 
+// Verify that OutputManagerAscii::checkpoint() throws: checkpointing
+// is only supported with HDF5 output. SimControls's own constructor
+// already rejects a non-zero outputs.checkpoint_interval combined with
+// ascii output_mode when parsing a real input deck (see
+// testSimControlsCheckpointAsciiThrows in tests/io/testSimControls.cpp),
+// so this instead builds an ordinary (checkpointing-disabled) ascii
+// SimControls, then sets a non-zero checkpointInterval() afterward via
+// setCheckpointInterval() -- bypassing that constructor-time check the
+// same way a caller building a SimControls directly (e.g. from Python)
+// could -- to confirm OutputManagerAscii::checkpoint() itself still
+// fails safely, rather than silently doing nothing or corrupting the
+// ascii output files.
+static auto testOutputManagerAsciiCheckpointThrows() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() /
+        "slugTestOutputManagerAsciiCheckpointThrows";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+    const std::string modelName = "test_model";
+    toml::table inputDeck = makeClusterPhysicsInputDeck(modelName, outDir);
+    inputDeck.at_path("outputs").as_table()->insert_or_assign(
+        "output_mode", std::string("ascii"));
+
+    // Construction happens outside the try block: only checkpoint()
+    // itself is the call under test, so an unexpected exception from
+    // SimControls/OutputManagerAscii construction (a bug elsewhere)
+    // surfaces as an uncaught exception instead of being silently
+    // misreported as this test passing.
+    io::SimControls controls(inputDeck);
+    controls.setCheckpointInterval(5);
+    io::OutputManagerAscii manager(controls, inputDeck);
+
+    try
+    {
+        manager.checkpoint(5);
+        std::cerr << "testOutputManager: ascii checkpoint: expected "
+            "checkpoint() to throw, but it succeeded\n";
+        return 1;
+    }
+    catch (const std::runtime_error&)
+    {
+        return 0;
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testOutputManager: ascii checkpoint test failed "
+            "with an unexpected exception type: " << error.what() << "\n";
+        return 1;
+    }
+}
+
 // Verify that constructing an OutputManager from a cluster-type deck
 // with write_cluster/write_cluster_spec/write_cluster_phot all set to
 // false also throws -- confirming sanity check 1 correctly excludes
@@ -2984,6 +3035,7 @@ auto testOutputManager() -> int
     result += testOptOutGalaxySpecOutput();
     result += testOptOutGalaxyPhotOutput();
     result += testAllOutputsFalseThrows();
+    result += testOutputManagerAsciiCheckpointThrows();
     result += testAllClusterOutputsFalseThrows();
     result += testPhotWithoutOutputThrows();
     return result;

@@ -70,7 +70,7 @@ namespace phot
      * constructed on first use rather than before main() begins, and
      * is shared by every caller for the remaining lifetime of the
      * program (the same lazy construct-once model used by
-     * utils::getID()/utils::rng()). This means vegaName only has any
+     * utils::uniqueID()/utils::rng()). This means vegaName only has any
      * effect on the very first call to this function anywhere in the
      * program; every later call, regardless of what vegaName it is
      * given, returns the spectrum already loaded by that first call. A

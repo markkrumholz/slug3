@@ -100,7 +100,7 @@ void core::Galaxy::advance(const double t)
     for (const double mass : newMasses)
     {
         const double formTime = sfr().draw(curTime_, t);
-        clusters_.emplace_back(utils::getID(), mass, formTime, sc);
+        clusters_.emplace_back(utils::uniqueID().get(), mass, formTime, sc);
     }
 
     // 3) For each new field star, draw a formation time from the same

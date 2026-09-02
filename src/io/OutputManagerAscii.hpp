@@ -152,6 +152,54 @@ namespace io
         void writeGalaxyPhot(unsigned long trial, double time,
             core::Galaxy& galaxy) override;
 
+        /**
+         * @brief Not supported for ascii output
+         * @param trialsCompleted Unused; present only to satisfy
+         *   OutputManager::checkpoint()'s own signature
+         * @throws std::runtime_error always
+         * @details
+         * Ascii output has no way to reopen/append to a file it has
+         * already finished writing the way OutputManagerH5 rolls over
+         * to a new HDF5 file, so checkpointing is only ever supported
+         * with HDF5 output -- see OutputManager::checkpoint()'s own
+         * comment for why this still needs to exist (and fail loudly)
+         * rather than simply not being overridden here at all.
+         */
+        void checkpoint(unsigned long trialsCompleted) override;
+
+        /**
+         * @brief Not supported for ascii output
+         * @throws std::runtime_error always
+         * @details
+         * Restarting resumes from a checkpoint, and ascii output never
+         * produces checkpoints in the first place (see checkpoint()'s
+         * own comment) -- see OutputManager::restartTrialsDone()'s own
+         * comment for why this still needs to exist (and fail loudly)
+         * rather than simply not being overridden here at all.
+         */
+        [[nodiscard]] auto restartTrialsDone() const -> unsigned long override;
+
+        /**
+         * @brief Not supported for ascii output
+         * @throws std::runtime_error always
+         * @details
+         * See restartTrialsDone()'s own comment -- the same reasoning
+         * applies here.
+         */
+        [[nodiscard]] auto restartMaxTrial() const -> unsigned long override;
+
+        /**
+         * @brief A no-op for ascii output
+         * @param trialsCompleted Unused; present only to satisfy
+         *   OutputManager::notifyEarlyTermination()'s own signature
+         * @details
+         * Unlike checkpoint()/restartTrialsDone() above, this does not
+         * throw: see OutputManager::notifyEarlyTermination()'s own
+         * comment for why there is simply nothing for ascii output to
+         * correct on an early exit.
+         */
+        void notifyEarlyTermination(unsigned long trialsCompleted) override;
+
     private:
 
         /**

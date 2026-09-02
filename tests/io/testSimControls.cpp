@@ -56,10 +56,10 @@ static auto checkOutTimes(const std::vector<double>& actual,
 }
 
 // Verify that simType is read correctly, that model_name, verbosity,
-// output_mode, out_dir, and n_trial fall back to their
-// documented defaults when not specified in the input deck, and that
-// the start_time/end_time/ntime output option (linear spacing) is
-// correctly expanded.
+// output_mode, out_dir, n_trial, and checkpoint_interval fall back to
+// their documented defaults when not specified in the input deck, and
+// that the start_time/end_time/ntime output option (linear spacing)
+// is correctly expanded.
 static auto testSimControlsDefaults() -> int
 {
     const std::string fileName = "tests/core/assets/testCluster.in";
@@ -106,6 +106,13 @@ static auto testSimControlsDefaults() -> int
             std::cerr << "testSimControls: " << fileName
                 << ": expected default nTrial() == 1, got "
                 << controls.nTrial() << "\n";
+            return 1;
+        }
+        if (controls.checkpointInterval() != 0)
+        {
+            std::cerr << "testSimControls: " << fileName
+                << ": expected default checkpointInterval() == 0, got "
+                << controls.checkpointInterval() << "\n";
             return 1;
         }
 
@@ -324,6 +331,66 @@ static auto testSimControlsInvalidOutputMode() -> int
 static auto testSimControlsInvalidSimType() -> int
 {
     const std::string fileName = "tests/io/assets/testControlsInvalidSimType.in";
+    const toml::table inputDeck = toml::parse_file(fileName);
+    try
+    {
+        const io::SimControls controls(inputDeck);
+        std::cerr << "testSimControls: " << fileName
+            << ": expected construction to throw, but it succeeded\n";
+        return 1;
+    }
+    catch (const std::runtime_error&)
+    {
+        return 0;
+    }
+}
+
+// Verify that outputs.checkpoint_interval is read correctly from a
+// deck with h5 output (the only output mode checkpointing supports --
+// see testSimControlsCheckpointAsciiThrows for the rejected
+// combination).
+static auto testSimControlsCheckpointInterval() -> int
+{
+    const std::string fileName = "tests/core/assets/testCluster.in";
+    try
+    {
+        toml::table inputDeck = toml::parse_file(fileName);
+        if (toml::table* outputsTbl = inputDeck["outputs"].as_table())
+        { outputsTbl->insert_or_assign("checkpoint_interval", static_cast<int64_t>(5)); }
+        else
+        {
+            inputDeck.insert("outputs",
+                toml::table{ { "checkpoint_interval", static_cast<int64_t>(5) } });
+        }
+        const io::SimControls controls(inputDeck);
+
+        if (controls.checkpointInterval() != 5)
+        {
+            std::cerr << "testSimControls: " << fileName
+                << ": expected checkpointInterval() == 5, got "
+                << controls.checkpointInterval() << "\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: checkpointInterval test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Verify that constructing SimControls from a deck with a non-zero
+// outputs.checkpoint_interval combined with ascii output throws --
+// checkpointing is only supported with HDF5 output (see
+// OutputManagerH5::checkpoint()'s own comment for why: unlike
+// OutputManagerH5 rolling over to a new HDF5 file, OutputManagerAscii
+// has no way to reopen/append to an ascii file it has already
+// finished writing).
+static auto testSimControlsCheckpointAsciiThrows() -> int
+{
+    const std::string fileName = "tests/io/assets/testControlsCheckpointAsciiConflict.in";
     const toml::table inputDeck = toml::parse_file(fileName);
     try
     {
@@ -1071,6 +1138,8 @@ auto testSimControls() -> int
     result += testSimControlsOutputTimesPartialRange();
     result += testSimControlsInvalidOutputMode();
     result += testSimControlsInvalidSimType();
+    result += testSimControlsCheckpointInterval();
+    result += testSimControlsCheckpointAsciiThrows();
     result += testSimControlsGalaxy();
     result += testSimControlsPhysicsCluster();
     result += testSimControlsPhysicsGalaxy();

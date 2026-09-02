@@ -232,6 +232,28 @@ void io::SimControls::initControlFlow(const toml::table& inputDeck)
         nTrial_ = nTrialInput.value();
     }
 
+    // Read the checkpoint interval (optional; 0 = disabled, the
+    // default). Checkpointing is only supported with HDF5 output --
+    // OutputManagerAscii has no way to reopen/append to an ascii file
+    // it has already finished writing, unlike OutputManagerH5 rolling
+    // over to a new HDF5 file (see OutputManagerH5::checkpoint()'s own
+    // comment) -- so a non-zero interval combined with ascii output is
+    // rejected here, at construction, rather than left to fail later,
+    // mid-run, the first time a checkpoint would actually be attempted.
+    const auto checkpointIntervalInput = utils::getTOMLKeyWithError<unsigned long>(
+        inputDeck, "outputs.checkpoint_interval");
+    if (checkpointIntervalInput.has_value())
+    {
+        checkpointInterval_ = checkpointIntervalInput.value();
+    }
+    if (checkpointInterval_ != 0 && outputMode_ == OutputMode::ascii)
+    {
+        throw std::runtime_error(
+            "SimControls: outputs.checkpoint_interval is non-zero, but "
+            "checkpointing is only supported with HDF5 output "
+            "(outputs.output_mode = \"h5\" or \"h5divided\"), not ascii");
+    }
+
     // Handle output time generation
     setOutputTimes(inputDeck);
 

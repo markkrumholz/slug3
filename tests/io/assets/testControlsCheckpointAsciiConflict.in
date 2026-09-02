@@ -1,0 +1,26 @@
+# Test input deck for SimControls: a non-zero outputs.checkpoint_interval
+# combined with ascii output, which is not supported
+
+sim_type = "cluster"
+
+[stars]
+IMF = "chabrier.toml"
+track_registry = "tests/tracks/assets/tracks.toml"
+tracks = "MIST_test"
+FeH = 0.0
+alphaFe = -0.2
+
+[clusters]
+CMF = 1e3
+
+[output]
+start_time = 0.0
+end_time = 10.0
+ntime = 3
+
+[outputs]
+output_mode = "ascii"
+checkpoint_interval = 5
+
+[nebular]
+compute_neb = false

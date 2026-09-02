@@ -20,6 +20,7 @@ auto main() -> int {
         int result = 0;
         result += testRngThread();
         result += testUniqueIDManager();
+        result += testUniqueIDManagerSetRead();
         result += testPDFIntegrator();
         return result;
     }

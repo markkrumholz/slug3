@@ -43,9 +43,10 @@ namespace
     class PyOutputManagerH5 : private InputDeckHolder, public io::OutputManagerH5
     {
     public:
-        PyOutputManagerH5(const io::SimControls& simControls, toml::table inputDeck) :
+        PyOutputManagerH5(const io::SimControls& simControls, toml::table inputDeck,
+            const bool restart) :
             InputDeckHolder(std::move(inputDeck)),
-            io::OutputManagerH5(simControls, InputDeckHolder::inputDeck_)
+            io::OutputManagerH5(simControls, InputDeckHolder::inputDeck_, restart)
         {
         }
     };
@@ -82,13 +83,24 @@ input_deck : str
     verbatim into the output file's own input_deck group, so a file
     this OutputManagerH5 produces always records exactly the deck that
     was actually used.
+restart : bool, default False
+    Whether this run is resuming a previous, interrupted run from its
+    most recent checkpoint, rather than starting a new one from
+    scratch. If True, scans sim_controls.outDir() for the most recent
+    checkpoint left behind by a previous run of the same model_name/
+    out_dir and resumes numbering checkpoints from just after it,
+    instead of starting over at checkpoint 0 -- see the C++
+    OutputManagerH5::restartSetup()'s own documentation for the full
+    detail. Only meaningful with HDF5 output and a non-zero
+    outputs.checkpoint_interval in input_deck.
 
 Throws
 ------
 RuntimeError
     If the output file (sim_controls.outDir()/sim_controls.modelName()
-    + ".h5") already exists, or input_deck matches neither a literal
-    TOML document nor a file containing one.)doc";
+    + ".h5") already exists, if input_deck matches neither a literal
+    TOML document nor a file containing one, or if restart is True and
+    sim_controls.outputMode() is ascii.)doc";
 
 // Disable linting for includes -- the pybind macro magic seems to confuse
 // the linter
@@ -97,14 +109,16 @@ void bindOutputManagerH5(py::module_& m)
 {
     py::class_<io::OutputManagerH5, io::OutputManager, py::smart_holder>(m, "OutputManagerH5")
         .def(py::init(
-                [](const io::SimControls& simControls, const std::string& inputDeck)
+                [](const io::SimControls& simControls, const std::string& inputDeck,
+                    const bool restart)
                     -> std::unique_ptr<io::OutputManagerH5>
                 {
                     return std::make_unique<PyOutputManagerH5>(
-                        simControls, parseTomlPathOrContent(inputDeck));
+                        simControls, parseTomlPathOrContent(inputDeck), restart);
                 }),
                 constructorDocstring.data(),
                 py::arg("sim_controls"), py::arg("input_deck"),
+                py::arg("restart") = false,
                 // Keep sim_controls (argument index 2: 1 = self) alive
                 // at least as long as this OutputManagerH5, since it
                 // stores only a live reference to it, exactly as
