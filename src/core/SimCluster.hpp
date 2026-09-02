@@ -80,17 +80,32 @@ namespace core
          * whatever was previously installed once this returns, by any
          * path -- normal completion, a caught SIGTERM, or an exception
          * propagating out): if SIGTERM is received while this is
-         * running, every trial already assigned to some thread still
-         * finishes normally (so no trial's own output is ever left
-         * half-written), but no further trials start, and this returns
-         * sigtermExitCode once the currently in-flight batch finishes,
-         * rather than continuing on to any later ones -- intended to
-         * pair with the standard PBS/SLURM practice of sending SIGTERM
-         * some minutes before a job's own walltime limit, so a long
-         * run can save its progress and exit cleanly instead of being
-         * killed outright mid-trial. See OutputManager::
-         * notifyEarlyTermination() for how the output itself ends up
-         * correctly reflecting only the trials actually completed.
+         * running, every trial some thread has already started still
+         * finishes normally (runTrial() only ever refuses to *start* a
+         * new trial, never aborts one already in progress, so no
+         * trial's own output is ever left half-written), but no
+         * further trial starts once the currently in-flight ones have
+         * all finished -- deliberately checked per trial, not just
+         * once the whole current checkpoint-sized batch finishes,
+         * since with a large checkpoint interval that batch could
+         * itself take far longer than is acceptable to wait out (an
+         * hour or more, for a large enough run) before responding.
+         * Since dynamic scheduling gives no guarantee that trials
+         * finish in numeric order, this can leave a higher-numbered
+         * trial done while a lower-numbered one from the same batch
+         * never started -- harmless for output correctness (see
+         * OutputManager::restartMaxTrial()'s own comment for how a
+         * later restart safely resumes numbering and counting despite
+         * that), just not perfectly numerically contiguous. Once every
+         * already-started trial in the interrupted batch finishes,
+         * this returns sigtermExitCode instead of continuing on to any
+         * later, not-yet-started batches -- intended to pair with the
+         * standard PBS/SLURM practice of sending SIGTERM some minutes
+         * before a job's own walltime limit, so a long run can save its
+         * progress and exit cleanly instead of being killed outright
+         * mid-trial. See OutputManager::notifyEarlyTermination() for
+         * how the output itself ends up correctly reflecting only the
+         * trials actually completed.
          */
         auto run() -> int;
 

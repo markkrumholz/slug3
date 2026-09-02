@@ -79,8 +79,16 @@ namespace
     public:
         SigtermGuard()
         {
+            // Reset the flag before installing the handler, not after
+            // (and so deliberately not via a member initializer for
+            // previousHandler_, despite what clang-tidy's
+            // cppcoreguidelines-prefer-member-initializer suggests --
+            // that would run the install first): a SIGTERM arriving
+            // between the two would otherwise have this immediately
+            // clear the very flag it just set, silently losing the
+            // signal.
             sigtermReceived = 0;
-            previousHandler_ = std::signal(SIGTERM, signalHandler);
+            previousHandler_ = std::signal(SIGTERM, signalHandler); // NOLINT(cppcoreguidelines-prefer-member-initializer)
             if (previousHandler_ == SIG_ERR)
             {
                 throw std::runtime_error(
@@ -90,7 +98,10 @@ namespace
 
         ~SigtermGuard()
         {
-            std::signal(SIGTERM, previousHandler_);
+            // Best-effort restore -- this runs from a destructor, so
+            // it must not throw, and there is nothing more useful to
+            // do with a failure here anyway
+            (void)std::signal(SIGTERM, previousHandler_); // NOLINT(cert-err33-c)
         }
 
         SigtermGuard(const SigtermGuard&) = delete;
@@ -137,7 +148,12 @@ void core::SimCluster::runTrial(const unsigned long trialNum)
     // run to completion elsewhere, not aborted, so no trial's own
     // output is ever left half-written. Checked first, before any
     // other work here (even the verbosity print below), so a trial
-    // that never starts costs as close to nothing as possible.
+    // that never starts costs as close to nothing as possible. Safe
+    // to bail out of individual trials independently like this,
+    // without regard to what order they happen to finish in relative
+    // to trial number, specifically because run() never treats
+    // trialsCompleted_ as if it meant "trials [0, trialsCompleted_)
+    // are done" -- see run()'s own comment for why.
     if (sigtermWasReceived()) { return; }
 
     if (simControls_.verbosity() > 1)
@@ -196,27 +212,66 @@ auto core::SimCluster::run() -> int
     // being rethrown) uniformly, via its own destructor
     const SigtermGuard sigtermGuard;
 
-    // If this run is resuming a previous, interrupted run, start from
-    // the trial number it had already reached rather than from trial
-    // 0 -- see the constructor's own comment. outputManager_'s own
-    // restartTrialsDone() is 0 if restart_ is true but no checkpoint
-    // was actually found to resume from (see
-    // OutputManagerH5::restartSetup()'s own comment), so this still
-    // behaves like an ordinary run from trial 0 in that case.
-    const unsigned long startTrial = restart_ ? outputManager_->restartTrialsDone() : 0;
+    // Trial *numbering* and trial *counting* are deliberately tracked
+    // separately here, and must not be conflated -- see
+    // OutputManager::restartMaxTrial()'s own comment for the full
+    // rationale, and runTrial()'s own comment for how that connects to
+    // the per-trial SIGTERM check below. In short: under dynamic
+    // OpenMP scheduling, a batch a SIGTERM interrupted partway through
+    // can finish with a higher-numbered trial done while a lower-
+    // numbered one is not (whichever thread happened to still be mid-
+    // flight when the others stopped taking on new work), so "how many
+    // trials are done" and "which trial numbers are safe to reuse" are
+    // two different questions with two different answers:
+    //   - priorTrialsCompleted (from OutputManager::restartTrialsDone())
+    //     is an accurate *count* of trials the run being restarted had
+    //     already completed, regardless of which specific numbers they
+    //     were -- trialsRemaining, how many *more* this session needs
+    //     to run to reach simControls_.nTrial() in total, follows
+    //     directly from it and needs nothing else.
+    //   - numberingStart (from OutputManager::restartMaxTrial() + 1)
+    //     is the smallest trial number guaranteed never to have been
+    //     written before, however ragged the run being restarted's own
+    //     numbering ended up -- this, not priorTrialsCompleted, is what
+    //     this session's own new trials must be numbered from to avoid
+    //     colliding with (and so silently overwriting the identity of)
+    //     one already on disk. It is fine for trial numbers to end up
+    //     non-contiguous across a restart (e.g. 0..3, 5..9 -- number 4
+    //     simply never used again) -- the total *count* across every
+    //     checkpoint is what has to come out right, not the specific
+    //     numbers.
+    // trialsCompleted_ (this object's own atomic counter) tracks only
+    // what *this* session itself completes, starting at 0 regardless
+    // of restart_ -- cumulativeTrialsCompleted, computed fresh
+    // wherever it's needed below, is what actually gets reported to
+    // outputManager_, combining that with priorTrialsCompleted.
+    const unsigned long priorTrialsCompleted = restart_ ? outputManager_->restartTrialsDone() : 0;
+    const unsigned long numberingStart = restart_ ? outputManager_->restartMaxTrial() + 1 : 0;
+    // Guards against underflow if priorTrialsCompleted somehow exceeds
+    // simControls_.nTrial() (e.g. n_trial was lowered in the deck
+    // between the original run and this restart) -- treated as
+    // "nothing left to do" rather than wrapping around to an
+    // enormous trial count.
+    const unsigned long trialsRemaining = (priorTrialsCompleted < simControls_.nTrial()) ?
+        (simControls_.nTrial() - priorTrialsCompleted) : 0;
+    const unsigned long numberingEnd = numberingStart + trialsRemaining;
 
     if (simControls_.verbosity() > 0)
     {
         std::cout << "slug: cluster simulation starting with "
             << simControls_.nTrial() << " trials";
-        if (startTrial != 0) { std::cout << " (resuming from trial " << startTrial << ")"; }
+        if (priorTrialsCompleted != 0)
+        {
+            std::cout << " (resuming: " << priorTrialsCompleted <<
+                " already done, numbering new trials from " << numberingStart << ")";
+        }
         std::cout << "\n";
     }
 
     // Trials run in batches of checkpointInterval() at a time (or, if
-    // checkpointing is disabled, one batch covering every trial, i.e.
-    // today's original, unbatched behavior) -- each batch its own
-    // "#pragma omp parallel for", so its own implicit barrier
+    // checkpointing is disabled, one batch covering every remaining
+    // trial, i.e. today's original, unbatched behavior) -- each batch
+    // its own "#pragma omp parallel for", so its own implicit barrier
     // guarantees every thread has finished every trial in the batch
     // (writeCluster/writeClusterSpec/writeClusterPhot for every output
     // time, not just started it) before this reaches the checkpoint()
@@ -234,13 +289,13 @@ auto core::SimCluster::run() -> int
     // batch's own slowest trial finishes, once per checkpoint --
     // deliberately traded for that correctness guarantee.
     const unsigned long batchSize = (simControls_.checkpointInterval() != 0) ?
-        simControls_.checkpointInterval() : simControls_.nTrial();
+        simControls_.checkpointInterval() : trialsRemaining;
 
-    for (unsigned long batchStart = startTrial; batchStart < simControls_.nTrial();
+    for (unsigned long batchStart = numberingStart; batchStart < numberingEnd;
         batchStart += batchSize)
     {
         const unsigned long batchEnd =
-            std::min(batchStart + batchSize, simControls_.nTrial());
+            std::min(batchStart + batchSize, numberingEnd);
 
 #ifdef _OPENMP
         // See runTrial()'s own comment for why each trial is
@@ -272,60 +327,72 @@ auto core::SimCluster::run() -> int
         if (firstError)
         {
             // This run is ending abnormally, having completed fewer
-            // than simControls_.nTrial() trials -- see
+            // than simControls_.nTrial() trials in total -- see
             // OutputManager::notifyEarlyTermination()'s own comment for
             // why the eventual destructor needs to be told that
             // explicitly, rather than assuming every trial finished the
             // way it otherwise would.
             outputManager_->notifyEarlyTermination(
-                trialsCompleted_.load(std::memory_order_relaxed));
+                priorTrialsCompleted + trialsCompleted_.load(std::memory_order_relaxed));
             std::rethrow_exception(firstError);
         }
 #else
-        for (unsigned long trialNum = batchStart; trialNum < batchEnd; ++trialNum)
+        try
         {
-            runTrial(trialNum);
+            for (unsigned long trialNum = batchStart; trialNum < batchEnd; ++trialNum)
+            {
+                runTrial(trialNum);
+            }
+        }
+        catch (...)
+        {
+            // See the identical #ifdef _OPENMP branch's own comment
+            outputManager_->notifyEarlyTermination(
+                priorTrialsCompleted + trialsCompleted_.load(std::memory_order_relaxed));
+            throw;
         }
 #endif
 
-        // Every trial actually started in this batch has now finished
-        // (see runTrial()'s own comment on what a caught SIGTERM does
-        // and does not still let run) -- so if one was caught during
-        // this batch, this is the correct, safe point to stop: save
-        // the currently-open checkpoint (or, without checkpointing, the
-        // run's own single output file) with the true number of trials
-        // completed so far, via notifyEarlyTermination() rather than
-        // checkpoint() -- there is nothing left to write into a new
-        // checkpoint, so rolling over to one would just leave it empty
-        // and un-closed for the destructor to eventually close with a
-        // wrong trial count of its own (see notifyEarlyTermination()'s
-        // own comment) -- and return sigtermExitCode instead of
-        // continuing on to any later, not-yet-started batches.
+        // If SIGTERM was caught somewhere in this batch, this is the
+        // correct, safe point to stop: every trial actually started
+        // has now finished (runTrial()'s own check only ever stops a
+        // trial from starting in the first place), so it is safe to
+        // save the currently-open checkpoint (or, without
+        // checkpointing, the run's own single output file) with the
+        // true, accurate cumulative count of trials completed so far,
+        // via notifyEarlyTermination() rather than checkpoint() --
+        // there is nothing left to write into a new checkpoint, so
+        // rolling over to one would just leave it empty and un-closed
+        // for the destructor to eventually close with a wrong trial
+        // count of its own (see notifyEarlyTermination()'s own
+        // comment) -- and return sigtermExitCode instead of continuing
+        // on to any later, not-yet-started batches.
         if (sigtermWasReceived())
         {
-            const auto completed = trialsCompleted_.load(std::memory_order_relaxed);
-            outputManager_->notifyEarlyTermination(completed);
+            const auto cumulativeCompleted =
+                priorTrialsCompleted + trialsCompleted_.load(std::memory_order_relaxed);
+            outputManager_->notifyEarlyTermination(cumulativeCompleted);
             if (simControls_.verbosity() > 0)
             {
                 std::cout << "slug: caught SIGTERM, stopping early with "
-                    << completed << " / " << simControls_.nTrial() << " trials completed\n";
+                    << cumulativeCompleted << " / " << simControls_.nTrial() <<
+                    " trials completed\n";
             }
             return sigtermExitCode;
         }
 
-        // Every trial in [batchStart, batchEnd) is now fully written
-        // -- see this method's own comment above -- so it is safe to
-        // roll over to a new checkpoint now, unless this was the
-        // final batch (in which case the current checkpoint is simply
-        // left open for the destructor to close/consolidate, exactly
-        // as when checkpointing is disabled entirely). batchEnd is
-        // also exactly the number of trials completed so far in the
-        // run (batches start at 0 and this one's own trials are all
-        // done), which is what checkpoint() records into the
-        // checkpoint's own output for a later restart to pick up from.
-        if (simControls_.checkpointInterval() != 0 && batchEnd < simControls_.nTrial())
+        // No SIGTERM was caught, so every trial in [batchStart,
+        // batchEnd) completed -- this batch is gap-free, so
+        // trialsCompleted_ now correctly counts exactly
+        // (batchEnd - numberingStart) trials this session has done.
+        // Safe to roll over to a new checkpoint now, unless this was
+        // the final batch (in which case the current checkpoint is
+        // simply left open for the destructor to close/consolidate,
+        // exactly as when checkpointing is disabled entirely).
+        if (simControls_.checkpointInterval() != 0 && batchEnd < numberingEnd)
         {
-            outputManager_->checkpoint(batchEnd);
+            outputManager_->checkpoint(
+                priorTrialsCompleted + trialsCompleted_.load(std::memory_order_relaxed));
         }
     }
 

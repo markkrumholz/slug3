@@ -268,6 +268,37 @@ namespace io
         { return restartTrialsDone_; }
 
         /**
+         * @brief Return the largest trial number the run being restarted ever actually wrote
+         * @return restartMaxTrial_, as set by restartSetup() when this
+         *   OutputManagerH5 was constructed with restart = true (0 if
+         *   it was not, or if restartSetup() found no existing
+         *   checkpoint to resume from)
+         * @details
+         * Only meaningful under the same conditions as
+         * restartTrialsDone(); see its own comment.
+         *
+         * Deliberately distinct from restartTrialsDone(): under
+         * dynamic OpenMP scheduling, a batch that SIGTERM interrupted
+         * partway through can finish with a higher-numbered trial
+         * (e.g. one a fast thread happened to grab) done while a
+         * lower-numbered one (assigned to a slower thread, still
+         * mid-flight when the batch's own implicit barrier released)
+         * is not -- trialsCompleted_'s own count still correctly
+         * reports how many trials completed, but "trials
+         * [0, trialsCompleted_) are done" is not a safe assumption
+         * once that can happen. maxTrial_ (see its own comment)
+         * exists precisely so a restart can resume numbering new
+         * trials at maxTrial_ + 1 -- guaranteed never to collide with
+         * one already written -- independently of how many more
+         * trials restartTrialsDone() says are actually needed to
+         * reach SimControls::nTrial(). SimCluster::run()'s/
+         * SimGalaxy::run()'s own comment has the full detail of how
+         * the two combine.
+         */
+        [[nodiscard]] auto restartMaxTrial() const -> unsigned long override
+        { return restartMaxTrial_; }
+
+        /**
          * @brief Record that this run is ending early, having only actually completed trialsCompleted trials
          * @param trialsCompleted Number of trials actually completed
          * @details
@@ -331,19 +362,27 @@ namespace io
          * already used (a fresh process's own utils::uniqueID()
          * otherwise starts back at 0) or leaving a gap (see
          * closeOutputFile()'s own comment for the full detail).
+         * restartMaxTrial_ is read the same way again, from that same
+         * checkpoint's own "max_trial" attribute -- see maxTrial_'s
+         * own comment for why this, not restartTrialsDone_, is what a
+         * restart needs to safely resume *numbering* new trials from,
+         * and SimCluster::run()'s/SimGalaxy::run()'s own comment for
+         * how the two combine.
          *
          * If no entry matching the checkpoint naming pattern exists at
-         * all, checkpointNumber_ and restartTrialsDone_ are simply
-         * left at their own default-constructed values of 0, and
-         * utils::uniqueID() is left untouched -- so a restart of a run
-         * that never actually got as far as its first checkpoint (or
-         * was never checkpointed to begin with) just starts over from
-         * trial 0, exactly like an ordinary, non-restart run would.
+         * all, checkpointNumber_, restartTrialsDone_, and
+         * restartMaxTrial_ are simply left at their own default-
+         * constructed values of 0, and utils::uniqueID() is left
+         * untouched -- so a restart of a run that never actually got
+         * as far as its first checkpoint (or was never checkpointed to
+         * begin with) just starts over from trial 0, exactly like an
+         * ordinary, non-restart run would.
          *
          * If SimControls::verbosity() is non-zero, prints which
          * checkpoint (if any) this restarted from, how many trials it
-         * reports already completed, and the next uid it resumed from,
-         * to stdout.
+         * reports already completed, the highest trial number it
+         * reports having written, and the next uid it resumed from, to
+         * stdout.
          *
          * Caveat: the largest NNNNN found on disk is not necessarily
          * one that finished closing before the run being restarted
@@ -451,10 +490,20 @@ namespace io
          * -- e.g. immediately after this file's own process starts,
          * before it has generated any IDs of its own at all).
          *
+         * Also writes maxTrial_ as this thread's own file's own
+         * "max_trial" top-level attribute, alongside the two above --
+         * see maxTrial_'s own comment for what it tracks and why a
+         * restart needs it (distinct from trialsCompleted, despite
+         * both being about "how far did this run get") to safely
+         * resume numbering new trials without colliding with ones
+         * already written.
+         *
          * Called once per thread from inside the destructor's own
          * OpenMP parallel region when built with OpenMP, or once,
-         * directly, otherwise; also called by checkpoint(), on just
-         * the one thread rolling over to a new checkpoint.
+         * directly, otherwise; checkpoint() calls it the same way --
+         * once per thread, from its own freshly spawned "#pragma omp
+         * parallel" team, not on a single thread -- each time it
+         * rolls over to a new checkpoint.
          */
         void closeOutputFile(unsigned long trialsCompleted);
 
@@ -574,6 +623,34 @@ namespace io
         // it needs no locking of its own either.
         unsigned long checkpointNumber_ = 0;
 
+        // The largest trial number ever actually passed to any write*
+        // method over this object's own whole lifetime (0 before the
+        // first one, or if this is a restart with nothing written yet
+        // this session -- see below) -- unlike checkpointNumber_/
+        // restartTrialsDone_ above, this genuinely is touched
+        // concurrently, from inside every write* method's own
+        // "#pragma omp critical(h5ThreadSafety)" block (see e.g.
+        // writeCluster()'s own comment), which is exactly why it is
+        // safe without any locking of its own: only one thread is ever
+        // inside that critical section at a time, regardless of which
+        // write* method it entered through.
+        //
+        // Deliberately never reset between checkpoints (unlike
+        // checkpointNumber_, which advances by one every rollover):
+        // if this object's constructor set restartMaxTrial_ (restart
+        // = true and a previous checkpoint was found), it also
+        // initializes this to that same value, so it already reflects
+        // every trial number the run being restarted ever wrote,
+        // before this session writes any of its own -- otherwise, if a
+        // restarted session were itself interrupted again having
+        // written nothing new yet, its own checkpoint's "max_trial"
+        // attribute (see closeOutputFile()'s own comment) would
+        // wrongly read back as 0 on a later restart, colliding new
+        // numbering with everything already written in earlier
+        // sessions. See restartSetup()'s own comment for how the
+        // value written here gets read back in.
+        unsigned long maxTrial_ = 0;
+
         // Number of trials the run being restarted had already
         // completed, as of the checkpoint restartSetup() found and
         // resumed from -- 0 if this OutputManagerH5 was not
@@ -585,6 +662,13 @@ namespace io
         // inside a "#pragma omp parallel" region by restartTrialsDone()'s
         // own callers.
         unsigned long restartTrialsDone_ = 0;
+
+        // The largest trial number restartSetup() found the run being
+        // restarted had ever actually written, as of the checkpoint it
+        // resumed from -- 0 under the same conditions restartTrialsDone_
+        // is 0 (see its own comment). Same locking rationale as
+        // restartTrialsDone_ (set once, before openNewOutputFiles()).
+        unsigned long restartMaxTrial_ = 0;
 
         // Set by notifyEarlyTermination(), from outside any active
         // parallel region, at most once, strictly before this object

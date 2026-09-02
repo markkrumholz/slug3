@@ -226,6 +226,41 @@ namespace io
         [[nodiscard]] virtual auto restartTrialsDone() const -> unsigned long = 0;
 
         /**
+         * @brief Return the largest trial number the run being restarted ever actually wrote
+         * @return The highest trial number the run being restarted had
+         *   actually written output for, as of the most recent
+         *   checkpoint it left behind -- see
+         *   OutputManagerH5::restartSetup()'s own comment for how that
+         *   is determined
+         * @details
+         * Only meaningful under the same conditions as
+         * restartTrialsDone() (only after a restart-constructed
+         * OutputManager, only with HDF5 output -- OutputManagerAscii's
+         * own implementation throws for the identical reason).
+         *
+         * Deliberately distinct from restartTrialsDone(), even though
+         * both describe "how far did the run being restarted get":
+         * under dynamic OpenMP scheduling, a batch that stopped
+         * partway through (a caught SIGTERM, or a per-trial exception)
+         * can finish with some higher-numbered trial done while a
+         * lower-numbered one is not (whichever thread happened to
+         * still be mid-flight when the others stopped taking on new
+         * work) -- restartTrialsDone() (a plain count of how many
+         * trials finished) stays accurate even then, but "trials
+         * [0, restartTrialsDone()) are done" stops being a safe
+         * assumption once that can happen, so a restart cannot safely
+         * resume trial *numbering* from restartTrialsDone() alone. It
+         * can always safely resume at restartMaxTrial() + 1, since
+         * that is defined as the largest number ever actually written
+         * -- guaranteed never to collide with one already on disk --
+         * independently of restartTrialsDone() itself, which still
+         * correctly says how many *more* trials are needed to reach
+         * SimControls::nTrial(). SimCluster::run()'s/SimGalaxy::run()'s
+         * own comment has the full detail of how the two combine.
+         */
+        [[nodiscard]] virtual auto restartMaxTrial() const -> unsigned long = 0;
+
+        /**
          * @brief Record that this run is ending early, having only actually completed trialsCompleted trials
          * @param trialsCompleted Number of trials actually completed
          *   before this run stopped short of SimControls::nTrial() --

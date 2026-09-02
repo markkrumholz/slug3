@@ -29,6 +29,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <toml.hpp>
 #include <vector>
 #ifdef _OPENMP
@@ -118,6 +119,125 @@ static auto readULongAttr(const hid_t loc, const std::string& name) -> unsigned 
     H5Aread(attr, H5T_NATIVE_ULONG, static_cast<void*>(&value));
     H5Aclose(attr);
     return value;
+}
+
+// Scan outDir for entries -- either modelName_chkNNNNN.h5 files or
+// modelName_chkNNNNN directories (see checkpointModelName()) -- whose
+// name starts with prefix, and return the largest NNNNN found, or no
+// value if outDir does not exist or contains no such entry. Factored
+// out of restartSetup() purely to keep that function's own cognitive
+// complexity down; has no other caller.
+static auto findMaxCheckpointNumber(const std::filesystem::path& outDir,
+    const std::string& prefix) -> std::optional<unsigned long>
+{
+    std::optional<unsigned long> maxCheckpoint;
+    if (!std::filesystem::exists(outDir)) { return maxCheckpoint; }
+
+    for (const auto& entry : std::filesystem::directory_iterator(outDir))
+    {
+        std::string suffix;
+        if (entry.is_regular_file() && entry.path().extension() == ".h5")
+        {
+            const auto stem = entry.path().stem().string();
+            if (!stem.starts_with(prefix)) { continue; }
+            suffix = stem.substr(prefix.size());
+        }
+        else if (entry.is_directory())
+        {
+            const auto dirName = entry.path().filename().string();
+            if (!dirName.starts_with(prefix)) { continue; }
+            suffix = dirName.substr(prefix.size());
+        }
+        else { continue; }
+
+        // suffix must be exactly the 5-digit, zero-padded checkpoint
+        // number checkpointModelName() itself always produces --
+        // anything else (wrong width, non-digits) is not actually one
+        // of this run's own checkpoints, so is silently skipped rather
+        // than treated as an error
+        if (suffix.size() != 5) { continue; }
+        unsigned long checkpointNum = 0;
+        const auto* const suffixEnd = suffix.data() + suffix.size(); // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic) -- suffix's own end pointer is always in-bounds
+        const auto parseResult = std::from_chars(suffix.data(), suffixEnd, checkpointNum);
+        if (parseResult.ec != std::errc{} || parseResult.ptr != suffixEnd) { continue; }
+
+        if (!maxCheckpoint.has_value() || checkpointNum > *maxCheckpoint)
+        { maxCheckpoint = checkpointNum; }
+    }
+    return maxCheckpoint;
+}
+
+// The trials_completed/restart_uid/max_trial attributes closeOutputFile()
+// writes on every checkpoint file, as read back by restartSetup()
+struct CheckpointAttrs
+{
+    unsigned long trialsCompleted_ = 0;
+    unsigned long restartUid_ = 0;
+    unsigned long maxTrial_ = 0;
+};
+
+// Open the HDF5 file at path read-only, read its trials_completed/
+// restart_uid/max_trial attributes (see CheckpointAttrs), close it,
+// and return them -- or throw std::runtime_error, naming deleteHint
+// as what the caller should delete before restarting again, if the
+// file cannot be opened or is missing any of the three. Factored out
+// of restartSetup() purely to keep that function's own cognitive
+// complexity down (it is called once directly, and once per
+// thread_NNNN.h5 file when restarting from an unconsolidated,
+// per-thread checkpoint); has no other caller.
+static auto readCheckpointAttrs(const std::filesystem::path& path,
+    const std::string& deleteHint) -> CheckpointAttrs
+{
+    // NOLINTBEGIN(misc-include-cleaner)
+    const hid_t file = H5Fopen(path.string().c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+    if (file < 0)
+    {
+        throw std::runtime_error(
+            "OutputManagerH5::restartSetup: unable to open " + path.string());
+    }
+    CheckpointAttrs attrs;
+    try
+    {
+        attrs.trialsCompleted_ = readULongAttr(file, "trials_completed");
+        attrs.restartUid_ = readULongAttr(file, "restart_uid");
+        attrs.maxTrial_ = readULongAttr(file, "max_trial");
+    }
+    catch (const std::exception&)
+    {
+        H5Fclose(file);
+        throw std::runtime_error(
+            "OutputManagerH5::restartSetup: " + path.string() +
+            " has no trials_completed/restart_uid/max_trial attribute "
+            "-- it may still have been open when the run being "
+            "restarted stopped; if so, delete " + deleteHint +
+            " and restart again");
+    }
+    H5Fclose(file);
+    // NOLINTEND(misc-include-cleaner)
+    return attrs;
+}
+
+// Record value as common's own first-seen value, or, if common
+// already holds one, throw std::runtime_error naming attrName if
+// value disagrees with it -- used by restartSetup() to check that
+// every thread_NNNN.h5 file in a not-yet-consolidated checkpoint
+// directory agrees on each of its own trials_completed/restart_uid/
+// max_trial attributes (closeOutputFile() always wrote them the same
+// value across every thread in the first place, so a mismatch here
+// can only mean the on-disk checkpoint itself is corrupt or was
+// tampered with). Factored out of restartSetup() purely to keep that
+// function's own cognitive complexity down; has no other caller.
+static void crossCheckAttr(std::optional<unsigned long>& common, const unsigned long value,
+    const std::string& attrName, const std::filesystem::path& dirPath)
+{
+    if (!common.has_value()) { common = value; return; }
+    if (value != *common)
+    {
+        throw std::runtime_error(
+            "OutputManagerH5::restartSetup: thread output files in " +
+            dirPath.string() + " disagree on " + attrName + " (" +
+            std::to_string(*common) + " vs " + std::to_string(value) + ")");
+    }
 }
 
 // Write a scalar string dataset called name, with the given value,
@@ -597,7 +717,19 @@ io::OutputManagerH5::OutputManagerH5(
             "is OutputMode::ascii -- restarting is only supported with "
             "HDF5 output");
     }
-    if (restart) { restartSetup(); }
+    if (restart)
+    {
+        restartSetup();
+        // See maxTrial_'s own comment for why this needs to start from
+        // restartMaxTrial_ (rather than its own default of 0), even
+        // though every write* method also keeps it up to date from
+        // here on: this session might end up writing nothing at all
+        // before its own checkpoint closes (e.g. an immediate SIGTERM),
+        // and that checkpoint's own "max_trial" attribute still needs
+        // to correctly reflect every trial number ever written by any
+        // earlier session, not just this one.
+        maxTrial_ = restartMaxTrial_;
+    }
     openNewOutputFiles();
 }
 
@@ -605,42 +737,7 @@ io::OutputManagerH5::OutputManagerH5(
 void io::OutputManagerH5::restartSetup()
 {
     const std::string prefix = simControls_.modelName() + "_chk";
-    std::optional<unsigned long> maxCheckpoint;
-
-    if (std::filesystem::exists(simControls_.outDir()))
-    {
-        for (const auto& entry : std::filesystem::directory_iterator(simControls_.outDir()))
-        {
-            std::string suffix;
-            if (entry.is_regular_file() && entry.path().extension() == ".h5")
-            {
-                const auto stem = entry.path().stem().string();
-                if (!stem.starts_with(prefix)) { continue; }
-                suffix = stem.substr(prefix.size());
-            }
-            else if (entry.is_directory())
-            {
-                const auto dirName = entry.path().filename().string();
-                if (!dirName.starts_with(prefix)) { continue; }
-                suffix = dirName.substr(prefix.size());
-            }
-            else { continue; }
-
-            // suffix must be exactly the 5-digit, zero-padded
-            // checkpoint number checkpointModelName() itself always
-            // produces -- anything else (wrong width, non-digits) is
-            // not actually one of this run's own checkpoints, so is
-            // silently skipped rather than treated as an error
-            if (suffix.size() != 5) { continue; }
-            unsigned long checkpointNum = 0;
-            const auto* const suffixEnd = suffix.data() + suffix.size(); // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic) -- suffix's own end pointer is always in-bounds
-            const auto parseResult = std::from_chars(suffix.data(), suffixEnd, checkpointNum);
-            if (parseResult.ec != std::errc{} || parseResult.ptr != suffixEnd) { continue; }
-
-            if (!maxCheckpoint.has_value() || checkpointNum > *maxCheckpoint)
-            { maxCheckpoint = checkpointNum; }
-        }
-    }
+    const auto maxCheckpoint = findMaxCheckpointNumber(simControls_.outDir(), prefix);
 
     if (!maxCheckpoint.has_value())
     {
@@ -661,31 +758,12 @@ void io::OutputManagerH5::restartSetup()
     std::string source;
     if (std::filesystem::is_regular_file(h5Path))
     {
-        // NOLINTBEGIN(misc-include-cleaner)
-        const hid_t file = H5Fopen(h5Path.string().c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
-        if (file < 0)
-        {
-            throw std::runtime_error(
-                "OutputManagerH5::restartSetup: unable to open " + h5Path.string());
-        }
-        try
-        {
-            restartTrialsDone_ = readULongAttr(file, "trials_completed");
-            restartUid = readULongAttr(file, "restart_uid");
-        }
-        catch (const std::exception&)
-        {
-            H5Fclose(file);
-            throw std::runtime_error(
-                "OutputManagerH5::restartSetup: " + h5Path.string() +
-                " has no trials_completed/restart_uid attribute -- it may "
-                "still have been open when the run being restarted stopped; "
-                "if so, delete it (and its own thread_NNNN.h5 files, if it "
-                "is a directory rather than a single file) and restart "
-                "again");
-        }
-        H5Fclose(file);
-        // NOLINTEND(misc-include-cleaner)
+        const auto attrs = readCheckpointAttrs(h5Path,
+            "it (and its own thread_NNNN.h5 files, if it is a directory "
+            "rather than a single file)");
+        restartTrialsDone_ = attrs.trialsCompleted_;
+        restartUid = attrs.restartUid_;
+        restartMaxTrial_ = attrs.maxTrial_;
         source = h5Path.string();
     }
     else if (std::filesystem::is_directory(dirPath))
@@ -707,56 +785,39 @@ void io::OutputManagerH5::restartSetup()
 
         std::optional<unsigned long> commonTrialsCompleted;
         std::optional<unsigned long> commonRestartUid;
+        std::optional<unsigned long> commonMaxTrial;
         for (const auto& threadFile : threadFiles)
         {
-            // NOLINTBEGIN(misc-include-cleaner)
-            const hid_t file = H5Fopen(threadFile.string().c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
-            if (file < 0)
-            {
-                throw std::runtime_error(
-                    "OutputManagerH5::restartSetup: unable to open " + threadFile.string());
-            }
-            unsigned long trialsCompleted = 0;
-            unsigned long uid = 0;
-            try
-            {
-                trialsCompleted = readULongAttr(file, "trials_completed");
-                uid = readULongAttr(file, "restart_uid");
-            }
-            catch (const std::exception&)
-            {
-                H5Fclose(file);
-                throw std::runtime_error(
-                    "OutputManagerH5::restartSetup: " + threadFile.string() +
-                    " has no trials_completed/restart_uid attribute -- it "
-                    "may still have been open when the run being restarted "
-                    "stopped; if so, delete " + dirPath.string() +
-                    " (its own directory) and restart again");
-            }
-            H5Fclose(file);
-            // NOLINTEND(misc-include-cleaner)
-
-            if (!commonTrialsCompleted.has_value()) { commonTrialsCompleted = trialsCompleted; }
-            else if (trialsCompleted != *commonTrialsCompleted)
-            {
-                throw std::runtime_error(
-                    "OutputManagerH5::restartSetup: thread output files in " +
-                    dirPath.string() + " disagree on trials_completed (" +
-                    std::to_string(*commonTrialsCompleted) + " vs " +
-                    std::to_string(trialsCompleted) + ")");
-            }
-            if (!commonRestartUid.has_value()) { commonRestartUid = uid; }
-            else if (uid != *commonRestartUid)
-            {
-                throw std::runtime_error(
-                    "OutputManagerH5::restartSetup: thread output files in " +
-                    dirPath.string() + " disagree on restart_uid (" +
-                    std::to_string(*commonRestartUid) + " vs " +
-                    std::to_string(uid) + ")");
-            }
+            const auto attrs = readCheckpointAttrs(threadFile,
+                dirPath.string() + " (its own directory)");
+            crossCheckAttr(commonTrialsCompleted, attrs.trialsCompleted_,
+                "trials_completed", dirPath);
+            crossCheckAttr(commonRestartUid, attrs.restartUid_, "restart_uid", dirPath);
+            crossCheckAttr(commonMaxTrial, attrs.maxTrial_, "max_trial", dirPath);
         }
-        restartTrialsDone_ = *commonTrialsCompleted;
-        restartUid = *commonRestartUid;
+        // threadFiles is non-empty (checked above), and crossCheckAttr()
+        // always sets each of these on the loop's first iteration, so
+        // this has_value() check can never actually fail -- present
+        // anyway so a future change to this function that broke the
+        // guarantee would fail loudly here instead of reading garbage.
+        if (!commonTrialsCompleted.has_value() || !commonRestartUid.has_value() ||
+            !commonMaxTrial.has_value())
+        {
+            throw std::runtime_error(
+                "OutputManagerH5::restartSetup: internal error: no thread "
+                "output files were actually read in " + dirPath.string());
+        }
+        // clang-tidy's bugprone-unchecked-optional-access does not
+        // credit the has_value() guard immediately above (tried as a
+        // single combined condition, then as three separate
+        // single-optional ifs -- neither satisfied it, and the latter
+        // pushed this function's own cognitive complexity back over
+        // its threshold for no real benefit), so it is suppressed
+        // explicitly below rather than fought further; the guard above
+        // is the actual safety net.
+        restartTrialsDone_ = commonTrialsCompleted.value(); // NOLINT(bugprone-unchecked-optional-access)
+        restartUid = commonRestartUid.value(); // NOLINT(bugprone-unchecked-optional-access)
+        restartMaxTrial_ = commonMaxTrial.value(); // NOLINT(bugprone-unchecked-optional-access)
         source = dirPath.string();
     }
     else
@@ -776,7 +837,8 @@ void io::OutputManagerH5::restartSetup()
     if (simControls_.verbosity() > 0)
     {
         std::cout << "slug: restarting from checkpoint " << source << ", "
-            << restartTrialsDone_ << " trials completed, next uid " <<
+            << restartTrialsDone_ << " trials completed, highest trial "
+            "number written " << restartMaxTrial_ << ", next uid " <<
             restartUid << "\n";
     }
 }
@@ -1323,13 +1385,31 @@ io::OutputManagerH5::~OutputManagerH5()
     // comments) and called notifyEarlyTermination() before returning:
     // earlyTerminationTrialsCompleted_ then holds the true count
     // instead, which value_or() prefers here.
+    // Neither closeOutputFile() nor consolidateFiles() may be allowed
+    // to throw out of a destructor (undefined behavior at best, a
+    // std::terminate() at worst if this fires during stack unwinding
+    // from some other exception already in flight) -- both are caught
+    // here and reported to stderr instead, on a strictly best-effort
+    // basis: there is no caller left to hand a thrown exception to by
+    // the time a destructor is running.
     const auto trialsCompleted =
         earlyTerminationTrialsCompleted_.value_or(simControls_.nTrial());
 #ifdef _OPENMP
 #pragma omp parallel
 #endif
     {
-        closeOutputFile(trialsCompleted);
+        try
+        {
+            closeOutputFile(trialsCompleted);
+        }
+        catch (const std::exception& error)
+        {
+#ifdef _OPENMP
+#pragma omp critical
+#endif
+            std::cerr << "slug: OutputManagerH5: error closing output file: "
+                << error.what() << "\n";
+        }
     }
 
 #ifdef _OPENMP
@@ -1359,13 +1439,29 @@ io::OutputManagerH5::~OutputManagerH5()
                 // checkpoints that a previous run's own destructor has
                 // already fully consolidated.
                 if (!std::filesystem::is_directory(chkPath)) { continue; }
-                consolidateFiles(chkPath);
+                try
+                {
+                    consolidateFiles(chkPath);
+                }
+                catch (const std::exception& error)
+                {
+                    std::cerr << "slug: OutputManagerH5: error consolidating " <<
+                        chkPath.string() << ": " << error.what() << "\n";
+                }
             }
         }
         else
         {
-            consolidateFiles(std::filesystem::path(simControls_.outDir()) /
-                simControls_.modelName());
+            try
+            {
+                consolidateFiles(std::filesystem::path(simControls_.outDir()) /
+                    simControls_.modelName());
+            }
+            catch (const std::exception& error)
+            {
+                std::cerr << "slug: OutputManagerH5: error consolidating output: "
+                    << error.what() << "\n";
+            }
         }
     }
 #endif
@@ -1389,6 +1485,7 @@ void io::OutputManagerH5::closeOutputFile(const unsigned long trialsCompleted)
         if (galaxyPhotGroup_() >= 0) { H5Gclose(galaxyPhotGroup_()); }
         writeULongAttr(file_(), "trials_completed", trialsCompleted);
         writeULongAttr(file_(), "restart_uid", utils::uniqueID().read());
+        writeULongAttr(file_(), "max_trial", maxTrial_);
         H5Fclose(file_());
         // NOLINTEND(misc-include-cleaner)
     }
@@ -1472,6 +1569,8 @@ void io::OutputManagerH5::writeCluster(
 #pragma omp critical(h5ThreadSafety)
 #endif
     {
+        if (trial > maxTrial_) { maxTrial_ = trial; }
+
         // NOLINTBEGIN(misc-include-cleaner)
         appendToDataset(clustersGroup_(), "trial", H5T_NATIVE_ULONG, &trial);
         appendToDataset(clustersGroup_(), "uid", H5T_NATIVE_ULONG, &uid);
@@ -1535,6 +1634,8 @@ void io::OutputManagerH5::writeClusterSpec(
 #pragma omp critical(h5ThreadSafety)
 #endif
     {
+        if (trial > maxTrial_) { maxTrial_ = trial; }
+
         // NOLINTBEGIN(misc-include-cleaner)
         appendToDataset(clusterSpectraGroup_(), "trial", H5T_NATIVE_ULONG, &trial);
         appendToDataset(clusterSpectraGroup_(), "time", H5T_NATIVE_DOUBLE, &time);
@@ -1584,6 +1685,8 @@ void io::OutputManagerH5::writeClusterPhot(
 #pragma omp critical(h5ThreadSafety)
 #endif
     {
+        if (trial > maxTrial_) { maxTrial_ = trial; }
+
         // NOLINTBEGIN(misc-include-cleaner)
         appendToDataset(clusterPhotGroup_(), "trial", H5T_NATIVE_ULONG, &trial);
         appendToDataset(clusterPhotGroup_(), "time", H5T_NATIVE_DOUBLE, &time);
@@ -1620,6 +1723,8 @@ void io::OutputManagerH5::writeGalaxy(
 #pragma omp critical(h5ThreadSafety)
 #endif
     {
+        if (trial > maxTrial_) { maxTrial_ = trial; }
+
         // NOLINTBEGIN(misc-include-cleaner)
         appendToDataset(galaxyGroup_(), "trial", H5T_NATIVE_ULONG, &trial);
         appendToDataset(galaxyGroup_(), "time", H5T_NATIVE_DOUBLE, &time);
@@ -1655,6 +1760,8 @@ void io::OutputManagerH5::writeGalaxySpec(
 #pragma omp critical(h5ThreadSafety)
 #endif
     {
+        if (trial > maxTrial_) { maxTrial_ = trial; }
+
         // NOLINTBEGIN(misc-include-cleaner)
         appendToDataset(galaxySpectraGroup_(), "trial", H5T_NATIVE_ULONG, &trial);
         appendToDataset(galaxySpectraGroup_(), "time", H5T_NATIVE_DOUBLE, &time);
@@ -1704,6 +1811,8 @@ void io::OutputManagerH5::writeGalaxyPhot(
 #pragma omp critical(h5ThreadSafety)
 #endif
     {
+        if (trial > maxTrial_) { maxTrial_ = trial; }
+
         // NOLINTBEGIN(misc-include-cleaner)
         appendToDataset(galaxyPhotGroup_(), "trial", H5T_NATIVE_ULONG, &trial);
         appendToDataset(galaxyPhotGroup_(), "time", H5T_NATIVE_DOUBLE, &time);

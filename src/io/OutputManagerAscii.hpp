@@ -154,6 +154,8 @@ namespace io
 
         /**
          * @brief Not supported for ascii output
+         * @param trialsCompleted Unused; present only to satisfy
+         *   OutputManager::checkpoint()'s own signature
          * @throws std::runtime_error always
          * @details
          * Ascii output has no way to reopen/append to a file it has
@@ -178,7 +180,18 @@ namespace io
         [[nodiscard]] auto restartTrialsDone() const -> unsigned long override;
 
         /**
+         * @brief Not supported for ascii output
+         * @throws std::runtime_error always
+         * @details
+         * See restartTrialsDone()'s own comment -- the same reasoning
+         * applies here.
+         */
+        [[nodiscard]] auto restartMaxTrial() const -> unsigned long override;
+
+        /**
          * @brief A no-op for ascii output
+         * @param trialsCompleted Unused; present only to satisfy
+         *   OutputManager::notifyEarlyTermination()'s own signature
          * @details
          * Unlike checkpoint()/restartTrialsDone() above, this does not
          * throw: see OutputManager::notifyEarlyTermination()'s own

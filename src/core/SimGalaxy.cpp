@@ -48,8 +48,13 @@ namespace
     public:
         SigtermGuard()
         {
+            // See SimCluster.cpp's own identical constructor for why
+            // the flag is reset before the handler is installed, not
+            // after (and so deliberately not via a member initializer
+            // for previousHandler_, despite what clang-tidy's
+            // cppcoreguidelines-prefer-member-initializer suggests)
             sigtermReceived = 0;
-            previousHandler_ = std::signal(SIGTERM, signalHandler);
+            previousHandler_ = std::signal(SIGTERM, signalHandler); // NOLINT(cppcoreguidelines-prefer-member-initializer)
             if (previousHandler_ == SIG_ERR)
             {
                 throw std::runtime_error(
@@ -59,7 +64,10 @@ namespace
 
         ~SigtermGuard()
         {
-            std::signal(SIGTERM, previousHandler_);
+            // Best-effort restore -- this runs from a destructor, so
+            // it must not throw, and there is nothing more useful to
+            // do with a failure here anyway
+            (void)std::signal(SIGTERM, previousHandler_); // NOLINT(cert-err33-c)
         }
 
         SigtermGuard(const SigtermGuard&) = delete;
@@ -126,27 +134,30 @@ auto core::SimGalaxy::run() -> int
     // See SimCluster::run()'s own identical comment
     const SigtermGuard sigtermGuard;
 
-    // If this run is resuming a previous, interrupted run, start from
-    // the trial number it had already reached rather than from trial
-    // 0 -- see the constructor's own comment. outputManager_'s own
-    // restartTrialsDone() is 0 if restart_ is true but no checkpoint
-    // was actually found to resume from (see
-    // OutputManagerH5::restartSetup()'s own comment), so this still
-    // behaves like an ordinary run from trial 0 in that case.
-    const unsigned long startTrial = restart_ ? outputManager_->restartTrialsDone() : 0;
+    // See SimCluster::run()'s own identical comment for the full
+    // rationale behind tracking numbering and counting separately
+    const unsigned long priorTrialsCompleted = restart_ ? outputManager_->restartTrialsDone() : 0;
+    const unsigned long numberingStart = restart_ ? outputManager_->restartMaxTrial() + 1 : 0;
+    const unsigned long trialsRemaining = (priorTrialsCompleted < simControls_.nTrial()) ?
+        (simControls_.nTrial() - priorTrialsCompleted) : 0;
+    const unsigned long numberingEnd = numberingStart + trialsRemaining;
 
     if (simControls_.verbosity() > 0)
     {
         std::cout << "slug: galaxy simulation starting with "
             << simControls_.nTrial() << " trials";
-        if (startTrial != 0) { std::cout << " (resuming from trial " << startTrial << ")"; }
+        if (priorTrialsCompleted != 0)
+        {
+            std::cout << " (resuming: " << priorTrialsCompleted <<
+                " already done, numbering new trials from " << numberingStart << ")";
+        }
         std::cout << "\n";
     }
 
     // Trials run in batches of checkpointInterval() at a time (or, if
-    // checkpointing is disabled, one batch covering every trial, i.e.
-    // today's original, unbatched behavior) -- each batch its own
-    // "#pragma omp parallel for", so its own implicit barrier
+    // checkpointing is disabled, one batch covering every remaining
+    // trial, i.e. today's original, unbatched behavior) -- each batch
+    // its own "#pragma omp parallel for", so its own implicit barrier
     // guarantees every thread has finished every trial in the batch
     // (writeGalaxy/writeGalaxySpec/writeGalaxyPhot for every output
     // time, not just started it) before this reaches the checkpoint()
@@ -164,13 +175,13 @@ auto core::SimGalaxy::run() -> int
     // batch's own slowest trial finishes, once per checkpoint --
     // deliberately traded for that correctness guarantee.
     const unsigned long batchSize = (simControls_.checkpointInterval() != 0) ?
-        simControls_.checkpointInterval() : simControls_.nTrial();
+        simControls_.checkpointInterval() : trialsRemaining;
 
-    for (unsigned long batchStart = startTrial; batchStart < simControls_.nTrial();
+    for (unsigned long batchStart = numberingStart; batchStart < numberingEnd;
         batchStart += batchSize)
     {
         const unsigned long batchEnd =
-            std::min(batchStart + batchSize, simControls_.nTrial());
+            std::min(batchStart + batchSize, numberingEnd);
 
 #ifdef _OPENMP
         // See runTrial()'s own comment for why each trial is
@@ -203,42 +214,46 @@ auto core::SimGalaxy::run() -> int
         {
             // See SimCluster::run()'s own identical comment
             outputManager_->notifyEarlyTermination(
-                trialsCompleted_.load(std::memory_order_relaxed));
+                priorTrialsCompleted + trialsCompleted_.load(std::memory_order_relaxed));
             std::rethrow_exception(firstError);
         }
 #else
-        for (unsigned long trialNum = batchStart; trialNum < batchEnd; ++trialNum)
+        try
         {
-            runTrial(trialNum);
+            for (unsigned long trialNum = batchStart; trialNum < batchEnd; ++trialNum)
+            {
+                runTrial(trialNum);
+            }
+        }
+        catch (...)
+        {
+            // See the identical #ifdef _OPENMP branch's own comment
+            outputManager_->notifyEarlyTermination(
+                priorTrialsCompleted + trialsCompleted_.load(std::memory_order_relaxed));
+            throw;
         }
 #endif
 
         // See SimCluster::run()'s own identical comment
         if (sigtermWasReceived())
         {
-            const auto completed = trialsCompleted_.load(std::memory_order_relaxed);
-            outputManager_->notifyEarlyTermination(completed);
+            const auto cumulativeCompleted =
+                priorTrialsCompleted + trialsCompleted_.load(std::memory_order_relaxed);
+            outputManager_->notifyEarlyTermination(cumulativeCompleted);
             if (simControls_.verbosity() > 0)
             {
                 std::cout << "slug: caught SIGTERM, stopping early with "
-                    << completed << " / " << simControls_.nTrial() << " trials completed\n";
+                    << cumulativeCompleted << " / " << simControls_.nTrial() <<
+                    " trials completed\n";
             }
             return sigtermExitCode;
         }
 
-        // Every trial in [batchStart, batchEnd) is now fully written
-        // -- see this method's own comment above -- so it is safe to
-        // roll over to a new checkpoint now, unless this was the
-        // final batch (in which case the current checkpoint is simply
-        // left open for the destructor to close/consolidate, exactly
-        // as when checkpointing is disabled entirely). batchEnd is
-        // also exactly the number of trials completed so far in the
-        // run (batches start at 0 and this one's own trials are all
-        // done), which is what checkpoint() records into the
-        // checkpoint's own output for a later restart to pick up from.
-        if (simControls_.checkpointInterval() != 0 && batchEnd < simControls_.nTrial())
+        // See SimCluster::run()'s own identical comment
+        if (simControls_.checkpointInterval() != 0 && batchEnd < numberingEnd)
         {
-            outputManager_->checkpoint(batchEnd);
+            outputManager_->checkpoint(
+                priorTrialsCompleted + trialsCompleted_.load(std::memory_order_relaxed));
         }
     }
 

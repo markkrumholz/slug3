@@ -1241,6 +1241,15 @@ auto io::OutputManagerAscii::restartTrialsDone() const -> unsigned long
         "supported with ascii output");
 }
 
+// See this method's own header comment: restarting is only ever
+// supported with HDF5 output, so this always throws.
+auto io::OutputManagerAscii::restartMaxTrial() const -> unsigned long
+{
+    throw std::runtime_error(
+        "OutputManagerAscii::restartMaxTrial: restarting is not "
+        "supported with ascii output");
+}
+
 // See this method's own header comment: nothing to do for ascii output
 void io::OutputManagerAscii::notifyEarlyTermination(unsigned long /*trialsCompleted*/)
 {

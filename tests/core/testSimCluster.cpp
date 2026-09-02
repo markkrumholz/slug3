@@ -235,7 +235,9 @@ static auto runEndToEnd(const toml::table& inputDeck, const bool restart = false
     {
         throw std::runtime_error(
             "testSimCluster: trialsCompleted() should equal nTrial() - startTrial "
-            "after run() completes");
+            "after run() completes (got " + std::to_string(simCluster.trialsCompleted()) +
+            ", expected " + std::to_string(expectedTrialsCompleted) + "; nTrial=" +
+            std::to_string(simControls.nTrial()) + ", startTrial=" + std::to_string(startTrial) + ")");
     }
     return constFeH;
 }
