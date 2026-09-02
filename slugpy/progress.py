@@ -89,8 +89,8 @@ def make_progress_bar(total: int, desc: str) -> Any:
     return tqdm(total=total, desc=desc)
 
 
-def run_with_progress(fn: Callable[[], None], get_current: Callable[[], int], total: int,
-    desc: str, poll_interval: float = 0.2) -> None:
+def run_with_progress[T](fn: Callable[[], T], get_current: Callable[[], int], total: int,
+    desc: str, poll_interval: float = 0.2) -> T:
     """
     Run fn to completion while showing a progress bar tracking
     get_current() against total.
@@ -110,6 +110,10 @@ def run_with_progress(fn: Callable[[], None], get_current: Callable[[], int], to
         Short label describing what's being tracked.
     poll_interval : float, default 0.2
         Seconds between successive polls of get_current.
+
+    Returns
+    -------
+    Whatever fn() itself returned.
 
     Raises
     ------
@@ -132,10 +136,11 @@ def run_with_progress(fn: Callable[[], None], get_current: Callable[[], int], to
     """
     bar = make_progress_bar(total=total, desc=desc)
     error: list[BaseException] = []
+    result: list[T] = []
 
     def _target() -> None:
         try:
-            fn()
+            result.append(fn())
         except BaseException as exc:  # noqa: BLE001 -- re-raised on the calling thread below
             error.append(exc)
 
@@ -155,3 +160,4 @@ def run_with_progress(fn: Callable[[], None], get_current: Callable[[], int], to
     bar.close()
     if error:
         raise error[0]
+    return result[0]

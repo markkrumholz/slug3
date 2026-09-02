@@ -171,7 +171,7 @@ def test_progress_true_drives_run_with_progress(tmp_path, monkeypatch):
 
     def _spy(fn, get_current, total, desc, **kwargs):
         calls.append((total, desc))
-        real_run_with_progress(fn, get_current, total, desc, **kwargs)
+        return real_run_with_progress(fn, get_current, total, desc, **kwargs)
 
     monkeypatch.setattr(run_sim_module, "run_with_progress", _spy)
     data = run_sim(CLUSTER_DECK, progress=True)

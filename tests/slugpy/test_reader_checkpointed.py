@@ -79,7 +79,7 @@ def _write_output_file(path: Path, *, trials: list[int], uids: list[int],
 # File discovery: plain (non-checkpointed) output
 # ---------------------------------------------------------------------
 
-def test_model_name_resolves_plain_h5(tmp_path):
+def test_model_name_resolves_plain_h5(tmp_path: Path) -> None:
     """A model name with only model.h5 on disk (no checkpointing, no
     h5divided) resolves to that single file -- the ordinary case."""
     path = tmp_path / "model.h5"
@@ -94,7 +94,7 @@ def test_model_name_resolves_plain_h5(tmp_path):
     assert cast(np.ndarray, clusters["trial"]).tolist() == [0]
 
 
-def test_model_name_resolves_thread_dir_without_checkpointing(tmp_path):
+def test_model_name_resolves_thread_dir_without_checkpointing(tmp_path: Path) -> None:
     """h5divided output without checkpointing (model/thread_NNNN.h5,
     never consolidated) is found and its per-thread files aggregated."""
     thread_dir = tmp_path / "model"
@@ -111,13 +111,13 @@ def test_model_name_resolves_thread_dir_without_checkpointing(tmp_path):
     assert sorted(cast(np.ndarray, clusters["trial"]).tolist()) == [0, 1]
 
 
-def test_model_name_raises_when_nothing_matches(tmp_path):
+def test_model_name_raises_when_nothing_matches(tmp_path: Path) -> None:
     """A model name with no matching output at all raises FileNotFoundError."""
     with pytest.raises(FileNotFoundError):
         slug_reader(str(tmp_path / "nonexistent_model"))
 
 
-def test_literal_h5_path_raises_when_missing(tmp_path):
+def test_literal_h5_path_raises_when_missing(tmp_path: Path) -> None:
     """A literal .h5 path that doesn't exist still raises FileNotFoundError (not silently treated as a model name)."""
     with pytest.raises(FileNotFoundError):
         slug_reader(str(tmp_path / "nonexistent.h5"))
@@ -127,7 +127,7 @@ def test_literal_h5_path_raises_when_missing(tmp_path):
 # File discovery + aggregation: checkpointed output
 # ---------------------------------------------------------------------
 
-def test_checkpoints_consolidated_files_aggregate_and_order(tmp_path):
+def test_checkpoints_consolidated_files_aggregate_and_order(tmp_path: Path) -> None:
     """Three consolidated checkpoint files (model_chkNNNNN.h5) are all
     found, in ascending checkpoint order, and their clusters rows
     pooled together."""
@@ -149,7 +149,7 @@ def test_checkpoints_consolidated_files_aggregate_and_order(tmp_path):
     assert sorted(cast(np.ndarray, clusters["trial"]).tolist()) == [0, 1, 2, 3, 4]
 
 
-def test_checkpoints_thread_dirs_aggregate(tmp_path):
+def test_checkpoints_thread_dirs_aggregate(tmp_path: Path) -> None:
     """An unconsolidated checkpoint (model_chkNNNNN/thread_NNNN.h5)
     alongside a consolidated one: every thread file of the
     unconsolidated checkpoint, plus the consolidated one, all
@@ -170,7 +170,7 @@ def test_checkpoints_thread_dirs_aggregate(tmp_path):
     assert sorted(cast(np.ndarray, clusters["trial"]).tolist()) == [0, 1, 2]
 
 
-def test_trials_completed_and_restart_uid_from_last_checkpoint(tmp_path):
+def test_trials_completed_and_restart_uid_from_last_checkpoint(tmp_path: Path) -> None:
     """trials_completed/restart_uid come from the highest-numbered
     checkpoint, not the first -- unlike slug_hash/date/time/rng_state,
     they differ from one checkpoint to the next."""
@@ -184,7 +184,7 @@ def test_trials_completed_and_restart_uid_from_last_checkpoint(tmp_path):
     assert reader.restart_uid == 23
 
 
-def test_trials_completed_and_restart_uid_none_when_last_checkpoint_incomplete(tmp_path):
+def test_trials_completed_and_restart_uid_none_when_last_checkpoint_incomplete(tmp_path: Path) -> None:
     """If the most recent checkpoint has no trials_completed/
     restart_uid attribute at all (e.g. it was still open when this was
     read), both come back None rather than raising -- see
@@ -199,7 +199,7 @@ def test_trials_completed_and_restart_uid_none_when_last_checkpoint_incomplete(t
     assert reader.restart_uid is None
 
 
-def test_fixed_dataset_read_once_not_duplicated(tmp_path):
+def test_fixed_dataset_read_once_not_duplicated(tmp_path: Path) -> None:
     """wl (fixed, not extensible) is read from one file only -- pooling
     it across every checkpoint the way extensible datasets are pooled
     would wrongly duplicate it once per checkpoint."""
@@ -215,7 +215,7 @@ def test_fixed_dataset_read_once_not_duplicated(tmp_path):
     assert wl.value.tolist() == [1000.0, 2000.0]  # not duplicated to length 4
 
 
-def test_extensible_2d_dataset_aggregated_by_row(tmp_path):
+def test_extensible_2d_dataset_aggregated_by_row(tmp_path: Path) -> None:
     """spec (extensible, 2D) gets one row per trial pooled across every
     checkpoint, each row's own columns intact."""
     _write_output_file(tmp_path / "model_chk00000.h5", trials=[0], uids=[0],
@@ -231,7 +231,7 @@ def test_extensible_2d_dataset_aggregated_by_row(tmp_path):
     assert spec.value.tolist() == [[1.0, 2.0], [1.0, 2.0], [1.0, 2.0]]
 
 
-def test_no_checkpoint_beyond_the_last_is_included(tmp_path):
+def test_no_checkpoint_beyond_the_last_is_included(tmp_path: Path) -> None:
     """A stray file that doesn't match the _chkNNNNN pattern at all
     (e.g. a leftover from an unrelated model) is not swept in."""
     _write_output_file(tmp_path / "model_chk00000.h5", trials=[0], uids=[0],
@@ -247,7 +247,7 @@ def test_no_checkpoint_beyond_the_last_is_included(tmp_path):
 # run_cloudy() and a multi-file reader
 # ---------------------------------------------------------------------
 
-def test_run_cloudy_raises_for_multi_file_reader(tmp_path):
+def test_run_cloudy_raises_for_multi_file_reader(tmp_path: Path) -> None:
     """run_cloudy() refuses outright when this reader spans more than
     one underlying file, rather than guessing which one to write new
     cluster_cloudy rows into."""
@@ -265,7 +265,7 @@ def test_run_cloudy_raises_for_multi_file_reader(tmp_path):
 # Never more than one file open at once
 # ---------------------------------------------------------------------
 
-def test_never_more_than_one_file_open_at_once(tmp_path, monkeypatch):
+def test_never_more_than_one_file_open_at_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Reading an aggregated dataset across several checkpoints opens
     (and closes) one file at a time -- never two concurrently -- per
     this reader's own design (see slug_reader.__init__'s own comment).

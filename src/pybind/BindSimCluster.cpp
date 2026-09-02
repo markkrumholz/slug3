@@ -36,6 +36,15 @@ restart : bool, default False
 
 static constexpr std::string_view runDocstring = R"doc(Run the simulation.
 
+Returns
+-------
+int
+    0 if every trial completed normally; 143 (128 + SIGTERM) if a
+    SIGTERM was caught and this stopped early instead, with fewer than
+    sim_controls.nTrial() trials completed -- see trialsCompleted() to
+    find out how many, and this SimCluster's own C++ run() comment for
+    the full detail on when and how that can happen.
+
 Details
 -------
 Runs sim_controls.nTrial() independent trials -- each drawing a

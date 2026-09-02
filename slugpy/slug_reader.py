@@ -386,6 +386,7 @@ class slug_reader:
         # than one file open at a time, no matter how many files it
         # spans (a checkpointed and/or h5divided run can easily span
         # thousands).
+        self._file: list[str]
         self._file, last_checkpoint_files = _find_output_files(filename)
 
         with h5py.File(self._file[0], "r") as f:

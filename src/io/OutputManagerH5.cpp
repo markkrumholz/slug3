@@ -717,6 +717,18 @@ io::OutputManagerH5::OutputManagerH5(
             "is OutputMode::ascii -- restarting is only supported with "
             "HDF5 output");
     }
+    // See this constructor's own header comment for why this
+    // combination is rejected rather than left to silently write
+    // output slug_reader's own checkpoint discovery would then ignore
+    if (restart && simControls_.checkpointInterval() == 0)
+    {
+        throw std::runtime_error(
+            "OutputManagerH5: restart is true, but "
+            "simControls.checkpointInterval() is 0 -- restarting "
+            "requires checkpointing to remain enabled for this session "
+            "too (set outputs.checkpoint_interval, or call "
+            "setCheckpointInterval(), to a non-zero value)");
+    }
     if (restart)
     {
         restartSetup();

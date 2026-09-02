@@ -95,6 +95,23 @@ namespace io
          *   defense-in-depth pattern SimControls::initControlFlow()'s
          *   own checkpointInterval()/ascii check and
          *   OutputManagerAscii::checkpoint()'s own throw already use.
+         * @throws std::runtime_error if restart is true and
+         *   simControls.checkpointInterval() is 0. Restarting with
+         *   checkpointing disabled for *this* session would still
+         *   correctly resume trial numbering/counting from the run
+         *   being restarted (restartSetup() does not depend on this
+         *   session's own checkpointInterval()), but this session's own
+         *   output would then be written to a fresh, non-checkpointed
+         *   modelName.h5 -- which slug_reader's own checkpoint
+         *   discovery silently ignores whenever any modelName_chkNNNNN
+         *   checkpoint exists (exactly the case here, since one must
+         *   exist for there to be anything to restart from), making
+         *   this session's own data invisible to any later read. Worse,
+         *   without checkpointing there is also no longer any
+         *   checkpoint boundary to protect this session's own progress
+         *   should it, too, be interrupted before finishing. Rejected
+         *   here rather than left to silently produce output nothing
+         *   can read back.
          * @details
          * simControls and inputDeck are stored by reference, so the
          * objects passed in must outlive this OutputManagerH5. See

@@ -2735,11 +2735,17 @@ static auto testOutputManagerAsciiCheckpointThrows() -> int
     inputDeck.at_path("outputs").as_table()->insert_or_assign(
         "output_mode", std::string("ascii"));
 
+    // Construction happens outside the try block: only checkpoint()
+    // itself is the call under test, so an unexpected exception from
+    // SimControls/OutputManagerAscii construction (a bug elsewhere)
+    // surfaces as an uncaught exception instead of being silently
+    // misreported as this test passing.
+    io::SimControls controls(inputDeck);
+    controls.setCheckpointInterval(5);
+    io::OutputManagerAscii manager(controls, inputDeck);
+
     try
     {
-        io::SimControls controls(inputDeck);
-        controls.setCheckpointInterval(5);
-        io::OutputManagerAscii manager(controls, inputDeck);
         manager.checkpoint(5);
         std::cerr << "testOutputManager: ascii checkpoint: expected "
             "checkpoint() to throw, but it succeeded\n";
