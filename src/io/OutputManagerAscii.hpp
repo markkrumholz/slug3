@@ -177,6 +177,16 @@ namespace io
          */
         [[nodiscard]] auto restartTrialsDone() const -> unsigned long override;
 
+        /**
+         * @brief A no-op for ascii output
+         * @details
+         * Unlike checkpoint()/restartTrialsDone() above, this does not
+         * throw: see OutputManager::notifyEarlyTermination()'s own
+         * comment for why there is simply nothing for ascii output to
+         * correct on an early exit.
+         */
+        void notifyEarlyTermination(unsigned long trialsCompleted) override;
+
     private:
 
         /**

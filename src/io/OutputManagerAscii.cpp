@@ -1240,3 +1240,8 @@ auto io::OutputManagerAscii::restartTrialsDone() const -> unsigned long
         "OutputManagerAscii::restartTrialsDone: restarting is not "
         "supported with ascii output");
 }
+
+// See this method's own header comment: nothing to do for ascii output
+void io::OutputManagerAscii::notifyEarlyTermination(unsigned long /*trialsCompleted*/)
+{
+}

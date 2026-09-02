@@ -60,9 +60,39 @@ namespace core
         ~SimGalaxy() = default;
 
         /**
-         * @brief Run the simulation
+         * @brief Conventional shell exit code (128 + SIGTERM) run() returns when it stops early due to a caught SIGTERM
+         * @details
+         * Matches the exit code a shell would report for a process
+         * actually killed by SIGTERM outright, so a caller (e.g. a
+         * PBS/SLURM job script checking $? after the slug executable
+         * exits) sees the same code whether the process caught the
+         * signal gracefully (see run()'s own comment) or not.
          */
-        void run();
+        static constexpr int sigtermExitCode = 143;
+
+        /**
+         * @brief Run the simulation
+         * @return 0 if every trial completed normally; sigtermExitCode
+         *   if a SIGTERM was caught and this stopped early instead
+         *   (see this method's own comment)
+         * @details
+         * Installs a handler for SIGTERM before running (restored to
+         * whatever was previously installed once this returns, by any
+         * path -- normal completion, a caught SIGTERM, or an exception
+         * propagating out): if SIGTERM is received while this is
+         * running, every trial already assigned to some thread still
+         * finishes normally (so no trial's own output is ever left
+         * half-written), but no further trials start, and this returns
+         * sigtermExitCode once the currently in-flight batch finishes,
+         * rather than continuing on to any later ones -- intended to
+         * pair with the standard PBS/SLURM practice of sending SIGTERM
+         * some minutes before a job's own walltime limit, so a long
+         * run can save its progress and exit cleanly instead of being
+         * killed outright mid-trial. See OutputManager::
+         * notifyEarlyTermination() for how the output itself ends up
+         * correctly reflecting only the trials actually completed.
+         */
+        auto run() -> int;
 
         /**
          * @brief Get the number of trials completed so far

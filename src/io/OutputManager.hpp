@@ -225,6 +225,40 @@ namespace io
          */
         [[nodiscard]] virtual auto restartTrialsDone() const -> unsigned long = 0;
 
+        /**
+         * @brief Record that this run is ending early, having only actually completed trialsCompleted trials
+         * @param trialsCompleted Number of trials actually completed
+         *   before this run stopped short of SimControls::nTrial() --
+         *   either because a per-trial exception was thrown and
+         *   rethrown out of SimCluster::run()/SimGalaxy::run(), or
+         *   because a SIGTERM was caught and handled gracefully (see
+         *   their own comments)
+         * @details
+         * Does not itself close or otherwise touch any output --
+         * OutputManagerH5's own implementation just remembers
+         * trialsCompleted, for its destructor to write as the
+         * currently-open file's own final "trials_completed" (and,
+         * where relevant, "restart_uid") attribute instead of
+         * SimControls::nTrial(), which the destructor would otherwise
+         * assume (see OutputManagerH5::closeOutputFile()'s own
+         * comment) -- an assumption only ever true when run() actually
+         * completed every trial, which stopping early specifically
+         * means it did not. Deliberately does not roll over to a new
+         * checkpoint the way checkpoint() does: there is nothing left
+         * to write into one, so doing so would just leave an empty,
+         * never-closed checkpoint behind for the destructor to
+         * eventually close with a wrong trial count of its own.
+         *
+         * OutputManagerAscii's own implementation is a no-op, not a
+         * throw (unlike checkpoint()/restartTrialsDone()): ascii
+         * output has no trials_completed attribute (or any other
+         * summary of how many trials it holds) to correct in the
+         * first place, so there is nothing wrong to leave uncorrected
+         * -- every row already written is already exactly as valid on
+         * an early exit as a normal one.
+         */
+        virtual void notifyEarlyTermination(unsigned long trialsCompleted) = 0;
+
     protected:
 
         /**

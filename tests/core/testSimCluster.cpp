@@ -17,7 +17,9 @@
 #include "hdf5.h" // NOLINT(misc-include-cleaner)
 #include "testSimCluster.hpp"
 #include <array>
+#include <chrono>
 #include <cmath>
+#include <csignal>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
@@ -31,6 +33,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <toml.hpp>
 #include <utility>
 #include <vector>
@@ -299,18 +302,22 @@ static auto checkRowsAndGroupByTrial(const OutputColumns& cols, TrialMap& rowsBy
     return 0;
 }
 
-// Verify that every trial from 0 to nTrial - 1 appears exactly once
-// (writeCluster is called a single time per trial, regardless of the
-// number of output times, since it only writes properties fixed at
-// cluster formation), and that no uid is reused across trials -- this
-// would fail if the dynamic schedule dropped or duplicated a trial,
-// if the omp critical guard around the output writes let two
+// Verify that every trial from 0 to totalTrials - 1 appears exactly
+// once (writeCluster is called a single time per trial, regardless of
+// the number of output times, since it only writes properties fixed
+// at cluster formation), and that no uid is reused across trials --
+// this would fail if the dynamic schedule dropped or duplicated a
+// trial, if the omp critical guard around the output writes let two
 // threads' rows corrupt each other, or if utils::uniqueID() handed
-// out a duplicate ID under concurrent use
-static auto checkTrialsAndUids(const TrialMap& rowsByTrial) -> int
+// out a duplicate ID under concurrent use. totalTrials defaults to
+// this file's own module-level nTrial constant, which every caller
+// except testSimClusterSigtermGracefulExit() (a deliberately smaller,
+// separately-sized run) actually uses.
+static auto checkTrialsAndUids(const TrialMap& rowsByTrial,
+    const unsigned long totalTrials = nTrial) -> int
 {
     std::set<unsigned long> seenUids;
-    for (unsigned long trial = 0; trial < nTrial; ++trial)
+    for (unsigned long trial = 0; trial < totalTrials; ++trial)
     {
         const auto it = rowsByTrial.find(trial);
         if (it == rowsByTrial.end())
@@ -1055,6 +1062,161 @@ static auto testSimClusterRestartFromCheckpoint() -> int
     }
 }
 
+// End-to-end check of graceful SIGTERM handling. A background thread
+// sleeps briefly then raises SIGTERM against this same process, while
+// the main thread is in the middle of a checkpointed SimCluster::run()
+// call -- long enough after run() starts that its own SigtermGuard has
+// certainly already installed its handler (that happens in
+// microseconds), but short relative to localNTrial's own total
+// runtime (this deck's own per-trial cost is on the order of 100+ ms,
+// so localNTrial trials take at least a couple of seconds run to
+// completion) that the run is nowhere near finished when SIGTERM
+// actually arrives.
+//
+// Checks that: run() returns SimCluster::sigtermExitCode rather than
+// 0; trialsCompleted() is strictly between 0 and localNTrial (some
+// real progress was made, but the run genuinely stopped early rather
+// than racing to completion first); the checkpoint that was open when
+// SIGTERM arrived -- found by scanning upward from checkpoint 0,
+// mirroring restartSetup()'s own discovery, rather than assumed --
+// has trialsCompleted() itself, not localNTrial, as its own
+// "trials_completed" attribute (see OutputManager::
+// notifyEarlyTermination()'s own comment for why this needs checking
+// at all: the destructor would otherwise wrongly assume every trial
+// had completed); and that no checkpoint beyond it exists (confirming
+// checkpoint() -- which would leave a new, empty, dangling one behind
+// -- was correctly not called here the way it is for an ordinary,
+// mid-run checkpoint rollover). Finally, restarts from there (mirroring
+// testSimClusterRestartFromCheckpoint) and checks that pooling every
+// checkpoint's own rows together afterward -- across both the
+// SIGTERM-truncated first phase and the completed restart -- still
+// yields every trial from 0 to localNTrial - 1 exactly once.
+static auto testSimClusterSigtermGracefulExit() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() /
+        "slugTestSimClusterSigtermGracefulExit";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+    const std::string modelName = "test_sim_cluster_sigterm";
+
+    constexpr unsigned long checkpointInterval = 3;
+    constexpr unsigned long localNTrial = 15;
+    constexpr auto sigtermDelay = std::chrono::milliseconds(400);
+
+    try
+    {
+        toml::table deck = makeInputDeck(modelName, outDir);
+        deck.at_path("outputs").as_table()->insert(
+            "checkpoint_interval", static_cast<int64_t>(checkpointInterval));
+        deck.insert_or_assign("n_trial", static_cast<int64_t>(localNTrial));
+
+        const io::SimControls simControls(deck);
+#ifdef _OPENMP
+        omp_set_num_threads(nThreads);
+#endif // _OPENMP
+
+        // Scoped so simCluster (and the OutputManagerH5 it owns)
+        // destructs -- actually closing and flushing the checkpoint
+        // that was open when SIGTERM arrived -- before this reads that
+        // file back below; mirrors runEndToEnd()'s own identical
+        // implicit scoping (its own simCluster/outputManager are local
+        // to that function, destructing when it returns, before its
+        // own caller reads anything back).
+        int exitCode = 0;
+        unsigned long completed = 0;
+        {
+            auto outputManager = std::make_unique<io::OutputManagerH5>(simControls, deck);
+            core::SimCluster simCluster(simControls, std::move(outputManager));
+
+            std::thread sigtermThread([&sigtermDelay]()
+            {
+                std::this_thread::sleep_for(sigtermDelay);
+                std::raise(SIGTERM);
+            });
+            exitCode = simCluster.run();
+            sigtermThread.join();
+            completed = simCluster.trialsCompleted();
+        }
+
+        if (exitCode != core::SimCluster::sigtermExitCode)
+        {
+            std::cerr << "testSimCluster: sigterm: expected run() to return "
+                << core::SimCluster::sigtermExitCode << ", got " << exitCode << "\n";
+            return 1;
+        }
+        if (completed == 0 || completed >= localNTrial)
+        {
+            std::cerr << "testSimCluster: sigterm: expected 0 < trialsCompleted() < "
+                << localNTrial << " (a real, partial early stop), got " << completed << "\n";
+            return 1;
+        }
+
+        // Find the highest-numbered checkpoint that actually exists --
+        // the one SIGTERM was caught in the middle of -- without
+        // assuming which number that is
+        unsigned long lastChk = 0;
+        while (std::filesystem::exists(checkpointH5Path(outDir, modelName, lastChk + 1)))
+        { ++lastChk; }
+        const auto lastChkPath = checkpointH5Path(outDir, modelName, lastChk);
+
+        // NOLINTBEGIN(misc-include-cleaner)
+        const hid_t file = H5Fopen(lastChkPath.string().c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+        const auto lastChkTrialsCompleted = readULongAttr(file, "trials_completed");
+        H5Fclose(file);
+        // NOLINTEND(misc-include-cleaner)
+        if (lastChkTrialsCompleted != completed)
+        {
+            std::cerr << "testSimCluster: sigterm: expected " << lastChkPath.string()
+                << " to have trials_completed=" << completed << ", got "
+                << lastChkTrialsCompleted << "\n";
+            return 1;
+        }
+
+        const auto extraPath = checkpointH5Path(outDir, modelName, lastChk + 1);
+        if (std::filesystem::exists(extraPath))
+        {
+            std::cerr << "testSimCluster: sigterm: unexpected extra "
+                "checkpoint file " << extraPath.string() << "\n";
+            return 1;
+        }
+
+        // Restart, completing the remaining trials
+        deck.insert_or_assign("n_trial", static_cast<int64_t>(localNTrial));
+        runEndToEnd(deck, /* restart = */ true);
+
+        const unsigned long totalCheckpoints =
+            (localNTrial + checkpointInterval - 1) / checkpointInterval;
+        TrialMap rowsByTrial;
+        for (unsigned long chk = 0; chk < totalCheckpoints; ++chk)
+        {
+            const auto h5Path = checkpointH5Path(outDir, modelName, chk);
+            if (!std::filesystem::exists(h5Path))
+            {
+                std::cerr << "testSimCluster: sigterm: missing "
+                    << h5Path.string() << "\n";
+                return 1;
+            }
+            const auto cols = readOutputColumns(h5Path);
+            for (std::size_t i = 0; i < cols.trial_.size(); ++i)
+            { rowsByTrial[cols.trial_.at(i)].push_back(cols.uid_.at(i)); }
+        }
+
+        if (rowsByTrial.size() != localNTrial)
+        {
+            std::cerr << "testSimCluster: sigterm: expected " << localNTrial
+                << " distinct trial numbers across every checkpoint after "
+                "restarting, got " << rowsByTrial.size() << "\n";
+            return 1;
+        }
+        return checkTrialsAndUids(rowsByTrial, localNTrial);
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimCluster: sigterm test failed: " << error.what() << "\n";
+        return 1;
+    }
+}
+
 auto testSimCluster() -> int
 {
     const auto outDir = std::filesystem::temp_directory_path() / "slugTestSimCluster";
@@ -1090,6 +1252,7 @@ auto testSimCluster() -> int
     result += testSimClusterPhotAscii();
     result += testSimClusterCheckpointedH5();
     result += testSimClusterRestartFromCheckpoint();
+    result += testSimClusterSigtermGracefulExit();
 
     return result;
 }

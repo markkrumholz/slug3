@@ -1314,15 +1314,22 @@ void io::OutputManagerH5::openGalaxyPhotGroup()
 // this runs.
 io::OutputManagerH5::~OutputManagerH5()
 {
+    // Ordinarily, being destroyed at all means every trial in the run
+    // must already be complete, so simControls_.nTrial() is the right
+    // trials_completed to close out with -- there is no partial-run
+    // count to pass on the way checkpoint() has one. The one exception
+    // is a run that ended early (a per-trial exception, or a caught
+    // SIGTERM -- see SimCluster::run()'s/SimGalaxy::run()'s own
+    // comments) and called notifyEarlyTermination() before returning:
+    // earlyTerminationTrialsCompleted_ then holds the true count
+    // instead, which value_or() prefers here.
+    const auto trialsCompleted =
+        earlyTerminationTrialsCompleted_.value_or(simControls_.nTrial());
 #ifdef _OPENMP
 #pragma omp parallel
 #endif
     {
-        // If we're being destroyed at all, every trial in the run
-        // must already be complete -- there is no partial-run
-        // trialsCompleted to pass on here the way checkpoint() has,
-        // just simControls_.nTrial() itself
-        closeOutputFile(simControls_.nTrial());
+        closeOutputFile(trialsCompleted);
     }
 
 #ifdef _OPENMP

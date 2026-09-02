@@ -97,17 +97,24 @@ auto main(int argc, char *argv[]) -> int
     // exception once every OpenMP trial has finished -- exits cleanly
     // with a message and a nonzero status instead of propagating
     // uncaught out of main() and calling std::terminate()/abort().
+    // exitCode stays 0 for a SimType::none deck (nothing to run);
+    // for cluster/galaxy decks it becomes whatever SimCluster::run()/
+    // SimGalaxy::run() itself returns -- 0 for a normal completion, or
+    // SimCluster::sigtermExitCode/SimGalaxy::sigtermExitCode (143) if a
+    // SIGTERM was caught and the run stopped early instead (see their
+    // own comments).
+    int exitCode = 0;
     try
     {
         if (simControls.simType() == io::SimControls::SimType::cluster)
         {
             core::SimCluster simCluster(simControls, std::move(outputManager), restart);
-            simCluster.run();
+            exitCode = simCluster.run();
         }
         else if (simControls.simType() == io::SimControls::SimType::galaxy)
         {
             core::SimGalaxy simGalaxy(simControls, std::move(outputManager), restart);
-            simGalaxy.run();
+            exitCode = simGalaxy.run();
         }
     }
     catch (const std::exception& e)
@@ -116,5 +123,5 @@ auto main(int argc, char *argv[]) -> int
         return 1;
     }
 
-    return 0;
+    return exitCode;
 }

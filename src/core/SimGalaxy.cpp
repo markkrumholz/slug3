@@ -12,10 +12,66 @@
 #include "Galaxy.hpp"
 #include <algorithm>
 #include <atomic>
+#include <csignal>
 #include <exception> // NOLINT(misc-include-cleaner) -- correct header for std::exception_ptr/current_exception/rethrow_exception; clang-tidy-18's own header-mapping data doesn't yet attribute these symbols to it
 #include <iostream>
 #include <memory>
+#include <stdexcept>
 #include <utility>
+
+namespace
+{
+    // See SimCluster.cpp's own identical anonymous namespace for the
+    // full rationale behind every piece of this -- duplicated here
+    // (rather than shared) since SimCluster and SimGalaxy are
+    // otherwise independent, never-both-running-at-once drivers, each
+    // with its own run()/runTrial() to guard.
+    volatile std::sig_atomic_t sigtermReceived = 0; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables) -- a signal handler can only communicate through global/static state; see this variable's own comment
+
+    void signalHandler(int /*signum*/)
+    {
+        sigtermReceived = 1;
+    }
+
+    auto sigtermWasReceived() -> bool
+    {
+        std::sig_atomic_t value = 0;
+#ifdef _OPENMP
+#pragma omp atomic read
+#endif
+        value = sigtermReceived;
+        return value != 0;
+    }
+
+    class SigtermGuard
+    {
+    public:
+        SigtermGuard()
+        {
+            sigtermReceived = 0;
+            previousHandler_ = std::signal(SIGTERM, signalHandler);
+            if (previousHandler_ == SIG_ERR)
+            {
+                throw std::runtime_error(
+                    "SimGalaxy::run: unable to install a SIGTERM handler");
+            }
+        }
+
+        ~SigtermGuard()
+        {
+            std::signal(SIGTERM, previousHandler_);
+        }
+
+        SigtermGuard(const SigtermGuard&) = delete;
+        auto operator=(const SigtermGuard&) -> SigtermGuard& = delete;
+        SigtermGuard(SigtermGuard&&) = delete;
+        auto operator=(SigtermGuard&&) -> SigtermGuard& = delete;
+
+    private:
+        using Handler = void (*)(int);
+        Handler previousHandler_ = nullptr;
+    };
+} // namespace
 
 core::SimGalaxy::SimGalaxy(const io::SimControls& simControls,
     std::unique_ptr<io::OutputManager> outputManager, const bool restart) :
@@ -27,6 +83,9 @@ core::SimGalaxy::SimGalaxy(const io::SimControls& simControls,
 
 void core::SimGalaxy::runTrial(const unsigned long trialNum)
 {
+    // See SimCluster::runTrial()'s own identical comment
+    if (sigtermWasReceived()) { return; }
+
     if (simControls_.verbosity() > 1)
     {
 #ifdef _OPENMP
@@ -62,8 +121,11 @@ void core::SimGalaxy::runTrial(const unsigned long trialNum)
     trialsCompleted_.fetch_add(1, std::memory_order_relaxed);
 }
 
-void core::SimGalaxy::run()
+auto core::SimGalaxy::run() -> int
 {
+    // See SimCluster::run()'s own identical comment
+    const SigtermGuard sigtermGuard;
+
     // If this run is resuming a previous, interrupted run, start from
     // the trial number it had already reached rather than from trial
     // 0 -- see the constructor's own comment. outputManager_'s own
@@ -137,13 +199,32 @@ void core::SimGalaxy::run()
                 }
             }
         }
-        if (firstError) { std::rethrow_exception(firstError); }
+        if (firstError)
+        {
+            // See SimCluster::run()'s own identical comment
+            outputManager_->notifyEarlyTermination(
+                trialsCompleted_.load(std::memory_order_relaxed));
+            std::rethrow_exception(firstError);
+        }
 #else
         for (unsigned long trialNum = batchStart; trialNum < batchEnd; ++trialNum)
         {
             runTrial(trialNum);
         }
 #endif
+
+        // See SimCluster::run()'s own identical comment
+        if (sigtermWasReceived())
+        {
+            const auto completed = trialsCompleted_.load(std::memory_order_relaxed);
+            outputManager_->notifyEarlyTermination(completed);
+            if (simControls_.verbosity() > 0)
+            {
+                std::cout << "slug: caught SIGTERM, stopping early with "
+                    << completed << " / " << simControls_.nTrial() << " trials completed\n";
+            }
+            return sigtermExitCode;
+        }
 
         // Every trial in [batchStart, batchEnd) is now fully written
         // -- see this method's own comment above -- so it is safe to
@@ -165,4 +246,5 @@ void core::SimGalaxy::run()
     {
         std::cout << "slug: simulation complete\n";
     }
+    return 0;
 }

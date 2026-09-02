@@ -14,6 +14,7 @@
 #include "SimControls.hpp"
 #include "hdf5.h" // NOLINT(misc-include-cleaner)
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <toml.hpp>
 
@@ -265,6 +266,26 @@ namespace io
          */
         [[nodiscard]] auto restartTrialsDone() const -> unsigned long override
         { return restartTrialsDone_; }
+
+        /**
+         * @brief Record that this run is ending early, having only actually completed trialsCompleted trials
+         * @param trialsCompleted Number of trials actually completed
+         * @details
+         * Stores trialsCompleted into earlyTerminationTrialsCompleted_,
+         * for the destructor to write as the currently-open file's own
+         * final "trials_completed"/"restart_uid" attributes instead of
+         * SimControls::nTrial()/utils::uniqueID().read() -- see the
+         * destructor's own comment, and OutputManager::
+         * notifyEarlyTermination()'s own comment for the full
+         * rationale. Does not itself close anything, or roll over to a
+         * new checkpoint: SimCluster::run()/SimGalaxy::run() call this
+         * and then simply return, leaving the currently-open
+         * checkpoint (or, without checkpointing, the run's own single
+         * output file) for the ordinary destructor to close, same as
+         * it always does once this object goes out of scope.
+         */
+        void notifyEarlyTermination(unsigned long trialsCompleted) override
+        { earlyTerminationTrialsCompleted_ = trialsCompleted; }
 
     private:
 
@@ -564,6 +585,17 @@ namespace io
         // inside a "#pragma omp parallel" region by restartTrialsDone()'s
         // own callers.
         unsigned long restartTrialsDone_ = 0;
+
+        // Set by notifyEarlyTermination(), from outside any active
+        // parallel region, at most once, strictly before this object
+        // is ever destroyed (see its own comment) -- read only by the
+        // destructor itself, single-threaded, so (like
+        // checkpointNumber_/restartTrialsDone_ above) needs no locking
+        // of its own. std::nullopt (the default) means this run ended
+        // normally, having completed every trial -- the destructor's
+        // own long-standing assumption, unchanged from before this
+        // existed.
+        std::optional<unsigned long> earlyTerminationTrialsCompleted_;
 
         // Each thread's own copy of every HDF5 handle below is
         // private to it -- see this class's own header comment on why

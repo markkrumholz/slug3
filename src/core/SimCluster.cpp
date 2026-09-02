@@ -15,12 +15,94 @@
 #include <array>
 #include <atomic>
 #include <charconv>
+#include <csignal>
 #include <exception> // NOLINT(misc-include-cleaner) -- correct header for std::exception_ptr/current_exception/rethrow_exception; clang-tidy-18's own header-mapping data doesn't yet attribute these symbols to it
 #include <iostream>
 #include <memory>
 #include <stdexcept>
 #include <string>
 #include <utility>
+
+namespace
+{
+    // Set (only) by signalHandler() below; read by sigtermWasReceived().
+    // volatile sig_atomic_t is the one type the C++ standard guarantees
+    // safe to write from inside a signal handler without risking
+    // undefined behavior -- but that guarantee is about signal-handler
+    // safety on whichever single thread the signal happened to be
+    // delivered to (POSIX picks one, not necessarily this process's
+    // main thread -- see SigtermGuard's own comment for why that
+    // doesn't matter here), not about the value becoming visible to
+    // every OpenMP worker thread's own read of it: that cross-thread
+    // visibility is what sigtermWasReceived()'s own "#pragma omp
+    // atomic read" actually provides.
+    volatile std::sig_atomic_t sigtermReceived = 0; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables) -- a signal handler can only communicate through global/static state; see this variable's own comment
+
+    void signalHandler(int /*signum*/)
+    {
+        sigtermReceived = 1;
+    }
+
+    // See sigtermReceived's own comment for why this is a "#pragma omp
+    // atomic read" rather than a plain read of a volatile
+    // sig_atomic_t, despite that alone already being signal-handler-safe
+    auto sigtermWasReceived() -> bool
+    {
+        std::sig_atomic_t value = 0;
+#ifdef _OPENMP
+#pragma omp atomic read
+#endif
+        value = sigtermReceived;
+        return value != 0;
+    }
+
+    // RAII guard: resets sigtermReceived and installs signalHandler for
+    // SIGTERM on construction, restoring whatever disposition was
+    // previously in place on destruction -- covering every one of
+    // run()'s own exit paths (normal return, a caught SIGTERM, or an
+    // exception propagating out) uniformly, since none of them can
+    // skip a local variable's own destructor running. Without the
+    // restore, a single process that calls SimCluster::run() more than
+    // once (e.g. a Python session driving several slug runs in a row
+    // via run_sim()) would leave slug's own handler permanently
+    // installed process-wide even after the run it was actually meant
+    // for has finished, silently overriding whatever the embedding
+    // application itself wanted SIGTERM to do afterward. Resetting
+    // sigtermReceived here (not just once, at namespace-scope
+    // initialization) matters for the same reason: without it, a
+    // second run() call in that same process would immediately see the
+    // *first* run's own already-set flag and exit early on its very
+    // first checkpoint, having never actually received a SIGTERM of its
+    // own at all.
+    class SigtermGuard
+    {
+    public:
+        SigtermGuard()
+        {
+            sigtermReceived = 0;
+            previousHandler_ = std::signal(SIGTERM, signalHandler);
+            if (previousHandler_ == SIG_ERR)
+            {
+                throw std::runtime_error(
+                    "SimCluster::run: unable to install a SIGTERM handler");
+            }
+        }
+
+        ~SigtermGuard()
+        {
+            std::signal(SIGTERM, previousHandler_);
+        }
+
+        SigtermGuard(const SigtermGuard&) = delete;
+        auto operator=(const SigtermGuard&) -> SigtermGuard& = delete;
+        SigtermGuard(SigtermGuard&&) = delete;
+        auto operator=(SigtermGuard&&) -> SigtermGuard& = delete;
+
+    private:
+        using Handler = void (*)(int);
+        Handler previousHandler_ = nullptr;
+    };
+} // namespace
 
 // Round-trip-safe double -> string conversion: std::to_string(double)
 // only ever prints a fixed 6 fractional digits, which is not enough
@@ -48,6 +130,16 @@ core::SimCluster::SimCluster(const io::SimControls& simControls,
 
 void core::SimCluster::runTrial(const unsigned long trialNum)
 {
+    // A SIGTERM caught during run()'s own currently-executing batch
+    // (see its own comment) means no further trial should actually
+    // start any work -- but a trial some other thread already dequeued
+    // and started before the signal arrived is deliberately left to
+    // run to completion elsewhere, not aborted, so no trial's own
+    // output is ever left half-written. Checked first, before any
+    // other work here (even the verbosity print below), so a trial
+    // that never starts costs as close to nothing as possible.
+    if (sigtermWasReceived()) { return; }
+
     if (simControls_.verbosity() > 1)
     {
 #ifdef _OPENMP
@@ -97,8 +189,13 @@ void core::SimCluster::runTrial(const unsigned long trialNum)
     trialsCompleted_.fetch_add(1, std::memory_order_relaxed);
 }
 
-void core::SimCluster::run()
+auto core::SimCluster::run() -> int
 {
+    // See this method's own header comment: covers every exit path
+    // below (normal completion, the early SIGTERM return, or firstError
+    // being rethrown) uniformly, via its own destructor
+    const SigtermGuard sigtermGuard;
+
     // If this run is resuming a previous, interrupted run, start from
     // the trial number it had already reached rather than from trial
     // 0 -- see the constructor's own comment. outputManager_'s own
@@ -172,13 +269,49 @@ void core::SimCluster::run()
                 }
             }
         }
-        if (firstError) { std::rethrow_exception(firstError); }
+        if (firstError)
+        {
+            // This run is ending abnormally, having completed fewer
+            // than simControls_.nTrial() trials -- see
+            // OutputManager::notifyEarlyTermination()'s own comment for
+            // why the eventual destructor needs to be told that
+            // explicitly, rather than assuming every trial finished the
+            // way it otherwise would.
+            outputManager_->notifyEarlyTermination(
+                trialsCompleted_.load(std::memory_order_relaxed));
+            std::rethrow_exception(firstError);
+        }
 #else
         for (unsigned long trialNum = batchStart; trialNum < batchEnd; ++trialNum)
         {
             runTrial(trialNum);
         }
 #endif
+
+        // Every trial actually started in this batch has now finished
+        // (see runTrial()'s own comment on what a caught SIGTERM does
+        // and does not still let run) -- so if one was caught during
+        // this batch, this is the correct, safe point to stop: save
+        // the currently-open checkpoint (or, without checkpointing, the
+        // run's own single output file) with the true number of trials
+        // completed so far, via notifyEarlyTermination() rather than
+        // checkpoint() -- there is nothing left to write into a new
+        // checkpoint, so rolling over to one would just leave it empty
+        // and un-closed for the destructor to eventually close with a
+        // wrong trial count of its own (see notifyEarlyTermination()'s
+        // own comment) -- and return sigtermExitCode instead of
+        // continuing on to any later, not-yet-started batches.
+        if (sigtermWasReceived())
+        {
+            const auto completed = trialsCompleted_.load(std::memory_order_relaxed);
+            outputManager_->notifyEarlyTermination(completed);
+            if (simControls_.verbosity() > 0)
+            {
+                std::cout << "slug: caught SIGTERM, stopping early with "
+                    << completed << " / " << simControls_.nTrial() << " trials completed\n";
+            }
+            return sigtermExitCode;
+        }
 
         // Every trial in [batchStart, batchEnd) is now fully written
         // -- see this method's own comment above -- so it is safe to
@@ -200,4 +333,5 @@ void core::SimCluster::run()
     {
         std::cout << "slug: simulation complete\n";
     }
+    return 0;
 }
