@@ -120,6 +120,7 @@ add_executable(slug
     src/io/SimControls.cpp
     src/utils/ParseUtils.cpp
     src/elem/IsotopeTable.cpp
+    src/utils/HDF5Utils.cpp
 )
 
 # Test executables
@@ -129,10 +130,12 @@ add_executable(slugTestInterpolation
     tests/interpolation/testMesh2DGrid.cpp
     tests/interpolation/testMesh2DInterpolator.cpp
     tests/interpolation/testMesh3DInterpolator.cpp
+    src/utils/HDF5Utils.cpp
 )
 add_executable(slugTestElem
     src/elem/IsotopeTable.cpp
     tests/elem/testElemAll.cpp
+    src/utils/HDF5Utils.cpp
 )
 add_executable(slugTestExtinct
     src/extinct/Extinct.cpp
@@ -140,6 +143,7 @@ add_executable(slugTestExtinct
     src/phot/FilterTabulated.cpp
     src/phot/FilterIdeal.cpp
     tests/extinct/testExtinctAll.cpp
+    src/utils/HDF5Utils.cpp
 )
 add_executable(slugTestPhot
     src/phot/FilterCollection.cpp
@@ -147,6 +151,7 @@ add_executable(slugTestPhot
     src/phot/FilterIdeal.cpp
     src/phot/FilterTabulated.cpp
     tests/phot/testPhotAll.cpp
+    src/utils/HDF5Utils.cpp
 )
 add_executable(slugTestPDFs
     src/pdfs/PDFFileParser.cpp
@@ -163,6 +168,7 @@ add_executable(slugTestPDFs
     tests/pdfs/testPDFReflect.cpp
     tests/pdfs/testPDFSegmentPowerlaw.cpp
     tests/pdfs/testPDFSegmentSchechter.cpp
+    src/utils/HDF5Utils.cpp
 )
 add_executable(slugTestUtils
     tests/utils/testUtilsAll.cpp
@@ -176,6 +182,7 @@ add_executable(slugTestUtils
     src/pdfs/PDFSegmentPowerlaw.cpp
     src/pdfs/PDFSegmentSchechter.cpp
     src/utils/ParseUtils.cpp
+    src/utils/HDF5Utils.cpp
 )
 add_executable(slugTestTracks
     src/interpolation/Mesh2DGrid.cpp
@@ -183,6 +190,7 @@ add_executable(slugTestTracks
     src/tracks/Tracks2D.cpp
     src/tracks/Tracks3D.cpp
     tests/tracks/testTracksAll.cpp
+    src/utils/HDF5Utils.cpp
 )
 add_executable(slugTestCore
     src/core/Cluster.cpp
@@ -227,6 +235,7 @@ add_executable(slugTestCore
     tests/core/testSimCluster.cpp
     tests/core/testSimGalaxy.cpp
     tests/core/testSpecsynChain.cpp
+    src/utils/HDF5Utils.cpp
 )
 # slugTestCoreFull: the slow, full-scale end-to-end counterpart to
 # slugTestCore above -- same core-area sources, but built and run as
@@ -281,6 +290,7 @@ add_executable(slugTestCoreFull
     tests/core/testGalaxySpecsynFullNonStoch.cpp
     tests/core/testGalaxySpecsynFullFieldStars.cpp
     tests/core/testCoreFullAll.cpp
+    src/utils/HDF5Utils.cpp
 )
 # slugTestCoreFull drives a real end-to-end run (real MIST tracks, real
 # multi-GB spectral libraries) through the same interpolation-heavy
@@ -331,6 +341,7 @@ add_executable(slugTestIo
     tests/io/testIoAll.cpp
     tests/io/testOutputManager.cpp
     tests/io/testSimControls.cpp
+    src/utils/HDF5Utils.cpp
 )
 add_executable(slugTestNebular
     src/extinct/Extinct.cpp
@@ -363,6 +374,7 @@ add_executable(slugTestNebular
     src/tracks/Tracks3D.cpp
     src/utils/ParseUtils.cpp
     tests/nebular/testNebularAll.cpp
+    src/utils/HDF5Utils.cpp
 )
 add_executable(slugTestSpecsyn
     src/specsyn/SpecsynBlackbody.cpp
@@ -401,6 +413,7 @@ add_executable(slugTestSpecsyn
     src/pdfs/PDFSegmentPowerlaw.cpp
     src/pdfs/PDFSegmentSchechter.cpp
     src/utils/ParseUtils.cpp
+    src/utils/HDF5Utils.cpp
 )
 
 # Python module. The CMake target is named slugPython (the "slug" target
@@ -470,6 +483,7 @@ pybind11_add_module(slugPython
     src/tracks/Tracks2D.cpp
     src/tracks/Tracks3D.cpp
     src/utils/ParseUtils.cpp
+    src/utils/HDF5Utils.cpp
 )
 set_target_properties(slugPython PROPERTIES
     OUTPUT_NAME _slug
