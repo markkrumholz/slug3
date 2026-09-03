@@ -11,6 +11,7 @@
 #include "../core/Galaxy.hpp"
 #include "../phot/FilterCollection.hpp"
 #include "../specsyn/Specsyn.hpp"
+#include "../utils/HDF5Utils.hpp"
 #include "../utils/RngThread.hpp"
 #include "../utils/ThreadVec.hpp"
 #include "../utils/UniqueIDManager.hpp"
@@ -40,86 +41,6 @@
 // including hdf5.h, instead of the individual HDF5 headers, since
 // this is the paradigm that HDF5 wants
 // NOLINTBEGIN(misc-include-cleaner)
-
-// Create (and return) a variable-length, UTF-8 HDF5 string datatype
-static auto vlenStrType() -> hid_t
-{
-    const hid_t strType = H5Tcopy(H5T_C_S1);
-    H5Tset_size(strType, H5T_VARIABLE);
-    H5Tset_cset(strType, H5T_CSET_UTF8);
-    return strType;
-}
-
-// Create (and return) a fixed-length HDF5 string datatype of the
-// given size, in bytes -- used for the "rng" dataset, whose elements
-// are utils::RngState's own fixed-width, null-padded buffers rather
-// than variable-length text
-static auto fixedStrType(const size_t size) -> hid_t
-{
-    const hid_t strType = H5Tcopy(H5T_C_S1);
-    H5Tset_size(strType, size);
-    return strType;
-}
-
-// Write a scalar string attribute called name, with the given
-// value, on the HDF5 object loc
-static void writeStringAttr(const hid_t loc, const std::string& name,
-    const std::string& value)
-{
-    const hid_t strType = vlenStrType();
-    const hid_t space = H5Screate(H5S_SCALAR);
-    const hid_t attr = H5Acreate2(loc, name.c_str(), strType, space,
-        H5P_DEFAULT, H5P_DEFAULT);
-    if (attr < 0)
-    {
-        H5Sclose(space);
-        H5Tclose(strType);
-        throw std::runtime_error(
-            "OutputManagerH5: unable to create attribute " + name);
-    }
-    const char* cstr = value.c_str();
-    H5Awrite(attr, strType, static_cast<const void*>(&cstr)); // NOLINT(bugprone-multi-level-implicit-pointer-conversion)
-    H5Aclose(attr);
-    H5Sclose(space);
-    H5Tclose(strType);
-}
-
-// Write a scalar unsigned long attribute called name, with the given
-// value, on the HDF5 object loc
-static void writeULongAttr(const hid_t loc, const std::string& name,
-    const unsigned long value)
-{
-    const hid_t space = H5Screate(H5S_SCALAR);
-    const hid_t attr = H5Acreate2(loc, name.c_str(), H5T_NATIVE_ULONG, space,
-        H5P_DEFAULT, H5P_DEFAULT);
-    if (attr < 0)
-    {
-        H5Sclose(space);
-        throw std::runtime_error(
-            "OutputManagerH5: unable to create attribute " + name);
-    }
-    H5Awrite(attr, H5T_NATIVE_ULONG, static_cast<const void*>(&value));
-    H5Aclose(attr);
-    H5Sclose(space);
-}
-
-// Read a scalar unsigned long attribute called name from the HDF5
-// object loc -- the inverse of writeULongAttr(), used by
-// restartSetup() to read back the "trials_completed" attribute
-// closeOutputFile() writes on every checkpoint file
-static auto readULongAttr(const hid_t loc, const std::string& name) -> unsigned long
-{
-    const hid_t attr = H5Aopen(loc, name.c_str(), H5P_DEFAULT);
-    if (attr < 0)
-    {
-        throw std::runtime_error(
-            "OutputManagerH5: unable to open attribute " + name);
-    }
-    unsigned long value = 0;
-    H5Aread(attr, H5T_NATIVE_ULONG, static_cast<void*>(&value));
-    H5Aclose(attr);
-    return value;
-}
 
 // Scan outDir for entries -- either modelName_chkNNNNN.h5 files or
 // modelName_chkNNNNN directories (see checkpointModelName()) -- whose
@@ -198,9 +119,9 @@ static auto readCheckpointAttrs(const std::filesystem::path& path,
     CheckpointAttrs attrs;
     try
     {
-        attrs.trialsCompleted_ = readULongAttr(file, "trials_completed");
-        attrs.restartUid_ = readULongAttr(file, "restart_uid");
-        attrs.maxTrial_ = readULongAttr(file, "max_trial");
+        attrs.trialsCompleted_ = utils::readULongAttr(file, "trials_completed");
+        attrs.restartUid_ = utils::readULongAttr(file, "restart_uid");
+        attrs.maxTrial_ = utils::readULongAttr(file, "max_trial");
     }
     catch (const std::exception&)
     {
@@ -240,200 +161,6 @@ static void crossCheckAttr(std::optional<unsigned long>& common, const unsigned 
     }
 }
 
-// Write a scalar string dataset called name, with the given value,
-// into the HDF5 group loc
-static void writeStringDataset(const hid_t loc, const std::string& name,
-    const std::string& value)
-{
-    const hid_t strType = vlenStrType();
-    const hid_t space = H5Screate(H5S_SCALAR);
-    const hid_t dset = H5Dcreate2(loc, name.c_str(), strType, space,
-        H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
-    if (dset < 0)
-    {
-        H5Sclose(space);
-        H5Tclose(strType);
-        throw std::runtime_error(
-            "OutputManagerH5: unable to create dataset " + name);
-    }
-    const char* cstr = value.c_str();
-    H5Dwrite(dset, strType, H5S_ALL, H5S_ALL, H5P_DEFAULT, static_cast<const void*>(&cstr)); // NOLINT(bugprone-multi-level-implicit-pointer-conversion)
-    H5Dclose(dset);
-    H5Sclose(space);
-    H5Tclose(strType);
-}
-
-// Write a 1d array-of-strings attribute called name, with the given
-// values, on the HDF5 object loc
-static void writeStringArrayAttr(const hid_t loc, const std::string& name,
-    const std::vector<std::string>& values)
-{
-    const hid_t strType = vlenStrType();
-    const auto n = static_cast<hsize_t>(values.size());
-    const hid_t space = H5Screate_simple(1, &n, nullptr);
-    const hid_t attr = H5Acreate2(loc, name.c_str(), strType, space,
-        H5P_DEFAULT, H5P_DEFAULT);
-    if (attr < 0)
-    {
-        H5Sclose(space);
-        H5Tclose(strType);
-        throw std::runtime_error(
-            "OutputManagerH5: unable to create attribute " + name);
-    }
-    std::vector<const char*> cstrs;
-    cstrs.reserve(values.size());
-    for (const auto& value : values) { cstrs.push_back(value.c_str()); }
-    H5Awrite(attr, strType, static_cast<const void*>(cstrs.data())); // NOLINT(bugprone-multi-level-implicit-pointer-conversion)
-    H5Aclose(attr);
-    H5Sclose(space);
-    H5Tclose(strType);
-}
-
-// Chunk size (in elements) used for the extensible cluster datasets
-static constexpr hsize_t clustersChunkSize = 256;
-
-// Create a 1d, extensible dataset called name, of the given HDF5
-// datatype, in the HDF5 group loc, chunked with clustersChunkSize
-// elements per chunk
-static auto createExtensible1dDataset(const hid_t loc, const std::string& name,
-    const hid_t type) -> hid_t
-{
-    constexpr hsize_t initDims = 0;
-    constexpr hsize_t maxDims = H5S_UNLIMITED;
-    const hid_t space = H5Screate_simple(1, &initDims, &maxDims);
-
-    const hid_t propList = H5Pcreate(H5P_DATASET_CREATE);
-    H5Pset_chunk(propList, 1, &clustersChunkSize);
-
-    const hid_t dset = H5Dcreate2(loc, name.c_str(), type, space,
-        H5P_DEFAULT, propList, H5P_DEFAULT);
-    H5Pclose(propList);
-    H5Sclose(space);
-    if (dset < 0)
-    {
-        throw std::runtime_error(
-            "OutputManagerH5: unable to create dataset " + name);
-    }
-    return dset;
-}
-
-// Create a 2d dataset called name, of the given HDF5 datatype, in
-// the HDF5 group loc, with nCols columns (fixed) and extensible in
-// the number of rows, chunked with clustersChunkSize rows per chunk
-static auto createExtensible2dDataset(const hid_t loc, const std::string& name,
-    const hid_t type, const hsize_t nCols) -> hid_t
-{
-    const std::array<hsize_t, 2> initDims = { 0, nCols };
-    const std::array<hsize_t, 2> maxDims = { H5S_UNLIMITED, nCols };
-    const hid_t space = H5Screate_simple(2, initDims.data(), maxDims.data());
-
-    const hid_t propList = H5Pcreate(H5P_DATASET_CREATE);
-    const std::array<hsize_t, 2> chunkDims = { clustersChunkSize, nCols };
-    H5Pset_chunk(propList, 2, chunkDims.data());
-
-    const hid_t dset = H5Dcreate2(loc, name.c_str(), type, space,
-        H5P_DEFAULT, propList, H5P_DEFAULT);
-    H5Pclose(propList);
-    H5Sclose(space);
-    if (dset < 0)
-    {
-        throw std::runtime_error(
-            "OutputManagerH5: unable to create dataset " + name);
-    }
-    return dset;
-}
-
-// Create a 1d, non-extensible dataset called name, of the given
-// HDF5 datatype, in the HDF5 group loc, immediately write data (an
-// array of len elements) into it, and tag it with a scalar "units"
-// string attribute
-static void writeFixed1dDataset(const hid_t loc, const std::string& name,
-    const hid_t type, const void* data, const hsize_t len, const std::string& units)
-{
-    const hid_t space = H5Screate_simple(1, &len, nullptr);
-    const hid_t dset = H5Dcreate2(loc, name.c_str(), type, space,
-        H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
-    if (dset < 0)
-    {
-        H5Sclose(space);
-        throw std::runtime_error(
-            "OutputManagerH5: unable to create dataset " + name);
-    }
-    H5Dwrite(dset, type, H5S_ALL, H5S_ALL, H5P_DEFAULT, data);
-    writeStringAttr(dset, "units", units);
-    H5Dclose(dset);
-    H5Sclose(space);
-}
-
-// Append a single element, of the given HDF5 memory datatype, to
-// the end of the extensible 1d dataset called name in the HDF5
-// group loc
-static void appendToDataset(const hid_t loc, const std::string& name,
-    const hid_t memType, const void* value)
-{
-    const hid_t dset = H5Dopen2(loc, name.c_str(), H5P_DEFAULT);
-    if (dset < 0)
-    {
-        throw std::runtime_error(
-            "OutputManagerH5: unable to open dataset " + name);
-    }
-
-    hid_t fileSpace = H5Dget_space(dset);
-    hsize_t curLen = 0;
-    hsize_t maxLen = 0;
-    H5Sget_simple_extent_dims(fileSpace, &curLen, &maxLen);
-    H5Sclose(fileSpace);
-
-    const hsize_t newLen = curLen + 1;
-    H5Dset_extent(dset, &newLen);
-
-    fileSpace = H5Dget_space(dset);
-    constexpr hsize_t count = 1;
-    H5Sselect_hyperslab(fileSpace, H5S_SELECT_SET, &curLen, nullptr, &count, nullptr);
-
-    const hid_t memSpace = H5Screate_simple(1, &count, nullptr);
-    H5Dwrite(dset, memType, memSpace, fileSpace, H5P_DEFAULT, value);
-
-    H5Sclose(memSpace);
-    H5Sclose(fileSpace);
-    H5Dclose(dset);
-}
-
-// Append a single row (the dataset's fixed number of columns, taken
-// from its own extent) to the end of the extensible 2d dataset
-// called name in the HDF5 group loc
-static void appendRowToDataset2d(const hid_t loc, const std::string& name,
-    const hid_t memType, const void* rowData)
-{
-    const hid_t dset = H5Dopen2(loc, name.c_str(), H5P_DEFAULT);
-    if (dset < 0)
-    {
-        throw std::runtime_error(
-            "OutputManagerH5: unable to open dataset " + name);
-    }
-
-    hid_t fileSpace = H5Dget_space(dset);
-    std::array<hsize_t, 2> curDims{};
-    std::array<hsize_t, 2> maxDims{};
-    H5Sget_simple_extent_dims(fileSpace, curDims.data(), maxDims.data());
-    H5Sclose(fileSpace);
-
-    const std::array<hsize_t, 2> newDims = { curDims.at(0) + 1, curDims.at(1) };
-    H5Dset_extent(dset, newDims.data());
-
-    fileSpace = H5Dget_space(dset);
-    const std::array<hsize_t, 2> start = { curDims.at(0), 0 };
-    const std::array<hsize_t, 2> count = { 1, curDims.at(1) };
-    H5Sselect_hyperslab(fileSpace, H5S_SELECT_SET, start.data(), nullptr, count.data(), nullptr);
-
-    const hid_t memSpace = H5Screate_simple(2, count.data(), nullptr);
-    H5Dwrite(dset, memType, memSpace, fileSpace, H5P_DEFAULT, rowData);
-
-    H5Sclose(memSpace);
-    H5Sclose(fileSpace);
-    H5Dclose(dset);
-}
-
 // Create the "spec_neb" 2D dataset in the given spectra group (sized
 // nWl, the same wavelength grid as the group's own "spec" dataset), if
 // a nebular emission grid was requested -- a no-op otherwise. Factored
@@ -442,8 +169,8 @@ static void appendRowToDataset2d(const hid_t loc, const std::string& name,
 static void createSpecNebDataset(const io::SimControls& simControls, const hid_t group, const hsize_t nWl)
 {
     if (simControls.nebular() == nullptr) { return; }
-    const hid_t dset = createExtensible2dDataset(group, "spec_neb", H5T_NATIVE_DOUBLE, nWl);
-    writeStringAttr(dset, "units", "erg/(s Angstrom)");
+    const hid_t dset = utils::createExtensible2dDataset(group, "spec_neb", H5T_NATIVE_DOUBLE, nWl);
+    utils::writeStringAttr(dset, "units", "erg/(s Angstrom)");
     H5Dclose(dset);
 }
 
@@ -459,8 +186,8 @@ static void createSpecNebExtinctDataset(const io::SimControls& simControls, cons
     const hsize_t nWlExtinct)
 {
     if (simControls.nebular() == nullptr) { return; }
-    const hid_t dset = createExtensible2dDataset(group, "spec_neb_extinct", H5T_NATIVE_DOUBLE, nWlExtinct);
-    writeStringAttr(dset, "units", "erg/(s Angstrom)");
+    const hid_t dset = utils::createExtensible2dDataset(group, "spec_neb_extinct", H5T_NATIVE_DOUBLE, nWlExtinct);
+    utils::writeStringAttr(dset, "units", "erg/(s Angstrom)");
     H5Dclose(dset);
 }
 
@@ -476,14 +203,14 @@ static void createPhotNebDatasets(const io::SimControls& simControls, const hid_
     const hsize_t nRealFilters, const std::vector<std::string>& realFilterUnits)
 {
     if (simControls.nebular() == nullptr) { return; }
-    const hid_t photNebDset = createExtensible2dDataset(group, "phot_neb", H5T_NATIVE_DOUBLE, nRealFilters);
-    writeStringArrayAttr(photNebDset, "units", realFilterUnits);
+    const hid_t photNebDset = utils::createExtensible2dDataset(group, "phot_neb", H5T_NATIVE_DOUBLE, nRealFilters);
+    utils::writeStringArrayAttr(photNebDset, "units", realFilterUnits);
     H5Dclose(photNebDset);
 
     if (simControls.extinct() == nullptr) { return; }
-    const hid_t photNebExtinctDset = createExtensible2dDataset(
+    const hid_t photNebExtinctDset = utils::createExtensible2dDataset(
         group, "phot_neb_extinct", H5T_NATIVE_DOUBLE, nRealFilters);
-    writeStringArrayAttr(photNebExtinctDset, "units", realFilterUnits);
+    utils::writeStringArrayAttr(photNebExtinctDset, "units", realFilterUnits);
     H5Dclose(photNebExtinctDset);
 }
 
@@ -492,17 +219,17 @@ static void createPhotNebDatasets(const io::SimControls& simControls, const hid_
 // group, if a nebular emission grid was requested -- a no-op
 // otherwise. Must only be called when SimControls::filters() is
 // already known to be non-null, and from inside the same critical
-// section as the caller's other appendRowToDataset2d() calls.
+// section as the caller's other utils::appendRowToDataset2d() calls.
 // Factored out of writeClusterPhot()/writeGalaxyPhot() to keep each
 // within its cognitive-complexity budget.
 static void appendPhotNebRows(const io::SimControls& simControls, const hid_t group,
     const std::vector<double>& photNeb, const std::vector<double>& photNebExtinct)
 {
     if (simControls.nebular() == nullptr || simControls.filters() == nullptr) { return; }
-    appendRowToDataset2d(group, "phot_neb", H5T_NATIVE_DOUBLE, photNeb.data());
+    utils::appendRowToDataset2d(group, "phot_neb", H5T_NATIVE_DOUBLE, photNeb.data());
 
     if (simControls.extinct() == nullptr) { return; }
-    appendRowToDataset2d(group, "phot_neb_extinct", H5T_NATIVE_DOUBLE, photNebExtinct.data());
+    utils::appendRowToDataset2d(group, "phot_neb_extinct", H5T_NATIVE_DOUBLE, photNebExtinct.data());
 }
 
 // Create the "line_wl"/"line_label" fixed datasets and the
@@ -526,7 +253,7 @@ static void createNebLinesDatasets(const io::SimControls& simControls, const hid
     const auto& lineLabel = neb->lineLabel();
     const auto nLines = static_cast<hsize_t>(lineWl.size());
 
-    writeFixed1dDataset(group, "line_wl", H5T_NATIVE_DOUBLE, lineWl.data(), nLines, "Angstrom");
+    utils::writeFixed1dDataset(group, "line_wl", H5T_NATIVE_DOUBLE, lineWl.data(), nLines, "Angstrom");
 
     std::size_t maxLabelLen = 0;
     for (const auto& label : lineLabel) { maxLabelLen = std::max(maxLabelLen, label.size()); }
@@ -536,17 +263,17 @@ static void createNebLinesDatasets(const io::SimControls& simControls, const hid
     {
         std::ranges::copy(lineLabel.at(ell), labelBuf.begin() + static_cast<std::ptrdiff_t>(ell * labelStrSize));
     }
-    const hid_t labelType = fixedStrType(labelStrSize);
-    writeFixed1dDataset(group, "line_label", labelType, labelBuf.data(), nLines, "");
+    const hid_t labelType = utils::fixedStrType(labelStrSize);
+    utils::writeFixed1dDataset(group, "line_label", labelType, labelBuf.data(), nLines, "");
     H5Tclose(labelType);
 
-    const hid_t linesDset = createExtensible2dDataset(group, "neb_lines", H5T_NATIVE_DOUBLE, nLines);
-    writeStringAttr(linesDset, "units", "erg/s");
+    const hid_t linesDset = utils::createExtensible2dDataset(group, "neb_lines", H5T_NATIVE_DOUBLE, nLines);
+    utils::writeStringAttr(linesDset, "units", "erg/s");
     H5Dclose(linesDset);
 
     if (simControls.extinct() == nullptr) { return; }
-    const hid_t linesExtinctDset = createExtensible2dDataset(group, "neb_lines_extinct", H5T_NATIVE_DOUBLE, nLines);
-    writeStringAttr(linesExtinctDset, "units", "erg/s");
+    const hid_t linesExtinctDset = utils::createExtensible2dDataset(group, "neb_lines_extinct", H5T_NATIVE_DOUBLE, nLines);
+    utils::writeStringAttr(linesExtinctDset, "units", "erg/s");
     H5Dclose(linesExtinctDset);
 }
 
@@ -554,138 +281,17 @@ static void createNebLinesDatasets(const io::SimControls& simControls, const hid
 // requested) "neb_lines_extinct" datasets in the given spectra group,
 // if a nebular emission grid was requested -- a no-op otherwise. Must
 // be called from inside the same critical section as the caller's
-// other appendRowToDataset2d() calls. Factored out of
+// other utils::appendRowToDataset2d() calls. Factored out of
 // writeClusterSpec()/writeGalaxySpec() to keep each within its
 // cognitive-complexity budget.
 static void appendNebLinesRow(const io::SimControls& simControls, const hid_t group,
     const std::vector<double>& lineLum, const std::vector<double>& lineLumExtinct)
 {
     if (simControls.nebular() == nullptr) { return; }
-    appendRowToDataset2d(group, "neb_lines", H5T_NATIVE_DOUBLE, lineLum.data());
+    utils::appendRowToDataset2d(group, "neb_lines", H5T_NATIVE_DOUBLE, lineLum.data());
 
     if (simControls.extinct() == nullptr) { return; }
-    appendRowToDataset2d(group, "neb_lines_extinct", H5T_NATIVE_DOUBLE, lineLumExtinct.data());
-}
-
-// Return the name of the idx-th direct child link of the HDF5 group
-// (or file, which is itself a group) loc
-static auto childNameByIdx(const hid_t loc, const hsize_t idx) -> std::string
-{
-    const auto len = H5Lget_name_by_idx(loc, ".", H5_INDEX_NAME, H5_ITER_NATIVE,
-        idx, nullptr, 0, H5P_DEFAULT);
-    std::string name(static_cast<std::size_t>(len), '\0');
-    H5Lget_name_by_idx(loc, ".", H5_INDEX_NAME, H5_ITER_NATIVE,
-        idx, name.data(), static_cast<std::size_t>(len) + 1, H5P_DEFAULT);
-    return name;
-}
-
-// A dataset is "extensible" if any one of its dimensions has an
-// unlimited maximum extent -- true of every dataset this class itself
-// creates via createExtensible1dDataset()/createExtensible2dDataset(),
-// false of every one it creates via writeFixed1dDataset() (e.g. "wl")
-// or writeStringDataset() (e.g. input_deck's own "toml"), so this is
-// exactly the distinction consolidateFiles() needs to know which
-// datasets hold one row per write (and so need merging across thread
-// files) versus fixed, shared metadata (already correctly present,
-// identically, in every thread file, so nothing to do)
-static auto isExtensibleDataset(const hid_t dset) -> bool
-{
-    const hid_t space = H5Dget_space(dset);
-    const int rank = H5Sget_simple_extent_ndims(space);
-    std::vector<hsize_t> maxDims(static_cast<std::size_t>(rank));
-    H5Sget_simple_extent_dims(space, nullptr, maxDims.data());
-    H5Sclose(space);
-    return std::ranges::any_of(maxDims,
-        [](const hsize_t d) { return d == H5S_UNLIMITED; });
-}
-
-// Read every row of the extensible dataset srcDset in full, and
-// append them onto the end of dstDset -- srcDset and dstDset are
-// assumed to share the same rank, element type, and (for a 2d
-// dataset) number of columns, which every thread_NNNN.h5 file
-// guarantees, since each was built by an identical openOutputFile()
-// call. A no-op if srcDset is currently empty (no rows to append).
-static void appendDatasetContents(const hid_t srcDset, const hid_t dstDset)
-{
-    const hid_t srcSpace = H5Dget_space(srcDset);
-    const int rank = H5Sget_simple_extent_ndims(srcSpace);
-    std::vector<hsize_t> srcDims(static_cast<std::size_t>(rank));
-    H5Sget_simple_extent_dims(srcSpace, srcDims.data(), nullptr);
-    H5Sclose(srcSpace);
-    const hsize_t nRows = srcDims.front();
-    if (nRows == 0) { return; }
-
-    // Every extensible dataset this class creates uses a fixed-size
-    // element type (H5T_NATIVE_ULONG, H5T_NATIVE_DOUBLE, or the
-    // fixed-width "rng" string type) as its on-disk type directly, so
-    // reading/writing through that same type as both the file and
-    // memory type (rather than converting to/from some other native
-    // type) round-trips the raw bytes exactly, with no variable-length
-    // data to separately manage
-    const hid_t type = H5Dget_type(srcDset);
-    const std::size_t elemSize = H5Tget_size(type);
-    auto nElem = static_cast<std::size_t>(nRows);
-    for (int i = 1; i < rank; ++i) { nElem *= static_cast<std::size_t>(srcDims.at(static_cast<std::size_t>(i))); }
-    std::vector<std::byte> buf(nElem * elemSize);
-    H5Dread(srcDset, type, H5S_ALL, H5S_ALL, H5P_DEFAULT, buf.data());
-
-    const hid_t dstSpaceBefore = H5Dget_space(dstDset);
-    std::vector<hsize_t> dstDims(static_cast<std::size_t>(rank));
-    H5Sget_simple_extent_dims(dstSpaceBefore, dstDims.data(), nullptr);
-    H5Sclose(dstSpaceBefore);
-    const hsize_t oldRows = dstDims.front();
-
-    std::vector<hsize_t> newDims = dstDims;
-    newDims.front() = oldRows + nRows;
-    H5Dset_extent(dstDset, newDims.data());
-
-    const hid_t dstSpace = H5Dget_space(dstDset);
-    std::vector<hsize_t> start(static_cast<std::size_t>(rank), 0);
-    start.front() = oldRows;
-    std::vector<hsize_t> count = srcDims;
-    H5Sselect_hyperslab(dstSpace, H5S_SELECT_SET, start.data(), nullptr, count.data(), nullptr);
-
-    const hid_t memSpace = H5Screate_simple(rank, count.data(), nullptr);
-    H5Dwrite(dstDset, type, memSpace, dstSpace, H5P_DEFAULT, buf.data());
-
-    H5Sclose(memSpace);
-    H5Sclose(dstSpace);
-    H5Tclose(type);
-}
-
-// Append every extensible dataset in every group of srcFile onto the
-// correspondingly-named dataset of the same group in dstFile -- see
-// consolidateFiles()'s own header comment
-static void appendFileContents(const hid_t srcFile, const hid_t dstFile)
-{
-    H5G_info_t rootInfo{};
-    H5Gget_info(srcFile, &rootInfo);
-    for (hsize_t i = 0; i < rootInfo.nlinks; ++i)
-    {
-        const std::string groupName = childNameByIdx(srcFile, i);
-        const hid_t srcChild = H5Oopen(srcFile, groupName.c_str(), H5P_DEFAULT);
-        if (H5Iget_type(srcChild) != H5I_GROUP) { H5Oclose(srcChild); continue; }
-
-        const hid_t dstGroup = H5Gopen2(dstFile, groupName.c_str(), H5P_DEFAULT);
-
-        H5G_info_t groupInfo{};
-        H5Gget_info(srcChild, &groupInfo);
-        for (hsize_t j = 0; j < groupInfo.nlinks; ++j)
-        {
-            const std::string dsetName = childNameByIdx(srcChild, j);
-            const hid_t srcObj = H5Oopen(srcChild, dsetName.c_str(), H5P_DEFAULT);
-            if (H5Iget_type(srcObj) == H5I_DATASET && isExtensibleDataset(srcObj))
-            {
-                const hid_t dstDset = H5Dopen2(dstGroup, dsetName.c_str(), H5P_DEFAULT);
-                appendDatasetContents(srcObj, dstDset);
-                H5Dclose(dstDset);
-            }
-            H5Oclose(srcObj);
-        }
-
-        H5Gclose(dstGroup);
-        H5Oclose(srcChild);
-    }
+    utils::appendRowToDataset2d(group, "neb_lines_extinct", H5T_NATIVE_DOUBLE, lineLumExtinct.data());
 }
 
 // NOLINTEND(misc-include-cleaner)
@@ -965,10 +571,10 @@ void io::OutputManagerH5::openOutputFile(const std::filesystem::path& path)
         }
 
         const auto [date, time] = currentDateAndTime();
-        writeStringAttr(file_(), "slug-hash", slugGitHash);
-        writeStringAttr(file_(), "date", date);
-        writeStringAttr(file_(), "time", time);
-        writeStringAttr(file_(), "rng_state", currentRngStateString());
+        utils::writeStringAttr(file_(), "slug-hash", slugGitHash);
+        utils::writeStringAttr(file_(), "date", date);
+        utils::writeStringAttr(file_(), "time", time);
+        utils::writeStringAttr(file_(), "rng_state", currentRngStateString());
 
         const hid_t inputDeckGrp = H5Gcreate2(file_(), "input_deck",
             H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
@@ -980,7 +586,7 @@ void io::OutputManagerH5::openOutputFile(const std::filesystem::path& path)
         }
         std::ostringstream tomlStream;
         tomlStream << inputDeck_;
-        writeStringDataset(inputDeckGrp, "toml", tomlStream.str());
+        utils::writeStringDataset(inputDeckGrp, "toml", tomlStream.str());
         H5Gclose(inputDeckGrp);
         // NOLINTEND(misc-include-cleaner)
 
@@ -1009,42 +615,42 @@ void io::OutputManagerH5::openClustersGroup()
             "OutputManagerH5: unable to create clusters group");
     }
 
-    const hid_t trialDset = createExtensible1dDataset(
+    const hid_t trialDset = utils::createExtensible1dDataset(
         clustersGroup_(), "trial", H5T_NATIVE_ULONG);
-    writeStringAttr(trialDset, "units", "");
+    utils::writeStringAttr(trialDset, "units", "");
     H5Dclose(trialDset);
-    const hid_t uidDset = createExtensible1dDataset(
+    const hid_t uidDset = utils::createExtensible1dDataset(
         clustersGroup_(), "uid", H5T_NATIVE_ULONG);
-    writeStringAttr(uidDset, "units", "");
+    utils::writeStringAttr(uidDset, "units", "");
     H5Dclose(uidDset);
-    const hid_t targetMassDset = createExtensible1dDataset(
+    const hid_t targetMassDset = utils::createExtensible1dDataset(
         clustersGroup_(), "target_mass", H5T_NATIVE_DOUBLE);
-    writeStringAttr(targetMassDset, "units", "Msun");
+    utils::writeStringAttr(targetMassDset, "units", "Msun");
     H5Dclose(targetMassDset);
-    const hid_t birthMassDset = createExtensible1dDataset(
+    const hid_t birthMassDset = utils::createExtensible1dDataset(
         clustersGroup_(), "birth_mass", H5T_NATIVE_DOUBLE);
-    writeStringAttr(birthMassDset, "units", "Msun");
+    utils::writeStringAttr(birthMassDset, "units", "Msun");
     H5Dclose(birthMassDset);
-    const hid_t formTimeDset = createExtensible1dDataset(
+    const hid_t formTimeDset = utils::createExtensible1dDataset(
         clustersGroup_(), "form_time", H5T_NATIVE_DOUBLE);
-    writeStringAttr(formTimeDset, "units", "yr");
+    utils::writeStringAttr(formTimeDset, "units", "yr");
     H5Dclose(formTimeDset);
-    const hid_t fehDset = createExtensible1dDataset(
+    const hid_t fehDset = utils::createExtensible1dDataset(
         clustersGroup_(), "feh", H5T_NATIVE_DOUBLE);
-    writeStringAttr(fehDset, "units", "");
+    utils::writeStringAttr(fehDset, "units", "");
     H5Dclose(fehDset);
-    const hid_t rngType = fixedStrType(utils::rngStateWidth);
-    const hid_t rngDset = createExtensible1dDataset(
+    const hid_t rngType = utils::fixedStrType(utils::rngStateWidth);
+    const hid_t rngDset = utils::createExtensible1dDataset(
         clustersGroup_(), "rng", rngType);
-    writeStringAttr(rngDset, "units", "");
+    utils::writeStringAttr(rngDset, "units", "");
     H5Dclose(rngDset);
     H5Tclose(rngType);
 
     if (simControls_.extinct() != nullptr)
     {
-        const hid_t aVDset = createExtensible1dDataset(
+        const hid_t aVDset = utils::createExtensible1dDataset(
             clustersGroup_(), "A_V", H5T_NATIVE_DOUBLE);
-        writeStringAttr(aVDset, "units", "magnitudes");
+        utils::writeStringAttr(aVDset, "units", "magnitudes");
         H5Dclose(aVDset);
     }
     // NOLINTEND(misc-include-cleaner)
@@ -1074,24 +680,24 @@ void io::OutputManagerH5::openClusterSpectraGroup()
             "OutputManagerH5: unable to create cluster_spectra group");
     }
 
-    writeFixed1dDataset(clusterSpectraGroup_(), "wl", H5T_NATIVE_DOUBLE,
+    utils::writeFixed1dDataset(clusterSpectraGroup_(), "wl", H5T_NATIVE_DOUBLE,
         wlObs.data(), nWl, "Angstrom");
 
-    const hid_t trialSpecDset = createExtensible1dDataset(
+    const hid_t trialSpecDset = utils::createExtensible1dDataset(
         clusterSpectraGroup_(), "trial", H5T_NATIVE_ULONG);
-    writeStringAttr(trialSpecDset, "units", "");
+    utils::writeStringAttr(trialSpecDset, "units", "");
     H5Dclose(trialSpecDset);
-    const hid_t timeDset = createExtensible1dDataset(
+    const hid_t timeDset = utils::createExtensible1dDataset(
         clusterSpectraGroup_(), "time", H5T_NATIVE_DOUBLE);
-    writeStringAttr(timeDset, "units", "yr");
+    utils::writeStringAttr(timeDset, "units", "yr");
     H5Dclose(timeDset);
-    const hid_t uidSpecDset = createExtensible1dDataset(
+    const hid_t uidSpecDset = utils::createExtensible1dDataset(
         clusterSpectraGroup_(), "uid", H5T_NATIVE_ULONG);
-    writeStringAttr(uidSpecDset, "units", "");
+    utils::writeStringAttr(uidSpecDset, "units", "");
     H5Dclose(uidSpecDset);
-    const hid_t specDset = createExtensible2dDataset(
+    const hid_t specDset = utils::createExtensible2dDataset(
         clusterSpectraGroup_(), "spec", H5T_NATIVE_DOUBLE, nWl);
-    writeStringAttr(specDset, "units", "erg/(s Angstrom)");
+    utils::writeStringAttr(specDset, "units", "erg/(s Angstrom)");
     H5Dclose(specDset);
 
     // specNeb (if requested) lives on the same wl grid as spec -- no
@@ -1103,11 +709,11 @@ void io::OutputManagerH5::openClusterSpectraGroup()
     {
         const std::vector<double> wlExtinctObs = simControls_.extinct()->wlObs();
         const auto nWlExtinct = static_cast<hsize_t>(wlExtinctObs.size());
-        writeFixed1dDataset(clusterSpectraGroup_(), "wl_extinct", H5T_NATIVE_DOUBLE,
+        utils::writeFixed1dDataset(clusterSpectraGroup_(), "wl_extinct", H5T_NATIVE_DOUBLE,
             wlExtinctObs.data(), nWlExtinct, "Angstrom");
-        const hid_t specExtinctDset = createExtensible2dDataset(
+        const hid_t specExtinctDset = utils::createExtensible2dDataset(
             clusterSpectraGroup_(), "spec_extinct", H5T_NATIVE_DOUBLE, nWlExtinct);
-        writeStringAttr(specExtinctDset, "units", "erg/(s Angstrom)");
+        utils::writeStringAttr(specExtinctDset, "units", "erg/(s Angstrom)");
         H5Dclose(specExtinctDset);
 
         // specNebExtinct (if requested) lives on the same
@@ -1150,28 +756,28 @@ void io::OutputManagerH5::openClusterPhotGroup()
             "OutputManagerH5: unable to create cluster_phot group");
     }
 
-    writeStringArrayAttr(clusterPhotGroup_(), "filters", filterNames);
+    utils::writeStringArrayAttr(clusterPhotGroup_(), "filters", filterNames);
 
-    const hid_t trialPhotDset = createExtensible1dDataset(
+    const hid_t trialPhotDset = utils::createExtensible1dDataset(
         clusterPhotGroup_(), "trial", H5T_NATIVE_ULONG);
-    writeStringAttr(trialPhotDset, "units", "");
+    utils::writeStringAttr(trialPhotDset, "units", "");
     H5Dclose(trialPhotDset);
-    const hid_t timePhotDset = createExtensible1dDataset(
+    const hid_t timePhotDset = utils::createExtensible1dDataset(
         clusterPhotGroup_(), "time", H5T_NATIVE_DOUBLE);
-    writeStringAttr(timePhotDset, "units", "yr");
+    utils::writeStringAttr(timePhotDset, "units", "yr");
     H5Dclose(timePhotDset);
-    const hid_t uidPhotDset = createExtensible1dDataset(
+    const hid_t uidPhotDset = utils::createExtensible1dDataset(
         clusterPhotGroup_(), "uid", H5T_NATIVE_ULONG);
-    writeStringAttr(uidPhotDset, "units", "");
+    utils::writeStringAttr(uidPhotDset, "units", "");
     H5Dclose(uidPhotDset);
-    const hid_t photDset = createExtensible2dDataset(
+    const hid_t photDset = utils::createExtensible2dDataset(
         clusterPhotGroup_(), "phot", H5T_NATIVE_DOUBLE, nFilters);
     // Each filter can have its own unit (e.g. a photon-count filter's
     // "photon/s" alongside another filter's magnitude system), so
     // this is a per-column string array -- unlike every other dataset
     // here, whose units are uniform across the whole dataset -- in
     // the same order as the "filters" attribute above
-    writeStringArrayAttr(photDset, "units", filterUnits);
+    utils::writeStringArrayAttr(photDset, "units", filterUnits);
     H5Dclose(photDset);
 
     // phot_extinct/phot_neb/phot_neb_extinct only ever cover real
@@ -1190,9 +796,9 @@ void io::OutputManagerH5::openClusterPhotGroup()
 
         if (simControls_.extinct() != nullptr)
         {
-            const hid_t photExtinctDset = createExtensible2dDataset(
+            const hid_t photExtinctDset = utils::createExtensible2dDataset(
                 clusterPhotGroup_(), "phot_extinct", H5T_NATIVE_DOUBLE, nRealFilters);
-            writeStringArrayAttr(photExtinctDset, "units", realFilterUnits);
+            utils::writeStringArrayAttr(photExtinctDset, "units", realFilterUnits);
             H5Dclose(photExtinctDset);
         }
 
@@ -1219,21 +825,21 @@ void io::OutputManagerH5::openGalaxyGroup()
             "OutputManagerH5: unable to create galaxy group");
     }
 
-    const hid_t trialDset = createExtensible1dDataset(
+    const hid_t trialDset = utils::createExtensible1dDataset(
         galaxyGroup_(), "trial", H5T_NATIVE_ULONG);
-    writeStringAttr(trialDset, "units", "");
+    utils::writeStringAttr(trialDset, "units", "");
     H5Dclose(trialDset);
-    const hid_t timeDset = createExtensible1dDataset(
+    const hid_t timeDset = utils::createExtensible1dDataset(
         galaxyGroup_(), "time", H5T_NATIVE_DOUBLE);
-    writeStringAttr(timeDset, "units", "yr");
+    utils::writeStringAttr(timeDset, "units", "yr");
     H5Dclose(timeDset);
-    const hid_t targetMassDset = createExtensible1dDataset(
+    const hid_t targetMassDset = utils::createExtensible1dDataset(
         galaxyGroup_(), "target_mass", H5T_NATIVE_DOUBLE);
-    writeStringAttr(targetMassDset, "units", "Msun");
+    utils::writeStringAttr(targetMassDset, "units", "Msun");
     H5Dclose(targetMassDset);
-    const hid_t actualMassDset = createExtensible1dDataset(
+    const hid_t actualMassDset = utils::createExtensible1dDataset(
         galaxyGroup_(), "actual_mass", H5T_NATIVE_DOUBLE);
-    writeStringAttr(actualMassDset, "units", "Msun");
+    utils::writeStringAttr(actualMassDset, "units", "Msun");
     H5Dclose(actualMassDset);
     // NOLINTEND(misc-include-cleaner)
 }
@@ -1262,20 +868,20 @@ void io::OutputManagerH5::openGalaxySpectraGroup()
             "OutputManagerH5: unable to create galaxy_spectra group");
     }
 
-    writeFixed1dDataset(galaxySpectraGroup_(), "wl", H5T_NATIVE_DOUBLE,
+    utils::writeFixed1dDataset(galaxySpectraGroup_(), "wl", H5T_NATIVE_DOUBLE,
         wlObs.data(), nWl, "Angstrom");
 
-    const hid_t trialSpecDset = createExtensible1dDataset(
+    const hid_t trialSpecDset = utils::createExtensible1dDataset(
         galaxySpectraGroup_(), "trial", H5T_NATIVE_ULONG);
-    writeStringAttr(trialSpecDset, "units", "");
+    utils::writeStringAttr(trialSpecDset, "units", "");
     H5Dclose(trialSpecDset);
-    const hid_t timeDset = createExtensible1dDataset(
+    const hid_t timeDset = utils::createExtensible1dDataset(
         galaxySpectraGroup_(), "time", H5T_NATIVE_DOUBLE);
-    writeStringAttr(timeDset, "units", "yr");
+    utils::writeStringAttr(timeDset, "units", "yr");
     H5Dclose(timeDset);
-    const hid_t specDset = createExtensible2dDataset(
+    const hid_t specDset = utils::createExtensible2dDataset(
         galaxySpectraGroup_(), "spec", H5T_NATIVE_DOUBLE, nWl);
-    writeStringAttr(specDset, "units", "erg/(s Angstrom)");
+    utils::writeStringAttr(specDset, "units", "erg/(s Angstrom)");
     H5Dclose(specDset);
 
     // specNeb (if requested) lives on the same wl grid as spec -- see
@@ -1287,11 +893,11 @@ void io::OutputManagerH5::openGalaxySpectraGroup()
     {
         const std::vector<double> wlExtinctObs = simControls_.extinct()->wlObs();
         const auto nWlExtinct = static_cast<hsize_t>(wlExtinctObs.size());
-        writeFixed1dDataset(galaxySpectraGroup_(), "wl_extinct", H5T_NATIVE_DOUBLE,
+        utils::writeFixed1dDataset(galaxySpectraGroup_(), "wl_extinct", H5T_NATIVE_DOUBLE,
             wlExtinctObs.data(), nWlExtinct, "Angstrom");
-        const hid_t specExtinctDset = createExtensible2dDataset(
+        const hid_t specExtinctDset = utils::createExtensible2dDataset(
             galaxySpectraGroup_(), "spec_extinct", H5T_NATIVE_DOUBLE, nWlExtinct);
-        writeStringAttr(specExtinctDset, "units", "erg/(s Angstrom)");
+        utils::writeStringAttr(specExtinctDset, "units", "erg/(s Angstrom)");
         H5Dclose(specExtinctDset);
 
         createSpecNebExtinctDataset(simControls_, galaxySpectraGroup_(), nWlExtinct);
@@ -1334,20 +940,20 @@ void io::OutputManagerH5::openGalaxyPhotGroup()
             "OutputManagerH5: unable to create galaxy_phot group");
     }
 
-    writeStringArrayAttr(galaxyPhotGroup_(), "filters", filterNames);
+    utils::writeStringArrayAttr(galaxyPhotGroup_(), "filters", filterNames);
 
-    const hid_t trialPhotDset = createExtensible1dDataset(
+    const hid_t trialPhotDset = utils::createExtensible1dDataset(
         galaxyPhotGroup_(), "trial", H5T_NATIVE_ULONG);
-    writeStringAttr(trialPhotDset, "units", "");
+    utils::writeStringAttr(trialPhotDset, "units", "");
     H5Dclose(trialPhotDset);
-    const hid_t timePhotDset = createExtensible1dDataset(
+    const hid_t timePhotDset = utils::createExtensible1dDataset(
         galaxyPhotGroup_(), "time", H5T_NATIVE_DOUBLE);
-    writeStringAttr(timePhotDset, "units", "yr");
+    utils::writeStringAttr(timePhotDset, "units", "yr");
     H5Dclose(timePhotDset);
-    const hid_t photDset = createExtensible2dDataset(
+    const hid_t photDset = utils::createExtensible2dDataset(
         galaxyPhotGroup_(), "phot", H5T_NATIVE_DOUBLE, nFilters);
     // Each filter can have its own unit, as in openClusterPhotGroup()
-    writeStringArrayAttr(photDset, "units", filterUnits);
+    utils::writeStringArrayAttr(photDset, "units", filterUnits);
     H5Dclose(photDset);
 
     // phot_extinct/phot_neb/phot_neb_extinct only ever cover real
@@ -1361,9 +967,9 @@ void io::OutputManagerH5::openGalaxyPhotGroup()
 
         if (simControls_.extinct() != nullptr)
         {
-            const hid_t photExtinctDset = createExtensible2dDataset(
+            const hid_t photExtinctDset = utils::createExtensible2dDataset(
                 galaxyPhotGroup_(), "phot_extinct", H5T_NATIVE_DOUBLE, nRealFilters);
-            writeStringArrayAttr(photExtinctDset, "units", realFilterUnits);
+            utils::writeStringArrayAttr(photExtinctDset, "units", realFilterUnits);
             H5Dclose(photExtinctDset);
         }
 
@@ -1495,9 +1101,9 @@ void io::OutputManagerH5::closeOutputFile(const unsigned long trialsCompleted)
         if (galaxyGroup_() >= 0) { H5Gclose(galaxyGroup_()); }
         if (galaxySpectraGroup_() >= 0) { H5Gclose(galaxySpectraGroup_()); }
         if (galaxyPhotGroup_() >= 0) { H5Gclose(galaxyPhotGroup_()); }
-        writeULongAttr(file_(), "trials_completed", trialsCompleted);
-        writeULongAttr(file_(), "restart_uid", utils::uniqueID().read());
-        writeULongAttr(file_(), "max_trial", maxTrial_);
+        utils::writeULongAttr(file_(), "trials_completed", trialsCompleted);
+        utils::writeULongAttr(file_(), "restart_uid", utils::uniqueID().read());
+        utils::writeULongAttr(file_(), "max_trial", maxTrial_);
         H5Fclose(file_());
         // NOLINTEND(misc-include-cleaner)
     }
@@ -1550,7 +1156,7 @@ void io::OutputManagerH5::consolidateFiles(const std::filesystem::path& path)
             throw std::runtime_error(
                 "OutputManagerH5::consolidateFiles: unable to open " + threadFiles.at(i).string());
         }
-        appendFileContents(srcFile, destFile);
+        utils::appendFileContents(srcFile, destFile);
         H5Fclose(srcFile);
     }
     H5Fclose(destFile);
@@ -1584,19 +1190,19 @@ void io::OutputManagerH5::writeCluster(
         if (trial > maxTrial_) { maxTrial_ = trial; }
 
         // NOLINTBEGIN(misc-include-cleaner)
-        appendToDataset(clustersGroup_(), "trial", H5T_NATIVE_ULONG, &trial);
-        appendToDataset(clustersGroup_(), "uid", H5T_NATIVE_ULONG, &uid);
-        appendToDataset(clustersGroup_(), "target_mass", H5T_NATIVE_DOUBLE, &targetMass);
-        appendToDataset(clustersGroup_(), "birth_mass", H5T_NATIVE_DOUBLE, &birthMass);
-        appendToDataset(clustersGroup_(), "form_time", H5T_NATIVE_DOUBLE, &formTime);
-        appendToDataset(clustersGroup_(), "feh", H5T_NATIVE_DOUBLE, &feH);
-        const hid_t rngType = fixedStrType(utils::rngStateWidth);
-        appendToDataset(clustersGroup_(), "rng", rngType, rngState.data());
+        utils::appendToDataset(clustersGroup_(), "trial", H5T_NATIVE_ULONG, &trial);
+        utils::appendToDataset(clustersGroup_(), "uid", H5T_NATIVE_ULONG, &uid);
+        utils::appendToDataset(clustersGroup_(), "target_mass", H5T_NATIVE_DOUBLE, &targetMass);
+        utils::appendToDataset(clustersGroup_(), "birth_mass", H5T_NATIVE_DOUBLE, &birthMass);
+        utils::appendToDataset(clustersGroup_(), "form_time", H5T_NATIVE_DOUBLE, &formTime);
+        utils::appendToDataset(clustersGroup_(), "feh", H5T_NATIVE_DOUBLE, &feH);
+        const hid_t rngType = utils::fixedStrType(utils::rngStateWidth);
+        utils::appendToDataset(clustersGroup_(), "rng", rngType, rngState.data());
         H5Tclose(rngType);
         if (simControls_.extinct() != nullptr)
         {
             const double aV = cluster.aV();
-            appendToDataset(clustersGroup_(), "A_V", H5T_NATIVE_DOUBLE, &aV);
+            utils::appendToDataset(clustersGroup_(), "A_V", H5T_NATIVE_DOUBLE, &aV);
         }
 
         // Flush this thread's own file now, rather than waiting for
@@ -1649,22 +1255,22 @@ void io::OutputManagerH5::writeClusterSpec(
         if (trial > maxTrial_) { maxTrial_ = trial; }
 
         // NOLINTBEGIN(misc-include-cleaner)
-        appendToDataset(clusterSpectraGroup_(), "trial", H5T_NATIVE_ULONG, &trial);
-        appendToDataset(clusterSpectraGroup_(), "time", H5T_NATIVE_DOUBLE, &time);
-        appendToDataset(clusterSpectraGroup_(), "uid", H5T_NATIVE_ULONG, &uid);
-        appendRowToDataset2d(clusterSpectraGroup_(), "spec", H5T_NATIVE_DOUBLE, spec.data());
+        utils::appendToDataset(clusterSpectraGroup_(), "trial", H5T_NATIVE_ULONG, &trial);
+        utils::appendToDataset(clusterSpectraGroup_(), "time", H5T_NATIVE_DOUBLE, &time);
+        utils::appendToDataset(clusterSpectraGroup_(), "uid", H5T_NATIVE_ULONG, &uid);
+        utils::appendRowToDataset2d(clusterSpectraGroup_(), "spec", H5T_NATIVE_DOUBLE, spec.data());
         if (simControls_.nebular() != nullptr)
         {
-            appendRowToDataset2d(clusterSpectraGroup_(), "spec_neb",
+            utils::appendRowToDataset2d(clusterSpectraGroup_(), "spec_neb",
                 H5T_NATIVE_DOUBLE, specNeb.data());
         }
         if (simControls_.extinct() != nullptr)
         {
-            appendRowToDataset2d(clusterSpectraGroup_(), "spec_extinct",
+            utils::appendRowToDataset2d(clusterSpectraGroup_(), "spec_extinct",
                 H5T_NATIVE_DOUBLE, specExtinct.data());
             if (simControls_.nebular() != nullptr)
             {
-                appendRowToDataset2d(clusterSpectraGroup_(), "spec_neb_extinct",
+                utils::appendRowToDataset2d(clusterSpectraGroup_(), "spec_neb_extinct",
                     H5T_NATIVE_DOUBLE, specNebExtinct.data());
             }
         }
@@ -1700,13 +1306,13 @@ void io::OutputManagerH5::writeClusterPhot(
         if (trial > maxTrial_) { maxTrial_ = trial; }
 
         // NOLINTBEGIN(misc-include-cleaner)
-        appendToDataset(clusterPhotGroup_(), "trial", H5T_NATIVE_ULONG, &trial);
-        appendToDataset(clusterPhotGroup_(), "time", H5T_NATIVE_DOUBLE, &time);
-        appendToDataset(clusterPhotGroup_(), "uid", H5T_NATIVE_ULONG, &uid);
-        appendRowToDataset2d(clusterPhotGroup_(), "phot", H5T_NATIVE_DOUBLE, phot.data());
+        utils::appendToDataset(clusterPhotGroup_(), "trial", H5T_NATIVE_ULONG, &trial);
+        utils::appendToDataset(clusterPhotGroup_(), "time", H5T_NATIVE_DOUBLE, &time);
+        utils::appendToDataset(clusterPhotGroup_(), "uid", H5T_NATIVE_ULONG, &uid);
+        utils::appendRowToDataset2d(clusterPhotGroup_(), "phot", H5T_NATIVE_DOUBLE, phot.data());
         if (simControls_.extinct() != nullptr && simControls_.filters() != nullptr)
         {
-            appendRowToDataset2d(clusterPhotGroup_(), "phot_extinct",
+            utils::appendRowToDataset2d(clusterPhotGroup_(), "phot_extinct",
                 H5T_NATIVE_DOUBLE, photExtinct.data());
         }
         appendPhotNebRows(simControls_, clusterPhotGroup_(), photNeb, photNebExtinct);
@@ -1738,10 +1344,10 @@ void io::OutputManagerH5::writeGalaxy(
         if (trial > maxTrial_) { maxTrial_ = trial; }
 
         // NOLINTBEGIN(misc-include-cleaner)
-        appendToDataset(galaxyGroup_(), "trial", H5T_NATIVE_ULONG, &trial);
-        appendToDataset(galaxyGroup_(), "time", H5T_NATIVE_DOUBLE, &time);
-        appendToDataset(galaxyGroup_(), "target_mass", H5T_NATIVE_DOUBLE, &targetMass);
-        appendToDataset(galaxyGroup_(), "actual_mass", H5T_NATIVE_DOUBLE, &actualMass);
+        utils::appendToDataset(galaxyGroup_(), "trial", H5T_NATIVE_ULONG, &trial);
+        utils::appendToDataset(galaxyGroup_(), "time", H5T_NATIVE_DOUBLE, &time);
+        utils::appendToDataset(galaxyGroup_(), "target_mass", H5T_NATIVE_DOUBLE, &targetMass);
+        utils::appendToDataset(galaxyGroup_(), "actual_mass", H5T_NATIVE_DOUBLE, &actualMass);
         // NOLINTEND(misc-include-cleaner)
     }
 
@@ -1775,21 +1381,21 @@ void io::OutputManagerH5::writeGalaxySpec(
         if (trial > maxTrial_) { maxTrial_ = trial; }
 
         // NOLINTBEGIN(misc-include-cleaner)
-        appendToDataset(galaxySpectraGroup_(), "trial", H5T_NATIVE_ULONG, &trial);
-        appendToDataset(galaxySpectraGroup_(), "time", H5T_NATIVE_DOUBLE, &time);
-        appendRowToDataset2d(galaxySpectraGroup_(), "spec", H5T_NATIVE_DOUBLE, spec.data());
+        utils::appendToDataset(galaxySpectraGroup_(), "trial", H5T_NATIVE_ULONG, &trial);
+        utils::appendToDataset(galaxySpectraGroup_(), "time", H5T_NATIVE_DOUBLE, &time);
+        utils::appendRowToDataset2d(galaxySpectraGroup_(), "spec", H5T_NATIVE_DOUBLE, spec.data());
         if (simControls_.nebular() != nullptr)
         {
-            appendRowToDataset2d(galaxySpectraGroup_(), "spec_neb",
+            utils::appendRowToDataset2d(galaxySpectraGroup_(), "spec_neb",
                 H5T_NATIVE_DOUBLE, specNeb.data());
         }
         if (simControls_.extinct() != nullptr)
         {
-            appendRowToDataset2d(galaxySpectraGroup_(), "spec_extinct",
+            utils::appendRowToDataset2d(galaxySpectraGroup_(), "spec_extinct",
                 H5T_NATIVE_DOUBLE, specExtinct.data());
             if (simControls_.nebular() != nullptr)
             {
-                appendRowToDataset2d(galaxySpectraGroup_(), "spec_neb_extinct",
+                utils::appendRowToDataset2d(galaxySpectraGroup_(), "spec_neb_extinct",
                     H5T_NATIVE_DOUBLE, specNebExtinct.data());
             }
         }
@@ -1826,12 +1432,12 @@ void io::OutputManagerH5::writeGalaxyPhot(
         if (trial > maxTrial_) { maxTrial_ = trial; }
 
         // NOLINTBEGIN(misc-include-cleaner)
-        appendToDataset(galaxyPhotGroup_(), "trial", H5T_NATIVE_ULONG, &trial);
-        appendToDataset(galaxyPhotGroup_(), "time", H5T_NATIVE_DOUBLE, &time);
-        appendRowToDataset2d(galaxyPhotGroup_(), "phot", H5T_NATIVE_DOUBLE, phot.data());
+        utils::appendToDataset(galaxyPhotGroup_(), "trial", H5T_NATIVE_ULONG, &trial);
+        utils::appendToDataset(galaxyPhotGroup_(), "time", H5T_NATIVE_DOUBLE, &time);
+        utils::appendRowToDataset2d(galaxyPhotGroup_(), "phot", H5T_NATIVE_DOUBLE, phot.data());
         if (simControls_.extinct() != nullptr && simControls_.filters() != nullptr)
         {
-            appendRowToDataset2d(galaxyPhotGroup_(), "phot_extinct",
+            utils::appendRowToDataset2d(galaxyPhotGroup_(), "phot_extinct",
                 H5T_NATIVE_DOUBLE, photExtinct.data());
         }
         appendPhotNebRows(simControls_, galaxyPhotGroup_(), photNeb, photNebExtinct);
