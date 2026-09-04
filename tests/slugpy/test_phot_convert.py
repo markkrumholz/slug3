@@ -17,8 +17,8 @@ V_FILTER_REGISTRY below resolves without needing SLUG_DIR.
 import numpy as np
 import pytest
 from astropy import units as u
-
 from slugpy._slug import FilterTabulated, PhotConvert
+
 from slugpy.phot_convert import phot_convert
 
 V_FILTER_REGISTRY = "data/filters/V_filter.toml"

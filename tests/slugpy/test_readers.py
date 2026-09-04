@@ -23,8 +23,8 @@ import h5py
 import numpy as np
 import pytest
 from astropy import units as u
-
 from slugpy._slug import Filter, FilterCollection
+
 from slugpy.slug_group_reader import slug_group_reader
 from slugpy.slug_phot_reader import slug_phot_reader
 from slugpy.slug_reader import slug_reader
@@ -446,7 +446,7 @@ def test_cluster_phot_ext_suffix(cluster_phot):
 
 def test_cluster_phot_lbol_has_no_extincted_counterpart(cluster_phot):
     """Lbol_ex isn't a real column (phot_extinct excludes Lbol) and fails."""
-    with pytest.raises(Exception):
+    with pytest.raises(IndexError):
         cluster_phot["Lbol_ex"]
 
 

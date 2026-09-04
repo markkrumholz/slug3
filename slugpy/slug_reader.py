@@ -21,7 +21,11 @@ from ._slug import Cluster, Filter, FilterIdeal, SimControls, parsePDFDescriptor
 from .cloudy.cloudy_continuum import read_cloudy_continuum
 from .cloudy.cloudy_input import write_cloudy_input
 from .cloudy.cloudy_lines import read_cloudy_linearr
-from .cloudy.cloudy_output import CloudyRunResult, delete_cloudy_h5_rows, write_cloudy_h5_results
+from .cloudy.cloudy_output import (
+    CloudyRunResult,
+    delete_cloudy_h5_rows,
+    write_cloudy_h5_results,
+)
 from .cloudy.cloudy_process import (
     cloudy_run_succeeded,
     find_cloudy_executable,
@@ -222,7 +226,7 @@ def _find_output_files(filename: str) -> tuple[list[str], list[str]]:
     # comment), so a relative path captured here would silently break
     # once the caller's own working directory ever changed, even
     # though the file itself never moved
-    if filename.endswith(".h5") or filename.endswith(".hdf5"):
+    if filename.endswith((".h5", ".hdf5")):
         path = Path(filename).resolve()
         if not path.is_file():
             raise FileNotFoundError(filename)

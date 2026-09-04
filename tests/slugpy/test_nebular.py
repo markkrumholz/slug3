@@ -30,7 +30,6 @@ import gc
 import pathlib
 
 import pytest
-
 from slugpy._slug import FilterIdeal, Nebular, SimControls
 
 REPO_ROOT = pathlib.Path.cwd()

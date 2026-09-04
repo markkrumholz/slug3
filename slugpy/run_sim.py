@@ -12,7 +12,13 @@ import gc
 import pathlib
 import warnings
 
-from ._slug import OutputManagerAscii, OutputManagerH5, SimCluster, SimControls, SimGalaxy
+from ._slug import (
+    OutputManagerAscii,
+    OutputManagerH5,
+    SimCluster,
+    SimControls,
+    SimGalaxy,
+)
 from .progress import run_with_progress
 from .read import read
 from .slug_reader import slug_reader

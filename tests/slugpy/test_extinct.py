@@ -28,7 +28,6 @@ import pathlib
 
 import h5py
 import pytest
-
 from slugpy._slug import Extinct, SimControls
 
 REPO_ROOT = pathlib.Path.cwd()
