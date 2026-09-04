@@ -86,18 +86,18 @@ _TRACK_FIELD_NAMES = (
 
 
 @pytest.fixture
-def fixed_feh_controls():
+def fixed_feh_controls() -> SimControls:
     """A SimControls built from FIXED_FEH_DECK."""
     return SimControls(FIXED_FEH_DECK)
 
 
 @pytest.fixture
-def var_feh_controls():
+def var_feh_controls() -> SimControls:
     """A SimControls built from VAR_FEH_DECK."""
     return SimControls(VAR_FEH_DECK)
 
 
-def test_default_time_is_log_spaced_from_1e5_to_logtmax(fixed_feh_controls):
+def test_default_time_is_log_spaced_from_1e5_to_logtmax(fixed_feh_controls: SimControls) -> None:
     """With time left as None, the returned times are ntimes values
     log-spaced between 1e5 yr and 10**tracks.logTMax(), and the result
     dict has ntimes columns and every track-quantity key, and no filter
@@ -114,7 +114,7 @@ def test_default_time_is_log_spaced_from_1e5_to_logtmax(fixed_feh_controls):
         assert data[name].shape == (2, 6)
 
 
-def test_explicit_time_is_returned_converted_to_yr(fixed_feh_controls):
+def test_explicit_time_is_returned_converted_to_yr(fixed_feh_controls: SimControls) -> None:
     """time, when given, comes back as the first return value,
     converted to yr."""
     time, _ = compute_tracks(
@@ -124,7 +124,7 @@ def test_explicit_time_is_returned_converted_to_yr(fixed_feh_controls):
     assert np.allclose(time.value, [1e6, 1e7])
 
 
-def test_time_plain_array_and_quantity_agree(fixed_feh_controls):
+def test_time_plain_array_and_quantity_agree(fixed_feh_controls: SimControls) -> None:
     """time as a plain array (assumed yr) and as an equivalent astropy
     Quantity array give the same result."""
     time_plain, from_plain = compute_tracks(
@@ -137,7 +137,7 @@ def test_time_plain_array_and_quantity_agree(fixed_feh_controls):
         assert np.allclose(from_plain[name].value, from_quantity[name].value, equal_nan=True)
 
 
-def test_mass_outside_track_range_is_nan(fixed_feh_controls):
+def test_mass_outside_track_range_is_nan(fixed_feh_controls: SimControls) -> None:
     """A mass beyond the tracks' own mass range (MIST_test tops out at
     300 Msun) is NaN in every field, at every time."""
     _, data = compute_tracks([500.0], simcontrols=fixed_feh_controls, time=[1e6, 1e7])
@@ -146,7 +146,7 @@ def test_mass_outside_track_range_is_nan(fixed_feh_controls):
         assert np.isnan(data[name].value).all()
 
 
-def test_time_beyond_star_lifetime_is_nan(fixed_feh_controls):
+def test_time_beyond_star_lifetime_is_nan(fixed_feh_controls: SimControls) -> None:
     """A time beyond a star's own lifetime is NaN, while earlier times
     for the same star are not -- a 20 Msun star has died by 1e10 yr but
     is still on the track at 1e6 yr."""
@@ -156,13 +156,13 @@ def test_time_beyond_star_lifetime_is_nan(fixed_feh_controls):
     assert np.isnan(data["mass"].value[0, 1])
 
 
-def test_filters_none_skips_photometry(fixed_feh_controls):
+def test_filters_none_skips_photometry(fixed_feh_controls: SimControls) -> None:
     """filters=None (the default) adds no filter keys to the result."""
     _, data = compute_tracks([1.0], simcontrols=fixed_feh_controls, time=[1e6])
     assert set(data.keys()) == set(_TRACK_FIELD_NAMES)
 
 
-def test_filters_string_and_collection_agree(fixed_feh_controls):
+def test_filters_string_and_collection_agree(fixed_feh_controls: SimControls) -> None:
     """Passing a filter name builds the same FilterCollection (same
     default PhotSystem.Flambda) as passing one explicitly."""
     fc = FilterCollection(["ideal_energy_1000_2000"], PhotSystem.Flambda)
@@ -179,7 +179,7 @@ def test_filters_string_and_collection_agree(fixed_feh_controls):
     assert from_name["ideal_energy_1000_2000"].unit == from_collection["ideal_energy_1000_2000"].unit
 
 
-def test_phot_system_changes_filter_units(fixed_feh_controls):
+def test_phot_system_changes_filter_units(fixed_feh_controls: SimControls) -> None:
     """phot_system (passed through to the FilterCollection built from a
     filter name) changes the unit an energy-flux filter's photometry
     comes back in."""
@@ -194,7 +194,7 @@ def test_phot_system_changes_filter_units(fixed_feh_controls):
     assert data_ab["ideal_energy_1000_2000"].unit == u.ABmag
 
 
-def test_fixed_feh_ignores_feh_kwarg(fixed_feh_controls):
+def test_fixed_feh_ignores_feh_kwarg(fixed_feh_controls: SimControls) -> None:
     """When simcontrols.feH is a delta distribution, the feh keyword is
     ignored -- results are identical regardless of what it's set to."""
     _, default_feh = compute_tracks([1.0, 5.0], simcontrols=fixed_feh_controls, time=[1e6, 1e7])
@@ -205,7 +205,7 @@ def test_fixed_feh_ignores_feh_kwarg(fixed_feh_controls):
         assert np.allclose(default_feh[name].value, other_feh[name].value, equal_nan=True)
 
 
-def test_var_feh_uses_feh_kwarg(var_feh_controls):
+def test_var_feh_uses_feh_kwarg(var_feh_controls: SimControls) -> None:
     """When simcontrols.feH is not a delta distribution, the feh keyword
     actually selects which [Fe/H] slice of the tracks is used."""
     _, data_low = compute_tracks([1.0], simcontrols=var_feh_controls, time=[1e7], feh=-0.5)
@@ -215,7 +215,7 @@ def test_var_feh_uses_feh_kwarg(var_feh_controls):
         data_low["log_Teff"].value, data_high["log_Teff"].value, equal_nan=True)
 
 
-def test_no_specsyn_raises():
+def test_no_specsyn_raises() -> None:
     """simcontrols.specsyn is None (no spectra.model in the deck) raises
     RuntimeError rather than failing deeper in with a confusing error."""
     deck = """
@@ -245,7 +245,7 @@ compute_neb = false
         compute_tracks([1.0], simcontrols=controls, time=[1e6])
 
 
-def test_simcontrols_kwargs_build_a_default_simcontrols():
+def test_simcontrols_kwargs_build_a_default_simcontrols() -> None:
     """With simcontrols left as None, compute_tracks builds one from its
     own extra keywords, exactly as SimControls(**kwargs) would."""
     time, data = compute_tracks([1.0, 5.0], path=FIXED_FEH_DECK, time=[1e6, 1e7])

@@ -86,18 +86,18 @@ _TRACK_FIELD_NAMES = (
 
 
 @pytest.fixture
-def fixed_feh_controls():
+def fixed_feh_controls() -> SimControls:
     """A SimControls built from FIXED_FEH_DECK."""
     return SimControls(FIXED_FEH_DECK)
 
 
 @pytest.fixture
-def var_feh_controls():
+def var_feh_controls() -> SimControls:
     """A SimControls built from VAR_FEH_DECK."""
     return SimControls(VAR_FEH_DECK)
 
 
-def test_default_masses_are_log_spaced_within_imf_range(fixed_feh_controls):
+def test_default_masses_are_log_spaced_within_imf_range(fixed_feh_controls: SimControls) -> None:
     """With masses left as None, the returned masses are nmass values
     log-spaced between the IMF's own min and max mass, and the result
     dict has nmass columns and every track-quantity key, and no filter
@@ -115,7 +115,7 @@ def test_default_masses_are_log_spaced_within_imf_range(fixed_feh_controls):
         assert data[name].shape == (1, 5)
 
 
-def test_explicit_masses_are_returned_unchanged(fixed_feh_controls):
+def test_explicit_masses_are_returned_unchanged(fixed_feh_controls: SimControls) -> None:
     """masses, when given, comes back as the first return value,
     converted to Msun."""
     masses, _ = compute_isochrones(
@@ -125,7 +125,7 @@ def test_explicit_masses_are_returned_unchanged(fixed_feh_controls):
     assert np.allclose(masses.value, [1.0, 5.0, 20.0])
 
 
-def test_explicit_masses_plain_array_and_quantity_agree(fixed_feh_controls):
+def test_explicit_masses_plain_array_and_quantity_agree(fixed_feh_controls: SimControls) -> None:
     """masses as a plain array (assumed Msun) and as an equivalent
     astropy Quantity array give the same result."""
     masses_plain, from_plain = compute_isochrones(
@@ -138,7 +138,7 @@ def test_explicit_masses_plain_array_and_quantity_agree(fixed_feh_controls):
         assert np.allclose(from_plain[name].value, from_quantity[name].value, equal_nan=True)
 
 
-def test_mass_outside_track_range_is_nan(fixed_feh_controls):
+def test_mass_outside_track_range_is_nan(fixed_feh_controls: SimControls) -> None:
     """A mass beyond every isochrone segment's own range (MIST_test's
     tracks top out at 300 Msun) is NaN in every field."""
     _, data = compute_isochrones(1e7, simcontrols=fixed_feh_controls, masses=[500.0])
@@ -147,7 +147,7 @@ def test_mass_outside_track_range_is_nan(fixed_feh_controls):
         assert np.isnan(data[name].value).all()
 
 
-def test_time_float_years_and_quantity_agree(fixed_feh_controls):
+def test_time_float_years_and_quantity_agree(fixed_feh_controls: SimControls) -> None:
     """A plain float time (assumed yr) and an equivalent Quantity in a
     different time unit give the same result."""
     _, from_float = compute_isochrones(1e7, simcontrols=fixed_feh_controls, masses=[1.0, 5.0])
@@ -157,13 +157,13 @@ def test_time_float_years_and_quantity_agree(fixed_feh_controls):
         assert np.allclose(from_float[name].value, from_myr[name].value, equal_nan=True)
 
 
-def test_filters_none_skips_photometry(fixed_feh_controls):
+def test_filters_none_skips_photometry(fixed_feh_controls: SimControls) -> None:
     """filters=None (the default) adds no filter keys to the result."""
     _, data = compute_isochrones(1e7, simcontrols=fixed_feh_controls, masses=[1.0])
     assert set(data.keys()) == set(_TRACK_FIELD_NAMES)
 
 
-def test_filters_string_and_collection_agree(fixed_feh_controls):
+def test_filters_string_and_collection_agree(fixed_feh_controls: SimControls) -> None:
     """Passing a filter name builds the same FilterCollection (same
     default PhotSystem.Flambda) as passing one explicitly."""
     fc = FilterCollection(["ideal_energy_1000_2000"], PhotSystem.Flambda)
@@ -180,7 +180,7 @@ def test_filters_string_and_collection_agree(fixed_feh_controls):
     assert from_name["ideal_energy_1000_2000"].unit == from_collection["ideal_energy_1000_2000"].unit
 
 
-def test_phot_system_changes_filter_units(fixed_feh_controls):
+def test_phot_system_changes_filter_units(fixed_feh_controls: SimControls) -> None:
     """phot_system (passed through to the FilterCollection built from a
     filter name) changes the unit an energy-flux filter's photometry
     comes back in."""
@@ -195,7 +195,7 @@ def test_phot_system_changes_filter_units(fixed_feh_controls):
     assert data_ab["ideal_energy_1000_2000"].unit == u.ABmag
 
 
-def test_fixed_feh_ignores_feh_kwarg(fixed_feh_controls):
+def test_fixed_feh_ignores_feh_kwarg(fixed_feh_controls: SimControls) -> None:
     """When simcontrols.feH is a delta distribution, the feh keyword is
     ignored -- results are identical regardless of what it's set to."""
     _, default_feh = compute_isochrones(1e7, simcontrols=fixed_feh_controls, masses=[1.0, 5.0])
@@ -206,7 +206,7 @@ def test_fixed_feh_ignores_feh_kwarg(fixed_feh_controls):
         assert np.allclose(default_feh[name].value, other_feh[name].value, equal_nan=True)
 
 
-def test_var_feh_uses_feh_kwarg(var_feh_controls):
+def test_var_feh_uses_feh_kwarg(var_feh_controls: SimControls) -> None:
     """When simcontrols.feH is not a delta distribution, the feh keyword
     actually selects which [Fe/H] slice of the tracks is used."""
     _, data_low = compute_isochrones(1e7, simcontrols=var_feh_controls, masses=[1.0], feh=-0.5)
@@ -216,7 +216,7 @@ def test_var_feh_uses_feh_kwarg(var_feh_controls):
         data_low["log_Teff"].value, data_high["log_Teff"].value, equal_nan=True)
 
 
-def test_no_specsyn_raises():
+def test_no_specsyn_raises() -> None:
     """simcontrols.specsyn is None (no spectra.model in the deck) raises
     RuntimeError rather than failing deeper in with a confusing error."""
     deck = """
@@ -246,7 +246,7 @@ compute_neb = false
         compute_isochrones(1e7, simcontrols=controls, masses=[1.0])
 
 
-def test_simcontrols_kwargs_build_a_default_simcontrols():
+def test_simcontrols_kwargs_build_a_default_simcontrols() -> None:
     """With simcontrols left as None, compute_isochrones builds one from
     its own extra keywords, exactly as SimControls(**kwargs) would."""
     masses, data = compute_isochrones(
