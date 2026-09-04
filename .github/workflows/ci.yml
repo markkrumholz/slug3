@@ -279,3 +279,36 @@ jobs:
           # it pyright can't resolve h5py/tomlkit/astropy/pytest at all
           # even though this exact interpreter just pip-installed them.
           echo "$CHANGED" | xargs python -m pyright --pythonpath "${{ steps.setup-python.outputs.python-path }}"
+
+  ruff:
+    name: ruff
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Install ruff
+        run: python -m pip install ruff
+
+      - name: Run ruff on changed files
+        # Only slugpy/tests/slugpy are held to this standard -- see
+        # AGENTS.md's own Coding style section; data/tools and
+        # tests/pybind are not checked here, matching the pyright job
+        # above. ruff needs no compiled _slug extension (it's a static
+        # checker, not an import-time one), so unlike the pyright job
+        # this needs no cmake configure/build step at all.
+        run: |
+          CHANGED=$(git diff --name-only --diff-filter=d origin/${{ github.base_ref }}...HEAD \
+            | grep -E '^(slugpy|tests/slugpy)/.*\.py$' || true)
+          if [ -z "$CHANGED" ]; then
+            echo "No slugpy Python files changed, skipping ruff."
+            exit 0
+          fi
+          echo "$CHANGED" | xargs ruff check
