@@ -1,0 +1,4 @@
+.. highlight:: rest
+
+Getting SLUG
+============

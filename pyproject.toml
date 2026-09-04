@@ -40,3 +40,7 @@ test = ["pytest"]
 # Needed for local type checking against pyrightconfig.json -- see
 # AGENTS.md's own Coding style section.
 dev = ["pyright"]
+# Needed to build doc/sphinx -- see its own conf.py. Doxygen itself
+# (which Exhale drives to produce the XML Breathe reads) is a separate,
+# non-Python dependency, not pip-installable here.
+docs = ["sphinx", "breathe", "exhale", "sphinx_rtd_theme"]
