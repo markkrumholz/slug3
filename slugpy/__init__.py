@@ -18,6 +18,7 @@ below explicitly.
 """
 
 from ._slug import *  # noqa: F401,F403
+from .compute_isochrones import compute_isochrones
 from .phot_convert import phot_convert
 from .read import read
 from .run_sim import run_sim
