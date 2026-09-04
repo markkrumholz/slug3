@@ -57,6 +57,10 @@ cmake_install.cmake
 Makefile
 install_manifest.txt
 compile_commands.json
+# doc/sphinx/Makefile is real, committed source (sphinx-quickstart's
+# own generated wrapper around sphinx-build), not a CMake artifact --
+# the bare "Makefile" pattern above would otherwise swallow it too.
+!doc/sphinx/Makefile
 
 # Temporary files
 *.tmp
@@ -117,3 +121,16 @@ data/nebular/*.h5
 # Downloaded archive caches from data/tools fetch scripts
 data/tools/spectra/powr_temp/
 data/tools/spectra/marcs_temp/
+
+# Sphinx/Doxygen/Exhale documentation build output -- doc/sphinx/
+# conf.py has Exhale run Doxygen into doc/sphinx/doxygen/ (XML for
+# Breathe) as part of every build, and Exhale itself generates
+# doc/sphinx/cpp_api/ (the organized Namespace/Class/File .rst pages,
+# from that XML) fresh each time too; Sphinx's own doctree cache goes
+# to doc/sphinx/_build/, and the final built HTML itself lands outside
+# doc/sphinx/ entirely, at doc/html/ (see doc/sphinx/Makefile's own
+# HTMLDIR). None of these four is source.
+doc/sphinx/doxygen/
+doc/sphinx/cpp_api/
+doc/sphinx/_build/
+doc/html/

@@ -675,6 +675,48 @@ else()
     message(STATUS "pybind11-stubgen not found: skipping slugpy/_slug.pyi stub generation (pip install pybind11-stubgen to enable)")
 endif()
 
+# Optional: build doc/sphinx (see its own conf.py) as part of the
+# normal build -- "cmake --build build" (no explicit --target) builds
+# every target added to ALL, and this "docs" target is added to ALL
+# only when its own dependencies (sphinx, breathe, exhale for the
+# Python interpreter CMake picked up; the doxygen executable, which
+# Exhale drives to actually parse the C++ side) are all present.
+# Entirely optional -- every other target builds and works identically
+# without them installed; this step is just skipped with a message()
+# note in that case, the same pattern as pybind11-stubgen above. The
+# built site (doc/html/) is gitignored: it's a build artifact, not
+# source to commit.
+find_program(DOXYGEN_EXECUTABLE doxygen)
+execute_process(
+    COMMAND ${Python_EXECUTABLE} -c "import sphinx, breathe, exhale"
+    RESULT_VARIABLE SLUG_DOCS_PYTHON_MISSING
+    OUTPUT_QUIET ERROR_QUIET)
+if(DOXYGEN_EXECUTABLE AND SLUG_DOCS_PYTHON_MISSING EQUAL 0)
+    message(STATUS "sphinx/breathe/exhale/doxygen found: doc/html will be (re)built as part of the default build")
+    # PATH: doxygen's own directory is prepended explicitly (rather
+    # than relying on it already being on PATH for whatever invokes
+    # the build, e.g. an IDE) since Exhale shells out to plain
+    # "doxygen" by name, not the full path find_program() resolved
+    # here. PYTHONPATH: same reason slugPython's own tests/pybind11-
+    # stubgen step above need it -- conf.py imports slugpy for
+    # autodoc, which needs the repo root on the path. WORKING_DIRECTORY
+    # is doc/sphinx/ itself: conf.py's own Doxygen invocation (and the
+    # relative paths inside it) are written assuming that cwd, exactly
+    # as if `make html`/`sphinx-build` had been run from there by hand.
+    get_filename_component(SLUG_DOXYGEN_DIR ${DOXYGEN_EXECUTABLE} DIRECTORY)
+    add_custom_target(docs ALL
+        COMMAND ${CMAKE_COMMAND} -E env
+            "PATH=${SLUG_DOXYGEN_DIR}:$ENV{PATH}"
+            PYTHONPATH=${CMAKE_SOURCE_DIR}
+            ${Python_EXECUTABLE} -m sphinx -b html -d _build/doctrees . ${CMAKE_SOURCE_DIR}/doc/html
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/doc/sphinx
+        DEPENDS slugPython
+        COMMENT "Building Sphinx documentation into doc/html"
+        VERBATIM)
+else()
+    message(STATUS "sphinx/breathe/exhale and/or doxygen not found: skipping doc/html build (pip install sphinx breathe exhale, and install doxygen, to enable)")
+endif()
+
 # Enable testing
 enable_testing()
 

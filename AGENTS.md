@@ -79,6 +79,7 @@ For Python code (the `data/tools` fetch/fixture scripts, the `pybind` test suite
     cmake --build build
     ```
     Either way, `cmake --build build [--target ...]` is the same afterward regardless of which generator configured `build/`. A build directory's generator is fixed at configure time -- switching an existing directory from Makefiles to Ninja (or back) requires wiping and reconfiguring it (`rm -rf build && cmake -S . -B build -G Ninja`), not just re-running `cmake -B build -G Ninja` in place.
+* `doc/sphinx` (see its own `conf.py`) builds into `doc/html` as part of the default build (`cmake --build build`, no `--target` needed) whenever `sphinx`, `breathe`, and `exhale` are all importable for whichever Python interpreter CMake picked up, and a `doxygen` executable is on `PATH` -- detected at configure time, the same optional-dependency pattern as `pybind11-stubgen` above. Entirely optional: every other target builds and works identically without them, and this step is just skipped with a `message()` note in that case. Since it has no per-file dependency tracking (unlike a compiled target), it re-runs on every build once enabled, even when nothing documentation-relevant changed; build just the `docs` target directly (`cmake --build build --target docs`) to (re)build only the docs without touching anything else.
 
 ## Testing guidelines
 
