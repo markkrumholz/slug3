@@ -633,6 +633,48 @@ if(OpenMP_CXX_FOUND)
     target_link_libraries(slugPython PRIVATE OpenMP::OpenMP_CXX)
 endif()
 
+# Optional: auto-regenerate a .pyi type stub for the compiled _slug
+# extension (via pybind11-stubgen, https://github.com/sizmailov/pybind11-stubgen
+# -- "pip install pybind11-stubgen") every time slugPython is rebuilt,
+# so editors/pyright see real signatures and docstrings for _slug's
+# otherwise type-opaque compiled classes instead of treating every
+# attribute access as Any. Entirely optional -- slugPython builds and
+# works identically without pybind11-stubgen installed; this step is
+# just skipped with a message() note in that case. The generated
+# slugpy/_slug.pyi is gitignored (see .gitignore): it's a build
+# artifact, one-to-one with the _slug binary that produced it, not
+# source to commit.
+execute_process(
+    COMMAND ${Python_EXECUTABLE} -c "import pybind11_stubgen"
+    RESULT_VARIABLE PYBIND11_STUBGEN_MISSING
+    OUTPUT_QUIET ERROR_QUIET)
+if(PYBIND11_STUBGEN_MISSING EQUAL 0)
+    message(STATUS "pybind11-stubgen found: slugPython will regenerate slugpy/_slug.pyi after each build")
+    # -o ${CMAKE_SOURCE_DIR}: pybind11-stubgen mirrors the dotted module
+    # name ("slugpy._slug") under the output root, so this lands the
+    # stub at ${CMAKE_SOURCE_DIR}/slugpy/_slug.pyi -- right next to the
+    # _slug.cpython-*.so module it documents, where pyright/editors
+    # expect to find it. --ignore-all-errors: a handful of SimControls
+    # properties (extinct, filters, nebular, specsyn) embed raw C++
+    # namespace-qualified types (e.g. "phot::FilterCollection") rather
+    # than their pybind-registered Python names in their docstrings, so
+    # pybind11-stubgen can't resolve those specific annotations; without
+    # this flag it still generates the rest of the stub and falls back
+    # to Any for just those, but prints ERROR-level noise on every
+    # build. PYTHONPATH is set (rather than relying on the ambient
+    # environment) since pybind11-stubgen imports the module by name
+    # ("slugpy._slug"), the same way test_PythonBindings/test_Slugpy do.
+    add_custom_command(TARGET slugPython POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_SOURCE_DIR}
+            ${Python_EXECUTABLE} -m pybind11_stubgen slugpy._slug
+            -o ${CMAKE_SOURCE_DIR} --ignore-all-errors
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        COMMENT "Regenerating slugpy/_slug.pyi with pybind11-stubgen"
+        VERBATIM)
+else()
+    message(STATUS "pybind11-stubgen not found: skipping slugpy/_slug.pyi stub generation (pip install pybind11-stubgen to enable)")
+endif()
+
 # Enable testing
 enable_testing()
 
