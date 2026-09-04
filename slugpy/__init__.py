@@ -17,9 +17,9 @@ below explicitly.
 :copyright: Copyright (c) 2026 Mark Krumholz
 """
 
-from ._slug import *  # noqa: F401,F403
-from .compute_isochrones import compute_isochrones
-from .compute_tracks import compute_tracks
-from .phot_convert import phot_convert
-from .read import read
-from .run_sim import run_sim
+from ._slug import *
+from .compute_isochrones import compute_isochrones as compute_isochrones
+from .compute_tracks import compute_tracks as compute_tracks
+from .phot_convert import phot_convert as phot_convert
+from .read import read as read
+from .run_sim import run_sim as run_sim

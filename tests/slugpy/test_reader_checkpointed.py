@@ -105,7 +105,8 @@ def test_model_name_resolves_thread_dir_without_checkpointing(tmp_path: Path) ->
         trials_completed=2, restart_uid=2)
 
     reader = slug_reader(str(tmp_path / "model"))
-    assert len(reader._file) == 2  # noqa: SLF001 -- exercising the discovery/aggregation contract directly
+    # Exercising the discovery/aggregation contract directly
+    assert len(reader._file) == 2
     clusters = reader.clusters
     assert clusters is not None
     assert sorted(cast(np.ndarray, clusters["trial"]).tolist()) == [0, 1]
@@ -139,7 +140,7 @@ def test_checkpoints_consolidated_files_aggregate_and_order(tmp_path: Path) -> N
         trials_completed=5, restart_uid=5)
 
     reader = slug_reader(str(tmp_path / "model"))
-    assert reader._file == [  # noqa: SLF001
+    assert reader._file == [
         str(tmp_path / "model_chk00000.h5"),
         str(tmp_path / "model_chk00001.h5"),
         str(tmp_path / "model_chk00002.h5"),
@@ -164,7 +165,7 @@ def test_checkpoints_thread_dirs_aggregate(tmp_path: Path) -> None:
         trials_completed=3, restart_uid=3)
 
     reader = slug_reader(str(tmp_path / "model"))
-    assert len(reader._file) == 3  # noqa: SLF001
+    assert len(reader._file) == 3
     clusters = reader.clusters
     assert clusters is not None
     assert sorted(cast(np.ndarray, clusters["trial"]).tolist()) == [0, 1, 2]
@@ -240,7 +241,7 @@ def test_no_checkpoint_beyond_the_last_is_included(tmp_path: Path) -> None:
         trials_completed=1, restart_uid=1)
 
     reader = slug_reader(str(tmp_path / "model"))
-    assert reader._file == [str(tmp_path / "model_chk00000.h5")]  # noqa: SLF001
+    assert reader._file == [str(tmp_path / "model_chk00000.h5")]
 
 
 # ---------------------------------------------------------------------

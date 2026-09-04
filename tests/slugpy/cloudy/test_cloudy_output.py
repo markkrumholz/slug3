@@ -14,7 +14,11 @@ import numpy as np
 import pytest
 from astropy import units as u
 
-from slugpy.cloudy.cloudy_output import CloudyRunResult, delete_cloudy_h5_rows, write_cloudy_h5_results
+from slugpy.cloudy.cloudy_output import (
+    CloudyRunResult,
+    delete_cloudy_h5_rows,
+    write_cloudy_h5_results,
+)
 
 
 def _result(id_val, time, nII=100.0, r0=1e18, r1=2e18, U=1e-3, U0=2e-3, Omega=0.5,

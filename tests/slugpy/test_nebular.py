@@ -30,7 +30,6 @@ import gc
 import pathlib
 
 import pytest
-
 from slugpy._slug import FilterIdeal, Nebular, SimControls
 
 REPO_ROOT = pathlib.Path.cwd()
@@ -86,7 +85,7 @@ def test_simcontrols_nebular_returns_instance(nebular_controls):
 def test_simcontrols_nebular_is_read_only(nebular_controls):
     """SimControls.nebular has no setter -- assigning to it raises."""
     with pytest.raises(AttributeError):
-        nebular_controls.nebular = None
+        nebular_controls.nebular = None  # pyright: ignore[reportAttributeAccessIssue] -- deliberately exercising the read-only contract at runtime
 
 
 def test_simcontrols_nebular_keeps_controls_alive(nebular_controls):
