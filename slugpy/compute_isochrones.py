@@ -12,28 +12,14 @@ the spectra through a set of filters to get photometry.
 import numpy as np
 from astropy import units as u
 
-from ._slug import FilterCollection, PhotSystem, SimControls
-
-# Names and units of the quantities Interpolator1D.__call__() returns
-# for an isochrone segment, in the order tracks::FieldIdx/fieldStr
-# list them in src/tracks/TrackCommons.hpp. That array isn't exposed
-# to Python, so this has to be kept in sync with it by hand.
-_TRACK_FIELDS: tuple[tuple[str, u.UnitBase], ...] = (
-    ("mass", u.Msun),
-    ("mdot", u.Msun / u.yr),
-    ("log_L", u.dex(u.Lsun)),
-    ("log_Teff", u.dex(u.K)),
-    ("h_surf", u.dimensionless_unscaled),
-    ("he_surf", u.dimensionless_unscaled),
-    ("c_surf", u.dimensionless_unscaled),
-    ("n_surf", u.dimensionless_unscaled),
-    ("o_surf", u.dimensionless_unscaled),
+from ._compute_common import (
+    empty_data,
+    fill_star,
+    resolve_controls,
+    resolve_filter_collection,
+    resolve_fixed_feh,
 )
-
-# The PhotSystem compute_isochrones builds a FilterCollection with when
-# filters is given as name(s) rather than an existing FilterCollection
-# and phot_system is left at its own default of None.
-_DEFAULT_PHOT_SYSTEM = PhotSystem.Flambda
+from ._slug import FilterCollection, PhotSystem, SimControls
 
 
 def compute_isochrones(
@@ -111,8 +97,7 @@ def compute_isochrones(
         If simcontrols.specsyn is None (i.e. no spectral synthesizer
         was configured).
     """
-    controls: SimControls = (
-        simcontrols if simcontrols is not None else SimControls(**simcontrols_kwargs))
+    controls = resolve_controls(simcontrols, simcontrols_kwargs)
 
     if masses is None:
         imf = controls.imf
@@ -121,15 +106,7 @@ def compute_isochrones(
         mass_val = u.Quantity(masses, u.Msun).to_value(u.Msun)
     nmass = len(mass_val)
 
-    filter_collection: FilterCollection | None
-    if filters is None:
-        filter_collection = None
-    elif isinstance(filters, FilterCollection):
-        filter_collection = filters
-    else:
-        names = [filters] if isinstance(filters, str) else list(filters)
-        ps = _DEFAULT_PHOT_SYSTEM if phot_system is None else phot_system
-        filter_collection = FilterCollection(names, ps)
+    filter_collection = resolve_filter_collection(filters, phot_system)
 
     time_yr = np.atleast_1d(u.Quantity(time, u.yr).to_value(u.yr))
     ntimes = len(time_yr)
@@ -142,17 +119,12 @@ def compute_isochrones(
             "through to SimControls, before computing spectra")
     wl = specsyn.wl()
 
-    feh_dist = controls.feH
-    fixed_feh = feh_dist.getMin() if feh_dist.getMin() == feh_dist.getMax() else None
+    fixed_feh = resolve_fixed_feh(controls)
 
     filter_names = filter_collection.filterNames() if filter_collection is not None else []
     filter_units = filter_collection.filterUnits() if filter_collection is not None else []
 
-    data: dict[str, u.Quantity] = {
-        name: np.full((ntimes, nmass), np.nan) * unit for name, unit in _TRACK_FIELDS}
-    for name, unit_str in zip(filter_names, filter_units, strict=True):
-        data[name] = np.full((ntimes, nmass), np.nan) * (
-            u.dimensionless_unscaled if unit_str == "" else u.Unit(unit_str))
+    data = empty_data((ntimes, nmass), filter_names, filter_units)
 
     tracks = controls.tracks
     for i, t in enumerate(time_yr):
@@ -162,16 +134,8 @@ def compute_isochrones(
             seg = next((s for s in isochrone if s.xMin() <= m <= s.xMax()), None)
             if seg is None:
                 continue
-            props = seg(m)
-            for (name, unit), value in zip(_TRACK_FIELDS, props, strict=True):
-                data[name][i, j] = value * unit
-
-            if filter_collection is None:
-                continue
-            spec = specsyn.spec(props, this_feh)
-            phot = filter_collection.phot(wl, spec)
-            for name, unit_str, value in zip(filter_names, filter_units, phot, strict=True):
-                unit = u.dimensionless_unscaled if unit_str == "" else u.Unit(unit_str)
-                data[name][i, j] = value * unit
+            fill_star(
+                data, i, j, seg(m), filter_collection, filter_names, filter_units,
+                specsyn, wl, this_feh)
 
     return mass_val * u.Msun, data
