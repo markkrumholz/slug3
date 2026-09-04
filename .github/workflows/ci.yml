@@ -221,11 +221,19 @@ jobs:
         # as the lint job above installs them: the stock Ubuntu
         # compiler doesn't ship C++23's <mdspan> yet (see AGENTS.md's
         # own Building section), and slugPython needs to actually
-        # compile for this job to do anything useful.
+        # compile for this job to do anything useful. pybind11-stubgen
+        # is installed here too, so the Configure step below detects it
+        # and the Build step's POST_BUILD hook regenerates slugpy/
+        # _slug.pyi (see CMakeLists.txt) before pyright runs against it
+        # -- giving this job real _slug signatures to check against,
+        # not just the Any fallback an unstubbed compiled extension
+        # otherwise leaves pyright with (see AGENTS.md's own Coding
+        # style section). Purely additive: pyright already passes
+        # without it, this only makes the check more precise.
         run: |
           sudo apt-get update
           sudo apt-get install -y clang-18 libc++-18-dev libc++abi-18-dev libgsl-dev libhdf5-dev ninja-build ccache
-          python -m pip install pyright pytest h5py tomlkit astropy numpy scipy tqdm
+          python -m pip install pyright pytest h5py tomlkit astropy numpy scipy tqdm pybind11-stubgen
 
       - name: Cache ccache
         uses: actions/cache@v6
