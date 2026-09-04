@@ -183,7 +183,7 @@ def test_simcontrols_extinct_property_is_read_only():
     """SimControls.extinct has no setter -- assigning to it raises."""
     controls = SimControls(CLUSTER_EXTINCT_DECK)
     with pytest.raises(AttributeError):
-        controls.extinct = None
+        controls.extinct = None  # pyright: ignore[reportAttributeAccessIssue] -- deliberately exercising the read-only contract at runtime
 
 
 def test_simcontrols_extinct_property_reads_z_live():
