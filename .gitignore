@@ -26,6 +26,10 @@
 # Python compiled files
 *.pyc
 
+# Type stub for the compiled _slug extension, auto-regenerated from it
+# by pybind11-stubgen (see CMakeLists.txt) when that tool is installed
+slugpy/_slug.pyi
+
 # Fortran module files
 *.mod
 *.smod
