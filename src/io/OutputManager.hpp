@@ -11,7 +11,6 @@
 
 #include "SimControls.hpp"
 #include <string>
-#include <toml.hpp>
 #include <utility>
 
 namespace core
@@ -38,25 +37,27 @@ namespace io
     public:
 
         /**
-         * @brief Cache references to the simulation controls and input deck, and sanity-check the output-control flags
+         * @brief Cache a reference to the simulation controls, and sanity-check the output-control flags
          * @param simControls Simulation controls (physics settings and
          *   control-flow settings together)
-         * @param inputDeck The simulation's toml input deck
          * @details
-         * simControls and inputDeck are stored by reference, so the
-         * objects passed in must outlive this OutputManager. This base
-         * constructor does not open any output files; that is left to
-         * the constructors of the format-specific subclasses.
+         * simControls is stored by reference, so the object passed in
+         * must outlive this OutputManager. This base constructor does
+         * not open any output files; that is left to the constructors
+         * of the format-specific subclasses.
          *
-         * The six output.write_cluster/write_cluster_spec/
-         * write_cluster_phot/write_galaxy/write_galaxy_spec/
-         * write_galaxy_phot flags the subclass constructors gate their
-         * own group/file creation on are simControls's own
-         * writeCluster()/writeClusterSpec()/writeClusterPhot()/
-         * writeGalaxy()/writeGalaxySpec()/writeGalaxyPhot() -- parsed
-         * by SimControls itself (see its own readOutput()), not by
-         * this class -- so this constructor only sanity-checks the
-         * resulting combination:
+         * Unlike simControls itself, this class no longer needs the
+         * input deck at all: the six output.write_cluster/
+         * write_cluster_spec/write_cluster_phot/write_galaxy/
+         * write_galaxy_spec/write_galaxy_phot flags the subclass
+         * constructors gate their own group/file creation on are
+         * simControls's own writeCluster()/writeClusterSpec()/
+         * writeClusterPhot()/writeGalaxy()/writeGalaxySpec()/
+         * writeGalaxyPhot() (parsed by SimControls itself -- see its
+         * own readOutput()), and the deck text a subclass constructor
+         * records for provenance is simControls's own inputDeckStr() --
+         * so this constructor only sanity-checks the write_* flags'
+         * own resulting combination:
          * @throws std::runtime_error if every output relevant to this
          *   simulation's own SimType (all six for a galaxy-type
          *   simulation; just writeCluster()/writeClusterSpec()/
@@ -70,7 +71,7 @@ namespace io
          *   mistake, rather than a deliberate "compute filters() for
          *   some other purpose but discard the result" request
          */
-        OutputManager(const SimControls& simControls, const toml::table& inputDeck);
+        explicit OutputManager(const SimControls& simControls);
 
         virtual ~OutputManager() = default;
 
@@ -312,7 +313,6 @@ namespace io
         static auto currentRngStateString() -> std::string;
 
         const SimControls& simControls_; /**< Simulation controls (physics and control-flow settings) */
-        const toml::table& inputDeck_;   /**< The simulation's toml input deck */
     };
 
 } // namespace io

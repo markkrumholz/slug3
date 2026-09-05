@@ -81,7 +81,7 @@ static auto testWriteClusterAscii() -> int
 
         {
             io::OutputManagerAscii
-                manager(controls, inputDeck);
+                manager(controls);
             manager.writeCluster(trial, cluster);
         }
 
@@ -165,7 +165,7 @@ static auto testWriteClusterAsciiExtinct() -> int
         constexpr unsigned long trial = 4;
 
         {
-            io::OutputManagerAscii manager(controls, inputDeck);
+            io::OutputManagerAscii manager(controls);
             manager.writeCluster(trial, cluster);
             manager.writeClusterSpec(trial, ageYr, cluster);
             manager.writeClusterPhot(trial, ageYr, cluster);
@@ -531,7 +531,7 @@ static auto testWriteClusterAsciiNebular() -> int
         constexpr unsigned long trial = 4;
 
         {
-            io::OutputManagerAscii manager(controls, inputDeck);
+            io::OutputManagerAscii manager(controls);
             manager.writeCluster(trial, cluster);
             manager.writeClusterSpec(trial, ageYr, cluster);
             manager.writeClusterPhot(trial, ageYr, cluster);
@@ -590,7 +590,7 @@ static auto testWriteClusterAsciiNebLines() -> int
         constexpr unsigned long trial = 8;
 
         {
-            io::OutputManagerAscii manager(controls, inputDeck);
+            io::OutputManagerAscii manager(controls);
             manager.writeCluster(trial, cluster);
             manager.writeClusterSpec(trial, ageYr, cluster);
         }
@@ -701,7 +701,7 @@ static auto testWriteClusterH5() -> int
 
         {
             io::OutputManagerH5
-                manager(controls, inputDeck);
+                manager(controls);
             manager.writeCluster(trial, cluster);
         }
 
@@ -792,7 +792,7 @@ static auto testWriteReadClusterRngRoundTrip() -> int
         constexpr unsigned long trial = 1;
 
         {
-            io::OutputManagerH5 manager(controls, inputDeck);
+            io::OutputManagerH5 manager(controls);
             manager.writeCluster(trial, cluster);
         }
 
@@ -882,7 +882,7 @@ static auto testWriteClusterSpecPhotH5Extinct() -> int
         constexpr unsigned long trial = 2;
 
         {
-            io::OutputManagerH5 manager(controls, inputDeck);
+            io::OutputManagerH5 manager(controls);
             manager.writeCluster(trial, cluster);
             manager.writeClusterSpec(trial, ageYr, cluster);
             manager.writeClusterPhot(trial, ageYr, cluster);
@@ -1055,7 +1055,7 @@ static auto testWriteClusterSpecPhotH5Nebular() -> int
         constexpr unsigned long trial = 2;
 
         {
-            io::OutputManagerH5 manager(controls, inputDeck);
+            io::OutputManagerH5 manager(controls);
             manager.writeCluster(trial, cluster);
             manager.writeClusterSpec(trial, ageYr, cluster);
             manager.writeClusterPhot(trial, ageYr, cluster);
@@ -1198,7 +1198,7 @@ static auto testWriteClusterSpecPhotH5NebLines() -> int
         constexpr unsigned long trial = 6;
 
         {
-            io::OutputManagerH5 manager(controls, inputDeck);
+            io::OutputManagerH5 manager(controls);
             manager.writeCluster(trial, cluster);
             manager.writeClusterSpec(trial, ageYr, cluster);
         }
@@ -1349,10 +1349,10 @@ static auto testOptOutClusterSpecOutput() -> int
         }
 
         {
-            const io::OutputManagerAscii manager(controls, inputDeck);
+            const io::OutputManagerAscii manager(controls);
         }
         {
-            const io::OutputManagerH5 manager(controls, inputDeck);
+            const io::OutputManagerH5 manager(controls);
         }
 
         const auto asciiSpecPath = outDir / (modelName + "_cluster_spectra.txt");
@@ -1716,7 +1716,7 @@ static auto testGalaxyGroupsH5() -> int
         }
 
         {
-            const io::OutputManagerH5 manager(controls, inputDeck);
+            const io::OutputManagerH5 manager(controls);
         }
 
         // NOLINTBEGIN(misc-include-cleaner)
@@ -1779,7 +1779,7 @@ static auto testGalaxyGroupsAbsentH5() -> int
         }
 
         {
-            const io::OutputManagerH5 manager(controls, inputDeck);
+            const io::OutputManagerH5 manager(controls);
         }
 
         // NOLINTBEGIN(misc-include-cleaner)
@@ -1843,7 +1843,7 @@ static auto testGalaxyFilesAscii() -> int
         }
 
         {
-            const io::OutputManagerAscii manager(controls, inputDeck);
+            const io::OutputManagerAscii manager(controls);
         }
 
         // _galaxy.txt: trial/time/target_mass/actual_mass, no uid
@@ -1957,7 +1957,7 @@ static auto testGalaxyFilesAbsentAscii() -> int
         }
 
         {
-            const io::OutputManagerAscii manager(controls, inputDeck);
+            const io::OutputManagerAscii manager(controls);
         }
 
         for (const std::string& suffix : { "_galaxy.txt", "_galaxy_spectra.txt", "_galaxy_phot.txt" })
@@ -2217,7 +2217,7 @@ static auto testWriteGalaxyH5() -> int
         constexpr unsigned long trial = 6;
 
         {
-            io::OutputManagerH5 manager(controls, inputDeck);
+            io::OutputManagerH5 manager(controls);
             manager.writeGalaxy(trial, galaxyWriteTime, galaxy);
             manager.writeGalaxySpec(trial, galaxyWriteTime, galaxy);
             manager.writeGalaxyPhot(trial, galaxyWriteTime, galaxy);
@@ -2497,7 +2497,7 @@ static auto testWriteGalaxyAscii() -> int
         constexpr unsigned long trial = 9;
 
         {
-            io::OutputManagerAscii manager(controls, inputDeck);
+            io::OutputManagerAscii manager(controls);
             manager.writeGalaxy(trial, galaxyWriteTime, galaxy);
             manager.writeGalaxySpec(trial, galaxyWriteTime, galaxy);
             manager.writeGalaxyPhot(trial, galaxyWriteTime, galaxy);
@@ -2560,10 +2560,10 @@ static auto checkOptOutSuppressesGroup(const toml::table& inputDeck,
     {
         const io::SimControls controls(inputDeck);
         {
-            const io::OutputManagerAscii manager(controls, inputDeck);
+            const io::OutputManagerAscii manager(controls);
         }
         {
-            const io::OutputManagerH5 manager(controls, inputDeck);
+            const io::OutputManagerH5 manager(controls);
         }
 
         const auto asciiPath = outDir / (modelName + asciiSuffix);
@@ -2703,7 +2703,7 @@ static auto testAllOutputsFalseThrows() -> int
     try
     {
         const io::SimControls controls(inputDeck);
-        const io::OutputManagerH5 manager(controls, inputDeck);
+        const io::OutputManagerH5 manager(controls);
         std::cerr << "testOutputManager: all outputs false: expected "
             "construction to throw, but it succeeded\n";
         return 1;
@@ -2750,7 +2750,7 @@ static auto testOutputManagerAsciiCheckpointThrows() -> int
     // misreported as this test passing.
     io::SimControls controls(inputDeck);
     controls.setCheckpointInterval(5);
-    io::OutputManagerAscii manager(controls, inputDeck);
+    io::OutputManagerAscii manager(controls);
 
     try
     {
@@ -2794,7 +2794,7 @@ static auto testAllClusterOutputsFalseThrows() -> int
     try
     {
         const io::SimControls controls(inputDeck);
-        const io::OutputManagerAscii manager(controls, inputDeck);
+        const io::OutputManagerAscii manager(controls);
         std::cerr << "testOutputManager: all cluster outputs false: expected "
             "construction to throw, but it succeeded\n";
         return 1;
@@ -2836,7 +2836,7 @@ static auto testPhotWithoutOutputThrows() -> int
                 "expected SimControls::filters() to be non-null\n";
             return 1;
         }
-        const io::OutputManagerH5 manager(controls, inputDeck);
+        const io::OutputManagerH5 manager(controls);
         std::cerr << "testOutputManager: phot without output: expected "
             "construction to throw, but it succeeded\n";
         return 1;
@@ -2869,7 +2869,7 @@ static auto testOutputManagerAscii() -> int
     try
     {
         const io::OutputManagerAscii
-            manager(controls, inputDeck);
+            manager(controls);
 
         if (!std::filesystem::exists(expectedPath))
         {
@@ -2916,7 +2916,7 @@ static auto testOutputManagerAscii() -> int
     try
     {
         const io::OutputManagerAscii
-            manager2(controls, inputDeck);
+            manager2(controls);
         std::cerr << "testOutputManager: ascii: expected construction to "
             "throw on an existing output file, but it succeeded\n";
         return 1;
@@ -2945,7 +2945,7 @@ static auto testOutputManagerH5() -> int
     {
         {
             const io::OutputManagerH5
-                manager(controls, inputDeck);
+                manager(controls);
         }
 
         if (!std::filesystem::exists(expectedPath))
@@ -3005,7 +3005,7 @@ static auto testOutputManagerH5() -> int
     try
     {
         const io::OutputManagerH5
-            manager2(controls, inputDeck);
+            manager2(controls);
         std::cerr << "testOutputManager: h5: expected construction to "
             "throw on an existing output file, but it succeeded\n";
         return 1;

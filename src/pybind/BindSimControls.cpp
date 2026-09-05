@@ -562,6 +562,16 @@ in the input deck. Only meaningful for a galaxy-type simulation. See
 writeCluster's own docstring on when assigning this does (and does
 not) take effect.)doc";
 
+static constexpr std::string_view inputDeckStrPropertyDocstring =
+R"doc(The input deck's own text.
+
+The toml table this SimControls was constructed from, re-serialized
+back to text -- not necessarily byte-identical to whatever text/file
+originally produced that table, but parses back to an equivalent
+table. Empty if this SimControls was built with no input deck at all.
+Read-only: there is no legitimate reason for a caller to override what
+deck actually built this SimControls.)doc";
+
 // Apply each property-named constructor keyword argument that was
 // actually given (not py::none()) to an already-built sc, via the
 // same setter its property uses -- factored out of the constructor
@@ -859,6 +869,9 @@ void bindSimControls(py::module_& m)
         .def_property("writeGalaxyPhot",
                 &io::SimControls::writeGalaxyPhot,
                 &io::SimControls::setWriteGalaxyPhot,
-                writeGalaxyPhotPropertyDocstring.data());
+                writeGalaxyPhotPropertyDocstring.data())
+        .def_property_readonly("inputDeckStr",
+                &io::SimControls::inputDeckStr,
+                inputDeckStrPropertyDocstring.data());
 }
 // NOLINTEND(misc-include-cleaner)

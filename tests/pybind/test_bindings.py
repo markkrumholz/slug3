@@ -972,6 +972,18 @@ def test_simcontrols_write_flag_read_from_deck():
     assert controls.writeClusterSpec is True
 
 
+def test_simcontrols_input_deck_str_property():
+    """inputDeckStr should round-trip to a table equivalent to the deck
+    that built this SimControls, and be read-only (no setInputDeckStr/
+    no setter -- assigning to the property should fail)."""
+    deck_text = pathlib.Path(CLUSTER_DECK).read_text()
+    controls = slug.SimControls(deck_text)
+    assert tomllib.loads(controls.inputDeckStr) == tomllib.loads(deck_text)
+
+    with pytest.raises(AttributeError):
+        controls.inputDeckStr = "sim_type = \"cluster\"\n"
+
+
 def test_simcontrols_specsyn_property():
     """The specsyn property should read back the Specsyn requested via
     spectra.model, and assigning a Specsyn to it should have the same
@@ -2061,11 +2073,11 @@ def test_outputmanagerh5_writes_valid_file(tmp_path, monkeypatch):
     """OutputManagerH5 opens a real HDF5 file (named after
     sim_controls.modelName(), in the current directory since
     CLUSTER_DECK sets neither), writing its header and input_deck
-    group to match sim_controls and the deck used to build it."""
+    group to match sim_controls and sim_controls.inputDeckStr."""
     sim_controls = slug.SimControls(CLUSTER_DECK_ABS)
     monkeypatch.chdir(tmp_path)
 
-    output_manager = slug.OutputManagerH5(sim_controls, CLUSTER_DECK_ABS)
+    output_manager = slug.OutputManagerH5(sim_controls)
     del output_manager
     gc.collect()
 
@@ -2085,25 +2097,27 @@ def test_outputmanagerh5_existing_file_raises(tmp_path, monkeypatch):
     sim_controls = slug.SimControls(CLUSTER_DECK_ABS)
     monkeypatch.chdir(tmp_path)
 
-    slug.OutputManagerH5(sim_controls, CLUSTER_DECK_ABS)
+    slug.OutputManagerH5(sim_controls)
     with pytest.raises(RuntimeError):
-        slug.OutputManagerH5(sim_controls, CLUSTER_DECK_ABS)
+        slug.OutputManagerH5(sim_controls)
 
 
-def test_outputmanagerh5_accepts_literal_toml_content(tmp_path, monkeypatch):
-    """input_deck may be the deck's own text, not just a path to it --
-    same rule as SimControls's own constructor."""
+def test_outputmanagerh5_records_simcontrols_input_deck(tmp_path, monkeypatch):
+    """The output file's own input_deck group should record exactly
+    sim_controls.inputDeckStr -- the deck that actually built
+    sim_controls -- regardless of how sim_controls itself was built
+    (here, from literal TOML text rather than a path)."""
     deck_text = pathlib.Path(CLUSTER_DECK_ABS).read_text()
     sim_controls = slug.SimControls(deck_text)
     monkeypatch.chdir(tmp_path)
 
-    slug.OutputManagerH5(sim_controls, deck_text)
+    slug.OutputManagerH5(sim_controls)
 
     output_path = tmp_path / "slug_sim.h5"
     assert output_path.exists()
     with h5py.File(output_path, "r") as f:
         written_deck = tomllib.loads(f["input_deck"]["toml"][()].decode())
-        assert written_deck == tomllib.loads(deck_text)
+        assert written_deck == tomllib.loads(sim_controls.inputDeckStr)
 
 
 def test_outputmanagerh5_is_an_outputmanager(tmp_path, monkeypatch):
@@ -2113,7 +2127,7 @@ def test_outputmanagerh5_is_an_outputmanager(tmp_path, monkeypatch):
     sim_controls = slug.SimControls(CLUSTER_DECK_ABS)
     monkeypatch.chdir(tmp_path)
 
-    output_manager = slug.OutputManagerH5(sim_controls, CLUSTER_DECK_ABS)
+    output_manager = slug.OutputManagerH5(sim_controls)
     assert isinstance(output_manager, slug.OutputManager)
 
 
@@ -2125,7 +2139,7 @@ def test_outputmanagerascii_writes_valid_files(tmp_path, monkeypatch):
     sim_controls = slug.SimControls(CLUSTER_DECK_ABS)
     monkeypatch.chdir(tmp_path)
 
-    output_manager = slug.OutputManagerAscii(sim_controls, CLUSTER_DECK_ABS)
+    output_manager = slug.OutputManagerAscii(sim_controls)
     assert isinstance(output_manager, slug.OutputManager)
     del output_manager
     gc.collect()
@@ -2148,7 +2162,7 @@ def test_simcluster_run_matches_deck(tmp_path, monkeypatch):
     at each."""
     sim_controls = slug.SimControls(CLUSTER_DECK_ABS)
     monkeypatch.chdir(tmp_path)
-    output_manager = slug.OutputManagerH5(sim_controls, CLUSTER_DECK_ABS)
+    output_manager = slug.OutputManagerH5(sim_controls)
 
     sim = slug.SimCluster(sim_controls, output_manager)
     sim.run()
@@ -2171,7 +2185,7 @@ def test_simgalaxy_run_writes_output(tmp_path, monkeypatch):
     writeGalaxy()'s/writeGalaxySpec()'s own per-cluster passthrough."""
     sim_controls = slug.SimControls(GALAXY_PYBIND_DECK_ABS)
     monkeypatch.chdir(tmp_path)
-    output_manager = slug.OutputManagerH5(sim_controls, GALAXY_PYBIND_DECK_ABS)
+    output_manager = slug.OutputManagerH5(sim_controls)
 
     sim = slug.SimGalaxy(sim_controls, output_manager)
     sim.run()

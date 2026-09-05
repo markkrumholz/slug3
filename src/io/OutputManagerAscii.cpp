@@ -25,7 +25,6 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
-#include <toml.hpp>
 #include <utility>
 #include <vector>
 
@@ -522,10 +521,8 @@ static void writeGalaxyNebLinesHeader(std::ofstream& file, const int lineLabelWi
 // the file. If the simulation outputs individual clusters, also
 // open the cluster output file, write its column-header rows, and
 // leave it open for later writing.
-io::OutputManagerAscii::OutputManagerAscii(
-    const SimControls& simControls,
-    const toml::table& inputDeck) :
-    OutputManager(simControls, inputDeck)
+io::OutputManagerAscii::OutputManagerAscii(const SimControls& simControls) :
+    OutputManager(simControls)
 {
     const auto path = std::filesystem::path(simControls_.outDir()) /
         (simControls_.modelName() + "_summary.txt");
@@ -548,7 +545,7 @@ io::OutputManagerAscii::OutputManagerAscii(
          << "time  " << time << "\n"
          << "rng_state  " << currentRngStateString() << "\n";
 
-    file << "input_deck\n" << inputDeck_ << "\n";
+    file << "input_deck\n" << simControls_.inputDeckStr() << "\n";
 
     file.close();
 

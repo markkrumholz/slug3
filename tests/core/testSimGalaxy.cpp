@@ -61,11 +61,11 @@ static void runEndToEnd(const toml::table& inputDeck)
     std::unique_ptr<io::OutputManager> outputManager;
     if (simControls.outputMode() == io::SimControls::OutputMode::h5)
     {
-        outputManager = std::make_unique<io::OutputManagerH5>(simControls, inputDeck);
+        outputManager = std::make_unique<io::OutputManagerH5>(simControls);
     }
     else
     {
-        outputManager = std::make_unique<io::OutputManagerAscii>(simControls, inputDeck);
+        outputManager = std::make_unique<io::OutputManagerAscii>(simControls);
     }
 
 #ifdef _OPENMP

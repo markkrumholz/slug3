@@ -15,13 +15,10 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
-#include <toml.hpp>
 #include <utility>
 
-io::OutputManager::OutputManager(const SimControls& simControls,
-    const toml::table& inputDeck) :
-    simControls_(simControls),
-    inputDeck_(inputDeck)
+io::OutputManager::OutputManager(const SimControls& simControls) :
+    simControls_(simControls)
 {
     // Sanity check 1: if every output relevant to this simulation's
     // own SimType is disabled, nothing at all would ever be written --

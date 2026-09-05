@@ -36,6 +36,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <toml.hpp>
@@ -171,6 +172,14 @@ static auto generateOutputTimesRange(const toml::table& inputDeck) -> std::vecto
 
 io::SimControls::SimControls(const toml::table& inputDeck)
 {
+    // Cache the deck's own text before parsing anything out of it, so
+    // OutputManagerH5/OutputManagerAscii can later record exactly what
+    // was actually used, without needing a toml::table of their own --
+    // see inputDeckStr()'s own comment.
+    std::ostringstream inputDeckStream;
+    inputDeckStream << inputDeck;
+    inputDeckStr_ = inputDeckStream.str();
+
     initControlFlow(inputDeck);
     initPhysics(inputDeck);
 }

@@ -105,11 +105,11 @@ auto main(int argc, char *argv[]) -> int // NOLINT(bugprone-exception-escape) --
         if (simControls.outputMode() == io::SimControls::OutputMode::h5 ||
             simControls.outputMode() == io::SimControls::OutputMode::h5divided)
         {
-            outputManager = std::make_unique<io::OutputManagerH5>(simControls, inputDeck, restart);
+            outputManager = std::make_unique<io::OutputManagerH5>(simControls, restart);
         }
         else
         {
-            outputManager = std::make_unique<io::OutputManagerAscii>(simControls, inputDeck);
+            outputManager = std::make_unique<io::OutputManagerAscii>(simControls);
         }
 
         if (simControls.simType() == io::SimControls::SimType::cluster)

@@ -215,6 +215,28 @@ namespace io
         [[nodiscard]] auto checkpointInterval() const { return checkpointInterval_; }
 
         /**
+         * @brief Return the input deck's own text
+         * @return The toml table this SimControls was constructed
+         *   from, re-serialized back to text -- not necessarily
+         *   byte-identical to whatever text/file originally produced
+         *   that table (toml++'s own operator<<, not the original
+         *   source, does the formatting), but parses back to an
+         *   equivalent table. Empty if this SimControls was built by
+         *   the default constructor, with no input deck at all.
+         * @details
+         * Read by OutputManagerH5/OutputManagerAscii to record the
+         * deck verbatim into the output file for provenance, so that a
+         * SimControls built without a backing input deck at all (e.g.
+         * from Python) still gives them something equivalent to record
+         * -- unlike the six output.write_* flags (see writeCluster()
+         * and its own siblings, just below), computed and cached once,
+         * at construction, this has no corresponding setter: unlike
+         * those flags, there is no legitimate reason for a caller to
+         * override what deck actually built this SimControls.
+         */
+        [[nodiscard]] auto inputDeckStr() const -> const std::string& { return inputDeckStr_; }
+
+        /**
          * @brief Whether the clusters group/file should be written
          * @return True (the default) unless output.write_cluster was
          *   set to false in the input deck; see OutputManager's own
@@ -967,6 +989,7 @@ namespace io
         std::size_t intMaxIter_ = 1UL << 19;
         double z_ = 0.0;                               /**< Redshift, read live by every Specsyn/Extinct built from this SimControls */
         unsigned long checkpointInterval_ = 0;         /**< Number of trials between checkpoints (0 = disabled); see checkpointInterval() */
+        std::string inputDeckStr_;                     /**< The input deck's own text, re-serialized; see inputDeckStr() */
 
         // Output content flags, parsed by readOutput(); see
         // writeCluster()'s own comment and OutputManager's own

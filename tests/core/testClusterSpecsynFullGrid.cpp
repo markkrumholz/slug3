@@ -179,7 +179,7 @@ namespace
                 // own identical comment.
                 const io::SimControls simControls(inputDeck);
                 std::unique_ptr<io::OutputManager> outputManager =
-                    std::make_unique<io::OutputManagerH5>(simControls, inputDeck);
+                    std::make_unique<io::OutputManagerH5>(simControls);
                 core::SimCluster simCluster(simControls, std::move(outputManager));
                 simCluster.run();
             }

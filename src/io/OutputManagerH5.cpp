@@ -309,9 +309,8 @@ static void appendNebLinesRow(const io::SimControls& simControls, const hid_t gr
 // openNewOutputFiles()'s own comment for the full detail of what
 // happens below.
 io::OutputManagerH5::OutputManagerH5(
-    const SimControls& simControls,
-    const toml::table& inputDeck, const bool restart) :
-    OutputManager(simControls, inputDeck)
+    const SimControls& simControls, const bool restart) :
+    OutputManager(simControls)
 {
     // See this constructor's own header comment for why this is
     // unreachable from the CLI in practice, but still worth guarding
@@ -584,9 +583,7 @@ void io::OutputManagerH5::openOutputFile(const std::filesystem::path& path)
             throw std::runtime_error(
                 "OutputManagerH5: unable to create input_deck group");
         }
-        std::ostringstream tomlStream;
-        tomlStream << inputDeck_;
-        utils::writeStringDataset(inputDeckGrp, "toml", tomlStream.str());
+        utils::writeStringDataset(inputDeckGrp, "toml", simControls_.inputDeckStr());
         H5Gclose(inputDeckGrp);
         // NOLINTEND(misc-include-cleaner)
 
