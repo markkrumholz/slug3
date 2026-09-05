@@ -35,7 +35,7 @@ SLUG can simulate either a simple stellar population (i.e., a group of stars all
 born at one time) or a composite stellar population, consisting of stars born at
 a distribution of times. We refer to the former case as a "cluster" simulation, and
 the latter as a "galaxy" simulation, since one can be thought of as approximating
-the behavior of a single star cluster, and the other as approximating a whole galaxy.
+the behavior of a single star cluster, and the other as approximating a whole galaxy. 
 
 Probability Distribution Functions and Monte Carlo Sampling
 -----------------------------------------------------------
@@ -46,13 +46,15 @@ population -- for example the initial mass function (IMF), the star formation hi
 wide range of possible functional forms; see :ref:`sec-pdfs` for details on the
 exact functional forms allowed, and on how they can be specified in the code. In its
 default operating mode, when SLUG generates a stellar population it draws from these
-PDFs to produce a stellar population star-by-star, and it calculates the composite
-spectra, photometry, yields, and feedback power of the resulting population by using
-one of several possible sets of stellar evolutionary tracks and stellar atmosphere models.
-Since each draw from the PDFs is random, the resulting stellar population will be different
-each time SLUG is run. By running many trials, one can build up a probability
-distribution function for the outputs of interest that arises from the stochastic
-nature of star formation.
+PDFs to produce a stellar population star-by-star, drawing stellar masses from the
+IMF (and, in a galaxy simulation, stellar ages from the PDF associated with the star
+formation rate), and similarly drawing other parameters such as the amount of extinction
+from their own PDFs. It then calculates the composite spectra, photometry, yields, and
+feedback power of the resulting population by using one of several possible sets of
+stellar evolutionary tracks and stellar atmosphere models. Since each draw from the PDFs
+is random, the resulting stellar population will be different each time SLUG is run. By
+running many trials, one can build up a probability distribution function for the
+outputs of interest that arises from the stochastic nature of star formation.
 
 However, users also have the option to disable some or all of the stochastic sampling
 in SLUG, for example by specifying that the IMF should be fully sampled, or that the
