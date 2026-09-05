@@ -13,7 +13,7 @@ runtime when SLUG is run in command-line mode, and the :ref:`slugpy` Python modu
 provides a class to read input decks which can then be used to control the simulation
 in Python -- see :ref:`sec-running` for details.
 
-The input deck consists some top-level key-value pairs that control basic operations
+The input deck contains some top-level key-value pairs that control basic operations
 of the simulation, followed by a series of sections that control either some aspect
 of simulation physics or some part of the simulation operation. Some of these keywords
 and sections are required, while others are optional and have default values. Some
@@ -55,8 +55,8 @@ These keywords must appear at the top level of the input deck, outside of any se
 They control basic aspects of the simulation, such as the type of simulation to run
 and the number of trials to perform.
 
-* ``sim_type`` (required): The type of simulation to run. Must be either ``cluster``
-  (a single simple stellar population, formed all at once) or ``galaxy`` (a composite
+* ``sim_type`` (required): The type of simulation to run. Must be either ``"cluster"``
+  (a single simple stellar population, formed all at once) or ``"galaxy"`` (a composite
   population, built up over time from a star formation history) -- see
   :ref:`sec-running` for the distinction.
 * ``n_trial`` (optional, default=1): The number of independent Monte Carlo trials to run.
@@ -70,13 +70,8 @@ and the number of trials to perform.
 Output Control Keywords
 -----------------------
 
-These keywords control what outputs are produced by the simulation, how they are
-formatted, and where they are written. Unusually, they are split across two
-separate sections -- ``[output]`` (singular) and ``[outputs]`` (plural) -- so be
-careful to place each keyword below in the section it actually belongs to.
-
-The ``[output]`` Section
-~~~~~~~~~~~~~~~~~~~~~~~~~
+These keywords, in the ``[output]`` section, control what outputs are produced by
+the simulation, how they are formatted, and where they are written.
 
 * ``model_name`` (optional, default="slug_sim"): The base name used for this
   model's output file(s).
@@ -84,13 +79,13 @@ The ``[output]`` Section
   be written. This may be given either as a number/PDF (see above) -- in which case
   every trial draws its own single output time from it -- or as an explicit array of
   times, in which case every trial produces output at each of the listed times.
-  Exactly one of ``output_times`` or the ``start_time``/``end_time``/``ntime`` trio
+  Exactly one of ``output_times`` or the ``start_time`` / ``end_time`` / ``ntime`` trio
   below must be given.
 * ``start_time``, ``end_time``, ``ntime``: An alternative to ``output_times``, these
   three keywords (which must all be given together) specify a grid of ``ntime``
   output times running from ``start_time`` to ``end_time`` (in yr), shared by every
   trial. ``start_time`` and ``end_time`` may only be equal if ``ntime`` = 1, and vice versa.
-* ``log_time`` (optional, default=false): If true, the ``start_time``/``end_time``/``ntime``
+* ``log_time`` (optional, default=false): If true, the ``start_time`` / ``end_time`` / ``ntime``
   grid above is spaced logarithmically rather than linearly; requires ``start_time`` > 0.
 * ``write_cluster`` (optional, default=true): Whether to write basic properties for
   each individual star cluster.
@@ -106,24 +101,20 @@ The ``[output]`` Section
   to write the integrated spectrum of the whole galaxy.
 * ``write_galaxy_phot`` (optional, default=true; galaxy simulations only): Whether
   to write the integrated photometry of the whole galaxy.
-
-At least one of the ``write_*`` keywords relevant to the simulation's own
-``sim_type`` must be left true, and if ``phot.filters`` was given, at least one of
-``write_cluster_phot``/``write_galaxy_phot`` must be true -- otherwise SLUG raises
-an error at startup, since the corresponding output(s) would otherwise never be written.
-
-The ``[outputs]`` Section
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
 * ``output_mode`` (optional, default="h5"): The output file format. Must be one of
-  ``h5``/``hdf5`` (a single, consolidated HDF5 file), ``h5divided``/``hdf5divided``
+  ``h5`` / ``hdf5`` (a single, consolidated HDF5 file), ``h5divided`` / ``hdf5divided``
   (HDF5 output, but skipping consolidation when SLUG is built with OpenMP, leaving
-  one file per thread), or ``ascii``/``txt`` (plain-text output).
+  one file per thread), or ``ascii`` / ``txt`` (plain-text output).
 * ``out_dir`` (optional, default=""): The directory into which output should be
   written. An empty string (the default) writes into the current working directory.
 * ``checkpoint_interval`` (optional, default=0): The number of trials between
   checkpoints; 0 disables checkpointing. Only supported when ``output_mode`` is
   ``h5`` or ``h5divided`` -- a non-zero value combined with ``ascii`` output is an error.
+
+At least one of the ``write_*`` keywords relevant to the simulation's own
+``sim_type`` must be left true, and if ``phot.filters`` was given, at least one of
+``write_cluster_phot`` / ``write_galaxy_phot`` must be true -- otherwise SLUG raises
+an error at startup, since the corresponding output(s) would otherwise never be written.
 
 
 Integrator Control Keywords
@@ -152,7 +143,7 @@ composition/rotation settings.
   current-working-directory/``SLUG_DIR``/repository search).
 * ``tracks`` (required): The name of the stellar evolutionary track set to use
   (e.g. ``"MIST"``), as listed in the track registry (see ``track_registry`` below).
-* ``track_registry`` (optional, default=``data/tracks/tracks.toml``): Overrides the
+* ``track_registry`` (optional, default="data/tracks/tracks.toml"): Overrides the
   default registry file used to look up ``tracks``.
 * ``FeH`` (required): The stellar metallicity, [Fe/H], as a number or PDF (see above).
 * ``v_vcrit`` (optional, default=0.0): The stellar rotation rate, as a fraction of
@@ -178,7 +169,7 @@ clusters formed by the simulation.
   cluster lifetime function, as a number or PDF (see above).
 * ``f_cluster`` (optional, default=1.0; galaxy simulations only): The fraction of a
   galaxy simulation's stellar mass formed in individually-tracked, stochastic
-  clusters; the remainder is treated as a continuous population in both mass and time.
+  clusters; the remainder is treated as continuously-distributed in time.
 
 
 Galaxy Keywords
@@ -186,7 +177,7 @@ Galaxy Keywords
 
 These keywords, in the ``[galaxy]`` section, describe the star formation history of
 a galaxy simulation, and are only used (and only permitted) when ``sim_type`` =
-``"galaxy"``. Exactly one of ``sfr``/``sfr_dist`` must be given.
+``"galaxy"``. Exactly one of ``sfr`` / ``sfr_dist`` must be given.
 
 * ``sfr``: The star formation rate as a function of time. A bare number gives a
   constant rate, in Msun/yr, shared by every trial; a string names a PDF descriptor
@@ -241,7 +232,7 @@ spectral synthesis to also be enabled (see ``spectra.model`` above).
   machinery.
 * ``system`` (optional, default="Flambda"): The photometric system to report
   magnitudes/fluxes in. Must be one of ``Flambda``, ``Fnu``, ``ST``, ``AB``, or ``Vega``.
-* ``registry`` (optional, default=``data/filters/filters.toml``): Overrides the
+* ``registry`` (optional, default="data/filters/filters.toml"): Overrides the
   default registry file used to look up ``filters``.
 * ``vega`` (optional): Overrides the default reference Vega spectrum file used by
   the ``Vega`` photometric system.
@@ -263,7 +254,7 @@ requires spectral synthesis to also be enabled (see ``spectra.model`` above).
   fixed extinction of zero, rather than being left unset.
 * ``model`` (required if ``AV`` or ``AV_field`` is given): The name of the
   extinction curve to apply, as listed in the extinction registry (see ``registry`` below).
-* ``registry`` (optional, default=``data/extinct/extinct.toml``): Overrides the
+* ``registry`` (optional, default="data/extinct/extinct.toml"): Overrides the
   default registry file used to look up ``model``.
 
 
