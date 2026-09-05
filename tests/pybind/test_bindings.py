@@ -93,6 +93,7 @@ import tomllib
 import h5py
 import numpy as np
 import pytest
+import tomlkit
 
 import slugpy as slug
 
@@ -929,6 +930,46 @@ def test_simcontrols_fcluster_property():
 
     controls.setFCluster(0.75)
     assert controls.fCluster == pytest.approx(0.75)
+
+
+def test_simcontrols_write_flag_properties():
+    """The six output content flags (writeCluster/writeClusterSpec/
+    writeClusterPhot/writeGalaxy/writeGalaxySpec/writeGalaxyPhot)
+    should default to True (CLUSTER_DECK's own deck sets none of the
+    corresponding output.write_* keys), and be assignable either via
+    the property or via the matching setWrite*() method, with the
+    same effect."""
+    controls = slug.SimControls(CLUSTER_DECK)
+
+    properties = (
+        "writeCluster", "writeClusterSpec", "writeClusterPhot",
+        "writeGalaxy", "writeGalaxySpec", "writeGalaxyPhot",
+    )
+    for name in properties:
+        assert getattr(controls, name) is True
+
+    controls.writeCluster = False
+    assert controls.writeCluster is False
+
+    controls.setWriteCluster(True)
+    assert controls.writeCluster is True
+
+    controls.setWriteGalaxyPhot(False)
+    assert controls.writeGalaxyPhot is False
+
+    controls.writeGalaxyPhot = True
+    assert controls.writeGalaxyPhot is True
+
+
+def test_simcontrols_write_flag_read_from_deck():
+    """A deck that explicitly sets output.write_cluster = false should
+    be reflected in the writeCluster property immediately after
+    construction, not just via the setter."""
+    deck = tomllib.loads(pathlib.Path(CLUSTER_DECK).read_text())
+    deck["output"]["write_cluster"] = False
+    controls = slug.SimControls(tomlkit.dumps(deck))
+    assert controls.writeCluster is False
+    assert controls.writeClusterSpec is True
 
 
 def test_simcontrols_specsyn_property():

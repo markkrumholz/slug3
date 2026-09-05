@@ -212,6 +212,57 @@ namespace io
         [[nodiscard]] auto checkpointInterval() const { return checkpointInterval_; }
 
         /**
+         * @brief Whether the clusters group/file should be written
+         * @return True (the default) unless output.write_cluster was
+         *   set to false in the input deck; see OutputManager's own
+         *   constructor for how this is enforced
+         */
+        [[nodiscard]] auto writeCluster() const { return writeCluster_; }
+
+        /**
+         * @brief Whether the cluster_spectra group/file should be written
+         * @return True (the default) unless output.write_cluster_spec
+         *   was set to false in the input deck; see OutputManager's
+         *   own constructor for how this is enforced
+         */
+        [[nodiscard]] auto writeClusterSpec() const { return writeClusterSpec_; }
+
+        /**
+         * @brief Whether the cluster_phot group/file should be written
+         * @return True (the default) unless output.write_cluster_phot
+         *   was set to false in the input deck; see OutputManager's
+         *   own constructor for how this is enforced
+         */
+        [[nodiscard]] auto writeClusterPhot() const { return writeClusterPhot_; }
+
+        /**
+         * @brief Whether the galaxy group/file should be written
+         * @return True (the default) unless output.write_galaxy was
+         *   set to false in the input deck; only meaningful for a
+         *   galaxy-type simulation -- see OutputManager's own
+         *   constructor for how this is enforced
+         */
+        [[nodiscard]] auto writeGalaxy() const { return writeGalaxy_; }
+
+        /**
+         * @brief Whether the galaxy_spectra group/file should be written
+         * @return True (the default) unless output.write_galaxy_spec
+         *   was set to false in the input deck; only meaningful for a
+         *   galaxy-type simulation -- see OutputManager's own
+         *   constructor for how this is enforced
+         */
+        [[nodiscard]] auto writeGalaxySpec() const { return writeGalaxySpec_; }
+
+        /**
+         * @brief Whether the galaxy_phot group/file should be written
+         * @return True (the default) unless output.write_galaxy_phot
+         *   was set to false in the input deck; only meaningful for a
+         *   galaxy-type simulation -- see OutputManager's own
+         *   constructor for how this is enforced
+         */
+        [[nodiscard]] auto writeGalaxyPhot() const { return writeGalaxyPhot_; }
+
+        /**
          * @brief Set the relative tolerance for PDF integration
          * @param tol New relative tolerance
          * @details
@@ -265,6 +316,71 @@ namespace io
          * throwing (see its own comment), rather than here.
          */
         void setCheckpointInterval(unsigned long interval) { checkpointInterval_ = interval; }
+
+        /**
+         * @brief Set whether the clusters group/file should be written
+         * @param value New value for writeCluster()
+         * @details
+         * Lets a caller (e.g. from Python, where there is no
+         * output.write_cluster input-deck entry to set this through)
+         * enable or suppress cluster output on an already-constructed
+         * SimControls. Unlike setIntRelTol()/setZ()/etc., this is not
+         * read live by an already-built OutputManagerH5/
+         * OutputManagerAscii: each one decides once, at its own
+         * construction, which groups/files to create at all (see
+         * OutputManager's own constructor), so this setter only
+         * affects an OutputManagerH5/OutputManagerAscii built from
+         * this SimControls afterward, not one already built from it.
+         */
+        void setWriteCluster(bool value) { writeCluster_ = value; }
+
+        /**
+         * @brief Set whether the cluster_spectra group/file should be written
+         * @param value New value for writeClusterSpec()
+         * @details
+         * See setWriteCluster()'s own comment on when this does (and
+         * does not) take effect.
+         */
+        void setWriteClusterSpec(bool value) { writeClusterSpec_ = value; }
+
+        /**
+         * @brief Set whether the cluster_phot group/file should be written
+         * @param value New value for writeClusterPhot()
+         * @details
+         * See setWriteCluster()'s own comment on when this does (and
+         * does not) take effect.
+         */
+        void setWriteClusterPhot(bool value) { writeClusterPhot_ = value; }
+
+        /**
+         * @brief Set whether the galaxy group/file should be written
+         * @param value New value for writeGalaxy()
+         * @details
+         * Only meaningful for a galaxy-type simulation. See
+         * setWriteCluster()'s own comment on when this does (and does
+         * not) take effect.
+         */
+        void setWriteGalaxy(bool value) { writeGalaxy_ = value; }
+
+        /**
+         * @brief Set whether the galaxy_spectra group/file should be written
+         * @param value New value for writeGalaxySpec()
+         * @details
+         * Only meaningful for a galaxy-type simulation. See
+         * setWriteCluster()'s own comment on when this does (and does
+         * not) take effect.
+         */
+        void setWriteGalaxySpec(bool value) { writeGalaxySpec_ = value; }
+
+        /**
+         * @brief Set whether the galaxy_phot group/file should be written
+         * @param value New value for writeGalaxyPhot()
+         * @details
+         * Only meaningful for a galaxy-type simulation. See
+         * setWriteCluster()'s own comment on when this does (and does
+         * not) take effect.
+         */
+        void setWriteGalaxyPhot(bool value) { writeGalaxyPhot_ = value; }
 
         // Getters for the physics settings
         /**
@@ -665,12 +781,12 @@ namespace io
          * @param inputDeck A toml table holding the input deck
          * @details
          * sim_type, verbosity, output mode/model name/directory,
-         * n_trial, output timing (via setOutputTimes), the optional
-         * rng_seed, and the integrator tolerances -- everything the
-         * original, pre-merge SimControls class itself used to parse.
-         * Split out of the constructor purely to keep its own
-         * cognitive complexity down; see initPhysics() for the other
-         * half.
+         * n_trial, output timing (via setOutputTimes), the output
+         * content flags (via readOutput()), the optional rng_seed, and
+         * the integrator tolerances -- everything the original,
+         * pre-merge SimControls class itself used to parse. Split out
+         * of the constructor purely to keep its own cognitive
+         * complexity down; see initPhysics() for the other half.
          */
         void initControlFlow(const toml::table& inputDeck);
 
@@ -695,6 +811,26 @@ namespace io
          * @param inputDeck A toml table holding the input deck
          */
         void setOutputTimes(const toml::table& inputDeck);
+
+        /**
+         * @brief Parse the output content flags from the input deck
+         * @param inputDeck A toml table holding the input deck
+         * @details
+         * Reads the six optional output.write_cluster/
+         * write_cluster_spec/write_cluster_phot/write_galaxy/
+         * write_galaxy_spec/write_galaxy_phot keys (each defaulting to
+         * true) into writeCluster_/writeClusterSpec_/writeClusterPhot_/
+         * writeGalaxy_/writeGalaxySpec_/writeGalaxyPhot_. Formerly done
+         * by OutputManager's own constructor directly from the input
+         * deck; moved here so that a SimControls built without an
+         * input deck at all (e.g. from Python) still carries these
+         * settings, and an OutputManagerH5/OutputManagerAscii built
+         * from it sees the same write_* values a real deck would have
+         * produced, not just the all-true defaults -- see
+         * OutputManager's own constructor, which now reads these via
+         * writeCluster()/etc. instead of parsing them itself.
+         */
+        void readOutput(const toml::table& inputDeck);
 
         /**
          * @brief Load a set of tracks specified by input deck
@@ -835,6 +971,16 @@ namespace io
         std::size_t intMaxIter_ = 1UL << 19;
         double z_ = 0.0;                               /**< Redshift, read live by every Specsyn/Extinct built from this SimControls */
         unsigned long checkpointInterval_ = 0;         /**< Number of trials between checkpoints (0 = disabled); see checkpointInterval() */
+
+        // Output content flags, parsed by readOutput(); see
+        // writeCluster()'s own comment and OutputManager's own
+        // constructor for where these are enforced/consumed.
+        bool writeCluster_ = true;      /**< Whether to write the clusters group/file; see writeCluster() */
+        bool writeClusterSpec_ = true;  /**< Whether to write the cluster_spectra group/file; see writeClusterSpec() */
+        bool writeClusterPhot_ = true;  /**< Whether to write the cluster_phot group/file; see writeClusterPhot() */
+        bool writeGalaxy_ = true;       /**< Whether to write the galaxy group/file (galaxy-type simulations only); see writeGalaxy() */
+        bool writeGalaxySpec_ = true;   /**< Whether to write the galaxy_spectra group/file (galaxy-type simulations only); see writeGalaxySpec() */
+        bool writeGalaxyPhot_ = true;   /**< Whether to write the galaxy_phot group/file (galaxy-type simulations only); see writeGalaxyPhot() */
 
         // Physics settings
         pdfs::PDF imf_;            /**< The IMF to use for the simulation */

@@ -38,7 +38,7 @@ namespace io
     public:
 
         /**
-         * @brief Cache references to the simulation controls and input deck, and parse the output-control keys
+         * @brief Cache references to the simulation controls and input deck, and sanity-check the output-control flags
          * @param simControls Simulation controls (physics settings and
          *   control-flow settings together)
          * @param inputDeck The simulation's toml input deck
@@ -48,21 +48,23 @@ namespace io
          * constructor does not open any output files; that is left to
          * the constructors of the format-specific subclasses.
          *
-         * Also reads the six optional output.write_cluster/
-         * write_cluster_spec/write_cluster_phot/write_galaxy/
-         * write_galaxy_spec/write_galaxy_phot keys (each defaulting to
-         * true) into writeCluster_/writeClusterSpec_/writeClusterPhot_/
-         * writeGalaxy_/writeGalaxySpec_/writeGalaxyPhot_, for the
-         * subclass constructors to gate their own group/file creation
-         * on, then sanity-checks the resulting combination:
+         * The six output.write_cluster/write_cluster_spec/
+         * write_cluster_phot/write_galaxy/write_galaxy_spec/
+         * write_galaxy_phot flags the subclass constructors gate their
+         * own group/file creation on are simControls's own
+         * writeCluster()/writeClusterSpec()/writeClusterPhot()/
+         * writeGalaxy()/writeGalaxySpec()/writeGalaxyPhot() -- parsed
+         * by SimControls itself (see its own readOutput()), not by
+         * this class -- so this constructor only sanity-checks the
+         * resulting combination:
          * @throws std::runtime_error if every output relevant to this
          *   simulation's own SimType (all six for a galaxy-type
-         *   simulation; just writeCluster_/writeClusterSpec_/
-         *   writeClusterPhot_ for a cluster-type simulation, since
+         *   simulation; just writeCluster()/writeClusterSpec()/
+         *   writeClusterPhot() for a cluster-type simulation, since
          *   write_galaxy* is meaningless when there is no Galaxy object
          *   at all) is false, since nothing would be written
-         * @throws std::runtime_error if writeClusterPhot_ and
-         *   writeGalaxyPhot_ are both false while SimControls::filters()
+         * @throws std::runtime_error if writeClusterPhot() and
+         *   writeGalaxyPhot() are both false while SimControls::filters()
          *   is non-null, since that means photometry was requested but
          *   would never be written anywhere -- almost certainly a
          *   mistake, rather than a deliberate "compute filters() for
@@ -311,20 +313,6 @@ namespace io
 
         const SimControls& simControls_; /**< Simulation controls (physics and control-flow settings) */
         const toml::table& inputDeck_;   /**< The simulation's toml input deck */
-
-        // Output-control flags, parsed from the input deck's
-        // output.write_cluster/write_cluster_spec/write_cluster_phot/
-        // write_galaxy/write_galaxy_spec/write_galaxy_phot keys (each
-        // optional, defaulting to true) by this base class's own
-        // constructor -- see its own comment. Read by the H5/Ascii
-        // subclass constructors to decide which groups/files to create
-        // at all.
-        bool writeCluster_ = true;      /**< Whether to write the clusters group/file */
-        bool writeClusterSpec_ = true;  /**< Whether to write the cluster_spectra group/file */
-        bool writeClusterPhot_ = true;  /**< Whether to write the cluster_phot group/file */
-        bool writeGalaxy_ = true;       /**< Whether to write the galaxy group/file (galaxy-type simulations only) */
-        bool writeGalaxySpec_ = true;   /**< Whether to write the galaxy_spectra group/file (galaxy-type simulations only) */
-        bool writeGalaxyPhot_ = true;   /**< Whether to write the galaxy_phot group/file (galaxy-type simulations only) */
     };
 
 } // namespace io

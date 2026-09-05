@@ -122,9 +122,8 @@ def test_run_sim_accepts_simcontrols_object(tmp_path, monkeypatch):
 def test_run_sim_simcontrols_object_ascii_still_warns(tmp_path, monkeypatch):
     """Passing a SimControls object built with ASCII output still runs
     to completion and still warns/returns None exactly as the
-    deck-text path does -- exercising OutputManagerAscii's own empty-
-    deck fallback (see run_sim's own docstring) rather than
-    OutputManagerH5's."""
+    deck-text path does -- exercising OutputManagerAscii's own
+    construction from a SimControls object rather than OutputManagerH5's."""
     monkeypatch.chdir(tmp_path)
     sim_controls = SimControls(ASCII_DECK)
 

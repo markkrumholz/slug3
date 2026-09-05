@@ -603,7 +603,7 @@ void io::OutputManagerH5::openOutputFile(const std::filesystem::path& path)
 // (optional, defaults to true) was not set to false
 void io::OutputManagerH5::openClustersGroup()
 {
-    if (!writeCluster_) { return; }
+    if (!simControls_.writeCluster()) { return; }
 
     // NOLINTBEGIN(misc-include-cleaner)
     clustersGroup_() = H5Gcreate2(file_(), "clusters",
@@ -664,7 +664,7 @@ void io::OutputManagerH5::openClustersGroup()
 void io::OutputManagerH5::openClusterSpectraGroup()
 {
     if (simControls_.specsyn() == nullptr) { return; }
-    if (!writeClusterSpec_) { return; }
+    if (!simControls_.writeClusterSpec()) { return; }
 
     const auto& synth = *simControls_.specsyn();
     const std::vector<double> wlObs = synth.wlObs();
@@ -730,7 +730,7 @@ void io::OutputManagerH5::openClusterSpectraGroup()
 void io::OutputManagerH5::openClusterPhotGroup()
 {
     if (simControls_.filters() == nullptr && !simControls_.computeLbol()) { return; }
-    if (!writeClusterPhot_) { return; }
+    if (!simControls_.writeClusterPhot()) { return; }
 
     std::vector<std::string> filterNames;
     std::vector<std::string> filterUnits;
@@ -813,7 +813,7 @@ void io::OutputManagerH5::openClusterPhotGroup()
 void io::OutputManagerH5::openGalaxyGroup()
 {
     if (simControls_.simType() != SimControls::SimType::galaxy) { return; }
-    if (!writeGalaxy_) { return; }
+    if (!simControls_.writeGalaxy()) { return; }
 
     // NOLINTBEGIN(misc-include-cleaner)
     galaxyGroup_() = H5Gcreate2(file_(), "galaxy",
@@ -852,7 +852,7 @@ void io::OutputManagerH5::openGalaxySpectraGroup()
 {
     if (simControls_.simType() != SimControls::SimType::galaxy) { return; }
     if (simControls_.specsyn() == nullptr) { return; }
-    if (!writeGalaxySpec_) { return; }
+    if (!simControls_.writeGalaxySpec()) { return; }
 
     const auto& synth = *simControls_.specsyn();
     const std::vector<double> wlObs = synth.wlObs();
@@ -914,7 +914,7 @@ void io::OutputManagerH5::openGalaxyPhotGroup()
 {
     if (simControls_.simType() != SimControls::SimType::galaxy) { return; }
     if (simControls_.filters() == nullptr && !simControls_.computeLbol()) { return; }
-    if (!writeGalaxyPhot_) { return; }
+    if (!simControls_.writeGalaxyPhot()) { return; }
 
     std::vector<std::string> filterNames;
     std::vector<std::string> filterUnits;

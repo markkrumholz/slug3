@@ -7,7 +7,6 @@
  */
 
 #include "OutputManager.hpp"
-#include "../utils/ParseUtils.hpp"
 #include "../utils/RngThread.hpp"
 #include "SimControls.hpp"
 #include <chrono>
@@ -19,23 +18,10 @@
 #include <toml.hpp>
 #include <utility>
 
-// Read an optional output.<key> boolean, defaulting to true if absent
-static auto readWriteFlag(const toml::table& inputDeck, const std::string& key) -> bool
-{
-    const auto value = utils::getTOMLKeyWithError<bool>(inputDeck, key);
-    return !value.has_value() || value.value();
-}
-
 io::OutputManager::OutputManager(const SimControls& simControls,
     const toml::table& inputDeck) :
     simControls_(simControls),
-    inputDeck_(inputDeck),
-    writeCluster_(readWriteFlag(inputDeck, "output.write_cluster")),
-    writeClusterSpec_(readWriteFlag(inputDeck, "output.write_cluster_spec")),
-    writeClusterPhot_(readWriteFlag(inputDeck, "output.write_cluster_phot")),
-    writeGalaxy_(readWriteFlag(inputDeck, "output.write_galaxy")),
-    writeGalaxySpec_(readWriteFlag(inputDeck, "output.write_galaxy_spec")),
-    writeGalaxyPhot_(readWriteFlag(inputDeck, "output.write_galaxy_phot"))
+    inputDeck_(inputDeck)
 {
     // Sanity check 1: if every output relevant to this simulation's
     // own SimType is disabled, nothing at all would ever be written --
@@ -43,10 +29,12 @@ io::OutputManager::OutputManager(const SimControls& simControls,
     // galaxy-type simulation (there is no Galaxy object, and so no
     // galaxy/galaxy_spectra/galaxy_phot group/file, for a cluster-type
     // simulation), so it is excluded from this check otherwise.
-    bool anyOutput = writeCluster_ || writeClusterSpec_ || writeClusterPhot_;
+    bool anyOutput = simControls_.writeCluster() || simControls_.writeClusterSpec() ||
+        simControls_.writeClusterPhot();
     if (simControls_.simType() == SimControls::SimType::galaxy)
     {
-        anyOutput = anyOutput || writeGalaxy_ || writeGalaxySpec_ || writeGalaxyPhot_;
+        anyOutput = anyOutput || simControls_.writeGalaxy() ||
+            simControls_.writeGalaxySpec() || simControls_.writeGalaxyPhot();
     }
     if (!anyOutput)
     {
@@ -61,7 +49,8 @@ io::OutputManager::OutputManager(const SimControls& simControls,
     // anywhere -- almost certainly a mistake, rather than a deliberate
     // "compute filters() for some other purpose but discard the
     // result" request.
-    if (!writeClusterPhot_ && !writeGalaxyPhot_ && simControls_.filters() != nullptr)
+    if (!simControls_.writeClusterPhot() && !simControls_.writeGalaxyPhot() &&
+        simControls_.filters() != nullptr)
     {
         throw std::runtime_error(
             "OutputManager: phot.filters was given, but both "

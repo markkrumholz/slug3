@@ -58,9 +58,9 @@ def run_sim(controls: SimControls | str, progress: bool = True, restart: bool = 
         object directly lets a simulation be driven entirely from
         Python -- via SimControls's own constructor keyword arguments
         and setters -- without ever writing an input deck to text; see
-        Details below for the one respect (output.write_cluster*/
-        write_galaxy* flags, and the deck recorded for provenance in
-        the output file) in which this differs from an equivalent deck.
+        Details below for the one respect (the deck recorded for
+        provenance in the output file) in which this differs from an
+        equivalent deck.
     progress : bool, default True
         Whether to show a progress bar (see slugpy.progress) tracking
         trials completed while the simulation runs.
@@ -92,14 +92,16 @@ def run_sim(controls: SimControls | str, progress: bool = True, restart: bool = 
     and -- depending on sim_controls.simType() -- a SimCluster or
     SimGalaxy, which it then runs.
 
-    OutputManagerH5/OutputManagerAscii each read a deck of their own,
-    independently of sim_controls: the optional output.write_cluster*/
-    write_galaxy* flags (each defaulting to True if absent), and the
-    deck's own text, recorded verbatim in the output file for
-    provenance. When controls is a SimControls object rather than deck
-    text, there is no such deck to hand them, so an empty one is used
-    instead -- every write_* flag then defaults to True (everything is
-    written), and the output file's own recorded input deck is empty.
+    OutputManagerH5/OutputManagerAscii each also take a deck of their
+    own, independently of sim_controls, but only for one purpose now:
+    recording its text verbatim in the output file for provenance (the
+    output.write_cluster*/write_galaxy* flags they gate their own
+    group/file creation on come from sim_controls itself -- see
+    SimControls.writeCluster/etc. -- not from this deck). When controls
+    is a SimControls object rather than deck text, there is no such
+    deck to hand them, so an empty one is used instead, and the output
+    file's own recorded input deck is simply empty; every write_* flag
+    still comes from sim_controls exactly as it would with a real deck.
 
     The progress bar (when enabled) is driven by run_with_progress:
     run() itself executes on a background thread, while this calling

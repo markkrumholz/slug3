@@ -513,6 +513,55 @@ SimControls built with ascii output that later has this set to a
 non-zero value here will raise a RuntimeError the first time a
 checkpoint is actually attempted, rather than immediately.)doc";
 
+static constexpr std::string_view writeClusterPropertyDocstring =
+R"doc(Whether the clusters group/file is written.
+
+True (the default) unless output.write_cluster was set to false in
+the input deck. Unlike intRelTol/z/etc., this is not read live by an
+already-built OutputManagerH5/OutputManagerAscii: each one decides
+once, at its own construction, which groups/files to create at all,
+so assigning this only affects an OutputManagerH5/OutputManagerAscii
+built from this SimControls afterward, not one already built from
+it.)doc";
+
+static constexpr std::string_view writeClusterSpecPropertyDocstring =
+R"doc(Whether the cluster_spectra group/file is written.
+
+True (the default) unless output.write_cluster_spec was set to false
+in the input deck. See writeCluster's own docstring on when assigning
+this does (and does not) take effect.)doc";
+
+static constexpr std::string_view writeClusterPhotPropertyDocstring =
+R"doc(Whether the cluster_phot group/file is written.
+
+True (the default) unless output.write_cluster_phot was set to false
+in the input deck. See writeCluster's own docstring on when assigning
+this does (and does not) take effect.)doc";
+
+static constexpr std::string_view writeGalaxyPropertyDocstring =
+R"doc(Whether the galaxy group/file is written.
+
+True (the default) unless output.write_galaxy was set to false in the
+input deck. Only meaningful for a galaxy-type simulation. See
+writeCluster's own docstring on when assigning this does (and does
+not) take effect.)doc";
+
+static constexpr std::string_view writeGalaxySpecPropertyDocstring =
+R"doc(Whether the galaxy_spectra group/file is written.
+
+True (the default) unless output.write_galaxy_spec was set to false
+in the input deck. Only meaningful for a galaxy-type simulation. See
+writeCluster's own docstring on when assigning this does (and does
+not) take effect.)doc";
+
+static constexpr std::string_view writeGalaxyPhotPropertyDocstring =
+R"doc(Whether the galaxy_phot group/file is written.
+
+True (the default) unless output.write_galaxy_phot was set to false
+in the input deck. Only meaningful for a galaxy-type simulation. See
+writeCluster's own docstring on when assigning this does (and does
+not) take effect.)doc";
+
 // Apply each property-named constructor keyword argument that was
 // actually given (not py::none()) to an already-built sc, via the
 // same setter its property uses -- factored out of the constructor
@@ -693,6 +742,18 @@ void bindSimControls(py::module_& m)
                 fClusterPropertyDocstring.data(), py::arg("f_cluster"))
         .def("setCheckpointInterval", &io::SimControls::setCheckpointInterval,
                 checkpointIntervalPropertyDocstring.data(), py::arg("interval"))
+        .def("setWriteCluster", &io::SimControls::setWriteCluster,
+                writeClusterPropertyDocstring.data(), py::arg("value"))
+        .def("setWriteClusterSpec", &io::SimControls::setWriteClusterSpec,
+                writeClusterSpecPropertyDocstring.data(), py::arg("value"))
+        .def("setWriteClusterPhot", &io::SimControls::setWriteClusterPhot,
+                writeClusterPhotPropertyDocstring.data(), py::arg("value"))
+        .def("setWriteGalaxy", &io::SimControls::setWriteGalaxy,
+                writeGalaxyPropertyDocstring.data(), py::arg("value"))
+        .def("setWriteGalaxySpec", &io::SimControls::setWriteGalaxySpec,
+                writeGalaxySpecPropertyDocstring.data(), py::arg("value"))
+        .def("setWriteGalaxyPhot", &io::SimControls::setWriteGalaxyPhot,
+                writeGalaxyPhotPropertyDocstring.data(), py::arg("value"))
         // Properties: alternative, attribute-style access to the same
         // getters/setters bound as plain methods above (e.g.
         // sc.imf = "20.0" instead of sc.setIMF("20.0")). Getters that
@@ -774,6 +835,30 @@ void bindSimControls(py::module_& m)
         .def_property("checkpointInterval",
                 &io::SimControls::checkpointInterval,
                 &io::SimControls::setCheckpointInterval,
-                checkpointIntervalPropertyDocstring.data());
+                checkpointIntervalPropertyDocstring.data())
+        .def_property("writeCluster",
+                &io::SimControls::writeCluster,
+                &io::SimControls::setWriteCluster,
+                writeClusterPropertyDocstring.data())
+        .def_property("writeClusterSpec",
+                &io::SimControls::writeClusterSpec,
+                &io::SimControls::setWriteClusterSpec,
+                writeClusterSpecPropertyDocstring.data())
+        .def_property("writeClusterPhot",
+                &io::SimControls::writeClusterPhot,
+                &io::SimControls::setWriteClusterPhot,
+                writeClusterPhotPropertyDocstring.data())
+        .def_property("writeGalaxy",
+                &io::SimControls::writeGalaxy,
+                &io::SimControls::setWriteGalaxy,
+                writeGalaxyPropertyDocstring.data())
+        .def_property("writeGalaxySpec",
+                &io::SimControls::writeGalaxySpec,
+                &io::SimControls::setWriteGalaxySpec,
+                writeGalaxySpecPropertyDocstring.data())
+        .def_property("writeGalaxyPhot",
+                &io::SimControls::writeGalaxyPhot,
+                &io::SimControls::setWriteGalaxyPhot,
+                writeGalaxyPhotPropertyDocstring.data());
 }
 // NOLINTEND(misc-include-cleaner)
