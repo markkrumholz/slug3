@@ -490,10 +490,11 @@ static constexpr std::string_view intAbsTolPropertyDocstring = R"doc(The absolut
 
 See intRelTol's own docstring on live (not snapshotted) effect.)doc";
 
-static constexpr std::string_view intMaxIterPropertyDocstring = R"doc(The maximum number of evaluations for PDF integration.
+static constexpr std::string_view intMaxIterPropertyDocstring = R"doc(The maximum number of bisection iterations for PDF integration.
 
-0 means unlimited. See intRelTol's own docstring on live (not
-snapshotted) effect.)doc";
+Not a count of raw integrand evaluations, which each iteration costs
+several of. 0 means unlimited. See intRelTol's own docstring on live
+(not snapshotted) effect.)doc";
 
 static constexpr std::string_view zPropertyDocstring = R"doc(The redshift.
 
