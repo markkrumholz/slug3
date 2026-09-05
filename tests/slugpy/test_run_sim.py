@@ -62,8 +62,6 @@ CMF = 1e3
 start_time = 0.0
 end_time = 10.0
 ntime = 3
-
-[outputs]
 output_mode = "ascii"
 
 # nebular.compute_neb defaults to true, which would otherwise require

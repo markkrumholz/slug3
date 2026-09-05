@@ -255,7 +255,7 @@ namespace io
          * @param interval New checkpoint interval; 0 disables
          *   checkpointing
          * @details
-         * Unlike setting outputs.checkpoint_interval in an input deck,
+         * Unlike setting output.checkpoint_interval in an input deck,
          * this plain setter does not check outputMode() -- a caller
          * (e.g. from Python) could use it to set up the same illegal
          * combination (a non-zero interval with ascii output) the

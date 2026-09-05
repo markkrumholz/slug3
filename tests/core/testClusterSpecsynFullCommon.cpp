@@ -242,11 +242,15 @@ auto runClusterSpecsynFull(const std::string& inputFile, const std::string& mode
     {
         toml::table inputDeck = toml::parse_file(inputFile);
         if (toml::table* outputTbl = inputDeck["output"].as_table())
-        { outputTbl->insert("model_name", modelName); }
-        else { inputDeck.insert("output", toml::table{ { "model_name", modelName } }); }
-        if (toml::table* outputsTbl = inputDeck["outputs"].as_table())
-        { outputsTbl->insert("out_dir", outDir.string()); }
-        else { inputDeck.insert("outputs", toml::table{ { "out_dir", outDir.string() } }); }
+        {
+            outputTbl->insert("model_name", modelName);
+            outputTbl->insert("out_dir", outDir.string());
+        }
+        else
+        {
+            inputDeck.insert("output", toml::table{
+                { "model_name", modelName }, { "out_dir", outDir.string() } });
+        }
 
         const io::SimControls simControls(inputDeck);
         const auto nTrial = simControls.nTrial(); // read back rather than assumed, since not every caller's deck uses the same n_trial

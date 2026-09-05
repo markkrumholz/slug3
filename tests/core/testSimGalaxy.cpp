@@ -37,11 +37,15 @@ static auto makeInputDeck(const std::string& modelName,
 {
     toml::table inputDeck = toml::parse_file("tests/core/assets/testGalaxy.in");
     if (toml::table* outputTbl = inputDeck["output"].as_table())
-    { outputTbl->insert("model_name", modelName); }
-    else { inputDeck.insert("output", toml::table{ { "model_name", modelName } }); }
-    if (toml::table* outputsTbl = inputDeck["outputs"].as_table())
-    { outputsTbl->insert("out_dir", outDir.string()); }
-    else { inputDeck.insert("outputs", toml::table{ { "out_dir", outDir.string() } }); }
+    {
+        outputTbl->insert("model_name", modelName);
+        outputTbl->insert("out_dir", outDir.string());
+    }
+    else
+    {
+        inputDeck.insert("output", toml::table{
+            { "model_name", modelName }, { "out_dir", outDir.string() } });
+    }
     inputDeck.insert("n_trial", static_cast<int64_t>(nTrial));
     return inputDeck;
 }

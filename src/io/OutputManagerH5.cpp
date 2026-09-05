@@ -332,7 +332,7 @@ io::OutputManagerH5::OutputManagerH5(
             "OutputManagerH5: restart is true, but "
             "simControls.checkpointInterval() is 0 -- restarting "
             "requires checkpointing to remain enabled for this session "
-            "too (set outputs.checkpoint_interval, or call "
+            "too (set output.checkpoint_interval, or call "
             "setCheckpointInterval(), to a non-zero value)");
     }
     if (restart)

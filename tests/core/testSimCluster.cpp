@@ -76,11 +76,15 @@ static auto makeInputDeck(const std::string& modelName,
 {
     toml::table inputDeck = toml::parse_file(deckPath);
     if (toml::table* outputTbl = inputDeck["output"].as_table())
-    { outputTbl->insert("model_name", modelName); }
-    else { inputDeck.insert("output", toml::table{ { "model_name", modelName } }); }
-    if (toml::table* outputsTbl = inputDeck["outputs"].as_table())
-    { outputsTbl->insert("out_dir", outDir.string()); }
-    else { inputDeck.insert("outputs", toml::table{ { "out_dir", outDir.string() } }); }
+    {
+        outputTbl->insert("model_name", modelName);
+        outputTbl->insert("out_dir", outDir.string());
+    }
+    else
+    {
+        inputDeck.insert("output", toml::table{
+            { "model_name", modelName }, { "out_dir", outDir.string() } });
+    }
     inputDeck.insert("n_trial", static_cast<int64_t>(nTrial));
     if (!fehDistPath.empty())
     {
@@ -182,7 +186,7 @@ static auto readULongAttr(const hid_t loc, const char* name) -> unsigned long //
 // (mirroring main.cpp's end-to-end setup), and run, forcing real
 // multi-threaded execution so SimCluster::run's parallel for loop
 // actually spans multiple threads. The output manager type (h5 or
-// ascii) is chosen from the deck's own outputs.output_mode (h5 and
+// ascii) is chosen from the deck's own output.output_mode (h5 and
 // h5divided both route to OutputManagerH5, exactly as main.cpp itself
 // does). restart is threaded through to both OutputManagerH5's and
 // SimCluster's own constructors -- see testSimClusterRestartFromCheckpoint()
@@ -508,7 +512,7 @@ static auto testSimClusterSpectraH5() -> int
 }
 
 // End-to-end check of ascii cluster-spectrum output: run with
-// spectra.model = "blackbody" and outputs.output_mode = "ascii", and
+// spectra.model = "blackbody" and output.output_mode = "ascii", and
 // verify the cluster_spectra.txt file has the expected number of
 // data lines (nTrial * nTime * nWl -- one line per wavelength, per
 // output time, per trial) and that every block of nWl consecutive
@@ -524,7 +528,7 @@ static auto testSimClusterSpectraAscii() -> int
     try
     {
         toml::table inputDeck = makeInputDeck(modelName, outDir);
-        inputDeck.at_path("outputs").as_table()->insert_or_assign(
+        inputDeck.at_path("output").as_table()->insert_or_assign(
             "output_mode", std::string("ascii"));
 
         runEndToEnd(inputDeck);
@@ -698,7 +702,7 @@ static auto testSimClusterPhotH5() -> int
 }
 
 // End-to-end check of ascii cluster-photometry output: run with
-// tests/core/assets/testClusterPhot.in and outputs.output_mode =
+// tests/core/assets/testClusterPhot.in and output.output_mode =
 // "ascii", and verify the cluster_phot.txt file has the expected
 // number of data lines (nTrial * nTime -- one line per cluster, per
 // output time, unlike the per-wavelength cluster-spectra file) and
@@ -718,7 +722,7 @@ static auto testSimClusterPhotAscii() -> int
     {
         toml::table inputDeck = makeInputDeck(modelName, outDir, "",
             "tests/core/assets/testClusterPhot.in");
-        inputDeck.at_path("outputs").as_table()->insert_or_assign(
+        inputDeck.at_path("output").as_table()->insert_or_assign(
             "output_mode", std::string("ascii"));
 
         runEndToEnd(inputDeck);
@@ -803,7 +807,7 @@ static auto checkpointH5Path(const std::filesystem::path& outDir,
 }
 
 // End-to-end check of checkpointed HDF5 output: with
-// outputs.checkpoint_interval set, SimCluster::run() should roll over
+// output.checkpoint_interval set, SimCluster::run() should roll over
 // to a new modelName_chkNNNNN.h5 file every checkpointInterval trials
 // (see SimControls::checkpointInterval()/OutputManagerH5::checkpoint()),
 // and the destructor's consolidateFiles() should merge every one of
@@ -835,7 +839,7 @@ static auto testSimClusterCheckpointedH5() -> int
     try
     {
         toml::table inputDeck = makeInputDeck(modelName, outDir);
-        inputDeck.at_path("outputs").as_table()->insert(
+        inputDeck.at_path("output").as_table()->insert(
             "checkpoint_interval", static_cast<int64_t>(checkpointInterval));
 
         runEndToEnd(inputDeck);
@@ -970,7 +974,7 @@ static auto testSimClusterRestartFromCheckpoint() -> int
     try
     {
         toml::table deck = makeInputDeck(modelName, outDir);
-        deck.at_path("outputs").as_table()->insert(
+        deck.at_path("output").as_table()->insert(
             "checkpoint_interval", static_cast<int64_t>(checkpointInterval));
 
         // Phase 1: run only the first firstPhaseTrials trials
@@ -1119,7 +1123,7 @@ static auto testSimClusterSigtermGracefulExit() -> int
     try
     {
         toml::table deck = makeInputDeck(modelName, outDir);
-        deck.at_path("outputs").as_table()->insert(
+        deck.at_path("output").as_table()->insert(
             "checkpoint_interval", static_cast<int64_t>(checkpointInterval));
         deck.insert_or_assign("n_trial", static_cast<int64_t>(localNTrial));
 

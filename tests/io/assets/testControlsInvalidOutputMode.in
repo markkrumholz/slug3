@@ -1,4 +1,4 @@
-# Test input deck for SimControls: an unrecognized outputs.output_mode value
+# Test input deck for SimControls: an unrecognized output.output_mode value
 
 sim_type = "cluster"
 
@@ -16,8 +16,6 @@ CMF = 1e3
 start_time = 0.0
 end_time = 10.0
 ntime = 3
-
-[outputs]
 output_mode = "bogus"
 
 [nebular]

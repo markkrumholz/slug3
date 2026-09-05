@@ -308,7 +308,7 @@ static auto testSimControlsOutputTimesPartialRange() -> int
 }
 
 // Verify that constructing SimControls from a deck with an unrecognized
-// outputs.output_mode value throws.
+// output.output_mode value throws.
 static auto testSimControlsInvalidOutputMode() -> int
 {
     const std::string fileName = "tests/io/assets/testControlsInvalidOutputMode.in";
@@ -345,7 +345,7 @@ static auto testSimControlsInvalidSimType() -> int
     }
 }
 
-// Verify that outputs.checkpoint_interval is read correctly from a
+// Verify that output.checkpoint_interval is read correctly from a
 // deck with h5 output (the only output mode checkpointing supports --
 // see testSimControlsCheckpointAsciiThrows for the rejected
 // combination).
@@ -355,11 +355,11 @@ static auto testSimControlsCheckpointInterval() -> int
     try
     {
         toml::table inputDeck = toml::parse_file(fileName);
-        if (toml::table* outputsTbl = inputDeck["outputs"].as_table())
-        { outputsTbl->insert_or_assign("checkpoint_interval", static_cast<int64_t>(5)); }
+        if (toml::table* outputTbl = inputDeck["output"].as_table())
+        { outputTbl->insert_or_assign("checkpoint_interval", static_cast<int64_t>(5)); }
         else
         {
-            inputDeck.insert("outputs",
+            inputDeck.insert("output",
                 toml::table{ { "checkpoint_interval", static_cast<int64_t>(5) } });
         }
         const io::SimControls controls(inputDeck);
@@ -382,7 +382,7 @@ static auto testSimControlsCheckpointInterval() -> int
 }
 
 // Verify that constructing SimControls from a deck with a non-zero
-// outputs.checkpoint_interval combined with ascii output throws --
+// output.checkpoint_interval combined with ascii output throws --
 // checkpointing is only supported with HDF5 output (see
 // OutputManagerH5::checkpoint()'s own comment for why: unlike
 // OutputManagerH5 rolling over to a new HDF5 file, OutputManagerAscii

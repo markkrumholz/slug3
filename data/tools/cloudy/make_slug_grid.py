@@ -355,7 +355,7 @@ def build_cluster_deck(track: str, feh: float, vvcrit: float, work_dir: Path) ->
         describe an on-grid, non-interpolated point.
     work_dir : pathlib.Path
         Directory this deck's own HDF5 output should be written into
-        (written as an absolute outputs.out_dir, so the deck resolves
+        (written as an absolute output.out_dir, so the deck resolves
         the same regardless of the working directory slug itself is
         launched from).
 
@@ -399,8 +399,6 @@ model_name = "{model_name}"
 start_time = {CLUSTER_START_TIME}
 end_time = {CLUSTER_END_TIME}
 ntime = {CLUSTER_NTIME}
-
-[outputs]
 out_dir = "{work_dir.resolve()}"
 '''
 
@@ -423,7 +421,7 @@ def build_galaxy_deck(track: str, feh: float, vvcrit: float, work_dir: Path) -> 
         describe an on-grid, non-interpolated point.
     work_dir : pathlib.Path
         Directory this deck's own HDF5 output should be written into
-        (written as an absolute outputs.out_dir, so the deck resolves
+        (written as an absolute output.out_dir, so the deck resolves
         the same regardless of the working directory slug itself is
         launched from).
 
@@ -470,8 +468,6 @@ sfr = {SFR}
 [output]
 model_name = "{model_name}"
 output_times = {GALAXY_TIME}
-
-[outputs]
 out_dir = "{work_dir.resolve()}"
 '''
 

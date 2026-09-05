@@ -508,7 +508,7 @@ R"doc(The number of trials between checkpoints.
 0 (the default) disables checkpointing. Only supported with HDF5
 output (output_mode "h5" or "h5divided"), not ascii: assigning a
 non-zero value here does not itself check output_mode the way
-setting outputs.checkpoint_interval in an input deck does, so a
+setting output.checkpoint_interval in an input deck does, so a
 SimControls built with ascii output that later has this set to a
 non-zero value here will raise a RuntimeError the first time a
 checkpoint is actually attempted, rather than immediately.)doc";

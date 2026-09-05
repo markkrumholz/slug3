@@ -63,7 +63,7 @@ def run_sim(input_deck: str, progress: bool = True, restart: bool = False) -> sl
         OutputManagerH5's own docstring for the full detail, and
         SimCluster.run/SimGalaxy.run's own docstrings for how the
         starting trial is chosen). Only valid with HDF5 output and a
-        non-zero outputs.checkpoint_interval in input_deck -- passing
+        non-zero output.checkpoint_interval in input_deck -- passing
         True with ASCII output raises RuntimeError, mirroring the
         slug command-line executable's own --restart/-R check.
 
