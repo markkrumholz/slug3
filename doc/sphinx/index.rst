@@ -10,9 +10,10 @@ Contents:
 .. toctree::
    :maxdepth: 2
 
+   quickstart
    license
-   getting
    intro
+   getting
    compiling
    running
    parameters
@@ -20,9 +21,9 @@ Contents:
    output
    filters
    slugpy
-   cpp_api/cpp_api_root
    cloudy
    tests
+   cpp_api/cpp_api_root
    acknowledgements
 
 Indices and tables

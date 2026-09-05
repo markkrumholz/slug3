@@ -37,8 +37,8 @@ a distribution of times. We refer to the former case as a "cluster" simulation, 
 the latter as a "galaxy" simulation, since one can be thought of as approximating
 the behavior of a single star cluster, and the other as approximating a whole galaxy.
 
-Probability Distribution Functions
-----------------------------------
+Probability Distribution Functions and Monte Carlo Sampling
+-----------------------------------------------------------
 
 As mentioned above, SLUG regards many of the characteristics describing a stellar
 population -- for example the initial mass function (IMF), the star formation history
@@ -50,9 +50,9 @@ PDFs to produce a stellar population star-by-star, and it calculates the composi
 spectra, photometry, yields, and feedback power of the resulting population by using
 one of several possible sets of stellar evolutionary tracks and stellar atmosphere models.
 Since each draw from the PDFs is random, the resulting stellar population will be different
-each time SLUG is run. By running SLUG many times, one can build up a probability
-distribution function for the outputs of interest, and thus quantify the uncertainty
-in those outputs that arises from the stochastic nature of star formation.
+each time SLUG is run. By running many trials, one can build up a probability
+distribution function for the outputs of interest that arises from the stochastic
+nature of star formation.
 
 However, users also have the option to disable some or all of the stochastic sampling
 in SLUG, for example by specifying that the IMF should be fully sampled, or that the
