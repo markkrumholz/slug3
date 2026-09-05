@@ -45,11 +45,15 @@ static auto makeClusterPhysicsInputDeck(const std::string& modelName,
 {
     toml::table inputDeck = toml::parse_file(deckPath);
     if (toml::table* outputTbl = inputDeck["output"].as_table())
-    { outputTbl->insert("model_name", modelName); }
-    else { inputDeck.insert("output", toml::table{ { "model_name", modelName } }); }
-    if (toml::table* outputsTbl = inputDeck["outputs"].as_table())
-    { outputsTbl->insert("out_dir", outDir.string()); }
-    else { inputDeck.insert("outputs", toml::table{ { "out_dir", outDir.string() } }); }
+    {
+        outputTbl->insert("model_name", modelName);
+        outputTbl->insert("out_dir", outDir.string());
+    }
+    else
+    {
+        inputDeck.insert("output", toml::table{
+            { "model_name", modelName }, { "out_dir", outDir.string() } });
+    }
     return inputDeck;
 }
 
@@ -1402,11 +1406,15 @@ static auto makeGalaxyPhysicsInputDeck(const std::string& modelName,
 {
     toml::table inputDeck = toml::parse_file(deckPath);
     if (toml::table* outputTbl = inputDeck["output"].as_table())
-    { outputTbl->insert("model_name", modelName); }
-    else { inputDeck.insert("output", toml::table{ { "model_name", modelName } }); }
-    if (toml::table* outputsTbl = inputDeck["outputs"].as_table())
-    { outputsTbl->insert("out_dir", outDir.string()); }
-    else { inputDeck.insert("outputs", toml::table{ { "out_dir", outDir.string() } }); }
+    {
+        outputTbl->insert("model_name", modelName);
+        outputTbl->insert("out_dir", outDir.string());
+    }
+    else
+    {
+        inputDeck.insert("output", toml::table{
+            { "model_name", modelName }, { "out_dir", outDir.string() } });
+    }
     return inputDeck;
 }
 
@@ -2714,7 +2722,7 @@ static auto testAllOutputsFalseThrows() -> int
 
 // Verify that OutputManagerAscii::checkpoint() throws: checkpointing
 // is only supported with HDF5 output. SimControls's own constructor
-// already rejects a non-zero outputs.checkpoint_interval combined with
+// already rejects a non-zero output.checkpoint_interval combined with
 // ascii output_mode when parsing a real input deck (see
 // testSimControlsCheckpointAsciiThrows in tests/io/testSimControls.cpp),
 // so this instead builds an ordinary (checkpointing-disabled) ascii
@@ -2732,7 +2740,7 @@ static auto testOutputManagerAsciiCheckpointThrows() -> int
     std::filesystem::create_directories(outDir);
     const std::string modelName = "test_model";
     toml::table inputDeck = makeClusterPhysicsInputDeck(modelName, outDir);
-    inputDeck.at_path("outputs").as_table()->insert_or_assign(
+    inputDeck.at_path("output").as_table()->insert_or_assign(
         "output_mode", std::string("ascii"));
 
     // Construction happens outside the try block: only checkpoint()

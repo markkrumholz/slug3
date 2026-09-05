@@ -198,7 +198,7 @@ void io::SimControls::initControlFlow(const toml::table& inputDeck)
 
     // Read output mode
     const auto outputMode = utils::getTOMLKeyWithError<std::string>(
-        inputDeck, "outputs.output_mode");
+        inputDeck, "output.output_mode");
     if (outputMode.has_value())
     {
         if (outputMode.value() == "h5" || outputMode.value() == "hdf5")
@@ -221,7 +221,7 @@ void io::SimControls::initControlFlow(const toml::table& inputDeck)
 
     // Read output directory
     const auto outDirInput =
-        utils::getTOMLKeyWithError<std::string>(inputDeck, "outputs.out_dir");
+        utils::getTOMLKeyWithError<std::string>(inputDeck, "output.out_dir");
     if (outDirInput.has_value()) { outDir_ = outDirInput.value(); }
 
     // Read number of trials
@@ -241,7 +241,7 @@ void io::SimControls::initControlFlow(const toml::table& inputDeck)
     // rejected here, at construction, rather than left to fail later,
     // mid-run, the first time a checkpoint would actually be attempted.
     const auto checkpointIntervalInput = utils::getTOMLKeyWithError<unsigned long>(
-        inputDeck, "outputs.checkpoint_interval");
+        inputDeck, "output.checkpoint_interval");
     if (checkpointIntervalInput.has_value())
     {
         checkpointInterval_ = checkpointIntervalInput.value();
@@ -249,9 +249,9 @@ void io::SimControls::initControlFlow(const toml::table& inputDeck)
     if (checkpointInterval_ != 0 && outputMode_ == OutputMode::ascii)
     {
         throw std::runtime_error(
-            "SimControls: outputs.checkpoint_interval is non-zero, but "
+            "SimControls: output.checkpoint_interval is non-zero, but "
             "checkpointing is only supported with HDF5 output "
-            "(outputs.output_mode = \"h5\" or \"h5divided\"), not ascii");
+            "(output.output_mode = \"h5\" or \"h5divided\"), not ascii");
     }
 
     // Handle output time generation

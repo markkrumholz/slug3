@@ -166,7 +166,7 @@ namespace
             starsTbl.insert_or_assign("FeH", combo.feh_);
             starsTbl.insert_or_assign("v_vcrit", combo.vvcrit_);
             tableAt(inputDeck, "output").insert_or_assign("model_name", std::string("grid_test"));
-            tableAt(inputDeck, "outputs").insert_or_assign("out_dir", outDir.string());
+            tableAt(inputDeck, "output").insert_or_assign("out_dir", outDir.string());
 
             std::filesystem::remove_all(outDir);
             std::filesystem::create_directories(outDir);

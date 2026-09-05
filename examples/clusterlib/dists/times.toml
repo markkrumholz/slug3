@@ -1,5 +1,5 @@
 # Output-time distribution for the clusterlib example, used as
-# outputs.output_time_dist: a single powerlaw segment with slope -1
+# output.output_times: a single powerlaw segment with slope -1
 # from 1e6 to 1e9 yr, so each trial's single output time is drawn
 # from this distribution rather than being fixed or laid out on a
 # grid.

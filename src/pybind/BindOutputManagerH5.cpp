@@ -92,7 +92,7 @@ restart : bool, default False
     instead of starting over at checkpoint 0 -- see the C++
     OutputManagerH5::restartSetup()'s own documentation for the full
     detail. Only meaningful with HDF5 output and a non-zero
-    outputs.checkpoint_interval in input_deck.
+    output.checkpoint_interval in input_deck.
 
 Throws
 ------
