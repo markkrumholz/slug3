@@ -18,4 +18,20 @@ into ``/home/user/slug3``, you can do::
 
     export SLUG_DIR=/home/user/slug3
 
-The next step, once that is done
+The next step, once that is done, is to write a parameter file describing the
+simulation you want to run. See :ref:`sec-parameters` for a full description of
+the parameter file format, and the ``examples/`` directory in the repository for
+example parameter files. Once you have a parameter file, you can run SLUG by
+doing::
+
+    build/slug path/to/parameter_file.toml
+
+The run will automatically use OpenMP to parallelize if SLUG was built with OpenMP
+support, and will use all available threads by default. You can control the number
+of threads used by setting the ``OMP_NUM_THREADS`` environment variable, e.g.::
+
+    export OMP_NUM_THREADS=4
+
+Running SLUG From Python
+------------------------
+
