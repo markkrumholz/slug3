@@ -24,7 +24,7 @@ from typing import cast
 import pytest
 from astropy import units as u
 
-from slugpy import run_sim
+from slugpy import SimControls, run_sim
 from slugpy.slug_reader import slug_reader
 
 # slugpy/__init__.py's own "from .run_sim import run_sim" overwrites the
@@ -99,6 +99,41 @@ def test_run_sim_accepts_literal_toml_content(tmp_path, monkeypatch):
     assert isinstance(data, slug_reader)
     assert data.clusters is not None
     assert list(cast(u.Quantity, data.clusters["target_mass"]).value) == [1000.0]
+
+
+def test_run_sim_accepts_simcontrols_object(tmp_path, monkeypatch):
+    """controls may be an already-built SimControls object, used
+    directly instead of being constructed from deck text -- same
+    result as passing the deck itself, since SimControls(CLUSTER_DECK)
+    and run_sim(CLUSTER_DECK) build an equivalent SimControls the same
+    way under the hood."""
+    monkeypatch.chdir(tmp_path)
+    sim_controls = SimControls(CLUSTER_DECK)
+
+    data = run_sim(sim_controls, progress=False)
+
+    assert isinstance(data, slug_reader)
+    assert data.clusters is not None
+    assert list(cast(u.Quantity, data.clusters["target_mass"]).value) == [1000.0]
+    assert data.cluster_spectra is not None
+    assert data.cluster_spectra["spec"].shape[0] == 3
+
+
+def test_run_sim_simcontrols_object_ascii_still_warns(tmp_path, monkeypatch):
+    """Passing a SimControls object built with ASCII output still runs
+    to completion and still warns/returns None exactly as the
+    deck-text path does -- exercising OutputManagerAscii's own empty-
+    deck fallback (see run_sim's own docstring) rather than
+    OutputManagerH5's."""
+    monkeypatch.chdir(tmp_path)
+    sim_controls = SimControls(ASCII_DECK)
+
+    with pytest.warns(UserWarning, match="ASCII output"):
+        result = run_sim(sim_controls, progress=False)
+
+    assert result is None
+    assert (tmp_path / "slug_sim_summary.txt").exists()
+    assert (tmp_path / "slug_sim_clusters.txt").exists()
 
 
 def test_run_sim_galaxy_deck(tmp_path, monkeypatch):
