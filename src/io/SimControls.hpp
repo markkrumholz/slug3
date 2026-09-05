@@ -189,9 +189,12 @@ namespace io
         [[nodiscard]] auto intAbsTol() const { return intAbsTol_; }
 
         /**
-         * @brief Return the maximum number of evaluations for PDF integration
-         * @return Max evaluations passed to PDFIntegrator (0 = unlimited;
-         *   default 2^19 -- see intMaxIter_'s own comment for why)
+         * @brief Return the maximum number of bisection iterations for PDF integration
+         * @return Max bisection iterations passed to PDFIntegrator (0 =
+         *   unlimited; default 2^19 -- see intMaxIter_'s own comment
+         *   for why); not a count of raw integrand evaluations, which
+         *   each iteration costs several of -- see GKIntegrator::
+         *   integrate()'s own comment
          */
         [[nodiscard]] auto intMaxIter() const { return intMaxIter_; }
 
@@ -283,8 +286,9 @@ namespace io
         void setIntAbsTol(double tol) { intAbsTol_ = tol; }
 
         /**
-         * @brief Set the maximum number of evaluations for PDF integration
-         * @param n New maximum (0 = unlimited)
+         * @brief Set the maximum number of bisection iterations for PDF integration
+         * @param n New maximum (0 = unlimited); not a count of raw
+         *   integrand evaluations -- see intMaxIter_'s own comment
          * @details
          * See setIntRelTol()'s own comment on live (not snapshotted) effect.
          */
@@ -927,46 +931,38 @@ namespace io
          * which can be genuinely tiny at wavelengths a given stellar
          * population barely emits at -- forcing the integrator to keep
          * refining indefinitely chasing relative precision on a
-         * near-zero quantity. 1e-3 was chosen alongside intMaxIter_'s
-         * own default (see its own comment) from the same benchmark:
-         * a sane floor at the same order as intRelTol_'s own default,
-         * not a value tuned to any specific integral.
+         * near-zero quantity. 1e-3 is a sane floor at the same order as
+         * intRelTol_'s own default, not a value tuned to any specific
+         * integral.
          */
         double intAbsTol_ = 1e-3;
         /**
-         * @brief Max evaluations for PDF integrator (0 = unlimited)
+         * @brief Max bisection iterations for PDF integrator (0 = unlimited)
          * @details
-         * 2^19 (524288) by default, not 0 (unlimited): with 0, an
-         * integrand that is slow to converge to the requested
-         * tolerance -- e.g. Specsyn::continuousSpecIntegrand()'s own
-         * dead-star discontinuity in (age, mass) space, whose exact
-         * effect on convergence rate isn't knowable in advance for an
-         * arbitrary track set/SFH -- has no cap on how long it can run
-         * or how much memory pAdaptive's own point cache can grow to
-         * (see Specsyn::specCtsHelper()'s own comment on the memory
-         * blowup this caused before intMaxIter_ had a real default).
-         * 2^19, not one further doubling to 2^20 (an earlier choice
-         * here, briefly): pAdaptive's own cache (see
-         * src/extern/cubature/pcubature.c) grows by attempting one
-         * more whole resolution *doubling*, in whichever dimension has
-         * the largest error, whenever the integral hasn't yet converged
-         * and max_iter hasn't yet been reached -- an inherently
-         * discontinuous jump in memory demand, not a gradual one, so
-         * "headroom above the largest benchmarked value" is not actually
-         * safer, since it can let one further such doubling be attempted
-         * that the benchmark itself never triggered. Confirmed
-         * empirically: the real, permanent
-         * testGalaxySpecsynFullNonStoch slow test's own curTime = 1e7 yr
-         * output time -- even reduced to the simplest possible case, a
-         * single [Fe/H] value and a single such doubling-prone 2D
-         * integral -- exceeded 6 GB of resident memory within a few
-         * seconds at max_iter = 2^20, but completed comfortably (peak
-         * well under that threshold) at max_iter = 2^19, the actual
-         * benchmarked-safe value from the original head-to-head
-         * benchmark of Specsyn::specCtsHelper()'s own continuous-
-         * population integral against CubatureMethod::hAdaptive at
-         * curTime up to 1e10 yr (every max_iter value tried, from 2^10
-         * up to 2^19, finished in a few seconds).
+         * Not a cap on raw evaluations of the integrand itself -- each
+         * bisection iteration costs a small, fixed number of further
+         * evaluations, not a growing one (see GKIntegrator::
+         * integrate()'s own comment) -- but a cap on how many times
+         * PDFIntegrator (see its own class comment; built on
+         * GKIntegrator, an adaptive Gauss-Kronrod quadrature, since
+         * replacing an earlier, cubature-package-based implementation)
+         * is allowed to keep bisecting whichever subinterval currently
+         * contributes the most error, chasing intRelTol_/intAbsTol_.
+         * Nonzero by default: with 0 (unlimited), an integrand that is
+         * slow to converge to the requested tolerance -- e.g.
+         * Specsyn::continuousSpecIntegrand()'s own dead-star
+         * discontinuity in (age, mass) space, whose exact effect on
+         * convergence rate isn't knowable in advance for an arbitrary
+         * track set/SFH -- has no cap on how long it can run. Unlike
+         * the cubature-based implementation this replaced -- whose own
+         * point cache could grow by a whole resolution *doubling* per
+         * iteration, an inherently discontinuous jump in memory demand
+         * that once caused a real memory blowup in this same codebase
+         * -- each of GKIntegrator's own bisections adds at most one net
+         * new subinterval, so its memory use grows linearly with
+         * intMaxIter_, not exponentially; 2^19 (524288), inherited
+         * unchanged from that earlier implementation's own tuning, has
+         * not needed revisiting since.
          */
         std::size_t intMaxIter_ = 1UL << 19;
         double z_ = 0.0;                               /**< Redshift, read live by every Specsyn/Extinct built from this SimControls */
