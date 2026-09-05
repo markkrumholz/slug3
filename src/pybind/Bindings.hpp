@@ -25,7 +25,6 @@
 #include <memory>
 #include <pybind11/pybind11.h>
 #include <pybind11/pytypes.h>
-#include <string>
 
 namespace py = pybind11;
 

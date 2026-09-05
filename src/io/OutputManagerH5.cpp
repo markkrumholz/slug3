@@ -31,7 +31,6 @@
 #include <stdexcept>
 #include <string>
 #include <system_error>
-#include <toml.hpp>
 #include <vector>
 #ifdef _OPENMP
 #   include <omp.h>
