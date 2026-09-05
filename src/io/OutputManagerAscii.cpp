@@ -25,7 +25,6 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
-#include <toml.hpp>
 #include <utility>
 #include <vector>
 
@@ -522,10 +521,8 @@ static void writeGalaxyNebLinesHeader(std::ofstream& file, const int lineLabelWi
 // the file. If the simulation outputs individual clusters, also
 // open the cluster output file, write its column-header rows, and
 // leave it open for later writing.
-io::OutputManagerAscii::OutputManagerAscii(
-    const SimControls& simControls,
-    const toml::table& inputDeck) :
-    OutputManager(simControls, inputDeck)
+io::OutputManagerAscii::OutputManagerAscii(const SimControls& simControls) :
+    OutputManager(simControls)
 {
     const auto path = std::filesystem::path(simControls_.outDir()) /
         (simControls_.modelName() + "_summary.txt");
@@ -548,7 +545,7 @@ io::OutputManagerAscii::OutputManagerAscii(
          << "time  " << time << "\n"
          << "rng_state  " << currentRngStateString() << "\n";
 
-    file << "input_deck\n" << inputDeck_ << "\n";
+    file << "input_deck\n" << simControls_.inputDeckStr() << "\n";
 
     file.close();
 
@@ -567,7 +564,7 @@ io::OutputManagerAscii::OutputManagerAscii(
 // openClustersGroup()'s identical gating condition)
 void io::OutputManagerAscii::openClustersFile()
 {
-    if (!writeCluster_) { return; }
+    if (!simControls_.writeCluster()) { return; }
 
     const auto clustersPath = std::filesystem::path(simControls_.outDir()) /
         (simControls_.modelName() + "_clusters.txt");
@@ -594,7 +591,7 @@ void io::OutputManagerAscii::openClustersFile()
 void io::OutputManagerAscii::openClusterSpectraFile()
 {
     if (simControls_.specsyn() == nullptr) { return; }
-    if (!writeClusterSpec_) { return; }
+    if (!simControls_.writeClusterSpec()) { return; }
 
     wlObs_ = simControls_.specsyn()->wlObs();
 
@@ -624,7 +621,7 @@ void io::OutputManagerAscii::openClusterNebLinesFile()
 {
     if (simControls_.nebular() == nullptr) { return; }
     if (simControls_.specsyn() == nullptr) { return; }
-    if (!writeClusterSpec_) { return; }
+    if (!simControls_.writeClusterSpec()) { return; }
 
     const auto clusterNebLinesPath = std::filesystem::path(simControls_.outDir()) /
         (simControls_.modelName() + "_cluster_neb_lines.txt");
@@ -649,7 +646,7 @@ void io::OutputManagerAscii::openClusterNebLinesFile()
 void io::OutputManagerAscii::openClusterPhotFile()
 {
     if (simControls_.filters() == nullptr && !simControls_.computeLbol()) { return; }
-    if (!writeClusterPhot_) { return; }
+    if (!simControls_.writeClusterPhot()) { return; }
 
     const auto clusterPhotPath = std::filesystem::path(simControls_.outDir()) /
         (simControls_.modelName() + "_cluster_phot.txt");
@@ -698,7 +695,7 @@ void io::OutputManagerAscii::openClusterPhotFile()
 void io::OutputManagerAscii::openGalaxyFile()
 {
     if (simControls_.simType() != SimControls::SimType::galaxy) { return; }
-    if (!writeGalaxy_) { return; }
+    if (!simControls_.writeGalaxy()) { return; }
 
     const auto galaxyPath = std::filesystem::path(simControls_.outDir()) /
         (simControls_.modelName() + "_galaxy.txt");
@@ -723,7 +720,7 @@ void io::OutputManagerAscii::openGalaxySpectraFile()
 {
     if (simControls_.simType() != SimControls::SimType::galaxy) { return; }
     if (simControls_.specsyn() == nullptr) { return; }
-    if (!writeGalaxySpec_) { return; }
+    if (!simControls_.writeGalaxySpec()) { return; }
 
     wlObs_ = simControls_.specsyn()->wlObs();
 
@@ -755,7 +752,7 @@ void io::OutputManagerAscii::openGalaxyNebLinesFile()
     if (simControls_.simType() != SimControls::SimType::galaxy) { return; }
     if (simControls_.nebular() == nullptr) { return; }
     if (simControls_.specsyn() == nullptr) { return; }
-    if (!writeGalaxySpec_) { return; }
+    if (!simControls_.writeGalaxySpec()) { return; }
 
     const auto galaxyNebLinesPath = std::filesystem::path(simControls_.outDir()) /
         (simControls_.modelName() + "_galaxy_neb_lines.txt");
@@ -783,7 +780,7 @@ void io::OutputManagerAscii::openGalaxyPhotFile()
 {
     if (simControls_.simType() != SimControls::SimType::galaxy) { return; }
     if (simControls_.filters() == nullptr && !simControls_.computeLbol()) { return; }
-    if (!writeGalaxyPhot_) { return; }
+    if (!simControls_.writeGalaxyPhot()) { return; }
 
     const auto galaxyPhotPath = std::filesystem::path(simControls_.outDir()) /
         (simControls_.modelName() + "_galaxy_phot.txt");

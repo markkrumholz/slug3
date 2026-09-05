@@ -212,11 +212,11 @@ static auto runEndToEnd(const toml::table& inputDeck, const bool restart = false
     if (simControls.outputMode() == io::SimControls::OutputMode::h5 ||
         simControls.outputMode() == io::SimControls::OutputMode::h5divided)
     {
-        outputManager = std::make_unique<io::OutputManagerH5>(simControls, inputDeck, restart);
+        outputManager = std::make_unique<io::OutputManagerH5>(simControls, restart);
     }
     else
     {
-        outputManager = std::make_unique<io::OutputManagerAscii>(simControls, inputDeck);
+        outputManager = std::make_unique<io::OutputManagerAscii>(simControls);
     }
 
     // Captured before outputManager is moved into simCluster below,
@@ -1142,7 +1142,7 @@ static auto testSimClusterSigtermGracefulExit() -> int
         int exitCode = 0;
         unsigned long completed = 0;
         {
-            auto outputManager = std::make_unique<io::OutputManagerH5>(simControls, deck);
+            auto outputManager = std::make_unique<io::OutputManagerH5>(simControls);
             core::SimCluster simCluster(simControls, std::move(outputManager));
 
             std::thread sigtermThread([&sigtermDelay]()

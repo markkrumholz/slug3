@@ -31,7 +31,6 @@
 #include <stdexcept>
 #include <string>
 #include <system_error>
-#include <toml.hpp>
 #include <vector>
 #ifdef _OPENMP
 #   include <omp.h>
@@ -309,9 +308,8 @@ static void appendNebLinesRow(const io::SimControls& simControls, const hid_t gr
 // openNewOutputFiles()'s own comment for the full detail of what
 // happens below.
 io::OutputManagerH5::OutputManagerH5(
-    const SimControls& simControls,
-    const toml::table& inputDeck, const bool restart) :
-    OutputManager(simControls, inputDeck)
+    const SimControls& simControls, const bool restart) :
+    OutputManager(simControls)
 {
     // See this constructor's own header comment for why this is
     // unreachable from the CLI in practice, but still worth guarding
@@ -584,9 +582,7 @@ void io::OutputManagerH5::openOutputFile(const std::filesystem::path& path)
             throw std::runtime_error(
                 "OutputManagerH5: unable to create input_deck group");
         }
-        std::ostringstream tomlStream;
-        tomlStream << inputDeck_;
-        utils::writeStringDataset(inputDeckGrp, "toml", tomlStream.str());
+        utils::writeStringDataset(inputDeckGrp, "toml", simControls_.inputDeckStr());
         H5Gclose(inputDeckGrp);
         // NOLINTEND(misc-include-cleaner)
 
@@ -603,7 +599,7 @@ void io::OutputManagerH5::openOutputFile(const std::filesystem::path& path)
 // (optional, defaults to true) was not set to false
 void io::OutputManagerH5::openClustersGroup()
 {
-    if (!writeCluster_) { return; }
+    if (!simControls_.writeCluster()) { return; }
 
     // NOLINTBEGIN(misc-include-cleaner)
     clustersGroup_() = H5Gcreate2(file_(), "clusters",
@@ -664,7 +660,7 @@ void io::OutputManagerH5::openClustersGroup()
 void io::OutputManagerH5::openClusterSpectraGroup()
 {
     if (simControls_.specsyn() == nullptr) { return; }
-    if (!writeClusterSpec_) { return; }
+    if (!simControls_.writeClusterSpec()) { return; }
 
     const auto& synth = *simControls_.specsyn();
     const std::vector<double> wlObs = synth.wlObs();
@@ -730,7 +726,7 @@ void io::OutputManagerH5::openClusterSpectraGroup()
 void io::OutputManagerH5::openClusterPhotGroup()
 {
     if (simControls_.filters() == nullptr && !simControls_.computeLbol()) { return; }
-    if (!writeClusterPhot_) { return; }
+    if (!simControls_.writeClusterPhot()) { return; }
 
     std::vector<std::string> filterNames;
     std::vector<std::string> filterUnits;
@@ -813,7 +809,7 @@ void io::OutputManagerH5::openClusterPhotGroup()
 void io::OutputManagerH5::openGalaxyGroup()
 {
     if (simControls_.simType() != SimControls::SimType::galaxy) { return; }
-    if (!writeGalaxy_) { return; }
+    if (!simControls_.writeGalaxy()) { return; }
 
     // NOLINTBEGIN(misc-include-cleaner)
     galaxyGroup_() = H5Gcreate2(file_(), "galaxy",
@@ -852,7 +848,7 @@ void io::OutputManagerH5::openGalaxySpectraGroup()
 {
     if (simControls_.simType() != SimControls::SimType::galaxy) { return; }
     if (simControls_.specsyn() == nullptr) { return; }
-    if (!writeGalaxySpec_) { return; }
+    if (!simControls_.writeGalaxySpec()) { return; }
 
     const auto& synth = *simControls_.specsyn();
     const std::vector<double> wlObs = synth.wlObs();
@@ -914,7 +910,7 @@ void io::OutputManagerH5::openGalaxyPhotGroup()
 {
     if (simControls_.simType() != SimControls::SimType::galaxy) { return; }
     if (simControls_.filters() == nullptr && !simControls_.computeLbol()) { return; }
-    if (!writeGalaxyPhot_) { return; }
+    if (!simControls_.writeGalaxyPhot()) { return; }
 
     std::vector<std::string> filterNames;
     std::vector<std::string> filterUnits;

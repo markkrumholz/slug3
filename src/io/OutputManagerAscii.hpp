@@ -12,7 +12,6 @@
 #include "OutputManager.hpp"
 #include "SimControls.hpp"
 #include <fstream>
-#include <toml.hpp>
 #include <vector>
 
 namespace core
@@ -36,13 +35,11 @@ namespace io
          * @brief Open the output file and write its header
          * @param simControls Simulation controls (physics settings and
          *   control-flow settings together)
-         * @param inputDeck The simulation's toml input deck
          * @details
-         * simControls and inputDeck are stored by reference, so the
-         * objects passed in must outlive this OutputManagerAscii.
+         * simControls is stored by reference, so the object passed in
+         * must outlive this OutputManagerAscii.
          */
-        OutputManagerAscii(const SimControls& simControls,
-            const toml::table& inputDeck);
+        explicit OutputManagerAscii(const SimControls& simControls);
 
         /**
          * @brief Close the cluster output file, if it was opened

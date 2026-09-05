@@ -16,7 +16,6 @@
 #include <filesystem>
 #include <optional>
 #include <string>
-#include <toml.hpp>
 
 namespace core
 {
@@ -78,7 +77,6 @@ namespace io
          * @brief Open the output file(s) and write their header
          * @param simControls Simulation controls (physics settings and
          *   control-flow settings together)
-         * @param inputDeck The simulation's toml input deck
          * @param restart Whether this run is resuming a previous,
          *   interrupted run from its most recent checkpoint (see
          *   restartSetup()'s own comment); defaults to false
@@ -113,10 +111,10 @@ namespace io
          *   here rather than left to silently produce output nothing
          *   can read back.
          * @details
-         * simControls and inputDeck are stored by reference, so the
-         * objects passed in must outlive this OutputManagerH5. See
-         * this class's own header comment for what "the output
-         * file(s)" means when built with OpenMP.
+         * simControls is stored by reference, so the object passed in
+         * must outlive this OutputManagerH5. See this class's own
+         * header comment for what "the output file(s)" means when
+         * built with OpenMP.
          *
          * If restart is true, calls restartSetup() before
          * openNewOutputFiles(), so checkpointNumber_ (and, via it,
@@ -124,8 +122,7 @@ namespace io
          * reflects where the run being restarted left off by the time
          * the first file is actually opened.
          */
-        OutputManagerH5(const SimControls& simControls,
-            const toml::table& inputDeck, bool restart = false);
+        explicit OutputManagerH5(const SimControls& simControls, bool restart = false);
 
         /**
          * @brief Close the output file

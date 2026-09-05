@@ -36,6 +36,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <toml.hpp>
@@ -171,6 +172,14 @@ static auto generateOutputTimesRange(const toml::table& inputDeck) -> std::vecto
 
 io::SimControls::SimControls(const toml::table& inputDeck)
 {
+    // Cache the deck's own text before parsing anything out of it, so
+    // OutputManagerH5/OutputManagerAscii can later record exactly what
+    // was actually used, without needing a toml::table of their own --
+    // see inputDeckStr()'s own comment.
+    std::ostringstream inputDeckStream;
+    inputDeckStream << inputDeck;
+    inputDeckStr_ = inputDeckStream.str();
+
     initControlFlow(inputDeck);
     initPhysics(inputDeck);
 }
@@ -256,6 +265,9 @@ void io::SimControls::initControlFlow(const toml::table& inputDeck)
 
     // Handle output time generation
     setOutputTimes(inputDeck);
+
+    // Read the output content flags (output.write_cluster/etc.)
+    readOutput(inputDeck);
 
     // If we have been given a specific RNG seed, use it
     const auto rngSeed =
@@ -499,6 +511,23 @@ void io::SimControls::setOutputTimes(const toml::table& inputDeck)
             "output.ntime must all be specified together");
     }
     outTimes_ = generateOutputTimesRange(inputDeck);
+}
+
+// Read an optional output.<key> boolean, defaulting to true if absent
+static auto readWriteFlag(const toml::table& inputDeck, const std::string& key) -> bool
+{
+    const auto value = utils::getTOMLKeyWithError<bool>(inputDeck, key);
+    return !value.has_value() || value.value();
+}
+
+void io::SimControls::readOutput(const toml::table& inputDeck)
+{
+    writeCluster_ = readWriteFlag(inputDeck, "output.write_cluster");
+    writeClusterSpec_ = readWriteFlag(inputDeck, "output.write_cluster_spec");
+    writeClusterPhot_ = readWriteFlag(inputDeck, "output.write_cluster_phot");
+    writeGalaxy_ = readWriteFlag(inputDeck, "output.write_galaxy");
+    writeGalaxySpec_ = readWriteFlag(inputDeck, "output.write_galaxy_spec");
+    writeGalaxyPhot_ = readWriteFlag(inputDeck, "output.write_galaxy_phot");
 }
 
 // Set the [Fe/H] distribution, recomputing tracks2D() (constFeHTracks_)

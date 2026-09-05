@@ -130,7 +130,7 @@ auto runGalaxySpecsynFull(const std::string& inputFile, const std::string& model
             // consolidated into h5Path (see OutputManagerH5's own
             // destructor comment), before the reopen attempt below
             std::unique_ptr<io::OutputManager> outputManager =
-                std::make_unique<io::OutputManagerH5>(simControls, inputDeck);
+                std::make_unique<io::OutputManagerH5>(simControls);
 
             core::SimGalaxy simGalaxy(simControls, std::move(outputManager));
             simGalaxy.run();
