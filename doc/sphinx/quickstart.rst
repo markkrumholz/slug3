@@ -34,3 +34,20 @@ To get started with SLUG, carry out the following steps:
         ctest -L quick
 
     See :ref:`sec-tests` for the full details on the test suite.
+
+4. Write a parameter file describing the simulation you want to run. See 
+:ref:`sec-parameters` for details, and the ``examples/`` directory in the
+repository for example parameter files.
+
+5. Run SLUG either from the command line or from Python. To run from the command
+line, do::
+
+    build/slug path/to/parameter_file.toml
+
+and to run from Python, do::
+
+    import slugpy
+    sim_result = slugpy.run_sim("path/to/parameter_file.toml")
+
+See :ref:`sec-running` for full details on running SLUG from the command line or
+from Python.

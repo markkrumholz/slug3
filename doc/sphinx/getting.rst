@@ -19,3 +19,8 @@ repository. For example, to download all of the data files, run::
 
 Warning: the data files are large (several GB), so make sure you have enough disk space
 before downloading them.
+
+If you prefer to download the data files manually, they can be accessed from the
+Australian National University
+`Data Commons <https://datacommons.anu.edu.au/DataCommons/rest/display/anudc:6518>`_
+service.

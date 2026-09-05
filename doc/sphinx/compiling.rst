@@ -131,14 +131,6 @@ test suite, `pyright <https://microsoft.github.io/pyright/>`_ to type-check
 
     pip install pytest pyright ruff
 
-.. _sec-getting:
-
-Getting the Source
---------------------
-
-See :doc:`getting` for how to clone the repository (including the git
-submodules the bundled dependencies above need).
-
 .. _sec-building:
 
 Configuring and Building
