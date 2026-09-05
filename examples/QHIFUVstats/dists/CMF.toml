@@ -1,9 +1,9 @@
 # Cluster mass function for the QHIFUVstats example: a Schechter
 # distribution (a powerlaw of slope alpha with an exponential cutoff
-# above xStar) with alpha = -2 and xStar = 1e5 Msun, matching
+# above x_star) with alpha = -2 and x_star = 1e5 Msun, matching
 # examples/clusterlib's own CMF.toml. Breakpoints set the mass range
 # this is sampled over: 100 Msun (a typical minimum bound-cluster
-# mass) to 1e7 Msun -- well above xStar, so the exponential cutoff,
+# mass) to 1e7 Msun -- well above x_star, so the exponential cutoff,
 # not this upper bound, is what actually shapes the high-mass tail.
 
 breakpoints = [1e2, 1e7]
@@ -11,4 +11,4 @@ breakpoints = [1e2, 1e7]
 [segment1]
 type = "schechter"
 slope = -2
-xStar = 1e5
+x_star = 1e5

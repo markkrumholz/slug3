@@ -30,12 +30,12 @@ pdfs::PDFSegmentSchechter::PDFSegmentSchechter(
         // Basic format
 
         // Call segment parser to get the tokens we need
-        std::vector<std::string> tokens = { "slope", "xStar" };
+        std::vector<std::string> tokens = { "slope", "x_star" };
         auto contents = segmentParser(file, tokens);
 
         // Use the parsed results to set parameters
         alpha_ = contents["slope"];
-        sStar_ = contents["xStar"];
+        sStar_ = contents["x_star"];
     }
     else
     {
@@ -43,12 +43,12 @@ pdfs::PDFSegmentSchechter::PDFSegmentSchechter(
 
         // Call segment parser to get the tokens we need
         std::vector<std::string> tokens =
-            { "slope", "xStar", "min", "max", "weight" };
+            { "slope", "x_star", "min", "max", "weight" };
         auto contents = segmentParser(file, tokens);
 
         // Use the parsed results to set parameters
         alpha_ = contents["slope"];
-        sStar_ = contents["xStar"];
+        sStar_ = contents["x_star"];
         sMin_ = contents["min"];
         sMax_ = contents["max"];
         wgt = contents["weight" ];
@@ -83,12 +83,12 @@ pdfs::PDFSegmentSchechter::PDFSegmentSchechter(
         // Basic format
 
         // Look for the keys we need
-        std::vector<std::string> tokens = { "slope", "xStar" };
+        std::vector<std::string> tokens = { "slope", "x_star" };
         auto contents = segmentParserToml(node, tokens);
 
         // Use the parsed results to set parameters
         alpha_ = contents["slope"];
-        sStar_ = contents["xStar"];
+        sStar_ = contents["x_star"];
     }
     else
     {
@@ -96,12 +96,12 @@ pdfs::PDFSegmentSchechter::PDFSegmentSchechter(
 
         // Look for the keys we need
         std::vector<std::string> tokens =
-            { "slope", "xStar", "min", "max", "weight" };
+            { "slope", "x_star", "min", "max", "weight" };
         auto contents = segmentParserToml(node, tokens);
 
         // Use the parsed results to set parameters
         alpha_ = contents["slope"];
-        sStar_ = contents["xStar"];
+        sStar_ = contents["x_star"];
         sMin_ = contents["min"];
         sMax_ = contents["max"];
         wgt = contents["weight" ];
