@@ -9,3 +9,13 @@ The easiest way to install SLUG is to use git to clone the repository by doing::
 
     git clone https://github.com/markkrumholz/slug3.git
     git submodule update --init --recursive
+
+In addition to the SLUG source code and its submodules, SLUG requires a number of
+data files that are not included in the github repository due to their size. These data
+files can be downloaded using the script ``data/tools/download_data.py`` in the
+repository. For example, to download all of the data files, run::
+
+    python data/tools/download_data.py --all
+
+Warning: the data files are large (several GB), so make sure you have enough disk space
+before downloading them.
