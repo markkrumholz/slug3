@@ -43,16 +43,24 @@ def _run(sim: SimCluster | SimGalaxy, sim_controls: SimControls, progress: bool)
     return sim.run()
 
 
-def run_sim(input_deck: str, progress: bool = True, restart: bool = False) -> slug_reader | None:
+def run_sim(controls: SimControls | str, progress: bool = True, restart: bool = False) -> slug_reader | None:
     """
     Run a slug simulation end to end, exactly as the slug command-line
     executable does.
 
     Parameters
     ----------
-    input_deck : str
-        Either the text of a slug TOML input deck, or a path to one on
-        disk (see SimControls's own constructor for the exact rule).
+    controls : SimControls or str
+        Either an already-built SimControls object, used directly, or
+        the text of a slug TOML input deck, or a path to one on disk
+        (see SimControls's own constructor for the exact string-
+        parsing rule), used to construct one. Passing a SimControls
+        object directly lets a simulation be driven entirely from
+        Python -- via SimControls's own constructor keyword arguments
+        and setters -- without ever writing an input deck to text; see
+        Details below for the one respect (output.write_cluster*/
+        write_galaxy* flags, and the deck recorded for provenance in
+        the output file) in which this differs from an equivalent deck.
     progress : bool, default True
         Whether to show a progress bar (see slugpy.progress) tracking
         trials completed while the simulation runs.
@@ -63,7 +71,7 @@ def run_sim(input_deck: str, progress: bool = True, restart: bool = False) -> sl
         OutputManagerH5's own docstring for the full detail, and
         SimCluster.run/SimGalaxy.run's own docstrings for how the
         starting trial is chosen). Only valid with HDF5 output and a
-        non-zero output.checkpoint_interval in input_deck -- passing
+        non-zero output.checkpoint_interval in controls -- passing
         True with ASCII output raises RuntimeError, mirroring the
         slug command-line executable's own --restart/-R check.
 
@@ -78,11 +86,20 @@ def run_sim(input_deck: str, progress: bool = True, restart: bool = False) -> sl
 
     Details
     -------
-    Mirrors main.cpp's own control flow: builds a SimControls from
-    input_deck, an OutputManagerH5 or OutputManagerAscii from it
-    (matching sim_controls.outputMode()), and -- depending on
-    sim_controls.simType() -- a SimCluster or SimGalaxy, which it then
-    runs.
+    Mirrors main.cpp's own control flow: obtains a SimControls (either
+    controls itself, or one built from it), an OutputManagerH5 or
+    OutputManagerAscii from it (matching sim_controls.outputMode()),
+    and -- depending on sim_controls.simType() -- a SimCluster or
+    SimGalaxy, which it then runs.
+
+    OutputManagerH5/OutputManagerAscii each read a deck of their own,
+    independently of sim_controls: the optional output.write_cluster*/
+    write_galaxy* flags (each defaulting to True if absent), and the
+    deck's own text, recorded verbatim in the output file for
+    provenance. When controls is a SimControls object rather than deck
+    text, there is no such deck to hand them, so an empty one is used
+    instead -- every write_* flag then defaults to True (everything is
+    written), and the output file's own recorded input deck is empty.
 
     The progress bar (when enabled) is driven by run_with_progress:
     run() itself executes on a background thread, while this calling
@@ -107,7 +124,12 @@ def run_sim(input_deck: str, progress: bool = True, restart: bool = False) -> sl
     returns None rather than trying to read back a file that was never
     written.
     """
-    sim_controls = SimControls(input_deck)
+    if isinstance(controls, SimControls):
+        sim_controls = controls
+        input_deck = ""
+    else:
+        sim_controls = SimControls(controls)
+        input_deck = controls
 
     if restart and sim_controls.outputMode() == SimControls.OutputMode.ascii:
         raise RuntimeError(
