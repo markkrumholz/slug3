@@ -22,6 +22,8 @@ Contents:
    tracks
    atmospheres
    photometry
+   nebular
+   extinction
    slugpy
    cloudy
    tests

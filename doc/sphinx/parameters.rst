@@ -146,7 +146,11 @@ composition/rotation settings.
 
 * ``IMF`` (required): The stellar initial mass function, as a number or PDF (see
   above). A file name is resolved under ``data/imfs`` (in addition to the usual
-  current-working-directory/``SLUG_DIR``/repository search).
+  current-working-directory/``SLUG_DIR``/repository search). The following IMF
+  models are included in the SLUG repo: ``chabrier.toml`` (a Chabrier 2005 IMF),
+  ``chabrier03.toml`` (a Chabrier 2003 IMF), ``kroupa.toml`` (a Kroupa 2002 IMF),
+  ``salpeter.toml`` (a Salpeter IMF), and ``weidner_kroupa06.toml`` (one version
+  of the Weidner & Kroupa 2006 IGIMF model).
 * ``tracks`` (required): The name of the stellar evolutionary track set to use
   (e.g. ``"MIST"``), as listed in the track registry (see ``track_registry`` below).
 * ``track_registry`` (optional, default="data/tracks/tracks.toml"): Overrides the
