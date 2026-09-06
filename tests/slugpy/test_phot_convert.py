@@ -38,7 +38,7 @@ def test_flambda_to_fnu_matches_raw_photconvert(v_filter):
     result = phot_convert(flambda, "Fnu", wl=wl)
     expected = PhotConvert("Flambda", "Fnu", flambda.value, wl)
 
-    assert result.unit == u.Jy
+    assert result.unit == u.erg / u.s / u.Hz
     assert np.allclose(result.value, expected)
 
 
@@ -67,12 +67,31 @@ def test_wl_as_quantity_matches_wl_as_float(v_filter):
 
 def test_fnu_ab_wl_independent(v_filter):
     """Fnu <-> AB works without a wavelength at all."""
-    fnu = np.array([100.0, 200.0]) * u.Jy
+    fnu = np.array([100.0, 200.0]) * u.erg / u.s / u.Hz
     ab = phot_convert(fnu, "AB")
     assert ab.unit == u.ABmag
 
     back = phot_convert(ab, "Fnu")
     assert np.allclose(back.value, fnu.value)
+
+
+def test_fnu_equivalent_unit_scale(v_filter):
+    """A specific luminosity given in a unit merely *equivalent* to
+    Fnu's own erg/(s Hz) -- not identical to it -- must still convert
+    correctly, not silently use the wrong numeric scale. Regression
+    test for phot_convert's phot.to_value(_PHOT_SYSTEM_UNITS[phot_from])
+    conversion: reading phot.value directly (the numeric value in
+    whatever unit the Quantity happened to be constructed with) would
+    pass W/Hz's own raw number through to the compiled PhotConvert
+    binding, which assumes its fixed erg/(s Hz) cgs convention -- off
+    by the W-to-erg/s conversion factor (1e7)."""
+    fnu_cgs = np.array([100.0, 200.0]) * u.erg / u.s / u.Hz
+    fnu_si = fnu_cgs.to(u.W / u.Hz)  # same physical quantity, different scale
+
+    ab_from_cgs = phot_convert(fnu_cgs, "AB")
+    ab_from_si = phot_convert(fnu_si, "AB")
+
+    assert np.allclose(ab_from_cgs.value, ab_from_si.value)
 
 
 def test_flambda_st_wl_independent(v_filter):

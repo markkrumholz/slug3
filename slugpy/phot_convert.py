@@ -16,10 +16,16 @@ from ._slug import Filter, PhotConvert
 
 # The unit phot_convert re-attaches to its result for each photometric
 # system, and (read in reverse) the units phot_convert recognizes when
-# deducing a Quantity's own system.
+# deducing a Quantity's own system. Fnu's unit here is erg/(s Hz) --
+# a specific luminosity, with no particular distance baked in -- not
+# Jy (a real flux density): the compiled PhotConvert binding's own Fnu
+# system now always means a specific luminosity (see PhotCommons.hpp's
+# own comments on fourPiTenPcSq), matching Flambda's erg/(s Angstrom)
+# below, which was never Jy's flux-domain analog (erg/s/cm^2/Angstrom)
+# in the first place.
 _PHOT_SYSTEM_UNITS: dict[str, u.UnitBase] = {
     "Flambda": u.erg / u.s / u.AA,
-    "Fnu": u.Jy,
+    "Fnu": u.erg / u.s / u.Hz,
     "ST": u.STmag,
     "AB": u.ABmag,
     "Vega": u.mag,
@@ -46,8 +52,11 @@ def _detect_phot_system(unit: u.UnitBase) -> str:
     ----------
     unit : astropy.units.UnitBase
         The unit to deduce a photometric system from: mag(ST),
-        mag(AB), a bare magnitude, a spectral flux density like Jy, or
-        a specific luminosity like erg/(s Angstrom).
+        mag(AB), a bare magnitude, or a specific luminosity like
+        erg/(s Angstrom) or erg/(s Hz). Note that this is *not* the
+        same as a real physical flux density like Jy -- see
+        _PHOT_SYSTEM_UNITS's own comment for why Fnu's unit here is
+        erg/(s Hz), not Jy.
 
     Returns
     -------
@@ -58,9 +67,9 @@ def _detect_phot_system(unit: u.UnitBase) -> str:
     ------
     ValueError
         If unit doesn't match any recognized photometric system --
-        e.g. Lsun (Lbol) or photon/s (an idealized photon-count
-        filter), neither of which is a convertible photometric
-        quantity at all.
+        e.g. Lsun (Lbol), Jy (a real flux density, not a specific
+        luminosity), or photon/s (an idealized photon-count filter),
+        none of which is a convertible photometric quantity here.
     """
     if isinstance(unit, u.MagUnit):
         physical = unit.physical_unit
@@ -70,16 +79,15 @@ def _detect_phot_system(unit: u.UnitBase) -> str:
             return "AB"
     elif unit.is_equivalent(u.mag):
         return "Vega"
-    elif unit.is_equivalent(u.Jy):
+    elif unit.is_equivalent(_PHOT_SYSTEM_UNITS["Fnu"]):
         return "Fnu"
     elif unit.is_equivalent(_PHOT_SYSTEM_UNITS["Flambda"]):
         return "Flambda"
 
     raise ValueError(
         f"phot_convert: cannot deduce a photometric system from unit "
-        f"{unit!r} (expected mag(ST), mag(AB), a bare magnitude, a "
-        "spectral flux density like Jy, or a specific luminosity like "
-        "erg/(s Angstrom))")
+        f"{unit!r} (expected mag(ST), mag(AB), a bare magnitude, or a "
+        "specific luminosity like erg/(s Angstrom) or erg/(s Hz))")
 
 
 def phot_convert(phot: u.Quantity, phot_to: str,
@@ -148,5 +156,13 @@ def phot_convert(phot: u.Quantity, phot_to: str,
             f"phot_convert: converting {phot_from} to {phot_to} requires a "
             "filter (filt), to look up its own fluxVega()")
 
-    result = PhotConvert(phot_from, phot_to, phot.value, wl_value, filt)
+    # phot.value is only correct if phot happens to already be expressed
+    # in _PHOT_SYSTEM_UNITS[phot_from] itself -- _detect_phot_system()
+    # accepts any equivalent unit (e.g. W/Hz for Fnu, erg/s/micron for
+    # Flambda), so phot must be explicitly converted to that canonical
+    # unit first, or an equivalent-but-differently-scaled input would
+    # silently pass the wrong number through to the compiled PhotConvert
+    # binding, which assumes its own fixed cgs convention.
+    phot_value = phot.to_value(_PHOT_SYSTEM_UNITS[phot_from])
+    result = PhotConvert(phot_from, phot_to, phot_value, wl_value, filt)
     return result * _PHOT_SYSTEM_UNITS[phot_to]

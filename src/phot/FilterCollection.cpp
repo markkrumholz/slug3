@@ -7,7 +7,6 @@
  */
 
 #include "FilterCollection.hpp"
-#include "../utils/Constants.hpp"
 #include "../utils/ParseUtils.hpp"
 #include "../utils/TOMLUtils.hpp"
 #include "Filter.hpp"
@@ -16,7 +15,6 @@
 #include "PhotCommons.hpp"
 #include <cstddef>
 #include <memory>
-#include <numbers>
 #include <stdexcept>
 #include <string>
 #include <toml.hpp>
@@ -71,11 +69,19 @@ namespace
         return result;
     }
 
-    // Convert an energy-flux value (in Flambda) to the requested
-    // PhotSystem at the given pivot wavelength (and, for Vega, this
-    // filter's own fluxVega -- see Filter::fluxVega()); PhotConvert is
-    // a compile-time-dispatched template, so this switch maps the
-    // runtime PhotSystem to the right instantiation
+    // Convert a specific-luminosity value (in Flambda, as returned by
+    // Filter::phot() -- no particular distance baked in) to the
+    // requested PhotSystem at the given pivot wavelength (and, for
+    // Vega, this filter's own fluxVega -- see Filter::fluxVega());
+    // PhotConvert is a compile-time-dispatched template, so this
+    // switch maps the runtime PhotSystem to the right instantiation.
+    // PhotConvert<Flambda, ST>/<Flambda, AB>/<Flambda, Vega> (and
+    // every specialization that chains through one of them)
+    // internally divide by fourPiTenPcSq to convert this luminosity to
+    // the flux that would be observed at the standard distance of
+    // 10 pc before applying each magnitude system's own zero point --
+    // see PhotCommons.hpp's own comments -- so this function need not
+    // do any such scaling itself.
     auto convertFlambda(const double value, const double wlPivot,
         const double fluxVega, const phot::PhotSystem to) -> double
     {
@@ -86,31 +92,11 @@ namespace
             case phot::PhotSystem::Fnu:
                 return phot::PhotConvert<phot::PhotSystem::Flambda, phot::PhotSystem::Fnu>(value, wlPivot);
             case phot::PhotSystem::ST:
+                return phot::PhotConvert<phot::PhotSystem::Flambda, phot::PhotSystem::ST>(value, wlPivot);
             case phot::PhotSystem::AB:
+                return phot::PhotConvert<phot::PhotSystem::Flambda, phot::PhotSystem::AB>(value, wlPivot);
             case phot::PhotSystem::Vega:
-            {
-                // ST, AB, and Vega magnitudes are defined in terms of
-                // a flux, not a luminosity -- but Filter::phot()
-                // returns a luminosity-like quantity (no distance
-                // baked in), so convert it to the flux that would be
-                // observed at the standard distance of 10 pc before
-                // handing it to PhotConvert. fluxVega itself needs no
-                // such scaling: it already comes from evaluating
-                // phot() on the real (already-at-Earth) Vega
-                // reference spectrum, not a simulated luminosity.
-                constexpr double pi = std::numbers::pi_v<double>;
-                constexpr double tenPc = 10.0 * utils::pc;
-                const double flux = value / (4.0 * pi * tenPc * tenPc);
-                if (to == phot::PhotSystem::ST)
-                {
-                    return phot::PhotConvert<phot::PhotSystem::Flambda, phot::PhotSystem::ST>(flux, wlPivot);
-                }
-                if (to == phot::PhotSystem::AB)
-                {
-                    return phot::PhotConvert<phot::PhotSystem::Flambda, phot::PhotSystem::AB>(flux, wlPivot);
-                }
-                return phot::PhotConvert<phot::PhotSystem::Flambda, phot::PhotSystem::Vega>(flux, wlPivot, fluxVega);
-            }
+                return phot::PhotConvert<phot::PhotSystem::Flambda, phot::PhotSystem::Vega>(value, wlPivot, fluxVega);
         }
         throw std::runtime_error("FilterCollection: unrecognized PhotSystem value");
     }
@@ -204,7 +190,7 @@ auto phot::FilterCollection::filterUnits() const -> std::vector<std::string>
         switch (photSystem_)
         {
             case PhotSystem::Flambda: result.emplace_back("erg/(s Angstrom)"); break;
-            case PhotSystem::Fnu:     result.emplace_back("Jy");             break;
+            case PhotSystem::Fnu:     result.emplace_back("erg/(s Hz)");      break;
             case PhotSystem::ST:      result.emplace_back("mag(ST)");       break;
             case PhotSystem::AB:      result.emplace_back("mag(AB)");       break;
             // astropy has no dedicated Vega-magnitude unit, so this

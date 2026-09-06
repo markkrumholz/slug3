@@ -145,9 +145,9 @@ namespace phot
          * @brief Get the units of every filter's phot() value
          * @return For a photCount() filter: "photon/s"; for an
          *   energy-flux filter: "erg/(s Angstrom)" (Flambda),
-         *   "Jy" (Fnu), "mag(ST)" (ST), "mag(AB)" (AB), or "mag"
-         *   (Vega -- astropy has no dedicated Vega-magnitude unit)
-         *   matching this collection's photSystem -- in the
+         *   "erg/(s Hz)" (Fnu), "mag(ST)" (ST), "mag(AB)" (AB), or
+         *   "mag" (Vega -- astropy has no dedicated Vega-magnitude
+         *   unit) matching this collection's photSystem -- in the
          *   same order as phot()/filterNames()
          */
         [[nodiscard]] auto filterUnits() const -> std::vector<std::string>;

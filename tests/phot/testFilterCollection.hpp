@@ -25,7 +25,6 @@
 #include "../../src/phot/FilterIdeal.hpp"
 #include "../../src/phot/FilterTabulated.hpp"
 #include "../../src/phot/PhotCommons.hpp"
-#include "../../src/utils/Constants.hpp"
 #include "../../src/utils/MiscUtils.hpp"
 #include "hdf5.h" // NOLINT(misc-include-cleaner)
 #include <algorithm>
@@ -33,7 +32,6 @@
 #include <cstddef>
 #include <exception>
 #include <iostream>
-#include <numbers>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -60,17 +58,6 @@ namespace
         }
         wl.back() = wlHi; // pin endpoint to avoid round-off
         return {std::move(wl), spec};
-    }
-
-    // Convert a Filter::phot() luminosity-like value to the flux
-    // observed at the standard distance of 10 pc, matching
-    // FilterCollection's own convertFlambda() -- ST/AB/Vega
-    // magnitudes are defined in terms of a flux, not a luminosity
-    auto luminosityToFlux(const double value) -> double
-    {
-        constexpr double pi = std::numbers::pi_v<double>;
-        constexpr double tenPc = 10.0 * utils::pc;
-        return value / (4.0 * pi * tenPc * tenPc);
     }
 
     // Disable linting for the next two functions -- including hdf5.h
@@ -250,11 +237,16 @@ inline auto testFilterCollectionPhotSystemConversion() -> int
         const phot::FilterIdeal refIdealPhot("ideal_phot_700_1500");
         const phot::FilterIdeal refQHI("Q(HI)");
 
+        // PhotConvert<Flambda, AB> now internally divides its input by
+        // fourPiTenPcSq to convert the specific luminosity Filter::phot()
+        // returns into the flux observed at the standard distance of
+        // 10 pc before applying AB's own zero point -- see PhotCommons.hpp's
+        // own comments -- so this test need not do that conversion itself.
         const std::vector<double> expected = {
             phot::PhotConvert<phot::PhotSystem::Flambda, phot::PhotSystem::AB>(
-                luminosityToFlux(refTab.phot(wl, spec)), refTab.wlPivot()),
+                refTab.phot(wl, spec), refTab.wlPivot()),
             phot::PhotConvert<phot::PhotSystem::Flambda, phot::PhotSystem::AB>(
-                luminosityToFlux(refIdealEnergy.phot(wl, spec)), refIdealEnergy.wlPivot()),
+                refIdealEnergy.phot(wl, spec), refIdealEnergy.wlPivot()),
             refIdealPhot.phot(wl, spec), // photon-count: unconverted
             refQHI.phot(wl, spec),       // photon-count: unconverted
         };
