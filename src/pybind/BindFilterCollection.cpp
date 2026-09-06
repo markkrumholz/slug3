@@ -90,7 +90,7 @@ Returns
 -------
 units : list of str
     For a photCount() filter: "photon/s"; for an energy-flux filter:
-    "erg/(s Angstrom)" (Flambda), "Jy" (Fnu), "mag(ST)" (ST), "mag(AB)"
+    "erg/(s Angstrom)" (Flambda), "erg/(s Hz)" (Fnu), "mag(ST)" (ST), "mag(AB)"
     (AB), or "mag" (Vega -- astropy has no dedicated Vega-magnitude
     unit), matching this collection's phot_system -- in the same order
     as phot()/filterNames().)doc";

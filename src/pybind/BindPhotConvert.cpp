@@ -123,7 +123,7 @@ namespace
 } // namespace
 
 // Numpy-style docstring for the Python binding below
-static constexpr std::string_view photConvertDocstring = R"doc(Convert a flux or magnitude from one photometric system to another.
+static constexpr std::string_view photConvertDocstring = R"doc(Convert a flux, specific luminosity, or magnitude from one photometric system to another.
 
 Parameters
 ----------
@@ -134,9 +134,20 @@ phot_to : str
     The photometric system to convert flux_in to; same recognized
     values as phot_from.
 flux_in : float or array_like of float
-    The input value(s), in erg/s/cm^2/Angstrom (if phot_from is
-    "Flambda"), Jy (if phot_from is "Fnu"), or a magnitude (if
-    phot_from is "ST", "AB", or "Vega").
+    The input value(s) -- despite the name, not necessarily a flux: in
+    erg/s/cm^2/Angstrom (if phot_from is "Flambda") or erg/s/cm^2/Hz
+    (if phot_from is "Fnu") if it genuinely is a flux, but just as
+    often a specific luminosity in erg/s/Angstrom or erg/s/Hz
+    respectively (with no particular distance baked in -- e.g. a
+    simulated spectrum straight from slug), or a magnitude (if
+    phot_from is "ST", "AB", or "Vega"). Converting a Flambda/Fnu-side
+    value to or from one of the magnitude systems (ST, AB, Vega)
+    always treats it as a specific luminosity, dividing or multiplying
+    by 4*pi*(10 pc)^2 to adopt the same standard 10 pc distance the
+    absolute-magnitude scale itself is defined at; the direct
+    Flambda <-> Fnu conversion never does this, so it works
+    identically whether flux_in genuinely is a flux or a specific
+    luminosity.
 wl : float or array_like of float
     The wavelength(s), in Angstrom, at which flux_in is evaluated;
     unused by conversions that don't depend on wavelength, but
@@ -147,7 +158,10 @@ filter : FilterIdeal or FilterTabulated, optional
     A filter whose fluxVega() gives the Vega zero point to use;
     required if phot_from or phot_to is "Vega" (fluxVega() is computed
     lazily, so this may trigger loading the global Vega reference
-    spectrum -- see Filter.fluxVega()), ignored otherwise.
+    spectrum -- see Filter.fluxVega()), ignored otherwise. Unlike
+    flux_in, fluxVega() is always a genuine flux (from the real,
+    already-at-Earth Vega reference spectrum), never a specific
+    luminosity.
 
 Returns
 -------

@@ -87,6 +87,7 @@ resolves stars.IMF = "chabrier.toml" via SLUG_DIR + "data/imfs".
 """
 
 import gc
+import math
 import pathlib
 import tomllib
 
@@ -1833,6 +1834,12 @@ def test_cluster_advance_populates_lbol(lbol_controls):
 # PhotConvert
 # ---------------------------------------------------------------------
 
+# 4 pi (10 pc)^2, in cm^2 -- matches phot::fourPiTenPcSq (PhotCommons.hpp),
+# computed independently here (from GSL's own CGSM parsec value, the
+# same one utils::pc is built from) rather than imported from slug, so
+# these tests cross-check that constant rather than assuming it.
+_FOUR_PI_TEN_PC_SQ = 4.0 * math.pi * (10.0 * 3.08567758135e18) ** 2
+
 
 @pytest.mark.parametrize("system", ["Flambda", "Fnu", "ST", "AB", "Vega"])
 def test_photconvert_identity(system):
@@ -1879,10 +1886,13 @@ def test_photconvert_vega_without_filter_raises():
 
 
 def test_photconvert_vega_matches_filter_fluxvega():
-    """Flambda -> Vega should match -2.5*log10(flux_in / filter.fluxVega()),
-    the definition of a Vega magnitude, and round-trip back to
-    flux_in. This also exercises fluxVega()'s lazy computation being
-    triggered as a side effect of the conversion."""
+    """Flambda -> Vega should match
+    -2.5*log10((flux_in / (4*pi*(10 pc)^2)) / filter.fluxVega()) -- the
+    definition of a Vega magnitude, applied to the flux flux_in (a
+    specific luminosity) would produce at the standard distance of
+    10 pc -- and round-trip back to flux_in. This also exercises
+    fluxVega()'s lazy computation being triggered as a side effect of
+    the conversion."""
     filt = slug.FilterTabulated("SLUGTEST", "CAM1", "G500", FILTER_REGISTRY)
     flambda_in = 1e-15
     wl = filt.wlPivot()
@@ -1890,7 +1900,8 @@ def test_photconvert_vega_matches_filter_fluxvega():
     vegamag = slug.PhotConvert("Flambda", "Vega", flambda_in, wl, filt)
 
     assert filt.fluxVega() > 0.0
-    assert vegamag == pytest.approx(-2.5 * np.log10(flambda_in / filt.fluxVega()))
+    expected_flux = flambda_in / _FOUR_PI_TEN_PC_SQ
+    assert vegamag == pytest.approx(-2.5 * np.log10(expected_flux / filt.fluxVega()))
 
     back = slug.PhotConvert("Vega", "Flambda", vegamag, wl, filt)
     assert back == pytest.approx(flambda_in, rel=1e-9)
@@ -1933,8 +1944,9 @@ def test_photconvert_vectorized_with_filter():
     vegamag = slug.PhotConvert("Flambda", "Vega", flambda_in, filt.wlPivot(), filt)
     assert vegamag.shape == flambda_in.shape
     for i in range(len(flambda_in)):
+        expected_flux = flambda_in[i] / _FOUR_PI_TEN_PC_SQ
         assert vegamag[i] == pytest.approx(
-            -2.5 * np.log10(flambda_in[i] / filt.fluxVega()))
+            -2.5 * np.log10(expected_flux / filt.fluxVega()))
 
 
 # ---------------------------------------------------------------------

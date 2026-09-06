@@ -38,7 +38,7 @@ def test_flambda_to_fnu_matches_raw_photconvert(v_filter):
     result = phot_convert(flambda, "Fnu", wl=wl)
     expected = PhotConvert("Flambda", "Fnu", flambda.value, wl)
 
-    assert result.unit == u.Jy
+    assert result.unit == u.erg / u.s / u.Hz
     assert np.allclose(result.value, expected)
 
 
@@ -67,7 +67,7 @@ def test_wl_as_quantity_matches_wl_as_float(v_filter):
 
 def test_fnu_ab_wl_independent(v_filter):
     """Fnu <-> AB works without a wavelength at all."""
-    fnu = np.array([100.0, 200.0]) * u.Jy
+    fnu = np.array([100.0, 200.0]) * u.erg / u.s / u.Hz
     ab = phot_convert(fnu, "AB")
     assert ab.unit == u.ABmag
 

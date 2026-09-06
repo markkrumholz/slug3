@@ -13,9 +13,17 @@
 #include "../../src/utils/Constants.hpp"
 #include <cmath>
 #include <iostream>
+#include <numbers>
 
 namespace
 {
+    // 4 pi (10 pc)^2, in cm^2 -- computed independently of
+    // phot::fourPiTenPcSq's own implementation, from the same
+    // defining formula, so tests below cross-check that constant
+    // rather than assuming it
+    constexpr double testFourPiTenPcSq =
+        4.0 * std::numbers::pi_v<double> * (10.0 * utils::pc) * (10.0 * utils::pc);
+
     // A static_assert (rather than a runtime check) that
     // PhotConvert is actually usable in a constant expression --
     // proof that it and everything it depends on (the utils::
@@ -30,35 +38,36 @@ namespace
  * @return 0 if the test passes, 1 if it fails.
  * @details
  * Checks the Flambda -> Fnu and Fnu -> Flambda conversions, at an
- * arbitrary (fluxIn, wl) point, against expected values computed
+ * arbitrary (photIn, wl) point, against expected values computed
  * independently from the defining formulas (not by calling
  * PhotConvert itself), and checks that converting Flambda -> Fnu
- * -> Flambda recovers the original flux to within floating-point
- * roundoff.
+ * -> Flambda recovers the original value to within floating-point
+ * roundoff. flambda here is treated as a specific luminosity (no
+ * particular distance baked in), but the conversion is purely a
+ * change of independent variable (wavelength to frequency), so it
+ * would give the identical result if flambda were instead a genuine
+ * flux -- see PhotConvert<Flambda, Fnu>'s own comment.
  */
 inline auto testPhotConvertFlambdaFnu() -> int
 {
     constexpr double relTol = 1e-12;
     constexpr double wl = 5000.0; // Angstrom
-    constexpr double flambda = 1e-15; // erg/s/cm^2/Angstrom
+    constexpr double flambda = 1e-15; // erg/s/Angstrom
 
     // F_nu = F_lambda * lambda^2 / c, with every quantity converted to
-    // cgs (cm, erg/s/cm^2/cm) before combining, and the result
-    // converted from erg/s/cm^2/Hz to Jy at the end -- computed here
+    // cgs (cm, erg/s/cm) before combining -- computed here
     // independently of PhotConvert's own implementation, from the
-    // same defining formula, and cross-checked against the standard
-    // F_nu[Jy] = 3.336e4 * lambda[Angstrom]^2 * F_lambda[erg/s/cm^2/Angstrom]
-    // conversion (utils::Angstrom / utils::c / utils::Jy = 3.336e4)
+    // same defining formula
     const double wlCm = wl * utils::Angstrom;
-    const double flambdaCgs = flambda / utils::Angstrom; // erg/s/cm^2/cm (dividing, not multiplying, by the cm/Angstrom width converts a per-Angstrom density to a per-cm density)
-    const double expectedFnu = (flambdaCgs * wlCm * wlCm / utils::c) / utils::Jy;
+    const double flambdaCgs = flambda / utils::Angstrom; // erg/s/cm (dividing, not multiplying, by the cm/Angstrom width converts a per-Angstrom density to a per-cm density)
+    const double expectedFnu = flambdaCgs * wlCm * wlCm / utils::c;
 
     const double fnu = phot::PhotConvert<phot::PhotSystem::Flambda, phot::PhotSystem::Fnu>(flambda, wl);
     const double relErrFnu = std::abs(fnu - expectedFnu) / std::abs(expectedFnu);
     if (relErrFnu > relTol)
     {
         std::cerr << "testPhotConvertFlambdaFnu: Flambda -> Fnu gave " << fnu
-            << " Jy, expected " << expectedFnu << " Jy (relative error "
+            << " erg/s/Hz, expected " << expectedFnu << " erg/s/Hz (relative error "
             << relErrFnu << ", tolerance " << relTol << ")\n";
         return 1;
     }
@@ -72,7 +81,7 @@ inline auto testPhotConvertFlambdaFnu() -> int
     if (relErrBack > relTol)
     {
         std::cerr << "testPhotConvertFlambdaFnu: Fnu -> Flambda round trip gave "
-            << flambdaBack << " erg/s/cm^2/Angstrom, expected " << flambda
+            << flambdaBack << " erg/s/Angstrom, expected " << flambda
             << " (relative error " << relErrBack << ", tolerance "
             << relTol << ")\n";
         return 1;
@@ -85,34 +94,41 @@ inline auto testPhotConvertFlambdaFnu() -> int
  * @brief Unit test for phot::PhotConvert<Fnu, AB> and <AB, Fnu>
  * @return 0 if the test passes, 1 if it fails.
  * @details
- * Checks that flux0AB itself (by definition, the AB system's zero
- * point) converts to exactly magnitude 0, that a flux computed from
- * an arbitrary magnitude via the AB -> Fnu direction converts back to
- * that same magnitude via Fnu -> AB, and that the AB -> Fnu / Fnu ->
- * AB pair are algebraic inverses of each other (round trip from an
- * arbitrary flux, not just from flux0AB).
+ * Checks that the specific luminosity equivalent to flux0AB (by
+ * definition, the AB system's zero point) at the standard distance of
+ * 10 pc converts to exactly magnitude 0, that a specific luminosity
+ * computed from an arbitrary magnitude via the AB -> Fnu direction
+ * converts back to that same magnitude via Fnu -> AB, and that the
+ * AB -> Fnu / Fnu -> AB pair are algebraic inverses of each other
+ * (round trip from an arbitrary luminosity, not just from the zero
+ * point).
  */
 inline auto testPhotConvertFnuAB() -> int
 {
     constexpr double relTol = 1e-12;
     constexpr double wl = 5000.0; // Angstrom, unused by this conversion but required by PhotConvert's signature
 
-    const double zeroPointMag = phot::PhotConvert<phot::PhotSystem::Fnu, phot::PhotSystem::AB>(phot::flux0AB, wl);
+    // The specific luminosity (erg/s/Hz) that, once divided by
+    // fourPiTenPcSq and by utils::Jy (PhotConvert<Fnu, AB>'s own first
+    // two steps), recovers flux0AB (in Jy) exactly
+    const double zeroPointLum = (phot::flux0AB * utils::Jy) * testFourPiTenPcSq;
+    const double zeroPointMag = phot::PhotConvert<phot::PhotSystem::Fnu, phot::PhotSystem::AB>(zeroPointLum, wl);
     if (std::abs(zeroPointMag) > relTol)
     {
-        std::cerr << "testPhotConvertFnuAB: flux0AB converted to magnitude "
-            << zeroPointMag << ", expected exactly 0\n";
+        std::cerr << "testPhotConvertFnuAB: the luminosity equivalent to flux0AB "
+            "converted to magnitude " << zeroPointMag << ", expected exactly 0\n";
         return 1;
     }
 
     constexpr double magIn = 18.5;
     const double fnu = phot::PhotConvert<phot::PhotSystem::AB, phot::PhotSystem::Fnu>(magIn, wl);
-    const double expectedFnu = phot::flux0AB * std::pow(10.0, magIn / -2.5);
+    const double expectedFlux = phot::flux0AB * std::pow(10.0, magIn / -2.5); // Jy
+    const double expectedFnu = (expectedFlux * utils::Jy) * testFourPiTenPcSq; // erg/s/Hz
     const double relErrFnu = std::abs(fnu - expectedFnu) / std::abs(expectedFnu);
     if (relErrFnu > relTol)
     {
         std::cerr << "testPhotConvertFnuAB: AB -> Fnu gave " << fnu
-            << " Jy, expected " << expectedFnu << " Jy (relative error "
+            << " erg/s/Hz, expected " << expectedFnu << " erg/s/Hz (relative error "
             << relErrFnu << ", tolerance " << relTol << ")\n";
         return 1;
     }
@@ -143,23 +159,28 @@ inline auto testPhotConvertFlambdaST() -> int
     constexpr double relTol = 1e-12;
     constexpr double wl = 5000.0; // Angstrom, unused by this conversion but required by PhotConvert's signature
 
-    const double zeroPointMag = phot::PhotConvert<phot::PhotSystem::Flambda, phot::PhotSystem::ST>(phot::flux0ST, wl);
+    // The specific luminosity (erg/s/Angstrom) that, once divided by
+    // fourPiTenPcSq (PhotConvert<Flambda, ST>'s own first step),
+    // recovers flux0ST exactly
+    const double zeroPointLum = phot::flux0ST * testFourPiTenPcSq;
+    const double zeroPointMag = phot::PhotConvert<phot::PhotSystem::Flambda, phot::PhotSystem::ST>(zeroPointLum, wl);
     if (std::abs(zeroPointMag) > relTol)
     {
-        std::cerr << "testPhotConvertFlambdaST: flux0ST converted to magnitude "
-            << zeroPointMag << ", expected exactly 0\n";
+        std::cerr << "testPhotConvertFlambdaST: the luminosity equivalent to flux0ST "
+            "converted to magnitude " << zeroPointMag << ", expected exactly 0\n";
         return 1;
     }
 
     constexpr double magIn = 18.5;
     const double flambda = phot::PhotConvert<phot::PhotSystem::ST, phot::PhotSystem::Flambda>(magIn, wl);
-    const double expectedFlambda = phot::flux0ST * std::pow(10.0, magIn / -2.5);
+    const double expectedFlux = phot::flux0ST * std::pow(10.0, magIn / -2.5); // erg/s/cm^2/Angstrom
+    const double expectedFlambda = expectedFlux * testFourPiTenPcSq; // erg/s/Angstrom
     const double relErrFlambda = std::abs(flambda - expectedFlambda) / std::abs(expectedFlambda);
     if (relErrFlambda > relTol)
     {
         std::cerr << "testPhotConvertFlambdaST: ST -> Flambda gave " << flambda
-            << " erg/s/cm^2/Angstrom, expected " << expectedFlambda
-            << " erg/s/cm^2/Angstrom (relative error " << relErrFlambda
+            << " erg/s/Angstrom, expected " << expectedFlambda
+            << " erg/s/Angstrom (relative error " << relErrFlambda
             << ", tolerance " << relTol << ")\n";
         return 1;
     }
@@ -191,16 +212,20 @@ inline auto testPhotConvertFlambdaST() -> int
  * check against an independent formula -- there is no single formula
  * here to independently reimplement other than the same two-step
  * chain), and checks that Flambda -> AB -> Flambda recovers the
- * original flux.
+ * original value. flambda here is a specific luminosity, so the
+ * intermediate Fnu-domain value is too, and picks up the standard-
+ * distance/Jy conversion only inside the Fnu -> AB step, exactly as
+ * PhotConvert<Fnu, AB> itself does.
  */
 inline auto testPhotConvertFlambdaAB() -> int
 {
     constexpr double relTol = 1e-9;
     constexpr double wl = 5000.0; // Angstrom
-    constexpr double flambda = 1e-15; // erg/s/cm^2/Angstrom
+    constexpr double flambda = 1e-15; // erg/s/Angstrom
 
-    const double fnu = (flambda / utils::Angstrom) * (wl * utils::Angstrom) * (wl * utils::Angstrom) / utils::c / utils::Jy;
-    const double expectedMagAB = -2.5 * std::log10(fnu / phot::flux0AB);
+    const double fnu = (flambda / utils::Angstrom) * (wl * utils::Angstrom) * (wl * utils::Angstrom) / utils::c; // erg/s/Hz
+    const double fluxJy = (fnu / testFourPiTenPcSq) / utils::Jy;
+    const double expectedMagAB = -2.5 * std::log10(fluxJy / phot::flux0AB);
 
     const double magAB = phot::PhotConvert<phot::PhotSystem::Flambda, phot::PhotSystem::AB>(flambda, wl);
     const double absErr = std::abs(magAB - expectedMagAB);
@@ -217,7 +242,7 @@ inline auto testPhotConvertFlambdaAB() -> int
     if (relErrBack > relTol)
     {
         std::cerr << "testPhotConvertFlambdaAB: AB -> Flambda round trip gave "
-            << flambdaBack << " erg/s/cm^2/Angstrom, expected " << flambda
+            << flambdaBack << " erg/s/Angstrom, expected " << flambda
             << " (relative error " << relErrBack << ", tolerance "
             << relTol << ")\n";
         return 1;
@@ -238,10 +263,11 @@ inline auto testPhotConvertFnuST() -> int
 {
     constexpr double relTol = 1e-9;
     constexpr double wl = 5000.0; // Angstrom
-    constexpr double fnu = 1e-3; // Jy
+    constexpr double fnu = 1e-3; // erg/s/Hz, a specific luminosity
 
-    const double flambda = fnu * utils::Jy * utils::c / (wl * wl * utils::Angstrom);
-    const double expectedMagST = -2.5 * std::log10(flambda / phot::flux0ST);
+    const double flambda = fnu * utils::c / (wl * wl * utils::Angstrom); // erg/s/Angstrom
+    const double flux = flambda / testFourPiTenPcSq; // erg/s/cm^2/Angstrom
+    const double expectedMagST = -2.5 * std::log10(flux / phot::flux0ST);
 
     const double magST = phot::PhotConvert<phot::PhotSystem::Fnu, phot::PhotSystem::ST>(fnu, wl);
     const double absErr = std::abs(magST - expectedMagST);
@@ -258,7 +284,7 @@ inline auto testPhotConvertFnuST() -> int
     if (relErrBack > relTol)
     {
         std::cerr << "testPhotConvertFnuST: ST -> Fnu round trip gave "
-            << fnuBack << " Jy, expected " << fnu << " Jy (relative error "
+            << fnuBack << " erg/s/Hz, expected " << fnu << " erg/s/Hz (relative error "
             << relErrBack << ", tolerance " << relTol << ")\n";
         return 1;
     }
@@ -272,7 +298,11 @@ inline auto testPhotConvertFnuST() -> int
  * @details
  * The ST/AB analog of testPhotConvertFlambdaAB (composed via ST ->
  * Flambda -> Fnu -> AB and its inverse, the longest of the composed
- * chains) -- see its own comment for what's checked and why.
+ * chains) -- see its own comment for what's checked and why. The
+ * standard-distance conversions ST -> Flambda applies and AB -> Fnu
+ * later undoes are algebraic inverses of each other (both use the
+ * same fourPiTenPcSq), so they cancel overall -- see PhotConvert<ST,
+ * AB>'s own comment.
  */
 inline auto testPhotConvertSTAB() -> int
 {
@@ -280,9 +310,11 @@ inline auto testPhotConvertSTAB() -> int
     constexpr double wl = 5000.0; // Angstrom
     constexpr double magST = 18.5;
 
-    const double flambda = phot::flux0ST * std::pow(10.0, magST / -2.5);
-    const double fnu = (flambda / utils::Angstrom) * (wl * utils::Angstrom) * (wl * utils::Angstrom) / utils::c / utils::Jy;
-    const double expectedMagAB = -2.5 * std::log10(fnu / phot::flux0AB);
+    const double fluxST = phot::flux0ST * std::pow(10.0, magST / -2.5); // erg/s/cm^2/Angstrom
+    const double flambda = fluxST * testFourPiTenPcSq; // erg/s/Angstrom, a specific luminosity
+    const double fnu = (flambda / utils::Angstrom) * (wl * utils::Angstrom) * (wl * utils::Angstrom) / utils::c; // erg/s/Hz
+    const double fluxAB = (fnu / testFourPiTenPcSq) / utils::Jy; // Jy
+    const double expectedMagAB = -2.5 * std::log10(fluxAB / phot::flux0AB);
 
     const double magAB = phot::PhotConvert<phot::PhotSystem::ST, phot::PhotSystem::AB>(magST, wl);
     const double absErr = std::abs(magAB - expectedMagAB);
@@ -313,11 +345,14 @@ inline auto testPhotConvertSTAB() -> int
  * @details
  * The Flambda/Vega analog of testPhotConvertFlambdaST -- see its own
  * comment for what's checked and why. fluxVega plays the role
- * flux0ST plays there: converting fluxVega itself gives magnitude 0
- * by construction, but here that zero point is a per-call argument
- * (a representative real Vega V-band flux density, from CALSPEC)
- * rather than a fixed library constant, since Vega's own zero point
- * is filter-dependent.
+ * flux0ST plays there: converting the specific luminosity equivalent
+ * to fluxVega at the standard distance of 10 pc gives magnitude 0 by
+ * construction, but here that zero point is a per-call argument (a
+ * representative real Vega V-band flux density, from CALSPEC) rather
+ * than a fixed library constant, since Vega's own zero point is
+ * filter-dependent. fluxVega itself is always a genuine flux, never
+ * scaled by fourPiTenPcSq -- see PhotConvert<Flambda, Vega>'s own
+ * comment.
  */
 inline auto testPhotConvertFlambdaVega() -> int
 {
@@ -325,23 +360,25 @@ inline auto testPhotConvertFlambdaVega() -> int
     constexpr double wl = 5000.0; // Angstrom, unused by this conversion but required by PhotConvert's signature
     constexpr double fluxVega = 3.44e-9; // erg/s/cm^2/Angstrom, representative real Vega V-band flux density (CALSPEC)
 
-    const double zeroPointMag = phot::PhotConvert<phot::PhotSystem::Flambda, phot::PhotSystem::Vega>(fluxVega, wl, fluxVega);
+    const double zeroPointLum = fluxVega * testFourPiTenPcSq;
+    const double zeroPointMag = phot::PhotConvert<phot::PhotSystem::Flambda, phot::PhotSystem::Vega>(zeroPointLum, wl, fluxVega);
     if (std::abs(zeroPointMag) > relTol)
     {
-        std::cerr << "testPhotConvertFlambdaVega: fluxVega converted to magnitude "
-            << zeroPointMag << ", expected exactly 0\n";
+        std::cerr << "testPhotConvertFlambdaVega: the luminosity equivalent to fluxVega "
+            "converted to magnitude " << zeroPointMag << ", expected exactly 0\n";
         return 1;
     }
 
     constexpr double magIn = 18.5;
     const double flambda = phot::PhotConvert<phot::PhotSystem::Vega, phot::PhotSystem::Flambda>(magIn, wl, fluxVega);
-    const double expectedFlambda = fluxVega * std::pow(10.0, magIn / -2.5);
+    const double expectedFlux = fluxVega * std::pow(10.0, magIn / -2.5); // erg/s/cm^2/Angstrom
+    const double expectedFlambda = expectedFlux * testFourPiTenPcSq; // erg/s/Angstrom
     const double relErrFlambda = std::abs(flambda - expectedFlambda) / std::abs(expectedFlambda);
     if (relErrFlambda > relTol)
     {
         std::cerr << "testPhotConvertFlambdaVega: Vega -> Flambda gave " << flambda
-            << " erg/s/cm^2/Angstrom, expected " << expectedFlambda
-            << " erg/s/cm^2/Angstrom (relative error " << relErrFlambda
+            << " erg/s/Angstrom, expected " << expectedFlambda
+            << " erg/s/Angstrom (relative error " << relErrFlambda
             << ", tolerance " << relTol << ")\n";
         return 1;
     }
@@ -361,7 +398,7 @@ inline auto testPhotConvertFlambdaVega() -> int
 }
 
 /**
- * @brief Sanity check: the same flux converts to similar, but not identical, ST and Vega magnitudes
+ * @brief Sanity check: the same input converts to similar, but not identical, ST and Vega magnitudes
  * @return 0 if the test passes, 1 if it fails.
  * @details
  * flux0ST (the ST system's fixed zero point) was historically chosen
@@ -373,12 +410,18 @@ inline auto testPhotConvertFlambdaVega() -> int
  * differ by a small but distinctly nonzero amount -- a difference of
  * exactly 0 would indicate the Vega conversion is accidentally using
  * flux0ST (or some other fixed constant) rather than the fluxVega
- * argument actually passed in.
+ * argument actually passed in. magST - magVega is, algebraically,
+ * -2.5*log10(fluxVega / flux0ST), independent of flambda's own actual
+ * value (both conversions divide it by the same fourPiTenPcSq before
+ * comparing against their own zero point, and that shared factor
+ * cancels in the difference) -- so this comparison is unaffected by
+ * whether flambda is a genuine flux or a specific luminosity, or by
+ * how large it is.
  */
 inline auto testPhotConvertVegaSanityCheck() -> int
 {
     constexpr double wl = 5500.0; // Angstrom, roughly V band
-    constexpr double flambda = 3.5e-9; // erg/s/cm^2/Angstrom, order-unity relative to both zero points below
+    constexpr double flambda = 3.5e-9; // erg/s/Angstrom, arbitrary -- see this function's own comment for why its value doesn't matter here
     constexpr double fluxVega = 3.44e-9; // erg/s/cm^2/Angstrom, representative real Vega V-band flux density (CALSPEC)
 
     const double magST = phot::PhotConvert<phot::PhotSystem::Flambda, phot::PhotSystem::ST>(flambda, wl);
