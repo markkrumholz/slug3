@@ -156,5 +156,13 @@ def phot_convert(phot: u.Quantity, phot_to: str,
             f"phot_convert: converting {phot_from} to {phot_to} requires a "
             "filter (filt), to look up its own fluxVega()")
 
-    result = PhotConvert(phot_from, phot_to, phot.value, wl_value, filt)
+    # phot.value is only correct if phot happens to already be expressed
+    # in _PHOT_SYSTEM_UNITS[phot_from] itself -- _detect_phot_system()
+    # accepts any equivalent unit (e.g. W/Hz for Fnu, erg/s/micron for
+    # Flambda), so phot must be explicitly converted to that canonical
+    # unit first, or an equivalent-but-differently-scaled input would
+    # silently pass the wrong number through to the compiled PhotConvert
+    # binding, which assumes its own fixed cgs convention.
+    phot_value = phot.to_value(_PHOT_SYSTEM_UNITS[phot_from])
+    result = PhotConvert(phot_from, phot_to, phot_value, wl_value, filt)
     return result * _PHOT_SYSTEM_UNITS[phot_to]

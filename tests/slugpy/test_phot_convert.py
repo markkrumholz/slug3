@@ -75,6 +75,25 @@ def test_fnu_ab_wl_independent(v_filter):
     assert np.allclose(back.value, fnu.value)
 
 
+def test_fnu_equivalent_unit_scale(v_filter):
+    """A specific luminosity given in a unit merely *equivalent* to
+    Fnu's own erg/(s Hz) -- not identical to it -- must still convert
+    correctly, not silently use the wrong numeric scale. Regression
+    test for phot_convert's phot.to_value(_PHOT_SYSTEM_UNITS[phot_from])
+    conversion: reading phot.value directly (the numeric value in
+    whatever unit the Quantity happened to be constructed with) would
+    pass W/Hz's own raw number through to the compiled PhotConvert
+    binding, which assumes its fixed erg/(s Hz) cgs convention -- off
+    by the W-to-erg/s conversion factor (1e7)."""
+    fnu_cgs = np.array([100.0, 200.0]) * u.erg / u.s / u.Hz
+    fnu_si = fnu_cgs.to(u.W / u.Hz)  # same physical quantity, different scale
+
+    ab_from_cgs = phot_convert(fnu_cgs, "AB")
+    ab_from_si = phot_convert(fnu_si, "AB")
+
+    assert np.allclose(ab_from_cgs.value, ab_from_si.value)
+
+
 def test_flambda_st_wl_independent(v_filter):
     """Flambda <-> ST works without a wavelength at all."""
     flambda = np.array([1e-10, 2e-10]) * u.erg / u.s / u.AA
