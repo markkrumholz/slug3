@@ -1,5 +1,7 @@
 .. highlight:: rest
 
+.. _sec-getting:
+
 Getting SLUG
 ==========================
 

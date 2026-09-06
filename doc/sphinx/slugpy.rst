@@ -2,14 +2,16 @@
 
 .. _sec-slugpy:
 
-slugpy -- The Python Helper Library
-=====================================
+slugpy 
+======
 
 slugpy is slug's Python frontend: it wraps the compiled C++ core
 (exposed as the private ``_slug`` extension module, built by CMake --
 see :doc:`cpp_api/cpp_api_root` for its own API documentation) and
 adds pure-Python analysis code of its own for reading and post-
 processing slug output files.
+
+.. _ssec-slugpy-full:
 
 Full Documentation of slugpy
 -------------------------------

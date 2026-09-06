@@ -77,9 +77,9 @@ population synthesis. The main physics modules are:
 * Stellar atmospheres: SLUG can use a variety of different sets of stellar atmosphere models, which
   determine the spectra and photometry of stars of different masses, metallicities, and evolutionary stages.
   See :ref:`sec-atmospheres` for details.
-* Filters and photometry: SLUG can calculate the photometry of stars and stellar populations
+* Photometry and filters: SLUG can calculate the photometry of stars and stellar populations
   in a wide range of different filters and using a range of photometric systems. See 
-  :ref:`sec-filters` for details.
+  :ref:`sec-photometry` for details.
 * Nebular emission: SLUG can calculate the contribution of nebular emission to the spectra
   and photometry of stellar populations, using a variety of different models for the ionized gas. See
   :ref:`sec-nebular` for details.

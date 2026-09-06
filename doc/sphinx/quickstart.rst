@@ -1,5 +1,7 @@
 .. highlight:: rest
 
+.. _sec-quickstart:
+
 Quickstart
 ==========
 

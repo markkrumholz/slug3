@@ -9,7 +9,7 @@ SLUG command-line simulations are controlled by an input deck, and input decks c
 also be used to control SLUG when it is run as a Python module. The input deck is a
 `TOML <https://toml.io/en/>`_ file which contains human-readable key-value pairs
 that control various aspects of the simulation. The input deck is read by SLUG at
-runtime when SLUG is run in command-line mode, and the :ref:`slugpy` Python module
+runtime when SLUG is run in command-line mode, and the :ref:`sec-slugpy` Python module
 provides a class to read input decks which can then be used to control the simulation
 in Python -- see :ref:`sec-running` for details.
 
@@ -19,7 +19,8 @@ of simulation physics or some part of the simulation operation. Some of these ke
 and sections are required, while others are optional and have default values. Some
 example input decks can be found in the ``examples`` directory of the repository.
 
-Below is a full section-by-section listing of the input deck keywords and their meanings.
+Below is a full section-by-section listing of the input deck keywords and their meanings,
+organized by section. 
 
 Numerical Values vs. Distributions vs. Files
 ---------------------------------------------
@@ -48,6 +49,8 @@ track/spectral/filter/extinction registries) are resolved under a fixed
 subdirectory of ``data/`` instead -- this is noted individually below where it
 applies.
 
+.. _ssec-parameters-toplevel:
+
 Top-level Keywords
 ------------------
 
@@ -66,6 +69,7 @@ and the number of trials to perform.
   repeated runs of the same input deck will not produce identical results unless a
   fixed seed is given.
 
+.. _ssec-parameters-output:
 
 Output Control Keywords
 -----------------------
@@ -116,6 +120,7 @@ At least one of the ``write_*`` keywords relevant to the simulation's own
 ``write_cluster_phot`` / ``write_galaxy_phot`` must be true -- otherwise SLUG raises
 an error at startup, since the corresponding output(s) would otherwise never be written.
 
+.. _ssec-parameters-integrator:
 
 Integrator Control Keywords
 ----------------------------
@@ -130,6 +135,7 @@ for typical SLUG simulations and rarely need to be changed.
 * ``max_iter`` (optional, default=524288, i.e. 2^19): The maximum number of
   integrand evaluations the integrator is allowed before giving up; 0 means unlimited.
 
+.. _ssec-parameters-stars:
 
 Stellar Population Keywords
 -----------------------------
@@ -157,6 +163,7 @@ composition/rotation settings.
   fully stochastically; stars below this mass are instead drawn from the
   continuous part of the IMF.
 
+.. _ssec-parameters-cluster:
 
 Cluster Keywords
 -------------------
@@ -171,6 +178,7 @@ clusters formed by the simulation.
   galaxy simulation's stellar mass formed in individually-tracked, stochastic
   clusters; the remainder is treated as continuously-distributed in time.
 
+.. _ssec-parameters-galaxy:
 
 Galaxy Keywords
 -------------------
@@ -189,6 +197,7 @@ a galaxy simulation, and are only used (and only permitted) when ``sim_type`` =
   Unlike ``sfr``, a bare number here is treated as an ordinary delta function, as
   for every other PDF-valued keyword.
 
+.. _ssec-parameters-specsyn:
 
 Spectral Synthesis Keywords
 ------------------------------
@@ -206,13 +215,14 @@ extinction) are computed for this simulation.
   library from the spectral registry (see ``registry`` below), or an array of such
   library names, in which case the libraries are chained together, each covering
   whichever stars fall outside the coverage of the ones before it.
-* ``registry`` (optional, default=``data/spectra/spectra.toml``): Overrides the
+* ``registry`` (optional, default="data/spectra/spectra.toml"): Overrides the
   default registry file used to look up ``model``.
 * ``wl_min``, ``wl_max``, ``nwl`` (optional; must be given together): Override the
   default output wavelength grid (roughly 91 to 1e5 Angstrom at 2048 points) with a
   grid of ``nwl`` points spanning ``wl_min`` to ``wl_max`` Angstrom.
 * ``z`` (optional, default=0.0): A redshift applied to every computed spectrum.
 
+.. _ssec-parameters-phot:
 
 Photometry Keywords
 -----------------------
@@ -237,6 +247,7 @@ spectral synthesis to also be enabled (see ``spectra.model`` above).
 * ``vega`` (optional): Overrides the default reference Vega spectrum file used by
   the ``Vega`` photometric system.
 
+.. _ssec-parameters-extinct:
 
 Extinction Keywords
 -----------------------
@@ -257,6 +268,7 @@ requires spectral synthesis to also be enabled (see ``spectra.model`` above).
 * ``registry`` (optional, default="data/extinct/extinct.toml"): Overrides the
   default registry file used to look up ``model``.
 
+.. _ssec-parameters-nebular:
 
 Nebular Emission Keywords
 -----------------------------

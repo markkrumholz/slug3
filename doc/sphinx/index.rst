@@ -19,7 +19,9 @@ Contents:
    parameters
    pdfs
    output
-   filters
+   tracks
+   atmospheres
+   photometry
    slugpy
    cloudy
    tests
