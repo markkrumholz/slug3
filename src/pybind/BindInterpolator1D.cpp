@@ -30,6 +30,13 @@ template class interp::Interpolator1D<nQty>;
 // only the (x, f) constructor overload exposed to Python; the
 // interpType parameter is not exposed there (it always defaults to
 // gsl_interp_steffen).
+static constexpr std::string_view classDocstring = R"doc(A 1D interpolator over every interpolated stellar-track quantity at once.
+
+Interpolates one or more tabulated functions of a single independent
+variable x (e.g. stellar age), evaluating all of them together at a
+query point. See Interpolator1DScalar for the single-quantity
+version.)doc";
+
 static constexpr std::string_view constructorDocstring = R"doc(Construct an Interpolator1D.
 
 Parameters
@@ -142,7 +149,7 @@ RuntimeError
 // NOLINTBEGIN(misc-include-cleaner)
 void bindInterpolator1D(py::module_& m)
 {
-    py::class_<Interp1D, py::smart_holder>(m, "Interpolator1D")
+    py::class_<Interp1D, py::smart_holder>(m, "Interpolator1D", classDocstring.data())
         .def(py::init<
                 const std::vector<double>&,                   // x
                 const std::array<std::vector<double>, nQty>&  // f

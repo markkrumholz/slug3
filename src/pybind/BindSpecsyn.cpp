@@ -37,6 +37,14 @@
 // Specsyn (abstract base class)
 // -------------------------------------------------------------------------
 
+static constexpr std::string_view specsynClassDocstring = R"doc(Abstract base class defining a common interface for spectral synthesis.
+
+Takes a set of stellar parameters produced by interpolation on the
+tracks, and returns stellar spectra on a pre-defined wavelength grid.
+Python code encounters a Specsyn through one of its concrete
+subclasses -- SpecsynBlackbody, SpecsynLibNoWind, SpecsynLibWR, or
+SpecsynLibChained -- constructed directly.)doc";
+
 static constexpr std::string_view specsynWlDocstring = R"doc(Return the rest-frame wavelength grid.
 
 Returns
@@ -114,6 +122,12 @@ max_iter : int
 // SpecsynBlackbody
 // -------------------------------------------------------------------------
 
+static constexpr std::string_view bbClassDocstring = R"doc(An example Specsyn specialization, for testing and validation only.
+
+Treats every star as a perfect blackbody radiating at its effective
+temperature, with a radius set by its luminosity and temperature via
+the Stefan-Boltzmann law. Not intended for production simulations.)doc";
+
 static constexpr std::string_view bbConstructorDocstring = R"doc(Construct a blackbody spectral synthesizer.
 
 All arguments are optional; the wavelength range defaults to a
@@ -144,6 +158,13 @@ controls : SimControls, optional
 // -------------------------------------------------------------------------
 // SpecsynLibNoWind
 // -------------------------------------------------------------------------
+
+static constexpr std::string_view nwClassDocstring = R"doc(A spectral synthesizer for stars without optically thick winds.
+
+Covers spectral libraries -- like BOSZ and TLUSTY -- whose spectra sit
+on a tensor grid of [Fe/H], log(g), and effective temperature, one
+HDF5 file per library. The counterpart to SpecsynLibWR, which instead
+covers Wolf-Rayet stars.)doc";
 
 static constexpr std::string_view nwConstructorDocstring = R"doc(Construct a no-wind spectral library synthesizer.
 
@@ -196,6 +217,14 @@ RuntimeError
 // SpecsynLibWR
 // -------------------------------------------------------------------------
 
+static constexpr std::string_view wrClassDocstring = R"doc(A spectral synthesizer for Wolf-Rayet stars.
+
+Covers the Potsdam Wolf-Rayet (PoWR) model grids, whose atmospheres
+are parameterized by [Fe/H], stellar temperature, and "transformed
+radius" (a function of mass-loss rate and stellar radius that captures
+the optically thick wind ordinary stars don't have) rather than the
+(log g, effective temperature) grid SpecsynLibNoWind uses.)doc";
+
 static constexpr std::string_view wrConstructorDocstring = R"doc(Construct a Wolf-Rayet spectral library synthesizer.
 
 Covers the Potsdam Wolf-Rayet (PoWR) model grids: spectra sit on a
@@ -238,6 +267,14 @@ RuntimeError
 // -------------------------------------------------------------------------
 // SpecsynLibChained
 // -------------------------------------------------------------------------
+
+static constexpr std::string_view chainedClassDocstring = R"doc(A Specsyn specialization that chains together several atmosphere-model libraries.
+
+Some parts of stellar parameter space are best covered by different
+model atmosphere libraries -- e.g. an OB-star library for hot, massive
+stars and a cooler-star library for everything else. Each library in
+the chain is tried in turn, in priority order, and the first one able
+to produce a spectrum for a given star is used.)doc";
 
 static constexpr std::string_view chainedConstructorDocstring = R"doc(Construct a chained spectral synthesizer from several libraries.
 
@@ -329,7 +366,7 @@ auto resolveControls(const py::object& controls,
 void bindSpecsyn(py::module_& m)
 {
     // Abstract base class: no constructor, just wl/wlObs/spec
-    py::class_<specsyn::Specsyn, py::smart_holder>(m, "Specsyn")
+    py::class_<specsyn::Specsyn, py::smart_holder>(m, "Specsyn", specsynClassDocstring.data())
         .def("wl",
                 [](const specsyn::Specsyn& self) -> std::vector<double>
                 { return self.wl(); },
@@ -354,7 +391,7 @@ void bindSpecsyn(py::module_& m)
 
     // SpecsynBlackbody
     py::class_<specsyn::SpecsynBlackbody, specsyn::Specsyn, py::smart_holder>(
-            m, "SpecsynBlackbody")
+            m, "SpecsynBlackbody", bbClassDocstring.data())
         .def(py::init(
                 [](double wlMin, double wlMax, std::size_t nWl,
                    const py::object& controls)
@@ -380,7 +417,7 @@ void bindSpecsyn(py::module_& m)
 
     // SpecsynLibNoWind<OOBPolicy::raise>
     py::class_<specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::raise>,
-               specsyn::Specsyn, py::smart_holder>(m, "SpecsynLibNoWind")
+               specsyn::Specsyn, py::smart_holder>(m, "SpecsynLibNoWind", nwClassDocstring.data())
         .def(py::init(
                 [](const std::string& spectraName,
                    double fehMin, double fehMax,
@@ -417,7 +454,7 @@ void bindSpecsyn(py::module_& m)
 
     // SpecsynLibWR<OOBPolicy::raise>
     py::class_<specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise>,
-               specsyn::Specsyn, py::smart_holder>(m, "SpecsynLibWR")
+               specsyn::Specsyn, py::smart_holder>(m, "SpecsynLibWR", wrClassDocstring.data())
         .def(py::init(
                 [](const std::string& spectraName,
                    double fehMin, double fehMax,
@@ -448,7 +485,7 @@ void bindSpecsyn(py::module_& m)
 
     // SpecsynLibChained
     py::class_<specsyn::SpecsynLibChained, specsyn::Specsyn, py::smart_holder>(
-            m, "SpecsynLibChained")
+            m, "SpecsynLibChained", chainedClassDocstring.data())
         .def(py::init(
                 [](const std::vector<std::string>& spectraNames,
                    double fehMin, double fehMax,

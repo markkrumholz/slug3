@@ -22,6 +22,13 @@ template class interp::Interpolator1D<1>;
 // is exposed here: an Interpolator1DScalar is only ever obtained from
 // Python by way of another bound object that owns one (e.g.
 // FilterTabulated.response()), not built directly.
+static constexpr std::string_view classDocstring = R"doc(A 1D interpolator over a single tabulated quantity.
+
+Interpolates one tabulated function of a single independent variable x
+(e.g. a filter's response as a function of ln(wavelength)) -- the
+single-quantity counterpart of Interpolator1D, which interpolates
+several quantities together at once.)doc";
+
 static constexpr std::string_view xMinDocstring = R"doc(Get the minimum allowed value of x.
 
 Returns
@@ -65,7 +72,7 @@ RuntimeError
 // NOLINTBEGIN(misc-include-cleaner)
 void bindInterpolator1DScalar(py::module_& m)
 {
-    py::class_<Interp1DScalar, py::smart_holder>(m, "Interpolator1DScalar")
+    py::class_<Interp1DScalar, py::smart_holder>(m, "Interpolator1DScalar", classDocstring.data())
         .def("xMin", &Interp1DScalar::xMin,
                 xMinDocstring.data())
         .def("xMax", &Interp1DScalar::xMax,

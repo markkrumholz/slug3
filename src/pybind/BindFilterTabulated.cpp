@@ -22,6 +22,8 @@
 // FilterTabulated disallows copy and move (it holds an
 // Interpolator1DScalar member, itself neither copyable nor movable --
 // see FilterTabulated's own comment).
+static constexpr std::string_view classDocstring = R"doc(A photometric filter whose response is tabulated as a function of wavelength.)doc";
+
 static constexpr std::string_view directConstructorDocstring = R"doc(Construct a FilterTabulated directly from a tabulated response.
 
 Parameters
@@ -120,7 +122,7 @@ response : Interpolator1DScalar
 // NOLINTBEGIN(misc-include-cleaner)
 void bindFilterTabulated(py::module_& m)
 {
-    py::class_<phot::FilterTabulated, phot::Filter, py::smart_holder>(m, "FilterTabulated")
+    py::class_<phot::FilterTabulated, phot::Filter, py::smart_holder>(m, "FilterTabulated", classDocstring.data())
         .def(py::init(
                 [](std::string name, const std::vector<double>& wl,
                    const std::vector<double>& response, double wlPivot)

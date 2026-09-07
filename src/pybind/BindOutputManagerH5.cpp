@@ -13,6 +13,8 @@
 #include <string_view>
 
 // Numpy-style docstring for the Python binding below
+static constexpr std::string_view classDocstring = R"doc(HDF5-output specialization of OutputManager.)doc";
+
 static constexpr std::string_view constructorDocstring = R"doc(Open an HDF5 output file and write its header.
 
 Parameters
@@ -50,7 +52,7 @@ RuntimeError
 // NOLINTBEGIN(misc-include-cleaner)
 void bindOutputManagerH5(py::module_& m)
 {
-    py::class_<io::OutputManagerH5, io::OutputManager, py::smart_holder>(m, "OutputManagerH5")
+    py::class_<io::OutputManagerH5, io::OutputManager, py::smart_holder>(m, "OutputManagerH5", classDocstring.data())
         .def(py::init<const io::SimControls&, bool>(),
                 constructorDocstring.data(),
                 py::arg("sim_controls"), py::arg("restart") = false,

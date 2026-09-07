@@ -20,6 +20,13 @@
 #include <string_view>
 
 // Numpy-style docstrings for the Python bindings below
+static constexpr std::string_view classDocstring = R"doc(A single, coeval (mono-age) star cluster.
+
+A Cluster is formed instantaneously, with a target mass and a set of
+stellar masses drawn from the IMF, then evolved forward in time via
+advance(), which updates its living/dead stellar masses, spectrum,
+photometry, and bolometric luminosity as the population ages.)doc";
+
 static constexpr std::string_view constructorDocstring = R"doc(Construct a Cluster.
 
 Parameters
@@ -176,7 +183,7 @@ static auto pyBytesToRngState(const py::bytes& rngState) -> utils::RngState
 // NOLINTBEGIN(misc-include-cleaner)
 void bindCluster(py::module_& m)
 {
-    py::class_<core::Cluster, py::smart_holder>(m, "Cluster")
+    py::class_<core::Cluster, py::smart_holder>(m, "Cluster", classDocstring.data())
         .def(py::init(
                 [](double mass, unsigned long uid, double time,
                    const py::object& controls, const py::object& rngState)

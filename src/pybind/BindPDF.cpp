@@ -69,6 +69,16 @@ namespace
 } // namespace
 
 // Numpy-style docstrings for the Python bindings below
+static constexpr std::string_view classDocstring = R"doc(A probability distribution composed of one or more segments.
+
+May or may not be properly normalized (so that the integral over all
+segments is unity). Provides methods for sampling from the
+distribution and computing various integrals and expectation values
+from it. No constructor is exposed on PDF itself: a PDF is only ever
+obtained from Python either by way of another bound object that owns
+one (e.g. SimControls.imf) or via the module-level
+parsePDFDescriptor() function.)doc";
+
 static constexpr std::string_view validDocstring = R"doc(Check whether this PDF is initialized and usable.
 
 Returns
@@ -238,7 +248,7 @@ RuntimeError
 // NOLINTBEGIN(misc-include-cleaner)
 void bindPDF(py::module_& m)
 {
-    py::class_<pdfs::PDF, py::smart_holder>(m, "PDF")
+    py::class_<pdfs::PDF, py::smart_holder>(m, "PDF", classDocstring.data())
         .def("valid", &pdfs::PDF::valid,
                 validDocstring.data())
         .def("getMin", &pdfs::PDF::getMin,

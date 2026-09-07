@@ -15,6 +15,13 @@
 #include <string_view>
 #include <vector>
 
+static constexpr std::string_view classDocstring = R"doc(A dust extinction curve, interpolated onto a caller-supplied wavelength grid.
+
+Built from a named curve in an extinction curve registry. The curve is
+normalized so that a V-band extinction of A_V = 1 mag corresponds to
+its own native shape; only the shape matters, since a caller scales it
+by whatever A_V is actually applied.)doc";
+
 static constexpr std::string_view constructorDocstring = R"doc(Construct an Extinct from a named registry entry.
 
 Parameters
@@ -184,7 +191,7 @@ line_lum_ext : list of float
 // NOLINTBEGIN(misc-include-cleaner)
 void bindExtinct(py::module_& m)
 {
-    py::class_<extinct::Extinct, py::smart_holder>(m, "Extinct")
+    py::class_<extinct::Extinct, py::smart_holder>(m, "Extinct", classDocstring.data())
         .def(py::init(
                 [](const std::string& extinctName, const std::vector<double>& wl,
                    const py::object& controls, const std::string& registryName)
