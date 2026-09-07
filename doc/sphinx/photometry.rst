@@ -1,6 +1,6 @@
 .. highlight:: rest
 
-.. _sec-filters:
+.. _sec-phot:
 
 Photometry and Filters
 ======================

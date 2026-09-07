@@ -177,10 +177,15 @@ clusters formed by the simulation.
 
 * ``CMF`` (required): The cluster mass function, as a number or PDF (see above).
 * ``CLF`` (required for galaxy simulations; unused for cluster simulations): The
-  cluster lifetime function, as a number or PDF (see above).
+  cluster lifetime function, as a number or PDF (see above). When clusters form
+  in a galaxy simulation, their lifetimes are drawn from the CLF, and clusters
+  that exceed their lifetime are considered disrupted and are no longer output in
+  the list of clusters in the galaxy (though the light produced by their stars
+  still contributes to the integrated galaxy light).
 * ``f_cluster`` (optional, default=1.0; galaxy simulations only): The fraction of a
   galaxy simulation's stellar mass formed in individually-tracked, stochastic
-  clusters; the remainder is treated as continuously-distributed in time.
+  clusters; the remainder is treated as "field" stars whose formation times are
+  continuously-distributed.
 
 .. _ssec-parameters-galaxy:
 

@@ -15,8 +15,9 @@ processed), SLUG also provides a "quick-and-dirty" estimate of nebular emission 
 can be computed much faster.
 
 SLUG's fast, approximate nebular emission calculation uses a grid of models computed
-by Cloudy for the spectra of a fully sampled stellar population drawn from the
-Chabrier (2005) IMF, for a nebular with a fixed density of
+by Cloudy from the spectra of fully sampled stellar populations (i.e., computed with 
+``min_stoch_mass`` set to a large value -- see :ref:`ssec-parameters-stars`) drawn from
+the Chabrier (2005) IMF, for a nebula with a fixed density of
 :math:`n = 100\,\mathrm{cm}^{-3}` and Solar-scaled abundances matching the [Fe/H] values
 of the stellar tracks. This calculation is performed for both simple stellar populations
 at a range of ages up to 10 Myr, and for a composite stellar population with a constant
@@ -25,9 +26,9 @@ star formation rate, for each of the track sets provided the standard data files
 as ``data/tools/cloudy/run_grid_pipeline.pbs``, which in turn calls other scripts in
 the same directory.
 
-The script computes the emission per unit ionizing photon in both
-the continuum and in the hundred brightest lines and stores the results in an HDF5
-table; the default table in SLUG ``data/nebular/nebular.h5``, but this choice can
+The script computes the emission per unit ionizing photon in both the continuum and in
+the hundred brightest emission lines and stores the results in an HDF5 table; the
+default table in SLUG is ``data/nebular/nebular.h5``, but this choice can
 be overridden if you with to produce your own table (see :ref:`ssec-parameters-nebular`).
 To produce its quick approximate stellar plus nebular emission spectrum, SLUG assumes
 the HI-ionizing portion of the stellar spectrum is fully absorbed by the nebula, and
@@ -44,5 +45,7 @@ The nebular emission calculation is controlled by three parameters in the
 * ``line_width``: the width of the nebular emission lines that are inserted into the spectrum.
 
 When nebular emission is enabled, SLUG writes both the intrinsic stellar spectrum and
-the stellar plus nebular reprocessed spectrum to the output; see :ref:`sec-output` for
-details.
+the stellar plus nebular reprocessed spectrum to the output. If photometry is enabled
+(see :ref:`sec-phot`) is also computes photometry on the stellar plus nebular spectrum.
+See :ref:`sec-output` for details on how these data are stored in the output file, and
+:ref:`sec-slugpy` for a description of how to access them using the slugpy reader.

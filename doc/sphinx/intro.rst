@@ -35,7 +35,11 @@ SLUG can simulate either a simple stellar population (i.e., a group of stars all
 born at one time) or a composite stellar population, consisting of stars born at
 a distribution of times. We refer to the former case as a "cluster" simulation, and
 the latter as a "galaxy" simulation, since one can be thought of as approximating
-the behavior of a single star cluster, and the other as approximating a whole galaxy. 
+the behavior of a single star cluster, and the other as approximating a whole galaxy.
+In a galaxy simulation, stars can either form as part of clusters, or as "field"
+stars that are not part of any cluster. Clusters can also disrupt over time, leaving
+their stars to contribute to the integrated light of the galaxy, but no longer
+appearing as a visible cluster.
 
 Probability Distribution Functions and Monte Carlo Sampling
 -----------------------------------------------------------
@@ -72,16 +76,15 @@ SLUG Physics
 SLUG includes a number of physics modules that control different aspects of the stellar
 population synthesis. The main physics modules are:
 
-* Stellar tracks: SLUG can use a variety of different sets of stellar evolutionarytracks, which
-  determine the evolution of stars of different masses and metallicities. See :ref:`sec-tracks` for details.
-* Stellar atmospheres: SLUG can use a variety of different sets of stellar atmosphere models, which
-  determine the spectra and photometry of stars of different masses, metallicities, and evolutionary stages.
-  See :ref:`sec-atmospheres` for details.
-* Photometry and filters: SLUG can calculate the photometry of stars and stellar populations
-  in a wide range of different filters and using a range of photometric systems. See 
-  :ref:`sec-photometry` for details.
-* Nebular emission: SLUG can calculate the contribution of nebular emission to the spectra
-  and photometry of stellar populations, using a variety of different models for the ionized gas. See
-  :ref:`sec-nebular` for details.
-* Extinction: SLUG can calculate the effects of dust extinction on the spectra and photometry
-  of stellar populations, using a variety of different extinction laws. See :ref:`sec-extinction` for details.
+* :ref:`sec-tracks`: SLUG can use a variety of different sets of stellar evolutionary tracks, which
+  determine the evolution of stars of different masses and metallicities.
+* :ref:`sec-atmospheres`: SLUG can use a variety of different sets of stellar atmosphere models, which
+  determine the spectra and photometry of stars of different masses, metallicities, and evolutionary
+  stages.
+* :ref:`sec-phot`: SLUG can calculate the photometry of stars and stellar populations
+  in a wide range of different filters and using a range of photometric systems.
+* :ref:`sec-nebular` SLUG can calculate the contribution of nebular emission to the spectra
+  and photometry of stellar populations, using a variety of different models for the ionized gas.
+* :ref:`sec-extinction`: SLUG can calculate the effects of dust extinction on the
+  spectra and photometry of stellar populations, using a variety of different extinction
+  laws.
