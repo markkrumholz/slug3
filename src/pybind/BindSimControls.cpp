@@ -86,6 +86,17 @@ auto sharedMinimalControls() -> const io::SimControls&
 // library with no Python bindings of its own, so exposing it was not
 // worth the surface area for what is, from Python, just a file to
 // load.
+static constexpr std::string_view classDocstring = R"doc(Holds simulation control-flow information and physics settings.
+
+Bundles together both control-flow settings (I/O, trial count, output
+timing) and physics choices (IMF, tracks, spectral synthesis) for a
+simulation -- almost every other object slug builds (Cluster, Galaxy,
+SimCluster, SimGalaxy, the output managers, every spectral
+synthesizer) needs both together, and reads many of its own settings
+(e.g. the integrator tolerances) live from this object rather than a
+snapshot taken at construction time, so a SimControls must outlive
+anything built from it.)doc";
+
 static constexpr std::string_view constructorDocstring = R"doc(Construct a SimControls object by parsing a slug input deck.
 
 Parameters
@@ -617,7 +628,7 @@ static void applyConstructorProperties(io::SimControls& sc,
 // NOLINTBEGIN(misc-include-cleaner)
 void bindSimControls(py::module_& m)
 {
-    py::class_<io::SimControls, py::smart_holder> simControlsClass(m, "SimControls");
+    py::class_<io::SimControls, py::smart_holder> simControlsClass(m, "SimControls", classDocstring.data());
 
     py::enum_<io::SimControls::SimType>(simControlsClass, "SimType",
             "The type of simulation this SimControls describes.")

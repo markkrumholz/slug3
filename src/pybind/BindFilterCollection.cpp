@@ -20,6 +20,15 @@
 #include <vector>
 
 // Numpy-style docstrings for the Python bindings below
+static constexpr std::string_view classDocstring = R"doc(Holds the set of photometric filters for which photometry will be computed.
+
+Constructed from a list of filter names, each parsed to determine
+whether it names a tabulated filter (resolved against a filter
+registry) or an idealized filter, building the corresponding Filter
+for each. phot() then evaluates every filter in the collection against
+a spectrum in one call, converting each energy-flux filter's result to
+the requested photometric system.)doc";
+
 static constexpr std::string_view photSystemDocstring = R"doc(A photometric system.
 
 Determines the units a computed photometric value is expressed in --
@@ -195,7 +204,7 @@ void bindFilterCollection(py::module_& m)
         .value("AB", phot::PhotSystem::AB, "The AB magnitude system")
         .value("Vega", phot::PhotSystem::Vega, "The Vega magnitude system");
 
-    py::class_<phot::FilterCollection, py::smart_holder>(m, "FilterCollection")
+    py::class_<phot::FilterCollection, py::smart_holder>(m, "FilterCollection", classDocstring.data())
         .def(py::init<const std::vector<std::string>&, phot::PhotSystem,
                 const std::string&>(),
                 constructorDocstring.data(),

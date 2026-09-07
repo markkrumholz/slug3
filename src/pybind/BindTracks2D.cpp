@@ -19,6 +19,13 @@
 #include <utility>
 
 // Numpy-style docstrings for the Python bindings below
+static constexpr std::string_view classDocstring = R"doc(A 2D set of stellar tracks, at a single ([Fe/H], v/vcrit, [alpha/Fe]) combination.
+
+Interpolates stellar properties as a function of initial mass and age
+within one track set's own (mass, age) grid at a fixed [Fe/H],
+rotation rate, and alpha-enhancement. See Tracks3D for a version that
+also interpolates across a range of [Fe/H].)doc";
+
 static constexpr std::string_view constructorDocstring = R"doc(Construct a Tracks2D object from tracks on disk.
 
 Parameters
@@ -155,7 +162,7 @@ isochrone : list of Interpolator1D
 // NOLINTBEGIN(misc-include-cleaner)
 void bindTracks2D(py::module_& m)
 {
-    py::class_<tracks::Tracks2D, py::smart_holder>(m, "Tracks2D")
+    py::class_<tracks::Tracks2D, py::smart_holder>(m, "Tracks2D", classDocstring.data())
         .def(py::init<
                 const std::string&, // trackName
                 double,             // feh

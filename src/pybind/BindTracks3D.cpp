@@ -19,6 +19,13 @@
 #include <utility>
 
 // Numpy-style docstrings for the Python bindings below
+static constexpr std::string_view classDocstring = R"doc(A 3D set of stellar tracks, spanning a range of [Fe/H] at a fixed v/vcrit and [alpha/Fe].
+
+Interpolates stellar properties as a function of initial mass, age,
+and [Fe/H], by combining several Tracks2D grids (one per available
+[Fe/H] value within the requested range) and interpolating across
+them.)doc";
+
 static constexpr std::string_view constructorDocstring = R"doc(Construct a Tracks3D object from tracks on disk.
 
 Parameters
@@ -166,7 +173,7 @@ isochrone : list of Interpolator1D
 // NOLINTBEGIN(misc-include-cleaner)
 void bindTracks3D(py::module_& m)
 {
-    py::class_<tracks::Tracks3D, py::smart_holder>(m, "Tracks3D")
+    py::class_<tracks::Tracks3D, py::smart_holder>(m, "Tracks3D", classDocstring.data())
         .def(py::init<
                 const std::string&, // trackName
                 double,             // fehMin

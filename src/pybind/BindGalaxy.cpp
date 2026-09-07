@@ -17,6 +17,15 @@
 #include <vector>
 
 // Numpy-style docstrings for the Python bindings below
+static constexpr std::string_view classDocstring = R"doc(A galaxy, built from a time-evolving population of star clusters.
+
+Unlike a Cluster, which represents a single mono-age population, a
+Galaxy represents an entire, continuously star-forming system:
+advance() draws new clusters as time passes, advances every cluster
+formed so far (whether still bound or already disrupted), and sums
+their individual spectra, photometry, and bolometric luminosities into
+this Galaxy's own totals.)doc";
+
 static constexpr std::string_view constructorDocstring = R"doc(Construct a Galaxy.
 
 Parameters
@@ -144,7 +153,7 @@ t : float
 // NOLINTBEGIN(misc-include-cleaner)
 void bindGalaxy(py::module_& m)
 {
-    py::class_<core::Galaxy, py::smart_holder>(m, "Galaxy")
+    py::class_<core::Galaxy, py::smart_holder>(m, "Galaxy", classDocstring.data())
         .def(py::init(
                 [](const py::object& controls) -> std::unique_ptr<core::Galaxy>
                 {

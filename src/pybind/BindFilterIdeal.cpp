@@ -18,6 +18,14 @@
 // wlMax, photCount) constructor is a lower-level entry point mainly
 // useful to FilterCollection's own name-parsing logic in C++, which
 // has no Python-facing counterpart of its own.
+static constexpr std::string_view classDocstring = R"doc(An idealized photometric filter whose response is a top-hat function of wavelength.
+
+A FilterIdeal's response is exactly 1 within [wl_min, wl_max] and
+exactly 0 everywhere else -- useful both for idealized experiments and
+for computing photon fluxes above (or between) particular ionization
+thresholds, without needing a real instrument's tabulated response
+curve.)doc";
+
 static constexpr std::string_view constructorDocstring = R"doc(Construct a FilterIdeal by parsing its name.
 
 Parameters
@@ -93,7 +101,7 @@ value : float
 // NOLINTBEGIN(misc-include-cleaner)
 void bindFilterIdeal(py::module_& m)
 {
-    py::class_<phot::FilterIdeal, phot::Filter, py::smart_holder>(m, "FilterIdeal")
+    py::class_<phot::FilterIdeal, phot::Filter, py::smart_holder>(m, "FilterIdeal", classDocstring.data())
         .def(py::init<std::string>(),
                 constructorDocstring.data(),
                 py::arg("name"))

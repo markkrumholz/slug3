@@ -16,6 +16,8 @@
 #include <utility>
 
 // Numpy-style docstrings for the Python bindings below
+static constexpr std::string_view classDocstring = R"doc(Drives a galaxy-type simulation end to end.)doc";
+
 static constexpr std::string_view constructorDocstring = R"doc(Construct a SimGalaxy to drive a galaxy-type simulation end to end.
 
 Parameters
@@ -82,7 +84,7 @@ entire duration and this itself is a fast, non-blocking read.)doc";
 // NOLINTBEGIN(misc-include-cleaner)
 void bindSimGalaxy(py::module_& m)
 {
-    py::class_<core::SimGalaxy, py::smart_holder>(m, "SimGalaxy")
+    py::class_<core::SimGalaxy, py::smart_holder>(m, "SimGalaxy", classDocstring.data())
         .def(py::init(
                 [](const io::SimControls& simControls, py::object outputManager,
                     const bool restart)

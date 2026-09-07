@@ -13,6 +13,8 @@
 #include <string_view>
 
 // Numpy-style docstring for the Python binding below
+static constexpr std::string_view classDocstring = R"doc(ASCII-output specialization of OutputManager.)doc";
+
 static constexpr std::string_view constructorDocstring = R"doc(Open the ascii output files and write their headers.
 
 Parameters
@@ -41,7 +43,7 @@ RuntimeError
 // NOLINTBEGIN(misc-include-cleaner)
 void bindOutputManagerAscii(py::module_& m)
 {
-    py::class_<io::OutputManagerAscii, io::OutputManager, py::smart_holder>(m, "OutputManagerAscii")
+    py::class_<io::OutputManagerAscii, io::OutputManager, py::smart_holder>(m, "OutputManagerAscii", classDocstring.data())
         .def(py::init<const io::SimControls&>(),
                 constructorDocstring.data(),
                 py::arg("sim_controls"),

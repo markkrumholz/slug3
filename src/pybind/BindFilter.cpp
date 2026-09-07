@@ -22,6 +22,15 @@
 #include <string_view>
 
 // Numpy-style docstrings for the Python bindings below
+static constexpr std::string_view classDocstring = R"doc(Abstract base class representing a photometric filter.
+
+Defines the common interface for computing the photometric response of
+a spectrum to a filter, however that filter's own response is actually
+represented. Abstract -- Python code only ever encounters a Filter
+through one of its concrete subclasses, FilterIdeal or
+FilterTabulated, either constructed directly or returned by
+FilterCollection.getFilter()/filters().)doc";
+
 static constexpr std::string_view nameDocstring = R"doc(Get the name of this filter.
 
 Returns
@@ -80,7 +89,7 @@ flux_vega : float
 // NOLINTBEGIN(misc-include-cleaner)
 void bindFilter(py::module_& m)
 {
-    py::class_<phot::Filter, py::smart_holder>(m, "Filter")
+    py::class_<phot::Filter, py::smart_holder>(m, "Filter", classDocstring.data())
         .def("name", &phot::Filter::name,
                 nameDocstring.data())
         .def("photCount", &phot::Filter::photCount,

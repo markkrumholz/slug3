@@ -15,6 +15,14 @@
 #include <string>
 #include <string_view>
 
+static constexpr std::string_view classDocstring = R"doc(Nebular emission line and continuum luminosity per ionizing photon, from a pre-computed cloudy grid.
+
+Looks up a pre-computed "quick and dirty" nebular emission grid for
+one track set, and provides the line and continuum luminosity per
+ionizing photon it holds, as a function of [Fe/H] and (for a cluster)
+age -- so that slug can add nebular emission to a stellar spectrum
+without running cloudy itself.)doc";
+
 static constexpr std::string_view constructorDocstring = R"doc(Construct a Nebular object, loading one track set's own cloudy grid.
 
 Parameters
@@ -138,7 +146,7 @@ RuntimeError
 // NOLINTBEGIN(misc-include-cleaner)
 void bindNebular(py::module_& m)
 {
-    py::class_<nebular::Nebular, py::smart_holder>(m, "Nebular")
+    py::class_<nebular::Nebular, py::smart_holder>(m, "Nebular", classDocstring.data())
         .def(py::init(
                 [](const std::string& tableName, const std::string& trackName,
                    const io::SimControls& controls, double vvcrit)
