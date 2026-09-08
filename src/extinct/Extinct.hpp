@@ -19,7 +19,6 @@
 #include <cmath>
 #include <cstddef>
 #include <filesystem>
-#include <iterator>
 #include <stdexcept>
 #include <string>
 #include <toml.hpp>
@@ -42,17 +41,28 @@ namespace extinct
 
     /**
      * @class Extinct
-     * @brief A dust extinction curve, interpolated onto a caller-supplied wavelength grid.
+     * @brief A dust extinction curve, interpolated onto its SimControls's own spectral-synthesis wavelength grid.
      * @details
      * An Extinct is built from a named curve in an extinction curve
      * registry (see data/extinct/extinct.toml/extinct.h5 and
      * data/tools/extinct/add_extinction_curve.py/fetch_draine_extinction.py
      * for how these are populated): the curve's own native
      * (wavelength, kappa) tabulation is read from the registry, then
-     * interpolated onto the wavelength grid the caller supplies,
-     * clipped to the native curve's own coverage. kappa is in
-     * arbitrary units -- only the curve's shape matters, since a
-     * caller scales it by a separately supplied A_V.
+     * interpolated onto controls.specsyn()->wl(), clipped to the
+     * native curve's own coverage. kappa is in arbitrary units -- only
+     * the curve's shape matters, since a caller scales it by a
+     * separately supplied A_V.
+     *
+     * Loading the curve from disk (loadCurve()) and rebuilding the
+     * cached quantities derived from it and from controls_
+     * (rebuildCache()) are each exposed as their own public method,
+     * rather than folded entirely into the constructor, so that a
+     * caller who has already built an Extinct can cheaply refresh it
+     * after some part of controls_ changes -- rebuildCache() alone if
+     * only controls_.specsyn()'s wavelength grid, controls_.nebular(),
+     * or controls_.avDistField() changed, or loadCurve() if the curve
+     * itself (extinct.model) changed and the underlying data must be
+     * re-read from disk.
      */
     class Extinct
     {
@@ -61,27 +71,70 @@ namespace extinct
         /**
          * @brief Construct an Extinct from a named registry entry
          * @param extinctName Name of the extinction curve to load (e.g. "Calzetti_starburst")
-         * @param wl Wavelength grid, in Angstrom, to interpolate the curve onto
          * @param controls Simulation controls this Extinct reads its
-         *   redshift (see wlObs()) from, live, for the rest of its
-         *   lifetime -- see controls_'s own comment. Must outlive this
-         *   Extinct. Has no default of its own (unlike registryName
-         *   below): a reference bound to a temporary default-
-         *   constructed SimControls would dangle the moment this
-         *   constructor returned, since this class stores it live
-         *   rather than copying out of it.
+         *   wavelength grid (controls.specsyn()->wl()), redshift (see
+         *   wlObs()), nebular emission grid, and field-star A_V
+         *   distribution from, live, for the rest of its lifetime --
+         *   see controls_'s own comment. controls.specsyn() must not
+         *   be null: Extinct has no wavelength grid of its own to fall
+         *   back on. Must outlive this Extinct. Has no default of its
+         *   own (unlike registryName below): a reference bound to a
+         *   temporary default-constructed SimControls would dangle the
+         *   moment this constructor returned, since this class stores
+         *   it live rather than copying out of it.
          * @param registryName Name of the extinction curve registry file
          * @throws std::runtime_error if extinctName is not found in the
-         *   registry, or the registry/HDF5 file cannot be read
+         *   registry, the registry/HDF5 file cannot be read, or
+         *   controls.specsyn() is null
          * @details
-         * wl is clipped to the native curve's own [min, max] wavelength
-         * coverage before interpolating -- see wl()'s own comment.
+         * Simply calls loadCurve(extinctName, registryName) -- see its
+         * own comment, and rebuildCache()'s, for what actually happens.
          */
         Extinct(const std::string& extinctName,
-            const std::vector<double>& wl,
             const io::SimControls& controls,
             const std::string& registryName = defaultRegistry) :
             controls_(controls)
+        {
+            loadCurve(extinctName, registryName);
+        }
+
+        // Copyable (rebinding controls_ to the same referent) but not
+        // assignable (controls_ can't be reseated), matching Specsyn's
+        // own identical copy/move declarations exactly -- see its
+        // comment. Never actually copied/assigned in practice: every
+        // Extinct is held via unique_ptr (see SimControls's own
+        // extinct_).
+        Extinct(const Extinct&) = default;
+        Extinct(Extinct&&) = default;
+        auto operator=(const Extinct&) -> Extinct& = delete;
+        auto operator=(Extinct&&) -> Extinct& = delete;
+        ~Extinct() = default;
+
+        /**
+         * @brief Read a named extinction curve from a registry entry, and rebuild every cached quantity from it
+         * @param extinctName Name of the extinction curve to load (e.g. "Calzetti_starburst")
+         * @param registryName Name of the extinction curve registry file
+         * @throws std::runtime_error if extinctName is not found in the
+         *   registry, the registry/HDF5 file cannot be read, or
+         *   controls_.specsyn() is null
+         * @details
+         * Locates and parses registryName, validates that it lists
+         * extinctName, opens the HDF5 file it names, and reads that
+         * curve's own native (wavelength, kappa) tabulation into
+         * wlDat_/extinctDat_ -- the actual cost of loading a
+         * *different* curve from disk, as opposed to merely re-
+         * deriving the cached quantities below from a curve already
+         * loaded (see rebuildCache()). Always finishes by calling
+         * rebuildCache(), so the cached quantities are never left
+         * stale relative to wlDat_/extinctDat_.
+         *
+         * Called once, by the constructor. Also public so a caller
+         * (e.g. from Python, after SimControls's own extinct.model
+         * changes) can reload a different curve into an already-
+         * constructed Extinct, without building a new one.
+         */
+        void loadCurve(const std::string& extinctName,
+            const std::string& registryName = defaultRegistry)
         {
             // Locate and parse the registry file
             const auto [registry, registryPath] =
@@ -131,56 +184,44 @@ namespace extinct
             H5Fclose(file);
             // NOLINTEND(misc-include-cleaner)
 
-            // Build an interpolator for the native curve data
-            const interp::Interpolator1D<1> interp(wlDat_, extinctDat_);
-
-            // Chop wl down to the interpolator's own coverage -- wl is
-            // assumed sorted ascending (a spectral wavelength grid),
-            // so the kept elements are a single contiguous run;
-            // wlOffset_ records how many leading elements were
-            // dropped, so applyExtinction() can later line up a
-            // spectrum tabulated on this same original wl without
-            // having to rediscover the chop -- then interpolate the
-            // curve onto what remains
-            const auto firstIt = std::ranges::find_if(wl,
-                [&interp](const double w) -> bool { return w >= interp.xMin(); });
-            wlOffset_ = static_cast<std::size_t>(std::distance(wl.begin(), firstIt));
-            for (auto it = firstIt; it != wl.end() && *it <= interp.xMax(); ++it)
-            {
-                wl_.push_back(*it);
-                extinct_.push_back(interp(*it));
-            }
-
-            // Interpolate the curve onto every nebular emission line's
-            // own wavelength too, if a nebular emission grid was
-            // requested -- see initExtinctLines()'s own comment. Needs
-            // io::SimControls's complete type (to call
-            // controls_.nebular()), so is defined out-of-line, in
-            // Extinct.cpp, exactly like computeExtinctionFacCts()
-            // below -- see that method's own comment for why.
-            initExtinctLines(interp);
-
-            // Normalize the curve (and, if any, the line-wavelength
-            // curve above) to a V-band extinction of 1 mag
-            normalize(wl_, extinct_, extinctLines_);
-
-            // Precompute extinctionFacCts_/extinctionFacCtsLines_ --
-            // see their own comments
-            computeExtinctionFacCts();
-            computeExtinctionFacCtsLines();
+            rebuildCache();
         }
 
-        // Copyable (rebinding controls_ to the same referent) but not
-        // assignable (controls_ can't be reseated), matching Specsyn's
-        // own identical copy/move declarations exactly -- see its
-        // comment. Never actually copied/assigned in practice: every
-        // Extinct is held via unique_ptr (see SimControls's own
-        // extinct_).
-        Extinct(const Extinct&) = default;
-        Extinct(Extinct&&) = default;
-        auto operator=(const Extinct&) -> Extinct& = delete;
-        auto operator=(Extinct&&) -> Extinct& = delete;
-        ~Extinct() = default;
+        /**
+         * @brief Recompute every cached quantity derived from wlDat_/extinctDat_ and controls_
+         * @throws std::runtime_error if controls_.specsyn() is null
+         * @details
+         * Builds an interpolator from the native curve data
+         * (wlDat_, extinctDat_) and:
+         *   - interpolates it onto controls_.specsyn()->wl(), clipped
+         *     to the native curve's own coverage, into wl_/extinct_
+         *     (see wl()'s own comment for wlOffset_);
+         *   - interpolates it onto every nebular emission line's own
+         *     wavelength too, if a nebular emission grid was requested
+         *     (see initExtinctLines());
+         *   - normalizes both of the above to a V-band extinction of
+         *     1 mag (see normalize());
+         *   - precomputes extinctionFacCts_/extinctionFacCtsLines_
+         *     (see their own comments).
+         *
+         * Called once, by loadCurve(), immediately after it finishes
+         * reading wlDat_/extinctDat_ from disk. Also public so a
+         * caller (e.g. from Python, after SimControls's own spectral
+         * synthesizer, nebular emission grid, or field-star A_V
+         * distribution changes) can recompute these cached quantities
+         * from the curve already loaded, without re-reading it from
+         * disk. Safe to call more than once: every quantity it touches
+         * is fully overwritten (not appended to) on each call, so
+         * calling it again after, say, controls_.nebular() has changed
+         * from non-null to null correctly leaves extinctLines_ (and
+         * extinctionFacCtsLines_) empty rather than stale.
+         *
+         * Needs io::SimControls's complete type (to call
+         * controls_.specsyn()/nebular()/avDistField()), so is defined
+         * out-of-line, in Extinct.cpp, exactly like wlObs() -- see its
+         * own comment for why.
+         */
+        void rebuildCache();
 
         // Observers
 
@@ -200,9 +241,8 @@ namespace extinct
 
         /**
          * @brief Get the interpolated wavelength grid
-         * @return A const reference to the wavelength grid, in
-         *   Angstrom, supplied to the constructor and clipped to
-         *   wlDat()'s own [min, max] coverage
+         * @return A const reference to controls_.specsyn()->wl(),
+         *   clipped to wlDat()'s own [min, max] coverage
          */
         [[nodiscard]] auto wl() const -> const std::vector<double>& { return wl_; }
 
@@ -225,22 +265,22 @@ namespace extinct
         [[nodiscard]] auto wlObs() const -> std::vector<double>;
 
         /**
-         * @brief Get the number of leading elements chopped off the constructor's own wl
-         * @return wlOffset_ -- the number of leading elements of the wl
-         *   passed to the constructor that fell below the native
+         * @brief Get the number of leading elements chopped off controls_.specsyn()->wl()
+         * @return wlOffset_ -- the number of leading elements of
+         *   controls_.specsyn()->wl() that fell below the native
          *   curve's own coverage and so are absent from wl()/extinct()
-         *   (see the constructor's own comment). Lets a caller line up
-         *   a spectrum tabulated on that original wl with wl()'s own,
-         *   narrower grid, exactly as applyExtinction() does internally.
+         *   (see rebuildCache()'s own comment). Lets a caller line up
+         *   a spectrum tabulated on that same wavelength grid with
+         *   wl()'s own, narrower grid, exactly as applyExtinction()
+         *   does internally.
          */
         [[nodiscard]] auto wlOffset() const { return wlOffset_; }
 
         /**
          * @brief Apply this extinction curve to a spectrum
          * @param A_V V-band extinction to apply, in magnitudes
-         * @param spec Spectrum to extinguish, tabulated on exactly the
-         *   same wavelength grid as the wl originally passed to the
-         *   constructor
+         * @param spec Spectrum to extinguish, tabulated on exactly
+         *   controls_.specsyn()->wl()
          * @returns The extinguished spectrum, on the wavelength grid
          *   returned by wl()
          * @details
@@ -255,16 +295,16 @@ namespace extinct
             std::vector<double> result(wl_.size());
             for (std::size_t i = 0; i < wl_.size(); i++)
             {
-                result[i] = spec[wlOffset_ + i] * std::exp(-A_V * extinct_[i]); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- result and extinct_ both have size wl_.size(), and i is bounded by wl_.size(); spec has the same size as the wl originally passed to the constructor (this class's own contract), so wlOffset_ + i stays in bounds
+                result[i] = spec[wlOffset_ + i] * std::exp(-A_V * extinct_[i]); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- result and extinct_ both have size wl_.size(), and i is bounded by wl_.size(); spec has the same size as controls_.specsyn()->wl() (this class's own contract), so wlOffset_ + i stays in bounds
             }
             return result;
         }
 
         /**
          * @brief Apply this extinction curve's own expected attenuation to a continuously-distributed population's spectrum
-         * @param spec Spectrum to extinguish, tabulated on exactly the
-         *   same wavelength grid as the wl originally passed to the
-         *   constructor -- see applyExtinction()'s own spec parameter
+         * @param spec Spectrum to extinguish, tabulated on exactly
+         *   controls_.specsyn()->wl() -- see applyExtinction()'s own
+         *   spec parameter
          * @returns The expected extinguished spectrum, on the
          *   wavelength grid returned by wl()
          * @details
@@ -275,8 +315,8 @@ namespace extinct
          * elements is multiplied by extinctionFacCts_ at the
          * corresponding wavelength: the expectation value of
          * exp(-A_V * extinct()) over the field-star A_V distribution
-         * (io::SimControls::avDistField()), precomputed once, at
-         * construction -- see extinctionFacCts_'s own comment.
+         * (io::SimControls::avDistField()), precomputed by
+         * rebuildCache() -- see extinctionFacCts_'s own comment.
          */
         [[nodiscard]] auto applyExtinctionCts(const std::vector<double>& spec) const -> std::vector<double>
         {
@@ -329,7 +369,7 @@ namespace extinct
          * corresponding line -- the expectation value of
          * exp(-A_V * extinctLines_) over the field-star A_V
          * distribution (io::SimControls::avDistField()), precomputed
-         * once, at construction -- see extinctionFacCtsLines_'s own
+         * by rebuildCache() -- see extinctionFacCtsLines_'s own
          * comment. See applyExtinctionLines()'s own comment for why
          * there is no analog of wlOffset_ here.
          */
@@ -450,13 +490,13 @@ namespace extinct
 
         /**
          * @brief Initialize extinctLines_ from the native curve's own interpolator
-         * @param interp Interpolator built (in the constructor) from
+         * @param interp Interpolator built (in rebuildCache()) from
          *   wlDat_/extinctDat_ -- the same one wl_/extinct_ are
          *   themselves interpolated from
          * @details
-         * A no-op (extinctLines_ left empty) if no nebular emission
-         * grid was requested (controls_.nebular() == nullptr).
-         * Otherwise resizes extinctLines_ to
+         * Clears extinctLines_ (a no-op, i.e. leaving it empty, if no
+         * nebular emission grid was requested -- controls_.nebular()
+         * == nullptr). Otherwise resizes extinctLines_ to
          * controls_.nebular()->lineWl().size() and, for each line,
          * evaluates interp at that line's own wavelength if it falls
          * within interp's own [xMin(), xMax()] coverage, or sets that
@@ -466,8 +506,13 @@ namespace extinct
          * elements are. Needs io::SimControls's complete type (to call
          * controls_.nebular()), so is defined out-of-line, in
          * Extinct.cpp -- see computeExtinctionFacCts()'s own comment
-         * for why. Called once, from the constructor, immediately
-         * after the wl_/extinct_ loop, before normalize().
+         * for why. Called by rebuildCache(), immediately after the
+         * wl_/extinct_ loop, before normalize() -- every time
+         * rebuildCache() runs, not just once, so the explicit clear()
+         * when controls_.nebular() is null matters: without it, a
+         * rebuildCache() call made after a previously-non-null
+         * controls_.nebular() became null would otherwise leave
+         * extinctLines_ stale rather than empty.
          */
         void initExtinctLines(const interp::Interpolator1D<1>& interp);
 
@@ -478,7 +523,10 @@ namespace extinct
          * comment for why (needs io::SimControls's complete type, to
          * call controls_.avDistField()/intMaxIter()/intAbsTol()/
          * intRelTol(); mirrors wlObs()'s identical situation). Called
-         * once, from the constructor, immediately after normalize().
+         * by rebuildCache(), immediately after normalize() -- every
+         * time rebuildCache() runs, not just once; always fully
+         * overwrites extinctionFacCts_, so repeated calls never leave
+         * it stale.
          */
         void computeExtinctionFacCts();
 
@@ -489,26 +537,38 @@ namespace extinct
          * its own comment; identical in every respect except that it
          * integrates extinctFacLines() (over extinctLines_.size()
          * quantities) rather than extinctFac(), storing the result
-         * into extinctionFacCtsLines_ rather than extinctionFacCts_. A
-         * no-op (an empty extinctionFacCtsLines_) if extinctLines_ is
-         * itself empty, i.e. no nebular emission grid was requested.
-         * Defined out-of-line, in Extinct.cpp, for the same reason as
-         * computeExtinctionFacCts(). Called once, from the
-         * constructor, immediately after computeExtinctionFacCts().
+         * into extinctionFacCtsLines_ rather than extinctionFacCts_.
+         * Clears extinctionFacCtsLines_ (a no-op if it's already
+         * empty) if extinctLines_ is itself empty, i.e. no nebular
+         * emission grid was requested -- mirrors initExtinctLines()'s
+         * own explicit clear(), for the same reason: without it, a
+         * rebuildCache() call made after extinctLines_ has gone from
+         * non-empty to empty would otherwise leave
+         * extinctionFacCtsLines_ stale rather than empty. Defined
+         * out-of-line, in Extinct.cpp, for the same reason as
+         * computeExtinctionFacCts(). Called by rebuildCache(),
+         * immediately after computeExtinctionFacCts(), every time
+         * rebuildCache() runs.
          */
         void computeExtinctionFacCtsLines();
 
         /**
-         * @brief Simulation controls this Extinct reads its redshift from
+         * @brief Simulation controls this Extinct reads its wavelength grid, redshift, nebular emission grid, and A_V distribution from
          * @details
-         * Read live, not snapshotted, every time wlObs() is called --
-         * changing controls_'s own redshift after this Extinct is
-         * built takes effect immediately, with no need to rebuild it.
-         * Bound once, at construction, from whichever SimControls
-         * actually built this Extinct (see SimControls::readExtinct());
-         * never reseated afterward, so that SimControls must outlive
-         * this Extinct. Mirrors Specsyn's own controls_ member exactly
-         * -- see its comment for the rationale.
+         * Read live, not snapshotted, every time wlObs()/rebuildCache()
+         * is called -- changing controls_'s own redshift takes effect
+         * immediately (wlObs() re-reads it every call), but a change to
+         * controls_.specsyn()'s wavelength grid, controls_.nebular(),
+         * or controls_.avDistField() only takes effect once
+         * rebuildCache() is called again (the cached quantities those
+         * three feed into -- wl_/extinct_/extinctLines_/
+         * extinctionFacCts_/extinctionFacCtsLines_ -- are not
+         * recomputed on every access). Bound once, at construction,
+         * from whichever SimControls actually built this Extinct (see
+         * SimControls::readExtinct()); never reseated afterward, so
+         * that SimControls must outlive this Extinct. Mirrors
+         * Specsyn's own controls_ member exactly -- see its comment
+         * for the rationale.
          */
         const io::SimControls& controls_; // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members) -- deliberately a live reference, not a copy: see this member's own comment for why. Only ever used through the same non-copyable, non-movable ownership pattern (unique_ptr in SimControls's own extinct_) as every other class with a reference member in this codebase (e.g. Specsyn's own controls_), so the usual objection (disabling implicit copy/move assignment) doesn't apply in practice.
 
@@ -516,14 +576,14 @@ namespace extinct
         std::vector<double> extinctDat_; /**< Native extinction curve, in arbitrary units */
         std::vector<double> wl_;         /**< Interpolated wavelength grid, in Angstrom */
         std::vector<double> extinct_;    /**< Extinction curve interpolated onto wl_ */
-        std::size_t wlOffset_ = 0;       /**< Number of leading elements of the constructor's own wl chopped off wl_'s front */
+        std::size_t wlOffset_ = 0;       /**< Number of leading elements of controls_.specsyn()->wl() chopped off wl_'s front */
 
         /**
          * @brief Extinction curve interpolated onto controls_.nebular()->lineWl()
          * @details
          * One entry per line in controls_.nebular()->lineWl(), in the
          * same order -- unlike extinct_ (interpolated onto wl_, a
-         * chopped-down copy of the constructor's own wl), no line is
+         * chopped-down copy of controls_.specsyn()->wl()), no line is
          * ever dropped here: a line falling outside the native curve's
          * own [wlDat_.front(), wlDat_.back()] coverage simply reads an
          * extinction of 0 (no attenuation) rather than being excluded,
@@ -541,9 +601,10 @@ namespace extinct
          * where \f$p\f$ is controls_.avDistField() -- the multiplicative
          * factor applyExtinctionCts() itself applies to a continuously-
          * distributed population's spectrum, since no single A_V
-         * applies to every member of that population. Computed once,
-         * by computeExtinctionFacCts(), at construction (avDistField()
-         * never changes after that, so neither does this).
+         * applies to every member of that population. Recomputed by
+         * computeExtinctionFacCts() every time rebuildCache() runs, so
+         * stays current with controls_.avDistField() even if it
+         * changes after this Extinct is first built.
          */
         std::vector<double> extinctionFacCts_;
 
@@ -553,10 +614,9 @@ namespace extinct
          * Line-luminosity analog of extinctionFacCts_ -- the
          * multiplicative factor applyExtinctionCtsLines() itself
          * applies to a continuously-distributed population's line
-         * luminosities. Computed once, by
-         * computeExtinctionFacCtsLines(), at construction. Left empty
-         * if extinctLines_ is itself empty, i.e. no nebular emission
-         * grid was requested.
+         * luminosities. Recomputed by computeExtinctionFacCtsLines()
+         * every time rebuildCache() runs. Left empty if extinctLines_
+         * is itself empty, i.e. no nebular emission grid was requested.
          */
         std::vector<double> extinctionFacCtsLines_;
     };

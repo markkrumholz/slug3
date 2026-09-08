@@ -899,7 +899,7 @@ void io::SimControls::readExtinct(const toml::table& inputDeck)
     }
 
     extinct_ = std::make_unique<extinct::Extinct>(
-        model.value(), specsyn_->wl(), *this, registryName); // NOLINT(bugprone-unchecked-optional-access) -- required=true above guarantees model has a value or getTOMLKeyWithError already threw
+        model.value(), *this, registryName); // NOLINT(bugprone-unchecked-optional-access) -- required=true above guarantees model has a value or getTOMLKeyWithError already threw
 }
 
 // Nebular emission controls and grid reader

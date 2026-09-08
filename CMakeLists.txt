@@ -139,9 +139,12 @@ add_executable(slugTestElem
 )
 add_executable(slugTestExtinct
     src/extinct/Extinct.cpp
+    src/interpolation/Mesh2DGrid.cpp
     src/nebular/Nebular.cpp
     src/phot/FilterTabulated.cpp
     src/phot/FilterIdeal.cpp
+    src/specsyn/Specsyn.cpp
+    src/specsyn/SpecsynBlackbody.cpp
     tests/extinct/testExtinctAll.cpp
     src/utils/HDF5Utils.cpp
 )
