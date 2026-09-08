@@ -71,6 +71,49 @@ files, so it must be the last thing run, and re-run (with
    with full mass coverage. Needs `--overwrite` to regenerate an
    existing output file.
 
+## Geneva / SYCLIST
+
+The Geneva tracks are published through the SYCLIST GitHub repository at
+four metallicities (Z = 0.0004, 0.002, 0.006, 0.014) and two rotation
+rates (v/v_crit = 0.0 and 0.4). The mass grids differ across metallicities
+in two ways: Z = 0.0004 lacks the low-mass end (minimum 1.7 M☉ versus
+0.8 M☉ for the others), and Z = 0.014 carries seven extra fine-grid masses
+(8, 10, 10.25, 10.5, 11, 11.5, 11.75 M☉) that the other metallicities
+omit. Because Tracks3D requires a fully rectangular mass × `[Fe/H]` grid,
+the data are split into three HDF5 files (see step 2). A single registry
+entry per file is written to `tracks.toml` so slug can load any of them.
+
+1. **`fetch_geneva.py`** -- fetches each `(Z, v/v_crit)` group from the
+   SYCLIST GitHub API and writes them all to `geneva.h5`. The script
+   handles the Fortran overflow notation (`2.83-289` → `2.83E-289`) that
+   older SYCLIST files use for very small mass-loss rates, and converts
+   the `lg(Md) = 0.0` sentinel (meaning "no mass loss recorded") to an
+   actual zero rather than 10⁰ M☉ yr⁻¹.
+2. **`prune_geneva.py`** -- applies three fixes to the fetched data and
+   writes three output files, updating `tracks.toml` accordingly:
+
+   * **Repeated-age pruning.** Low-mass tracks (≤ 2 M☉) end with ~210
+     padding rows all at the same terminal age, and massive-star tracks
+     carry single duplicate rows at phase boundaries. The script keeps
+     only the first occurrence at each age (equivalent to filtering for
+     strictly increasing age), shrinking affected tracks by 50–100 points
+     or more.
+
+   * **Mass-monotonicity fix.** A small number of tracks have a one-step
+     upward blip in the present-day mass column (a numerical artifact at
+     phase-restart boundaries). A cumulative minimum over each track's mass
+     column is applied to guarantee non-increasing mass throughout.
+
+   * **Mass-grid rectification and file split.** The raw `geneva.h5` is
+     split into three files, each with a uniform mass grid across all of
+     its metallicities:
+
+     - `geneva.h5` (overwritten in-place) -- Z = 0.002, 0.006, 0.014 with
+       the 24-mass grid common to all three. The seven extra Z = 0.014
+       masses are dropped from this file.
+     - `geneva_Z0004.h5` -- Z = 0.0004 only, with its 17-mass grid.
+     - `geneva_Z014.h5` -- Z = 0.014 only, retaining all 31 masses.
+
 ## Stromlo
 
 1. **`fetch_stromlo.py`** -- fetches the raw Stromlo track grid and
