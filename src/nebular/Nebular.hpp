@@ -104,6 +104,17 @@ namespace nebular
         // Observers
 
         /**
+         * @brief Get the SimControls this Nebular was constructed against
+         * @return A const reference to simControls_ -- see its own
+         *   comment. Exposed so a caller replacing a SimControls's own
+         *   nebular emission grid (see SimControls::setNebular()) can
+         *   verify it is installing a Nebular actually built against
+         *   that same SimControls, rather than one whose simControls_
+         *   points somewhere else entirely.
+         */
+        [[nodiscard]] auto simControls() const -> const io::SimControls& { return simControls_; }
+
+        /**
          * @brief Get the label of each of this Nebular's own nebular emission lines
          * @return lineLabel_, in the same order as lineWl() -- see
          *   lineWl_'s own comment for that order's own source

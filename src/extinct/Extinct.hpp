@@ -212,6 +212,17 @@ namespace extinct
         // Observers
 
         /**
+         * @brief Get the SimControls this Extinct was constructed against
+         * @return A const reference to controls_ -- see its own
+         *   comment. Exposed so a caller replacing a SimControls's own
+         *   extinction curve (see SimControls::setExtinct()) can
+         *   verify it is installing an Extinct actually built against
+         *   that same SimControls, rather than one whose controls_
+         *   points somewhere else entirely.
+         */
+        [[nodiscard]] auto controls() const -> const io::SimControls& { return controls_; }
+
+        /**
          * @brief Get the native extinction curve wavelength grid
          * @return A const reference to the wavelength grid, in Angstrom,
          *   as read directly from the registry entry

@@ -880,6 +880,21 @@ def test_simcontrols_set_specsyn_installs_new_synthesizer(tmp_path):
         specsyn.wl()
 
 
+def test_simcontrols_set_specsyn_mismatched_controls_raises():
+    """setSpecsyn() must reject a Specsyn built against a different
+    SimControls than the one it's being installed on -- a Specsyn
+    stores a live reference to whichever SimControls it was built
+    against, so installing one bound elsewhere would leave it reading
+    that other SimControls's own tolerances/redshift live, not this
+    one's."""
+    controls = slug.SimControls(CLUSTER_DECK)
+    other_controls = slug.SimControls(CLUSTER_DECK)
+    specsyn = slug.SpecsynBlackbody(3000.0, 9000.0, 50, other_controls)
+
+    with pytest.raises(ValueError):
+        controls.setSpecsyn(specsyn)
+
+
 def test_simcontrols_set_specsyn_rebuilds_extinct_cache():
     """setSpecsyn() must rebuild extinct's own cached quantities
     (Extinct.rebuildCache()), not just specsyn itself -- otherwise
@@ -954,6 +969,21 @@ def test_simcontrols_set_extinct_none_removes_curve():
     assert controls.extinct is None
 
 
+def test_simcontrols_set_extinct_mismatched_controls_raises():
+    """setExtinct() must reject an Extinct built against a different
+    SimControls than the one it's being installed on -- an Extinct
+    stores a live reference to whichever SimControls it was built
+    against, so installing one bound elsewhere would leave its cached
+    quantities silently describing that other SimControls's own
+    settings, not this one's."""
+    controls = slug.SimControls(CLUSTER_DECK)
+    other_controls = slug.SimControls(CLUSTER_DECK)
+    ext = slug.Extinct("Calzetti_starburst", controls=other_controls)
+
+    with pytest.raises(ValueError):
+        controls.setExtinct(ext)
+
+
 def test_simcontrols_set_nebular_installs_new_grid():
     """setNebular() should install a working Nebular on a SimControls
     whose nebular property was previously None (CLUSTER_DECK sets
@@ -983,6 +1013,19 @@ def test_simcontrols_set_nebular_none_removes_grid():
 
     controls.setNebular(None)
     assert controls.nebular is None
+
+
+def test_simcontrols_set_nebular_mismatched_controls_raises():
+    """setNebular() must reject a Nebular built against a different
+    SimControls than the one it's being installed on -- see
+    test_simcontrols_set_extinct_mismatched_controls_raises's own
+    identical reasoning."""
+    controls = slug.SimControls(CLUSTER_DECK)
+    other_controls = slug.SimControls(CLUSTER_DECK)
+    neb = slug.Nebular("tests/nebular/assets/nebular_test.h5", "MIST_test", other_controls)
+
+    with pytest.raises(ValueError):
+        controls.setNebular(neb)
 
 
 def test_simcontrols_set_filters_installs_new_collection():
@@ -1423,27 +1466,44 @@ def test_simcontrols_constructor_kwargs_compute_lbol():
 
 
 def test_simcontrols_constructor_kwargs_move_only_properties():
-    """SimControls's constructor should accept specsyn/filters/tracks
-    as keyword arguments, each transferring ownership exactly like
-    the corresponding property/setter does (disowning the Python
-    object passed in)."""
-    tolerances_only = slug.SimControls(CLUSTER_DECK)
-    specsyn = slug.SpecsynBlackbody(3000.0, 9000.0, 50, tolerances_only)
+    """SimControls's constructor should accept filters/tracks as
+    keyword arguments, each transferring ownership exactly like the
+    corresponding property/setter does (disowning the Python object
+    passed in). specsyn is exercised separately, in
+    test_simcontrols_constructor_kwargs_specsyn_mismatched_controls_raises
+    -- unlike FilterCollection/Tracks3D, a Specsyn must be built
+    against the exact SimControls it ends up installed on (see
+    setSpecsyn()'s own docstring), which the constructor's own kwarg
+    path can never satisfy (that SimControls doesn't exist yet at the
+    point a specsyn= value would need to be built), so it doesn't fit
+    this shared success-path pattern."""
     fc = slug.FilterCollection([], slug.PhotSystem.Flambda)
     fc.addFilter("Q(HI)")
     tracks = slug.Tracks3D(TRACK_SET, -1.0, 0.5, KNOWN_VVCRIT, KNOWN_AFE, REGISTRY)
 
     controls = slug.SimControls(
-        CLUSTER_DECK, "cluster", specsyn=specsyn, filters=fc, tracks=tracks)
+        CLUSTER_DECK, "cluster", filters=fc, tracks=tracks)
 
-    assert len(controls.wl()) == 50
     assert controls.filters.filterNames() == ["Q(HI)"]
     assert controls.tracks.mMin() == pytest.approx(0.1)
     assert controls.tracks.mMax() == pytest.approx(300.0)
 
-    for obj, method in ((specsyn, "wl"), (fc, "filterNames"), (tracks, "mMin")):
+    for obj, method in ((fc, "filterNames"), (tracks, "mMin")):
         with pytest.raises(ValueError):
             getattr(obj, method)()
+
+
+def test_simcontrols_constructor_kwargs_specsyn_mismatched_controls_raises():
+    """Passing specsyn= to the constructor with a Specsyn built against
+    a different SimControls must raise ValueError (via setSpecsyn()'s
+    own cross-SimControls validation) rather than silently installing
+    it -- see the constructor's own docstring on why specsyn can't
+    usefully be passed this way at all, unlike filters/tracks."""
+    other_controls = slug.SimControls(CLUSTER_DECK)
+    specsyn = slug.SpecsynBlackbody(3000.0, 9000.0, 50, other_controls)
+
+    with pytest.raises(ValueError):
+        slug.SimControls(CLUSTER_DECK, "cluster", specsyn=specsyn)
 
 
 def test_simcontrols_constructor_kwargs_numeric_properties():

@@ -137,7 +137,14 @@ intMaxIter : int, optional
     SimControls() followed by sc.imf = "20.0". specsyn/filters/tracks
     transfer ownership exactly as their own setter/property does, so
     the object passed in is no longer usable from Python afterward.
-    See each property's own docstring for further details.
+    specsyn, unlike filters/tracks, cannot usefully be passed here in
+    practice: a Specsyn must have been constructed with controls=this
+    same SimControls (see setSpecsyn()'s own docstring), which does not
+    yet exist at the point a value for this keyword argument would
+    need to be built -- prefer setting it after construction instead
+    (sc = SimControls(...); sc.specsyn = SpecsynBlackbody(...,
+    controls=sc)). See each property's own docstring for further
+    details.
 
 Throws
 ------
@@ -145,7 +152,11 @@ RuntimeError
     If the file cannot be parsed, sim_type is not "cluster" or
     "galaxy", the deck is otherwise invalid, (only if path is empty)
     the bundled default deck cannot be found, or any of the
-    property-setting keyword arguments above would itself raise.)doc";
+    property-setting keyword arguments above would itself raise a
+    RuntimeError.
+ValueError
+    If specsyn is given and was constructed against a different
+    SimControls -- see specsyn's own description above.)doc";
 
 static constexpr std::string_view wlDocstring = R"doc(Return the rest-frame wavelength grid of the spectral synthesizer.
 
@@ -395,11 +406,26 @@ static constexpr std::string_view setSpecsynDocstring = R"doc(Set the spectral s
 
 Parameters
 ----------
-specsyn : Specsyn
+specsyn : Specsyn, optional
     The spectral synthesizer to use (e.g. a SpecsynBlackbody,
     SpecsynLibNoWind, SpecsynLibWR, or SpecsynLibChained); ownership is
     transferred to this SimControls, so specsyn is no longer usable
-    from Python after this call.
+    from Python after this call. May be None, to remove the current
+    one.
+
+Throws
+------
+ValueError
+    If specsyn is not None and was constructed with a controls
+    argument other than this same SimControls -- a Specsyn stores a
+    live reference to whichever SimControls it was built against, for
+    the rest of its lifetime, and this method cannot re-bind it, so
+    specsyn must already have been constructed with controls=this
+    SimControls (e.g. slug.SpecsynBlackbody(..., controls=sc);
+    sc.setSpecsyn(specsyn)). This also means specsyn cannot usefully be
+    passed as a constructor keyword argument (SimControls(...,
+    specsyn=...)): the SimControls being constructed does not exist
+    yet at the point specsyn would need to be built against it.
 
 Details
 -------
@@ -504,9 +530,11 @@ this property (or setComputeLbol()) has since been set to True.)doc";
 static constexpr std::string_view specsynPropertyDocstring = R"doc(The spectral synthesizer, or None if none was requested.
 
 Reading returns the Specsyn requested via spectra.model (or None if
-spectra.model was not given). Assigning a Specsyn transfers its
-ownership to this SimControls, so it is no longer usable from Python
-after assignment -- see setSpecsyn()'s own docstring.)doc";
+spectra.model was not given). Assigning a Specsyn (or None, to remove
+one already present) transfers its ownership to this SimControls, so
+it is no longer usable from Python after assignment -- see
+setSpecsyn()'s own docstring, including the ValueError raised if it
+was built against a different SimControls.)doc";
 
 static constexpr std::string_view filtersPropertyDocstring = R"doc(The photometric filter collection, or None if none was requested.
 
@@ -522,7 +550,9 @@ neither extinct.AV nor extinct.AV_field was given in the input deck),
 built once, at construction, or later installed via setExtinct().
 Assigning an Extinct (or None, to remove one already present)
 transfers its ownership to this SimControls, so it is no longer usable
-from Python after assignment -- see setExtinct()'s own docstring.)doc";
+from Python after assignment -- see setExtinct()'s own docstring,
+including the ValueError raised if it was built against a different
+SimControls.)doc";
 
 static constexpr std::string_view nebularPropertyDocstring = R"doc(The nebular emission grid, or None if none was requested.
 
@@ -533,16 +563,23 @@ builds one), in which case this is None. Built once, at construction,
 or later installed via setNebular(). Assigning a Nebular (or None, to
 remove one already present) transfers its ownership to this
 SimControls, so it is no longer usable from Python after assignment --
-see setNebular()'s own docstring.)doc";
+see setNebular()'s own docstring, including the ValueError raised if
+it was built against a different SimControls.)doc";
 
 static constexpr std::string_view setExtinctDocstring = R"doc(Set the extinction curve.
 
 Parameters
 ----------
-extinct : Extinct
+extinct : Extinct, optional
     The extinction curve to use; ownership is transferred to this
     SimControls, so extinct is no longer usable from Python after this
-    call.
+    call. May be None, to remove the current one.
+
+Throws
+------
+ValueError
+    If extinct is not None and was constructed with a controls
+    argument other than this same SimControls.
 
 Details
 -------
@@ -556,19 +593,22 @@ extinct must have been constructed with its own controls argument set
 to this same SimControls (e.g. extinct = slug.Extinct(name,
 controls=sc); sc.setExtinct(extinct)) -- an Extinct stores a live
 reference to whichever SimControls it was built against, for the rest
-of its lifetime, and this method cannot re-bind it. Passing one built
-against some other SimControls installs it anyway, but its cached
-quantities will keep describing that other SimControls's own settings,
-not this one's.)doc";
+of its lifetime, and this method cannot re-bind it.)doc";
 
 static constexpr std::string_view setNebularDocstring = R"doc(Set the nebular emission grid.
 
 Parameters
 ----------
-nebular : Nebular
+nebular : Nebular, optional
     The nebular emission grid to use; ownership is transferred to this
     SimControls, so nebular is no longer usable from Python after this
-    call.
+    call. May be None, to remove the current one.
+
+Throws
+------
+ValueError
+    If nebular is not None and was constructed with a controls
+    argument other than this same SimControls.
 
 Details
 -------

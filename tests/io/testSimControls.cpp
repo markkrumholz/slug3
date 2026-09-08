@@ -11,6 +11,7 @@
 #include "../src/pdfs/PDFSegment.hpp"
 #include "../src/pdfs/PDFSegmentLognormal.hpp"
 #include "../src/pdfs/PDFSegmentPowerlaw.hpp"
+#include "../src/specsyn/SpecsynBlackbody.hpp"
 #include "../src/utils/MiscUtils.hpp"
 #include "testSimControls.hpp"
 #include <algorithm>
@@ -1189,6 +1190,59 @@ static auto testSimControlsSetFeHRejectsBroadening() -> int
     return 0;
 }
 
+// Verify that setSpecsyn()/setExtinct()/setNebular() each reject an
+// object constructed against a different SimControls than the one
+// it's being installed on -- each of Specsyn/Extinct/Nebular stores a
+// live reference to whichever SimControls it was built against, so
+// installing one bound elsewhere would leave it silently reading (or
+// describing) the wrong object's own settings.
+static auto testSimControlsSettersRejectMismatchedControls() -> int
+{
+    const std::string fileName = "tests/core/assets/testCluster.in";
+    const toml::table inputDeck = toml::parse_file(fileName);
+    io::SimControls sim1(inputDeck);
+    io::SimControls sim2(inputDeck);
+
+    {
+        auto badSpecsyn = std::make_unique<specsyn::SpecsynBlackbody>(3000.0, 9000.0, 50, sim1);
+        try
+        {
+            sim2.setSpecsyn(std::move(badSpecsyn));
+            std::cerr << "testSimControls: setSpecsyn: expected a Specsyn built "
+                "against sim1 to be rejected when installed on sim2\n";
+            return 1;
+        }
+        catch (const std::invalid_argument&) { /* expected */ }
+    }
+
+    {
+        auto badExtinct = std::make_unique<extinct::Extinct>("Calzetti_starburst", sim1);
+        try
+        {
+            sim2.setExtinct(std::move(badExtinct));
+            std::cerr << "testSimControls: setExtinct: expected an Extinct built "
+                "against sim1 to be rejected when installed on sim2\n";
+            return 1;
+        }
+        catch (const std::invalid_argument&) { /* expected */ }
+    }
+
+    {
+        auto badNebular = std::make_unique<nebular::Nebular>(
+            "tests/nebular/assets/nebular_test.h5", "MIST_test", sim1);
+        try
+        {
+            sim2.setNebular(std::move(badNebular));
+            std::cerr << "testSimControls: setNebular: expected a Nebular built "
+                "against sim1 to be rejected when installed on sim2\n";
+            return 1;
+        }
+        catch (const std::invalid_argument&) { /* expected */ }
+    }
+
+    return 0;
+}
+
 auto testSimControls() -> int
 {
     int result = 0;
@@ -1215,5 +1269,6 @@ auto testSimControls() -> int
     result += testSimControlsExtinctField();
     result += testSimControlsSFRDist();
     result += testSimControlsSetFeHRejectsBroadening();
+    result += testSimControlsSettersRejectMismatchedControls();
     return result;
 }

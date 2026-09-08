@@ -85,6 +85,17 @@ namespace specsyn
         [[nodiscard]] auto wl() const -> const std::vector<double>& { return wl_; }
 
         /**
+         * @brief Get the SimControls this Specsyn was constructed against
+         * @return A const reference to controls_ -- see its own
+         *   comment. Exposed so a caller replacing a SimControls's own
+         *   specsyn (see SimControls::setSpecsyn()) can verify it is
+         *   installing a Specsyn actually built against that same
+         *   SimControls, rather than one whose controls_ points
+         *   somewhere else entirely.
+         */
+        [[nodiscard]] auto controls() const -> const io::SimControls& { return controls_; }
+
+        /**
          * @brief Return the observed-frame wavelength grid
          * @return The wavelength grid, in Angstrom, redshifted by
          *   (1 + z), with z read live from controls_
