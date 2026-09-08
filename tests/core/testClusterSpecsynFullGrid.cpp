@@ -32,11 +32,15 @@ namespace
 {
     // Additional real data files this sweep needs beyond what
     // allRequiredDataFilesExist() already checks (MIST + every
-    // spectral library) -- Stromlo and PARSEC_comp, the other two
-    // track sets make_slug_grid.py's own TRACK_SETS builds decks for.
-    const std::array<std::string, 2> extraRequiredDataFiles = { { // NOLINT(bugprone-throwing-static-initialization,cert-err58-cpp) -- see requiredDataFiles's own identical NOLINT in testClusterSpecsynFullCommon.cpp
+    // spectral library) -- Stromlo, PARSEC_comp, and the three Geneva
+    // files, the other track sets make_slug_grid.py's own TRACK_SETS
+    // builds decks for.
+    const std::array<std::string, 5> extraRequiredDataFiles = { { // NOLINT(bugprone-throwing-static-initialization,cert-err58-cpp) -- see requiredDataFiles's own identical NOLINT in testClusterSpecsynFullCommon.cpp
         "data/tracks/stromlo.h5",
         "data/tracks/parsec_composite.h5",
+        "data/tracks/geneva.h5",
+        "data/tracks/geneva_Z0004.h5",
+        "data/tracks/geneva_Z014.h5",
     }};
 
     auto extraRequiredDataFilesExist() -> bool
@@ -91,17 +95,20 @@ namespace
         double vvcrit_;
     };
 
-    // Every combination the tracks registry offers for the three
+    // Every combination the tracks registry offers for the six
     // track sets make_slug_grid.py's own TRACK_SETS builds decks for
     // -- see testClusterSpecsynFullGrid()'s own comment for why just
-    // these three. Each track set's own Fe_H and v_vcrit arrays are
+    // these six. Each track set's own Fe_H and v_vcrit arrays are
     // read straight from the registry, so this automatically tracks
     // the registry's own current grid (e.g. Stromlo's [Fe/H] max
     // dropping to +0.5 after PR #184) rather than needing to be kept
     // in sync by hand.
     auto allCombos() -> std::vector<Combo>
     {
-        static constexpr std::array<const char*, 3> trackSets = { "MIST", "Stromlo", "PARSEC_comp" };
+        static constexpr std::array<const char*, 6> trackSets = {
+            "MIST", "Stromlo", "PARSEC_comp",
+            "Geneva", "Geneva_Z0004", "Geneva_Z014"
+        };
         const auto registry = tracks::parseRegistry().first;
 
         std::vector<Combo> combos;
