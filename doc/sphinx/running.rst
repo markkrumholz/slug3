@@ -39,6 +39,8 @@ The outputs of the simulation will be written to a file in the current working d
 whose name matches the ``model_name`` provided in the parameter file.
 See :ref:`sec-output` for details on the outputs and how to read them.
 
+.. _ssec-running-python:
+
 Running SLUG From Python
 ------------------------
 

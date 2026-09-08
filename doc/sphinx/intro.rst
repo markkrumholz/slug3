@@ -12,7 +12,8 @@ in any published work, please cite the following papers:
 What Does SLUG Do?
 ------------------
 
-SLUG is a stellar population synthesis (SPS) code, meaning that, for a 
+SLUG (Stochastically Lighting Up Galaxies) is a stellar population synthesis
+(SPS) code, meaning that, for a 
 specified stellar initial mass function (IMF), star formation history (SFH), 
 cluster mass function (CMF), cluster lifetime function (CLF), metallicity
 distribution [Fe/H], and (optionally)  distribution of extinctions (A_V), it

@@ -27,6 +27,7 @@ Contents:
    slugpy
    cloudy
    tests
+   python_api
    cpp_api/cpp_api_root
    acknowledgements
 

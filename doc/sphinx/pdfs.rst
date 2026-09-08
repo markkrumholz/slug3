@@ -31,8 +31,10 @@ is one that satisfies
 while an unnormalized PDF need not satisfy this condition; for an unnormalized PDF, the
 factors :math:`n_i` are arbitrary.
 
-Specifying PDFs
----------------
+.. _ssec-pdf-files:
+
+PDF Definition Files
+--------------------
 
 When a PDF is called for in a parameter file, it can be provided as either a single number
 or the name of a PDF descriptor file. A single number is treated as a delta function at
