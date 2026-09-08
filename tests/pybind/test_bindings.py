@@ -973,6 +973,62 @@ def test_simcontrols_write_flag_read_from_deck():
     assert controls.writeClusterSpec is True
 
 
+def test_simcontrols_output_identity_properties():
+    """modelName, outDir, nTrial, and outputMode should each be readable
+    as a property, reflect deck values (or defaults), and be writable
+    both via the property and via the matching set*() method."""
+    controls = slug.SimControls(CLUSTER_DECK)
+
+    # Default values when the deck sets none of these explicitly
+    assert controls.modelName == "slug_sim"
+    assert controls.outDir == ""
+    assert controls.nTrial == 1
+    assert controls.outputMode == slug.SimControls.OutputMode.h5
+
+    # Assign via property; read back via property
+    controls.modelName = "my_run"
+    assert controls.modelName == "my_run"
+
+    controls.outDir = "/tmp/slug_out"
+    assert controls.outDir == "/tmp/slug_out"
+
+    controls.nTrial = 42
+    assert controls.nTrial == 42
+
+    controls.outputMode = slug.SimControls.OutputMode.ascii
+    assert controls.outputMode == slug.SimControls.OutputMode.ascii
+
+    # Assign via setter method; read back via property
+    controls.setModelName("other_run")
+    assert controls.modelName == "other_run"
+
+    controls.setOutDir("")
+    assert controls.outDir == ""
+
+    controls.setNTrial(7)
+    assert controls.nTrial == 7
+
+    controls.setOutputMode(slug.SimControls.OutputMode.h5)
+    assert controls.outputMode == slug.SimControls.OutputMode.h5
+
+
+def test_simcontrols_output_identity_from_deck():
+    """modelName, outDir, nTrial, and outputMode should reflect values
+    actually set in the input deck, not just the defaults."""
+    import tomlkit
+    deck = tomlkit.parse(pathlib.Path(CLUSTER_DECK).read_text())
+    deck.setdefault("output", tomlkit.table())
+    deck["output"]["model_name"] = "deck_model"
+    deck["output"]["out_dir"] = "/deck/dir"
+    deck["output"]["output_mode"] = "ascii"
+    deck["n_trial"] = 5
+    controls = slug.SimControls(tomlkit.dumps(deck))
+    assert controls.modelName == "deck_model"
+    assert controls.outDir == "/deck/dir"
+    assert controls.nTrial == 5
+    assert controls.outputMode == slug.SimControls.OutputMode.ascii
+
+
 def test_simcontrols_input_deck_str_property():
     """inputDeckStr should round-trip to a table equivalent to the deck
     that built this SimControls, and be read-only (no setInputDeckStr/

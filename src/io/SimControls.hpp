@@ -344,6 +344,46 @@ namespace io
         void setCheckpointInterval(unsigned long interval) { checkpointInterval_ = interval; }
 
         /**
+         * @brief Set the model name
+         * @param name New model name (base name of output file(s))
+         * @details
+         * Like modelName_ itself, this is read by an OutputManager at
+         * its own construction, not live, so assigning this only
+         * affects an OutputManager built from this SimControls
+         * afterward, not one already built from it.
+         */
+        void setModelName(std::string name) { modelName_ = std::move(name); }
+
+        /**
+         * @brief Set the output directory
+         * @param dir New output directory path; empty string means the
+         *   current working directory
+         * @details
+         * Like outDir_ itself, this is read by an OutputManager at
+         * its own construction, not live, so assigning this only
+         * affects an OutputManager built from this SimControls
+         * afterward, not one already built from it.
+         */
+        void setOutDir(std::string dir) { outDir_ = std::move(dir); }
+
+        /**
+         * @brief Set the number of trials
+         * @param n New number of trials
+         */
+        void setNTrial(unsigned long n) { nTrial_ = n; }
+
+        /**
+         * @brief Set the output mode
+         * @param mode New output mode
+         * @details
+         * Like outputMode_ itself, this determines what kind of
+         * OutputManager is built, so assigning this only affects an
+         * OutputManager built from this SimControls afterward, not one
+         * already built from it.
+         */
+        void setOutputMode(OutputMode mode) { outputMode_ = mode; }
+
+        /**
          * @brief Set whether the clusters group/file should be written
          * @param value New value for writeCluster()
          * @details

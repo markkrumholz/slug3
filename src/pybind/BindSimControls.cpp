@@ -514,6 +514,43 @@ built by this SimControls reads this value live, not a snapshot, so
 assigning a new value takes effect the next time wlObs() is called --
 no need to rebuild anything.)doc";
 
+static constexpr std::string_view modelNamePropertyDocstring =
+R"doc(The model name.
+
+Base name of this simulation's output file(s) -- e.g. for HDF5 output,
+modelName + ".h5". Defaults to "slug_sim" when no output.model_name was
+given in the input deck.
+
+Like the write* flags, this is read by an OutputManager at its own
+construction, not live: assigning this only affects an OutputManager
+built from this SimControls afterward, not one already built from it.)doc";
+
+static constexpr std::string_view outDirPropertyDocstring =
+R"doc(The output directory.
+
+Directory into which output files are written. An empty string (the
+default when no output.out_dir was given in the input deck) means the
+current working directory.
+
+Like the write* flags, this is read by an OutputManager at its own
+construction, not live: assigning this only affects an OutputManager
+built from this SimControls afterward, not one already built from it.)doc";
+
+static constexpr std::string_view nTrialPropertyDocstring =
+R"doc(The number of trials this simulation will run.
+
+Defaults to 1 when no n_trial was given in the input deck. Assigning
+this before calling SimCluster.run() / SimGalaxy.run() takes effect
+immediately -- no need to rebuild the simulation object.)doc";
+
+static constexpr std::string_view outputModePropertyDocstring =
+R"doc(The output mode.
+
+One of SimControls.OutputMode.h5 (the default), .h5divided, or .ascii.
+Determines what kind of OutputManager is built from this SimControls, so
+like the write* flags, assigning this only affects an OutputManager built
+afterward, not one already built from it.)doc";
+
 static constexpr std::string_view checkpointIntervalPropertyDocstring =
 R"doc(The number of trials between checkpoints.
 
@@ -718,14 +755,14 @@ void bindSimControls(py::module_& m)
                 wlObsDocstring.data())
         .def("simType", &io::SimControls::simType,
                 simTypeGetterDocstring.data())
-        .def("outputMode", &io::SimControls::outputMode,
-                outputModeGetterDocstring.data())
-        .def("modelName", &io::SimControls::modelName,
-                modelNameGetterDocstring.data())
-        .def("outDir", &io::SimControls::outDir,
-                outDirGetterDocstring.data())
-        .def("nTrial", &io::SimControls::nTrial,
-                nTrialGetterDocstring.data())
+        .def("setOutputMode", &io::SimControls::setOutputMode,
+                outputModePropertyDocstring.data(), py::arg("mode"))
+        .def("setModelName", &io::SimControls::setModelName,
+                modelNamePropertyDocstring.data(), py::arg("name"))
+        .def("setOutDir", &io::SimControls::setOutDir,
+                outDirPropertyDocstring.data(), py::arg("dir"))
+        .def("setNTrial", &io::SimControls::setNTrial,
+                nTrialPropertyDocstring.data(), py::arg("n"))
         .def("setComputeLbol", &io::SimControls::setComputeLbol,
                 setComputeLbolDocstring.data(), py::arg("value"))
         .def("setIMF", &io::SimControls::setIMF,
@@ -854,6 +891,22 @@ void bindSimControls(py::module_& m)
                 &io::SimControls::z,
                 &io::SimControls::setZ,
                 zPropertyDocstring.data())
+        .def_property("outputMode",
+                &io::SimControls::outputMode,
+                &io::SimControls::setOutputMode,
+                outputModePropertyDocstring.data())
+        .def_property("modelName",
+                &io::SimControls::modelName,
+                &io::SimControls::setModelName,
+                modelNamePropertyDocstring.data())
+        .def_property("outDir",
+                &io::SimControls::outDir,
+                &io::SimControls::setOutDir,
+                outDirPropertyDocstring.data())
+        .def_property("nTrial",
+                &io::SimControls::nTrial,
+                &io::SimControls::setNTrial,
+                nTrialPropertyDocstring.data())
         .def_property("checkpointInterval",
                 &io::SimControls::checkpointInterval,
                 &io::SimControls::setCheckpointInterval,
