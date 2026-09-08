@@ -21,6 +21,7 @@ auto main() -> int {
         result += testExtinctApplyExtinctionCtsInvalid();
         result += testExtinctLinesEmpty();
         result += testExtinctLoadCurveAtomic();
+        result += testExtinctNullSpecsyn();
         return result;
     }
     catch (const std::exception& error)

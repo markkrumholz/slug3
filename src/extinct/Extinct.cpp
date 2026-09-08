@@ -25,6 +25,12 @@
 
 auto extinct::Extinct::wlObs() const -> std::vector<double>
 {
+    if (wl_.empty())
+    {
+        throw std::runtime_error(
+            "Extinct::wlObs: this Extinct has no wavelength grid -- "
+            "controls_.specsyn() was null the last time rebuildCache() ran");
+    }
     const double z = controls_.z();
     std::vector<double> wlObs(wl_.size());
     std::ranges::transform(wl_, wlObs.begin(),
@@ -43,10 +49,19 @@ void extinct::Extinct::rebuildCacheImpl()
 {
     if (controls_.specsyn() == nullptr)
     {
-        throw std::runtime_error(
-            "Extinct::rebuildCache: controls has no spectral synthesizer "
-            "(SimControls::specsyn() is null), so no wavelength grid is "
-            "available to interpolate the extinction curve onto");
+        // No wavelength grid to interpolate the curve onto -- see this
+        // method's own header comment for why every cached quantity,
+        // not just wl_/extinct_, has to be cleared rather than left as
+        // whatever it was before (normalize() needs a non-empty wl_/
+        // extinct_ to derive its own V-band scale factor, so
+        // extinctLines_ can't be meaningfully normalized either)
+        wl_.clear();
+        extinct_.clear();
+        wlOffset_ = 0;
+        extinctLines_.clear();
+        extinctionFacCts_.clear();
+        extinctionFacCtsLines_.clear();
+        return;
     }
     const auto& wl = controls_.specsyn()->wl();
 

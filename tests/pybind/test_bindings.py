@@ -876,6 +876,29 @@ def test_simcontrols_set_specsyn_rebuilds_extinct_cache():
     assert len(controls.extinct.wl()) == len(controls.extinct.extinct())
 
 
+def test_simcontrols_set_specsyn_none_empties_extinct_cache():
+    """setSpecsyn(None) should not raise even when this SimControls
+    already has an extinction curve -- Extinct tolerates a null
+    specsyn by clearing its own cached quantities (wl()/extinct() end
+    up empty) rather than throwing, so removing/replacing the spectral
+    synthesizer stays a valid operation either way.
+    applyExtinctionCts() should then raise, and installing a real
+    specsyn again should make extinct fully usable once more."""
+    controls = _controls_with_extinct(av_field=1.0)
+    assert len(controls.extinct.wl()) > 0
+
+    controls.setSpecsyn(None)
+
+    assert controls.specsyn is None
+    assert len(controls.extinct.wl()) == 0
+    with pytest.raises(RuntimeError):
+        controls.extinct.applyExtinctionCts([])
+
+    new_specsyn = slug.SpecsynBlackbody(3000.0, 9000.0, 50, controls)
+    controls.setSpecsyn(new_specsyn)
+    assert len(controls.extinct.wl()) > 0
+
+
 def test_simcontrols_set_extinct_installs_new_curve():
     """setExtinct() should install a working Extinct on a SimControls
     whose extinct property was previously None, transferring ownership

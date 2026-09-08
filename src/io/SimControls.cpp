@@ -600,33 +600,6 @@ void io::SimControls::setAVDistField(const std::string& avDistField)
     }
 }
 
-// Set the spectral synthesizer, rebuilding extinct_'s own cached
-// quantities if an extinction curve is already present -- see
-// setSpecsyn()'s own header comment for why this matters, and
-// setAVDistField()'s own definition just above for why a failed
-// rebuild restores the previous specsyn_ rather than leaving the new,
-// rejected one in place
-void io::SimControls::setSpecsyn(std::unique_ptr<specsyn::Specsyn> specsyn)
-{
-    if (!extinct_)
-    {
-        specsyn_ = std::move(specsyn);
-        return;
-    }
-
-    auto oldSpecsyn = std::move(specsyn_);
-    specsyn_ = std::move(specsyn);
-    try
-    {
-        extinct_->rebuildCache();
-    }
-    catch (...)
-    {
-        specsyn_ = std::move(oldSpecsyn);
-        throw;
-    }
-}
-
 // Set the star formation rate -- mirrors the galaxy.sfr handling in
 // the constructor above exactly, including not resolving a file name
 // through utils::getFilePath (unlike setIMF()/setCMF()/setFeH()/

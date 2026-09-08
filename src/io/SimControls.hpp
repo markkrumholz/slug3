@@ -883,7 +883,26 @@ namespace io
          * new one's -- mirrors setAVDistField()'s own identical
          * amendment exactly.
          */
-        void setSpecsyn(std::unique_ptr<specsyn::Specsyn> specsyn);
+        void setSpecsyn(std::unique_ptr<specsyn::Specsyn> specsyn)
+        {
+            if (!extinct_)
+            {
+                specsyn_ = std::move(specsyn);
+                return;
+            }
+
+            auto oldSpecsyn = std::move(specsyn_);
+            specsyn_ = std::move(specsyn);
+            try
+            {
+                extinct_->rebuildCache();
+            }
+            catch (...)
+            {
+                specsyn_ = std::move(oldSpecsyn);
+                throw;
+            }
+        }
 
         /**
          * @brief Set the photometric filter collection
