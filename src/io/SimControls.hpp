@@ -733,7 +733,15 @@ namespace io
          * applyExtinctionCts()/applyExtinctionCtsLines()) stay in sync
          * with the new avDistField() -- see Extinct::rebuildCache()'s
          * own comment for why those aren't simply recomputed on every
-         * access instead.
+         * access instead. If that call throws, avDistField() is left
+         * exactly as it was beforehand (rather than the new,
+         * rejected value): rebuildCache() reads avDistField() live,
+         * so avDistField_ must already hold the new value for that
+         * call to have any effect, but since rebuildCache() is itself
+         * failure-atomic, its own cache stays at its previous, valid
+         * state on failure either way -- leaving avDistField_ at the
+         * new value in that case would make it describe a
+         * distribution extinct()'s own cache doesn't actually reflect.
          */
         void setAVDistField(const std::string& avDistField);
 

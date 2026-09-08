@@ -328,4 +328,63 @@ auto testExtinctLinesEmpty() -> int
     return 0; // Passed
 }
 
+/**
+ * @brief Unit test for loadCurve()'s failure-atomicity
+ * @returns 0 if the test passes, 1 if it fails
+ * @details
+ * Reloading a bogus curve name into an already-successfully-loaded
+ * Extinct must leave every one of its cached quantities exactly as
+ * they were beforehand, not some inconsistent mix of the previous
+ * curve and a partially-applied new one -- see loadCurve()'s own
+ * comment on why it (and rebuildCache()) is failure-atomic. Also
+ * checks that a subsequent, valid reload still works normally
+ * afterward, i.e. the failed reload didn't leave the object broken in
+ * some other way.
+ */
+auto testExtinctLoadCurveAtomic() -> int
+{
+    io::SimControls testControls;
+    attachWideWlGrid(testControls);
+    extinct::Extinct ext("Calzetti_starburst", testControls);
+
+    const auto wlDatBefore = ext.wlDat();
+    const auto extinctDatBefore = ext.extinctDat();
+    const auto wlBefore = ext.wl();
+    const auto extinctBefore = ext.extinct();
+    const auto wlOffsetBefore = ext.wlOffset();
+
+    try
+    {
+        ext.loadCurve("NotARealCurve");
+        std::cerr << "testExtinctLoadCurveAtomic: expected exception for unknown curve name\n";
+        return 1;
+    }
+    catch (const std::runtime_error&) { /* expected */ }
+
+    if (ext.wlDat() != wlDatBefore || ext.extinctDat() != extinctDatBefore ||
+        ext.wl() != wlBefore || ext.extinct() != extinctBefore ||
+        ext.wlOffset() != wlOffsetBefore)
+    {
+        std::cerr << "testExtinctLoadCurveAtomic: a failed loadCurve() call "
+            "left this Extinct's cached state changed from before the call\n";
+        return 1;
+    }
+
+    // The object should still be fully usable afterward, including for
+    // a subsequent, valid reload of a genuinely different curve --
+    // Bouchet_SMC shares Calzetti_starburst's own native wavelength
+    // grid (both tabulated on the same instrument grid), so it's
+    // extinctDat() (the actual curve values), not wlDat(), that must
+    // differ here
+    ext.loadCurve("Bouchet_SMC");
+    if (ext.extinctDat() == extinctDatBefore)
+    {
+        std::cerr << "testExtinctLoadCurveAtomic: test bug: expected "
+            "Bouchet_SMC's own extinctDat() to differ from Calzetti_starburst's\n";
+        return 1;
+    }
+
+    return 0; // Passed
+}
+
 #endif // TESTEXTINCT_HPP

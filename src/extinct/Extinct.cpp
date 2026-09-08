@@ -34,6 +34,13 @@ auto extinct::Extinct::wlObs() const -> std::vector<double>
 
 void extinct::Extinct::rebuildCache()
 {
+    Extinct tmp(*this);
+    tmp.rebuildCacheImpl();
+    commitFrom(tmp);
+}
+
+void extinct::Extinct::rebuildCacheImpl()
+{
     if (controls_.specsyn() == nullptr)
     {
         throw std::runtime_error(

@@ -22,6 +22,7 @@
 #include <stdexcept>
 #include <string>
 #include <toml.hpp>
+#include <utility>
 #include <vector>
 
 namespace io
@@ -62,7 +63,13 @@ namespace extinct
      * only controls_.specsyn()'s wavelength grid, controls_.nebular(),
      * or controls_.avDistField() changed, or loadCurve() if the curve
      * itself (extinct.model) changed and the underlying data must be
-     * re-read from disk.
+     * re-read from disk. Both are failure-atomic: each performs its
+     * actual work (loadCurveImpl()/rebuildCacheImpl()) on a disposable
+     * copy of *this, committing the result back (via commitFrom())
+     * only once that work has fully succeeded, so a caller who catches
+     * an exception from either always finds this object exactly as it
+     * was beforehand, never a partially-updated mix of old and new
+     * state.
      */
     class Extinct
     {
@@ -87,15 +94,20 @@ namespace extinct
          *   registry, the registry/HDF5 file cannot be read, or
          *   controls.specsyn() is null
          * @details
-         * Simply calls loadCurve(extinctName, registryName) -- see its
-         * own comment, and rebuildCache()'s, for what actually happens.
+         * Calls loadCurveImpl(extinctName, registryName) -- see its
+         * own comment, and rebuildCacheImpl()'s, for what actually
+         * happens. Calls the *Impl variant directly, not loadCurve()
+         * itself (which additionally wraps this same work for
+         * atomicity -- see its own comment): a constructor that throws
+         * leaves no object behind to roll back to, so that extra copy-
+         * and-commit dance would be pure overhead here.
          */
         Extinct(const std::string& extinctName,
             const io::SimControls& controls,
             const std::string& registryName = defaultRegistry) :
             controls_(controls)
         {
-            loadCurve(extinctName, registryName);
+            loadCurveImpl(extinctName, registryName);
         }
 
         // Copyable (rebinding controls_ to the same referent) but not
@@ -119,16 +131,17 @@ namespace extinct
          *   controls_.specsyn() is null
          * @details
          * Locates and parses registryName, validates that it lists
-         * extinctName, opens the HDF5 file it names, and reads that
-         * curve's own native (wavelength, kappa) tabulation into
-         * wlDat_/extinctDat_ -- the actual cost of loading a
-         * *different* curve from disk, as opposed to merely re-
-         * deriving the cached quantities below from a curve already
-         * loaded (see rebuildCache()). Always finishes by calling
-         * rebuildCache(), so the cached quantities are never left
-         * stale relative to wlDat_/extinctDat_.
+         * extinctName, opens the HDF5 file it names, reads that
+         * curve's own native (wavelength, kappa) tabulation, and
+         * rebuilds every cached quantity derived from it -- the actual
+         * work is loadCurveImpl()'s, see its own comment.
          *
-         * Called once, by the constructor. Also public so a caller
+         * Performed on a disposable copy of *this, committed back (see
+         * commitFrom()) only once that copy's loadCurveImpl() call has
+         * fully succeeded -- see this class's own top-level comment
+         * for why. Called once, by the constructor (via
+         * loadCurveImpl() directly there, not this wrapper -- see the
+         * constructor's own comment for why). Also public so a caller
          * (e.g. from Python, after SimControls's own extinct.model
          * changes) can reload a different curve into an already-
          * constructed Extinct, without building a new one.
@@ -136,55 +149,9 @@ namespace extinct
         void loadCurve(const std::string& extinctName,
             const std::string& registryName = defaultRegistry)
         {
-            // Locate and parse the registry file
-            const auto [registry, registryPath] =
-                utils::parseTOMLFile(registryName, "Extinct");
-
-            // Validate that the registry actually lists this curve
-            const auto curves = utils::getStringArrayField(registry, "curves");
-            if (std::ranges::find(curves, extinctName) == curves.end())
-            {
-                throw std::runtime_error(
-                    "Extinct: registry " + registryPath.string() +
-                    " has no extinction curve '" + extinctName + "'");
-            }
-
-            // The registry's top-level "file" entry names the HDF5 file
-            // holding the actual curve data, relative to the directory
-            // containing the registry itself
-            const auto h5Name = registry["file"].value<std::string>(); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- toml::table::operator[] is a keyed lookup, not a bounds-checkable container index; a missing key just yields a null node_view, handled by value<std::string>() returning nullopt
-            if (!h5Name.has_value())
-            {
-                throw std::runtime_error(
-                    "Extinct: registry " + registryPath.string() +
-                    " is missing required 'file' field");
-            }
-            const auto h5Path = registryPath.parent_path() / h5Name.value();
-
-            // NOLINTBEGIN(misc-include-cleaner) -- see HDF5Utils.hpp's own comment
-            const hid_t file = H5Fopen(h5Path.string().c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
-            if (file < 0)
-            {
-                throw std::runtime_error(
-                    "Extinct: unable to open HDF5 file " + h5Path.string());
-            }
-            const hid_t grp = H5Gopen2(file, extinctName.c_str(), H5P_DEFAULT);
-            if (grp < 0)
-            {
-                H5Fclose(file);
-                throw std::runtime_error(
-                    "Extinct: unable to open group " + extinctName +
-                    " in HDF5 file " + h5Path.string());
-            }
-
-            wlDat_ = utils::readDataset1D(grp, "wavelength", "Extinct");
-            extinctDat_ = utils::readDataset1D(grp, "kappa", "Extinct");
-
-            H5Gclose(grp);
-            H5Fclose(file);
-            // NOLINTEND(misc-include-cleaner)
-
-            rebuildCache();
+            Extinct tmp(*this);
+            tmp.loadCurveImpl(extinctName, registryName);
+            commitFrom(tmp);
         }
 
         /**
@@ -203,23 +170,30 @@ namespace extinct
          *     1 mag (see normalize());
          *   - precomputes extinctionFacCts_/extinctionFacCtsLines_
          *     (see their own comments).
+         * The actual computation is rebuildCacheImpl()'s -- this
+         * method itself only performs it on a disposable copy of
+         * *this and commits the result back on success (see
+         * commitFrom(), and this class's own top-level comment for
+         * why), so a failure partway through (e.g. a degenerate
+         * avDistField -- see computeExtinctionFacCts()) leaves every
+         * cached quantity exactly as it was before the call.
          *
-         * Called once, by loadCurve(), immediately after it finishes
-         * reading wlDat_/extinctDat_ from disk. Also public so a
+         * Called once, by loadCurveImpl(), immediately after it
+         * finishes reading wlDat_/extinctDat_ from disk (via
+         * rebuildCacheImpl() directly there, not this wrapper -- see
+         * loadCurveImpl()'s own comment for why). Also public so a
          * caller (e.g. from Python, after SimControls's own spectral
          * synthesizer, nebular emission grid, or field-star A_V
          * distribution changes) can recompute these cached quantities
          * from the curve already loaded, without re-reading it from
-         * disk. Safe to call more than once: every quantity it touches
-         * is fully overwritten (not appended to) on each call, so
-         * calling it again after, say, controls_.nebular() has changed
-         * from non-null to null correctly leaves extinctLines_ (and
-         * extinctionFacCtsLines_) empty rather than stale.
+         * disk. Safe to call more than once, for the same reason
+         * rebuildCacheImpl() is -- see its own comment.
          *
-         * Needs io::SimControls's complete type (to call
-         * controls_.specsyn()/nebular()/avDistField()), so is defined
-         * out-of-line, in Extinct.cpp, exactly like wlObs() -- see its
-         * own comment for why.
+         * Defined out-of-line, in Extinct.cpp, next to
+         * rebuildCacheImpl() (which needs io::SimControls's complete
+         * type to call controls_.specsyn()/nebular()/avDistField() --
+         * see that file's own comment), even though this wrapper
+         * itself does not.
          */
         void rebuildCache();
 
@@ -384,6 +358,116 @@ namespace extinct
         }
 
     private:
+
+        /**
+         * @brief Commit a successfully load/rebuild-ed disposable copy's cached state into *this
+         * @param tmp An Extinct built by loadCurve()/rebuildCache() as
+         *   a disposable copy of *this, already fully loaded/rebuilt
+         *   via loadCurveImpl()/rebuildCacheImpl() -- left in a valid
+         *   but unspecified (moved-from) state by this call
+         * @details
+         * Moves every cached member (wlDat_/extinctDat_/wl_/extinct_/
+         * wlOffset_/extinctLines_/extinctionFacCts_/
+         * extinctionFacCtsLines_) from tmp into *this. Unlike the
+         * loadCurveImpl()/rebuildCacheImpl() work that produced tmp's
+         * state in the first place (see their own comments), these
+         * moves cannot fail for any reason loadCurve()/rebuildCache()
+         * need to guard against -- exactly why they only ever call
+         * this after that work has already fully succeeded.
+         */
+        void commitFrom(Extinct& tmp)
+        {
+            wlDat_ = std::move(tmp.wlDat_);
+            extinctDat_ = std::move(tmp.extinctDat_);
+            wl_ = std::move(tmp.wl_);
+            extinct_ = std::move(tmp.extinct_);
+            wlOffset_ = tmp.wlOffset_;
+            extinctLines_ = std::move(tmp.extinctLines_);
+            extinctionFacCts_ = std::move(tmp.extinctionFacCts_);
+            extinctionFacCtsLines_ = std::move(tmp.extinctionFacCtsLines_);
+        }
+
+        /**
+         * @brief The actual work of loadCurve(), without its atomicity wrapper
+         * @param extinctName Name of the extinction curve to load (e.g. "Calzetti_starburst")
+         * @param registryName Name of the extinction curve registry file
+         * @throws std::runtime_error if extinctName is not found in the
+         *   registry, the registry/HDF5 file cannot be read, or
+         *   controls_.specsyn() is null
+         * @details
+         * Locates and parses registryName, validates that it lists
+         * extinctName, opens the HDF5 file it names, and reads that
+         * curve's own native (wavelength, kappa) tabulation into
+         * wlDat_/extinctDat_ -- the actual cost of loading a
+         * *different* curve from disk, as opposed to merely re-
+         * deriving the cached quantities below from a curve already
+         * loaded (see rebuildCacheImpl()). Always finishes by calling
+         * rebuildCacheImpl(), so the cached quantities are never left
+         * stale relative to wlDat_/extinctDat_.
+         *
+         * Mutates wlDat_/extinctDat_ (and, via rebuildCacheImpl(),
+         * every other cached member) directly and unconditionally, so
+         * a failure partway through (e.g. a curve whose "wavelength"
+         * dataset reads fine but whose "kappa" one is malformed) can
+         * leave the object it is called on in an inconsistent state --
+         * exactly why it is only ever called on *this directly by the
+         * constructor (which has no prior state to protect: see its
+         * own comment), and otherwise only on a disposable copy, by
+         * loadCurve()'s own atomicity wrapper.
+         */
+        void loadCurveImpl(const std::string& extinctName,
+            const std::string& registryName)
+        {
+            // Locate and parse the registry file
+            const auto [registry, registryPath] =
+                utils::parseTOMLFile(registryName, "Extinct");
+
+            // Validate that the registry actually lists this curve
+            const auto curves = utils::getStringArrayField(registry, "curves");
+            if (std::ranges::find(curves, extinctName) == curves.end())
+            {
+                throw std::runtime_error(
+                    "Extinct: registry " + registryPath.string() +
+                    " has no extinction curve '" + extinctName + "'");
+            }
+
+            // The registry's top-level "file" entry names the HDF5 file
+            // holding the actual curve data, relative to the directory
+            // containing the registry itself
+            const auto h5Name = registry["file"].value<std::string>(); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- toml::table::operator[] is a keyed lookup, not a bounds-checkable container index; a missing key just yields a null node_view, handled by value<std::string>() returning nullopt
+            if (!h5Name.has_value())
+            {
+                throw std::runtime_error(
+                    "Extinct: registry " + registryPath.string() +
+                    " is missing required 'file' field");
+            }
+            const auto h5Path = registryPath.parent_path() / h5Name.value();
+
+            // NOLINTBEGIN(misc-include-cleaner) -- see HDF5Utils.hpp's own comment
+            const hid_t file = H5Fopen(h5Path.string().c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+            if (file < 0)
+            {
+                throw std::runtime_error(
+                    "Extinct: unable to open HDF5 file " + h5Path.string());
+            }
+            const hid_t grp = H5Gopen2(file, extinctName.c_str(), H5P_DEFAULT);
+            if (grp < 0)
+            {
+                H5Fclose(file);
+                throw std::runtime_error(
+                    "Extinct: unable to open group " + extinctName +
+                    " in HDF5 file " + h5Path.string());
+            }
+
+            wlDat_ = utils::readDataset1D(grp, "wavelength", "Extinct");
+            extinctDat_ = utils::readDataset1D(grp, "kappa", "Extinct");
+
+            H5Gclose(grp);
+            H5Fclose(file);
+            // NOLINTEND(misc-include-cleaner)
+
+            rebuildCacheImpl();
+        }
 
         /**
          * @brief Normalize an extinction curve to a V-band extinction of 1 mag
@@ -551,6 +635,46 @@ namespace extinct
          * rebuildCache() runs.
          */
         void computeExtinctionFacCtsLines();
+
+        /**
+         * @brief The actual work of rebuildCache(), without its atomicity wrapper
+         * @throws std::runtime_error if controls_.specsyn() is null
+         * @details
+         * Builds an interpolator from the native curve data
+         * (wlDat_, extinctDat_) and:
+         *   - interpolates it onto controls_.specsyn()->wl(), clipped
+         *     to the native curve's own coverage, into wl_/extinct_
+         *     (see wl()'s own comment for wlOffset_);
+         *   - interpolates it onto every nebular emission line's own
+         *     wavelength too, if a nebular emission grid was requested
+         *     (see initExtinctLines());
+         *   - normalizes both of the above to a V-band extinction of
+         *     1 mag (see normalize());
+         *   - precomputes extinctionFacCts_/extinctionFacCtsLines_
+         *     (see their own comments).
+         * Safe to call more than once: every quantity it touches is
+         * fully overwritten (not appended to) on each call, so calling
+         * it again after, say, controls_.nebular() has changed from
+         * non-null to null correctly leaves extinctLines_ (and
+         * extinctionFacCtsLines_) empty rather than stale.
+         *
+         * Mutates wl_/extinct_/wlOffset_/extinctLines_/
+         * extinctionFacCts_/extinctionFacCtsLines_ directly and
+         * unconditionally, so a failure partway through (e.g. a
+         * degenerate avDistField -- see computeExtinctionFacCts()) can
+         * leave the object it is called on in an inconsistent state --
+         * exactly why it is only ever called on *this directly by
+         * loadCurveImpl() (itself only ever called on *this by the
+         * constructor, or on a disposable copy by loadCurve() -- see
+         * their own comments), and otherwise only on a disposable
+         * copy, by rebuildCache()'s own atomicity wrapper.
+         *
+         * Needs io::SimControls's complete type (to call
+         * controls_.specsyn()/nebular()/avDistField()), so is defined
+         * out-of-line, in Extinct.cpp, exactly like wlObs() -- see its
+         * own comment for why.
+         */
+        void rebuildCacheImpl();
 
         /**
          * @brief Simulation controls this Extinct reads its wavelength grid, redshift, nebular emission grid, and A_V distribution from

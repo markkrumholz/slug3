@@ -570,8 +570,34 @@ void io::SimControls::setAVDist(const std::string& avDist)
 // setAVDistField()'s own header comment for why this one matters
 void io::SimControls::setAVDistField(const std::string& avDistField)
 {
-    avDistField_ = utils::initPDFFromString(avDistField);
-    if (extinct_) { extinct_->rebuildCache(); }
+    auto newAVDistField = utils::initPDFFromString(avDistField);
+    if (!extinct_)
+    {
+        avDistField_ = std::move(newAVDistField);
+        return;
+    }
+
+    // extinct_->rebuildCache() reads avDistField_ live (via
+    // controls_.avDistField()), so the new value must already be in
+    // place before calling it -- but if that call throws (e.g. a
+    // degenerate avDistField -- see Extinct::computeExtinctionFacCts()),
+    // avDistField_ must be restored to its previous value before
+    // rethrowing: extinct_'s own cache stays at its previous, valid
+    // state either way (rebuildCache() is itself failure-atomic -- see
+    // its own comment), so leaving avDistField_ at the new, rejected
+    // value would otherwise make SimControls::avDistField() disagree
+    // with what extinct_'s cache actually encodes.
+    auto oldAVDistField = std::move(avDistField_);
+    avDistField_ = std::move(newAVDistField);
+    try
+    {
+        extinct_->rebuildCache();
+    }
+    catch (...)
+    {
+        avDistField_ = std::move(oldAVDistField);
+        throw;
+    }
 }
 
 // Set the star formation rate -- mirrors the galaxy.sfr handling in

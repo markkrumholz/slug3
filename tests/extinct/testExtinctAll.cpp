@@ -20,6 +20,7 @@ auto main() -> int {
         result += testExtinctNormalization();
         result += testExtinctApplyExtinctionCtsInvalid();
         result += testExtinctLinesEmpty();
+        result += testExtinctLoadCurveAtomic();
         return result;
     }
     catch (const std::exception& error)
