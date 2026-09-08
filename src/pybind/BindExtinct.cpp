@@ -52,6 +52,56 @@ RuntimeError
     If extinct_name is not found in the registry, the registry/HDF5
     file cannot be read, or controls.specsyn is None.)doc";
 
+static constexpr std::string_view loadCurveDocstring = R"doc(Read a named extinction curve from a registry entry, and rebuild every cached quantity from it.
+
+Parameters
+----------
+extinct_name : str
+    Name of the extinction curve to load (e.g. "Calzetti_starburst").
+registry_name : str, optional
+    Path to the extinction curve registry file. Default is the
+    package's default registry (data/extinct/extinct.toml).
+
+Throws
+------
+RuntimeError
+    If extinct_name is not found in the registry, the registry/HDF5
+    file cannot be read, or this Extinct's own SimControls.specsyn is
+    None.
+
+Details
+-------
+Reads extinct_name's own native (wavelength, kappa) tabulation from
+registry_name's HDF5 file into wlDat()/extinctDat() -- the actual cost
+of loading a *different* curve from disk, as opposed to merely re-
+deriving the cached quantities from a curve already loaded (see
+rebuildCache()) -- then always finishes by calling rebuildCache(), so
+the cached quantities are never left stale relative to the newly-
+loaded curve. Lets an already-constructed Extinct be pointed at a
+different curve (e.g. after its SimControls's own extinct.model
+changes) without building a new one.)doc";
+
+static constexpr std::string_view rebuildCacheDocstring = R"doc(Recompute every cached quantity derived from this curve's data and its SimControls.
+
+Throws
+------
+RuntimeError
+    If this Extinct's own SimControls.specsyn is None.
+
+Details
+-------
+Interpolates the native curve data onto SimControls.specsyn.wl,
+clipped to its own coverage (see wl()); interpolates it onto every
+nebular emission line's own wavelength too, if a nebular emission grid
+was requested (SimControls.nebular is not None); normalizes both to a
+V-band extinction of 1 mag; and recomputes the field-star expectation
+values applyExtinctionCts()/applyExtinctionCtsLines() use from
+SimControls.avDistField. Call this (rather than loadCurve()) after
+this Extinct's own SimControls has its spectral synthesizer, nebular
+emission grid, or field-star A_V distribution change, to bring these
+cached quantities back in sync with them, without re-reading the
+curve itself from disk.)doc";
+
 static constexpr std::string_view wlDatDocstring = R"doc(Get the native extinction curve wavelength grid.
 
 Returns
@@ -231,6 +281,11 @@ void bindExtinct(py::module_& m)
                 // function-local static (see its own comment in
                 // Bindings.hpp).
                 py::keep_alive<1, 3>())
+        .def("loadCurve", &extinct::Extinct::loadCurve,
+                loadCurveDocstring.data(),
+                py::arg("extinct_name"), py::arg("registry_name") = extinct::defaultRegistry)
+        .def("rebuildCache", &extinct::Extinct::rebuildCache,
+                rebuildCacheDocstring.data())
         .def("wlDat", &extinct::Extinct::wlDat, wlDatDocstring.data())
         .def("extinctDat", &extinct::Extinct::extinctDat, extinctDatDocstring.data())
         .def("wl", &extinct::Extinct::wl, wlDocstring.data())
