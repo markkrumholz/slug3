@@ -19,6 +19,8 @@
 #include "../utils/PDFIntegrator.hpp"
 #include <algorithm>
 #include <cstddef>
+#include <iterator>
+#include <stdexcept>
 #include <vector>
 
 auto extinct::Extinct::wlObs() const -> std::vector<double>
@@ -30,10 +32,75 @@ auto extinct::Extinct::wlObs() const -> std::vector<double>
     return wlObs;
 }
 
+void extinct::Extinct::rebuildCache()
+{
+    Extinct tmp(*this);
+    tmp.rebuildCacheImpl();
+    commitFrom(tmp);
+}
+
+void extinct::Extinct::rebuildCacheImpl()
+{
+    if (controls_.specsyn() == nullptr)
+    {
+        throw std::runtime_error(
+            "Extinct::rebuildCache: controls has no spectral synthesizer "
+            "(SimControls::specsyn() is null), so no wavelength grid is "
+            "available to interpolate the extinction curve onto");
+    }
+    const auto& wl = controls_.specsyn()->wl();
+
+    // Build an interpolator for the native curve data
+    const interp::Interpolator1D<1> interp(wlDat_, extinctDat_);
+
+    // Chop wl down to the interpolator's own coverage -- wl is
+    // assumed sorted ascending (a spectral wavelength grid), so the
+    // kept elements are a single contiguous run; wlOffset_ records
+    // how many leading elements were dropped, so applyExtinction()
+    // can later line up a spectrum tabulated on this same wl without
+    // having to rediscover the chop -- then interpolate the curve
+    // onto what remains. wl_/extinct_ are cleared first (rather than
+    // relying on them starting empty, as the old constructor-only
+    // call site could) since rebuildCache() may run more than once
+    // over this Extinct's lifetime.
+    wl_.clear();
+    extinct_.clear();
+    const auto firstIt = std::ranges::find_if(wl,
+        [&interp](const double w) -> bool { return w >= interp.xMin(); });
+    wlOffset_ = static_cast<std::size_t>(std::distance(wl.begin(), firstIt));
+    for (auto it = firstIt; it != wl.end() && *it <= interp.xMax(); ++it)
+    {
+        wl_.push_back(*it);
+        extinct_.push_back(interp(*it));
+    }
+
+    // Interpolate the curve onto every nebular emission line's own
+    // wavelength too, if a nebular emission grid was requested -- see
+    // initExtinctLines()'s own comment.
+    initExtinctLines(interp);
+
+    // Normalize the curve (and, if any, the line-wavelength curve
+    // above) to a V-band extinction of 1 mag
+    normalize(wl_, extinct_, extinctLines_);
+
+    // Recompute extinctionFacCts_/extinctionFacCtsLines_ -- see their
+    // own comments
+    computeExtinctionFacCts();
+    computeExtinctionFacCtsLines();
+}
+
 void extinct::Extinct::initExtinctLines(const interp::Interpolator1D<1>& interp)
 {
     const auto* neb = controls_.nebular();
-    if (neb == nullptr) { return; }
+    if (neb == nullptr)
+    {
+        // No nebular emission grid was requested -- extinctLines_
+        // must be left empty, not merely untouched: a prior
+        // rebuildCache() call, made while controls_.nebular() was
+        // still non-null, may have left it populated.
+        extinctLines_.clear();
+        return;
+    }
 
     const auto& lineWl = neb->lineWl();
     extinctLines_.resize(lineWl.size());
@@ -90,9 +157,15 @@ void extinct::Extinct::computeExtinctionFacCts()
 void extinct::Extinct::computeExtinctionFacCtsLines()
 {
     // No nebular emission grid was requested, so there are no lines
-    // to compute this for -- leave extinctionFacCtsLines_ empty,
-    // matching extinctLines_ itself
-    if (extinctLines_.empty()) { return; }
+    // to compute this for -- extinctionFacCtsLines_ must be left
+    // empty, matching extinctLines_ itself; clear() rather than a
+    // bare return, since a prior rebuildCache() call, made while
+    // extinctLines_ was still non-empty, may have left it populated
+    if (extinctLines_.empty())
+    {
+        extinctionFacCtsLines_.clear();
+        return;
+    }
 
     const auto& avDistField = controls_.avDistField();
 

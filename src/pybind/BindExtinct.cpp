@@ -8,14 +8,14 @@
 
 #include "Bindings.hpp"
 #include "../extinct/Extinct.hpp"
+#include "../io/SimControls.hpp"
 #include <memory>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h> // NOLINT(misc-include-cleaner); needed for list/vector conversions
 #include <string>
 #include <string_view>
-#include <vector>
 
-static constexpr std::string_view classDocstring = R"doc(A dust extinction curve, interpolated onto a caller-supplied wavelength grid.
+static constexpr std::string_view classDocstring = R"doc(A dust extinction curve, interpolated onto its SimControls's own spectral-synthesis wavelength grid.
 
 Built from a named curve in an extinction curve registry. The curve is
 normalized so that a V-band extinction of A_V = 1 mag corresponds to
@@ -28,19 +28,20 @@ Parameters
 ----------
 extinct_name : str
     Name of the extinction curve to load (e.g. "Calzetti_starburst").
-wl : list of float
-    Wavelength grid, in Angstrom, to interpolate the curve onto.
-    Clipped to the native curve's own [min, max] wavelength coverage
-    before interpolating -- see wl()'s own docstring.
 controls : SimControls, optional
-    Simulation controls this Extinct reads its redshift (see
-    wlObs()) and, if a nebular emission grid was requested
-    (SimControls.nebular), its field-star A_V distribution
-    (SimControls.avDistField) from, live, for the rest of its
-    lifetime. If None (the default), uses a minimal, all-C++-defaults
-    SimControls -- z = 0, no nebular emission grid, an invalid
-    avDistField() (treated as a delta at A_V = 0) -- rather than
-    slug's bundled physics deck.
+    Simulation controls this Extinct reads its wavelength grid
+    (controls.specsyn.wl, which controls.specsyn must therefore
+    provide), redshift (see wlObs()), and, if a nebular emission grid
+    was requested (SimControls.nebular), its field-star A_V
+    distribution (SimControls.avDistField) from, live, for the rest of
+    its lifetime. If None (the default), uses slug's own shared,
+    bundled-default SimControls (built from
+    src/pybind/assets/PyDefaults.toml the first time it is needed, and
+    reused after that -- see SimControls()'s own default path), rather
+    than a minimal, all-C++-defaults one: unlike most other classes'
+    own optional controls argument, Extinct always needs a real
+    spectral synthesizer to provide a wavelength grid, which a minimal
+    SimControls does not have.
 registry_name : str, optional
     Path to the extinction curve registry file. Default is the
     package's default registry (data/extinct/extinct.toml).
@@ -48,8 +49,58 @@ registry_name : str, optional
 Throws
 ------
 RuntimeError
-    If extinct_name is not found in the registry, or the registry/
-    HDF5 file cannot be read.)doc";
+    If extinct_name is not found in the registry, the registry/HDF5
+    file cannot be read, or controls.specsyn is None.)doc";
+
+static constexpr std::string_view loadCurveDocstring = R"doc(Read a named extinction curve from a registry entry, and rebuild every cached quantity from it.
+
+Parameters
+----------
+extinct_name : str
+    Name of the extinction curve to load (e.g. "Calzetti_starburst").
+registry_name : str, optional
+    Path to the extinction curve registry file. Default is the
+    package's default registry (data/extinct/extinct.toml).
+
+Throws
+------
+RuntimeError
+    If extinct_name is not found in the registry, the registry/HDF5
+    file cannot be read, or this Extinct's own SimControls.specsyn is
+    None.
+
+Details
+-------
+Reads extinct_name's own native (wavelength, kappa) tabulation from
+registry_name's HDF5 file into wlDat()/extinctDat() -- the actual cost
+of loading a *different* curve from disk, as opposed to merely re-
+deriving the cached quantities from a curve already loaded (see
+rebuildCache()) -- then always finishes by calling rebuildCache(), so
+the cached quantities are never left stale relative to the newly-
+loaded curve. Lets an already-constructed Extinct be pointed at a
+different curve (e.g. after its SimControls's own extinct.model
+changes) without building a new one.)doc";
+
+static constexpr std::string_view rebuildCacheDocstring = R"doc(Recompute every cached quantity derived from this curve's data and its SimControls.
+
+Throws
+------
+RuntimeError
+    If this Extinct's own SimControls.specsyn is None.
+
+Details
+-------
+Interpolates the native curve data onto SimControls.specsyn.wl,
+clipped to its own coverage (see wl()); interpolates it onto every
+nebular emission line's own wavelength too, if a nebular emission grid
+was requested (SimControls.nebular is not None); normalizes both to a
+V-band extinction of 1 mag; and recomputes the field-star expectation
+values applyExtinctionCts()/applyExtinctionCtsLines() use from
+SimControls.avDistField. Call this (rather than loadCurve()) after
+this Extinct's own SimControls has its spectral synthesizer, nebular
+emission grid, or field-star A_V distribution change, to bring these
+cached quantities back in sync with them, without re-reading the
+curve itself from disk.)doc";
 
 static constexpr std::string_view wlDatDocstring = R"doc(Get the native extinction curve wavelength grid.
 
@@ -72,8 +123,8 @@ static constexpr std::string_view wlDocstring = R"doc(Get the interpolated wavel
 Returns
 -------
 wl : list of float
-    Wavelength grid, in Angstrom, supplied to the constructor and
-    clipped to wlDat()'s own [min, max] coverage.)doc";
+    This Extinct's own SimControls.specsyn.wl, clipped to wlDat()'s
+    own [min, max] coverage.)doc";
 
 static constexpr std::string_view extinctDocstring = R"doc(Get the interpolated extinction curve.
 
@@ -91,16 +142,16 @@ wl_obs : list of float
     wl(), redshifted by (1 + z), with z read live from the
     SimControls this Extinct was built from.)doc";
 
-static constexpr std::string_view wlOffsetDocstring = R"doc(Get the number of leading elements chopped off the constructor's own wl.
+static constexpr std::string_view wlOffsetDocstring = R"doc(Get the number of leading elements chopped off this Extinct's own SimControls.specsyn.wl.
 
 Returns
 -------
 wl_offset : int
-    The number of leading elements of the wl passed to the
-    constructor that fell below the native curve's own coverage and
-    so are absent from wl()/extinct(). Lets a caller line up a
-    spectrum tabulated on that original wl with wl()'s own, narrower
-    grid, exactly as applyExtinction() does internally.)doc";
+    The number of leading elements of this Extinct's own
+    SimControls.specsyn.wl that fell below the native curve's own
+    coverage and so are absent from wl()/extinct(). Lets a caller line
+    up a spectrum tabulated on that same wavelength grid with wl()'s
+    own, narrower grid, exactly as applyExtinction() does internally.)doc";
 
 static constexpr std::string_view applyExtinctionDocstring = R"doc(Apply this extinction curve to a spectrum.
 
@@ -109,8 +160,8 @@ Parameters
 A_V : float
     V-band extinction to apply, in magnitudes.
 spec : list of float
-    Spectrum to extinguish, tabulated on exactly the same wavelength
-    grid as the wl originally passed to the constructor.
+    Spectrum to extinguish, tabulated on exactly this Extinct's own
+    SimControls.specsyn.wl.
 
 Returns
 -------
@@ -129,14 +180,14 @@ with one known A_V, this is for a population whose members are not
 individually tracked, so there is no single A_V to apply -- instead,
 each element of spec is multiplied by the expectation value of
 exp(-A_V * extinct()) over the field-star A_V distribution
-(SimControls.avDistField), precomputed once at construction.
+(SimControls.avDistField).
 
 Parameters
 ----------
 spec : list of float
-    Spectrum to extinguish, tabulated on exactly the same wavelength
-    grid as the wl originally passed to the constructor -- see
-    applyExtinction()'s own spec parameter.
+    Spectrum to extinguish, tabulated on exactly this Extinct's own
+    SimControls.specsyn.wl -- see applyExtinction()'s own spec
+    parameter.
 
 Returns
 -------
@@ -171,8 +222,7 @@ static constexpr std::string_view applyExtinctionCtsLinesDocstring =
 Line-luminosity analog of applyExtinctionCts() -- see its own
 docstring; each element of line_lum is multiplied by the expectation
 value of exp(-A_V * extinctLines) over the field-star A_V
-distribution (SimControls.avDistField), precomputed once at
-construction.
+distribution (SimControls.avDistField).
 
 Parameters
 ----------
@@ -193,29 +243,49 @@ void bindExtinct(py::module_& m)
 {
     py::class_<extinct::Extinct, py::smart_holder>(m, "Extinct", classDocstring.data())
         .def(py::init(
-                [](const std::string& extinctName, const std::vector<double>& wl,
+                [](const std::string& extinctName,
                    const py::object& controls, const std::string& registryName)
                     -> std::unique_ptr<extinct::Extinct>
                 {
+                    // Deliberately a ternary, not resolveControls(controls,
+                    // sharedDefaultControls()): sharedDefaultControls() is
+                    // expensive (parses PyDefaults.toml, the real MIST
+                    // tracks, and the full spectral-library chain) and can
+                    // throw, so it must only run when controls is actually
+                    // py::none() -- a plain function-call argument would
+                    // evaluate it eagerly on every construction regardless
+                    // -- see BindCluster.cpp's own identical comment.
+                    // sharedMinimalControls() (used by every other
+                    // Specsyn-derived class's own default controls
+                    // argument) won't do here: it has no spectral
+                    // synthesizer, and Extinct now always needs one, to
+                    // provide the wavelength grid the curve is
+                    // interpolated onto.
+                    const io::SimControls& controlsRef = controls.is_none()
+                        ? sharedDefaultControls()
+                        : py::cast<const io::SimControls&>(controls);
                     return std::make_unique<extinct::Extinct>(
-                        extinctName, wl,
-                        resolveControls(controls, sharedMinimalControls()),
-                        registryName);
+                        extinctName, controlsRef, registryName);
                 }),
                 constructorDocstring.data(),
                 py::arg("extinct_name"),
-                py::arg("wl"),
                 py::arg("controls") = py::none(),
                 py::arg("registry_name") = extinct::defaultRegistry,
-                // Keep controls (index 4: 1 = self, 2 = extinct_name,
-                // 3 = wl) alive at least as long as this Extinct,
-                // which stores a live reference to it rather than
-                // copying its redshift/nebular grid/avDistField out --
-                // see Extinct's own controls_ member. A harmless no-op
-                // when controls is omitted: sharedMinimalControls()'s
-                // own instance is a function-local static (see its
-                // own comment in Bindings.hpp).
-                py::keep_alive<1, 4>())
+                // Keep controls (index 3: 1 = self, 2 = extinct_name)
+                // alive at least as long as this Extinct, which stores
+                // a live reference to it rather than copying its
+                // wavelength grid/redshift/nebular grid/avDistField
+                // out -- see Extinct's own controls_ member. A
+                // harmless no-op when controls is omitted:
+                // sharedDefaultControls()'s own instance is a
+                // function-local static (see its own comment in
+                // Bindings.hpp).
+                py::keep_alive<1, 3>())
+        .def("loadCurve", &extinct::Extinct::loadCurve,
+                loadCurveDocstring.data(),
+                py::arg("extinct_name"), py::arg("registry_name") = extinct::defaultRegistry)
+        .def("rebuildCache", &extinct::Extinct::rebuildCache,
+                rebuildCacheDocstring.data())
         .def("wlDat", &extinct::Extinct::wlDat, wlDatDocstring.data())
         .def("extinctDat", &extinct::Extinct::extinctDat, extinctDatDocstring.data())
         .def("wl", &extinct::Extinct::wl, wlDocstring.data())

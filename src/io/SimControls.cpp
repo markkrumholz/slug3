@@ -555,6 +555,51 @@ void io::SimControls::setTracks(tracks::Tracks3D tracks)
     }
 }
 
+// Set the clustered-star A_V distribution, rebuilding extinct_'s own
+// cached quantities if an extinction curve is already present -- see
+// setAVDist()'s own header comment for why this call is harmless
+// rather than strictly necessary
+void io::SimControls::setAVDist(const std::string& avDist)
+{
+    avDist_ = utils::initPDFFromString(avDist);
+    if (extinct_) { extinct_->rebuildCache(); }
+}
+
+// Set the field-star A_V distribution, rebuilding extinct_'s own
+// cached quantities if an extinction curve is already present -- see
+// setAVDistField()'s own header comment for why this one matters
+void io::SimControls::setAVDistField(const std::string& avDistField)
+{
+    auto newAVDistField = utils::initPDFFromString(avDistField);
+    if (!extinct_)
+    {
+        avDistField_ = std::move(newAVDistField);
+        return;
+    }
+
+    // extinct_->rebuildCache() reads avDistField_ live (via
+    // controls_.avDistField()), so the new value must already be in
+    // place before calling it -- but if that call throws (e.g. a
+    // degenerate avDistField -- see Extinct::computeExtinctionFacCts()),
+    // avDistField_ must be restored to its previous value before
+    // rethrowing: extinct_'s own cache stays at its previous, valid
+    // state either way (rebuildCache() is itself failure-atomic -- see
+    // its own comment), so leaving avDistField_ at the new, rejected
+    // value would otherwise make SimControls::avDistField() disagree
+    // with what extinct_'s cache actually encodes.
+    auto oldAVDistField = std::move(avDistField_);
+    avDistField_ = std::move(newAVDistField);
+    try
+    {
+        extinct_->rebuildCache();
+    }
+    catch (...)
+    {
+        avDistField_ = std::move(oldAVDistField);
+        throw;
+    }
+}
+
 // Set the star formation rate -- mirrors the galaxy.sfr handling in
 // the constructor above exactly, including not resolving a file name
 // through utils::getFilePath (unlike setIMF()/setCMF()/setFeH()/
@@ -899,7 +944,7 @@ void io::SimControls::readExtinct(const toml::table& inputDeck)
     }
 
     extinct_ = std::make_unique<extinct::Extinct>(
-        model.value(), specsyn_->wl(), *this, registryName); // NOLINT(bugprone-unchecked-optional-access) -- required=true above guarantees model has a value or getTOMLKeyWithError already threw
+        model.value(), *this, registryName); // NOLINT(bugprone-unchecked-optional-access) -- required=true above guarantees model has a value or getTOMLKeyWithError already threw
 }
 
 // Nebular emission controls and grid reader
