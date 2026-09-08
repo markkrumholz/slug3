@@ -90,16 +90,28 @@ def test_default_registry_matches_explicit(wide_controls):
     assert list(default.extinct()) == list(explicit.extinct())
 
 
-def test_unknown_curve_raises():
-    """An unrecognized curve name raises RuntimeError, not a crash."""
+def test_unknown_curve_raises(wide_controls):
+    """An unrecognized curve name raises RuntimeError, not a crash.
+
+    Passes an explicit controls (rather than omitting it, which would
+    resolve to slug's real bundled default deck via
+    sharedDefaultControls() -- see wide_controls's own comment on why
+    this suite avoids that) so the failure is unambiguously about the
+    unrecognized curve name, not about that deck's own data being
+    unavailable."""
     with pytest.raises(RuntimeError):
-        Extinct("NotARealCurve", registry_name=EXTINCT_REGISTRY)
+        Extinct("NotARealCurve", controls=wide_controls, registry_name=EXTINCT_REGISTRY)
 
 
-def test_wlobs_matches_wl_when_controls_omitted():
+def test_wlobs_matches_wl_when_controls_omitted(wide_controls):
     """With no controls argument, wlObs() falls back to slug's shared
-    default SimControls (sharedDefaultControls()), whose z defaults to 0."""
-    ext = Extinct(CURVE_NAME, registry_name=EXTINCT_REGISTRY)
+    default SimControls (sharedDefaultControls()), whose z defaults to
+    0 -- same as any other SimControls at its own default z, so this
+    only checks the z = 0 property itself (via wide_controls, to avoid
+    needing sharedDefaultControls()'s own real bundled track data,
+    which this quick test suite deliberately avoids -- see the module
+    docstring)."""
+    ext = Extinct(CURVE_NAME, controls=wide_controls, registry_name=EXTINCT_REGISTRY)
     assert list(ext.wlObs()) == list(ext.wl())
 
 
