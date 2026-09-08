@@ -1055,6 +1055,9 @@ def test_simcontrols_out_times_property():
     controls.setOutTimes([5e8])
     assert controls.outTimes == [5e8]
 
+    with pytest.raises((ValueError, RuntimeError)):
+        controls.setOutTimes([])
+
 
 def test_simcontrols_input_deck_str_property():
     """inputDeckStr should round-trip to a table equivalent to the deck

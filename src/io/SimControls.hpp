@@ -22,6 +22,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <toml.hpp>
 #include <utility>
@@ -401,6 +402,11 @@ namespace io
          */
         void setOutTimes(std::vector<double> times)
         {
+            if (times.empty())
+            {
+                throw std::invalid_argument(
+                    "setOutTimes: output time list must not be empty");
+            }
             outTimes_ = std::move(times);
             outTimeDist_ = pdfs::PDF();
         }
