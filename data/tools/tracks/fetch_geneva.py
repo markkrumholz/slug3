@@ -69,8 +69,13 @@ parser.add_argument("--verbose", action="store_true",
                     help="Print verbose output")
 args = parser.parse_args()
 
-# urllib3 pool manager; GitHub API requests use the JSON accept header
+# urllib3 pool manager; GitHub API requests use the JSON accept header.
+# Timeouts: 10s to establish a connection, 120s to receive a response
+# (track .dat files run to a few hundred KB, so 120s is generous but safe
+# on a slow link; without a timeout the script can hang indefinitely on a
+# stalled upstream connection).
 http = urllib3.PoolManager(
+    timeout=urllib3.Timeout(connect=10, read=120),
     headers={"Accept": "application/vnd.github.v3+json",
              "User-Agent": "slug3-fetch-geneva"})
 
