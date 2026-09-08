@@ -691,8 +691,19 @@ namespace io
          * @param feH A numerical value (interpreted as a fixed
          *   [Fe/H]) or the name of a [Fe/H] PDF file
          * @throws std::runtime_error if feH is not numeric and does
-         *   not name a file that can be found
+         *   not name a file that can be found, or if its own
+         *   [min, max] range is broader than fehDist()'s current one
          * @details
+         * Rejects (rather than accepts and later failing to
+         * interpolate) any new distribution whose [min, max] range is
+         * not a subset of the current fehDist()'s own -- tracks_ is
+         * only ever loaded, once, at construction (via readTracks(),
+         * over fehDist_'s own range at that time), never re-loaded
+         * afterward, so widening fehDist_ past what was actually
+         * loaded would risk interpolating tracks_ outside its own
+         * data. Narrowing, or otherwise staying within, the current
+         * range is always safe and always accepted.
+         *
          * If the new fehDist_ is fixed (constFeH() becomes true),
          * also recomputes tracks2D() (the [Fe/H]-sliced cache) from
          * the current tracks_, mirroring the constructor's own
@@ -861,19 +872,72 @@ namespace io
 
         // Object-replacement setters: unlike the string-driven setters
         // above, these accept an already-built object -- e.g. from
-        // Python, where Specsyn, FilterCollection, and Tracks3D are
-        // all directly constructible -- and install it in place of
-        // whatever this SimControls already holds.
+        // Python, where Specsyn, FilterCollection, Tracks3D, Extinct,
+        // and Nebular are all directly constructible -- and install it
+        // in place of whatever this SimControls already holds. Of
+        // these, Specsyn/Extinct/Nebular each store a live reference
+        // to whichever SimControls they were built against (see each
+        // class's own controls_/simControls_ comment), so their own
+        // setters additionally validate that the object being
+        // installed was actually built against *this, throwing
+        // std::invalid_argument otherwise -- FilterCollection/
+        // Tracks3D hold no such reference, so setFilters()/
+        // setTracks() have nothing to validate.
 
         /**
          * @brief Set the spectral synthesizer
          * @param specsyn The spectral synthesizer to use; ownership is
-         *   transferred to this SimControls
+         *   transferred to this SimControls. May be null, to remove
+         *   the current one.
+         * @throws std::invalid_argument if specsyn is not null and was
+         *   constructed against a different SimControls than *this
+         *   (see Specsyn::controls()'s own comment) -- a live
+         *   reference bound elsewhere can't be re-bound after the
+         *   fact, so installing it here would leave it reading that
+         *   other SimControls's own tolerances/redshift live, not
+         *   this one's
          * @details
          * Lets a caller replace this SimControls's spectral synthesizer
-         * with its own, without needing an input deck.
+         * with its own, without needing an input deck. If this
+         * SimControls already has an extinction curve (extinct() is
+         * not null), also calls its own Extinct::rebuildCache() --
+         * extinct_ reads controls_.specsyn()->wl() live every time it
+         * rebuilds (see Extinct::rebuildCache()'s own comment on why
+         * that isn't simply re-read on every access instead), so
+         * without this, its cached wl()/extinct()/extinctionFacCts()/
+         * extinctionFacCtsLines() would keep describing the previous
+         * spectral synthesizer's own wavelength grid rather than this
+         * new one's -- mirrors setAVDistField()'s own identical
+         * amendment exactly.
          */
-        void setSpecsyn(std::unique_ptr<specsyn::Specsyn> specsyn) { specsyn_ = std::move(specsyn); }
+        void setSpecsyn(std::unique_ptr<specsyn::Specsyn> specsyn)
+        {
+            if (specsyn && &specsyn->controls() != this)
+            {
+                throw std::invalid_argument(
+                    "SimControls::setSpecsyn: specsyn was constructed "
+                    "against a different SimControls than this one -- "
+                    "construct it with this same SimControls instead");
+            }
+
+            if (!extinct_)
+            {
+                specsyn_ = std::move(specsyn);
+                return;
+            }
+
+            auto oldSpecsyn = std::move(specsyn_);
+            specsyn_ = std::move(specsyn);
+            try
+            {
+                extinct_->rebuildCache();
+            }
+            catch (...)
+            {
+                specsyn_ = std::move(oldSpecsyn);
+                throw;
+            }
+        }
 
         /**
          * @brief Set the photometric filter collection
@@ -897,6 +961,88 @@ namespace io
          * whichever of tracks_/fehDist_ changed most recently.
          */
         void setTracks(tracks::Tracks3D tracks);
+
+        /**
+         * @brief Set the extinction curve
+         * @param extinct The extinction curve to use; ownership is
+         *   transferred to this SimControls. May be null, to remove
+         *   the current one.
+         * @throws std::invalid_argument if extinct is not null and was
+         *   constructed against a different SimControls than *this
+         *   (see Extinct::controls()'s own comment)
+         * @details
+         * Lets a caller replace this SimControls's extinction curve
+         * with its own, without needing an input deck -- including
+         * installing one for the first time on a SimControls whose
+         * extinct() was previously null (neither extinct.AV nor
+         * extinct.AV_field was given), or passing nullptr to remove
+         * one already present.
+         *
+         * Like Specsyn (see setSpecsyn()'s own comment), an Extinct
+         * stores a live reference to whichever SimControls it was
+         * built against, for the rest of its lifetime, and this method
+         * cannot re-bind it -- extinct must therefore already have
+         * been constructed with its own controls argument equal to
+         * *this (e.g. from Python, extinct::Extinct(name,
+         * controls=this_same_sim_controls)), which this method
+         * verifies (via Extinct::controls()) rather than letting its
+         * cached quantities silently end up describing the wavelength
+         * grid/nebular emission grid/A_V distribution of whatever
+         * other SimControls it actually was built against.
+         */
+        void setExtinct(std::unique_ptr<extinct::Extinct> extinct)
+        {
+            if (extinct && &extinct->controls() != this)
+            {
+                throw std::invalid_argument(
+                    "SimControls::setExtinct: extinct was constructed "
+                    "against a different SimControls than this one -- "
+                    "construct it with this same SimControls instead");
+            }
+            extinct_ = std::move(extinct);
+        }
+
+        /**
+         * @brief Set the nebular emission grid
+         * @param nebular The nebular emission grid to use; ownership
+         *   is transferred to this SimControls. May be null, to
+         *   remove the current one.
+         * @throws std::invalid_argument if nebular is not null and was
+         *   constructed against a different SimControls than *this
+         *   (see Nebular::simControls()'s own comment)
+         * @details
+         * Lets a caller replace this SimControls's nebular emission
+         * grid with its own, without needing an input deck --
+         * including installing one for the first time on a
+         * SimControls whose nebular() was previously null, or passing
+         * nullptr to remove one already present. Does not touch
+         * nebControls().computeNeb_ either way -- see
+         * setNebControls()'s own comment on why that flag and
+         * nebular()'s own null-ness can therefore end up disagreeing
+         * if set independently.
+         *
+         * Like Specsyn/Extinct (see setSpecsyn()'s/setExtinct()'s own
+         * comments), a Nebular stores a live reference to whichever
+         * SimControls it was built against, for the rest of its
+         * lifetime, and this method cannot re-bind it -- nebular must
+         * therefore already have been constructed with its own
+         * simControls argument equal to *this, which this method
+         * verifies (via Nebular::simControls()) rather than letting
+         * its cached quantities silently end up describing the
+         * settings of whatever other SimControls it actually was
+         * built against.
+         */
+        void setNebular(std::unique_ptr<nebular::Nebular> nebular)
+        {
+            if (nebular && &nebular->simControls() != this)
+            {
+                throw std::invalid_argument(
+                    "SimControls::setNebular: nebular was constructed "
+                    "against a different SimControls than this one -- "
+                    "construct it with this same SimControls instead");
+            }
+            nebular_ = std::move(nebular);
+        }
 
         /**
          * @brief Set the minimum mass for fully stochastic treatment

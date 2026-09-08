@@ -387,4 +387,91 @@ auto testExtinctLoadCurveAtomic() -> int
     return 0; // Passed
 }
 
+/**
+ * @brief Unit test for Extinct's behavior when controls_.specsyn() is null
+ * @returns 0 if the test passes, 1 if it fails
+ * @details
+ * A directly-constructed Extinct against a specsyn-less SimControls
+ * should end up with every cached quantity cleared -- wl()/extinct()
+ * empty, wlOffset() == 0 -- rather than throwing at construction time
+ * (mirroring what an already-valid Extinct's own rebuildCache() does
+ * if its SimControls later loses its specsyn, e.g. via
+ * SimControls::setSpecsyn(nullptr)); every method that reads those
+ * quantities (wlObs()/applyExtinction()/applyExtinctionCts()/
+ * applyExtinctionLines()/applyExtinctionCtsLines()) should throw
+ * instead of silently returning an empty or wrongly-shaped result.
+ * Reattaching a real specsyn and calling rebuildCache() again should
+ * make the Extinct fully usable again.
+ */
+auto testExtinctNullSpecsyn() -> int
+{
+    io::SimControls bareControls; // no specsyn attached
+    extinct::Extinct ext("Calzetti_starburst", bareControls);
+
+    if (!ext.wl().empty() || !ext.extinct().empty() || ext.wlOffset() != 0)
+    {
+        std::cerr << "testExtinctNullSpecsyn: expected wl()/extinct() empty and "
+            "wlOffset() == 0 when constructed against a specsyn-less SimControls\n";
+        return 1;
+    }
+
+    try
+    {
+        const auto result = ext.wlObs();
+        std::cerr << "testExtinctNullSpecsyn: expected wlObs() to throw, got "
+            << result.size() << " elements\n";
+        return 1;
+    }
+    catch (const std::runtime_error&) { /* expected */ }
+
+    try
+    {
+        const auto result = ext.applyExtinction(1.0, {});
+        std::cerr << "testExtinctNullSpecsyn: expected applyExtinction() to throw, got "
+            << result.size() << " elements\n";
+        return 1;
+    }
+    catch (const std::runtime_error&) { /* expected */ }
+
+    try
+    {
+        const auto result = ext.applyExtinctionCts({});
+        std::cerr << "testExtinctNullSpecsyn: expected applyExtinctionCts() to throw, got "
+            << result.size() << " elements\n";
+        return 1;
+    }
+    catch (const std::runtime_error&) { /* expected */ }
+
+    try
+    {
+        const auto result = ext.applyExtinctionLines(1.0, {});
+        std::cerr << "testExtinctNullSpecsyn: expected applyExtinctionLines() to throw, got "
+            << result.size() << " elements\n";
+        return 1;
+    }
+    catch (const std::runtime_error&) { /* expected */ }
+
+    try
+    {
+        const auto result = ext.applyExtinctionCtsLines({});
+        std::cerr << "testExtinctNullSpecsyn: expected applyExtinctionCtsLines() to throw, got "
+            << result.size() << " elements\n";
+        return 1;
+    }
+    catch (const std::runtime_error&) { /* expected */ }
+
+    // Attaching a real specsyn and rebuilding should make this Extinct
+    // fully usable again
+    attachWideWlGrid(bareControls);
+    ext.rebuildCache();
+    if (ext.wl().empty())
+    {
+        std::cerr << "testExtinctNullSpecsyn: expected wl() to be non-empty "
+            "after attaching a real specsyn and calling rebuildCache()\n";
+        return 1;
+    }
+
+    return 0; // Passed
+}
+
 #endif // TESTEXTINCT_HPP

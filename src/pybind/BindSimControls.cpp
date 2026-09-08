@@ -137,7 +137,14 @@ intMaxIter : int, optional
     SimControls() followed by sc.imf = "20.0". specsyn/filters/tracks
     transfer ownership exactly as their own setter/property does, so
     the object passed in is no longer usable from Python afterward.
-    See each property's own docstring for further details.
+    specsyn, unlike filters/tracks, cannot usefully be passed here in
+    practice: a Specsyn must have been constructed with controls=this
+    same SimControls (see setSpecsyn()'s own docstring), which does not
+    yet exist at the point a value for this keyword argument would
+    need to be built -- prefer setting it after construction instead
+    (sc = SimControls(...); sc.specsyn = SpecsynBlackbody(...,
+    controls=sc)). See each property's own docstring for further
+    details.
 
 Throws
 ------
@@ -145,7 +152,11 @@ RuntimeError
     If the file cannot be parsed, sim_type is not "cluster" or
     "galaxy", the deck is otherwise invalid, (only if path is empty)
     the bundled default deck cannot be found, or any of the
-    property-setting keyword arguments above would itself raise.)doc";
+    property-setting keyword arguments above would itself raise a
+    RuntimeError.
+ValueError
+    If specsyn is given and was constructed against a different
+    SimControls -- see specsyn's own description above.)doc";
 
 static constexpr std::string_view wlDocstring = R"doc(Return the rest-frame wavelength grid of the spectral synthesizer.
 
@@ -273,7 +284,13 @@ feh : str
 Throws
 ------
 RuntimeError
-    If feh is not numeric and does not name a file that can be found.)doc";
+    If feh is not numeric and does not name a file that can be found,
+    or if its own [min, max] range is broader than the feH property's
+    current one -- the stellar tracks are only ever loaded, once, at
+    construction, over the [Fe/H] range requested then, so widening it
+    afterward risks interpolating outside the range of data actually
+    loaded. Narrowing, or otherwise staying within, the current range
+    is always accepted.)doc";
 
 static constexpr std::string_view setCLFDocstring = R"doc(Set the cluster lifetime function.
 
@@ -389,11 +406,26 @@ static constexpr std::string_view setSpecsynDocstring = R"doc(Set the spectral s
 
 Parameters
 ----------
-specsyn : Specsyn
+specsyn : Specsyn, optional
     The spectral synthesizer to use (e.g. a SpecsynBlackbody,
     SpecsynLibNoWind, SpecsynLibWR, or SpecsynLibChained); ownership is
     transferred to this SimControls, so specsyn is no longer usable
-    from Python after this call.
+    from Python after this call. May be None, to remove the current
+    one.
+
+Throws
+------
+ValueError
+    If specsyn is not None and was constructed with a controls
+    argument other than this same SimControls -- a Specsyn stores a
+    live reference to whichever SimControls it was built against, for
+    the rest of its lifetime, and this method cannot re-bind it, so
+    specsyn must already have been constructed with controls=this
+    SimControls (e.g. slug.SpecsynBlackbody(..., controls=sc);
+    sc.setSpecsyn(specsyn)). This also means specsyn cannot usefully be
+    passed as a constructor keyword argument (SimControls(...,
+    specsyn=...)): the SimControls being constructed does not exist
+    yet at the point specsyn would need to be built against it.
 
 Details
 -------
@@ -461,7 +493,9 @@ static constexpr std::string_view feHPropertyDocstring = R"doc(The [Fe/H] distri
 
 Reading returns a PDF; assigning a str sets a new one via setFeH() --
 see its own docstring for the exact rules, including the tracks2D()
-cache rebuild that happens if constFeH() is True afterward.)doc";
+cache rebuild that happens if constFeH() is True afterward, and the
+RuntimeError raised if the new range is broader than the current
+one.)doc";
 
 static constexpr std::string_view clfPropertyDocstring = R"doc(The cluster lifetime function.
 
@@ -496,9 +530,11 @@ this property (or setComputeLbol()) has since been set to True.)doc";
 static constexpr std::string_view specsynPropertyDocstring = R"doc(The spectral synthesizer, or None if none was requested.
 
 Reading returns the Specsyn requested via spectra.model (or None if
-spectra.model was not given). Assigning a Specsyn transfers its
-ownership to this SimControls, so it is no longer usable from Python
-after assignment -- see setSpecsyn()'s own docstring.)doc";
+spectra.model was not given). Assigning a Specsyn (or None, to remove
+one already present) transfers its ownership to this SimControls, so
+it is no longer usable from Python after assignment -- see
+setSpecsyn()'s own docstring, including the ValueError raised if it
+was built against a different SimControls.)doc";
 
 static constexpr std::string_view filtersPropertyDocstring = R"doc(The photometric filter collection, or None if none was requested.
 
@@ -509,21 +545,86 @@ from Python after assignment -- see setFilters()'s own docstring.)doc";
 
 static constexpr std::string_view extinctPropertyDocstring = R"doc(The extinction curve, or None if none was requested.
 
-Read-only: reading returns the Extinct requested via extinct.model (or
-None if neither extinct.AV nor extinct.AV_field was given in the input
-deck), built once, at construction. There is no setter -- unlike
-specsyn/filters/tracks, this SimControls's own extinction curve is not
-reassignable from Python.)doc";
+Reading returns the Extinct requested via extinct.model (or None if
+neither extinct.AV nor extinct.AV_field was given in the input deck),
+built once, at construction, or later installed via setExtinct().
+Assigning an Extinct (or None, to remove one already present)
+transfers its ownership to this SimControls, so it is no longer usable
+from Python after assignment -- see setExtinct()'s own docstring,
+including the ValueError raised if it was built against a different
+SimControls.)doc";
 
 static constexpr std::string_view nebularPropertyDocstring = R"doc(The nebular emission grid, or None if none was requested.
 
-Read-only: reading returns the Nebular built from nebular.table/
-stars.tracks, unless the input deck explicitly set
-nebular.compute_neb = false (it defaults to true, so a deck that
-never mentions [nebular] at all still builds one), in which case this
-is None. Built once, at construction. There is no setter -- unlike
-specsyn/filters/tracks, this SimControls's own nebular emission grid
-is not reassignable from Python.)doc";
+Reading returns the Nebular built from nebular.table/stars.tracks,
+unless the input deck explicitly set nebular.compute_neb = false (it
+defaults to true, so a deck that never mentions [nebular] at all still
+builds one), in which case this is None. Built once, at construction,
+or later installed via setNebular(). Assigning a Nebular (or None, to
+remove one already present) transfers its ownership to this
+SimControls, so it is no longer usable from Python after assignment --
+see setNebular()'s own docstring, including the ValueError raised if
+it was built against a different SimControls.)doc";
+
+static constexpr std::string_view setExtinctDocstring = R"doc(Set the extinction curve.
+
+Parameters
+----------
+extinct : Extinct, optional
+    The extinction curve to use; ownership is transferred to this
+    SimControls, so extinct is no longer usable from Python after this
+    call. May be None, to remove the current one.
+
+Throws
+------
+ValueError
+    If extinct is not None and was constructed with a controls
+    argument other than this same SimControls.
+
+Details
+-------
+Lets a caller build its own Extinct and install it on an
+already-constructed SimControls, without needing an input deck --
+including installing one for the first time on a SimControls whose
+extinct property was previously None, or passing None to remove one
+already present.
+
+extinct must have been constructed with its own controls argument set
+to this same SimControls (e.g. extinct = slug.Extinct(name,
+controls=sc); sc.setExtinct(extinct)) -- an Extinct stores a live
+reference to whichever SimControls it was built against, for the rest
+of its lifetime, and this method cannot re-bind it.)doc";
+
+static constexpr std::string_view setNebularDocstring = R"doc(Set the nebular emission grid.
+
+Parameters
+----------
+nebular : Nebular, optional
+    The nebular emission grid to use; ownership is transferred to this
+    SimControls, so nebular is no longer usable from Python after this
+    call. May be None, to remove the current one.
+
+Throws
+------
+ValueError
+    If nebular is not None and was constructed with a controls
+    argument other than this same SimControls.
+
+Details
+-------
+Lets a caller build its own Nebular and install it on an
+already-constructed SimControls, without needing an input deck --
+including installing one for the first time on a SimControls whose
+nebular property was previously None, or passing None to remove one
+already present. Does not touch nebControls().compute_neb either way,
+so that flag and the nebular property's own None-ness can end up
+disagreeing if set independently -- see setNebControls()'s own
+docstring.
+
+nebular must have been constructed with its own controls argument set
+to this same SimControls, for the same reason described in
+setExtinct()'s own docstring -- a Nebular stores an identical live
+reference to whichever SimControls it was built against.)doc";
 
 static constexpr std::string_view tracksPropertyDocstring = R"doc(The stellar tracks.
 
@@ -860,6 +961,10 @@ void bindSimControls(py::module_& m)
                     self.setTracks(std::move(*tracks));
                 },
                 setTracksDocstring.data(), py::arg("tracks"))
+        .def("setExtinct", &io::SimControls::setExtinct,
+                setExtinctDocstring.data(), py::arg("extinct"))
+        .def("setNebular", &io::SimControls::setNebular,
+                setNebularDocstring.data(), py::arg("nebular"))
         .def("setMinStochMass", &io::SimControls::setMinStochMass,
                 setMinStochMassDocstring.data(), py::arg("min_stoch_mass"))
         .def("setIntRelTol", &io::SimControls::setIntRelTol,
@@ -933,11 +1038,13 @@ void bindSimControls(py::module_& m)
                 &io::SimControls::filters,
                 &io::SimControls::setFilters,
                 filtersPropertyDocstring.data())
-        .def_property_readonly("extinct",
+        .def_property("extinct",
                 &io::SimControls::extinct,
+                &io::SimControls::setExtinct,
                 extinctPropertyDocstring.data())
-        .def_property_readonly("nebular",
+        .def_property("nebular",
                 &io::SimControls::nebular,
+                &io::SimControls::setNebular,
                 nebularPropertyDocstring.data())
         .def_property("tracks",
                 &io::SimControls::tracks,

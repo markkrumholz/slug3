@@ -82,17 +82,19 @@ namespace extinct
          *   wavelength grid (controls.specsyn()->wl()), redshift (see
          *   wlObs()), nebular emission grid, and field-star A_V
          *   distribution from, live, for the rest of its lifetime --
-         *   see controls_'s own comment. controls.specsyn() must not
-         *   be null: Extinct has no wavelength grid of its own to fall
-         *   back on. Must outlive this Extinct. Has no default of its
-         *   own (unlike registryName below): a reference bound to a
-         *   temporary default-constructed SimControls would dangle the
-         *   moment this constructor returned, since this class stores
-         *   it live rather than copying out of it.
+         *   see controls_'s own comment. controls.specsyn() may be
+         *   null (e.g. before Python installs one via
+         *   SimControls::setSpecsyn(), or after removing one already
+         *   installed) -- see rebuildCacheImpl()'s own comment for
+         *   what that leaves this Extinct able to do. Must outlive
+         *   this Extinct. Has no default of its own (unlike
+         *   registryName below): a reference bound to a temporary
+         *   default-constructed SimControls would dangle the moment
+         *   this constructor returned, since this class stores it live
+         *   rather than copying out of it.
          * @param registryName Name of the extinction curve registry file
          * @throws std::runtime_error if extinctName is not found in the
-         *   registry, the registry/HDF5 file cannot be read, or
-         *   controls.specsyn() is null
+         *   registry, or the registry/HDF5 file cannot be read
          * @details
          * Calls loadCurveImpl(extinctName, registryName) -- see its
          * own comment, and rebuildCacheImpl()'s, for what actually
@@ -127,8 +129,7 @@ namespace extinct
          * @param extinctName Name of the extinction curve to load (e.g. "Calzetti_starburst")
          * @param registryName Name of the extinction curve registry file
          * @throws std::runtime_error if extinctName is not found in the
-         *   registry, the registry/HDF5 file cannot be read, or
-         *   controls_.specsyn() is null
+         *   registry, or the registry/HDF5 file cannot be read
          * @details
          * Locates and parses registryName, validates that it lists
          * extinctName, opens the HDF5 file it names, reads that
@@ -156,9 +157,20 @@ namespace extinct
 
         /**
          * @brief Recompute every cached quantity derived from wlDat_/extinctDat_ and controls_
-         * @throws std::runtime_error if controls_.specsyn() is null
          * @details
-         * Builds an interpolator from the native curve data
+         * If controls_.specsyn() is null, clears every cached quantity
+         * (wl_/extinct_/wlOffset_/extinctLines_/extinctionFacCts_/
+         * extinctionFacCtsLines_) instead of computing anything -- see
+         * rebuildCacheImpl()'s own comment for why every one of them,
+         * not just wl_/extinct_, ends up equally unusable in that
+         * state. Every method that reads these quantities (wlObs(),
+         * applyExtinction(), applyExtinctionCts(),
+         * applyExtinctionLines(), applyExtinctionCtsLines()) throws
+         * rather than silently returning an empty or wrongly-shaped
+         * result while this Extinct is in that state -- see their own
+         * comments.
+         *
+         * Otherwise, builds an interpolator from the native curve data
          * (wlDat_, extinctDat_) and:
          *   - interpolates it onto controls_.specsyn()->wl(), clipped
          *     to the native curve's own coverage, into wl_/extinct_
@@ -200,6 +212,17 @@ namespace extinct
         // Observers
 
         /**
+         * @brief Get the SimControls this Extinct was constructed against
+         * @return A const reference to controls_ -- see its own
+         *   comment. Exposed so a caller replacing a SimControls's own
+         *   extinction curve (see SimControls::setExtinct()) can
+         *   verify it is installing an Extinct actually built against
+         *   that same SimControls, rather than one whose controls_
+         *   points somewhere else entirely.
+         */
+        [[nodiscard]] auto controls() const -> const io::SimControls& { return controls_; }
+
+        /**
          * @brief Get the native extinction curve wavelength grid
          * @return A const reference to the wavelength grid, in Angstrom,
          *   as read directly from the registry entry
@@ -216,20 +239,26 @@ namespace extinct
         /**
          * @brief Get the interpolated wavelength grid
          * @return A const reference to controls_.specsyn()->wl(),
-         *   clipped to wlDat()'s own [min, max] coverage
+         *   clipped to wlDat()'s own [min, max] coverage -- empty if
+         *   controls_.specsyn() was null the last time rebuildCache()
+         *   ran (see its own comment)
          */
         [[nodiscard]] auto wl() const -> const std::vector<double>& { return wl_; }
 
         /**
          * @brief Get the interpolated extinction curve
          * @return A const reference to the extinction curve, in
-         *   arbitrary units, interpolated onto wl()
+         *   arbitrary units, interpolated onto wl() -- empty exactly
+         *   when wl() is, and for the same reason
          */
         [[nodiscard]] auto extinct() const -> const std::vector<double>& { return extinct_; }
 
         /**
          * @brief Get the observed-frame interpolated wavelength grid
          * @return wl(), redshifted by (1 + z), with z read live from controls_
+         * @throws std::runtime_error if wl() is empty (controls_.specsyn()
+         *   was null the last time rebuildCache() ran -- see its own
+         *   comment)
          * @details
          * Defined out-of-line, in Extinct.cpp -- see that file's own
          * comment for why (controls_.z() needs io::SimControls's
@@ -246,7 +275,8 @@ namespace extinct
          *   (see rebuildCache()'s own comment). Lets a caller line up
          *   a spectrum tabulated on that same wavelength grid with
          *   wl()'s own, narrower grid, exactly as applyExtinction()
-         *   does internally.
+         *   does internally. 0 (not otherwise meaningful) whenever
+         *   wl() is empty.
          */
         [[nodiscard]] auto wlOffset() const { return wlOffset_; }
 
@@ -257,6 +287,9 @@ namespace extinct
          *   controls_.specsyn()->wl()
          * @returns The extinguished spectrum, on the wavelength grid
          *   returned by wl()
+         * @throws std::runtime_error if wl() is empty (controls_.specsyn()
+         *   was null the last time rebuildCache() ran -- see its own
+         *   comment)
          * @details
          * spec's first wlOffset_ elements (those falling outside this
          * curve's own wavelength coverage) are discarded; each of the
@@ -266,6 +299,14 @@ namespace extinct
         [[nodiscard]] auto applyExtinction(const double A_V, // NOLINT(readability-identifier-naming) -- see above
             const std::vector<double>& spec) const -> std::vector<double>
         {
+            if (wl_.empty())
+            {
+                throw std::runtime_error(
+                    "Extinct::applyExtinction: this Extinct has no wavelength "
+                    "grid -- controls_.specsyn() was null the last time "
+                    "rebuildCache() ran, so there is nothing to extinguish "
+                    "spec against");
+            }
             std::vector<double> result(wl_.size());
             for (std::size_t i = 0; i < wl_.size(); i++)
             {
@@ -281,6 +322,9 @@ namespace extinct
          *   spec parameter
          * @returns The expected extinguished spectrum, on the
          *   wavelength grid returned by wl()
+         * @throws std::runtime_error if wl() is empty (controls_.specsyn()
+         *   was null the last time rebuildCache() ran -- see its own
+         *   comment)
          * @details
          * Unlike applyExtinction(), which attenuates a single star (or
          * cluster) with one known A_V, this is for a population whose
@@ -294,6 +338,14 @@ namespace extinct
          */
         [[nodiscard]] auto applyExtinctionCts(const std::vector<double>& spec) const -> std::vector<double>
         {
+            if (wl_.empty())
+            {
+                throw std::runtime_error(
+                    "Extinct::applyExtinctionCts: this Extinct has no "
+                    "wavelength grid -- controls_.specsyn() was null the "
+                    "last time rebuildCache() ran, so there is nothing to "
+                    "extinguish spec against");
+            }
             std::vector<double> result(wl_.size());
             for (std::size_t i = 0; i < wl_.size(); i++)
             {
@@ -309,6 +361,12 @@ namespace extinct
          *   controls_.nebular()->lineWl()'s own lines, in erg/s
          * @returns The extinguished line luminosities, in the same
          *   order as lineLum/controls_.nebular()->lineWl()
+         * @throws std::runtime_error if wl() is empty (controls_.specsyn()
+         *   was null the last time rebuildCache() ran -- see its own
+         *   comment). Does NOT throw merely because extinctLines_
+         *   itself is empty (controls_.nebular() is null): that is a
+         *   separate, valid state -- see @details below -- this method
+         *   already returns an empty result for.
          * @details
          * Line-luminosity analog of applyExtinction(): each element of
          * lineLum is multiplied by exp(-A_V * extinctLines_) at the
@@ -322,6 +380,14 @@ namespace extinct
         [[nodiscard]] auto applyExtinctionLines(const double A_V, // NOLINT(readability-identifier-naming) -- see applyExtinction()'s own identical NOLINT
             const std::vector<double>& lineLum) const -> std::vector<double>
         {
+            if (wl_.empty())
+            {
+                throw std::runtime_error(
+                    "Extinct::applyExtinctionLines: this Extinct has no "
+                    "wavelength grid -- controls_.specsyn() was null the "
+                    "last time rebuildCache() ran, so extinctLines_ could "
+                    "not be meaningfully normalized");
+            }
             std::vector<double> result(extinctLines_.size());
             for (std::size_t i = 0; i < extinctLines_.size(); i++)
             {
@@ -337,6 +403,10 @@ namespace extinct
          *   applyExtinctionLines()'s own lineLum parameter
          * @returns The expected extinguished line luminosities, in the
          *   same order as lineLum/controls_.nebular()->lineWl()
+         * @throws std::runtime_error if wl() is empty (controls_.specsyn()
+         *   was null the last time rebuildCache() ran). Does NOT throw
+         *   merely because extinctLines_ itself is empty -- see
+         *   applyExtinctionLines()'s own identical comment.
          * @details
          * Line-luminosity analog of applyExtinctionCts(): each element
          * of lineLum is multiplied by extinctionFacCtsLines_ at the
@@ -349,6 +419,14 @@ namespace extinct
          */
         [[nodiscard]] auto applyExtinctionCtsLines(const std::vector<double>& lineLum) const -> std::vector<double>
         {
+            if (wl_.empty())
+            {
+                throw std::runtime_error(
+                    "Extinct::applyExtinctionCtsLines: this Extinct has no "
+                    "wavelength grid -- controls_.specsyn() was null the "
+                    "last time rebuildCache() ran, so extinctLines_ could "
+                    "not be meaningfully normalized");
+            }
             std::vector<double> result(extinctLines_.size());
             for (std::size_t i = 0; i < extinctLines_.size(); i++)
             {
@@ -392,8 +470,7 @@ namespace extinct
          * @param extinctName Name of the extinction curve to load (e.g. "Calzetti_starburst")
          * @param registryName Name of the extinction curve registry file
          * @throws std::runtime_error if extinctName is not found in the
-         *   registry, the registry/HDF5 file cannot be read, or
-         *   controls_.specsyn() is null
+         *   registry, or the registry/HDF5 file cannot be read
          * @details
          * Locates and parses registryName, validates that it lists
          * extinctName, opens the HDF5 file it names, and reads that
@@ -638,9 +715,30 @@ namespace extinct
 
         /**
          * @brief The actual work of rebuildCache(), without its atomicity wrapper
-         * @throws std::runtime_error if controls_.specsyn() is null
          * @details
-         * Builds an interpolator from the native curve data
+         * If controls_.specsyn() is null, there is no wavelength grid
+         * to interpolate the native curve onto -- rather than throw,
+         * this clears wl_/extinct_/wlOffset_/extinctLines_/
+         * extinctionFacCts_/extinctionFacCtsLines_ and returns. Every
+         * one of those, not just wl_/extinct_, has to go: even though
+         * initExtinctLines() itself only needs wlDat_/extinctDat_/
+         * controls_.nebular() to interpolate the curve onto each
+         * line's own wavelength, normalize() -- which both extinct_
+         * and extinctLines_ need, to mean the same A_V = 1 mag scale
+         * -- derives its own scale factor from wl_/extinct_
+         * themselves (see its own comment), so an empty wl_/extinct_
+         * leaves no way to produce a meaningfully normalized
+         * extinctLines_ either. This is the state a caller (e.g. from
+         * Python, via SimControls::setSpecsyn()) reaches by installing
+         * a null specsyn on a SimControls that already has an
+         * Extinct -- see this class's own constructor comment. Every
+         * method that reads these quantities throws instead of
+         * silently returning an empty or wrongly-shaped result while
+         * in this state -- see wlObs()'s/applyExtinction()'s/
+         * applyExtinctionCts()'s/applyExtinctionLines()'s/
+         * applyExtinctionCtsLines()'s own comments.
+         *
+         * Otherwise, builds an interpolator from the native curve data
          * (wlDat_, extinctDat_) and:
          *   - interpolates it onto controls_.specsyn()->wl(), clipped
          *     to the native curve's own coverage, into wl_/extinct_

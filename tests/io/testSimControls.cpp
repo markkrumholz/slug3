@@ -11,6 +11,7 @@
 #include "../src/pdfs/PDFSegment.hpp"
 #include "../src/pdfs/PDFSegmentLognormal.hpp"
 #include "../src/pdfs/PDFSegmentPowerlaw.hpp"
+#include "../src/specsyn/SpecsynBlackbody.hpp"
 #include "../src/utils/MiscUtils.hpp"
 #include "testSimControls.hpp"
 #include <algorithm>
@@ -1125,6 +1126,123 @@ static auto testSimControlsSFRDist() -> int
     return 0;
 }
 
+// Verify that setFeH() rejects a new [Fe/H] distribution whose own
+// [min, max] range is broader than the current one -- tracks_ is only
+// ever loaded, once, at construction, over fehDist_'s own range at
+// that time, so widening it afterward risks interpolating outside the
+// data actually loaded. Narrowing (and then, deliberately, trying to
+// widen back toward the original range) should distinguish the two
+// cases correctly -- the rejection compares against the *current*
+// fehDist_, not the range originally loaded at construction.
+static auto testSimControlsSetFeHRejectsBroadening() -> int
+{
+    const std::string fileName = "tests/core/assets/testClusterVarFeH.in";
+    const toml::table inputDeck = toml::parse_file(fileName);
+    io::SimControls sim(inputDeck);
+
+    if (sim.fehDist().getMin() != -0.5 || sim.fehDist().getMax() != 0.5)
+    {
+        std::cerr << "testSimControls: setFeH: test bug: expected " << fileName
+            << "'s own stars.FeH to be [-0.5, 0.5]\n";
+        return 1;
+    }
+
+    // Narrowing to a fixed value well within [-0.5, 0.5] should succeed
+    try
+    {
+        sim.setFeH("-0.25");
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: setFeH: expected narrowing to -0.25 "
+            "to succeed, but it threw: " << error.what() << "\n";
+        return 1;
+    }
+    if (sim.fehDist().getMin() != -0.25 || sim.fehDist().getMax() != -0.25)
+    {
+        std::cerr << "testSimControls: setFeH: expected fehDist() == "
+            "[-0.25, -0.25] after narrowing\n";
+        return 1;
+    }
+
+    // Widening back out to the same [-0.5, 0.5] range originally
+    // loaded at construction should now be rejected: setFeH() compares
+    // against the current, already-narrowed fehDist_ ([-0.25, -0.25]),
+    // not the wider range tracks_ actually holds
+    try
+    {
+        sim.setFeH("tests/core/assets/testClusterFeHDist.toml");
+        std::cerr << "testSimControls: setFeH: expected widening back to "
+            "[-0.5, 0.5] to throw\n";
+        return 1;
+    }
+    catch (const std::runtime_error&) { /* expected */ }
+
+    // ...and fehDist_ itself should be left exactly as it was before
+    // the rejected call, not partially updated
+    if (sim.fehDist().getMin() != -0.25 || sim.fehDist().getMax() != -0.25)
+    {
+        std::cerr << "testSimControls: setFeH: expected fehDist() to remain "
+            "[-0.25, -0.25] after the rejected widening attempt\n";
+        return 1;
+    }
+
+    return 0;
+}
+
+// Verify that setSpecsyn()/setExtinct()/setNebular() each reject an
+// object constructed against a different SimControls than the one
+// it's being installed on -- each of Specsyn/Extinct/Nebular stores a
+// live reference to whichever SimControls it was built against, so
+// installing one bound elsewhere would leave it silently reading (or
+// describing) the wrong object's own settings.
+static auto testSimControlsSettersRejectMismatchedControls() -> int
+{
+    const std::string fileName = "tests/core/assets/testCluster.in";
+    const toml::table inputDeck = toml::parse_file(fileName);
+    io::SimControls sim1(inputDeck);
+    io::SimControls sim2(inputDeck);
+
+    {
+        auto badSpecsyn = std::make_unique<specsyn::SpecsynBlackbody>(3000.0, 9000.0, 50, sim1);
+        try
+        {
+            sim2.setSpecsyn(std::move(badSpecsyn));
+            std::cerr << "testSimControls: setSpecsyn: expected a Specsyn built "
+                "against sim1 to be rejected when installed on sim2\n";
+            return 1;
+        }
+        catch (const std::invalid_argument&) { /* expected */ }
+    }
+
+    {
+        auto badExtinct = std::make_unique<extinct::Extinct>("Calzetti_starburst", sim1);
+        try
+        {
+            sim2.setExtinct(std::move(badExtinct));
+            std::cerr << "testSimControls: setExtinct: expected an Extinct built "
+                "against sim1 to be rejected when installed on sim2\n";
+            return 1;
+        }
+        catch (const std::invalid_argument&) { /* expected */ }
+    }
+
+    {
+        auto badNebular = std::make_unique<nebular::Nebular>(
+            "tests/nebular/assets/nebular_test.h5", "MIST_test", sim1);
+        try
+        {
+            sim2.setNebular(std::move(badNebular));
+            std::cerr << "testSimControls: setNebular: expected a Nebular built "
+                "against sim1 to be rejected when installed on sim2\n";
+            return 1;
+        }
+        catch (const std::invalid_argument&) { /* expected */ }
+    }
+
+    return 0;
+}
+
 auto testSimControls() -> int
 {
     int result = 0;
@@ -1150,5 +1268,7 @@ auto testSimControls() -> int
     result += testSimControlsSpectraChained();
     result += testSimControlsExtinctField();
     result += testSimControlsSFRDist();
+    result += testSimControlsSetFeHRejectsBroadening();
+    result += testSimControlsSettersRejectMismatchedControls();
     return result;
 }

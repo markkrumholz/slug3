@@ -18,7 +18,7 @@ degenerate-avDistField handling, ...) is already covered by the C++
 unit tests in tests/extinct/testExtinct.hpp; the tests here instead
 focus on the binding itself: argument order/defaults, the optional
 ``controls`` argument's fallback and keep-alive behavior, exception
-propagation, and SimControls's own read-only "extinct" property.
+propagation, and SimControls's own settable "extinct" property.
 
 :copyright: Copyright (c) 2026 Mark Krumholz
 """
@@ -196,11 +196,19 @@ def test_simcontrols_extinct_property_returns_extinct_instance():
     assert len(ext.wl()) == len(ext.extinct())
 
 
-def test_simcontrols_extinct_property_is_read_only():
-    """SimControls.extinct has no setter -- assigning to it raises."""
+def test_simcontrols_extinct_property_is_settable():
+    """SimControls.extinct can be assigned an Extinct (transferring its
+    ownership, exactly like setExtinct() -- see its own docstring), or
+    None, to remove one already present."""
     controls = SimControls(CLUSTER_EXTINCT_DECK)
-    with pytest.raises(AttributeError):
-        controls.extinct = None  # pyright: ignore[reportAttributeAccessIssue] -- deliberately exercising the read-only contract at runtime
+    assert controls.extinct is not None
+
+    controls.extinct = None
+    assert controls.extinct is None
+
+    controls.extinct = Extinct(CURVE_NAME, controls=controls, registry_name=EXTINCT_REGISTRY)
+    assert controls.extinct is not None
+    assert len(controls.extinct.wl()) > 0
 
 
 def test_simcontrols_extinct_property_reads_z_live():
