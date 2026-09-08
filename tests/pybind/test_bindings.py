@@ -749,6 +749,32 @@ def test_simcontrols_set_feh_invalid_raises():
         controls.setFeH("not_numeric_or_a_real_file")
 
 
+def test_simcontrols_set_feh_rejects_broadening():
+    """setFeH() must reject a new [Fe/H] distribution whose own
+    [min, max] range is broader than the current one -- tracks_ is
+    only ever loaded, once, at construction, over fehDist_'s own range
+    at that time, so widening it afterward risks interpolating outside
+    the data actually loaded. Narrowing is always accepted; widening
+    back toward the original [-0.5, 0.5] range (VAR_FEH_DECK's own
+    stars.FeH) after narrowing to a point should be rejected, since
+    setFeH() compares against the *current* feH, not the range
+    actually loaded at construction -- and feH itself must be left
+    unchanged by the rejected call."""
+    controls = slug.SimControls(VAR_FEH_DECK)
+    assert controls.feH.getMin() == pytest.approx(-0.5)
+    assert controls.feH.getMax() == pytest.approx(0.5)
+
+    controls.setFeH("-0.25")
+    assert controls.feH.getMin() == pytest.approx(-0.25)
+    assert controls.feH.getMax() == pytest.approx(-0.25)
+
+    with pytest.raises(RuntimeError):
+        controls.setFeH("tests/core/assets/testClusterFeHDist.toml")
+
+    assert controls.feH.getMin() == pytest.approx(-0.25)
+    assert controls.feH.getMax() == pytest.approx(-0.25)
+
+
 def test_simcontrols_set_cmf_clf_sfr_numeric():
     """setCMF()/setCLF()/setSFR() should all accept a numeric argument
     without raising. This only exercises that the bindings are wired up

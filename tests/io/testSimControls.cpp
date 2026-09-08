@@ -1125,6 +1125,70 @@ static auto testSimControlsSFRDist() -> int
     return 0;
 }
 
+// Verify that setFeH() rejects a new [Fe/H] distribution whose own
+// [min, max] range is broader than the current one -- tracks_ is only
+// ever loaded, once, at construction, over fehDist_'s own range at
+// that time, so widening it afterward risks interpolating outside the
+// data actually loaded. Narrowing (and then, deliberately, trying to
+// widen back toward the original range) should distinguish the two
+// cases correctly -- the rejection compares against the *current*
+// fehDist_, not the range originally loaded at construction.
+static auto testSimControlsSetFeHRejectsBroadening() -> int
+{
+    const std::string fileName = "tests/core/assets/testClusterVarFeH.in";
+    const toml::table inputDeck = toml::parse_file(fileName);
+    io::SimControls sim(inputDeck);
+
+    if (sim.fehDist().getMin() != -0.5 || sim.fehDist().getMax() != 0.5)
+    {
+        std::cerr << "testSimControls: setFeH: test bug: expected " << fileName
+            << "'s own stars.FeH to be [-0.5, 0.5]\n";
+        return 1;
+    }
+
+    // Narrowing to a fixed value well within [-0.5, 0.5] should succeed
+    try
+    {
+        sim.setFeH("-0.25");
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: setFeH: expected narrowing to -0.25 "
+            "to succeed, but it threw: " << error.what() << "\n";
+        return 1;
+    }
+    if (sim.fehDist().getMin() != -0.25 || sim.fehDist().getMax() != -0.25)
+    {
+        std::cerr << "testSimControls: setFeH: expected fehDist() == "
+            "[-0.25, -0.25] after narrowing\n";
+        return 1;
+    }
+
+    // Widening back out to the same [-0.5, 0.5] range originally
+    // loaded at construction should now be rejected: setFeH() compares
+    // against the current, already-narrowed fehDist_ ([-0.25, -0.25]),
+    // not the wider range tracks_ actually holds
+    try
+    {
+        sim.setFeH("tests/core/assets/testClusterFeHDist.toml");
+        std::cerr << "testSimControls: setFeH: expected widening back to "
+            "[-0.5, 0.5] to throw\n";
+        return 1;
+    }
+    catch (const std::runtime_error&) { /* expected */ }
+
+    // ...and fehDist_ itself should be left exactly as it was before
+    // the rejected call, not partially updated
+    if (sim.fehDist().getMin() != -0.25 || sim.fehDist().getMax() != -0.25)
+    {
+        std::cerr << "testSimControls: setFeH: expected fehDist() to remain "
+            "[-0.25, -0.25] after the rejected widening attempt\n";
+        return 1;
+    }
+
+    return 0;
+}
+
 auto testSimControls() -> int
 {
     int result = 0;
@@ -1150,5 +1214,6 @@ auto testSimControls() -> int
     result += testSimControlsSpectraChained();
     result += testSimControlsExtinctField();
     result += testSimControlsSFRDist();
+    result += testSimControlsSetFeHRejectsBroadening();
     return result;
 }

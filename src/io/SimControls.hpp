@@ -691,8 +691,19 @@ namespace io
          * @param feH A numerical value (interpreted as a fixed
          *   [Fe/H]) or the name of a [Fe/H] PDF file
          * @throws std::runtime_error if feH is not numeric and does
-         *   not name a file that can be found
+         *   not name a file that can be found, or if its own
+         *   [min, max] range is broader than fehDist()'s current one
          * @details
+         * Rejects (rather than accepts and later failing to
+         * interpolate) any new distribution whose [min, max] range is
+         * not a subset of the current fehDist()'s own -- tracks_ is
+         * only ever loaded, once, at construction (via readTracks(),
+         * over fehDist_'s own range at that time), never re-loaded
+         * afterward, so widening fehDist_ past what was actually
+         * loaded would risk interpolating tracks_ outside its own
+         * data. Narrowing, or otherwise staying within, the current
+         * range is always safe and always accepted.
+         *
          * If the new fehDist_ is fixed (constFeH() becomes true),
          * also recomputes tracks2D() (the [Fe/H]-sliced cache) from
          * the current tracks_, mirroring the constructor's own

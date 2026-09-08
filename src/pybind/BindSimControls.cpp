@@ -273,7 +273,13 @@ feh : str
 Throws
 ------
 RuntimeError
-    If feh is not numeric and does not name a file that can be found.)doc";
+    If feh is not numeric and does not name a file that can be found,
+    or if its own [min, max] range is broader than the feH property's
+    current one -- the stellar tracks are only ever loaded, once, at
+    construction, over the [Fe/H] range requested then, so widening it
+    afterward risks interpolating outside the range of data actually
+    loaded. Narrowing, or otherwise staying within, the current range
+    is always accepted.)doc";
 
 static constexpr std::string_view setCLFDocstring = R"doc(Set the cluster lifetime function.
 
@@ -461,7 +467,9 @@ static constexpr std::string_view feHPropertyDocstring = R"doc(The [Fe/H] distri
 
 Reading returns a PDF; assigning a str sets a new one via setFeH() --
 see its own docstring for the exact rules, including the tracks2D()
-cache rebuild that happens if constFeH() is True afterward.)doc";
+cache rebuild that happens if constFeH() is True afterward, and the
+RuntimeError raised if the new range is broader than the current
+one.)doc";
 
 static constexpr std::string_view clfPropertyDocstring = R"doc(The cluster lifetime function.
 

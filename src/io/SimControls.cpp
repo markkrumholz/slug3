@@ -536,7 +536,22 @@ void io::SimControls::readOutput(const toml::table& inputDeck)
 // once, after both tracks_ and fehDist_ are set
 void io::SimControls::setFeH(const std::string& feH)
 {
-    fehDist_ = utils::initPDFFromString(feH);
+    auto newFehDist = utils::initPDFFromString(feH);
+    if (newFehDist.getMin() < fehDist_.getMin() || newFehDist.getMax() > fehDist_.getMax())
+    {
+        throw std::runtime_error(
+            "SimControls::setFeH: the requested [Fe/H] distribution, "
+            "[" + std::to_string(newFehDist.getMin()) + ", " +
+            std::to_string(newFehDist.getMax()) + "], is broader than "
+            "the current one, [" + std::to_string(fehDist_.getMin()) + ", " +
+            std::to_string(fehDist_.getMax()) + "] -- the stellar tracks "
+            "were only loaded over the [Fe/H] range requested at "
+            "construction (stars.FeH), so the [Fe/H] distribution "
+            "cannot be broadened after construction without risking an "
+            "out-of-range interpolation. Construct a new SimControls "
+            "with a wider stars.FeH range instead if you need one.");
+    }
+    fehDist_ = std::move(newFehDist);
     if (constFeH())
     {
         constFeHTracks_ = tracks_.sliceConstFeH(fehDist_.getMin());
