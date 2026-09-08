@@ -1029,6 +1029,33 @@ def test_simcontrols_output_identity_from_deck():
     assert controls.outputMode == slug.SimControls.OutputMode.ascii
 
 
+def test_simcontrols_verbosity_property():
+    """verbosity should default to 0, be readable as a property, and be
+    writable both via the property and via setVerbosity()."""
+    controls = slug.SimControls(CLUSTER_DECK)
+    assert controls.verbosity == 0
+    controls.verbosity = 3
+    assert controls.verbosity == 3
+    controls.setVerbosity(0)
+    assert controls.verbosity == 0
+
+
+def test_simcontrols_out_times_property():
+    """outTimes should return the deck's output times as a list, and
+    assigning a list should replace them (clearing any distribution)."""
+    controls = slug.SimControls(CLUSTER_DECK)
+    original = controls.outTimes
+    assert isinstance(original, list)
+    assert len(original) > 0
+
+    new_times = [1e6, 1e7, 1e8]
+    controls.outTimes = new_times
+    assert controls.outTimes == new_times
+
+    controls.setOutTimes([5e8])
+    assert controls.outTimes == [5e8]
+
+
 def test_simcontrols_input_deck_str_property():
     """inputDeckStr should round-trip to a table equivalent to the deck
     that built this SimControls, and be read-only (no setInputDeckStr/

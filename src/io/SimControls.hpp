@@ -384,6 +384,28 @@ namespace io
         void setOutputMode(OutputMode mode) { outputMode_ = mode; }
 
         /**
+         * @brief Set the verbosity level
+         * @param verbosity New verbosity level (0 = no extra output)
+         */
+        void setVerbosity(unsigned int verbosity) { verbosity_ = verbosity; }
+
+        /**
+         * @brief Set the output times
+         * @param times New output times, in years
+         * @details
+         * Replaces any times or time distribution set by the input deck.
+         * Clears outTimeDist_ since outTimes_ and outTimeDist_ are
+         * mutually exclusive: outTimes() returns the explicit vector
+         * when non-empty, and draws from outTimeDist_ only when
+         * outTimes_ is empty (see outTimes()'s own body).
+         */
+        void setOutTimes(std::vector<double> times)
+        {
+            outTimes_ = std::move(times);
+            outTimeDist_ = pdfs::PDF();
+        }
+
+        /**
          * @brief Set whether the clusters group/file should be written
          * @param value New value for writeCluster()
          * @details

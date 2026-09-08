@@ -551,6 +551,25 @@ Determines what kind of OutputManager is built from this SimControls, so
 like the write* flags, assigning this only affects an OutputManager built
 afterward, not one already built from it.)doc";
 
+static constexpr std::string_view verbosityPropertyDocstring =
+R"doc(The verbosity level.
+
+Controls how much diagnostic output is printed during a simulation
+run. 0 (the default) means no extra output; higher values produce
+progressively more. Read live by every object that checks this
+SimControls's verbosity() -- no need to rebuild anything after
+assigning.)doc";
+
+static constexpr std::string_view outTimesPropertyDocstring =
+R"doc(The output times, in years.
+
+Reading returns the output times as a list of floats -- either the
+explicit array from the input deck, or a single time drawn from the
+output time distribution if a distribution was specified instead.
+Assigning a list sets an explicit array and clears any distribution
+that was previously set: once assigned, outTimes always returns the
+assigned list, never a draw from a distribution.)doc";
+
 static constexpr std::string_view checkpointIntervalPropertyDocstring =
 R"doc(The number of trials between checkpoints.
 
@@ -763,6 +782,10 @@ void bindSimControls(py::module_& m)
                 outDirPropertyDocstring.data(), py::arg("dir"))
         .def("setNTrial", &io::SimControls::setNTrial,
                 nTrialPropertyDocstring.data(), py::arg("n"))
+        .def("setVerbosity", &io::SimControls::setVerbosity,
+                verbosityPropertyDocstring.data(), py::arg("verbosity"))
+        .def("setOutTimes", &io::SimControls::setOutTimes,
+                outTimesPropertyDocstring.data(), py::arg("times"))
         .def("setComputeLbol", &io::SimControls::setComputeLbol,
                 setComputeLbolDocstring.data(), py::arg("value"))
         .def("setIMF", &io::SimControls::setIMF,
@@ -907,6 +930,14 @@ void bindSimControls(py::module_& m)
                 &io::SimControls::nTrial,
                 &io::SimControls::setNTrial,
                 nTrialPropertyDocstring.data())
+        .def_property("verbosity",
+                &io::SimControls::verbosity,
+                &io::SimControls::setVerbosity,
+                verbosityPropertyDocstring.data())
+        .def_property("outTimes",
+                &io::SimControls::outTimes,
+                &io::SimControls::setOutTimes,
+                outTimesPropertyDocstring.data())
         .def_property("checkpointInterval",
                 &io::SimControls::checkpointInterval,
                 &io::SimControls::setCheckpointInterval,
