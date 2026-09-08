@@ -28,7 +28,7 @@ import pathlib
 
 import h5py
 import pytest
-from slugpy._slug import Extinct, SimControls
+from slugpy._slug import Extinct, SimControls, SpecsynBlackbody
 
 REPO_ROOT = pathlib.Path.cwd()
 CLUSTER_DECK = str(REPO_ROOT / "tests" / "core" / "assets" / "testCluster.in")
@@ -47,27 +47,31 @@ def raw_curve():
 
 
 @pytest.fixture
-def wide_wl(raw_curve):
-    """A request grid extending well past both ends of the native curve's own coverage."""
+def wide_controls(raw_curve):
+    """A SimControls whose specsyn wavelength grid extends well past both
+    ends of the native curve's own coverage -- stands in for the old
+    explicit `wl` argument to Extinct's constructor, removed once
+    Extinct started reading controls.specsyn().wl() directly instead."""
     wl_raw, _ = raw_curve
     lo, hi = wl_raw[0] - 500.0, wl_raw[-1] + 500.0
-    n = 200
-    step = (hi - lo) / (n - 1)
-    return [lo + i * step for i in range(n)]
+    controls = SimControls(CLUSTER_DECK)
+    controls.setSpecsyn(SpecsynBlackbody(lo, hi, 200, controls))
+    return controls
 
 
-def test_construction_matches_raw_hdf5_data(raw_curve, wide_wl):
+def test_construction_matches_raw_hdf5_data(raw_curve, wide_controls):
     """wlDat()/extinctDat() reproduce the registry's own raw data exactly."""
     wl_raw, kappa_raw = raw_curve
-    ext = Extinct(CURVE_NAME, wide_wl, registry_name=EXTINCT_REGISTRY)
+    ext = Extinct(CURVE_NAME, controls=wide_controls, registry_name=EXTINCT_REGISTRY)
     assert list(ext.wlDat()) == wl_raw
     assert list(ext.extinctDat()) == kappa_raw
 
 
-def test_wl_truncated_to_native_coverage(raw_curve, wide_wl):
+def test_wl_truncated_to_native_coverage(raw_curve, wide_controls):
     """wl()/extinct() are clipped to the native curve's own [min, max] coverage."""
     wl_raw, _ = raw_curve
-    ext = Extinct(CURVE_NAME, wide_wl, registry_name=EXTINCT_REGISTRY)
+    wide_wl = list(wide_controls.wl())
+    ext = Extinct(CURVE_NAME, controls=wide_controls, registry_name=EXTINCT_REGISTRY)
 
     assert ext.wl()[0] >= wl_raw[0]
     assert ext.wl()[-1] <= wl_raw[-1]
@@ -78,30 +82,31 @@ def test_wl_truncated_to_native_coverage(raw_curve, wide_wl):
     assert ext.wlOffset() == next(i for i, w in enumerate(wide_wl) if w >= wl_raw[0])
 
 
-def test_default_registry_matches_explicit(wide_wl):
+def test_default_registry_matches_explicit(wide_controls):
     """Omitting registry_name falls back to data/extinct/extinct.toml."""
-    default = Extinct(CURVE_NAME, wide_wl)
-    explicit = Extinct(CURVE_NAME, wide_wl, registry_name=EXTINCT_REGISTRY)
+    default = Extinct(CURVE_NAME, controls=wide_controls)
+    explicit = Extinct(CURVE_NAME, controls=wide_controls, registry_name=EXTINCT_REGISTRY)
     assert list(default.wl()) == list(explicit.wl())
     assert list(default.extinct()) == list(explicit.extinct())
 
 
-def test_unknown_curve_raises(wide_wl):
+def test_unknown_curve_raises():
     """An unrecognized curve name raises RuntimeError, not a crash."""
     with pytest.raises(RuntimeError):
-        Extinct("NotARealCurve", wide_wl, registry_name=EXTINCT_REGISTRY)
+        Extinct("NotARealCurve", registry_name=EXTINCT_REGISTRY)
 
 
-def test_wlobs_matches_wl_when_controls_omitted(wide_wl):
-    """With no controls argument, wlObs() falls back to a minimal SimControls with z = 0."""
-    ext = Extinct(CURVE_NAME, wide_wl, registry_name=EXTINCT_REGISTRY)
+def test_wlobs_matches_wl_when_controls_omitted():
+    """With no controls argument, wlObs() falls back to slug's shared
+    default SimControls (sharedDefaultControls()), whose z defaults to 0."""
+    ext = Extinct(CURVE_NAME, registry_name=EXTINCT_REGISTRY)
     assert list(ext.wlObs()) == list(ext.wl())
 
 
-def test_wlobs_reads_z_live_from_controls(wide_wl):
+def test_wlobs_reads_z_live_from_controls():
     """wlObs() re-reads controls.z live, not a value snapshotted at construction."""
     controls = SimControls(CLUSTER_DECK)
-    ext = Extinct(CURVE_NAME, wide_wl, controls=controls, registry_name=EXTINCT_REGISTRY)
+    ext = Extinct(CURVE_NAME, controls=controls, registry_name=EXTINCT_REGISTRY)
 
     assert list(ext.wlObs()) == list(ext.wl())
 
@@ -110,11 +115,11 @@ def test_wlobs_reads_z_live_from_controls(wide_wl):
     assert all(wl_obs[i] == pytest.approx(ext.wl()[i] * 1.25) for i in range(len(wl_obs)))
 
 
-def test_controls_keep_alive_across_del(wide_wl):
+def test_controls_keep_alive_across_del():
     """The Extinct built from a Python-local SimControls survives that SimControls being deleted."""
     controls = SimControls(CLUSTER_DECK)
     controls.z = 0.1
-    ext = Extinct(CURVE_NAME, wide_wl, controls=controls, registry_name=EXTINCT_REGISTRY)
+    ext = Extinct(CURVE_NAME, controls=controls, registry_name=EXTINCT_REGISTRY)
 
     del controls
     gc.collect()
@@ -125,40 +130,40 @@ def test_controls_keep_alive_across_del(wide_wl):
     assert all(wl_obs[i] == pytest.approx(ext.wl()[i] * 1.1) for i in range(len(wl_obs)))
 
 
-def test_apply_extinction_attenuates_flux(wide_wl):
+def test_apply_extinction_attenuates_flux(wide_controls):
     """applyExtinction() with A_V > 0 uniformly reduces a flat spectrum."""
-    ext = Extinct(CURVE_NAME, wide_wl, registry_name=EXTINCT_REGISTRY)
-    # spec must be tabulated on the *original* wl passed to the
-    # constructor (wide_wl), not the truncated ext.wl() -- see
+    ext = Extinct(CURVE_NAME, controls=wide_controls, registry_name=EXTINCT_REGISTRY)
+    # spec must be tabulated on the full controls.specsyn().wl() grid
+    # (wide_controls.wl()), not the truncated ext.wl() -- see
     # applyExtinction()'s own docstring
-    spec = [1.0] * len(wide_wl)
+    spec = [1.0] * len(wide_controls.wl())
 
     result = ext.applyExtinction(1.0, spec)
     assert len(result) == len(ext.wl())
     assert all(0.0 < value < 1.0 for value in result)
 
 
-def test_apply_extinction_zero_av_is_a_no_op(wide_wl):
+def test_apply_extinction_zero_av_is_a_no_op(wide_controls):
     """applyExtinction() with A_V = 0 leaves a spectrum unchanged (exp(0) = 1)."""
-    ext = Extinct(CURVE_NAME, wide_wl, registry_name=EXTINCT_REGISTRY)
-    spec = [1.0] * len(wide_wl)
+    ext = Extinct(CURVE_NAME, controls=wide_controls, registry_name=EXTINCT_REGISTRY)
+    spec = [1.0] * len(wide_controls.wl())
 
     result = ext.applyExtinction(0.0, spec)
     assert all(value == pytest.approx(1.0) for value in result)
 
 
-def test_apply_extinction_cts_matches_unattenuated_with_invalid_avdistfield(wide_wl):
+def test_apply_extinction_cts_matches_unattenuated_with_invalid_avdistfield(wide_controls):
     """With no controls (an invalid avDistField()), applyExtinctionCts() is a no-op (A_V = 0)."""
-    ext = Extinct(CURVE_NAME, wide_wl, registry_name=EXTINCT_REGISTRY)
-    spec = [1.0] * len(wide_wl)
+    ext = Extinct(CURVE_NAME, controls=wide_controls, registry_name=EXTINCT_REGISTRY)
+    spec = [1.0] * len(wide_controls.wl())
 
     result = ext.applyExtinctionCts(spec)
     assert all(value == pytest.approx(1.0) for value in result)
 
 
-def test_apply_extinction_lines_empty_without_nebular_grid(wide_wl):
+def test_apply_extinction_lines_empty_without_nebular_grid(wide_controls):
     """With no nebular emission grid requested, both line-extinction methods return empty lists."""
-    ext = Extinct(CURVE_NAME, wide_wl, registry_name=EXTINCT_REGISTRY)
+    ext = Extinct(CURVE_NAME, controls=wide_controls, registry_name=EXTINCT_REGISTRY)
 
     assert ext.applyExtinctionLines(1.0, []) == []
     assert ext.applyExtinctionCtsLines([]) == []
