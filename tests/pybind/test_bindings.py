@@ -854,6 +854,88 @@ def test_simcontrols_set_specsyn_installs_new_synthesizer(tmp_path):
         specsyn.wl()
 
 
+def test_simcontrols_set_specsyn_rebuilds_extinct_cache():
+    """setSpecsyn() must rebuild extinct's own cached quantities
+    (Extinct.rebuildCache()), not just specsyn itself -- otherwise
+    extinct.wl()/extinct() (interpolated onto controls.specsyn().wl())
+    would keep describing the *old* spectral synthesizer's own
+    wavelength grid. Checked by installing a new SpecsynBlackbody with
+    a different wavelength range and confirming extinct.wl() is
+    re-truncated from that new range (via wlDat(), the curve's own
+    native coverage, unaffected by the rebuild) rather than the
+    original one."""
+    controls = _controls_with_extinct(av_field=1.0)
+    wl_dat = list(controls.extinct.wlDat())
+
+    new_specsyn = slug.SpecsynBlackbody(wl_dat[0] - 200.0, wl_dat[-1] + 200.0, 80, controls)
+    controls.setSpecsyn(new_specsyn)
+
+    new_wl = list(controls.wl())
+    expected_wl = [w for w in new_wl if wl_dat[0] <= w <= wl_dat[-1]]
+    assert list(controls.extinct.wl()) == pytest.approx(expected_wl)
+    assert len(controls.extinct.wl()) == len(controls.extinct.extinct())
+
+
+def test_simcontrols_set_extinct_installs_new_curve():
+    """setExtinct() should install a working Extinct on a SimControls
+    whose extinct property was previously None, transferring ownership
+    of the Python-built Extinct (mirroring setSpecsyn()'s own
+    ownership-transfer behavior)."""
+    controls = slug.SimControls(CLUSTER_DECK)
+    assert controls.extinct is None
+
+    ext = slug.Extinct("Calzetti_starburst", controls=controls)
+    controls.setExtinct(ext)
+
+    assert controls.extinct is not None
+    assert len(controls.extinct.wl()) > 0
+    assert len(controls.extinct.wl()) == len(controls.extinct.extinct())
+
+    with pytest.raises(ValueError):
+        ext.wl()
+
+
+def test_simcontrols_set_extinct_none_removes_curve():
+    """setExtinct(None) should remove an already-installed extinction
+    curve, leaving the extinct property None again."""
+    controls = _controls_with_extinct(av_field=1.0)
+    assert controls.extinct is not None
+
+    controls.setExtinct(None)
+    assert controls.extinct is None
+
+
+def test_simcontrols_set_nebular_installs_new_grid():
+    """setNebular() should install a working Nebular on a SimControls
+    whose nebular property was previously None (CLUSTER_DECK sets
+    nebular.compute_neb = false), transferring ownership of the
+    Python-built Nebular (mirroring setSpecsyn()'s own
+    ownership-transfer behavior)."""
+    controls = slug.SimControls(CLUSTER_DECK)
+    assert controls.nebular is None
+
+    neb = slug.Nebular("tests/nebular/assets/nebular_test.h5", "MIST_test", controls)
+    controls.setNebular(neb)
+
+    assert controls.nebular is not None
+    assert len(controls.nebular.lineWl()) > 0
+
+    with pytest.raises(ValueError):
+        neb.lineWl()
+
+
+def test_simcontrols_set_nebular_none_removes_grid():
+    """setNebular(None) should remove an already-installed nebular
+    emission grid, leaving the nebular property None again."""
+    deck = tomllib.loads(pathlib.Path(CLUSTER_DECK).read_text())
+    deck["nebular"] = {"compute_neb": True, "table": "tests/nebular/assets/nebular_test.h5"}
+    controls = slug.SimControls(tomlkit.dumps(deck))
+    assert controls.nebular is not None
+
+    controls.setNebular(None)
+    assert controls.nebular is None
+
+
 def test_simcontrols_set_filters_installs_new_collection():
     """setFilters() should install a working FilterCollection on a
     SimControls built from a deck with no phot.filters (so Cluster.phot()
