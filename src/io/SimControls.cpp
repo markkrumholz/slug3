@@ -555,6 +555,25 @@ void io::SimControls::setTracks(tracks::Tracks3D tracks)
     }
 }
 
+// Set the clustered-star A_V distribution, rebuilding extinct_'s own
+// cached quantities if an extinction curve is already present -- see
+// setAVDist()'s own header comment for why this call is harmless
+// rather than strictly necessary
+void io::SimControls::setAVDist(const std::string& avDist)
+{
+    avDist_ = utils::initPDFFromString(avDist);
+    if (extinct_) { extinct_->rebuildCache(); }
+}
+
+// Set the field-star A_V distribution, rebuilding extinct_'s own
+// cached quantities if an extinction curve is already present -- see
+// setAVDistField()'s own header comment for why this one matters
+void io::SimControls::setAVDistField(const std::string& avDistField)
+{
+    avDistField_ = utils::initPDFFromString(avDistField);
+    if (extinct_) { extinct_->rebuildCache(); }
+}
+
 // Set the star formation rate -- mirrors the galaxy.sfr handling in
 // the constructor above exactly, including not resolving a file name
 // through utils::getFilePath (unlike setIMF()/setCMF()/setFeH()/

@@ -288,6 +288,52 @@ Throws
 RuntimeError
     If clf is not numeric and does not name a file that can be found.)doc";
 
+static constexpr std::string_view setAVDistDocstring = R"doc(Set the distribution of V-band extinction for clustered stars.
+
+Parameters
+----------
+av_dist : str
+    A numerical value (interpreted as a delta-function A_V at that
+    value) or the name of an A_V PDF file.
+
+Throws
+------
+RuntimeError
+    If av_dist is not numeric and does not name a file that can be
+    found.
+
+Details
+-------
+If this SimControls already has an extinction curve (its extinct
+property is not None), also rebuilds that Extinct's own cached
+quantities (Extinct.rebuildCache()) -- av_dist itself is never
+actually read by Extinct (only av_dist_field is), so this is harmless
+rather than strictly necessary, but kept for symmetry with
+set_av_dist_field()'s own identical behavior, where it is actually
+needed.)doc";
+
+static constexpr std::string_view setAVDistFieldDocstring = R"doc(Set the distribution of V-band extinction for field stars.
+
+Parameters
+----------
+av_dist_field : str
+    A numerical value (interpreted as a delta-function A_V at that
+    value) or the name of an A_V PDF file.
+
+Throws
+------
+RuntimeError
+    If av_dist_field is not numeric and does not name a file that can
+    be found.
+
+Details
+-------
+If this SimControls already has an extinction curve (its extinct
+property is not None), also rebuilds that Extinct's own cached
+quantities (Extinct.rebuildCache()), so its cached expectation values
+(used by Extinct.applyExtinctionCts()/applyExtinctionCtsLines()) stay
+in sync with the new distribution.)doc";
+
 static constexpr std::string_view setSFRDocstring = R"doc(Set the star formation rate.
 
 Parameters
@@ -796,6 +842,10 @@ void bindSimControls(py::module_& m)
                 setFeHDocstring.data(), py::arg("feh"))
         .def("setCLF", &io::SimControls::setCLF,
                 setCLFDocstring.data(), py::arg("clf"))
+        .def("setAVDist", &io::SimControls::setAVDist,
+                setAVDistDocstring.data(), py::arg("av_dist"))
+        .def("setAVDistField", &io::SimControls::setAVDistField,
+                setAVDistFieldDocstring.data(), py::arg("av_dist_field"))
         .def("setSFR", &io::SimControls::setSFR,
                 setSFRDocstring.data(), py::arg("sfr"))
         .def("setSFRDist", &io::SimControls::setSFRDist,

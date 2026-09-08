@@ -770,6 +770,64 @@ def test_simcontrols_set_cmf_clf_sfr_invalid_raises(setter):
         getattr(controls, setter)("not_numeric_or_a_real_file")
 
 
+def test_simcontrols_set_av_dist_numeric_no_extinct():
+    """setAVDist()/setAVDistField() should both accept a numeric
+    argument without raising, and should be harmless (no extinction
+    curve to rebuild) on a SimControls with no extinct.AV/extinct.AV_field
+    -- see extinct's own None-ness below. No av_dist/av_dist_field
+    getter is exposed to Python, so this only checks that neither
+    setter raises; see test_simcontrols_set_av_dist_field_rebuilds_extinct_cache
+    below for a check of the actual value taking effect."""
+    controls = slug.SimControls(CLUSTER_DECK)
+    assert controls.extinct is None
+
+    controls.setAVDist("1.0")
+    controls.setAVDistField("2.0")
+
+
+@pytest.mark.parametrize("setter", ["setAVDist", "setAVDistField"])
+def test_simcontrols_set_av_dist_invalid_raises(setter):
+    """setAVDist()/setAVDistField() should each raise, not crash, for a
+    value that is neither numeric nor a findable file name."""
+    controls = slug.SimControls(CLUSTER_DECK)
+    with pytest.raises(RuntimeError):
+        getattr(controls, setter)("not_numeric_or_a_real_file")
+
+
+def _controls_with_extinct(av_field):
+    """A SimControls built from CLUSTER_DECK with extinction enabled
+    (extinct.AV/extinct.AV_field/extinct.model added), so extinct is
+    populated -- shared by the setAVDistField() cache-rebuild tests
+    below."""
+    deck = tomllib.loads(pathlib.Path(CLUSTER_DECK).read_text())
+    deck["extinct"] = {"AV": 1.0, "AV_field": av_field, "model": "Calzetti_starburst"}
+    return slug.SimControls(tomlkit.dumps(deck))
+
+
+def test_simcontrols_set_av_dist_field_rebuilds_extinct_cache():
+    """setAVDistField() must rebuild extinct's own cached quantities
+    (Extinct.rebuildCache()), not just avDistField itself -- otherwise
+    applyExtinctionCts() (which reads extinctionFacCts_, precomputed
+    from avDistField) would keep using a stale value computed from the
+    *old* distribution. Checked by comparing applyExtinctionCts() on an
+    unattenuated spectrum before and after changing extinct.AV_field
+    from 1.0 (near-zero attenuation) to a much larger value (strong
+    attenuation): the two must differ, and the "after" value must match
+    a SimControls built with that same field value from the start."""
+    controls = _controls_with_extinct(av_field=1e-6)
+    spec = [1.0] * len(controls.wl())
+    before = controls.extinct.applyExtinctionCts(spec)
+
+    controls.setAVDistField("5.0")
+    after = controls.extinct.applyExtinctionCts(spec)
+
+    assert not np.allclose(before, after)
+
+    expected_controls = _controls_with_extinct(av_field=5.0)
+    expected = expected_controls.extinct.applyExtinctionCts(spec)
+    assert np.allclose(after, expected)
+
+
 def test_simcontrols_set_specsyn_installs_new_synthesizer(tmp_path):
     """setSpecsyn() should install a working spectral synthesizer on a
     SimControls built from a deck with no spectra.model (so wl() raises

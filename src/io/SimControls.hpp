@@ -701,6 +701,43 @@ namespace io
         void setFeH(const std::string& feH);
 
         /**
+         * @brief Set the distribution of V-band extinction for clustered stars
+         * @param avDist A numerical value (interpreted as a delta-
+         *   function A_V at that value) or the name of an A_V PDF file
+         * @throws std::runtime_error if avDist is not numeric and does
+         *   not name a file that can be found
+         * @details
+         * If this SimControls already has an extinction curve
+         * (extinct() is not null), also calls its own
+         * Extinct::rebuildCache() -- avDist() itself is never actually
+         * read by Extinct (only avDistField() is, via
+         * applyExtinctionCts()/applyExtinctionCtsLines()), so this
+         * call is harmless rather than strictly necessary, but kept
+         * for symmetry with setAVDistField()'s own identical behavior,
+         * where it is actually needed.
+         */
+        void setAVDist(const std::string& avDist);
+
+        /**
+         * @brief Set the distribution of V-band extinction for field stars
+         * @param avDistField A numerical value (interpreted as a
+         *   delta-function A_V at that value) or the name of an A_V
+         *   PDF file
+         * @throws std::runtime_error if avDistField is not numeric and
+         *   does not name a file that can be found
+         * @details
+         * If this SimControls already has an extinction curve
+         * (extinct() is not null), also calls its own
+         * Extinct::rebuildCache(), so that its cached
+         * extinctionFacCts()/extinctionFacCtsLines() (used by
+         * applyExtinctionCts()/applyExtinctionCtsLines()) stay in sync
+         * with the new avDistField() -- see Extinct::rebuildCache()'s
+         * own comment for why those aren't simply recomputed on every
+         * access instead.
+         */
+        void setAVDistField(const std::string& avDistField);
+
+        /**
          * @brief Set the cluster lifetime function
          * @param clf A numerical value (interpreted as a delta-function
          *   CLF at that lifetime) or the name of a CLF PDF file
