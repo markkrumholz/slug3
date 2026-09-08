@@ -39,7 +39,7 @@ def _run(sim: SimCluster | SimGalaxy, sim_controls: SimControls, progress: bool)
         SimGalaxy.run's own docstrings).
     """
     if progress:
-        return run_with_progress(sim.run, sim.trialsCompleted, sim_controls.nTrial(), "Running trials")
+        return run_with_progress(sim.run, sim.trialsCompleted, sim_controls.nTrial, "Running trials")
     return sim.run()
 
 
@@ -117,12 +117,12 @@ def run_sim(controls: SimControls | str, progress: bool = True, restart: bool = 
     else:
         sim_controls = SimControls(controls)
 
-    if restart and sim_controls.outputMode() == SimControls.OutputMode.ascii:
+    if restart and sim_controls.outputMode == SimControls.OutputMode.ascii:
         raise RuntimeError(
             "run_sim: restart is True, but sim_controls.outputMode() is "
             "ascii -- restarting is only supported with HDF5 output")
 
-    if sim_controls.outputMode() in (SimControls.OutputMode.h5, SimControls.OutputMode.h5divided):
+    if sim_controls.outputMode in (SimControls.OutputMode.h5, SimControls.OutputMode.h5divided):
         output_manager = OutputManagerH5(sim_controls, restart)
     else:
         output_manager = OutputManagerAscii(sim_controls)
@@ -168,7 +168,7 @@ def run_sim(controls: SimControls | str, progress: bool = True, restart: bool = 
     del output_manager
     gc.collect()
 
-    if sim_controls.outputMode() == SimControls.OutputMode.ascii:
+    if sim_controls.outputMode == SimControls.OutputMode.ascii:
         warnings.warn(
             "run_sim: ASCII output cannot be returned as a slug_reader; "
             "returning None. Use HDF5 output (the default) to get a "
@@ -182,5 +182,5 @@ def run_sim(controls: SimControls | str, progress: bool = True, restart: bool = 
     # consolidated file, per-checkpoint files, or h5divided's own
     # per-thread files), which a hardcoded ".h5" path would get wrong
     # whenever checkpointing was enabled.
-    output_path = pathlib.Path(sim_controls.outDir()) / sim_controls.modelName()
+    output_path = pathlib.Path(sim_controls.outDir) / sim_controls.modelName
     return read(str(output_path))

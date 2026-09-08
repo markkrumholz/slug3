@@ -22,6 +22,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <toml.hpp>
 #include <utility>
@@ -342,6 +343,73 @@ namespace io
          * throwing (see its own comment), rather than here.
          */
         void setCheckpointInterval(unsigned long interval) { checkpointInterval_ = interval; }
+
+        /**
+         * @brief Set the model name
+         * @param name New model name (base name of output file(s))
+         * @details
+         * Like modelName_ itself, this is read by an OutputManager at
+         * its own construction, not live, so assigning this only
+         * affects an OutputManager built from this SimControls
+         * afterward, not one already built from it.
+         */
+        void setModelName(std::string name) { modelName_ = std::move(name); }
+
+        /**
+         * @brief Set the output directory
+         * @param dir New output directory path; empty string means the
+         *   current working directory
+         * @details
+         * Like outDir_ itself, this is read by an OutputManager at
+         * its own construction, not live, so assigning this only
+         * affects an OutputManager built from this SimControls
+         * afterward, not one already built from it.
+         */
+        void setOutDir(std::string dir) { outDir_ = std::move(dir); }
+
+        /**
+         * @brief Set the number of trials
+         * @param n New number of trials
+         */
+        void setNTrial(unsigned long n) { nTrial_ = n; }
+
+        /**
+         * @brief Set the output mode
+         * @param mode New output mode
+         * @details
+         * Like outputMode_ itself, this determines what kind of
+         * OutputManager is built, so assigning this only affects an
+         * OutputManager built from this SimControls afterward, not one
+         * already built from it.
+         */
+        void setOutputMode(OutputMode mode) { outputMode_ = mode; }
+
+        /**
+         * @brief Set the verbosity level
+         * @param verbosity New verbosity level (0 = no extra output)
+         */
+        void setVerbosity(unsigned int verbosity) { verbosity_ = verbosity; }
+
+        /**
+         * @brief Set the output times
+         * @param times New output times, in years
+         * @details
+         * Replaces any times or time distribution set by the input deck.
+         * Clears outTimeDist_ since outTimes_ and outTimeDist_ are
+         * mutually exclusive: outTimes() returns the explicit vector
+         * when non-empty, and draws from outTimeDist_ only when
+         * outTimes_ is empty (see outTimes()'s own body).
+         */
+        void setOutTimes(std::vector<double> times)
+        {
+            if (times.empty())
+            {
+                throw std::invalid_argument(
+                    "setOutTimes: output time list must not be empty");
+            }
+            outTimes_ = std::move(times);
+            outTimeDist_ = pdfs::PDF();
+        }
 
         /**
          * @brief Set whether the clusters group/file should be written
