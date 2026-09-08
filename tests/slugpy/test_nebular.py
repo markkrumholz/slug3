@@ -17,7 +17,7 @@ Physics-level correctness ([Fe/H]/age interpolation, line deposition,
 edge zeroing, ...) is already covered by the C++ unit tests; the tests
 here instead focus on the binding itself: argument order/defaults, the
 mandatory (no fallback) ``controls`` argument's keep-alive behavior,
-exception propagation, and SimControls's own read-only "nebular"
+exception propagation, and SimControls's own settable "nebular"
 property -- while still cross-checking a handful of values against the
 fixture's own known-analytic formulas, both directly against Nebular
 and via SimControls.nebular, so the binding is exercised the same way
@@ -82,10 +82,16 @@ def test_simcontrols_nebular_returns_instance(nebular_controls):
     assert isinstance(nebular_controls.nebular, Nebular)
 
 
-def test_simcontrols_nebular_is_read_only(nebular_controls):
-    """SimControls.nebular has no setter -- assigning to it raises."""
-    with pytest.raises(AttributeError):
-        nebular_controls.nebular = None  # pyright: ignore[reportAttributeAccessIssue] -- deliberately exercising the read-only contract at runtime
+def test_simcontrols_nebular_is_settable(nebular_controls):
+    """SimControls.nebular can be assigned a Nebular (transferring its
+    ownership, exactly like setNebular() -- see its own docstring), or
+    None, to remove one already present."""
+    nebular_controls.nebular = None
+    assert nebular_controls.nebular is None
+
+    nebular_controls.nebular = Nebular(NEBULAR_TABLE, TRACK_NAME, nebular_controls)
+    assert nebular_controls.nebular is not None
+    assert len(nebular_controls.nebular.lineWl()) == N_LINE
 
 
 def test_simcontrols_nebular_keeps_controls_alive(nebular_controls):

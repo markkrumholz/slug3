@@ -509,21 +509,23 @@ from Python after assignment -- see setFilters()'s own docstring.)doc";
 
 static constexpr std::string_view extinctPropertyDocstring = R"doc(The extinction curve, or None if none was requested.
 
-Read-only property: reading returns the Extinct requested via
-extinct.model (or None if neither extinct.AV nor extinct.AV_field was
-given in the input deck), built once, at construction, or later
-installed via setExtinct(). Unlike specsyn/filters/tracks, assigning to
-this property directly is not supported -- use setExtinct() instead.)doc";
+Reading returns the Extinct requested via extinct.model (or None if
+neither extinct.AV nor extinct.AV_field was given in the input deck),
+built once, at construction, or later installed via setExtinct().
+Assigning an Extinct (or None, to remove one already present)
+transfers its ownership to this SimControls, so it is no longer usable
+from Python after assignment -- see setExtinct()'s own docstring.)doc";
 
 static constexpr std::string_view nebularPropertyDocstring = R"doc(The nebular emission grid, or None if none was requested.
 
-Read-only property: reading returns the Nebular built from
-nebular.table/stars.tracks, unless the input deck explicitly set
-nebular.compute_neb = false (it defaults to true, so a deck that
-never mentions [nebular] at all still builds one), in which case this
-is None. Built once, at construction, or later installed via
-setNebular(). Unlike specsyn/filters/tracks, assigning to this
-property directly is not supported -- use setNebular() instead.)doc";
+Reading returns the Nebular built from nebular.table/stars.tracks,
+unless the input deck explicitly set nebular.compute_neb = false (it
+defaults to true, so a deck that never mentions [nebular] at all still
+builds one), in which case this is None. Built once, at construction,
+or later installed via setNebular(). Assigning a Nebular (or None, to
+remove one already present) transfers its ownership to this
+SimControls, so it is no longer usable from Python after assignment --
+see setNebular()'s own docstring.)doc";
 
 static constexpr std::string_view setExtinctDocstring = R"doc(Set the extinction curve.
 
@@ -988,11 +990,13 @@ void bindSimControls(py::module_& m)
                 &io::SimControls::filters,
                 &io::SimControls::setFilters,
                 filtersPropertyDocstring.data())
-        .def_property_readonly("extinct",
+        .def_property("extinct",
                 &io::SimControls::extinct,
+                &io::SimControls::setExtinct,
                 extinctPropertyDocstring.data())
-        .def_property_readonly("nebular",
+        .def_property("nebular",
                 &io::SimControls::nebular,
+                &io::SimControls::setNebular,
                 nebularPropertyDocstring.data())
         .def_property("tracks",
                 &io::SimControls::tracks,

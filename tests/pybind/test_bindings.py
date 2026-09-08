@@ -1278,6 +1278,44 @@ def test_simcontrols_tracks_property():
         new_tracks.mMin()
 
 
+def test_simcontrols_extinct_property():
+    """The extinct property should read back the current extinction
+    curve (or None), and assigning an Extinct to it should have the
+    same effect as setExtinct(), transferring ownership -- assigning
+    None should remove one already present."""
+    controls = slug.SimControls(CLUSTER_DECK)
+    assert controls.extinct is None
+
+    ext = slug.Extinct("Calzetti_starburst", controls=controls)
+    controls.extinct = ext
+    assert controls.extinct is not None
+    assert len(controls.extinct.wl()) > 0
+    with pytest.raises(ValueError):
+        ext.wl()
+
+    controls.extinct = None
+    assert controls.extinct is None
+
+
+def test_simcontrols_nebular_property():
+    """The nebular property should read back the current nebular
+    emission grid (or None), and assigning a Nebular to it should have
+    the same effect as setNebular(), transferring ownership --
+    assigning None should remove one already present."""
+    controls = slug.SimControls(CLUSTER_DECK)
+    assert controls.nebular is None
+
+    neb = slug.Nebular("tests/nebular/assets/nebular_test.h5", "MIST_test", controls)
+    controls.nebular = neb
+    assert controls.nebular is not None
+    assert len(controls.nebular.lineWl()) > 0
+    with pytest.raises(ValueError):
+        neb.lineWl()
+
+    controls.nebular = None
+    assert controls.nebular is None
+
+
 def test_simcontrols_min_stoch_mass_property():
     """The minStochMass property should read back its current value,
     and assigning a value to it should have the same effect as
