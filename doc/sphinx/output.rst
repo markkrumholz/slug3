@@ -263,6 +263,75 @@ luminosity requested. Identical in structure and meaning to the
 with no ``uid`` dataset: each row is one (trial, output time) pair (the whole
 galaxy's own integrated photometry), not one (cluster, output time) pair.
 
+The ``cluster_cloudy`` Group
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Not produced by SLUG itself. Instead, this group is created (and appended to)
+by ``slugpy``'s own ``run_cloudy`` method, run with ``spec_type="cluster"``,
+which post-processes one or more of this file's ``cluster_spectra`` rows
+through `Cloudy <https://gitlab.nublado.org/cloudy/cloudy>`_ to compute a
+photoionized nebula's emergent continuum and emission lines -- see
+:ref:`sec-cloudy-slug` for details of that process. Present only once
+``run_cloudy`` has actually been called on this file at least once. There is
+one row per (cluster, output time) pair with a stored Cloudy run; call this
+row count ``n_rows``.
+
+* ``uid`` (unitless integer, shape ``(n_rows,)``): The unique identifier of
+  the cluster this row's Cloudy run was computed from.
+* ``time`` (yr, shape ``(n_rows,)``): The output time of the spectrum this
+  row's Cloudy run was computed from.
+* ``nII`` (cm\ :sup:`-3`, shape ``(n_rows,)``): The number density of H
+  nuclei assumed for this row's HII region.
+* ``r0`` (cm, shape ``(n_rows,)``): The inner (wind-cleared cavity) radius
+  assumed for this row's HII region.
+* ``r1`` (cm, shape ``(n_rows,)``): The outer radius assumed for this row's
+  HII region.
+* ``U`` (unitless, shape ``(n_rows,)``): The volume-averaged ionization
+  parameter of this row's HII region.
+* ``U0`` (unitless, shape ``(n_rows,)``): The ionization parameter at the
+  inner radius ``r0`` of this row's HII region.
+* ``Omega`` (unitless, shape ``(n_rows,)``): The dimensionless wind
+  parameter of this row's HII region.
+* ``wl`` (Angstrom, shape ``(n_wl_cloudy,)``; only present once at least one
+  row has continuum output): The wavelength grid shared by
+  ``spec_inc``/``spec_trans``/``spec_emit``/``spec_trans_emit`` below.
+  Cloudy's own output grid always shares the same maximum wavelength and
+  spacing across runs, but the minimum wavelength can vary; this grid is the
+  longest one seen among rows with continuum output, and rows whose own grid
+  was shorter are zero-padded at the low-wavelength end.
+* ``spec_inc``, ``spec_trans``, ``spec_emit``, ``spec_trans_emit`` (erg/(s
+  Angstrom), shape ``(n_rows, n_wl_cloudy)``): This row's Cloudy-computed
+  incident, transmitted, emitted, and transmitted-plus-emitted continuum,
+  respectively. A row with no continuum output of its own (including any row
+  written before the first row with continuum output was ever stored) is all
+  zero.
+* ``line_wl`` (Angstrom, shape ``(n_lines_cloudy,)``; only present once at
+  least one row has line output): The rest-frame wavelength of every
+  distinct emission line reported by any stored row's Cloudy run -- since
+  different runs need not report the same set of lines, this is the union of
+  every one seen so far, sorted by wavelength.
+* ``line_label`` (string, shape ``(n_lines_cloudy,)``): A short label
+  identifying the species/transition of each entry of ``line_wl``, in the
+  same order.
+* ``line_lum`` (erg/s, shape ``(n_rows, n_lines_cloudy)``): This row's own
+  Cloudy-reported luminosity for each line in ``line_wl``/``line_label``,
+  without extinction applied; zero for any line that row's own run did not
+  report, including an all-zero row for a row with no line output at all.
+
+Since it is written by ``slugpy`` rather than by SLUG itself, ``cluster_cloudy``
+has no ASCII counterpart: Cloudy post-processing results are only ever stored
+in an HDF5 output file.
+
+The ``galaxy_cloudy`` Group
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Identical in structure and meaning to the ``cluster_cloudy`` group above --
+including its physical-condition, continuum, and line datasets -- except
+written by ``run_cloudy(spec_type="galaxy")`` from this file's own
+``galaxy_spectra`` rows, and with a ``trial`` dataset (the trial number of
+the row's own galaxy spectrum) in place of ``uid``, since a galaxy has no
+individual identity the way a cluster does.
+
 ASCII Format
 ~~~~~~~~~~~~
 
