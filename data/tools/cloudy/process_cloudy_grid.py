@@ -82,6 +82,29 @@ Output layout (cloudy_table.h5, default name):
   does not stop the pipeline over such a failure, precisely so this
   gap-fill gets a chance to paper over it.
 
+By default, --output is merged into rather than replaced: if a file
+already exists there, it is read back first (see read_existing_table),
+and the new table this call writes carries forward every (track,
+[Fe/H], v/vcrit) combination it already had that --work-dir's own
+entries don't also cover, remapped onto whatever this call's own
+merged wl/line/time grids turn out to be (see
+compute_global_grids, _remap_combo_sim) -- a combination --work-dir
+does cover is instead (re)computed fresh from --work-dir, entirely
+replacing (not merging into) whatever that same combination already
+had, on the assumption that its presence in --work-dir means it was
+deliberately (re)run. This is what lets --work-dir be reused a track
+set (or [Fe/H]/v/vcrit slice) at a time -- e.g. running the full
+pipeline once for MIST/Stromlo/PARSEC_comp, discarding that --work-dir
+once done, then later running it again from scratch for a
+newly-available track set like Geneva -- without the second run
+wiping out the first's own results: make_slug_grid.py's own
+--output-table already skips writing decks for combinations already
+complete there, so a --work-dir populated this way only ever contains
+combinations genuinely missing from --output, and this script's own
+merge just needs to add those in without disturbing anything else.
+Pass --overwrite to restore the old behavior instead: build --output
+from --work-dir alone, discarding whatever it already had.
+
 Like the two earlier stages, this is cheap to run compared to the
 cloudy runs it post-processes, but only meaningful once run against a
 work-dir run_cloudy_grid.py has actually populated -- verify locally
@@ -323,8 +346,92 @@ def discover_files(work_dir: Path) -> list[FileEntry]:
     return entries
 
 
+class ExistingTable(NamedTuple):
+    """
+    An earlier build_table call's own output, read back for merging into a new one.
+
+    Attributes
+    ----------
+    wl : numpy.ndarray
+        This table's own top-level continuum wavelength grid, in
+        Angstrom.
+    line_wl : numpy.ndarray
+        This table's own top-level line wavelength list, in Angstrom.
+    line_label : list of str
+        Cloudy's own label for each wavelength in line_wl, same order.
+    time : numpy.ndarray
+        This table's own top-level cluster output-time list, in yr.
+    combos : dict mapping (str, float, float) to dict
+        {(track, [Fe/H], v/vcrit): {log10(U): {"cluster" or "galaxy":
+        {"spec": ..., "line_lum": ...}}}} -- every group this table
+        has, with every array still aligned to this same object's own
+        wl/line_wl/time (i.e. not yet remapped onto a new build's own
+        merged grids; see _remap_combo_sim).
+    """
+
+    wl: np.ndarray
+    line_wl: np.ndarray
+    line_label: list[str]
+    time: np.ndarray
+    combos: dict[tuple[str, float, float], dict[float, dict[str, dict[str, np.ndarray]]]]
+
+
+def read_existing_table(path: Path) -> ExistingTable | None:
+    """
+    Read back an existing build_table output for merging into a new one.
+
+    Parameters
+    ----------
+    path : pathlib.Path
+        Path to a previously-written table (see build_table's own
+        output layout); need not exist.
+
+    Returns
+    -------
+    ExistingTable, optional
+        None if path does not exist yet. Otherwise every dataset this
+        table has -- its own top-level wl/line_wl/line_label/time and
+        every group's own spec/line_lum -- is read fully into plain
+        in-memory numpy arrays, not left as lazy h5py datasets: by
+        default build_table reopens path itself in "w" (i.e.
+        truncating) mode immediately after calling this, since the
+        normal case is --output pointing at the very file being merged
+        from (rerunning this script against the same --output it wrote
+        last time), so nothing here can still be reading from path by
+        the time that happens.
+    """
+    if not path.exists():
+        return None
+
+    combos: dict[tuple[str, float, float], dict[float, dict[str, dict[str, np.ndarray]]]] = {}
+    with h5py.File(path, "r") as f:
+        wl = f["wl"][()]
+        line_wl = f["line_wl"][()]
+        line_label = [lbl.decode() if isinstance(lbl, bytes) else lbl for lbl in f["line_label"][()]]
+        time = f["time"][()]
+
+        for track_name, track_group in f.items():
+            if not isinstance(track_group, h5py.Group):
+                continue  # skip the top-level wl/line_wl/line_label/time datasets themselves
+            for feh_group in track_group.values():
+                feh = float(feh_group.attrs["FeH"])
+                for vvcrit_group in feh_group.values():
+                    vvcrit = float(vvcrit_group.attrs["v_vcrit"])
+                    logu_data: dict[float, dict[str, dict[str, np.ndarray]]] = {}
+                    for logu_group in vvcrit_group.values():
+                        log_u = float(logu_group.attrs["logU"])
+                        logu_data[log_u] = {
+                            sim_type: {"spec": logu_group[sim_type]["spec"][()],
+                                "line_lum": logu_group[sim_type]["line_lum"][()]}
+                            for sim_type in ("cluster", "galaxy") if sim_type in logu_group
+                        }
+                    combos[(track_name, feh, vvcrit)] = logu_data
+
+    return ExistingTable(wl=wl, line_wl=line_wl, line_label=line_label, time=time, combos=combos)
+
+
 def compute_global_grids(
-    entries: list[FileEntry], nline: int,
+    entries: list[FileEntry], nline: int, existing: ExistingTable | None = None,
 ) -> tuple[u.Quantity, np.ndarray, list[str], np.ndarray]:
     """
     Build the common wavelength grid, line list, and cluster output-time list shared by the whole table.
@@ -339,36 +446,49 @@ def compute_global_grids(
         of every row's own top-nline lines, across every processed
         file, can still exceed nline overall, since the brightest
         lines generally differ from one row to the next.
+    existing : ExistingTable, optional
+        A previously-written table being merged into (see
+        read_existing_table); its own wl/line_wl/line_label/time are
+        folded into the result alongside whatever entries itself
+        contributes, so a combination being carried forward unchanged
+        from existing (see build_table) never needs remapping onto a
+        smaller grid than its own data already lives on.
 
     Returns
     -------
     global_wl : astropy.units.Quantity
         The longest "wl" continuum grid found across every processed
-        file's own cluster_cloudy/galaxy_cloudy group (see this
-        module's own docstring for why the longest grid is always a
-        superset of every shorter one).
+        file's own cluster_cloudy/galaxy_cloudy group, and existing's
+        own wl if given (see this module's own docstring for why the
+        longest grid is always a superset of every shorter one).
     global_line_wl : numpy.ndarray
         Ascending-sorted union of every row's own top-nline distinct
         line wavelengths (in Angstrom) found across every processed
-        file.
+        file, and every wavelength in existing.line_wl if given.
     global_line_label : list of str
         Cloudy's own label for each wavelength in global_line_wl, in
         the same order.
     global_time : numpy.ndarray
         Ascending-sorted union of every distinct cluster output time
         (in yr) found across every processed cluster-type file's own
-        cluster_spectra group.
+        cluster_spectra group, and every time in existing.time if
+        given.
 
     Raises
     ------
     ValueError
-        If none of the processed files have any cloudy continuum data
-        yet (i.e. run_cloudy_grid.py has not been run against work_dir,
-        or every run in it failed).
+        If existing is None and none of the processed files have any
+        cloudy continuum data yet (i.e. run_cloudy_grid.py has not
+        been run against work_dir, or every run in it failed).
     """
     global_wl: u.Quantity | None = None
     line_table: dict[float, str] = {}
     time_set: set[float] = set()
+
+    if existing is not None:
+        global_wl = existing.wl * u.AA
+        line_table.update(zip(existing.line_wl.tolist(), existing.line_label, strict=True))
+        time_set.update(existing.time.tolist())
 
     for path, sim_type, _track, _feh, _vvcrit in entries:
         reader = slug_reader(str(path))
@@ -711,7 +831,174 @@ def _write_normalized_group(parent: h5py.Group, name: str, data: dict[str, np.nd
     line_dset.attrs["units"] = str(_LINE_NORM_UNIT)
 
 
-def build_table(entries: list[FileEntry], output_path: Path, log_u_values: list[float], nline: int) -> None:
+def _remap_wl(old_wl: np.ndarray, values: np.ndarray, new_wl: np.ndarray) -> np.ndarray:
+    """
+    Re-grid an already-normalized spectrum (or a stack of them) onto a new common wavelength grid.
+
+    Parameters
+    ----------
+    old_wl : numpy.ndarray
+        The wavelength grid values is aligned with along its last axis
+        (Angstrom) -- an existing table's own top-level "wl" dataset.
+        Unlike line_filter_interp, no line filtering is applied here:
+        values is already line-stripped/Q(HI)-normalized, so this is
+        purely a re-gridding.
+    values : numpy.ndarray
+        1-D (galaxy) or 2-D (cluster, one row per output time)
+        spectra.
+    new_wl : numpy.ndarray
+        The table's own new (possibly longer) merged wavelength grid.
+
+    Returns
+    -------
+    numpy.ndarray
+        values re-interpolated onto new_wl, 0 outside old_wl's own
+        range. If new_wl equals old_wl -- the expected common case,
+        since cloudy's own grid is stable across runs at fixed nII/U
+        (see this module's own docstring) -- this is an exact copy.
+    """
+    if old_wl.shape == new_wl.shape and np.array_equal(old_wl, new_wl):
+        return values.copy()
+    return np.apply_along_axis(lambda row: np.interp(new_wl, old_wl, row, left=0.0, right=0.0), -1, values)
+
+
+def _remap_lines(old_line_wl: np.ndarray, values: np.ndarray, new_line_index: dict[float, int]) -> np.ndarray:
+    """
+    Re-index an already-normalized line-luminosity array (or stack of them) onto a new common line list.
+
+    Parameters
+    ----------
+    old_line_wl : numpy.ndarray
+        The line wavelength list values is aligned with along its last
+        axis (Angstrom) -- an existing table's own top-level "line_wl"
+        dataset.
+    values : numpy.ndarray
+        1-D (galaxy) or 2-D (cluster) line luminosities.
+    new_line_index : dict mapping float to int
+        wavelength (Angstrom) -> column index into the table's own new
+        merged line list; always a superset of old_line_wl, since
+        compute_global_grids folds an existing table's own line_wl
+        into the merged line list unconditionally.
+
+    Returns
+    -------
+    numpy.ndarray
+        values re-indexed onto the new merged line list, 0 for any new
+        line old_line_wl never had (there are no lines old_line_wl has
+        that new_line_index lacks, by the same superset guarantee).
+    """
+    new_values = np.zeros(values.shape[:-1] + (len(new_line_index),))
+    for old_i, w in enumerate(old_line_wl):
+        new_values[..., new_line_index[w]] = values[..., old_i]
+    return new_values
+
+
+def _remap_time(old_time: np.ndarray, values: np.ndarray, time_index: dict[float, int]) -> np.ndarray:
+    """
+    Re-index a cluster-type (ntime_old, ...) array onto the table's own new merged output-time grid.
+
+    Parameters
+    ----------
+    old_time : numpy.ndarray
+        The output times (yr) values's own first axis is aligned with
+        -- an existing table's own top-level "time" dataset.
+    values : numpy.ndarray
+        A cluster-type "spec" or "line_lum" array, one row per entry
+        in old_time.
+    time_index : dict mapping float to int
+        output time (yr) -> row index into the table's own new merged
+        cluster output-time list; always a superset of old_time, for
+        the same reason as _remap_lines's own new_line_index.
+
+    Returns
+    -------
+    numpy.ndarray
+        values re-indexed onto the new merged time grid, 0 for any
+        output time old_time never had.
+    """
+    new_values = np.zeros((len(time_index),) + values.shape[1:])
+    for old_i, t in enumerate(old_time):
+        new_values[time_index[t], ...] = values[old_i, ...]
+    return new_values
+
+
+def _remap_combo_sim(existing: ExistingTable, data: dict[str, np.ndarray], sim_type: str,
+    global_wl: np.ndarray, line_index: dict[float, int], time_index: dict[float, int]) -> dict[str, np.ndarray]:
+    """
+    Remap one existing "cluster" or "galaxy" group's own spec/line_lum onto a new build's own merged grids.
+
+    Parameters
+    ----------
+    existing : ExistingTable
+        The table data was read from -- carries the old wl/line_wl/
+        time grids data's own arrays are still aligned to.
+    data : dict
+        {"spec": ..., "line_lum": ...} for one (combo, log10(U),
+        sim_type), as stored in ExistingTable.combos.
+    sim_type : {"cluster", "galaxy"}
+        Which kind of group this is -- cluster's own arrays carry an
+        extra leading output-time axis that also needs remapping
+        (galaxy has none: a galaxy-type file has only ever had a
+        single output time, so there is nothing to index on).
+    global_wl, line_index, time_index
+        This build_table call's own merged grids -- see _remap_wl,
+        _remap_lines, _remap_time.
+
+    Returns
+    -------
+    dict
+        {"spec": ..., "line_lum": ...}, remapped onto global_wl/
+        line_index (and, for a cluster group, time_index too).
+    """
+    spec = _remap_wl(existing.wl, data["spec"], global_wl)
+    line_lum = _remap_lines(existing.line_wl, data["line_lum"], line_index)
+    if sim_type == "cluster":
+        spec = _remap_time(existing.time, spec, time_index)
+        line_lum = _remap_time(existing.time, line_lum, time_index)
+    return {"spec": spec, "line_lum": line_lum}
+
+
+def _write_remapped_combo(fout: h5py.File, combo: tuple[str, float, float],
+    logu_data: dict[float, dict[str, dict[str, np.ndarray]]], existing: ExistingTable,
+    global_wl: np.ndarray, line_index: dict[float, int], time_index: dict[float, int]) -> None:
+    """
+    Write one (track, [Fe/H], v/vcrit) combination carried forward unchanged from an existing table.
+
+    Parameters
+    ----------
+    fout : h5py.File
+        The new table currently being written.
+    combo : tuple of (str, float, float)
+        (track, [Fe/H], v/vcrit) this combination's own data belongs
+        to.
+    logu_data : dict
+        This combo's own entry in existing.combos -- {log10(U):
+        {"cluster" or "galaxy": {"spec": ..., "line_lum": ...}}}, still
+        aligned to existing's own wl/line_wl/time.
+    existing : ExistingTable
+        The table logu_data was read from (see _remap_combo_sim).
+    global_wl, line_index, time_index
+        This build_table call's own merged grids (see
+        _remap_combo_sim).
+    """
+    track, feh, vvcrit = combo
+    track_group = fout.require_group(track)
+    track_group.attrs["track"] = track
+    feh_group = track_group.require_group(f"FeH{feh:+.4f}")
+    feh_group.attrs["FeH"] = feh
+    vvcrit_group = feh_group.require_group(f"vvcrit{vvcrit:.2f}")
+    vvcrit_group.attrs["v_vcrit"] = vvcrit
+
+    for log_u, sim_data in sorted(logu_data.items()):
+        logu_group = vvcrit_group.require_group(f"logU{log_u:+.2f}")
+        logu_group.attrs["logU"] = log_u
+        for sim_type, data in sim_data.items():
+            remapped = _remap_combo_sim(existing, data, sim_type, global_wl, line_index, time_index)
+            _write_normalized_group(logu_group, sim_type, remapped)
+
+
+def build_table(entries: list[FileEntry], output_path: Path, log_u_values: list[float], nline: int,
+    overwrite: bool = False) -> None:
     """
     Build the full nebular emission lookup table from every discovered slug output file.
 
@@ -720,15 +1007,30 @@ def build_table(entries: list[FileEntry], output_path: Path, log_u_values: list[
     entries : list of FileEntry
         As returned by discover_files.
     output_path : pathlib.Path
-        Path to write the table to (overwritten if it already exists).
+        Path to write the table to.
     log_u_values : list of float
         Nominal log10(U) grid to sort rows into (see _nearest_log_u);
         should match run_cloudy_grid.py's own --log-u.
     nline : int
         Maximum number of lines to keep per row, ranked by luminosity
         (see _row_top_lines); a value <= 0 keeps every line.
+    overwrite : bool, default False
+        If True, build output_path from entries alone, discarding
+        whatever it already had (the old, pre-merge behavior). If
+        False (the default), read back an existing file at output_path
+        first (see read_existing_table) and merge: every (track,
+        [Fe/H], v/vcrit) combination it already had is carried forward
+        into the new output_path, remapped onto this call's own merged
+        wl/line/time grids (see _write_remapped_combo), *except* a
+        combination entries also covers -- that one is instead
+        (re)computed fresh from entries, entirely replacing (not
+        merging into) whatever it already had, on the assumption that
+        appearing in entries at all means it was deliberately (re)run.
+        Has no effect if output_path does not exist yet.
     """
-    global_wl_q, global_line_wl, global_line_label, global_time = compute_global_grids(entries, nline)
+    existing = None if overwrite else read_existing_table(output_path)
+
+    global_wl_q, global_line_wl, global_line_label, global_time = compute_global_grids(entries, nline, existing)
     global_wl = global_wl_q.to_value(u.AA)
     line_index = {w: i for i, w in enumerate(global_line_wl)}
     time_index = {t: i for i, t in enumerate(global_time)}
@@ -739,6 +1041,12 @@ def build_table(entries: list[FileEntry], output_path: Path, log_u_values: list[
 
     with h5py.File(output_path, "w") as fout:
         _write_top_level(fout, global_wl_q, global_line_wl, global_line_label, global_time)
+
+        if existing is not None:
+            for combo, logu_data in sorted(existing.combos.items()):
+                if combo in by_track_feh_vvcrit:
+                    continue  # entries covers this combo too -- (re)computed fresh below instead
+                _write_remapped_combo(fout, combo, logu_data, existing, global_wl, line_index, time_index)
 
         for (track, feh, vvcrit), paths in sorted(by_track_feh_vvcrit.items()):
             cluster_path = paths.get("cluster")
@@ -782,8 +1090,12 @@ def parse_args() -> argparse.Namespace:
         help=f"Directory to look for slug *.h5 output files in (default: {DEFAULT_WORK_DIR}); "
             "should be the same --work-dir make_slug_grid.py and run_cloudy_grid.py were run with.")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT,
-        help=f"Path to write the lookup table to (default: {DEFAULT_OUTPUT}); overwritten if it "
-            "already exists.")
+        help=f"Path to write the lookup table to (default: {DEFAULT_OUTPUT}). By default, if this "
+            "already exists, it is merged into rather than replaced -- see this module's own "
+            "docstring, and --overwrite to disable that.")
+    parser.add_argument("--overwrite", action="store_true",
+        help="Build --output from --work-dir alone, discarding whatever it already had, instead "
+            "of merging into it (the default -- see this module's own docstring).")
     parser.add_argument("--log-u", type=float, nargs="+", default=list(LOG_U_VALUES),
         help=f"Nominal log10(U) grid to sort rows into (default: {list(LOG_U_VALUES)}); "
             "should match run_cloudy_grid.py's own --log-u.")
@@ -803,7 +1115,7 @@ def main() -> None:
         print(f"No .h5 files found in {args.work_dir}")
         return
 
-    build_table(entries, args.output, args.log_u, args.nline)
+    build_table(entries, args.output, args.log_u, args.nline, overwrite=args.overwrite)
     print(f"Wrote {args.output}")
 
 
