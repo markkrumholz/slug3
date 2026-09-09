@@ -86,22 +86,27 @@ By default, --output is merged into rather than replaced: if a file
 already exists there, it is read back first (see read_existing_table),
 and the new table this call writes carries forward every (track,
 [Fe/H], v/vcrit) combination it already had that --work-dir's own
-entries don't also cover, remapped onto whatever this call's own
-merged wl/line/time grids turn out to be (see
+entries don't actually produce fresh cloudy results for, remapped onto
+whatever this call's own merged wl/line/time grids turn out to be (see
 compute_global_grids, _remap_combo_sim) -- a combination --work-dir
-does cover is instead (re)computed fresh from --work-dir, entirely
-replacing (not merging into) whatever that same combination already
-had, on the assumption that its presence in --work-dir means it was
-deliberately (re)run. This is what lets --work-dir be reused a track
-set (or [Fe/H]/v/vcrit slice) at a time -- e.g. running the full
-pipeline once for MIST/Stromlo/PARSEC_comp, discarding that --work-dir
-once done, then later running it again from scratch for a
-newly-available track set like Geneva -- without the second run
-wiping out the first's own results: make_slug_grid.py's own
---output-table already skips writing decks for combinations already
-complete there, so a --work-dir populated this way only ever contains
-combinations genuinely missing from --output, and this script's own
-merge just needs to add those in without disturbing anything else.
+does produce fresh results for is instead written from those results,
+entirely replacing (not merging into) whatever that same combination
+already had, on the assumption that producing fresh results at all
+means it was deliberately (re)run. A combination --work-dir merely
+*covers* (i.e. its own slug output file(s) are there) but that yields
+no cloudy results at all -- every cloudy run for it failed, most
+commonly -- is not "fresh" by this definition, so whatever it already
+had in --output survives untouched instead of being silently dropped.
+This is what lets --work-dir be reused a track set (or [Fe/H]/v/vcrit
+slice) at a time -- e.g. running the full pipeline once for MIST/
+Stromlo/PARSEC_comp, discarding that --work-dir once done, then later
+running it again from scratch for a newly-available track set like
+Geneva -- without the second run wiping out the first's own results:
+make_slug_grid.py's own --output-table already skips writing decks for
+combinations already complete there, so a --work-dir populated this
+way only ever contains combinations genuinely missing from --output,
+and this script's own merge just needs to add those in without
+disturbing anything else.
 Pass --overwrite to restore the old behavior instead: build --output
 from --work-dir alone, discarding whatever it already had.
 
@@ -116,6 +121,7 @@ and run_cloudy_grid.py were run with.
 
 # Imports
 import argparse
+import os
 import sys
 from pathlib import Path
 from typing import NamedTuple, cast
@@ -997,6 +1003,55 @@ def _write_remapped_combo(fout: h5py.File, combo: tuple[str, float, float],
             _write_normalized_group(logu_group, sim_type, remapped)
 
 
+class _OutputTableLock:
+    """
+    An exclusive, cross-process lock on one output_path, held for build_table's entire read/merge/write.
+
+    Two build_table calls racing against the same output_path (e.g. two
+    concurrent pipeline runs sharing one --output) would otherwise be
+    unsafe in a way this module's own pre-merge behavior never was: the
+    later call's own read_existing_table (see build_table) can capture
+    output_path's on-disk state from *before* the earlier call's own
+    h5py.File(output_path, "w") lands, so the later call's write then
+    completely replaces the file with a merge based on that stale
+    snapshot -- silently discarding every combination the earlier call
+    had just added. Even with --overwrite (no read step at all), two
+    processes opening the same path "w" concurrently is still unsafe at
+    the HDF5/filesystem level.
+
+    Implemented via a sidecar output_path-plus-".lock" file created with
+    os.O_CREAT | os.O_EXCL -- atomic on every filesystem this pipeline
+    runs on, including the Lustre scratch filesystem --output normally
+    lives on -- deliberately *not* flock/fcntl locking, which
+    run_grid_pipeline.pbs's own HDF5_USE_FILE_LOCKING=FALSE setting
+    documents as unreliable on that same Lustre filesystem. This lock
+    fails fast rather than blocking-and-waiting: a long-running batch
+    pipeline stuck waiting on a lock (rather than erroring loudly) risks
+    quietly burning an entire job's own walltime/core-hour allocation
+    for nothing, which is worse than just telling the second invocation
+    to go away and rerun once the first one finishes.
+    """
+
+    def __init__(self, output_path: Path) -> None:
+        self._lock_path = output_path.with_name(output_path.name + ".lock")
+
+    def __enter__(self) -> "_OutputTableLock":
+        try:
+            fd = os.open(str(self._lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            raise RuntimeError(
+                f"build_table: {self._lock_path} already exists -- either another process is "
+                f"currently building/merging {self._lock_path.with_name(self._lock_path.name.removesuffix('.lock'))} "
+                "right now, or a previous call crashed while holding this lock; if the latter, "
+                "delete the lock file by hand and retry.") from None
+        os.write(fd, f"{os.getpid()}\n".encode())
+        os.close(fd)
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self._lock_path.unlink(missing_ok=True)
+
+
 def build_table(entries: list[FileEntry], output_path: Path, log_u_values: list[float], nline: int,
     overwrite: bool = False) -> None:
     """
@@ -1022,63 +1077,88 @@ def build_table(entries: list[FileEntry], output_path: Path, log_u_values: list[
         [Fe/H], v/vcrit) combination it already had is carried forward
         into the new output_path, remapped onto this call's own merged
         wl/line/time grids (see _write_remapped_combo), *except* a
-        combination entries also covers -- that one is instead
-        (re)computed fresh from entries, entirely replacing (not
-        merging into) whatever it already had, on the assumption that
-        appearing in entries at all means it was deliberately (re)run.
-        Has no effect if output_path does not exist yet.
+        combination entries actually produces fresh cloudy results
+        for -- that one is instead (re)computed fresh from entries,
+        entirely replacing (not merging into) whatever it already had,
+        on the assumption that producing fresh results at all means it
+        was deliberately (re)run. A combination entries *covers* but
+        that yields no cloudy results at all (e.g. every cloudy run
+        for it failed) is not "fresh" by this definition, so whatever
+        it already had in output_path survives untouched rather than
+        being dropped. Has no effect if output_path does not exist
+        yet.
+
+    Raises
+    ------
+    RuntimeError
+        If another build_table call already holds output_path's own
+        lock file (see _OutputTableLock) -- either a genuinely
+        concurrent call against the same output_path, or one left
+        behind by an earlier call that crashed mid-build.
     """
-    existing = None if overwrite else read_existing_table(output_path)
+    with _OutputTableLock(output_path):
+        existing = None if overwrite else read_existing_table(output_path)
 
-    global_wl_q, global_line_wl, global_line_label, global_time = compute_global_grids(entries, nline, existing)
-    global_wl = global_wl_q.to_value(u.AA)
-    line_index = {w: i for i, w in enumerate(global_line_wl)}
-    time_index = {t: i for i, t in enumerate(global_time)}
+        global_wl_q, global_line_wl, global_line_label, global_time = compute_global_grids(
+            entries, nline, existing)
+        global_wl = global_wl_q.to_value(u.AA)
+        line_index = {w: i for i, w in enumerate(global_line_wl)}
+        time_index = {t: i for i, t in enumerate(global_time)}
 
-    by_track_feh_vvcrit: dict[tuple[str, float, float], dict[str, Path]] = {}
-    for path, sim_type, track, feh, vvcrit in entries:
-        by_track_feh_vvcrit.setdefault((track, feh, vvcrit), {})[sim_type] = path
+        by_track_feh_vvcrit: dict[tuple[str, float, float], dict[str, Path]] = {}
+        for path, sim_type, track, feh, vvcrit in entries:
+            by_track_feh_vvcrit.setdefault((track, feh, vvcrit), {})[sim_type] = path
 
-    with h5py.File(output_path, "w") as fout:
-        _write_top_level(fout, global_wl_q, global_line_wl, global_line_label, global_time)
+        with h5py.File(output_path, "w") as fout:
+            _write_top_level(fout, global_wl_q, global_line_wl, global_line_label, global_time)
 
-        if existing is not None:
-            for combo, logu_data in sorted(existing.combos.items()):
-                if combo in by_track_feh_vvcrit:
-                    continue  # entries covers this combo too -- (re)computed fresh below instead
-                _write_remapped_combo(fout, combo, logu_data, existing, global_wl, line_index, time_index)
+            # Fresh combinations are written first, tracking which ones
+            # actually produced cloudy results, so the existing.combos
+            # carry-forward loop below can tell "entries covers this combo
+            # but every cloudy run for it failed" (existing data must
+            # survive) apart from "entries produced fresh data for this
+            # combo" (existing data is superseded) -- by_track_feh_vvcrit
+            # alone conflates the two, since a combo with zero results
+            # still has an entry there.
+            written: set[tuple[str, float, float]] = set()
+            for (track, feh, vvcrit), paths in sorted(by_track_feh_vvcrit.items()):
+                cluster_path = paths.get("cluster")
+                galaxy_path = paths.get("galaxy")
 
-        for (track, feh, vvcrit), paths in sorted(by_track_feh_vvcrit.items()):
-            cluster_path = paths.get("cluster")
-            galaxy_path = paths.get("galaxy")
+                cluster_data = (process_cluster_file(cluster_path, global_wl, line_index, time_index,
+                    log_u_values, nline) if cluster_path is not None else {})
+                for bucket in cluster_data.values():
+                    _fill_bounded_gaps(bucket)
+                galaxy_data = (process_galaxy_file(galaxy_path, global_wl, line_index, log_u_values, nline)
+                    if galaxy_path is not None else {})
 
-            cluster_data = (process_cluster_file(cluster_path, global_wl, line_index, time_index,
-                log_u_values, nline) if cluster_path is not None else {})
-            for bucket in cluster_data.values():
-                _fill_bounded_gaps(bucket)
-            galaxy_data = (process_galaxy_file(galaxy_path, global_wl, line_index, log_u_values, nline)
-                if galaxy_path is not None else {})
+                log_us = sorted(set(cluster_data) | set(galaxy_data))
+                if not log_us:
+                    print(f"  {track} FeH={feh:+.4f} vvcrit={vvcrit:.2f}: no cloudy results found; "
+                        "skipping", file=sys.stderr)
+                    continue
 
-            log_us = sorted(set(cluster_data) | set(galaxy_data))
-            if not log_us:
-                print(f"  {track} FeH={feh:+.4f} vvcrit={vvcrit:.2f}: no cloudy results found; "
-                    "skipping", file=sys.stderr)
-                continue
+                written.add((track, feh, vvcrit))
+                track_group = fout.require_group(track)
+                track_group.attrs["track"] = track
+                feh_group = track_group.require_group(f"FeH{feh:+.4f}")
+                feh_group.attrs["FeH"] = feh
+                vvcrit_group = feh_group.require_group(f"vvcrit{vvcrit:.2f}")
+                vvcrit_group.attrs["v_vcrit"] = vvcrit
 
-            track_group = fout.require_group(track)
-            track_group.attrs["track"] = track
-            feh_group = track_group.require_group(f"FeH{feh:+.4f}")
-            feh_group.attrs["FeH"] = feh
-            vvcrit_group = feh_group.require_group(f"vvcrit{vvcrit:.2f}")
-            vvcrit_group.attrs["v_vcrit"] = vvcrit
+                for log_u in log_us:
+                    logu_group = vvcrit_group.require_group(f"logU{log_u:+.2f}")
+                    logu_group.attrs["logU"] = log_u
+                    if log_u in galaxy_data:
+                        _write_normalized_group(logu_group, "galaxy", galaxy_data[log_u])
+                    if log_u in cluster_data:
+                        _write_normalized_group(logu_group, "cluster", cluster_data[log_u])
 
-            for log_u in log_us:
-                logu_group = vvcrit_group.require_group(f"logU{log_u:+.2f}")
-                logu_group.attrs["logU"] = log_u
-                if log_u in galaxy_data:
-                    _write_normalized_group(logu_group, "galaxy", galaxy_data[log_u])
-                if log_u in cluster_data:
-                    _write_normalized_group(logu_group, "cluster", cluster_data[log_u])
+            if existing is not None:
+                for combo, logu_data in sorted(existing.combos.items()):
+                    if combo in written:
+                        continue  # entries produced fresh data for this combo instead
+                    _write_remapped_combo(fout, combo, logu_data, existing, global_wl, line_index, time_index)
 
 
 def parse_args() -> argparse.Namespace:
