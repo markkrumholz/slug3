@@ -26,11 +26,14 @@ Stromlo, PARSEC_comp, and Geneva track sets, at every [Fe/H] value and
 value each one's own registry entry lists, optionally narrowed further
 by --feh-min/--feh-max and --v-vcrit-min/--v-vcrit-max (see
 TRACK_SETS, get_feh_grid, get_vvcrit_grid, and data/tracks/
-tracks.toml). Geneva here means the registry's own solar-metallicity
-Geneva entry (data/tracks/geneva.h5, [Fe/H] and v/vcrit only) rather
-than the separate single-Z Geneva_Z0004/Geneva_Z014 registry entries,
-mirroring PARSEC_comp's own role as the composite alternative to
-PARSEC_vms/PARSEC_rot.
+tracks.toml). Geneva here means the registry's own Geneva entry
+(data/tracks/geneva.h5) rather than the separate Geneva_Z0004/
+Geneva_Z014 registry entries: geneva.h5 is a pared-down subset of the
+full Geneva model repository, keeping only the part that forms a
+structured (Fe/H, v/vcrit, mass) tensor grid, while Geneva_Z0004 and
+Geneva_Z014 are single-[Fe/H] slices of the full repository that live
+in their own files because their own mass sampling doesn't match
+geneva.h5's own grid.
 
 For each (track set, [Fe/H], v/vcrit) triple, this writes two decks:
 
