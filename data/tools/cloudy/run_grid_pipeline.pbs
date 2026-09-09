@@ -49,15 +49,28 @@ SLUG_DATA_DIR=/scratch/mk27/mrk120/slug3
 TRACK_REGISTRY="$SLUG_DATA_DIR/data/tracks/tracks.toml"
 
 # Directory holding cloudy.exe (slug_reader.run_cloudy's own default
-# lookup is $CLOUDY_DIR/cloudy.exe).
+# lookup is $CLOUDY_DIR/cloudy.exe), and its own vectorhash shared
+# library / data directory -- see the Environment section below for
+# why both are needed on top of CLOUDY_DIR itself.
 CLOUDY_HOME=/scratch/mk27/mrk120/cloudy/source
+CLOUDY_VECTORHASH_LIB=/scratch/mk27/mrk120/cloudy/library/vectorhash/lib64
+CLOUDY_DATA=/scratch/mk27/mrk120/cloudy/data
 
 # Working directory for every slug/cloudy output this pipeline
 # produces (stage 1 and 2 both read/write here; stage 3 reads it and
 # writes the final table alongside it).
 OUT_ROOT=/scratch/mk27/mrk120/slug3/grid_run
 WORK_DIR="$OUT_ROOT/slug_grid_work"
-OUTPUT_TABLE="$OUT_ROOT/cloudy_table.h5"
+
+# The pipeline's actual, already-partly-built lookup table -- deliberately
+# outside OUT_ROOT (built up over multiple runs across track sets; OUT_ROOT
+# itself is disposable per-run scratch space, see WORK_DIR's own comment
+# above). process_cloudy_grid.py's own default (see its module docstring)
+# is to merge into this rather than replace it, and make_slug_grid.py's own
+# --output-table (below) skips writing decks for any (track, [Fe/H],
+# v/vcrit) combination already complete here -- both depend on this
+# pointing at the real, persistent table, not a fresh path under OUT_ROOT.
+OUTPUT_TABLE=/scratch/mk27/mrk120/slug3/cloudy_table.h5
 
 PIPELINE_DIR="$REPO_ROOT/data/tools/cloudy"
 
@@ -80,6 +93,19 @@ export PYTHONPATH="$REPO_ROOT"
 export SLUG_DIR="$SLUG_DATA_DIR"
 export SLUG_EXE
 export CLOUDY_DIR="$CLOUDY_HOME"
+
+# cloudy.exe won't even start without both of these: it dynamically
+# links against its own vectorhash library (not on the default linker
+# search path), and its own compiled-in default CLOUDY_DATA_PATH
+# points at the stale project path it happened to be built under
+# rather than $CLOUDY_HOME's own current location -- confirmed
+# directly against this cloudy.exe: without LD_LIBRARY_PATH it fails
+# immediately with "error while loading shared libraries: libvhsum.so:
+# cannot open shared object file", and even with that fixed it then
+# fails with "PROBLEM DISASTER I could not open the file
+# checksums.dat" until CLOUDY_DATA_PATH is set explicitly.
+export LD_LIBRARY_PATH="$CLOUDY_VECTORHASH_LIB${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export CLOUDY_DATA_PATH="$CLOUDY_DATA"
 
 # OUT_ROOT/WORK_DIR live on /scratch, which is Lustre: HDF5's default
 # file locking (flock) is unreliable there, and spuriously fails with
@@ -104,7 +130,7 @@ export OMP_NUM_THREADS=1
 
 echo "=== $(date) : starting on $(hostname), repo at $(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown) ==="
 
-for f in "$SLUG_EXE" "$TRACK_REGISTRY" "$CLOUDY_HOME/cloudy.exe"; do
+for f in "$SLUG_EXE" "$TRACK_REGISTRY" "$CLOUDY_HOME/cloudy.exe" "$CLOUDY_VECTORHASH_LIB/libvhsum.so" "$CLOUDY_DATA/checksums.dat"; do
     if [[ ! -e "$f" ]]; then
         echo "ERROR: required path does not exist: $f" >&2
         exit 1
