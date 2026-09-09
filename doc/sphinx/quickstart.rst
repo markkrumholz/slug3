@@ -37,19 +37,32 @@ To get started with SLUG, carry out the following steps:
 
     See :ref:`sec-tests` for the full details on the test suite.
 
-4. Write a parameter file describing the simulation you want to run. See 
-:ref:`sec-parameters` for details, and the ``examples/`` directory in the
-repository for example parameter files.
+4. Write a parameter file describing the simulation you want to run. See :ref:`sec-parameters` for details, and the ``examples/`` directory in the repository for example parameter files.
 
-5. Run SLUG either from the command line or from Python. To run from the command
-line, do::
+5. Run SLUG either from the command line or from Python. To run from the command line, do:
 
-    build/slug path/to/parameter_file.toml
+    .. code-block:: bash
 
-and to run from Python, do::
+        build/slug path/to/parameter_file.toml
 
-    import slugpy
-    sim_result = slugpy.run_sim("path/to/parameter_file.toml")
+    and to run from Python, do:
 
-See :ref:`sec-running` for full details on running SLUG from the command line or
-from Python.
+    .. code-block:: python
+
+        import slugpy
+        sim_result = slugpy.run_sim("path/to/parameter_file.toml")
+
+    See :ref:`sec-running` for full details on running SLUG from the command line or 
+    from Python.
+
+6. If SLUG was run from the command line, use the Python lazy-reader to examine the output:
+
+    .. code-block:: python
+
+        import slugpy
+        sim_result = slugpy.read("path/to/model_name")
+
+    This step is not needed if SLUG was run from Python, as the Python runner automatically
+    returns a Python lazy-reader pointing to the simulation output. See :ref:`sec-slugpy`
+    for details on how to use the lazy-reader, and :ref:`sec-ouput` for full documentation
+    of the contents of the otuput of a simulation. 

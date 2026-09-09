@@ -37,6 +37,8 @@ by the :ref:`ssec-parameters-output` section of :ref:`sec-parameters`.
 
 A full description of the format of the outputs is provided below.
 
+.. _ssec-output-reading:
+
 Reading Outputs
 ---------------
 
@@ -44,10 +46,12 @@ Outputs in ASCII mode are simple text files that can be read with any text edito
 and should be self-explanatory (though full details are provided below). To read
 outputs in HDF5 format, you can use any HDF5 reader, but the recommended approach
 is to use ``slugpy``. A simulation output in HDF5 format can be read into Python
-simply by doing::
+simply by doing:
 
-    import slugpy
-    sim_result = slugpy.read("path/model_name")
+    .. code-block:: python
+      
+      import slugpy
+      sim_result = slugpy.read("path/model_name")
 
 The reader will automatically detect whether the output format is ``h5`` or ``h5divided``
 and read the outputs appropriately. The result returned by ``slugpy.read`` is a
