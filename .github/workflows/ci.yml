@@ -187,7 +187,7 @@ jobs:
             echo "No C++ source files changed, skipping clang-tidy."
             exit 0
           fi
-          echo "$CHANGED" | xargs clang-tidy-18 -p build
+          echo "$CHANGED" | xargs -P "$(nproc)" -n1 clang-tidy-18 -p build
 
   pyright:
     name: pyright
