@@ -22,6 +22,7 @@ auto main() -> int {
         result += testTracks3D();
         result += testTracks3DFieldOrder();
         result += testTracks3DGetStar();
+        result += testTracks3DFeHRangeGuard();
         result += testTrackUtils();
         return result;
     }
