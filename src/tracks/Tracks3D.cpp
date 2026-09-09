@@ -233,6 +233,37 @@ namespace tracks
         const auto nExpand = static_cast<unsigned int>(
             gsl_interp_type_min_size(gsl_interp_steffen) / 2);
 
+        // Step 0: verify that [fehMin, fehMax] actually falls within
+        // the [Fe/H] values available for this track set at the
+        // requested vvcrit/afe. findMatchingTracks() itself never
+        // checks this -- given an out-of-range fehMin or fehMax, it
+        // silently brackets against whichever available value is
+        // closest instead of failing -- so this queries the full
+        // available range explicitly (a cheap, metadata-only scan: it
+        // returns feh values and group names, never any of the actual
+        // per-mass track data) and throws here instead of allowing a
+        // silently narrower-than-requested set of tracks to be loaded
+        // below.
+        const auto availMatches = findMatchingTracks(
+            trackName, std::numeric_limits<double>::lowest(),
+            std::numeric_limits<double>::max(), vvcrit, afe, 0, registryName);
+        if (!availMatches.first.empty())
+        {
+            const double availFehMin = availMatches.first.front();
+            const double availFehMax = availMatches.first.back();
+            if (fehMin < availFehMin || fehMax > availFehMax)
+            {
+                throw std::runtime_error(
+                    "Tracks3D: requested [Fe/H] range [" +
+                    std::to_string(fehMin) + ", " + std::to_string(fehMax) +
+                    "] extends outside the range available for track set " +
+                    trackName + " at vvcrit = " + std::to_string(vvcrit) +
+                    ", afe = " + std::to_string(afe) + " ([" +
+                    std::to_string(availFehMin) + ", " +
+                    std::to_string(availFehMax) + "])");
+            }
+        }
+
         // Special case: if fehMin and fehMax are exactly equal, and a
         // track set exists at exactly that [Fe/H] value, load only
         // that single slice instead of expanding by nExpand

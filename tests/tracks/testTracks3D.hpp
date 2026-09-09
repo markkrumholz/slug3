@@ -54,6 +54,61 @@ inline auto testTracks3D() -> int
     return 0;
 }
 
+/**
+ * @brief Unit test that an out-of-range [Fe/H] request is rejected.
+ * @return 0 if the test passes, 1 if it fails.
+ * @details
+ * The MIST_test track set in tests/tracks/assets/tracks.toml provides
+ * feh = -1.0, -0.5, -0.25, 0.0, 0.5 at afe = -0.2, vvcrit = 0.0. This
+ * checks that requesting a fehMin below -1.0 or a fehMax above 0.5
+ * throws, rather than silently bracketing against the nearest
+ * available value the way findMatchingTracks() does internally, and
+ * that a request fully inside that range still succeeds.
+ */
+inline auto testTracks3DFeHRangeGuard() -> int
+{
+    const std::string registryName = "tests/tracks/assets/tracks.toml";
+    const std::string trackName = "MIST_test";
+    int result = 0;
+
+    try
+    {
+        const tracks::Tracks3D tracks3d(
+            trackName, -2.0, 0.0, 0.0, -0.2, registryName);
+        std::cerr << "testTracks3DFeHRangeGuard: construction with "
+            "fehMin = -2.0 (below the available minimum of -1.0) "
+            "should have thrown, but did not\n";
+        result = 1;
+    }
+    catch (const std::runtime_error&) { /* expected */ }
+
+    try
+    {
+        const tracks::Tracks3D tracks3d(
+            trackName, 0.0, 1.0, 0.0, -0.2, registryName);
+        std::cerr << "testTracks3DFeHRangeGuard: construction with "
+            "fehMax = 1.0 (above the available maximum of 0.5) "
+            "should have thrown, but did not\n";
+        result = 1;
+    }
+    catch (const std::runtime_error&) { /* expected */ }
+
+    try
+    {
+        const tracks::Tracks3D tracks3d(
+            trackName, -1.0, 0.5, 0.0, -0.2, registryName);
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "testTracks3DFeHRangeGuard: construction spanning "
+            "the full available [-1.0, 0.5] range unexpectedly threw: "
+            << e.what() << "\n";
+        result = 1;
+    }
+
+    return result;
+}
+
 // Suppress clang-tidy warnings iun this namespace caused by just including
 // hdf5.h, instead of the individual HDF5 headers, since this is the paradigm
 // that HDF5 wants

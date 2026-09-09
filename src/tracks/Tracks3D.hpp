@@ -47,6 +47,10 @@ namespace tracks
          * @param vvcrit Rotation rate v/vcrit
          * @param afe Value of [alpha/Fe]
          * @param registryName Name of the track registry file
+         * @throws std::runtime_error if fehMin or fehMax lies outside
+         *   the [Fe/H] range actually available for this track set at
+         *   the requested vvcrit/afe, or if no tracks match trackName/
+         *   vvcrit/afe at all
         */
         Tracks3D(
             const std::string& trackName,
