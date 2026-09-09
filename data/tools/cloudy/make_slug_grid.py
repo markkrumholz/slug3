@@ -21,11 +21,19 @@ Unlike slug2, where a single nebular model existed per track set,
 slug3 supports far more track-set/rotation/[alpha/Fe] combinations
 than is practical to build a full grid for, so this deliberately
 starts from a narrow slice: the [alpha/Fe] = 0 subset of the MIST,
-Stromlo, and PARSEC_comp track sets, at every [Fe/H] value and (for
-the track sets that have a rotation axis at all) every v/vcrit value
-each one's own registry entry lists, optionally narrowed further by
---feh-min/--feh-max and --v-vcrit-min/--v-vcrit-max (see TRACK_SETS,
-get_feh_grid, get_vvcrit_grid, and data/tracks/tracks.toml).
+Stromlo, PARSEC_comp, and Geneva track sets, at every [Fe/H] value and
+(for the track sets that have a rotation axis at all) every v/vcrit
+value each one's own registry entry lists, optionally narrowed further
+by --feh-min/--feh-max and --v-vcrit-min/--v-vcrit-max (see
+TRACK_SETS, get_feh_grid, get_vvcrit_grid, and data/tracks/
+tracks.toml). Geneva here means the registry's own Geneva entry
+(data/tracks/geneva.h5) rather than the separate Geneva_Z0004/
+Geneva_Z014 registry entries: geneva.h5 is a pared-down subset of the
+full Geneva model repository, keeping only the part that forms a
+structured (Fe/H, v/vcrit, mass) tensor grid, while Geneva_Z0004 and
+Geneva_Z014 are single-[Fe/H] slices of the full repository that live
+in their own files because their own mass sampling doesn't match
+geneva.h5's own grid.
 
 For each (track set, [Fe/H], v/vcrit) triple, this writes two decks:
 
@@ -129,9 +137,11 @@ import h5py
 # a given track set even has that axis at all: TrackUtils treats a
 # track group with no vvcrit/afe attribute of its own as matching any
 # requested value (see src/tracks/TrackUtils.cpp's own comment) --
-# true of PARSEC_comp, which has neither axis (get_vvcrit_grid treats
-# it as a single v/vcrit = 0.0 entry accordingly).
-TRACK_SETS = ("MIST", "Stromlo", "PARSEC_comp")
+# true of PARSEC_comp and Geneva, neither of which has an alpha_Fe
+# axis (get_vvcrit_grid treats a track set with no v_vcrit axis at all
+# as a single v/vcrit = 0.0 entry, though both PARSEC_comp and Geneva
+# do have one).
+TRACK_SETS = ("MIST", "Stromlo", "PARSEC_comp", "Geneva")
 
 # This script's own directory, and the repo's data/tracks/tracks.toml
 # registry relative to it (data/tools/cloudy -> data/tools -> data)
