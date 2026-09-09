@@ -231,7 +231,7 @@ def line_filter_interp(wl: np.ndarray, spec: np.ndarray, wl_grid: np.ndarray,
     return np.interp(wl_grid, wl_pass, spec_pass, left=0.0, right=0.0)
 
 
-def _assign_nominal_log_u(row_time: np.ndarray, log_u_values: list[float]) -> list[float | None]:
+def _assign_nominal_log_u(row_time: np.ndarray, log_u_values: list[float]) -> list[float]:
     """
     Recover the nominal log10(U) value each row was actually requested at, from row order alone.
 
@@ -252,7 +252,17 @@ def _assign_nominal_log_u(row_time: np.ndarray, log_u_values: list[float]) -> li
     output time (cluster) or one row (galaxy) before moving on to the
     next entry -- so the k-th time a given output time recurs in row
     order is always that time's own k-th log_u_values entry's run,
-    regardless of what U that run actually achieved.
+    regardless of what U that run actually achieved. This positional
+    inference itself relies on every entry actually writing a row: per
+    slug_reader.run_cloudy's own docstring, an individual failed run
+    writes nothing at all (not even a placeholder), so one failed run
+    for a single (time, log U) pair would silently shift every later
+    occurrence of that same time into the wrong nominal bucket. Rather
+    than risk that silently, this checks the row counts are self-
+    consistent first -- see Raises -- since nothing in a raw cluster_
+    cloudy/galaxy_cloudy group's own stored columns distinguishes "ran
+    at the 2nd nominal value" from "ran at the 3rd, but the 2nd failed"
+    after the fact.
 
     Parameters
     ----------
@@ -266,18 +276,45 @@ def _assign_nominal_log_u(row_time: np.ndarray, log_u_values: list[float]) -> li
 
     Returns
     -------
-    list of float or None
+    list of float
         log_u_values[k] for the k-th occurrence (in row order) of that
-        row's own output time; None for a (len(log_u_values)+1)-th or
-        later occurrence, which should not happen -- see callers for
-        how this is handled.
+        row's own output time.
+
+    Raises
+    ------
+    ValueError
+        If any output time does not occur in row_time exactly
+        len(log_u_values) times. Every qualifying output time is run
+        once per log_u_values entry (see run_cloudy_grid.py's own
+        process_cluster_file/process_galaxy_file), so a time occurring
+        fewer times means some individual run for it failed outright
+        (see above); a time occurring more times means row_time holds
+        runs from more than one --log-u grid (e.g. two build_table
+        calls against the same --work-dir with different --log-u).
+        Either way, row order can no longer be trusted to recover
+        which nominal log_u a given row belongs to.
     """
+    counts: dict[float, int] = {}
+    for t in row_time:
+        counts[t] = counts.get(t, 0) + 1
+    bad = {t: c for t, c in counts.items() if c != len(log_u_values)}
+    if bad:
+        sample = ", ".join(f"{t:.0f} yr: {c} run(s)" for t, c in sorted(bad.items())[:5])
+        more = f" (+{len(bad) - 5} more)" if len(bad) > 5 else ""
+        raise ValueError(
+            f"_assign_nominal_log_u: expected every output time to occur exactly "
+            f"{len(log_u_values)} time(s) (once per --log-u value), but {len(bad)} "
+            f"output time(s) don't: {sample}{more} -- an individual cloudy run may have "
+            "failed without failing the whole file, or row_time mixes runs from more than "
+            "one --log-u grid; row order can no longer be trusted to recover the nominal "
+            "log_u each row belongs to.")
+
     seen: dict[float, int] = {}
-    assigned: list[float | None] = []
+    assigned: list[float] = []
     for t in row_time:
         k = seen.get(t, 0)
         seen[t] = k + 1
-        assigned.append(log_u_values[k] if k < len(log_u_values) else None)
+        assigned.append(log_u_values[k])
     return assigned
 
 
@@ -420,13 +457,14 @@ def read_existing_table(path: Path) -> ExistingTable | None:
         None if path does not exist yet. Otherwise every dataset this
         table has -- its own top-level wl/line_wl/line_label/time and
         every group's own spec/line_lum -- is read fully into plain
-        in-memory numpy arrays, not left as lazy h5py datasets: by
-        default build_table reopens path itself in "w" (i.e.
-        truncating) mode immediately after calling this, since the
-        normal case is --output pointing at the very file being merged
-        from (rerunning this script against the same --output it wrote
-        last time), so nothing here can still be reading from path by
-        the time that happens.
+        in-memory numpy arrays, not left as lazy h5py datasets: build_
+        table writes its own merged output to a separate sidecar path
+        (see its own docstring) and only replaces path with that once
+        every write has succeeded, but the normal case is --output
+        pointing at the very file being merged from (rerunning this
+        script against the same --output it wrote last time), so this
+        still reads everything up front rather than leaving path open
+        underneath that eventual replace.
     """
     if not path.exists():
         return None
@@ -707,7 +745,11 @@ def process_cluster_file(path: Path, global_wl: np.ndarray, line_index: dict[flo
     arrays = _GroupArrays(group)
     qhi_by_time = _qhi_by_time(phot)
     ntime, nwl, n_line_total = len(time_index), len(global_wl), len(line_index)
-    nominal_log_u = _assign_nominal_log_u(arrays.row_time, log_u_values)
+    try:
+        nominal_log_u = _assign_nominal_log_u(arrays.row_time, log_u_values)
+    except ValueError as exc:
+        print(f"  {path.name}: {exc}; skipping", file=sys.stderr)
+        return {}
 
     result: dict[float, dict[str, np.ndarray]] = {}
     for i in range(len(arrays.row_time)):
@@ -718,10 +760,6 @@ def process_cluster_file(path: Path, global_wl: np.ndarray, line_index: dict[flo
             continue
 
         log_u = nominal_log_u[i]
-        if log_u is None:
-            print(f"  {path.name}: t={t:.0f} yr has more cloudy runs than --log-u values "
-                f"({len(log_u_values)}); skipping the extra one", file=sys.stderr)
-            continue
         bucket = result.setdefault(log_u, {
             "spec": np.zeros((ntime, nwl)),
             "line_lum": np.zeros((ntime, n_line_total)),
@@ -829,7 +867,11 @@ def process_galaxy_file(path: Path, global_wl: np.ndarray, line_index: dict[floa
     arrays = _GroupArrays(group)
     qhi_by_time = _qhi_by_time(phot)
     n_line_total = len(line_index)
-    nominal_log_u = _assign_nominal_log_u(arrays.row_time, log_u_values)
+    try:
+        nominal_log_u = _assign_nominal_log_u(arrays.row_time, log_u_values)
+    except ValueError as exc:
+        print(f"  {path.name}: {exc}; skipping", file=sys.stderr)
+        return {}
 
     result: dict[float, dict[str, np.ndarray]] = {}
     for i in range(len(arrays.row_time)):
@@ -837,10 +879,6 @@ def process_galaxy_file(path: Path, global_wl: np.ndarray, line_index: dict[floa
         if qhi is None or qhi <= 0:
             continue
         log_u = nominal_log_u[i]
-        if log_u is None:
-            print(f"  {path.name}: t={arrays.row_time[i]:.0f} yr has more cloudy runs than "
-                f"--log-u values ({len(log_u_values)}); skipping the extra one", file=sys.stderr)
-            continue
         spec, line_lum = _normalize_row(arrays, i, qhi, global_wl, line_index, n_line_total, nline)
         result[log_u] = {"spec": spec, "line_lum": line_lum}
 
@@ -1048,12 +1086,13 @@ class _OutputTableLock:
     unsafe in a way this module's own pre-merge behavior never was: the
     later call's own read_existing_table (see build_table) can capture
     output_path's on-disk state from *before* the earlier call's own
-    h5py.File(output_path, "w") lands, so the later call's write then
+    os.replace onto output_path lands, so the later call's write then
     completely replaces the file with a merge based on that stale
     snapshot -- silently discarding every combination the earlier call
     had just added. Even with --overwrite (no read step at all), two
-    processes opening the same path "w" concurrently is still unsafe at
-    the HDF5/filesystem level.
+    processes writing the same output_path-plus-".tmp" sidecar
+    concurrently (see build_table) is still unsafe at the HDF5/
+    filesystem level.
 
     Implemented via a sidecar output_path-plus-".lock" file created with
     os.O_CREAT | os.O_EXCL -- atomic on every filesystem this pipeline
@@ -1146,56 +1185,75 @@ def build_table(entries: list[FileEntry], output_path: Path, log_u_values: list[
         for path, sim_type, track, feh, vvcrit in entries:
             by_track_feh_vvcrit.setdefault((track, feh, vvcrit), {})[sim_type] = path
 
-        with h5py.File(output_path, "w") as fout:
-            _write_top_level(fout, global_wl_q, global_line_wl, global_line_label, global_time)
+        # Written to a same-directory (so same-filesystem, for os.replace's
+        # own atomicity) sidecar path first, and only swapped into
+        # output_path -- via os.replace, atomic on every filesystem this
+        # pipeline runs on -- once every write below has completed without
+        # error. output_path itself is never opened for writing, so a crash
+        # or exception partway through (this loop can run for a long time,
+        # across every discovered combination) leaves whatever output_path
+        # already had (including the very data existing above just read
+        # back from it) untouched rather than truncated/corrupted; tmp_path
+        # is removed on that path instead. A tmp_path left behind by an
+        # earlier crash (one bad enough to skip even this except clause,
+        # e.g. SIGKILL) is harmless -- the next call just truncates and
+        # reuses it.
+        tmp_path = output_path.with_name(output_path.name + ".tmp")
+        try:
+            with h5py.File(tmp_path, "w") as fout:
+                _write_top_level(fout, global_wl_q, global_line_wl, global_line_label, global_time)
 
-            # Fresh combinations are written first, tracking which ones
-            # actually produced cloudy results, so the existing.combos
-            # carry-forward loop below can tell "entries covers this combo
-            # but every cloudy run for it failed" (existing data must
-            # survive) apart from "entries produced fresh data for this
-            # combo" (existing data is superseded) -- by_track_feh_vvcrit
-            # alone conflates the two, since a combo with zero results
-            # still has an entry there.
-            written: set[tuple[str, float, float]] = set()
-            for (track, feh, vvcrit), paths in sorted(by_track_feh_vvcrit.items()):
-                cluster_path = paths.get("cluster")
-                galaxy_path = paths.get("galaxy")
+                # Fresh combinations are written first, tracking which ones
+                # actually produced cloudy results, so the existing.combos
+                # carry-forward loop below can tell "entries covers this combo
+                # but every cloudy run for it failed" (existing data must
+                # survive) apart from "entries produced fresh data for this
+                # combo" (existing data is superseded) -- by_track_feh_vvcrit
+                # alone conflates the two, since a combo with zero results
+                # still has an entry there.
+                written: set[tuple[str, float, float]] = set()
+                for (track, feh, vvcrit), paths in sorted(by_track_feh_vvcrit.items()):
+                    cluster_path = paths.get("cluster")
+                    galaxy_path = paths.get("galaxy")
 
-                cluster_data = (process_cluster_file(cluster_path, global_wl, line_index, time_index,
-                    log_u_values, nline) if cluster_path is not None else {})
-                for bucket in cluster_data.values():
-                    _fill_bounded_gaps(bucket)
-                galaxy_data = (process_galaxy_file(galaxy_path, global_wl, line_index, log_u_values, nline)
-                    if galaxy_path is not None else {})
+                    cluster_data = (process_cluster_file(cluster_path, global_wl, line_index, time_index,
+                        log_u_values, nline) if cluster_path is not None else {})
+                    for bucket in cluster_data.values():
+                        _fill_bounded_gaps(bucket)
+                    galaxy_data = (process_galaxy_file(galaxy_path, global_wl, line_index, log_u_values, nline)
+                        if galaxy_path is not None else {})
 
-                log_us = sorted(set(cluster_data) | set(galaxy_data))
-                if not log_us:
-                    print(f"  {track} FeH={feh:+.4f} vvcrit={vvcrit:.2f}: no cloudy results found; "
-                        "skipping", file=sys.stderr)
-                    continue
+                    log_us = sorted(set(cluster_data) | set(galaxy_data))
+                    if not log_us:
+                        print(f"  {track} FeH={feh:+.4f} vvcrit={vvcrit:.2f}: no cloudy results found; "
+                            "skipping", file=sys.stderr)
+                        continue
 
-                written.add((track, feh, vvcrit))
-                track_group = fout.require_group(track)
-                track_group.attrs["track"] = track
-                feh_group = track_group.require_group(f"FeH{feh:+.4f}")
-                feh_group.attrs["FeH"] = feh
-                vvcrit_group = feh_group.require_group(f"vvcrit{vvcrit:.2f}")
-                vvcrit_group.attrs["v_vcrit"] = vvcrit
+                    written.add((track, feh, vvcrit))
+                    track_group = fout.require_group(track)
+                    track_group.attrs["track"] = track
+                    feh_group = track_group.require_group(f"FeH{feh:+.4f}")
+                    feh_group.attrs["FeH"] = feh
+                    vvcrit_group = feh_group.require_group(f"vvcrit{vvcrit:.2f}")
+                    vvcrit_group.attrs["v_vcrit"] = vvcrit
 
-                for log_u in log_us:
-                    logu_group = vvcrit_group.require_group(f"logU{log_u:+.2f}")
-                    logu_group.attrs["logU"] = log_u
-                    if log_u in galaxy_data:
-                        _write_normalized_group(logu_group, "galaxy", galaxy_data[log_u])
-                    if log_u in cluster_data:
-                        _write_normalized_group(logu_group, "cluster", cluster_data[log_u])
+                    for log_u in log_us:
+                        logu_group = vvcrit_group.require_group(f"logU{log_u:+.2f}")
+                        logu_group.attrs["logU"] = log_u
+                        if log_u in galaxy_data:
+                            _write_normalized_group(logu_group, "galaxy", galaxy_data[log_u])
+                        if log_u in cluster_data:
+                            _write_normalized_group(logu_group, "cluster", cluster_data[log_u])
 
-            if existing is not None:
-                for combo, logu_data in sorted(existing.combos.items()):
-                    if combo in written:
-                        continue  # entries produced fresh data for this combo instead
-                    _write_remapped_combo(fout, combo, logu_data, existing, global_wl, line_index, time_index)
+                if existing is not None:
+                    for combo, logu_data in sorted(existing.combos.items()):
+                        if combo in written:
+                            continue  # entries produced fresh data for this combo instead
+                        _write_remapped_combo(fout, combo, logu_data, existing, global_wl, line_index, time_index)
+        except BaseException:
+            tmp_path.unlink(missing_ok=True)
+            raise
+        os.replace(tmp_path, output_path)
 
 
 def parse_args() -> argparse.Namespace:
