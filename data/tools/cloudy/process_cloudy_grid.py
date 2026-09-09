@@ -56,9 +56,10 @@ Output layout (cloudy_table.h5, default name):
   group per v/vcrit value found within that (e.g. "vvcrit0.00";
   attrs["v_vcrit"] records the value), containing one group per
   log10(U) value found within that (e.g. "logU-2.50"; attrs["logU"]
-  records the value; see _nearest_log_u for how each row's own,
-  possibly hiiregparam-adjusted, U is matched back to one of
-  --log-u's nominal values).
+  records the value; see _assign_nominal_log_u for how each row is
+  matched back to the nominal --log-u value it was actually requested
+  at, which its own U may not be closest to once hiiregparam has
+  adjusted it).
 - Within each logU group: a "galaxy" group (if that combination has
   galaxy data) with 1-D "spec" (erg/Angstrom/photon, on the common
   wavelength grid, zero where that grid extends past what this
@@ -230,33 +231,54 @@ def line_filter_interp(wl: np.ndarray, spec: np.ndarray, wl_grid: np.ndarray,
     return np.interp(wl_grid, wl_pass, spec_pass, left=0.0, right=0.0)
 
 
-def _nearest_log_u(u_val: float, log_u_values: list[float]) -> float:
+def _assign_nominal_log_u(row_time: np.ndarray, log_u_values: list[float]) -> list[float | None]:
     """
-    Match an actual ionization parameter to the nearest nominal log10(U) value it was run at.
+    Recover the nominal log10(U) value each row was actually requested at, from row order alone.
+
+    A row's own stored U is the *achieved* value -- hiiregparam can
+    adjust the requested U to keep it physically consistent with the
+    run's own density and ionizing luminosity (see its own "U too
+    large for input value of nII" warning), so it need not equal, or
+    even be closest to, 10**(the log_u_values entry that was actually
+    requested). Matching rows back to a nominal log10(U) by nearest
+    achieved value is therefore unsound: a heavily-lowered run
+    requested at one nominal value can end up nearer a neighboring
+    nominal value than the row genuinely run at that neighbor, and
+    silently overwrite it.
+
+    Instead, this relies on run_cloudy_grid.py's own process_cluster_
+    file/process_galaxy_file, each of which loops over log_u_values in
+    order and, for each entry, fully appends one row per qualifying
+    output time (cluster) or one row (galaxy) before moving on to the
+    next entry -- so the k-th time a given output time recurs in row
+    order is always that time's own k-th log_u_values entry's run,
+    regardless of what U that run actually achieved.
 
     Parameters
     ----------
-    u_val : float
-        The actual (dimensionless) U value a cloudy run was stored
-        with -- hiiregparam can adjust the requested U slightly to
-        keep it physically consistent with the run's own density and
-        ionizing luminosity (see its own "U too large for input value
-        of nII" warning), so this need not exactly equal 10**(a
-        log_u_values entry).
+    row_time : numpy.ndarray
+        Output time of each row, in yr, in on-disk row order (see
+        _GroupArrays.row_time).
     log_u_values : list of float
         The nominal log10(U) grid cloudy was requested to run at (see
-        run_cloudy_grid.py's own --log-u); must be spaced widely
-        enough that hiiregparam's own adjustments never move a run
-        closer to the wrong neighbor.
+        run_cloudy_grid.py's own --log-u), in the same order it was
+        passed there.
 
     Returns
     -------
-    float
-        The entry of log_u_values closest to log10(u_val).
+    list of float or None
+        log_u_values[k] for the k-th occurrence (in row order) of that
+        row's own output time; None for a (len(log_u_values)+1)-th or
+        later occurrence, which should not happen -- see callers for
+        how this is handled.
     """
-    log_u_actual = np.log10(u_val)
-    diffs = [abs(log_u_actual - target) for target in log_u_values]
-    return log_u_values[int(np.argmin(diffs))]
+    seen: dict[float, int] = {}
+    assigned: list[float | None] = []
+    for t in row_time:
+        k = seen.get(t, 0)
+        seen[t] = k + 1
+        assigned.append(log_u_values[k] if k < len(log_u_values) else None)
+    return assigned
 
 
 def _row_top_lines(wl: np.ndarray, label: list[str], lum_row: np.ndarray,
@@ -651,7 +673,9 @@ def process_cluster_file(path: Path, global_wl: np.ndarray, line_index: dict[flo
         output time (yr) -> row index into the table's own common
         cluster output-time list.
     log_u_values : list of float
-        Nominal log10(U) grid to sort rows into (see _nearest_log_u).
+        Nominal log10(U) grid to sort rows into (see
+        _assign_nominal_log_u), in the same order passed to
+        run_cloudy_grid.py's own --log-u.
     nline : int
         Maximum number of lines to keep per row (see _row_top_lines);
         must match the value compute_global_grids built line_index
@@ -683,6 +707,7 @@ def process_cluster_file(path: Path, global_wl: np.ndarray, line_index: dict[flo
     arrays = _GroupArrays(group)
     qhi_by_time = _qhi_by_time(phot)
     ntime, nwl, n_line_total = len(time_index), len(global_wl), len(line_index)
+    nominal_log_u = _assign_nominal_log_u(arrays.row_time, log_u_values)
 
     result: dict[float, dict[str, np.ndarray]] = {}
     for i in range(len(arrays.row_time)):
@@ -692,7 +717,11 @@ def process_cluster_file(path: Path, global_wl: np.ndarray, line_index: dict[flo
         if qhi is None or qhi <= 0 or t_idx is None:
             continue
 
-        log_u = _nearest_log_u(arrays.row_u[i], log_u_values)
+        log_u = nominal_log_u[i]
+        if log_u is None:
+            print(f"  {path.name}: t={t:.0f} yr has more cloudy runs than --log-u values "
+                f"({len(log_u_values)}); skipping the extra one", file=sys.stderr)
+            continue
         bucket = result.setdefault(log_u, {
             "spec": np.zeros((ntime, nwl)),
             "line_lum": np.zeros((ntime, n_line_total)),
@@ -771,7 +800,9 @@ def process_galaxy_file(path: Path, global_wl: np.ndarray, line_index: dict[floa
         wavelength (Angstrom) -> column index into the table's own
         common line list.
     log_u_values : list of float
-        Nominal log10(U) grid to sort rows into (see _nearest_log_u).
+        Nominal log10(U) grid to sort rows into (see
+        _assign_nominal_log_u), in the same order passed to
+        run_cloudy_grid.py's own --log-u.
     nline : int
         Maximum number of lines to keep per row (see _row_top_lines);
         must match the value compute_global_grids built line_index
@@ -798,13 +829,18 @@ def process_galaxy_file(path: Path, global_wl: np.ndarray, line_index: dict[floa
     arrays = _GroupArrays(group)
     qhi_by_time = _qhi_by_time(phot)
     n_line_total = len(line_index)
+    nominal_log_u = _assign_nominal_log_u(arrays.row_time, log_u_values)
 
     result: dict[float, dict[str, np.ndarray]] = {}
     for i in range(len(arrays.row_time)):
         qhi = qhi_by_time.get(arrays.row_time[i])
         if qhi is None or qhi <= 0:
             continue
-        log_u = _nearest_log_u(arrays.row_u[i], log_u_values)
+        log_u = nominal_log_u[i]
+        if log_u is None:
+            print(f"  {path.name}: t={arrays.row_time[i]:.0f} yr has more cloudy runs than "
+                f"--log-u values ({len(log_u_values)}); skipping the extra one", file=sys.stderr)
+            continue
         spec, line_lum = _normalize_row(arrays, i, qhi, global_wl, line_index, n_line_total, nline)
         result[log_u] = {"spec": spec, "line_lum": line_lum}
 
@@ -1064,8 +1100,9 @@ def build_table(entries: list[FileEntry], output_path: Path, log_u_values: list[
     output_path : pathlib.Path
         Path to write the table to.
     log_u_values : list of float
-        Nominal log10(U) grid to sort rows into (see _nearest_log_u);
-        should match run_cloudy_grid.py's own --log-u.
+        Nominal log10(U) grid to sort rows into (see
+        _assign_nominal_log_u); must match run_cloudy_grid.py's own
+        --log-u, in the same order it was passed there.
     nline : int
         Maximum number of lines to keep per row, ranked by luminosity
         (see _row_top_lines); a value <= 0 keeps every line.
