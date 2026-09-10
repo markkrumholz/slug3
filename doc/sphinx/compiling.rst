@@ -28,22 +28,48 @@ Required
     wherever the code indexes a ``std::mdspan``.
   * ``std::views::zip``, from ``<ranges>``.
 
-  In practice, the two configurations SLUG's own continuous integration
-  builds and tests against are:
+  SLUG's own continuous integration builds and tests against GCC 16 and
+  Clang 18 (linked against LLVM's own libc++ 18, *not* whatever
+  system-provided libc++/libstdc++ the compiler defaults to -- see below).
+  Those aren't the actual minimum versions, though: verified locally (a
+  full build plus the relevant test suites, on several Homebrew-packaged
+  versions of each), the real floor is **GCC 13** and **Clang 17**. Every
+  Clang version number below is really shorthand for "Clang paired with
+  its own same-numbered libc++" (as with the CI configuration above, and
+  as Homebrew's ``llvm@N`` formulae and LLVM's own releases both bundle
+  it) -- ``std::views::zip`` and ``std::format`` are strictly libc++
+  features, so a mismatched pairing (an unusually old or new libc++ built
+  separately from the Clang frontend) could in principle behave
+  differently; what's stated here is what was actually verified to build
+  and pass tests with each matched pairing, not a reading of any
+  third-party feature-completeness table, which can disagree with what
+  works in practice for this codebase's own specific usage. Earlier
+  versions fail for specific, identified reasons rather than a blanket "too
+  old":
 
-  * GCC 16 (paired with a libstdc++ new enough to have these features --
-    see the note on ``<mdspan>`` under "Bundled" below, since that specific
-    header can lag behind the rest of a compiler's own C++23 support even
-    at the same nominal GCC version).
-  * Clang 18, linked against LLVM's own libc++ 18 (*not* whatever
-    system-provided libc++/libstdc++ the compiler defaults to -- see below).
+  * GCC 12 is missing ``std::views::zip`` from libstdc++ entirely; GCC 11
+    additionally lacks the multidimensional ``operator[]`` language feature
+    itself. GCC 12/13/14 (unlike 15+) are also missing ``std::vector``'s
+    ``append_range`` -- a third C++23 library addition this codebase used
+    to depend on in one place, since fixed to use the older, equally
+    portable ``insert(end(), begin(), end())`` instead specifically so it
+    wouldn't force the floor higher than the two features above already
+    require.
+  * Clang 16 already has both of the two features above, but still fails
+    to build this code, for two unrelated reasons: the bundled ``<mdspan>``
+    fallback (see "Bundled" below) deliberately disables its own
+    multi-index ``operator[]`` before Clang 17, working around a documented
+    upstream Clang bug involving parameter packs in bracket operators
+    (visible in ``src/extern/mdspan``'s own ``config.hpp``); separately,
+    libc++ doesn't gain ``std::format`` (used in a handful of places under
+    ``src/tracks``) until Clang 17 either. Clang 15 and earlier are also
+    missing ``std::views::zip`` outright, the same as GCC 12.
 
-  Older GCC/Clang releases, and other C++23-capable compilers such as
-  Intel's LLVM-based ``icpx``/``icx`` (part of the oneAPI DPC++/C++
-  Compiler; the older, classic ``icc`` is discontinued and should not be
-  used), have not been verified and may or may not work -- if you have
-  success or failure with a configuration not listed here, please let us
-  know so this list can be extended.
+  Other C++23-capable compilers, such as Intel's LLVM-based ``icpx``/``icx``
+  (part of the oneAPI DPC++/C++ Compiler; the older, classic ``icc`` is
+  discontinued and should not be used), have not been verified and may or
+  may not work -- if you have success or failure with a configuration not
+  listed here, please let us know so this list can be extended.
 * The `GNU Scientific Library <https://www.gnu.org/software/gsl/>`_ (GSL).
 * `HDF5 <https://www.hdfgroup.org/solutions/hdf5/>`_, built with its C++
   component enabled.
@@ -77,6 +103,18 @@ fetches them after the fact too):
   bundled submodule -- see that file's own comments, or AGENTS.md, for the
   full detail. Application code always just does ``#include <mdspan>``
   regardless of which provider actually supplied it.
+
+  One further wrinkle specific to this bundled fallback: its own
+  ``config.hpp`` deliberately disables its multi-index ``operator[]`` on
+  Clang versions before 17, as a workaround for a documented upstream
+  Clang bug with parameter packs in bracket operators -- so a build that
+  falls back to this submodule under Clang 16 or earlier fails with "no
+  viable overloaded operator[]" errors on every ``mdspan`` indexing
+  expression, even though Clang itself supports the multidimensional
+  ``operator[]`` language feature from an earlier version (see
+  :ref:`sec-dependencies` above). This is why Clang's own effective
+  minimum version is 17, one version above where the language feature
+  itself first appears.
 
 Optional
 ~~~~~~~~~

@@ -524,7 +524,7 @@ namespace interp
                 startInterior, endInterior);
 
             // Append to list
-            intList.append_range(intListSeg);
+            intList.insert(intList.end(), intListSeg.begin(), intListSeg.end());
         }
 
         // Return final intersection list
