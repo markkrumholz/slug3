@@ -1127,13 +1127,17 @@ static auto testSimControlsSFRDist() -> int
 }
 
 // Verify that setFeH() rejects a new [Fe/H] distribution whose own
-// [min, max] range is broader than the current one -- tracks_ is only
-// ever loaded, once, at construction, over fehDist_'s own range at
-// that time, so widening it afterward risks interpolating outside the
-// data actually loaded. Narrowing (and then, deliberately, trying to
-// widen back toward the original range) should distinguish the two
-// cases correctly -- the rejection compares against the *current*
-// fehDist_, not the range originally loaded at construction.
+// [min, max] range is broader than tracks_'s own [fehMin(), fehMax()]
+// -- tracks_ is only ever loaded, once, at construction, over that
+// range, so accepting a distribution wider than what was actually
+// loaded risks interpolating outside the data tracks_ actually holds.
+// Critically, the check compares against tracks_'s own construction-
+// time range, not against fehDist_'s current one: narrowing once, then
+// setting a second, unrelated narrow value that doesn't nest inside
+// the first (but is still within what tracks_ covers), and separately
+// widening back out to exactly tracks_'s own bounds, must both
+// succeed -- only a distribution that actually exceeds tracks_'s own
+// range should ever be rejected.
 static auto testSimControlsSetFeHRejectsBroadening() -> int
 {
     const std::string fileName = "tests/core/assets/testClusterVarFeH.in";
@@ -1165,25 +1169,69 @@ static auto testSimControlsSetFeHRejectsBroadening() -> int
         return 1;
     }
 
-    // Widening back out to the same [-0.5, 0.5] range originally
-    // loaded at construction should now be rejected: setFeH() compares
-    // against the current, already-narrowed fehDist_ ([-0.25, -0.25]),
-    // not the wider range tracks_ actually holds
+    // Setting a second, unrelated narrow value (0.4) that does not
+    // nest inside the first (-0.25) must still succeed, since both are
+    // within tracks_'s own [-0.5, 0.5] -- this is exactly the case the
+    // old, buggy comparison against fehDist_'s current (already
+    // narrowed) value got wrong
+    try
+    {
+        sim.setFeH("0.4");
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: setFeH: expected setting the "
+            "unrelated narrow value 0.4 (after narrowing to -0.25) to "
+            "succeed, but it threw: " << error.what() << "\n";
+        return 1;
+    }
+    if (sim.fehDist().getMin() != 0.4 || sim.fehDist().getMax() != 0.4)
+    {
+        std::cerr << "testSimControls: setFeH: expected fehDist() == "
+            "[0.4, 0.4] after setting 0.4\n";
+        return 1;
+    }
+
+    // Widening back out to exactly [-0.5, 0.5] -- tracks_'s own range,
+    // loaded at construction -- must also succeed
     try
     {
         sim.setFeH("tests/core/assets/testClusterFeHDist.toml");
+    }
+    catch (const std::exception& error)
+    {
         std::cerr << "testSimControls: setFeH: expected widening back to "
-            "[-0.5, 0.5] to throw\n";
+            "[-0.5, 0.5] (tracks_'s own range) to succeed, but it threw: "
+            << error.what() << "\n";
+        return 1;
+    }
+    if (sim.fehDist().getMin() != -0.5 || sim.fehDist().getMax() != 0.5)
+    {
+        std::cerr << "testSimControls: setFeH: expected fehDist() == "
+            "[-0.5, 0.5] after widening back to tracks_'s own range\n";
+        return 1;
+    }
+
+    // A distribution that actually exceeds tracks_'s own [-0.5, 0.5]
+    // (here, a single point at -0.75, still within the MIST_test
+    // fixture's real [-1.0, 0.5] availability, but outside what this
+    // SimControls' own tracks_ was actually constructed to cover)
+    // should still be rejected
+    try
+    {
+        sim.setFeH("-0.75");
+        std::cerr << "testSimControls: setFeH: expected -0.75 (outside "
+            "tracks_'s own [-0.5, 0.5]) to throw\n";
         return 1;
     }
     catch (const std::runtime_error&) { /* expected */ }
 
     // ...and fehDist_ itself should be left exactly as it was before
     // the rejected call, not partially updated
-    if (sim.fehDist().getMin() != -0.25 || sim.fehDist().getMax() != -0.25)
+    if (sim.fehDist().getMin() != -0.5 || sim.fehDist().getMax() != 0.5)
     {
         std::cerr << "testSimControls: setFeH: expected fehDist() to remain "
-            "[-0.25, -0.25] after the rejected widening attempt\n";
+            "[-0.5, 0.5] after the rejected out-of-range attempt\n";
         return 1;
     }
 
