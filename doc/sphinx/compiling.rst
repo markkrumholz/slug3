@@ -33,7 +33,17 @@ Required
   system-provided libc++/libstdc++ the compiler defaults to -- see below).
   Those aren't the actual minimum versions, though: verified locally (a
   full build plus the relevant test suites, on several Homebrew-packaged
-  versions of each), the real floor is **GCC 13** and **Clang 17**. Earlier
+  versions of each), the real floor is **GCC 13** and **Clang 17**. Every
+  Clang version number below is really shorthand for "Clang paired with
+  its own same-numbered libc++" (as with the CI configuration above, and
+  as Homebrew's ``llvm@N`` formulae and LLVM's own releases both bundle
+  it) -- ``std::views::zip`` and ``std::format`` are strictly libc++
+  features, so a mismatched pairing (an unusually old or new libc++ built
+  separately from the Clang frontend) could in principle behave
+  differently; what's stated here is what was actually verified to build
+  and pass tests with each matched pairing, not a reading of any
+  third-party feature-completeness table, which can disagree with what
+  works in practice for this codebase's own specific usage. Earlier
   versions fail for specific, identified reasons rather than a blanket "too
   old":
 
