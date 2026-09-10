@@ -217,7 +217,9 @@ namespace tracks
         const double afe,
         const std::string& registryName) :
         AFe_(afe),
-        vVcrit_(vvcrit)
+        vVcrit_(vvcrit),
+        fehMin_(fehMin),
+        fehMax_(fehMax)
     {
         using Array1D = interp::Mesh3DInterpolator<nQty>::Array1D;
         using Array3D = interp::Mesh3DInterpolator<nQty>::Array3D;

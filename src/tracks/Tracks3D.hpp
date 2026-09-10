@@ -62,9 +62,11 @@ namespace tracks
         /**
          * @brief Construct an empty, invalid Tracks3D object
          */
-        Tracks3D() : 
+        Tracks3D() :
             AFe_(std::numeric_limits<double>::quiet_NaN()),
-            vVcrit_(std::numeric_limits<double>::quiet_NaN())
+            vVcrit_(std::numeric_limits<double>::quiet_NaN()),
+            fehMin_(std::numeric_limits<double>::quiet_NaN()),
+            fehMax_(std::numeric_limits<double>::quiet_NaN())
         { }
         virtual ~Tracks3D() = default;
         Tracks3D(const Tracks3D&) = delete;
@@ -103,6 +105,31 @@ namespace tracks
          * @return A const reference to the [Fe/H] values spanned by this set of tracks
          */
         [[nodiscard]] auto feH() const -> const std::vector<double>& { return FeH_; }
+
+        /**
+         * @brief Return the minimum [Fe/H] this object was constructed to cover
+         * @return The fehMin value passed to the constructor
+         * @details
+         * This is the originally-requested bound, not derived from feH()
+         * (which can be wider, since the constructor pads the loaded grid
+         * with neighboring points beyond [fehMin, fehMax] to support
+         * interpolation -- see the constructor's own comment) or from any
+         * [Fe/H] distribution a caller may be using this object alongside,
+         * which can be narrower than this if it has since been amended.
+         * Callers that need to validate a new distribution against what
+         * this object can actually interpolate over should check against
+         * this and fehMax(), not against their own distribution's current
+         * bounds.
+         */
+        [[nodiscard]] auto fehMin() const { return fehMin_; }
+
+        /**
+         * @brief Return the maximum [Fe/H] this object was constructed to cover
+         * @return The fehMax value passed to the constructor
+         * @details
+         * See fehMin()'s own comment.
+         */
+        [[nodiscard]] auto fehMax() const { return fehMax_; }
 
         /**
          * @brief Return the [alpha/Fe] value of this set of tracks
@@ -216,7 +243,9 @@ namespace tracks
         M3DPtr interp_;           /**< Interpolator for the tracks */
         std::vector<double> FeH_; /**< [Fe/H] values for all tracks */  // NOLINT(readability-identifier-naming)
         double AFe_;              /**< [alpha/Fe] value of this set of tracks, or quiet_NaN if not available */ // NOLINT(readability-identifier-naming)
-        double vVcrit_;           /**< v/vcrit value of this set of tracks, or quiet_NaN if not available */   
+        double vVcrit_;           /**< v/vcrit value of this set of tracks, or quiet_NaN if not available */
+        double fehMin_;           /**< Minimum [Fe/H] requested at construction (see fehMin()'s own comment) */
+        double fehMax_;           /**< Maximum [Fe/H] requested at construction (see fehMax()'s own comment) */
 
     };
 

@@ -751,15 +751,17 @@ def test_simcontrols_set_feh_invalid_raises():
 
 def test_simcontrols_set_feh_rejects_broadening():
     """setFeH() must reject a new [Fe/H] distribution whose own
-    [min, max] range is broader than the current one -- tracks_ is
-    only ever loaded, once, at construction, over fehDist_'s own range
-    at that time, so widening it afterward risks interpolating outside
-    the data actually loaded. Narrowing is always accepted; widening
-    back toward the original [-0.5, 0.5] range (VAR_FEH_DECK's own
-    stars.FeH) after narrowing to a point should be rejected, since
-    setFeH() compares against the *current* feH, not the range
-    actually loaded at construction -- and feH itself must be left
-    unchanged by the rejected call."""
+    [min, max] range is broader than tracks_'s own [fehMin(),
+    fehMax()] -- tracks_ is only ever loaded, once, at construction,
+    over that range, so accepting anything broader risks interpolating
+    outside the data actually loaded. The check compares against
+    tracks_'s own construction-time range, not fehDist_'s current one,
+    so: narrowing to a point, then setting a second, unrelated narrow
+    point that doesn't nest inside the first, must succeed (both are
+    within tracks_'s own [-0.5, 0.5]); widening back out to exactly
+    that same [-0.5, 0.5] (VAR_FEH_DECK's own stars.FeH) must also
+    succeed; only a distribution that actually exceeds [-0.5, 0.5]
+    should be rejected, leaving feH unchanged."""
     controls = slug.SimControls(VAR_FEH_DECK)
     assert controls.feH.getMin() == pytest.approx(-0.5)
     assert controls.feH.getMax() == pytest.approx(0.5)
@@ -768,11 +770,30 @@ def test_simcontrols_set_feh_rejects_broadening():
     assert controls.feH.getMin() == pytest.approx(-0.25)
     assert controls.feH.getMax() == pytest.approx(-0.25)
 
-    with pytest.raises(RuntimeError):
-        controls.setFeH("tests/core/assets/testClusterFeHDist.toml")
+    # A second, unrelated narrow value that doesn't nest inside the
+    # first must still succeed, since both are within tracks_'s own
+    # [-0.5, 0.5] -- this is exactly the case the old, buggy comparison
+    # against fehDist_'s current (already narrowed) value got wrong
+    controls.setFeH("0.4")
+    assert controls.feH.getMin() == pytest.approx(0.4)
+    assert controls.feH.getMax() == pytest.approx(0.4)
 
-    assert controls.feH.getMin() == pytest.approx(-0.25)
-    assert controls.feH.getMax() == pytest.approx(-0.25)
+    # Widening back out to exactly [-0.5, 0.5] -- tracks_'s own range,
+    # loaded at construction -- must also succeed
+    controls.setFeH("tests/core/assets/testClusterFeHDist.toml")
+    assert controls.feH.getMin() == pytest.approx(-0.5)
+    assert controls.feH.getMax() == pytest.approx(0.5)
+
+    # A distribution that actually exceeds tracks_'s own [-0.5, 0.5]
+    # (here, a single point at -0.75, still within the MIST_test
+    # fixture's real [-1.0, 0.5] availability, but outside what this
+    # SimControls' own tracks_ was actually constructed to cover)
+    # should still be rejected, leaving feH unchanged
+    with pytest.raises(RuntimeError):
+        controls.setFeH("-0.75")
+
+    assert controls.feH.getMin() == pytest.approx(-0.5)
+    assert controls.feH.getMax() == pytest.approx(0.5)
 
 
 def test_simcontrols_set_cmf_clf_sfr_numeric():

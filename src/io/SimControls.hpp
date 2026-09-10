@@ -692,16 +692,26 @@ namespace io
          *   [Fe/H]) or the name of a [Fe/H] PDF file
          * @throws std::runtime_error if feH is not numeric and does
          *   not name a file that can be found, or if its own
-         *   [min, max] range is broader than fehDist()'s current one
+         *   [min, max] range is broader than tracks_'s own
+         *   [fehMin(), fehMax()]
          * @details
          * Rejects (rather than accepts and later failing to
          * interpolate) any new distribution whose [min, max] range is
-         * not a subset of the current fehDist()'s own -- tracks_ is
-         * only ever loaded, once, at construction (via readTracks(),
-         * over fehDist_'s own range at that time), never re-loaded
-         * afterward, so widening fehDist_ past what was actually
-         * loaded would risk interpolating tracks_ outside its own
-         * data. Narrowing, or otherwise staying within, the current
+         * not a subset of tracks_'s own [fehMin(), fehMax()] -- the
+         * range it was actually constructed to cover (via readTracks()),
+         * which tracks_ retains regardless of how fehDist_ has been
+         * amended since. Checking against tracks_ itself, rather than
+         * against fehDist_'s own current range, matters because
+         * fehDist_ may already have been narrowed by an earlier call
+         * to this method: were the check against fehDist_'s current
+         * range instead, a second amendment could be rejected for
+         * being broader than the first one even though both are within
+         * what tracks_ actually covers (e.g. narrow to [-1, 0], then
+         * try to narrow again to the unrelated but still in-range
+         * [-2, -1]). tracks_ is only ever loaded once, at construction,
+         * never re-loaded afterward, so widening fehDist_ past what
+         * tracks_ actually covers would risk interpolating it outside
+         * its own data. Narrowing, or otherwise staying within, that
          * range is always safe and always accepted.
          *
          * If the new fehDist_ is fixed (constFeH() becomes true),
