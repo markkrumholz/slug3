@@ -32,8 +32,8 @@ sys.path.insert(0, os.path.abspath(os.path.join("..", "..")))
 
 # -- Project information -------------------------------------------------
 project = "slug"
-copyright = "2026, Mark Krumholz, Michele Fumagalli, et al."
-author = "Mark Krumholz, Michele Fumagalli, et al."
+copyright = "2026, Mark Krumholz"
+author = "Mark Krumholz"
 version = "3.0"
 release = "3.0"
 

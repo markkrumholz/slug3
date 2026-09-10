@@ -16,11 +16,9 @@ SLUG (Stochastically Lighting Up Galaxies) is a stellar population synthesis
 (SPS) code, meaning that, for a 
 specified stellar initial mass function (IMF), star formation history (SFH), 
 cluster mass function (CMF), cluster lifetime function (CLF), metallicity
-distribution [Fe/H], and (optionally)  distribution of extinctions (A_V), it
+distribution [Fe/H], and (optionally) a distribution of extinctions (A_V), it
 predicts the spectra and photometry of both individual star clusters (treated
-as simple stellar populations) and galaxies (composite populations). It can
-also predict the yields of various isotopes, and the feedback power provided
-by stellar winds and supernovae. In this regard, SLUG operates much like any
+as simple stellar populations) and galaxies (composite populations). In this regard, SLUG operates much like any
 other SPS code. The main difference is that SLUG regards the functions describing
 the stellar population as probability distributions, and the resulting stellar
 population as being the result of a draw from them. SLUG performs a Monte Carlo
@@ -54,8 +52,8 @@ default operating mode, when SLUG generates a stellar population it draws from t
 PDFs to produce a stellar population star-by-star, drawing stellar masses from the
 IMF (and, in a galaxy simulation, stellar ages from the PDF associated with the star
 formation rate), and similarly drawing other parameters such as the amount of extinction
-from their own PDFs. It then calculates the composite spectra, photometry, yields, and
-feedback power of the resulting population by using one of several possible sets of
+from their own PDFs. It then calculates the composite spectra and photometry
+of the resulting population by using one of several possible sets of
 stellar evolutionary tracks and stellar atmosphere models. Since each draw from the PDFs
 is random, the resulting stellar population will be different each time SLUG is run. By
 running many trials, one can build up a probability distribution function for the
@@ -84,7 +82,7 @@ population synthesis. The main physics modules are:
   stages.
 * :ref:`sec-phot`: SLUG can calculate the photometry of stars and stellar populations
   in a wide range of different filters and using a range of photometric systems.
-* :ref:`sec-nebular` SLUG can calculate the contribution of nebular emission to the spectra
+* :ref:`sec-nebular`: SLUG can calculate the contribution of nebular emission to the spectra
   and photometry of stellar populations, using a variety of different models for the ionized gas.
 * :ref:`sec-extinction`: SLUG can calculate the effects of dust extinction on the
   spectra and photometry of stellar populations, using a variety of different extinction

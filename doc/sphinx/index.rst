@@ -26,6 +26,8 @@ Contents:
    extinction
    slugpy
    cloudy
+   examples
+   troubleshooting
    tests
    python_api
    cpp_api/cpp_api_root

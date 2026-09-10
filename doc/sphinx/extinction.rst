@@ -21,12 +21,12 @@ where :math:`\langle\cdot\rangle_V` is the spectrum averaged over a Johnson V fi
 see :ref:`sec-phot` for the precise definition of the filter average. 
 
 When extinction is enabled (by setting values of :math:`A_V` and the extinction curve)
-as described below, the output will contain an extincted spectrum as well as the the
+as described below, the output will contain an extincted spectrum as well as the
 intrinsic spectrum. Note that the extincted spectrum may be truncated to a wavelength
 grid that is narrower than the one used for the intrinsic spectrum if the extinction
 curve selected does not cover the full wavelength range of the intrinsic spectrum.
 
-If nebular emission is enabled (see :ref:`sec-nebular`) it will also contain spectra
+If nebular emission is enabled (see :ref:`sec-nebular`), it will also contain spectra
 and photometry computed on the nebular-reprocessed spectrum. Thus in the most general
 case when both nebular reprocessing and extinction are enabled, SLUG will output four
 versions of each spectrum: the intrinsic stellar spectrum, the spectrum after nebular

@@ -35,7 +35,7 @@ of :ref:`sec-parameters`. The allowed photometric systems are:
 * ``Fnu``: returns a specific luminosity :math:`\left\langle L_\nu \right\rangle_R` with units of energy per time per frequency, which is related to :math:`\left\langle L_\lambda \right\rangle_R` by :math:`\left\langle L_\nu \right\rangle_R = (\lambda_R^2/c) \left\langle L_\lambda \right\rangle_R`, where :math:`\lambda_R` is the pivot wavelength of the filter (see :ref:`ssec-phot-filterdata`)
 * ``ST``: returns a magnitude in the ST system, which is related to :math:`\left\langle L_\lambda \right\rangle_R` by :math:`\mathrm{mag}_\mathrm{ST} = -2.5 \log_{10}[\left\langle L_\lambda \right\rangle_R / (4\pi d^2) / F_\mathrm{ST,0}]`, where :math:`d = 10` pc is the standard distance and :math:`F_\mathrm{ST,0} = 3.631\times 10^{-9}\,\mathrm{erg}/\mathrm{cm}^2/\mathrm{s}/\mathrm{Å}` is the zero point of the ST magnitude system 
 * ``AB``: returns a magnitude in the AB system, which is related to :math:`\left\langle L_\nu \right\rangle_R` by :math:`\mathrm{mag}_\mathrm{AB} = -2.5 \log_{10}[\left\langle L_\nu \right\rangle_R / (4 \pi d^2) / F_\mathrm{AB,0}]`, where :math:`d = 10` pc is the standard distance and :math:`F_\mathrm{AB,0} = 3631.0\,\mathrm{Jy}` is the zero point of the AB magnitude system
-* ``Vega``: returns a magnitude in the Vega system, which is computed from :math:`\left\langle L_\lambda \right\rangle_R` as :math:`\mathrm{mag}_\mathrm{Vega} = -2.5 \log_{10}[\left\langle L_\lambda \right\rangle_R / (4\pi d^2) / \langle F_\mathrm{Vega} \rangle_R]`, where :math:`\langle F_\mathrm{Vega}\rangle_R` is the flux of Vega convolved with the response function :math:`R_\lambda`. The Vega flux is computed on-the-fly from a reference Vega spectrum stored in the respository as ``data/spectra/vega.h5``.
+* ``Vega``: returns a magnitude in the Vega system, which is computed from :math:`\left\langle L_\lambda \right\rangle_R` as :math:`\mathrm{mag}_\mathrm{Vega} = -2.5 \log_{10}[\left\langle L_\lambda \right\rangle_R / (4\pi d^2) / \langle F_\mathrm{Vega} \rangle_R]`, where :math:`\langle F_\mathrm{Vega}\rangle_R` is the flux of Vega convolved with the response function :math:`R_\lambda`. The Vega flux is computed on-the-fly from a reference Vega spectrum stored in the repository as ``data/spectra/vega.h5``.
 
 :ref:`sec-slugpy` also contains a tool, ``phot_convert``, to convert between
 photometric systems after a simulation has been run.
@@ -68,8 +68,8 @@ entries can be included in the filter list to produce these outputs:
 
 * ``ideal_energy_X_Y``: a filter where the response function :math:`R_\lambda` is a perfect tophat function that is unity for wavelengths between X and Y (in Angstrom) and 0 elsewhere
 * ``ideal_phot_X_Y``: a filter that measures the total number of photons per unit time evaluated over the wavelength range from X to Y, by evaluating the integral :math:`\int_X^Y L_\lambda / (hc/\lambda) \, \mathrm{d}\lambda`. For filters of this type, Y can be "inf", in which case the upper limit on the integral is taken to be infinity.
-* ``Q(<Elem><IonStage>)``, where ``<Elem>`` is a the standard elemental symbol for some element (e.g., H, He) and ``<IonStage>`` is a Roman numeral giving the ionization stage of that element; this filter returns the number of photons emitter per unit time with energies high enough to ionize the given ion to one higher ionization state, e.g., "Q(HI)" gives the number of photons per second emitted capable of ionizing neutral hydrogen, "Q(CII)" gives the number of photons per second emitted capable of ionizing C+ to C++. This is equivalent to ``ideal_phot_0_Y`` with Y set to the wavelength that corresponds to the ionization potential of the ion in question.
-* ``Lbol``: a "filter" that returnst the total bolometric luminosity of the stellar population; this is not computed by integrating a spectrum at all, and instead is computed directly from the output of the :ref:`sec-tracks`.
+* ``Q(<Elem><IonStage>)``, where ``<Elem>`` is the standard elemental symbol for some element (e.g., H, He) and ``<IonStage>`` is a Roman numeral giving the ionization stage of that element; this filter returns the number of photons emitted per unit time with energies high enough to ionize the given ion to one higher ionization state, e.g., "Q(HI)" gives the number of photons per second emitted capable of ionizing neutral hydrogen, "Q(CII)" gives the number of photons per second emitted capable of ionizing C+ to C++. This is equivalent to ``ideal_phot_0_Y`` with Y set to the wavelength that corresponds to the ionization potential of the ion in question.
+* ``Lbol``: a "filter" that returns the total bolometric luminosity of the stellar population; this is not computed by integrating a spectrum at all, and instead is computed directly from the output of the :ref:`sec-tracks`.
 
 Outputs for ``ideal_energy_X_Y``-type filters use the same photometric system as real
 filters, while outputs for all the other ideal filter types use units of photons per
@@ -83,11 +83,11 @@ Adding Additional Filters
 SLUG's default data set contains all the filters hosted by SVO for the following facilities:
 2MASS, CFHT, GALEX, HST, JWST, Paranal, SLOAN, SkyMapper, and Spitzer. It also provides the
 "Generic" facility filters (which includes the standard Bessell, Cousins, Johnson, and Stromgren
-filters). If you want to add fitlers from any other facility whose filter data are
+filters). If you want to add filters from any other facility whose filter data are
 hosted on SVO, the repository contains a script ``data/tools/filters/fetch_filter_vo.py``
 that can be used to add additional filters to the ``data/filters/filters.h5`` filter
 catalogue and add corresponding registry entries to ``data/filters/filters.toml`` so
-that filters can be access by SLUG.
+that filters can be accessed by SLUG.
 
 If you want to add filters from another source, you can do so by writing your own HDF5
 file (or appending to the existing one) with a corresponding `TOML <https://toml.io/en/>`_

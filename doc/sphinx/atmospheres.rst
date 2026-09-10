@@ -5,7 +5,7 @@
 Stellar Atmospheres and Spectral Synthesis
 ==========================================
 
-A second step is most SLUG simulations is, after using the :ref:`sec-tracks` to
+A second step in most SLUG simulations is, after using the :ref:`sec-tracks` to
 generate the properties of every star, to use those properties as inputs to a
 set of stellar atmosphere models to predict the stars' specific luminosities
 per unit wavelength :math:`L_\lambda`.
@@ -26,17 +26,17 @@ on how to select other models from the available list, and
 Spectral synthesis is also affected by the properties of the stars, as controlled
 by the ``alphaFe`` and ``CFe`` keywords in the :ref:`ssec-parameters-stars` section
 of :ref:`sec-parameters`. These parameters set the [alpha/Fe] and [C/Fe] abundances
-of the stellar atmopsheres, for the subset of model atmosphere libraries that have
+of the stellar atmospheres, for the subset of model atmosphere libraries that have
 models available for a range of [alpha/Fe] and [C/Fe] values.
 
 In addition to setting the model atmosphere, users can control the wavelength grid
 over which spectra are computed using the ``wl_min``, ``wl_max``, and ``nwl`` keywords
 in the :ref:`ssec-parameters-specsyn` section of :ref:`sec-parameters`, and can set
-a redshift ``z``. If the redshift is non-zero, the wavelengths specfied by the
+a redshift ``z``. If the redshift is non-zero, the wavelengths specified by the
 ``wl_min``, ``wl_max``, and ``nwl`` keywords are interpreted as describing the
 wavelength grid in the *comoving* frame of the emitting stellar population, and
 the output spectrum will be written in this comoving frame -- the ``z`` does not
-affect the output spectra. However, it does affect :ref:`sec-photometry`, which
+affect the output spectra. However, it does affect :ref:`sec-phot`, which
 is computed using the wavelength grid redshifted to the *observed* frame.
 
 .. _ssec-atmospheres-default:
@@ -78,7 +78,7 @@ atmosphere models already cover it.
 
 Every other star -- the vast majority of them -- is treated as a normal star.
 
-Once a star has been catagorized, it is routed to the stellar atmosphere models that
+Once a star has been categorized, it is routed to the stellar atmosphere models that
 cover that type of star. These are applied in order, with stars that are not covered
 by one set of atmospheres being passed on to the next and so forth; the code is
 structured this way because published model atmosphere libraries generally specialize
@@ -187,7 +187,7 @@ multiple names are provided SLUG will try the specified models in order, by
 checking for each star if its properties are within the range covered by the
 first set of models, if not trying the second set, and so forth.
 
-However, be warned that the SLUG will exit with an error if it encounters a
+However, be warned that SLUG will exit with an error if it encounters a
 star whose properties are not within the coverage of any of the provided models; the
 "default" model set has been assembled carefully to ensure that it covers 
 almost all of the possible stellar properties that can be produced by

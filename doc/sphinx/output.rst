@@ -9,17 +9,17 @@ Controlling Outputs
 -------------------
 
 A SLUG simulation produces output files whose names, locations, and types are
-controlled by the ``model_name``, ``out_dir``, and ``output_format`` keywords in
+controlled by the ``model_name``, ``out_dir``, and ``output_mode`` keywords in
 the :ref:`ssec-parameters-output` section of :ref:`sec-parameters`.
 
 The outputs are written in either HDF5 or ASCII format, depending on whether
-``output_format`` is set to ``"h5"`` (or ``"h5divided"``) or ``ascii``.
+``output_mode`` is set to ``"h5"`` (or ``"h5divided"``) or ``ascii``.
 ASCII format is intended for small, quick
 simulations with small outputs, and is not recommended for large, production-scale
 runs. HDF5 format is recommended for all but the smallest runs, and is the only
 format that the Python interface can read, as detailed below. The ``"h5divided"``
 option produces outputs that are identical to ``"h5"`` except that the outputs
-from different threads are are left in separate HDF5 files rather than consolidated
+from different threads are left in separate HDF5 files rather than consolidated
 into a single one, which is preferable for very large runs where a monolithic
 HDF5 file would be unwieldy; the ``slugpy`` interface can read both formats
 transparently.

@@ -14,23 +14,29 @@ Controlling Simulation Physics
 ------------------------------
 
 As discussed in :ref:`ssec-running-python`, one can run a SLUG simulation
-from Python by doing::
+from Python by doing:
 
-    import slugpy
-    sim_controls = slugpy.SimControls(...)
-    sim_result = slugpy.run_sim(sim_controls)
+   .. code-block:: python
+
+      import slugpy
+      sim_controls = slugpy.SimControls(...)
+      sim_result = slugpy.run_sim(sim_controls)
 
 The ``slugpy.SimControls`` object can be constructed by reading an input
 deck, either on-disk or directly from a toml table (see :ref:`sec-slugpy-full`),
 but it is also possible to control its properties directly from Python. For
-example, to change the IMF used in a simulation one can do::
+example, to change the IMF used in a simulation one can do:
 
-   sim_controls.setIMF("path/to/pdf.toml")
+   .. code-block:: python
 
-where "pdf.toml" is a :ref:`ssec-pdf-files`. To add a photometric filters
-to a simulation, one can could do::
+      sim_controls.setIMF("path/to/pdf.toml")
 
-   sim_controls.filters.addFilter("filter_name")
+where "pdf.toml" is a :ref:`ssec-pdf-files`. To add a photometric filter
+to a simulation, one can do:
+
+   .. code-block:: python
+
+      sim_controls.filters.addFilter("filter_name")
 
 where "filter_name" is the name of a filter. Every parameter in
 :ref:`sec-parameters` has a corresponding representation in
@@ -54,6 +60,7 @@ As described in :ref:`ssec-output-reading`, the function ``read`` in slugpy
 provides a lazy-reader for SLUG HDF5 outputs, which can be accessed by doing
 
    .. code-block:: python
+      
       import slugpy
       sim_result = slugpy.read("path/model_name")
 
@@ -68,7 +75,7 @@ an exhaustive list -- :ref:`sec-slugpy-full`) include:
 * ``cluster_cloudy``: a dict-like interface to the cluster_cloudy group's data, e.g., ``sim_result.cluster_cloudy['spec_trans_emit']``. See :ref:`sec-cloudy-slug`.
 * ``galaxy``, ``galaxy_spectra``, ``galaxy_phot``, ``galaxy_cloudy``: same as the ``cluster*`` fields of the same name, but for galaxy outputs.
 * ``filters``: list of all photometric filters available in this data set.
-* ``controls``: a ``SimControls`` object build from this data set's input deck.
+* ``controls``: a ``SimControls`` object built from this data set's input deck.
 
 Not all of these data will be present in every file; for example, if no photometry
 was requested for the run, then ``cluster_phot`` and ``galaxy_phot`` will be ``None``.
@@ -78,8 +85,13 @@ In addition to providing access to data, the lazy-reader provides convenience fu
 for manipulating it:
 
 * ``slug_reader.get_cluster(uid)``: this method accepts as input the unique ID number of any cluster in the data set and returns a live-constructed ``Cluster`` object. This object can be examined to access data not already in the outputs, for example generating spectra or photometry at times not in the original output. See :ref:`sec-slugpy-full` for a full listing of all of ``Cluster``'s methods.
-* ``slug_reader.get_filter(filter_name)``: this method accepts as input the name of any filter present in the data set and returns a live-constructed ``Filter`` objects. This object contains all information about the filter, such as its full response curve. See :ref:`sec-slugpy-full` for details on the ``Filter`` class.
+* ``slug_reader.get_filter(filter_name)``: this method accepts as input the name of any filter present in the data set and returns a live-constructed ``Filter`` object. This object contains all information about the filter, such as its full response curve. See :ref:`sec-slugpy-full` for details on the ``Filter`` class.
 * ``slug_reader.phot_convert(phot_system)``: this method converts any loaded photometric data from the current photometric system to the system named by ``phot_system``, which can be "Flambda", "Fnu", "ST", "AB", or "Vega"; see :ref:`sec-phot` for an explanation of the photometric systems.
+
+Finally, the lazy-reader can pipe SLUG-predicted spectra through the photoionization
+code ``cloudy``, and incorporate the resulting predictions of nebular emission and
+reprocessing of starlight into the saved SLUG outputs. See :ref:`sec-cloudy-slug` for
+details.
 
 Interrogating Tracks and Isochrones
 -----------------------------------

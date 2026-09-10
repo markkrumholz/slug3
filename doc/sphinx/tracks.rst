@@ -39,7 +39,7 @@ Standard Track Sets
 The list of track sets available for use in SLUG are listed in a registry file. 
 The default registry, which is provided as part of the standard data download
 (see :ref:`sec-getting`), is ``data/tracks/tracks.toml``. The registry is a
-human-readable description of the availalble track sets, with the set of available
+human-readable description of the available track sets, with the set of available
 track sets listed in the ``track_sets`` keyword at the top-level of the file. 
 
 The SLUG standard data files provide the following track sets:
@@ -64,7 +64,7 @@ The :ref:`sec-slugpy` module provides two convenient tools to browse the tracks:
 ``compute_tracks`` and ``compute_isochrones`` routines. These provide a high-level
 interface to compute sets of stellar properties as a function of time for stars of
 specified initial mass (tracks) or as a function of mass for stars at a specified
-age (isochrones). See :ref:`ssec-slugpy-full` for full documentation of these tools. 
+age (isochrones). See :ref:`sec-slugpy-full` for full documentation of these tools.
 
 Adding New Track Sets
 ---------------------

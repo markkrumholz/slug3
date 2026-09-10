@@ -17,7 +17,8 @@ The input deck contains some top-level key-value pairs that control basic operat
 of the simulation, followed by a series of sections that control either some aspect
 of simulation physics or some part of the simulation operation. Some of these keywords
 and sections are required, while others are optional and have default values. Some
-example input decks can be found in the ``examples`` directory of the repository.
+example input decks can be found in the ``examples`` directory of the repository
+(see :ref:`sec-examples`).
 
 Below is a full section-by-section listing of the input deck keywords and their meanings,
 organized by section. 
@@ -64,6 +65,8 @@ and the number of trials to perform.
   :ref:`sec-running` for the distinction.
 * ``n_trial`` (optional, default=1): The number of independent Monte Carlo trials to run.
 * ``verbosity`` (optional, default=0): The level of diagnostic output SLUG prints while running.
+  Setting to 1 will cause SLUG to print when it starts, restarts, or ends, and setting to
+  2 or more will cause slug to print at the start of every trial.
 * ``rng_seed`` (optional): An integer seed for SLUG's random number generator. If not
   given, SLUG seeds itself from the operating system's own entropy source, so
   repeated runs of the same input deck will not produce identical results unless a

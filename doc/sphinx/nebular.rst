@@ -21,7 +21,7 @@ the Chabrier (2005) IMF, for a nebula with a fixed density of
 :math:`n = 100\,\mathrm{cm}^{-3}` and Solar-scaled abundances matching the [Fe/H] values
 of the stellar tracks. This calculation is performed for both simple stellar populations
 at a range of ages up to 10 Myr, and for a composite stellar population with a constant
-star formation rate, for each of the track sets provided the standard data files (see
+star formation rate, for each of the track sets provided by the standard data files (see
 :ref:`sec-tracks`). The script that generates the grid is included in the repository
 as ``data/tools/cloudy/run_grid_pipeline.pbs``, which in turn calls other scripts in
 the same directory.
@@ -29,7 +29,7 @@ the same directory.
 The script computes the emission per unit ionizing photon in both the continuum and in
 the hundred brightest emission lines and stores the results in an HDF5 table; the
 default table in SLUG is ``data/nebular/nebular.h5``, but this choice can
-be overridden if you with to produce your own table (see :ref:`ssec-parameters-nebular`).
+be overridden if you wish to produce your own table (see :ref:`ssec-parameters-nebular`).
 To produce its quick approximate stellar plus nebular emission spectrum, SLUG assumes
 the HI-ionizing portion of the stellar spectrum is fully absorbed by the nebula, and
 it scales the HI-ionizing photon flux by the recorded emission per ionizing photon
@@ -40,12 +40,12 @@ The nebular emission calculation is controlled by three parameters in the
 :ref:`ssec-parameters-nebular` section of :ref:`sec-parameters`:
 
 * ``compute_neb``: defaults to true; setting to false disables nebular computation entirely
-* ``logU``: the volume-averaged ionization parameter of the nebula; see :ref:`sec-cloudy-slug` for the precise definition of this parameter. Valid values are in the range -3 to -2.
+* ``log_U``: the volume-averaged ionization parameter of the nebula; see :ref:`sec-cloudy-slug` for the precise definition of this parameter. Valid values are in the range -3 to -2.
 * ``cov_fac``: the covering factor of the nebula, which in practice means the fraction of output ionizing photons that are reprocessed into nebular emission. Photons that are not reprocessed are assumed to be absorbed by dust grains, to be reprocessed outside the observational aperture, or to form part of the photon background responsible for producing diffuse ionized gas.
 * ``line_width``: the width of the nebular emission lines that are inserted into the spectrum.
 
 When nebular emission is enabled, SLUG writes both the intrinsic stellar spectrum and
 the stellar plus nebular reprocessed spectrum to the output. If photometry is enabled
-(see :ref:`sec-phot`) is also computes photometry on the stellar plus nebular spectrum.
+(see :ref:`sec-phot`), it also computes photometry on the stellar plus nebular spectrum.
 See :ref:`sec-output` for details on how these data are stored in the output file, and
 :ref:`sec-slugpy` for a description of how to access them using the slugpy reader.

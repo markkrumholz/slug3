@@ -107,7 +107,7 @@ This is followed by a series of tables ``[segment1]``, ``[segment2]``, etc. desc
 segment. Each of these tables must contain a ``type`` keyword and all the mandatory
 additional parameters for that type (see :ref:`ssec-pdfs-segment-types`), and must also
 contain the keywords ``min``, ``max``, and ``weight``. The keywords ``min`` and ``max``
-define the two endpoints of the segement, i.e., :math:`x_{i,a}` and :math:`x_{i,b}`, and
+define the two endpoints of the segment, i.e., :math:`x_{i,a}` and :math:`x_{i,b}`, and
 weight defines the integral of the segment, i.e.,
 
 .. math:: \int_{x_{i,a}}^{x_{i,b}} f_i(x; x_{i,a}, x_{i,b}) \,dx = \mathrm{weight}

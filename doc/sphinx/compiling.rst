@@ -93,7 +93,9 @@ Optional
   system package manager or Homebrew), plus the Python packages `Sphinx
   <https://www.sphinx-doc.org/>`_, `Breathe
   <https://breathe.readthedocs.io/>`_, and `Exhale
-  <https://exhale.readthedocs.io/>`_::
+  <https://exhale.readthedocs.io/>`_:
+
+    .. code-block:: bash
 
       pip install sphinx breathe exhale sphinx_rtd_theme
 
@@ -108,9 +110,11 @@ SLUG's Python frontend, ``slugpy`` (see :ref:`sec-slugpy`), requires Python
 3.12 or later, plus `astropy <https://www.astropy.org/>`_, `h5py
 <https://www.h5py.org/>`_, `NumPy <https://numpy.org/>`_, `SciPy
 <https://scipy.org/>`_, `tomlkit <https://tomlkit.readthedocs.io/>`_, and
-`tqdm <https://tqdm.github.io/>`_::
+`tqdm <https://tqdm.github.io/>`_:
 
-    pip install astropy h5py numpy scipy tomlkit tqdm
+    .. code-block:: bash
+
+      pip install astropy h5py numpy scipy tomlkit tqdm
 
 CMake builds the compiled ``_slug`` extension module against whichever
 Python interpreter it finds (or the one given explicitly via
@@ -127,19 +131,23 @@ comment).
 A further three tools are needed only for specific development tasks, not
 for using ``slugpy`` itself: `pytest <https://pytest.org/>`_ to run the
 test suite, `pyright <https://microsoft.github.io/pyright/>`_ to type-check
-``slugpy`` locally, and `ruff <https://docs.astral.sh/ruff/>`_ to lint it::
+``slugpy`` locally, and `ruff <https://docs.astral.sh/ruff/>`_ to lint it:
 
-    pip install pytest pyright ruff
+    .. code-block:: bash
+
+      pip install pytest pyright ruff
 
 .. _sec-building:
 
 Configuring and Building
 --------------------------
 
-SLUG uses an out-of-source CMake build. From the repository root::
+SLUG uses an out-of-source CMake build. From the repository root:
 
-    cmake -S . -B build -G Ninja
-    cmake --build build
+    .. code-block:: bash
+
+      cmake -S . -B build -G Ninja
+      cmake --build build
 
 (omit ``-G Ninja`` to use CMake's own default generator instead, if Ninja
 isn't installed -- see :ref:`sec-dependencies` above). This produces the
@@ -194,11 +202,15 @@ If Doxygen and the Python packages Sphinx, Breathe, and Exhale (see
 site too, into ``doc/html``, alongside everything else -- if they aren't
 found, that step is simply skipped, with a note printed at configure time,
 and every other target is unaffected. To build just the documentation
-without touching anything else::
+without touching anything else:
 
-    cmake --build build --target docs
+    .. code-block:: bash
 
-or, from ``doc/sphinx`` directly, without going through CMake at all::
+      cmake --build build --target docs
 
-    cd doc/sphinx
-    make html
+or, from ``doc/sphinx`` directly, without going through CMake at all:
+
+    .. code-block:: bash
+
+      cd doc/sphinx
+      make html

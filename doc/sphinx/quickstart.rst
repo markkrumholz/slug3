@@ -7,17 +7,17 @@ Quickstart
 
 To get started with SLUG, carry out the following steps:
 
-1. Download SLUG and its required data by doing:
+#. Download SLUG and its required data by doing:
 
     .. code-block:: bash
     
         git clone https://github.com/markkrumholz/slug3.git
         git submodule update --init --recursive
-        python data/tools/download_data.py --all
+        python data/tools/download_data.py
 
     See :ref:`sec-getting` for full details.
 
-2. Compile SLUG by doing:
+#. Compile SLUG by doing:
 
     .. code-block:: bash
 
@@ -28,7 +28,7 @@ To get started with SLUG, carry out the following steps:
     doesn't work, check the list of dependencies and supported compilers in
     :ref:`sec-building`.)
 
-3. Run the ``quick`` test suite to make sure everything is working:
+#. Run the ``quick`` test suite to make sure everything is working:
 
     .. code-block:: bash
 
@@ -37,9 +37,9 @@ To get started with SLUG, carry out the following steps:
 
     See :ref:`sec-tests` for the full details on the test suite.
 
-4. Write a parameter file describing the simulation you want to run. See :ref:`sec-parameters` for details, and the ``examples/`` directory in the repository for example parameter files.
+#. Write a parameter file describing the simulation you want to run. See :ref:`sec-parameters` for details, and the ``examples/`` directory in the repository for example parameter files (see :ref:`sec-examples`).
 
-5. Run SLUG either from the command line or from Python. To run from the command line, do:
+#. Run SLUG either from the command line or from Python. To run from the command line, do:
 
     .. code-block:: bash
 
@@ -55,7 +55,7 @@ To get started with SLUG, carry out the following steps:
     See :ref:`sec-running` for full details on running SLUG from the command line or 
     from Python.
 
-6. If SLUG was run from the command line, use the Python lazy-reader to examine the output:
+#. If SLUG was run from the command line, use the Python lazy-reader to examine the output:
 
     .. code-block:: python
 
@@ -64,5 +64,5 @@ To get started with SLUG, carry out the following steps:
 
     This step is not needed if SLUG was run from Python, as the Python runner automatically
     returns a Python lazy-reader pointing to the simulation output. See :ref:`sec-slugpy`
-    for details on how to use the lazy-reader, and :ref:`sec-ouput` for full documentation
-    of the contents of the otuput of a simulation. 
+    for details on how to use the lazy-reader, and :ref:`sec-output` for full documentation
+    of the contents of the output of a simulation.
