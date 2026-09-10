@@ -15,7 +15,7 @@ set HTMLDIR=..\html
 
 if "%1" == "" goto help
 
-%SPHINXBUILD% >NUL 2>NUL
+"%SPHINXBUILD%" >NUL 2>NUL
 if errorlevel 9009 (
 	echo.
 	echo.The 'sphinx-build' command was not found. Make sure you have Sphinx
@@ -31,20 +31,20 @@ if errorlevel 9009 (
 if "%1" == "html" goto html
 if "%1" == "clean" goto clean
 
-%SPHINXBUILD% -M %1 %SOURCEDIR% %BUILDDIR% %SPHINXOPTS% %O%
+"%SPHINXBUILD%" -M %1 %SOURCEDIR% %BUILDDIR% %SPHINXOPTS% %O%
 goto end
 
 :html
-%SPHINXBUILD% -b html -d "%BUILDDIR%\doctrees" %SOURCEDIR% %HTMLDIR% %SPHINXOPTS% %O%
+"%SPHINXBUILD%" -b html -d "%BUILDDIR%\doctrees" %SOURCEDIR% %HTMLDIR% %SPHINXOPTS% %O%
 goto end
 
 :clean
-%SPHINXBUILD% -M clean %SOURCEDIR% %BUILDDIR% %SPHINXOPTS% %O%
+"%SPHINXBUILD%" -M clean %SOURCEDIR% %BUILDDIR% %SPHINXOPTS% %O%
 if exist %HTMLDIR% rmdir /s /q %HTMLDIR%
 goto end
 
 :help
-%SPHINXBUILD% -M help %SOURCEDIR% %BUILDDIR% %SPHINXOPTS% %O%
+"%SPHINXBUILD%" -M help %SOURCEDIR% %BUILDDIR% %SPHINXOPTS% %O%
 
 :end
 popd

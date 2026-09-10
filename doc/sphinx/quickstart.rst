@@ -12,6 +12,7 @@ To get started with SLUG, carry out the following steps:
     .. code-block:: bash
     
         git clone https://github.com/markkrumholz/slug3.git
+        cd slug3
         git submodule update --init --recursive
         python data/tools/download_data.py
 
@@ -62,7 +63,8 @@ To get started with SLUG, carry out the following steps:
         import slugpy
         sim_result = slugpy.read("path/to/model_name")
 
-    This step is not needed if SLUG was run from Python, as the Python runner automatically
-    returns a Python lazy-reader pointing to the simulation output. See :ref:`sec-slugpy`
-    for details on how to use the lazy-reader, and :ref:`sec-output` for full documentation
-    of the contents of the output of a simulation.
+    This step is not needed if SLUG was run from Python with HDF5 output (the default), as
+    the Python runner automatically returns a Python lazy-reader pointing to the simulation
+    output in that case (for ASCII output, it returns ``None`` instead, and this step doesn't
+    apply). See :ref:`sec-slugpy` for details on how to use the lazy-reader, and
+    :ref:`sec-output` for full documentation of the contents of the output of a simulation.

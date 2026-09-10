@@ -707,9 +707,14 @@ if(DOXYGEN_EXECUTABLE AND SLUG_DOCS_PYTHON_MISSING EQUAL 0)
     # relative paths inside it) are written assuming that cwd, exactly
     # as if `make html`/`sphinx-build` had been run from there by hand.
     get_filename_component(SLUG_DOXYGEN_DIR ${DOXYGEN_EXECUTABLE} DIRECTORY)
+    if(WIN32)
+        set(SLUG_PATH_SEP ";")
+    else()
+        set(SLUG_PATH_SEP ":")
+    endif()
     add_custom_target(docs ALL
         COMMAND ${CMAKE_COMMAND} -E env
-            "PATH=${SLUG_DOXYGEN_DIR}:$ENV{PATH}"
+            "PATH=${SLUG_DOXYGEN_DIR}${SLUG_PATH_SEP}$ENV{PATH}"
             PYTHONPATH=${CMAKE_SOURCE_DIR}
             ${Python_EXECUTABLE} -m sphinx -b html -d _build/doctrees . ${CMAKE_SOURCE_DIR}/doc/html
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/doc/sphinx

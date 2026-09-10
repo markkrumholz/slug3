@@ -52,7 +52,7 @@ Running SLUG From Python
 ------------------------
 
 To run a SLUG simulation from Python, you first need to import the ``slugpy`` module;
-see :ref:`sec-slugpy` for details. The module contains a function ``run_slug`` that can
+see :ref:`sec-slugpy` for details. The module contains a function ``run_sim`` that can
 run a simulation end-to-end. This function takes a single argument, which can be either
 the path to a parameter file, or a ``SimControls`` object that contains all the information
 that a parameter file would contain; see :ref:`sec-slugpy` for details on ``SimControls``
@@ -71,9 +71,12 @@ or:
         sim_controls = slugpy.SimControls(...)
         sim_result = slugpy.run_sim(sim_controls)
 
-The result of the simulation will be returned in ``sim_result``, which is a 
-``slugpy.slug_reader`` object that can be used to inspect the outputs. The output
-will also be written to disk as with runs from the command line. See
+If the simulation's own output mode is HDF5 (the default; see
+:ref:`ssec-parameters-output`), the result will be returned in ``sim_result``,
+which is a ``slugpy.slug_reader`` object that can be used to inspect the
+outputs; for ASCII output, ``sim_result`` is ``None`` instead, since ASCII
+output cannot currently be read back this way. The output is written to disk
+either way, exactly as with runs from the command line. See
 :ref:`sec-output` for details on the outputs and how to read them.
 
 Simulations run from Python will also automatically be parallelized with OpenMP if

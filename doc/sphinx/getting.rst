@@ -12,6 +12,7 @@ The easiest way to install SLUG is to use git to clone the repository by doing:
     .. code-block:: bash
 
         git clone https://github.com/markkrumholz/slug3.git
+        cd slug3
         git submodule update --init --recursive
 
 In addition to the SLUG source code and its submodules, SLUG requires a number of

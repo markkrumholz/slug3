@@ -36,13 +36,26 @@ The basic steps involved in running cloudy on SLUG outputs are as follows:
 
    .. code-block:: python
 
-      sim_result.run_cloudy("cluster")     # or sim_result.run_cloudy("galaxy")
+      success = sim_result.run_cloudy("cluster")     # or sim_result.run_cloudy("galaxy")
 
-#. The cloudy output will be added to the HDF5 file containing the SLUG output automatically, and is available through the ``slug_reader``, by doing
+   ``run_cloudy`` returns a ``bool`` (or a ``list`` of ``bool``, one per matched
+   spectrum) recording whether each cloudy run succeeded; a spectrum whose
+   physical conditions exactly match an already-stored run is skipped and
+   counted as a success (pass ``overwrite=True`` to rerun it anyway). Results
+   are only added to the output file for runs that actually succeeded -- if
+   every matched run fails, the file is left untouched and
+   ``cluster_cloudy``/``galaxy_cloudy`` stay ``None``. ``run_cloudy`` also
+   requires the ``slug_reader`` to be backed by a single HDF5 file, and raises
+   ``RuntimeError`` if it instead spans several (as for a checkpointed or
+   ``h5divided`` run); see the full ``run_cloudy`` docstring in
+   :ref:`sec-slugpy-full` for these and its other options.
+
+#. Successful cloudy output is added to the HDF5 file containing the SLUG output automatically, and is available through the ``slug_reader``, by doing
 
    .. code-block:: python
 
-      sim_result.cluster_cloudy[keyword]   # or sim_result.galaxy_cloudy[keyword]
+      if sim_result.cluster_cloudy is not None:     # or sim_result.galaxy_cloudy
+          sim_result.cluster_cloudy[keyword]        # or sim_result.galaxy_cloudy[keyword]
 
    where ``keyword`` is the output one wishes to access -- see :ref:`sec-output` for a full list of options.
 

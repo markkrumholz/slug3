@@ -36,8 +36,9 @@ it scales the HI-ionizing photon flux by the recorded emission per ionizing phot
 to produce a nebular emission spectrum that is added to the sub-ionizing stellar
 spectrum.
 
-The nebular emission calculation is controlled by three parameters in the 
-:ref:`ssec-parameters-nebular` section of :ref:`sec-parameters`:
+The nebular emission calculation is controlled by four runtime parameters in
+the :ref:`ssec-parameters-nebular` section of :ref:`sec-parameters` (plus the
+``table`` override, described above, of the underlying emission grid itself):
 
 * ``compute_neb``: defaults to true; setting to false disables nebular computation entirely
 * ``log_U``: the volume-averaged ionization parameter of the nebula; see :ref:`sec-cloudy-slug` for the precise definition of this parameter. Valid values are in the range -3 to -2.

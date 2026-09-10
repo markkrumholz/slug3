@@ -137,7 +137,7 @@ An example of an advanced format PDF definition file is:
 
     # Second burst
     [segment2]
-    type = "exponential"
+    type = "normal"
     min = 1.0e8     # Start of burst in yr
     max = 2.0e8     # End of burst in yr
     weight = 1e5    # Total stellar mass formed in burst in Msun
@@ -200,7 +200,7 @@ value :math:`x_\mathrm{target}`:
 * ``stop_50``: same as ``stop_nearest``, but keep or exclude the final draw with 50% probability regardless of which choice gets closer to the target.
 * ``number``: draw exactly :math:`N = \operatorname{round}(x_\mathrm{target}/\langle x\rangle)` samples, where :math:`\langle x\rangle = \int_{-\infty}^{\infty} x (dp/dx) \, dx / \int_{-\infty}^{\infty} (dp/dx) \, dx` is the expectation value of the PDF.
 * ``poisson``: draw exactly :math:`N` objects, where the value of :math:`N` is chosen from a Poisson distribution with expectation value :math:`\langle N \rangle = x_\mathrm{target}/\langle x\rangle`. Note that this is the *only* sampling policy for which the mean, expectation value, and similar statistical properties of the population drawn are identical to those of the underlying PDF.
-* ``sorted_sampling``: this method was introduced by `Weidner & Kroupa (2006, MNRAS. 365, 1333) <http://adsabs.harvard.edu/abs/2006MNRAS.365.1333W>`_, and proceeds in steps. One first draws exactly :math:`N= x_\mathrm{target}/\langle x\rangle` samples as in the ``number`` method. If the resulting total of the draws :math:`x_\mathrm{sum} = \sum_{i=1}^N x_i` is less than :math:`x_\mathrm{target}`, the procedure is repeated recursively using a new target :math:`x_\mathrm{target} - x_\mathrm{sum}` until :math:`x_\mathrm{sum} > x_\mathrm{target}`. Finally, one sorts the resulting draws from smallest to largest, and then keeps or removes the final, largest sample using a ``stop_nearest`` policy.
+* ``sorted_sampling``: this method was introduced by `Weidner & Kroupa (2006, MNRAS. 365, 1333) <http://adsabs.harvard.edu/abs/2006MNRAS.365.1333W>`_, and proceeds in steps. One first draws exactly :math:`N = \operatorname{round}(x_\mathrm{target}/\langle x\rangle)` samples as in the ``number`` method. If the resulting total of the draws :math:`x_\mathrm{sum} = \sum_{i=1}^N x_i` is less than :math:`x_\mathrm{target}`, the procedure is repeated recursively using a new target :math:`x_\mathrm{target} - x_\mathrm{sum}` (with each recursive step's own batch count likewise rounded to the nearest integer) until :math:`x_\mathrm{sum} > x_\mathrm{target}`. Finally, one sorts the resulting draws from smallest to largest, and then keeps or removes the final, largest sample using a ``stop_nearest`` policy.
 
 See ``data/imfs/weidner_kroupa06.toml`` for an example of a PDF definition file that
 uses a sampling policy.

@@ -208,9 +208,14 @@ without touching anything else:
 
       cmake --build build --target docs
 
-or, from ``doc/sphinx`` directly, without going through CMake at all:
+or, from ``doc/sphinx`` directly, without going through CMake at all -- though
+in this case ``slugPython`` must already have been built (``cmake --build
+build --target docs`` above builds it automatically first; this page's own
+autodoc-generated content, e.g. :ref:`sec-slugpy-full`, imports ``slugpy``,
+which fails without it):
 
     .. code-block:: bash
 
+      cmake --build build --target slugPython
       cd doc/sphinx
       make html
