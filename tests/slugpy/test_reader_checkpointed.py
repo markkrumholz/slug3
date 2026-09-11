@@ -112,6 +112,43 @@ def test_model_name_resolves_thread_dir_without_checkpointing(tmp_path: Path) ->
     assert sorted(cast(np.ndarray, clusters["trial"]).tolist()) == [0, 1]
 
 
+def test_model_name_resolves_rank_dir_without_checkpointing(tmp_path: Path) -> None:
+    """MPI output without checkpointing (model/rank_NNNN.h5, never
+    consolidated) is found and its per-rank files aggregated, mirroring
+    test_model_name_resolves_thread_dir_without_checkpointing above but
+    for MPI's own rank_NNNN.h5 naming (no OpenMP)."""
+    rank_dir = tmp_path / "model"
+    rank_dir.mkdir()
+    _write_output_file(rank_dir / "rank_0000.h5", trials=[0], uids=[0],
+        trials_completed=2, restart_uid=2)
+    _write_output_file(rank_dir / "rank_0001.h5", trials=[1], uids=[1 << 40],
+        trials_completed=2, restart_uid=2)
+
+    reader = slug_reader(str(tmp_path / "model"))
+    assert len(reader._file) == 2
+    clusters = reader.clusters
+    assert clusters is not None
+    assert sorted(cast(np.ndarray, clusters["trial"]).tolist()) == [0, 1]
+
+
+def test_model_name_resolves_rank_thread_dir_without_checkpointing(tmp_path: Path) -> None:
+    """MPI *and* OpenMP together name each file rank_NNNN_thread_MMMM.h5
+    (see OutputManagerH5::openNewOutputFiles()'s own comment) -- also
+    found and aggregated."""
+    rank_dir = tmp_path / "model"
+    rank_dir.mkdir()
+    _write_output_file(rank_dir / "rank_0000_thread_0000.h5", trials=[0], uids=[0],
+        trials_completed=2, restart_uid=2)
+    _write_output_file(rank_dir / "rank_0001_thread_0000.h5", trials=[1], uids=[1 << 40],
+        trials_completed=2, restart_uid=2)
+
+    reader = slug_reader(str(tmp_path / "model"))
+    assert len(reader._file) == 2
+    clusters = reader.clusters
+    assert clusters is not None
+    assert sorted(cast(np.ndarray, clusters["trial"]).tolist()) == [0, 1]
+
+
 def test_model_name_raises_when_nothing_matches(tmp_path: Path) -> None:
     """A model name with no matching output at all raises FileNotFoundError."""
     with pytest.raises(FileNotFoundError):
@@ -160,6 +197,28 @@ def test_checkpoints_thread_dirs_aggregate(tmp_path: Path) -> None:
     _write_output_file(chk0_dir / "thread_0000.h5", trials=[0], uids=[0],
         trials_completed=2, restart_uid=2)
     _write_output_file(chk0_dir / "thread_0001.h5", trials=[1], uids=[1],
+        trials_completed=2, restart_uid=2)
+    _write_output_file(tmp_path / "model_chk00001.h5", trials=[2], uids=[2],
+        trials_completed=3, restart_uid=3)
+
+    reader = slug_reader(str(tmp_path / "model"))
+    assert len(reader._file) == 3
+    clusters = reader.clusters
+    assert clusters is not None
+    assert sorted(cast(np.ndarray, clusters["trial"]).tolist()) == [0, 1, 2]
+
+
+def test_checkpoints_rank_dirs_aggregate(tmp_path: Path) -> None:
+    """An unconsolidated checkpoint (model_chkNNNNN/rank_NNNN.h5)
+    alongside a consolidated one: every rank file of the unconsolidated
+    checkpoint, plus the consolidated one, all contribute their own
+    rows -- mirrors test_checkpoints_thread_dirs_aggregate above but
+    for MPI's own rank_NNNN.h5 naming."""
+    chk0_dir = tmp_path / "model_chk00000"
+    chk0_dir.mkdir()
+    _write_output_file(chk0_dir / "rank_0000.h5", trials=[0], uids=[0],
+        trials_completed=2, restart_uid=2)
+    _write_output_file(chk0_dir / "rank_0001.h5", trials=[1], uids=[1 << 40],
         trials_completed=2, restart_uid=2)
     _write_output_file(tmp_path / "model_chk00001.h5", trials=[2], uids=[2],
         trials_completed=3, restart_uid=3)
