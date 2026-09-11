@@ -23,8 +23,8 @@ Required
 * A C++23-capable compiler. The following compilers are known to work:
 
   * GCC 13 or later
-  * Clang 17 or later (Note: ensure that the version of libc++ matches the compiler version; on some systems a later version of the Clang frontend is paired with an older libc++, but libc++ version 17 or later is required here.)
-  * Intel llvm/2024.2.0 or later (requires the flag ``-fp-model=strict`` for correct behavior)
+  * Clang 17 or later (paired with a libc++ of the same version or newer)
+  * Intel's LLVM-based ``icpx``/oneAPI 2024.2.0+ (requires the flag ``-fp-model=strict`` for correct behavior)
   * Other C++23-capable compilers have not been tested.
 
 * The `GNU Scientific Library <https://www.gnu.org/software/gsl/>`_ (GSL).
