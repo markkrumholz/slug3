@@ -9,6 +9,7 @@
 #include "SimGalaxy.hpp"
 #include "../io/OutputManager.hpp"
 #include "../io/SimControls.hpp"
+#include "../utils/MPIUtils.hpp"
 #include "../utils/SigtermGuard.hpp"
 #include "Galaxy.hpp"
 #include <algorithm>
@@ -17,6 +18,21 @@
 #include <iostream>
 #include <memory>
 #include <utility>
+
+// See SimCluster.cpp's own identical helper for why this exists and
+// why it reports cumulativeCompleted plainly, not as a fraction of
+// nTrial.
+static void printSigtermMessage(const unsigned long cumulativeCompleted, const unsigned long nTrial)
+{
+    std::cout << "slug: caught SIGTERM, stopping early with " <<
+        cumulativeCompleted << " trials completed";
+    if (utils::mpiSize() > 1)
+    {
+        std::cout << " on rank " << utils::mpiRank() <<
+            " (this rank's own share of " << nTrial << " total trials across all ranks)";
+    }
+    std::cout << "\n";
+}
 
 core::SimGalaxy::SimGalaxy(const io::SimControls& simControls,
     std::unique_ptr<io::OutputManager> outputManager, const bool restart) :
@@ -79,7 +95,8 @@ auto core::SimGalaxy::run() -> int
         (simControls_.nTrial() - priorTrialsCompleted) : 0;
     const unsigned long numberingEnd = numberingStart + trialsRemaining;
 
-    if (simControls_.verbosity() > 0)
+    // Gated to rank 0 only -- see SimCluster::run()'s own identical comment
+    if (simControls_.verbosity() > 0 && utils::mpiRank() == 0)
     {
         std::cout << "slug: galaxy simulation starting with "
             << simControls_.nTrial() << " trials";
@@ -120,6 +137,10 @@ auto core::SimGalaxy::run() -> int
         const unsigned long batchEnd =
             std::min(batchStart + batchSize, numberingEnd);
 
+        // See SimCluster::run()'s own identical comment
+        const auto [rankBatchStart, rankBatchEnd] =
+            utils::mpiPartitionRange(batchStart, batchEnd);
+
 #ifdef _OPENMP
         // See runTrial()'s own comment for why each trial is
         // individually wrapped in a try/catch here, rather than
@@ -132,7 +153,7 @@ auto core::SimGalaxy::run() -> int
         // sees the same kind of failure it always has.
         std::exception_ptr firstError;
 #pragma omp parallel for schedule(dynamic)
-        for (unsigned long trialNum = batchStart; trialNum < batchEnd; ++trialNum)
+        for (unsigned long trialNum = rankBatchStart; trialNum < rankBatchEnd; ++trialNum)
         {
             try
             {
@@ -157,7 +178,7 @@ auto core::SimGalaxy::run() -> int
 #else
         try
         {
-            for (unsigned long trialNum = batchStart; trialNum < batchEnd; ++trialNum)
+            for (unsigned long trialNum = rankBatchStart; trialNum < rankBatchEnd; ++trialNum)
             {
                 runTrial(trialNum);
             }
@@ -172,16 +193,14 @@ auto core::SimGalaxy::run() -> int
 #endif
 
         // See SimCluster::run()'s own identical comment
-        if (utils::sigtermWasReceived())
+        if (utils::mpiAllReceivedSigterm(utils::sigtermWasReceived()))
         {
             const auto cumulativeCompleted =
                 priorTrialsCompleted + trialsCompleted_.load(std::memory_order_relaxed);
             outputManager_->notifyEarlyTermination(cumulativeCompleted);
             if (simControls_.verbosity() > 0)
             {
-                std::cout << "slug: caught SIGTERM, stopping early with "
-                    << cumulativeCompleted << " / " << simControls_.nTrial() <<
-                    " trials completed\n";
+                printSigtermMessage(cumulativeCompleted, simControls_.nTrial());
             }
             return sigtermExitCode;
         }
@@ -193,6 +212,10 @@ auto core::SimGalaxy::run() -> int
                 priorTrialsCompleted + trialsCompleted_.load(std::memory_order_relaxed));
         }
     }
+
+    // See SimCluster::run()'s own identical comment
+    outputManager_->notifyEarlyTermination(
+        priorTrialsCompleted + trialsCompleted_.load(std::memory_order_relaxed));
 
     if (simControls_.verbosity() > 0)
     {

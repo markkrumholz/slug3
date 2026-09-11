@@ -12,6 +12,7 @@
 #include "../phot/FilterCollection.hpp"
 #include "../specsyn/Specsyn.hpp"
 #include "../utils/HDF5Utils.hpp"
+#include "../utils/MPIUtils.hpp" // NOLINT(misc-include-cleaner) -- every symbol from this header (utils::mpiRank()/mpiSize()/mpiBarrier()) is used directly, but only inside "#ifdef SLUG_MPI" blocks; a build not compiled with SLUG_MPI (every target except slug) elides all of them, making the check think this include is unused for that specific configuration
 #include "../utils/RngThread.hpp"
 #include "../utils/ThreadVec.hpp"
 #include "../utils/UniqueIDManager.hpp"
@@ -21,6 +22,7 @@
 #include "io/SlugVersion.hpp"
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <charconv>
 #include <cstddef>
 #include <filesystem>
@@ -159,6 +161,92 @@ static void crossCheckAttr(std::optional<unsigned long>& common, const unsigned 
             std::to_string(*common) + " vs " + std::to_string(value) + ")");
     }
 }
+
+// True if every one of the n characters starting at start is an ASCII
+// digit -- used below to validate the zero-padded rank/thread numbers
+// in a candidate output file name (std::setw(4) on the writing side --
+// see openNewOutputFiles()) character-by-character, rather than just
+// checking a name's length/prefix, which digits alone can't guarantee
+// (e.g. "rank_abcd.h5" is the right length and shape but not a real
+// rank number).
+static auto isNDigits(const std::string& name, const std::size_t start, const std::size_t n) -> bool
+{
+    return std::all_of(name.begin() + static_cast<std::ptrdiff_t>(start),
+        name.begin() + static_cast<std::ptrdiff_t>(start + n),
+        [](const unsigned char c) { return std::isdigit(c) != 0; });
+}
+
+// True if name is exactly one of the three shapes openNewOutputFiles()
+// actually writes: thread_NNNN.h5 (OpenMP, no MPI), rank_NNNN.h5 (MPI,
+// no OpenMP), or rank_NNNN_thread_MMMM.h5 (both), with exactly four
+// digits in each numeric segment -- rather than a bare "thread_"/
+// "rank_" prefix match, so a stray, unrelated file someone happened to
+// drop into one of these directories (e.g. "rank_notes.h5") is never
+// mistaken for one of OutputManagerH5's own per-rank/thread output
+// files. Shared by filesForRank() below, restartSetup(), and
+// consolidateFiles(), which otherwise each had their own, more
+// permissive version of the same check.
+static auto isOutputFileName(const std::string& name) -> bool
+{
+    if (name.size() == 14 && name.compare(0, 7, "thread_") == 0 &&
+        isNDigits(name, 7, 4) && name.compare(11, 3, ".h5") == 0)
+    { return true; }
+    if (name.size() == 12 && name.compare(0, 5, "rank_") == 0 &&
+        isNDigits(name, 5, 4) && name.compare(9, 3, ".h5") == 0)
+    { return true; }
+    if (name.size() == 24 && name.compare(0, 5, "rank_") == 0 &&
+        isNDigits(name, 5, 4) && name.compare(9, 8, "_thread_") == 0 &&
+        isNDigits(name, 17, 4) && name.compare(21, 3, ".h5") == 0)
+    { return true; }
+    return false;
+}
+
+// Return every rank_<rank>.h5 or rank_<rank>_thread_MMMM.h5 file
+// (whichever this build's own naming scheme produces -- see
+// openNewOutputFiles()) directly inside dirPath, i.e. every one of the
+// given rank's own output files for one checkpoint. Every one of them
+// was written the same rank-local trials_completed/max_trial by
+// closeOutputFile(), so callers needing that value only actually need
+// to read the first; syncCheckpoints() also needs the full list, to
+// overwrite the reconciled, run-wide value into every one. Throws if
+// none are found -- a rank that actually ran this checkpoint must have
+// written at least one file. Only ever called when SLUG_MPI is
+// defined; factored out of syncCheckpoints()/restartSetup() purely to
+// keep each of their own cognitive complexity down.
+#ifdef SLUG_MPI
+static auto filesForRank(const std::filesystem::path& dirPath, const int rank)
+    -> std::vector<std::filesystem::path>
+{
+    std::ostringstream prefixStream;
+    prefixStream << "rank_" << std::setfill('0') << std::setw(4) << rank;
+    const std::string prefix = prefixStream.str();
+
+    std::vector<std::filesystem::path> files;
+    for (const auto& entry : std::filesystem::directory_iterator(dirPath))
+    {
+        if (!entry.is_regular_file()) { continue; }
+        const auto& name = entry.path().filename().string();
+        // isOutputFileName() alone would also accept a *different*
+        // rank's own file; starts_with(prefix) narrows to this rank
+        // specifically. Safe to combine the two this way (rather than
+        // needing a single combined check) because isOutputFileName()
+        // fixes the total length and internal structure exactly, so a
+        // name starting with e.g. "rank_0001" can only be rank 1's own
+        // "rank_0001.h5"/"rank_0001_thread_MMMM.h5" -- never some
+        // other, longer rank number's file -- once it also passes that
+        // check.
+        if (isOutputFileName(name) && name.starts_with(prefix))
+        { files.push_back(entry.path()); }
+    }
+    if (files.empty())
+    {
+        throw std::runtime_error(
+            "OutputManagerH5: no output files found for rank " +
+            std::to_string(rank) + " in " + dirPath.string());
+    }
+    return files;
+}
+#endif
 
 // Create the "spec_neb" 2D dataset in the given spectra group (sized
 // nWl, the same wavelength grid as the group's own "spec" dataset), if
@@ -350,7 +438,84 @@ io::OutputManagerH5::OutputManagerH5(
 }
 
 // See this method's own header comment for the full design
-void io::OutputManagerH5::restartSetup()
+auto io::OutputManagerH5::findRestartUidForRank( // NOLINT(readability-convert-member-functions-to-static) -- genuinely needs simControls_/checkpointModelName() when built with SLUG_MPI; the suggestion only appears because a build without it (every target except slug) reduces this method's whole body to "return std::nullopt", which indeed touches no member state
+    [[maybe_unused]] const unsigned long maxCheckpoint) const -> std::optional<unsigned long>
+{
+#ifdef SLUG_MPI
+    const int rank = utils::mpiRank();
+    // Highest checkpoint number first: the most recent one this rank
+    // actually appears in is what should win, if (thanks to a changed
+    // rank count somewhere in this run's own history) it happens to
+    // appear in more than one.
+    for (unsigned long chk = maxCheckpoint + 1; chk-- > 0; )
+    {
+        const std::string name = checkpointModelName(chk);
+        const auto dirPath = std::filesystem::path(simControls_.outDir()) / name;
+        const auto h5Path = std::filesystem::path(simControls_.outDir()) / (name + ".h5");
+
+        if (std::filesystem::is_regular_file(h5Path))
+        {
+            // Fully consolidated (see consolidateFiles()'s own
+            // comment): every rank's own data has already been merged
+            // into one file, which -- since restart_uid is
+            // deliberately never synced across ranks the way
+            // trials_completed/max_trial are (see syncCheckpoints()'s
+            // own comment) -- ends up holding only whichever rank's
+            // file happened to be consolidateFiles()'s own copy source
+            // (rank 0's), not a value meaningful for every rank. Safe
+            // to use directly when this invocation itself is a single
+            // rank (there being only one rank's own value to be
+            // ambiguous between); with more than one, silently reusing
+            // it would hand every rank the same starting uid, causing
+            // exactly the collisions mpiUidStride exists to prevent --
+            // e.g. restarting an already-fully-completed run with a
+            // larger stars/trials count than before, so it actually has
+            // new trials (and therefore new IDs) left to generate.
+            // Consolidation discards the very per-rank boundary this
+            // method needs, so there is no way to recover it after the
+            // fact; this throws rather than returning a value that
+            // would silently corrupt the restarted run's own output.
+            if (utils::mpiSize() > 1)
+            {
+                throw std::runtime_error(
+                    "OutputManagerH5::restartSetup: checkpoint " + h5Path.string() +
+                    " has already been fully consolidated (see consolidateFiles()), "
+                    "which discards the per-rank information a multi-rank restart "
+                    "needs to keep unique IDs from colliding across ranks. "
+                    "Restarting from a consolidated checkpoint under MPI is only "
+                    "supported with exactly one rank.");
+            }
+            const auto attrs = readCheckpointAttrs(h5Path, h5Path.string());
+            return attrs.restartUid_;
+        }
+        if (!std::filesystem::is_directory(dirPath)) { continue; }
+
+        std::vector<std::filesystem::path> files;
+        try
+        {
+            files = filesForRank(dirPath, rank);
+        }
+        catch (const std::runtime_error&)
+        {
+            // This rank's own files are not present in this checkpoint
+            // (e.g. this invocation has more ranks than the one that
+            // wrote it) -- keep looking further back.
+            continue;
+        }
+        // Every one of this rank's own files already agrees with each
+        // other -- see filesForRank()'s own comment -- so reading the
+        // first is enough.
+        const auto attrs = readCheckpointAttrs(files.front(),
+            dirPath.string() + " (its own directory)");
+        return attrs.restartUid_;
+    }
+    return std::nullopt;
+#else
+    return std::nullopt;
+#endif
+}
+
+void io::OutputManagerH5::restartSetup() // NOLINT(readability-function-cognitive-complexity) -- complexity is 26, one over threshold; the #ifdef SLUG_MPI branch resolving restart_uid separately from trials_completed/max_trial (see this method's own header comment for why they must be) is what pushed it there, and splitting it out further would only add indirection, not clarity, for a single-caller helper this function-specific -- see TrackUtils.cpp's own identical "over-by-one" NOLINT for precedent
 {
     const std::string prefix = simControls_.modelName() + "_chk";
     const auto maxCheckpoint = findMaxCheckpointNumber(simControls_.outDir(), prefix);
@@ -370,13 +535,17 @@ void io::OutputManagerH5::restartSetup()
     const auto h5Path = std::filesystem::path(simControls_.outDir()) / (name + ".h5");
     const auto dirPath = std::filesystem::path(simControls_.outDir()) / name;
 
+    // Only actually used outside MPI (see below) -- kept as a plain
+    // unsigned long, not an optional, since every file agrees on it in
+    // that case (the same shared, whole-process counter), so any one
+    // reading is as good as any other.
     unsigned long restartUid = 0;
     std::string source;
     if (std::filesystem::is_regular_file(h5Path))
     {
         const auto attrs = readCheckpointAttrs(h5Path,
-            "it (and its own thread_NNNN.h5 files, if it is a directory "
-            "rather than a single file)");
+            "it (and its own thread_NNNN.h5/rank_NNNN*.h5 files, if it "
+            "is a directory rather than a single file)");
         restartTrialsDone_ = attrs.trialsCompleted_;
         restartUid = attrs.restartUid_;
         restartMaxTrial_ = attrs.maxTrial_;
@@ -389,18 +558,16 @@ void io::OutputManagerH5::restartSetup()
         {
             if (!entry.is_regular_file()) { continue; }
             const auto& fname = entry.path().filename().string();
-            if (fname.starts_with("thread_") && entry.path().extension() == ".h5")
-            { threadFiles.push_back(entry.path()); }
+            if (isOutputFileName(fname)) { threadFiles.push_back(entry.path()); }
         }
         if (threadFiles.empty())
         {
             throw std::runtime_error(
-                "OutputManagerH5::restartSetup: no thread_*.h5 files found in " +
+                "OutputManagerH5::restartSetup: no thread_*.h5/rank_*.h5 files found in " +
                 dirPath.string());
         }
 
         std::optional<unsigned long> commonTrialsCompleted;
-        std::optional<unsigned long> commonRestartUid;
         std::optional<unsigned long> commonMaxTrial;
         for (const auto& threadFile : threadFiles)
         {
@@ -408,16 +575,27 @@ void io::OutputManagerH5::restartSetup()
                 dirPath.string() + " (its own directory)");
             crossCheckAttr(commonTrialsCompleted, attrs.trialsCompleted_,
                 "trials_completed", dirPath);
-            crossCheckAttr(commonRestartUid, attrs.restartUid_, "restart_uid", dirPath);
             crossCheckAttr(commonMaxTrial, attrs.maxTrial_, "max_trial", dirPath);
+            // restart_uid is deliberately not cross-checked here, the
+            // way trials_completed/max_trial are just above: under MPI
+            // it is rank-local by construction (see
+            // findRestartUidForRank()'s own comment), so different
+            // ranks' files legitimately disagree on it -- only
+            // trials_completed/max_trial are ever synced identically
+            // across every rank/thread's own file (see
+            // syncCheckpoints()). Whichever file this loop reads last
+            // ends up here, which is fine: this value is only actually
+            // used below outside MPI, where every file's own
+            // restart_uid does still agree (there being only one
+            // rank's own, whole-process-shared counter to record).
+            restartUid = attrs.restartUid_;
         }
         // threadFiles is non-empty (checked above), and crossCheckAttr()
         // always sets each of these on the loop's first iteration, so
         // this has_value() check can never actually fail -- present
         // anyway so a future change to this function that broke the
         // guarantee would fail loudly here instead of reading garbage.
-        if (!commonTrialsCompleted.has_value() || !commonRestartUid.has_value() ||
-            !commonMaxTrial.has_value())
+        if (!commonTrialsCompleted.has_value() || !commonMaxTrial.has_value())
         {
             throw std::runtime_error(
                 "OutputManagerH5::restartSetup: internal error: no thread "
@@ -425,14 +603,13 @@ void io::OutputManagerH5::restartSetup()
         }
         // clang-tidy's bugprone-unchecked-optional-access does not
         // credit the has_value() guard immediately above (tried as a
-        // single combined condition, then as three separate
-        // single-optional ifs -- neither satisfied it, and the latter
-        // pushed this function's own cognitive complexity back over
-        // its threshold for no real benefit), so it is suppressed
+        // single combined condition, then as two separate single-
+        // optional ifs -- neither satisfied it, and the latter pushed
+        // this function's own cognitive complexity back over its
+        // threshold for no real benefit), so it is suppressed
         // explicitly below rather than fought further; the guard above
         // is the actual safety net.
         restartTrialsDone_ = commonTrialsCompleted.value(); // NOLINT(bugprone-unchecked-optional-access)
-        restartUid = commonRestartUid.value(); // NOLINT(bugprone-unchecked-optional-access)
         restartMaxTrial_ = commonMaxTrial.value(); // NOLINT(bugprone-unchecked-optional-access)
         source = dirPath.string();
     }
@@ -444,11 +621,35 @@ void io::OutputManagerH5::restartSetup()
             " nor " + dirPath.string() + " exists");
     }
 
+#ifdef SLUG_MPI
+    // Each rank's own restart_uid is rank-local (see
+    // findRestartUidForRank()'s own comment), unlike
+    // trials_completed/max_trial above, so it is resolved entirely
+    // separately here rather than from whatever the branches above
+    // happened to read.
+    const auto rankRestartUid = findRestartUidForRank(*maxCheckpoint);
+    if (rankRestartUid.has_value())
+    {
+        utils::uniqueID().set(*rankRestartUid);
+        restartUid = *rankRestartUid;
+    }
+    else
+    {
+        // This rank's own files were not found in any checkpoint up to
+        // and including the last one -- e.g. this invocation has more
+        // ranks than any previous one of this run ever did -- so
+        // utils::uniqueID() is correctly left at its own default-
+        // constructed mpiRank() * mpiUidStride; nothing to set(). Read
+        // back purely for the verbosity report below.
+        restartUid = utils::uniqueID().read();
+    }
+#else
     // Resume ID generation from exactly where the run being restarted
     // left off -- see closeOutputFile()'s own comment for why this is
     // the correct value to resume from, rather than either 0 (this
     // process's own uniqueID() starting fresh) or leaving it alone
     utils::uniqueID().set(restartUid);
+#endif
 
     if (simControls_.verbosity() > 0)
     {
@@ -472,6 +673,13 @@ void io::OutputManagerH5::checkpoint(const unsigned long trialsCompleted)
 #else
     closeOutputFile(trialsCompleted);
 #endif
+    // See syncCheckpoints()'s own header comment; a no-op outside MPI.
+    // Called here, after every thread's own closeOutputFile() call has
+    // already finished (the "#pragma omp parallel" block above has its
+    // own implicit barrier), and before openNewOutputFiles() below
+    // moves on to the next checkpoint -- never from inside an active
+    // OpenMP parallel region itself.
+    syncCheckpoints(trialsCompleted);
     ++checkpointNumber_;
     openNewOutputFiles();
 }
@@ -491,24 +699,54 @@ void io::OutputManagerH5::openNewOutputFiles()
     const std::string modelName = (simControls_.checkpointInterval() != 0) ?
         checkpointModelName(checkpointNumber_) : simControls_.modelName();
 
-#ifdef _OPENMP
+#if defined(_OPENMP) || defined(SLUG_MPI)
     const auto threadDir = std::filesystem::path(simControls_.outDir()) / modelName;
     const auto finalPath = std::filesystem::path(simControls_.outDir()) / (modelName + ".h5");
+    // Every rank checks independently, before any rank creates anything
+    // below (enforced by the barrier that follows this, under MPI) --
+    // otherwise a rank slower to reach this check could see another
+    // rank's own just-created (this run's own, not stale) directory and
+    // mistake it for a leftover from a previous run.
     if (std::filesystem::exists(threadDir) || std::filesystem::exists(finalPath))
     {
         throw std::runtime_error(
             "OutputManagerH5: output " + threadDir.string() + " or " +
             finalPath.string() + " already exists");
     }
+#ifdef SLUG_MPI
+    // See the comment above for why this barrier must come before
+    // create_directory() below: without it, a rank that reaches its own
+    // check late could observe another rank's own already-created
+    // directory and incorrectly throw. Only rank 0 actually creates it,
+    // to avoid every rank racing to create the same path; the second
+    // barrier ensures it exists before any rank (rank 0 included, for
+    // uniformity) tries to open its own file inside it.
+    utils::mpiBarrier();
+    if (utils::mpiRank() == 0) { std::filesystem::create_directory(threadDir); }
+    utils::mpiBarrier();
+#else
     std::filesystem::create_directory(threadDir);
+#endif
 
+#ifdef _OPENMP
 #pragma omp parallel
     {
-        std::ostringstream threadFile;
-        threadFile << "thread_" << std::setfill('0') << std::setw(4) <<
+        std::ostringstream fileName;
+#ifdef SLUG_MPI
+        fileName << "rank_" << std::setfill('0') << std::setw(4) << utils::mpiRank() << "_";
+#endif
+        fileName << "thread_" << std::setfill('0') << std::setw(4) <<
             omp_get_thread_num() << ".h5";
-        openOutputFile(threadDir / threadFile.str());
+        openOutputFile(threadDir / fileName.str());
     }
+#else
+    // SLUG_MPI without _OPENMP: exactly one file per rank, no further
+    // per-thread subdivision needed
+    std::ostringstream fileName;
+    fileName << "rank_" << std::setfill('0') << std::setw(4) << utils::mpiRank() << ".h5";
+    openOutputFile(threadDir / fileName.str());
+#endif
+
 #else
     const auto finalPath = std::filesystem::path(simControls_.outDir()) / (modelName + ".h5");
     if (std::filesystem::exists(finalPath))
@@ -988,7 +1226,7 @@ void io::OutputManagerH5::openGalaxyPhotGroup()
 // consolidates (see its own comment), so every earlier checkpoint's
 // own thread_NNNN.h5 files are still sitting there, unmerged, until
 // this runs.
-io::OutputManagerH5::~OutputManagerH5()
+io::OutputManagerH5::~OutputManagerH5() // NOLINT(bugprone-exception-escape) -- every throwing call below (closeOutputFile(), syncCheckpoints(), consolidateFiles()) is inside its own try/catch, catching std::exception by reference; verified at runtime (real MPI + non-MPI runs alike, including ones that hit closeOutputFile()'s own genuine HDF5 failure paths) that a throw here is caught cleanly rather than escaping. This check's own known limitation (see main.cpp's own identical NOLINT) is that it cannot see through calls into other translation units -- utils::appendFileContents()/utils::overwriteULongAttr(), both defined in HDF5Utils.cpp -- well enough to confirm every type they could throw derives from std::exception, so it stays conservative regardless of the try/catch actually present.
 {
     // Ordinarily, being destroyed at all means every trial in the run
     // must already be complete, so simControls_.nTrial() is the right
@@ -1026,9 +1264,33 @@ io::OutputManagerH5::~OutputManagerH5()
         }
     }
 
-#ifdef _OPENMP
-    if (simControls_.outputMode() == SimControls::OutputMode::h5)
+    // See syncCheckpoints()'s own header comment: this is the final
+    // checkpoint's own sync, exactly mirroring the one checkpoint()
+    // itself does mid-run -- a no-op outside MPI.
+    try
     {
+        syncCheckpoints(trialsCompleted);
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "slug: OutputManagerH5: error syncing final checkpoint: "
+            << error.what() << "\n";
+    }
+
+#if defined(_OPENMP) || defined(SLUG_MPI)
+    if (simControls_.outputMode() == SimControls::OutputMode::h5 &&
+        utils::mpiRank() == 0)
+    {
+        // Consolidation (unlike syncCheckpoints() above) deliberately
+        // happens only here, once, at the very end of the whole run --
+        // see this class's own header comment for why: moving a
+        // checkpoint's worth of actual row data around (as opposed to
+        // updating a single attribute) is not free, and doing it once
+        // per checkpoint would slow the run itself down for no benefit,
+        // since nothing reads a checkpoint's consolidated form until
+        // the run is over anyway. Only rank 0 does this (under MPI):
+        // every rank would otherwise race to consolidate, read, and
+        // delete the very same files.
         if (simControls_.checkpointInterval() != 0)
         {
             for (unsigned long chk = 0; chk <= checkpointNumber_; ++chk)
@@ -1041,17 +1303,17 @@ io::OutputManagerH5::~OutputManagerH5()
                 // checkpointNumber_ that a *previous* run's own
                 // destructor already consolidated (and, per
                 // consolidateFiles()'s own comment, already deleted
-                // the thread_NNNN.h5 directory for) before this run
-                // ever began -- skip those rather than trying to
-                // consolidate a directory that no longer exists. Every
-                // checkpoint number below checkpointNumber_ that was
-                // instead left behind by a run that never reached its
-                // own destructor (e.g. an actual crash -- the
-                // ordinary case restarting exists for) is still
-                // exactly the not-yet-consolidated directory
-                // consolidateFiles() expects, so this only ever skips
-                // checkpoints that a previous run's own destructor has
-                // already fully consolidated.
+                // the thread_NNNN.h5/rank_NNNN*.h5 directory for)
+                // before this run ever began -- skip those rather than
+                // trying to consolidate a directory that no longer
+                // exists. Every checkpoint number below
+                // checkpointNumber_ that was instead left behind by a
+                // run that never reached its own destructor (e.g. an
+                // actual crash -- the ordinary case restarting exists
+                // for) is still exactly the not-yet-consolidated
+                // directory consolidateFiles() expects, so this only
+                // ever skips checkpoints that a previous run's own
+                // destructor has already fully consolidated.
                 if (!std::filesystem::is_directory(chkPath)) { continue; }
                 try
                 {
@@ -1105,6 +1367,88 @@ void io::OutputManagerH5::closeOutputFile(const unsigned long trialsCompleted)
     }
 }
 
+// See this class's own header comment for the full design
+void io::OutputManagerH5::syncCheckpoints([[maybe_unused]] const unsigned long trialsCompleted)
+{
+#ifdef SLUG_MPI
+    // Every rank's own per-thread closeOutputFile() calls (this
+    // method's own callers run it only after those have all already
+    // finished) have written this checkpoint's own rank-local
+    // trials_completed/max_trial by now on this rank -- this barrier
+    // ensures every *other* rank has reached the same point too before
+    // rank 0 starts reading any of their files below.
+    utils::mpiBarrier();
+
+    if (utils::mpiRank() == 0)
+    {
+        const std::string modelName = (simControls_.checkpointInterval() != 0) ?
+            checkpointModelName(checkpointNumber_) : simControls_.modelName();
+        const auto dirPath = std::filesystem::path(simControls_.outDir()) / modelName;
+
+        // This rank's (rank 0's) own values are already known directly
+        // -- trialsCompleted is this call's own argument, and maxTrial_
+        // is already this object's own up-to-date member -- so only
+        // every *other* rank's own files need to be read back.
+        //
+        // trialsCompleted (like every other rank's own passed-in
+        // value) is priorTrialsCompleted + this rank's own session-
+        // local count (see SimCluster::run()'s/SimGalaxy::run()'s own
+        // callers) -- priorTrialsCompleted being a *global* quantity,
+        // carried over identically on every rank from a restart (see
+        // restartTrialsDone()), not a per-rank one. Summing every
+        // rank's own raw value directly would therefore count that
+        // shared prefix once per rank instead of once overall, so it
+        // is subtracted out of each rank's own value before summing
+        // (reducing it to that rank's own session-local count alone),
+        // then added back exactly once at the end. A no-op whenever
+        // this is not a restarted run, since restartTrialsDone_ is 0.
+        unsigned long globalTrialsCompleted = trialsCompleted - restartTrialsDone_;
+        unsigned long globalMaxTrial = maxTrial_;
+        const int size = utils::mpiSize();
+        for (int rank = 1; rank < size; ++rank)
+        {
+            // Every one of this rank's own files already agrees with
+            // each other (each of its own threads' closeOutputFile()
+            // wrote the identical rank-local value into its own file),
+            // so reading the first is enough.
+            const auto files = filesForRank(dirPath, rank);
+            const auto attrs = readCheckpointAttrs(files.front(),
+                dirPath.string() + " (its own directory)");
+            globalTrialsCompleted += (attrs.trialsCompleted_ - restartTrialsDone_);
+            globalMaxTrial = std::max(globalMaxTrial, attrs.maxTrial_);
+        }
+        globalTrialsCompleted += restartTrialsDone_;
+
+        // NOLINTBEGIN(misc-include-cleaner)
+        for (int rank = 0; rank < size; ++rank)
+        {
+            for (const auto& path : filesForRank(dirPath, rank))
+            {
+                const hid_t file = H5Fopen(path.string().c_str(), H5F_ACC_RDWR, H5P_DEFAULT);
+                if (file < 0)
+                {
+                    throw std::runtime_error(
+                        "OutputManagerH5::syncCheckpoints: unable to reopen " +
+                        path.string() + " for updating");
+                }
+                utils::overwriteULongAttr(file, "trials_completed", globalTrialsCompleted);
+                utils::overwriteULongAttr(file, "max_trial", globalMaxTrial);
+                H5Fclose(file);
+            }
+        }
+        // NOLINTEND(misc-include-cleaner)
+    }
+
+    // Precautionary rather than strictly required by this process's
+    // own in-memory state (nothing here feeds back into it -- see this
+    // method's own header comment for why not), but keeps "this
+    // checkpoint is fully synced" a crisp guarantee the moment
+    // syncCheckpoints() returns on every rank, rather than one that
+    // only holds on rank 0.
+    utils::mpiBarrier();
+#endif
+}
+
 // See this class's own header comment for the full merge algorithm
 void io::OutputManagerH5::consolidateFiles(const std::filesystem::path& path)
 {
@@ -1114,22 +1458,35 @@ void io::OutputManagerH5::consolidateFiles(const std::filesystem::path& path)
             "OutputManagerH5::consolidateFiles: " + path.string() + " is not a directory");
     }
 
+    // Matches thread_NNNN.h5 (OpenMP, no MPI), rank_NNNN.h5 (MPI, no
+    // OpenMP), or rank_NNNN_thread_MMMM.h5 (both) -- see
+    // openNewOutputFiles()'s own naming. A build's own naming scheme is
+    // fixed by which of _OPENMP/SLUG_MPI it was compiled with, so
+    // exactly one of these three patterns is ever actually present in
+    // a given directory; matching all three here (rather than
+    // conditionally compiling this function differently per
+    // configuration) keeps this the one place that needs to know about
+    // both naming schemes.
     std::vector<std::filesystem::path> threadFiles;
     for (const auto& entry : std::filesystem::directory_iterator(path))
     {
         if (!entry.is_regular_file()) { continue; }
         const auto& name = entry.path().filename().string();
-        if (name.starts_with("thread_") && entry.path().extension() == ".h5")
-        { threadFiles.push_back(entry.path()); }
+        if (isOutputFileName(name)) { threadFiles.push_back(entry.path()); }
     }
     if (threadFiles.empty())
     {
         throw std::runtime_error(
-            "OutputManagerH5::consolidateFiles: no thread_*.h5 files found in " + path.string());
+            "OutputManagerH5::consolidateFiles: no thread_*.h5/rank_*.h5 files found in " +
+            path.string());
     }
-    // Zero-padded thread numbers (see the constructor's own
-    // thread_NNNN.h5 naming) sort lexicographically in the same order
-    // as numerically, so a plain path sort puts thread_0000.h5 first
+    // Zero-padded rank/thread numbers (see openNewOutputFiles()'s own
+    // naming) sort lexicographically in the same order as numerically,
+    // rank-major then thread-minor, so a plain path sort puts every
+    // rank's own files together, in thread order within each -- the
+    // exact order does not otherwise matter, since only unique ID
+    // uniqueness (guaranteed by construction -- see mpiUidStride's own
+    // comment), not append order, matters for correctness here.
     std::ranges::sort(threadFiles);
 
     const auto destPath = path.string() + ".h5";

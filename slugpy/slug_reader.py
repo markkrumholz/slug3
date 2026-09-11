@@ -121,26 +121,42 @@ def _find_matching_cloudy_row(group: slug_group_reader | None, id_key: str, id_v
     return int(matches[0]) if len(matches) > 0 else None
 
 
-def _thread_files_in_dir(dir_path: Path) -> list[str]:
+def _rank_thread_files_in_dir(dir_path: Path) -> list[str]:
     """
-    Sorted thread_NNNN.h5 files directly inside dir_path -- one
-    OpenMP thread's own output file, in a checkpoint (or, without
-    checkpointing, the whole run's own) directory that OutputManagerH5
-    has not consolidated -- mirrors OutputManagerH5::consolidateFiles's
-    own C++ file-matching rule (name starts with "thread_", suffix
-    ".h5"), and its own sort-by-name (equivalent to numeric order,
-    since the thread number is zero-padded to a fixed width).
+    Sorted thread_NNNN.h5/rank_NNNN.h5/rank_NNNN_thread_MMMM.h5 files
+    directly inside dir_path -- one OpenMP thread's and/or MPI rank's
+    own output file, in a checkpoint (or, without checkpointing, the
+    whole run's own) directory that OutputManagerH5 has not
+    consolidated -- mirrors OutputManagerH5::consolidateFiles's own
+    C++ file-matching rule (name starts with "thread_" or "rank_",
+    suffix ".h5"; see that method's own comment for exactly which of
+    the three shapes appears, depending on whether the run that wrote
+    them had OpenMP, MPI, both, or neither enabled), and its own
+    sort-by-name (equivalent to numeric order within each rank, since
+    both the rank and thread numbers are zero-padded to a fixed
+    width; a plain, non-MPI thread_NNNN.h5 run sorts the same way).
 
     Raises
     ------
     FileNotFoundError
         If dir_path holds no matching files.
     """
+    # Exactly four digits in each numeric segment (matching the C++
+    # side's own std::setw(4) zero-padding -- see
+    # OutputManagerH5::openNewOutputFiles()), not just a bare "thread_"/
+    # "rank_" prefix, so a stray, unrelated file someone happened to
+    # drop in this directory (e.g. "rank_notes.h5") is never mistaken
+    # for one of OutputManagerH5's own per-rank/thread output files.
+    # [0-9], not \d -- \d also matches non-ASCII Unicode decimal digits,
+    # which OutputManagerH5::isOutputFileName()'s own std::isdigit
+    # (ASCII-only) never writes, so \d would accept filenames the C++
+    # side never actually produces.
+    name_re = re.compile(r"(thread_[0-9]{4}|rank_[0-9]{4}(_thread_[0-9]{4})?)\.h5")
     files = sorted(
         p for p in dir_path.iterdir()
-        if p.is_file() and p.name.startswith("thread_") and p.suffix == ".h5")
+        if p.is_file() and name_re.fullmatch(p.name))
     if not files:
-        raise FileNotFoundError(f"no thread_*.h5 files found in {dir_path}")
+        raise FileNotFoundError(f"no thread_*.h5/rank_*.h5 files found in {dir_path}")
     return [str(p) for p in files]
 
 
@@ -153,10 +169,11 @@ def _checkpoint_files(prefix: Path, checkpoint_num: int) -> list[str]:
     -------
     list of str
         [prefix.parent / (name + ".h5")] if that consolidated file
-        exists, else every thread_NNNN.h5 file in prefix.parent /
-        name -- mirrors OutputManagerH5::restartSetup()'s own
-        precedence between the two shapes a checkpoint can be in (see
-        its own comment).
+        exists, else every thread_NNNN.h5/rank_NNNN.h5/
+        rank_NNNN_thread_MMMM.h5 file in prefix.parent / name --
+        mirrors OutputManagerH5::restartSetup()'s own precedence
+        between the two shapes a checkpoint can be in (see its own
+        comment).
 
     Raises
     ------
@@ -169,7 +186,7 @@ def _checkpoint_files(prefix: Path, checkpoint_num: int) -> list[str]:
         return [str(h5_path)]
     dir_path = prefix.parent / name
     if dir_path.is_dir():
-        return _thread_files_in_dir(dir_path)
+        return _rank_thread_files_in_dir(dir_path)
     raise FileNotFoundError(
         f"checkpoint {checkpoint_num} of {prefix} found, but neither "
         f"{h5_path} nor {dir_path} exists")
@@ -190,13 +207,17 @@ def _find_output_files(filename: str) -> tuple[list[str], list[str]]:
         -- in which case this searches outDir for every checkpoint
         this run left behind: either model_name_chkNNNNN.h5 (a
         consolidated checkpoint) or model_name_chkNNNNN/ (holding that
-        checkpoint's own, not-yet-consolidated thread_NNNN.h5 files) --
-        see OutputManagerH5::restartSetup()'s own comment, which this
+        checkpoint's own, not-yet-consolidated thread_NNNN.h5/
+        rank_NNNN.h5/rank_NNNN_thread_MMMM.h5 files -- the shape
+        depends on whether the run that wrote them had OpenMP, MPI,
+        both, or neither enabled; see
+        OutputManagerH5::openNewOutputFiles()'s own comment) -- see
+        OutputManagerH5::restartSetup()'s own comment, which this
         mirrors. If no checkpoints are found at all, falls back to a
         plain, non-checkpointed run's own output instead: model_name.h5
         if it exists, else model_name/ (holding that run's own
-        thread_NNNN.h5 files, if it used h5divided output without
-        checkpointing).
+        thread_NNNN.h5/rank_NNNN*.h5 files, if it used h5divided output
+        without checkpointing).
 
     Returns
     -------
@@ -260,12 +281,12 @@ def _find_output_files(filename: str) -> tuple[list[str], list[str]]:
     if plain_h5.is_file():
         return [str(plain_h5)], [str(plain_h5)]
     if prefix.is_dir():
-        files = _thread_files_in_dir(prefix)
+        files = _rank_thread_files_in_dir(prefix)
         return files, files
 
     raise FileNotFoundError(
         f"no slug output found matching model name {filename!r} -- looked "
-        f"for {plain_h5}, {prefix} as a thread directory, and "
+        f"for {plain_h5}, {prefix} as a thread/rank directory, and "
         f"{prefix.name}_chkNNNNN.h5/{prefix.name}_chkNNNNN/ checkpoints in "
         f"{prefix.parent}")
 
@@ -286,10 +307,10 @@ class slug_reader:
         ".h5" or ".hdf5"), or a run's own model name (really, outDir/
         model_name together, with no extension) to search for and
         aggregate every checkpoint (and, within each, every OpenMP
-        thread's own file, if not yet consolidated) that run left
-        behind -- see _find_output_files's own docstring for the exact
-        search rule, which mirrors OutputManagerH5::restartSetup()'s
-        own.
+        thread's and/or MPI rank's own file, if not yet consolidated)
+        that run left behind -- see _find_output_files's own
+        docstring for the exact search rule, which mirrors
+        OutputManagerH5::restartSetup()'s own.
 
     Attributes
     ----------
@@ -319,6 +340,12 @@ class slug_reader:
         from, as of the same checkpoint trials_completed was read from
         (see OutputManagerH5::closeOutputFile()'s own "restart_uid"
         attribute) -- same None cases as trials_completed (read-only).
+        Under MPI, each rank's own output file has its own restart_uid
+        (see the SLUG documentation's own note on this, in "Output
+        Files and Format"); this is read from the lowest-numbered
+        rank's file specifically (rank 0's, if present), not some
+        run-wide value -- there isn't one, since each rank's own ID
+        numbering runs in its own, non-overlapping range.
     input_deck : tomlkit.TOMLDocument
         The input deck used to produce this file, read from the
         input_deck group's toml dataset and parsed on first access

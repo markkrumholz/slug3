@@ -25,15 +25,27 @@ HDF5 file would be unwieldy; the ``slugpy`` interface can read both formats
 transparently.
 
 Outputs are placed in the directory specified by ``out_dir`` in the parameter
-file, which defaults to the current working directory if not specified. 
+file, which defaults to the current working directory if not specified.
 The output file name is constructed from the ``model_name`` keyword in the parameter
 file. For ``h5`` output, the output file is named ``<model_name>.h5``, while for
 ``h5divided`` output the output files are placed in a directory named ``<model_name>``,
 with each thread's output stored in a separate file in that directory called
-``thread_<NNNNN>.h5`` where ``<NNNNN>`` is the thread number. For ASCII output,
+``thread_<NNNN>.h5`` where ``<NNNN>`` is the thread number. For ASCII output,
 there will be multiple file outputs, whose names follow the pattern
 ``<model_name>_<output_type>.txt``. Which output types are produced is controlled
 by the :ref:`ssec-parameters-output` section of :ref:`sec-parameters`.
+
+If SLUG was built and run under MPI (see :ref:`sec-running-mpi`), each
+process's ("rank's") own output is likewise kept separate -- even for a
+single-rank run, since this naming is a property of the build, not of how
+many ranks a given run actually used -- named ``rank_<NNNN>.h5`` where
+``<NNNN>`` is the rank number -- or, if OpenMP
+threading is also in use within each rank, ``rank_<NNNN>_thread_<NNNN>.h5``,
+combining both numbers. This naming only appears with ``h5divided`` output,
+or transiently with checkpointed ``h5`` output before a checkpoint is
+consolidated; once an ``h5`` run finishes, every rank's and thread's output is
+merged into the single ``<model_name>.h5`` (or ``<model_name>_chk<NNNNN>.h5``)
+file described above, and the per-rank/thread files are removed.
 
 A full description of the format of the outputs is provided below.
 
@@ -91,14 +103,21 @@ group within it.
   moment this file was opened.
 * ``trials_completed``: The number of trials actually completed and written to
   this file (or, for one checkpoint of a checkpointed run, to that checkpoint)
-  by the time it was closed.
+  by the time it was closed. Under MPI, this is a run-wide total (the sum
+  across every rank), kept identical in every rank's own file, not just this
+  one rank's own share -- see :ref:`sec-running-mpi`.
 * ``restart_uid``: An internal identifier used to keep cluster/star ID
   numbering consistent across a run resumed with ``--restart``; not generally
-  meaningful on its own.
+  meaningful on its own. Under MPI, each rank's own output file has its own
+  ``restart_uid`` (unlike ``trials_completed``/``max_trial``, which are the
+  same run-wide total in every rank's file), since each rank's ID numbering
+  runs in its own, non-overlapping range -- see :ref:`sec-running-mpi`.
 * ``max_trial``: The largest trial number actually written to this file. Used
   internally when resuming a run from a checkpoint, so that trial numbering in
   the resumed session never collides with a trial number a previous session
-  already used.
+  already used. Under MPI, this is likewise a run-wide value (the largest
+  trial number any rank wrote), kept identical in every rank's own file --
+  see :ref:`sec-running-mpi`.
 
 The ``input_deck`` Group
 ^^^^^^^^^^^^^^^^^^^^^^^^^

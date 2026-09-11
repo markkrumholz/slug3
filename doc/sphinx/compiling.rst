@@ -79,6 +79,14 @@ Optional
 * `OpenMP <https://www.openmp.org/>`_, for multi-threaded execution. If no
   OpenMP implementation is found, the build falls back to a single-threaded
   binary automatically, with a warning at configure time.
+* An MPI implementation (e.g. `OpenMPI <https://www.open-mpi.org/>`_ or
+  `MPICH <https://www.mpich.org/>`_), for multi-process execution across
+  more than one machine -- see :ref:`sec-running-mpi`. If none is found,
+  the build falls back to a single-process binary automatically, with a
+  warning at configure time, the same way OpenMP does above; the two are
+  independent of each other, so a build can have either, both, or neither.
+  MPI support only applies to the ``slug`` command-line executable itself,
+  not the Python bindings.
 * `Ninja <https://ninja-build.org/>`_, as the CMake generator. Not required
   -- CMake falls back to its own platform default (Unix Makefiles on
   Linux/macOS) -- but Ninja parallelizes the build automatically and

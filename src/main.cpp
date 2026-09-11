@@ -12,6 +12,8 @@
 #include "io/OutputManagerAscii.hpp"
 #include "io/OutputManagerH5.hpp"
 #include "io/SimControls.hpp"
+#include "utils/MPIUtils.hpp"
+#include "utils/UniqueIDManager.hpp"
 #include <cstdlib>
 #include <exception>
 #include <iostream>
@@ -23,6 +25,29 @@
 
 auto main(int argc, char *argv[]) -> int // NOLINT(bugprone-exception-escape) -- every throwing call below (SimControls, OutputManagerH5/OutputManagerAscii construction, SimCluster::run()/SimGalaxy::run()) is inside the try block below, catching std::exception by reference; verified at runtime that a genuine constructor throw (e.g. an invalid deck) is caught cleanly rather than escaping. This check's own known limitation is that it cannot see through calls into other translation units (OpenMP-parallel code among them) well enough to confirm every thrown type derives from std::exception, so it stays conservative here regardless.
 {
+    // Must be the very first thing main() does, and must live for its
+    // entire remaining scope -- see MPIGuard's own comment for why every
+    // one of this function's several exit paths is safe as a result.
+    // A no-op (argc/argv left untouched) when this build was not
+    // compiled with SLUG_MPI.
+    const utils::MPIGuard mpiGuard(&argc, &argv);
+
+    // Force utils::uniqueID()'s function-local static to construct here,
+    // on this thread, right now -- rather than lazily, wherever the
+    // first call to uniqueID() from deep inside SimCluster::run()/
+    // SimGalaxy::run() happens to land, which (for a fresh, non-restart
+    // run) is inside a "#pragma omp parallel for" loop body, with no
+    // guarantee that lands on this same thread. UniqueIDManager's own
+    // constructor calls mpiRank(), an MPI call; MPI_THREAD_FUNNELED
+    // (see initMPI()'s own comment) requires every MPI call to come
+    // from the one thread that called MPI_Init_thread -- this one, this
+    // early, before any parallel region has had a chance to open.
+    // Restarting instead constructs it explicitly, just as early (see
+    // OutputManagerH5::restartSetup()'s own comment), so this call is a
+    // harmless no-op in that case -- constructing a C++11 function-
+    // local static twice just returns the same already-built instance.
+    static_cast<void>(utils::uniqueID());
+
     // Check arguments: either just the input deck, or an optional
     // --restart/-R flag ahead of it, requesting that this run resume
     // a previous, interrupted run from its most recent checkpoint

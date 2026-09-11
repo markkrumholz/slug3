@@ -9,6 +9,8 @@
 #ifndef UNIQUEIDMANAGER_HPP
 #define UNIQUEIDMANAGER_HPP
 
+#include "MPIUtils.hpp"
+
 namespace utils {
 
     /**
@@ -21,9 +23,20 @@ namespace utils {
 
         /**
          * @brief Construct a UniqueIDManager, with the first ID it
-         *   hands out being 0
+         *   hands out being mpiRank() * mpiUidStride (0, when this
+         *   build was not compiled with SLUG_MPI, or was compiled with
+         *   it but is running as a single rank)
+         * @details
+         * Seeding the very first ID from this process's own MPI rank
+         * (rather than always 0) is what keeps every rank's own
+         * live-generated IDs permanently non-overlapping for the whole
+         * run -- see mpiUidStride's own comment. Safe to call this
+         * early even under MPI: this is a function-local static (see
+         * uniqueID() below), so it is not actually constructed until
+         * the first call to uniqueID() itself, well after main()'s own
+         * MPIGuard has already initialized MPI.
          */
-        UniqueIDManager() = default;
+        UniqueIDManager() : uniqueID_(static_cast<unsigned long>(mpiRank()) * mpiUidStride) { }
 
         ~UniqueIDManager() = default;
 
@@ -117,7 +130,7 @@ namespace utils {
 
     private:
 
-        unsigned long uniqueID_ = 0; /**< Next ID to be handed out */
+        unsigned long uniqueID_; /**< Next ID to be handed out (see the constructor's own comment for its initial value) */
 
     };
 

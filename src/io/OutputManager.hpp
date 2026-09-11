@@ -264,28 +264,46 @@ namespace io
         [[nodiscard]] virtual auto restartMaxTrial() const -> unsigned long = 0;
 
         /**
-         * @brief Record that this run is ending early, having only actually completed trialsCompleted trials
-         * @param trialsCompleted Number of trials actually completed
-         *   before this run stopped short of SimControls::nTrial() --
-         *   either because a per-trial exception was thrown and
-         *   rethrown out of SimCluster::run()/SimGalaxy::run(), or
-         *   because a SIGTERM was caught and handled gracefully (see
-         *   their own comments)
+         * @brief Record this rank's own true final trials-completed count, for the destructor to use
+         * @param trialsCompleted Number of trials this rank has
+         *   actually completed -- either short of
+         *   SimControls::nTrial(), because a per-trial exception was
+         *   thrown and rethrown out of SimCluster::run()/
+         *   SimGalaxy::run(), or because a SIGTERM was caught and
+         *   handled gracefully (see their own comments); or, on a
+         *   perfectly normal completion, this rank's own final
+         *   priorTrialsCompleted + trialsCompleted_ (see their own
+         *   callers in SimCluster::run()/SimGalaxy::run())
          * @details
+         * Despite the name (kept for the common, original case this
+         * was written for), this is called on every exit path from
+         * run(), not just an early one: OutputManagerH5's own
+         * destructor otherwise assumes SimControls::nTrial() itself is
+         * this rank's own final trial count on ordinary completion (see
+         * OutputManagerH5::closeOutputFile()'s own comment) -- true in
+         * a single-rank run, where every rank *is* the whole run, but
+         * not under MPI, where nTrial() is the *whole run's* target
+         * shared across every rank, not any one rank's own share of it
+         * (see SimCluster::run()'s/SimGalaxy::run()'s own
+         * mpiPartitionRange() comment). Calling this unconditionally
+         * before returning, with this rank's own true count either way,
+         * makes the destructor's assumption correct in both cases
+         * rather than only the single-rank one -- a no-op outside MPI,
+         * where the two values already agree whenever every trial
+         * actually completed.
+         *
          * Does not itself close or otherwise touch any output --
          * OutputManagerH5's own implementation just remembers
          * trialsCompleted, for its destructor to write as the
          * currently-open file's own final "trials_completed" (and,
          * where relevant, "restart_uid") attribute instead of
-         * SimControls::nTrial(), which the destructor would otherwise
-         * assume (see OutputManagerH5::closeOutputFile()'s own
-         * comment) -- an assumption only ever true when run() actually
-         * completed every trial, which stopping early specifically
-         * means it did not. Deliberately does not roll over to a new
-         * checkpoint the way checkpoint() does: there is nothing left
-         * to write into one, so doing so would just leave an empty,
-         * never-closed checkpoint behind for the destructor to
-         * eventually close with a wrong trial count of its own.
+         * SimControls::nTrial(). Deliberately does not roll over to a
+         * new checkpoint the way checkpoint() does: on an early exit,
+         * there is nothing left to write into one, so doing so would
+         * just leave an empty, never-closed checkpoint behind for the
+         * destructor to eventually close with a wrong trial count of
+         * its own; on a normal exit, the current checkpoint is already
+         * the last one, so there is nothing to roll over to regardless.
          *
          * OutputManagerAscii's own implementation is a no-op, not a
          * throw (unlike checkpoint()/restartTrialsDone()): ascii

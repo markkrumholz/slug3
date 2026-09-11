@@ -179,6 +179,25 @@ namespace utils
     auto readULongAttr(hid_t loc, const std::string& name) -> unsigned long;
 
     /**
+     * @brief Overwrite an already-existing scalar unsigned long attribute
+     * @param loc Handle to the object (a group, dataset, or file) the
+     *   attribute is attached to
+     * @param name Name of the attribute
+     * @param value New value of the attribute
+     * @throws std::runtime_error if the attribute does not already
+     *   exist or cannot be opened
+     * @details
+     * Unlike writeULongAttr(), which creates a brand-new attribute (and
+     * fails if one of that name already exists), this opens and
+     * rewrites one already written by an earlier writeULongAttr() call
+     * -- used by OutputManagerH5::syncCheckpoints() to replace a
+     * rank-local trials_completed/max_trial value, already written by
+     * closeOutputFile(), with the run-wide value summed/maxed across
+     * every rank.
+     */
+    void overwriteULongAttr(hid_t loc, const std::string& name, unsigned long value);
+
+    /**
      * @brief Write a scalar string dataset into an HDF5 group
      * @param loc Handle to the group (or file) to create the dataset in
      * @param name Name of the dataset

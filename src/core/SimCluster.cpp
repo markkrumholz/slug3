@@ -9,6 +9,7 @@
 #include "SimCluster.hpp"
 #include "../io/OutputManager.hpp"
 #include "../io/SimControls.hpp"
+#include "../utils/MPIUtils.hpp"
 #include "../utils/SigtermGuard.hpp"
 #include "../utils/UniqueIDManager.hpp"
 #include "Cluster.hpp"
@@ -37,6 +38,31 @@ static auto toRoundTripString(const double value) -> std::string
     const auto result = std::to_chars(buf.data(),
         buf.data() + buf.size(), value); // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic) -- buf is a fixed-size stack array, its own end pointer is always in-bounds
     return { buf.data(), result.ptr };
+}
+
+// Print run()'s own "caught SIGTERM" progress message -- factored out
+// purely to keep run()'s own cognitive complexity down, not because
+// it's used from more than one place. cumulativeCompleted is only
+// this rank's own share of the run (see run()'s own comment at its one
+// call site); reporting it against nTrial -- the *whole run's* target
+// across every rank -- would misleadingly imply cumulativeCompleted /
+// nTrial is this run's true overall completion fraction, which is
+// only true outside MPI (mpiSize() == 1). The true, global total is
+// only ever reconciled later, once every rank has reached
+// OutputManagerH5::syncCheckpoints()'s own barrier (see
+// notifyEarlyTermination()'s own comment); nothing here waits for that
+// just to print a progress message, so this reports each rank's own
+// number plainly instead of a fraction it cannot yet know.
+static void printSigtermMessage(const unsigned long cumulativeCompleted, const unsigned long nTrial)
+{
+    std::cout << "slug: caught SIGTERM, stopping early with " <<
+        cumulativeCompleted << " trials completed";
+    if (utils::mpiSize() > 1)
+    {
+        std::cout << " on rank " << utils::mpiRank() <<
+            " (this rank's own share of " << nTrial << " total trials across all ranks)";
+    }
+    std::cout << "\n";
 }
 
 core::SimCluster::SimCluster(const io::SimControls& simControls,
@@ -164,7 +190,10 @@ auto core::SimCluster::run() -> int
         (simControls_.nTrial() - priorTrialsCompleted) : 0;
     const unsigned long numberingEnd = numberingStart + trialsRemaining;
 
-    if (simControls_.verbosity() > 0)
+    // Gated to rank 0 only (a no-op distinction outside MPI, or running
+    // as a single rank) so this run-wide summary is printed once, not
+    // once per rank
+    if (simControls_.verbosity() > 0 && utils::mpiRank() == 0)
     {
         std::cout << "slug: cluster simulation starting with "
             << simControls_.nTrial() << " trials";
@@ -205,6 +234,18 @@ auto core::SimCluster::run() -> int
         const unsigned long batchEnd =
             std::min(batchStart + batchSize, numberingEnd);
 
+        // Under MPI, each rank runs only its own contiguous slice of
+        // this batch -- see mpiPartitionRange()'s own comment. Trial
+        // numbers themselves never collide across ranks this way (each
+        // rank's own slice is disjoint); it is only unique IDs
+        // (assigned independently by each rank's own UniqueIDManager)
+        // that need mpiUidStride to stay non-overlapping. A no-op
+        // (rankBatchStart, rankBatchEnd) == (batchStart, batchEnd) when
+        // this build was not compiled with SLUG_MPI, or is running as a
+        // single rank.
+        const auto [rankBatchStart, rankBatchEnd] =
+            utils::mpiPartitionRange(batchStart, batchEnd);
+
 #ifdef _OPENMP
         // See runTrial()'s own comment for why each trial is
         // individually wrapped in a try/catch here, rather than
@@ -217,7 +258,7 @@ auto core::SimCluster::run() -> int
         // sees the same kind of failure it always has.
         std::exception_ptr firstError;
 #pragma omp parallel for schedule(dynamic)
-        for (unsigned long trialNum = batchStart; trialNum < batchEnd; ++trialNum)
+        for (unsigned long trialNum = rankBatchStart; trialNum < rankBatchEnd; ++trialNum)
         {
             try
             {
@@ -247,7 +288,7 @@ auto core::SimCluster::run() -> int
 #else
         try
         {
-            for (unsigned long trialNum = batchStart; trialNum < batchEnd; ++trialNum)
+            for (unsigned long trialNum = rankBatchStart; trialNum < rankBatchEnd; ++trialNum)
             {
                 runTrial(trialNum);
             }
@@ -261,30 +302,32 @@ auto core::SimCluster::run() -> int
         }
 #endif
 
-        // If SIGTERM was caught somewhere in this batch, this is the
-        // correct, safe point to stop: every trial actually started
-        // has now finished (runTrial()'s own check only ever stops a
-        // trial from starting in the first place), so it is safe to
-        // save the currently-open checkpoint (or, without
-        // checkpointing, the run's own single output file) with the
-        // true, accurate cumulative count of trials completed so far,
-        // via notifyEarlyTermination() rather than checkpoint() --
-        // there is nothing left to write into a new checkpoint, so
+        // If SIGTERM was caught somewhere in this batch -- on this
+        // rank, or (under MPI) any other rank, since mpiAllReceivedSigterm()
+        // reconciles every rank onto the same decision here (see its
+        // own comment for why every rank must agree, rather than each
+        // deciding independently from its own local signal state alone)
+        // -- this is the correct, safe point to stop: every trial
+        // actually started has now finished (runTrial()'s own check
+        // only ever stops a trial from starting in the first place),
+        // so it is safe to save the currently-open checkpoint (or,
+        // without checkpointing, the run's own single output file)
+        // with the true, accurate cumulative count of trials completed
+        // so far, via notifyEarlyTermination() rather than checkpoint()
+        // -- there is nothing left to write into a new checkpoint, so
         // rolling over to one would just leave it empty and un-closed
         // for the destructor to eventually close with a wrong trial
         // count of its own (see notifyEarlyTermination()'s own
         // comment) -- and return sigtermExitCode instead of continuing
         // on to any later, not-yet-started batches.
-        if (utils::sigtermWasReceived())
+        if (utils::mpiAllReceivedSigterm(utils::sigtermWasReceived()))
         {
             const auto cumulativeCompleted =
                 priorTrialsCompleted + trialsCompleted_.load(std::memory_order_relaxed);
             outputManager_->notifyEarlyTermination(cumulativeCompleted);
             if (simControls_.verbosity() > 0)
             {
-                std::cout << "slug: caught SIGTERM, stopping early with "
-                    << cumulativeCompleted << " / " << simControls_.nTrial() <<
-                    " trials completed\n";
+                printSigtermMessage(cumulativeCompleted, simControls_.nTrial());
             }
             return sigtermExitCode;
         }
@@ -303,6 +346,19 @@ auto core::SimCluster::run() -> int
                 priorTrialsCompleted + trialsCompleted_.load(std::memory_order_relaxed));
         }
     }
+
+    // Every batch above completed normally (an early SIGTERM/exception
+    // return already left via one of the notifyEarlyTermination() calls
+    // above instead), so this rank's own true final trial count is
+    // exactly priorTrialsCompleted + trialsCompleted_. Recording it here
+    // -- despite nothing having actually ended "early" -- matters under
+    // MPI: without it, OutputManagerH5's own destructor falls back to
+    // assuming simControls_.nTrial() (the *whole run's* target across
+    // every rank) is this rank's own final count, which is only true in
+    // a single-rank run. Outside MPI this is a no-op, since the two
+    // already agree whenever every trial actually completed.
+    outputManager_->notifyEarlyTermination(
+        priorTrialsCompleted + trialsCompleted_.load(std::memory_order_relaxed));
 
     if (simControls_.verbosity() > 0)
     {

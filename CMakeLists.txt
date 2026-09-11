@@ -42,6 +42,18 @@ if(NOT OpenMP_CXX_FOUND)
     message(WARNING "OpenMP not found: building without threading support")
 endif()
 
+# Find MPI; multi-process parallelism is optional, like OpenMP, and only
+# ever needed by the slug CLI executable itself (not slugPython or the
+# test suite -- see SLUG_MPI's own uses in src/core and src/io). Unlike
+# _OPENMP, which the compiler defines automatically, there is no standard
+# preprocessor macro for "MPI is available", so code that depends on it
+# must guard itself with #ifdef SLUG_MPI, defined below only for the
+# targets that actually link MPI::MPI_CXX.
+find_package(MPI)
+if(NOT MPI_CXX_FOUND)
+    message(WARNING "MPI not found: building without multi-process support")
+endif()
+
 # Find (or build) an implementation of C++23's <mdspan>; see that file's
 # own comment for the native/package/submodule priority this uses.
 include(cmake/Mdspan.cmake)
@@ -636,6 +648,17 @@ if(OpenMP_CXX_FOUND)
     target_link_libraries(slugPython PRIVATE OpenMP::OpenMP_CXX)
 endif()
 
+# Link to MPI, if available -- only the slug CLI executable itself, not
+# slugPython or any test target (see SLUG_MPI's own comment above and in
+# src/core/SimCluster.cpp/SimGalaxy.cpp/src/io/OutputManagerH5.cpp): the
+# shared sources those other targets also compile simply take the
+# existing, unchanged single-rank code path when SLUG_MPI is not defined
+# for them.
+if(MPI_CXX_FOUND)
+    target_compile_definitions(slug PRIVATE SLUG_MPI)
+    target_link_libraries(slug PRIVATE MPI::MPI_CXX)
+endif()
+
 # Optional: auto-regenerate a .pyi type stub for the compiled _slug
 # extension (via pybind11-stubgen, https://github.com/sizmailov/pybind11-stubgen
 # -- "pip install pybind11-stubgen") every time slugPython is rebuilt,
@@ -815,6 +838,25 @@ add_test(NAME test_Slugpy
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 set_tests_properties(test_Slugpy PROPERTIES
     ENVIRONMENT "PYTHONPATH=${CMAKE_SOURCE_DIR}")
+
+# MPI end-to-end test: only registered when this build actually links
+# MPI (see the find_package(MPI) block above), since the SLUG_MPI-
+# guarded code under test (per-rank UID striping, checkpoint sync,
+# rank-aware restart lookup -- see src/utils/MPIUtils.hpp) is entirely
+# absent from a non-MPI build, and mpiexec itself may not even be
+# installed. Unlike test_PythonBindings/test_Slugpy above, this drives
+# the slug CLI itself under mpiexec rather than the Python bindings,
+# so it needs the slug executable's own path and FindMPI's own
+# mpiexec/flag variables passed through as environment variables --
+# see tests/mpi/test_mpi_e2e.py's own skipif for how it uses them.
+if(MPI_CXX_FOUND)
+    add_test(NAME test_MPI
+        COMMAND ${Python_EXECUTABLE} -m pytest ${CMAKE_SOURCE_DIR}/tests/mpi -v
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    set_tests_properties(test_MPI PROPERTIES
+        ENVIRONMENT "SLUG_DIR=${CMAKE_SOURCE_DIR};SLUG_EXECUTABLE=$<TARGET_FILE:slug>;MPIEXEC_EXECUTABLE=${MPIEXEC_EXECUTABLE};MPIEXEC_NUMPROC_FLAG=${MPIEXEC_NUMPROC_FLAG}"
+        LABELS "quick")
+endif()
 
 # Tag every test "quick" or "slow", so `ctest -L quick` (or `ctest -LE
 # slow`) runs only the fast suite, skipping anything that takes
