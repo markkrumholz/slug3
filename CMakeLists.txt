@@ -839,6 +839,25 @@ add_test(NAME test_Slugpy
 set_tests_properties(test_Slugpy PROPERTIES
     ENVIRONMENT "PYTHONPATH=${CMAKE_SOURCE_DIR}")
 
+# MPI end-to-end test: only registered when this build actually links
+# MPI (see the find_package(MPI) block above), since the SLUG_MPI-
+# guarded code under test (per-rank UID striping, checkpoint sync,
+# rank-aware restart lookup -- see src/utils/MPIUtils.hpp) is entirely
+# absent from a non-MPI build, and mpiexec itself may not even be
+# installed. Unlike test_PythonBindings/test_Slugpy above, this drives
+# the slug CLI itself under mpiexec rather than the Python bindings,
+# so it needs the slug executable's own path and FindMPI's own
+# mpiexec/flag variables passed through as environment variables --
+# see tests/mpi/test_mpi_e2e.py's own skipif for how it uses them.
+if(MPI_CXX_FOUND)
+    add_test(NAME test_MPI
+        COMMAND ${Python_EXECUTABLE} -m pytest ${CMAKE_SOURCE_DIR}/tests/mpi -v
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    set_tests_properties(test_MPI PROPERTIES
+        ENVIRONMENT "SLUG_DIR=${CMAKE_SOURCE_DIR};SLUG_EXECUTABLE=$<TARGET_FILE:slug>;MPIEXEC_EXECUTABLE=${MPIEXEC_EXECUTABLE};MPIEXEC_NUMPROC_FLAG=${MPIEXEC_NUMPROC_FLAG}"
+        LABELS "quick")
+endif()
+
 # Tag every test "quick" or "slow", so `ctest -L quick` (or `ctest -LE
 # slow`) runs only the fast suite, skipping anything that takes
 # upwards of a minute to run -- currently just test_CoreFull, but
