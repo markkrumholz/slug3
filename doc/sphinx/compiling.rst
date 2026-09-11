@@ -20,56 +20,13 @@ Required
 ~~~~~~~~~
 
 * `CMake <https://cmake.org/>`_, version 3.15 or later.
-* A C++23-capable compiler. This is a firmer requirement than it sounds: two
-  particular C++23 features are used throughout the code with no fallback
-  if the compiler/standard-library combination doesn't have them --
+* A C++23-capable compiler. The following compilers are known to work:
 
-  * The multidimensional ``operator[]`` (e.g. ``view[i, j, k]``), used
-    wherever the code indexes a ``std::mdspan``.
-  * ``std::views::zip``, from ``<ranges>``.
+  * GCC 13 or later
+  * Clang 17 or later (Note: ensure that the version of libc++ matches the compiler version; on some systems a later version of the Clang frontend is paired with an older libc++, but libc++ version 17 or later is required here.)
+  * Intel llvm/2024.2.0 or later (requires the flag ``-fp-model=strict`` for correct behavior)
+  * Other C++23-capable compilers have not been tested.
 
-  SLUG's own continuous integration builds and tests against GCC 16 and
-  Clang 18 (linked against LLVM's own libc++ 18, *not* whatever
-  system-provided libc++/libstdc++ the compiler defaults to -- see below).
-  Those aren't the actual minimum versions, though: verified locally (a
-  full build plus the relevant test suites, on several Homebrew-packaged
-  versions of each), the real floor is **GCC 13** and **Clang 17**. Every
-  Clang version number below is really shorthand for "Clang paired with
-  its own same-numbered libc++" (as with the CI configuration above, and
-  as Homebrew's ``llvm@N`` formulae and LLVM's own releases both bundle
-  it) -- ``std::views::zip`` and ``std::format`` are strictly libc++
-  features, so a mismatched pairing (an unusually old or new libc++ built
-  separately from the Clang frontend) could in principle behave
-  differently; what's stated here is what was actually verified to build
-  and pass tests with each matched pairing, not a reading of any
-  third-party feature-completeness table, which can disagree with what
-  works in practice for this codebase's own specific usage. Earlier
-  versions fail for specific, identified reasons rather than a blanket "too
-  old":
-
-  * GCC 12 is missing ``std::views::zip`` from libstdc++ entirely; GCC 11
-    additionally lacks the multidimensional ``operator[]`` language feature
-    itself. GCC 12/13/14 (unlike 15+) are also missing ``std::vector``'s
-    ``append_range`` -- a third C++23 library addition this codebase used
-    to depend on in one place, since fixed to use the older, equally
-    portable ``insert(end(), begin(), end())`` instead specifically so it
-    wouldn't force the floor higher than the two features above already
-    require.
-  * Clang 16 already has both of the two features above, but still fails
-    to build this code, for two unrelated reasons: the bundled ``<mdspan>``
-    fallback (see "Bundled" below) deliberately disables its own
-    multi-index ``operator[]`` before Clang 17, working around a documented
-    upstream Clang bug involving parameter packs in bracket operators
-    (visible in ``src/extern/mdspan``'s own ``config.hpp``); separately,
-    libc++ doesn't gain ``std::format`` (used in a handful of places under
-    ``src/tracks``) until Clang 17 either. Clang 15 and earlier are also
-    missing ``std::views::zip`` outright, the same as GCC 12.
-
-  Other C++23-capable compilers, such as Intel's LLVM-based ``icpx``/``icx``
-  (part of the oneAPI DPC++/C++ Compiler; the older, classic ``icc`` is
-  discontinued and should not be used), have not been verified and may or
-  may not work -- if you have success or failure with a configuration not
-  listed here, please let us know so this list can be extended.
 * The `GNU Scientific Library <https://www.gnu.org/software/gsl/>`_ (GSL).
 * `HDF5 <https://www.hdfgroup.org/solutions/hdf5/>`_, built with its C++
   component enabled.
