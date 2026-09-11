@@ -56,7 +56,7 @@ def _oversubscribe_flag():
         version = subprocess.run(
             [MPIEXEC_EXECUTABLE, "--version"], capture_output=True, text=True, timeout=10,
         ).stdout
-    except OSError:
+    except (OSError, subprocess.TimeoutExpired):
         return []
     return ["--oversubscribe"] if "Open MPI" in version or "OpenRTE" in version else []
 

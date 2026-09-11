@@ -193,7 +193,7 @@ auto core::SimGalaxy::run() -> int
 #endif
 
         // See SimCluster::run()'s own identical comment
-        if (utils::sigtermWasReceived())
+        if (utils::mpiAllReceivedSigterm(utils::sigtermWasReceived()))
         {
             const auto cumulativeCompleted =
                 priorTrialsCompleted + trialsCompleted_.load(std::memory_order_relaxed);

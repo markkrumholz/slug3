@@ -17,6 +17,9 @@
 #ifdef SLUG_MPI
 #   include <mpi.h> // NOLINT(misc-include-cleaner)
 #endif
+#ifdef _OPENMP
+#   include <omp.h> // NOLINT(misc-include-cleaner) -- only used inside initMPI()'s own "provided < MPI_THREAD_FUNNELED" branch, under #ifdef SLUG_MPI as well, so a build with _OPENMP but not SLUG_MPI never actually uses it
+#endif
 
 namespace utils
 {
@@ -44,14 +47,22 @@ namespace utils
      * A no-op when SLUG_MPI is not defined. Requests
      * MPI_THREAD_FUNNELED, since MPI is only ever called from a single
      * thread, outside any active OpenMP parallel region (see
-     * mpiBarrier()'s own callers); if the MPI implementation cannot
-     * provide even that, a warning is printed but the run continues
-     * regardless, since this codebase's own MPI usage never actually
-     * requires more than single-threaded (MPI_THREAD_SINGLE) support in
-     * practice -- FUNNELED is requested only because it is the more
-     * portable, standard way to express "one designated thread calls
-     * MPI", rather than because a lesser-supported level would actually
-     * break anything here.
+     * mpiBarrier()'s own callers). MPI_THREAD_FUNNELED itself only
+     * constrains which thread may call MPI -- but the next level down,
+     * MPI_THREAD_SINGLE, is a stronger promise from *this process* to
+     * the MPI implementation that it will never be multithreaded at
+     * all, not just that MPI calls are confined to one thread; an
+     * implementation that could only actually provide MPI_THREAD_SINGLE
+     * gives no guarantee that it behaves correctly once this build (if
+     * also compiled with OpenMP) goes on to spawn worker threads
+     * regardless, even ones that never call MPI themselves. Since this
+     * build cannot un-compile its own OpenMP support at this point, the
+     * next best thing is forcing OpenMP down to a single thread for the
+     * rest of the run, so the "no threads beyond this one" promise
+     * MPI_THREAD_SINGLE actually implies is still honored in practice
+     * -- slower than intended, but correct, rather than silently
+     * relying on a implementation-specific tolerance the standard
+     * itself does not promise.
      */
     inline void initMPI([[maybe_unused]] int* argc, [[maybe_unused]] char*** argv)
     {
@@ -61,9 +72,13 @@ namespace utils
         if (provided < MPI_THREAD_FUNNELED)
         {
             std::cerr << "slug: warning: MPI implementation provided a lesser "
-                "thread support level than MPI_THREAD_FUNNELED; continuing "
-                "anyway, since slug never calls MPI from more than one "
-                "thread at a time\n";
+                "thread support level than MPI_THREAD_FUNNELED; forcing "
+                "single-threaded execution for this run, since the MPI "
+                "standard does not guarantee correct behavior for a "
+                "multithreaded process otherwise\n";
+#ifdef _OPENMP
+            omp_set_num_threads(1);
+#endif
         }
 #endif
     }
@@ -154,6 +169,44 @@ namespace utils
     {
 #ifdef SLUG_MPI
         MPI_Barrier(MPI_COMM_WORLD);
+#endif
+    }
+
+    /**
+     * @brief Reconcile a per-rank boolean flag to true if any rank's own is true
+     * @param local This rank's own value of the flag
+     * @return local, unchanged, when SLUG_MPI is not defined or
+     *   mpiSize() == 1; otherwise true if any rank passed true, false
+     *   only if every rank passed false
+     * @details
+     * A signal like SIGTERM is caught independently, per-process (see
+     * utils::sigtermWasReceived()) -- under MPI, only the rank(s) an
+     * external SIGTERM was actually sent to (in principle, an entire
+     * job's process group, but not guaranteed, and not even guaranteed
+     * to be observed at the same moment by every rank that did receive
+     * it) would ever see it, and every rank still needs to reach the
+     * exact same decision at the exact same point for
+     * OutputManagerH5::checkpoint()/its own destructor's barrier-
+     * synchronized calls to stay in lockstep across ranks: a rank
+     * stopping alone, while others continue on to their own next
+     * mpiBarrier() call, would otherwise deadlock those other ranks
+     * forever, since nothing they call is left to make that barrier's
+     * matching call on the now-stopped rank's behalf. This is a single
+     * cheap collective (one MPI_Allreduce), called at the same,
+     * infrequent points sigtermWasReceived() itself already was
+     * (once per batch, not per trial), so its own cost is negligible
+     * next to those already-existing per-batch/per-checkpoint
+     * collectives.
+     */
+    [[nodiscard]] inline auto mpiAllReceivedSigterm(const bool local) -> bool
+    {
+#ifdef SLUG_MPI
+        int localFlag = local ? 1 : 0;
+        int anyFlag = 0;
+        MPI_Allreduce(&localFlag, &anyFlag, 1, MPI_INT, MPI_LOR, MPI_COMM_WORLD);
+        return anyFlag != 0;
+#else
+        return local;
 #endif
     }
 

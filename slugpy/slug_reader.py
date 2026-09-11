@@ -147,7 +147,11 @@ def _rank_thread_files_in_dir(dir_path: Path) -> list[str]:
     # "rank_" prefix, so a stray, unrelated file someone happened to
     # drop in this directory (e.g. "rank_notes.h5") is never mistaken
     # for one of OutputManagerH5's own per-rank/thread output files.
-    name_re = re.compile(r"(thread_\d{4}|rank_\d{4}(_thread_\d{4})?)\.h5")
+    # [0-9], not \d -- \d also matches non-ASCII Unicode decimal digits,
+    # which OutputManagerH5::isOutputFileName()'s own std::isdigit
+    # (ASCII-only) never writes, so \d would accept filenames the C++
+    # side never actually produces.
+    name_re = re.compile(r"(thread_[0-9]{4}|rank_[0-9]{4}(_thread_[0-9]{4})?)\.h5")
     files = sorted(
         p for p in dir_path.iterdir()
         if p.is_file() and name_re.fullmatch(p.name))

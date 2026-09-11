@@ -30,7 +30,7 @@ The output file name is constructed from the ``model_name`` keyword in the param
 file. For ``h5`` output, the output file is named ``<model_name>.h5``, while for
 ``h5divided`` output the output files are placed in a directory named ``<model_name>``,
 with each thread's output stored in a separate file in that directory called
-``thread_<NNNNN>.h5`` where ``<NNNNN>`` is the thread number. For ASCII output,
+``thread_<NNNN>.h5`` where ``<NNNN>`` is the thread number. For ASCII output,
 there will be multiple file outputs, whose names follow the pattern
 ``<model_name>_<output_type>.txt``. Which output types are produced is controlled
 by the :ref:`ssec-parameters-output` section of :ref:`sec-parameters`.
@@ -38,7 +38,7 @@ by the :ref:`ssec-parameters-output` section of :ref:`sec-parameters`.
 If SLUG was run under MPI (see :ref:`sec-running-mpi`) with more than one
 process, each process's ("rank's") own output is likewise kept separate,
 named ``rank_<NNNN>.h5`` where ``<NNNN>`` is the rank number -- or, if OpenMP
-threading is also in use within each rank, ``rank_<NNNN>_thread_<NNNNN>.h5``,
+threading is also in use within each rank, ``rank_<NNNN>_thread_<NNNN>.h5``,
 combining both numbers. This naming only appears with ``h5divided`` output,
 or transiently with checkpointed ``h5`` output before a checkpoint is
 consolidated; once an ``h5`` run finishes, every rank's and thread's output is

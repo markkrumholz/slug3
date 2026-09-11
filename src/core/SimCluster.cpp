@@ -302,21 +302,25 @@ auto core::SimCluster::run() -> int
         }
 #endif
 
-        // If SIGTERM was caught somewhere in this batch, this is the
-        // correct, safe point to stop: every trial actually started
-        // has now finished (runTrial()'s own check only ever stops a
-        // trial from starting in the first place), so it is safe to
-        // save the currently-open checkpoint (or, without
-        // checkpointing, the run's own single output file) with the
-        // true, accurate cumulative count of trials completed so far,
-        // via notifyEarlyTermination() rather than checkpoint() --
-        // there is nothing left to write into a new checkpoint, so
+        // If SIGTERM was caught somewhere in this batch -- on this
+        // rank, or (under MPI) any other rank, since mpiAllReceivedSigterm()
+        // reconciles every rank onto the same decision here (see its
+        // own comment for why every rank must agree, rather than each
+        // deciding independently from its own local signal state alone)
+        // -- this is the correct, safe point to stop: every trial
+        // actually started has now finished (runTrial()'s own check
+        // only ever stops a trial from starting in the first place),
+        // so it is safe to save the currently-open checkpoint (or,
+        // without checkpointing, the run's own single output file)
+        // with the true, accurate cumulative count of trials completed
+        // so far, via notifyEarlyTermination() rather than checkpoint()
+        // -- there is nothing left to write into a new checkpoint, so
         // rolling over to one would just leave it empty and un-closed
         // for the destructor to eventually close with a wrong trial
         // count of its own (see notifyEarlyTermination()'s own
         // comment) -- and return sigtermExitCode instead of continuing
         // on to any later, not-yet-started batches.
-        if (utils::sigtermWasReceived())
+        if (utils::mpiAllReceivedSigterm(utils::sigtermWasReceived()))
         {
             const auto cumulativeCompleted =
                 priorTrialsCompleted + trialsCompleted_.load(std::memory_order_relaxed);
