@@ -124,4 +124,39 @@ reader also automatically handles runs whose outputs are divided across checkpoi
 When checkpointing is enabled, SLUG will also safely complete the current trial and
 finalize its ouptut files if it receives ``SIGTERM``. This capability can be used to
 force-write a final checkpoint shortly before hitting walltime limits when running
-in a queued environment. 
+in a queued environment.
+
+.. _sec-running-mpi:
+
+Running SLUG With MPI
+----------------------
+
+If SLUG was built with MPI support (see :ref:`sec-dependencies`), the trials of a
+single run can also be divided across multiple processes -- potentially spanning
+multiple machines -- in addition to (or instead of) OpenMP's own multi-threading
+within a process. This is only available from the command line, not from Python;
+launch ``slug`` through your MPI implementation's usual launcher, e.g.
+
+    .. code-block:: bash
+
+        mpirun -n 4 build/slug path/to/parameter_file.toml
+
+which divides the run's trials evenly across the 4 processes ("ranks"). Each rank
+still uses OpenMP to further parallelize across its own share of trials if SLUG was
+also built with OpenMP support, so a run started this way is dividing work two
+levels deep: first across ranks, then across each rank's own threads. Set
+``OMP_NUM_THREADS`` as usual (see above) to control the second level; the first is
+controlled the normal way for your MPI implementation, e.g. ``mpirun -n``'s own
+argument above.
+
+Restarting an MPI run works the same way as a single-process run (see
+"Checkpointing and Batch Runs" above), with one added benefit: the number of ranks
+used to restart a run need not match the number used originally -- a run started
+on 4 ranks can be restarted on 8, or on just 1, and SLUG will pick up correctly
+either way. This flexibility does not extend to a run whose output has already
+been fully consolidated into a single file (``output_mode = "h5"``, once the run
+completes; see :ref:`sec-output`): restarting from a consolidated checkpoint is
+only supported with exactly one rank, since consolidation discards the
+per-rank bookkeeping a multi-rank restart needs. A run using
+``output_mode = "h5divided"`` never consolidates its output at all, so it can
+always be restarted with a different number of ranks.
