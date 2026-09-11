@@ -368,14 +368,31 @@ namespace io
          * mismatch here can only mean the on-disk checkpoint itself is
          * corrupt or was tampered with; throws std::runtime_error if
          * so, or if a directory found this way turns out to hold no
-         * thread_NNNN.h5 files at all). Also reads that same
-         * checkpoint's own "restart_uid" attribute the same way, and
-         * calls utils::uniqueID().set() with it, so this process's own
-         * cluster/galaxy IDs resume exactly where the run being
-         * restarted left off, rather than either colliding with IDs it
-         * already used (a fresh process's own utils::uniqueID()
-         * otherwise starts back at 0) or leaving a gap (see
-         * closeOutputFile()'s own comment for the full detail).
+         * thread_NNNN.h5/rank_NNNN*.h5 files at all).
+         *
+         * "restart_uid" is handled differently: outside MPI (or this
+         * build was not compiled with SLUG_MPI), it is read from that
+         * same last checkpoint exactly like trials_completed/max_trial
+         * above, and utils::uniqueID().set() is called with it so this
+         * process's own cluster/galaxy IDs resume exactly where the run
+         * being restarted left off. Under MPI, each rank's own
+         * restart_uid is instead rank-local by construction (see
+         * mpiUidStride's own comment), so it would be wrong to read it
+         * from just any file in the last checkpoint the way
+         * trials_completed/max_trial are -- findRestartUidForRank()
+         * scans every checkpoint from the last down to 0 for one
+         * containing this rank's own output file(s) (the number of
+         * ranks can differ between invocations -- see this class's own
+         * header comment -- so the rank actually present in the most
+         * recent checkpoint is not necessarily this one), and
+         * utils::uniqueID().set() is called with the first one found.
+         * If this rank's own files are not found in any checkpoint up
+         * to and including the last one, utils::uniqueID() is left
+         * untouched, at its own default-constructed
+         * mpiRank() * mpiUidStride -- correct for a rank that is
+         * genuinely new to this run's own history (e.g. restarting with
+         * more ranks than any previous invocation used).
+         *
          * restartMaxTrial_ is read the same way again, from that same
          * checkpoint's own "max_trial" attribute -- see maxTrial_'s
          * own comment for why this, not restartTrialsDone_, is what a
@@ -415,6 +432,42 @@ namespace io
          * before restarting again.
          */
         void restartSetup();
+
+        /**
+         * @brief Find the restart_uid this rank should resume from, if any
+         * @param maxCheckpoint The highest checkpoint number found on
+         *   disk (see findMaxCheckpointNumber())
+         * @return The "restart_uid" attribute recorded for this
+         *   process's own rank (utils::mpiRank()) in the most recent
+         *   checkpoint, from maxCheckpoint down to 0, that actually
+         *   contains an output file for it -- or no value, if none of
+         *   them do
+         * @throws std::runtime_error if the most recent checkpoint this
+         *   rank appears in has already been fully consolidated (see
+         *   consolidateFiles()) and this run has more than one rank --
+         *   consolidation discards the very per-rank boundary this
+         *   method needs, with no way to recover it after the fact, so
+         *   restarting a multi-rank run from a consolidated checkpoint
+         *   (e.g. one that already ran to completion, now being
+         *   restarted with a larger stars/trials count so it has new
+         *   trials, and therefore new IDs, left to generate) is only
+         *   supported with exactly one rank -- silently reusing that
+         *   single consolidated file's own restart_uid for every rank
+         *   would hand them all the same starting value instead.
+         * @details
+         * Only meaningful when built with SLUG_MPI; restartSetup() is
+         * this method's only caller, and only under MPI. Needs to look
+         * further back than just maxCheckpoint itself because the
+         * number of ranks can change between invocations of the same
+         * run (restarting with a different -n than before is
+         * explicitly supported): a rank present in an earlier
+         * checkpoint can be genuinely absent from a later one written
+         * by an invocation with fewer ranks, and vice versa. See
+         * restartSetup()'s own comment for how the returned value (or
+         * its absence) is used.
+         */
+        [[nodiscard]] auto findRestartUidForRank(unsigned long maxCheckpoint) const
+            -> std::optional<unsigned long>;
 
         /**
          * @brief Reset this run's output state and open a fresh output file (or set of files)
@@ -522,47 +575,111 @@ namespace io
         void closeOutputFile(unsigned long trialsCompleted);
 
         /**
-         * @brief Merge every thread_NNNN.h5 file in a directory into a single sibling HDF5 file
-         * @param path Directory holding the thread_NNNN.h5 files to
-         *   merge; it is an error if this is not a directory
+         * @brief Reconcile trials_completed/max_trial across every MPI rank for the current checkpoint
+         * @param trialsCompleted This rank's own count of trials
+         *   completed so far, exactly as passed to closeOutputFile()
          * @details
-         * Only meaningful when built with OpenMP, and only called by
-         * the destructor when SimControls::outputMode() is
+         * A no-op when this build was not compiled with SLUG_MPI.
+         * Called once per rank -- from checkpoint() and the destructor,
+         * after every thread's own closeOutputFile() call has already
+         * finished (never from inside an active OpenMP parallel region
+         * itself, matching mpiBarrier()'s own requirement) -- for the
+         * checkpoint that closeOutputFile() just wrote.
+         *
+         * Every rank's own trials_completed/max_trial, as written into
+         * its own output file(s) by closeOutputFile(), only reflects
+         * that one rank's own share of the work (see
+         * SimCluster::run()'s/SimGalaxy::run()'s own mpiPartitionRange()
+         * comment for why trial numbers are partitioned across ranks in
+         * the first place). This reconciles them into the true,
+         * run-wide values every rank's own output should report: an
+         * MPI_Barrier ensures every rank has actually finished writing
+         * before rank 0 reads any of their files, then rank 0 alone
+         * sums trials_completed and takes the max of max_trial across
+         * every rank (reading every other rank's own value back from
+         * whichever of its own output files -- there may be more than
+         * one, if this build was also compiled with OpenMP -- since
+         * there is no other channel to learn it; see this class's own
+         * header comment for why MPI usage here is kept to this one
+         * barrier plus file I/O), and overwrites (via
+         * utils::overwriteULongAttr(), not writeULongAttr(), since
+         * closeOutputFile() already wrote each rank-local value)
+         * trials_completed/max_trial in every rank's own file(s) with
+         * the reconciled, run-wide values. A second barrier follows,
+         * so no rank proceeds while rank 0 might still be mid-write.
+         *
+         * On a restarted run, trialsCompleted (like the value every
+         * other rank's own most recent output file already holds) is
+         * priorTrialsCompleted + that rank's own session-local count
+         * (see SimCluster::run()'s/SimGalaxy::run()'s own callers) --
+         * priorTrialsCompleted being a *global* quantity, carried over
+         * identically on every rank from restartTrialsDone(), not a
+         * per-rank one. Naively summing every rank's own raw value
+         * would therefore count that shared prefix once per rank
+         * instead of once overall; restartTrialsDone_ is subtracted
+         * out of each rank's own value before summing (reducing it to
+         * that rank's own session-local count alone) and added back
+         * exactly once at the end -- a no-op whenever this is not a
+         * restarted run, since restartTrialsDone_ is then 0.
+         *
+         * Deliberately does not touch restart_uid: unlike
+         * trials_completed/max_trial, each rank's own unique IDs are
+         * already permanently non-overlapping by construction (see
+         * mpiUidStride's own comment), so restart_uid is left as
+         * whatever closeOutputFile() already wrote -- purely rank-
+         * local, and correctly so.
+         */
+        void syncCheckpoints(unsigned long trialsCompleted);
+
+        /**
+         * @brief Merge every thread_NNNN.h5/rank_NNNN*.h5 file in a directory into a single sibling HDF5 file
+         * @param path Directory holding the thread_NNNN.h5/rank_NNNN*.h5
+         *   files to merge; it is an error if this is not a directory
+         * @details
+         * Only meaningful when built with OpenMP and/or MPI, and only
+         * called by the destructor when SimControls::outputMode() is
          * OutputMode::h5 (not h5divided) -- see this class's own
-         * header comment. If checkpointing is enabled (see
-         * checkpointModelName()), the destructor calls this once per
-         * checkpoint (path being that checkpoint's own
+         * header comment. Under MPI, only rank 0 ever calls this
+         * (every other rank would otherwise race to consolidate, read,
+         * and delete the very same files). If checkpointing is enabled
+         * (see checkpointModelName()), the destructor calls this once
+         * per checkpoint (path being that checkpoint's own
          * outDir_/modelName_chkNNNNN), not just once, since each
-         * checkpoint's own thread_NNNN.h5 files are entirely separate
-         * from every other checkpoint's -- deliberately not called
-         * mid-run, from checkpoint() itself, so consolidating doesn't
-         * slow down the run itself (see checkpoint()'s own comment).
+         * checkpoint's own thread_NNNN.h5/rank_NNNN*.h5 files are
+         * entirely separate from every other checkpoint's --
+         * deliberately not called mid-run, from checkpoint() itself
+         * (unlike syncCheckpoints() above, which is), so consolidating
+         * -- moving a checkpoint's worth of actual row data around, not
+         * just updating a single attribute -- does not slow the run
+         * itself down for no benefit, since nothing reads a
+         * checkpoint's consolidated form until the run is over anyway.
          *
-         * Finds every file in path matching thread_NNNN.h5, sorted by
-         * name (equivalent to numeric order, since the thread number
-         * is zero-padded to a fixed width). Copies the first
-         * (thread_0000.h5) to a new file, path.h5 (a sibling of path,
-         * in path's own parent directory -- e.g. outDir/modelName.h5,
-         * given outDir/modelName), and opens that copy for updating.
-         * Every remaining thread_NNNN.h5 file is then opened for
-         * reading, and every extensible dataset in every one of its
-         * groups (identified generically, by iterating the file's own
-         * group/dataset structure, rather than by a hardcoded list of
-         * names -- so this needs no update if a new group/dataset is
-         * ever added elsewhere in this class) is appended onto the
-         * correspondingly-named dataset in path.h5 -- every
-         * thread_NNNN.h5 shares an identical group/dataset skeleton
-         * with path.h5 (each was built by an identical
+         * Finds every file in path matching thread_NNNN.h5 or
+         * rank_NNNN*.h5 (whichever this build's own naming scheme
+         * produces -- see openNewOutputFiles()), sorted by name
+         * (equivalent to rank-major, thread-minor numeric order, since
+         * both numbers are zero-padded to a fixed width). Copies the
+         * first to a new file, path.h5 (a sibling of path, in path's
+         * own parent directory -- e.g. outDir/modelName.h5, given
+         * outDir/modelName), and opens that copy for updating. Every
+         * remaining file is then opened for reading, and every
+         * extensible dataset in every one of its groups (identified
+         * generically, by iterating the file's own group/dataset
+         * structure, rather than by a hardcoded list of names -- so
+         * this needs no update if a new group/dataset is ever added
+         * elsewhere in this class) is appended onto the
+         * correspondingly-named dataset in path.h5 -- every file
+         * shares an identical group/dataset skeleton with path.h5
+         * (each was built by an identical
          * openOutputFile() call), so every append target is
-         * guaranteed to already exist. Row order across threads is
-         * not preserved -- rows from thread_0000.h5 come first, then
-         * thread_0001.h5's own rows, etc. -- but nothing downstream
-         * relies on the order rows were written in.
+         * guaranteed to already exist. Row order across the merged
+         * files is not preserved -- rows from whichever file sorts
+         * first come first, then the next file's own rows, etc. -- but
+         * nothing downstream relies on the order rows were written in.
          *
-         * Once every thread_NNNN.h5 file's contents have been merged
-         * in and path.h5 has been closed, every thread_NNNN.h5 file
-         * and path itself (now empty) are deleted, leaving only
-         * path.h5 behind.
+         * Once every file's contents have been merged in and path.h5
+         * has been closed, every one of those files and path itself
+         * (now empty) are deleted, leaving only path.h5 behind.
          */
         static void consolidateFiles(const std::filesystem::path& path);
 

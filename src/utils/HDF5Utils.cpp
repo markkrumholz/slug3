@@ -293,6 +293,19 @@ auto utils::readULongAttr(const hid_t loc, const std::string& name) -> unsigned 
     return value;
 }
 
+void utils::overwriteULongAttr(const hid_t loc, const std::string& name,
+    const unsigned long value)
+{
+    const hid_t attr = H5Aopen(loc, name.c_str(), H5P_DEFAULT);
+    if (attr < 0)
+    {
+        throw std::runtime_error(
+            "utils::overwriteULongAttr: unable to open attribute " + name);
+    }
+    H5Awrite(attr, H5T_NATIVE_ULONG, static_cast<const void*>(&value));
+    H5Aclose(attr);
+}
+
 void utils::writeStringDataset(const hid_t loc, const std::string& name,
     const std::string& value)
 {

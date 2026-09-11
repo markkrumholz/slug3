@@ -42,6 +42,18 @@ if(NOT OpenMP_CXX_FOUND)
     message(WARNING "OpenMP not found: building without threading support")
 endif()
 
+# Find MPI; multi-process parallelism is optional, like OpenMP, and only
+# ever needed by the slug CLI executable itself (not slugPython or the
+# test suite -- see SLUG_MPI's own uses in src/core and src/io). Unlike
+# _OPENMP, which the compiler defines automatically, there is no standard
+# preprocessor macro for "MPI is available", so code that depends on it
+# must guard itself with #ifdef SLUG_MPI, defined below only for the
+# targets that actually link MPI::MPI_CXX.
+find_package(MPI)
+if(NOT MPI_CXX_FOUND)
+    message(WARNING "MPI not found: building without multi-process support")
+endif()
+
 # Find (or build) an implementation of C++23's <mdspan>; see that file's
 # own comment for the native/package/submodule priority this uses.
 include(cmake/Mdspan.cmake)
@@ -634,6 +646,17 @@ if(OpenMP_CXX_FOUND)
     target_link_libraries(slugTestNebular PRIVATE OpenMP::OpenMP_CXX)
     target_link_libraries(slugTestSpecsyn PRIVATE OpenMP::OpenMP_CXX)
     target_link_libraries(slugPython PRIVATE OpenMP::OpenMP_CXX)
+endif()
+
+# Link to MPI, if available -- only the slug CLI executable itself, not
+# slugPython or any test target (see SLUG_MPI's own comment above and in
+# src/core/SimCluster.cpp/SimGalaxy.cpp/src/io/OutputManagerH5.cpp): the
+# shared sources those other targets also compile simply take the
+# existing, unchanged single-rank code path when SLUG_MPI is not defined
+# for them.
+if(MPI_CXX_FOUND)
+    target_compile_definitions(slug PRIVATE SLUG_MPI)
+    target_link_libraries(slug PRIVATE MPI::MPI_CXX)
 endif()
 
 # Optional: auto-regenerate a .pyi type stub for the compiled _slug

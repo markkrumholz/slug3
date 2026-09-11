@@ -12,6 +12,7 @@
 #include "io/OutputManagerAscii.hpp"
 #include "io/OutputManagerH5.hpp"
 #include "io/SimControls.hpp"
+#include "utils/MPIUtils.hpp"
 #include <cstdlib>
 #include <exception>
 #include <iostream>
@@ -23,6 +24,13 @@
 
 auto main(int argc, char *argv[]) -> int // NOLINT(bugprone-exception-escape) -- every throwing call below (SimControls, OutputManagerH5/OutputManagerAscii construction, SimCluster::run()/SimGalaxy::run()) is inside the try block below, catching std::exception by reference; verified at runtime that a genuine constructor throw (e.g. an invalid deck) is caught cleanly rather than escaping. This check's own known limitation is that it cannot see through calls into other translation units (OpenMP-parallel code among them) well enough to confirm every thrown type derives from std::exception, so it stays conservative here regardless.
 {
+    // Must be the very first thing main() does, and must live for its
+    // entire remaining scope -- see MPIGuard's own comment for why every
+    // one of this function's several exit paths is safe as a result.
+    // A no-op (argc/argv left untouched) when this build was not
+    // compiled with SLUG_MPI.
+    const utils::MPIGuard mpiGuard(&argc, &argv);
+
     // Check arguments: either just the input deck, or an optional
     // --restart/-R flag ahead of it, requesting that this run resume
     // a previous, interrupted run from its most recent checkpoint

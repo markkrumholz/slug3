@@ -9,6 +9,7 @@
 #include "SimCluster.hpp"
 #include "../io/OutputManager.hpp"
 #include "../io/SimControls.hpp"
+#include "../utils/MPIUtils.hpp"
 #include "../utils/SigtermGuard.hpp"
 #include "../utils/UniqueIDManager.hpp"
 #include "Cluster.hpp"
@@ -164,7 +165,10 @@ auto core::SimCluster::run() -> int
         (simControls_.nTrial() - priorTrialsCompleted) : 0;
     const unsigned long numberingEnd = numberingStart + trialsRemaining;
 
-    if (simControls_.verbosity() > 0)
+    // Gated to rank 0 only (a no-op distinction outside MPI, or running
+    // as a single rank) so this run-wide summary is printed once, not
+    // once per rank
+    if (simControls_.verbosity() > 0 && utils::mpiRank() == 0)
     {
         std::cout << "slug: cluster simulation starting with "
             << simControls_.nTrial() << " trials";
@@ -205,6 +209,18 @@ auto core::SimCluster::run() -> int
         const unsigned long batchEnd =
             std::min(batchStart + batchSize, numberingEnd);
 
+        // Under MPI, each rank runs only its own contiguous slice of
+        // this batch -- see mpiPartitionRange()'s own comment. Trial
+        // numbers themselves never collide across ranks this way (each
+        // rank's own slice is disjoint); it is only unique IDs
+        // (assigned independently by each rank's own UniqueIDManager)
+        // that need mpiUidStride to stay non-overlapping. A no-op
+        // (rankBatchStart, rankBatchEnd) == (batchStart, batchEnd) when
+        // this build was not compiled with SLUG_MPI, or is running as a
+        // single rank.
+        const auto [rankBatchStart, rankBatchEnd] =
+            utils::mpiPartitionRange(batchStart, batchEnd);
+
 #ifdef _OPENMP
         // See runTrial()'s own comment for why each trial is
         // individually wrapped in a try/catch here, rather than
@@ -217,7 +233,7 @@ auto core::SimCluster::run() -> int
         // sees the same kind of failure it always has.
         std::exception_ptr firstError;
 #pragma omp parallel for schedule(dynamic)
-        for (unsigned long trialNum = batchStart; trialNum < batchEnd; ++trialNum)
+        for (unsigned long trialNum = rankBatchStart; trialNum < rankBatchEnd; ++trialNum)
         {
             try
             {
@@ -247,7 +263,7 @@ auto core::SimCluster::run() -> int
 #else
         try
         {
-            for (unsigned long trialNum = batchStart; trialNum < batchEnd; ++trialNum)
+            for (unsigned long trialNum = rankBatchStart; trialNum < rankBatchEnd; ++trialNum)
             {
                 runTrial(trialNum);
             }
@@ -303,6 +319,19 @@ auto core::SimCluster::run() -> int
                 priorTrialsCompleted + trialsCompleted_.load(std::memory_order_relaxed));
         }
     }
+
+    // Every batch above completed normally (an early SIGTERM/exception
+    // return already left via one of the notifyEarlyTermination() calls
+    // above instead), so this rank's own true final trial count is
+    // exactly priorTrialsCompleted + trialsCompleted_. Recording it here
+    // -- despite nothing having actually ended "early" -- matters under
+    // MPI: without it, OutputManagerH5's own destructor falls back to
+    // assuming simControls_.nTrial() (the *whole run's* target across
+    // every rank) is this rank's own final count, which is only true in
+    // a single-rank run. Outside MPI this is a no-op, since the two
+    // already agree whenever every trial actually completed.
+    outputManager_->notifyEarlyTermination(
+        priorTrialsCompleted + trialsCompleted_.load(std::memory_order_relaxed));
 
     if (simControls_.verbosity() > 0)
     {

@@ -9,6 +9,7 @@
 #include "SimGalaxy.hpp"
 #include "../io/OutputManager.hpp"
 #include "../io/SimControls.hpp"
+#include "../utils/MPIUtils.hpp"
 #include "../utils/SigtermGuard.hpp"
 #include "Galaxy.hpp"
 #include <algorithm>
@@ -79,7 +80,8 @@ auto core::SimGalaxy::run() -> int
         (simControls_.nTrial() - priorTrialsCompleted) : 0;
     const unsigned long numberingEnd = numberingStart + trialsRemaining;
 
-    if (simControls_.verbosity() > 0)
+    // Gated to rank 0 only -- see SimCluster::run()'s own identical comment
+    if (simControls_.verbosity() > 0 && utils::mpiRank() == 0)
     {
         std::cout << "slug: galaxy simulation starting with "
             << simControls_.nTrial() << " trials";
@@ -120,6 +122,10 @@ auto core::SimGalaxy::run() -> int
         const unsigned long batchEnd =
             std::min(batchStart + batchSize, numberingEnd);
 
+        // See SimCluster::run()'s own identical comment
+        const auto [rankBatchStart, rankBatchEnd] =
+            utils::mpiPartitionRange(batchStart, batchEnd);
+
 #ifdef _OPENMP
         // See runTrial()'s own comment for why each trial is
         // individually wrapped in a try/catch here, rather than
@@ -132,7 +138,7 @@ auto core::SimGalaxy::run() -> int
         // sees the same kind of failure it always has.
         std::exception_ptr firstError;
 #pragma omp parallel for schedule(dynamic)
-        for (unsigned long trialNum = batchStart; trialNum < batchEnd; ++trialNum)
+        for (unsigned long trialNum = rankBatchStart; trialNum < rankBatchEnd; ++trialNum)
         {
             try
             {
@@ -157,7 +163,7 @@ auto core::SimGalaxy::run() -> int
 #else
         try
         {
-            for (unsigned long trialNum = batchStart; trialNum < batchEnd; ++trialNum)
+            for (unsigned long trialNum = rankBatchStart; trialNum < rankBatchEnd; ++trialNum)
             {
                 runTrial(trialNum);
             }
@@ -193,6 +199,10 @@ auto core::SimGalaxy::run() -> int
                 priorTrialsCompleted + trialsCompleted_.load(std::memory_order_relaxed));
         }
     }
+
+    // See SimCluster::run()'s own identical comment
+    outputManager_->notifyEarlyTermination(
+        priorTrialsCompleted + trialsCompleted_.load(std::memory_order_relaxed));
 
     if (simControls_.verbosity() > 0)
     {
