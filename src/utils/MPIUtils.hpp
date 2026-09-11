@@ -11,7 +11,7 @@
 #define MPIUTILS_HPP
 
 #include <algorithm>
-#include <iostream>
+#include <iostream> // NOLINT(misc-include-cleaner) -- only used inside initMPI()'s own #ifdef SLUG_MPI block (std::cerr, for the MPI_THREAD_FUNNELED warning), so a build without SLUG_MPI never actually uses it, the same reason <mpi.h> below needs its own identical NOLINT
 #include <utility>
 
 #ifdef SLUG_MPI
@@ -94,7 +94,16 @@ namespace utils
     class MPIGuard
     {
     public:
+        /**
+         * @brief Construct the guard, calling initMPI() with the given argc/argv
+         * @param argc Address of main()'s own argc
+         * @param argv Address of main()'s own argv
+         */
         MPIGuard(int* argc, char*** argv) { initMPI(argc, argv); }
+
+        /**
+         * @brief Destroy the guard, calling finalizeMPI()
+         */
         ~MPIGuard() { finalizeMPI(); }
         MPIGuard(const MPIGuard&) = delete;
         MPIGuard(MPIGuard&&) = delete;

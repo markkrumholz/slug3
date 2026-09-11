@@ -141,10 +141,16 @@ def _rank_thread_files_in_dir(dir_path: Path) -> list[str]:
     FileNotFoundError
         If dir_path holds no matching files.
     """
+    # Exactly four digits in each numeric segment (matching the C++
+    # side's own std::setw(4) zero-padding -- see
+    # OutputManagerH5::openNewOutputFiles()), not just a bare "thread_"/
+    # "rank_" prefix, so a stray, unrelated file someone happened to
+    # drop in this directory (e.g. "rank_notes.h5") is never mistaken
+    # for one of OutputManagerH5's own per-rank/thread output files.
+    name_re = re.compile(r"(thread_\d{4}|rank_\d{4}(_thread_\d{4})?)\.h5")
     files = sorted(
         p for p in dir_path.iterdir()
-        if p.is_file() and p.suffix == ".h5"
-        and (p.name.startswith("thread_") or p.name.startswith("rank_")))
+        if p.is_file() and name_re.fullmatch(p.name))
     if not files:
         raise FileNotFoundError(f"no thread_*.h5/rank_*.h5 files found in {dir_path}")
     return [str(p) for p in files]
@@ -330,6 +336,12 @@ class slug_reader:
         from, as of the same checkpoint trials_completed was read from
         (see OutputManagerH5::closeOutputFile()'s own "restart_uid"
         attribute) -- same None cases as trials_completed (read-only).
+        Under MPI, each rank's own output file has its own restart_uid
+        (see the SLUG documentation's own note on this, in "Output
+        Files and Format"); this is read from the lowest-numbered
+        rank's file specifically (rank 0's, if present), not some
+        run-wide value -- there isn't one, since each rank's own ID
+        numbering runs in its own, non-overlapping range.
     input_deck : tomlkit.TOMLDocument
         The input deck used to produce this file, read from the
         input_deck group's toml dataset and parsed on first access

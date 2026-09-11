@@ -39,6 +39,30 @@ pytestmark = pytest.mark.skipif(
     "this test when MPI_CXX_FOUND)",
 )
 
+
+def _oversubscribe_flag():
+    # A CI runner's own core count can be smaller than the rank counts
+    # this module deliberately exercises (e.g. 4), and Open MPI's
+    # mpiexec refuses to run more ranks than it thinks there are cores
+    # ("not enough slots") unless told otherwise -- --oversubscribe is
+    # exactly that override. Only add it for Open MPI specifically:
+    # the flag doesn't exist for MPICH (whose mpiexec doesn't impose
+    # this limit to begin with, so nothing needs overriding there),
+    # and passing an unrecognized flag would just be a new failure
+    # mode of its own.
+    if not MPIEXEC_EXECUTABLE:
+        return []
+    try:
+        version = subprocess.run(
+            [MPIEXEC_EXECUTABLE, "--version"], capture_output=True, text=True, timeout=10,
+        ).stdout
+    except OSError:
+        return []
+    return ["--oversubscribe"] if "Open MPI" in version or "OpenRTE" in version else []
+
+
+_OVERSUBSCRIBE_FLAG = _oversubscribe_flag()
+
 # A minimal, fast-to-run cluster deck: MIST_test is a small, committed
 # track fixture (tests/tracks/assets/, unlike the real, gitignored
 # data/tracks/*.h5), and blackbody spectra need no spectral library at
@@ -78,7 +102,7 @@ compute_neb = false
 
 
 def run_slug(deck_path, nranks, restart=False):
-    cmd = [MPIEXEC_EXECUTABLE, MPIEXEC_NUMPROC_FLAG, str(nranks)]
+    cmd = [MPIEXEC_EXECUTABLE, MPIEXEC_NUMPROC_FLAG, str(nranks)] + _OVERSUBSCRIBE_FLAG
     if restart:
         cmd += [SLUG_EXECUTABLE, "--restart", str(deck_path)]
     else:

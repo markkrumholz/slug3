@@ -22,6 +22,7 @@
 #include "io/SlugVersion.hpp"
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <charconv>
 #include <cstddef>
 #include <filesystem>
@@ -161,6 +162,45 @@ static void crossCheckAttr(std::optional<unsigned long>& common, const unsigned 
     }
 }
 
+// True if every one of the n characters starting at start is an ASCII
+// digit -- used below to validate the zero-padded rank/thread numbers
+// in a candidate output file name (std::setw(4) on the writing side --
+// see openNewOutputFiles()) character-by-character, rather than just
+// checking a name's length/prefix, which digits alone can't guarantee
+// (e.g. "rank_abcd.h5" is the right length and shape but not a real
+// rank number).
+static auto isNDigits(const std::string& name, const std::size_t start, const std::size_t n) -> bool
+{
+    return std::all_of(name.begin() + static_cast<std::ptrdiff_t>(start),
+        name.begin() + static_cast<std::ptrdiff_t>(start + n),
+        [](const unsigned char c) { return std::isdigit(c) != 0; });
+}
+
+// True if name is exactly one of the three shapes openNewOutputFiles()
+// actually writes: thread_NNNN.h5 (OpenMP, no MPI), rank_NNNN.h5 (MPI,
+// no OpenMP), or rank_NNNN_thread_MMMM.h5 (both), with exactly four
+// digits in each numeric segment -- rather than a bare "thread_"/
+// "rank_" prefix match, so a stray, unrelated file someone happened to
+// drop into one of these directories (e.g. "rank_notes.h5") is never
+// mistaken for one of OutputManagerH5's own per-rank/thread output
+// files. Shared by filesForRank() below, restartSetup(), and
+// consolidateFiles(), which otherwise each had their own, more
+// permissive version of the same check.
+static auto isOutputFileName(const std::string& name) -> bool
+{
+    if (name.size() == 14 && name.compare(0, 7, "thread_") == 0 &&
+        isNDigits(name, 7, 4) && name.compare(11, 3, ".h5") == 0)
+    { return true; }
+    if (name.size() == 12 && name.compare(0, 5, "rank_") == 0 &&
+        isNDigits(name, 5, 4) && name.compare(9, 3, ".h5") == 0)
+    { return true; }
+    if (name.size() == 24 && name.compare(0, 5, "rank_") == 0 &&
+        isNDigits(name, 5, 4) && name.compare(9, 8, "_thread_") == 0 &&
+        isNDigits(name, 17, 4) && name.compare(21, 3, ".h5") == 0)
+    { return true; }
+    return false;
+}
+
 // Return every rank_<rank>.h5 or rank_<rank>_thread_MMMM.h5 file
 // (whichever this build's own naming scheme produces -- see
 // openNewOutputFiles()) directly inside dirPath, i.e. every one of the
@@ -186,13 +226,16 @@ static auto filesForRank(const std::filesystem::path& dirPath, const int rank)
     {
         if (!entry.is_regular_file()) { continue; }
         const auto& name = entry.path().filename().string();
-        // Either an exact "rank_NNNN.h5" (no OpenMP) or a
-        // "rank_NNNN_"-prefixed "rank_NNNN_thread_MMMM.h5" (with
-        // OpenMP) -- requiring the trailing "_" (or nothing at all)
-        // right after the zero-padded rank number, rather than a bare
-        // prefix match, so e.g. rank 1's own "rank_0001..." files are
-        // never confused with rank 10's "rank_0010...".
-        if ((name == prefix + ".h5") || name.starts_with(prefix + "_"))
+        // isOutputFileName() alone would also accept a *different*
+        // rank's own file; starts_with(prefix) narrows to this rank
+        // specifically. Safe to combine the two this way (rather than
+        // needing a single combined check) because isOutputFileName()
+        // fixes the total length and internal structure exactly, so a
+        // name starting with e.g. "rank_0001" can only be rank 1's own
+        // "rank_0001.h5"/"rank_0001_thread_MMMM.h5" -- never some
+        // other, longer rank number's file -- once it also passes that
+        // check.
+        if (isOutputFileName(name) && name.starts_with(prefix))
         { files.push_back(entry.path()); }
     }
     if (files.empty())
@@ -515,9 +558,7 @@ void io::OutputManagerH5::restartSetup() // NOLINT(readability-function-cognitiv
         {
             if (!entry.is_regular_file()) { continue; }
             const auto& fname = entry.path().filename().string();
-            if ((fname.starts_with("thread_") || fname.starts_with("rank_")) &&
-                entry.path().extension() == ".h5")
-            { threadFiles.push_back(entry.path()); }
+            if (isOutputFileName(fname)) { threadFiles.push_back(entry.path()); }
         }
         if (threadFiles.empty())
         {
@@ -1431,9 +1472,7 @@ void io::OutputManagerH5::consolidateFiles(const std::filesystem::path& path)
     {
         if (!entry.is_regular_file()) { continue; }
         const auto& name = entry.path().filename().string();
-        if ((name.starts_with("thread_") || name.starts_with("rank_")) &&
-            entry.path().extension() == ".h5")
-        { threadFiles.push_back(entry.path()); }
+        if (isOutputFileName(name)) { threadFiles.push_back(entry.path()); }
     }
     if (threadFiles.empty())
     {

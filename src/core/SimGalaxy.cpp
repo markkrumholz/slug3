@@ -19,6 +19,21 @@
 #include <memory>
 #include <utility>
 
+// See SimCluster.cpp's own identical helper for why this exists and
+// why it reports cumulativeCompleted plainly, not as a fraction of
+// nTrial.
+static void printSigtermMessage(const unsigned long cumulativeCompleted, const unsigned long nTrial)
+{
+    std::cout << "slug: caught SIGTERM, stopping early with " <<
+        cumulativeCompleted << " trials completed";
+    if (utils::mpiSize() > 1)
+    {
+        std::cout << " on rank " << utils::mpiRank() <<
+            " (this rank's own share of " << nTrial << " total trials across all ranks)";
+    }
+    std::cout << "\n";
+}
+
 core::SimGalaxy::SimGalaxy(const io::SimControls& simControls,
     std::unique_ptr<io::OutputManager> outputManager, const bool restart) :
     simControls_(simControls),
@@ -185,9 +200,7 @@ auto core::SimGalaxy::run() -> int
             outputManager_->notifyEarlyTermination(cumulativeCompleted);
             if (simControls_.verbosity() > 0)
             {
-                std::cout << "slug: caught SIGTERM, stopping early with "
-                    << cumulativeCompleted << " / " << simControls_.nTrial() <<
-                    " trials completed\n";
+                printSigtermMessage(cumulativeCompleted, simControls_.nTrial());
             }
             return sigtermExitCode;
         }

@@ -40,6 +40,31 @@ static auto toRoundTripString(const double value) -> std::string
     return { buf.data(), result.ptr };
 }
 
+// Print run()'s own "caught SIGTERM" progress message -- factored out
+// purely to keep run()'s own cognitive complexity down, not because
+// it's used from more than one place. cumulativeCompleted is only
+// this rank's own share of the run (see run()'s own comment at its one
+// call site); reporting it against nTrial -- the *whole run's* target
+// across every rank -- would misleadingly imply cumulativeCompleted /
+// nTrial is this run's true overall completion fraction, which is
+// only true outside MPI (mpiSize() == 1). The true, global total is
+// only ever reconciled later, once every rank has reached
+// OutputManagerH5::syncCheckpoints()'s own barrier (see
+// notifyEarlyTermination()'s own comment); nothing here waits for that
+// just to print a progress message, so this reports each rank's own
+// number plainly instead of a fraction it cannot yet know.
+static void printSigtermMessage(const unsigned long cumulativeCompleted, const unsigned long nTrial)
+{
+    std::cout << "slug: caught SIGTERM, stopping early with " <<
+        cumulativeCompleted << " trials completed";
+    if (utils::mpiSize() > 1)
+    {
+        std::cout << " on rank " << utils::mpiRank() <<
+            " (this rank's own share of " << nTrial << " total trials across all ranks)";
+    }
+    std::cout << "\n";
+}
+
 core::SimCluster::SimCluster(const io::SimControls& simControls,
     std::unique_ptr<io::OutputManager> outputManager, const bool restart) :
     simControls_(simControls),
@@ -298,9 +323,7 @@ auto core::SimCluster::run() -> int
             outputManager_->notifyEarlyTermination(cumulativeCompleted);
             if (simControls_.verbosity() > 0)
             {
-                std::cout << "slug: caught SIGTERM, stopping early with "
-                    << cumulativeCompleted << " / " << simControls_.nTrial() <<
-                    " trials completed\n";
+                printSigtermMessage(cumulativeCompleted, simControls_.nTrial());
             }
             return sigtermExitCode;
         }
