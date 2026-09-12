@@ -1,6 +1,6 @@
-<img src="doc/logos/slug-logo-banner.png" alt="slug" width="400">
+<img src="doc/logos/slug-logo-banner.png" alt="slug" width="300">
 
-### Overview of slug3 ###
+### Overview of SLUG ###
 
 This is version 3 of the Stochastically Lighting Up Galaxies (SLUG) code. 
 
