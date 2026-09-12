@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <mdspan> // NOLINT(misc-include-cleaner)
+#include <optional>
 #include <ranges>
 #include <stdexcept>
 #include <string>
@@ -30,6 +31,31 @@ namespace yields
 {
     namespace
     {
+        /**
+         * @brief RAII guard that disables HDF5's automatic error-stack
+         *   printing for its lifetime, restoring the prior handler on
+         *   destruction -- including when unwinding past it due to an
+         *   exception, unlike a bare save/set/restore triplet
+         */
+        class H5ErrorSuppressor //NOLINT(llvm-prefer-static-over-anonymous-namespace)
+        {
+        public:
+            H5ErrorSuppressor()
+            {
+                H5Eget_auto2(H5E_DEFAULT, &oldFunc_, &oldClientData_);
+                H5Eset_auto2(H5E_DEFAULT, nullptr, nullptr);
+            }
+            ~H5ErrorSuppressor() { H5Eset_auto2(H5E_DEFAULT, oldFunc_, oldClientData_); }
+            H5ErrorSuppressor(const H5ErrorSuppressor&) = delete;
+            H5ErrorSuppressor(H5ErrorSuppressor&&) = delete;
+            auto operator=(const H5ErrorSuppressor&) -> H5ErrorSuppressor& = delete;
+            auto operator=(H5ErrorSuppressor&&) -> H5ErrorSuppressor& = delete;
+
+        private:
+            H5E_auto2_t oldFunc_ = nullptr;
+            void* oldClientData_ = nullptr;
+        };
+
         /**
          * @brief Scan, validate, and bracket the [Fe/H] groups in one channel's group
          * @param grp Handle to the channel's own already-open group
@@ -61,12 +87,15 @@ namespace yields
          * format grows. Leaves grp itself open either way -- the
          * caller owns closing it (and the file containing it).
          *
-         * HDF5's own automatic error-stack printing is disabled around
-         * the loop below and restored right after: every non-group
-         * child (masses/isotope_z/isotope_a) is *expected* to fail
-         * H5Gopen2, and this codebase has no use for HDF5's own
-         * multi-line stderr diagnostic dump on each such harmless,
-         * anticipated failure.
+         * HDF5's own automatic error-stack printing is disabled (via
+         * H5ErrorSuppressor, above) around the loop below: every
+         * non-group child (masses/isotope_z/isotope_a) is *expected*
+         * to fail H5Gopen2, and this codebase has no use for HDF5's
+         * own multi-line stderr diagnostic dump on each such harmless,
+         * anticipated failure. The RAII guard, rather than a bare
+         * save/set/restore triplet, ensures the prior handler is put
+         * back even if utils::childNameByIdx or
+         * utils::readScalarAttrIfPresent throws.
          */
         auto findBracketingFeH( //NOLINT(llvm-prefer-static-over-anonymous-namespace)
             const hid_t grp, const double fehMin, const double fehMax,
@@ -77,20 +106,27 @@ namespace yields
             H5Gget_info(grp, &ginfo);
             std::vector<std::pair<double, std::string>> available;
 
-            H5E_auto2_t oldFunc = nullptr;
-            void* oldClientData = nullptr;
-            H5Eget_auto2(H5E_DEFAULT, &oldFunc, &oldClientData);
-            H5Eset_auto2(H5E_DEFAULT, nullptr, nullptr);
-            for (hsize_t i = 0; i < ginfo.nlinks; ++i)
             {
-                const auto childName = utils::childNameByIdx(grp, i);
-                const hid_t childGrp = H5Gopen2(grp, childName.c_str(), H5P_DEFAULT);
-                if (childGrp < 0) { continue; }
-                const auto fehVal = utils::readScalarAttrIfPresent(childGrp, "Fe_H");
-                H5Gclose(childGrp);
-                if (fehVal.has_value()) { available.emplace_back(*fehVal, childName); }
+                const H5ErrorSuppressor suppressor;
+                for (hsize_t i = 0; i < ginfo.nlinks; ++i)
+                {
+                    const auto childName = utils::childNameByIdx(grp, i);
+                    const hid_t childGrp = H5Gopen2(grp, childName.c_str(), H5P_DEFAULT);
+                    if (childGrp < 0) { continue; }
+                    std::optional<double> fehVal;
+                    try
+                    {
+                        fehVal = utils::readScalarAttrIfPresent(childGrp, "Fe_H");
+                    }
+                    catch (...)
+                    {
+                        H5Gclose(childGrp);
+                        throw;
+                    }
+                    H5Gclose(childGrp);
+                    if (fehVal.has_value()) { available.emplace_back(*fehVal, childName); }
+                }
             }
-            H5Eset_auto2(H5E_DEFAULT, oldFunc, oldClientData);
             std::ranges::sort(available);
 
             if (available.empty())

@@ -10,11 +10,21 @@ both ejecta and wind yields; 100.0 Msun, a failed supernova with an
 all-zero ccsn yield -- see import_yield_tables.py's own comment) and 3
 isotopes (h1, fe56, ni56) from the real, already-imported
 data/yields/sukhbold16.h5, for both the ccsn and massive_star_winds
-channels, at their one shared Fe_H = 0.0. Reading real values (rather
+channels, at their one real Fe_H = 0.0. Reading real values (rather
 than making up small round numbers by hand, the way most other
 tests/*/assets fixtures in this project do) means the resulting unit
 test can assert against numbers already independently verified by hand
 against the original s18.2.yield_table/s100.yield_table text files.
+
+The real Sukhbold et al. (2016) data is itself singular in [Fe/H]
+(Solar-only), so it cannot supply a second, real metallicity to
+exercise YieldChannel::yield()'s interpolation *across* Fe_H groups --
+only across masses. A second, synthetic Fe_H = -1.0 group is added
+here purely for that purpose: its yield array is exactly 2x the real
+Fe_H = 0.0 array, elementwise, so any yield() call blending the two is
+trivial to verify by hand (e.g. the Fe_H = -0.5 midpoint is exactly 1.5x
+the Fe_H = 0.0 value). This does not represent a real [Fe/H] = -1
+Sukhbold model and must never be read as one.
 
 Run from the repository root, after data/yields/sukhbold16.h5 already
 exists (see import_yield_tables.py):
@@ -36,6 +46,12 @@ MASSES = [18.2, 100.0]
 ISOTOPES = [(1, 1), (26, 56), (28, 56)]  # (Z, A) for h1, fe56, ni56
 CHANNELS = ["ccsn", "massive_star_winds"]
 MODEL_NAME = "sukhbold_test"
+
+# Synthetic second Fe/H group -- see the module docstring's own
+# explanation of why this can't be extracted from the real (singular
+# in Fe/H) source data
+SYNTHETIC_FEH = -1.0
+SYNTHETIC_SCALE = 2.0
 
 
 def extract_channel(src: h5py.File, channel: str) -> dict:
@@ -70,6 +86,10 @@ def write_h5(extracted: dict[str, dict]) -> None:
             feh_grp = grp.create_group("feh_0")
             feh_grp.attrs["Fe_H"] = 0.0
             feh_grp.create_dataset("yield", data=data["yield"])
+            # Synthetic second Fe/H group -- see the module docstring
+            synth_grp = grp.create_group("feh_neg1")
+            synth_grp.attrs["Fe_H"] = SYNTHETIC_FEH
+            synth_grp.create_dataset("yield", data=data["yield"] * SYNTHETIC_SCALE)
 
 
 def write_registry() -> None:
@@ -83,7 +103,7 @@ def write_registry() -> None:
         model_table["reference"] = "Sukhbold, T., Ertl, T., Woosley, S. E., Brown, J. M., Janka, H.-T. 2016, ApJ, 821, 38"
         model_table["reference_url"] = "https://ui.adsabs.harvard.edu/abs/2016ApJ...821...38S/abstract"
         model_table["file"] = "yields_test.h5"
-        model_table["Fe_H"] = [0.0]
+        model_table["Fe_H"] = [SYNTHETIC_FEH, 0.0]
         model_table["masses"] = MASSES
         channel_table[MODEL_NAME] = model_table
         doc[channel] = channel_table

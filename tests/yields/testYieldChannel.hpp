@@ -167,9 +167,10 @@ inline auto testYieldChannelMassiveStarWinds() -> int
  * @brief Unit test that an out-of-range [Fe/H] request is rejected
  * @return 0 if the test passes, 1 if it fails
  * @details
- * tests/yields/assets/yields.toml's "sukhbold_test" model only
- * provides Fe_H = 0.0. This checks that requesting a fehMin below or
- * a fehMax above 0.0 throws, mirroring
+ * tests/yields/assets/yields.toml's "sukhbold_test" model provides
+ * Fe_H = -1.0 (synthetic -- see make_yields_test_fixture.py's own
+ * docstring) and 0.0 (real). This checks that requesting a fehMin
+ * below -1.0 or a fehMax above 0.0 throws, mirroring
  * testTracks3DFeHRangeGuard()'s identical check for Tracks3D.
  */
 inline auto testYieldChannelFeHRangeGuard() -> int
@@ -180,9 +181,9 @@ inline auto testYieldChannelFeHRangeGuard() -> int
     try
     {
         const yields::YieldChannel yc(
-            yields::Channel::ccsn_, "sukhbold_test", -0.1, 0.0, registryName);
+            yields::Channel::ccsn_, "sukhbold_test", -1.1, 0.0, registryName);
         std::cerr << "testYieldChannelFeHRangeGuard: construction with "
-            "fehMin = -0.1 (below the available minimum of 0.0) "
+            "fehMin = -1.1 (below the available minimum of -1.0) "
             "should have thrown, but did not\n";
         result = 1;
     }
@@ -191,7 +192,7 @@ inline auto testYieldChannelFeHRangeGuard() -> int
     try
     {
         const yields::YieldChannel yc(
-            yields::Channel::ccsn_, "sukhbold_test", 0.0, 0.1, registryName);
+            yields::Channel::ccsn_, "sukhbold_test", -1.0, 0.1, registryName);
         std::cerr << "testYieldChannelFeHRangeGuard: construction with "
             "fehMax = 0.1 (above the available maximum of 0.0) "
             "should have thrown, but did not\n";
@@ -280,11 +281,18 @@ inline auto testYieldChannelHasYield() -> int
  *   masses' own values, for both the ccsn (where mass 100.0 is a
  *   failed supernova with an all-zero yield) and massive_star_winds
  *   channels.
- * - Every one of these calls also exercises feH_'s own singular
- *   (size-1) axis, at Fe_H = 0.0 -- the exact scenario the Sukhbold
- *   et al. (2016) data itself presents, Solar-only -- confirming
- *   utils::findBracket's own degenerate-axis handling (lo_ == hi_,
- *   t_ == 0) needs no special-casing in yield() itself.
+ * - Every one of the checks above also exercises feH_'s own singular
+ *   (size-1) axis, at Fe_H = 0.0 -- the exact scenario the real
+ *   Sukhbold et al. (2016) data itself presents, Solar-only --
+ *   confirming utils::findBracket's own degenerate-axis handling
+ *   (lo_ == hi_, t_ == 0) needs no special-casing in yield() itself.
+ * - A separate YieldChannel, loaded over [-1.0, 0.0], covers
+ *   interpolation *across* Fe_H groups instead: the real data alone
+ *   can't exercise this (it is Solar-only), so
+ *   make_yields_test_fixture.py adds one synthetic Fe_H = -1.0 group
+ *   whose yield array is exactly 2x the real Fe_H = 0.0 array (see its
+ *   own docstring) -- making the Fe_H = -0.5 midpoint exactly 1.5x the
+ *   real value, at a fixed, exact-grid mass.
  */
 inline auto testYieldChannelInterpolation() -> int
 {
@@ -331,6 +339,36 @@ inline auto testYieldChannelInterpolation() -> int
             ccsn.yield(59.1, 0.0), { 2.965, 4.23e-2, 3.51e-2 });
         checkVec("testYieldChannelInterpolation (winds, midpoint)",
             wind.yield(59.1, 0.0), { 16.405, 6.0e-2, 0.0 });
+
+        // Multi-metallicity interpolation, across Fe_H groups rather
+        // than across masses -- see this function's own comment on
+        // why a synthetic Fe_H = -1.0 group is needed for this
+        const yields::YieldChannel ccsnMultiFeH(
+            yields::Channel::ccsn_, "sukhbold_test", -1.0, 0.0, registryName);
+        const yields::YieldChannel windMultiFeH(
+            yields::Channel::massiveStarWinds_, "sukhbold_test", -1.0, 0.0, registryName);
+
+        if (ccsnMultiFeH.feH().size() != 2 || ccsnMultiFeH.feH()[0] != -1.0 ||
+            ccsnMultiFeH.feH()[1] != 0.0)
+        {
+            std::cerr << "testYieldChannelInterpolation: unexpected feH() on the "
+                "[-1.0, 0.0] channel\n";
+            result = 1;
+        }
+
+        // Exact hit on the synthetic Fe_H = -1.0 group: exactly 2x the
+        // real Fe_H = 0.0 values, at the exact grid mass 18.2
+        checkVec("testYieldChannelInterpolation (ccsn, exact Fe_H=-1.0)",
+            ccsnMultiFeH.yield(18.2, -1.0), { 11.86, 1.692e-1, 1.404e-1 });
+        checkVec("testYieldChannelInterpolation (winds, exact Fe_H=-1.0)",
+            windMultiFeH.yield(18.2, -1.0), { 4.42, 8.00e-3, 0.0 });
+
+        // Fe_H = -0.5, the exact arithmetic midpoint of [-1.0, 0.0]:
+        // exactly 1.5x the real Fe_H = 0.0 value, at the exact grid mass 18.2
+        checkVec("testYieldChannelInterpolation (ccsn, Fe_H midpoint)",
+            ccsnMultiFeH.yield(18.2, -0.5), { 8.895, 1.269e-1, 1.053e-1 });
+        checkVec("testYieldChannelInterpolation (winds, Fe_H midpoint)",
+            windMultiFeH.yield(18.2, -0.5), { 3.315, 6.00e-3, 0.0 });
     }
     catch (const std::exception& e)
     {
