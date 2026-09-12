@@ -10,14 +10,14 @@ This repository is version 3 of the code. The previous version is [slug2](https:
 
 The main top-level directories in the repository are `data`, `slugpy`, `src`, and `tests`.
 
-* The `data` directory contains the data files on which slug relies. See below for more details on how slug handles data files. This directory is broken into subdirectories `filters`, `imfs`, `spectra`, `tools`, and `tracks`; a further subdirectory `yields` will be added.
+* The `data` directory contains the data files on which slug relies. See below for more details on how slug handles data files. This directory is broken into subdirectories `extinct`, `filters`, `imfs`, `spectra`, `tools`, `tracks`, and `yields`.
     * `extinct` holds tabulated extinction curves
     * `filters` contains photometric filters
     * `imfs` contains definition files for commonly-used initial mass functions
     * `spectra` contains libraries of stellar atomsphere models that provide spectra
     * `tools` contains scripts used to download and process data from public sources and populate the other `data` directories
     * `tracks` contains stellar tracks
-    * `yields` will contain libraries of stellar nucleosynthetic yields.
+    * `yields` contains libraries of stellar nucleosynthetic yields, organized by nucleosynthetic channel (e.g. `ccsn`, `massive_star_winds`)
 * The `src` directory contains the main program source code; `main.cpp` is in the top-level source directory, and the rest of the code is in subdirectories; each subdirectory defines a namespace whose name matches the name of the subdirectory, and all classes and functions defined in that subdirectory below to that namespace. The subdirectories are:
     * `core` contains the top-level routines that manage simulations and store their data
     * `elem` holds fundamental elemental and atomic data
