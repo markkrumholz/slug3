@@ -9,6 +9,7 @@
 #include "SpecsynLibWD.hpp"
 #include "../io/SimControls.hpp"
 #include "../tracks/TrackCommons.hpp"
+#include "../utils/GridBracket.hpp"
 #include "../utils/HDF5Utils.hpp"
 #include "../utils/MiscUtils.hpp"
 #include "Specsyn.hpp"
@@ -292,7 +293,7 @@ namespace specsyn
 
         const auto [area, logg] = this->getSAandLogg(props);
         std::size_t cacheIdx = 0;
-        const auto bTeff = detail::findBracket(logTeff_, logTeff, cacheIdx);
+        const auto bTeff = utils::findBracket(logTeff_, logTeff, cacheIdx);
 
         // For each of the (up to two) bracketing logTeff columns,
         // search every logg_ value for whichever is both populated

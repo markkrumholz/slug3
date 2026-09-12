@@ -9,6 +9,7 @@
 #include "SpecsynLibNoWind.hpp"
 #include "../io/SimControls.hpp"
 #include "../tracks/TrackCommons.hpp"
+#include "../utils/GridBracket.hpp"
 #include "../utils/HDF5Utils.hpp"
 #include "../utils/MiscUtils.hpp"
 #include "Specsyn.hpp"
@@ -702,8 +703,8 @@ namespace specsyn
 
         std::size_t fehCache = 0;
         std::size_t teffCache = 0;
-        const auto bFeh = detail::findBracket(FeH_, feh, fehCache);
-        const auto bTeff = detail::findBracket(logTeff_, logTeff, teffCache);
+        const auto bFeh = utils::findBracket(FeH_, feh, fehCache);
+        const auto bTeff = utils::findBracket(logTeff_, logTeff, teffCache);
 
         // For each of the (up to four) bracketing (feh, logTeff)
         // corners, search every logg_ value for whichever is both
