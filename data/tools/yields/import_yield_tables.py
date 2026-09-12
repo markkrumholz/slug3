@@ -162,7 +162,14 @@ def parse_yield_table(path: pathlib.Path) -> dict[str, tuple[float, float]]:
     with open(path) as f:
         lines = f.readlines()
     header = lines[0].split()
-    has_ejecta = "[ejecta]" in header
+    if header == ["[isotope]", "[ejecta]", "[wind]"]:
+        has_ejecta = True
+    elif header == ["[isotope]", "[wind]"]:
+        has_ejecta = False
+    else:
+        raise ValueError(
+            f"{path}: unrecognized header {header!r}; expected "
+            "['[isotope]', '[ejecta]', '[wind]'] or ['[isotope]', '[wind]']")
 
     table: dict[str, tuple[float, float]] = {}
     for line in lines[1:]:
@@ -254,15 +261,33 @@ def write_channel_group(h5file: h5py.File, channel: str, masses: np.ndarray,
     if any, is left untouched).
 
     masses/isotope_z/isotope_a are shared across every feh_<value>
-    subgroup in this channel, so re-running this script for a second
+    subgroup in this channel: re-running this script for a second
     --feh against a source whose own mass/isotope grid differs from
-    the first would silently leave that first --feh's own "yield"
-    dataset shaped against a grid this channel's masses/isotope_z/
-    isotope_a no longer describe. Not a concern for any single-[Fe/H]
-    source (this one included); a future multi-[Fe/H] source needs a
-    common grid across all its own [Fe/H] values, or a change here.
+    the first would otherwise silently leave that first --feh's own
+    "yield" dataset shaped against a grid these three datasets no
+    longer describe, so if this channel's group already holds at
+    least one feh_<value> subgroup, the incoming grid is required to
+    exactly match its existing masses/isotope_z/isotope_a -- a
+    ValueError is raised rather than overwriting them out from under
+    that other [Fe/H]'s own data. A channel with no feh_<value>
+    subgroup yet (a first import, or a prior run that only got as far
+    as raising this same error) has no existing grid to conflict with,
+    so this run's own grid is written unconditionally in that case.
     """
     grp = h5file.require_group(channel)
+    existing_feh_groups = [name for name in grp if name.startswith("feh_")]
+    if existing_feh_groups:
+        mismatched = [
+            dset_name for dset_name, data in
+            (("masses", masses), ("isotope_z", isotope_z), ("isotope_a", isotope_a))
+            if not np.array_equal(grp[dset_name][()], data)
+        ]
+        if mismatched:
+            raise ValueError(
+                f"channel '{channel}' already holds {existing_feh_groups} on a "
+                f"different {'/'.join(mismatched)} grid; this script does not "
+                "support merging different grids for the same channel")
+
     for dset_name, data in (("masses", masses), ("isotope_z", isotope_z),
             ("isotope_a", isotope_a)):
         if dset_name in grp:

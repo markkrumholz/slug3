@@ -200,6 +200,7 @@ add_executable(slugTestUtils
     src/pdfs/PDFSegmentSchechter.cpp
     src/utils/ParseUtils.cpp
     src/utils/HDF5Utils.cpp
+    src/utils/GridBracket.cpp
 )
 add_executable(slugTestTracks
     src/interpolation/Mesh2DGrid.cpp

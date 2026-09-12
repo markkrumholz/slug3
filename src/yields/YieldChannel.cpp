@@ -17,6 +17,7 @@
 #include <stdexcept>
 #include <string>
 #include <toml.hpp>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -59,6 +60,13 @@ namespace yields
          * non-[Fe/H]-group dataset names to keep in sync as this
          * format grows. Leaves grp itself open either way -- the
          * caller owns closing it (and the file containing it).
+         *
+         * HDF5's own automatic error-stack printing is disabled around
+         * the loop below and restored right after: every non-group
+         * child (masses/isotope_z/isotope_a) is *expected* to fail
+         * H5Gopen2, and this codebase has no use for HDF5's own
+         * multi-line stderr diagnostic dump on each such harmless,
+         * anticipated failure.
          */
         auto findBracketingFeH( //NOLINT(llvm-prefer-static-over-anonymous-namespace)
             const hid_t grp, const double fehMin, const double fehMax,
@@ -68,6 +76,11 @@ namespace yields
             H5G_info_t ginfo{};
             H5Gget_info(grp, &ginfo);
             std::vector<std::pair<double, std::string>> available;
+
+            H5E_auto2_t oldFunc = nullptr;
+            void* oldClientData = nullptr;
+            H5Eget_auto2(H5E_DEFAULT, &oldFunc, &oldClientData);
+            H5Eset_auto2(H5E_DEFAULT, nullptr, nullptr);
             for (hsize_t i = 0; i < ginfo.nlinks; ++i)
             {
                 const auto childName = utils::childNameByIdx(grp, i);
@@ -77,6 +90,7 @@ namespace yields
                 H5Gclose(childGrp);
                 if (fehVal.has_value()) { available.emplace_back(*fehVal, childName); }
             }
+            H5Eset_auto2(H5E_DEFAULT, oldFunc, oldClientData);
             std::ranges::sort(available);
 
             if (available.empty())
@@ -163,7 +177,21 @@ namespace yields
                     throw std::runtime_error(
                         "YieldChannel: unable to open group " + groupNames[f]);
                 }
-                auto [data, shape] = utils::readDataset2D(fehGrp, "yield", "YieldChannel");
+                // fehGrp must be closed even if readDataset2D throws
+                // (e.g. this group's own "yield" dataset is missing or
+                // malformed) -- caught, closed, and rethrown here
+                // rather than leaking it.
+                std::vector<double> data;
+                std::pair<std::size_t, std::size_t> shape;
+                try
+                {
+                    std::tie(data, shape) = utils::readDataset2D(fehGrp, "yield", "YieldChannel");
+                }
+                catch (...)
+                {
+                    H5Gclose(fehGrp);
+                    throw;
+                }
                 H5Gclose(fehGrp);
                 const auto [nrow, ncol] = shape;
                 if (nrow != niso || ncol != nmass)
@@ -254,11 +282,19 @@ namespace yields
             // Step 3: read masses/isotope_z/isotope_a, shared across
             // every [Fe/H] this channel's group holds
             masses_ = utils::readDataset1D(grp, "masses", "YieldChannel");
-            if (!std::ranges::is_sorted(masses_))
+            // Not just "sorted": an empty grid would make masses_.front()/
+            // back() (hasYield()/yield()'s own bracketing) undefined
+            // behavior, and a merely non-decreasing (as opposed to
+            // strictly increasing) grid could give findBracket() two
+            // equal-valued neighbors, dividing by zero when it computes
+            // t. adjacent_find with greater_equal locates the first
+            // adjacent pair that violates strict ascent, if any.
+            if (masses_.empty() ||
+                std::ranges::adjacent_find(masses_, std::ranges::greater_equal{}) != masses_.end())
             {
                 throw std::runtime_error(
                     "YieldChannel: masses dataset in group " + channelName +
-                    " of " + h5Path.string() + " is not sorted ascending");
+                    " of " + h5Path.string() + " is empty or not strictly ascending");
             }
 
             const auto zData = utils::readDataset1D(grp, "isotope_z", "YieldChannel");
@@ -285,6 +321,18 @@ namespace yields
             {
                 feH_.push_back(feh);
                 groupNames.push_back(name);
+            }
+            // Same risk, and same fix, as masses_'s own identical
+            // check above -- two feh_<value> groups that happened to
+            // share a "Fe_H" attribute value (a malformed/hand-edited
+            // file; findBracketingFeH()'s own group-name-derived values
+            // can't produce this from a normal import) would divide by
+            // zero in findBracket() exactly the same way.
+            if (std::ranges::adjacent_find(feH_, std::ranges::greater_equal{}) != feH_.end())
+            {
+                throw std::runtime_error(
+                    "YieldChannel: [Fe/H] groups in group " + channelName +
+                    " of " + h5Path.string() + " do not have strictly ascending Fe_H values");
             }
 
             // Step 5: read the yield data for every bracketed [Fe/H]

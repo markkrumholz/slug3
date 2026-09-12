@@ -8,6 +8,7 @@
  * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
+#include "testGridBracket.hpp"
 #include "testPDFIntegrator.hpp"
 #include "testRngThread.hpp"
 #include "testUniqueIDManager.hpp"
@@ -22,6 +23,10 @@ auto main() -> int {
         result += testUniqueIDManager();
         result += testUniqueIDManagerSetRead();
         result += testPDFIntegrator();
+        result += testGridBracketSingularGrid();
+        result += testGridBracketExactHits();
+        result += testGridBracketInterpolation();
+        result += testGridBracketCache();
         return result;
     }
     catch (const std::exception& error)
