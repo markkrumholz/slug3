@@ -2,6 +2,10 @@
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
+.. image:: ../logos/slug-logo-banner.png
+   :alt: slug
+   :align: center
+
 Welcome to slug's documentation!
 ================================
 

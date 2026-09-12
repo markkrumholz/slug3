@@ -1,3 +1,5 @@
+![slug](doc/logos/slug-logo-banner.png)
+
 ### Overview of slug3 ###
 
 This is version 3 of the Stochastically Lighting Up Galaxies (SLUG) code. 
