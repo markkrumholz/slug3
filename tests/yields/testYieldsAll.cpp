@@ -20,7 +20,8 @@ auto main() -> int {
         result += testYieldChannelMassiveStarWinds();
         result += testYieldChannelFeHRangeGuard();
         result += testYieldChannelUnknownModel();
-        result += testYieldChannelCopyMoveSafety();
+        result += testYieldChannelHasYield();
+        result += testYieldChannelInterpolation();
         return result;
     }
     catch (const std::exception& error)

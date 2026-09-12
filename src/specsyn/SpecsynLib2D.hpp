@@ -114,7 +114,7 @@ namespace specsyn
          * checked that d2 and d3 each lie within [dim2_.front(),
          * dim2_.back()] and [dim3_.front(), dim3_.back()]
          * respectively. This method locates the bracketing grid cell
-         * along each axis (via detail::findBracket -- the same
+         * along each axis (via utils::findBracket -- the same
          * cache-accelerated binary search SpecsynLib::spec(double,
          * double, double) itself uses, reusing dim2Cache_/dim3Cache_
          * rather than keeping a redundant cache of its own) and

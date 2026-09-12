@@ -7,6 +7,7 @@
  */
 
 #include "SpecsynLib2D.hpp"
+#include "../utils/GridBracket.hpp"
 #include "SpecsynCommons.hpp"
 #include "SpecsynLib.hpp"
 #include <cstddef>
@@ -43,8 +44,8 @@ namespace specsyn
         // Locate the bracketing cell on each axis -- exactly as
         // SpecsynLib::spec(double, double, double) does for its own
         // three axes.
-        const auto b2 = detail::findBracket(this->dim2_, d2, this->dim2Cache_());
-        const auto b3 = detail::findBracket(this->dim3_, d3, this->dim3Cache_());
+        const auto b2 = utils::findBracket(this->dim2_, d2, this->dim2Cache_());
+        const auto b3 = utils::findBracket(this->dim3_, d3, this->dim3Cache_());
 
         // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- b2/b3 indices are all < the corresponding grid's size by construction, and the interpolation loop below is a hot path where the cost of bounds checking matters
         // Every one of the 4 neighboring grid points must actually

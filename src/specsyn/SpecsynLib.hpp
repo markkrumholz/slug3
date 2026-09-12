@@ -24,49 +24,6 @@ namespace io
 
 namespace specsyn
 {
-    namespace detail
-    {
-        /**
-         * @brief A bracketing pair of grid indices, plus an interpolation weight
-         * @details
-         * lo_ and hi_ are the indices of the grid points immediately
-         * below and above (or equal to) a query value, and t_ is the
-         * fractional distance of the query value between them, so
-         * that (1 - t_) * grid[lo_] + t_ * grid[hi_] recovers the
-         * query value. For a grid of size 1 (a degenerate axis with
-         * no actual extent), lo_ == hi_ == 0 and t_ == 0.
-         */
-        struct Bracket
-        {
-            std::size_t lo_;
-            std::size_t hi_;
-            double t_;
-        };
-
-        /**
-         * @brief Find the bracketing grid points of a sorted grid
-         * @param grid A sorted (ascending), non-empty grid of values
-         * @param value The query value; assumed to already lie within
-         *   [grid.front(), grid.back()]
-         * @param cacheIdx The calling thread's cached bracket index
-         *   for this axis (one of SpecsynLib::dim1Cache_/dim2Cache_/
-         *   dim3Cache_, already resolved to the element private to
-         *   this thread); updated in place to the bracket this call
-         *   finds, so the next call -- if its own query value is
-         *   still within, or close to, this same cell -- can reuse it
-         * @returns The bracketing Bracket for value
-         * @details
-         * Locates the bracket via a binary search accelerated by
-         * cacheIdx -- see SpecsynLib.cpp's own definition for the
-         * full rationale. Declared here (in specsyn::detail, not an
-         * anonymous namespace local to SpecsynLib.cpp) so that
-         * SpecsynLib2D's own, simplified 2D spec() can reuse the
-         * exact same bracket-search logic rather than reimplementing
-         * it.
-         */
-        auto findBracket(const std::vector<double>& grid, double value,
-            std::size_t& cacheIdx) -> Bracket;
-    } // namespace detail
 
 
     /**
@@ -305,9 +262,9 @@ namespace specsyn
         // nearly sorted along each axis (e.g. a series of stars fed
         // through in Teff/logg order), so the bracket found for one
         // query is usually still correct, or nearly so, for the next
-        // one. Caching it lets findBracket (detail::findBracket, in
-        // SpecsynLib.cpp) skip the binary search entirely on a cache
-        // hit, and narrow its search range on a miss, rather than
+        // one. Caching it lets findBracket (utils::findBracket, in
+        // src/utils/GridBracket.cpp) skip the binary search entirely
+        // on a cache hit, and narrow its search range on a miss, rather than
         // always searching the full axis from scratch. ThreadVec's,
         // rather than plain size_t's, so that each OpenMP thread gets
         // its own private cached index -- without this, concurrent

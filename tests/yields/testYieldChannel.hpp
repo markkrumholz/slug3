@@ -21,10 +21,13 @@
 
 #include "../../src/yields/YieldChannel.hpp"
 #include <cmath>
+#include <cstddef>
 #include <exception>
 #include <iostream>
 #include <string>
+#include <type_traits>
 #include <utility>
+#include <vector>
 
 namespace
 {
@@ -219,47 +222,139 @@ inline auto testYieldChannelUnknownModel() -> int
 }
 
 /**
- * @brief Unit test that copying/moving a YieldChannel keeps yld() valid
+ * @brief Unit test for YieldChannel::hasYield()
  * @return 0 if the test passes, 1 if it fails
  * @details
- * yld()'s own comment explains why it builds its mdspan view fresh
- * from yieldData_ on every call rather than caching one as a sibling
- * member: a cached view would keep pointing at whichever object's
- * yieldData_ happened to own the memory at the time it was built,
- * which a subsequent copy or move can invalidate or orphan. This
- * constructs one YieldChannel, copies it, move-constructs a second
- * object from a third, and checks that every one of the resulting
- * three objects' own yld() still reads back the correct value --
- * this would fail (or, worse, read freed memory) if yld() were ever
- * changed back to a plain stored member instead.
+ * tests/yields/assets/yields.toml's "sukhbold_test" model holds masses
+ * [18.2, 100.0]; checks both endpoints (inclusive), a mass strictly
+ * between them, and masses strictly below/above the range.
  */
-inline auto testYieldChannelCopyMoveSafety() -> int
+inline auto testYieldChannelHasYield() -> int
 {
     const std::string registryName = "tests/yields/assets/yields.toml";
     int result = 0;
 
     try
     {
-        const yields::YieldChannel original(
+        const yields::YieldChannel yc(
             yields::Channel::ccsn_, "sukhbold_test", 0.0, 0.0, registryName);
 
-        const yields::YieldChannel copy(original); // NOLINT(performance-unnecessary-copy-initialization) -- deliberately exercising the copy constructor itself, not just its result
-
-        yields::YieldChannel toMoveFrom(original);
-        const yields::YieldChannel moved(std::move(toMoveFrom));
-
-        result += checkYield(original, "testYieldChannelCopyMoveSafety (original)", 0, 0, 5.93);
-        result += checkYield(copy, "testYieldChannelCopyMoveSafety (copy)", 0, 0, 5.93);
-        result += checkYield(moved, "testYieldChannelCopyMoveSafety (moved)", 0, 0, 5.93);
+        const std::vector<std::pair<double, bool>> cases{
+            { 18.2, true }, { 100.0, true }, { 59.1, true },
+            { 18.199, false }, { 100.001, false }, { 5.0, false }, { 500.0, false },
+        };
+        for (const auto& [mass, expected] : cases)
+        {
+            if (yc.hasYield(mass) != expected)
+            {
+                std::cerr << "testYieldChannelHasYield: hasYield(" << mass <<
+                    ") returned " << yc.hasYield(mass) << ", expected " << expected << "\n";
+                result = 1;
+            }
+        }
     }
     catch (const std::exception& e)
     {
-        std::cerr << "testYieldChannelCopyMoveSafety: failed to construct YieldChannel from "
+        std::cerr << "testYieldChannelHasYield: failed to construct YieldChannel from "
             << registryName << ": " << e.what() << "\n";
         return 1;
     }
 
     return result;
 }
+
+/**
+ * @brief Unit test for YieldChannel::yield()'s interpolation
+ * @return 0 if the test passes, 1 if it fails
+ * @details
+ * Checks three things against tests/yields/assets/yields.toml's
+ * "sukhbold_test" model (masses [18.2, 100.0], a single Fe_H = 0.0):
+ *
+ * - yield() at an exact grid mass (18.2) reproduces the same values
+ *   checkYield() already verified directly against yld() in
+ *   testYieldChannelCcsn()/testYieldChannelMassiveStarWinds(), showing
+ *   the bracket-and-interpolate machinery collapses correctly to an
+ *   exact hit rather than perturbing it.
+ * - yield() at mass = 59.1, the exact arithmetic midpoint of [18.2,
+ *   100.0], gives exactly the unweighted average of the two grid
+ *   masses' own values, for both the ccsn (where mass 100.0 is a
+ *   failed supernova with an all-zero yield) and massive_star_winds
+ *   channels.
+ * - Every one of these calls also exercises feH_'s own singular
+ *   (size-1) axis, at Fe_H = 0.0 -- the exact scenario the Sukhbold
+ *   et al. (2016) data itself presents, Solar-only -- confirming
+ *   utils::findBracket's own degenerate-axis handling (lo_ == hi_,
+ *   t_ == 0) needs no special-casing in yield() itself.
+ */
+inline auto testYieldChannelInterpolation() -> int
+{
+    const std::string registryName = "tests/yields/assets/yields.toml";
+    int result = 0;
+
+    auto checkVec = [&result](const std::string& label, const std::vector<double>& actual,
+        const std::vector<double>& expected) {
+        if (actual.size() != expected.size())
+        {
+            std::cerr << label << ": expected a vector of size " << expected.size() <<
+                ", got " << actual.size() << "\n";
+            result = 1;
+            return;
+        }
+        for (std::size_t i = 0; i < expected.size(); ++i)
+        {
+            if (std::abs(actual[i] - expected[i]) > tol)
+            {
+                std::cerr << label << ": isotope index " << i << ": expected " <<
+                    expected[i] << ", got " << actual[i] << "\n";
+                result = 1;
+            }
+        }
+    };
+
+    try
+    {
+        const yields::YieldChannel ccsn(
+            yields::Channel::ccsn_, "sukhbold_test", 0.0, 0.0, registryName);
+        const yields::YieldChannel wind(
+            yields::Channel::massiveStarWinds_, "sukhbold_test", 0.0, 0.0, registryName);
+
+        // Exact grid hit at mass = 18.2 -- same values as
+        // testYieldChannelCcsn()/testYieldChannelMassiveStarWinds()
+        checkVec("testYieldChannelInterpolation (ccsn, exact 18.2)",
+            ccsn.yield(18.2, 0.0), { 5.93, 8.46e-2, 7.02e-2 });
+        checkVec("testYieldChannelInterpolation (winds, exact 18.2)",
+            wind.yield(18.2, 0.0), { 2.21, 4.00e-3, 0.0 });
+
+        // Midpoint mass = 59.1 -- exactly halfway between the two grid
+        // masses, so the interpolated result is exactly their average
+        checkVec("testYieldChannelInterpolation (ccsn, midpoint)",
+            ccsn.yield(59.1, 0.0), { 2.965, 4.23e-2, 3.51e-2 });
+        checkVec("testYieldChannelInterpolation (winds, midpoint)",
+            wind.yield(59.1, 0.0), { 16.405, 6.0e-2, 0.0 });
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "testYieldChannelInterpolation: failed to construct YieldChannel from "
+            << registryName << ": " << e.what() << "\n";
+        return 1;
+    }
+
+    return result;
+}
+
+// YieldChannel is deliberately neither copyable nor movable -- see its
+// own constructor comment for why (massCache_/fehCache_ are
+// utils::ThreadVec, itself neither, the same reason SpecsynLib is
+// neither). A static_assert, not a runtime test, since this is a
+// compile-time property; checked here so a future change that
+// accidentally made YieldChannel copyable/movable again (e.g. by
+// switching massCache_/fehCache_ to a different cache type) would fail
+// the build with a clear message, rather than silently reintroducing
+// the per-thread-cache-sharing hazard the deleted special members
+// exist to prevent.
+static_assert(!std::is_copy_constructible_v<yields::YieldChannel>,
+    "YieldChannel must not be copy-constructible (see its own constructor comment)");
+static_assert(!std::is_move_constructible_v<yields::YieldChannel>,
+    "YieldChannel must not be move-constructible (see its own constructor comment)");
 
 #endif // TESTYIELDCHANNEL_HPP

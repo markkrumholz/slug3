@@ -119,6 +119,7 @@ add_executable(slug
     src/specsyn/Specsyn.cpp
     src/specsyn/SpecsynUtils.cpp
     src/specsyn/SpecsynLib.cpp
+    src/utils/GridBracket.cpp
     src/specsyn/SpecsynLibNoWind.cpp
     src/specsyn/SpecsynLib2D.cpp
     src/specsyn/SpecsynLibWD.cpp
@@ -212,6 +213,7 @@ add_executable(slugTestYields
     src/yields/YieldChannel.cpp
     tests/yields/testYieldsAll.cpp
     src/utils/HDF5Utils.cpp
+    src/utils/GridBracket.cpp
 )
 add_executable(slugTestCore
     src/core/Cluster.cpp
@@ -241,6 +243,7 @@ add_executable(slugTestCore
     src/specsyn/Specsyn.cpp
     src/specsyn/SpecsynUtils.cpp
     src/specsyn/SpecsynLib.cpp
+    src/utils/GridBracket.cpp
     src/specsyn/SpecsynLibNoWind.cpp
     src/specsyn/SpecsynLib2D.cpp
     src/specsyn/SpecsynLibWD.cpp
@@ -292,6 +295,7 @@ add_executable(slugTestCoreFull
     src/specsyn/Specsyn.cpp
     src/specsyn/SpecsynUtils.cpp
     src/specsyn/SpecsynLib.cpp
+    src/utils/GridBracket.cpp
     src/specsyn/SpecsynLibNoWind.cpp
     src/specsyn/SpecsynLib2D.cpp
     src/specsyn/SpecsynLibWD.cpp
@@ -350,6 +354,7 @@ add_executable(slugTestIo
     src/specsyn/Specsyn.cpp
     src/specsyn/SpecsynUtils.cpp
     src/specsyn/SpecsynLib.cpp
+    src/utils/GridBracket.cpp
     src/specsyn/SpecsynLibNoWind.cpp
     src/specsyn/SpecsynLib2D.cpp
     src/specsyn/SpecsynLibWD.cpp
@@ -385,6 +390,7 @@ add_executable(slugTestNebular
     src/specsyn/Specsyn.cpp
     src/specsyn/SpecsynUtils.cpp
     src/specsyn/SpecsynLib.cpp
+    src/utils/GridBracket.cpp
     src/specsyn/SpecsynLibNoWind.cpp
     src/specsyn/SpecsynLib2D.cpp
     src/specsyn/SpecsynLibWD.cpp
@@ -402,6 +408,7 @@ add_executable(slugTestSpecsyn
     src/specsyn/Specsyn.cpp
     src/specsyn/SpecsynUtils.cpp
     src/specsyn/SpecsynLib.cpp
+    src/utils/GridBracket.cpp
     src/specsyn/SpecsynLibNoWind.cpp
     src/specsyn/SpecsynLib2D.cpp
     src/specsyn/SpecsynLibWD.cpp
@@ -495,6 +502,7 @@ pybind11_add_module(slugPython
     src/specsyn/Specsyn.cpp
     src/specsyn/SpecsynUtils.cpp
     src/specsyn/SpecsynLib.cpp
+    src/utils/GridBracket.cpp
     src/specsyn/SpecsynLibNoWind.cpp
     src/specsyn/SpecsynLib2D.cpp
     src/specsyn/SpecsynLibWD.cpp
