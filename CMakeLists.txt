@@ -133,6 +133,7 @@ add_executable(slug
     src/utils/ParseUtils.cpp
     src/elem/IsotopeTable.cpp
     src/utils/HDF5Utils.cpp
+    src/yields/YieldChannel.cpp
 )
 
 # Test executables
@@ -205,6 +206,11 @@ add_executable(slugTestTracks
     src/tracks/Tracks2D.cpp
     src/tracks/Tracks3D.cpp
     tests/tracks/testTracksAll.cpp
+    src/utils/HDF5Utils.cpp
+)
+add_executable(slugTestYields
+    src/yields/YieldChannel.cpp
+    tests/yields/testYieldsAll.cpp
     src/utils/HDF5Utils.cpp
 )
 add_executable(slugTestCore
@@ -549,6 +555,9 @@ target_include_directories(slugTestUtils SYSTEM PRIVATE src/extern/pcg-cpp/inclu
 target_include_directories(slugTestTracks PRIVATE src)
 target_include_directories(slugTestTracks SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
 
+target_include_directories(slugTestYields PRIVATE src)
+target_include_directories(slugTestYields SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
+
 target_include_directories(slugTestCore PRIVATE src ${CMAKE_BINARY_DIR}/generated)
 target_include_directories(slugTestCore SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
 
@@ -575,6 +584,7 @@ target_include_directories(slugTestPhot SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestPDFs SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestUtils SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestTracks SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
+target_include_directories(slugTestYields SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestCore SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestCoreFull SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestIo SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
@@ -591,6 +601,7 @@ target_link_libraries(slugTestPhot PRIVATE GSL::gsl)
 target_link_libraries(slugTestPDFs PRIVATE GSL::gsl)
 target_link_libraries(slugTestUtils PRIVATE GSL::gsl)
 target_link_libraries(slugTestTracks PRIVATE GSL::gsl)
+target_link_libraries(slugTestYields PRIVATE GSL::gsl)
 target_link_libraries(slugTestCore PRIVATE GSL::gsl)
 target_link_libraries(slugTestCoreFull PRIVATE GSL::gsl)
 target_link_libraries(slugTestIo PRIVATE GSL::gsl)
@@ -607,6 +618,7 @@ target_link_libraries(slugTestPhot PRIVATE slug_mdspan)
 target_link_libraries(slugTestPDFs PRIVATE slug_mdspan)
 target_link_libraries(slugTestUtils PRIVATE slug_mdspan)
 target_link_libraries(slugTestTracks PRIVATE slug_mdspan)
+target_link_libraries(slugTestYields PRIVATE slug_mdspan)
 target_link_libraries(slugTestCore PRIVATE slug_mdspan)
 target_link_libraries(slugTestCoreFull PRIVATE slug_mdspan)
 target_link_libraries(slugTestIo PRIVATE slug_mdspan)
@@ -623,6 +635,7 @@ target_link_libraries(slugTestPhot PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugTestPDFs PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugTestUtils PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugTestTracks PRIVATE ${HDF5_CXX_LIBRARIES})
+target_link_libraries(slugTestYields PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugTestCore PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugTestCoreFull PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugTestIo PRIVATE ${HDF5_CXX_LIBRARIES})
@@ -640,6 +653,7 @@ if(OpenMP_CXX_FOUND)
     target_link_libraries(slugTestPDFs PRIVATE OpenMP::OpenMP_CXX)
     target_link_libraries(slugTestUtils PRIVATE OpenMP::OpenMP_CXX)
     target_link_libraries(slugTestTracks PRIVATE OpenMP::OpenMP_CXX)
+    target_link_libraries(slugTestYields PRIVATE OpenMP::OpenMP_CXX)
     target_link_libraries(slugTestCore PRIVATE OpenMP::OpenMP_CXX)
     target_link_libraries(slugTestCoreFull PRIVATE OpenMP::OpenMP_CXX)
     target_link_libraries(slugTestIo PRIVATE OpenMP::OpenMP_CXX)
@@ -776,6 +790,8 @@ add_test(NAME test_Specsyn COMMAND slugTestSpecsyn
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 add_test(NAME test_Tracks COMMAND slugTestTracks
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+add_test(NAME test_Yields COMMAND slugTestYields
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 # test_Core exercises SimPhysics's file resolution via getFilePath's
 # SLUG_DIR + prefix rule (e.g. for stars.IMF = "chabrier.toml", which
@@ -873,7 +889,7 @@ endif()
 # executable would make it impossible to skip on its own.
 set_tests_properties(
     test_Interpolation test_Elem test_Extinct test_Phot test_PDFs test_Utils test_Specsyn test_Tracks
-    test_Core test_Io test_Nebular test_PythonBindings test_Slugpy
+    test_Yields test_Core test_Io test_Nebular test_PythonBindings test_Slugpy
     PROPERTIES LABELS "quick")
 set_tests_properties(test_CoreFull PROPERTIES LABELS "slow")
 

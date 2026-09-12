@@ -214,8 +214,14 @@ def import_directory(input_dir: str) -> dict:
 
     masses = sorted(tables_by_mass.keys())
     isotopes = sorted(all_isotopes, key=isotope_z_a)
-    isotope_z = np.array([isotope_z_a(iso)[0] for iso in isotopes], dtype=np.int32)
-    isotope_a = np.array([isotope_z_a(iso)[1] for iso in isotopes], dtype=np.int32)
+    # float64, not an integer dtype -- matching data/elem/isotopes.h5's
+    # own Z/A datasets (see data/tools/elem/build_isotope_table.py), so
+    # the C++ reader can use the same utils::readDataset1D() every
+    # other float dataset in this project's own HDF5 files already
+    # goes through, rather than needing a separate integer-dataset
+    # reader just for this one case.
+    isotope_z = np.array([isotope_z_a(iso)[0] for iso in isotopes], dtype=np.float64)
+    isotope_a = np.array([isotope_z_a(iso)[1] for iso in isotopes], dtype=np.float64)
     isotope_index = {iso: i for i, iso in enumerate(isotopes)}
     mass_index = {m: j for j, m in enumerate(masses)}
 
