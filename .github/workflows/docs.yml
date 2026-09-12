@@ -1,0 +1,119 @@
+name: Docs
+
+# Rebuilds this documentation site (see doc/sphinx/) and republishes it
+# to GitHub Pages every time main changes (i.e. every merged PR) --
+# see the "deploy" job below, which only ever runs on push events, not
+# on manual workflow_dispatch runs (see its own "if" condition), so a
+# manual run is always a dry run that verifies the site still builds
+# without publishing anything.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Least-privilege defaults, then only what actions/deploy-pages
+# actually needs, granted on the job that runs it (see deploy's own
+# permissions below) rather than here -- see actions/deploy-pages'
+# own docs for why both pages:write (to publish) and id-token:write
+# (to mint the OIDC token deploy-pages authenticates with) are
+# required.
+permissions:
+  contents: read
+
+# Only one Pages deployment may be in flight at a time; queue behind
+# an in-progress one rather than cancelling it (cancel-in-progress:
+# false), so a fast-follow push never publishes a half-finished build
+# over one already underway.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+
+    env:
+      CMAKE_GENERATOR: Ninja
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 400M
+      CCACHE_SLOPPINESS: time_macros
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        id: setup-python
+        with:
+          python-version: '3.12'
+
+      - name: Install Python doc dependencies
+        run: python -m pip install sphinx breathe exhale sphinx_rtd_theme
+
+      # doxygen builds the C++ API's XML that breathe/exhale read;
+      # libgsl-dev/libhdf5-dev are needed to configure and build
+      # slugPython itself, which this documentation's own autodoc
+      # content (e.g. the slugpy API pages) imports -- see
+      # CMakeLists.txt's docs custom command, which DEPENDS on it.
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgsl-dev libhdf5-dev doxygen ninja-build ccache
+
+      - name: Cache ccache
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-docs-${{ github.sha }}
+          restore-keys: |
+            ccache-docs-
+
+      # See ci.yml's own identical Configure step for why
+      # CMAKE_CXX_SCAN_FOR_MODULES=OFF matters for ccache.
+      - name: Configure
+        run: |
+          cmake -B build \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_SCAN_FOR_MODULES=OFF \
+            -DPython_EXECUTABLE="${{ steps.setup-python.outputs.python-path }}"
+
+      - name: Build documentation
+        run: cmake --build build --target docs
+
+      - name: ccache stats
+        run: ccache -s
+
+      # Without this, GitHub Pages runs the site through Jekyll before
+      # publishing it, which silently drops every directory Jekyll
+      # treats as special -- including Sphinx's own _static/_sources,
+      # both underscore-prefixed -- breaking every page's CSS/JS.
+      - name: Disable Jekyll processing
+        run: touch doc/html/.nojekyll
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: doc/html
+
+  deploy:
+    name: Deploy
+    needs: build
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    permissions:
+      pages: write
+      id-token: write
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
