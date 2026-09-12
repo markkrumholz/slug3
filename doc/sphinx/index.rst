@@ -5,6 +5,7 @@
 .. image:: ../logos/slug-logo-banner.png
    :alt: slug
    :align: center
+   :width: 400px
 
 Welcome to slug's documentation!
 ================================

@@ -1,4 +1,4 @@
-![slug](doc/logos/slug-logo-banner.png)
+<img src="doc/logos/slug-logo-banner.png" alt="slug" width="400">
 
 ### Overview of slug3 ###
 
