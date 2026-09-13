@@ -290,8 +290,9 @@ namespace yields
             {
                 for (std::size_t j = 0; j < isoMap.size(); ++j)
                 {
-                    if (!isoMap[j].has_value()) { continue; } // no matching isotope in isotopesOrig_ -- leave at 0
-                    newView[f, mi, j] = ratio * origView[f, src, *isoMap[j]]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- f/mi/src/j/*isoMap[j] all in range by construction, see rebuildYieldGrid()'s own comment
+                    const auto& srcIso = isoMap[j];
+                    if (!srcIso.has_value()) { continue; } // no matching isotope in isotopesOrig_ -- leave at 0
+                    newView[f, mi, j] = ratio * origView[f, src, *srcIso]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- f/mi/src/j/*srcIso all in range by construction, see rebuildYieldGrid()'s own comment
                 }
             }
         }
@@ -316,10 +317,11 @@ namespace yields
             {
                 for (std::size_t j = 0; j < isoMap.size(); ++j)
                 {
-                    if (!isoMap[j].has_value()) { continue; } // no matching isotope in isotopesOrig_ -- leave at 0
-                    newView[f, mi, j] = // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- f/mi/j/bracket/*isoMap[j] all in range by construction, see rebuildYieldGrid()'s own comment
-                        (1.0 - bracket.t_) * origView[f, bracket.lo_, *isoMap[j]] +
-                        bracket.t_ * origView[f, bracket.hi_, *isoMap[j]];
+                    const auto& srcIso = isoMap[j];
+                    if (!srcIso.has_value()) { continue; } // no matching isotope in isotopesOrig_ -- leave at 0
+                    newView[f, mi, j] = // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- f/mi/j/bracket/*srcIso all in range by construction, see rebuildYieldGrid()'s own comment
+                        (1.0 - bracket.t_) * origView[f, bracket.lo_, *srcIso] +
+                        bracket.t_ * origView[f, bracket.hi_, *srcIso];
                 }
             }
         }

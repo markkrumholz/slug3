@@ -62,6 +62,7 @@ namespace yields
     {
         yieldChannels_.push_back(std::make_unique<YieldChannel>(
             descriptor, controls_.fehDist().getMin(), controls_.fehDist().getMax(), registryName_));
+        descriptors_.push_back(descriptor);
     }
 
     void Yields::rebuildYieldGrid()
@@ -83,20 +84,20 @@ namespace yields
                 isotopes_.end(), channel->isotopesOrig().begin(), channel->isotopesOrig().end());
         }
         std::ranges::sort(isotopes_,
-            [](const auto& lhs, const auto& rhs) { return lhs.get() < rhs.get(); });
+            [](const auto lhs, const auto rhs) { return lhs.get() < rhs.get(); }); // NOLINT(performance-unnecessary-value-param) -- by-value (not const&) deliberately, to sidestep a clang-analyzer false positive (cplusplus.Move) that otherwise fires on this comparator's parameters during std::sort's internal element swaps; reference_wrapper is pointer-sized, so this has no real cost
         const auto dup = std::ranges::unique(isotopes_,
             [](const auto& lhs, const auto& rhs) { return lhs.get() == rhs.get(); });
         isotopes_.erase(dup.begin(), dup.end());
 
         // Push isotopes_ (and each channel's own descriptor mMin_/mMax_)
         // back down into every channel, synchronizing them all onto the
-        // same isotope list -- see this method's own comment for why
-        // yieldChannels_ and controls_.yieldChannels() are assumed to
-        // stay in lockstep here.
-        const auto& descriptors = controls_.yieldChannels();
+        // same isotope list -- see this method's own comment. descriptors_
+        // is appended to by addChannel() in lockstep with yieldChannels_
+        // itself, so this doesn't need to assume anything about
+        // controls_.yieldChannels() staying in sync.
         for (std::size_t i = 0; i < yieldChannels_.size(); ++i)
         {
-            yieldChannels_[i]->rebuildYieldGrid(descriptors[i].mMin_, descriptors[i].mMax_, isotopes_); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i < yieldChannels_.size() == descriptors.size() by construction, see this method's own comment
+            yieldChannels_[i]->rebuildYieldGrid(descriptors_[i].mMin_, descriptors_[i].mMax_, isotopes_); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i < yieldChannels_.size() == descriptors_.size() by construction, see this method's own comment
         }
     }
 

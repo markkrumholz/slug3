@@ -317,12 +317,16 @@ inline auto testYieldChannelYieldBeforeRebuild() -> int
                 "before rebuildYieldGrid() is ever called\n";
             return 1;
         }
-        (void)yc.yield(18.2, 0.0);
+
+        try
+        {
+            (void)yc.yield(18.2, 0.0);
+        }
+        catch (const std::runtime_error&) { return 0; /* expected */ }
         std::cerr << "testYieldChannelYieldBeforeRebuild: expected yield() to throw "
             "before rebuildYieldGrid() is ever called, but it did not\n";
         return 1;
     }
-    catch (const std::runtime_error&) { return 0; /* expected */ }
     catch (const std::exception& e)
     {
         std::cerr << "testYieldChannelYieldBeforeRebuild: failed to construct "

@@ -990,7 +990,7 @@ void io::SimControls::readYields(const toml::table& inputDeck)
         if (channelIt == yields::channelStr.end())
         {
             throw std::runtime_error(
-                "SimControls: " + tableKey + ".channel = '" + channelInput.value() +
+                "SimControls: " + tableKey + ".channel = '" + channelInput.value() + // NOLINT(bugprone-unchecked-optional-access) -- required=true above guarantees channelInput has a value or getTOMLKeyWithError already threw
                 "' is not a recognized yield channel");
         }
         const auto channel = static_cast<yields::Channel>(

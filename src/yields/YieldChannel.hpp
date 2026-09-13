@@ -244,14 +244,17 @@ namespace yields
          * @param mass Stellar mass to check (Msun)
          * @return True if mass lies within [masses().front(), masses().back()], false otherwise
          * @details
-         * Like yield(), only meaningful once rebuildYieldGrid() has been
-         * called at least once -- masses() is empty until then, so this
-         * itself is not safe to call before that (see yield()'s own,
-         * explicit guard for why it can throw instead of just asserting).
+         * Only meaningful once rebuildYieldGrid() has been called at
+         * least once; before that, masses() is empty and this returns
+         * false unconditionally (no mass is ever in range on an
+         * unbuilt grid) rather than reading masses_.front()/back() on
+         * an empty vector -- unlike yield() (see its own comment),
+         * this doesn't throw, since "no mass is in range yet" is
+         * itself a meaningful, correct answer here.
          */
         [[nodiscard]] auto hasYield(const double mass) const -> bool
         {
-            return mass >= masses_.front() && mass <= masses_.back();
+            return !masses_.empty() && mass >= masses_.front() && mass <= masses_.back();
         }
 
         /**
