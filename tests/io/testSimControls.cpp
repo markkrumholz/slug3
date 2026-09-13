@@ -963,6 +963,165 @@ static auto testSimControlsExtinctField() -> int
     return 0;
 }
 
+// Verify SimControls::readYields()'s own parsing of yields.channel1,
+// yields.channel2, etc. into yieldChannels(), and of yields.registry
+// into the Yields it builds from them.
+static auto testSimControlsYields() -> int
+{
+    constexpr std::string_view baseDeck = "tests/core/assets/testGalaxy.in";
+    int result = 0;
+
+    // No yields.channelN table at all: yieldChannels() empty, yields() null
+    try
+    {
+        const toml::table inputDeck = toml::parse_file(baseDeck);
+        const io::SimControls controls(inputDeck);
+        if (!controls.yieldChannels().empty() || controls.yields() != nullptr)
+        {
+            std::cerr << "testSimControls: yields: expected yieldChannels() empty "
+                "and yields() null when no yields.channelN table is given\n";
+            result = 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: yields: no-channels case failed: "
+            << error.what() << "\n";
+        result = 1;
+    }
+
+    // Two channels, the second with m_min/m_max, plus an explicit registry
+    try
+    {
+        toml::table inputDeck = toml::parse_file(baseDeck);
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{
+                { "channel", "ccsn" }, { "model", "sukhbold16" } } },
+            { "channel2", toml::table{
+                { "channel", "massive_star_winds" }, { "model", "kobayashi06_11" },
+                { "m_min", 8.0 }, { "m_max", 40.0 } } },
+            { "registry", "some/registry.toml" },
+        });
+        const io::SimControls controls(inputDeck);
+
+        const auto& channels = controls.yieldChannels();
+        if (channels.size() != 2)
+        {
+            std::cerr << "testSimControls: yields: expected 2 yieldChannels(), got "
+                << channels.size() << "\n";
+            result = 1;
+        }
+        else
+        {
+            if (channels[0].channel_ != yields::Channel::ccsn_ ||
+                channels[0].modelName_ != "sukhbold16" ||
+                channels[0].mMin_.has_value() || channels[0].mMax_.has_value())
+            {
+                std::cerr << "testSimControls: yields: unexpected yieldChannels()[0]\n";
+                result = 1;
+            }
+            if (channels[1].channel_ != yields::Channel::massiveStarWinds_ ||
+                channels[1].modelName_ != "kobayashi06_11" ||
+                !channels[1].mMin_.has_value() || channels[1].mMin_.value() != 8.0 ||
+                !channels[1].mMax_.has_value() || channels[1].mMax_.value() != 40.0)
+            {
+                std::cerr << "testSimControls: yields: unexpected yieldChannels()[1]\n";
+                result = 1;
+            }
+        }
+
+        if (controls.yields() == nullptr)
+        {
+            std::cerr << "testSimControls: yields: expected yields() non-null "
+                "when yields.channel1 is given\n";
+            result = 1;
+        }
+        else if (controls.yields()->registryName() != "some/registry.toml")
+        {
+            std::cerr << "testSimControls: yields: expected yields()->registryName() "
+                "== \"some/registry.toml\", got \"" << controls.yields()->registryName() << "\"\n";
+            result = 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: yields: two-channels case failed: "
+            << error.what() << "\n";
+        result = 1;
+    }
+
+    // One channel, no yields.registry given: yields()->registryName()
+    // falls back to yields::defaultRegistry
+    try
+    {
+        toml::table inputDeck = toml::parse_file(baseDeck);
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{
+                { "channel", "ccsn" }, { "model", "sukhbold16" } } },
+        });
+        const io::SimControls controls(inputDeck);
+
+        if (controls.yields() == nullptr ||
+            controls.yields()->registryName() != yields::defaultRegistry)
+        {
+            std::cerr << "testSimControls: yields: expected yields()->registryName() "
+                "to fall back to yields::defaultRegistry when yields.registry is absent\n";
+            result = 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: yields: default-registry case failed: "
+            << error.what() << "\n";
+        result = 1;
+    }
+
+    // yields.channel1.channel not one of channelStr's own entries: throws
+    try
+    {
+        toml::table inputDeck = toml::parse_file(baseDeck);
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{
+                { "channel", "not_a_real_channel" }, { "model", "sukhbold16" } } },
+        });
+        const io::SimControls controls(inputDeck);
+        std::cerr << "testSimControls: yields: expected an exception for an "
+            "unrecognized yields.channel1.channel\n";
+        result = 1;
+    }
+    catch (const std::runtime_error&) { /* expected */ }
+
+    // yields.channel1 missing its required "model" keyword: throws
+    try
+    {
+        toml::table inputDeck = toml::parse_file(baseDeck);
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{ { "channel", "ccsn" } } },
+        });
+        const io::SimControls controls(inputDeck);
+        std::cerr << "testSimControls: yields: expected an exception when "
+            "yields.channel1.model is missing\n";
+        result = 1;
+    }
+    catch (const std::runtime_error&) { /* expected */ }
+
+    // yields.channel1 missing its required "channel" keyword: throws
+    try
+    {
+        toml::table inputDeck = toml::parse_file(baseDeck);
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{ { "model", "sukhbold16" } } },
+        });
+        const io::SimControls controls(inputDeck);
+        std::cerr << "testSimControls: yields: expected an exception when "
+            "yields.channel1.channel is missing\n";
+        result = 1;
+    }
+    catch (const std::runtime_error&) { /* expected */ }
+
+    return result;
+}
+
 // Verify galaxy.sfr/galaxy.sfr_dist's exclusive-or requirement and
 // galaxy.sfr_dist's own parsing: both given must throw, neither given
 // must throw, a plain number for galaxy.sfr_dist must become an
@@ -1315,6 +1474,7 @@ auto testSimControls() -> int
     result += testSimControlsSpectraLibrary();
     result += testSimControlsSpectraChained();
     result += testSimControlsExtinctField();
+    result += testSimControlsYields();
     result += testSimControlsSFRDist();
     result += testSimControlsSetFeHRejectsBroadening();
     result += testSimControlsSettersRejectMismatchedControls();

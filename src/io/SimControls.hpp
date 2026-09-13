@@ -18,6 +18,8 @@
 #include "../tracks/Tracks2D.hpp"
 #include "../tracks/Tracks3D.hpp"
 #include "../utils/ParseUtils.hpp"
+#include "../yields/YieldCommons.hpp"
+#include "../yields/Yields.hpp"
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -624,6 +626,25 @@ namespace io
         [[nodiscard]] auto extinct() const -> const extinct::Extinct* { return extinct_.get(); }
 
         /**
+         * @brief Get the yield channels requested via the input deck's own [yields] stanza
+         * @return A const reference to the descriptors parsed from
+         *   yields.channel1, yields.channel2, etc. (see readYields()'s
+         *   own comment), empty if no yields.channelN table was found
+         */
+        [[nodiscard]] auto yieldChannels() const -> const std::vector<yields::YieldChannelDescriptor>&
+        {
+            return yieldChannels_;
+        }
+
+        /**
+         * @brief Get the Yields built from yieldChannels(), if any
+         * @return A pointer to the Yields built from yieldChannels()
+         *   and yields.registry (see readYields()), or nullptr if
+         *   yieldChannels() is empty
+         */
+        [[nodiscard]] auto yields() const -> const yields::Yields* { return yields_.get(); }
+
+        /**
          * @brief Get the nebular emission control parameters
          * @return A const reference to the control parameters
          *   populated from the input deck's own [nebular] stanza (see
@@ -1187,6 +1208,30 @@ namespace io
         void readExtinct(const toml::table& inputDeck);
 
         /**
+         * @brief Load the nucleosynthetic yield channels specified by input deck
+         * @param inputDeck A toml table holding the input deck
+         * @details
+         * Looks for yields.channel1, yields.channel2, etc., stopping at
+         * the first N for which yields.channelN is absent -- so
+         * yieldChannels_ ends up empty if even yields.channel1 is
+         * missing. Each yields.channelN table must have its own
+         * yields.channelN.channel (one of the strings in channelStr;
+         * an unrecognized one throws) and yields.channelN.model (not
+         * itself validated here -- see YieldChannel::YieldChannel()'s
+         * own comment for where that happens), and may have its own
+         * yields.channelN.m_min/m_max, each independently optional.
+         * One yields::YieldChannelDescriptor is built per table found,
+         * in order, into yieldChannels_.
+         *
+         * If yieldChannels_ ends up non-empty, also reads the optional
+         * yields.registry (falling back to yields::defaultRegistry),
+         * and constructs yields_ from *this and that registry name --
+         * left null if yieldChannels_ is empty, since there is nothing
+         * for a Yields to chain together in that case.
+         */
+        void readYields(const toml::table& inputDeck);
+
+        /**
          * @brief Load the nebular emission controls and grid specified by input deck
          * @param inputDeck A toml table holding the input deck
          * @details
@@ -1290,6 +1335,8 @@ namespace io
         std::unique_ptr<extinct::Extinct> extinct_; /**< Extinction curve requested via extinct.model, or nullptr if neither extinct.AV nor extinct.AV_field was given */
         nebular::NebularControls nebControls_; /**< Nebular emission control parameters, see nebControls() */
         std::unique_ptr<nebular::Nebular> nebular_; /**< Nebular emission grid requested via the [nebular] stanza */
+        std::vector<yields::YieldChannelDescriptor> yieldChannels_; /**< Yield channels requested via yields.channel1, yields.channel2, etc. -- see readYields()'s own comment */
+        std::unique_ptr<yields::Yields> yields_; /**< Yields built from yieldChannels_, or nullptr if yieldChannels_ is empty */
 
         // Output wavelength grid (spectra.wl_min, spectra.wl_max,
         // spectra.nwl), read by readSpectra and passed through to
