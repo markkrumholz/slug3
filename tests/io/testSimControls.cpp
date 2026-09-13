@@ -1320,6 +1320,108 @@ static auto testSimControlsYieldsIsotopes() -> int
     return result;
 }
 
+// Verify Yields::yield()/yieldSum() correctly aggregate every loaded
+// channel's own YieldChannel::yield() into a (nchannels,
+// isotopes().size()) array (yield()) and its column sums (yieldSum()).
+// Uses the same two-model small-fixture setup as
+// testSimControlsYieldsIsotopes(), but with sukhbold_test's own m_min
+// overridden to 15.0 (extrapolated from its native minimum of 18.2,
+// by a plain ratio -- no interpolation ambiguity) so that mass = 15.0
+// is a single query both channels can answer at once: their native
+// mass ranges (sukhbold_test [18.2, 100.0], kobayashi_test
+// [13.0, 15.0, 18.0]) don't otherwise overlap at all, and 15.0 is
+// kobayashi_test's own exact native grid point too, so both rows below
+// are exact, hand-computable values rather than interpolated ones.
+static auto testSimControlsYieldsYieldAndSum() -> int
+{
+    constexpr std::string_view baseDeck = "tests/core/assets/testGalaxy.in";
+    constexpr double tol = 1e-9;
+    int result = 0;
+
+    try
+    {
+        toml::table inputDeck = toml::parse_file(baseDeck);
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{
+                { "channel", "ccsn" }, { "model", "sukhbold_test" }, { "m_min", 15.0 } } },
+            { "channel2", toml::table{
+                { "channel", "ccsn" }, { "model", "kobayashi_test" } } },
+            { "registry", "tests/yields/assets/yields.toml" },
+        });
+        const io::SimControls controls(inputDeck);
+
+        if (controls.yields() == nullptr)
+        {
+            std::cerr << "testSimControls: yieldsYieldAndSum: expected yields() non-null\n";
+            return 1;
+        }
+
+        // Isotope order is [h1, fe56, ni56, ni58] (see
+        // testSimControlsYieldsIsotopes()'s own identical check).
+        // Row 0 (sukhbold_test): its native mass-18.2 values
+        // (5.93, 8.46e-2, 7.02e-2 for h1/fe56/ni56), each scaled by
+        // 15.0/18.2 (extrapolating down to the overridden m_min), with
+        // 0 for ni58 (never tabulated by sukhbold_test). Row 1
+        // (kobayashi_test): its own real, native mass-15.0 values
+        // (6.79, 8.52e-2, 1.15e-3 for h1/fe56/ni58), with 0 for ni56
+        // (never tabulated by kobayashi_test).
+        const auto [view, data] = controls.yields()->yield(15.0, 0.0);
+        const std::vector<double> row0{
+            5.93 * 15.0 / 18.2, 8.46e-2 * 15.0 / 18.2, 7.02e-2 * 15.0 / 18.2, 0.0 };
+        const std::vector<double> row1{ 6.79, 8.52e-2, 0.0, 1.15e-3 };
+
+        if (view.extent(0) != 2 || view.extent(1) != row0.size())
+        {
+            std::cerr << "testSimControls: yieldsYieldAndSum: expected yield() shape (2, " <<
+                row0.size() << "), got (" << view.extent(0) << ", " << view.extent(1) << ")\n";
+            return 1;
+        }
+        for (std::size_t j = 0; j < row0.size(); ++j)
+        {
+            if (std::abs(view[0, j] - row0[j]) > tol)
+            {
+                std::cerr << "testSimControls: yieldsYieldAndSum: yield()[0, " << j << "] = " <<
+                    view[0, j] << ", expected " << row0[j] << "\n";
+                result = 1;
+            }
+            if (std::abs(view[1, j] - row1[j]) > tol)
+            {
+                std::cerr << "testSimControls: yieldsYieldAndSum: yield()[1, " << j << "] = " <<
+                    view[1, j] << ", expected " << row1[j] << "\n";
+                result = 1;
+            }
+        }
+
+        const auto sum = controls.yields()->yieldSum(15.0, 0.0);
+        if (sum.size() != row0.size())
+        {
+            std::cerr << "testSimControls: yieldsYieldAndSum: yieldSum() has size " <<
+                sum.size() << ", expected " << row0.size() << "\n";
+            result = 1;
+        }
+        else
+        {
+            for (std::size_t j = 0; j < row0.size(); ++j)
+            {
+                const double expected = row0[j] + row1[j];
+                if (std::abs(sum[j] - expected) > tol)
+                {
+                    std::cerr << "testSimControls: yieldsYieldAndSum: yieldSum()[" << j << "] = " <<
+                        sum[j] << ", expected " << expected << "\n";
+                    result = 1;
+                }
+            }
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: yieldsYieldAndSum: failed: " << error.what() << "\n";
+        result = 1;
+    }
+
+    return result;
+}
+
 // Verify galaxy.sfr/galaxy.sfr_dist's exclusive-or requirement and
 // galaxy.sfr_dist's own parsing: both given must throw, neither given
 // must throw, a plain number for galaxy.sfr_dist must become an
@@ -1674,6 +1776,7 @@ auto testSimControls() -> int
     result += testSimControlsExtinctField();
     result += testSimControlsYields();
     result += testSimControlsYieldsIsotopes();
+    result += testSimControlsYieldsYieldAndSum();
     result += testSimControlsSFRDist();
     result += testSimControlsSetFeHRejectsBroadening();
     result += testSimControlsSettersRejectMismatchedControls();

@@ -11,10 +11,12 @@
 #include "YieldChannel.hpp"
 #include "YieldCommons.hpp"
 #include <algorithm>
+#include <cassert>
 #include <cstddef>
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace yields
 {
@@ -69,6 +71,41 @@ namespace yields
         {
             yieldChannels_[i]->rebuildYieldGrid(descriptors[i].mMin_, descriptors[i].mMax_, isotopes_); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i < yieldChannels_.size() == descriptors.size() by construction, see this method's own comment
         }
+    }
+
+    auto Yields::yield(const double mass, const double feH) const
+        -> std::pair<Array2D, std::vector<double>>
+    {
+        const std::size_t nchannels = yieldChannels_.size();
+        const std::size_t niso = isotopes_.size();
+        std::vector<double> data(nchannels * niso, 0.0);
+        for (std::size_t i = 0; i < nchannels; ++i)
+        {
+            const auto row = yieldChannels_[i]->yield(mass, feH); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i < nchannels == yieldChannels_.size() by construction
+            assert(row.size() == niso); // guaranteed once rebuildYieldGrid() has synchronized every channel onto isotopes_ -- see this method's own comment
+            for (std::size_t j = 0; j < niso; ++j)
+            {
+                data[(i * niso) + j] = row[j]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,cppcoreguidelines-pro-bounds-constant-array-index) -- i < nchannels, j < niso == row.size() (asserted above) by construction
+            }
+        }
+        const Array2D view(data.data(), nchannels, niso);
+        return { view, std::move(data) };
+    }
+
+    auto Yields::yieldSum(const double mass, const double feH) const -> std::vector<double>
+    {
+        const auto [view, data] = yield(mass, feH);
+        const std::size_t nchannels = view.extent(0);
+        const std::size_t niso = view.extent(1);
+        std::vector<double> result(niso, 0.0);
+        for (std::size_t i = 0; i < nchannels; ++i)
+        {
+            for (std::size_t j = 0; j < niso; ++j)
+            {
+                result[j] += view[i, j]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i < nchannels, j < niso by construction
+            }
+        }
+        return result;
     }
 
 } // namespace yields

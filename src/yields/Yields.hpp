@@ -11,8 +11,11 @@
 
 #include "YieldChannel.hpp"
 #include "YieldCommons.hpp"
+#include <cstddef>
+#include <mdspan> // NOLINT(misc-include-cleaner)
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace io
@@ -43,6 +46,9 @@ namespace yields
     class Yields
     {
     public:
+
+        /** @brief mdspan view returned by yield() -- see its own comment */
+        using Array2D = std::mdspan<const double, std::dextents<std::size_t, 2>>; // NOLINT(misc-include-cleaner)
 
         /**
          * @brief Construct a Yields from a SimControls's own yieldChannels()
@@ -170,6 +176,59 @@ namespace yields
          *   same order -- see rebuildYieldGrid()'s own comment
          */
         [[nodiscard]] auto isotopes() const -> const IsotopeList& { return isotopes_; }
+
+        /**
+         * @brief Return every channel's own yield, as one (nchannels, isotopes().size()) array
+         * @param mass Stellar mass (Msun); must satisfy every
+         *   yieldChannels() entry's own hasYield(mass)
+         * @param feH [Fe/H]; must lie within every yieldChannels()
+         *   entry's own feH() range
+         * @return A pair (view, data): data is the backing storage,
+         *   data.data() the origin of view; view is an mdspan of shape
+         *   (yieldChannels().size(), isotopes().size()), i.e.
+         *   view[i, j] is the yield (Msun) of isotopes()[j] from
+         *   yieldChannels()[i], for a star of the given mass/feH
+         * @throws std::runtime_error if any yieldChannels() entry's own
+         *   yield() throws -- see its own comment (e.g. rebuildYieldGrid()
+         *   was never called on that particular channel)
+         * @details
+         * Row i is exactly yieldChannels()[i]->yield(mass, feH) --
+         * always isotopes().size() long, in isotopes()'s own order,
+         * once rebuildYieldGrid() has synchronized every channel onto
+         * isotopes() (which the constructor always does before
+         * returning; see its own comment for the one way this could
+         * stop being true -- addChannel() called again afterward
+         * without a following rebuildYieldGrid()).
+         *
+         * Every call recomputes mass/feH's own yield from every channel
+         * from scratch and returns freshly-allocated storage -- unlike
+         * YieldChannel::yld(), this has no backing member of its own to
+         * return a view into. view's own pointer is captured from
+         * data.data() before data is moved into the returned pair;
+         * std::vector's move constructor never reallocates (always an
+         * O(1) pointer transfer), so that pointer stays valid, pointing
+         * into the returned pair's own data, wherever the pair itself
+         * ends up.
+         */
+        [[nodiscard]] auto yield(double mass, double feH) const -> std::pair<Array2D, std::vector<double>>;
+
+        /**
+         * @brief Return the sum, over every channel, of yield(mass, feH)
+         * @param mass Stellar mass (Msun); see yield()'s own comment
+         * @param feH [Fe/H]; see yield()'s own comment
+         * @return A vector of isotopes().size() yields (Msun), in
+         *   isotopes()'s own order: result[j] = sum over i of
+         *   yield(mass, feH)'s own view[i, j]
+         * @throws std::runtime_error under the same conditions as yield()
+         * @details
+         * Built by summing yield()'s own (nchannels, isotopes().size())
+         * array along its first axis, rather than calling every
+         * channel's own yield() a second time -- numerically identical
+         * to summing "the outputs of the calls to YieldChannel::yield"
+         * directly, since that is exactly what yield()'s own rows
+         * already are.
+         */
+        [[nodiscard]] auto yieldSum(double mass, double feH) const -> std::vector<double>;
 
     private:
 
