@@ -11,6 +11,7 @@
 #include "YieldChannel.hpp"
 #include "YieldCommons.hpp"
 #include <algorithm>
+#include <cstddef>
 #include <memory>
 #include <string>
 #include <utility>
@@ -25,31 +26,49 @@ namespace yields
         {
             addChannel(descriptor);
         }
-
-        // Union every loaded channel's own isotopes() into one
-        // deduplicated, sorted isotopes_ -- see its own comment.
-        // IsotopeData's own operator</operator== (Z first, then A) is
-        // reused here via the referenced object (.get()), rather than
-        // reference_wrapper's own identity-based comparison, so two
-        // channels that both tabulate the same isotope (necessarily the
-        // very same elem::isotopeTable() entry, since that table is a
-        // single, global, per-(Z,A) map) are correctly recognized as
-        // one isotope, not kept as duplicates.
-        for (const auto& channel : yieldChannels_)
-        {
-            isotopes_.insert(isotopes_.end(), channel->isotopes().begin(), channel->isotopes().end());
-        }
-        std::ranges::sort(isotopes_,
-            [](const auto& lhs, const auto& rhs) { return lhs.get() < rhs.get(); });
-        const auto dup = std::ranges::unique(isotopes_,
-            [](const auto& lhs, const auto& rhs) { return lhs.get() == rhs.get(); });
-        isotopes_.erase(dup.begin(), dup.end());
+        rebuildYieldGrid();
     }
 
     void Yields::addChannel(const YieldChannelDescriptor& descriptor)
     {
         yieldChannels_.push_back(std::make_unique<YieldChannel>(
             descriptor, controls_.fehDist().getMin(), controls_.fehDist().getMax(), registryName_));
+    }
+
+    void Yields::rebuildYieldGrid()
+    {
+        // Union every loaded channel's own isotopesOrig() into one
+        // deduplicated, sorted isotopes_ -- see this method's own
+        // comment. IsotopeData's own operator</operator== (Z first,
+        // then A) is reused here via the referenced object (.get()),
+        // rather than reference_wrapper's own identity-based
+        // comparison, so two channels that both tabulate the same
+        // isotope (necessarily the very same elem::isotopeTable()
+        // entry, since that table is a single, global, per-(Z,A) map)
+        // are correctly recognized as one isotope, not kept as
+        // duplicates.
+        isotopes_.clear();
+        for (const auto& channel : yieldChannels_)
+        {
+            isotopes_.insert(
+                isotopes_.end(), channel->isotopesOrig().begin(), channel->isotopesOrig().end());
+        }
+        std::ranges::sort(isotopes_,
+            [](const auto& lhs, const auto& rhs) { return lhs.get() < rhs.get(); });
+        const auto dup = std::ranges::unique(isotopes_,
+            [](const auto& lhs, const auto& rhs) { return lhs.get() == rhs.get(); });
+        isotopes_.erase(dup.begin(), dup.end());
+
+        // Push isotopes_ (and each channel's own descriptor mMin_/mMax_)
+        // back down into every channel, synchronizing them all onto the
+        // same isotope list -- see this method's own comment for why
+        // yieldChannels_ and controls_.yieldChannels() are assumed to
+        // stay in lockstep here.
+        const auto& descriptors = controls_.yieldChannels();
+        for (std::size_t i = 0; i < yieldChannels_.size(); ++i)
+        {
+            yieldChannels_[i]->rebuildYieldGrid(descriptors[i].mMin_, descriptors[i].mMax_, isotopes_); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i < yieldChannels_.size() == descriptors.size() by construction, see this method's own comment
+        }
     }
 
 } // namespace yields

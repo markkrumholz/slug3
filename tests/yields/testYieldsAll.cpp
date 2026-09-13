@@ -20,11 +20,13 @@ auto main() -> int {
         result += testYieldChannelMassiveStarWinds();
         result += testYieldChannelFeHRangeGuard();
         result += testYieldChannelUnknownModel();
+        result += testYieldChannelYieldBeforeRebuild();
         result += testYieldChannelHasYield();
         result += testYieldChannelInterpolation();
         result += testYieldChannelMassGridExtrapolation();
         result += testYieldChannelMassGridNarrowing();
-        result += testYieldChannelRebuildMassGrid();
+        result += testYieldChannelRebuildYieldGrid();
+        result += testYieldChannelIsotopeRemap();
         return result;
     }
     catch (const std::exception& error)

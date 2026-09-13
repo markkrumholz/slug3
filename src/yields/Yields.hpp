@@ -9,10 +9,8 @@
 #ifndef YIELDS_HPP
 #define YIELDS_HPP
 
-#include "../elem/IsotopeData.hpp"
 #include "YieldChannel.hpp"
 #include "YieldCommons.hpp"
-#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -32,11 +30,15 @@ namespace yields
      * @details
      * Built from controls.yieldChannels() (see the constructor's own
      * comment): one YieldChannel per descriptor, added via addChannel()
-     * and owned in yieldChannels_. The constructor also collects every
-     * loaded channel's own isotopes() into one deduplicated, sorted
-     * isotopes_ -- the union of every isotope any requested channel
-     * covers. There will be more to this class -- nothing yet combines
-     * the channels' actual yield values together.
+     * and owned in yieldChannels_. The constructor also calls
+     * rebuildYieldGrid() once, which collects every loaded channel's
+     * own isotopesOrig() into one deduplicated, sorted isotopes_ (the
+     * union of every isotope any requested channel covers), then pushes
+     * that same isotopes_ back down into every channel's own
+     * rebuildYieldGrid() -- so every YieldChannel this Yields owns ends
+     * up synchronized onto the same isotope list, in the same order.
+     * There will be more to this class -- nothing yet combines the
+     * channels' actual yield values together.
      */
     class Yields
     {
@@ -56,9 +58,8 @@ namespace yields
          *   controls.fehDist() -- see addChannel()'s own comment
          * @details
          * Calls addChannel() once per entry in controls.yieldChannels(),
-         * in order, then builds isotopes_ from the union of every
-         * loaded channel's own isotopes() -- see isotopes()'s own
-         * comment.
+         * in order, then rebuildYieldGrid() once -- see its own comment
+         * for what that does.
          */
         Yields(const io::SimControls& controls,
             std::string registryName = defaultRegistry);
@@ -93,6 +94,49 @@ namespace yields
         void addChannel(const YieldChannelDescriptor& descriptor);
 
         /**
+         * @brief Rebuild isotopes_ from yieldChannels_, then push it back into every channel
+         * @throws std::invalid_argument if propagated from some
+         *   channel's own rebuildYieldGrid() call (should not happen in
+         *   practice: the mMin/mMax passed to each are exactly what
+         *   that channel's own descriptor already validated, indirectly,
+         *   the first time it was built)
+         * @details
+         * First, collects every entry in yieldChannels_'s own
+         * isotopesOrig() (not isotopes() -- see below) into one
+         * deduplicated, sorted isotopes_: the union of every isotope
+         * any loaded channel's own model tabulates, in IsotopeData's
+         * own Z-then-A order, comparing the referenced IsotopeData
+         * objects themselves (not reference_wrapper identity), so two
+         * channels tabulating the same isotope (necessarily the same
+         * global elem::isotopeTable() entry) are correctly recognized
+         * as one, not kept as duplicates.
+         *
+         * Then, for each entry i in yieldChannels_, calls
+         * yieldChannels_[i]->rebuildYieldGrid(mMin, mMax, isotopes_),
+         * where mMin/mMax are controls_.yieldChannels()[i]'s own
+         * mMin_/mMax_ -- relying on yieldChannels_ and
+         * controls_.yieldChannels() staying in lockstep (both built,
+         * in the same order, only by the constructor's own addChannel()
+         * loop). This is what actually synchronizes every channel onto
+         * the same, shared isotopes_: passing it to rebuildYieldGrid()
+         * remaps that channel's own yieldData_ onto isotopes_'s exact
+         * order, backfilling 0 for any isotope this channel's own model
+         * doesn't tabulate (see YieldChannel::rebuildYieldGrid()'s own
+         * comment for the mechanics) -- reads isotopesOrig() again for
+         * this reason, since isotopes() on a channel not yet
+         * synchronized would still be empty, or already the same
+         * (stale) list from a previous rebuildYieldGrid() call here.
+         *
+         * Called once by the constructor, right after every requested
+         * channel has been added; also public, so a caller (e.g. from
+         * Python, after addChannel() adds a further channel to an
+         * already-built Yields) can rerun this to re-synchronize every
+         * channel -- including ones added earlier -- onto the new,
+         * larger union of isotopes.
+         */
+        void rebuildYieldGrid();
+
+        /**
          * @brief Return the SimControls this Yields reads its channel descriptors from
          * @return A const reference to controls_
          */
@@ -115,26 +159,24 @@ namespace yields
         }
 
         /**
-         * @brief Return the union of every loaded channel's own isotopes()
+         * @brief Return the union of every loaded channel's own isotopesOrig()
          * @return A const reference to isotopes_: every isotope that
-         *   appears in at least one of yieldChannels()'s own isotopes()
-         *   lists, deduplicated and sorted (by IsotopeData's own Z-then-A
-         *   ordering) -- unlike any one channel's own isotopes(), not
-         *   necessarily in the order any single yield table tabulates
-         *   them
+         *   appears in at least one of yieldChannels()'s own
+         *   isotopesOrig() lists, deduplicated and sorted (by
+         *   IsotopeData's own Z-then-A ordering) -- once
+         *   rebuildYieldGrid() has run (always true after the
+         *   constructor itself returns), this is also exactly what
+         *   every yieldChannels() entry's own isotopes() equals, in the
+         *   same order -- see rebuildYieldGrid()'s own comment
          */
-        [[nodiscard]] auto isotopes() const
-            -> const std::vector<std::reference_wrapper<const elem::IsotopeData>>&
-        {
-            return isotopes_;
-        }
+        [[nodiscard]] auto isotopes() const -> const IsotopeList& { return isotopes_; }
 
     private:
 
         const io::SimControls& controls_; // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members) -- deliberately a live reference, not a copy, matching Extinct's/Specsyn's own identical controls_ members exactly -- see either one's own comment for why. Only ever used through the same non-copyable ownership pattern (unique_ptr in SimControls's own yields_) as those, so the usual objection (disabling implicit copy/move assignment) doesn't apply in practice.
         std::string registryName_;        /**< Name of the yield registry file */
         std::vector<std::unique_ptr<YieldChannel>> yieldChannels_; /**< Yield channels built via addChannel(), one per entry in controls_.yieldChannels() -- see yieldChannels()'s own comment */
-        std::vector<std::reference_wrapper<const elem::IsotopeData>> isotopes_; /**< Union of every yieldChannels_ entry's own isotopes(), deduplicated and sorted -- see isotopes()'s own comment */
+        IsotopeList isotopes_; /**< Union of every yieldChannels_ entry's own isotopesOrig(), deduplicated and sorted -- see isotopes()'s own comment */
 
     };
 

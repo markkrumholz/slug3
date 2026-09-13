@@ -9,15 +9,14 @@
 #ifndef YIELDCHANNEL_HPP
 #define YIELDCHANNEL_HPP
 
-#include "../elem/IsotopeData.hpp"
 #include "../utils/GridBracket.hpp"
 #include "../utils/ThreadVec.hpp"
 #include "YieldCommons.hpp"
 #include <cassert>
 #include <cstddef>
-#include <functional>
 #include <mdspan> // NOLINT(misc-include-cleaner)
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -42,7 +41,7 @@ namespace yields
          * @param descriptor Which channel/model to load, and the mass
          *   range it should cover -- see YieldChannelDescriptor's own
          *   comment for each member; descriptor.mMin_/mMax_ mean exactly
-         *   what rebuildMassGrid()'s own mMin/mMax parameters do
+         *   what rebuildYieldGrid()'s own mMin/mMax parameters do
          * @param fehMin Minimum [Fe/H] value
          * @param fehMax Maximum [Fe/H] value
          * @param registryName Name of the yield registry file
@@ -51,14 +50,20 @@ namespace yields
          *   the [Fe/H] range actually available for that channel/model,
          *   or if the underlying HDF5 file cannot be read or is malformed
          * @details
-         * Calls rebuildMassGrid(descriptor.mMin_, descriptor.mMax_) once
-         * the model's own native mass grid (massesOrig_) has been read
-         * -- see rebuildMassGrid()'s own comment for how those turn
-         * into masses_/yieldData_. fehMin/fehMax/registryName are
-         * separate parameters, rather than YieldChannelDescriptor
-         * members, because a whole run's worth of channels (see the
-         * Yields class) share one [Fe/H] range and registry, but each
-         * has its own channel/model/mass range.
+         * Reads massesOrig_/isotopesOrig_/yieldDataOrig_ from disk, but
+         * -- unlike descriptor.mMin_/mMax_, which used to be applied
+         * immediately here via an end-of-constructor rebuildYieldGrid()
+         * call -- does not itself populate masses_/isotopes_/
+         * yieldData_: a caller must call rebuildYieldGrid() explicitly
+         * (with descriptor.mMin_/mMax_, and optionally a synchronized
+         * isotope list -- see its own comment) before yield() can be
+         * called. This lets a caller building several YieldChannel
+         * objects at once (see the Yields class) read every channel's
+         * own native isotopesOrig_ first, decide on one synchronized
+         * isotope list across all of them, and only then build each
+         * channel's actual yieldData_ against that shared list, rather
+         * than building it once here against this channel's own native
+         * isotopes and then immediately rebuilding it again.
          */
         YieldChannel(
             const YieldChannelDescriptor& descriptor,
@@ -83,21 +88,30 @@ namespace yields
         auto operator=(YieldChannel&&) -> YieldChannel& = delete;
 
         /**
-         * @brief Rebuild masses_/yieldData_ over [mMin, mMax] from massesOrig_/yieldDataOrig_
+         * @brief Rebuild masses_/isotopes_/yieldData_ from massesOrig_/isotopesOrig_/yieldDataOrig_
          * @param mMin Minimum stellar mass this channel should cover;
          *   defaults (nullopt) to massesOrig().front()
          * @param mMax Maximum stellar mass this channel should cover;
          *   defaults (nullopt) to massesOrig().back()
+         * @param isotopes The isotope list yieldData_'s third axis
+         *   should be built over; an empty vector (the default) means
+         *   "use isotopesOrig_ itself, unchanged" -- see below for what
+         *   a non-empty list does
          * @throws std::invalid_argument if the resolved mMin or mMax is
          *   not finite and strictly positive (a stellar mass), or if
          *   the resolved mMin is not strictly less than the resolved mMax
          * @details
-         * Called once by the constructor, with whatever mMin/mMax it
-         * was given; also public, so a caller (e.g. from Python, after
-         * changing which mass range a channel should cover) can rerun
-         * this on an already-constructed YieldChannel without building
-         * a new one -- the same role loadCurve()/rebuildCache() play
-         * for Extinct, and loadTable() for Nebular.
+         * Must be called at least once (with whatever mMin/mMax/isotopes
+         * a caller wants) before yield() can be called -- unlike most of
+         * this project's own analogous rebuild-from-native-data methods
+         * (e.g. Extinct::rebuildCache()), the constructor does not call
+         * this itself; see its own comment for why. Public so a caller
+         * (e.g. from Python, after changing which mass range a channel
+         * should cover, or -- see the Yields class -- to synchronize
+         * several channels onto one common isotope list) can rerun this
+         * on an already-constructed YieldChannel without building a new
+         * one -- the same role loadCurve()/rebuildCache() play for
+         * Extinct, and loadTable() for Nebular.
          *
          * masses_ is set to mMin, followed by every value in
          * massesOrig_ strictly between mMin and mMax, followed by mMax
@@ -106,39 +120,43 @@ namespace yields
          * (extrapolation), narrower (a truncated sub-range), or
          * identical to it (mMin/mMax left at their defaults).
          *
-         * yieldData_ is filled in one mass column at a time. For a
-         * masses_ entry that exactly matches some value in massesOrig_
-         * (including, as a special case, every value copied verbatim
-         * from massesOrig_ above), utils::findBracket returns a
-         * bracket weight of exactly 0 or 1, which the same interpolation
-         * formula used for a genuine interior point below reduces to an
-         * exact copy of that one massesOrig_ column -- so no separate
-         * exact-match branch is needed for that case. For an entry
-         * strictly between two massesOrig_ values, that same
-         * utils::findBracket bracket/weight linearly interpolates
-         * between the two neighboring massesOrig_ columns. For an entry
-         * outside [massesOrig_.front(), massesOrig_.back()] altogether
-         * -- the actual extrapolation case this method exists for --
-         * utils::findBracket can't help (it clamps out-of-range queries
-         * to the nearest edge, weight 0 or 1, rather than reporting
-         * them as out of range), so that case is detected explicitly
-         * and handled by scaling every isotope's yield in the nearest
-         * massesOrig_ column (front() if mMin is below it, back() if
-         * mMax is above it) by the ratio of the requested mass to that
-         * column's own mass -- e.g. extrapolating a massesOrig_.front()
-         * of 13 Msun down to mMin = 8 Msun scales that column's every
-         * yield by 8/13.
+         * isotopes_ is set to isotopesOrig_ if isotopes is empty, or to
+         * isotopes itself otherwise -- letting a caller reorder,
+         * subset, or extend (see below) the isotope list this channel's
+         * own yieldData_ is built over, e.g. to match every other
+         * channel a Yields is chaining together.
+         *
+         * yieldData_ is filled in one (mass, isotope) entry at a time.
+         * The mass axis works exactly as it always has (see the
+         * previous revision of this comment, before isotope remapping
+         * was added): a masses_ entry that exactly matches some value
+         * in massesOrig_ (including every value copied verbatim from
+         * massesOrig_ above) resolves to an exact copy of that
+         * massesOrig_ column; one strictly between two massesOrig_
+         * values is linearly interpolated between them via
+         * utils::findBracket; one outside [massesOrig_.front(),
+         * massesOrig_.back()] altogether is extrapolated by scaling the
+         * nearest massesOrig_ column by the ratio of the requested mass
+         * to that column's own mass. The isotope axis is independent:
+         * for each entry in isotopes_, its index in isotopesOrig_ is
+         * looked up (by IsotopeData equality, i.e. matching (Z, A), not
+         * isotopesOrig_'s own order) to find which yieldDataOrig_
+         * column to read the mass axis above from; an isotopes_ entry
+         * with no match in isotopesOrig_ (this channel's own model
+         * never tabulated it) leaves that isotope's own yieldData_
+         * entries at exactly 0, for every mass and [Fe/H].
          *
          * massCache_ is reset to 0 for every thread once masses_ has a
          * new size: an index cached against the old masses_ could
          * otherwise be at or past the end of a smaller new one, which
          * yield()'s own unchecked utils::findBracket call requires
          * never happens. fehCache_/feH_ are untouched -- this method
-         * only ever changes the mass axis.
+         * never changes the [Fe/H] axis.
          */
-        void rebuildMassGrid(
+        void rebuildYieldGrid(
             std::optional<double> mMin = std::nullopt,
-            std::optional<double> mMax = std::nullopt);
+            std::optional<double> mMax = std::nullopt,
+            IsotopeList isotopes = {});
 
         // Observers
 
@@ -153,8 +171,9 @@ namespace yields
          * @return A const reference to the masses (Msun), ascending --
          *   this is the grid yield()/hasYield() actually use, which can
          *   extend below/above massesOrig()'s own range (extrapolated)
-         *   or be a narrower sub-range of it (see rebuildMassGrid()'s
-         *   own comment)
+         *   or be a narrower sub-range of it (see rebuildYieldGrid()'s
+         *   own comment). Empty until rebuildYieldGrid() is called at
+         *   least once.
          */
         [[nodiscard]] auto masses() const -> const std::vector<double>& { return masses_; }
 
@@ -162,24 +181,34 @@ namespace yields
          * @brief Return the stellar masses natively tabulated by the underlying model
          * @return A const reference to the masses (Msun), ascending,
          *   exactly as read from the model's own HDF5 file -- unlike
-         *   masses(), never affected by the mMin/mMax passed to the
-         *   constructor or rebuildMassGrid()
+         *   masses(), never affected by the mMin/mMax passed to
+         *   rebuildYieldGrid(), and already populated once the
+         *   constructor returns (no need to call rebuildYieldGrid() first)
          */
         [[nodiscard]] auto massesOrig() const -> const std::vector<double>& { return massesOrig_; }
 
         /**
-         * @brief Return the isotopes this channel's yields are tabulated for
+         * @brief Return the isotopes this channel's yieldData_ is actually tabulated for
          * @return A const reference to the isotopes, in the same order
-         *   as yld()'s own third axis -- each one a reference into the
-         *   single, global elem::isotopeTable(), resolved once (via the
-         *   (Z, A) pairs read from the model's own HDF5 file) in the
-         *   constructor
+         *   as yld()'s own third axis -- either isotopesOrig() itself,
+         *   or whatever isotope list was last passed to
+         *   rebuildYieldGrid(), depending on which it was called with
+         *   (see its own comment). Empty until rebuildYieldGrid() is
+         *   called at least once.
          */
-        [[nodiscard]] auto isotopes() const
-            -> const std::vector<std::reference_wrapper<const elem::IsotopeData>>&
-        {
-            return isotopes_;
-        }
+        [[nodiscard]] auto isotopes() const -> const IsotopeList& { return isotopes_; }
+
+        /**
+         * @brief Return the isotopes natively tabulated by the underlying model
+         * @return A const reference to the isotopes, in the same order
+         *   as yieldDataOrig_'s own third axis, each one a reference
+         *   into the single, global elem::isotopeTable(), resolved once
+         *   (via the (Z, A) pairs read from the model's own HDF5 file)
+         *   in the constructor -- unlike isotopes(), never affected by
+         *   rebuildYieldGrid(), and already populated once the
+         *   constructor returns (no need to call rebuildYieldGrid() first)
+         */
+        [[nodiscard]] auto isotopesOrig() const -> const IsotopeList& { return isotopesOrig_; }
 
         /**
          * @brief Return the [Fe/H] values this channel's yields are tabulated at
@@ -214,6 +243,11 @@ namespace yields
          * @brief Check whether a stellar mass falls within this channel's mass grid
          * @param mass Stellar mass to check (Msun)
          * @return True if mass lies within [masses().front(), masses().back()], false otherwise
+         * @details
+         * Like yield(), only meaningful once rebuildYieldGrid() has been
+         * called at least once -- masses() is empty until then, so this
+         * itself is not safe to call before that (see yield()'s own,
+         * explicit guard for why it can throw instead of just asserting).
          */
         [[nodiscard]] auto hasYield(const double mass) const -> bool
         {
@@ -227,17 +261,27 @@ namespace yields
          * @return A vector of isotopes().size() yields (Msun), in the
          *   same order as isotopes(), bilinearly interpolated from
          *   yld() in (feH, mass)
+         * @throws std::runtime_error if rebuildYieldGrid() has never
+         *   been called (yieldData_ is still empty), so masses_/isotopes_
+         *   don't yet describe any real grid to interpolate on
          * @details
          * Callers must check hasYield(mass) (and that feH lies within
          * feH()'s own range) themselves before calling this -- enforced
          * here only via assert(), so a violation is caught in a debug
          * build but costs nothing in an optimized one, and via
          * unchecked mdspan/vector element access throughout, for the
-         * same reason. utils::findBracket handles a singular (size-1)
-         * feH() axis -- e.g. a Solar-only yield model such as
-         * sukhbold16 -- automatically, returning weight 0 on one side
-         * and 1 on the other with no special-casing needed here; see
-         * its own comment.
+         * same reason. The yieldData_-empty check above is a real,
+         * always-on throw rather than another assert(): unlike a bad
+         * mass/feH (a caller bug, on an otherwise-usable object),
+         * calling this before rebuildYieldGrid() at all means the
+         * object has no grid whatsoever yet, which a caller has no way
+         * to detect for itself the way it can check hasYield(mass)
+         * before calling this.
+         *
+         * utils::findBracket handles a singular (size-1) feH() axis --
+         * e.g. a Solar-only yield model such as sukhbold16 --
+         * automatically, returning weight 0 on one side and 1 on the
+         * other with no special-casing needed here; see its own comment.
          *
          * massCache_/fehCache_ accelerate repeated nearby queries the
          * same way SpecsynLib's own dim*Cache_ members do for spec()
@@ -247,6 +291,12 @@ namespace yields
          */
         [[nodiscard]] auto yield(const double mass, const double feH) const -> std::vector<double>
         {
+            if (yieldData_.empty())
+            {
+                throw std::runtime_error(
+                    "YieldChannel::yield: yieldData_ is empty -- call "
+                    "rebuildYieldGrid() at least once before calling yield()");
+            }
             assert(hasYield(mass));
             assert(feH >= feH_.front() && feH <= feH_.back());
 
@@ -283,10 +333,11 @@ namespace yields
         Channel channel_;                  /**< Which nucleosynthetic channel this is */
         std::vector<double> masses_;       /**< Stellar masses (Msun) this channel's yields are tabulated at -- see masses()'s own comment */
         std::vector<double> massesOrig_;   /**< Stellar masses (Msun) as read from the model's own HDF5 file -- see massesOrig()'s own comment */
-        std::vector<std::reference_wrapper<const elem::IsotopeData>> isotopes_; /**< Isotopes this channel's yields are tabulated for -- see isotopes()'s own comment */
+        IsotopeList isotopes_;             /**< Isotopes yieldData_ is actually tabulated for -- see isotopes()'s own comment */
+        IsotopeList isotopesOrig_;         /**< Isotopes as read from the model's own HDF5 file -- see isotopesOrig()'s own comment */
         std::vector<double> feH_;          /**< [Fe/H] values for all yields */ // NOLINT(readability-identifier-naming)
-        std::vector<double> yieldData_;    /**< Backing storage for yld(), over masses_ -- see its own comment */
-        std::vector<double> yieldDataOrig_; /**< Backing storage over massesOrig_, from which yieldData_ is (re)derived -- see rebuildMassGrid()'s own comment */
+        std::vector<double> yieldData_;    /**< Backing storage for yld(), over masses_/isotopes_ -- see its own comment */
+        std::vector<double> yieldDataOrig_; /**< Backing storage over massesOrig_/isotopesOrig_, from which yieldData_ is (re)derived -- see rebuildYieldGrid()'s own comment */
         mutable utils::ThreadVec<std::size_t> massCache_; /**< Cached bracket index for masses_, see yield()'s own comment */
         mutable utils::ThreadVec<std::size_t> fehCache_;  /**< Cached bracket index for feH_, see yield()'s own comment */
 

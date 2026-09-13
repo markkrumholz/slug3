@@ -1173,14 +1173,18 @@ static auto testSimControlsYields() -> int
 }
 
 // Verify Yields::isotopes() is the deduplicated, sorted union of every
-// loaded channel's own isotopes(). Uses the small yields test fixture
+// loaded channel's own isotopesOrig(), and that Yields::rebuildYieldGrid()
+// (called by the constructor) actually pushes that same list back down
+// into every channel -- both its isotopes() (in the same order) and its
+// yield() values (remapped, with 0 for any isotope that channel's own
+// model doesn't tabulate). Uses the small yields test fixture
 // (tests/yields/assets/yields.toml, see make_yields_test_fixture.py)
 // rather than the real registry: its "sukhbold_test" (h1, fe56, ni56)
 // and "kobayashi_test" (h1, fe56, ni58) models deliberately share some
 // isotopes and differ in one, so this actually exercises
-// deduplication -- two channels of the very same real model would
-// share their whole isotope_z/isotope_a datasets outright and so could
-// never expose a dedup bug.
+// deduplication and zero-backfill -- two channels of the very same
+// real model would share their whole isotope_z/isotope_a datasets
+// outright and so could never expose either kind of bug.
 static auto testSimControlsYieldsIsotopes() -> int
 {
     constexpr std::string_view baseDeck = "tests/core/assets/testGalaxy.in";
@@ -1206,7 +1210,7 @@ static auto testSimControlsYieldsIsotopes() -> int
 
         const auto& isotopes = controls.yields()->isotopes();
         const std::vector<std::pair<unsigned int, unsigned int>> expected{
-            { 1, 1 }, { 26, 56 }, { 28, 56 }, { 28, 58 } };
+            { 1, 1 }, { 26, 56 }, { 28, 56 }, { 28, 58 } }; // h1, fe56, ni56, ni58
         if (isotopes.size() != expected.size())
         {
             std::cerr << "testSimControls: yieldsIsotopes: expected " << expected.size() <<
@@ -1226,6 +1230,84 @@ static auto testSimControlsYieldsIsotopes() -> int
                         isotopes[i].get().A() << ")\n";
                     result = 1;
                 }
+            }
+        }
+
+        const auto& loaded = controls.yields()->yieldChannels();
+        if (loaded.size() != 2)
+        {
+            std::cerr << "testSimControls: yieldsIsotopes: expected 2 yieldChannels(), got "
+                << loaded.size() << "\n";
+            return result | 1;
+        }
+
+        // Both channels must be synchronized onto the exact same
+        // isotopes() -- Yields::isotopes() itself, in the same order
+        for (const auto* label : { "sukhbold_test", "kobayashi_test" })
+        {
+            const auto& channelIsotopes = (label == std::string_view{ "sukhbold_test" }) ?
+                loaded[0]->isotopes() : loaded[1]->isotopes();
+            if (channelIsotopes.size() != isotopes.size())
+            {
+                std::cerr << "testSimControls: yieldsIsotopes: " << label <<
+                    " channel's own isotopes() was not synchronized to yields()->isotopes()\n";
+                result = 1;
+                continue;
+            }
+            for (std::size_t i = 0; i < isotopes.size(); ++i)
+            {
+                if (channelIsotopes[i].get() != isotopes[i].get())
+                {
+                    std::cerr << "testSimControls: yieldsIsotopes: " << label <<
+                        " channel's own isotopes()[" << i << "] does not match "
+                        "yields()->isotopes()[" << i << "]\n";
+                    result = 1;
+                }
+            }
+        }
+
+        // sukhbold_test's own native h1/fe56/ni56 values at its own
+        // exact grid mass 18.2, remapped onto [h1, fe56, ni56, ni58] --
+        // ni58 (index 3) must be exactly 0, since sukhbold_test never
+        // tabulated it
+        constexpr double yieldTol = 1e-10;
+        const std::vector<double> sukhboldExpected{ 5.93, 8.46e-2, 7.02e-2, 0.0 };
+        const auto sukhboldActual = loaded[0]->yield(18.2, 0.0);
+        if (sukhboldActual.size() != sukhboldExpected.size())
+        {
+            std::cerr << "testSimControls: yieldsIsotopes: sukhbold_test yield() has "
+                "size " << sukhboldActual.size() << ", expected " << sukhboldExpected.size() << "\n";
+            result = 1;
+        }
+        for (std::size_t i = 0; i < std::min(sukhboldActual.size(), sukhboldExpected.size()); ++i)
+        {
+            if (std::abs(sukhboldActual[i] - sukhboldExpected[i]) > yieldTol)
+            {
+                std::cerr << "testSimControls: yieldsIsotopes: sukhbold_test yield()[" << i <<
+                    "] = " << sukhboldActual[i] << ", expected " << sukhboldExpected[i] << "\n";
+                result = 1;
+            }
+        }
+
+        // kobayashi_test's own native h1/fe56/ni58 values at its own
+        // exact grid mass 13.0, remapped onto [h1, fe56, ni56, ni58] --
+        // ni56 (index 2) must be exactly 0, since kobayashi_test never
+        // tabulated it
+        const std::vector<double> kobayashiExpected{ 6.16, 8.32e-2, 0.0, 2.23e-3 };
+        const auto kobayashiActual = loaded[1]->yield(13.0, 0.0);
+        if (kobayashiActual.size() != kobayashiExpected.size())
+        {
+            std::cerr << "testSimControls: yieldsIsotopes: kobayashi_test yield() has "
+                "size " << kobayashiActual.size() << ", expected " << kobayashiExpected.size() << "\n";
+            result = 1;
+        }
+        for (std::size_t i = 0; i < std::min(kobayashiActual.size(), kobayashiExpected.size()); ++i)
+        {
+            if (std::abs(kobayashiActual[i] - kobayashiExpected[i]) > yieldTol)
+            {
+                std::cerr << "testSimControls: yieldsIsotopes: kobayashi_test yield()[" << i <<
+                    "] = " << kobayashiActual[i] << ", expected " << kobayashiExpected[i] << "\n";
+                result = 1;
             }
         }
     }
