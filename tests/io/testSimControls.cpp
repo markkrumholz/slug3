@@ -990,7 +990,11 @@ static auto testSimControlsYields() -> int
         result = 1;
     }
 
-    // Two channels, the second with m_min/m_max, plus an explicit registry
+    // Two channels (both real models in the default registry, so
+    // Yields::Yields() -- called from readYields() -- actually builds
+    // both), the second with m_min/m_max extrapolating past
+    // sukhbold16's own native [9.0, 120.0] mass range on both ends,
+    // plus an explicit (if here, redundant with the default) registry
     try
     {
         toml::table inputDeck = toml::parse_file(baseDeck);
@@ -998,9 +1002,9 @@ static auto testSimControlsYields() -> int
             { "channel1", toml::table{
                 { "channel", "ccsn" }, { "model", "sukhbold16" } } },
             { "channel2", toml::table{
-                { "channel", "massive_star_winds" }, { "model", "kobayashi06_11" },
-                { "m_min", 8.0 }, { "m_max", 40.0 } } },
-            { "registry", "some/registry.toml" },
+                { "channel", "massive_star_winds" }, { "model", "sukhbold16" },
+                { "m_min", 8.0 }, { "m_max", 150.0 } } },
+            { "registry", yields::defaultRegistry },
         });
         const io::SimControls controls(inputDeck);
 
@@ -1021,9 +1025,9 @@ static auto testSimControlsYields() -> int
                 result = 1;
             }
             if (channels[1].channel_ != yields::Channel::massiveStarWinds_ ||
-                channels[1].modelName_ != "kobayashi06_11" ||
+                channels[1].modelName_ != "sukhbold16" ||
                 !channels[1].mMin_.has_value() || channels[1].mMin_.value() != 8.0 ||
-                !channels[1].mMax_.has_value() || channels[1].mMax_.value() != 40.0)
+                !channels[1].mMax_.has_value() || channels[1].mMax_.value() != 150.0)
             {
                 std::cerr << "testSimControls: yields: unexpected yieldChannels()[1]\n";
                 result = 1;
@@ -1036,11 +1040,39 @@ static auto testSimControlsYields() -> int
                 "when yields.channel1 is given\n";
             result = 1;
         }
-        else if (controls.yields()->registryName() != "some/registry.toml")
+        else
         {
-            std::cerr << "testSimControls: yields: expected yields()->registryName() "
-                "== \"some/registry.toml\", got \"" << controls.yields()->registryName() << "\"\n";
-            result = 1;
+            if (controls.yields()->registryName() != yields::defaultRegistry)
+            {
+                std::cerr << "testSimControls: yields: expected yields()->registryName() "
+                    "== yields::defaultRegistry, got \"" << controls.yields()->registryName() << "\"\n";
+                result = 1;
+            }
+
+            const auto& loaded = controls.yields()->yieldChannels();
+            if (loaded.size() != 2)
+            {
+                std::cerr << "testSimControls: yields: expected yields()->yieldChannels() "
+                    "to have size 2, got " << loaded.size() << "\n";
+                result = 1;
+            }
+            else
+            {
+                if (loaded[0]->channel() != yields::Channel::ccsn_)
+                {
+                    std::cerr << "testSimControls: yields: yields()->yieldChannels()[0] "
+                        "has the wrong channel()\n";
+                    result = 1;
+                }
+                if (loaded[1]->channel() != yields::Channel::massiveStarWinds_ ||
+                    !loaded[1]->hasYield(8.0) || !loaded[1]->hasYield(150.0))
+                {
+                    std::cerr << "testSimControls: yields: yields()->yieldChannels()[1] "
+                        "has the wrong channel(), or doesn't cover the requested "
+                        "[8.0, 150.0] extrapolated mass range\n";
+                    result = 1;
+                }
+            }
         }
     }
     catch (const std::exception& error)
@@ -1049,6 +1081,24 @@ static auto testSimControlsYields() -> int
             << error.what() << "\n";
         result = 1;
     }
+
+    // A channel naming a model that doesn't exist in the registry: not
+    // checked by readYields() itself (see its own comment), but Yields'
+    // constructor builds the real YieldChannel eagerly, so this throws
+    // once SimControls actually gets there.
+    try
+    {
+        toml::table inputDeck = toml::parse_file(baseDeck);
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{
+                { "channel", "ccsn" }, { "model", "not_a_real_model" } } },
+        });
+        const io::SimControls controls(inputDeck);
+        std::cerr << "testSimControls: yields: expected an exception for a "
+            "yields.channel1.model that doesn't exist in the registry\n";
+        result = 1;
+    }
+    catch (const std::runtime_error&) { /* expected */ }
 
     // One channel, no yields.registry given: yields()->registryName()
     // falls back to yields::defaultRegistry

@@ -9,9 +9,11 @@
 #ifndef YIELDS_HPP
 #define YIELDS_HPP
 
+#include "YieldChannel.hpp"
 #include "YieldCommons.hpp"
+#include <memory>
 #include <string>
-#include <utility>
+#include <vector>
 
 namespace io
 {
@@ -26,10 +28,11 @@ namespace yields
      *   SimControls requests, and is the connector between them and
      *   the rest of the code
      * @details
-     * A stub for now: the constructor stores controls_/registryName_
-     * but does not yet build any YieldChannel objects from
-     * controls.yieldChannels() -- that, and the rest of this class's
-     * actual behavior, comes in a follow-up commit.
+     * Built from controls.yieldChannels() (see the constructor's own
+     * comment): one YieldChannel per descriptor, added via addChannel()
+     * and owned in yieldChannels_. There will be more to this class --
+     * this is only the part that loads the requested channels; nothing
+     * yet combines their yields together.
      */
     class Yields
     {
@@ -38,26 +41,50 @@ namespace yields
         /**
          * @brief Construct a Yields from a SimControls's own yieldChannels()
          * @param controls Simulation controls this Yields reads its
-         *   yield-channel descriptors (controls.yieldChannels()) from,
-         *   live, for the rest of its lifetime -- see controls_'s own
-         *   comment. Must outlive this Yields.
+         *   yield-channel descriptors (controls.yieldChannels()) and
+         *   [Fe/H] range (controls.fehDist()) from, live, for the rest
+         *   of its lifetime -- see controls_'s own comment. Must
+         *   outlive this Yields.
          * @param registryName Name of the yield registry file
+         * @throws std::runtime_error if any descriptor in
+         *   controls.yieldChannels() names a channel/model not found in
+         *   registryName, or whose [Fe/H] range doesn't cover
+         *   controls.fehDist() -- see addChannel()'s own comment
+         * @details
+         * Calls addChannel() once per entry in controls.yieldChannels(),
+         * in order.
          */
         Yields(const io::SimControls& controls,
-            std::string registryName = defaultRegistry) :
-            controls_(controls),
-            registryName_(std::move(registryName))
-        {}
+            std::string registryName = defaultRegistry);
 
-        // Copyable (rebinding controls_ to the same referent) but not
-        // assignable (controls_ can't be reseated), matching Extinct's
-        // own identical copy/move declarations exactly -- see its
-        // comment.
-        Yields(const Yields&) = default;
+        // Movable (moving yieldChannels_'s own ownership, and rebinding
+        // controls_ to the same referent) but neither copyable (
+        // yieldChannels_ holds move-only std::unique_ptr<YieldChannel>
+        // elements) nor assignable (controls_ can't be reseated,
+        // matching Extinct's/Specsyn's own identical controls_ members
+        // -- see either one's own comment).
+        Yields(const Yields&) = delete;
         Yields(Yields&&) = default;
         auto operator=(const Yields&) -> Yields& = delete;
         auto operator=(Yields&&) -> Yields& = delete;
         ~Yields() = default;
+
+        /**
+         * @brief Add one YieldChannel, built from a descriptor, to yieldChannels_
+         * @param descriptor Which channel/model to load, and the mass
+         *   range it should cover
+         * @throws std::runtime_error if descriptor.channel_/modelName_
+         *   is not found in the registry named by registryName(), or if
+         *   controls_.fehDist()'s own range lies outside the [Fe/H]
+         *   range actually available for that channel/model -- see
+         *   YieldChannel::YieldChannel()'s own comment
+         * @details
+         * The new YieldChannel is loaded over controls_.fehDist()'s own
+         * [min, max] range -- mirrors SimControls::readTracks()'s
+         * identical use of fehDist_.getMin()/getMax() to pick the
+         * [Fe/H] range a model is loaded over.
+         */
+        void addChannel(const YieldChannelDescriptor& descriptor);
 
         /**
          * @brief Return the SimControls this Yields reads its channel descriptors from
@@ -71,10 +98,21 @@ namespace yields
          */
         [[nodiscard]] auto registryName() const -> const std::string& { return registryName_; }
 
+        /**
+         * @brief Return the yield channels loaded so far
+         * @return A const reference to yieldChannels_, in the same
+         *   order as controls().yieldChannels()
+         */
+        [[nodiscard]] auto yieldChannels() const -> const std::vector<std::unique_ptr<YieldChannel>>&
+        {
+            return yieldChannels_;
+        }
+
     private:
 
-        const io::SimControls& controls_; // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members) -- deliberately a live reference, not a copy, matching Extinct's/Specsyn's own identical controls_ members exactly -- see either one's own comment for why. Only ever used through the same non-copyable, non-movable ownership pattern (unique_ptr in SimControls's own yields_) as those, so the usual objection (disabling implicit copy/move assignment) doesn't apply in practice.
+        const io::SimControls& controls_; // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members) -- deliberately a live reference, not a copy, matching Extinct's/Specsyn's own identical controls_ members exactly -- see either one's own comment for why. Only ever used through the same non-copyable ownership pattern (unique_ptr in SimControls's own yields_) as those, so the usual objection (disabling implicit copy/move assignment) doesn't apply in practice.
         std::string registryName_;        /**< Name of the yield registry file */
+        std::vector<std::unique_ptr<YieldChannel>> yieldChannels_; /**< Yield channels built via addChannel(), one per entry in controls_.yieldChannels() -- see yieldChannels()'s own comment */
 
     };
 
