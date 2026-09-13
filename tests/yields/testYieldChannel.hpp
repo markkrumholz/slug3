@@ -78,7 +78,8 @@ inline auto testYieldChannelCcsn() -> int
     try
     {
         const yields::YieldChannel yc(
-            yields::Channel::ccsn_, "sukhbold_test", 0.0, 0.0, registryName);
+            yields::YieldChannelDescriptor{ yields::Channel::ccsn_, "sukhbold_test" },
+            0.0, 0.0, registryName);
 
         if (yc.channel() != yields::Channel::ccsn_)
         {
@@ -142,7 +143,8 @@ inline auto testYieldChannelMassiveStarWinds() -> int
     try
     {
         const yields::YieldChannel yc(
-            yields::Channel::massiveStarWinds_, "sukhbold_test", 0.0, 0.0, registryName);
+            yields::YieldChannelDescriptor{ yields::Channel::massiveStarWinds_, "sukhbold_test" },
+            0.0, 0.0, registryName);
 
         if (yc.channel() != yields::Channel::massiveStarWinds_)
         {
@@ -188,7 +190,8 @@ inline auto testYieldChannelFeHRangeGuard() -> int
     try
     {
         const yields::YieldChannel yc(
-            yields::Channel::ccsn_, "sukhbold_test", -1.1, 0.0, registryName);
+            yields::YieldChannelDescriptor{ yields::Channel::ccsn_, "sukhbold_test" },
+            -1.1, 0.0, registryName);
         std::cerr << "testYieldChannelFeHRangeGuard: construction with "
             "fehMin = -1.1 (below the available minimum of -1.0) "
             "should have thrown, but did not\n";
@@ -199,7 +202,8 @@ inline auto testYieldChannelFeHRangeGuard() -> int
     try
     {
         const yields::YieldChannel yc(
-            yields::Channel::ccsn_, "sukhbold_test", -1.0, 0.1, registryName);
+            yields::YieldChannelDescriptor{ yields::Channel::ccsn_, "sukhbold_test" },
+            -1.0, 0.1, registryName);
         std::cerr << "testYieldChannelFeHRangeGuard: construction with "
             "fehMax = 0.1 (above the available maximum of 0.0) "
             "should have thrown, but did not\n";
@@ -221,7 +225,8 @@ inline auto testYieldChannelUnknownModel() -> int
     try
     {
         const yields::YieldChannel yc(
-            yields::Channel::ccsn_, "no_such_model", 0.0, 0.0, registryName);
+            yields::YieldChannelDescriptor{ yields::Channel::ccsn_, "no_such_model" },
+            0.0, 0.0, registryName);
         std::cerr << "testYieldChannelUnknownModel: construction with an "
             "unknown model name should have thrown, but did not\n";
         return 1;
@@ -245,7 +250,8 @@ inline auto testYieldChannelHasYield() -> int
     try
     {
         const yields::YieldChannel yc(
-            yields::Channel::ccsn_, "sukhbold_test", 0.0, 0.0, registryName);
+            yields::YieldChannelDescriptor{ yields::Channel::ccsn_, "sukhbold_test" },
+            0.0, 0.0, registryName);
 
         const std::vector<std::pair<double, bool>> cases{
             { 18.2, true }, { 100.0, true }, { 59.1, true },
@@ -329,9 +335,11 @@ inline auto testYieldChannelInterpolation() -> int
     try
     {
         const yields::YieldChannel ccsn(
-            yields::Channel::ccsn_, "sukhbold_test", 0.0, 0.0, registryName);
+            yields::YieldChannelDescriptor{ yields::Channel::ccsn_, "sukhbold_test" },
+            0.0, 0.0, registryName);
         const yields::YieldChannel wind(
-            yields::Channel::massiveStarWinds_, "sukhbold_test", 0.0, 0.0, registryName);
+            yields::YieldChannelDescriptor{ yields::Channel::massiveStarWinds_, "sukhbold_test" },
+            0.0, 0.0, registryName);
 
         // Exact grid hit at mass = 18.2 -- same values as
         // testYieldChannelCcsn()/testYieldChannelMassiveStarWinds()
@@ -351,9 +359,11 @@ inline auto testYieldChannelInterpolation() -> int
         // than across masses -- see this function's own comment on
         // why a synthetic Fe_H = -1.0 group is needed for this
         const yields::YieldChannel ccsnMultiFeH(
-            yields::Channel::ccsn_, "sukhbold_test", -1.0, 0.0, registryName);
+            yields::YieldChannelDescriptor{ yields::Channel::ccsn_, "sukhbold_test" },
+            -1.0, 0.0, registryName);
         const yields::YieldChannel windMultiFeH(
-            yields::Channel::massiveStarWinds_, "sukhbold_test", -1.0, 0.0, registryName);
+            yields::YieldChannelDescriptor{ yields::Channel::massiveStarWinds_, "sukhbold_test" },
+            -1.0, 0.0, registryName);
 
         if (ccsnMultiFeH.feH().size() != 2 || ccsnMultiFeH.feH()[0] != -1.0 ||
             ccsnMultiFeH.feH()[1] != 0.0)
@@ -439,7 +449,8 @@ inline auto testYieldChannelMassGridExtrapolation() -> int
     try
     {
         const yields::YieldChannel yc(
-            yields::Channel::ccsn_, "kobayashi_test", 0.0, 0.0, registryName, 8.0, 25.0);
+            yields::YieldChannelDescriptor{ yields::Channel::ccsn_, "kobayashi_test", 8.0, 25.0 },
+            0.0, 0.0, registryName);
 
         if (yc.massesOrig().size() != 3 || yc.massesOrig()[0] != 13.0 ||
             yc.massesOrig()[1] != 15.0 || yc.massesOrig()[2] != 18.0)
@@ -522,7 +533,8 @@ inline auto testYieldChannelMassGridNarrowing() -> int
     try
     {
         const yields::YieldChannel yc(
-            yields::Channel::ccsn_, "kobayashi_test", 0.0, 0.0, registryName, 14.0, 17.0);
+            yields::YieldChannelDescriptor{ yields::Channel::ccsn_, "kobayashi_test", 14.0, 17.0 },
+            0.0, 0.0, registryName);
 
         const std::vector<double> expectedMasses{ 14.0, 15.0, 17.0 };
         if (yc.masses() != expectedMasses)
@@ -578,7 +590,8 @@ inline auto testYieldChannelRebuildMassGrid() -> int
     try
     {
         yields::YieldChannel yc(
-            yields::Channel::ccsn_, "kobayashi_test", 0.0, 0.0, registryName);
+            yields::YieldChannelDescriptor{ yields::Channel::ccsn_, "kobayashi_test" },
+            0.0, 0.0, registryName);
 
         const std::vector<double> nativeMasses{ 13.0, 15.0, 18.0 };
         if (yc.masses() != nativeMasses)

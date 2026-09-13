@@ -309,16 +309,14 @@ namespace yields
     } // namespace
 
     YieldChannel::YieldChannel(
-        const Channel channel,
-        const std::string& modelName,
+        const YieldChannelDescriptor& descriptor,
         const double fehMin,
         const double fehMax,
-        const std::string& registryName,
-        const std::optional<double> mMin,
-        const std::optional<double> mMax) :
-        channel_(channel)
+        const std::string& registryName) :
+        channel_(descriptor.channel_)
     {
-        const std::string channelName(channelStr.at(static_cast<std::size_t>(channel)));
+        const std::string& modelName = descriptor.modelName_;
+        const std::string channelName(channelStr.at(static_cast<std::size_t>(descriptor.channel_)));
 
         // Step 1: locate and validate the registry entry for this
         // channel/model, and resolve the HDF5 file it names. Mirrors
@@ -445,7 +443,7 @@ namespace yields
 
         // Step 6: derive masses_/yieldData_ from massesOrig_/
         // yieldDataOrig_ -- see rebuildMassGrid()'s own comment
-        rebuildMassGrid(mMin, mMax);
+        rebuildMassGrid(descriptor.mMin_, descriptor.mMax_);
     }
 
     void YieldChannel::rebuildMassGrid(

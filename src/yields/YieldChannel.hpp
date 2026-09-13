@@ -37,36 +37,32 @@ namespace yields
 
         /**
          * @brief Construct a YieldChannel from a yield model on disk
-         * @param channel Which nucleosynthetic channel to load (e.g. Channel::ccsn_)
-         * @param modelName Name of the yield model (e.g. "sukhbold16")
+         * @param descriptor Which channel/model to load, and the mass
+         *   range it should cover -- see YieldChannelDescriptor's own
+         *   comment for each member; descriptor.mMin_/mMax_ mean exactly
+         *   what rebuildMassGrid()'s own mMin/mMax parameters do
          * @param fehMin Minimum [Fe/H] value
          * @param fehMax Maximum [Fe/H] value
          * @param registryName Name of the yield registry file
-         * @param mMin Minimum stellar mass this channel should cover;
-         *   defaults (nullopt) to the lowest mass the model itself
-         *   provides -- see rebuildMassGrid()'s own comment for what
-         *   passing a value below that does
-         * @param mMax Maximum stellar mass this channel should cover;
-         *   defaults (nullopt) to the highest mass the model itself
-         *   provides -- see rebuildMassGrid()'s own comment for what
-         *   passing a value above that does
-         * @throws std::runtime_error if channel/modelName is not found
-         *   in the registry, if fehMin or fehMax lies outside the
-         *   [Fe/H] range actually available for that channel/model, or
-         *   if the underlying HDF5 file cannot be read or is malformed
+         * @throws std::runtime_error if descriptor.channel_/modelName_ is
+         *   not found in the registry, if fehMin or fehMax lies outside
+         *   the [Fe/H] range actually available for that channel/model,
+         *   or if the underlying HDF5 file cannot be read or is malformed
          * @details
-         * Calls rebuildMassGrid(mMin, mMax) once the model's own native
-         * mass grid (massesOrig_) has been read -- see its own comment
-         * for how mMin/mMax turn into masses_/yieldData_.
+         * Calls rebuildMassGrid(descriptor.mMin_, descriptor.mMax_) once
+         * the model's own native mass grid (massesOrig_) has been read
+         * -- see rebuildMassGrid()'s own comment for how those turn
+         * into masses_/yieldData_. fehMin/fehMax/registryName are
+         * separate parameters, rather than YieldChannelDescriptor
+         * members, because a whole run's worth of channels (see the
+         * Yields class) share one [Fe/H] range and registry, but each
+         * has its own channel/model/mass range.
          */
         YieldChannel(
-            Channel channel,
-            const std::string& modelName,
+            const YieldChannelDescriptor& descriptor,
             double fehMin,
             double fehMax,
-            const std::string& registryName = defaultRegistry,
-            std::optional<double> mMin = std::nullopt,
-            std::optional<double> mMax = std::nullopt);
+            const std::string& registryName = defaultRegistry);
 
         ~YieldChannel() = default;
 
