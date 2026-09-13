@@ -645,6 +645,20 @@ namespace io
         [[nodiscard]] auto yields() const -> const yields::Yields* { return yields_.get(); }
 
         /**
+         * @brief Whether yields should be reported decomposed by channel, or summed over all channels
+         * @return The value of the optional yields.channel_decomposed
+         *   key (see readYields()), true by default
+         * @details
+         * Meaningful only if yields() is non-null. True means each
+         * yield channel's own contribution should be kept separate
+         * (one row per channel); false means every channel's
+         * contribution should be summed together into one combined
+         * total per isotope -- mirroring Yields::yield()'s own
+         * per-channel rows versus Yields::yieldSum()'s combined total.
+         */
+        [[nodiscard]] auto yieldsChannelDecomposed() const { return yieldsChannelDecomposed_; }
+
+        /**
          * @brief Get the nebular emission control parameters
          * @return A const reference to the control parameters
          *   populated from the input deck's own [nebular] stanza (see
@@ -1228,6 +1242,11 @@ namespace io
          * and constructs yields_ from *this and that registry name --
          * left null if yieldChannels_ is empty, since there is nothing
          * for a Yields to chain together in that case.
+         *
+         * Also reads the optional yields.channel_decomposed (default
+         * true) into yieldsChannelDecomposed_, regardless of whether
+         * yieldChannels_ ends up empty -- see its own observer's
+         * comment for what it controls.
          */
         void readYields(const toml::table& inputDeck);
 
@@ -1337,6 +1356,7 @@ namespace io
         std::unique_ptr<nebular::Nebular> nebular_; /**< Nebular emission grid requested via the [nebular] stanza */
         std::vector<yields::YieldChannelDescriptor> yieldChannels_; /**< Yield channels requested via yields.channel1, yields.channel2, etc. -- see readYields()'s own comment */
         std::unique_ptr<yields::Yields> yields_; /**< Yields built from yieldChannels_, or nullptr if yieldChannels_ is empty */
+        bool yieldsChannelDecomposed_ = true; /**< Whether yields should be reported decomposed by channel (true) or summed over all channels (false) -- see yieldsChannelDecomposed()'s own comment; from the optional yields.channel_decomposed key, see readYields() */
 
         // Output wavelength grid (spectra.wl_min, spectra.wl_max,
         // spectra.nwl), read by readSpectra and passed through to

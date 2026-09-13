@@ -75,10 +75,16 @@ core::Cluster::Cluster(const unsigned long uid,
     }
 
     // If yield channels were requested, size yields_ to hold one
-    // (currently zero) entry per isotope -- see yields_'s own comment
+    // (currently zero) entry per isotope, times one row per channel
+    // if SimControls::yieldsChannelDecomposed() is true (matching
+    // Yields::yield()'s own (nchannels, nisotopes) layout), or just
+    // one combined total per isotope otherwise (matching
+    // Yields::yieldSum()) -- see yields_'s own comment
     if (const auto* yields = sc.yields())
     {
-        yields_.assign(yields->isotopes().size(), 0.0);
+        const std::size_t n = yields->isotopes().size() *
+            (sc.yieldsChannelDecomposed() ? yields->yieldChannels().size() : 1);
+        yields_.assign(n, 0.0);
     }
 }
 
@@ -155,10 +161,16 @@ core::Cluster::Cluster(const unsigned long uid,
     }
 
     // If yield channels were requested, size yields_ to hold one
-    // (currently zero) entry per isotope -- see yields_'s own comment
+    // (currently zero) entry per isotope, times one row per channel
+    // if SimControls::yieldsChannelDecomposed() is true (matching
+    // Yields::yield()'s own (nchannels, nisotopes) layout), or just
+    // one combined total per isotope otherwise (matching
+    // Yields::yieldSum()) -- see yields_'s own comment
     if (const auto* yields = sc.yields())
     {
-        yields_.assign(yields->isotopes().size(), 0.0);
+        const std::size_t n = yields->isotopes().size() *
+            (sc.yieldsChannelDecomposed() ? yields->yieldChannels().size() : 1);
+        yields_.assign(n, 0.0);
     }
 }
 

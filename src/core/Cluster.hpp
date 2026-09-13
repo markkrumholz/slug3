@@ -386,9 +386,13 @@ namespace core
          * @brief Return this cluster's total nucleosynthetic yield of each isotope
          * @return A const reference to yields_: intended to be the
          *   total yield (Msun) of each isotope in controls().yields()'s
-         *   own isotopes(), in the same order, summed over this
-         *   cluster's stars; an empty vector if no yield channels were
-         *   requested (controls().yields() is null)
+         *   own isotopes(), summed over this cluster's stars -- laid
+         *   out as one channel-major row (of isotopes().size() entries
+         *   each) per entry in controls().yields()->yieldChannels() if
+         *   controls().yieldsChannelDecomposed() is true, or just
+         *   isotopes().size() combined totals (summed over every
+         *   channel) if false; an empty vector if no yield channels
+         *   were requested (controls().yields() is null)
          * @details
          * Computed lazily -- see spec()'s own comment. computeYields()
          * is currently a no-op stub, so yields_ stays at the all-zero
@@ -471,7 +475,7 @@ namespace core
         std::vector<double> photNeb_; /**< Photometry of specNeb_ through each filter in SimControls::filters(), at the current time */
         std::vector<double> photNebExtinct_; /**< Photometry of specNebExtinct_ through each filter in SimControls::filters(), at the current time */
         double lbol_ = 0.0;         /**< Bolometric luminosity of the population, in Lsun, at the current time */
-        std::vector<double> yields_; /**< Total nucleosynthetic yield of each isotope in controls().yields()'s own isotopes(), in Msun, summed over this cluster's stars -- sized to all zeros at construction if controls().yields() is non-null, empty otherwise; see yields()'s own comment for why it stays all-zero until a following commit implements computeYields() */
+        std::vector<double> yields_; /**< Total nucleosynthetic yield of each isotope in controls().yields()'s own isotopes(), in Msun, summed over this cluster's stars, laid out per yields()'s own comment -- sized to all zeros at construction if controls().yields() is non-null, empty otherwise; see yields()'s own comment for why it stays all-zero until a following commit implements computeYields() */
 
         /**
          * @brief Whether spec_/specExtinct_/specNeb_/specNebExtinct_/lineLum_/lineLumExtinct_ are current as of curTime_

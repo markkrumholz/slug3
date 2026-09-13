@@ -1010,6 +1010,11 @@ void io::SimControls::readYields(const toml::table& inputDeck)
             channel, modelInput.value(), mMinInput, mMaxInput}); // NOLINT(bugprone-unchecked-optional-access) -- required=true above guarantees modelInput has a value or getTOMLKeyWithError already threw
     }
 
+    // yields.channel_decomposed: optional, read regardless of whether
+    // yieldChannels_ ends up empty (harmless either way)
+    yieldsChannelDecomposed_ = utils::getTOMLKeyWithError<bool>(
+        inputDeck, "yields.channel_decomposed").value_or(true);
+
     if (yieldChannels_.empty()) { return; }
 
     // yields.registry: optional override of the default yield registry
