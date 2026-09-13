@@ -9,11 +9,13 @@
 #ifndef YIELDCHANNEL_HPP
 #define YIELDCHANNEL_HPP
 
+#include "../elem/IsotopeData.hpp"
 #include "../utils/GridBracket.hpp"
 #include "../utils/ThreadVec.hpp"
 #include "YieldCommons.hpp"
 #include <cassert>
 #include <cstddef>
+#include <functional>
 #include <mdspan> // NOLINT(misc-include-cleaner)
 #include <optional>
 #include <string>
@@ -166,18 +168,18 @@ namespace yields
         [[nodiscard]] auto massesOrig() const -> const std::vector<double>& { return massesOrig_; }
 
         /**
-         * @brief Return the atomic number of each isotope this channel's yields are tabulated for
-         * @return A const reference to the atomic numbers, in the same
-         *   order as yldA() and yld()'s own third axis
+         * @brief Return the isotopes this channel's yields are tabulated for
+         * @return A const reference to the isotopes, in the same order
+         *   as yld()'s own third axis -- each one a reference into the
+         *   single, global elem::isotopeTable(), resolved once (via the
+         *   (Z, A) pairs read from the model's own HDF5 file) in the
+         *   constructor
          */
-        [[nodiscard]] auto yldZ() const -> const std::vector<unsigned int>& { return yldZ_; }
-
-        /**
-         * @brief Return the mass number of each isotope this channel's yields are tabulated for
-         * @return A const reference to the mass numbers, in the same
-         *   order as yldZ() and yld()'s own third axis
-         */
-        [[nodiscard]] auto yldA() const -> const std::vector<unsigned int>& { return yldA_; }
+        [[nodiscard]] auto isotopes() const
+            -> const std::vector<std::reference_wrapper<const elem::IsotopeData>>&
+        {
+            return isotopes_;
+        }
 
         /**
          * @brief Return the [Fe/H] values this channel's yields are tabulated at
@@ -190,9 +192,9 @@ namespace yields
         /**
          * @brief Return the yield data as a 3D view
          * @return An mdspan of shape (feH().size(), masses().size(),
-         *   yldZ().size()) into yieldData_, i.e. yld()[f, m, i] is the
-         *   yield (Msun) of isotope i, from a star of mass masses()[m],
-         *   at metallicity feH()[f]
+         *   isotopes().size()) into yieldData_, i.e. yld()[f, m, i] is
+         *   the yield (Msun) of isotope i, from a star of mass
+         *   masses()[m], at metallicity feH()[f]
          * @details
          * Built fresh from yieldData_ on every call, rather than cached
          * as its own sibling member, mirroring Mesh3DInterpolator's own
@@ -205,7 +207,7 @@ namespace yields
          */
         [[nodiscard]] auto yld() const -> Array3D
         {
-            return Array3D(yieldData_.data(), feH_.size(), masses_.size(), yldZ_.size());
+            return Array3D(yieldData_.data(), feH_.size(), masses_.size(), isotopes_.size());
         }
 
         /**
@@ -222,9 +224,9 @@ namespace yields
          * @brief Return the yield of every isotope for a star of given mass and [Fe/H]
          * @param mass Stellar mass (Msun); must satisfy hasYield(mass)
          * @param feH [Fe/H]; must lie within [feH().front(), feH().back()]
-         * @return A vector of yldZ().size() yields (Msun), in the same
-         *   isotope order as yldZ()/yldA(), bilinearly interpolated
-         *   from yld() in (feH, mass)
+         * @return A vector of isotopes().size() yields (Msun), in the
+         *   same order as isotopes(), bilinearly interpolated from
+         *   yld() in (feH, mass)
          * @details
          * Callers must check hasYield(mass) (and that feH lies within
          * feH()'s own range) themselves before calling this -- enforced
@@ -251,7 +253,7 @@ namespace yields
             const auto bm = utils::findBracket(masses_, mass, massCache_());
             const auto bf = utils::findBracket(feH_, feH, fehCache_());
             const auto view = yld();
-            const std::size_t niso = yldZ_.size();
+            const std::size_t niso = isotopes_.size();
 
             std::vector<double> result(niso, 0.0);
             // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- bm/bf indices are all < the corresponding grid's size by construction, and this loop is a hot path where the cost of bounds checking matters -- see this method's own comment
@@ -281,8 +283,7 @@ namespace yields
         Channel channel_;                  /**< Which nucleosynthetic channel this is */
         std::vector<double> masses_;       /**< Stellar masses (Msun) this channel's yields are tabulated at -- see masses()'s own comment */
         std::vector<double> massesOrig_;   /**< Stellar masses (Msun) as read from the model's own HDF5 file -- see massesOrig()'s own comment */
-        std::vector<unsigned int> yldZ_;   /**< Atomic number of each isotope */
-        std::vector<unsigned int> yldA_;   /**< Mass number of each isotope */
+        std::vector<std::reference_wrapper<const elem::IsotopeData>> isotopes_; /**< Isotopes this channel's yields are tabulated for -- see isotopes()'s own comment */
         std::vector<double> feH_;          /**< [Fe/H] values for all yields */ // NOLINT(readability-identifier-naming)
         std::vector<double> yieldData_;    /**< Backing storage for yld(), over masses_ -- see its own comment */
         std::vector<double> yieldDataOrig_; /**< Backing storage over massesOrig_, from which yieldData_ is (re)derived -- see rebuildMassGrid()'s own comment */

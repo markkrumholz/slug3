@@ -1172,6 +1172,72 @@ static auto testSimControlsYields() -> int
     return result;
 }
 
+// Verify Yields::isotopes() is the deduplicated, sorted union of every
+// loaded channel's own isotopes(). Uses the small yields test fixture
+// (tests/yields/assets/yields.toml, see make_yields_test_fixture.py)
+// rather than the real registry: its "sukhbold_test" (h1, fe56, ni56)
+// and "kobayashi_test" (h1, fe56, ni58) models deliberately share some
+// isotopes and differ in one, so this actually exercises
+// deduplication -- two channels of the very same real model would
+// share their whole isotope_z/isotope_a datasets outright and so could
+// never expose a dedup bug.
+static auto testSimControlsYieldsIsotopes() -> int
+{
+    constexpr std::string_view baseDeck = "tests/core/assets/testGalaxy.in";
+    int result = 0;
+
+    try
+    {
+        toml::table inputDeck = toml::parse_file(baseDeck);
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{
+                { "channel", "ccsn" }, { "model", "sukhbold_test" } } },
+            { "channel2", toml::table{
+                { "channel", "ccsn" }, { "model", "kobayashi_test" } } },
+            { "registry", "tests/yields/assets/yields.toml" },
+        });
+        const io::SimControls controls(inputDeck);
+
+        if (controls.yields() == nullptr)
+        {
+            std::cerr << "testSimControls: yieldsIsotopes: expected yields() non-null\n";
+            return 1;
+        }
+
+        const auto& isotopes = controls.yields()->isotopes();
+        const std::vector<std::pair<unsigned int, unsigned int>> expected{
+            { 1, 1 }, { 26, 56 }, { 28, 56 }, { 28, 58 } };
+        if (isotopes.size() != expected.size())
+        {
+            std::cerr << "testSimControls: yieldsIsotopes: expected " << expected.size() <<
+                " isotopes (h1, fe56, ni56, ni58), got " << isotopes.size() << "\n";
+            result = 1;
+        }
+        else
+        {
+            for (std::size_t i = 0; i < expected.size(); ++i)
+            {
+                if (isotopes[i].get().Z() != expected[i].first ||
+                    isotopes[i].get().A() != expected[i].second)
+                {
+                    std::cerr << "testSimControls: yieldsIsotopes: isotopes()[" << i <<
+                        "] expected (Z=" << expected[i].first << ", A=" << expected[i].second <<
+                        "), got (Z=" << isotopes[i].get().Z() << ", A=" <<
+                        isotopes[i].get().A() << ")\n";
+                    result = 1;
+                }
+            }
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: yieldsIsotopes: failed: " << error.what() << "\n";
+        result = 1;
+    }
+
+    return result;
+}
+
 // Verify galaxy.sfr/galaxy.sfr_dist's exclusive-or requirement and
 // galaxy.sfr_dist's own parsing: both given must throw, neither given
 // must throw, a plain number for galaxy.sfr_dist must become an
@@ -1525,6 +1591,7 @@ auto testSimControls() -> int
     result += testSimControlsSpectraChained();
     result += testSimControlsExtinctField();
     result += testSimControlsYields();
+    result += testSimControlsYieldsIsotopes();
     result += testSimControlsSFRDist();
     result += testSimControlsSetFeHRejectsBroadening();
     result += testSimControlsSettersRejectMismatchedControls();

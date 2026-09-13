@@ -91,14 +91,12 @@ inline auto testYieldChannelCcsn() -> int
             std::cerr << "testYieldChannelCcsn: unexpected masses()\n";
             result = 1;
         }
-        if (yc.yldZ().size() != 3 || yc.yldZ()[0] != 1 || yc.yldZ()[1] != 26 || yc.yldZ()[2] != 28)
+        if (yc.isotopes().size() != 3 ||
+            yc.isotopes()[0].get().Z() != 1 || yc.isotopes()[0].get().A() != 1 ||
+            yc.isotopes()[1].get().Z() != 26 || yc.isotopes()[1].get().A() != 56 ||
+            yc.isotopes()[2].get().Z() != 28 || yc.isotopes()[2].get().A() != 56)
         {
-            std::cerr << "testYieldChannelCcsn: unexpected yldZ()\n";
-            result = 1;
-        }
-        if (yc.yldA().size() != 3 || yc.yldA()[0] != 1 || yc.yldA()[1] != 56 || yc.yldA()[2] != 56)
-        {
-            std::cerr << "testYieldChannelCcsn: unexpected yldA()\n";
+            std::cerr << "testYieldChannelCcsn: unexpected isotopes()\n";
             result = 1;
         }
         if (yc.feH().size() != 1 || yc.feH()[0] != 0.0)
@@ -462,6 +460,20 @@ inline auto testYieldChannelMassGridExtrapolation() -> int
         if (yc.masses() != expectedMasses)
         {
             std::cerr << "testYieldChannelMassGridExtrapolation: unexpected masses()\n";
+            result = 1;
+        }
+
+        // kobayashi_test's own isotopes are h1, fe56, ni58 -- distinct
+        // from sukhbold_test's h1, fe56, ni56 (testYieldChannelCcsn's
+        // own check), confirming isotopes() resolves the (Z, A) pairs
+        // this specific model's file actually holds, not some other
+        // model's
+        if (yc.isotopes().size() != 3 ||
+            yc.isotopes()[0].get().Z() != 1 || yc.isotopes()[0].get().A() != 1 ||
+            yc.isotopes()[1].get().Z() != 26 || yc.isotopes()[1].get().A() != 56 ||
+            yc.isotopes()[2].get().Z() != 28 || yc.isotopes()[2].get().A() != 58)
+        {
+            std::cerr << "testYieldChannelMassGridExtrapolation: unexpected isotopes()\n";
             result = 1;
         }
 

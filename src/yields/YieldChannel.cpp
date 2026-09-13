@@ -7,6 +7,7 @@
  */
 
 #include "YieldChannel.hpp"
+#include "../elem/IsotopeTable.hpp"
 #include "../utils/HDF5Utils.hpp"
 #include "../utils/TOMLUtils.hpp"
 #include "hdf5.h" // NOLINT(misc-include-cleaner)
@@ -184,7 +185,7 @@ namespace yields
          * @param grp Handle to the channel's own already-open group
          * @param groupNames Names of the bracketed [Fe/H] groups, ascending
          * @param nmass Number of masses (masses_.size())
-         * @param niso Number of isotopes (yldZ_.size())
+         * @param niso Number of isotopes (isotopes_.size())
          * @returns The flat backing storage for a (groupNames.size(),
          *   nmass, niso) mdspan (see YieldChannel::yld()'s own comment)
          * @throws std::runtime_error if a group cannot be opened, or
@@ -261,7 +262,7 @@ namespace yields
          * @param origView Yield data over massesOrig_, shape (nfeh, massesOrig_.size(), niso)
          * @param newView Yield data over masses_, shape (nfeh, masses_.size(), niso) -- column mi is written
          * @param nfeh feH_.size()
-         * @param niso yldZ_.size()
+         * @param niso isotopes_.size()
          * @param mi Index into masses_ (and newView's second axis) to fill
          * @param src Index into massesOrig_ (and origView's second axis) of the nearest native column
          * @param ratio Requested mass divided by massesOrig_[src] -- see rebuildMassGrid()'s own comment
@@ -285,7 +286,7 @@ namespace yields
          * @param origView Yield data over massesOrig_, shape (nfeh, massesOrig_.size(), niso)
          * @param newView Yield data over masses_, shape (nfeh, masses_.size(), niso) -- column mi is written
          * @param nfeh feH_.size()
-         * @param niso yldZ_.size()
+         * @param niso isotopes_.size()
          * @param mi Index into masses_ (and newView's second axis) to fill
          * @param bracket Bracketing indices/weight (into massesOrig_) from utils::findBracket --
          *   weight 0 or 1 reduces this to an exact copy of one massesOrig_ column, see
@@ -397,12 +398,24 @@ namespace yields
                     "YieldChannel: isotope_z and isotope_a in group " +
                     channelName + " of " + h5Path.string() + " have different lengths");
             }
-            yldZ_.resize(zData.size());
-            std::ranges::transform(zData, yldZ_.begin(),
-                [](const double z) { return static_cast<unsigned int>(z); });
-            yldA_.resize(aData.size());
-            std::ranges::transform(aData, yldA_.begin(),
-                [](const double a) { return static_cast<unsigned int>(a); });
+            isotopes_.clear();
+            isotopes_.reserve(zData.size());
+            for (const auto& [z, a] : std::views::zip(zData, aData))
+            {
+                const auto zInt = static_cast<unsigned int>(z);
+                const auto aInt = static_cast<unsigned int>(a);
+                try
+                {
+                    isotopes_.emplace_back(elem::isotopeTable(zInt, aInt));
+                }
+                catch (const std::out_of_range&)
+                {
+                    throw std::runtime_error(
+                        "YieldChannel: isotope (Z=" + std::to_string(zInt) + ", A=" +
+                        std::to_string(aInt) + ") in group " + channelName + " of " +
+                        h5Path.string() + " is not in the isotope table");
+                }
+            }
 
             // Step 4: find the bracketing [Fe/H] subset -- see
             // findBracketingFeH()'s own comment
@@ -429,7 +442,7 @@ namespace yields
 
             // Step 5: read the yield data for every bracketed [Fe/H]
             // group -- see readYieldData()'s own comment
-            yieldDataOrig_ = readYieldData(grp, groupNames, massesOrig_.size(), yldZ_.size());
+            yieldDataOrig_ = readYieldData(grp, groupNames, massesOrig_.size(), isotopes_.size());
         }
         catch (...)
         {
@@ -476,7 +489,7 @@ namespace yields
         const std::size_t nfeh = feH_.size();
         const std::size_t nmassOrig = massesOrig_.size();
         const std::size_t nmass = masses_.size();
-        const std::size_t niso = yldZ_.size();
+        const std::size_t niso = isotopes_.size();
         const Array3D origView(yieldDataOrig_.data(), nfeh, nmassOrig, niso);
 
         yieldData_.assign(nfeh * nmass * niso, 0.0);

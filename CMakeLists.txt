@@ -212,6 +212,7 @@ add_executable(slugTestTracks
     src/utils/HDF5Utils.cpp
 )
 add_executable(slugTestYields
+    src/elem/IsotopeTable.cpp
     src/yields/YieldChannel.cpp
     tests/yields/testYieldsAll.cpp
     src/utils/HDF5Utils.cpp
@@ -262,6 +263,7 @@ add_executable(slugTestCore
     tests/core/testSimGalaxy.cpp
     tests/core/testSpecsynChain.cpp
     src/utils/HDF5Utils.cpp
+    src/elem/IsotopeTable.cpp
     src/yields/YieldChannel.cpp
     src/yields/Yields.cpp
 )
@@ -320,6 +322,7 @@ add_executable(slugTestCoreFull
     tests/core/testGalaxySpecsynFullFieldStars.cpp
     tests/core/testCoreFullAll.cpp
     src/utils/HDF5Utils.cpp
+    src/elem/IsotopeTable.cpp
     src/yields/YieldChannel.cpp
     src/yields/Yields.cpp
 )
@@ -374,6 +377,7 @@ add_executable(slugTestIo
     tests/io/testOutputManager.cpp
     tests/io/testSimControls.cpp
     src/utils/HDF5Utils.cpp
+    src/elem/IsotopeTable.cpp
     src/yields/YieldChannel.cpp
     src/yields/Yields.cpp
 )
@@ -410,6 +414,7 @@ add_executable(slugTestNebular
     src/utils/ParseUtils.cpp
     tests/nebular/testNebularAll.cpp
     src/utils/HDF5Utils.cpp
+    src/elem/IsotopeTable.cpp
     src/yields/YieldChannel.cpp
     src/yields/Yields.cpp
 )
@@ -452,6 +457,7 @@ add_executable(slugTestSpecsyn
     src/pdfs/PDFSegmentSchechter.cpp
     src/utils/ParseUtils.cpp
     src/utils/HDF5Utils.cpp
+    src/elem/IsotopeTable.cpp
     src/yields/YieldChannel.cpp
     src/yields/Yields.cpp
 )
@@ -525,6 +531,7 @@ pybind11_add_module(slugPython
     src/tracks/Tracks3D.cpp
     src/utils/ParseUtils.cpp
     src/utils/HDF5Utils.cpp
+    src/elem/IsotopeTable.cpp
     src/yields/YieldChannel.cpp
     src/yields/Yields.cpp
 )

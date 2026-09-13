@@ -9,8 +9,10 @@
 #ifndef YIELDS_HPP
 #define YIELDS_HPP
 
+#include "../elem/IsotopeData.hpp"
 #include "YieldChannel.hpp"
 #include "YieldCommons.hpp"
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -30,9 +32,11 @@ namespace yields
      * @details
      * Built from controls.yieldChannels() (see the constructor's own
      * comment): one YieldChannel per descriptor, added via addChannel()
-     * and owned in yieldChannels_. There will be more to this class --
-     * this is only the part that loads the requested channels; nothing
-     * yet combines their yields together.
+     * and owned in yieldChannels_. The constructor also collects every
+     * loaded channel's own isotopes() into one deduplicated, sorted
+     * isotopes_ -- the union of every isotope any requested channel
+     * covers. There will be more to this class -- nothing yet combines
+     * the channels' actual yield values together.
      */
     class Yields
     {
@@ -52,7 +56,9 @@ namespace yields
          *   controls.fehDist() -- see addChannel()'s own comment
          * @details
          * Calls addChannel() once per entry in controls.yieldChannels(),
-         * in order.
+         * in order, then builds isotopes_ from the union of every
+         * loaded channel's own isotopes() -- see isotopes()'s own
+         * comment.
          */
         Yields(const io::SimControls& controls,
             std::string registryName = defaultRegistry);
@@ -108,11 +114,27 @@ namespace yields
             return yieldChannels_;
         }
 
+        /**
+         * @brief Return the union of every loaded channel's own isotopes()
+         * @return A const reference to isotopes_: every isotope that
+         *   appears in at least one of yieldChannels()'s own isotopes()
+         *   lists, deduplicated and sorted (by IsotopeData's own Z-then-A
+         *   ordering) -- unlike any one channel's own isotopes(), not
+         *   necessarily in the order any single yield table tabulates
+         *   them
+         */
+        [[nodiscard]] auto isotopes() const
+            -> const std::vector<std::reference_wrapper<const elem::IsotopeData>>&
+        {
+            return isotopes_;
+        }
+
     private:
 
         const io::SimControls& controls_; // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members) -- deliberately a live reference, not a copy, matching Extinct's/Specsyn's own identical controls_ members exactly -- see either one's own comment for why. Only ever used through the same non-copyable ownership pattern (unique_ptr in SimControls's own yields_) as those, so the usual objection (disabling implicit copy/move assignment) doesn't apply in practice.
         std::string registryName_;        /**< Name of the yield registry file */
         std::vector<std::unique_ptr<YieldChannel>> yieldChannels_; /**< Yield channels built via addChannel(), one per entry in controls_.yieldChannels() -- see yieldChannels()'s own comment */
+        std::vector<std::reference_wrapper<const elem::IsotopeData>> isotopes_; /**< Union of every yieldChannels_ entry's own isotopes(), deduplicated and sorted -- see isotopes()'s own comment */
 
     };
 

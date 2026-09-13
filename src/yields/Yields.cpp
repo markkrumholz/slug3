@@ -10,6 +10,7 @@
 #include "../io/SimControls.hpp"
 #include "YieldChannel.hpp"
 #include "YieldCommons.hpp"
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <utility>
@@ -24,6 +25,25 @@ namespace yields
         {
             addChannel(descriptor);
         }
+
+        // Union every loaded channel's own isotopes() into one
+        // deduplicated, sorted isotopes_ -- see its own comment.
+        // IsotopeData's own operator</operator== (Z first, then A) is
+        // reused here via the referenced object (.get()), rather than
+        // reference_wrapper's own identity-based comparison, so two
+        // channels that both tabulate the same isotope (necessarily the
+        // very same elem::isotopeTable() entry, since that table is a
+        // single, global, per-(Z,A) map) are correctly recognized as
+        // one isotope, not kept as duplicates.
+        for (const auto& channel : yieldChannels_)
+        {
+            isotopes_.insert(isotopes_.end(), channel->isotopes().begin(), channel->isotopes().end());
+        }
+        std::ranges::sort(isotopes_,
+            [](const auto& lhs, const auto& rhs) { return lhs.get() < rhs.get(); });
+        const auto dup = std::ranges::unique(isotopes_,
+            [](const auto& lhs, const auto& rhs) { return lhs.get() == rhs.get(); });
+        isotopes_.erase(dup.begin(), dup.end());
     }
 
     void Yields::addChannel(const YieldChannelDescriptor& descriptor)
