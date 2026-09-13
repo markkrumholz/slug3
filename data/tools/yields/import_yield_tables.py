@@ -410,6 +410,39 @@ def update_registry(registry_path: str, h5_filename: str, name: str,
     reg_file.write_text(tomlkit.dumps(doc))
 
 
+def check_no_stale_wind_data(h5_path: str, wind_channel: str, feh: float) -> None:
+    """Refuse to silently leave stale wind data behind when the current
+    --input-dir has no [wind] column at all.
+
+    write_h5()/update_registry() simply skip wind_channel in that case
+    (see main()'s own comment) -- fine the first time a model is
+    imported, but if an earlier run of this script already wrote wind
+    data for this exact (model, --feh) into h5_path, that data would
+    otherwise be left behind untouched, looking like it's still valid
+    for the *current* --input-dir when it isn't. This script has no
+    delete-a-group-and-its-registry-entry path (removing a hand-edited
+    registry entry safely is not this script's job), so the safer
+    choice is to fail loudly here and let a human decide, rather than
+    guess.
+    """
+    path = pathlib.Path(h5_path)
+    if not path.exists():
+        return
+    with h5py.File(path, "r") as h5file:
+        if wind_channel not in h5file:
+            return
+        feh_name = f"feh_{feh:g}"
+        if feh_name in h5file[wind_channel]:
+            raise ValueError(
+                f"{h5_path} already holds wind data (channel '{wind_channel}', "
+                f"Fe_H = {feh:g}) from a previous import, but the current "
+                "--input-dir has no [wind] column at all; this script does not "
+                "support removing already-written wind data, to avoid silently "
+                f"discarding it -- delete the '{wind_channel}/{feh_name}' group "
+                "(and its registry entry, if this was its last [Fe/H]) by hand "
+                "first if dropping wind support for this model is intentional")
+
+
 def main() -> None:
     args = parse_args()
 
@@ -417,15 +450,17 @@ def main() -> None:
     n_iso, n_mass = imported["ejecta_yield"].shape
     print(f"parsed {n_mass} masses, {n_iso} isotopes from {args.input_dir}")
 
+    h5_filename = f"{args.name}.h5"
+    h5_path = str(pathlib.Path(args.h5_dir) / h5_filename)
+
     channels = [args.ejecta_channel]
     if imported["has_wind"]:
         channels.append(args.wind_channel)
     else:
+        check_no_stale_wind_data(h5_path, args.wind_channel, args.feh)
         print(f"no [wind] column found anywhere in {args.input_dir}; "
             f"leaving '{args.wind_channel}' untouched for this model")
 
-    h5_filename = f"{args.name}.h5"
-    h5_path = str(pathlib.Path(args.h5_dir) / h5_filename)
     write_h5(h5_path, args.reference, args.reference_url,
         args.ejecta_channel, args.wind_channel, args.feh, imported)
     print(f"wrote channel(s) {channels} to {h5_path}")

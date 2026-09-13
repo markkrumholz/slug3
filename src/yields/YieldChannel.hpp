@@ -90,8 +90,9 @@ namespace yields
          *   defaults (nullopt) to massesOrig().front()
          * @param mMax Maximum stellar mass this channel should cover;
          *   defaults (nullopt) to massesOrig().back()
-         * @throws std::invalid_argument if the resolved mMin is not
-         *   strictly less than the resolved mMax
+         * @throws std::invalid_argument if the resolved mMin or mMax is
+         *   not finite and strictly positive (a stellar mass), or if
+         *   the resolved mMin is not strictly less than the resolved mMax
          * @details
          * Called once by the constructor, with whatever mMin/mMax it
          * was given; also public, so a caller (e.g. from Python, after

@@ -11,6 +11,7 @@
 #include "../utils/TOMLUtils.hpp"
 #include "hdf5.h" // NOLINT(misc-include-cleaner)
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <mdspan> // NOLINT(misc-include-cleaner)
 #include <optional>
@@ -452,6 +453,13 @@ namespace yields
     {
         const double loMass = mMin.value_or(massesOrig_.front());
         const double hiMass = mMax.value_or(massesOrig_.back());
+        if (!std::isfinite(loMass) || !std::isfinite(hiMass) || loMass <= 0.0 || hiMass <= 0.0)
+        {
+            throw std::invalid_argument(
+                "YieldChannel::rebuildMassGrid: mMin (" + std::to_string(loMass) +
+                ") and mMax (" + std::to_string(hiMass) +
+                ") must both be finite and strictly positive");
+        }
         if (!(loMass < hiMass))
         {
             throw std::invalid_argument(

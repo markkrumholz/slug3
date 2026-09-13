@@ -317,7 +317,7 @@ inline auto testYieldChannelInterpolation() -> int
         }
         for (std::size_t i = 0; i < expected.size(); ++i)
         {
-            if (std::abs(actual[i] - expected[i]) > tol)
+            if (!std::isfinite(actual[i]) || std::abs(actual[i] - expected[i]) > tol)
             {
                 std::cerr << label << ": isotope index " << i << ": expected " <<
                     expected[i] << ", got " << actual[i] << "\n";
@@ -427,7 +427,7 @@ inline auto testYieldChannelMassGridExtrapolation() -> int
         }
         for (std::size_t i = 0; i < expected.size(); ++i)
         {
-            if (std::abs(actual[i] - expected[i]) > tol)
+            if (!std::isfinite(actual[i]) || std::abs(actual[i] - expected[i]) > tol)
             {
                 std::cerr << label << ": isotope index " << i << ": expected " <<
                     expected[i] << ", got " << actual[i] << "\n";
@@ -510,7 +510,7 @@ inline auto testYieldChannelMassGridNarrowing() -> int
         }
         for (std::size_t i = 0; i < expected.size(); ++i)
         {
-            if (std::abs(actual[i] - expected[i]) > tol)
+            if (!std::isfinite(actual[i]) || std::abs(actual[i] - expected[i]) > tol)
             {
                 std::cerr << label << ": isotope index " << i << ": expected " <<
                     expected[i] << ", got " << actual[i] << "\n";
