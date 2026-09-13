@@ -1423,6 +1423,71 @@ static auto testSimControlsYieldsYieldAndSum() -> int
     return result;
 }
 
+// Verify Yields::yield() leaves a channel's own row all zero, rather
+// than throwing, when the query mass lies outside that particular
+// channel's own hasYield() range -- the two-model fixture's native
+// mass ranges (sukhbold_test [18.2, 100.0], kobayashi_test
+// [13.0, 15.0, 18.0], no m_min/m_max overrides this time) don't
+// overlap at their shared edge, so mass = 18.2 is sukhbold_test's own
+// exact native grid point (hasYield(18.2) true, no interpolation) but
+// lies just outside kobayashi_test's own range (hasYield(18.2) false,
+// its own max mass being 18.0).
+static auto testSimControlsYieldsPartialRange() -> int
+{
+    constexpr std::string_view baseDeck = "tests/core/assets/testGalaxy.in";
+    constexpr double tol = 1e-9;
+    int result = 0;
+
+    try
+    {
+        toml::table inputDeck = toml::parse_file(baseDeck);
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{ { "channel", "ccsn" }, { "model", "sukhbold_test" } } },
+            { "channel2", toml::table{ { "channel", "ccsn" }, { "model", "kobayashi_test" } } },
+            { "registry", "tests/yields/assets/yields.toml" },
+        });
+        const io::SimControls controls(inputDeck);
+
+        // Isotope order is [h1, fe56, ni56, ni58] (see
+        // testSimControlsYieldsIsotopes()'s own identical check). Row 0
+        // (sukhbold_test) is its own real, native mass-18.2 values; row
+        // 1 (kobayashi_test) is all zero, since 18.2 is outside its own
+        // [13.0, 18.0] range.
+        const auto [view, data] = controls.yields()->yield(18.2, 0.0);
+        const std::vector<double> row0{ 5.93, 8.46e-2, 7.02e-2, 0.0 };
+        const std::vector<double> row1{ 0.0, 0.0, 0.0, 0.0 };
+
+        if (view.extent(0) != 2 || view.extent(1) != row0.size())
+        {
+            std::cerr << "testSimControls: yieldsPartialRange: expected yield() shape (2, " <<
+                row0.size() << "), got (" << view.extent(0) << ", " << view.extent(1) << ")\n";
+            return 1;
+        }
+        for (std::size_t j = 0; j < row0.size(); ++j)
+        {
+            if (std::abs(view[0, j] - row0[j]) > tol)
+            {
+                std::cerr << "testSimControls: yieldsPartialRange: yield()[0, " << j << "] = " <<
+                    view[0, j] << ", expected " << row0[j] << "\n";
+                result = 1;
+            }
+            if (std::abs(view[1, j] - row1[j]) > tol)
+            {
+                std::cerr << "testSimControls: yieldsPartialRange: yield()[1, " << j << "] = " <<
+                    view[1, j] << ", expected " << row1[j] << " (out of range, should stay 0)\n";
+                result = 1;
+            }
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: yieldsPartialRange: failed: " << error.what() << "\n";
+        result = 1;
+    }
+
+    return result;
+}
+
 // Verify Yields::Yields() prints a "slug: warning" (to std::cout) when
 // the same channel is requested more than once, but does not forbid
 // it -- both channels must still be built normally. Also verifies the
@@ -1886,6 +1951,7 @@ auto testSimControls() -> int
     result += testSimControlsYields();
     result += testSimControlsYieldsIsotopes();
     result += testSimControlsYieldsYieldAndSum();
+    result += testSimControlsYieldsPartialRange();
     result += testSimControlsYieldsDuplicateChannelWarning();
     result += testSimControlsSFRDist();
     result += testSimControlsSetFeHRejectsBroadening();

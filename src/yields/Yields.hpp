@@ -195,8 +195,8 @@ namespace yields
 
         /**
          * @brief Return every channel's own yield, as one (nchannels, isotopes().size()) array
-         * @param mass Stellar mass (Msun); must satisfy every
-         *   yieldChannels() entry's own hasYield(mass)
+         * @param mass Stellar mass (Msun); need not satisfy every
+         *   yieldChannels() entry's own hasYield(mass) -- see @details
          * @param feH [Fe/H]; must lie within every yieldChannels()
          *   entry's own feH() range
          * @return A pair (view, data): data is the backing storage,
@@ -208,9 +208,13 @@ namespace yields
          *   yield() throws -- see its own comment (e.g. rebuildYieldGrid()
          *   was never called on that particular channel)
          * @details
-         * Row i is exactly yieldChannels()[i]->yield(mass, feH) --
-         * always isotopes().size() long, in isotopes()'s own order,
-         * once rebuildYieldGrid() has synchronized every channel onto
+         * Row i is yieldChannels()[i]->yield(mass, feH) if
+         * yieldChannels()[i]->hasYield(mass) is true, or left all zero
+         * otherwise -- so a mass outside one channel's own range
+         * simply contributes nothing from that channel, rather than
+         * every channel needing to cover mass. Each populated row is
+         * isotopes().size() long, in isotopes()'s own order, once
+         * rebuildYieldGrid() has synchronized every channel onto
          * isotopes() (which the constructor always does before
          * returning; see its own comment for the one way this could
          * stop being true -- addChannel() called again afterward
