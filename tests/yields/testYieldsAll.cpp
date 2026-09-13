@@ -22,6 +22,9 @@ auto main() -> int {
         result += testYieldChannelUnknownModel();
         result += testYieldChannelHasYield();
         result += testYieldChannelInterpolation();
+        result += testYieldChannelMassGridExtrapolation();
+        result += testYieldChannelMassGridNarrowing();
+        result += testYieldChannelRebuildMassGrid();
         return result;
     }
     catch (const std::exception& error)

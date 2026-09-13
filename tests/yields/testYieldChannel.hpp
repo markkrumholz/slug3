@@ -11,7 +11,13 @@
  * from data/yields/sukhbold16.h5 -- the expected values checked here
  * were independently verified by hand against the original
  * s18.2.yield_table/s100.yield_table text files (see
- * import_yield_tables.py's own docstring for that source format).
+ * import_yield_tables.py's own docstring for that source format). The
+ * mass-grid extrapolation/interpolation tests further down instead use
+ * the fixture's own "kobayashi_test" model (extracted from the real
+ * data/yields/kobayashi06_11.h5, which -- unlike sukhbold_test's 2-mass
+ * grid -- has 3 masses, enough to exercise "some requested masses are
+ * native grid points, some are interpolated between two of them, some
+ * are extrapolated beyond either end" all in the same YieldChannel).
  * @date 2026-09-12
  * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
@@ -24,6 +30,7 @@
 #include <cstddef>
 #include <exception>
 #include <iostream>
+#include <stdexcept>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -310,7 +317,7 @@ inline auto testYieldChannelInterpolation() -> int
         }
         for (std::size_t i = 0; i < expected.size(); ++i)
         {
-            if (std::abs(actual[i] - expected[i]) > tol)
+            if (!std::isfinite(actual[i]) || std::abs(actual[i] - expected[i]) > tol)
             {
                 std::cerr << label << ": isotope index " << i << ": expected " <<
                     expected[i] << ", got " << actual[i] << "\n";
@@ -374,6 +381,250 @@ inline auto testYieldChannelInterpolation() -> int
     {
         std::cerr << "testYieldChannelInterpolation: failed to construct YieldChannel from "
             << registryName << ": " << e.what() << "\n";
+        return 1;
+    }
+
+    return result;
+}
+
+/**
+ * @brief Unit test for YieldChannel's mass-grid extrapolation and interpolation
+ * @return 0 if the test passes, 1 if it fails
+ * @details
+ * tests/yields/assets/yields.toml's "kobayashi_test" model (ccsn only)
+ * holds masses [13.0, 15.0, 18.0] and isotopes [h1, fe56, ni58] at
+ * Fe_H = 0.0 -- see make_yields_test_fixture.py's own comment for why
+ * this fixture, rather than sukhbold_test's own 2-mass one, is used
+ * here. Constructed with mMin = 8.0, mMax = 25.0 (both outside
+ * massesOrig()'s own [13.0, 18.0] range), so masses() becomes exactly
+ * [8.0, 13.0, 15.0, 18.0, 25.0] -- massesOrig()'s own 3 points,
+ * unchanged, plus the two new extrapolated endpoints. This exercises
+ * all three of rebuildMassGrid()'s own rules at once:
+ * - masses() entries 13.0/15.0/18.0 are exact massesOrig() hits, so
+ *   yield() there must reproduce the real, hand-verified native values
+ *   exactly (rule 1);
+ * - mass = 14.0, strictly between two massesOrig() values, is linearly
+ *   interpolated between them (rule 2);
+ * - mass = 8.0 (below massesOrig().front() = 13.0) and mass = 25.0
+ *   (above massesOrig().back() = 18.0) are each extrapolated by
+ *   scaling the nearest native column by the ratio of the requested
+ *   mass to that column's own mass (rule 3) -- e.g. every isotope's
+ *   13.0 Msun yield, times 8.0/13.0, for mass = 8.0.
+ */
+inline auto testYieldChannelMassGridExtrapolation() -> int
+{
+    const std::string registryName = "tests/yields/assets/yields.toml";
+    int result = 0;
+
+    auto checkVec = [&result](const std::string& label, const std::vector<double>& actual,
+        const std::vector<double>& expected) {
+        if (actual.size() != expected.size())
+        {
+            std::cerr << label << ": expected a vector of size " << expected.size() <<
+                ", got " << actual.size() << "\n";
+            result = 1;
+            return;
+        }
+        for (std::size_t i = 0; i < expected.size(); ++i)
+        {
+            if (!std::isfinite(actual[i]) || std::abs(actual[i] - expected[i]) > tol)
+            {
+                std::cerr << label << ": isotope index " << i << ": expected " <<
+                    expected[i] << ", got " << actual[i] << "\n";
+                result = 1;
+            }
+        }
+    };
+
+    try
+    {
+        const yields::YieldChannel yc(
+            yields::Channel::ccsn_, "kobayashi_test", 0.0, 0.0, registryName, 8.0, 25.0);
+
+        if (yc.massesOrig().size() != 3 || yc.massesOrig()[0] != 13.0 ||
+            yc.massesOrig()[1] != 15.0 || yc.massesOrig()[2] != 18.0)
+        {
+            std::cerr << "testYieldChannelMassGridExtrapolation: unexpected massesOrig()\n";
+            result = 1;
+        }
+        const std::vector<double> expectedMasses{ 8.0, 13.0, 15.0, 18.0, 25.0 };
+        if (yc.masses() != expectedMasses)
+        {
+            std::cerr << "testYieldChannelMassGridExtrapolation: unexpected masses()\n";
+            result = 1;
+        }
+
+        // Exact massesOrig() hits: unchanged from the real, native values
+        checkVec("testYieldChannelMassGridExtrapolation (exact 13.0)",
+            yc.yield(13.0, 0.0), { 6.16, 8.32e-2, 2.23e-3 });
+        checkVec("testYieldChannelMassGridExtrapolation (exact 15.0)",
+            yc.yield(15.0, 0.0), { 6.79, 8.52e-2, 1.15e-3 });
+        checkVec("testYieldChannelMassGridExtrapolation (exact 18.0)",
+            yc.yield(18.0, 0.0), { 7.53, 8.72e-2, 2.70e-3 });
+
+        // Interior interpolation, strictly between two native masses
+        checkVec("testYieldChannelMassGridExtrapolation (interpolated 14.0)",
+            yc.yield(14.0, 0.0), { 6.475, 8.42e-2, 1.69e-3 });
+
+        // Extrapolation below/above massesOrig()'s own range
+        checkVec("testYieldChannelMassGridExtrapolation (extrapolated 8.0)",
+            yc.yield(8.0, 0.0), { 3.790769230769231, 5.12e-2, 1.3723076923076924e-3 });
+        checkVec("testYieldChannelMassGridExtrapolation (extrapolated 25.0)",
+            yc.yield(25.0, 0.0), { 10.458333333333334, 1.211111111111111e-1, 3.75e-3 });
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "testYieldChannelMassGridExtrapolation: failed to construct "
+            "YieldChannel from " << registryName << ": " << e.what() << "\n";
+        return 1;
+    }
+
+    return result;
+}
+
+/**
+ * @brief Unit test that mMin/mMax can also narrow masses() to a sub-range of massesOrig()
+ * @return 0 if the test passes, 1 if it fails
+ * @details
+ * mMin = 14.0, mMax = 17.0 both lie strictly inside massesOrig()'s own
+ * [13.0, 18.0] range, so masses() becomes [14.0, 15.0, 17.0]: the one
+ * massesOrig() value inside (14.0, 17.0) -- 15.0 -- kept unchanged,
+ * plus the two new endpoints, each interpolated (not extrapolated,
+ * since both lie inside massesOrig()'s own range). hasYield() no
+ * longer accepts 13.0 or 18.0 once the range has been narrowed away
+ * from them this way.
+ */
+inline auto testYieldChannelMassGridNarrowing() -> int
+{
+    const std::string registryName = "tests/yields/assets/yields.toml";
+    int result = 0;
+
+    auto checkVec = [&result](const std::string& label, const std::vector<double>& actual,
+        const std::vector<double>& expected) {
+        if (actual.size() != expected.size())
+        {
+            std::cerr << label << ": expected a vector of size " << expected.size() <<
+                ", got " << actual.size() << "\n";
+            result = 1;
+            return;
+        }
+        for (std::size_t i = 0; i < expected.size(); ++i)
+        {
+            if (!std::isfinite(actual[i]) || std::abs(actual[i] - expected[i]) > tol)
+            {
+                std::cerr << label << ": isotope index " << i << ": expected " <<
+                    expected[i] << ", got " << actual[i] << "\n";
+                result = 1;
+            }
+        }
+    };
+
+    try
+    {
+        const yields::YieldChannel yc(
+            yields::Channel::ccsn_, "kobayashi_test", 0.0, 0.0, registryName, 14.0, 17.0);
+
+        const std::vector<double> expectedMasses{ 14.0, 15.0, 17.0 };
+        if (yc.masses() != expectedMasses)
+        {
+            std::cerr << "testYieldChannelMassGridNarrowing: unexpected masses()\n";
+            result = 1;
+        }
+        if (yc.hasYield(13.0) || yc.hasYield(18.0))
+        {
+            std::cerr << "testYieldChannelMassGridNarrowing: hasYield() should reject "
+                "masses outside the narrowed [14.0, 17.0] range\n";
+            result = 1;
+        }
+
+        checkVec("testYieldChannelMassGridNarrowing (interpolated 14.0)",
+            yc.yield(14.0, 0.0), { 6.475, 8.42e-2, 1.69e-3 });
+        checkVec("testYieldChannelMassGridNarrowing (exact 15.0)",
+            yc.yield(15.0, 0.0), { 6.79, 8.52e-2, 1.15e-3 });
+        checkVec("testYieldChannelMassGridNarrowing (interpolated 17.0)",
+            yc.yield(17.0, 0.0), { 7.283333333333333, 8.653333333333332e-2, 2.183333333333333e-3 });
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "testYieldChannelMassGridNarrowing: failed to construct "
+            "YieldChannel from " << registryName << ": " << e.what() << "\n";
+        return 1;
+    }
+
+    return result;
+}
+
+/**
+ * @brief Unit test for YieldChannel::rebuildMassGrid() called directly, after construction
+ * @return 0 if the test passes, 1 if it fails
+ * @details
+ * Constructs a "kobayashi_test" channel with the default (nullopt)
+ * mMin/mMax -- so masses() starts out identical to massesOrig() -- then
+ * calls rebuildMassGrid(8.0, 25.0) directly, the same way a caller (per
+ * this method's own comment, e.g. from Python after changing which
+ * mass range a channel should cover) would reuse an already-
+ * constructed YieldChannel rather than building a new one. Checks that
+ * masses()/yield() end up identical to
+ * testYieldChannelMassGridExtrapolation()'s own construction-time
+ * equivalent, and that rebuildMassGrid(mMin, mMax) with mMin >= mMax
+ * throws std::invalid_argument without disturbing the grid from the
+ * last successful call.
+ */
+inline auto testYieldChannelRebuildMassGrid() -> int
+{
+    const std::string registryName = "tests/yields/assets/yields.toml";
+    int result = 0;
+
+    try
+    {
+        yields::YieldChannel yc(
+            yields::Channel::ccsn_, "kobayashi_test", 0.0, 0.0, registryName);
+
+        const std::vector<double> nativeMasses{ 13.0, 15.0, 18.0 };
+        if (yc.masses() != nativeMasses)
+        {
+            std::cerr << "testYieldChannelRebuildMassGrid: masses() should start out "
+                "identical to massesOrig() when mMin/mMax are left at their defaults\n";
+            result = 1;
+        }
+
+        yc.rebuildMassGrid(8.0, 25.0);
+        const std::vector<double> expectedMasses{ 8.0, 13.0, 15.0, 18.0, 25.0 };
+        if (yc.masses() != expectedMasses)
+        {
+            std::cerr << "testYieldChannelRebuildMassGrid: unexpected masses() "
+                "after rebuildMassGrid(8.0, 25.0)\n";
+            result = 1;
+        }
+        if (yc.massesOrig() != nativeMasses)
+        {
+            std::cerr << "testYieldChannelRebuildMassGrid: massesOrig() must not "
+                "change when rebuildMassGrid() is called\n";
+            result = 1;
+        }
+
+        bool threw = false;
+        try { yc.rebuildMassGrid(20.0, 10.0); }
+        catch (const std::invalid_argument&) { threw = true; }
+        if (!threw)
+        {
+            std::cerr << "testYieldChannelRebuildMassGrid: rebuildMassGrid(20.0, 10.0) "
+                "(mMin >= mMax) should have thrown std::invalid_argument, but did not\n";
+            result = 1;
+        }
+        // The failed call above must not have disturbed the grid from
+        // the last successful rebuildMassGrid(8.0, 25.0) call
+        if (yc.masses() != expectedMasses)
+        {
+            std::cerr << "testYieldChannelRebuildMassGrid: masses() changed after a "
+                "rebuildMassGrid() call that threw\n";
+            result = 1;
+        }
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "testYieldChannelRebuildMassGrid: failed to construct "
+            "YieldChannel from " << registryName << ": " << e.what() << "\n";
         return 1;
     }
 

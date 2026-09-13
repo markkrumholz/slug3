@@ -11,6 +11,7 @@
 #include "../utils/TOMLUtils.hpp"
 #include "hdf5.h" // NOLINT(misc-include-cleaner)
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <mdspan> // NOLINT(misc-include-cleaner)
 #include <optional>
@@ -251,6 +252,60 @@ namespace yields
 
             return yieldData;
         }
+
+        /** @brief mdspan view used for both yieldData_/yieldDataOrig_ in rebuildMassGrid() */
+        using MutableArray3D = std::mdspan<double, std::dextents<std::size_t, 3>>; // NOLINT(misc-include-cleaner)
+
+        /**
+         * @brief Fill one masses_ column of newView by extrapolating a massesOrig_ column
+         * @param origView Yield data over massesOrig_, shape (nfeh, massesOrig_.size(), niso)
+         * @param newView Yield data over masses_, shape (nfeh, masses_.size(), niso) -- column mi is written
+         * @param nfeh feH_.size()
+         * @param niso yldZ_.size()
+         * @param mi Index into masses_ (and newView's second axis) to fill
+         * @param src Index into massesOrig_ (and origView's second axis) of the nearest native column
+         * @param ratio Requested mass divided by massesOrig_[src] -- see rebuildMassGrid()'s own comment
+         */
+        void extrapolateMassColumn( //NOLINT(llvm-prefer-static-over-anonymous-namespace)
+            const YieldChannel::Array3D& origView, const MutableArray3D& newView,
+            const std::size_t nfeh, const std::size_t niso,
+            const std::size_t mi, const std::size_t src, const double ratio)
+        {
+            for (std::size_t f = 0; f < nfeh; ++f)
+            {
+                for (std::size_t iso = 0; iso < niso; ++iso)
+                {
+                    newView[f, mi, iso] = ratio * origView[f, src, iso]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- f/mi/src/iso all in range by construction, see rebuildMassGrid()'s own comment
+                }
+            }
+        }
+
+        /**
+         * @brief Fill one masses_ column of newView by interpolating between two massesOrig_ columns
+         * @param origView Yield data over massesOrig_, shape (nfeh, massesOrig_.size(), niso)
+         * @param newView Yield data over masses_, shape (nfeh, masses_.size(), niso) -- column mi is written
+         * @param nfeh feH_.size()
+         * @param niso yldZ_.size()
+         * @param mi Index into masses_ (and newView's second axis) to fill
+         * @param bracket Bracketing indices/weight (into massesOrig_) from utils::findBracket --
+         *   weight 0 or 1 reduces this to an exact copy of one massesOrig_ column, see
+         *   rebuildMassGrid()'s own comment
+         */
+        void interpolateMassColumn( //NOLINT(llvm-prefer-static-over-anonymous-namespace)
+            const YieldChannel::Array3D& origView, const MutableArray3D& newView,
+            const std::size_t nfeh, const std::size_t niso,
+            const std::size_t mi, const utils::Bracket& bracket)
+        {
+            for (std::size_t f = 0; f < nfeh; ++f)
+            {
+                for (std::size_t iso = 0; iso < niso; ++iso)
+                {
+                    newView[f, mi, iso] = // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- f/mi/iso/bracket indices all in range by construction, see rebuildMassGrid()'s own comment
+                        (1.0 - bracket.t_) * origView[f, bracket.lo_, iso] +
+                        bracket.t_ * origView[f, bracket.hi_, iso];
+                }
+            }
+        }
     } // namespace
 
     YieldChannel::YieldChannel(
@@ -258,7 +313,9 @@ namespace yields
         const std::string& modelName,
         const double fehMin,
         const double fehMax,
-        const std::string& registryName) :
+        const std::string& registryName,
+        const std::optional<double> mMin,
+        const std::optional<double> mMax) :
         channel_(channel)
     {
         const std::string channelName(channelStr.at(static_cast<std::size_t>(channel)));
@@ -317,16 +374,17 @@ namespace yields
         {
             // Step 3: read masses/isotope_z/isotope_a, shared across
             // every [Fe/H] this channel's group holds
-            masses_ = utils::readDataset1D(grp, "masses", "YieldChannel");
-            // Not just "sorted": an empty grid would make masses_.front()/
-            // back() (hasYield()/yield()'s own bracketing) undefined
-            // behavior, and a merely non-decreasing (as opposed to
-            // strictly increasing) grid could give findBracket() two
-            // equal-valued neighbors, dividing by zero when it computes
-            // t. adjacent_find with greater_equal locates the first
-            // adjacent pair that violates strict ascent, if any.
-            if (masses_.empty() ||
-                std::ranges::adjacent_find(masses_, std::ranges::greater_equal{}) != masses_.end())
+            massesOrig_ = utils::readDataset1D(grp, "masses", "YieldChannel");
+            // Not just "sorted": an empty grid would make
+            // massesOrig_.front()/back() (rebuildMassGrid()'s own
+            // default mMin/mMax, below) undefined behavior, and a
+            // merely non-decreasing (as opposed to strictly increasing)
+            // grid could give findBracket() two equal-valued neighbors,
+            // dividing by zero when it computes t. adjacent_find with
+            // greater_equal locates the first adjacent pair that
+            // violates strict ascent, if any.
+            if (massesOrig_.empty() ||
+                std::ranges::adjacent_find(massesOrig_, std::ranges::greater_equal{}) != massesOrig_.end())
             {
                 throw std::runtime_error(
                     "YieldChannel: masses dataset in group " + channelName +
@@ -373,7 +431,7 @@ namespace yields
 
             // Step 5: read the yield data for every bracketed [Fe/H]
             // group -- see readYieldData()'s own comment
-            yieldData_ = readYieldData(grp, groupNames, masses_.size(), yldZ_.size());
+            yieldDataOrig_ = readYieldData(grp, groupNames, massesOrig_.size(), yldZ_.size());
         }
         catch (...)
         {
@@ -384,6 +442,79 @@ namespace yields
 
         H5Gclose(grp);
         H5Fclose(file);
+
+        // Step 6: derive masses_/yieldData_ from massesOrig_/
+        // yieldDataOrig_ -- see rebuildMassGrid()'s own comment
+        rebuildMassGrid(mMin, mMax);
+    }
+
+    void YieldChannel::rebuildMassGrid(
+        const std::optional<double> mMin, const std::optional<double> mMax)
+    {
+        const double loMass = mMin.value_or(massesOrig_.front());
+        const double hiMass = mMax.value_or(massesOrig_.back());
+        if (!std::isfinite(loMass) || !std::isfinite(hiMass) || loMass <= 0.0 || hiMass <= 0.0)
+        {
+            throw std::invalid_argument(
+                "YieldChannel::rebuildMassGrid: mMin (" + std::to_string(loMass) +
+                ") and mMax (" + std::to_string(hiMass) +
+                ") must both be finite and strictly positive");
+        }
+        if (!(loMass < hiMass))
+        {
+            throw std::invalid_argument(
+                "YieldChannel::rebuildMassGrid: mMin (" + std::to_string(loMass) +
+                ") must be strictly less than mMax (" + std::to_string(hiMass) + ")");
+        }
+
+        masses_.clear();
+        masses_.push_back(loMass);
+        for (const double m : massesOrig_)
+        {
+            if (m > loMass && m < hiMass) { masses_.push_back(m); }
+        }
+        masses_.push_back(hiMass);
+
+        const std::size_t nfeh = feH_.size();
+        const std::size_t nmassOrig = massesOrig_.size();
+        const std::size_t nmass = masses_.size();
+        const std::size_t niso = yldZ_.size();
+        const Array3D origView(yieldDataOrig_.data(), nfeh, nmassOrig, niso);
+
+        yieldData_.assign(nfeh * nmass * niso, 0.0);
+        const MutableArray3D newView(yieldData_.data(), nfeh, nmass, niso);
+
+        // Extrapolation (mt outside massesOrig_'s own range) can't just
+        // be utils::findBracket, unlike the interior case: it clamps
+        // out-of-range queries to weight 0 or 1 at the nearest edge
+        // rather than reporting them as out of range -- see
+        // extrapolateMassColumn()/interpolateMassColumn()'s own
+        // comments for the two cases this splits into.
+        std::size_t cache = 0;
+        for (std::size_t mi = 0; mi < nmass; ++mi)
+        {
+            const double mt = masses_[mi]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- mi < nmass == masses_.size() by construction
+            if (mt < massesOrig_.front() || mt > massesOrig_.back())
+            {
+                const bool below = mt < massesOrig_.front();
+                const std::size_t src = below ? 0 : nmassOrig - 1;
+                const double ratio = mt / (below ? massesOrig_.front() : massesOrig_.back());
+                extrapolateMassColumn(origView, newView, nfeh, niso, mi, src, ratio);
+            }
+            else
+            {
+                const auto bracket = utils::findBracket(massesOrig_, mt, cache);
+                interpolateMassColumn(origView, newView, nfeh, niso, mi, bracket);
+            }
+        }
+
+        // massCache_'s cached indices were only ever valid against the
+        // old masses_; a stale one could now be at or past the end of
+        // a smaller new masses_, which yield()'s own unchecked
+        // utils::findBracket call requires never happens. feH_/
+        // fehCache_ are untouched -- this method only changes the mass
+        // axis.
+        std::ranges::fill(massCache_, 0);
     }
 
 } // namespace yields

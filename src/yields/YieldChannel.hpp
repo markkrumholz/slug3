@@ -15,6 +15,7 @@
 #include <cassert>
 #include <cstddef>
 #include <mdspan> // NOLINT(misc-include-cleaner)
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -41,17 +42,31 @@ namespace yields
          * @param fehMin Minimum [Fe/H] value
          * @param fehMax Maximum [Fe/H] value
          * @param registryName Name of the yield registry file
+         * @param mMin Minimum stellar mass this channel should cover;
+         *   defaults (nullopt) to the lowest mass the model itself
+         *   provides -- see rebuildMassGrid()'s own comment for what
+         *   passing a value below that does
+         * @param mMax Maximum stellar mass this channel should cover;
+         *   defaults (nullopt) to the highest mass the model itself
+         *   provides -- see rebuildMassGrid()'s own comment for what
+         *   passing a value above that does
          * @throws std::runtime_error if channel/modelName is not found
          *   in the registry, if fehMin or fehMax lies outside the
          *   [Fe/H] range actually available for that channel/model, or
          *   if the underlying HDF5 file cannot be read or is malformed
+         * @details
+         * Calls rebuildMassGrid(mMin, mMax) once the model's own native
+         * mass grid (massesOrig_) has been read -- see its own comment
+         * for how mMin/mMax turn into masses_/yieldData_.
          */
         YieldChannel(
             Channel channel,
             const std::string& modelName,
             double fehMin,
             double fehMax,
-            const std::string& registryName = defaultRegistry);
+            const std::string& registryName = defaultRegistry,
+            std::optional<double> mMin = std::nullopt,
+            std::optional<double> mMax = std::nullopt);
 
         ~YieldChannel() = default;
 
@@ -69,6 +84,64 @@ namespace yields
         auto operator=(const YieldChannel&) -> YieldChannel& = delete;
         auto operator=(YieldChannel&&) -> YieldChannel& = delete;
 
+        /**
+         * @brief Rebuild masses_/yieldData_ over [mMin, mMax] from massesOrig_/yieldDataOrig_
+         * @param mMin Minimum stellar mass this channel should cover;
+         *   defaults (nullopt) to massesOrig().front()
+         * @param mMax Maximum stellar mass this channel should cover;
+         *   defaults (nullopt) to massesOrig().back()
+         * @throws std::invalid_argument if the resolved mMin or mMax is
+         *   not finite and strictly positive (a stellar mass), or if
+         *   the resolved mMin is not strictly less than the resolved mMax
+         * @details
+         * Called once by the constructor, with whatever mMin/mMax it
+         * was given; also public, so a caller (e.g. from Python, after
+         * changing which mass range a channel should cover) can rerun
+         * this on an already-constructed YieldChannel without building
+         * a new one -- the same role loadCurve()/rebuildCache() play
+         * for Extinct, and loadTable() for Nebular.
+         *
+         * masses_ is set to mMin, followed by every value in
+         * massesOrig_ strictly between mMin and mMax, followed by mMax
+         * -- so masses_ is always exactly [mMin, mMax] endpoint-
+         * inclusive, whether that's wider than massesOrig_'s own range
+         * (extrapolation), narrower (a truncated sub-range), or
+         * identical to it (mMin/mMax left at their defaults).
+         *
+         * yieldData_ is filled in one mass column at a time. For a
+         * masses_ entry that exactly matches some value in massesOrig_
+         * (including, as a special case, every value copied verbatim
+         * from massesOrig_ above), utils::findBracket returns a
+         * bracket weight of exactly 0 or 1, which the same interpolation
+         * formula used for a genuine interior point below reduces to an
+         * exact copy of that one massesOrig_ column -- so no separate
+         * exact-match branch is needed for that case. For an entry
+         * strictly between two massesOrig_ values, that same
+         * utils::findBracket bracket/weight linearly interpolates
+         * between the two neighboring massesOrig_ columns. For an entry
+         * outside [massesOrig_.front(), massesOrig_.back()] altogether
+         * -- the actual extrapolation case this method exists for --
+         * utils::findBracket can't help (it clamps out-of-range queries
+         * to the nearest edge, weight 0 or 1, rather than reporting
+         * them as out of range), so that case is detected explicitly
+         * and handled by scaling every isotope's yield in the nearest
+         * massesOrig_ column (front() if mMin is below it, back() if
+         * mMax is above it) by the ratio of the requested mass to that
+         * column's own mass -- e.g. extrapolating a massesOrig_.front()
+         * of 13 Msun down to mMin = 8 Msun scales that column's every
+         * yield by 8/13.
+         *
+         * massCache_ is reset to 0 for every thread once masses_ has a
+         * new size: an index cached against the old masses_ could
+         * otherwise be at or past the end of a smaller new one, which
+         * yield()'s own unchecked utils::findBracket call requires
+         * never happens. fehCache_/feH_ are untouched -- this method
+         * only ever changes the mass axis.
+         */
+        void rebuildMassGrid(
+            std::optional<double> mMin = std::nullopt,
+            std::optional<double> mMax = std::nullopt);
+
         // Observers
 
         /**
@@ -79,9 +152,22 @@ namespace yields
 
         /**
          * @brief Return the stellar masses this channel's yields are tabulated at
-         * @return A const reference to the masses (Msun), ascending
+         * @return A const reference to the masses (Msun), ascending --
+         *   this is the grid yield()/hasYield() actually use, which can
+         *   extend below/above massesOrig()'s own range (extrapolated)
+         *   or be a narrower sub-range of it (see rebuildMassGrid()'s
+         *   own comment)
          */
         [[nodiscard]] auto masses() const -> const std::vector<double>& { return masses_; }
+
+        /**
+         * @brief Return the stellar masses natively tabulated by the underlying model
+         * @return A const reference to the masses (Msun), ascending,
+         *   exactly as read from the model's own HDF5 file -- unlike
+         *   masses(), never affected by the mMin/mMax passed to the
+         *   constructor or rebuildMassGrid()
+         */
+        [[nodiscard]] auto massesOrig() const -> const std::vector<double>& { return massesOrig_; }
 
         /**
          * @brief Return the atomic number of each isotope this channel's yields are tabulated for
@@ -197,11 +283,13 @@ namespace yields
     private:
 
         Channel channel_;                  /**< Which nucleosynthetic channel this is */
-        std::vector<double> masses_;       /**< Stellar masses (Msun) this channel's yields are tabulated at */
+        std::vector<double> masses_;       /**< Stellar masses (Msun) this channel's yields are tabulated at -- see masses()'s own comment */
+        std::vector<double> massesOrig_;   /**< Stellar masses (Msun) as read from the model's own HDF5 file -- see massesOrig()'s own comment */
         std::vector<unsigned int> yldZ_;   /**< Atomic number of each isotope */
         std::vector<unsigned int> yldA_;   /**< Mass number of each isotope */
         std::vector<double> feH_;          /**< [Fe/H] values for all yields */ // NOLINT(readability-identifier-naming)
-        std::vector<double> yieldData_;    /**< Backing storage for yld() -- see its own comment */
+        std::vector<double> yieldData_;    /**< Backing storage for yld(), over masses_ -- see its own comment */
+        std::vector<double> yieldDataOrig_; /**< Backing storage over massesOrig_, from which yieldData_ is (re)derived -- see rebuildMassGrid()'s own comment */
         mutable utils::ThreadVec<std::size_t> massCache_; /**< Cached bracket index for masses_, see yield()'s own comment */
         mutable utils::ThreadVec<std::size_t> fehCache_;  /**< Cached bracket index for feH_, see yield()'s own comment */
 
