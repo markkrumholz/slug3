@@ -9,26 +9,33 @@ documented with its own literature reference. This script's own input
 format is one specific such source layout: a directory containing one
 plain-text file per progenitor mass, named ``s<mass>.yield_table``
 (e.g. ``s18.2.yield_table`` for an 18.2 Msun progenitor), each holding
-a whitespace-delimited table with a header row
+a whitespace-delimited table with a header row of one of three forms:
 
     [isotope]    [ejecta]     [wind]
+    [isotope]    [wind]
+    [isotope]    [ejecta]
 
-(the ``[ejecta]`` column is entirely absent for a failed supernova
-that never explodes -- see below) followed by one row per isotope,
-formatted as a one- or two-letter element symbol immediately followed
-by its mass number with no separator (e.g. ``fe56``), then the mass
-(Msun) of that isotope returned over the star's life via each channel.
+followed by one row per isotope, formatted as a one- or two-letter
+element symbol immediately followed by its mass number with no
+separator (e.g. ``fe56``), then the mass (Msun) of that isotope
+returned over the star's life via each channel present in the header.
 Not every isotope appears in every file; a combination of isotope,
 channel, and mass this script never actually sees a row for is written
 as a yield of exactly zero, not left out -- including every isotope's
 own ejecta yield for a mass whose own file has no ``[ejecta]`` column
 at all (a failed supernova, which returns nothing via that channel by
 construction, as opposed to simply not having been measured). The wind
-column is used as-is for the ``--wind-channel`` (e.g.
-massive_star_winds), and the ejecta column for ``--ejecta-channel``
-(e.g. ccsn) -- see this project's own documentation for why the actual
-timing of wind mass return within the star's life is approximated as
-happening all at once, when the star dies.
+column, when present in at least one file in --input-dir, is used as-is
+for the ``--wind-channel`` (e.g. massive_star_winds), and the ejecta
+column for ``--ejecta-channel`` (e.g. ccsn) -- see this project's own
+documentation for why the actual timing of wind mass return within the
+star's life is approximated as happening all at once, when the star
+dies. A source whose files never have a ``[wind]`` column at all (e.g.
+a supernova-only yield set that simply doesn't model winds, as opposed
+to a per-mass failed supernova that has zero real ejecta) is detected
+automatically: ``--wind-channel`` is then left entirely unwritten and
+unregistered for this model, rather than recording a misleading
+all-zero wind yield for every mass.
 
 The output HDF5 file holds top-level ``reference``/``reference_url``
 attributes, then one group per channel (``--ejecta-channel``,
@@ -58,6 +65,19 @@ core-collapse yields this script was first written for:
         --name sukhbold16 \\
         --reference "Sukhbold, T., Ertl, T., Woosley, S. E., Brown, J. M., Janka, H.-T. 2016, ApJ, 821, 38" \\
         --reference-url "https://ui.adsabs.harvard.edu/abs/2016ApJ...821...38S/abstract" \\
+        --feh 0.0
+
+Or, for a source with several [Fe/H] values, each in its own directory
+of s<mass>.yield_table files and none of them ever measuring winds
+(e.g. Kobayashi et al. 2006/2011, whose z<Z>models directories hold Z
+-- not [Fe/H] -- so each needs converting via [Fe/H] = log10(Z/0.02)
+before being passed here), run once per directory/[Fe/H]:
+
+    python3 data/tools/yields/import_yield_tables.py \\
+        --input-dir /path/to/SNII_Kobayashi0611/z02models \\
+        --name kobayashi06_11 \\
+        --reference "Kobayashi, Umeda, Nomoto, et al. 2006, ApJ, 653, 1145" "Kobayashi, Karakas, & Umeda, 2011, MNRAS, 414, 3231" \\
+        --reference-url "https://ui.adsabs.harvard.edu/abs/2006ApJ...653.1145K/abstract" "https://ui.adsabs.harvard.edu/abs/2011MNRAS.414.3231K/abstract" \\
         --feh 0.0
 
 :copyright: Copyright (c) 2026 Mark Krumholz
@@ -142,6 +162,15 @@ def scalar_or_list(values: list[str]) -> str | list[str]:
     return values[0] if len(values) == 1 else list(values)
 
 
+def parse_float(token: str) -> float:
+    """Parse one numeric token, tolerating a Unicode minus sign
+    (U+2212) in place of ASCII '-' in the exponent -- an encoding
+    artifact seen in a couple of the Kobayashi et al. (2006/2011)
+    source files (e.g. "2.07E−16" for 2.07e-16) that plain
+    float() rejects outright."""
+    return float(token.replace("−", "-"))
+
+
 def parse_mass_from_filename(path: pathlib.Path) -> float:
     match = _FILENAME_RE.match(path.name)
     if match is None:
@@ -149,27 +178,35 @@ def parse_mass_from_filename(path: pathlib.Path) -> float:
     return float(match.group(1))
 
 
-def parse_yield_table(path: pathlib.Path) -> dict[str, tuple[float, float]]:
+def parse_yield_table(path: pathlib.Path) -> tuple[dict[str, tuple[float, float]], bool]:
     """Parse one s<mass>.yield_table file.
 
     Returns
     -------
-    dict mapping each isotope symbol (as given in the file, e.g.
-    "fe56") to (ejecta, wind) in Msun -- ejecta is 0.0 for every
-    isotope if this file has no [ejecta] column at all (a failed
-    supernova).
+    (table, has_wind) -- table maps each isotope symbol (as given in
+    the file, e.g. "fe56") to (ejecta, wind) in Msun; ejecta is 0.0 for
+    every isotope if this file has no [ejecta] column at all (a failed
+    supernova), and likewise wind is 0.0 for every isotope if this file
+    has no [wind] column at all (a source that doesn't model winds).
+    has_wind is False only in that last case -- see import_directory()'s
+    own comment on why this, unlike the analogous all-zero-ejecta case,
+    is tracked across the whole directory rather than trusted as a real
+    per-mass zero.
     """
     with open(path) as f:
         lines = f.readlines()
     header = lines[0].split()
     if header == ["[isotope]", "[ejecta]", "[wind]"]:
-        has_ejecta = True
+        has_ejecta, has_wind = True, True
     elif header == ["[isotope]", "[wind]"]:
-        has_ejecta = False
+        has_ejecta, has_wind = False, True
+    elif header == ["[isotope]", "[ejecta]"]:
+        has_ejecta, has_wind = True, False
     else:
         raise ValueError(
             f"{path}: unrecognized header {header!r}; expected "
-            "['[isotope]', '[ejecta]', '[wind]'] or ['[isotope]', '[wind]']")
+            "['[isotope]', '[ejecta]', '[wind]'], ['[isotope]', '[wind]'], "
+            "or ['[isotope]', '[ejecta]']")
 
     table: dict[str, tuple[float, float]] = {}
     for line in lines[1:]:
@@ -177,12 +214,14 @@ def parse_yield_table(path: pathlib.Path) -> dict[str, tuple[float, float]]:
         if not tokens:
             continue
         isotope = tokens[0]
-        if has_ejecta:
-            ejecta, wind = float(tokens[1]), float(tokens[2])
+        if has_ejecta and has_wind:
+            ejecta, wind = parse_float(tokens[1]), parse_float(tokens[2])
+        elif has_wind:
+            ejecta, wind = 0.0, parse_float(tokens[1])
         else:
-            ejecta, wind = 0.0, float(tokens[1])
+            ejecta, wind = parse_float(tokens[1]), 0.0
         table[isotope] = (ejecta, wind)
-    return table
+    return table, has_wind
 
 
 def isotope_z_a(isotope: str) -> tuple[int, int]:
@@ -203,9 +242,13 @@ def import_directory(input_dir: str) -> dict:
     Returns
     -------
     dict with "masses" (ascending, Msun), "isotope_z"/"isotope_a"
-    (sorted by (Z, A)), and "ejecta_yield"/"wind_yield" (each
-    n_isotopes x n_masses, Msun) -- the four arrays needed to populate
-    both channel groups this script writes.
+    (sorted by (Z, A)), "ejecta_yield"/"wind_yield" (each n_isotopes x
+    n_masses, Msun) -- the four arrays needed to populate both channel
+    groups this script writes -- and "has_wind": True if at least one
+    file in input_dir had a [wind] column, False if none did (in which
+    case wind_yield is all zero, but only because no file ever measured
+    it, not because it's really zero -- see write_h5()'s own use of
+    this to decide whether to write the wind channel at all).
     """
     files = sorted(pathlib.Path(input_dir).glob("s*.yield_table"))
     if not files:
@@ -213,11 +256,13 @@ def import_directory(input_dir: str) -> dict:
 
     tables_by_mass: dict[float, dict[str, tuple[float, float]]] = {}
     all_isotopes: set[str] = set()
+    has_wind = False
     for path in files:
         mass = parse_mass_from_filename(path)
-        table = parse_yield_table(path)
+        table, file_has_wind = parse_yield_table(path)
         tables_by_mass[mass] = table
         all_isotopes.update(table.keys())
+        has_wind = has_wind or file_has_wind
 
     masses = sorted(tables_by_mass.keys())
     isotopes = sorted(all_isotopes, key=isotope_z_a)
@@ -247,6 +292,7 @@ def import_directory(input_dir: str) -> dict:
         "isotope_a": isotope_a,
         "ejecta_yield": ejecta_yield,
         "wind_yield": wind_yield,
+        "has_wind": has_wind,
     }
 
 
@@ -312,8 +358,9 @@ def write_h5(h5_path: str, reference: list[str], reference_url: list[str],
 
         write_channel_group(h5file, ejecta_channel, imported["masses"],
             imported["isotope_z"], imported["isotope_a"], feh, imported["ejecta_yield"])
-        write_channel_group(h5file, wind_channel, imported["masses"],
-            imported["isotope_z"], imported["isotope_a"], feh, imported["wind_yield"])
+        if imported["has_wind"]:
+            write_channel_group(h5file, wind_channel, imported["masses"],
+                imported["isotope_z"], imported["isotope_a"], feh, imported["wind_yield"])
 
 
 def update_registry(registry_path: str, h5_filename: str, name: str,
@@ -370,15 +417,22 @@ def main() -> None:
     n_iso, n_mass = imported["ejecta_yield"].shape
     print(f"parsed {n_mass} masses, {n_iso} isotopes from {args.input_dir}")
 
+    channels = [args.ejecta_channel]
+    if imported["has_wind"]:
+        channels.append(args.wind_channel)
+    else:
+        print(f"no [wind] column found anywhere in {args.input_dir}; "
+            f"leaving '{args.wind_channel}' untouched for this model")
+
     h5_filename = f"{args.name}.h5"
     h5_path = str(pathlib.Path(args.h5_dir) / h5_filename)
     write_h5(h5_path, args.reference, args.reference_url,
         args.ejecta_channel, args.wind_channel, args.feh, imported)
-    print(f"wrote channels '{args.ejecta_channel}'/'{args.wind_channel}' to {h5_path}")
+    print(f"wrote channel(s) {channels} to {h5_path}")
 
     update_registry(args.registry, h5_filename, args.name,
         args.reference, args.reference_url,
-        [args.ejecta_channel, args.wind_channel], args.feh, imported["masses"])
+        channels, args.feh, imported["masses"])
     print(f"updated {args.registry}")
 
 
