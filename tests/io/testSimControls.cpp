@@ -21,6 +21,7 @@
 #include <iostream>
 #include <memory>
 #include <numbers>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -1422,6 +1423,114 @@ static auto testSimControlsYieldsYieldAndSum() -> int
     return result;
 }
 
+// Verify Yields::Yields() prints a "slug: warning" (to std::cout) when
+// the same channel is requested more than once, but does not forbid
+// it -- both channels must still be built normally. Also verifies the
+// negative case: two channels of genuinely different types must not
+// warn. Captures std::cout via a temporary rdbuf redirect (there's no
+// existing precedent for this in the test suite, since nothing else
+// prints a warning worth checking the exact text of); always restores
+// the original rdbuf before returning, including on the exception path.
+static auto testSimControlsYieldsDuplicateChannelWarning() -> int
+{
+    constexpr std::string_view baseDeck = "tests/core/assets/testGalaxy.in";
+    int result = 0;
+
+    // Two channels, both "ccsn": should warn, but still build both
+    try
+    {
+        toml::table inputDeck = toml::parse_file(baseDeck);
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{
+                { "channel", "ccsn" }, { "model", "sukhbold_test" } } },
+            { "channel2", toml::table{
+                { "channel", "ccsn" }, { "model", "kobayashi_test" } } },
+            { "registry", "tests/yields/assets/yields.toml" },
+        });
+
+        std::ostringstream captured;
+        std::streambuf* const origBuf = std::cout.rdbuf(captured.rdbuf());
+        std::unique_ptr<io::SimControls> controls;
+        try
+        {
+            controls = std::make_unique<io::SimControls>(inputDeck);
+        }
+        catch (...)
+        {
+            std::cout.rdbuf(origBuf);
+            throw;
+        }
+        std::cout.rdbuf(origBuf);
+
+        if (captured.str().find("2 yield channels requested for channel 'ccsn'") == std::string::npos)
+        {
+            std::cerr << "testSimControls: yieldsDuplicateChannelWarning: expected a "
+                "duplicate-channel warning for two ccsn channels, got: \"" <<
+                captured.str() << "\"\n";
+            result = 1;
+        }
+        if (controls->yields() == nullptr || controls->yields()->yieldChannels().size() != 2)
+        {
+            std::cerr << "testSimControls: yieldsDuplicateChannelWarning: duplicate "
+                "channels should still both be built, not rejected\n";
+            result = 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: yieldsDuplicateChannelWarning: failed to construct "
+            "SimControls with two ccsn channels: " << error.what() << "\n";
+        result = 1;
+    }
+
+    // Two channels, different types ("ccsn"/"massive_star_winds"): should not warn
+    try
+    {
+        toml::table inputDeck = toml::parse_file(baseDeck);
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{
+                { "channel", "ccsn" }, { "model", "sukhbold_test" } } },
+            { "channel2", toml::table{
+                { "channel", "massive_star_winds" }, { "model", "sukhbold_test" } } },
+            { "registry", "tests/yields/assets/yields.toml" },
+        });
+
+        std::ostringstream captured;
+        std::streambuf* const origBuf = std::cout.rdbuf(captured.rdbuf());
+        try
+        {
+            const io::SimControls controls(inputDeck);
+        }
+        catch (...)
+        {
+            std::cout.rdbuf(origBuf);
+            throw;
+        }
+        std::cout.rdbuf(origBuf);
+
+        // baseDeck itself already triggers an unrelated, pre-existing
+        // "slug: warning" (tracks minimum mass vs. IMF minimum mass --
+        // see readTracks()'s own caller in initPhysics()), so this
+        // checks specifically for the duplicate-channel warning's own
+        // text, not just "slug: warning" generically.
+        if (captured.str().find("yield channels requested for channel") != std::string::npos)
+        {
+            std::cerr << "testSimControls: yieldsDuplicateChannelWarning: unexpected "
+                "duplicate-channel warning for two channels of different types: \"" <<
+                captured.str() << "\"\n";
+            result = 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: yieldsDuplicateChannelWarning: failed to construct "
+            "SimControls with distinct channels: " << error.what() << "\n";
+        result = 1;
+    }
+
+    return result;
+}
+
 // Verify galaxy.sfr/galaxy.sfr_dist's exclusive-or requirement and
 // galaxy.sfr_dist's own parsing: both given must throw, neither given
 // must throw, a plain number for galaxy.sfr_dist must become an
@@ -1777,6 +1886,7 @@ auto testSimControls() -> int
     result += testSimControlsYields();
     result += testSimControlsYieldsIsotopes();
     result += testSimControlsYieldsYieldAndSum();
+    result += testSimControlsYieldsDuplicateChannelWarning();
     result += testSimControlsSFRDist();
     result += testSimControlsSetFeHRejectsBroadening();
     result += testSimControlsSettersRejectMismatchedControls();

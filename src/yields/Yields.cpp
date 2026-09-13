@@ -11,8 +11,10 @@
 #include "YieldChannel.hpp"
 #include "YieldCommons.hpp"
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cstddef>
+#include <iostream>
 #include <memory>
 #include <string>
 #include <utility>
@@ -24,6 +26,31 @@ namespace yields
         controls_(controls),
         registryName_(std::move(registryName))
     {
+        // Warn (not throw) if the same channel was requested more than
+        // once -- a suspicious pattern that's easy to hit by mistake
+        // (e.g. a copy-pasted yields.channelN table with the "model"
+        // key never updated), but not forbidden outright: there are
+        // legitimate reasons for it too, e.g. comparing two different
+        // yield tables for the same channel, or covering one channel's
+        // own mass range with two different models over two different
+        // sub-ranges.
+        std::array<unsigned int, static_cast<std::size_t>(Channel::nChannel_)> channelCounts{};
+        for (const auto& descriptor : controls_.yieldChannels())
+        {
+            ++channelCounts.at(static_cast<std::size_t>(descriptor.channel_));
+        }
+        for (std::size_t i = 0; i < channelCounts.size(); ++i)
+        {
+            if (channelCounts.at(i) > 1)
+            {
+                std::cout << "slug: warning: " << channelCounts.at(i) <<
+                    " yield channels requested for channel '" << channelStr.at(i) <<
+                    "'; this is allowed (e.g. to compare yield tables, or to cover "
+                    "different mass ranges with different models) but is also an easy "
+                    "mistake to make by accident -- make sure this is intentional\n";
+            }
+        }
+
         for (const auto& descriptor : controls_.yieldChannels())
         {
             addChannel(descriptor);

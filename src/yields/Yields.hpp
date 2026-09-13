@@ -63,9 +63,19 @@ namespace yields
          *   registryName, or whose [Fe/H] range doesn't cover
          *   controls.fehDist() -- see addChannel()'s own comment
          * @details
-         * Calls addChannel() once per entry in controls.yieldChannels(),
-         * in order, then rebuildYieldGrid() once -- see its own comment
-         * for what that does.
+         * Prints a "slug: warning" (to std::cout, not thrown -- see
+         * below) if controls.yieldChannels() requests the same channel
+         * more than once: a suspicious pattern that's easy to hit by
+         * accident (e.g. a copy-pasted yields.channelN table with the
+         * "model" key never updated), but not forbidden outright, since
+         * there are legitimate reasons for it too -- comparing two
+         * different yield tables for the same channel, or covering one
+         * channel's own mass range with two different models over two
+         * different sub-ranges.
+         *
+         * Then calls addChannel() once per entry in
+         * controls.yieldChannels(), in order, then rebuildYieldGrid()
+         * once -- see its own comment for what that does.
          */
         Yields(const io::SimControls& controls,
             std::string registryName = defaultRegistry);
