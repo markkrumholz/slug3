@@ -16,6 +16,7 @@
 #include "../utils/GKIntegratorData.hpp"
 #include "../utils/PDFIntegrator.hpp"
 #include "../utils/RngThread.hpp"
+#include "../yields/Yields.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -71,6 +72,13 @@ core::Cluster::Cluster(const unsigned long uid,
     else
     {
         tracks_ = sc.tracks().sliceConstFeH(feH_);
+    }
+
+    // If yield channels were requested, size yields_ to hold one
+    // (currently zero) entry per isotope -- see yields_'s own comment
+    if (const auto* yields = sc.yields())
+    {
+        yields_.assign(yields->isotopes().size(), 0.0);
     }
 }
 
@@ -144,6 +152,13 @@ core::Cluster::Cluster(const unsigned long uid,
     else
     {
         tracks_ = sc.tracks().sliceConstFeH(feH_);
+    }
+
+    // If yield channels were requested, size yields_ to hold one
+    // (currently zero) entry per isotope -- see yields_'s own comment
+    if (const auto* yields = sc.yields())
+    {
+        yields_.assign(yields->isotopes().size(), 0.0);
     }
 }
 
@@ -408,6 +423,12 @@ void core::Cluster::computeLbol()
         }
         lbol_ += lbolCts * birthNonStochMass_;
     }
+}
+
+// Update yields_ -- currently a no-op stub, see this method's own
+// header comment
+void core::Cluster::computeYields()
+{
 }
 
 // Per-star bolometric luminosity, given a mass and isochrone segment
