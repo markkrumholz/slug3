@@ -297,18 +297,25 @@ void bindPDF(py::module_& m)
                 { return self.integral(a, b); },
                 integralRangeDocstring.data(),
                 py::arg("a"), py::arg("b"))
-        .def("draw",
-                [](const pdfs::PDF& self, double a, double b) -> double
-                { return self.draw(a, b); },
-                drawDocstring.data(),
-                py::arg("a") = std::numeric_limits<double>::lowest(),
-                py::arg("b") = std::numeric_limits<double>::max())
+        // Registration order matters here: pybind11 (>=3.1, see its own
+        // PR #5879) now lets a Python int match a noconvert double
+        // parameter, so pdf.draw(10) would otherwise match this
+        // overload's own a= first and silently return a single float
+        // instead of reaching the n_draw overload below. Putting the
+        // unsigned int overload first means it wins the exact-type
+        // match before a='s implicit-int-acceptance is even tried.
         .def("draw",
                 [](const pdfs::PDF& self, unsigned int nDraw, double a, double b)
                     -> std::vector<double>
                 { return self.draw(nDraw, a, b); },
                 drawNDocstring.data(),
                 py::arg("n_draw"),
+                py::arg("a") = std::numeric_limits<double>::lowest(),
+                py::arg("b") = std::numeric_limits<double>::max())
+        .def("draw",
+                [](const pdfs::PDF& self, double a, double b) -> double
+                { return self.draw(a, b); },
+                drawDocstring.data(),
                 py::arg("a") = std::numeric_limits<double>::lowest(),
                 py::arg("b") = std::numeric_limits<double>::max())
         .def("drawTarget",
