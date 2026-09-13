@@ -29,10 +29,13 @@
 #include "../utils/ParseUtils.hpp"
 #include "../utils/RngThread.hpp"
 #include "../utils/TOMLUtils.hpp"
+#include "../yields/YieldCommons.hpp"
+#include "../yields/Yields.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <iostream>
+#include <iterator>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -339,6 +342,10 @@ void io::SimControls::initPhysics(const toml::table& inputDeck)
     // (just set above) to provide the line wavelengths extinctLines_
     // is interpolated onto.
     readExtinct(inputDeck);
+
+    // Read the nucleosynthetic yield channels requested, if any -- see
+    // readYields()'s own comment.
+    readYields(inputDeck);
 
     // In a galaxy simulation, read CLF, SFR, and the stochastic
     // cluster mass fraction
@@ -960,6 +967,56 @@ void io::SimControls::readExtinct(const toml::table& inputDeck)
 
     extinct_ = std::make_unique<extinct::Extinct>(
         model.value(), *this, registryName); // NOLINT(bugprone-unchecked-optional-access) -- required=true above guarantees model has a value or getTOMLKeyWithError already threw
+}
+
+// Nucleosynthetic yield channel reader
+void io::SimControls::readYields(const toml::table& inputDeck)
+{
+    yieldChannels_.clear();
+
+    // yields.channel1, yields.channel2, etc., stopping at the first N
+    // for which yields.channelN is absent
+    for (std::size_t i = 1; ; ++i)
+    {
+        const std::string tableKey = "yields.channel" + std::to_string(i);
+        if (!inputDeck.at_path(tableKey)) { break; }
+
+        // yields.channelN.channel: required, must match one of
+        // yields::channelStr's own entries
+        const auto channelInput = utils::getTOMLKeyWithError<std::string>(
+            inputDeck, tableKey + ".channel", true);
+        const auto* const channelIt = std::ranges::find(
+            yields::channelStr, channelInput.value()); // NOLINT(bugprone-unchecked-optional-access) -- required=true above guarantees channelInput has a value or getTOMLKeyWithError already threw
+        if (channelIt == yields::channelStr.end())
+        {
+            throw std::runtime_error(
+                "SimControls: " + tableKey + ".channel = '" + channelInput.value() + // NOLINT(bugprone-unchecked-optional-access) -- required=true above guarantees channelInput has a value or getTOMLKeyWithError already threw
+                "' is not a recognized yield channel");
+        }
+        const auto channel = static_cast<yields::Channel>(
+            std::distance(yields::channelStr.begin(), channelIt));
+
+        // yields.channelN.model: required, but not itself validated
+        // here -- see YieldChannel::YieldChannel()'s own comment for
+        // where that happens
+        const auto modelInput = utils::getTOMLKeyWithError<std::string>(
+            inputDeck, tableKey + ".model", true);
+
+        // yields.channelN.m_min/m_max: both independently optional
+        const auto mMinInput = utils::getTOMLKeyWithError<double>(inputDeck, tableKey + ".m_min");
+        const auto mMaxInput = utils::getTOMLKeyWithError<double>(inputDeck, tableKey + ".m_max");
+
+        yieldChannels_.push_back(yields::YieldChannelDescriptor{
+            channel, modelInput.value(), mMinInput, mMaxInput}); // NOLINT(bugprone-unchecked-optional-access) -- required=true above guarantees modelInput has a value or getTOMLKeyWithError already threw
+    }
+
+    if (yieldChannels_.empty()) { return; }
+
+    // yields.registry: optional override of the default yield registry
+    const auto registryInput = utils::getTOMLKeyWithError<std::string>(inputDeck, "yields.registry");
+    const std::string registryName = registryInput.value_or(yields::defaultRegistry);
+
+    yields_ = std::make_unique<yields::Yields>(*this, registryName);
 }
 
 // Nebular emission controls and grid reader

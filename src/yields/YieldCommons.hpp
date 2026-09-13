@@ -9,11 +9,15 @@
 #ifndef YIELDCOMMONS_HPP
 #define YIELDCOMMONS_HPP
 
+#include "../elem/IsotopeData.hpp"
 #include <array>
 #include <cstddef>
 #include <filesystem>
+#include <functional>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 /**
  * @brief A namespace to hold items dealing with nucleosynthetic yields
@@ -51,6 +55,44 @@ namespace yields
     inline static const std::string defaultRegistry = // NOLINT(bugprone-throwing-static-initialization,cert-err58-cpp) -- built from fixed string literals, so the (theoretically throwing) path conversion can never actually throw here
         (std::filesystem::path("data") / std::filesystem::path("yields")
         / std::filesystem::path("yields.toml")); /**< Default registry */
+
+    /**
+     * @brief A list of isotopes, each a const reference into the
+     *   single, global elem::isotopeTable()
+     * @details
+     * Used throughout the yields classes (YieldChannel::isotopesOrig()/
+     * isotopes(), Yields::isotopes()) wherever "an ordered list of
+     * isotopes" is needed, since the fully-spelled-out type is long
+     * enough to make repeating it at every use site hurt readability.
+     */
+    using IsotopeList = std::vector<std::reference_wrapper<const elem::IsotopeData>>;
+
+    /**
+     * @struct YieldChannelDescriptor
+     * @brief Everything needed to select and size one YieldChannel,
+     *   other than the [Fe/H] range and registry a whole run's worth
+     *   of channels share
+     * @details
+     * Members have the same meaning and type as the like-named
+     * parameters of YieldChannel::YieldChannel() -- see its own
+     * comment for each. Introduced so a caller building several
+     * YieldChannel objects at once (Yields, the class that chains
+     * multiple channels together) can hold "which channel/model/mass
+     * range" as one value per channel, and so SimControls can read
+     * yield-related keys and hand back a std::vector<
+     * YieldChannelDescriptor> without also having to carry the
+     * (single, run-wide) fehMin/fehMax/registryName alongside every
+     * element of that vector.
+     */
+    struct YieldChannelDescriptor
+    {
+        // NOLINTBEGIN(readability-identifier-naming) -- trailing underscore matches this project's own member-variable convention (see utils::Bracket's identical public-struct-fields-with-trailing-underscore precedent), even though these particular names otherwise match YieldChannel::YieldChannel()'s own parameter names exactly
+        Channel channel_;             /**< Which nucleosynthetic channel to load (e.g. Channel::ccsn_) */
+        std::string modelName_;       /**< Name of the yield model (e.g. "sukhbold16") */
+        std::optional<double> mMin_;  /**< Minimum stellar mass this channel should cover; nullopt for the model's own native minimum */
+        std::optional<double> mMax_;  /**< Maximum stellar mass this channel should cover; nullopt for the model's own native maximum */
+        // NOLINTEND(readability-identifier-naming)
+    };
 
 } // namespace yields
 

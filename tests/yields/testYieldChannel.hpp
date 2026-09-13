@@ -18,6 +18,13 @@
  * grid -- has 3 masses, enough to exercise "some requested masses are
  * native grid points, some are interpolated between two of them, some
  * are extrapolated beyond either end" all in the same YieldChannel).
+ *
+ * YieldChannel::YieldChannel() no longer builds masses()/isotopes()/
+ * yield() itself -- every test below must call rebuildYieldGrid()
+ * explicitly (see its own comment) before using any of those; a
+ * dedicated test (testYieldChannelYieldBeforeRebuild()) checks that
+ * calling yield() before doing so throws, rather than silently
+ * misbehaving.
  * @date 2026-09-12
  * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
@@ -25,6 +32,7 @@
 #ifndef TESTYIELDCHANNEL_HPP
 #define TESTYIELDCHANNEL_HPP
 
+#include "../../src/elem/IsotopeTable.hpp"
 #include "../../src/yields/YieldChannel.hpp"
 #include <cmath>
 #include <cstddef>
@@ -57,6 +65,37 @@ namespace
         }
         return 0;
     }
+
+    /**
+     * @brief Check one yield() result vector against expected values
+     * @return 0 if the test passes, 1 if it fails
+     * @details
+     * Shared by every test below that checks yield()'s own return
+     * value; rejects a non-finite actual value explicitly, since
+     * std::abs(NaN - expected) > tol is false, which would otherwise
+     * let a NaN regression pass silently.
+     */
+    auto checkVec(const std::string& label, const std::vector<double>& actual,
+        const std::vector<double>& expected) -> int
+    {
+        if (actual.size() != expected.size())
+        {
+            std::cerr << label << ": expected a vector of size " << expected.size() <<
+                ", got " << actual.size() << "\n";
+            return 1;
+        }
+        int result = 0;
+        for (std::size_t i = 0; i < expected.size(); ++i)
+        {
+            if (!std::isfinite(actual[i]) || std::abs(actual[i] - expected[i]) > tol)
+            {
+                std::cerr << label << ": isotope index " << i << ": expected " <<
+                    expected[i] << ", got " << actual[i] << "\n";
+                result = 1;
+            }
+        }
+        return result;
+    }
 } // namespace
 
 /**
@@ -68,7 +107,10 @@ namespace
  * ni56 (Z=28,A=56)] at Fe_H = 0.0. Mass 100.0 is a failed supernova
  * (no [ejecta] column in the original source file -- see
  * import_yield_tables.py's own comment), so every isotope's own ccsn
- * yield there must be exactly zero, not merely small.
+ * yield there must be exactly zero, not merely small. Also checks that
+ * isotopesOrig() -- unlike masses()/isotopes()/yield() -- is already
+ * populated right after construction, with no rebuildYieldGrid() call
+ * needed first.
  */
 inline auto testYieldChannelCcsn() -> int
 {
@@ -77,27 +119,40 @@ inline auto testYieldChannelCcsn() -> int
 
     try
     {
-        const yields::YieldChannel yc(
-            yields::Channel::ccsn_, "sukhbold_test", 0.0, 0.0, registryName);
+        yields::YieldChannel yc(
+            yields::YieldChannelDescriptor{ yields::Channel::ccsn_, "sukhbold_test" },
+            0.0, 0.0, registryName);
 
         if (yc.channel() != yields::Channel::ccsn_)
         {
             std::cerr << "testYieldChannelCcsn: channel() does not match constructor argument\n";
             result = 1;
         }
+
+        // isotopesOrig() is populated by the constructor itself -- no
+        // rebuildYieldGrid() call needed first, unlike isotopes() below
+        if (yc.isotopesOrig().size() != 3 ||
+            yc.isotopesOrig()[0].get().Z() != 1 || yc.isotopesOrig()[0].get().A() != 1 ||
+            yc.isotopesOrig()[1].get().Z() != 26 || yc.isotopesOrig()[1].get().A() != 56 ||
+            yc.isotopesOrig()[2].get().Z() != 28 || yc.isotopesOrig()[2].get().A() != 56)
+        {
+            std::cerr << "testYieldChannelCcsn: unexpected isotopesOrig()\n";
+            result = 1;
+        }
+
+        yc.rebuildYieldGrid();
+
         if (yc.masses().size() != 2 || yc.masses()[0] != 18.2 || yc.masses()[1] != 100.0)
         {
             std::cerr << "testYieldChannelCcsn: unexpected masses()\n";
             result = 1;
         }
-        if (yc.yldZ().size() != 3 || yc.yldZ()[0] != 1 || yc.yldZ()[1] != 26 || yc.yldZ()[2] != 28)
+        if (yc.isotopes().size() != 3 ||
+            yc.isotopes()[0].get().Z() != 1 || yc.isotopes()[0].get().A() != 1 ||
+            yc.isotopes()[1].get().Z() != 26 || yc.isotopes()[1].get().A() != 56 ||
+            yc.isotopes()[2].get().Z() != 28 || yc.isotopes()[2].get().A() != 56)
         {
-            std::cerr << "testYieldChannelCcsn: unexpected yldZ()\n";
-            result = 1;
-        }
-        if (yc.yldA().size() != 3 || yc.yldA()[0] != 1 || yc.yldA()[1] != 56 || yc.yldA()[2] != 56)
-        {
-            std::cerr << "testYieldChannelCcsn: unexpected yldA()\n";
+            std::cerr << "testYieldChannelCcsn: unexpected isotopes()\n";
             result = 1;
         }
         if (yc.feH().size() != 1 || yc.feH()[0] != 0.0)
@@ -141,8 +196,10 @@ inline auto testYieldChannelMassiveStarWinds() -> int
 
     try
     {
-        const yields::YieldChannel yc(
-            yields::Channel::massiveStarWinds_, "sukhbold_test", 0.0, 0.0, registryName);
+        yields::YieldChannel yc(
+            yields::YieldChannelDescriptor{ yields::Channel::massiveStarWinds_, "sukhbold_test" },
+            0.0, 0.0, registryName);
+        yc.rebuildYieldGrid();
 
         if (yc.channel() != yields::Channel::massiveStarWinds_)
         {
@@ -178,7 +235,9 @@ inline auto testYieldChannelMassiveStarWinds() -> int
  * Fe_H = -1.0 (synthetic -- see make_yields_test_fixture.py's own
  * docstring) and 0.0 (real). This checks that requesting a fehMin
  * below -1.0 or a fehMax above 0.0 throws, mirroring
- * testTracks3DFeHRangeGuard()'s identical check for Tracks3D.
+ * testTracks3DFeHRangeGuard()'s identical check for Tracks3D. Thrown
+ * by the constructor itself, before rebuildYieldGrid() would even be
+ * relevant, so this test needs no such call.
  */
 inline auto testYieldChannelFeHRangeGuard() -> int
 {
@@ -188,7 +247,8 @@ inline auto testYieldChannelFeHRangeGuard() -> int
     try
     {
         const yields::YieldChannel yc(
-            yields::Channel::ccsn_, "sukhbold_test", -1.1, 0.0, registryName);
+            yields::YieldChannelDescriptor{ yields::Channel::ccsn_, "sukhbold_test" },
+            -1.1, 0.0, registryName);
         std::cerr << "testYieldChannelFeHRangeGuard: construction with "
             "fehMin = -1.1 (below the available minimum of -1.0) "
             "should have thrown, but did not\n";
@@ -199,7 +259,8 @@ inline auto testYieldChannelFeHRangeGuard() -> int
     try
     {
         const yields::YieldChannel yc(
-            yields::Channel::ccsn_, "sukhbold_test", -1.0, 0.1, registryName);
+            yields::YieldChannelDescriptor{ yields::Channel::ccsn_, "sukhbold_test" },
+            -1.0, 0.1, registryName);
         std::cerr << "testYieldChannelFeHRangeGuard: construction with "
             "fehMax = 0.1 (above the available maximum of 0.0) "
             "should have thrown, but did not\n";
@@ -221,12 +282,57 @@ inline auto testYieldChannelUnknownModel() -> int
     try
     {
         const yields::YieldChannel yc(
-            yields::Channel::ccsn_, "no_such_model", 0.0, 0.0, registryName);
+            yields::YieldChannelDescriptor{ yields::Channel::ccsn_, "no_such_model" },
+            0.0, 0.0, registryName);
         std::cerr << "testYieldChannelUnknownModel: construction with an "
             "unknown model name should have thrown, but did not\n";
         return 1;
     }
     catch (const std::exception&) { return 0; /* expected */ }
+}
+
+/**
+ * @brief Unit test that yield() throws before rebuildYieldGrid() has ever been called
+ * @return 0 if the test passes, 1 if it fails
+ * @details
+ * YieldChannel::YieldChannel() deliberately leaves masses_/isotopes_/
+ * yieldData_ empty (see its own comment) -- this checks the guard
+ * yield() uses to report that clearly (std::runtime_error) rather than
+ * asserting (debug-only) or reading past the end of an empty
+ * yieldData_ (release builds). hasYield()/masses() are not similarly
+ * guarded (see hasYield()'s own comment), so this only checks yield().
+ */
+inline auto testYieldChannelYieldBeforeRebuild() -> int
+{
+    const std::string registryName = "tests/yields/assets/yields.toml";
+
+    try
+    {
+        const yields::YieldChannel yc(
+            yields::YieldChannelDescriptor{ yields::Channel::ccsn_, "sukhbold_test" },
+            0.0, 0.0, registryName);
+        if (!yc.masses().empty())
+        {
+            std::cerr << "testYieldChannelYieldBeforeRebuild: expected masses() empty "
+                "before rebuildYieldGrid() is ever called\n";
+            return 1;
+        }
+
+        try
+        {
+            (void)yc.yield(18.2, 0.0);
+        }
+        catch (const std::runtime_error&) { return 0; /* expected */ }
+        std::cerr << "testYieldChannelYieldBeforeRebuild: expected yield() to throw "
+            "before rebuildYieldGrid() is ever called, but it did not\n";
+        return 1;
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "testYieldChannelYieldBeforeRebuild: failed to construct "
+            "YieldChannel from " << registryName << ": " << e.what() << "\n";
+        return 1;
+    }
 }
 
 /**
@@ -244,8 +350,10 @@ inline auto testYieldChannelHasYield() -> int
 
     try
     {
-        const yields::YieldChannel yc(
-            yields::Channel::ccsn_, "sukhbold_test", 0.0, 0.0, registryName);
+        yields::YieldChannel yc(
+            yields::YieldChannelDescriptor{ yields::Channel::ccsn_, "sukhbold_test" },
+            0.0, 0.0, registryName);
+        yc.rebuildYieldGrid();
 
         const std::vector<std::pair<double, bool>> cases{
             { 18.2, true }, { 100.0, true }, { 59.1, true },
@@ -306,54 +414,42 @@ inline auto testYieldChannelInterpolation() -> int
     const std::string registryName = "tests/yields/assets/yields.toml";
     int result = 0;
 
-    auto checkVec = [&result](const std::string& label, const std::vector<double>& actual,
-        const std::vector<double>& expected) {
-        if (actual.size() != expected.size())
-        {
-            std::cerr << label << ": expected a vector of size " << expected.size() <<
-                ", got " << actual.size() << "\n";
-            result = 1;
-            return;
-        }
-        for (std::size_t i = 0; i < expected.size(); ++i)
-        {
-            if (!std::isfinite(actual[i]) || std::abs(actual[i] - expected[i]) > tol)
-            {
-                std::cerr << label << ": isotope index " << i << ": expected " <<
-                    expected[i] << ", got " << actual[i] << "\n";
-                result = 1;
-            }
-        }
-    };
-
     try
     {
-        const yields::YieldChannel ccsn(
-            yields::Channel::ccsn_, "sukhbold_test", 0.0, 0.0, registryName);
-        const yields::YieldChannel wind(
-            yields::Channel::massiveStarWinds_, "sukhbold_test", 0.0, 0.0, registryName);
+        yields::YieldChannel ccsn(
+            yields::YieldChannelDescriptor{ yields::Channel::ccsn_, "sukhbold_test" },
+            0.0, 0.0, registryName);
+        ccsn.rebuildYieldGrid();
+        yields::YieldChannel wind(
+            yields::YieldChannelDescriptor{ yields::Channel::massiveStarWinds_, "sukhbold_test" },
+            0.0, 0.0, registryName);
+        wind.rebuildYieldGrid();
 
         // Exact grid hit at mass = 18.2 -- same values as
         // testYieldChannelCcsn()/testYieldChannelMassiveStarWinds()
-        checkVec("testYieldChannelInterpolation (ccsn, exact 18.2)",
+        result += checkVec("testYieldChannelInterpolation (ccsn, exact 18.2)",
             ccsn.yield(18.2, 0.0), { 5.93, 8.46e-2, 7.02e-2 });
-        checkVec("testYieldChannelInterpolation (winds, exact 18.2)",
+        result += checkVec("testYieldChannelInterpolation (winds, exact 18.2)",
             wind.yield(18.2, 0.0), { 2.21, 4.00e-3, 0.0 });
 
         // Midpoint mass = 59.1 -- exactly halfway between the two grid
         // masses, so the interpolated result is exactly their average
-        checkVec("testYieldChannelInterpolation (ccsn, midpoint)",
+        result += checkVec("testYieldChannelInterpolation (ccsn, midpoint)",
             ccsn.yield(59.1, 0.0), { 2.965, 4.23e-2, 3.51e-2 });
-        checkVec("testYieldChannelInterpolation (winds, midpoint)",
+        result += checkVec("testYieldChannelInterpolation (winds, midpoint)",
             wind.yield(59.1, 0.0), { 16.405, 6.0e-2, 0.0 });
 
         // Multi-metallicity interpolation, across Fe_H groups rather
         // than across masses -- see this function's own comment on
         // why a synthetic Fe_H = -1.0 group is needed for this
-        const yields::YieldChannel ccsnMultiFeH(
-            yields::Channel::ccsn_, "sukhbold_test", -1.0, 0.0, registryName);
-        const yields::YieldChannel windMultiFeH(
-            yields::Channel::massiveStarWinds_, "sukhbold_test", -1.0, 0.0, registryName);
+        yields::YieldChannel ccsnMultiFeH(
+            yields::YieldChannelDescriptor{ yields::Channel::ccsn_, "sukhbold_test" },
+            -1.0, 0.0, registryName);
+        ccsnMultiFeH.rebuildYieldGrid();
+        yields::YieldChannel windMultiFeH(
+            yields::YieldChannelDescriptor{ yields::Channel::massiveStarWinds_, "sukhbold_test" },
+            -1.0, 0.0, registryName);
+        windMultiFeH.rebuildYieldGrid();
 
         if (ccsnMultiFeH.feH().size() != 2 || ccsnMultiFeH.feH()[0] != -1.0 ||
             ccsnMultiFeH.feH()[1] != 0.0)
@@ -365,16 +461,16 @@ inline auto testYieldChannelInterpolation() -> int
 
         // Exact hit on the synthetic Fe_H = -1.0 group: exactly 2x the
         // real Fe_H = 0.0 values, at the exact grid mass 18.2
-        checkVec("testYieldChannelInterpolation (ccsn, exact Fe_H=-1.0)",
+        result += checkVec("testYieldChannelInterpolation (ccsn, exact Fe_H=-1.0)",
             ccsnMultiFeH.yield(18.2, -1.0), { 11.86, 1.692e-1, 1.404e-1 });
-        checkVec("testYieldChannelInterpolation (winds, exact Fe_H=-1.0)",
+        result += checkVec("testYieldChannelInterpolation (winds, exact Fe_H=-1.0)",
             windMultiFeH.yield(18.2, -1.0), { 4.42, 8.00e-3, 0.0 });
 
         // Fe_H = -0.5, the exact arithmetic midpoint of [-1.0, 0.0]:
         // exactly 1.5x the real Fe_H = 0.0 value, at the exact grid mass 18.2
-        checkVec("testYieldChannelInterpolation (ccsn, Fe_H midpoint)",
+        result += checkVec("testYieldChannelInterpolation (ccsn, Fe_H midpoint)",
             ccsnMultiFeH.yield(18.2, -0.5), { 8.895, 1.269e-1, 1.053e-1 });
-        checkVec("testYieldChannelInterpolation (winds, Fe_H midpoint)",
+        result += checkVec("testYieldChannelInterpolation (winds, Fe_H midpoint)",
             windMultiFeH.yield(18.2, -0.5), { 3.315, 6.00e-3, 0.0 });
     }
     catch (const std::exception& e)
@@ -395,11 +491,12 @@ inline auto testYieldChannelInterpolation() -> int
  * holds masses [13.0, 15.0, 18.0] and isotopes [h1, fe56, ni58] at
  * Fe_H = 0.0 -- see make_yields_test_fixture.py's own comment for why
  * this fixture, rather than sukhbold_test's own 2-mass one, is used
- * here. Constructed with mMin = 8.0, mMax = 25.0 (both outside
- * massesOrig()'s own [13.0, 18.0] range), so masses() becomes exactly
- * [8.0, 13.0, 15.0, 18.0, 25.0] -- massesOrig()'s own 3 points,
- * unchanged, plus the two new extrapolated endpoints. This exercises
- * all three of rebuildMassGrid()'s own rules at once:
+ * here. rebuildYieldGrid(8.0, 25.0) is called with mMin = 8.0,
+ * mMax = 25.0 (both outside massesOrig()'s own [13.0, 18.0] range), so
+ * masses() becomes exactly [8.0, 13.0, 15.0, 18.0, 25.0] --
+ * massesOrig()'s own 3 points, unchanged, plus the two new extrapolated
+ * endpoints. This exercises all three of rebuildYieldGrid()'s own mass-
+ * axis rules at once:
  * - masses() entries 13.0/15.0/18.0 are exact massesOrig() hits, so
  *   yield() there must reproduce the real, hand-verified native values
  *   exactly (rule 1);
@@ -416,30 +513,12 @@ inline auto testYieldChannelMassGridExtrapolation() -> int
     const std::string registryName = "tests/yields/assets/yields.toml";
     int result = 0;
 
-    auto checkVec = [&result](const std::string& label, const std::vector<double>& actual,
-        const std::vector<double>& expected) {
-        if (actual.size() != expected.size())
-        {
-            std::cerr << label << ": expected a vector of size " << expected.size() <<
-                ", got " << actual.size() << "\n";
-            result = 1;
-            return;
-        }
-        for (std::size_t i = 0; i < expected.size(); ++i)
-        {
-            if (!std::isfinite(actual[i]) || std::abs(actual[i] - expected[i]) > tol)
-            {
-                std::cerr << label << ": isotope index " << i << ": expected " <<
-                    expected[i] << ", got " << actual[i] << "\n";
-                result = 1;
-            }
-        }
-    };
-
     try
     {
-        const yields::YieldChannel yc(
-            yields::Channel::ccsn_, "kobayashi_test", 0.0, 0.0, registryName, 8.0, 25.0);
+        yields::YieldChannel yc(
+            yields::YieldChannelDescriptor{ yields::Channel::ccsn_, "kobayashi_test" },
+            0.0, 0.0, registryName);
+        yc.rebuildYieldGrid(8.0, 25.0);
 
         if (yc.massesOrig().size() != 3 || yc.massesOrig()[0] != 13.0 ||
             yc.massesOrig()[1] != 15.0 || yc.massesOrig()[2] != 18.0)
@@ -454,22 +533,36 @@ inline auto testYieldChannelMassGridExtrapolation() -> int
             result = 1;
         }
 
+        // kobayashi_test's own isotopes are h1, fe56, ni58 -- distinct
+        // from sukhbold_test's h1, fe56, ni56 (testYieldChannelCcsn's
+        // own check), confirming isotopes() resolves the (Z, A) pairs
+        // this specific model's file actually holds, not some other
+        // model's
+        if (yc.isotopes().size() != 3 ||
+            yc.isotopes()[0].get().Z() != 1 || yc.isotopes()[0].get().A() != 1 ||
+            yc.isotopes()[1].get().Z() != 26 || yc.isotopes()[1].get().A() != 56 ||
+            yc.isotopes()[2].get().Z() != 28 || yc.isotopes()[2].get().A() != 58)
+        {
+            std::cerr << "testYieldChannelMassGridExtrapolation: unexpected isotopes()\n";
+            result = 1;
+        }
+
         // Exact massesOrig() hits: unchanged from the real, native values
-        checkVec("testYieldChannelMassGridExtrapolation (exact 13.0)",
+        result += checkVec("testYieldChannelMassGridExtrapolation (exact 13.0)",
             yc.yield(13.0, 0.0), { 6.16, 8.32e-2, 2.23e-3 });
-        checkVec("testYieldChannelMassGridExtrapolation (exact 15.0)",
+        result += checkVec("testYieldChannelMassGridExtrapolation (exact 15.0)",
             yc.yield(15.0, 0.0), { 6.79, 8.52e-2, 1.15e-3 });
-        checkVec("testYieldChannelMassGridExtrapolation (exact 18.0)",
+        result += checkVec("testYieldChannelMassGridExtrapolation (exact 18.0)",
             yc.yield(18.0, 0.0), { 7.53, 8.72e-2, 2.70e-3 });
 
         // Interior interpolation, strictly between two native masses
-        checkVec("testYieldChannelMassGridExtrapolation (interpolated 14.0)",
+        result += checkVec("testYieldChannelMassGridExtrapolation (interpolated 14.0)",
             yc.yield(14.0, 0.0), { 6.475, 8.42e-2, 1.69e-3 });
 
         // Extrapolation below/above massesOrig()'s own range
-        checkVec("testYieldChannelMassGridExtrapolation (extrapolated 8.0)",
+        result += checkVec("testYieldChannelMassGridExtrapolation (extrapolated 8.0)",
             yc.yield(8.0, 0.0), { 3.790769230769231, 5.12e-2, 1.3723076923076924e-3 });
-        checkVec("testYieldChannelMassGridExtrapolation (extrapolated 25.0)",
+        result += checkVec("testYieldChannelMassGridExtrapolation (extrapolated 25.0)",
             yc.yield(25.0, 0.0), { 10.458333333333334, 1.211111111111111e-1, 3.75e-3 });
     }
     catch (const std::exception& e)
@@ -486,43 +579,25 @@ inline auto testYieldChannelMassGridExtrapolation() -> int
  * @brief Unit test that mMin/mMax can also narrow masses() to a sub-range of massesOrig()
  * @return 0 if the test passes, 1 if it fails
  * @details
- * mMin = 14.0, mMax = 17.0 both lie strictly inside massesOrig()'s own
- * [13.0, 18.0] range, so masses() becomes [14.0, 15.0, 17.0]: the one
- * massesOrig() value inside (14.0, 17.0) -- 15.0 -- kept unchanged,
- * plus the two new endpoints, each interpolated (not extrapolated,
- * since both lie inside massesOrig()'s own range). hasYield() no
- * longer accepts 13.0 or 18.0 once the range has been narrowed away
- * from them this way.
+ * rebuildYieldGrid(14.0, 17.0): both bounds lie strictly inside
+ * massesOrig()'s own [13.0, 18.0] range, so masses() becomes
+ * [14.0, 15.0, 17.0]: the one massesOrig() value inside (14.0, 17.0) --
+ * 15.0 -- kept unchanged, plus the two new endpoints, each interpolated
+ * (not extrapolated, since both lie inside massesOrig()'s own range).
+ * hasYield() no longer accepts 13.0 or 18.0 once the range has been
+ * narrowed away from them this way.
  */
 inline auto testYieldChannelMassGridNarrowing() -> int
 {
     const std::string registryName = "tests/yields/assets/yields.toml";
     int result = 0;
 
-    auto checkVec = [&result](const std::string& label, const std::vector<double>& actual,
-        const std::vector<double>& expected) {
-        if (actual.size() != expected.size())
-        {
-            std::cerr << label << ": expected a vector of size " << expected.size() <<
-                ", got " << actual.size() << "\n";
-            result = 1;
-            return;
-        }
-        for (std::size_t i = 0; i < expected.size(); ++i)
-        {
-            if (!std::isfinite(actual[i]) || std::abs(actual[i] - expected[i]) > tol)
-            {
-                std::cerr << label << ": isotope index " << i << ": expected " <<
-                    expected[i] << ", got " << actual[i] << "\n";
-                result = 1;
-            }
-        }
-    };
-
     try
     {
-        const yields::YieldChannel yc(
-            yields::Channel::ccsn_, "kobayashi_test", 0.0, 0.0, registryName, 14.0, 17.0);
+        yields::YieldChannel yc(
+            yields::YieldChannelDescriptor{ yields::Channel::ccsn_, "kobayashi_test" },
+            0.0, 0.0, registryName);
+        yc.rebuildYieldGrid(14.0, 17.0);
 
         const std::vector<double> expectedMasses{ 14.0, 15.0, 17.0 };
         if (yc.masses() != expectedMasses)
@@ -537,11 +612,11 @@ inline auto testYieldChannelMassGridNarrowing() -> int
             result = 1;
         }
 
-        checkVec("testYieldChannelMassGridNarrowing (interpolated 14.0)",
+        result += checkVec("testYieldChannelMassGridNarrowing (interpolated 14.0)",
             yc.yield(14.0, 0.0), { 6.475, 8.42e-2, 1.69e-3 });
-        checkVec("testYieldChannelMassGridNarrowing (exact 15.0)",
+        result += checkVec("testYieldChannelMassGridNarrowing (exact 15.0)",
             yc.yield(15.0, 0.0), { 6.79, 8.52e-2, 1.15e-3 });
-        checkVec("testYieldChannelMassGridNarrowing (interpolated 17.0)",
+        result += checkVec("testYieldChannelMassGridNarrowing (interpolated 17.0)",
             yc.yield(17.0, 0.0), { 7.283333333333333, 8.653333333333332e-2, 2.183333333333333e-3 });
     }
     catch (const std::exception& e)
@@ -555,22 +630,20 @@ inline auto testYieldChannelMassGridNarrowing() -> int
 }
 
 /**
- * @brief Unit test for YieldChannel::rebuildMassGrid() called directly, after construction
+ * @brief Unit test for YieldChannel::rebuildYieldGrid() called repeatedly, after construction
  * @return 0 if the test passes, 1 if it fails
  * @details
- * Constructs a "kobayashi_test" channel with the default (nullopt)
- * mMin/mMax -- so masses() starts out identical to massesOrig() -- then
- * calls rebuildMassGrid(8.0, 25.0) directly, the same way a caller (per
- * this method's own comment, e.g. from Python after changing which
- * mass range a channel should cover) would reuse an already-
- * constructed YieldChannel rather than building a new one. Checks that
- * masses()/yield() end up identical to
- * testYieldChannelMassGridExtrapolation()'s own construction-time
- * equivalent, and that rebuildMassGrid(mMin, mMax) with mMin >= mMax
+ * Constructs a "kobayashi_test" channel, checks that masses() starts
+ * out empty (see testYieldChannelYieldBeforeRebuild() for the
+ * analogous yield() check), then calls rebuildYieldGrid() with no
+ * arguments (masses() becomes massesOrig() itself), then
+ * rebuildYieldGrid(8.0, 25.0) (masses() becomes identical to
+ * testYieldChannelMassGridExtrapolation()'s own equivalent), and
+ * finally checks that rebuildYieldGrid(20.0, 10.0) (mMin >= mMax)
  * throws std::invalid_argument without disturbing the grid from the
  * last successful call.
  */
-inline auto testYieldChannelRebuildMassGrid() -> int
+inline auto testYieldChannelRebuildYieldGrid() -> int
 {
     const std::string registryName = "tests/yields/assets/yields.toml";
     int result = 0;
@@ -578,52 +651,155 @@ inline auto testYieldChannelRebuildMassGrid() -> int
     try
     {
         yields::YieldChannel yc(
-            yields::Channel::ccsn_, "kobayashi_test", 0.0, 0.0, registryName);
+            yields::YieldChannelDescriptor{ yields::Channel::ccsn_, "kobayashi_test" },
+            0.0, 0.0, registryName);
 
-        const std::vector<double> nativeMasses{ 13.0, 15.0, 18.0 };
-        if (yc.masses() != nativeMasses)
+        if (!yc.masses().empty())
         {
-            std::cerr << "testYieldChannelRebuildMassGrid: masses() should start out "
-                "identical to massesOrig() when mMin/mMax are left at their defaults\n";
+            std::cerr << "testYieldChannelRebuildYieldGrid: expected masses() empty "
+                "before rebuildYieldGrid() is ever called\n";
             result = 1;
         }
 
-        yc.rebuildMassGrid(8.0, 25.0);
+        const std::vector<double> nativeMasses{ 13.0, 15.0, 18.0 };
+        yc.rebuildYieldGrid();
+        if (yc.masses() != nativeMasses)
+        {
+            std::cerr << "testYieldChannelRebuildYieldGrid: expected masses() == "
+                "massesOrig() after rebuildYieldGrid() with no arguments\n";
+            result = 1;
+        }
+
+        yc.rebuildYieldGrid(8.0, 25.0);
         const std::vector<double> expectedMasses{ 8.0, 13.0, 15.0, 18.0, 25.0 };
         if (yc.masses() != expectedMasses)
         {
-            std::cerr << "testYieldChannelRebuildMassGrid: unexpected masses() "
-                "after rebuildMassGrid(8.0, 25.0)\n";
+            std::cerr << "testYieldChannelRebuildYieldGrid: unexpected masses() "
+                "after rebuildYieldGrid(8.0, 25.0)\n";
             result = 1;
         }
         if (yc.massesOrig() != nativeMasses)
         {
-            std::cerr << "testYieldChannelRebuildMassGrid: massesOrig() must not "
-                "change when rebuildMassGrid() is called\n";
+            std::cerr << "testYieldChannelRebuildYieldGrid: massesOrig() must not "
+                "change when rebuildYieldGrid() is called\n";
             result = 1;
         }
 
         bool threw = false;
-        try { yc.rebuildMassGrid(20.0, 10.0); }
+        try { yc.rebuildYieldGrid(20.0, 10.0); }
         catch (const std::invalid_argument&) { threw = true; }
         if (!threw)
         {
-            std::cerr << "testYieldChannelRebuildMassGrid: rebuildMassGrid(20.0, 10.0) "
+            std::cerr << "testYieldChannelRebuildYieldGrid: rebuildYieldGrid(20.0, 10.0) "
                 "(mMin >= mMax) should have thrown std::invalid_argument, but did not\n";
             result = 1;
         }
         // The failed call above must not have disturbed the grid from
-        // the last successful rebuildMassGrid(8.0, 25.0) call
+        // the last successful rebuildYieldGrid(8.0, 25.0) call
         if (yc.masses() != expectedMasses)
         {
-            std::cerr << "testYieldChannelRebuildMassGrid: masses() changed after a "
-                "rebuildMassGrid() call that threw\n";
+            std::cerr << "testYieldChannelRebuildYieldGrid: masses() changed after a "
+                "rebuildYieldGrid() call that threw\n";
             result = 1;
         }
     }
     catch (const std::exception& e)
     {
-        std::cerr << "testYieldChannelRebuildMassGrid: failed to construct "
+        std::cerr << "testYieldChannelRebuildYieldGrid: failed to construct "
+            "YieldChannel from " << registryName << ": " << e.what() << "\n";
+        return 1;
+    }
+
+    return result;
+}
+
+/**
+ * @brief Unit test for rebuildYieldGrid()'s own isotope-remapping argument
+ * @return 0 if the test passes, 1 if it fails
+ * @details
+ * "kobayashi_test"'s own native isotopes are h1 (Z=1,A=1), fe56
+ * (Z=26,A=56), ni58 (Z=28,A=58) (see testYieldChannelMassGridExtrapolation()'s
+ * own check) -- this passes rebuildYieldGrid() a hand-built isotope
+ * list of [fe56, ni56 (Z=28,A=56), h1], in that order, exercising all
+ * three things a caller-supplied isotope list can do at once, relative
+ * to isotopesOrig():
+ * - reordering: fe56 first and h1 last, the reverse of isotopesOrig()'s
+ *   own [h1, fe56, ni58] order -- isotopes() and yld()'s own third axis
+ *   must follow the requested order, not isotopesOrig()'s;
+ * - a "foreign" isotope not in isotopesOrig() at all: ni56, present in
+ *   sukhbold_test but not kobayashi_test, must appear in isotopes()
+ *   (so every YieldChannel synchronized this way exposes the same
+ *   isotope list) with an all-zero yield rather than being dropped or
+ *   causing an error;
+ * - subsetting: ni58, one of kobayashi_test's own 3 native isotopes,
+ *   is not requested at all, and so must not appear in isotopes() or
+ *   yld() -- confirming a caller-supplied list, not isotopesOrig(),
+ *   fully determines isotopes() once given.
+ *
+ * The mass axis is left at its default (no mMin/mMax override) to
+ * isolate the isotope-remapping behavior from mass extrapolation/
+ * interpolation, already covered by
+ * testYieldChannelMassGridExtrapolation()/Narrowing().
+ */
+inline auto testYieldChannelIsotopeRemap() -> int
+{
+    const std::string registryName = "tests/yields/assets/yields.toml";
+    int result = 0;
+
+    try
+    {
+        yields::YieldChannel yc(
+            yields::YieldChannelDescriptor{ yields::Channel::ccsn_, "kobayashi_test" },
+            0.0, 0.0, registryName);
+
+        const yields::IsotopeList target{
+            elem::isotopeTable(26, 56), // fe56 -- native to kobayashi_test
+            elem::isotopeTable(28, 56), // ni56 -- NOT native to kobayashi_test
+            elem::isotopeTable(1, 1),   // h1 -- native to kobayashi_test
+        };
+        yc.rebuildYieldGrid(std::nullopt, std::nullopt, target);
+
+        // masses() is unaffected by the isotope remap: still exactly massesOrig()
+        const std::vector<double> nativeMasses{ 13.0, 15.0, 18.0 };
+        if (yc.masses() != nativeMasses)
+        {
+            std::cerr << "testYieldChannelIsotopeRemap: masses() should be unaffected "
+                "by rebuildYieldGrid()'s own isotopes argument\n";
+            result = 1;
+        }
+
+        if (yc.isotopes().size() != 3 ||
+            yc.isotopes()[0].get().Z() != 26 || yc.isotopes()[0].get().A() != 56 ||
+            yc.isotopes()[1].get().Z() != 28 || yc.isotopes()[1].get().A() != 56 ||
+            yc.isotopes()[2].get().Z() != 1 || yc.isotopes()[2].get().A() != 1)
+        {
+            std::cerr << "testYieldChannelIsotopeRemap: isotopes() does not match "
+                "the requested [fe56, ni56, h1] order\n";
+            result = 1;
+        }
+
+        // At the exact grid mass 13.0: fe56 = 8.32e-2 and h1 = 6.16
+        // (the same real values testYieldChannelMassGridExtrapolation()
+        // checks, just reordered), and ni56 = 0.0 (not tabulated by
+        // kobayashi_test at all)
+        result += checkVec("testYieldChannelIsotopeRemap (exact 13.0)",
+            yc.yield(13.0, 0.0), { 8.32e-2, 0.0, 6.16 });
+
+        // isotopesOrig() must remain kobayashi_test's own native list,
+        // unaffected by the isotope remap -- only isotopes() changes
+        if (yc.isotopesOrig().size() != 3 ||
+            yc.isotopesOrig()[0].get().Z() != 1 || yc.isotopesOrig()[0].get().A() != 1 ||
+            yc.isotopesOrig()[1].get().Z() != 26 || yc.isotopesOrig()[1].get().A() != 56 ||
+            yc.isotopesOrig()[2].get().Z() != 28 || yc.isotopesOrig()[2].get().A() != 58)
+        {
+            std::cerr << "testYieldChannelIsotopeRemap: isotopesOrig() must not "
+                "change when rebuildYieldGrid() is given an isotopes argument\n";
+            result = 1;
+        }
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "testYieldChannelIsotopeRemap: failed to construct "
             "YieldChannel from " << registryName << ": " << e.what() << "\n";
         return 1;
     }

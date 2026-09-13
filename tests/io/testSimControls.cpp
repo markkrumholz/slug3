@@ -21,6 +21,7 @@
 #include <iostream>
 #include <memory>
 #include <numbers>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -963,6 +964,573 @@ static auto testSimControlsExtinctField() -> int
     return 0;
 }
 
+// Verify SimControls::readYields()'s own parsing of yields.channel1,
+// yields.channel2, etc. into yieldChannels(), and of yields.registry
+// into the Yields it builds from them.
+static auto testSimControlsYields() -> int
+{
+    constexpr std::string_view baseDeck = "tests/core/assets/testGalaxy.in";
+    int result = 0;
+
+    // No yields.channelN table at all: yieldChannels() empty, yields() null
+    try
+    {
+        const toml::table inputDeck = toml::parse_file(baseDeck);
+        const io::SimControls controls(inputDeck);
+        if (!controls.yieldChannels().empty() || controls.yields() != nullptr)
+        {
+            std::cerr << "testSimControls: yields: expected yieldChannels() empty "
+                "and yields() null when no yields.channelN table is given\n";
+            result = 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: yields: no-channels case failed: "
+            << error.what() << "\n";
+        result = 1;
+    }
+
+    // Two channels (both real models in the default registry, so
+    // Yields::Yields() -- called from readYields() -- actually builds
+    // both), the second with m_min/m_max extrapolating past
+    // sukhbold16's own native [9.0, 120.0] mass range on both ends,
+    // plus an explicit (if here, redundant with the default) registry
+    try
+    {
+        toml::table inputDeck = toml::parse_file(baseDeck);
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{
+                { "channel", "ccsn" }, { "model", "sukhbold16" } } },
+            { "channel2", toml::table{
+                { "channel", "massive_star_winds" }, { "model", "sukhbold16" },
+                { "m_min", 8.0 }, { "m_max", 150.0 } } },
+            { "registry", yields::defaultRegistry },
+        });
+        const io::SimControls controls(inputDeck);
+
+        const auto& channels = controls.yieldChannels();
+        if (channels.size() != 2)
+        {
+            std::cerr << "testSimControls: yields: expected 2 yieldChannels(), got "
+                << channels.size() << "\n";
+            result = 1;
+        }
+        else
+        {
+            if (channels[0].channel_ != yields::Channel::ccsn_ ||
+                channels[0].modelName_ != "sukhbold16" ||
+                channels[0].mMin_.has_value() || channels[0].mMax_.has_value())
+            {
+                std::cerr << "testSimControls: yields: unexpected yieldChannels()[0]\n";
+                result = 1;
+            }
+            if (channels[1].channel_ != yields::Channel::massiveStarWinds_ ||
+                channels[1].modelName_ != "sukhbold16" ||
+                !channels[1].mMin_.has_value() || channels[1].mMin_.value() != 8.0 ||
+                !channels[1].mMax_.has_value() || channels[1].mMax_.value() != 150.0)
+            {
+                std::cerr << "testSimControls: yields: unexpected yieldChannels()[1]\n";
+                result = 1;
+            }
+        }
+
+        if (controls.yields() == nullptr)
+        {
+            std::cerr << "testSimControls: yields: expected yields() non-null "
+                "when yields.channel1 is given\n";
+            result = 1;
+        }
+        else
+        {
+            if (controls.yields()->registryName() != yields::defaultRegistry)
+            {
+                std::cerr << "testSimControls: yields: expected yields()->registryName() "
+                    "== yields::defaultRegistry, got \"" << controls.yields()->registryName() << "\"\n";
+                result = 1;
+            }
+
+            const auto& loaded = controls.yields()->yieldChannels();
+            if (loaded.size() != 2)
+            {
+                std::cerr << "testSimControls: yields: expected yields()->yieldChannels() "
+                    "to have size 2, got " << loaded.size() << "\n";
+                result = 1;
+            }
+            else
+            {
+                if (loaded[0]->channel() != yields::Channel::ccsn_)
+                {
+                    std::cerr << "testSimControls: yields: yields()->yieldChannels()[0] "
+                        "has the wrong channel()\n";
+                    result = 1;
+                }
+                if (loaded[1]->channel() != yields::Channel::massiveStarWinds_ ||
+                    !loaded[1]->hasYield(8.0) || !loaded[1]->hasYield(150.0))
+                {
+                    std::cerr << "testSimControls: yields: yields()->yieldChannels()[1] "
+                        "has the wrong channel(), or doesn't cover the requested "
+                        "[8.0, 150.0] extrapolated mass range\n";
+                    result = 1;
+                }
+            }
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: yields: two-channels case failed: "
+            << error.what() << "\n";
+        result = 1;
+    }
+
+    // A channel naming a model that doesn't exist in the registry: not
+    // checked by readYields() itself (see its own comment), but Yields'
+    // constructor builds the real YieldChannel eagerly, so this throws
+    // once SimControls actually gets there.
+    try
+    {
+        toml::table inputDeck = toml::parse_file(baseDeck);
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{
+                { "channel", "ccsn" }, { "model", "not_a_real_model" } } },
+        });
+        const io::SimControls controls(inputDeck);
+        std::cerr << "testSimControls: yields: expected an exception for a "
+            "yields.channel1.model that doesn't exist in the registry\n";
+        result = 1;
+    }
+    catch (const std::runtime_error&) { /* expected */ }
+
+    // One channel, no yields.registry given: yields()->registryName()
+    // falls back to yields::defaultRegistry
+    try
+    {
+        toml::table inputDeck = toml::parse_file(baseDeck);
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{
+                { "channel", "ccsn" }, { "model", "sukhbold16" } } },
+        });
+        const io::SimControls controls(inputDeck);
+
+        if (controls.yields() == nullptr ||
+            controls.yields()->registryName() != yields::defaultRegistry)
+        {
+            std::cerr << "testSimControls: yields: expected yields()->registryName() "
+                "to fall back to yields::defaultRegistry when yields.registry is absent\n";
+            result = 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: yields: default-registry case failed: "
+            << error.what() << "\n";
+        result = 1;
+    }
+
+    // yields.channel1.channel not one of channelStr's own entries: throws
+    try
+    {
+        toml::table inputDeck = toml::parse_file(baseDeck);
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{
+                { "channel", "not_a_real_channel" }, { "model", "sukhbold16" } } },
+        });
+        const io::SimControls controls(inputDeck);
+        std::cerr << "testSimControls: yields: expected an exception for an "
+            "unrecognized yields.channel1.channel\n";
+        result = 1;
+    }
+    catch (const std::runtime_error&) { /* expected */ }
+
+    // yields.channel1 missing its required "model" keyword: throws
+    try
+    {
+        toml::table inputDeck = toml::parse_file(baseDeck);
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{ { "channel", "ccsn" } } },
+        });
+        const io::SimControls controls(inputDeck);
+        std::cerr << "testSimControls: yields: expected an exception when "
+            "yields.channel1.model is missing\n";
+        result = 1;
+    }
+    catch (const std::runtime_error&) { /* expected */ }
+
+    // yields.channel1 missing its required "channel" keyword: throws
+    try
+    {
+        toml::table inputDeck = toml::parse_file(baseDeck);
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{ { "model", "sukhbold16" } } },
+        });
+        const io::SimControls controls(inputDeck);
+        std::cerr << "testSimControls: yields: expected an exception when "
+            "yields.channel1.channel is missing\n";
+        result = 1;
+    }
+    catch (const std::runtime_error&) { /* expected */ }
+
+    return result;
+}
+
+// Verify Yields::isotopes() is the deduplicated, sorted union of every
+// loaded channel's own isotopesOrig(), and that Yields::rebuildYieldGrid()
+// (called by the constructor) actually pushes that same list back down
+// into every channel -- both its isotopes() (in the same order) and its
+// yield() values (remapped, with 0 for any isotope that channel's own
+// model doesn't tabulate). Uses the small yields test fixture
+// (tests/yields/assets/yields.toml, see make_yields_test_fixture.py)
+// rather than the real registry: its "sukhbold_test" (h1, fe56, ni56)
+// and "kobayashi_test" (h1, fe56, ni58) models deliberately share some
+// isotopes and differ in one, so this actually exercises
+// deduplication and zero-backfill -- two channels of the very same
+// real model would share their whole isotope_z/isotope_a datasets
+// outright and so could never expose either kind of bug.
+static auto testSimControlsYieldsIsotopes() -> int
+{
+    constexpr std::string_view baseDeck = "tests/core/assets/testGalaxy.in";
+    int result = 0;
+
+    try
+    {
+        toml::table inputDeck = toml::parse_file(baseDeck);
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{
+                { "channel", "ccsn" }, { "model", "sukhbold_test" } } },
+            { "channel2", toml::table{
+                { "channel", "ccsn" }, { "model", "kobayashi_test" } } },
+            { "registry", "tests/yields/assets/yields.toml" },
+        });
+        const io::SimControls controls(inputDeck);
+
+        if (controls.yields() == nullptr)
+        {
+            std::cerr << "testSimControls: yieldsIsotopes: expected yields() non-null\n";
+            return 1;
+        }
+
+        const auto& isotopes = controls.yields()->isotopes();
+        const std::vector<std::pair<unsigned int, unsigned int>> expected{
+            { 1, 1 }, { 26, 56 }, { 28, 56 }, { 28, 58 } }; // h1, fe56, ni56, ni58
+        if (isotopes.size() != expected.size())
+        {
+            std::cerr << "testSimControls: yieldsIsotopes: expected " << expected.size() <<
+                " isotopes (h1, fe56, ni56, ni58), got " << isotopes.size() << "\n";
+            result = 1;
+        }
+        else
+        {
+            for (std::size_t i = 0; i < expected.size(); ++i)
+            {
+                if (isotopes[i].get().Z() != expected[i].first ||
+                    isotopes[i].get().A() != expected[i].second)
+                {
+                    std::cerr << "testSimControls: yieldsIsotopes: isotopes()[" << i <<
+                        "] expected (Z=" << expected[i].first << ", A=" << expected[i].second <<
+                        "), got (Z=" << isotopes[i].get().Z() << ", A=" <<
+                        isotopes[i].get().A() << ")\n";
+                    result = 1;
+                }
+            }
+        }
+
+        const auto& loaded = controls.yields()->yieldChannels();
+        if (loaded.size() != 2)
+        {
+            std::cerr << "testSimControls: yieldsIsotopes: expected 2 yieldChannels(), got "
+                << loaded.size() << "\n";
+            return result | 1;
+        }
+
+        // Both channels must be synchronized onto the exact same
+        // isotopes() -- Yields::isotopes() itself, in the same order
+        for (const auto* label : { "sukhbold_test", "kobayashi_test" })
+        {
+            const auto& channelIsotopes = (label == std::string_view{ "sukhbold_test" }) ?
+                loaded[0]->isotopes() : loaded[1]->isotopes();
+            if (channelIsotopes.size() != isotopes.size())
+            {
+                std::cerr << "testSimControls: yieldsIsotopes: " << label <<
+                    " channel's own isotopes() was not synchronized to yields()->isotopes()\n";
+                result = 1;
+                continue;
+            }
+            for (std::size_t i = 0; i < isotopes.size(); ++i)
+            {
+                if (channelIsotopes[i].get() != isotopes[i].get())
+                {
+                    std::cerr << "testSimControls: yieldsIsotopes: " << label <<
+                        " channel's own isotopes()[" << i << "] does not match "
+                        "yields()->isotopes()[" << i << "]\n";
+                    result = 1;
+                }
+            }
+        }
+
+        // sukhbold_test's own native h1/fe56/ni56 values at its own
+        // exact grid mass 18.2, remapped onto [h1, fe56, ni56, ni58] --
+        // ni58 (index 3) must be exactly 0, since sukhbold_test never
+        // tabulated it
+        constexpr double yieldTol = 1e-10;
+        const std::vector<double> sukhboldExpected{ 5.93, 8.46e-2, 7.02e-2, 0.0 };
+        const auto sukhboldActual = loaded[0]->yield(18.2, 0.0);
+        if (sukhboldActual.size() != sukhboldExpected.size())
+        {
+            std::cerr << "testSimControls: yieldsIsotopes: sukhbold_test yield() has "
+                "size " << sukhboldActual.size() << ", expected " << sukhboldExpected.size() << "\n";
+            result = 1;
+        }
+        for (std::size_t i = 0; i < std::min(sukhboldActual.size(), sukhboldExpected.size()); ++i)
+        {
+            if (std::abs(sukhboldActual[i] - sukhboldExpected[i]) > yieldTol)
+            {
+                std::cerr << "testSimControls: yieldsIsotopes: sukhbold_test yield()[" << i <<
+                    "] = " << sukhboldActual[i] << ", expected " << sukhboldExpected[i] << "\n";
+                result = 1;
+            }
+        }
+
+        // kobayashi_test's own native h1/fe56/ni58 values at its own
+        // exact grid mass 13.0, remapped onto [h1, fe56, ni56, ni58] --
+        // ni56 (index 2) must be exactly 0, since kobayashi_test never
+        // tabulated it
+        const std::vector<double> kobayashiExpected{ 6.16, 8.32e-2, 0.0, 2.23e-3 };
+        const auto kobayashiActual = loaded[1]->yield(13.0, 0.0);
+        if (kobayashiActual.size() != kobayashiExpected.size())
+        {
+            std::cerr << "testSimControls: yieldsIsotopes: kobayashi_test yield() has "
+                "size " << kobayashiActual.size() << ", expected " << kobayashiExpected.size() << "\n";
+            result = 1;
+        }
+        for (std::size_t i = 0; i < std::min(kobayashiActual.size(), kobayashiExpected.size()); ++i)
+        {
+            if (std::abs(kobayashiActual[i] - kobayashiExpected[i]) > yieldTol)
+            {
+                std::cerr << "testSimControls: yieldsIsotopes: kobayashi_test yield()[" << i <<
+                    "] = " << kobayashiActual[i] << ", expected " << kobayashiExpected[i] << "\n";
+                result = 1;
+            }
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: yieldsIsotopes: failed: " << error.what() << "\n";
+        result = 1;
+    }
+
+    return result;
+}
+
+// Verify Yields::yield()/yieldSum() correctly aggregate every loaded
+// channel's own YieldChannel::yield() into a (nchannels,
+// isotopes().size()) array (yield()) and its column sums (yieldSum()).
+// Uses the same two-model small-fixture setup as
+// testSimControlsYieldsIsotopes(), but with sukhbold_test's own m_min
+// overridden to 15.0 (extrapolated from its native minimum of 18.2,
+// by a plain ratio -- no interpolation ambiguity) so that mass = 15.0
+// is a single query both channels can answer at once: their native
+// mass ranges (sukhbold_test [18.2, 100.0], kobayashi_test
+// [13.0, 15.0, 18.0]) don't otherwise overlap at all, and 15.0 is
+// kobayashi_test's own exact native grid point too, so both rows below
+// are exact, hand-computable values rather than interpolated ones.
+static auto testSimControlsYieldsYieldAndSum() -> int
+{
+    constexpr std::string_view baseDeck = "tests/core/assets/testGalaxy.in";
+    constexpr double tol = 1e-9;
+    int result = 0;
+
+    try
+    {
+        toml::table inputDeck = toml::parse_file(baseDeck);
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{
+                { "channel", "ccsn" }, { "model", "sukhbold_test" }, { "m_min", 15.0 } } },
+            { "channel2", toml::table{
+                { "channel", "ccsn" }, { "model", "kobayashi_test" } } },
+            { "registry", "tests/yields/assets/yields.toml" },
+        });
+        const io::SimControls controls(inputDeck);
+
+        if (controls.yields() == nullptr)
+        {
+            std::cerr << "testSimControls: yieldsYieldAndSum: expected yields() non-null\n";
+            return 1;
+        }
+
+        // Isotope order is [h1, fe56, ni56, ni58] (see
+        // testSimControlsYieldsIsotopes()'s own identical check).
+        // Row 0 (sukhbold_test): its native mass-18.2 values
+        // (5.93, 8.46e-2, 7.02e-2 for h1/fe56/ni56), each scaled by
+        // 15.0/18.2 (extrapolating down to the overridden m_min), with
+        // 0 for ni58 (never tabulated by sukhbold_test). Row 1
+        // (kobayashi_test): its own real, native mass-15.0 values
+        // (6.79, 8.52e-2, 1.15e-3 for h1/fe56/ni58), with 0 for ni56
+        // (never tabulated by kobayashi_test).
+        const auto [view, data] = controls.yields()->yield(15.0, 0.0);
+        const std::vector<double> row0{
+            5.93 * 15.0 / 18.2, 8.46e-2 * 15.0 / 18.2, 7.02e-2 * 15.0 / 18.2, 0.0 };
+        const std::vector<double> row1{ 6.79, 8.52e-2, 0.0, 1.15e-3 };
+
+        if (view.extent(0) != 2 || view.extent(1) != row0.size())
+        {
+            std::cerr << "testSimControls: yieldsYieldAndSum: expected yield() shape (2, " <<
+                row0.size() << "), got (" << view.extent(0) << ", " << view.extent(1) << ")\n";
+            return 1;
+        }
+        for (std::size_t j = 0; j < row0.size(); ++j)
+        {
+            if (std::abs(view[0, j] - row0[j]) > tol)
+            {
+                std::cerr << "testSimControls: yieldsYieldAndSum: yield()[0, " << j << "] = " <<
+                    view[0, j] << ", expected " << row0[j] << "\n";
+                result = 1;
+            }
+            if (std::abs(view[1, j] - row1[j]) > tol)
+            {
+                std::cerr << "testSimControls: yieldsYieldAndSum: yield()[1, " << j << "] = " <<
+                    view[1, j] << ", expected " << row1[j] << "\n";
+                result = 1;
+            }
+        }
+
+        const auto sum = controls.yields()->yieldSum(15.0, 0.0);
+        if (sum.size() != row0.size())
+        {
+            std::cerr << "testSimControls: yieldsYieldAndSum: yieldSum() has size " <<
+                sum.size() << ", expected " << row0.size() << "\n";
+            result = 1;
+        }
+        else
+        {
+            for (std::size_t j = 0; j < row0.size(); ++j)
+            {
+                const double expected = row0[j] + row1[j];
+                if (std::abs(sum[j] - expected) > tol)
+                {
+                    std::cerr << "testSimControls: yieldsYieldAndSum: yieldSum()[" << j << "] = " <<
+                        sum[j] << ", expected " << expected << "\n";
+                    result = 1;
+                }
+            }
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: yieldsYieldAndSum: failed: " << error.what() << "\n";
+        result = 1;
+    }
+
+    return result;
+}
+
+// Verify Yields::Yields() prints a "slug: warning" (to std::cout) when
+// the same channel is requested more than once, but does not forbid
+// it -- both channels must still be built normally. Also verifies the
+// negative case: two channels of genuinely different types must not
+// warn. Captures std::cout via a temporary rdbuf redirect (there's no
+// existing precedent for this in the test suite, since nothing else
+// prints a warning worth checking the exact text of); always restores
+// the original rdbuf before returning, including on the exception path.
+static auto testSimControlsYieldsDuplicateChannelWarning() -> int
+{
+    constexpr std::string_view baseDeck = "tests/core/assets/testGalaxy.in";
+    int result = 0;
+
+    // Two channels, both "ccsn": should warn, but still build both
+    try
+    {
+        toml::table inputDeck = toml::parse_file(baseDeck);
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{
+                { "channel", "ccsn" }, { "model", "sukhbold_test" } } },
+            { "channel2", toml::table{
+                { "channel", "ccsn" }, { "model", "kobayashi_test" } } },
+            { "registry", "tests/yields/assets/yields.toml" },
+        });
+
+        std::ostringstream captured;
+        std::streambuf* const origBuf = std::cout.rdbuf(captured.rdbuf());
+        std::unique_ptr<io::SimControls> controls;
+        try
+        {
+            controls = std::make_unique<io::SimControls>(inputDeck);
+        }
+        catch (...)
+        {
+            std::cout.rdbuf(origBuf);
+            throw;
+        }
+        std::cout.rdbuf(origBuf);
+
+        if (captured.str().find("2 yield channels requested for channel 'ccsn'") == std::string::npos)
+        {
+            std::cerr << "testSimControls: yieldsDuplicateChannelWarning: expected a "
+                "duplicate-channel warning for two ccsn channels, got: \"" <<
+                captured.str() << "\"\n";
+            result = 1;
+        }
+        if (controls->yields() == nullptr || controls->yields()->yieldChannels().size() != 2)
+        {
+            std::cerr << "testSimControls: yieldsDuplicateChannelWarning: duplicate "
+                "channels should still both be built, not rejected\n";
+            result = 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: yieldsDuplicateChannelWarning: failed to construct "
+            "SimControls with two ccsn channels: " << error.what() << "\n";
+        result = 1;
+    }
+
+    // Two channels, different types ("ccsn"/"massive_star_winds"): should not warn
+    try
+    {
+        toml::table inputDeck = toml::parse_file(baseDeck);
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{
+                { "channel", "ccsn" }, { "model", "sukhbold_test" } } },
+            { "channel2", toml::table{
+                { "channel", "massive_star_winds" }, { "model", "sukhbold_test" } } },
+            { "registry", "tests/yields/assets/yields.toml" },
+        });
+
+        std::ostringstream captured;
+        std::streambuf* const origBuf = std::cout.rdbuf(captured.rdbuf());
+        try
+        {
+            const io::SimControls controls(inputDeck);
+        }
+        catch (...)
+        {
+            std::cout.rdbuf(origBuf);
+            throw;
+        }
+        std::cout.rdbuf(origBuf);
+
+        // baseDeck itself already triggers an unrelated, pre-existing
+        // "slug: warning" (tracks minimum mass vs. IMF minimum mass --
+        // see readTracks()'s own caller in initPhysics()), so this
+        // checks specifically for the duplicate-channel warning's own
+        // text, not just "slug: warning" generically.
+        if (captured.str().find("yield channels requested for channel") != std::string::npos)
+        {
+            std::cerr << "testSimControls: yieldsDuplicateChannelWarning: unexpected "
+                "duplicate-channel warning for two channels of different types: \"" <<
+                captured.str() << "\"\n";
+            result = 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: yieldsDuplicateChannelWarning: failed to construct "
+            "SimControls with distinct channels: " << error.what() << "\n";
+        result = 1;
+    }
+
+    return result;
+}
+
 // Verify galaxy.sfr/galaxy.sfr_dist's exclusive-or requirement and
 // galaxy.sfr_dist's own parsing: both given must throw, neither given
 // must throw, a plain number for galaxy.sfr_dist must become an
@@ -1315,6 +1883,10 @@ auto testSimControls() -> int
     result += testSimControlsSpectraLibrary();
     result += testSimControlsSpectraChained();
     result += testSimControlsExtinctField();
+    result += testSimControlsYields();
+    result += testSimControlsYieldsIsotopes();
+    result += testSimControlsYieldsYieldAndSum();
+    result += testSimControlsYieldsDuplicateChannelWarning();
     result += testSimControlsSFRDist();
     result += testSimControlsSetFeHRejectsBroadening();
     result += testSimControlsSettersRejectMismatchedControls();

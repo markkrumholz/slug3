@@ -135,6 +135,7 @@ add_executable(slug
     src/elem/IsotopeTable.cpp
     src/utils/HDF5Utils.cpp
     src/yields/YieldChannel.cpp
+    src/yields/Yields.cpp
 )
 
 # Test executables
@@ -211,6 +212,7 @@ add_executable(slugTestTracks
     src/utils/HDF5Utils.cpp
 )
 add_executable(slugTestYields
+    src/elem/IsotopeTable.cpp
     src/yields/YieldChannel.cpp
     tests/yields/testYieldsAll.cpp
     src/utils/HDF5Utils.cpp
@@ -261,6 +263,9 @@ add_executable(slugTestCore
     tests/core/testSimGalaxy.cpp
     tests/core/testSpecsynChain.cpp
     src/utils/HDF5Utils.cpp
+    src/elem/IsotopeTable.cpp
+    src/yields/YieldChannel.cpp
+    src/yields/Yields.cpp
 )
 # slugTestCoreFull: the slow, full-scale end-to-end counterpart to
 # slugTestCore above -- same core-area sources, but built and run as
@@ -317,6 +322,9 @@ add_executable(slugTestCoreFull
     tests/core/testGalaxySpecsynFullFieldStars.cpp
     tests/core/testCoreFullAll.cpp
     src/utils/HDF5Utils.cpp
+    src/elem/IsotopeTable.cpp
+    src/yields/YieldChannel.cpp
+    src/yields/Yields.cpp
 )
 # slugTestCoreFull drives a real end-to-end run (real MIST tracks, real
 # multi-GB spectral libraries) through the same interpolation-heavy
@@ -369,6 +377,9 @@ add_executable(slugTestIo
     tests/io/testOutputManager.cpp
     tests/io/testSimControls.cpp
     src/utils/HDF5Utils.cpp
+    src/elem/IsotopeTable.cpp
+    src/yields/YieldChannel.cpp
+    src/yields/Yields.cpp
 )
 add_executable(slugTestNebular
     src/extinct/Extinct.cpp
@@ -403,6 +414,9 @@ add_executable(slugTestNebular
     src/utils/ParseUtils.cpp
     tests/nebular/testNebularAll.cpp
     src/utils/HDF5Utils.cpp
+    src/elem/IsotopeTable.cpp
+    src/yields/YieldChannel.cpp
+    src/yields/Yields.cpp
 )
 add_executable(slugTestSpecsyn
     src/specsyn/SpecsynBlackbody.cpp
@@ -443,6 +457,9 @@ add_executable(slugTestSpecsyn
     src/pdfs/PDFSegmentSchechter.cpp
     src/utils/ParseUtils.cpp
     src/utils/HDF5Utils.cpp
+    src/elem/IsotopeTable.cpp
+    src/yields/YieldChannel.cpp
+    src/yields/Yields.cpp
 )
 
 # Python module. The CMake target is named slugPython (the "slug" target
@@ -514,6 +531,9 @@ pybind11_add_module(slugPython
     src/tracks/Tracks3D.cpp
     src/utils/ParseUtils.cpp
     src/utils/HDF5Utils.cpp
+    src/elem/IsotopeTable.cpp
+    src/yields/YieldChannel.cpp
+    src/yields/Yields.cpp
 )
 set_target_properties(slugPython PROPERTIES
     OUTPUT_NAME _slug
