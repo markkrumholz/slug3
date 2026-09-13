@@ -221,10 +221,15 @@ void core::Cluster::advance(const double t)
     // Mark spec_/specExtinct_/phot_/photExtinct_/lbol_ as stale; they
     // are recomputed lazily, on demand, the next time spec()/
     // specExtinct()/phot()/photExtinct()/lbol() is actually called
-    // (see specCurrent_/photCurrent_/lbolCurrent_'s own comments)
+    // (see specCurrent_/photCurrent_/lbolCurrent_'s own comments).
+    // yields_ is marked stale the same way, but -- unlike the others --
+    // computeYields() accumulates onto yields_ rather than recomputing
+    // it from scratch, so this doesn't erase anything already added;
+    // see yieldsCurrent_'s and computeYields()'s own comments.
     specCurrent_ = false;
     photCurrent_ = false;
     lbolCurrent_ = false;
+    yieldsCurrent_ = false;
 
     // Check for disruption
     if (curTime_ > disruptTime_) { isDisrupted_ = true; }
@@ -437,10 +442,36 @@ void core::Cluster::computeLbol()
     }
 }
 
-// Update yields_ -- currently a no-op stub, see this method's own
-// header comment
+// Update yields_ from the stars that died since the last advance() --
+// see this method's own header comment for why this accumulates onto
+// yields_ rather than recomputing it from scratch. Does not yet
+// account for the continuously-sampled (non-stochastic) part of the
+// population -- a following commit will add that.
 void core::Cluster::computeYields()
 {
+    const auto& sc = controls_.get();
+    const auto* yields = sc.yields();
+    if (yields == nullptr) { return; }
+
+    for (const double mass : mDead_)
+    {
+        if (sc.yieldsChannelDecomposed())
+        {
+            const auto& data = yields->yield(mass, feH_).second;
+            for (std::size_t k = 0; k < data.size(); ++k)
+            {
+                yields_[k] += data[k]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- yields_ and data are both sized nchannels * isotopes().size() by construction, see yields_'s own comment
+            }
+        }
+        else
+        {
+            const auto sum = yields->yieldSum(mass, feH_);
+            for (std::size_t j = 0; j < sum.size(); ++j)
+            {
+                yields_[j] += sum[j]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- yields_ and sum are both sized isotopes().size() by construction, see yields_'s own comment
+            }
+        }
+    }
 }
 
 // Per-star bolometric luminosity, given a mass and isochrone segment

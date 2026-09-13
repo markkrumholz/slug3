@@ -394,10 +394,14 @@ namespace core
          *   channel) if false; an empty vector if no yield channels
          *   were requested (controls().yields() is null)
          * @details
-         * Computed lazily -- see spec()'s own comment. computeYields()
-         * is currently a no-op stub, so yields_ stays at the all-zero
-         * vector it was sized to at construction (see yields_'s own
-         * comment) until a following commit implements it.
+         * Computed lazily -- see spec()'s own comment, and
+         * yieldsCurrent_'s and computeYields()'s own comments for how
+         * this differs from spec()/phot()/lbol(): rather than being
+         * recomputed from scratch, yields_ accumulates the
+         * contribution of every star that has died over this
+         * cluster's whole lifetime so far. computeYields() does not
+         * yet account for the continuously-sampled (non-stochastic)
+         * part of the population -- a following commit will add that.
          */
         [[nodiscard]] auto yields() -> const auto&
         {
@@ -475,7 +479,7 @@ namespace core
         std::vector<double> photNeb_; /**< Photometry of specNeb_ through each filter in SimControls::filters(), at the current time */
         std::vector<double> photNebExtinct_; /**< Photometry of specNebExtinct_ through each filter in SimControls::filters(), at the current time */
         double lbol_ = 0.0;         /**< Bolometric luminosity of the population, in Lsun, at the current time */
-        std::vector<double> yields_; /**< Total nucleosynthetic yield of each isotope in controls().yields()'s own isotopes(), in Msun, summed over this cluster's stars, laid out per yields()'s own comment -- sized to all zeros at construction if controls().yields() is non-null, empty otherwise; see yields()'s own comment for why it stays all-zero until a following commit implements computeYields() */
+        std::vector<double> yields_; /**< Total nucleosynthetic yield of each isotope, in Msun, accumulated over every star that has died so far in this cluster's lifetime, laid out per yields()'s own comment -- sized to all zeros at construction if controls().yields() is non-null, empty otherwise; see computeYields()'s own comment for how it accumulates */
 
         /**
          * @brief Whether spec_/specExtinct_/specNeb_/specNebExtinct_/lineLum_/lineLumExtinct_ are current as of curTime_
@@ -514,7 +518,7 @@ namespace core
         bool lbolCurrent_ = true;
 
         /**
-         * @brief Whether yields_ is current
+         * @brief Whether yields_ reflects every star that has died so far
          * @details
          * Initialized to false -- unlike specCurrent_/photCurrent_/
          * lbolCurrent_, which start true because spec_/phot_/lbol_'s
@@ -523,6 +527,17 @@ namespace core
          * first call to yields() always runs computeYields() at least
          * once, rather than trusting yields_'s at-construction
          * zero-fill (see its own comment) as already being current.
+         *
+         * Set back to false at the end of every advance() call, same
+         * as specCurrent_/photCurrent_/lbolCurrent_ -- but unlike
+         * those, computeYields() does not recompute yields_ from
+         * scratch when it runs; it only adds the contribution of
+         * whichever stars died during that particular advance() call
+         * (mDead_ is reset to hold only those at the start of every
+         * advance(), via updateLivingStars()). So yieldsCurrent_ only
+         * really means "have the deaths from the most recent advance()
+         * call been folded into yields_ yet" -- yields_ itself is
+         * always a running total over this cluster's whole lifetime.
          */
         bool yieldsCurrent_ = false;
 
@@ -598,13 +613,23 @@ namespace core
         void computeLbol();
 
         /**
-         * @brief Update yields_ from the current star lists
+         * @brief Add the yield of every star that died since the last advance() to yields_
          * @details
-         * Currently a no-op stub -- leaves yields_ at whatever it was
-         * last set to (the all-zero vector it was sized to at
-         * construction, until this is implemented). A following commit
-         * will give this a real body, mirroring computeSpec()/
-         * computePhot()/computeLbol()'s own null-guard pattern.
+         * Does nothing if controls().yields() is null (no yield
+         * channels were requested), mirroring computeSpec()/
+         * computePhot()/computeLbol()'s own null-guards. Otherwise
+         * loops over mDead_ (the stars that died during the most
+         * recent advance() call -- see updateLivingStars()'s own
+         * comment) and, for each, adds controls().yields()'s own
+         * yield(mass, feH_) (if controls().yieldsChannelDecomposed())
+         * or yieldSum(mass, feH_) (otherwise) into yields_ -- unlike
+         * computeSpec()/computePhot()/computeLbol(), this accumulates
+         * onto yields_ rather than overwriting it, since yields_ is a
+         * running total over this cluster's whole lifetime, not a
+         * snapshot of its current state; see yieldsCurrent_'s own
+         * comment. Does not yet account for the continuously-sampled
+         * (non-stochastic) part of the population -- a following
+         * commit will add that.
          */
         void computeYields();
 
