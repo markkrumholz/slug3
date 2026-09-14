@@ -18,6 +18,7 @@
 #include "../utils/GKIntegratorData.hpp"
 #include "../utils/PDFIntegrator.hpp"
 #include "../utils/UniqueIDManager.hpp"
+#include "../yields/Yields.hpp"
 #include "Cluster.hpp"
 #include <algorithm>
 #include <array>
@@ -53,6 +54,19 @@ core::Galaxy::Galaxy(const io::SimControls& controls) :
     else if (controls.sfrDist().valid())
     {
         sfr_ = io::SimControls::buildConstantSFR(controls.sfrDist().draw());
+    }
+
+    // If yield channels were requested, size yields_/fieldYields_ to
+    // hold one (currently zero) entry per isotope, times one row per
+    // channel if SimControls::yieldsChannelDecomposed() is true, or
+    // just one combined total per isotope otherwise -- mirrors
+    // Cluster::Cluster()'s own identical sizing exactly
+    if (const auto* yields = controls.yields())
+    {
+        const std::size_t n = yields->isotopes().size() *
+            (controls.yieldsChannelDecomposed() ? yields->yieldChannels().size() : 1);
+        yields_.assign(n, 0.0);
+        fieldYields_.assign(n, 0.0);
     }
 }
 
@@ -537,6 +551,12 @@ void core::Galaxy::computeLbolCts()
 
     lbolCts_ = lbolRaw * (1.0 - fCluster) * (1.0 - sc.fracStochMass());
     lbolCtsCurrent_ = true;
+}
+
+// Update yields_/fieldYields_ -- currently a no-op stub, see this
+// method's own header comment
+void core::Galaxy::computeYields()
+{
 }
 
 auto core::Galaxy::getFieldStarProps() const -> std::vector<specsyn::Specsyn::StarData>

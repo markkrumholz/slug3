@@ -392,6 +392,26 @@ namespace core
         }
 
         /**
+         * @brief Return this galaxy's total nucleosynthetic yield of each isotope
+         * @return A const reference to yields_ -- see
+         *   Cluster::yields()'s own comment for the general shape/
+         *   layout this mirrors
+         * @details
+         * Computed lazily, exactly as Cluster::yields() is -- see its
+         * own comment, and lastYieldTime_'s own comment for why this
+         * accumulates onto yields_ rather than recomputing it from
+         * scratch. computeYields() is currently a no-op stub, so
+         * yields_ stays at the all-zero vector it was sized to at
+         * construction (see yields_'s own comment) until a following
+         * commit implements it.
+         */
+        [[nodiscard]] auto yields() -> const auto&
+        {
+            if (lastYieldTime_ < curTime_) { computeYields(); lastYieldTime_ = curTime_; }
+            return yields_;
+        }
+
+        /**
          * @brief Return the total target stellar mass formed so far
          * @return The sum, over every advance() call so far, of the
          *   total stellar mass (sfr().integral() over that call's own
@@ -548,6 +568,22 @@ namespace core
          * computeLbolCts() path.
          */
         bool lbolCtsCurrent_ = false;
+
+        std::vector<double> yields_; /**< Total nucleosynthetic yield of each isotope, in Msun, accumulated over every star that has died so far across the whole galaxy (clusters, field stars, and the purely continuous population together), laid out per Cluster::yields()'s own comment -- sized to all zeros at construction if controls().yields() is non-null, empty otherwise; see Cluster::yields_'s own comment for how it accumulates */
+        std::vector<double> fieldYields_; /**< Like yields_, but restricted to the individually-tracked field star population (fieldStars_/deadFieldStars_) alone -- excludes both clusters_/disruptedClusters_ and the purely continuous (non-clustered, below minStochMass()) population; initialized the same way as yields_. Tracked separately so a following commit's computeYields() can combine per-population contributions without double-counting */
+
+        /**
+         * @brief Simulation time through which yields_/fieldYields_ have been updated
+         * @details
+         * Mirrors Cluster::lastYieldTime_'s own comment exactly: starts
+         * at 0 (rather than curTime_'s own initial value, though here
+         * the two happen to coincide already) so the first call to
+         * yields() always runs computeYields() at least once; nothing
+         * in advance() needs to reset this, since curTime_ advancing
+         * past it is what makes yields()'s own lastYieldTime_ <
+         * curTime_ check go stale on its own.
+         */
+        double lastYieldTime_ = 0.0;
 
         /**
          * @brief Simulation controls (physics and control-flow settings) this galaxy was built from
@@ -857,6 +893,21 @@ namespace core
          * very advance() call that produced this evaluation).
          */
         [[nodiscard]] auto getFieldStarProps() const -> std::vector<specsyn::Specsyn::StarData>;
+
+        /**
+         * @brief Update yields_/fieldYields_ from the stars that died since lastYieldTime_
+         * @details
+         * Currently a no-op stub -- leaves yields_/fieldYields_ at
+         * whatever they were last set to (the all-zero vectors they
+         * were sized to at construction, until this is implemented). A
+         * following commit will give this a real body, mirroring
+         * Cluster::computeYields()'s own null-guard pattern and
+         * summing/integrating over clusters_/disruptedClusters_,
+         * fieldStars_/deadFieldStars_, and the purely continuous
+         * population, the same way computeSpec()/computeLbol() already
+         * do for their own quantities.
+         */
+        void computeYields();
 
     };
 
