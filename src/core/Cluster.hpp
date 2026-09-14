@@ -21,6 +21,11 @@
 #include <variant>
 #include <vector>
 
+namespace yields
+{
+    class Yields;
+} // namespace yields
+
 namespace core
 {
 
@@ -395,17 +400,15 @@ namespace core
          *   were requested (controls().yields() is null)
          * @details
          * Computed lazily -- see spec()'s own comment, and
-         * yieldsCurrent_'s and computeYields()'s own comments for how
+         * lastYieldTime_'s and computeYields()'s own comments for how
          * this differs from spec()/phot()/lbol(): rather than being
          * recomputed from scratch, yields_ accumulates the
          * contribution of every star that has died over this
-         * cluster's whole lifetime so far. computeYields() does not
-         * yet account for the continuously-sampled (non-stochastic)
-         * part of the population -- a following commit will add that.
+         * cluster's whole lifetime so far.
          */
         [[nodiscard]] auto yields() -> const auto&
         {
-            if (!yieldsCurrent_) { computeYields(); yieldsCurrent_ = true; }
+            if (lastYieldTime_ < curTime_) { computeYields(); lastYieldTime_ = curTime_; }
             return yields_;
         }
 
@@ -518,28 +521,37 @@ namespace core
         bool lbolCurrent_ = true;
 
         /**
-         * @brief Whether yields_ reflects every star that has died so far
+         * @brief Simulation time through which yields_ has been updated
          * @details
-         * Initialized to false -- unlike specCurrent_/photCurrent_/
-         * lbolCurrent_, which start true because spec_/phot_/lbol_'s
-         * own empty/zero in-class defaults are already the correct,
-         * current answer before advance() has ever run -- so that the
-         * first call to yields() always runs computeYields() at least
-         * once, rather than trusting yields_'s at-construction
-         * zero-fill (see its own comment) as already being current.
+         * Initialized to 0 rather than curTime_ (formTime_'s own
+         * value) -- unlike specCurrent_/photCurrent_/lbolCurrent_,
+         * which start true because spec_/phot_/lbol_'s own empty/zero
+         * in-class defaults are already the correct, current answer
+         * before advance() has ever run -- so that the first call to
+         * yields() always runs computeYields() at least once, rather
+         * than trusting yields_'s at-construction zero-fill (see its
+         * own comment) as already being current; yields() itself
+         * treats any lastYieldTime_ before formTime_ as formTime_ (see
+         * computeYields()'s own comment), so starting at 0 rather than
+         * formTime_ has no effect beyond guaranteeing that first call.
          *
-         * Set back to false at the end of every advance() call, same
-         * as specCurrent_/photCurrent_/lbolCurrent_ -- but unlike
-         * those, computeYields() does not recompute yields_ from
+         * Unlike specCurrent_/photCurrent_/lbolCurrent_, nothing needs
+         * to reset this in advance(): yields() itself already compares
+         * lastYieldTime_ against curTime_, and advance() advancing
+         * curTime_ is exactly what makes that comparison go stale on
+         * its own. computeYields() does not recompute yields_ from
          * scratch when it runs; it only adds the contribution of
-         * whichever stars died during that particular advance() call
-         * (mDead_ is reset to hold only those at the start of every
-         * advance(), via updateLivingStars()). So yieldsCurrent_ only
-         * really means "have the deaths from the most recent advance()
-         * call been folded into yields_ yet" -- yields_ itself is
-         * always a running total over this cluster's whole lifetime.
+         * whatever died between lastYieldTime_ and curTime_ -- for the
+         * stochastic population, this relies on mDead_ only ever
+         * holding the deaths from the single most recently advance()
+         * call (see updateLivingStars()'s own comment), so calling
+         * yields() only after every advance() call (as opposed to,
+         * say, every other one) is required for the stochastic part of
+         * yields_ to stay complete; the non-stochastic part has no
+         * such restriction, since it is computed directly from the
+         * gap between lastYieldTime_ and curTime_ regardless of size.
          */
-        bool yieldsCurrent_ = false;
+        double lastYieldTime_ = 0.0;
 
         /**
          * Tracks for this cluster's [Fe/H]: either owned outright (when
@@ -613,23 +625,49 @@ namespace core
         void computeLbol();
 
         /**
-         * @brief Add the yield of every star that died since the last advance() to yields_
+         * @brief Add the yield of every star that died since lastYieldTime_ into yields_
          * @details
          * Does nothing if controls().yields() is null (no yield
          * channels were requested), mirroring computeSpec()/
          * computePhot()/computeLbol()'s own null-guards. Otherwise
-         * loops over mDead_ (the stars that died during the most
-         * recent advance() call -- see updateLivingStars()'s own
-         * comment) and, for each, adds controls().yields()'s own
-         * yield(mass, feH_) (if controls().yieldsChannelDecomposed())
-         * or yieldSum(mass, feH_) (otherwise) into yields_ -- unlike
-         * computeSpec()/computePhot()/computeLbol(), this accumulates
-         * onto yields_ rather than overwriting it, since yields_ is a
-         * running total over this cluster's whole lifetime, not a
-         * snapshot of its current state; see yieldsCurrent_'s own
-         * comment. Does not yet account for the continuously-sampled
-         * (non-stochastic) part of the population -- a following
-         * commit will add that.
+         * handles the stochastic and non-stochastic parts of the
+         * population separately, adding both into yields_ -- see
+         * lastYieldTime_'s own comment for why this accumulates onto
+         * yields_ rather than overwriting it, unlike computeSpec()/
+         * computePhot()/computeLbol().
+         *
+         * Stochastic (individually-sampled) stars: loops over mDead_
+         * (the stars that died during the most recent advance() call
+         * -- see updateLivingStars()'s own comment) and, for each,
+         * adds controls().yields()'s own yield(mass, feH_) (if
+         * controls().yieldsChannelDecomposed()) or yieldSum(mass,
+         * feH_) (otherwise) into yields_.
+         *
+         * Continuously-sampled (non-stochastic) stars: does nothing if
+         * birthNonStochMass_ is 0 (no continuously-sampled population
+         * at all), mirroring computeLbol()'s own identical guard.
+         * Otherwise finds the live mass range at lastYieldTime_ (via
+         * tracks().liveMassRange(), clamping lastYieldTime_ up to
+         * formTime_ first, so the very first call -- lastYieldTime_
+         * still at its initial 0 -- reads the live range at this
+         * cluster's own birth, not simulation time 0) and subtracts
+         * from it the live mass range now (read directly off
+         * isochrone_'s own segments, rather than calling
+         * tracks().liveMassRange() a second time). The result is the
+         * set of mass ranges that were alive at lastYieldTime_ but are
+         * dead now -- possibly several disjoint ranges -- each then
+         * clipped to lie below controls().minStochMass() (the
+         * non-stochastic population's own upper mass limit; the part
+         * above it, if any, belongs to the stochastic stars already
+         * handled above, via mDead_). For each surviving, non-empty
+         * range [m0, m1], integrates yieldStar() (see its own comment)
+         * against controls().imf() over [m0, m1] via PDFIntegrator,
+         * exactly as computeLbol() integrates lbolStar() over the
+         * analogous non-stochastic mass range, and adds
+         * birthNonStochMass_ times that integral into yields_ -- the
+         * same "integrate a per-unit-mass quantity against the
+         * normalized IMF, then scale by the population's actual total
+         * mass" pattern computeLbol()/Specsyn::specCts() both use.
          */
         void computeYields();
 
@@ -655,6 +693,31 @@ namespace core
          * pointer rather than a pointer to member function.
          */
         [[nodiscard]] static auto lbolStar(double m, const Segment& segment) -> std::array<double, 1>;
+
+        /**
+         * @brief Nucleosynthetic yield of a single star, given its mass and [Fe/H]
+         * @param m Stellar mass, in Msun
+         * @param feH [Fe/H] to evaluate the yield at
+         * @param yields The Yields to evaluate -- controls().yields(),
+         *   passed explicitly rather than read from controls_ directly,
+         *   for the same reason segment is passed explicitly to
+         *   lbolStar() rather than read off isochrone_
+         * @param decomposed Whether to keep every channel's own
+         *   contribution separate (yields.yield()) or combine them all
+         *   into one per-isotope total (yields.yieldSum()) -- see
+         *   controls().yieldsChannelDecomposed()'s own comment
+         * @return yields.yield(m, feH).second if decomposed, or
+         *   yields.yieldSum(m, feH) otherwise -- either way, a vector
+         *   the same length as yields_ itself
+         * @details
+         * Exists so computeYields() can hand it to utils::PDFIntegrator,
+         * mirroring lbolStar()'s own identical role for computeLbol()
+         * -- see its own comment. Static for the same reason lbolStar()
+         * is: it needs no instance state, so computeYields() can hand
+         * PDFIntegrator a plain function pointer.
+         */
+        [[nodiscard]] static auto yieldStar(double m, double feH,
+            const yields::Yields& yields, bool decomposed) -> std::vector<double>;
 
     };
 
