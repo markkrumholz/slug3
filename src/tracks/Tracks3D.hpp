@@ -167,6 +167,20 @@ namespace tracks
        { return interp_->sliceConstZ(feh).yLim(t); }
 
        /**
+        * @brief Return the mass(es) and dm/d(logT) of the star(s) whose lifetime is a given value, at a given [Fe/H]
+        * @param logT log10(lifetime / yr)
+        * @param feh [Fe/H] value of the tracks to use
+        * @return See Tracks2D::massAndDerivFromLifetime()'s own comment
+        * @details
+        * Mirrors liveMassRange()'s own identical pattern: slices
+        * interp_ to feh, then delegates to that slice's own
+        * yEdgeSlope(logT, false) -- see Tracks2D::
+        * massAndDerivFromLifetime()'s own comment for what it returns.
+        */
+       [[nodiscard]] auto massAndDerivFromLifetime(const double logT, const double feh) const
+       { return interp_->sliceConstZ(feh).yEdgeSlope(logT, false); }
+
+       /**
         * @brief Check whether a star of a given mass is alive at a given time and [Fe/H]
         * @param m Mass of the star
         * @param logT log10(time / yr) at which to evaluate

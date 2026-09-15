@@ -151,6 +151,30 @@ namespace tracks
        [[nodiscard]] auto liveMassRange(const double logT) const { return interp_->yLim(logT); }
 
        /**
+        * @brief Return the mass(es) and dm/d(logT) of the star(s) whose lifetime is a given value
+        * @param logT log10(lifetime / yr)
+        * @return One (mass, dm/d(logT)) pair per star whose own
+        *   tabulated lifetime (see starLifetime()'s own comment)
+        *   equals 10^logT yr -- in general more than one for a
+        *   non-monotonic mass-lifetime relation (e.g. a low- and a
+        *   high-mass star sharing the same lifetime)
+        * @details
+        * A thin wrapper around interp_->yEdgeSlope(logT, false): the
+        * mesh's own right edge (see Mesh2DGrid::yEdgeSlope()'s own
+        * comment) is exactly the locus of (xMax(m), m) pairs across
+        * every tabulated mass -- i.e. the (log-lifetime, mass) curve
+        * starLifetime() itself reads a single point off of -- so
+        * finding where a line of constant x = logT crosses it gives
+        * every mass whose own lifetime is 10^logT yr. The slope
+        * yEdgeSlope() reports there is dm/d(logT), in the mesh's own
+        * native (x, y) = (logT, mass) coordinates, not dm/dT (plain,
+        * un-logged lifetime) -- left for the caller to convert via the
+        * chain rule (dm/dT = dm/d(logT) / (T * ln 10)) if needed.
+        */
+       [[nodiscard]] auto massAndDerivFromLifetime(const double logT) const
+       { return interp_->yEdgeSlope(logT, false); }
+
+       /**
         * @brief Check whether a star of a given mass is alive at a given time
         * @param m Mass of the star
         * @param logT log10(time / yr) at which to evaluate
