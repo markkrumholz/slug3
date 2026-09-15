@@ -385,6 +385,28 @@ namespace interp
         std::vector<double> yL; // We'll break this up into pairs at the end
         std::vector<std::pair<double,double>> ym; // (y, dy/dx) pairs on the requested edge
 
+        // Record (y, leftSlope) into ym if leftEdge and isLeftCol, or
+        // (y, rightSlope) if !leftEdge and isRightCol -- used for both
+        // the bottom- and top-vertex corner checks below. Skips if
+        // ym's own last entry is already at y, so the top-vertex check
+        // doesn't double-count a point the bottom-vertex/else-branch
+        // check already found (only possible at y == yMax_, and only
+        // when ym is otherwise still empty at the bottom -- see this
+        // function's own comment). Takes isLeftCol/isRightCol as
+        // already-evaluated comparisons, and does its own leftEdge
+        // branching internally, purely to keep this function's own
+        // cognitive complexity down (an equivalent inline expression
+        // would put that same branching, and the cost of evaluating
+        // it, in this function's own body instead).
+        const auto recordVertex = [&ym, leftEdge](
+            const bool isLeftCol, const bool isRightCol,
+            const double y, const double leftSlope, const double rightSlope)
+        {
+            if (!ym.empty() && ym.back().first == y) { return; }
+            if (leftEdge && isLeftCol) { ym.emplace_back(y, leftSlope); }
+            else if (!leftEdge && isRightCol) { ym.emplace_back(y, rightSlope); }
+        };
+
         // Check if the x we have been given lies within the range covered
         // by the bottom rib
         if (x >= x_[0,0] && x <= x_[nx()-1,0])
@@ -393,6 +415,15 @@ namespace interp
             // is y coordinate of this rib
             yL.push_back(yMin_);
             jSaveLoc = 0; // Cached pointer
+
+            // If x also lands exactly on the requested edge's own
+            // bottom vertex (mass yMin_), record it -- yLim() itself
+            // has no need to (yMin_ is already its own answer either
+            // way), but yEdgeSlope() does, since this point would
+            // otherwise never be visited by the per-segment checks
+            // below (which only look for a crossing strictly between
+            // two rows, not a touch exactly at row 0 itself)
+            recordVertex(x == x_[0,0], x == x_[nx()-1,0], yMin_, m_[0,0], m_[nx()-1,0]);
         }
         else
         {
@@ -408,15 +439,42 @@ namespace interp
             { ++jSaveLoc; }
             yL.push_back(y_[jSaveLoc] +
                 (m_[iSaveLoc,jSaveLoc] * (x - x_[iSaveLoc,jSaveLoc])));
-            if ((iSaveLoc == 0 && leftEdge) || (iSaveLoc == nx()-1 && !leftEdge))
-            {
-                ym.emplace_back(yL.back(), m_[iSaveLoc,jSaveLoc]);
-            }
+            recordVertex(iSaveLoc == 0, iSaveLoc == nx()-1,
+                yL.back(), m_[iSaveLoc,jSaveLoc], m_[iSaveLoc,jSaveLoc]);
             ++jSaveLoc;
         }
 
-        // Now march upward through the mesh, recording where we exit
-        while (yEdgeSlopeTraverse(x, yL, ym, leftEdge)) {}
+        // Now march upward through the mesh, recording where we exit --
+        // but only if jSaveLoc doesn't already point past the mesh's
+        // own top row: unlike yLim() (which always enters this loop
+        // unconditionally), yEdgeSlope() must guard this, since the
+        // "else" branch above can leave jSaveLoc at ny()-1 if its own
+        // climb happened to land exactly on the last (top) segment --
+        // calling yEdgeSlopeTraverse() with that jSaveLoc would read
+        // past row ny()-1, which yLimTraverse() itself is equally
+        // exposed to (this is a pre-existing, latent out-of-bounds
+        // read in yLim()'s own identical unconditional call, not
+        // something specific to yEdgeSlope() -- it simply happens not
+        // to corrupt yLim()'s own result in practice, since yLimTraverse()
+        // only ever adds a point on a strict sign change, which a row
+        // of garbage values essentially never produces by chance).
+        if (jSaveLoc <= ny() - 2)
+        {
+            while (yEdgeSlopeTraverse(x, yL, ym, leftEdge)) {}
+        }
+
+        // The mesh's own top corner on the requested edge is a second
+        // special case, structurally analogous to the bottom-vertex
+        // check above: yEdgeSlopeTraverse()'s own corner-case check
+        // deliberately excludes the last segment (jSaveLoc == ny()-2,
+        // mirroring yLimTraverse()'s own identical exclusion, which
+        // relies on yLim()'s separate post-loop top-of-mesh fallback
+        // instead -- see yLim()'s own comment), so it must be checked
+        // explicitly here (recordVertex()'s own duplicate check
+        // handles the case where the "else" branch's own climb above
+        // already found this exact point directly).
+        recordVertex(x == x_[0, ny()-1], x == x_[nx()-1, ny()-1],
+            yMax_, m_[0, ny()-2], m_[nx()-1, ny()-2]);
 
         // Return the edge (y, dy/dx) pairs found
         return ym;
