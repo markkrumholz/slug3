@@ -362,6 +362,67 @@ namespace interp
 
     }
 
+    // Find (y, dy/dx) at every intersection of a line of constant x
+    // with one edge (left, column 0, or right, column nx()-1) of the
+    // mesh -- structured exactly like yLim() above (see its own
+    // comment), since the underlying upward traversal at fixed x is
+    // identical; the only difference is what gets recorded, and where.
+    auto Mesh2DGrid::yEdgeSlope(const double x, const bool leftEdge) const
+        -> std::vector<std::pair<double,double>>
+    {
+        auto& iSaveLoc = iSave_();
+        auto& jSaveLoc = jSave_();
+
+        if (x < xMin_ || x > xMax_)
+        {
+            // Case where line misses mesh entirely; return
+            // empty vector
+            return {};
+        }
+
+        // If we are here, the line intersects the
+        // mesh at least once; create accumulator for result
+        std::vector<double> yL; // We'll break this up into pairs at the end
+        std::vector<std::pair<double,double>> ym; // (y, dy/dx) pairs on the requested edge
+
+        // Check if the x we have been given lies within the range covered
+        // by the bottom rib
+        if (x >= x_[0,0] && x <= x_[nx()-1,0])
+        {
+            // Yes, this x is within the bottom rib, so first intersection
+            // is y coordinate of this rib
+            yL.push_back(yMin_);
+            jSaveLoc = 0; // Cached pointer
+        }
+        else
+        {
+            // Point we have been given is outside the bottom rib, so the
+            // line must hit the bottom of the mesh on one of the side
+            // spines.
+            if (x < x_[0,0]) { iSaveLoc = 0; } // Left of bottom rib
+            else { iSaveLoc = nx() - 1; } // Right of bottom rib
+            jSaveLoc = 0; // Initial position
+
+            // Now march upward until we encounter the mesh edge
+            while ((x_[iSaveLoc,jSaveLoc] - x) * (x_[iSaveLoc,jSaveLoc+1] - x) > 0)
+            { ++jSaveLoc; }
+            yL.push_back(y_[jSaveLoc] +
+                (m_[iSaveLoc,jSaveLoc] * (x - x_[iSaveLoc,jSaveLoc])));
+            if ((iSaveLoc == 0 && leftEdge) || (iSaveLoc == nx()-1 && !leftEdge))
+            {
+                ym.emplace_back(yL.back(), m_[iSaveLoc,jSaveLoc]);
+            }
+            ++jSaveLoc;
+        }
+
+        // Now march upward through the mesh, recording where we exit
+        while (yEdgeSlopeTraverse(x, yL, ym, leftEdge)) {}
+
+        // Return the edge (y, dy/dx) pairs found
+        return ym;
+
+    }
+
     // Traversal function used by yLim
     auto Mesh2DGrid::yLimTraverse(
         const double x,
@@ -415,6 +476,106 @@ namespace interp
                 // This is the corner case
                 yL.push_back(y_[jSaveLoc] +
                     (m_[nx()-1,jSaveLoc] * (x - x_[nx()-1,jSaveLoc])));
+            }
+        }
+
+        // Special check: if we started outside the mesh, it is possible
+        // that we crossed both edges; if we did then it is also
+        // possible that we got the order wrong, in that we added the
+        // left crossing before the right, when it should have been the
+        // other way around. Here we check for that possibility and fix
+        // the problem if it has occurred.
+        if (yL.size() >= 2)
+        {
+            if (yL[yL.size()-2] > yL[yL.size()-1])
+            {
+                std::swap(yL[yL.size()-2], yL[yL.size()-1]);
+            }
+        }
+
+        // If we're convex, there are only 2 limits to find; stop if
+        // we've found both
+        if (convex_ && yL.size() == 2) { return false; }
+
+        // Either increment j, or exit if we've reached the top
+        if (jSaveLoc == ny()-2) { return false; }
+        jSaveLoc++;
+
+        // If we reach here, continue traversal
+        return true;
+
+    }
+
+    // Traversal function used by yEdgeSlope -- identical to
+    // yLimTraverse() above (see its own comment), except that every yL
+    // push from column 0 or column nx()-1 also records the
+    // corresponding (y, dy/dx) pair into yEdge, if that column is the
+    // one leftEdge selects.
+    auto Mesh2DGrid::yEdgeSlopeTraverse(
+        const double x,
+        std::vector<double>& yL,
+        std::vector<std::pair<double,double>>& yEdge,
+        const bool leftEdge
+    ) const -> bool
+    {
+        auto& jSaveLoc = jSave_();
+
+        // Append y to yL, and -- if recordEdge is true -- the
+        // corresponding (y, slope) pair to yEdge too; factored out of
+        // the two duplicated (left-edge/right-edge) blocks below
+        // purely to keep this function's own cognitive complexity
+        // down, not for any reuse elsewhere.
+        const auto pushPoint = [&yL, &yEdge](const bool recordEdge, const double y, const double slope)
+        {
+            yL.push_back(y);
+            if (recordEdge) { yEdge.emplace_back(y, slope); }
+        };
+
+        // Check left edge; be careful with corner cases, where we need
+        // to consider both the slope and whether we are currently
+        // inside or outside the mesh to decide if we have a hit
+        double dx0 = x_[0,jSaveLoc] - x;
+        double dx1 = x_[0,jSaveLoc+1] - x;
+        if (dx0 * dx1 < 0)
+        {
+            // This is the regular case
+            pushPoint(leftEdge, y_[jSaveLoc] +
+                (m_[0,jSaveLoc] * (x - x_[0,jSaveLoc])), m_[0,jSaveLoc]);
+        }
+        else if (dx1 == 0 && jSaveLoc < ny()-2)
+        {
+            if ((m_[0,jSaveLoc+1] > 0 &&
+                yL.size() % 2 == 1 &&
+                m_[0,jSaveLoc+1] != bigNum) ||
+                (m_[0,jSaveLoc+1] < 0 &&
+                yL.size() % 2 == 0))
+            {
+                // This is the corner case
+                pushPoint(leftEdge, y_[jSaveLoc] +
+                    (m_[0,jSaveLoc] * (x - x_[0,jSaveLoc])), m_[0,jSaveLoc]);
+            }
+        }
+
+        // Check right edge; again, be careful of corner cases
+        dx0 = x_[nx()-1,jSaveLoc] - x;
+        dx1 = x_[nx()-1,jSaveLoc+1] - x;
+        if (dx0 * dx1 < 0)
+        {
+            // This is the regular case
+            pushPoint(!leftEdge, y_[jSaveLoc] +
+                (m_[nx()-1,jSaveLoc] * (x - x_[nx()-1,jSaveLoc])), m_[nx()-1,jSaveLoc]);
+        }
+        else if (dx1 == 0 && jSaveLoc < ny()-2)
+        {
+            if ((m_[nx()-1,jSaveLoc+1] < 0 &&
+                yL.size() % 2 == 1) ||
+                (m_[nx()-1,jSaveLoc+1] > 0 &&
+                yL.size() % 2 == 0 &&
+                m_[nx()-1,jSaveLoc+1] != bigNum))
+            {
+                // This is the corner case
+                pushPoint(!leftEdge, y_[jSaveLoc] +
+                    (m_[nx()-1,jSaveLoc] * (x - x_[nx()-1,jSaveLoc])), m_[nx()-1,jSaveLoc]);
             }
         }
 
