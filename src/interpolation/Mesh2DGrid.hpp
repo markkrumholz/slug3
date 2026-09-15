@@ -391,6 +391,27 @@ namespace interp
         const -> std::vector<std::pair<double, double>>;
 
         /**
+         * @brief Find y and dy/dx at every point where a line of constant x intersects one mesh edge
+         * @param x x position
+         * @param leftEdge True to find intersections with the mesh's
+         *   left edge (column 0), false for its right edge (column
+         *   nx()-1)
+         * @returns One (y, dy/dx) pair per intersection with the
+         *   requested edge, in ascending y order
+         * @details
+         * Structured exactly like yLim() (see its own comment) --
+         * traversing the mesh upward at fixed x -- but records only
+         * those intersections that land on the requested edge, and
+         * for each records the edge segment's own slope (dy/dx)
+         * alongside its y coordinate, rather than pairing every
+         * intersection up into (min, max) ranges. For a convex mesh
+         * this is empty or a single pair; a non-convex mesh's edge can
+         * fold back on itself, so this can return more.
+         */
+        auto yEdgeSlope(double x, bool leftEdge)
+        const -> std::vector<std::pair<double, double>>;
+
+        /**
          * @brief Check if a point is contained in the mesh
          * @param x x position
          * @param y y position
@@ -665,6 +686,25 @@ namespace interp
          * @returns True if traversal should continue, false if it should stop
         */
         auto yLimTraverse(double x, std::vector<double>& yL) const -> bool;
+
+        /**
+         * @brief Traverse mesh to find edge (y, dy/dx) pairs at fixed x, for yEdgeSlope()
+         * @param x x coordinate at which to traverse
+         * @param yL Limits on y being filled, exactly as in yLimTraverse()
+         * @param yEdge (y, dy/dx) pairs on the requested edge being filled
+         * @param leftEdge True to record intersections with the mesh's
+         *   left edge (column 0) into yEdge, false for its right edge
+         *   (column nx()-1) -- see yEdgeSlope()'s own comment
+         * @returns True if traversal should continue, false if it should stop
+         * @details
+         * Identical to yLimTraverse() (see its own comment) -- same yL
+         * bookkeeping, same continuation logic -- except that every
+         * time a point is appended to yL from column 0 or column
+         * nx()-1, the corresponding (y, slope) pair is also appended
+         * to yEdge, if that column is the one leftEdge selects.
+         */
+        auto yEdgeSlopeTraverse(double x, std::vector<double>& yL,
+            std::vector<std::pair<double, double>>& yEdge, bool leftEdge) const -> bool;
 
         /**
          * @brief Find the list of points where a line of constant x intersects mesh ribs and spines

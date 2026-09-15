@@ -248,6 +248,21 @@ namespace interp
         [[nodiscard]] auto yLim(double x) const { return mesh_.yLim(x); }
 
         /**
+         * @brief Find y and dy/dx at every point where a line of constant x intersects one mesh edge
+         * @param x x position
+         * @param leftEdge True to find intersections with the mesh's
+         *   left edge (column 0), false for its right edge (column
+         *   nx()-1)
+         * @returns One (y, dy/dx) pair per intersection with the
+         *   requested edge, in ascending y order
+         * @details
+         * Thin wrapper around Mesh2DGrid::yEdgeSlope() -- see its own
+         * comment.
+         */
+        [[nodiscard]] auto yEdgeSlope(double x, bool leftEdge) const
+        { return mesh_.yEdgeSlope(x, leftEdge); }
+
+        /**
          * @brief Check whether a point is contained in the mesh
          * @param x x position
          * @param y y position

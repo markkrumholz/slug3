@@ -23,6 +23,7 @@ auto main() -> int {
         result += testTracks3DFieldOrder();
         result += testTracks3DGetStar();
         result += testTracks3DFeHRangeGuard();
+        result += testTracks3DMassAndDerivFromLifetime();
         result += testTrackUtils();
         return result;
     }

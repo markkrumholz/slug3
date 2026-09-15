@@ -382,6 +382,85 @@ inline auto testTracks2DGetStar() -> int
  * that getStar() reproduces the same ground truth directly (see
  * testTracks2DGetStar()).
  */
+/**
+ * @brief Unit test for Tracks2D::massAndDerivFromLifetime()
+ * @return 0 if the test passes, 1 if it fails
+ * @details
+ * Constructs a Tracks2D from the MIST_test track set (feh=0.0,
+ * vvcrit=0.0, afe=-0.2), whose own mass grid is [0.1, 1, 5, 20, 100,
+ * 300] Msun, and whose starLifetime() is monotonically decreasing
+ * with mass over that grid. Cross-checks
+ * massAndDerivFromLifetime(logT) at a log-lifetime strictly between
+ * two adjacent grid masses' own starLifetime() values (1.0 and 5.0
+ * Msun) against an independent linear interpolation between those two
+ * (mass, log-lifetime) points -- valid because Mesh2DGrid's own right
+ * edge (which massAndDerivFromLifetime() reads via yEdgeSlope()) is by
+ * construction a straight line between consecutive mass-grid rows in
+ * (logT, mass) space (see Mesh2DGrid::m_'s own dy/dx definition), so
+ * both the interpolated mass and the reported dm/d(logT) slope should
+ * reproduce that same linear relationship exactly. Also checks that a
+ * log-lifetime shorter than every tabulated mass's own lifetime (5.0,
+ * safely below log10(starLifetime(300)) ~ 6.42, but still well inside
+ * the mesh's overall x range, so this exercises real traversal rather
+ * than the trivial out-of-mesh-bounds rejection) returns no points at
+ * all.
+ */
+inline auto testTracks2DMassAndDerivFromLifetime() -> int
+{
+    const std::string registryName = "tests/tracks/assets/tracks.toml";
+    const std::string trackName = "MIST_test";
+
+    int result = 0;
+    try
+    {
+        const tracks::Tracks2D tracks2d(trackName, 0.0, 0.0, -0.2, registryName);
+
+        constexpr double m1 = 1.0;
+        constexpr double m2 = 5.0;
+        const double logT1 = std::log10(tracks2d.starLifetime(m1));
+        const double logT2 = std::log10(tracks2d.starLifetime(m2));
+
+        const double logTQuery = 0.5 * (logT1 + logT2);
+        const double expectedSlope = (m2 - m1) / (logT2 - logT1);
+        const double expectedMass = m1 + (expectedSlope * (logTQuery - logT1));
+
+        const auto edges = tracks2d.massAndDerivFromLifetime(logTQuery);
+        if (edges.size() != 1)
+        {
+            std::cerr << "testTracks2DMassAndDerivFromLifetime: expected 1 "
+                "(mass, slope) pair at logT = " << logTQuery << ", got "
+                << edges.size() << "\n";
+            result = 1;
+        }
+        else if (!testutil::fieldsMatch(edges.at(0).first, expectedMass) ||
+            !testutil::fieldsMatch(edges.at(0).second, expectedSlope))
+        {
+            std::cerr << "testTracks2DMassAndDerivFromLifetime: expected (mass, "
+                "dm/dlogT) = (" << expectedMass << ", " << expectedSlope <<
+                "), got (" << edges.at(0).first << ", " << edges.at(0).second << ")\n";
+            result = 1;
+        }
+
+        constexpr double logTShort = 5.0; // shorter than every tabulated lifetime
+        const auto noEdges = tracks2d.massAndDerivFromLifetime(logTShort);
+        if (!noEdges.empty())
+        {
+            std::cerr << "testTracks2DMassAndDerivFromLifetime: expected no "
+                "(mass, slope) pairs at logT = " << logTShort << ", got "
+                << noEdges.size() << "\n";
+            result = 1;
+        }
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "testTracks2DMassAndDerivFromLifetime: unexpected exception: "
+            << e.what() << "\n";
+        result = 1;
+    }
+
+    return result;
+}
+
 inline auto testTracks2D() -> int
 {
     const std::array<TestTracks2DCase, 6> files = {{
@@ -423,6 +502,7 @@ inline auto testTracks2D() -> int
     if (testTracks2DGetters() != 0) { result = 1; }
     if (testTracks2DFieldOrder() != 0) { result = 1; }
     if (testTracks2DGetStar() != 0) { result = 1; }
+    if (testTracks2DMassAndDerivFromLifetime() != 0) { result = 1; }
     return result;
 }
 

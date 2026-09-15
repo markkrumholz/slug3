@@ -336,6 +336,124 @@ testXIntersectNonConvex(const interp::Mesh2DGrid& m2dNC)
     return 0;  // Success
 }
 
+// Test ability to find (y, dy/dx) pairs on the left/right mesh edges
+// at fixed x, via yEdgeSlope() -- reuses the same convex (m2d) and
+// non-convex (m2dNC) meshes, and the same x test points, as
+// testXIntersectConvex()/testXIntersectNonConvex() above, so the
+// expected results below are cross-checked against those functions'
+// own already-verified yLim()/xIntersect() results (see their own
+// comments for the geometry): m2d is a parallelogram sheared by
+// fac = 0.1 per row (both left and right edges are straight lines of
+// slope 1/fac = 10), while m2dNC's left/right edges each fold back on
+// themselves once (row 1 shifted right relative to rows 0/2), giving
+// two edge crossings at the x values that clip that fold, one of
+// slope 10 and one of slope -10.
+//
+// Also covers the mesh's own bottom/top corners on each edge
+// (x exactly at x_[0,0]/x_[nx()-1,0] or x_[0,ny()-1]/x_[nx()-1,ny()-1]):
+// a regression case for a bug found in review (both corners were
+// silently dropped -- the bottom because the initial bottom-rib branch
+// never checked it, the top because yEdgeSlopeTraverse()'s own
+// corner-case check deliberately excludes the mesh's last segment,
+// mirroring yLimTraverse()'s own identical exclusion, which yLim()
+// itself compensates for via a separate post-loop step that
+// yEdgeSlope() has no equivalent of). For m2dNC, x = 0 and x = 3 each
+// hit both the bottom and the top corner at once (row 1 is shifted
+// right relative to rows 0 and 2, so the left/right edges return to
+// their own row-0 x value at row 2 as well), giving two points.
+static auto
+testYEdgeSlope(const interp::Mesh2DGrid& m2d, const interp::Mesh2DGrid& m2dNC)
+{
+    using EdgePair = std::pair<double, double>; // (y, dy/dx)
+    constexpr double slope = 10.0; // 1 / fac, fac = 0.1
+
+    // x, leftEdge, mesh, expected -- one row per case. mesh is a
+    // pointer (not a reference) purely so this local struct can be
+    // held in a std::vector; NOLINT block below matches
+    // xIntersectionDescriptor's own identical precedent (Mesh2DGrid.hpp)
+    // for a plain-data struct with non-underscore member names.
+    // NOLINTBEGIN(readability-identifier-naming)
+    struct TestCase
+    {
+        double x;
+        bool leftEdge;
+        const interp::Mesh2DGrid* mesh;
+        std::vector<EdgePair> expected;
+        std::string label;
+    };
+    // NOLINTEND(readability-identifier-naming)
+
+    const std::vector<TestCase> cases = {
+        // Convex mesh: entirely off the mesh -- no edge touched
+        { -0.5, true, &m2d, {}, "convex, off-mesh, left" },
+        { -0.5, false, &m2d, {}, "convex, off-mesh, right" },
+        // Convex mesh, x = 0.05: enters via bottom rib, exits via left
+        // spine at y = 0.5 (see testXIntersectConvex's own yLim[1])
+        { 0.05, true, &m2d, { { 0.5, slope } }, "convex, x=0.05, left" },
+        { 0.05, false, &m2d, {}, "convex, x=0.05, right" },
+        // Convex mesh, x = 0.5: enters/exits via bottom/top ribs only
+        // (see yLim[2]) -- neither edge is touched
+        { 0.5, true, &m2d, {}, "convex, x=0.5, left" },
+        { 0.5, false, &m2d, {}, "convex, x=0.5, right" },
+        // Convex mesh, x = 3.05: enters via right spine at y = 0.5,
+        // exits via top rib (see yLim[3])
+        { 3.05, true, &m2d, {}, "convex, x=3.05, left" },
+        { 3.05, false, &m2d, { { 0.5, slope } }, "convex, x=3.05, right" },
+        // Convex mesh, x = 3.1: enters via right spine at y = 1,
+        // exits via top rib (see yLim[4])
+        { 3.1, true, &m2d, {}, "convex, x=3.1, left" },
+        { 3.1, false, &m2d, { { 1.0, slope } }, "convex, x=3.1, right" },
+        // Non-convex mesh, x = 0.05: left edge folds back on itself,
+        // crossing it twice (see yLimNC[0]/xIntersectNC[0]) -- once
+        // exiting (slope +10) and once re-entering (slope -10)
+        { 0.05, true, &m2dNC, { { 0.5, slope }, { 1.5, -slope } }, "non-convex, x=0.05, left" },
+        { 0.05, false, &m2dNC, {}, "non-convex, x=0.05, right" },
+        // Non-convex mesh, x = 3.05: same fold on the right edge (see
+        // yLimNC[1]/xIntersectNC[1])
+        { 3.05, true, &m2dNC, {}, "non-convex, x=3.05, left" },
+        { 3.05, false, &m2dNC, { { 0.5, slope }, { 1.5, -slope } }, "non-convex, x=3.05, right" },
+        // Convex mesh: bottom-left and bottom-right corners
+        { 0.0, true, &m2d, { { 0.0, slope } }, "convex, x=0 (bottom-left corner), left" },
+        { 0.0, false, &m2d, {}, "convex, x=0 (bottom-left corner), right" },
+        { 3.0, false, &m2d, { { 0.0, slope } }, "convex, x=3 (bottom-right corner), right" },
+        { 3.0, true, &m2d, {}, "convex, x=3 (bottom-right corner), left" },
+        // Convex mesh: top-left and top-right corners
+        { 0.2, true, &m2d, { { 2.0, slope } }, "convex, x=0.2 (top-left corner), left" },
+        { 0.2, false, &m2d, {}, "convex, x=0.2 (top-left corner), right" },
+        { 3.2, false, &m2d, { { 2.0, slope } }, "convex, x=3.2 (top-right corner), right" },
+        { 3.2, true, &m2d, {}, "convex, x=3.2 (top-right corner), left" },
+        // Non-convex mesh: x = 0 and x = 3 each hit both the bottom
+        // and the top corner of their own edge at once (see this
+        // function's own comment)
+        { 0.0, true, &m2dNC, { { 0.0, slope }, { 2.0, -slope } }, "non-convex, x=0 (bottom+top-left corner), left" },
+        { 0.0, false, &m2dNC, {}, "non-convex, x=0 (bottom+top-left corner), right" },
+        { 3.0, false, &m2dNC, { { 0.0, slope }, { 2.0, -slope } }, "non-convex, x=3 (bottom+top-right corner), right" },
+        { 3.0, true, &m2dNC, {}, "non-convex, x=3 (bottom+top-right corner), left" },
+    };
+
+    for (const auto& c : cases)
+    {
+        const auto result = c.mesh->yEdgeSlope(c.x, c.leftEdge);
+        if (result.size() != c.expected.size())
+        {
+            std::cerr << "testMesh2DGrid: yEdgeSlope (" << c.label << "): expected "
+                << c.expected.size() << " edge point(s), got " << result.size() << "\n";
+            return 1;
+        }
+        for (const auto& [r, e] : std::views::zip(result, c.expected))
+        {
+            if (!utils::approxEqual(r.first, e.first) || !utils::approxEqual(r.second, e.second))
+            {
+                std::cerr << "testMesh2DGrid: yEdgeSlope (" << c.label << "): expected (y, dy/dx) = ("
+                    << e.first << ", " << e.second << "), got (" << r.first << ", " << r.second << ")\n";
+                return 1;
+            }
+        }
+    }
+
+    return 0; // Success
+}
+
 // Helper for testXIntersectN: check xIntersectN(x, y, n) against the
 // corresponding window of the already-tested xIntersect(x) list, for
 // every valid n and for both starting types of y -- exactly on an
@@ -1064,6 +1182,7 @@ auto testMesh2DGrid() -> int
     // Do intersection tests
     test += testXIntersectConvex(m2d, nx, fac);
     test += testXIntersectNonConvex(m2dNC);
+    test += testYEdgeSlope(m2d, m2dNC);
     test += testXIntersectN(m2d, m2dNC);
     test += testYIntersect(m2d, nx, fac);
 

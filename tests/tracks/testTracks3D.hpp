@@ -17,8 +17,8 @@
 #define TESTTRACKS3D_HPP
 
 #include "../../src/tracks/Tracks3D.hpp"
-#include "trackFieldFixture.hpp"
 #include "hdf5.h" // NOLINT(misc-include-cleaner)
+#include "trackFieldFixture.hpp"
 #include <cmath>
 #include <exception>
 #include <iostream>
@@ -290,6 +290,74 @@ inline auto testTracks3DGetStar() -> int
 
     H5Gclose(grp);
     H5Fclose(file);
+    return result;
+}
+
+/**
+ * @brief Unit test for Tracks3D::massAndDerivFromLifetime()
+ * @return 0 if the test passes, 1 if it fails
+ * @details
+ * Mirrors Tracks2D::testTracks2DMassAndDerivFromLifetime()'s own
+ * setup and reasoning exactly, at feh = 0.0 (one of MIST_test's own
+ * tabulated [Fe/H] grid values, so this Tracks3D slice reduces to
+ * exactly the same feh_0.00_afe_-0.2_vvcrit_0.00 group Tracks2D itself
+ * reads, with no [Fe/H] interpolation error to account for).
+ */
+inline auto testTracks3DMassAndDerivFromLifetime() -> int
+{
+    const std::string registryName = "tests/tracks/assets/tracks.toml";
+    const std::string trackName = "MIST_test";
+    constexpr double feh = 0.0;
+
+    int result = 0;
+    try
+    {
+        const tracks::Tracks3D tracks3d(
+            trackName, feh, feh, 0.0, -0.2, registryName);
+
+        constexpr double m1 = 1.0;
+        constexpr double m2 = 5.0;
+        const double logT1 = std::log10(tracks3d.starLifetime(m1, feh));
+        const double logT2 = std::log10(tracks3d.starLifetime(m2, feh));
+
+        const double logTQuery = 0.5 * (logT1 + logT2);
+        const double expectedSlope = (m2 - m1) / (logT2 - logT1);
+        const double expectedMass = m1 + (expectedSlope * (logTQuery - logT1));
+
+        const auto edges = tracks3d.massAndDerivFromLifetime(logTQuery, feh);
+        if (edges.size() != 1)
+        {
+            std::cerr << "testTracks3DMassAndDerivFromLifetime: expected 1 "
+                "(mass, slope) pair at logT = " << logTQuery << ", got "
+                << edges.size() << "\n";
+            result = 1;
+        }
+        else if (!testutil::fieldsMatch(edges.at(0).first, expectedMass) ||
+            !testutil::fieldsMatch(edges.at(0).second, expectedSlope))
+        {
+            std::cerr << "testTracks3DMassAndDerivFromLifetime: expected (mass, "
+                "dm/dlogT) = (" << expectedMass << ", " << expectedSlope <<
+                "), got (" << edges.at(0).first << ", " << edges.at(0).second << ")\n";
+            result = 1;
+        }
+
+        constexpr double logTShort = 5.0; // shorter than every tabulated lifetime
+        const auto noEdges = tracks3d.massAndDerivFromLifetime(logTShort, feh);
+        if (!noEdges.empty())
+        {
+            std::cerr << "testTracks3DMassAndDerivFromLifetime: expected no "
+                "(mass, slope) pairs at logT = " << logTShort << ", got "
+                << noEdges.size() << "\n";
+            result = 1;
+        }
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "testTracks3DMassAndDerivFromLifetime: unexpected exception: "
+            << e.what() << "\n";
+        result = 1;
+    }
+
     return result;
 }
 
