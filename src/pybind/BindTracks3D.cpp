@@ -129,6 +129,24 @@ ranges : list of tuple of float
     t. Usually contains a single pair, but may contain more than one
     for non-monotonic tracks.)doc";
 
+static constexpr std::string_view massAndDerivFromLifetimeDocstring = R"doc(Return the mass(es) and dm/d(logT) of the star(s) whose lifetime is a given value, at a given [Fe/H].
+
+Parameters
+----------
+logT : float
+    log10(lifetime / yr).
+feh : float
+    [Fe/H] value of the tracks to use.
+
+Returns
+-------
+pairs : list of tuple of float
+    A list of (mass, dm/d(logT)) pairs, one per star whose own
+    lifetime (see starLifetime()) equals 10**logT yr. Usually a single
+    pair, but may contain more than one for a non-monotonic
+    mass-lifetime relation. The derivative is with respect to logT
+    itself (not the un-logged lifetime).)doc";
+
 static constexpr std::string_view getTrackDocstring = R"doc(Return the track for a star of a given mass and [Fe/H].
 
 Parameters
@@ -213,6 +231,9 @@ void bindTracks3D(py::module_& m)
         .def("liveMassRange", &tracks::Tracks3D::liveMassRange,
                 liveMassRangeDocstring.data(),
                 py::arg("t"), py::arg("feh"))
+        .def("massAndDerivFromLifetime", &tracks::Tracks3D::massAndDerivFromLifetime,
+                massAndDerivFromLifetimeDocstring.data(),
+                py::arg("logT"), py::arg("feh"))
         .def("getTrack",
                 [](const tracks::Tracks3D& self, const double m, const double feh)
                     -> std::unique_ptr<Interp1D>
