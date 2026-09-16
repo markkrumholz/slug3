@@ -409,7 +409,7 @@ namespace core
          * all-zero vector it was sized to at construction (see its own
          * comment) until advance() has run at least once.
          */
-        [[nodiscard]] auto yields() -> const auto&
+        [[nodiscard]] auto yields() const -> const auto&
         {
             return yields_;
         }

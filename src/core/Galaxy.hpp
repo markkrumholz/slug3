@@ -405,7 +405,7 @@ namespace core
          * at construction (see its own comment) until advance() has
          * run at least once.
          */
-        [[nodiscard]] auto yields() -> const auto&
+        [[nodiscard]] auto yields() const -> const auto&
         {
             return yields_;
         }
@@ -644,7 +644,7 @@ namespace core
         bool lbolCtsCurrent_ = false;
 
         std::vector<double> yields_; /**< Total nucleosynthetic yield of each isotope, in Msun, accumulated over every star that has died so far across the whole galaxy (clusters, field stars, and the purely continuous population together), laid out per Cluster::yields()'s own comment -- sized to all zeros at construction if controls().yields() is non-null, empty otherwise; see Cluster::yields_'s own comment for how it accumulates */
-        std::vector<double> fieldYields_; /**< Like yields_, but restricted to the individually-tracked field star population (fieldStars_/deadFieldStars_) alone -- excludes both clusters_/disruptedClusters_ and the purely continuous (non-clustered, below minStochMass()) population; initialized the same way as yields_. Tracked separately so computeYields() can combine per-population contributions without double-counting */
+        std::vector<double> fieldYields_; /**< Like yields_, but restricted to the non-clustered population -- both the individually-tracked field stars (fieldStars_/deadFieldStars_) and the purely continuous (below minStochMass()) population together, see computeYields()'s own comment for how each is added in -- excluding only clusters_/disruptedClusters_; initialized the same way as yields_. Tracked separately so computeYields() can combine per-population contributions without double-counting */
 
         /**
          * @brief Simulation time through which yields_/fieldYields_ have been updated

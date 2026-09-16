@@ -287,6 +287,16 @@ namespace utils
         template <class... Args>
         [[nodiscard]] auto integrate(const double a, const double b, Args&&... args) const -> std::vector<double>
         {
+            // A zero-width interval's own quad_/err_ both come out
+            // exactly 0.0 regardless of f_ (every Gauss-Kronrod
+            // abscissa collapses to the same point a == b, and quad_/
+            // err_ are both scaled by the interval's own zero half-
+            // width) -- but that makes the relative-error check below
+            // divide 0.0 by 0.0 (a NaN that adaptive bisection would
+            // otherwise need to somehow terminate on), so short-circuit
+            // here instead of relying on that division's own behavior.
+            if (a == b) { return std::vector<double>(nInt_, 0.0); }
+
             // args is forwarded exactly once, into this tuple, for the
             // same reason quadSingle() itself does this -- see its own
             // comment (including for why this is not const).
