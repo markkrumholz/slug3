@@ -109,6 +109,9 @@ namespace yields
         std::vector<double> data(nchannels * niso, 0.0);
         for (std::size_t i = 0; i < nchannels; ++i)
         {
+            if (!yieldChannels_[i]->hasYield(mass)) { continue; } // mass outside this channel's own range -- leave its row at 0, see this method's own comment // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i < nchannels == yieldChannels_.size() by construction
+            const auto& channelFeH = yieldChannels_[i]->feH(); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- see above
+            if (feH < channelFeH.front() || feH > channelFeH.back()) { continue; } // feH outside this channel's own range -- leave its row at 0, same as an out-of-range mass above
             const auto row = yieldChannels_[i]->yield(mass, feH); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i < nchannels == yieldChannels_.size() by construction
             assert(row.size() == niso); // guaranteed once rebuildYieldGrid() has synchronized every channel onto isotopes_ -- see this method's own comment
             for (std::size_t j = 0; j < niso; ++j)

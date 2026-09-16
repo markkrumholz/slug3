@@ -392,6 +392,100 @@ namespace core
         }
 
         /**
+         * @brief Return this galaxy's total nucleosynthetic yield of each isotope
+         * @return A const reference to yields_ -- see
+         *   Cluster::yields()'s own comment for the general shape/
+         *   layout this mirrors
+         * @details
+         * Unlike spec()/phot()/lbol(), not computed lazily here --
+         * mirrors Cluster::yields() exactly (see its own comment):
+         * advance() itself calls computeYields() eagerly at the end of
+         * every call, so yields_ is already current by the time this
+         * is called, and stays at the all-zero vector it was sized to
+         * at construction (see its own comment) until advance() has
+         * run at least once.
+         */
+        [[nodiscard]] auto yields() const -> const auto&
+        {
+            return yields_;
+        }
+
+        /**
+         * @brief The instantaneous rate at which the continuous population returns each isotope, at a given time and [Fe/H]
+         * @param t Simulation time, in yr, since this galaxy's own
+         *   formation (time 0) -- not necessarily curTime(); this is a
+         *   standalone calculation, independent of advance()/curTime()
+         * @param feh [Fe/H] to evaluate at
+         * @return A vector laid out exactly as
+         *   Galaxy::yieldsIntegrand()'s own comment describes (one
+         *   channel-major row per isotope if
+         *   controls().yieldsChannelDecomposed(), or just
+         *   isotopes().size() combined entries otherwise): the total
+         *   rate (Msun/yr) at which the continuously-sampled
+         *   population -- integrated over this galaxy's own star
+         *   formation history sfr() from 0 to t -- currently returns
+         *   each isotope (and, if decomposed, channel) to the ISM.
+         *   Does not include the stochastically-sampled (individual
+         *   cluster/field star) population's own contribution. An
+         *   empty vector if controls().yields() is null (no yield
+         *   channels were requested).
+         * @details
+         * A no-op returning {} if controls().yields() is null.
+         * Otherwise, mirrors computeLbolCts()'s own general structure (see its
+         * own comment): builds a pdfs::PDFReflect view of sfr()
+         * pivoted at 0.5 * t, so its own coordinate becomes age
+         * directly, then integrates yieldsIntegrand() (weighted by
+         * that reflected sfr, i.e. by the star formation rate at each
+         * age) over [0, t] via a single utils::PDFIntegrator
+         * (GKOrder::GK15) call. Unlike computeLbolCts(), this takes
+         * feh as an explicit parameter rather than averaging over
+         * SimControls::fehDist()'s own range itself -- see the
+         * feh-less yieldsRate(double) overload for that.
+         *
+         * The integral's own absolute tolerance is
+         * SimControls::intAbsTol() * 1e-6 * sfr().integral(0, t) -- the
+         * same "scale the tolerance by the star formation history's
+         * own integral" idea computeLbolCts() uses for its own absTol,
+         * but three orders of magnitude tighter, since yield
+         * quantities are typically much smaller relative to their own
+         * natural scale than Lbol is to its.
+         */
+        [[nodiscard]] auto yieldsRate(double t, double feh) const -> std::vector<double>;
+
+        /**
+         * @brief The instantaneous rate at which the continuous population returns each isotope, at a given time, averaged over [Fe/H]
+         * @param t Simulation time, in yr, since this galaxy's own
+         *   formation (time 0) -- see the (t, feh) overload's own
+         *   comment
+         * @return See the (t, feh) overload's own comment for the
+         *   returned vector's layout; here, averaged over
+         *   SimControls::fehDist()'s own range rather than evaluated
+         *   at a single [Fe/H]
+         * @details
+         * If SimControls::fehDist() is degenerate (a single value,
+         * SimControls::fehDist().getMin() == getMax()), simply calls
+         * the (t, feh) overload at that value. Otherwise, mirrors
+         * computeLbolCts()'s own multi-feh handling (see its own
+         * comment) generalized to a vector-valued result the same way
+         * Specsyn::specCtsHelper() does for a full spectrum (see its
+         * own comment): evaluates yieldsRate(t, feh) at every [Fe/H]
+         * grid point SimControls::tracks() is actually defined at,
+         * weights each by SimControls::fehDist()'s own density there,
+         * then -- since Interpolator1D's own template parameter fixes
+         * how many quantities it interpolates at compile time, but the
+         * number of components here (isotopes, times channels if
+         * decomposed) is only known at runtime -- builds one
+         * Interpolator1D<1> per output component (plus one more for
+         * the weights themselves) to integrate each of those discrete,
+         * [Fe/H]-grid-sampled curves over SimControls::fehDist()'s own
+         * [min, max] range, dividing each component's own weighted
+         * integral by the weights' own integral (the same normalized
+         * weighted-average construction computeLbolCts()/
+         * specCtsHelper() both use).
+         */
+        [[nodiscard]] auto yieldsRate(double t) const -> std::vector<double>;
+
+        /**
          * @brief Return the total target stellar mass formed so far
          * @return The sum, over every advance() call so far, of the
          *   total stellar mass (sfr().integral() over that call's own
@@ -548,6 +642,30 @@ namespace core
          * computeLbolCts() path.
          */
         bool lbolCtsCurrent_ = false;
+
+        std::vector<double> yields_; /**< Total nucleosynthetic yield of each isotope, in Msun, accumulated over every star that has died so far across the whole galaxy (clusters, field stars, and the purely continuous population together), laid out per Cluster::yields()'s own comment -- sized to all zeros at construction if controls().yields() is non-null, empty otherwise; see Cluster::yields_'s own comment for how it accumulates */
+        std::vector<double> fieldYields_; /**< Like yields_, but restricted to the non-clustered population -- both the individually-tracked field stars (fieldStars_/deadFieldStars_) and the purely continuous (below minStochMass()) population together, see computeYields()'s own comment for how each is added in -- excluding only clusters_/disruptedClusters_; initialized the same way as yields_. Tracked separately so computeYields() can combine per-population contributions without double-counting */
+
+        /**
+         * @brief Simulation time through which yields_/fieldYields_ have been updated
+         * @details
+         * Mirrors Cluster::lastYieldTime_'s own comment exactly: starts
+         * at 0 (rather than curTime_'s own initial value, though here
+         * the two happen to coincide already), documenting that
+         * nothing has died yet. advance() itself sets this to curTime_
+         * right after every call to computeYields() -- see both of
+         * their own comments for why this can't be left to a lazy
+         * yields() call the way spec_/phot_/lbol_'s own analogous
+         * staleness flags are: computeYields() only adds the
+         * contribution of whatever died between lastYieldTime_ and
+         * curTime_, and for the field-star share of that relies on
+         * deadFieldStars_, which only ever holds the deaths from the
+         * single most recently advance() call (see its own comment),
+         * so computeYields() must run before deadFieldStars_'s own
+         * contents are overwritten by the next advance() call, not
+         * merely before yields_/fieldYields_ are next read.
+         */
+        double lastYieldTime_ = 0.0;
 
         /**
          * @brief Simulation controls (physics and control-flow settings) this galaxy was built from
@@ -857,6 +975,84 @@ namespace core
          * very advance() call that produced this evaluation).
          */
         [[nodiscard]] auto getFieldStarProps() const -> std::vector<specsyn::Specsyn::StarData>;
+
+        /**
+         * @brief The instantaneous per-isotope yield rate of the purely continuous population, per unit stellar mass, at a given age and [Fe/H]
+         * @param t Age of the stellar population, in yr (a lifetime,
+         *   in the same sense as Tracks3D::massAndDerivFromLifetime()'s
+         *   own logT)
+         * @param feh [Fe/H] of the population
+         * @return A vector laid out exactly as Cluster::yields()'s own
+         *   comment describes: one channel-major row of
+         *   controls().yields()->isotopes().size() entries per entry
+         *   in controls().yields()->yieldChannels() if
+         *   controls().yieldsChannelDecomposed() is true, or just
+         *   isotopes().size() combined entries otherwise -- each the
+         *   instantaneous rate, per unit stellar mass, at which a star
+         *   dying at age t returns that isotope (and, if decomposed,
+         *   channel) -- 0 for every entry if no star with lifetime t
+         *   is currently in the continuously-sampled (non-stochastic,
+         *   below controls().minStochMass()) share of the population.
+         *   Caller must ensure controls().yields() is non-null.
+         * @details
+         * Evaluates y(m(t), feh) * |dm/dt| * (dn/dm)(m(t)) /
+         * controls().imf().expectationValue() -- y() from
+         * controls().yields()'s own yield() (if
+         * controls().yieldsChannelDecomposed()) or yieldSum()
+         * (otherwise), dn/dm from controls().imf()'s own operator(),
+         * and m(t)/dm/dt from
+         * controls().tracks()'s own massAndDerivFromLifetime(log10(t),
+         * feh), which converts the dm/d(log10 t) it returns to dm/dt
+         * via the chain rule (dm/dt = dm/d(log10 t) / (t ln 10)) --
+         * summed over every mass massAndDerivFromLifetime() returns
+         * (there can be more than one star with the same lifetime),
+         * skipping any mass at or above controls().minStochMass() (the
+         * stochastically-sampled share, handled separately, per-star,
+         * rather than through this per-unit-mass rate).
+         */
+        [[nodiscard]] auto yieldsIntegrand(double t, double feh) const -> std::vector<double>;
+
+        /**
+         * @brief Update yields_/fieldYields_ from the stars that died since lastYieldTime_
+         * @details
+         * Called eagerly from advance() itself, at the end of every
+         * call -- not lazily from yields() the way spec_/phot_/lbol_
+         * are computed -- see lastYieldTime_'s own comment for why.
+         * A no-op if controls().yields() is null. Otherwise, mirrors
+         * Cluster::computeYields()'s own null-guard pattern one level
+         * up, summing/integrating over three populations in turn:
+         *
+         * - Clustered stars: yields_ is rebuilt from scratch (like
+         *   lbol_, unlike fieldYields_ below) by summing
+         *   Cluster::yields()'s own cumulative total over every
+         *   cluster in clusters_ and disruptedClusters_, since each
+         *   cluster keeps growing that total on its own rather than
+         *   reporting only what died this step.
+         * - Individually-tracked field stars: every star in
+         *   deadFieldStars_ (which, like Cluster::mDead_, only ever
+         *   holds the stars that died during the most recent
+         *   advance() call) has controls().yields()'s own yield() (if
+         *   controls().yieldsChannelDecomposed()) or yieldSum()
+         *   (otherwise) evaluated at its own mass_/feh_, added onto
+         *   fieldYields_.
+         * - The purely continuous (non-clustered, below
+         *   minStochMass()) population: skipped entirely if
+         *   minStochMass() == 0 (no such population exists at all) or
+         *   fCluster() == 1 (no non-clustered population at all).
+         *   Otherwise, yieldsRate(double)'s own instantaneous rate is
+         *   integrated directly over real time from lastYieldTime_ to
+         *   curTime_ via a utils::GKIntegrator (unweighted -- unlike
+         *   yieldsRate()'s own internal use of utils::PDFIntegrator to
+         *   weight by the SF history, this integral is already over a
+         *   rate, not a rate density), multiplied by (1 - fCluster())
+         *   (the non-clustered share), and added onto fieldYields_.
+         *
+         * fieldYields_ accumulates across calls (never zeroed) since,
+         * unlike the clustered total, earlier steps' own dead field
+         * stars are not available to re-sum from scratch; yields_'s
+         * own final value is the clustered total plus fieldYields_.
+         */
+        void computeYields();
 
     };
 

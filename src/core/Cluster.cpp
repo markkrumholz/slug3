@@ -16,6 +16,7 @@
 #include "../utils/GKIntegratorData.hpp"
 #include "../utils/PDFIntegrator.hpp"
 #include "../utils/RngThread.hpp"
+#include "../yields/Yields.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -27,6 +28,47 @@
 #include <stdexcept>
 #include <utility>
 #include <variant>
+#include <vector>
+
+namespace
+{
+    /**
+     * @brief Subtract one set of mass ranges from another
+     * @param minuend Mass ranges to subtract from, e.g. as returned by
+     *   Tracks2D::liveMassRange() -- sorted ascending by lower bound,
+     *   and internally non-overlapping
+     * @param subtrahend Mass ranges to subtract, in the same format
+     * @return The pieces of minuend left over once every overlap with
+     *   subtrahend is removed -- still sorted ascending and
+     *   non-overlapping, though possibly with more entries than
+     *   minuend itself (a single minuend range can be split into
+     *   several pieces by one or more subtrahend ranges falling
+     *   inside it)
+     * @details
+     * Used by Cluster::computeYields() to find which masses were alive
+     * at one time but are dead at another -- see its own comment.
+     */
+    auto subtractMassRanges(
+        const std::vector<std::pair<double, double>>& minuend,
+        const std::vector<std::pair<double, double>>& subtrahend)
+        -> std::vector<std::pair<double, double>>
+    {
+        std::vector<std::pair<double, double>> result;
+        for (const auto& [aLo, aHi] : minuend)
+        {
+            double lo = aLo;
+            for (const auto& [bLo, bHi] : subtrahend)
+            {
+                if (lo >= aHi) { break; } // nothing left of this range to subtract from
+                if (bHi <= lo || bLo >= aHi) { continue; } // no overlap with what's left
+                if (bLo > lo) { result.emplace_back(lo, bLo); }
+                lo = std::max(lo, bHi);
+            }
+            if (lo < aHi) { result.emplace_back(lo, aHi); }
+        }
+        return result;
+    }
+} // namespace
 
 // Constructor
 core::Cluster::Cluster(const unsigned long uid,
@@ -71,6 +113,19 @@ core::Cluster::Cluster(const unsigned long uid,
     else
     {
         tracks_ = sc.tracks().sliceConstFeH(feH_);
+    }
+
+    // If yield channels were requested, size yields_ to hold one
+    // (currently zero) entry per isotope, times one row per channel
+    // if SimControls::yieldsChannelDecomposed() is true (matching
+    // Yields::yield()'s own (nchannels, nisotopes) layout), or just
+    // one combined total per isotope otherwise (matching
+    // Yields::yieldSum()) -- see yields_'s own comment
+    if (const auto* yields = sc.yields())
+    {
+        const std::size_t n = yields->isotopes().size() *
+            (sc.yieldsChannelDecomposed() ? yields->yieldChannels().size() : 1);
+        yields_.assign(n, 0.0);
     }
 }
 
@@ -145,6 +200,19 @@ core::Cluster::Cluster(const unsigned long uid,
     {
         tracks_ = sc.tracks().sliceConstFeH(feH_);
     }
+
+    // If yield channels were requested, size yields_ to hold one
+    // (currently zero) entry per isotope, times one row per channel
+    // if SimControls::yieldsChannelDecomposed() is true (matching
+    // Yields::yield()'s own (nchannels, nisotopes) layout), or just
+    // one combined total per isotope otherwise (matching
+    // Yields::yieldSum()) -- see yields_'s own comment
+    if (const auto* yields = sc.yields())
+    {
+        const std::size_t n = yields->isotopes().size() *
+            (sc.yieldsChannelDecomposed() ? yields->yieldChannels().size() : 1);
+        yields_.assign(n, 0.0);
+    }
 }
 
 // Get the tracks at this cluster's [Fe/H]
@@ -191,10 +259,26 @@ void core::Cluster::advance(const double t)
     // Get isochrone for new time
     isochrone_ = tracks().getIsochrone(logAge);
 
+    // Update yields_ now, eagerly -- unlike spec_/phot_/lbol_ (which
+    // are recomputed lazily, from scratch, on demand -- see
+    // specCurrent_/photCurrent_/lbolCurrent_'s own comments),
+    // yields_ only ever accumulates the contribution of stars that
+    // died since lastYieldTime_, and the stochastic half of that
+    // relies on mDead_, which only ever holds the deaths from this one
+    // advance() call (see updateLivingStars()'s own comment): the very
+    // next advance() call's own updateLivingStars() clears it, so
+    // computeYields() must consume it here, before that happens,
+    // rather than waiting for some later, lazy call to yields() that
+    // might never come before the next advance() -- see
+    // lastYieldTime_'s own comment for the data loss that used to
+    // result otherwise.
+    computeYields();
+    lastYieldTime_ = curTime_;
+
     // Mark spec_/specExtinct_/phot_/photExtinct_/lbol_ as stale; they
     // are recomputed lazily, on demand, the next time spec()/
     // specExtinct()/phot()/photExtinct()/lbol() is actually called
-    // (see specCurrent_/photCurrent_/lbolCurrent_'s own comments)
+    // (see specCurrent_/photCurrent_/lbolCurrent_'s own comments).
     specCurrent_ = false;
     photCurrent_ = false;
     lbolCurrent_ = false;
@@ -410,6 +494,86 @@ void core::Cluster::computeLbol()
     }
 }
 
+// Update yields_ from the stars that died since lastYieldTime_ -- see
+// this method's own header comment for both halves (stochastic and
+// non-stochastic) and for why this accumulates onto yields_ rather
+// than recomputing it from scratch.
+void core::Cluster::computeYields()
+{
+    const auto& sc = controls_.get();
+    const auto* yields = sc.yields();
+    if (yields == nullptr) { return; }
+
+    const bool decomposed = sc.yieldsChannelDecomposed();
+
+    // Stochastic (individually-sampled) stars that died during the
+    // most recent advance() call
+    for (const double mass : mDead_)
+    {
+        if (decomposed)
+        {
+            const auto& data = yields->yield(mass, feH_).second;
+            for (std::size_t k = 0; k < data.size(); ++k)
+            {
+                yields_[k] += data[k]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- yields_ and data are both sized nchannels * isotopes().size() by construction, see yields_'s own comment
+            }
+        }
+        else
+        {
+            const auto sum = yields->yieldSum(mass, feH_);
+            for (std::size_t j = 0; j < sum.size(); ++j)
+            {
+                yields_[j] += sum[j]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- yields_ and sum are both sized isotopes().size() by construction, see yields_'s own comment
+            }
+        }
+    }
+
+    // Continuously-sampled (non-stochastic) stars that died between
+    // lastYieldTime_ and curTime_ -- mirrors computeLbol()'s own
+    // identical guard: nothing to do if there is no such population
+    if (birthNonStochMass_ <= 0.0) { return; }
+
+    // Live mass range at lastYieldTime_, clamped up to formTime_ so
+    // the very first call (lastYieldTime_ still at its initial 0)
+    // reads the live range at this cluster's own birth rather than
+    // simulation time 0 -- see lastYieldTime_'s own comment
+    const double lastTime = std::max(lastYieldTime_, formTime_);
+    const auto logAgeLast = std::max(std::log10(lastTime - formTime_), tracks().logTMin());
+    const auto liveMassRangeLast = tracks().liveMassRange(logAgeLast);
+
+    // Live mass range now, read directly off isochrone_'s own segments
+    // (already current as of curTime_, from advance()) rather than
+    // calling tracks().liveMassRange() a second time
+    std::vector<std::pair<double, double>> liveMassRangeNow;
+    liveMassRangeNow.reserve(isochrone_.size());
+    for (const auto& seg : isochrone_)
+    {
+        liveMassRangeNow.emplace_back(seg->xMin(), seg->xMax());
+    }
+
+    // Masses alive at lastYieldTime_ but dead now, clipped to lie
+    // below minStochMass() (the non-stochastic population's own upper
+    // mass limit -- any part at or above it belongs to the stochastic
+    // stars already handled above, via mDead_)
+    using YieldSegFn = std::vector<double> (*)(double, double, const yields::Yields&, bool);
+    const utils::PDFIntegrator<YieldSegFn> integrator(
+        sc.imf(), static_cast<YieldSegFn>(&Cluster::yieldStar), yields_.size(),
+        false, sc.intMaxIter(), sc.intAbsTol(), sc.intRelTol());
+
+    for (const auto& [lo, hi] : subtractMassRanges(liveMassRangeLast, liveMassRangeNow))
+    {
+        const double m0 = lo;
+        const double m1 = std::min(hi, sc.minStochMass());
+        if (m0 >= m1) { continue; } // empty once clipped below minStochMass()
+
+        const auto segResult = integrator.integrate(m0, m1, feH_, *yields, decomposed);
+        for (std::size_t k = 0; k < segResult.size(); ++k)
+        {
+            yields_[k] += segResult[k] * birthNonStochMass_; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- yields_ and segResult are both sized yields_.size() by construction (segResult via nInt_ above)
+        }
+    }
+}
+
 // Per-star bolometric luminosity, given a mass and isochrone segment
 // -- see this method's own header comment for why it returns a
 // single-element array rather than a bare double
@@ -417,4 +581,15 @@ auto core::Cluster::lbolStar(const double m, const Segment& segment) -> std::arr
 {
     const auto logL = segment(m, static_cast<size_t>(tracks::FieldIdx::logL));
     return { std::pow(10.0, logL) };
+}
+
+// Per-star nucleosynthetic yield, given a mass and [Fe/H] -- see this
+// method's own header comment for why m/feH/yields/decomposed are all
+// taken as explicit arguments rather than captured state
+auto core::Cluster::yieldStar(
+    const double m, const double feH, const yields::Yields& yields, const bool decomposed)
+    -> std::vector<double>
+{
+    if (decomposed) { return yields.yield(m, feH).second; }
+    return yields.yieldSum(m, feH);
 }

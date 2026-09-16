@@ -12,13 +12,16 @@
 #include "../src/phot/FilterCollection.hpp"
 #include "../src/utils/HDF5Utils.hpp"
 #include "../src/utils/MiscUtils.hpp"
+#include "../src/utils/PDFIntegrator.hpp"
 #include "../src/utils/RngThread.hpp"
+#include "../src/yields/Yields.hpp"
 #include "hdf5.h" // NOLINT(misc-include-cleaner) -- see HDF5Utils.hpp's own comment on including hdf5.h wholesale
 #include "testCluster.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <exception>
+#include <functional>
 #include <iostream>
 #include <iterator>
 #include <numeric>
@@ -33,6 +36,7 @@ static constexpr std::string_view inputFileMinStochMass =
 static constexpr std::string_view inputFilePhot = "tests/core/assets/testClusterPhot.in";
 static constexpr std::string_view inputFileLbol = "tests/core/assets/testClusterLbol.in";
 static constexpr std::string_view inputFileExtinct = "tests/core/assets/testClusterExtinct.in";
+static constexpr std::string_view yieldsRegistry = "tests/yields/assets/yields.toml";
 static constexpr unsigned int rngSeed = 42;
 
 // Verify that Cluster::starMasses() sums to within 5% of the target mass.
@@ -817,6 +821,304 @@ static auto testClusterExtinctLines() -> int
     return 0;
 }
 
+// Verify Cluster::yields()'s stochastic (individually-sampled)
+// contribution by comparing against an independent recomputation from
+// deadStarMasses() and SimControls::yields()'s own yieldSum() --
+// mirrors testClusterExtinctLines()'s own "bit-for-bit independent
+// recomputation" style. Uses testCluster.in unmodified -- its own
+// min_stoch_mass defaults to 0, so the whole population is stochastic,
+// same as testClusterSpecFullyStochastic()'s own setup -- with a
+// single ccsn/sukhbold_test yield channel added; at ageYr = 5e6,
+// testClusterAdvance() (same base deck/mass/age) already confirms
+// some stars have died, and the turnoff mass at that age (~70 Msun)
+// lies within sukhbold_test's own native range ([18.2, 100]).
+static auto testClusterYieldsStochastic() -> int
+{
+    constexpr double ageYr = 5e6;
+    constexpr double clusterMass = 1e4;
+    constexpr double tol = 1e-9;
+
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFile);
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{ { "channel", "ccsn" }, { "model", "sukhbold_test" } } },
+            { "registry", std::string(yieldsRegistry) },
+        });
+        const io::SimControls controls(inputDeck);
+
+        if (controls.yields() == nullptr)
+        {
+            std::cerr << "testCluster: yieldsStochastic: expected yields() non-null\n";
+            return 1;
+        }
+
+        utils::rng().seed(rngSeed);
+        core::Cluster cluster(0, clusterMass, 0.0, controls);
+
+        if (std::reduce(cluster.yields().begin(), cluster.yields().end(), 0.0) != 0.0)
+        {
+            std::cerr << "testCluster: yieldsStochastic: expected yields() all zero "
+                "before advance() has ever run\n";
+            return 1;
+        }
+
+        cluster.advance(ageYr);
+
+        const auto& dead = cluster.deadStarMasses();
+        if (dead.empty())
+        {
+            std::cerr << "testCluster: yieldsStochastic: expected some dead stars at "
+                << ageYr << " yr\n";
+            return 1;
+        }
+
+        // Independently recompute the expected total by summing
+        // controls.yields()->yieldSum() over every dead star
+        const std::size_t niso = controls.yields()->isotopes().size();
+        std::vector<double> expected(niso, 0.0);
+        for (const double m : dead)
+        {
+            const auto sum = controls.yields()->yieldSum(m, cluster.feH());
+            for (std::size_t j = 0; j < niso; ++j) { expected[j] += sum[j]; }
+        }
+
+        const auto& actual = cluster.yields();
+        if (actual.size() != expected.size())
+        {
+            std::cerr << "testCluster: yieldsStochastic: yields() has size " <<
+                actual.size() << ", expected " << expected.size() << "\n";
+            return 1;
+        }
+        for (std::size_t j = 0; j < niso; ++j)
+        {
+            if (std::abs(actual[j] - expected[j]) > tol * std::max(1.0, std::abs(expected[j])))
+            {
+                std::cerr << "testCluster: yieldsStochastic: yields()[" << j << "] = " <<
+                    actual[j] << ", expected " << expected[j] << "\n";
+                return 1;
+            }
+        }
+        if (std::reduce(expected.begin(), expected.end(), 0.0) <= 0.0)
+        {
+            std::cerr << "testCluster: yieldsStochastic: expected a positive total yield\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testCluster: yieldsStochastic test failed: " << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Verify Cluster::yields()'s continuously-sampled (non-stochastic)
+// contribution by comparing against an independent recomputation using
+// the same live-mass-range-difference and utils::PDFIntegrator
+// machinery Cluster::computeYields() itself uses internally. Sets
+// min_stoch_mass to chabrier.toml's own maximum mass (120), exactly as
+// tests/core/assets/testClusterSpecsynFullNonStoch.in's own comment
+// describes, to force fracStochMass_ to exactly 0 -- the whole
+// population ends up continuously-sampled, starMasses()/
+// deadStarMasses() both staying empty throughout, isolating this path
+// from testClusterYieldsStochastic()'s own.
+static auto testClusterYieldsNonStochastic() -> int
+{
+    constexpr double ageYr = 5e6;
+    constexpr double clusterMass = 1e4;
+    constexpr double tol = 1e-9;
+
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFile);
+        inputDeck.at_path("stars").as_table()->insert_or_assign("min_stoch_mass", 120.0);
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{ { "channel", "ccsn" }, { "model", "sukhbold_test" } } },
+            { "registry", std::string(yieldsRegistry) },
+        });
+        const io::SimControls controls(inputDeck);
+
+        utils::rng().seed(rngSeed);
+        core::Cluster cluster(0, clusterMass, 0.0, controls);
+
+        if (!cluster.starMasses().empty())
+        {
+            std::cerr << "testCluster: yieldsNonStochastic: expected an empty "
+                "starMasses() with min_stoch_mass at the IMF's own maximum\n";
+            return 1;
+        }
+
+        cluster.advance(ageYr);
+
+        if (!cluster.deadStarMasses().empty())
+        {
+            std::cerr << "testCluster: yieldsNonStochastic: expected an empty "
+                "deadStarMasses(): no star should ever be individually sampled\n";
+            return 1;
+        }
+
+        // Live mass range at birth and at ageYr, read from this
+        // cluster's own tracks() -- exactly what computeYields()
+        // itself queries (see its own comment). Both are single
+        // intervals sharing the same lower bound for this track
+        // fixture at these ages (only the upper "turnoff" bound
+        // shrinks with age); verified below, rather than assumed,
+        // since that is what lets a plain (turnoffNow, turnoffBirth]
+        // stand in for the general (possibly multi-segment) set
+        // difference computeYields() itself computes.
+        const auto& tr = cluster.tracks();
+        const auto birthRange = tr.liveMassRange(tr.logTMin());
+        const auto nowRange = tr.liveMassRange(
+            std::max(std::log10(ageYr), tr.logTMin()));
+        if (birthRange.size() != 1 || nowRange.size() != 1 ||
+            birthRange.front().first != nowRange.front().first)
+        {
+            std::cerr << "testCluster: yieldsNonStochastic: live mass range shape "
+                "assumption violated -- test needs updating\n";
+            return 1;
+        }
+        const double m0 = nowRange.front().second;
+        const double m1 = std::min(birthRange.front().second, controls.minStochMass());
+        if (m0 >= m1)
+        {
+            std::cerr << "testCluster: yieldsNonStochastic: expected a non-empty "
+                "died-since-birth mass range at " << ageYr << " yr\n";
+            return 1;
+        }
+
+        const std::size_t niso = controls.yields()->isotopes().size();
+        const std::function<std::vector<double>(double)> integrand =
+            [&controls, &cluster](const double m) -> std::vector<double>
+            { return controls.yields()->yieldSum(m, cluster.feH()); };
+        const utils::PDFIntegrator<std::function<std::vector<double>(double)>> integrator(
+            controls.imf(), integrand, niso,
+            false, controls.intMaxIter(), controls.intAbsTol(), controls.intRelTol());
+        const auto integral = integrator.integrate(m0, m1);
+
+        const auto& actual = cluster.yields();
+        if (actual.size() != niso)
+        {
+            std::cerr << "testCluster: yieldsNonStochastic: yields() has size " <<
+                actual.size() << ", expected " << niso << "\n";
+            return 1;
+        }
+        for (std::size_t j = 0; j < niso; ++j)
+        {
+            const double expected = integral[j] * clusterMass;
+            if (std::abs(actual[j] - expected) > tol * std::max(1.0, std::abs(expected)))
+            {
+                std::cerr << "testCluster: yieldsNonStochastic: yields()[" << j << "] = " <<
+                    actual[j] << ", expected " << expected << "\n";
+                return 1;
+            }
+        }
+        if (std::reduce(actual.begin(), actual.end(), 0.0) <= 0.0)
+        {
+            std::cerr << "testCluster: yieldsNonStochastic: expected a positive total yield\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testCluster: yieldsNonStochastic test failed: " << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Regression test: verify that stochastic deaths from an earlier
+// advance() call are not silently lost when yields() is never called
+// in between two advance() calls. Before computeYields() was moved to
+// run eagerly at the end of advance() itself (see lastYieldTime_'s own
+// comment), mDead_ -- which only ever holds the deaths from the single
+// most recently advance() call, see updateLivingStars()'s own comment
+// -- would be overwritten by the second advance() call's own
+// updateLivingStars() before ever being consumed into yields_, since
+// nothing but a lazy yields() call used to trigger that consumption.
+// Same base setup as testClusterYieldsStochastic(), but splits its own
+// single advance(ageYr) into several steps (rather than guessing a
+// single split point likely to straddle a death, which proved fragile
+// against this rngSeed's own draw), deliberately never calling
+// yields() until after all of them.
+static auto testClusterYieldsMultipleAdvanceCalls() -> int
+{
+    constexpr double ageYr = 5e6;
+    constexpr std::size_t nSteps = 5;
+    // 10x testClusterYieldsStochastic()'s own clusterMass: at this
+    // rngSeed, that smaller cluster's own most massive stars turn out
+    // to all die within the last of these steps (empirically, none
+    // before it) -- a bigger cluster samples further into the IMF's
+    // own tail, giving some stars massive (and so short-lived) enough
+    // to have already died in an earlier step too.
+    constexpr double clusterMass = 1e5;
+    constexpr double tol = 1e-9;
+
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFile);
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{ { "channel", "ccsn" }, { "model", "sukhbold_test" } } },
+            { "registry", std::string(yieldsRegistry) },
+        });
+        const io::SimControls controls(inputDeck);
+
+        utils::rng().seed(rngSeed);
+        core::Cluster cluster(0, clusterMass, 0.0, controls);
+
+        const std::size_t niso = controls.yields()->isotopes().size();
+        std::vector<double> expected(niso, 0.0);
+        bool sawEarlyDeath = false;
+
+        // Advance in nSteps equal steps, deliberately not calling
+        // yields() until after the last one -- every step but the
+        // last, having at least one death, is exactly the scenario
+        // that used to lose that step's own mDead_ once yields() was
+        // only ever computed lazily (see lastYieldTime_'s own comment)
+        for (std::size_t s = 1; s <= nSteps; ++s)
+        {
+            cluster.advance(ageYr * static_cast<double>(s) / static_cast<double>(nSteps));
+            const auto dead = cluster.deadStarMasses();
+            if (!dead.empty() && s < nSteps) { sawEarlyDeath = true; }
+            for (const double m : dead)
+            {
+                const auto sum = controls.yields()->yieldSum(m, cluster.feH());
+                for (std::size_t j = 0; j < niso; ++j) { expected[j] += sum[j]; }
+            }
+        }
+        if (!sawEarlyDeath)
+        {
+            std::cerr << "testCluster: yieldsMultipleAdvanceCalls: test bug: expected "
+                "some dead stars before the last of " << nSteps << " advance() calls\n";
+            return 1;
+        }
+
+        const auto& actual = cluster.yields();
+        if (actual.size() != expected.size())
+        {
+            std::cerr << "testCluster: yieldsMultipleAdvanceCalls: yields() has size " <<
+                actual.size() << ", expected " << expected.size() << "\n";
+            return 1;
+        }
+        for (std::size_t j = 0; j < niso; ++j)
+        {
+            if (std::abs(actual[j] - expected[j]) > tol * std::max(1.0, std::abs(expected[j])))
+            {
+                std::cerr << "testCluster: yieldsMultipleAdvanceCalls: yields()[" << j <<
+                    "] = " << actual[j] << ", expected " << expected[j] <<
+                    " -- deaths from the first advance() call may have been lost\n";
+                return 1;
+            }
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testCluster: yieldsMultipleAdvanceCalls test failed: " << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
 auto testCluster() -> int
 {
     int result = 0;
@@ -831,5 +1133,8 @@ auto testCluster() -> int
     result += testClusterLbol();
     result += testClusterNebular();
     result += testClusterExtinctLines();
+    result += testClusterYieldsStochastic();
+    result += testClusterYieldsNonStochastic();
+    result += testClusterYieldsMultipleAdvanceCalls();
     return result;
 }

@@ -15,9 +15,11 @@
 #include "../pdfs/PDFReflect.hpp"
 #include "../phot/FilterCollection.hpp"
 #include "../tracks/TrackCommons.hpp"
+#include "../utils/GKIntegrator.hpp"
 #include "../utils/GKIntegratorData.hpp"
 #include "../utils/PDFIntegrator.hpp"
 #include "../utils/UniqueIDManager.hpp"
+#include "../yields/Yields.hpp"
 #include "Cluster.hpp"
 #include <algorithm>
 #include <array>
@@ -25,6 +27,7 @@
 #include <cstddef>
 #include <functional>
 #include <iterator>
+#include <numbers>
 #include <numeric>
 #include <sstream>
 #include <stdexcept>
@@ -53,6 +56,19 @@ core::Galaxy::Galaxy(const io::SimControls& controls) :
     else if (controls.sfrDist().valid())
     {
         sfr_ = io::SimControls::buildConstantSFR(controls.sfrDist().draw());
+    }
+
+    // If yield channels were requested, size yields_/fieldYields_ to
+    // hold one (currently zero) entry per isotope, times one row per
+    // channel if SimControls::yieldsChannelDecomposed() is true, or
+    // just one combined total per isotope otherwise -- mirrors
+    // Cluster::Cluster()'s own identical sizing exactly
+    if (const auto* yields = controls.yields())
+    {
+        const std::size_t n = yields->isotopes().size() *
+            (controls.yieldsChannelDecomposed() ? yields->yieldChannels().size() : 1);
+        yields_.assign(n, 0.0);
+        fieldYields_.assign(n, 0.0);
     }
 }
 
@@ -177,6 +193,18 @@ void core::Galaxy::advance(const double t)
 
     // 8) Update current time
     curTime_ = t;
+
+    // 9) Update yields_/fieldYields_ now, eagerly -- unlike
+    // spec_/phot_/lbol_ (recomputed lazily, from scratch, on demand),
+    // yields_/fieldYields_ only ever accumulate, and rely on
+    // deadFieldStars_/each cluster's own mDead_, both of which only
+    // ever hold this one step's own deaths (see step 6's own comment,
+    // and Cluster::updateLivingStars()'s), so computeYields() must run
+    // here, before the next advance() call's own step 6 clears
+    // deadFieldStars_ -- see lastYieldTime_'s own comment for the data
+    // loss that used to result otherwise.
+    computeYields();
+    lastYieldTime_ = curTime_;
 }
 
 // Sum spec_/specExtinct_ (and, if a nebular emission grid was
@@ -537,6 +565,196 @@ void core::Galaxy::computeLbolCts()
 
     lbolCts_ = lbolRaw * (1.0 - fCluster) * (1.0 - sc.fracStochMass());
     lbolCtsCurrent_ = true;
+}
+
+// Per-unit-stellar-mass instantaneous yield rate of the purely
+// continuous population, at a given age and [Fe/H] -- see this
+// method's own header comment
+auto core::Galaxy::yieldsIntegrand(const double t, const double feh) const -> std::vector<double>
+{
+    const auto& sc = controls_.get();
+    const auto* yields = sc.yields();
+    const bool decomposed = sc.yieldsChannelDecomposed();
+
+    const std::size_t n = decomposed
+        ? yields->yieldChannels().size() * yields->isotopes().size()
+        : yields->isotopes().size();
+    std::vector<double> result(n, 0.0);
+
+    const auto massDeriv = sc.tracks().massAndDerivFromLifetime(std::log10(t), feh);
+    for (const auto& [m, dmDlogT] : massDeriv)
+    {
+        if (m > sc.minStochMass()) { continue; } // stochastically-sampled, handled separately
+
+        const double dmDt = dmDlogT / (t * std::numbers::ln10); // chain rule
+        const std::vector<double> y = decomposed
+            ? yields->yield(m, feh).second
+            : yields->yieldSum(m, feh);
+        const double weight = std::abs(dmDt) * sc.imf()(m) / sc.imf().expectationValue();
+        for (std::size_t k = 0; k < result.size(); ++k)
+        {
+            result[k] += y[k] * weight; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- y and result are both sized n by construction, and k is bounded by result.size()
+        }
+    }
+
+    return result;
+}
+
+// The continuous population's own instantaneous per-isotope yield
+// rate, integrated over the star formation history -- see this
+// method's own header comment
+auto core::Galaxy::yieldsRate(const double t, const double feh) const -> std::vector<double>
+{
+    const auto& sc = controls_.get();
+    const auto* yields = sc.yields();
+    if (yields == nullptr) { return {}; }
+
+    const std::size_t n = sc.yieldsChannelDecomposed()
+        ? yields->yieldChannels().size() * yields->isotopes().size()
+        : yields->isotopes().size();
+
+    // See computeLbolCts()'s own comment for why this reflects sfr()
+    // about t / 2, so this dimension's own coordinate becomes age
+    // directly
+    const pdfs::PDFReflect sfrAge(sfr(), 0.5 * t);
+    const double absTol = sc.intAbsTol() * 1e-6 * sfr().integral(0.0, t);
+
+    using IntegrandFn = std::vector<double> (Galaxy::*)(double, double) const;
+    const utils::PDFIntegrator<IntegrandFn, utils::GKOrder::GK15> integrator(
+        sfrAge, static_cast<IntegrandFn>(&Galaxy::yieldsIntegrand),
+        n, false, sc.intMaxIter(), absTol, sc.intRelTol());
+
+    return integrator.integrate(0.0, t, this, feh);
+}
+
+// The continuous population's own instantaneous per-isotope yield
+// rate, averaged over [Fe/H] -- see this method's own header comment
+auto core::Galaxy::yieldsRate(const double t) const -> std::vector<double>
+{
+    const auto& sc = controls_.get();
+    const auto& fehDist = sc.fehDist();
+
+    if (fehDist.getMin() == fehDist.getMax())
+    {
+        return yieldsRate(t, fehDist.getMin());
+    }
+
+    // Multi-feh: evaluate yieldsRate(t, feh) at every [Fe/H] grid
+    // point the tracks are actually defined at, then interpolate and
+    // integrate those discrete results over [Fe/H] -- mirrors
+    // computeLbolCts()'s own identical technique, generalized to a
+    // vector-valued result the same way Specsyn::specCtsHelper() does
+    // for a full spectrum: one Interpolator1D<1> per output component,
+    // since Interpolator1D's own NF is a compile-time template
+    // parameter, but the number of components here is only known at
+    // runtime -- see this method's own header comment.
+    const auto& fehGrid = sc.tracks().feH();
+    const std::size_t nFeh = fehGrid.size();
+
+    std::vector<std::vector<double>> rateAtFeh(nFeh);
+    std::vector<double> fehWeight(nFeh);
+    for (std::size_t f = 0; f < nFeh; ++f)
+    {
+        rateAtFeh[f] = yieldsRate(t, fehGrid[f]); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- f < nFeh == fehGrid.size() by construction
+        fehWeight[f] = fehDist(fehGrid[f]); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- f < nFeh == fehGrid.size() by construction
+    }
+
+    // Normalizing denominator: the integral of fehDist alone over its
+    // own domain (fehDist need not itself integrate to exactly 1)
+    const interp::Interpolator1D<1> weightInterp(fehGrid, fehWeight);
+    const double weightIntegral = weightInterp.integ(fehDist.getMin(), fehDist.getMax());
+
+    const std::size_t n = rateAtFeh.front().size();
+    std::vector<double> result(n, 0.0);
+    std::vector<double> quantityAtFeh(nFeh);
+    for (std::size_t k = 0; k < n; ++k)
+    {
+        for (std::size_t f = 0; f < nFeh; ++f)
+        {
+            quantityAtFeh[f] = rateAtFeh[f][k] * fehWeight[f]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,cppcoreguidelines-pro-bounds-constant-array-index) -- rateAtFeh[f] has size n by construction (every yieldsRate(t, feh) call returns the same-sized vector), and k/f are both bounded by their own loop
+        }
+        const interp::Interpolator1D<1> quantityInterp(fehGrid, quantityAtFeh);
+        result[k] = quantityInterp.integ(fehDist.getMin(), fehDist.getMax()) / weightIntegral; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- result has size n by construction, and k is bounded by n
+    }
+
+    return result;
+}
+
+// Update yields_/fieldYields_ from the stars that died since
+// lastYieldTime_ -- see this method's own header comment for the
+// three populations summed (clustered, individually-tracked field
+// stars, and the purely continuous population), and Cluster::
+// computeYields()'s own comment for the same null-guard/accumulation
+// pattern this mirrors one level up
+void core::Galaxy::computeYields()
+{
+    const auto& sc = controls_.get();
+    const auto* yields = sc.yields();
+    if (yields == nullptr) { return; }
+
+    // yields_ itself is rebuilt from scratch every call (like lbol_,
+    // unlike fieldYields_) because clusters_/disruptedClusters_ each
+    // keep growing their own cumulative yields() total on their own,
+    // so it must be re-summed here rather than accumulated onto
+    yields_.assign(yields_.size(), 0.0);
+    for (auto& cluster : clusters_)
+    {
+        const auto& clusterYields = cluster.yields();
+        for (std::size_t k = 0; k < clusterYields.size(); ++k)
+        {
+            yields_[k] += clusterYields[k]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,cppcoreguidelines-pro-bounds-constant-array-index) -- yields_ and clusterYields are both sized identically (isotopes, times channels if decomposed) by construction
+        }
+    }
+    for (auto& cluster : disruptedClusters_)
+    {
+        const auto& clusterYields = cluster.yields();
+        for (std::size_t k = 0; k < clusterYields.size(); ++k)
+        {
+            yields_[k] += clusterYields[k]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,cppcoreguidelines-pro-bounds-constant-array-index) -- see above
+        }
+    }
+
+    // Individually-tracked field stars that died during this step
+    // alone (deadFieldStars_ only ever holds those, mirroring
+    // Cluster::mDead_'s own per-step convention) -- accumulated onto
+    // fieldYields_ rather than recomputed, since earlier steps' own
+    // dead field stars are no longer available to re-sum
+    const bool decomposed = sc.yieldsChannelDecomposed();
+    for (const auto& fieldStar : deadFieldStars_)
+    {
+        const auto contribution = decomposed
+            ? yields->yield(fieldStar.mass_, fieldStar.feh_).second
+            : yields->yieldSum(fieldStar.mass_, fieldStar.feh_);
+        for (std::size_t k = 0; k < contribution.size(); ++k)
+        {
+            fieldYields_[k] += contribution[k]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,cppcoreguidelines-pro-bounds-constant-array-index) -- fieldYields_ and contribution are both sized identically by construction
+        }
+    }
+
+    // Purely continuous (non-clustered, below minStochMass()) share:
+    // integrate yieldsRate(t)'s own instantaneous rate directly over
+    // real time from lastYieldTime_ to curTime_ -- skipped whenever
+    // there is no such population at all, either because every
+    // non-clustered star is stochastically sampled (minStochMass() ==
+    // 0) or because there is no non-clustered population to begin
+    // with (fCluster() == 1)
+    if (sc.minStochMass() > 0.0 && sc.fCluster() < 1.0)
+    {
+        using YieldsRateFn = std::vector<double> (Galaxy::*)(double) const;
+        const utils::GKIntegrator<YieldsRateFn, utils::GKOrder::GK15> integrator(
+            static_cast<YieldsRateFn>(&Galaxy::yieldsRate), fieldYields_.size(),
+            sc.intMaxIter(), sc.intAbsTol(), sc.intRelTol());
+        const auto result = integrator.integrate(lastYieldTime_, curTime_, this);
+        for (std::size_t k = 0; k < result.size(); ++k)
+        {
+            fieldYields_[k] += result[k] * (1.0 - sc.fCluster()); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,cppcoreguidelines-pro-bounds-constant-array-index) -- fieldYields_ and result are both sized identically by construction
+        }
+    }
+
+    for (std::size_t k = 0; k < yields_.size(); ++k)
+    {
+        yields_[k] += fieldYields_[k]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,cppcoreguidelines-pro-bounds-constant-array-index) -- yields_ and fieldYields_ are both sized identically by construction
+    }
 }
 
 auto core::Galaxy::getFieldStarProps() const -> std::vector<specsyn::Specsyn::StarData>
