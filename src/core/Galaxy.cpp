@@ -26,6 +26,7 @@
 #include <cstddef>
 #include <functional>
 #include <iterator>
+#include <numbers>
 #include <numeric>
 #include <sstream>
 #include <stdexcept>
@@ -551,6 +552,39 @@ void core::Galaxy::computeLbolCts()
 
     lbolCts_ = lbolRaw * (1.0 - fCluster) * (1.0 - sc.fracStochMass());
     lbolCtsCurrent_ = true;
+}
+
+// Per-unit-stellar-mass instantaneous yield rate of the purely
+// continuous population, at a given age and [Fe/H] -- see this
+// method's own header comment
+auto core::Galaxy::yieldsIntegrand(const double t, const double feh) const -> std::vector<double>
+{
+    const auto& sc = controls_.get();
+    const auto* yields = sc.yields();
+    const bool decomposed = sc.yieldsChannelDecomposed();
+
+    const std::size_t n = decomposed
+        ? yields->yieldChannels().size() * yields->isotopes().size()
+        : yields->isotopes().size();
+    std::vector<double> result(n, 0.0);
+
+    const auto massDeriv = sc.tracks().massAndDerivFromLifetime(std::log10(t), feh);
+    for (const auto& [m, dmDlogT] : massDeriv)
+    {
+        if (m > sc.minStochMass()) { continue; } // stochastically-sampled, handled separately
+
+        const double dmDt = dmDlogT / (t * std::numbers::ln10); // chain rule
+        const std::vector<double> y = decomposed
+            ? yields->yield(m, feh).second
+            : yields->yieldSum(m, feh);
+        const double weight = std::abs(dmDt) * sc.imf()(m) / sc.imf().expectationValue();
+        for (std::size_t k = 0; k < result.size(); ++k)
+        {
+            result[k] += y[k] * weight; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- y and result are both sized n by construction, and k is bounded by result.size()
+        }
+    }
+
+    return result;
 }
 
 // Update yields_/fieldYields_ -- currently a no-op stub, see this

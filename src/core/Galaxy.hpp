@@ -895,6 +895,42 @@ namespace core
         [[nodiscard]] auto getFieldStarProps() const -> std::vector<specsyn::Specsyn::StarData>;
 
         /**
+         * @brief The instantaneous per-isotope yield rate of the purely continuous population, per unit stellar mass, at a given age and [Fe/H]
+         * @param t Age of the stellar population, in yr (a lifetime,
+         *   in the same sense as Tracks3D::massAndDerivFromLifetime()'s
+         *   own logT)
+         * @param feh [Fe/H] of the population
+         * @return A vector laid out exactly as Cluster::yields()'s own
+         *   comment describes: one channel-major row of
+         *   controls().yields()->isotopes().size() entries per entry
+         *   in controls().yields()->yieldChannels() if
+         *   controls().yieldsChannelDecomposed() is true, or just
+         *   isotopes().size() combined entries otherwise -- each the
+         *   instantaneous rate, per unit stellar mass, at which a star
+         *   dying at age t returns that isotope (and, if decomposed,
+         *   channel) -- 0 for every entry if no star with lifetime t
+         *   is currently in the continuously-sampled (non-stochastic,
+         *   below controls().minStochMass()) share of the population.
+         *   Caller must ensure controls().yields() is non-null.
+         * @details
+         * Evaluates y(m(t), feh) * |dm/dt| * (dn/dm)(m(t)) /
+         * controls().imf().expectationValue() -- y() from
+         * controls().yields()'s own yield() (if
+         * controls().yieldsChannelDecomposed()) or yieldSum()
+         * (otherwise), dn/dm from controls().imf()'s own operator(),
+         * and m(t)/dm/dt from
+         * controls().tracks()'s own massAndDerivFromLifetime(log10(t),
+         * feh), which converts the dm/d(log10 t) it returns to dm/dt
+         * via the chain rule (dm/dt = dm/d(log10 t) / (t ln 10)) --
+         * summed over every mass massAndDerivFromLifetime() returns
+         * (there can be more than one star with the same lifetime),
+         * skipping any mass at or above controls().minStochMass() (the
+         * stochastically-sampled share, handled separately, per-star,
+         * rather than through this per-unit-mass rate).
+         */
+        [[nodiscard]] auto yieldsIntegrand(double t, double feh) const -> std::vector<double>;
+
+        /**
          * @brief Update yields_/fieldYields_ from the stars that died since lastYieldTime_
          * @details
          * Currently a no-op stub -- leaves yields_/fieldYields_ at
