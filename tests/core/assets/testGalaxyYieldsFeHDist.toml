@@ -1,0 +1,22 @@
+# A [Fe/H] distribution, flat from -1 to -0.5, for
+# testGalaxy.cpp's testYieldsRateMultiFeh(). Deliberately narrower than
+# testClusterSpecsynFullFeHDist.toml's own [-1, 0]: Tracks3D's own
+# constructor pads the loaded track [Fe/H] grid by one grid point
+# beyond [fehDist.getMin(), fehDist.getMax()] on each side (see
+# SimControls::readSpectra()'s own comment on tracks_.feH() for why),
+# and Galaxy::yieldsRate(t)'s own multi-feh averaging evaluates
+# yieldsRate(t, feh) at every one of those padding grid points too
+# (mirroring computeLbolCts()'s identical technique) -- so the yield
+# channels used by this test, which only cover [Fe/H] in [-1.0, 0.0]
+# (see tests/yields/assets/yields.toml's own sukhbold_test entries),
+# must actually cover the padded grid, not just this distribution's
+# own [min, max]. With the MIST_test track grid's own points at
+# [-1.0, -0.5, -0.25, 0.0, 0.5] (tests/tracks/assets/tracks.toml), a
+# distribution over [-1, 0] pads up to 0.5 -- outside the yield
+# channels' own range -- while this narrower [-1, -0.5] range only
+# pads up to -0.25, safely inside it.
+breakpoints -1 -0.5
+
+segment
+type powerlaw
+slope 0

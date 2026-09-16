@@ -437,8 +437,8 @@ namespace core
          * age) over [0, t] via a single utils::PDFIntegrator
          * (GKOrder::GK15) call. Unlike computeLbolCts(), this takes
          * feh as an explicit parameter rather than averaging over
-         * SimControls::fehDist()'s own range, so there is no separate
-         * single-feh/multi-feh split here.
+         * SimControls::fehDist()'s own range itself -- see the
+         * feh-less yieldsRate(double) overload for that.
          *
          * The integral's own absolute tolerance is
          * SimControls::intAbsTol() * 1e-6 * sfr().integral(0, t) -- the
@@ -449,6 +449,39 @@ namespace core
          * natural scale than Lbol is to its.
          */
         [[nodiscard]] auto yieldsRate(double t, double feh) const -> std::vector<double>;
+
+        /**
+         * @brief The instantaneous rate at which the continuous population returns each isotope, at a given time, averaged over [Fe/H]
+         * @param t Simulation time, in yr, since this galaxy's own
+         *   formation (time 0) -- see the (t, feh) overload's own
+         *   comment
+         * @return See the (t, feh) overload's own comment for the
+         *   returned vector's layout; here, averaged over
+         *   SimControls::fehDist()'s own range rather than evaluated
+         *   at a single [Fe/H]
+         * @details
+         * If SimControls::fehDist() is degenerate (a single value,
+         * SimControls::fehDist().getMin() == getMax()), simply calls
+         * the (t, feh) overload at that value. Otherwise, mirrors
+         * computeLbolCts()'s own multi-feh handling (see its own
+         * comment) generalized to a vector-valued result the same way
+         * Specsyn::specCtsHelper() does for a full spectrum (see its
+         * own comment): evaluates yieldsRate(t, feh) at every [Fe/H]
+         * grid point SimControls::tracks() is actually defined at,
+         * weights each by SimControls::fehDist()'s own density there,
+         * then -- since Interpolator1D's own template parameter fixes
+         * how many quantities it interpolates at compile time, but the
+         * number of components here (isotopes, times channels if
+         * decomposed) is only known at runtime -- builds one
+         * Interpolator1D<1> per output component (plus one more for
+         * the weights themselves) to integrate each of those discrete,
+         * [Fe/H]-grid-sampled curves over SimControls::fehDist()'s own
+         * [min, max] range, dividing each component's own weighted
+         * integral by the weights' own integral (the same normalized
+         * weighted-average construction computeLbolCts()/
+         * specCtsHelper() both use).
+         */
+        [[nodiscard]] auto yieldsRate(double t) const -> std::vector<double>;
 
         /**
          * @brief Return the total target stellar mass formed so far

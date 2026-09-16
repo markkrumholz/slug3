@@ -8,6 +8,7 @@
 
 #include "../src/core/Cluster.hpp"
 #include "../src/core/Galaxy.hpp"
+#include "../src/interpolation/Interpolator1D.hpp"
 #include "../src/io/SimControls.hpp"
 #include "../src/phot/FilterCollection.hpp"
 #include "../src/utils/Constants.hpp"
@@ -1835,6 +1836,182 @@ static auto testYieldsRateHydrogenOrderOfMagnitude() -> int
     return 0;
 }
 
+// Verify that Galaxy::yieldsRate(t) (no feh argument) exactly
+// delegates to yieldsRate(t, feh) when SimControls::fehDist() is
+// degenerate (a single value) -- testGalaxyDynamics.in's own stars.FeH
+// = 0.0 is exactly this case. Reuses
+// testYieldsRateHydrogenOrderOfMagnitude()'s own yields/min_stoch_mass/
+// f_cluster setup.
+static auto testYieldsRateSingleFehDelegates() -> int
+{
+    constexpr double age = 1e8;
+
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFile);
+        inputDeck.at_path("clusters").as_table()->insert("f_cluster", 0.0);
+        inputDeck.at_path("stars").as_table()->insert_or_assign("min_stoch_mass", 120.0);
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{ { "channel", "ccsn" }, { "model", "kobayashi_test" } } },
+            { "channel2", toml::table{ { "channel", "ccsn" }, { "model", "sukhbold_test" } } },
+            { "channel3", toml::table{ { "channel", "massive_star_winds" }, { "model", "sukhbold_test" } } },
+            { "channel_decomposed", false },
+            { "registry", std::string("tests/yields/assets/yields.toml") },
+        });
+        const io::SimControls controls(inputDeck);
+
+        if (controls.fehDist().getMin() != controls.fehDist().getMax())
+        {
+            std::cerr << "testGalaxy: yieldsRateSingleFehDelegates: test bug: "
+                "expected a degenerate (single-value) fehDist()\n";
+            return 1;
+        }
+
+        utils::rng().seed(rngSeed);
+        const core::Galaxy galaxy(controls);
+
+        const auto rateNoFeh = galaxy.yieldsRate(age);
+        const auto rateWithFeh = galaxy.yieldsRate(age, controls.fehDist().getMin());
+        if (rateNoFeh.size() != rateWithFeh.size())
+        {
+            std::cerr << "testGalaxy: yieldsRateSingleFehDelegates: size mismatch: "
+                << rateNoFeh.size() << " vs " << rateWithFeh.size() << "\n";
+            return 1;
+        }
+        for (std::size_t k = 0; k < rateNoFeh.size(); ++k)
+        {
+            if (rateNoFeh.at(k) != rateWithFeh.at(k))
+            {
+                std::cerr << "testGalaxy: yieldsRateSingleFehDelegates: entry " << k <<
+                    ": yieldsRate(t) = " << rateNoFeh.at(k) << ", yieldsRate(t, feh) = " <<
+                    rateWithFeh.at(k) << " -- expected bit-for-bit equality\n";
+                return 1;
+            }
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testGalaxy: yieldsRateSingleFehDelegates test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Verify Galaxy::yieldsRate(t)'s multi-feh averaging against an
+// independent recomputation using the same public API the
+// implementation itself is built from: evaluates yieldsRate(t, feh) at
+// every SimControls::tracks()->feH() grid point directly, weights each
+// by SimControls::fehDist()'s own density there via a hand-built
+// interp::Interpolator1D<1> pair (one for the weights, one per
+// isotope for the weighted values), and compares the resulting
+// weighted average against yieldsRate(t)'s own result -- mirrors this
+// test suite's general "independent recomputation" style (e.g.
+// testContinuousPopSpecMultiFeh() and its own reference-check sibling)
+// rather than merely checking the result is finite. Reuses
+// testYieldsRateHydrogenOrderOfMagnitude()'s own yields setup, minus
+// kobayashi_test (only tabulated at Fe/H = 0.0, unlike sukhbold_test's
+// [-1.0, 0.0]). Uses testGalaxyYieldsFeHDist.toml (flat over
+// [-1, -0.5]) rather than testContinuousPopSpecMultiFeh()'s own
+// [-1, 0] fixture -- see that fixture's own comment for why: every
+// yield channel used must cover not just this distribution's own
+// [min, max], but also the [Fe/H] grid point Tracks3D pads in beyond
+// it, which lands outside the yield channels' own [-1.0, 0.0] range
+// if the distribution itself is allowed to reach all the way to 0.
+static auto testYieldsRateMultiFeh() -> int
+{
+    constexpr double age = 1e8;
+    constexpr double relTol = 1e-9; // both sides use the exact same yieldsRate(t, feh) calls
+
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFile);
+        inputDeck.at_path("clusters").as_table()->insert("f_cluster", 0.0);
+        inputDeck.at_path("stars").as_table()->insert_or_assign("min_stoch_mass", 120.0);
+        inputDeck.at_path("stars").as_table()->insert_or_assign(
+            "FeH", "tests/core/assets/testGalaxyYieldsFeHDist.toml");
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{ { "channel", "ccsn" }, { "model", "sukhbold_test" } } },
+            { "channel2", toml::table{ { "channel", "massive_star_winds" }, { "model", "sukhbold_test" } } },
+            { "channel_decomposed", false },
+            { "registry", std::string("tests/yields/assets/yields.toml") },
+        });
+        const io::SimControls controls(inputDeck);
+
+        if (controls.fehDist().getMin() == controls.fehDist().getMax())
+        {
+            std::cerr << "testGalaxy: yieldsRateMultiFeh: test bug: "
+                "expected a non-degenerate fehDist()\n";
+            return 1;
+        }
+
+        utils::rng().seed(rngSeed);
+        const core::Galaxy galaxy(controls);
+
+        // Independent recomputation, mirroring Galaxy::yieldsRate(t)'s
+        // own multi-feh implementation exactly, but built here from
+        // scratch via the public API alone
+        const auto& fehDist = controls.fehDist();
+        const auto& fehGrid = controls.tracks().feH();
+        const std::size_t nFeh = fehGrid.size();
+
+        std::vector<std::vector<double>> rateAtFeh(nFeh);
+        std::vector<double> fehWeight(nFeh);
+        for (std::size_t f = 0; f < nFeh; ++f)
+        {
+            rateAtFeh.at(f) = galaxy.yieldsRate(age, fehGrid.at(f));
+            fehWeight.at(f) = fehDist(fehGrid.at(f));
+        }
+
+        const interp::Interpolator1D<1> weightInterp(fehGrid, fehWeight);
+        const double weightIntegral = weightInterp.integ(fehDist.getMin(), fehDist.getMax());
+
+        const std::size_t n = rateAtFeh.front().size();
+        std::vector<double> expected(n, 0.0);
+        std::vector<double> quantityAtFeh(nFeh);
+        for (std::size_t k = 0; k < n; ++k)
+        {
+            for (std::size_t f = 0; f < nFeh; ++f)
+            {
+                quantityAtFeh.at(f) = rateAtFeh.at(f).at(k) * fehWeight.at(f);
+            }
+            const interp::Interpolator1D<1> quantityInterp(fehGrid, quantityAtFeh);
+            expected.at(k) = quantityInterp.integ(fehDist.getMin(), fehDist.getMax()) / weightIntegral;
+        }
+
+        const auto actual = galaxy.yieldsRate(age);
+        if (actual.size() != expected.size())
+        {
+            std::cerr << "testGalaxy: yieldsRateMultiFeh: size mismatch: "
+                << actual.size() << " vs " << expected.size() << "\n";
+            return 1;
+        }
+        for (std::size_t k = 0; k < expected.size(); ++k)
+        {
+            if (std::abs(actual.at(k) - expected.at(k)) >
+                relTol * std::max(1.0, std::abs(expected.at(k))))
+            {
+                std::cerr << "testGalaxy: yieldsRateMultiFeh: entry " << k <<
+                    ": yieldsRate(t) = " << actual.at(k) << ", expected " <<
+                    expected.at(k) << "\n";
+                return 1;
+            }
+        }
+        if (std::reduce(expected.begin(), expected.end(), 0.0) <= 0.0)
+        {
+            std::cerr << "testGalaxy: yieldsRateMultiFeh: expected a positive "
+                "total yield rate\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testGalaxy: yieldsRateMultiFeh test failed: " << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
 auto testGalaxy() -> int
 {
     int result = testGalaxyBasics();
@@ -1853,6 +2030,8 @@ auto testGalaxy() -> int
     result += testGalaxyNebular();
     result += testContinuousPopNebularExtinct();
     result += testYieldsRateHydrogenOrderOfMagnitude();
+    result += testYieldsRateSingleFehDelegates();
+    result += testYieldsRateMultiFeh();
 
     try
     {

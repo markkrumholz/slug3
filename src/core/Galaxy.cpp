@@ -613,6 +613,59 @@ auto core::Galaxy::yieldsRate(const double t, const double feh) const -> std::ve
     return integrator.integrate(0.0, t, this, feh);
 }
 
+// The continuous population's own instantaneous per-isotope yield
+// rate, averaged over [Fe/H] -- see this method's own header comment
+auto core::Galaxy::yieldsRate(const double t) const -> std::vector<double>
+{
+    const auto& sc = controls_.get();
+    const auto& fehDist = sc.fehDist();
+
+    if (fehDist.getMin() == fehDist.getMax())
+    {
+        return yieldsRate(t, fehDist.getMin());
+    }
+
+    // Multi-feh: evaluate yieldsRate(t, feh) at every [Fe/H] grid
+    // point the tracks are actually defined at, then interpolate and
+    // integrate those discrete results over [Fe/H] -- mirrors
+    // computeLbolCts()'s own identical technique, generalized to a
+    // vector-valued result the same way Specsyn::specCtsHelper() does
+    // for a full spectrum: one Interpolator1D<1> per output component,
+    // since Interpolator1D's own NF is a compile-time template
+    // parameter, but the number of components here is only known at
+    // runtime -- see this method's own header comment.
+    const auto& fehGrid = sc.tracks().feH();
+    const std::size_t nFeh = fehGrid.size();
+
+    std::vector<std::vector<double>> rateAtFeh(nFeh);
+    std::vector<double> fehWeight(nFeh);
+    for (std::size_t f = 0; f < nFeh; ++f)
+    {
+        rateAtFeh[f] = yieldsRate(t, fehGrid[f]); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- f < nFeh == fehGrid.size() by construction
+        fehWeight[f] = fehDist(fehGrid[f]); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- f < nFeh == fehGrid.size() by construction
+    }
+
+    // Normalizing denominator: the integral of fehDist alone over its
+    // own domain (fehDist need not itself integrate to exactly 1)
+    const interp::Interpolator1D<1> weightInterp(fehGrid, fehWeight);
+    const double weightIntegral = weightInterp.integ(fehDist.getMin(), fehDist.getMax());
+
+    const std::size_t n = rateAtFeh.front().size();
+    std::vector<double> result(n, 0.0);
+    std::vector<double> quantityAtFeh(nFeh);
+    for (std::size_t k = 0; k < n; ++k)
+    {
+        for (std::size_t f = 0; f < nFeh; ++f)
+        {
+            quantityAtFeh[f] = rateAtFeh[f][k] * fehWeight[f]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,cppcoreguidelines-pro-bounds-constant-array-index) -- rateAtFeh[f] has size n by construction (every yieldsRate(t, feh) call returns the same-sized vector), and k/f are both bounded by their own loop
+        }
+        const interp::Interpolator1D<1> quantityInterp(fehGrid, quantityAtFeh);
+        result[k] = quantityInterp.integ(fehDist.getMin(), fehDist.getMax()) / weightIntegral; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- result has size n by construction, and k is bounded by n
+    }
+
+    return result;
+}
+
 // Update yields_/fieldYields_ -- currently a no-op stub, see this
 // method's own header comment
 void core::Galaxy::computeYields()
