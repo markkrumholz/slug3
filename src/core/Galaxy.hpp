@@ -412,6 +412,45 @@ namespace core
         }
 
         /**
+         * @brief The instantaneous rate at which the continuous population returns each isotope, at a given time and [Fe/H]
+         * @param t Simulation time, in yr, since this galaxy's own
+         *   formation (time 0) -- not necessarily curTime(); this is a
+         *   standalone calculation, independent of advance()/curTime()
+         * @param feh [Fe/H] to evaluate at
+         * @return A vector laid out exactly as
+         *   Galaxy::yieldsIntegrand()'s own comment describes (one
+         *   channel-major row per isotope if
+         *   controls().yieldsChannelDecomposed(), or just
+         *   isotopes().size() combined entries otherwise): the total
+         *   rate (Msun/yr) at which the continuously-sampled
+         *   population -- integrated over this galaxy's own star
+         *   formation history sfr() from 0 to t -- currently returns
+         *   each isotope (and, if decomposed, channel) to the ISM.
+         *   Does not include the stochastically-sampled (individual
+         *   cluster/field star) population's own contribution.
+         * @details
+         * Mirrors computeLbolCts()'s own general structure (see its
+         * own comment): builds a pdfs::PDFReflect view of sfr()
+         * pivoted at 0.5 * t, so its own coordinate becomes age
+         * directly, then integrates yieldsIntegrand() (weighted by
+         * that reflected sfr, i.e. by the star formation rate at each
+         * age) over [0, t] via a single utils::PDFIntegrator
+         * (GKOrder::GK15) call. Unlike computeLbolCts(), this takes
+         * feh as an explicit parameter rather than averaging over
+         * SimControls::fehDist()'s own range, so there is no separate
+         * single-feh/multi-feh split here.
+         *
+         * The integral's own absolute tolerance is
+         * SimControls::intAbsTol() * 1e-6 * sfr().integral(0, t) -- the
+         * same "scale the tolerance by the star formation history's
+         * own integral" idea computeLbolCts() uses for its own absTol,
+         * but three orders of magnitude tighter, since yield
+         * quantities are typically much smaller relative to their own
+         * natural scale than Lbol is to its.
+         */
+        [[nodiscard]] auto yieldsRate(double t, double feh) const -> std::vector<double>;
+
+        /**
          * @brief Return the total target stellar mass formed so far
          * @return The sum, over every advance() call so far, of the
          *   total stellar mass (sfr().integral() over that call's own

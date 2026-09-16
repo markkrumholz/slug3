@@ -20,6 +20,7 @@
 #include <cstddef>
 #include <exception>
 #include <iostream>
+#include <iterator>
 #include <limits>
 #include <numeric>
 #include <string>
@@ -1732,6 +1733,108 @@ static auto testGalaxySFRDistResolution() -> int
     return 0;
 }
 
+// Verify Galaxy::yieldsRate()'s order of magnitude: for a population
+// forming with a constant SFR, the instantaneous hydrogen return rate
+// at age 100 Myr should be of order 10% of the SFR itself, following
+// the standard rule of thumb that roughly 10% of the mass that forms
+// in a stellar population is eventually returned to the ISM within
+// about 100 Myr (dominated by the most massive stars' winds and
+// supernovae). Forces min_stoch_mass to chabrier.toml's own maximum
+// mass and f_cluster to 0 (mirroring
+// testContinuousPopLbolStandaloneMatchesSpec()'s own identical
+// technique) so the entire population -- including every mass whose
+// lifetime is under 100 Myr -- is continuously sampled, letting
+// yieldsRate() (which only covers that population) account for all of
+// it. Loads both ccsn models (kobayashi_test, covering [13, 18] Msun,
+// and sukhbold_test, covering [18.2, 100]) plus
+// massive_star_winds/sukhbold_test, between them covering the whole
+// relevant mass range down to the ~15 Msun turnoff at 100 Myr -- a
+// single, narrower channel underestimates the ratio by roughly an
+// order of magnitude, since most of the return over the full [0, 100
+// Myr] integration window then comes from masses no yield channel
+// tabulates. yields.channel_decomposed = false collapses the two ccsn
+// entries (a deliberately duplicated channel type, hence the expected
+// "slug: warning" on construction -- see
+// testSimControlsYieldsDuplicateChannelWarning()'s own identical
+// pattern) and the wind channel into one combined per-isotope total,
+// so hydrogen's own index can be read directly.
+static auto testYieldsRateHydrogenOrderOfMagnitude() -> int
+{
+    constexpr double age = 1e8; // 100 Myr
+    constexpr double ratioMin = 0.01; // one order of magnitude below 10%
+    constexpr double ratioMax = 1.0; // one order of magnitude above 10%
+
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFile);
+        inputDeck.at_path("clusters").as_table()->insert("f_cluster", 0.0);
+        inputDeck.at_path("stars").as_table()->insert_or_assign("min_stoch_mass", 120.0);
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{ { "channel", "ccsn" }, { "model", "kobayashi_test" } } },
+            { "channel2", toml::table{ { "channel", "ccsn" }, { "model", "sukhbold_test" } } },
+            { "channel3", toml::table{ { "channel", "massive_star_winds" }, { "model", "sukhbold_test" } } },
+            { "channel_decomposed", false },
+            { "registry", std::string("tests/yields/assets/yields.toml") },
+        });
+        const io::SimControls controls(inputDeck);
+
+        if (controls.yields() == nullptr)
+        {
+            std::cerr << "testGalaxy: yieldsRateHydrogenOrderOfMagnitude: "
+                "expected yields() non-null\n";
+            return 1;
+        }
+
+        // Find hydrogen's own index (Z = 1, A = 1) in isotopes()
+        const auto& isotopes = controls.yields()->isotopes();
+        const auto h1It = std::ranges::find_if(isotopes,
+            [](const auto& iso) { return iso.get().Z() == 1 && iso.get().A() == 1; });
+        if (h1It == isotopes.end())
+        {
+            std::cerr << "testGalaxy: yieldsRateHydrogenOrderOfMagnitude: "
+                "expected hydrogen (Z=1, A=1) among isotopes()\n";
+            return 1;
+        }
+        const auto h1Idx = static_cast<std::size_t>(std::distance(isotopes.begin(), h1It));
+
+        utils::rng().seed(rngSeed);
+        const core::Galaxy galaxy(controls);
+
+        const auto rate = galaxy.yieldsRate(age, 0.0);
+        const double sfrVal = galaxy.sfr()(age);
+        if (!(sfrVal > 0.0))
+        {
+            std::cerr << "testGalaxy: yieldsRateHydrogenOrderOfMagnitude: "
+                "expected a positive sfr(), got " << sfrVal << "\n";
+            return 1;
+        }
+        if (h1Idx >= rate.size() || !std::isfinite(rate[h1Idx]) || rate[h1Idx] <= 0.0)
+        {
+            std::cerr << "testGalaxy: yieldsRateHydrogenOrderOfMagnitude: "
+                "expected a finite, positive hydrogen return rate, got " <<
+                (h1Idx < rate.size() ? std::to_string(rate[h1Idx]) : "out of range") << "\n";
+            return 1;
+        }
+
+        const double ratio = rate[h1Idx] / sfrVal;
+        if (ratio < ratioMin || ratio > ratioMax)
+        {
+            std::cerr << "testGalaxy: yieldsRateHydrogenOrderOfMagnitude: "
+                "hydrogen return rate / sfr = " << ratio << " at age " << age <<
+                " yr, expected order of magnitude 0.1 (i.e. in [" << ratioMin <<
+                ", " << ratioMax << "])\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testGalaxy: yieldsRateHydrogenOrderOfMagnitude test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
 auto testGalaxy() -> int
 {
     int result = testGalaxyBasics();
@@ -1749,6 +1852,7 @@ auto testGalaxy() -> int
     result += testExtinctApplyExtinctionCtsUniform();
     result += testGalaxyNebular();
     result += testContinuousPopNebularExtinct();
+    result += testYieldsRateHydrogenOrderOfMagnitude();
 
     try
     {

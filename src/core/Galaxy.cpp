@@ -587,6 +587,32 @@ auto core::Galaxy::yieldsIntegrand(const double t, const double feh) const -> st
     return result;
 }
 
+// The continuous population's own instantaneous per-isotope yield
+// rate, integrated over the star formation history -- see this
+// method's own header comment
+auto core::Galaxy::yieldsRate(const double t, const double feh) const -> std::vector<double>
+{
+    const auto& sc = controls_.get();
+    const auto* yields = sc.yields();
+
+    const std::size_t n = sc.yieldsChannelDecomposed()
+        ? yields->yieldChannels().size() * yields->isotopes().size()
+        : yields->isotopes().size();
+
+    // See computeLbolCts()'s own comment for why this reflects sfr()
+    // about t / 2, so this dimension's own coordinate becomes age
+    // directly
+    const pdfs::PDFReflect sfrAge(sfr(), 0.5 * t);
+    const double absTol = sc.intAbsTol() * 1e-6 * sfr().integral(0.0, t);
+
+    using IntegrandFn = std::vector<double> (Galaxy::*)(double, double) const;
+    const utils::PDFIntegrator<IntegrandFn, utils::GKOrder::GK15> integrator(
+        sfrAge, static_cast<IntegrandFn>(&Galaxy::yieldsIntegrand),
+        n, false, sc.intMaxIter(), absTol, sc.intRelTol());
+
+    return integrator.integrate(0.0, t, this, feh);
+}
+
 // Update yields_/fieldYields_ -- currently a no-op stub, see this
 // method's own header comment
 void core::Galaxy::computeYields()
