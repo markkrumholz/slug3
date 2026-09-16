@@ -197,8 +197,8 @@ namespace yields
          * @brief Return every channel's own yield, as one (nchannels, isotopes().size()) array
          * @param mass Stellar mass (Msun); need not satisfy every
          *   yieldChannels() entry's own hasYield(mass) -- see @details
-         * @param feH [Fe/H]; must lie within every yieldChannels()
-         *   entry's own feH() range
+         * @param feH [Fe/H]; need not lie within every yieldChannels()
+         *   entry's own feH() range -- see @details
          * @return A pair (view, data): data is the backing storage,
          *   data.data() the origin of view; view is an mdspan of shape
          *   (yieldChannels().size(), isotopes().size()), i.e.
@@ -209,10 +209,16 @@ namespace yields
          *   was never called on that particular channel)
          * @details
          * Row i is yieldChannels()[i]->yield(mass, feH) if
-         * yieldChannels()[i]->hasYield(mass) is true, or left all zero
-         * otherwise -- so a mass outside one channel's own range
-         * simply contributes nothing from that channel, rather than
-         * every channel needing to cover mass. Each populated row is
+         * yieldChannels()[i]->hasYield(mass) is true and feH lies
+         * within yieldChannels()[i]->feH()'s own [front(), back()]
+         * range, or left all zero otherwise -- so a mass or [Fe/H]
+         * outside one channel's own range simply contributes nothing
+         * from that channel, rather than every channel needing to
+         * cover the same mass/[Fe/H] (e.g. a caller like
+         * Galaxy::yieldsRate(double) averaging over every [Fe/H] grid
+         * point the tracks are defined at, some of which may lie
+         * outside a narrower yield channel's own tabulated range).
+         * Each populated row is
          * isotopes().size() long, in isotopes()'s own order, once
          * rebuildYieldGrid() has synchronized every channel onto
          * isotopes() (which the constructor always does before

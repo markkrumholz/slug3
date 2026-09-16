@@ -1909,15 +1909,19 @@ static auto testYieldsRateSingleFehDelegates() -> int
 // test suite's general "independent recomputation" style (e.g.
 // testContinuousPopSpecMultiFeh() and its own reference-check sibling)
 // rather than merely checking the result is finite. Reuses
-// testYieldsRateHydrogenOrderOfMagnitude()'s own yields setup, minus
-// kobayashi_test (only tabulated at Fe/H = 0.0, unlike sukhbold_test's
-// [-1.0, 0.0]). Uses testGalaxyYieldsFeHDist.toml (flat over
-// [-1, -0.5]) rather than testContinuousPopSpecMultiFeh()'s own
-// [-1, 0] fixture -- see that fixture's own comment for why: every
-// yield channel used must cover not just this distribution's own
-// [min, max], but also the [Fe/H] grid point Tracks3D pads in beyond
-// it, which lands outside the yield channels' own [-1.0, 0.0] range
-// if the distribution itself is allowed to reach all the way to 0.
+// testContinuousPopSpecMultiFeh()'s own [-1, 0] fixture, combined with
+// sukhbold_test/massive_star_winds (whose own [-1.0, 0.0] tabulated
+// range exactly matches it, unlike kobayashi_test's own single-point
+// Fe/H = 0.0 -- SimControls itself rejects a yield channel whose own
+// range doesn't cover fehDist's, at construction, so kobayashi_test
+// can't be used here at all). Tracks3D's own one-point padding beyond
+// fehDist's own range still reaches Fe/H = 0.5 (see
+// tests/tracks/assets/tracks.toml's own MIST_test grid), outside even
+// sukhbold_test/massive_star_winds's own [-1.0, 0.0] -- exercising
+// Yields::yield()'s own [Fe/H] range check (mirroring its existing
+// hasYield(mass) check) that makes evaluating yieldsRate(t, feh) at
+// that padding point return zero from every channel rather than
+// hitting YieldChannel::yield()'s own out-of-range assert.
 static auto testYieldsRateMultiFeh() -> int
 {
     constexpr double age = 1e8;
@@ -1929,7 +1933,7 @@ static auto testYieldsRateMultiFeh() -> int
         inputDeck.at_path("clusters").as_table()->insert("f_cluster", 0.0);
         inputDeck.at_path("stars").as_table()->insert_or_assign("min_stoch_mass", 120.0);
         inputDeck.at_path("stars").as_table()->insert_or_assign(
-            "FeH", "tests/core/assets/testGalaxyYieldsFeHDist.toml");
+            "FeH", "tests/core/assets/testClusterSpecsynFullFeHDist.toml");
         inputDeck.insert("yields", toml::table{
             { "channel1", toml::table{ { "channel", "ccsn" }, { "model", "sukhbold_test" } } },
             { "channel2", toml::table{ { "channel", "massive_star_winds" }, { "model", "sukhbold_test" } } },
@@ -2243,6 +2247,128 @@ static auto testGalaxyYieldsFieldAndContinuous() -> int
     return 0;
 }
 
+// Regression test: verify that field-star deaths from an earlier
+// advance() call are not silently lost when yields() is never called
+// in between two advance() calls -- mirrors testCluster.cpp's own
+// testClusterYieldsMultipleAdvanceCalls(), one level up in Galaxy:
+// before computeYields() was moved to run eagerly at the end of
+// advance() itself (see lastYieldTime_'s own comment), deadFieldStars_
+// -- which only ever holds the deaths from the single most recently
+// advance() call, see advance()'s own step 6 -- would be overwritten
+// by the second advance() call's own step 6 before ever being consumed
+// into fieldYields_. Reuses testGalaxyYieldsFieldAndContinuous()'s own
+// setup and age exactly (min_stoch_mass = 50, default sfr, age = 1e8),
+// splitting its single advance(age) into two steps at age / 2 with no
+// yields() call in between, so expected is built the same way that
+// test's own is: the direct field-star sum (now from both steps'
+// deadFieldStars(), rather than just one) plus a composite Simpson's
+// rule integral of yieldsRate(t) -- still over the whole [0, age], by
+// additivity of integration, regardless of the intermediate step.
+static auto testGalaxyYieldsMultipleAdvanceCalls() -> int
+{
+    constexpr double age = 1e8;
+    constexpr std::size_t nSimpson = 2000; // even, for composite Simpson's rule
+    constexpr double relTol = 5e-3; // see testGalaxyYieldsFieldAndContinuous()'s own comment
+
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFile);
+        inputDeck.at_path("clusters").as_table()->insert_or_assign("f_cluster", 0.0);
+        inputDeck.at_path("stars").as_table()->insert_or_assign("min_stoch_mass", 50.0);
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{ { "channel", "ccsn" }, { "model", "kobayashi_test" } } },
+            { "channel2", toml::table{ { "channel", "ccsn" }, { "model", "sukhbold_test" } } },
+            { "channel3", toml::table{ { "channel", "massive_star_winds" }, { "model", "sukhbold_test" } } },
+            { "channel_decomposed", false },
+            { "registry", std::string("tests/yields/assets/yields.toml") },
+        });
+        const io::SimControls controls(inputDeck);
+
+        if (controls.yields() == nullptr)
+        {
+            std::cerr << "testGalaxy: yieldsMultipleAdvanceCalls: expected "
+                "yields() non-null\n";
+            return 1;
+        }
+        const auto& isotopes = controls.yields()->isotopes();
+        const auto h1It = std::ranges::find_if(isotopes,
+            [](const auto& iso) { return iso.get().Z() == 1 && iso.get().A() == 1; });
+        if (h1It == isotopes.end())
+        {
+            std::cerr << "testGalaxy: yieldsMultipleAdvanceCalls: expected "
+                "hydrogen (Z=1, A=1) among isotopes()\n";
+            return 1;
+        }
+        const auto h1Idx = static_cast<std::size_t>(std::distance(isotopes.begin(), h1It));
+
+        utils::rng().seed(rngSeed);
+        core::Galaxy galaxy(controls);
+
+        double fieldH1 = 0.0;
+
+        // First advance, to the halfway point -- deliberately not
+        // calling yields() afterward
+        galaxy.advance(age / 2.0);
+        const auto deadFirst = galaxy.deadFieldStars();
+        if (deadFirst.empty())
+        {
+            std::cerr << "testGalaxy: yieldsMultipleAdvanceCalls: test bug: "
+                "expected some dead field stars by " << (age / 2.0) <<
+                " yr, the first of two advance() calls\n";
+            return 1;
+        }
+        for (const auto& fs : deadFirst)
+        {
+            fieldH1 += controls.yields()->yieldSum(fs.mass_, fs.feh_).at(h1Idx);
+        }
+
+        // Second advance, to the final age -- again not calling
+        // yields() in between
+        galaxy.advance(age);
+        for (const auto& fs : galaxy.deadFieldStars())
+        {
+            fieldH1 += controls.yields()->yieldSum(fs.mass_, fs.feh_).at(h1Idx);
+        }
+        if (!(fieldH1 > 0.0))
+        {
+            std::cerr << "testGalaxy: yieldsMultipleAdvanceCalls: expected a "
+                "positive field-star hydrogen yield, got " << fieldH1 << "\n";
+            return 1;
+        }
+
+        // Composite Simpson's rule for int_0^age yieldsRate(t)[h1Idx]
+        // dt -- see testGalaxyYieldsFieldAndContinuous()'s own comment
+        const double h = age / static_cast<double>(nSimpson);
+        double contH1 = 0.0 + galaxy.yieldsRate(age).at(h1Idx);
+        for (std::size_t i = 1; i < nSimpson; ++i)
+        {
+            const double t = static_cast<double>(i) * h;
+            const double weight = (i % 2 == 0) ? 2.0 : 4.0;
+            contH1 += weight * galaxy.yieldsRate(t).at(h1Idx);
+        }
+        contH1 *= h / 3.0;
+
+        const double expectedH1 = fieldH1 + contH1;
+        const double actualH1 = galaxy.yields().at(h1Idx);
+        if (std::abs(actualH1 - expectedH1) > relTol * std::abs(expectedH1))
+        {
+            std::cerr << "testGalaxy: yieldsMultipleAdvanceCalls: "
+                "galaxy.yields()[h1] = " << actualH1 << ", expected " <<
+                expectedH1 << " (field " << fieldH1 << " + continuous " <<
+                contH1 << ") -- deaths from the first advance() call may "
+                "have been lost\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testGalaxy: yieldsMultipleAdvanceCalls test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
 auto testGalaxy() -> int
 {
     int result = testGalaxyBasics();
@@ -2265,6 +2391,7 @@ auto testGalaxy() -> int
     result += testYieldsRateMultiFeh();
     result += testGalaxyYieldsClusteredOnly();
     result += testGalaxyYieldsFieldAndContinuous();
+    result += testGalaxyYieldsMultipleAdvanceCalls();
 
     try
     {

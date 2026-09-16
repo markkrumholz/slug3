@@ -193,6 +193,18 @@ void core::Galaxy::advance(const double t)
 
     // 8) Update current time
     curTime_ = t;
+
+    // 9) Update yields_/fieldYields_ now, eagerly -- unlike
+    // spec_/phot_/lbol_ (recomputed lazily, from scratch, on demand),
+    // yields_/fieldYields_ only ever accumulate, and rely on
+    // deadFieldStars_/each cluster's own mDead_, both of which only
+    // ever hold this one step's own deaths (see step 6's own comment,
+    // and Cluster::updateLivingStars()'s), so computeYields() must run
+    // here, before the next advance() call's own step 6 clears
+    // deadFieldStars_ -- see lastYieldTime_'s own comment for the data
+    // loss that used to result otherwise.
+    computeYields();
+    lastYieldTime_ = curTime_;
 }
 
 // Sum spec_/specExtinct_ (and, if a nebular emission grid was
@@ -595,6 +607,7 @@ auto core::Galaxy::yieldsRate(const double t, const double feh) const -> std::ve
 {
     const auto& sc = controls_.get();
     const auto* yields = sc.yields();
+    if (yields == nullptr) { return {}; }
 
     const std::size_t n = sc.yieldsChannelDecomposed()
         ? yields->yieldChannels().size() * yields->isotopes().size()

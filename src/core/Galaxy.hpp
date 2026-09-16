@@ -397,17 +397,16 @@ namespace core
          *   Cluster::yields()'s own comment for the general shape/
          *   layout this mirrors
          * @details
-         * Computed lazily, exactly as Cluster::yields() is -- see its
-         * own comment, and lastYieldTime_'s own comment for why this
-         * accumulates onto yields_ rather than recomputing it from
-         * scratch. computeYields() is currently a no-op stub, so
-         * yields_ stays at the all-zero vector it was sized to at
-         * construction (see yields_'s own comment) until a following
-         * commit implements it.
+         * Unlike spec()/phot()/lbol(), not computed lazily here --
+         * mirrors Cluster::yields() exactly (see its own comment):
+         * advance() itself calls computeYields() eagerly at the end of
+         * every call, so yields_ is already current by the time this
+         * is called, and stays at the all-zero vector it was sized to
+         * at construction (see its own comment) until advance() has
+         * run at least once.
          */
         [[nodiscard]] auto yields() -> const auto&
         {
-            if (lastYieldTime_ < curTime_) { computeYields(); lastYieldTime_ = curTime_; }
             return yields_;
         }
 
@@ -427,9 +426,12 @@ namespace core
          *   formation history sfr() from 0 to t -- currently returns
          *   each isotope (and, if decomposed, channel) to the ISM.
          *   Does not include the stochastically-sampled (individual
-         *   cluster/field star) population's own contribution.
+         *   cluster/field star) population's own contribution. An
+         *   empty vector if controls().yields() is null (no yield
+         *   channels were requested).
          * @details
-         * Mirrors computeLbolCts()'s own general structure (see its
+         * A no-op returning {} if controls().yields() is null.
+         * Otherwise, mirrors computeLbolCts()'s own general structure (see its
          * own comment): builds a pdfs::PDFReflect view of sfr()
          * pivoted at 0.5 * t, so its own coordinate becomes age
          * directly, then integrates yieldsIntegrand() (weighted by
@@ -642,18 +644,26 @@ namespace core
         bool lbolCtsCurrent_ = false;
 
         std::vector<double> yields_; /**< Total nucleosynthetic yield of each isotope, in Msun, accumulated over every star that has died so far across the whole galaxy (clusters, field stars, and the purely continuous population together), laid out per Cluster::yields()'s own comment -- sized to all zeros at construction if controls().yields() is non-null, empty otherwise; see Cluster::yields_'s own comment for how it accumulates */
-        std::vector<double> fieldYields_; /**< Like yields_, but restricted to the individually-tracked field star population (fieldStars_/deadFieldStars_) alone -- excludes both clusters_/disruptedClusters_ and the purely continuous (non-clustered, below minStochMass()) population; initialized the same way as yields_. Tracked separately so a following commit's computeYields() can combine per-population contributions without double-counting */
+        std::vector<double> fieldYields_; /**< Like yields_, but restricted to the individually-tracked field star population (fieldStars_/deadFieldStars_) alone -- excludes both clusters_/disruptedClusters_ and the purely continuous (non-clustered, below minStochMass()) population; initialized the same way as yields_. Tracked separately so computeYields() can combine per-population contributions without double-counting */
 
         /**
          * @brief Simulation time through which yields_/fieldYields_ have been updated
          * @details
          * Mirrors Cluster::lastYieldTime_'s own comment exactly: starts
          * at 0 (rather than curTime_'s own initial value, though here
-         * the two happen to coincide already) so the first call to
-         * yields() always runs computeYields() at least once; nothing
-         * in advance() needs to reset this, since curTime_ advancing
-         * past it is what makes yields()'s own lastYieldTime_ <
-         * curTime_ check go stale on its own.
+         * the two happen to coincide already), documenting that
+         * nothing has died yet. advance() itself sets this to curTime_
+         * right after every call to computeYields() -- see both of
+         * their own comments for why this can't be left to a lazy
+         * yields() call the way spec_/phot_/lbol_'s own analogous
+         * staleness flags are: computeYields() only adds the
+         * contribution of whatever died between lastYieldTime_ and
+         * curTime_, and for the field-star share of that relies on
+         * deadFieldStars_, which only ever holds the deaths from the
+         * single most recently advance() call (see its own comment),
+         * so computeYields() must run before deadFieldStars_'s own
+         * contents are overwritten by the next advance() call, not
+         * merely before yields_/fieldYields_ are next read.
          */
         double lastYieldTime_ = 0.0;
 
@@ -1005,6 +1015,9 @@ namespace core
         /**
          * @brief Update yields_/fieldYields_ from the stars that died since lastYieldTime_
          * @details
+         * Called eagerly from advance() itself, at the end of every
+         * call -- not lazily from yields() the way spec_/phot_/lbol_
+         * are computed -- see lastYieldTime_'s own comment for why.
          * A no-op if controls().yields() is null. Otherwise, mirrors
          * Cluster::computeYields()'s own null-guard pattern one level
          * up, summing/integrating over three populations in turn:

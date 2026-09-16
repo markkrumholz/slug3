@@ -259,15 +259,26 @@ void core::Cluster::advance(const double t)
     // Get isochrone for new time
     isochrone_ = tracks().getIsochrone(logAge);
 
+    // Update yields_ now, eagerly -- unlike spec_/phot_/lbol_ (which
+    // are recomputed lazily, from scratch, on demand -- see
+    // specCurrent_/photCurrent_/lbolCurrent_'s own comments),
+    // yields_ only ever accumulates the contribution of stars that
+    // died since lastYieldTime_, and the stochastic half of that
+    // relies on mDead_, which only ever holds the deaths from this one
+    // advance() call (see updateLivingStars()'s own comment): the very
+    // next advance() call's own updateLivingStars() clears it, so
+    // computeYields() must consume it here, before that happens,
+    // rather than waiting for some later, lazy call to yields() that
+    // might never come before the next advance() -- see
+    // lastYieldTime_'s own comment for the data loss that used to
+    // result otherwise.
+    computeYields();
+    lastYieldTime_ = curTime_;
+
     // Mark spec_/specExtinct_/phot_/photExtinct_/lbol_ as stale; they
     // are recomputed lazily, on demand, the next time spec()/
     // specExtinct()/phot()/photExtinct()/lbol() is actually called
     // (see specCurrent_/photCurrent_/lbolCurrent_'s own comments).
-    // yields_ goes stale automatically, with nothing to do here --
-    // curTime_'s own update above is exactly what makes yields()'s
-    // lastYieldTime_ < curTime_ check go stale; see lastYieldTime_'s
-    // own comment for why, unlike the others, this doesn't erase
-    // anything already added to yields_.
     specCurrent_ = false;
     photCurrent_ = false;
     lbolCurrent_ = false;

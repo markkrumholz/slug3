@@ -1027,6 +1027,98 @@ static auto testClusterYieldsNonStochastic() -> int
     return 0;
 }
 
+// Regression test: verify that stochastic deaths from an earlier
+// advance() call are not silently lost when yields() is never called
+// in between two advance() calls. Before computeYields() was moved to
+// run eagerly at the end of advance() itself (see lastYieldTime_'s own
+// comment), mDead_ -- which only ever holds the deaths from the single
+// most recently advance() call, see updateLivingStars()'s own comment
+// -- would be overwritten by the second advance() call's own
+// updateLivingStars() before ever being consumed into yields_, since
+// nothing but a lazy yields() call used to trigger that consumption.
+// Same base setup as testClusterYieldsStochastic(), but splits its own
+// single advance(ageYr) into several steps (rather than guessing a
+// single split point likely to straddle a death, which proved fragile
+// against this rngSeed's own draw), deliberately never calling
+// yields() until after all of them.
+static auto testClusterYieldsMultipleAdvanceCalls() -> int
+{
+    constexpr double ageYr = 5e6;
+    constexpr std::size_t nSteps = 5;
+    // 10x testClusterYieldsStochastic()'s own clusterMass: at this
+    // rngSeed, that smaller cluster's own most massive stars turn out
+    // to all die within the last of these steps (empirically, none
+    // before it) -- a bigger cluster samples further into the IMF's
+    // own tail, giving some stars massive (and so short-lived) enough
+    // to have already died in an earlier step too.
+    constexpr double clusterMass = 1e5;
+    constexpr double tol = 1e-9;
+
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFile);
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{ { "channel", "ccsn" }, { "model", "sukhbold_test" } } },
+            { "registry", std::string(yieldsRegistry) },
+        });
+        const io::SimControls controls(inputDeck);
+
+        utils::rng().seed(rngSeed);
+        core::Cluster cluster(0, clusterMass, 0.0, controls);
+
+        const std::size_t niso = controls.yields()->isotopes().size();
+        std::vector<double> expected(niso, 0.0);
+        bool sawEarlyDeath = false;
+
+        // Advance in nSteps equal steps, deliberately not calling
+        // yields() until after the last one -- every step but the
+        // last, having at least one death, is exactly the scenario
+        // that used to lose that step's own mDead_ once yields() was
+        // only ever computed lazily (see lastYieldTime_'s own comment)
+        for (std::size_t s = 1; s <= nSteps; ++s)
+        {
+            cluster.advance(ageYr * static_cast<double>(s) / static_cast<double>(nSteps));
+            const auto dead = cluster.deadStarMasses();
+            if (!dead.empty() && s < nSteps) { sawEarlyDeath = true; }
+            for (const double m : dead)
+            {
+                const auto sum = controls.yields()->yieldSum(m, cluster.feH());
+                for (std::size_t j = 0; j < niso; ++j) { expected[j] += sum[j]; }
+            }
+        }
+        if (!sawEarlyDeath)
+        {
+            std::cerr << "testCluster: yieldsMultipleAdvanceCalls: test bug: expected "
+                "some dead stars before the last of " << nSteps << " advance() calls\n";
+            return 1;
+        }
+
+        const auto& actual = cluster.yields();
+        if (actual.size() != expected.size())
+        {
+            std::cerr << "testCluster: yieldsMultipleAdvanceCalls: yields() has size " <<
+                actual.size() << ", expected " << expected.size() << "\n";
+            return 1;
+        }
+        for (std::size_t j = 0; j < niso; ++j)
+        {
+            if (std::abs(actual[j] - expected[j]) > tol * std::max(1.0, std::abs(expected[j])))
+            {
+                std::cerr << "testCluster: yieldsMultipleAdvanceCalls: yields()[" << j <<
+                    "] = " << actual[j] << ", expected " << expected[j] <<
+                    " -- deaths from the first advance() call may have been lost\n";
+                return 1;
+            }
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testCluster: yieldsMultipleAdvanceCalls test failed: " << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
 auto testCluster() -> int
 {
     int result = 0;
@@ -1043,5 +1135,6 @@ auto testCluster() -> int
     result += testClusterExtinctLines();
     result += testClusterYieldsStochastic();
     result += testClusterYieldsNonStochastic();
+    result += testClusterYieldsMultipleAdvanceCalls();
     return result;
 }

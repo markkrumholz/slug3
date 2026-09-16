@@ -399,16 +399,18 @@ namespace core
          *   channel) if false; an empty vector if no yield channels
          *   were requested (controls().yields() is null)
          * @details
-         * Computed lazily -- see spec()'s own comment, and
-         * lastYieldTime_'s and computeYields()'s own comments for how
-         * this differs from spec()/phot()/lbol(): rather than being
-         * recomputed from scratch, yields_ accumulates the
-         * contribution of every star that has died over this
-         * cluster's whole lifetime so far.
+         * Unlike spec()/phot()/lbol() (see spec()'s own comment), not
+         * computed lazily here: advance() itself calls computeYields()
+         * eagerly at the end of every call (see its own comment for
+         * why), so yields_ is already current by the time this is
+         * called -- rather than being recomputed from scratch, yields_
+         * accumulates the contribution of every star that has died
+         * over this cluster's whole lifetime so far, and stays at the
+         * all-zero vector it was sized to at construction (see its own
+         * comment) until advance() has run at least once.
          */
         [[nodiscard]] auto yields() -> const auto&
         {
-            if (lastYieldTime_ < curTime_) { computeYields(); lastYieldTime_ = curTime_; }
             return yields_;
         }
 
@@ -524,32 +526,22 @@ namespace core
          * @brief Simulation time through which yields_ has been updated
          * @details
          * Initialized to 0 rather than curTime_ (formTime_'s own
-         * value) -- unlike specCurrent_/photCurrent_/lbolCurrent_,
-         * which start true because spec_/phot_/lbol_'s own empty/zero
-         * in-class defaults are already the correct, current answer
-         * before advance() has ever run -- so that the first call to
-         * yields() always runs computeYields() at least once, rather
-         * than trusting yields_'s at-construction zero-fill (see its
-         * own comment) as already being current; yields() itself
-         * treats any lastYieldTime_ before formTime_ as formTime_ (see
-         * computeYields()'s own comment), so starting at 0 rather than
-         * formTime_ has no effect beyond guaranteeing that first call.
+         * value); computeYields() itself treats any lastYieldTime_
+         * before formTime_ as formTime_ (see its own comment), so this
+         * has no effect beyond documenting that nothing has died yet.
          *
-         * Unlike specCurrent_/photCurrent_/lbolCurrent_, nothing needs
-         * to reset this in advance(): yields() itself already compares
-         * lastYieldTime_ against curTime_, and advance() advancing
-         * curTime_ is exactly what makes that comparison go stale on
-         * its own. computeYields() does not recompute yields_ from
-         * scratch when it runs; it only adds the contribution of
-         * whatever died between lastYieldTime_ and curTime_ -- for the
-         * stochastic population, this relies on mDead_ only ever
-         * holding the deaths from the single most recently advance()
-         * call (see updateLivingStars()'s own comment), so calling
-         * yields() only after every advance() call (as opposed to,
-         * say, every other one) is required for the stochastic part of
-         * yields_ to stay complete; the non-stochastic part has no
-         * such restriction, since it is computed directly from the
-         * gap between lastYieldTime_ and curTime_ regardless of size.
+         * advance() itself sets this to curTime_ right after every
+         * call to computeYields() (see both of their own comments for
+         * why this can't be left to a lazy yields() call the way
+         * spec_/phot_/lbol_'s own analogous staleness flags are):
+         * computeYields() does not recompute yields_ from scratch when
+         * it runs, it only adds the contribution of whatever died
+         * between lastYieldTime_ and curTime_ -- for the stochastic
+         * population, this relies on mDead_, which only ever holds the
+         * deaths from the single most recently advance() call (see
+         * updateLivingStars()'s own comment), so computeYields() must
+         * run before mDead_'s own contents are overwritten by the next
+         * advance() call, not merely before yields_ is next read.
          */
         double lastYieldTime_ = 0.0;
 
@@ -627,11 +619,15 @@ namespace core
         /**
          * @brief Add the yield of every star that died since lastYieldTime_ into yields_
          * @details
-         * Does nothing if controls().yields() is null (no yield
-         * channels were requested), mirroring computeSpec()/
-         * computePhot()/computeLbol()'s own null-guards. Otherwise
-         * handles the stochastic and non-stochastic parts of the
-         * population separately, adding both into yields_ -- see
+         * Unlike computeSpec()/computePhot()/computeLbol() (each
+         * called lazily from its own accessor), called eagerly from
+         * advance() itself, at the end of every call -- see
+         * lastYieldTime_'s own comment for why. Does nothing if
+         * controls().yields() is null (no yield channels were
+         * requested), mirroring computeSpec()/computePhot()/
+         * computeLbol()'s own null-guards. Otherwise handles the
+         * stochastic and non-stochastic parts of the population
+         * separately, adding both into yields_ -- see
          * lastYieldTime_'s own comment for why this accumulates onto
          * yields_ rather than overwriting it, unlike computeSpec()/
          * computePhot()/computeLbol().
