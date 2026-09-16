@@ -2012,6 +2012,237 @@ static auto testYieldsRateMultiFeh() -> int
     return 0;
 }
 
+// Verify Galaxy::computeYields()'s clustered-population share: with
+// f_cluster = 1 (every star clustered, so fieldYields_ and the
+// continuous-population integral both stay exactly zero -- see
+// computeYields()'s own header comment), galaxy.yields() should equal
+// the sum of Cluster::yields()'s own cumulative total over every
+// cluster in clusters() and disruptedClusters(), bit for bit --
+// calling cluster.yields() again here after galaxy.yields() already
+// has is safe/idempotent (its own lastYieldTime_ is already at
+// curTime_, so it just returns the cached total, not recomputing it).
+// Reuses testYieldsRateHydrogenOrderOfMagnitude()'s own yields setup.
+static auto testGalaxyYieldsClusteredOnly() -> int
+{
+    constexpr double age = 1e8;
+
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFile);
+        inputDeck.at_path("clusters").as_table()->insert_or_assign("f_cluster", 1.0);
+        // A fixed 1e4 Msun cluster mass (a delta-function CMF, like
+        // testCluster.cpp's own testClusterYieldsStochastic()) rather
+        // than testGalaxyDynamicsCMF.toml's own 100-1000 Msun power law
+        // -- clusters that small essentially never sample a star above
+        // the yield channels' own 13 Msun floor at all (verified: with
+        // the small CMF, the single most massive star drawn across
+        // every cluster this test formed topped out at 11.4 Msun), so
+        // every cluster needs to be big enough to reliably sample some.
+        inputDeck.at_path("clusters").as_table()->insert_or_assign("CMF", 1e4);
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{ { "channel", "ccsn" }, { "model", "kobayashi_test" } } },
+            { "channel2", toml::table{ { "channel", "ccsn" }, { "model", "sukhbold_test" } } },
+            { "channel3", toml::table{ { "channel", "massive_star_winds" }, { "model", "sukhbold_test" } } },
+            { "channel_decomposed", false },
+            { "registry", std::string("tests/yields/assets/yields.toml") },
+        });
+        const io::SimControls controls(inputDeck);
+
+        utils::rng().seed(rngSeed);
+        core::Galaxy galaxy(controls);
+        galaxy.advance(age);
+
+        if (galaxy.clusters().empty() && galaxy.disruptedClusters().empty())
+        {
+            std::cerr << "testGalaxy: yieldsRateClusteredOnly: expected at "
+                "least one cluster to have formed by age " << age << "\n";
+            return 1;
+        }
+
+        const auto& actual = galaxy.yields();
+
+        std::vector<double> expected(actual.size(), 0.0);
+        for (auto& cluster : galaxy.clusters())
+        {
+            const auto& cy = cluster.yields();
+            for (std::size_t k = 0; k < cy.size(); ++k) { expected.at(k) += cy.at(k); }
+        }
+        for (auto& cluster : galaxy.disruptedClusters())
+        {
+            const auto& cy = cluster.yields();
+            for (std::size_t k = 0; k < cy.size(); ++k) { expected.at(k) += cy.at(k); }
+        }
+
+        if (actual.size() != expected.size())
+        {
+            std::cerr << "testGalaxy: yieldsRateClusteredOnly: size mismatch: "
+                << actual.size() << " vs " << expected.size() << "\n";
+            return 1;
+        }
+        for (std::size_t k = 0; k < expected.size(); ++k)
+        {
+            if (actual.at(k) != expected.at(k))
+            {
+                std::cerr << "testGalaxy: yieldsRateClusteredOnly: entry " << k <<
+                    ": galaxy.yields() = " << actual.at(k) << ", expected " <<
+                    expected.at(k) << "\n";
+                return 1;
+            }
+        }
+        if (std::reduce(expected.begin(), expected.end(), 0.0) <= 0.0)
+        {
+            std::cerr << "testGalaxy: yieldsRateClusteredOnly: expected a "
+                "positive total yield\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testGalaxy: yieldsRateClusteredOnly test failed: " << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Verify Galaxy::computeYields()'s field-star and purely-continuous
+// shares together (f_cluster = 0, so clusters()/disruptedClusters()
+// stay empty and yields_ == fieldYields_ exactly): independently
+// recomputes the field-star share as the sum of
+// controls.yields()->yieldSum(mass_, feh_) over every star in
+// deadFieldStars() (the same per-star call computeYields() itself
+// makes), and the continuous share as a composite Simpson's-rule
+// integral of yieldsRate(t) -- a different quadrature from
+// computeYields()'s own adaptive Gauss-Kronrod utils::GKIntegrator,
+// so this is a genuine independent check, not a call into the same
+// code path. min_stoch_mass = 50 (unlike
+// testYieldsRateHydrogenOrderOfMagnitude()'s 120) is chosen to fall
+// strictly inside the yield channels' own covered mass range
+// ([13, 100], see tests/yields/assets/yields.toml), splitting it
+// between the continuous population ([imf().getMin(), 50], including
+// the yield-covered [13, 50]) and field stars ([50, imf().getMax()]
+// = [50, 120], including the yield-covered [50, 100]) -- so both
+// shares are actually exercised with nonzero contributions, not just
+// the zero one either would trivially get called with no yield
+// coverage at all.
+static auto testGalaxyYieldsFieldAndContinuous() -> int
+{
+    constexpr double age = 1e8;
+    constexpr std::size_t nSimpson = 2000; // even, for composite Simpson's rule
+    // Composite Simpson's rule vs. adaptive Gauss-Kronrod -- looser than
+    // a typical cross-check because yieldsRate(t) is not smooth here: as
+    // t increases, the stellar mass corresponding to that lifetime
+    // (massAndDerivFromLifetime()) sweeps across the yield channels' own
+    // tabulated mass boundaries (13/18/18.2/100 Msun, see
+    // tests/yields/assets/yields.toml), each a small jump in
+    // hasYield()'s own coverage and so a kink in yieldsRate(t) itself --
+    // composite Simpson only converges linearly (not its usual 4th
+    // order) across a kink, so 0.1%-level agreement isn't reachable at a
+    // sample count that still runs in reasonable time; empirically, the
+    // observed disagreement dropped from ~1.2% at nSimpson = 200 to
+    // ~0.27% at 2000 (i.e. shrinking, not a fixed offset -- consistent
+    // with discretization error, not a real bug), so 0.5% comfortably
+    // covers it with margin.
+    constexpr double relTol = 5e-3;
+
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFile);
+        inputDeck.at_path("clusters").as_table()->insert_or_assign("f_cluster", 0.0);
+        inputDeck.at_path("stars").as_table()->insert_or_assign("min_stoch_mass", 50.0);
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{ { "channel", "ccsn" }, { "model", "kobayashi_test" } } },
+            { "channel2", toml::table{ { "channel", "ccsn" }, { "model", "sukhbold_test" } } },
+            { "channel3", toml::table{ { "channel", "massive_star_winds" }, { "model", "sukhbold_test" } } },
+            { "channel_decomposed", false },
+            { "registry", std::string("tests/yields/assets/yields.toml") },
+        });
+        const io::SimControls controls(inputDeck);
+
+        if (controls.yields() == nullptr)
+        {
+            std::cerr << "testGalaxy: yieldsRateFieldAndContinuous: expected "
+                "yields() non-null\n";
+            return 1;
+        }
+        const auto& isotopes = controls.yields()->isotopes();
+        const auto h1It = std::ranges::find_if(isotopes,
+            [](const auto& iso) { return iso.get().Z() == 1 && iso.get().A() == 1; });
+        if (h1It == isotopes.end())
+        {
+            std::cerr << "testGalaxy: yieldsRateFieldAndContinuous: expected "
+                "hydrogen (Z=1, A=1) among isotopes()\n";
+            return 1;
+        }
+        const auto h1Idx = static_cast<std::size_t>(std::distance(isotopes.begin(), h1It));
+
+        utils::rng().seed(rngSeed);
+        core::Galaxy galaxy(controls);
+        galaxy.advance(age);
+
+        if (galaxy.deadFieldStars().empty())
+        {
+            std::cerr << "testGalaxy: yieldsRateFieldAndContinuous: expected "
+                "at least one dead field star by age " << age << "\n";
+            return 1;
+        }
+
+        double fieldH1 = 0.0;
+        for (const auto& fs : galaxy.deadFieldStars())
+        {
+            fieldH1 += controls.yields()->yieldSum(fs.mass_, fs.feh_).at(h1Idx);
+        }
+        if (!(fieldH1 > 0.0))
+        {
+            std::cerr << "testGalaxy: yieldsRateFieldAndContinuous: expected "
+                "a positive field-star hydrogen yield, got " << fieldH1 << "\n";
+            return 1;
+        }
+
+        // Composite Simpson's rule for int_0^age yieldsRate(t)[h1Idx] dt,
+        // independent of computeYields()'s own adaptive quadrature. The
+        // t = 0 endpoint is taken as exactly 0 rather than calling
+        // yieldsRate(0.0) -- analytically correct (no star has had time
+        // to die yet), and avoids yieldsRate(t, feh)'s own internal
+        // integrator.integrate(0.0, 0.0, ...) zero-width-interval edge
+        // case, whose relative-error check divides by a zero quadrature
+        // estimate.
+        const double h = age / static_cast<double>(nSimpson);
+        double contH1 = 0.0 + galaxy.yieldsRate(age).at(h1Idx);
+        for (std::size_t i = 1; i < nSimpson; ++i)
+        {
+            const double t = static_cast<double>(i) * h;
+            const double weight = (i % 2 == 0) ? 2.0 : 4.0;
+            contH1 += weight * galaxy.yieldsRate(t).at(h1Idx);
+        }
+        contH1 *= h / 3.0;
+        if (!(contH1 > 0.0))
+        {
+            std::cerr << "testGalaxy: yieldsRateFieldAndContinuous: expected "
+                "a positive continuous-population hydrogen yield, got " <<
+                contH1 << "\n";
+            return 1;
+        }
+
+        const double expectedH1 = fieldH1 + contH1;
+        const double actualH1 = galaxy.yields().at(h1Idx);
+        if (std::abs(actualH1 - expectedH1) > relTol * std::abs(expectedH1))
+        {
+            std::cerr << "testGalaxy: yieldsRateFieldAndContinuous: "
+                "galaxy.yields()[h1] = " << actualH1 << ", expected " <<
+                expectedH1 << " (field " << fieldH1 << " + continuous " <<
+                contH1 << ")\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testGalaxy: yieldsRateFieldAndContinuous test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
 auto testGalaxy() -> int
 {
     int result = testGalaxyBasics();
@@ -2032,6 +2263,8 @@ auto testGalaxy() -> int
     result += testYieldsRateHydrogenOrderOfMagnitude();
     result += testYieldsRateSingleFehDelegates();
     result += testYieldsRateMultiFeh();
+    result += testGalaxyYieldsClusteredOnly();
+    result += testGalaxyYieldsFieldAndContinuous();
 
     try
     {

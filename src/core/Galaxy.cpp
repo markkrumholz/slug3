@@ -15,6 +15,7 @@
 #include "../pdfs/PDFReflect.hpp"
 #include "../phot/FilterCollection.hpp"
 #include "../tracks/TrackCommons.hpp"
+#include "../utils/GKIntegrator.hpp"
 #include "../utils/GKIntegratorData.hpp"
 #include "../utils/PDFIntegrator.hpp"
 #include "../utils/UniqueIDManager.hpp"
@@ -666,10 +667,81 @@ auto core::Galaxy::yieldsRate(const double t) const -> std::vector<double>
     return result;
 }
 
-// Update yields_/fieldYields_ -- currently a no-op stub, see this
-// method's own header comment
+// Update yields_/fieldYields_ from the stars that died since
+// lastYieldTime_ -- see this method's own header comment for the
+// three populations summed (clustered, individually-tracked field
+// stars, and the purely continuous population), and Cluster::
+// computeYields()'s own comment for the same null-guard/accumulation
+// pattern this mirrors one level up
 void core::Galaxy::computeYields()
 {
+    const auto& sc = controls_.get();
+    const auto* yields = sc.yields();
+    if (yields == nullptr) { return; }
+
+    // yields_ itself is rebuilt from scratch every call (like lbol_,
+    // unlike fieldYields_) because clusters_/disruptedClusters_ each
+    // keep growing their own cumulative yields() total on their own,
+    // so it must be re-summed here rather than accumulated onto
+    yields_.assign(yields_.size(), 0.0);
+    for (auto& cluster : clusters_)
+    {
+        const auto& clusterYields = cluster.yields();
+        for (std::size_t k = 0; k < clusterYields.size(); ++k)
+        {
+            yields_[k] += clusterYields[k]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,cppcoreguidelines-pro-bounds-constant-array-index) -- yields_ and clusterYields are both sized identically (isotopes, times channels if decomposed) by construction
+        }
+    }
+    for (auto& cluster : disruptedClusters_)
+    {
+        const auto& clusterYields = cluster.yields();
+        for (std::size_t k = 0; k < clusterYields.size(); ++k)
+        {
+            yields_[k] += clusterYields[k]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,cppcoreguidelines-pro-bounds-constant-array-index) -- see above
+        }
+    }
+
+    // Individually-tracked field stars that died during this step
+    // alone (deadFieldStars_ only ever holds those, mirroring
+    // Cluster::mDead_'s own per-step convention) -- accumulated onto
+    // fieldYields_ rather than recomputed, since earlier steps' own
+    // dead field stars are no longer available to re-sum
+    const bool decomposed = sc.yieldsChannelDecomposed();
+    for (const auto& fieldStar : deadFieldStars_)
+    {
+        const auto contribution = decomposed
+            ? yields->yield(fieldStar.mass_, fieldStar.feh_).second
+            : yields->yieldSum(fieldStar.mass_, fieldStar.feh_);
+        for (std::size_t k = 0; k < contribution.size(); ++k)
+        {
+            fieldYields_[k] += contribution[k]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,cppcoreguidelines-pro-bounds-constant-array-index) -- fieldYields_ and contribution are both sized identically by construction
+        }
+    }
+
+    // Purely continuous (non-clustered, below minStochMass()) share:
+    // integrate yieldsRate(t)'s own instantaneous rate directly over
+    // real time from lastYieldTime_ to curTime_ -- skipped whenever
+    // there is no such population at all, either because every
+    // non-clustered star is stochastically sampled (minStochMass() ==
+    // 0) or because there is no non-clustered population to begin
+    // with (fCluster() == 1)
+    if (sc.minStochMass() > 0.0 && sc.fCluster() < 1.0)
+    {
+        using YieldsRateFn = std::vector<double> (Galaxy::*)(double) const;
+        const utils::GKIntegrator<YieldsRateFn, utils::GKOrder::GK15> integrator(
+            static_cast<YieldsRateFn>(&Galaxy::yieldsRate), fieldYields_.size(),
+            sc.intMaxIter(), sc.intAbsTol(), sc.intRelTol());
+        const auto result = integrator.integrate(lastYieldTime_, curTime_, this);
+        for (std::size_t k = 0; k < result.size(); ++k)
+        {
+            fieldYields_[k] += result[k] * (1.0 - sc.fCluster()); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,cppcoreguidelines-pro-bounds-constant-array-index) -- fieldYields_ and result are both sized identically by construction
+        }
+    }
+
+    for (std::size_t k = 0; k < yields_.size(); ++k)
+    {
+        yields_[k] += fieldYields_[k]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,cppcoreguidelines-pro-bounds-constant-array-index) -- yields_ and fieldYields_ are both sized identically by construction
+    }
 }
 
 auto core::Galaxy::getFieldStarProps() const -> std::vector<specsyn::Specsyn::StarData>

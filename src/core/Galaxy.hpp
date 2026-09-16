@@ -1005,15 +1005,39 @@ namespace core
         /**
          * @brief Update yields_/fieldYields_ from the stars that died since lastYieldTime_
          * @details
-         * Currently a no-op stub -- leaves yields_/fieldYields_ at
-         * whatever they were last set to (the all-zero vectors they
-         * were sized to at construction, until this is implemented). A
-         * following commit will give this a real body, mirroring
-         * Cluster::computeYields()'s own null-guard pattern and
-         * summing/integrating over clusters_/disruptedClusters_,
-         * fieldStars_/deadFieldStars_, and the purely continuous
-         * population, the same way computeSpec()/computeLbol() already
-         * do for their own quantities.
+         * A no-op if controls().yields() is null. Otherwise, mirrors
+         * Cluster::computeYields()'s own null-guard pattern one level
+         * up, summing/integrating over three populations in turn:
+         *
+         * - Clustered stars: yields_ is rebuilt from scratch (like
+         *   lbol_, unlike fieldYields_ below) by summing
+         *   Cluster::yields()'s own cumulative total over every
+         *   cluster in clusters_ and disruptedClusters_, since each
+         *   cluster keeps growing that total on its own rather than
+         *   reporting only what died this step.
+         * - Individually-tracked field stars: every star in
+         *   deadFieldStars_ (which, like Cluster::mDead_, only ever
+         *   holds the stars that died during the most recent
+         *   advance() call) has controls().yields()'s own yield() (if
+         *   controls().yieldsChannelDecomposed()) or yieldSum()
+         *   (otherwise) evaluated at its own mass_/feh_, added onto
+         *   fieldYields_.
+         * - The purely continuous (non-clustered, below
+         *   minStochMass()) population: skipped entirely if
+         *   minStochMass() == 0 (no such population exists at all) or
+         *   fCluster() == 1 (no non-clustered population at all).
+         *   Otherwise, yieldsRate(double)'s own instantaneous rate is
+         *   integrated directly over real time from lastYieldTime_ to
+         *   curTime_ via a utils::GKIntegrator (unweighted -- unlike
+         *   yieldsRate()'s own internal use of utils::PDFIntegrator to
+         *   weight by the SF history, this integral is already over a
+         *   rate, not a rate density), multiplied by (1 - fCluster())
+         *   (the non-clustered share), and added onto fieldYields_.
+         *
+         * fieldYields_ accumulates across calls (never zeroed) since,
+         * unlike the clustered total, earlier steps' own dead field
+         * stars are not available to re-sum from scratch; yields_'s
+         * own final value is the clustered total plus fieldYields_.
          */
         void computeYields();
 
