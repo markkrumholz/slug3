@@ -295,7 +295,7 @@ namespace utils
             // divide 0.0 by 0.0 (a NaN that adaptive bisection would
             // otherwise need to somehow terminate on), so short-circuit
             // here instead of relying on that division's own behavior.
-            if (a == b) { return std::vector<double>(nInt_, 0.0); }
+            if (a == b) { return std::vector<double>(nInt_, 0.0); } // NOLINT(modernize-return-braced-init-list) -- a braced return ({nInt_, 0.0}) would call vector's initializer_list constructor instead of its (count, value) one, silently returning the 2-element vector {double(nInt_), 0.0} instead of nInt_ copies of 0.0
 
             // args is forwarded exactly once, into this tuple, for the
             // same reason quadSingle() itself does this -- see its own
