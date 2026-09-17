@@ -71,7 +71,7 @@ Fe_H = [-3.0, -2.0, -1.0, 0.0]
 masses = [13.0, 15.0, 20.0, 25.0, 30.0, 40.0, 60.0, 80.0, 120.0]
 
 [agb]
-models = ["doherty14"]
+models = ["doherty14", "karakas-pmz0", "karakas-pmz1e-3", "karakas-pmz1e-4", "karakas-pmz2e-3", "karakas-pmz2e-4", "karakas-pmz4e-3", "karakas-pmz5e-4", "karakas-pmz6e-3"]
 
 [agb.doherty14]
 reference = "Doherty, Gil-Pons, Lau, et al. 2014, MNRAS, 437, 195"
@@ -79,3 +79,59 @@ reference_url = "https://ui.adsabs.harvard.edu/abs/2014MNRAS.437..195D/abstract"
 file = "doherty14.h5"
 Fe_H = [-0.6989700043360187, -0.3979400086720376, 0.0]
 masses = [6.5, 7.0, 7.5, 8.0, 8.5, 9.0]
+
+[agb.karakas-pmz0]
+reference = ["Karakas, A. I. & Lugaro, M. 2016, ApJ, 825, 26", "Karakas, A. I., Lugaro, M., Carlos, M., et al. 2018, MNRAS, 477, 421"]
+reference_url = ["https://ui.adsabs.harvard.edu/abs/2016ApJ...825...26K/abstract", "https://ui.adsabs.harvard.edu/abs/2018MNRAS.477..421K/abstract"]
+file = "karakas-pmz0.h5"
+Fe_H = [-1.845098040014257, -1.3679767852945945, -0.6989700043360189, -0.3010299956639812, 0.0, 0.3309932190414244]
+masses = [1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.36, 3.0, 3.75, 4.0, 4.5, 4.75, 5.0, 5.5, 6.0, 6.5, 7.0, 7.5, 8.0]
+
+[agb.karakas-pmz1e-4]
+reference = ["Karakas, A. I. & Lugaro, M. 2016, ApJ, 825, 26", "Karakas, A. I., Lugaro, M., Carlos, M., et al. 2018, MNRAS, 477, 421"]
+reference_url = ["https://ui.adsabs.harvard.edu/abs/2016ApJ...825...26K/abstract", "https://ui.adsabs.harvard.edu/abs/2018MNRAS.477..421K/abstract"]
+file = "karakas-pmz1e-4.h5"
+Fe_H = [-1.845098040014257, -1.3679767852945945, -0.6989700043360189, -0.3010299956639812, 0.0, 0.3309932190414244]
+masses = [2.0, 2.36, 3.0, 3.25, 3.5, 3.75, 4.0, 4.25, 4.5, 4.75, 5.0]
+
+[agb.karakas-pmz2e-4]
+reference = ["Karakas, A. I. & Lugaro, M. 2016, ApJ, 825, 26", "Karakas, A. I., Lugaro, M., Carlos, M., et al. 2018, MNRAS, 477, 421"]
+reference_url = ["https://ui.adsabs.harvard.edu/abs/2016ApJ...825...26K/abstract", "https://ui.adsabs.harvard.edu/abs/2018MNRAS.477..421K/abstract"]
+file = "karakas-pmz2e-4.h5"
+Fe_H = [0.0]
+masses = [2.0, 3.0]
+
+[agb.karakas-pmz5e-4]
+reference = ["Karakas, A. I. & Lugaro, M. 2016, ApJ, 825, 26", "Karakas, A. I., Lugaro, M., Carlos, M., et al. 2018, MNRAS, 477, 421"]
+reference_url = ["https://ui.adsabs.harvard.edu/abs/2016ApJ...825...26K/abstract", "https://ui.adsabs.harvard.edu/abs/2018MNRAS.477..421K/abstract"]
+file = "karakas-pmz5e-4.h5"
+Fe_H = [-1.845098040014257, -0.6989700043360189]
+masses = [2.75, 3.0, 3.25, 3.5, 3.75, 4.0]
+
+[agb.karakas-pmz1e-3]
+reference = ["Karakas, A. I. & Lugaro, M. 2016, ApJ, 825, 26", "Karakas, A. I., Lugaro, M., Carlos, M., et al. 2018, MNRAS, 477, 421"]
+reference_url = ["https://ui.adsabs.harvard.edu/abs/2016ApJ...825...26K/abstract", "https://ui.adsabs.harvard.edu/abs/2018MNRAS.477..421K/abstract"]
+file = "karakas-pmz1e-3.h5"
+Fe_H = [-1.845098040014257, -1.3679767852945945, -1.146128035678238, -0.6989700043360189, -0.3010299956639812, 0.0, 0.3309932190414244]
+masses = [1.0, 1.15, 1.25, 1.5, 1.7, 1.75, 1.85, 2.0, 2.25, 2.36, 2.5, 2.75, 3.0, 3.25, 3.5, 3.75, 4.0, 4.25, 4.5]
+
+[agb.karakas-pmz2e-3]
+reference = ["Karakas, A. I. & Lugaro, M. 2016, ApJ, 825, 26", "Karakas, A. I., Lugaro, M., Carlos, M., et al. 2018, MNRAS, 477, 421"]
+reference_url = ["https://ui.adsabs.harvard.edu/abs/2016ApJ...825...26K/abstract", "https://ui.adsabs.harvard.edu/abs/2018MNRAS.477..421K/abstract"]
+file = "karakas-pmz2e-3.h5"
+Fe_H = [-1.845098040014257, -1.3679767852945945, -0.6989700043360189, -0.3010299956639812, 0.0, 0.3309932190414244]
+masses = [0.9, 0.95, 1.0, 1.1, 1.15, 1.2, 1.25, 1.5, 1.7, 1.75, 1.9, 2.0, 2.1, 2.25, 2.36, 2.5, 2.75, 3.0, 3.25]
+
+[agb.karakas-pmz4e-3]
+reference = ["Karakas, A. I. & Lugaro, M. 2016, ApJ, 825, 26", "Karakas, A. I., Lugaro, M., Carlos, M., et al. 2018, MNRAS, 477, 421"]
+reference_url = ["https://ui.adsabs.harvard.edu/abs/2016ApJ...825...26K/abstract", "https://ui.adsabs.harvard.edu/abs/2018MNRAS.477..421K/abstract"]
+file = "karakas-pmz4e-3.h5"
+Fe_H = [-1.3679767852945945, -0.6989700043360189, 0.0]
+masses = [1.7, 2.0, 2.25, 2.5]
+
+[agb.karakas-pmz6e-3]
+reference = ["Karakas, A. I. & Lugaro, M. 2016, ApJ, 825, 26", "Karakas, A. I., Lugaro, M., Carlos, M., et al. 2018, MNRAS, 477, 421"]
+reference_url = ["https://ui.adsabs.harvard.edu/abs/2016ApJ...825...26K/abstract", "https://ui.adsabs.harvard.edu/abs/2018MNRAS.477..421K/abstract"]
+file = "karakas-pmz6e-3.h5"
+Fe_H = [-0.6989700043360189]
+masses = [1.15, 1.25, 1.5, 1.75, 2.0]
