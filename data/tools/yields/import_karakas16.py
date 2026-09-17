@@ -62,6 +62,10 @@ Mass grid:
 When overshoot and no-overshoot variants exist for the same (mass, Z, pmz),
 only the no-overshoot variant is kept (it is processed first in sorted order).
 
+For z0002models and z0028models, some masses have both a b95massloss and a
+vw93massloss file.  Where both exist for the same (mass, pmz), the b95massloss
+file is used (per advice from A. Karakas); the vw93massloss file is skipped.
+
 Run from the repository root:
 
     python3 data/tools/yields/import_karakas16.py \\
@@ -100,12 +104,13 @@ REFERENCE_URLS = [
     "https://ui.adsabs.harvard.edu/abs/2018MNRAS.477..421K/abstract",
 ]
 
-# Subdirectories to read from ext-dir, with their known Z values.
+# Subdirectories to read from ext-dir, with their known Z values and whether
+# b95massloss is preferred over vw93massloss when both variants are present.
 EXT_SUBDIRS = [
-    ("z0002models/scaled_solar/stellar_yields", 0.0002),
-    ("z0006models/yields/y0.24", 0.0006),
-    ("z001models/2019-new-Z=0.001models/yields", 0.001),
-    ("z0028models/isotopic_yields", 0.0028),
+    ("z0002models/scaled_solar/stellar_yields", 0.0002, True),
+    ("z0006models/yields/y0.24", 0.0006, False),
+    ("z001models/2019-new-Z=0.001models/yields", 0.001, False),
+    ("z0028models/isotopic_yields", 0.0028, True),
 ]
 
 # Subdirectories to read from slug2-dir, with their known Z values.
@@ -351,6 +356,39 @@ def parse_headerless_file(
 # Record collection
 # ---------------------------------------------------------------------------
 
+def _filter_prefer_b95(src: pathlib.Path) -> list[pathlib.Path]:
+    """Return sorted files from *src*, skipping vw93 files where a b95 file
+    exists for the same (mass, pmz).  Files with neither label are kept as-is.
+    """
+    all_files = sorted(src.glob("m*.dat"))
+    b95_files = [f for f in all_files if "b95" in f.name]
+    if not b95_files:
+        return all_files
+
+    # Parse headers of b95 files to build (mass, pmz) exclusion set
+    b95_keys: set[tuple[float, float]] = set()
+    for path in b95_files:
+        rec = parse_standard_file(path)
+        if rec is not None:
+            b95_keys.add((rec.mass, rec.pmz))
+
+    # Keep all non-vw93 files; keep vw93 only when no b95 covers that (mass, pmz)
+    result: list[pathlib.Path] = []
+    for path in all_files:
+        if "vw93" not in path.name:
+            result.append(path)
+            continue
+        rec = parse_standard_file(path)
+        if rec is not None and (rec.mass, rec.pmz) in b95_keys:
+            warnings.warn(
+                f"Skipping {path.name}: b95massloss variant preferred "
+                f"for mass={rec.mass}, pmz={rec.pmz}"
+            )
+        else:
+            result.append(path)
+    return result
+
+
 def collect_records(
     ext_dir: pathlib.Path,
     slug2_dir: pathlib.Path,
@@ -359,12 +397,13 @@ def collect_records(
     records: list[YieldRecord] = []
 
     # files_for_external sources (standard format)
-    for subdir, _z in EXT_SUBDIRS:
+    for subdir, _z, prefer_b95 in EXT_SUBDIRS:
         src = ext_dir / subdir
         if not src.is_dir():
             warnings.warn(f"Directory not found, skipping: {src}")
             continue
-        for path in sorted(src.glob("m*.dat")):
+        files = _filter_prefer_b95(src) if prefer_b95 else sorted(src.glob("m*.dat"))
+        for path in files:
             rec = parse_standard_file(path)
             if rec is not None:
                 records.append(rec)
