@@ -532,9 +532,11 @@ void io::SimControls::readOutput(const toml::table& inputDeck)
     writeCluster_ = readWriteFlag(inputDeck, "output.write_cluster");
     writeClusterSpec_ = readWriteFlag(inputDeck, "output.write_cluster_spec");
     writeClusterPhot_ = readWriteFlag(inputDeck, "output.write_cluster_phot");
+    writeClusterYields_ = readWriteFlag(inputDeck, "output.write_cluster_yields");
     writeGalaxy_ = readWriteFlag(inputDeck, "output.write_galaxy");
     writeGalaxySpec_ = readWriteFlag(inputDeck, "output.write_galaxy_spec");
     writeGalaxyPhot_ = readWriteFlag(inputDeck, "output.write_galaxy_phot");
+    writeGalaxyYields_ = readWriteFlag(inputDeck, "output.write_galaxy_yields");
 }
 
 // Set the [Fe/H] distribution, recomputing tracks2D() (constFeHTracks_)
@@ -1016,6 +1018,26 @@ void io::SimControls::readYields(const toml::table& inputDeck)
         inputDeck, "yields.channel_decomposed").value_or(true);
 
     if (yieldChannels_.empty()) { return; }
+
+    // Sanity check: if yield channels were requested but the computed
+    // yields would never be written anywhere, that's almost certainly
+    // a mistake -- mirrors OutputManager's own check for phot.filters
+    // vs. writeClusterPhot()/writeGalaxyPhot(). writeGalaxyYields_ is
+    // meaningless for a cluster-type simulation (there is no Galaxy,
+    // and so no galaxy_yields group/file, in that case), so it cannot
+    // rescue the yields from going unwritten there the way it could in
+    // a galaxy-type simulation -- writeClusterYields_ being false is
+    // fatal on its own for a cluster-type simulation.
+    if (!writeClusterYields_ &&
+        (!writeGalaxyYields_ || simType_ == SimType::cluster))
+    {
+        throw std::runtime_error(
+            "SimControls: yield channels were given, but "
+            "output.write_cluster_yields and output.write_galaxy_yields "
+            "are both false (or this is a cluster-type simulation and "
+            "output.write_cluster_yields is false), so the computed "
+            "yields would never be written");
+    }
 
     // yields.registry: optional override of the default yield registry
     const auto registryInput = utils::getTOMLKeyWithError<std::string>(inputDeck, "yields.registry");

@@ -291,6 +291,23 @@ namespace io
         [[nodiscard]] auto writeGalaxyPhot() const { return writeGalaxyPhot_; }
 
         /**
+         * @brief Whether the cluster_yields group/file should be written
+         * @return True (the default) unless output.write_cluster_yields
+         *   was set to false in the input deck; see OutputManager's
+         *   own constructor for how this is enforced
+         */
+        [[nodiscard]] auto writeClusterYields() const { return writeClusterYields_; }
+
+        /**
+         * @brief Whether the galaxy_yields group/file should be written
+         * @return True (the default) unless output.write_galaxy_yields
+         *   was set to false in the input deck; only meaningful for a
+         *   galaxy-type simulation -- see OutputManager's own
+         *   constructor for how this is enforced
+         */
+        [[nodiscard]] auto writeGalaxyYields() const { return writeGalaxyYields_; }
+
+        /**
          * @brief Set the relative tolerance for PDF integration
          * @param tol New relative tolerance
          * @details
@@ -1146,11 +1163,13 @@ namespace io
          * @brief Parse the output content flags from the input deck
          * @param inputDeck A toml table holding the input deck
          * @details
-         * Reads the six optional output.write_cluster/
-         * write_cluster_spec/write_cluster_phot/write_galaxy/
-         * write_galaxy_spec/write_galaxy_phot keys (each defaulting to
-         * true) into writeCluster_/writeClusterSpec_/writeClusterPhot_/
-         * writeGalaxy_/writeGalaxySpec_/writeGalaxyPhot_. Formerly done
+         * Reads the eight optional output.write_cluster/
+         * write_cluster_spec/write_cluster_phot/write_cluster_yields/
+         * write_galaxy/write_galaxy_spec/write_galaxy_phot/
+         * write_galaxy_yields keys (each defaulting to true) into
+         * writeCluster_/writeClusterSpec_/writeClusterPhot_/
+         * writeClusterYields_/writeGalaxy_/writeGalaxySpec_/
+         * writeGalaxyPhot_/writeGalaxyYields_. Formerly done
          * by OutputManager's own constructor directly from the input
          * deck; moved here so that a SimControls built without an
          * input deck at all (e.g. from Python) still carries these
@@ -1247,6 +1266,18 @@ namespace io
          * true) into yieldsChannelDecomposed_, regardless of whether
          * yieldChannels_ ends up empty -- see its own observer's
          * comment for what it controls.
+         *
+         * Finally, if yieldChannels_ ends up non-empty, checks that the
+         * computed yields would actually be written somewhere: throws
+         * if both writeClusterYields() and writeGalaxyYields() are
+         * false (mirrors OutputManager's own sanity check for
+         * phot.filters vs. writeClusterPhot()/writeGalaxyPhot()), or if
+         * writeClusterYields() alone is false in a cluster-type
+         * simulation, since writeGalaxyYields() is meaningless there
+         * (there is no Galaxy, and so no galaxy_yields group/file, for
+         * a cluster-type simulation) and so cannot rescue the yields
+         * from going unwritten the way it could in a galaxy-type
+         * simulation.
          */
         void readYields(const toml::table& inputDeck);
 
@@ -1333,6 +1364,8 @@ namespace io
         bool writeGalaxy_ = true;       /**< Whether to write the galaxy group/file (galaxy-type simulations only); see writeGalaxy() */
         bool writeGalaxySpec_ = true;   /**< Whether to write the galaxy_spectra group/file (galaxy-type simulations only); see writeGalaxySpec() */
         bool writeGalaxyPhot_ = true;   /**< Whether to write the galaxy_phot group/file (galaxy-type simulations only); see writeGalaxyPhot() */
+        bool writeClusterYields_ = true; /**< Whether to write the cluster_yields group/file; see writeClusterYields() */
+        bool writeGalaxyYields_ = true; /**< Whether to write the galaxy_yields group/file (galaxy-type simulations only); see writeGalaxyYields() */
 
         // Physics settings
         pdfs::PDF imf_;            /**< The IMF to use for the simulation */

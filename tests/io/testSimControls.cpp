@@ -1173,6 +1173,133 @@ static auto testSimControlsYields() -> int
     return result;
 }
 
+// Verify writeClusterYields()/writeGalaxyYields() default to true, are
+// parsed from output.write_cluster_yields/output.write_galaxy_yields
+// exactly like the other six output.write_* keys (see readOutput()'s
+// own comment), and that readYields() throws if yield channels were
+// requested but both are false, or if writeClusterYields() alone is
+// false in a cluster-type simulation (where writeGalaxyYields() is
+// meaningless and so cannot rescue the yields from going unwritten).
+static auto testSimControlsWriteYields() -> int
+{
+    constexpr std::string_view galaxyDeck = "tests/core/assets/testGalaxy.in";
+    constexpr std::string_view clusterDeck = "tests/core/assets/testCluster.in";
+    int result = 0;
+
+    // Defaults: both true when no yields.channelN and no write_*_yields
+    // key are given at all
+    try
+    {
+        const toml::table inputDeck = toml::parse_file(galaxyDeck);
+        const io::SimControls controls(inputDeck);
+        if (!controls.writeClusterYields() || !controls.writeGalaxyYields())
+        {
+            std::cerr << "testSimControls: write yields: expected both "
+                "writeClusterYields() and writeGalaxyYields() to default "
+                "to true\n";
+            result = 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: write yields: defaults case failed: "
+            << error.what() << "\n";
+        result = 1;
+    }
+
+    // output.write_cluster_yields = false, no yield channels requested:
+    // parsed straight through to writeClusterYields(), no throw (the
+    // sanity check only fires when yieldChannels() is non-empty)
+    try
+    {
+        toml::table inputDeck = toml::parse_file(galaxyDeck);
+        inputDeck.at_path("output").as_table()->insert("write_cluster_yields", false);
+        const io::SimControls controls(inputDeck);
+        if (controls.writeClusterYields() || !controls.writeGalaxyYields())
+        {
+            std::cerr << "testSimControls: write yields: expected "
+                "writeClusterYields() false, writeGalaxyYields() true, "
+                "after setting only output.write_cluster_yields = false\n";
+            result = 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: write yields: no-channels opt-out "
+            "case failed: " << error.what() << "\n";
+        result = 1;
+    }
+
+    // Yield channels requested, output.write_cluster_yields and
+    // output.write_galaxy_yields both false: throws
+    try
+    {
+        toml::table inputDeck = toml::parse_file(galaxyDeck);
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{
+                { "channel", "ccsn" }, { "model", "sukhbold16" } } },
+        });
+        inputDeck.at_path("output").as_table()->insert("write_cluster_yields", false);
+        inputDeck.at_path("output").as_table()->insert("write_galaxy_yields", false);
+        const io::SimControls controls(inputDeck);
+        std::cerr << "testSimControls: write yields: expected an exception "
+            "when yield channels are given but both write_cluster_yields "
+            "and write_galaxy_yields are false\n";
+        result = 1;
+    }
+    catch (const std::runtime_error&) { /* expected */ }
+
+    // Yield channels requested, only output.write_cluster_yields false,
+    // in a galaxy-type simulation: no throw, since writeGalaxyYields()
+    // (still true) can carry the yields
+    try
+    {
+        toml::table inputDeck = toml::parse_file(galaxyDeck);
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{
+                { "channel", "ccsn" }, { "model", "sukhbold16" } } },
+        });
+        inputDeck.at_path("output").as_table()->insert("write_cluster_yields", false);
+        const io::SimControls controls(inputDeck);
+        if (controls.writeClusterYields() || !controls.writeGalaxyYields())
+        {
+            std::cerr << "testSimControls: write yields: expected "
+                "writeClusterYields() false, writeGalaxyYields() true, "
+                "after setting only output.write_cluster_yields = false\n";
+            result = 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: write yields: galaxy-sim opt-out "
+            "case failed: " << error.what() << "\n";
+        result = 1;
+    }
+
+    // Yield channels requested, only output.write_cluster_yields false,
+    // in a cluster-type simulation: throws, since writeGalaxyYields()
+    // is meaningless there (no Galaxy, so no galaxy_yields group/file)
+    // and so cannot rescue the yields the way it could for a galaxy-type
+    // simulation
+    try
+    {
+        toml::table inputDeck = toml::parse_file(clusterDeck);
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{
+                { "channel", "ccsn" }, { "model", "sukhbold16" } } },
+        });
+        inputDeck.at_path("output").as_table()->insert("write_cluster_yields", false);
+        const io::SimControls controls(inputDeck);
+        std::cerr << "testSimControls: write yields: expected an exception "
+            "when yield channels are given and write_cluster_yields is "
+            "false in a cluster-type simulation\n";
+        result = 1;
+    }
+    catch (const std::runtime_error&) { /* expected */ }
+
+    return result;
+}
+
 // Verify Yields::isotopes() is the deduplicated, sorted union of every
 // loaded channel's own isotopesOrig(), and that Yields::rebuildYieldGrid()
 // (called by the constructor) actually pushes that same list back down
@@ -1949,6 +2076,7 @@ auto testSimControls() -> int
     result += testSimControlsSpectraChained();
     result += testSimControlsExtinctField();
     result += testSimControlsYields();
+    result += testSimControlsWriteYields();
     result += testSimControlsYieldsIsotopes();
     result += testSimControlsYieldsYieldAndSum();
     result += testSimControlsYieldsPartialRange();
