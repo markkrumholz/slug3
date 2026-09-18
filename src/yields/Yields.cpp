@@ -97,8 +97,21 @@ namespace yields
 
     void Yields::setChannels(const std::vector<YieldChannelDescriptor>& descriptors)
     {
-        yieldChannels_.clear();
-        for (const auto& descriptor : descriptors) { addChannel(descriptor); }
+        // Built into a temporary vector, not straight into
+        // yieldChannels_ via addChannel(), so that a descriptor partway
+        // through that fails to load (e.g. an unknown model, or a
+        // [Fe/H] range mismatch -- see the YieldChannel constructor's
+        // own comment) leaves yieldChannels_ completely untouched,
+        // rather than a half-built mix of some new channels and none
+        // of the old ones.
+        std::vector<std::unique_ptr<YieldChannel>> newChannels;
+        newChannels.reserve(descriptors.size());
+        for (const auto& descriptor : descriptors)
+        {
+            newChannels.push_back(std::make_unique<YieldChannel>(
+                descriptor, controls_.fehDist().getMin(), controls_.fehDist().getMax(), registryName_));
+        }
+        yieldChannels_ = std::move(newChannels);
     }
 
     void Yields::rebuildYieldGrid(const IsotopeList& isotopes)

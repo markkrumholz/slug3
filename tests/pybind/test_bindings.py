@@ -2919,6 +2919,21 @@ def test_yields_set_channels_with_descriptor_list(yields_controls):
     assert yields.yieldChannels[0].descriptor().model_name == "kobayashi_test"
 
 
+def test_yields_set_channels_with_descriptor_list_is_transactional(yields_controls):
+    """If a later descriptor in the list fails to load, setChannels()
+    must leave yieldChannels completely unchanged -- not a mix of some
+    newly-built channels and none of the old ones."""
+    yields = slug.Yields(controls=yields_controls, registry_name=YIELDS_REGISTRY)
+    original_names = [d.descriptor().model_name for d in yields.yieldChannels]
+
+    good_descriptor = slug.YieldChannelDescriptor(slug.YieldChannelType.ccsn, "kobayashi_test")
+    bad_descriptor = slug.YieldChannelDescriptor(slug.YieldChannelType.ccsn, "not_a_real_model")
+    with pytest.raises(RuntimeError):
+        yields.setChannels([good_descriptor, bad_descriptor])
+
+    assert [d.descriptor().model_name for d in yields.yieldChannels] == original_names
+
+
 def test_yields_yield_channels_property_setter_dispatches_by_element_type(yields_controls):
     """Assigning to the yieldChannels property has the same effect as
     setChannels(), for either accepted element type, and resynchronizes

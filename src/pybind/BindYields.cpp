@@ -188,8 +188,11 @@ descriptors : list of YieldChannelDescriptor
 Throws
 ------
 RuntimeError
-    If propagated from building any of the fresh channels -- see
-    addChannel()'s own docstring.
+    If any descriptor fails to load (e.g. an unknown channel/model, or
+    a [Fe/H] range mismatch). yieldChannels() is left completely
+    unchanged in this case -- every replacement channel is built into
+    a temporary list first, and yieldChannels() only ever gets
+    replaced wholesale once every descriptor has succeeded.
 
 Details
 -------

@@ -178,17 +178,23 @@ namespace yields
          *   from, in order -- see addChannel(const
          *   YieldChannelDescriptor&)'s own comment for what each one
          *   means and how it's loaded
-         * @throws std::runtime_error if propagated from some
-         *   addChannel(const YieldChannelDescriptor&) call -- see its
-         *   own comment
+         * @throws std::runtime_error if any descriptor fails to load
+         *   (e.g. an unknown channel/model, or a [Fe/H] range mismatch
+         *   -- see the YieldChannel constructor's own comment);
+         *   yieldChannels_ is left completely untouched in this case,
+         *   still describing whatever channels it held before this
+         *   call
          * @details
-         * yieldChannels_ is cleared, then addChannel(descriptor) is
-         * called once per entry of descriptors, in order -- unlike the
-         * std::unique_ptr<YieldChannel> overload, this builds every
-         * channel fresh from disk, rather than moving in already-built
-         * ones. Does not call rebuildYieldGrid(): as with the other
-         * overload, a caller must call it explicitly afterward to
-         * resynchronize isotopes_ onto the new channels.
+         * Every replacement channel is built fresh from disk, in
+         * order, into a temporary vector -- unlike the
+         * std::unique_ptr<YieldChannel> overload, which moves in
+         * already-built ones -- and yieldChannels_ is only replaced
+         * (via a single move) once every descriptor has succeeded, so
+         * a failure partway through never leaves yieldChannels_ a mix
+         * of some new channels and none of the old ones. Does not call
+         * rebuildYieldGrid(): as with the other overload, a caller
+         * must call it explicitly afterward to resynchronize isotopes_
+         * onto the new channels.
          */
         void setChannels(const std::vector<YieldChannelDescriptor>& descriptors);
 
