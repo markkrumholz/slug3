@@ -35,7 +35,10 @@ class slug_yields_reader(slug_group_reader):
     attribute is True, indexing can instead take a (channel, model,
     isotope) triple, letting a caller select just the channel(s)
     and/or model(s) it wants rather than every channel the isotope was
-    tabulated for.
+    tabulated for. A string key naming one of this group's own raw
+    dataset names (e.g. "trial", "time", "uid", "yields") falls
+    through to slug_group_reader's own __getitem__ instead, mirroring
+    slug_phot_reader's identical fallback for a non-filter key.
 
     Parameters
     ----------
@@ -83,7 +86,7 @@ class slug_yields_reader(slug_group_reader):
             self._models: list[str] = list(group.attrs["models"])
             self._decomposed: bool = bool(group.attrs["decomposed"])
 
-        self._registry_name = registry_name
+        self._registry_name: str | None = registry_name
         self._yields: dict[str, u.Quantity] = {}
 
     @property
@@ -220,10 +223,16 @@ class slug_yields_reader(slug_group_reader):
         Parameters
         ----------
         key : str or sequence of 3 str
-            If decomposed is False, must be a bare isotope name (see
-            _resolve_isotope for the accepted spellings); the returned
-            Quantity is 1D, one entry per trial/time, summed over
-            every channel.
+            A string key naming one of this group's own raw dataset
+            names (e.g. "trial", "time", "uid", "yields") falls
+            through to slug_group_reader.__getitem__ instead of being
+            treated as an isotope name -- mirrors slug_phot_reader's
+            own identical fallback for a non-filter key.
+
+            Otherwise, if decomposed is False, must be a bare isotope
+            name (see _resolve_isotope for the accepted spellings);
+            the returned Quantity is 1D, one entry per trial/time,
+            summed over every channel.
 
             If decomposed is True, key can either be:
 
@@ -256,6 +265,8 @@ class slug_yields_reader(slug_group_reader):
             channels/models.
         """
         if isinstance(key, str):
+            if key in self._datasets:
+                return super().__getitem__(key)
             isotope = self._resolve_isotope(key)
             return self._load_isotope(isotope)
 
