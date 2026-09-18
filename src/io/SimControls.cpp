@@ -7,6 +7,10 @@
  */
 
 #include "SimControls.hpp"
+#include "../elem/ElemCommons.hpp"
+#include "../elem/IonizationData.hpp"
+#include "../elem/IsotopeData.hpp"
+#include "../elem/IsotopeTable.hpp"
 #include "../extinct/Extinct.hpp"
 #include "../nebular/Nebular.hpp"
 #include "../nebular/NebularCommons.hpp"
@@ -32,8 +36,11 @@
 #include "../yields/YieldCommons.hpp"
 #include "../yields/Yields.hpp"
 #include <algorithm>
+#include <array>
+#include <cctype>
 #include <cmath>
 #include <cstddef>
+#include <functional>
 #include <iostream>
 #include <iterator>
 #include <limits>
@@ -971,6 +978,68 @@ void io::SimControls::readExtinct(const toml::table& inputDeck)
         model.value(), *this, registryName); // NOLINT(bugprone-unchecked-optional-access) -- required=true above guarantees model has a value or getTOMLKeyWithError already threw
 }
 
+// True if tableSymbol (elem::ionizationData's own two-character atomic
+// symbol, first character always uppercase, second either lowercase or
+// '\0' for a single-letter symbol -- see IonizationData.hpp's own
+// table) matches input case-insensitively, e.g. tableSymbol {'N','a'}
+// matches input "Na", "na", or "NA", but not "N" or "NAA"
+static auto symbolMatches(const std::array<char, 2>& tableSymbol, const std::string& input) -> bool
+{
+    if (input.empty() || input.size() > 2) { return false; }
+    if (std::toupper(static_cast<unsigned char>(input.front())) != tableSymbol[0]) { return false; }
+    if (input.size() == 1) { return tableSymbol[1] == '\0'; }
+    return tableSymbol[1] != '\0' &&
+        std::tolower(static_cast<unsigned char>(input[1])) == tableSymbol[1];
+}
+
+// Parse one yields.isotopes entry (e.g. "H1", "Na22", "fe56") into a
+// reference to its IsotopeData record in the global elem::isotopeTable()
+// -- see readYields()'s own comment for the exact syntax accepted
+static auto parseIsotopeEntry(const std::string& entry) -> std::reference_wrapper<const elem::IsotopeData>
+{
+    std::size_t split = 0;
+    while (split < entry.size() && (std::isalpha(static_cast<unsigned char>(entry[split])) != 0)) { ++split; }
+    const std::string symbolPart = entry.substr(0, split);
+    const std::string massPart = entry.substr(split);
+
+    const bool massIsNumeric = !massPart.empty() && std::ranges::all_of(
+        massPart, [](unsigned char c) { return std::isdigit(c) != 0; });
+    if (symbolPart.empty() || symbolPart.size() > 2 || !massIsNumeric)
+    {
+        throw std::runtime_error(
+            "SimControls: yields.isotopes entry '" + entry + "' is not a valid "
+            "isotope specifier (expected an element symbol followed by a mass "
+            "number, e.g. 'H1', 'Na22', or 'fe56')");
+    }
+
+    unsigned int z = 0;
+    for (std::size_t i = 0; i < static_cast<std::size_t>(elem::Symbols::nElem); ++i)
+    {
+        if (symbolMatches(elem::ionizationData.at(i).symbol(), symbolPart))
+        {
+            z = elem::ionizationData.at(i).Z();
+            break;
+        }
+    }
+    if (z == 0)
+    {
+        throw std::runtime_error(
+            "SimControls: yields.isotopes entry '" + entry + "' names an "
+            "unrecognized element symbol '" + symbolPart + "'");
+    }
+    try
+    {
+        const auto a = static_cast<unsigned int>(std::stoul(massPart));
+        return elem::isotopeTable(z, a);
+    }
+    catch (const std::out_of_range&)
+    {
+        throw std::runtime_error(
+            "SimControls: yields.isotopes entry '" + entry + "' does not "
+            "correspond to a known isotope in the isotope table");
+    }
+}
+
 // Nucleosynthetic yield channel reader
 void io::SimControls::readYields(const toml::table& inputDeck)
 {
@@ -1044,6 +1113,32 @@ void io::SimControls::readYields(const toml::table& inputDeck)
     const std::string registryName = registryInput.value_or(yields::defaultRegistry);
 
     yields_ = std::make_unique<yields::Yields>(*this, registryName);
+
+    // yields.isotopes: optional, restricts the isotopes yields_ ends up
+    // tabulating to the intersection of every loaded channel's own
+    // isotopes and this list -- see parseIsotopeEntry()'s own comment
+    // for the exact "<symbol><mass number>" syntax each entry must
+    // follow (e.g. "H1", "Na22", "fe56"; case-insensitive on the
+    // symbol). Must be an array of strings; absent entirely leaves
+    // yields_->isotopes() at the union rebuildYieldGrid() already
+    // built above, unrestricted.
+    const auto isotopesNode = inputDeck.at_path("yields.isotopes");
+    if (isotopesNode)
+    {
+        const toml::array* const isotopesArr = isotopesNode.as_array();
+        if (isotopesArr == nullptr)
+        {
+            throw std::runtime_error("SimControls: yields.isotopes must be an array of strings");
+        }
+        const auto isotopeNames = utils::stringArrayContents(isotopesArr);
+        yields::IsotopeList isotopes;
+        isotopes.reserve(isotopeNames.size());
+        for (const auto& name : isotopeNames)
+        {
+            isotopes.push_back(parseIsotopeEntry(name));
+        }
+        yields_->rebuildYieldGrid(isotopes);
+    }
 }
 
 // Nebular emission controls and grid reader

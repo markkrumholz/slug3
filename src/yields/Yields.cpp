@@ -65,7 +65,7 @@ namespace yields
         descriptors_.push_back(descriptor);
     }
 
-    void Yields::rebuildYieldGrid()
+    void Yields::rebuildYieldGrid(const IsotopeList& isotopes)
     {
         // Union every loaded channel's own isotopesOrig() into one
         // deduplicated, sorted isotopes_ -- see this method's own
@@ -88,6 +88,22 @@ namespace yields
         const auto dup = std::ranges::unique(isotopes_,
             [](const auto& lhs, const auto& rhs) { return lhs.get() == rhs.get(); });
         isotopes_.erase(dup.begin(), dup.end());
+
+        // If the caller passed a non-empty isotopes list, restrict
+        // isotopes_ down to its intersection with that list -- an
+        // empty isotopes (the default) leaves every channel's own
+        // isotope free to appear, exactly as before this parameter
+        // existed.
+        if (!isotopes.empty())
+        {
+            const auto toDrop = std::ranges::remove_if(isotopes_,
+                [&isotopes](const auto& candidate)
+                {
+                    return std::ranges::none_of(isotopes,
+                        [&candidate](const auto& wanted) { return wanted.get() == candidate.get(); });
+                });
+            isotopes_.erase(toDrop.begin(), toDrop.end());
+        }
 
         // Push isotopes_ (and each channel's own descriptor mMin_/mMax_)
         // back down into every channel, synchronizing them all onto the

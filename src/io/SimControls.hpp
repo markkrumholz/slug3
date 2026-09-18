@@ -1262,6 +1262,20 @@ namespace io
          * left null if yieldChannels_ is empty, since there is nothing
          * for a Yields to chain together in that case.
          *
+         * Once yields_ is built, also reads the optional yields.isotopes
+         * -- an array of strings, each one an element symbol (matched
+         * case-insensitively against elem::Symbols) immediately followed
+         * by a mass number, e.g. "H1", "Na22", or "fe56" (but not "a2",
+         * since "a" is not a valid symbol, nor bare "Na", since it has
+         * no mass number); an entry failing to parse this way throws.
+         * Each parses to a reference into the single, global
+         * elem::isotopeTable(), and the resulting yields::IsotopeList is
+         * passed to yields_->rebuildYieldGrid(), restricting yields_'s
+         * own isotopes() to the intersection of that list and whatever
+         * every loaded channel actually tabulates (see
+         * Yields::rebuildYieldGrid()'s own comment) -- left alone
+         * (every tabulated isotope kept) if yields.isotopes is absent.
+         *
          * Also reads the optional yields.channel_decomposed (default
          * true) into yieldsChannelDecomposed_, regardless of whether
          * yieldChannels_ ends up empty -- see its own observer's
