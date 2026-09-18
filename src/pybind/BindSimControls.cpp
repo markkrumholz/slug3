@@ -21,7 +21,6 @@
 #include "../specsyn/Specsyn.hpp"
 #include "../tracks/Tracks3D.hpp"
 #include "../utils/MiscUtils.hpp"
-#include "../yields/YieldCommons.hpp"
 #include "../yields/Yields.hpp"
 #include <cstddef>
 #include <memory>
