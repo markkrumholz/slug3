@@ -208,7 +208,23 @@ static constexpr std::string_view channelDocstring = R"doc(Get which nucleosynth
 Returns
 -------
 channel : YieldChannelType
-    The channel passed to the constructor.)doc";
+    descriptor().channel -- the channel named by the descriptor passed
+    to the constructor.)doc";
+
+static constexpr std::string_view descriptorDocstring =
+    R"doc(Get a copy of the descriptor this channel was built from.
+
+Returns
+-------
+descriptor : YieldChannelDescriptor
+    A copy of the descriptor passed to the constructor, except that
+    m_min/m_max instead reflect whichever mass range was actually last
+    requested -- either still the constructor's own descriptor.m_min/
+    m_max, if rebuildYieldGrid() has never been called with an explicit
+    m_min/m_max of its own, or whatever it was called with most
+    recently otherwise. A copy, not a live view: it does not update if
+    this channel's own descriptor changes on a later rebuildYieldGrid()
+    call.)doc";
 
 static constexpr std::string_view massesDocstring = R"doc(Get the stellar masses this channel's yields are tabulated at.
 
@@ -360,6 +376,7 @@ void bindYieldChannel(py::module_& m)
                 py::arg("m_min") = std::nullopt, py::arg("m_max") = std::nullopt,
                 py::arg("isotopes") = std::vector<const elem::IsotopeData*>{})
         .def("channel", &yields::YieldChannel::channel, channelDocstring.data())
+        .def("descriptor", &yields::YieldChannel::descriptor, descriptorDocstring.data())
         .def("masses", &yields::YieldChannel::masses, massesDocstring.data())
         .def("massesOrig", &yields::YieldChannel::massesOrig, massesOrigDocstring.data())
         .def("isotopes",

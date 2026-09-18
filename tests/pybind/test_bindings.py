@@ -2706,6 +2706,46 @@ def test_yield_channel_native_data_available_before_rebuild():
     assert channel.isotopes() == []
 
 
+def test_yield_channel_descriptor_reflects_constructor_argument():
+    """descriptor() starts out equal to the descriptor passed to the constructor."""
+    descriptor = slug.YieldChannelDescriptor(
+        slug.YieldChannelType.ccsn, "sukhbold_test", m_min=10.0)
+    channel = slug.YieldChannel(descriptor, 0.0, 0.0, registry_name=YIELDS_REGISTRY)
+    got = channel.descriptor()
+    assert got.channel == descriptor.channel
+    assert got.model_name == descriptor.model_name
+    assert got.m_min == descriptor.m_min
+    assert got.m_max is None
+    # channel() itself still works, now sourced from descriptor()
+    assert channel.channel() == slug.YieldChannelType.ccsn
+
+
+def test_yield_channel_descriptor_tracks_rebuild_yield_grid():
+    """descriptor() picks up whichever m_min/m_max was last explicitly
+    passed to rebuildYieldGrid(), leaving the other field untouched if
+    only one of the two is given."""
+    descriptor = slug.YieldChannelDescriptor(slug.YieldChannelType.ccsn, "sukhbold_test")
+    channel = slug.YieldChannel(descriptor, 0.0, 0.0, registry_name=YIELDS_REGISTRY)
+
+    channel.rebuildYieldGrid()
+    assert channel.descriptor().m_min is None
+    assert channel.descriptor().m_max is None
+
+    channel.rebuildYieldGrid(m_min=9.5)
+    assert channel.descriptor().m_min == 9.5
+    assert channel.descriptor().m_max is None
+
+    channel.rebuildYieldGrid(m_max=30.0)
+    assert channel.descriptor().m_min == 9.5  # untouched by the m_max-only call above
+    assert channel.descriptor().m_max == 30.0
+
+    # descriptor() is a snapshot copy, not a live view
+    snapshot = channel.descriptor()
+    channel.rebuildYieldGrid(m_min=12.0)
+    assert snapshot.m_min == 9.5
+    assert channel.descriptor().m_min == 12.0
+
+
 def test_yield_channel_rebuild_yield_grid_defaults():
     """rebuildYieldGrid() with no arguments uses the channel's own native mass/isotope range."""
     descriptor = slug.YieldChannelDescriptor(slug.YieldChannelType.ccsn, "sukhbold_test")

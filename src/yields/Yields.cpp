@@ -63,7 +63,6 @@ namespace yields
     {
         yieldChannels_.push_back(std::make_unique<YieldChannel>(
             descriptor, controls_.fehDist().getMin(), controls_.fehDist().getMax(), registryName_));
-        descriptors_.push_back(descriptor);
     }
 
     void Yields::rebuildYieldGrid(const IsotopeList& isotopes)
@@ -133,13 +132,14 @@ namespace yields
 
         // Push isotopes_ (and each channel's own descriptor mMin_/mMax_)
         // back down into every channel, synchronizing them all onto the
-        // same isotope list -- see this method's own comment. descriptors_
-        // is appended to by addChannel() in lockstep with yieldChannels_
-        // itself, so this doesn't need to assume anything about
-        // controls_.yieldChannels() staying in sync.
-        for (std::size_t i = 0; i < yieldChannels_.size(); ++i)
+        // same isotope list -- see this method's own comment. Each
+        // channel's own descriptor() already caches its own mMin_/
+        // mMax_, so this needs no separate, parallel record of its own
+        // to stay in sync with yieldChannels_.
+        for (const auto& channel : yieldChannels_)
         {
-            yieldChannels_[i]->rebuildYieldGrid(descriptors_[i].mMin_, descriptors_[i].mMax_, isotopes_); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i < yieldChannels_.size() == descriptors_.size() by construction, see this method's own comment
+            const auto descriptor = channel->descriptor();
+            channel->rebuildYieldGrid(descriptor.mMin_, descriptor.mMax_, isotopes_);
         }
     }
 

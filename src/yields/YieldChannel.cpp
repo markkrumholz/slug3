@@ -332,7 +332,7 @@ namespace yields
         const double fehMin,
         const double fehMax,
         const std::string& registryName) :
-        channel_(descriptor.channel_)
+        descriptor_(descriptor)
     {
         const std::string& modelName = descriptor.modelName_;
         const std::string channelName(channelStr.at(static_cast<std::size_t>(descriptor.channel_)));
@@ -496,6 +496,15 @@ namespace yields
                 "YieldChannel::rebuildYieldGrid: mMin (" + std::to_string(loMass) +
                 ") must be strictly less than mMax (" + std::to_string(hiMass) + ")");
         }
+
+        // Keep descriptor_ in sync with whichever mass range was just
+        // actually requested -- see descriptor()'s own comment. Only
+        // once validation above has already succeeded, and only for
+        // whichever of mMin/mMax was actually given: leaving the other
+        // at its own nullopt default leaves descriptor_'s
+        // corresponding field untouched rather than resetting it.
+        if (mMin.has_value()) { descriptor_.mMin_ = mMin; }
+        if (mMax.has_value()) { descriptor_.mMax_ = mMax; }
 
         masses_.clear();
         masses_.push_back(loMass);

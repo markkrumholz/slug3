@@ -50,20 +50,22 @@ namespace yields
          *   the [Fe/H] range actually available for that channel/model,
          *   or if the underlying HDF5 file cannot be read or is malformed
          * @details
-         * Reads massesOrig_/isotopesOrig_/yieldDataOrig_ from disk, but
-         * -- unlike descriptor.mMin_/mMax_, which used to be applied
-         * immediately here via an end-of-constructor rebuildYieldGrid()
-         * call -- does not itself populate masses_/isotopes_/
-         * yieldData_: a caller must call rebuildYieldGrid() explicitly
-         * (with descriptor.mMin_/mMax_, and optionally a synchronized
-         * isotope list -- see its own comment) before yield() can be
-         * called. This lets a caller building several YieldChannel
-         * objects at once (see the Yields class) read every channel's
-         * own native isotopesOrig_ first, decide on one synchronized
-         * isotope list across all of them, and only then build each
-         * channel's actual yieldData_ against that shared list, rather
-         * than building it once here against this channel's own native
-         * isotopes and then immediately rebuilding it again.
+         * Caches a copy of descriptor in descriptor_ -- see descriptor()'s
+         * own comment -- then reads massesOrig_/isotopesOrig_/
+         * yieldDataOrig_ from disk, but -- unlike descriptor.mMin_/
+         * mMax_, which used to be applied immediately here via an
+         * end-of-constructor rebuildYieldGrid() call -- does not itself
+         * populate masses_/isotopes_/yieldData_: a caller must call
+         * rebuildYieldGrid() explicitly (with descriptor.mMin_/mMax_,
+         * and optionally a synchronized isotope list -- see its own
+         * comment) before yield() can be called. This lets a caller
+         * building several YieldChannel objects at once (see the
+         * Yields class) read every channel's own native isotopesOrig_
+         * first, decide on one synchronized isotope list across all of
+         * them, and only then build each channel's actual yieldData_
+         * against that shared list, rather than building it once here
+         * against this channel's own native isotopes and then
+         * immediately rebuilding it again.
          */
         YieldChannel(
             const YieldChannelDescriptor& descriptor,
@@ -152,6 +154,15 @@ namespace yields
          * yield()'s own unchecked utils::findBracket call requires
          * never happens. fehCache_/feH_ are untouched -- this method
          * never changes the [Fe/H] axis.
+         *
+         * If mMin/mMax are given (not nullopt), descriptor_'s own
+         * mMin_/mMax_ are updated to match, once validation above has
+         * already succeeded -- so descriptor() always reflects the
+         * most recent mass range actually requested, even after a
+         * caller (e.g. from Python) calls this again with a different
+         * one. Leaving mMin/mMax at their own nullopt default leaves
+         * descriptor_'s corresponding field untouched, rather than
+         * resetting it back to nullopt.
          */
         void rebuildYieldGrid(
             std::optional<double> mMin = std::nullopt,
@@ -162,9 +173,25 @@ namespace yields
 
         /**
          * @brief Return which nucleosynthetic channel this object holds
-         * @return The channel passed to the constructor
+         * @return descriptor_.channel_ -- the channel named by the
+         *   descriptor passed to the constructor
          */
-        [[nodiscard]] auto channel() const { return channel_; }
+        [[nodiscard]] auto channel() const { return descriptor_.channel_; }
+
+        /**
+         * @brief Return a copy of the descriptor this channel was built from
+         * @return A copy of descriptor_: the same descriptor passed to
+         *   the constructor, except that mMin_/mMax_ instead reflect
+         *   whichever mass range was actually last requested -- either
+         *   still the constructor's own descriptor.mMin_/mMax_, if
+         *   rebuildYieldGrid() has never been called with an explicit
+         *   mMin/mMax of its own, or whatever it was called with most
+         *   recently otherwise (see its own comment). Returned by
+         *   value, not by reference, since descriptor_ can change
+         *   underneath a caller on the very next rebuildYieldGrid()
+         *   call.
+         */
+        [[nodiscard]] auto descriptor() const -> YieldChannelDescriptor { return descriptor_; }
 
         /**
          * @brief Return the stellar masses this channel's yields are tabulated at
@@ -333,7 +360,7 @@ namespace yields
 
     private:
 
-        Channel channel_;                  /**< Which nucleosynthetic channel this is */
+        YieldChannelDescriptor descriptor_; /**< The descriptor this channel was built from, with mMin_/mMax_ kept in sync with rebuildYieldGrid()'s own most recent explicit values -- see descriptor()'s own comment */
         std::vector<double> masses_;       /**< Stellar masses (Msun) this channel's yields are tabulated at -- see masses()'s own comment */
         std::vector<double> massesOrig_;   /**< Stellar masses (Msun) as read from the model's own HDF5 file -- see massesOrig()'s own comment */
         IsotopeList isotopes_;             /**< Isotopes yieldData_ is actually tabulated for -- see isotopes()'s own comment */

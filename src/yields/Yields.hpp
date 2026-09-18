@@ -105,13 +105,11 @@ namespace yields
          * The new YieldChannel is loaded over controls_.fehDist()'s own
          * [min, max] range -- mirrors SimControls::readTracks()'s
          * identical use of fehDist_.getMin()/getMax() to pick the
-         * [Fe/H] range a model is loaded over. descriptor is also
-         * appended to descriptors_, so rebuildYieldGrid() can later
-         * recover each channel's own mMin_/mMax_ without assuming
-         * yieldChannels_ stays in lockstep with controls_.yieldChannels()
-         * (a caller is free to keep adding to controls_.yieldChannels()
-         * after this Yields is built, without those later entries
-         * retroactively describing channels already loaded here).
+         * [Fe/H] range a model is loaded over. The new YieldChannel
+         * itself caches a copy of descriptor (see its own descriptor()
+         * observer), so rebuildYieldGrid() can later recover each
+         * channel's own mMin_/mMax_ directly from the channel itself,
+         * without needing a separate, parallel record of its own here.
          */
         void addChannel(const YieldChannelDescriptor& descriptor);
 
@@ -160,12 +158,13 @@ namespace yields
          *
          * Then, for each entry i in yieldChannels_, calls
          * yieldChannels_[i]->rebuildYieldGrid(mMin, mMax, isotopes_),
-         * where mMin/mMax are descriptors_[i]'s own mMin_/mMax_ --
-         * descriptors_ is appended to by addChannel() in the same call,
-         * and so stays in lockstep with yieldChannels_ by construction,
-         * independent of whatever controls_.yieldChannels() looks like
-         * by the time this runs. This is what actually synchronizes
-         * every channel onto the same, shared isotopes_: passing it to rebuildYieldGrid()
+         * where mMin/mMax are yieldChannels_[i]->descriptor()'s own
+         * mMin_/mMax_ -- each channel caches its own descriptor (see
+         * YieldChannel::descriptor()'s own comment), so this reads it
+         * directly from the channel itself, independent of whatever
+         * controls_.yieldChannels() looks like by the time this runs.
+         * This is what actually synchronizes every channel onto the
+         * same, shared isotopes_: passing it to rebuildYieldGrid()
          * remaps that channel's own yieldData_ onto isotopes_'s exact
          * order, backfilling 0 for any isotope this channel's own model
          * doesn't tabulate (see YieldChannel::rebuildYieldGrid()'s own
@@ -287,7 +286,6 @@ namespace yields
         const io::SimControls& controls_; // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members) -- deliberately a live reference, not a copy, matching Extinct's/Specsyn's own identical controls_ members exactly -- see either one's own comment for why. Only ever used through the same non-copyable ownership pattern (unique_ptr in SimControls's own yields_) as those, so the usual objection (disabling implicit copy/move assignment) doesn't apply in practice.
         std::string registryName_;        /**< Name of the yield registry file */
         std::vector<std::unique_ptr<YieldChannel>> yieldChannels_; /**< Yield channels built via addChannel(), one per entry in controls_.yieldChannels() -- see yieldChannels()'s own comment */
-        std::vector<YieldChannelDescriptor> descriptors_; /**< Descriptor passed to addChannel() for each yieldChannels_ entry, same order -- lets rebuildYieldGrid() recover each channel's own mMin_/mMax_ without assuming controls_.yieldChannels() stays in lockstep, see addChannel()'s own comment */
         IsotopeList isotopes_; /**< Union of every yieldChannels_ entry's own isotopesOrig(), deduplicated and sorted -- see isotopes()'s own comment */
 
     };
