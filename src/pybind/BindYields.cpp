@@ -33,7 +33,7 @@ static auto toIsotopeList(const std::vector<const elem::IsotopeData*>& isotopes)
     result.reserve(isotopes.size());
     for (const auto* iso : isotopes)
     {
-        if (iso == nullptr) { throw py::value_error("isotopes must not contain None"); }
+        if (iso == nullptr) { throw py::value_error("isotopes must not contain None"); } // NOLINT(misc-include-cleaner) -- py::value_error is provided by pybind11.h (already included above); clang-tidy's IWYU mapping just doesn't know that
         result.emplace_back(*iso);
     }
     return result;
