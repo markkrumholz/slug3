@@ -2676,7 +2676,7 @@ static auto testOptOutClusterYieldsOutput() -> int
     try
     {
         const io::SimControls controls(inputDeck);
-        const io::OutputManagerH5 manager(controls);
+        { const io::OutputManagerH5 manager(controls); }
 
         const auto h5Path = outDir / (modelName + ".h5");
         // NOLINTBEGIN(misc-include-cleaner)
