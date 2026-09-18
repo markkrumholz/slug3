@@ -117,11 +117,17 @@ namespace yields
 
         /**
          * @brief Rebuild isotopes_ from yieldChannels_, then push it back into every channel
+         * @param isotopes Restricts isotopes_ to its own intersection
+         *   with this list; an empty list (the default) means "keep
+         *   every isotope any loaded channel tabulates" -- see @details
          * @throws std::invalid_argument if propagated from some
          *   channel's own rebuildYieldGrid() call (should not happen in
          *   practice: the mMin/mMax passed to each are exactly what
          *   that channel's own descriptor already validated, indirectly,
          *   the first time it was built)
+         * @throws std::runtime_error if isotopes is non-empty but
+         *   matches nothing any loaded channel tabulates, leaving
+         *   isotopes_ empty -- see @details
          * @details
          * First, collects every entry in yieldChannels_'s own
          * isotopesOrig() (not isotopes() -- see below) into one
@@ -132,6 +138,25 @@ namespace yields
          * channels tabulating the same isotope (necessarily the same
          * global elem::isotopeTable() entry) are correctly recognized
          * as one, not kept as duplicates.
+         *
+         * If isotopes is non-empty, isotopes_ is then narrowed down to
+         * just the entries that also appear (by the same IsotopeData
+         * equality, i.e. matching (Z, A)) somewhere in isotopes --
+         * letting a caller (see SimControls::readYields()'s own
+         * yields.isotopes handling) restrict which isotopes actually
+         * end up tabulated, even though every loaded channel's own
+         * model may cover a much larger set. An isotopes entry that
+         * doesn't match anything in the union is simply ignored, rather
+         * than treated as an error, since it may simply be an isotope
+         * no loaded channel happens to tabulate -- but if isotopes
+         * itself is non-empty and none of its entries match anything
+         * (isotopes_ would end up entirely empty), that throws instead:
+         * every yieldChannels_ entry's own isotopesOrig() is always
+         * non-empty in practice, so this can only mean the caller's own
+         * isotopes list is entirely wrong, almost certainly a mistake
+         * worth surfacing clearly, before it can instead reach
+         * OutputManagerH5's own group-creation code as an opaque
+         * zero-column HDF5 dataset failure.
          *
          * Then, for each entry i in yieldChannels_, calls
          * yieldChannels_[i]->rebuildYieldGrid(mMin, mMax, isotopes_),
@@ -154,9 +179,10 @@ namespace yields
          * Python, after addChannel() adds a further channel to an
          * already-built Yields) can rerun this to re-synchronize every
          * channel -- including ones added earlier -- onto the new,
-         * larger union of isotopes.
+         * larger union of isotopes, or to change which isotopes subset
+         * is kept.
          */
-        void rebuildYieldGrid();
+        void rebuildYieldGrid(const IsotopeList& isotopes = {});
 
         /**
          * @brief Return the SimControls this Yields reads its channel descriptors from

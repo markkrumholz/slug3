@@ -26,6 +26,7 @@
 #include <iostream>
 #include <iterator>
 #include <map>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -2260,6 +2261,574 @@ static auto testWriteGalaxyH5() -> int
     return 0;
 }
 
+// ---------------------------------------------------------------------
+// cluster_yields/galaxy_yields tests: OutputManagerH5's own handling of
+// SimControls::yields(), gated on output.write_cluster_yields/
+// write_galaxy_yields (ascii support is not yet implemented -- see
+// OutputManagerAscii::writeClusterYields()'s own comment). Every test
+// below reuses the small sukhbold_test/kobayashi_test fixture registry
+// (tests/yields/assets/yields.toml) already exercised by
+// testSimControlsYieldsIsotopes() in testSimControls.cpp: two ccsn
+// channels whose isotope union is h1/fe56/ni56/ni58 (Z-then-A order),
+// so "isotopes"/"channels"/"models" below are always the same four
+// expected values.
+// ---------------------------------------------------------------------
+
+// Insert a yields.channel1/channel2 table (sukhbold_test/kobayashi_test,
+// both channel "ccsn", from the small fixture registry) into inputDeck,
+// plus yields.channel_decomposed if decomposed has a value -- shared by
+// every cluster_yields/galaxy_yields test below.
+static void addYieldsFixture(toml::table& inputDeck,
+    const std::optional<bool> decomposed = std::nullopt)
+{
+    toml::table yieldsTbl{
+        { "channel1", toml::table{
+            { "channel", "ccsn" }, { "model", "sukhbold_test" } } },
+        { "channel2", toml::table{
+            { "channel", "ccsn" }, { "model", "kobayashi_test" } } },
+        { "registry", "tests/yields/assets/yields.toml" },
+    };
+    if (decomposed.has_value()) { yieldsTbl.insert("channel_decomposed", decomposed.value()); }
+    inputDeck.insert("yields", std::move(yieldsTbl));
+}
+
+// Check a cluster_yields/galaxy_yields group's own "isotopes"/
+// "channels"/"models"/"decomposed" attributes and empty trial/time/
+// [uid/]yields datasets against the sukhbold_test/kobayashi_test
+// fixture's own known shape -- see this section's own header comment.
+// hasUid selects whether a "uid" dataset is expected (cluster_yields)
+// or not (galaxy_yields). Throws std::runtime_error (caught by the
+// caller) describing the first mismatch found.
+static void checkYieldsGroup(const hid_t file, const char* groupName,
+    const bool decomposed, const bool hasUid) // NOLINT(misc-include-cleaner)
+{
+    // NOLINTBEGIN(misc-include-cleaner)
+    const hid_t grp = H5Gopen2(file, groupName, H5P_DEFAULT);
+    if (grp < 0) { throw std::runtime_error(std::string("missing ") + groupName + " group"); }
+
+    try
+    {
+        const std::vector<std::string> expectedIsotopes{ "H1", "Fe56", "Ni56", "Ni58" };
+        const std::vector<std::string> expectedChannels{ "ccsn", "ccsn" };
+        const std::vector<std::string> expectedModels{ "sukhbold_test", "kobayashi_test" };
+
+        if (readStringArrayAttr(grp, "isotopes") != expectedIsotopes)
+        {
+            throw std::runtime_error("isotopes attribute does not match expected isotope list");
+        }
+        if (readStringArrayAttr(grp, "channels") != expectedChannels)
+        {
+            throw std::runtime_error("channels attribute does not match expected channel list");
+        }
+        if (readStringArrayAttr(grp, "models") != expectedModels)
+        {
+            throw std::runtime_error("models attribute does not match expected model list");
+        }
+
+        const hid_t decomposedAttr = H5Aopen(grp, "decomposed", H5P_DEFAULT);
+        if (decomposedAttr < 0) { throw std::runtime_error("missing decomposed attribute"); }
+        hbool_t readDecomposed = 0;
+        H5Aread(decomposedAttr, H5T_NATIVE_HBOOL, &readDecomposed);
+        H5Aclose(decomposedAttr);
+        if ((readDecomposed != 0) != decomposed)
+        {
+            throw std::runtime_error("decomposed attribute does not match expected value");
+        }
+
+        if (readExtent1d(grp, "trial") != 0 || readExtent1d(grp, "time") != 0)
+        {
+            throw std::runtime_error("trial/time are not empty");
+        }
+        if (hasUid && readExtent1d(grp, "uid") != 0)
+        {
+            throw std::runtime_error("uid is not empty");
+        }
+
+        const auto expectedCols = decomposed ?
+            expectedIsotopes.size() * expectedModels.size() : expectedIsotopes.size();
+        const auto [yieldsRows, yieldsCols] = readExtent2d(grp, "yields");
+        if (yieldsRows != 0 || yieldsCols != expectedCols)
+        {
+            throw std::runtime_error("yields has unexpected shape");
+        }
+
+        const hid_t yieldsDset = H5Dopen2(grp, "yields", H5P_DEFAULT);
+        const auto units = readUnitsAttr(yieldsDset);
+        H5Dclose(yieldsDset);
+        if (units != "Msun")
+        {
+            throw std::runtime_error("yields has units '" + units + "', expected 'Msun'");
+        }
+    }
+    catch (...)
+    {
+        H5Gclose(grp);
+        throw;
+    }
+    H5Gclose(grp);
+    // NOLINTEND(misc-include-cleaner)
+}
+
+// Verify that OutputManagerH5's constructor creates the cluster_yields
+// group, with correct attributes/shape (decomposed, the default), for
+// a cluster-type simulation with yield channels requested -- see
+// checkYieldsGroup()'s own docstring.
+static auto testClusterYieldsGroupH5() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() / "slugTestOutputManagerClusterYieldsGroupH5";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+    const std::string modelName = "test_model";
+    const auto expectedPath = outDir / (modelName + ".h5");
+    toml::table inputDeck = makeClusterPhysicsInputDeck(modelName, outDir);
+    addYieldsFixture(inputDeck);
+
+    try
+    {
+        const io::SimControls controls(inputDeck);
+        if (controls.yields() == nullptr)
+        {
+            std::cerr << "testOutputManager: cluster yields group h5: test bug: "
+                "expected yields() to be non-null\n";
+            return 1;
+        }
+
+        { const io::OutputManagerH5 manager(controls); }
+
+        // NOLINTBEGIN(misc-include-cleaner)
+        const hid_t file = H5Fopen(expectedPath.string().c_str(),
+            H5F_ACC_RDONLY, H5P_DEFAULT);
+        if (file < 0)
+        {
+            std::cerr << "testOutputManager: cluster yields group h5: unable to reopen "
+                << expectedPath.string() << "\n";
+            return 1;
+        }
+        try
+        {
+            checkYieldsGroup(file, "cluster_yields", true, true);
+        }
+        catch (const std::runtime_error& error)
+        {
+            H5Fclose(file);
+            std::cerr << "testOutputManager: cluster yields group h5: " << error.what() << "\n";
+            return 1;
+        }
+        H5Fclose(file);
+        // NOLINTEND(misc-include-cleaner)
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testOutputManager: cluster yields group h5 test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Verify that, with yields.channel_decomposed = false, the
+// cluster_yields group's own "yields" dataset is sized to just the
+// isotope count (not multiplied by the channel count), and its
+// "decomposed" attribute reads back false.
+static auto testClusterYieldsGroupNotDecomposedH5() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() /
+        "slugTestOutputManagerClusterYieldsGroupNotDecomposedH5";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+    const std::string modelName = "test_model";
+    const auto expectedPath = outDir / (modelName + ".h5");
+    toml::table inputDeck = makeClusterPhysicsInputDeck(modelName, outDir);
+    addYieldsFixture(inputDeck, false);
+
+    try
+    {
+        const io::SimControls controls(inputDeck);
+        { const io::OutputManagerH5 manager(controls); }
+
+        // NOLINTBEGIN(misc-include-cleaner)
+        const hid_t file = H5Fopen(expectedPath.string().c_str(),
+            H5F_ACC_RDONLY, H5P_DEFAULT);
+        if (file < 0)
+        {
+            std::cerr << "testOutputManager: cluster yields not decomposed h5: "
+                "unable to reopen " << expectedPath.string() << "\n";
+            return 1;
+        }
+        try
+        {
+            checkYieldsGroup(file, "cluster_yields", false, true);
+        }
+        catch (const std::runtime_error& error)
+        {
+            H5Fclose(file);
+            std::cerr << "testOutputManager: cluster yields not decomposed h5: "
+                << error.what() << "\n";
+            return 1;
+        }
+        H5Fclose(file);
+        // NOLINTEND(misc-include-cleaner)
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testOutputManager: cluster yields not decomposed h5 test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Verify that OutputManagerH5::writeClusterYields writes a row matching
+// cluster.yields() into the cluster_yields group's own trial/time/uid/
+// yields datasets.
+static auto testWriteClusterYieldsH5() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() / "slugTestOutputManagerWriteClusterYieldsH5";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+    const std::string modelName = "test_model";
+    const auto expectedPath = outDir / (modelName + ".h5");
+    toml::table inputDeck = makeClusterPhysicsInputDeck(modelName, outDir);
+    addYieldsFixture(inputDeck);
+
+    try
+    {
+        const io::SimControls controls(inputDeck);
+        utils::rng().seed(42);
+        core::Cluster cluster(11, 2e3, 0.0, controls);
+        constexpr unsigned long trial = 7;
+        constexpr double writeTime = 1e5;
+        cluster.advance(writeTime);
+        if (cluster.yields().empty())
+        {
+            std::cerr << "testOutputManager: write cluster yields h5: test bug: "
+                "expected a non-empty yields() row\n";
+            return 1;
+        }
+
+        {
+            io::OutputManagerH5 manager(controls);
+            manager.writeClusterYields(trial, writeTime, cluster);
+        }
+
+        // NOLINTBEGIN(misc-include-cleaner)
+        const hid_t file = H5Fopen(expectedPath.string().c_str(),
+            H5F_ACC_RDONLY, H5P_DEFAULT);
+        if (file < 0)
+        {
+            std::cerr << "testOutputManager: write cluster yields h5: unable to reopen "
+                << expectedPath.string() << "\n";
+            return 1;
+        }
+        const hid_t grp = H5Gopen2(file, "cluster_yields", H5P_DEFAULT);
+        const auto readTrial = readColumnULong(grp, "trial");
+        const auto readTime = readColumnDouble(grp, "time");
+        const auto readUid = readColumnULong(grp, "uid");
+        const auto readYields = readRow2d(grp, "yields", 0, cluster.yields().size());
+        H5Gclose(grp);
+        H5Fclose(file);
+        // NOLINTEND(misc-include-cleaner)
+
+        if (readTrial.size() != 1 || readTrial.at(0) != trial ||
+            readTime.at(0) != writeTime || readUid.at(0) != cluster.uid())
+        {
+            std::cerr << "testOutputManager: write cluster yields h5: trial/time/uid "
+                "row does not match\n";
+            return 1;
+        }
+        if (!std::ranges::equal(readYields, cluster.yields()))
+        {
+            std::cerr << "testOutputManager: write cluster yields h5: yields row "
+                "does not match cluster.yields()\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testOutputManager: write cluster yields h5 test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Verify that OutputManagerH5::writeGalaxyYields writes a row matching
+// galaxy.yields() into the galaxy_yields group, and also writes a
+// matching passthrough row -- via its own internal writeClusterYields()
+// calls -- into cluster_yields for every currently-alive cluster in
+// the galaxy.
+static auto testWriteGalaxyYieldsH5() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() / "slugTestOutputManagerWriteGalaxyYieldsH5";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+    const std::string modelName = "test_model";
+    const auto expectedPath = outDir / (modelName + ".h5");
+    toml::table inputDeck = makeGalaxyPhysicsInputDeck(modelName, outDir);
+    addYieldsFixture(inputDeck);
+
+    try
+    {
+        const io::SimControls controls(inputDeck);
+        if (controls.yields() == nullptr)
+        {
+            std::cerr << "testOutputManager: write galaxy yields h5: test bug: "
+                "expected yields() to be non-null\n";
+            return 1;
+        }
+
+        utils::rng().seed(42);
+        core::Galaxy galaxy(controls);
+        galaxy.advance(galaxyWriteTime);
+        if (galaxy.clusters().empty())
+        {
+            std::cerr << "testOutputManager: write galaxy yields h5: test bug: "
+                "expected at least one cluster to have formed\n";
+            return 1;
+        }
+        constexpr unsigned long trial = 8;
+
+        {
+            io::OutputManagerH5 manager(controls);
+            manager.writeGalaxyYields(trial, galaxyWriteTime, galaxy);
+        }
+
+        // NOLINTBEGIN(misc-include-cleaner)
+        const hid_t file = H5Fopen(expectedPath.string().c_str(),
+            H5F_ACC_RDONLY, H5P_DEFAULT);
+        if (file < 0)
+        {
+            std::cerr << "testOutputManager: write galaxy yields h5: unable to reopen "
+                << expectedPath.string() << "\n";
+            return 1;
+        }
+
+        try
+        {
+            const hid_t galaxyGrp = H5Gopen2(file, "galaxy_yields", H5P_DEFAULT);
+            if (galaxyGrp < 0) { throw std::runtime_error("missing galaxy_yields group"); }
+            const auto readGalaxyYields = readRow2d(galaxyGrp, "yields", 0, galaxy.yields().size());
+            H5Gclose(galaxyGrp);
+            if (!std::ranges::equal(readGalaxyYields, galaxy.yields()))
+            {
+                throw std::runtime_error("galaxy_yields row does not match galaxy.yields()");
+            }
+
+            const hid_t clusterGrp = H5Gopen2(file, "cluster_yields", H5P_DEFAULT);
+            if (clusterGrp < 0) { throw std::runtime_error("missing cluster_yields group"); }
+            const auto uidCol = readColumnULong(clusterGrp, "uid");
+            H5Gclose(clusterGrp);
+            if (uidCol.size() != galaxy.clusters().size())
+            {
+                throw std::runtime_error("cluster_yields group has " +
+                    std::to_string(uidCol.size()) + " rows, expected " +
+                    std::to_string(galaxy.clusters().size()));
+            }
+            for (auto& cluster : galaxy.clusters())
+            {
+                const auto i = findIndex(uidCol, cluster.uid());
+                const hid_t grp2 = H5Gopen2(file, "cluster_yields", H5P_DEFAULT);
+                const auto readYields = readRow2d(grp2, "yields", i, cluster.yields().size());
+                H5Gclose(grp2);
+                if (!std::ranges::equal(readYields, cluster.yields()))
+                {
+                    throw std::runtime_error("cluster_yields row for uid " +
+                        std::to_string(cluster.uid()) + " does not match yields()");
+                }
+            }
+        }
+        catch (const std::runtime_error& error)
+        {
+            H5Fclose(file);
+            std::cerr << "testOutputManager: write galaxy yields h5: " << error.what() << "\n";
+            return 1;
+        }
+        H5Fclose(file);
+        // NOLINTEND(misc-include-cleaner)
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testOutputManager: write galaxy yields h5 test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Verify that output.write_galaxy_yields = false does not suppress
+// writeGalaxyYields()'s own writeClusterYields() fan-out: the
+// galaxy_yields group does not exist (so no galaxy-level row is
+// written), but output.write_cluster_yields is independently left at
+// its own default of true, so cluster_yields must still get a row for
+// every currently-alive cluster. Regression test for a bug where
+// writeGalaxyYields() returned early whenever galaxyYieldsGroup_() was
+// null, skipping the per-cluster loop entirely -- unlike
+// writeClusterYields()'s own no-op path, which only ever depends on
+// clusterYieldsGroup_() itself.
+static auto testWriteGalaxyYieldsFalseStillWritesClustersH5() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() /
+        "slugTestOutputManagerGalaxyYieldsFalseStillWritesClustersH5";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+    const std::string modelName = "test_model";
+    const auto expectedPath = outDir / (modelName + ".h5");
+    toml::table inputDeck = makeGalaxyPhysicsInputDeck(modelName, outDir);
+    addYieldsFixture(inputDeck);
+    inputDeck.at_path("output").as_table()->insert("write_galaxy_yields", false);
+
+    try
+    {
+        const io::SimControls controls(inputDeck);
+        if (controls.writeGalaxyYields() || !controls.writeClusterYields())
+        {
+            std::cerr << "testOutputManager: galaxy yields false still writes clusters h5: "
+                "test bug: expected writeGalaxyYields() false, writeClusterYields() true\n";
+            return 1;
+        }
+
+        utils::rng().seed(42);
+        core::Galaxy galaxy(controls);
+        galaxy.advance(galaxyWriteTime);
+        if (galaxy.clusters().empty())
+        {
+            std::cerr << "testOutputManager: galaxy yields false still writes clusters h5: "
+                "test bug: expected at least one cluster to have formed\n";
+            return 1;
+        }
+        constexpr unsigned long trial = 10;
+
+        {
+            io::OutputManagerH5 manager(controls);
+            manager.writeGalaxyYields(trial, galaxyWriteTime, galaxy);
+        }
+
+        // NOLINTBEGIN(misc-include-cleaner)
+        const hid_t file = H5Fopen(expectedPath.string().c_str(),
+            H5F_ACC_RDONLY, H5P_DEFAULT);
+        if (file < 0)
+        {
+            std::cerr << "testOutputManager: galaxy yields false still writes clusters h5: "
+                "unable to reopen " << expectedPath.string() << "\n";
+            return 1;
+        }
+
+        const bool hasGalaxyGroup = H5Lexists(file, "galaxy_yields", H5P_DEFAULT) > 0;
+        if (hasGalaxyGroup)
+        {
+            H5Fclose(file);
+            std::cerr << "testOutputManager: galaxy yields false still writes clusters h5: "
+                "unexpectedly created a galaxy_yields group\n";
+            return 1;
+        }
+
+        try
+        {
+            const hid_t clusterGrp = H5Gopen2(file, "cluster_yields", H5P_DEFAULT);
+            if (clusterGrp < 0) { throw std::runtime_error("missing cluster_yields group"); }
+            const auto uidCol = readColumnULong(clusterGrp, "uid");
+            H5Gclose(clusterGrp);
+            if (uidCol.size() != galaxy.clusters().size())
+            {
+                throw std::runtime_error("cluster_yields group has " +
+                    std::to_string(uidCol.size()) + " rows, expected " +
+                    std::to_string(galaxy.clusters().size()));
+            }
+        }
+        catch (const std::runtime_error& error)
+        {
+            H5Fclose(file);
+            std::cerr << "testOutputManager: galaxy yields false still writes clusters h5: "
+                << error.what() << "\n";
+            return 1;
+        }
+        H5Fclose(file);
+        // NOLINTEND(misc-include-cleaner)
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testOutputManager: galaxy yields false still writes clusters h5 "
+            "test failed: " << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Verify that output.write_cluster_yields = false suppresses just the
+// cluster_yields H5 group, leaving galaxy_yields in place -- a
+// galaxy-type simulation, unlike a cluster-type one, needs a
+// deliberately-chosen deck for this: SimControls::readYields() itself
+// throws if write_cluster_yields is false in a cluster-type simulation
+// (see testSimControlsWriteYields() in testSimControls.cpp), since
+// write_galaxy_yields is meaningless there and so cannot rescue the
+// yields from going unwritten the way it can here.
+static auto testOptOutClusterYieldsOutput() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() / "slugTestOutputManagerNoClusterYieldsOutput";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+    const std::string modelName = "test_model";
+    toml::table inputDeck = makeGalaxyPhysicsInputDeck(modelName, outDir);
+    addYieldsFixture(inputDeck);
+    inputDeck.at_path("output").as_table()->insert("write_cluster_yields", false);
+
+    try
+    {
+        const io::SimControls controls(inputDeck);
+        { const io::OutputManagerH5 manager(controls); }
+
+        const auto h5Path = outDir / (modelName + ".h5");
+        // NOLINTBEGIN(misc-include-cleaner)
+        const hid_t file = H5Fopen(h5Path.string().c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+        if (file < 0)
+        {
+            std::cerr << "testOutputManager: opt-out cluster yields output: unable to reopen "
+                << h5Path.string() << "\n";
+            return 1;
+        }
+        const bool hasClusterGroup = H5Lexists(file, "cluster_yields", H5P_DEFAULT) > 0;
+        const bool hasGalaxyGroup = H5Lexists(file, "galaxy_yields", H5P_DEFAULT) > 0;
+        H5Fclose(file);
+        // NOLINTEND(misc-include-cleaner)
+
+        if (hasClusterGroup)
+        {
+            std::cerr << "testOutputManager: opt-out cluster yields output: h5 "
+                "unexpectedly created a cluster_yields group\n";
+            return 1;
+        }
+        if (!hasGalaxyGroup)
+        {
+            std::cerr << "testOutputManager: opt-out cluster yields output: h5 "
+                "unexpectedly did not create the galaxy_yields group\n";
+            return 1;
+        }
+
+        // Same check on the ascii side: no _cluster_yields.txt file,
+        // but _galaxy_yields.txt still exists
+        const io::OutputManagerAscii asciiManager(controls);
+        if (std::filesystem::exists(outDir / (modelName + "_cluster_yields.txt")))
+        {
+            std::cerr << "testOutputManager: opt-out cluster yields output: ascii "
+                "unexpectedly created a _cluster_yields.txt file\n";
+            return 1;
+        }
+        if (!std::filesystem::exists(outDir / (modelName + "_galaxy_yields.txt")))
+        {
+            std::cerr << "testOutputManager: opt-out cluster yields output: ascii "
+                "unexpectedly did not create a _galaxy_yields.txt file\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testOutputManager: opt-out cluster yields output test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
 // Skip an ascii output file's 3-line header (column names, units,
 // dashed rule), leaving file positioned at its first data line
 static void skipAsciiHeader(std::ifstream& file)
@@ -2528,6 +3097,328 @@ static auto testWriteGalaxyAscii() -> int
     catch (const std::exception& error)
     {
         std::cerr << "testOutputManager: write galaxy ascii test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// ---------------------------------------------------------------------
+// cluster_yields/galaxy_yields ascii tests: OutputManagerAscii's own
+// mirror of the H5 cluster_yields/galaxy_yields tests above, using the
+// same sukhbold_test/kobayashi_test fixture (see addYieldsFixture()'s
+// own comment) -- one wide, fixed-width column per (channel, isotope)
+// pair (decomposed) or per isotope (not decomposed), named per
+// buildYieldsColumnNames()'s own convention in OutputManagerAscii.cpp.
+// ---------------------------------------------------------------------
+
+// Verify the cluster-yields ascii header names its decomposed columns
+// "ccsn1_<isotope>"/"ccsn2_<isotope>" (the fixture's two channels'
+// own global 1-based index, both channel type "ccsn"), with units
+// "Msun", for each of the fixture's own four isotopes.
+static auto testClusterYieldsHeaderAscii() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() / "slugTestOutputManagerClusterYieldsHeaderAscii";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+    const std::string modelName = "test_model";
+    toml::table inputDeck = makeClusterPhysicsInputDeck(modelName, outDir);
+    addYieldsFixture(inputDeck);
+
+    try
+    {
+        const io::SimControls controls(inputDeck);
+        { const io::OutputManagerAscii manager(controls); }
+
+        std::ifstream file(outDir / (modelName + "_cluster_yields.txt"));
+        std::string headerLine;
+        std::string unitsLine;
+        std::getline(file, headerLine);
+        std::getline(file, unitsLine);
+
+        for (const char* col : { "ccsn1_H1", "ccsn1_Fe56", "ccsn1_Ni56", "ccsn1_Ni58",
+            "ccsn2_H1", "ccsn2_Fe56", "ccsn2_Ni56", "ccsn2_Ni58" })
+        {
+            if (!headerLine.contains(col))
+            {
+                std::cerr << "testOutputManager: cluster yields header ascii: "
+                    "missing expected column '" << col << "' in header:\n" << headerLine << "\n";
+                return 1;
+            }
+        }
+        if (!unitsLine.contains("Msun"))
+        {
+            std::cerr << "testOutputManager: cluster yields header ascii: "
+                "units line missing expected 'Msun'\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testOutputManager: cluster yields header ascii test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Verify that, with yields.channel_decomposed = false, the
+// cluster-yields ascii header names its columns by isotope alone (no
+// "ccsnN_" prefix).
+static auto testClusterYieldsHeaderNotDecomposedAscii() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() /
+        "slugTestOutputManagerClusterYieldsHeaderNotDecomposedAscii";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+    const std::string modelName = "test_model";
+    toml::table inputDeck = makeClusterPhysicsInputDeck(modelName, outDir);
+    addYieldsFixture(inputDeck, false);
+
+    try
+    {
+        const io::SimControls controls(inputDeck);
+        { const io::OutputManagerAscii manager(controls); }
+
+        std::ifstream file(outDir / (modelName + "_cluster_yields.txt"));
+        std::string headerLine;
+        std::getline(file, headerLine);
+
+        for (const char* col : { "H1", "Fe56", "Ni56", "Ni58" })
+        {
+            if (!headerLine.contains(col))
+            {
+                std::cerr << "testOutputManager: cluster yields header not decomposed "
+                    "ascii: missing expected column '" << col << "' in header:\n" << headerLine << "\n";
+                return 1;
+            }
+        }
+        if (headerLine.contains("ccsn1") || headerLine.contains("ccsn2"))
+        {
+            std::cerr << "testOutputManager: cluster yields header not decomposed "
+                "ascii: header unexpectedly still has a channel prefix:\n" << headerLine << "\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testOutputManager: cluster yields header not decomposed ascii "
+            "test failed: " << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Verify that OutputManagerAscii::writeClusterYields writes a row
+// (trial, time, uid, one value per column) matching cluster.yields()
+// to the cluster-yields output file.
+static auto testWriteClusterYieldsAscii() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() / "slugTestOutputManagerWriteClusterYieldsAscii";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+    const std::string modelName = "test_model";
+    toml::table inputDeck = makeClusterPhysicsInputDeck(modelName, outDir);
+    addYieldsFixture(inputDeck);
+
+    try
+    {
+        const io::SimControls controls(inputDeck);
+        utils::rng().seed(42);
+        core::Cluster cluster(11, 2e3, 0.0, controls);
+        constexpr unsigned long trial = 7;
+        constexpr double writeTime = 1e5;
+        cluster.advance(writeTime);
+        if (cluster.yields().empty())
+        {
+            std::cerr << "testOutputManager: write cluster yields ascii: test bug: "
+                "expected a non-empty yields() row\n";
+            return 1;
+        }
+
+        {
+            io::OutputManagerAscii manager(controls);
+            manager.writeClusterYields(trial, writeTime, cluster);
+        }
+
+        std::ifstream file(outDir / (modelName + "_cluster_yields.txt"));
+        skipAsciiHeader(file);
+        std::string dataLine;
+        std::getline(file, dataLine);
+        std::istringstream lineStream(dataLine);
+
+        unsigned long readTrial = 0;
+        double readTime = NAN;
+        unsigned long readUid = 0;
+        lineStream >> readTrial >> readTime >> readUid;
+        std::vector<double> readYields(cluster.yields().size());
+        for (auto& value : readYields) { lineStream >> value; }
+
+        constexpr double tol = 1e-5;
+        if (readTrial != trial || std::abs(readTime - writeTime) > tol ||
+            readUid != cluster.uid())
+        {
+            std::cerr << "testOutputManager: write cluster yields ascii: trial/time/uid "
+                "row does not match\n";
+            return 1;
+        }
+        for (std::size_t i = 0; i < readYields.size(); ++i)
+        {
+            const double expected = cluster.yields().at(i);
+            const double atol = std::max(tol, tol * std::abs(expected));
+            if (std::abs(readYields.at(i) - expected) > atol)
+            {
+                std::cerr << "testOutputManager: write cluster yields ascii: column " << i <<
+                    " = " << readYields.at(i) << ", expected " << expected << "\n";
+                return 1;
+            }
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testOutputManager: write cluster yields ascii test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Verify that OutputManagerAscii::writeGalaxyYields writes a row
+// matching galaxy.yields() to the galaxy-yields output file, and also
+// writes a matching passthrough row -- via its own internal
+// writeClusterYields() calls -- to the cluster-yields output file for
+// every currently-alive cluster in the galaxy.
+static auto testWriteGalaxyYieldsAscii() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() / "slugTestOutputManagerWriteGalaxyYieldsAscii";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+    const std::string modelName = "test_model";
+    toml::table inputDeck = makeGalaxyPhysicsInputDeck(modelName, outDir);
+    addYieldsFixture(inputDeck);
+
+    try
+    {
+        const io::SimControls controls(inputDeck);
+        if (controls.yields() == nullptr)
+        {
+            std::cerr << "testOutputManager: write galaxy yields ascii: test bug: "
+                "expected yields() to be non-null\n";
+            return 1;
+        }
+
+        utils::rng().seed(42);
+        core::Galaxy galaxy(controls);
+        galaxy.advance(galaxyWriteTime);
+        if (galaxy.clusters().empty())
+        {
+            std::cerr << "testOutputManager: write galaxy yields ascii: test bug: "
+                "expected at least one cluster to have formed\n";
+            return 1;
+        }
+        constexpr unsigned long trial = 8;
+
+        {
+            io::OutputManagerAscii manager(controls);
+            manager.writeGalaxyYields(trial, galaxyWriteTime, galaxy);
+        }
+
+        constexpr double tol = 1e-5;
+
+        // galaxy_yields.txt: single row, no uid column
+        {
+            std::ifstream file(outDir / (modelName + "_galaxy_yields.txt"));
+            skipAsciiHeader(file);
+            std::string dataLine;
+            std::getline(file, dataLine);
+            std::istringstream lineStream(dataLine);
+            unsigned long readTrial = 0;
+            double readTime = NAN;
+            lineStream >> readTrial >> readTime;
+            std::vector<double> readYields(galaxy.yields().size());
+            for (auto& value : readYields) { lineStream >> value; }
+
+            if (readTrial != trial || std::abs(readTime - galaxyWriteTime) > tol)
+            {
+                std::cerr << "testOutputManager: write galaxy yields ascii: "
+                    "trial/time row does not match\n";
+                return 1;
+            }
+            for (std::size_t i = 0; i < readYields.size(); ++i)
+            {
+                const double expected = galaxy.yields().at(i);
+                const double atol = std::max(tol, tol * std::abs(expected));
+                if (std::abs(readYields.at(i) - expected) > atol)
+                {
+                    std::cerr << "testOutputManager: write galaxy yields ascii: column " <<
+                        i << " = " << readYields.at(i) << ", expected " << expected << "\n";
+                    return 1;
+                }
+            }
+        }
+
+        // cluster_yields.txt: one passthrough row per currently-alive cluster
+        {
+            std::ifstream file(outDir / (modelName + "_cluster_yields.txt"));
+            skipAsciiHeader(file);
+            std::map<unsigned long, std::vector<double>> rowsByUid;
+            std::string dataLine;
+            while (std::getline(file, dataLine))
+            {
+                if (dataLine.empty()) { continue; }
+                std::istringstream lineStream(dataLine);
+                unsigned long readTrialRow = 0;
+                double readTimeRow = NAN;
+                unsigned long readUid = 0;
+                lineStream >> readTrialRow >> readTimeRow >> readUid;
+                std::vector<double> values;
+                double value = NAN;
+                while (lineStream >> value) { values.push_back(value); }
+                rowsByUid.emplace(readUid, std::move(values));
+            }
+
+            if (rowsByUid.size() != galaxy.clusters().size())
+            {
+                std::cerr << "testOutputManager: write galaxy yields ascii: "
+                    "cluster_yields.txt has " << rowsByUid.size() << " rows, expected " <<
+                    galaxy.clusters().size() << "\n";
+                return 1;
+            }
+            for (auto& cluster : galaxy.clusters())
+            {
+                const auto it = rowsByUid.find(cluster.uid());
+                if (it == rowsByUid.end())
+                {
+                    std::cerr << "testOutputManager: write galaxy yields ascii: no "
+                        "cluster_yields.txt row for uid " << cluster.uid() << "\n";
+                    return 1;
+                }
+                const auto& values = it->second;
+                if (values.size() != cluster.yields().size())
+                {
+                    std::cerr << "testOutputManager: write galaxy yields ascii: row for uid " <<
+                        cluster.uid() << " has " << values.size() << " columns, expected " <<
+                        cluster.yields().size() << "\n";
+                    return 1;
+                }
+                for (std::size_t i = 0; i < values.size(); ++i)
+                {
+                    const double expected = cluster.yields().at(i);
+                    const double atol = std::max(tol, tol * std::abs(expected));
+                    if (std::abs(values.at(i) - expected) > atol)
+                    {
+                        std::cerr << "testOutputManager: write galaxy yields ascii: uid " <<
+                            cluster.uid() << " column " << i << " = " << values.at(i) <<
+                            ", expected " << expected << "\n";
+                        return 1;
+                    }
+                }
+            }
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testOutputManager: write galaxy yields ascii test failed: "
             << error.what() << "\n";
         return 1;
     }
@@ -3046,5 +3937,15 @@ auto testOutputManager() -> int
     result += testOutputManagerAsciiCheckpointThrows();
     result += testAllClusterOutputsFalseThrows();
     result += testPhotWithoutOutputThrows();
+    result += testClusterYieldsGroupH5();
+    result += testClusterYieldsGroupNotDecomposedH5();
+    result += testWriteClusterYieldsH5();
+    result += testWriteGalaxyYieldsH5();
+    result += testWriteGalaxyYieldsFalseStillWritesClustersH5();
+    result += testOptOutClusterYieldsOutput();
+    result += testClusterYieldsHeaderAscii();
+    result += testClusterYieldsHeaderNotDecomposedAscii();
+    result += testWriteClusterYieldsAscii();
+    result += testWriteGalaxyYieldsAscii();
     return result;
 }

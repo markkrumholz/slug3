@@ -13,6 +13,8 @@
 #include "../phot/FilterCollection.hpp"
 #include "../specsyn/Specsyn.hpp"
 #include "../utils/RngThread.hpp"
+#include "../yields/YieldCommons.hpp"
+#include "../yields/Yields.hpp"
 #include "OutputManager.hpp"
 #include "SimControls.hpp"
 #include "io/SlugVersion.hpp"
@@ -187,6 +189,97 @@ static auto computeLineLabelWidth(const std::vector<std::string>& lineLabels) ->
         width = std::max(width, static_cast<int>(label.size()) + photColPad);
     }
     return width;
+}
+
+// Build the ascii column names for the cluster-yields/galaxy-yields
+// files -- one "<isotope>" column per SimControls::yields()->isotopes()
+// entry (via elem::IsotopeData::label(), e.g. "Fe56") if
+// SimControls::yieldsChannelDecomposed() is false, or, if true, one
+// "<channelType><N>_<isotope>" column per (channel, isotope) pair,
+// channel-major, where N is that channel's own 1-based position among
+// SimControls::yieldChannels() (not a per-channel-type counter) -- so
+// column names stay unique even if two channels share the same
+// channel type (e.g. two "ccsn" channels with different models; see
+// Yields::Yields()'s own comment on why that's allowed). Must only be
+// called when SimControls::yields() is already known to be non-null.
+static auto buildYieldsColumnNames(const io::SimControls& simControls) -> std::vector<std::string>
+{
+    const auto& isotopes = simControls.yields()->isotopes();
+    std::vector<std::string> isotopeLabels;
+    isotopeLabels.reserve(isotopes.size());
+    for (const auto& iso : isotopes) { isotopeLabels.push_back(iso.get().label()); }
+
+    if (!simControls.yieldsChannelDecomposed()) { return isotopeLabels; }
+
+    const auto& channelDescriptors = simControls.yieldChannels();
+    std::vector<std::string> names;
+    names.reserve(isotopeLabels.size() * channelDescriptors.size());
+    for (std::size_t c = 0; c < channelDescriptors.size(); ++c)
+    {
+        const std::string prefix = std::string(
+            yields::channelStr.at(static_cast<std::size_t>(channelDescriptors.at(c).channel_))) +
+            std::to_string(c + 1);
+        for (const auto& isoLabel : isotopeLabels)
+        {
+            std::string colName = prefix;
+            colName += '_';
+            colName += isoLabel;
+            names.push_back(std::move(colName));
+        }
+    }
+    return names;
+}
+
+// Write the cluster-yields ascii header (column names, a row of units,
+// and a dashed rule) to file: one row per (trial, time) pair for each
+// cluster (identified by uid), with one column per entry in
+// columnNames (see buildYieldsColumnNames()'s own comment), each with
+// units "Msun" and its own width from colWidths (see
+// computePhotColWidths()).
+static void writeClusterYieldsHeader(std::ofstream& file,
+    const std::vector<std::string>& columnNames, const std::vector<int>& colWidths)
+{
+    file << std::right << std::setw(uidWidth) << "trial"
+         << std::setw(numWidth) << "time"
+         << std::setw(uidWidth) << "uid";
+    for (std::size_t i = 0; i < columnNames.size(); ++i)
+    {
+        file << std::setw(colWidths.at(i)) << columnNames.at(i);
+    }
+    file << "\n";
+    file << std::right << std::setw(uidWidth) << "none"
+         << std::setw(numWidth) << "yr"
+         << std::setw(uidWidth) << "none";
+    for (const int w : colWidths) { file << std::setw(w) << "Msun"; }
+    file << "\n";
+    auto totalWidth = (static_cast<std::string::size_type>(2) * uidWidth) +
+        static_cast<std::string::size_type>(numWidth);
+    for (const int w : colWidths) { totalWidth += static_cast<std::string::size_type>(w); }
+    file << std::string(totalWidth, '-') << "\n";
+}
+
+// Write the galaxy-yields ascii header (column names, a row of units,
+// and a dashed rule) to file. Mirrors writeClusterYieldsHeader()'s own
+// layout, but with no "uid" column, since a galaxy (unlike a cluster)
+// has no individual identity.
+static void writeGalaxyYieldsHeader(std::ofstream& file,
+    const std::vector<std::string>& columnNames, const std::vector<int>& colWidths)
+{
+    file << std::right << std::setw(uidWidth) << "trial"
+         << std::setw(numWidth) << "time";
+    for (std::size_t i = 0; i < columnNames.size(); ++i)
+    {
+        file << std::setw(colWidths.at(i)) << columnNames.at(i);
+    }
+    file << "\n";
+    file << std::right << std::setw(uidWidth) << "none"
+         << std::setw(numWidth) << "yr";
+    for (const int w : colWidths) { file << std::setw(w) << "Msun"; }
+    file << "\n";
+    auto totalWidth = static_cast<std::string::size_type>(uidWidth) +
+        static_cast<std::string::size_type>(numWidth);
+    for (const int w : colWidths) { totalWidth += static_cast<std::string::size_type>(w); }
+    file << std::string(totalWidth, '-') << "\n";
 }
 
 // Build the "<filter>_ex" column names/units for the
@@ -553,10 +646,12 @@ io::OutputManagerAscii::OutputManagerAscii(const SimControls& simControls) :
     openClusterSpectraFile();
     openClusterNebLinesFile();
     openClusterPhotFile();
+    openClusterYieldsFile();
     openGalaxyFile();
     openGalaxySpectraFile();
     openGalaxyNebLinesFile();
     openGalaxyPhotFile();
+    openGalaxyYieldsFile();
 }
 
 // Open the cluster output file and write its header, if cluster
@@ -686,6 +781,34 @@ void io::OutputManagerAscii::openClusterPhotFile()
         extinctFilterNames, extinctFilterUnits, photExtinctColWidths_,
         nebFilterNames, nebFilterUnits, photNebColWidths_,
         nebExtinctFilterNames, nebExtinctFilterUnits, photNebExtinctColWidths_);
+}
+
+// Open the cluster-yields output file and write its header, if yield
+// channels were requested for this simulation (see OutputManagerH5::
+// openClusterYieldsGroup()'s identical gating condition)
+void io::OutputManagerAscii::openClusterYieldsFile()
+{
+    if (simControls_.yields() == nullptr) { return; }
+    if (!simControls_.writeClusterYields()) { return; }
+
+    const auto clusterYieldsPath = std::filesystem::path(simControls_.outDir()) /
+        (simControls_.modelName() + "_cluster_yields.txt");
+    if (std::filesystem::exists(clusterYieldsPath))
+    {
+        throw std::runtime_error(
+            "OutputManagerAscii: output file " + clusterYieldsPath.string() + " already exists");
+    }
+
+    clusterYieldsFile_.open(clusterYieldsPath);
+    if (!clusterYieldsFile_)
+    {
+        throw std::runtime_error(
+            "OutputManagerAscii: unable to open output file " + clusterYieldsPath.string());
+    }
+    const auto columnNames = buildYieldsColumnNames(simControls_);
+    yieldsColWidths_ = computePhotColWidths(
+        columnNames, std::vector<std::string>(columnNames.size(), "Msun"));
+    writeClusterYieldsHeader(clusterYieldsFile_, columnNames, yieldsColWidths_);
 }
 
 // Open the galaxy output file and write its header, for a galaxy-type
@@ -822,16 +945,47 @@ void io::OutputManagerAscii::openGalaxyPhotFile()
         nebExtinctFilterNames, nebExtinctFilterUnits, photNebExtinctColWidths_);
 }
 
+// Open the galaxy-yields output file and write its header, for a
+// galaxy-type simulation with yield channels requested -- mirrors
+// openClusterYieldsFile()'s own column-list construction
+void io::OutputManagerAscii::openGalaxyYieldsFile()
+{
+    if (simControls_.simType() != SimControls::SimType::galaxy) { return; }
+    if (simControls_.yields() == nullptr) { return; }
+    if (!simControls_.writeGalaxyYields()) { return; }
+
+    const auto galaxyYieldsPath = std::filesystem::path(simControls_.outDir()) /
+        (simControls_.modelName() + "_galaxy_yields.txt");
+    if (std::filesystem::exists(galaxyYieldsPath))
+    {
+        throw std::runtime_error(
+            "OutputManagerAscii: output file " + galaxyYieldsPath.string() + " already exists");
+    }
+
+    galaxyYieldsFile_.open(galaxyYieldsPath);
+    if (!galaxyYieldsFile_)
+    {
+        throw std::runtime_error(
+            "OutputManagerAscii: unable to open output file " + galaxyYieldsPath.string());
+    }
+    const auto columnNames = buildYieldsColumnNames(simControls_);
+    yieldsColWidths_ = computePhotColWidths(
+        columnNames, std::vector<std::string>(columnNames.size(), "Msun"));
+    writeGalaxyYieldsHeader(galaxyYieldsFile_, columnNames, yieldsColWidths_);
+}
+
 io::OutputManagerAscii::~OutputManagerAscii()
 {
     if (clustersFile_.is_open()) { clustersFile_.close(); }
     if (clusterSpectraFile_.is_open()) { clusterSpectraFile_.close(); }
     if (clusterNebLinesFile_.is_open()) { clusterNebLinesFile_.close(); }
     if (clusterPhotFile_.is_open()) { clusterPhotFile_.close(); }
+    if (clusterYieldsFile_.is_open()) { clusterYieldsFile_.close(); }
     if (galaxyFile_.is_open()) { galaxyFile_.close(); }
     if (galaxySpectraFile_.is_open()) { galaxySpectraFile_.close(); }
     if (galaxyNebLinesFile_.is_open()) { galaxyNebLinesFile_.close(); }
     if (galaxyPhotFile_.is_open()) { galaxyPhotFile_.close(); }
+    if (galaxyYieldsFile_.is_open()) { galaxyYieldsFile_.close(); }
 }
 
 // Write one fixed-width row of cluster data to the cluster output
@@ -1037,6 +1191,41 @@ void io::OutputManagerAscii::writeClusterPhot(
     }
 }
 
+// Write one fixed-width row of cluster yields (trial, time, uid, one
+// column per isotope or channel-isotope pair) to the cluster-yields
+// output file. A no-op if no yield channels were requested for this
+// simulation (the cluster-yields file was not opened) -- unlike
+// writeClusterSpec()/writeClusterPhot(), does not skip a disrupted
+// cluster -- see OutputManager::writeClusterYields()'s own comment for
+// why.
+void io::OutputManagerAscii::writeClusterYields(
+    const unsigned long trial, const double time, core::Cluster& cluster)
+{
+    if (!clusterYieldsFile_.is_open()) { return; }
+
+    const unsigned long uid = cluster.uid();
+    const auto& yields = cluster.yields();
+
+    // Guard the actual write against concurrent callers from other
+    // threads; uses its own critical section, distinct from every
+    // other writeCluster*'s own, since each writes to an independent
+    // file
+#ifdef _OPENMP
+#pragma omp critical(clusterYieldsOutputWrite)
+#endif
+    {
+        clusterYieldsFile_ << std::right
+                            << std::setw(uidWidth) << formatUid(trial)
+                            << std::setw(numWidth) << formatSci(time)
+                            << std::setw(uidWidth) << formatUid(uid);
+        for (std::size_t i = 0; i < yields.size(); ++i)
+        {
+            clusterYieldsFile_ << std::setw(yieldsColWidths_.at(i)) << formatSci(yields.at(i));
+        }
+        clusterYieldsFile_ << "\n";
+    }
+}
+
 // Write one fixed-width row of galaxy data (trial, time, target_mass,
 // actual_mass -- no uid, since a galaxy has no individual identity)
 // to the galaxy output file, then call writeCluster() on every
@@ -1218,6 +1407,38 @@ void io::OutputManagerAscii::writeGalaxyPhot(
     }
 
     for (auto& cluster : galaxy.clusters()) { writeClusterPhot(trial, time, cluster); }
+}
+
+// Write one fixed-width row of galaxy yields (trial, time, one column
+// per isotope or channel-isotope pair -- no uid, since a galaxy has no
+// individual identity) to the galaxy-yields output file, then call
+// writeClusterYields() on every currently-alive (non-disrupted)
+// cluster in galaxy. A no-op if no yield channels were requested for
+// this simulation (the galaxy-yields file was not opened).
+void io::OutputManagerAscii::writeGalaxyYields(
+    const unsigned long trial, const double time, core::Galaxy& galaxy)
+{
+    if (galaxyYieldsFile_.is_open())
+    {
+        const auto& yields = galaxy.yields();
+
+        // See writeClusterYields's own comment on this critical section
+#ifdef _OPENMP
+#pragma omp critical(galaxyYieldsOutputWrite)
+#endif
+        {
+            galaxyYieldsFile_ << std::right
+                               << std::setw(uidWidth) << formatUid(trial)
+                               << std::setw(numWidth) << formatSci(time);
+            for (std::size_t i = 0; i < yields.size(); ++i)
+            {
+                galaxyYieldsFile_ << std::setw(yieldsColWidths_.at(i)) << formatSci(yields.at(i));
+            }
+            galaxyYieldsFile_ << "\n";
+        }
+    }
+
+    for (auto& cluster : galaxy.clusters()) { writeClusterYields(trial, time, cluster); }
 }
 
 // See this method's own header comment: checkpointing is only ever

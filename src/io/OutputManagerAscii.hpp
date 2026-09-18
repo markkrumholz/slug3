@@ -98,6 +98,26 @@ namespace io
             core::Cluster& cluster) override;
 
         /**
+         * @brief Write a cluster's nucleosynthetic yields
+         * @param trial Trial number to which this cluster belongs
+         * @param time The output time at which this row was recorded, in yr
+         * @param cluster The cluster whose yields should be written
+         * @details
+         * If no yield channels were requested for this simulation (the
+         * cluster-yields file was not opened), this is a no-op --
+         * unlike writeClusterSpec()/writeClusterPhot(), a disrupted
+         * cluster's own row is still written (see
+         * OutputManager::writeClusterYields()'s own comment for why).
+         * Otherwise writes one line, holding trial, time, uid, and one
+         * column per isotope (or per channel-isotope pair, if
+         * SimControls::yieldsChannelDecomposed()), to the
+         * cluster-yields file -- see buildYieldsColumnNames()'s own
+         * comment for the exact column-naming convention.
+         */
+        void writeClusterYields(unsigned long trial, double time,
+            core::Cluster& cluster) override;
+
+        /**
          * @brief Write a galaxy's data as a row of the galaxy output file
          * @param trial Trial number to which this galaxy belongs
          * @param time The output time at which this row was recorded, in yr
@@ -147,6 +167,25 @@ namespace io
          * every currently-alive (non-disrupted) cluster in galaxy.
          */
         void writeGalaxyPhot(unsigned long trial, double time,
+            core::Galaxy& galaxy) override;
+
+        /**
+         * @brief Write a galaxy's nucleosynthetic yields
+         * @param trial Trial number to which this galaxy belongs
+         * @param time The output time at which this row was recorded, in yr
+         * @param galaxy The galaxy whose yields should be written
+         * @details
+         * Writing the galaxy's own line -- trial, time, and one column
+         * per isotope (or per channel-isotope pair, mirroring
+         * writeClusterYields()'s own column layout) -- is a no-op if
+         * the galaxy-yields file was not opened (no yield channels were
+         * requested, or output.write_galaxy_yields is false).
+         * writeClusterYields() is still called on every currently-alive
+         * (non-disrupted) cluster in galaxy regardless, since
+         * output.write_cluster_yields is independently togglable (see
+         * OutputManagerH5::writeGalaxyYields()'s own comment).
+         */
+        void writeGalaxyYields(unsigned long trial, double time,
             core::Galaxy& galaxy) override;
 
         /**
@@ -227,6 +266,15 @@ namespace io
         void openClusterPhotFile();
 
         /**
+         * @brief Open the cluster-yields output file and write its header, if yield channels were requested
+         * @details
+         * A no-op if SimControls::yields() is null (no yield channels
+         * were requested), or if output.write_cluster_yields
+         * (optional, defaults to true) is set to false.
+         */
+        void openClusterYieldsFile();
+
+        /**
          * @brief Open the galaxy output file and write its header, for a galaxy-type simulation
          * @details
          * A no-op unless SimControls::simType() is SimType::galaxy --
@@ -255,6 +303,16 @@ namespace io
          * defaults to true) is set to false.
          */
         void openGalaxyPhotFile();
+
+        /**
+         * @brief Open the galaxy-yields output file and write its header, if yield channels were requested
+         * @details
+         * A no-op unless SimControls::simType() is SimType::galaxy, if
+         * SimControls::yields() is null (no yield channels were
+         * requested), or if output.write_galaxy_yields (optional,
+         * defaults to true) is set to false.
+         */
+        void openGalaxyYieldsFile();
 
         /**
          * @brief Open the cluster-nebular-line-luminosity output file and write its header, if a nebular emission grid was requested
@@ -316,16 +374,19 @@ namespace io
         std::ofstream clustersFile_; /**< Handle to the open cluster output file */
         std::ofstream clusterSpectraFile_; /**< Handle to the open cluster-spectra output file, if any */
         std::ofstream clusterPhotFile_; /**< Handle to the open cluster-photometry output file, if any */
+        std::ofstream clusterYieldsFile_; /**< Handle to the open cluster-yields output file, if any */
         std::ofstream clusterNebLinesFile_; /**< Handle to the open cluster-nebular-line-luminosity output file, if any */
         std::ofstream galaxyFile_; /**< Handle to the open galaxy output file, if any (galaxy-type simulations only) */
         std::ofstream galaxySpectraFile_; /**< Handle to the open galaxy-spectra output file, if any */
         std::ofstream galaxyPhotFile_; /**< Handle to the open galaxy-photometry output file, if any */
+        std::ofstream galaxyYieldsFile_; /**< Handle to the open galaxy-yields output file, if any */
         std::ofstream galaxyNebLinesFile_; /**< Handle to the open galaxy-nebular-line-luminosity output file, if any */
         std::vector<double> wlObs_; /**< Observed-frame wavelength grid, if spectral synthesis is enabled -- shared by both the cluster- and galaxy-spectra files, since both are drawn from the same SimControls::specsyn() */
         std::vector<int> photColWidths_; /**< Column width used for each filter in the cluster- and galaxy-photometry files -- see computePhotColWidths() */
         std::vector<int> photExtinctColWidths_; /**< Column width used for each "<filter>_ex" column in the cluster- and galaxy-photometry files, if SimControls::extinct() is set -- see computePhotColWidths() */
         std::vector<int> photNebColWidths_; /**< Column width used for each "<filter>_neb" column in the cluster- and galaxy-photometry files, if SimControls::nebular() is set -- see computePhotColWidths() */
         std::vector<int> photNebExtinctColWidths_; /**< Column width used for each "<filter>_neb_ex" column in the cluster- and galaxy-photometry files, if both SimControls::nebular() and SimControls::extinct() are set -- see computePhotColWidths() */
+        std::vector<int> yieldsColWidths_; /**< Column width used for each isotope (or channel-isotope pair) column in the cluster- and galaxy-yields files -- see buildYieldsColumnNames()/computePhotColWidths() */
         int lineLabelWidth_ = 0; /**< Column width used for the "line_label" column in the cluster- and galaxy-nebular-line-luminosity files, if SimControls::nebular() is set -- see computeLineLabelWidth() */
     };
 

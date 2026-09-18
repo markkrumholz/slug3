@@ -1173,6 +1173,133 @@ static auto testSimControlsYields() -> int
     return result;
 }
 
+// Verify writeClusterYields()/writeGalaxyYields() default to true, are
+// parsed from output.write_cluster_yields/output.write_galaxy_yields
+// exactly like the other six output.write_* keys (see readOutput()'s
+// own comment), and that readYields() throws if yield channels were
+// requested but both are false, or if writeClusterYields() alone is
+// false in a cluster-type simulation (where writeGalaxyYields() is
+// meaningless and so cannot rescue the yields from going unwritten).
+static auto testSimControlsWriteYields() -> int
+{
+    constexpr std::string_view galaxyDeck = "tests/core/assets/testGalaxy.in";
+    constexpr std::string_view clusterDeck = "tests/core/assets/testCluster.in";
+    int result = 0;
+
+    // Defaults: both true when no yields.channelN and no write_*_yields
+    // key are given at all
+    try
+    {
+        const toml::table inputDeck = toml::parse_file(galaxyDeck);
+        const io::SimControls controls(inputDeck);
+        if (!controls.writeClusterYields() || !controls.writeGalaxyYields())
+        {
+            std::cerr << "testSimControls: write yields: expected both "
+                "writeClusterYields() and writeGalaxyYields() to default "
+                "to true\n";
+            result = 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: write yields: defaults case failed: "
+            << error.what() << "\n";
+        result = 1;
+    }
+
+    // output.write_cluster_yields = false, no yield channels requested:
+    // parsed straight through to writeClusterYields(), no throw (the
+    // sanity check only fires when yieldChannels() is non-empty)
+    try
+    {
+        toml::table inputDeck = toml::parse_file(galaxyDeck);
+        inputDeck.at_path("output").as_table()->insert("write_cluster_yields", false);
+        const io::SimControls controls(inputDeck);
+        if (controls.writeClusterYields() || !controls.writeGalaxyYields())
+        {
+            std::cerr << "testSimControls: write yields: expected "
+                "writeClusterYields() false, writeGalaxyYields() true, "
+                "after setting only output.write_cluster_yields = false\n";
+            result = 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: write yields: no-channels opt-out "
+            "case failed: " << error.what() << "\n";
+        result = 1;
+    }
+
+    // Yield channels requested, output.write_cluster_yields and
+    // output.write_galaxy_yields both false: throws
+    try
+    {
+        toml::table inputDeck = toml::parse_file(galaxyDeck);
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{
+                { "channel", "ccsn" }, { "model", "sukhbold16" } } },
+        });
+        inputDeck.at_path("output").as_table()->insert("write_cluster_yields", false);
+        inputDeck.at_path("output").as_table()->insert("write_galaxy_yields", false);
+        const io::SimControls controls(inputDeck);
+        std::cerr << "testSimControls: write yields: expected an exception "
+            "when yield channels are given but both write_cluster_yields "
+            "and write_galaxy_yields are false\n";
+        result = 1;
+    }
+    catch (const std::runtime_error&) { /* expected */ }
+
+    // Yield channels requested, only output.write_cluster_yields false,
+    // in a galaxy-type simulation: no throw, since writeGalaxyYields()
+    // (still true) can carry the yields
+    try
+    {
+        toml::table inputDeck = toml::parse_file(galaxyDeck);
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{
+                { "channel", "ccsn" }, { "model", "sukhbold16" } } },
+        });
+        inputDeck.at_path("output").as_table()->insert("write_cluster_yields", false);
+        const io::SimControls controls(inputDeck);
+        if (controls.writeClusterYields() || !controls.writeGalaxyYields())
+        {
+            std::cerr << "testSimControls: write yields: expected "
+                "writeClusterYields() false, writeGalaxyYields() true, "
+                "after setting only output.write_cluster_yields = false\n";
+            result = 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: write yields: galaxy-sim opt-out "
+            "case failed: " << error.what() << "\n";
+        result = 1;
+    }
+
+    // Yield channels requested, only output.write_cluster_yields false,
+    // in a cluster-type simulation: throws, since writeGalaxyYields()
+    // is meaningless there (no Galaxy, so no galaxy_yields group/file)
+    // and so cannot rescue the yields the way it could for a galaxy-type
+    // simulation
+    try
+    {
+        toml::table inputDeck = toml::parse_file(clusterDeck);
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{
+                { "channel", "ccsn" }, { "model", "sukhbold16" } } },
+        });
+        inputDeck.at_path("output").as_table()->insert("write_cluster_yields", false);
+        const io::SimControls controls(inputDeck);
+        std::cerr << "testSimControls: write yields: expected an exception "
+            "when yield channels are given and write_cluster_yields is "
+            "false in a cluster-type simulation\n";
+        result = 1;
+    }
+    catch (const std::runtime_error&) { /* expected */ }
+
+    return result;
+}
+
 // Verify Yields::isotopes() is the deduplicated, sorted union of every
 // loaded channel's own isotopesOrig(), and that Yields::rebuildYieldGrid()
 // (called by the constructor) actually pushes that same list back down
@@ -1317,6 +1444,196 @@ static auto testSimControlsYieldsIsotopes() -> int
         std::cerr << "testSimControls: yieldsIsotopes: failed: " << error.what() << "\n";
         result = 1;
     }
+
+    return result;
+}
+
+// Verify SimControls::readYields()'s own yields.isotopes handling:
+// parses each entry as a case-insensitive element symbol immediately
+// followed by a mass number, converts the whole list to a
+// yields::IsotopeList, and passes it to yields_->rebuildYieldGrid() so
+// that yields()->isotopes() ends up restricted to the intersection of
+// that list and whatever the loaded channels actually tabulate. Reuses
+// the same sukhbold_test/kobayashi_test fixture (isotope union h1,
+// fe56, ni56, ni58) as testSimControlsYieldsIsotopes() above.
+static auto testSimControlsYieldsIsotopesKeyword() -> int
+{
+    constexpr std::string_view baseDeck = "tests/core/assets/testGalaxy.in";
+    int result = 0;
+
+    auto buildDeck = [&](const toml::array& isotopesArr) -> toml::table
+    {
+        toml::table inputDeck = toml::parse_file(baseDeck);
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{
+                { "channel", "ccsn" }, { "model", "sukhbold_test" } } },
+            { "channel2", toml::table{
+                { "channel", "ccsn" }, { "model", "kobayashi_test" } } },
+            { "registry", "tests/yields/assets/yields.toml" },
+            { "isotopes", isotopesArr },
+        });
+        return inputDeck;
+    };
+
+    // Mixed-case symbols, one entry ("C12") that matches no loaded
+    // channel's own isotopes at all: isotopes() ends up restricted to
+    // exactly {fe56, ni58} (Z-then-A order), dropping h1 and ni56, and
+    // silently ignoring the C12 entry rather than throwing for it.
+    try
+    {
+        const toml::table inputDeck = buildDeck(toml::array{ "Fe56", "ni58", "C12" });
+        const io::SimControls controls(inputDeck);
+        if (controls.yields() == nullptr)
+        {
+            std::cerr << "testSimControls: yieldsIsotopesKeyword: expected yields() non-null\n";
+            return 1;
+        }
+
+        const auto& isotopes = controls.yields()->isotopes();
+        const std::vector<std::pair<unsigned int, unsigned int>> expected{
+            { 26, 56 }, { 28, 58 } }; // fe56, ni58
+        if (isotopes.size() != expected.size())
+        {
+            std::cerr << "testSimControls: yieldsIsotopesKeyword: expected " <<
+                expected.size() << " isotopes (fe56, ni58), got " << isotopes.size() << "\n";
+            result = 1;
+        }
+        else
+        {
+            for (std::size_t i = 0; i < expected.size(); ++i)
+            {
+                if (isotopes[i].get().Z() != expected[i].first ||
+                    isotopes[i].get().A() != expected[i].second)
+                {
+                    std::cerr << "testSimControls: yieldsIsotopesKeyword: isotopes()[" << i <<
+                        "] expected (Z=" << expected[i].first << ", A=" << expected[i].second <<
+                        "), got (Z=" << isotopes[i].get().Z() << ", A=" <<
+                        isotopes[i].get().A() << ")\n";
+                    result = 1;
+                }
+            }
+        }
+
+        // sukhbold_test's own yield() (Yields::rebuildYieldGrid() ran
+        // again with the narrowed isotope list, so YieldChannel::yield()
+        // now returns only 2 entries, in the same [fe56, ni58] order)
+        constexpr double yieldTol = 1e-10;
+        const auto& loaded = controls.yields()->yieldChannels();
+        const std::vector<double> sukhboldExpected{ 8.46e-2, 0.0 }; // fe56, ni58 (never tabulated)
+        const auto sukhboldActual = loaded.at(0)->yield(18.2, 0.0);
+        if (sukhboldActual.size() != sukhboldExpected.size())
+        {
+            std::cerr << "testSimControls: yieldsIsotopesKeyword: sukhbold_test yield() has "
+                "size " << sukhboldActual.size() << ", expected " << sukhboldExpected.size() << "\n";
+            result = 1;
+        }
+        else
+        {
+            for (std::size_t i = 0; i < sukhboldExpected.size(); ++i)
+            {
+                if (std::abs(sukhboldActual[i] - sukhboldExpected[i]) > yieldTol)
+                {
+                    std::cerr << "testSimControls: yieldsIsotopesKeyword: sukhbold_test yield()[" <<
+                        i << "] = " << sukhboldActual[i] << ", expected " << sukhboldExpected[i] << "\n";
+                    result = 1;
+                }
+            }
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: yieldsIsotopesKeyword: filter case failed: "
+            << error.what() << "\n";
+        result = 1;
+    }
+
+    // An empty yields.isotopes array is the same as not giving the key
+    // at all -- no restriction, every unioned isotope is kept
+    try
+    {
+        const toml::table inputDeck = buildDeck(toml::array{});
+        const io::SimControls controls(inputDeck);
+        if (controls.yields() == nullptr || controls.yields()->isotopes().size() != 4)
+        {
+            std::cerr << "testSimControls: yieldsIsotopesKeyword: expected an empty "
+                "yields.isotopes to leave all 4 unioned isotopes in place\n";
+            result = 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: yieldsIsotopesKeyword: empty-array case failed: "
+            << error.what() << "\n";
+        result = 1;
+    }
+
+    // yields.isotopes not an array: throws
+    try
+    {
+        toml::table inputDeck = toml::parse_file(baseDeck);
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{
+                { "channel", "ccsn" }, { "model", "sukhbold_test" } } },
+            { "registry", "tests/yields/assets/yields.toml" },
+            { "isotopes", "fe56" },
+        });
+        const io::SimControls controls(inputDeck);
+        std::cerr << "testSimControls: yieldsIsotopesKeyword: expected an exception "
+            "when yields.isotopes is not an array\n";
+        result = 1;
+    }
+    catch (const std::runtime_error&) { /* expected */ }
+
+    // yields.isotopes entry with an unrecognized element symbol: throws
+    try
+    {
+        const toml::table inputDeck = buildDeck(toml::array{ "a2" });
+        const io::SimControls controls(inputDeck);
+        std::cerr << "testSimControls: yieldsIsotopesKeyword: expected an exception "
+            "for the unrecognized symbol 'a' in 'a2'\n";
+        result = 1;
+    }
+    catch (const std::runtime_error&) { /* expected */ }
+
+    // yields.isotopes entry with no mass number: throws
+    try
+    {
+        const toml::table inputDeck = buildDeck(toml::array{ "Na" });
+        const io::SimControls controls(inputDeck);
+        std::cerr << "testSimControls: yieldsIsotopesKeyword: expected an exception "
+            "for 'Na' having no mass number\n";
+        result = 1;
+    }
+    catch (const std::runtime_error&) { /* expected */ }
+
+    // yields.isotopes entry naming a real element but a mass number
+    // with no corresponding entry in the global isotope table: throws
+    try
+    {
+        const toml::table inputDeck = buildDeck(toml::array{ "H999" });
+        const io::SimControls controls(inputDeck);
+        std::cerr << "testSimControls: yieldsIsotopesKeyword: expected an exception "
+            "for 'H999', which does not exist in the isotope table\n";
+        result = 1;
+    }
+    catch (const std::runtime_error&) { /* expected */ }
+
+    // yields.isotopes entirely non-empty but matching no isotope any
+    // loaded channel tabulates (unlike the earlier "Fe56"/"ni58"/"C12"
+    // case above, where C12 alone was ignored because Fe56/ni58 still
+    // matched something): Yields::rebuildYieldGrid() throws rather than
+    // silently leaving yields()->isotopes() empty -- see its own
+    // comment for why an entirely-empty result can only mean the whole
+    // list was wrong
+    try
+    {
+        const toml::table inputDeck = buildDeck(toml::array{ "C12" });
+        const io::SimControls controls(inputDeck);
+        std::cerr << "testSimControls: yieldsIsotopesKeyword: expected an exception "
+            "when yields.isotopes matches nothing any loaded channel tabulates\n";
+        result = 1;
+    }
+    catch (const std::runtime_error&) { /* expected */ }
 
     return result;
 }
@@ -1949,7 +2266,9 @@ auto testSimControls() -> int
     result += testSimControlsSpectraChained();
     result += testSimControlsExtinctField();
     result += testSimControlsYields();
+    result += testSimControlsWriteYields();
     result += testSimControlsYieldsIsotopes();
+    result += testSimControlsYieldsIsotopesKeyword();
     result += testSimControlsYieldsYieldAndSum();
     result += testSimControlsYieldsPartialRange();
     result += testSimControlsYieldsDuplicateChannelWarning();

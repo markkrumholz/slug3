@@ -171,6 +171,21 @@ namespace io
             core::Cluster& cluster) override;
 
         /**
+         * @brief Write a cluster's nucleosynthetic yields as a row of the cluster_yields datasets
+         * @param trial Trial number to which this cluster belongs
+         * @param time The output time at which this row was recorded, in yr
+         * @param cluster The cluster whose yields should be written
+         * @details
+         * If no yield channels were requested for this simulation (the
+         * cluster_yields group does not exist), this is a no-op --
+         * unlike writeClusterPhot()/writeClusterSpec(), a disrupted
+         * cluster's own row is still written (see
+         * OutputManager::writeClusterYields()'s own comment for why).
+         */
+        void writeClusterYields(unsigned long trial, double time,
+            core::Cluster& cluster) override;
+
+        /**
          * @brief Write a galaxy's data as a row of the galaxy datasets
          * @param trial Trial number to which this galaxy belongs
          * @param time The output time at which this row was recorded, in yr
@@ -212,6 +227,26 @@ namespace io
          * (non-disrupted) cluster in galaxy.
          */
         void writeGalaxyPhot(unsigned long trial, double time,
+            core::Galaxy& galaxy) override;
+
+        /**
+         * @brief Write a galaxy's nucleosynthetic yields as a row of the galaxy_yields datasets
+         * @param trial Trial number to which this galaxy belongs
+         * @param time The output time at which this row was recorded, in yr
+         * @param galaxy The galaxy whose yields should be written
+         * @details
+         * Writing the galaxy_yields row itself is a no-op if the
+         * galaxy_yields group does not exist (no yield channels were
+         * requested, or output.write_galaxy_yields is false) --
+         * writeClusterYields() is still called on every currently-alive
+         * (non-disrupted) cluster in galaxy regardless, since
+         * output.write_cluster_yields is independently togglable from
+         * output.write_galaxy_yields (see SimControls::readYields()'s
+         * own sanity check, which only rejects both being false at
+         * once); writeClusterYields() itself then no-ops per cluster if
+         * the cluster_yields group also does not exist.
+         */
+        void writeGalaxyYields(unsigned long trial, double time,
             core::Galaxy& galaxy) override;
 
         /**
@@ -516,8 +551,9 @@ namespace io
          * the file, writes its top-level slug-hash/date/time/rng_state
          * attributes and input_deck group, then calls
          * openClustersGroup()/openClusterSpectraGroup()/
-         * openClusterPhotGroup()/openGalaxyGroup()/
-         * openGalaxySpectraGroup()/openGalaxyPhotGroup() to create
+         * openClusterPhotGroup()/openClusterYieldsGroup()/
+         * openGalaxyGroup()/openGalaxySpectraGroup()/
+         * openGalaxyPhotGroup()/openGalaxyYieldsGroup() to create
          * whichever of those groups are enabled. Called once per
          * thread (each with its own path) from inside
          * openNewOutputFiles()'s own OpenMP parallel region when built
@@ -711,6 +747,15 @@ namespace io
         void openClusterPhotGroup();
 
         /**
+         * @brief Create the cluster_yields group and its datasets, if yield channels were requested
+         * @details
+         * A no-op if SimControls::yields() is null (no yield channels
+         * were requested), or if output.write_cluster_yields (optional,
+         * defaults to true) is set to false.
+         */
+        void openClusterYieldsGroup();
+
+        /**
          * @brief Create the galaxy group and its datasets, for a galaxy-type simulation
          * @details
          * A no-op unless SimControls::simType() is SimType::galaxy --
@@ -739,6 +784,16 @@ namespace io
          * defaults to true) is set to false.
          */
         void openGalaxyPhotGroup();
+
+        /**
+         * @brief Create the galaxy_yields group and its datasets, if yield channels were requested
+         * @details
+         * A no-op unless SimControls::simType() is SimType::galaxy, if
+         * SimControls::yields() is null (no yield channels were
+         * requested), or if output.write_galaxy_yields (optional,
+         * defaults to true) is set to false.
+         */
+        void openGalaxyYieldsGroup();
 
         // Number of times checkpoint() has rolled over to a new
         // checkpoint; 0 until the first call. Only meaningful if
@@ -824,9 +879,11 @@ namespace io
         utils::ThreadVec<hid_t> clustersGroup_; /**< Handle to this thread's own open clusters group, if any */ // NOLINT(misc-include-cleaner)
         utils::ThreadVec<hid_t> clusterSpectraGroup_; /**< Handle to this thread's own open cluster_spectra group, if any */ // NOLINT(misc-include-cleaner)
         utils::ThreadVec<hid_t> clusterPhotGroup_; /**< Handle to this thread's own open cluster_phot group, if any */ // NOLINT(misc-include-cleaner)
+        utils::ThreadVec<hid_t> clusterYieldsGroup_; /**< Handle to this thread's own open cluster_yields group, if any */ // NOLINT(misc-include-cleaner)
         utils::ThreadVec<hid_t> galaxyGroup_; /**< Handle to this thread's own open galaxy group, if any */ // NOLINT(misc-include-cleaner)
         utils::ThreadVec<hid_t> galaxySpectraGroup_; /**< Handle to this thread's own open galaxy_spectra group, if any */ // NOLINT(misc-include-cleaner)
         utils::ThreadVec<hid_t> galaxyPhotGroup_; /**< Handle to this thread's own open galaxy_phot group, if any */ // NOLINT(misc-include-cleaner)
+        utils::ThreadVec<hid_t> galaxyYieldsGroup_; /**< Handle to this thread's own open galaxy_yields group, if any */ // NOLINT(misc-include-cleaner)
     };
 
 } // namespace io
