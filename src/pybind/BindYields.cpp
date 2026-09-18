@@ -31,7 +31,11 @@ static auto toIsotopeList(const std::vector<const elem::IsotopeData*>& isotopes)
 {
     yields::IsotopeList result;
     result.reserve(isotopes.size());
-    for (const auto* iso : isotopes) { result.emplace_back(*iso); }
+    for (const auto* iso : isotopes)
+    {
+        if (iso == nullptr) { throw py::value_error("isotopes must not contain None"); }
+        result.emplace_back(*iso);
+    }
     return result;
 }
 
@@ -103,7 +107,13 @@ Parameters
 ----------
 channel : YieldChannel
     The channel to add; ownership is transferred to this Yields, so
-    channel is no longer usable from Python after this call.
+    channel is no longer usable from Python after this call. Must not
+    be None.
+
+Throws
+------
+ValueError
+    If channel is None.
 
 Details
 -------
@@ -129,7 +139,15 @@ Details
 -------
 Also calls rebuildYieldGrid() afterward, so isotopes() (and every
 remaining channel) stays synchronized once the removed channel's own
-isotopes no longer count toward the union.)doc";
+isotopes no longer count toward the union.
+
+Warning: a YieldChannel object previously read back from yieldChannels()
+is a non-owning reference into this Yields's own storage. If it happens
+to be the entry index removes, that Python object becomes a dangling
+reference -- calling any of its methods afterward is undefined
+behavior. Don't retain a YieldChannel across a call to this method (or
+setChannels(), or assigning to the yieldChannels property) unless
+you've confirmed it wasn't the one removed/replaced.)doc";
 
 static constexpr std::string_view setChannelsPointersDocstring =
     R"doc(Replace yieldChannels() wholesale with a list of already-built channels.
@@ -139,13 +157,23 @@ Parameters
 channels : list of YieldChannel
     The channels to install, in order; ownership of each is
     transferred to this Yields, so none of them are usable from Python
-    after this call.
+    after this call. None of the entries may be None.
+
+Throws
+------
+ValueError
+    If any entry of channels is None.
 
 Details
 -------
 yieldChannels() is discarded and replaced by channels, then
 rebuildYieldGrid() is called, synchronizing isotopes() (and every
-installed channel) onto the union of their own isotopesOrig().)doc";
+installed channel) onto the union of their own isotopesOrig().
+
+Warning: every previously-installed YieldChannel is discarded by this
+call (not just reassigned), so a Python YieldChannel object read back
+from yieldChannels() before this call becomes a dangling reference
+afterward -- see deleteChannel()'s own docstring for the same caveat.)doc";
 
 static constexpr std::string_view setChannelsDescriptorsDocstring =
     R"doc(Replace yieldChannels() wholesale with channels built from a list of descriptors.
@@ -167,7 +195,12 @@ Details
 -------
 Unlike the YieldChannel-list overload, this builds every channel fresh
 from disk rather than moving in already-built ones. Also calls
-rebuildYieldGrid() afterward.)doc";
+rebuildYieldGrid() afterward.
+
+Warning: every previously-installed YieldChannel is discarded by this
+call, so a Python YieldChannel object read back from yieldChannels()
+before this call becomes a dangling reference afterward -- see
+deleteChannel()'s own docstring for the same caveat.)doc";
 
 static constexpr std::string_view rebuildYieldGridDocstring =
     R"doc(Rebuild isotopes() from yieldChannels(), then push it back into every channel.
@@ -208,7 +241,12 @@ controls().yieldChannels(). Assigning a list transfers ownership of
 each element to this Yields via setChannels() -- see its own
 docstring for the two accepted element types (YieldChannel or
 YieldChannelDescriptor) -- then calls rebuildYieldGrid(), so isotopes()
-(and every channel) stays synchronized onto the new list.)doc";
+(and every channel) stays synchronized onto the new list.
+
+Warning: each YieldChannel this returns is a non-owning reference into
+this Yields's own storage, not an independent object -- see
+deleteChannel()'s own docstring for what can make a previously-read
+one dangling.)doc";
 
 static constexpr std::string_view isotopesDocstring =
     R"doc(The isotopes this Yields' yield grid is tabulated for.
@@ -351,24 +389,46 @@ void bindYields(py::module_& m)
                 {
                     // def_property only supports one setter signature,
                     // unlike setChannels()'s own two overloaded .def()
-                    // bindings above -- so dispatch by peeking at the
-                    // first element's type (without consuming/casting
-                    // it, to avoid partially releasing ownership of a
-                    // YieldChannel list before knowing which branch
-                    // actually applies) before committing to one cast
-                    // or the other. An empty channels is handled
-                    // identically by either overload (both simply clear
-                    // yieldChannels()), so the branch taken doesn't matter.
-                    const bool isDescriptors = channels.empty() ||
-                        py::isinstance<yields::YieldChannelDescriptor>(channels[0]);
-                    if (isDescriptors)
+                    // bindings above -- so dispatch by inspecting every
+                    // element's type up front (via py::isinstance,
+                    // which only inspects -- it never casts/consumes/
+                    // releases ownership of anything) before committing
+                    // to either ownership-transferring cast below.
+                    // Checking every element, not just the first, is
+                    // what matters here: a mixed list (e.g. one
+                    // YieldChannel followed by one
+                    // YieldChannelDescriptor) must be rejected outright,
+                    // rather than picking a branch from the first
+                    // element and letting py::cast's own per-element
+                    // vector conversion fail partway through the
+                    // second overload's own cast -- by then, any
+                    // YieldChannel elements before the mismatched one
+                    // would already have had their own Python-side
+                    // ownership released, even though the overall
+                    // assignment ends up throwing and yieldChannels_
+                    // itself is left unchanged.
+                    bool allDescriptors = true;
+                    bool allChannels = true;
+                    for (const auto& element : channels)
+                    {
+                        allDescriptors = allDescriptors &&
+                            py::isinstance<yields::YieldChannelDescriptor>(element);
+                        allChannels = allChannels && py::isinstance<yields::YieldChannel>(element);
+                    }
+                    if (allDescriptors)
                     {
                         self.setChannels(py::cast<std::vector<yields::YieldChannelDescriptor>>(channels));
                     }
-                    else
+                    else if (allChannels)
                     {
                         self.setChannels(
                             py::cast<std::vector<std::unique_ptr<yields::YieldChannel>>>(channels));
+                    }
+                    else
+                    {
+                        throw py::type_error(
+                            "yieldChannels must be assigned a list of only YieldChannel or "
+                            "only YieldChannelDescriptor, not a mix of the two (or any other type)");
                     }
                     self.rebuildYieldGrid();
                 },

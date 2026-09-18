@@ -624,7 +624,14 @@ yields must have been constructed with its own controls argument set
 to this same SimControls (e.g. yields = slug.Yields(controls=sc);
 sc.setYields(yields)) -- a Yields stores a live reference to whichever
 SimControls it was built against, for the rest of its lifetime, and
-this method cannot re-bind it.)doc";
+this method cannot re-bind it.
+
+Warning: a Yields object previously read back from the yields property
+is a non-owning reference into this SimControls's own storage. Calling
+this method replaces (or, with None, clears) that storage, so a
+Python Yields object read before this call becomes a dangling
+reference afterward -- don't retain one across a call to this method
+(or an assignment to the yields property) on the same SimControls.)doc";
 
 static constexpr std::string_view setNebularDocstring = R"doc(Set the nebular emission grid.
 

@@ -67,6 +67,10 @@ namespace yields
 
     void Yields::addChannel(std::unique_ptr<YieldChannel> channel)
     {
+        if (!channel)
+        {
+            throw std::invalid_argument("Yields::addChannel: channel must not be null");
+        }
         yieldChannels_.push_back(std::move(channel));
     }
 
@@ -84,6 +88,10 @@ namespace yields
 
     void Yields::setChannels(std::vector<std::unique_ptr<YieldChannel>> channels)
     {
+        if (std::ranges::any_of(channels, [](const auto& channel) { return !channel; }))
+        {
+            throw std::invalid_argument("Yields::setChannels: channels must not contain any null entries");
+        }
         yieldChannels_ = std::move(channels);
     }
 

@@ -33,7 +33,11 @@ static auto toIsotopeList(const std::vector<const elem::IsotopeData*>& isotopes)
 {
     yields::IsotopeList result;
     result.reserve(isotopes.size());
-    for (const auto* iso : isotopes) { result.emplace_back(*iso); }
+    for (const auto* iso : isotopes)
+    {
+        if (iso == nullptr) { throw py::value_error("isotopes must not contain None"); }
+        result.emplace_back(*iso);
+    }
     return result;
 }
 

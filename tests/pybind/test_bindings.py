@@ -2938,6 +2938,25 @@ def test_yields_yield_channels_property_setter_dispatches_by_element_type(yields
     assert yields.yieldChannels[0].descriptor().model_name == "kobayashi_test"
 
 
+def test_yields_yield_channels_property_setter_mixed_types_raises(yields_controls):
+    """Assigning a list mixing YieldChannel and YieldChannelDescriptor
+    elements must be rejected outright with TypeError, rather than
+    silently picking a branch from the first element and releasing
+    ownership of any YieldChannel elements before the mismatch is
+    discovered partway through."""
+    yields = slug.Yields(controls=yields_controls, registry_name=YIELDS_REGISTRY)
+    descriptor = slug.YieldChannelDescriptor(slug.YieldChannelType.ccsn, "sukhbold_test")
+    channel = slug.YieldChannel(descriptor, 0.0, 0.0, registry_name=YIELDS_REGISTRY)
+
+    with pytest.raises(TypeError):
+        yields.yieldChannels = [channel, descriptor]
+
+    # channel must still be usable: the rejected assignment must not
+    # have released its ownership before raising
+    channel.rebuildYieldGrid()
+    assert len(channel.masses()) > 0
+
+
 def test_yields_yield_channels_property_setter_empty_list(yields_controls):
     """Assigning an empty list to yieldChannels clears every channel and
     leaves isotopes() empty, without raising (only a non-empty explicit
@@ -2974,6 +2993,43 @@ def test_yields_isotopes_property_setter_no_match_raises(yields_controls):
     c12 = slug.isotopeTable(6, 12)
     with pytest.raises(RuntimeError):
         yields.isotopes = [c12]
+
+
+def test_yields_rebuild_yield_grid_rejects_none_isotope(yields_controls):
+    """A None entry in the isotopes list must raise ValueError rather
+    than crash by dereferencing a null IsotopeData pointer."""
+    fe56 = slug.isotopeTable(26, 56)
+    with pytest.raises(ValueError):
+        yields_controls.yields.rebuildYieldGrid(isotopes=[fe56, None])
+
+
+def test_yield_channel_rebuild_yield_grid_rejects_none_isotope():
+    """Same None-isotope rejection as Yields.rebuildYieldGrid(), for
+    YieldChannel.rebuildYieldGrid() itself."""
+    descriptor = slug.YieldChannelDescriptor(slug.YieldChannelType.ccsn, "sukhbold_test")
+    channel = slug.YieldChannel(descriptor, 0.0, 0.0, registry_name=YIELDS_REGISTRY)
+    with pytest.raises(ValueError):
+        channel.rebuildYieldGrid(isotopes=[None])
+
+
+def test_yields_add_channel_pointer_rejects_none():
+    """addChannel(None) must raise ValueError rather than store a null
+    channel that would crash on the next use."""
+    controls = slug.SimControls(CLUSTER_DECK)
+    yields = slug.Yields(controls=controls, registry_name=YIELDS_REGISTRY)
+    with pytest.raises(ValueError):
+        yields.addChannel(None)
+
+
+def test_yields_set_channels_rejects_none_entry(yields_controls):
+    """setChannels([None]) (via the YieldChannel-list overload) must
+    raise ValueError rather than install a null channel, and must leave
+    yieldChannels unchanged."""
+    yields = slug.Yields(controls=yields_controls, registry_name=YIELDS_REGISTRY)
+    original_count = len(yields.yieldChannels)
+    with pytest.raises(ValueError):
+        yields.setChannels([None])
+    assert len(yields.yieldChannels) == original_count
 
 
 def test_simcontrols_set_yields_installs_new_yields():

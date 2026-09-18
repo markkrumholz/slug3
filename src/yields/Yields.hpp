@@ -116,7 +116,8 @@ namespace yields
         /**
          * @brief Add one already-built YieldChannel to yieldChannels_
          * @param channel The channel to add; ownership is transferred
-         *   to yieldChannels_
+         *   to yieldChannels_. Must not be null.
+         * @throws std::invalid_argument if channel is null
          * @details
          * Unlike addChannel(const YieldChannelDescriptor&), which
          * constructs a fresh YieldChannel from a descriptor, this
@@ -142,13 +143,23 @@ namespace yields
          * union that existed before index was removed, until a caller
          * reruns rebuildYieldGrid() -- e.g. to drop an isotope that
          * only the removed channel tabulated.
+         *
+         * A raw pointer or reference into yieldChannels()[index], held
+         * by a caller from before this call, dangles once this returns
+         * -- yieldChannels_ owns each YieldChannel via unique_ptr, so
+         * removing an entry destroys it. The same is true of
+         * setChannels() (both overloads), which discard every existing
+         * entry outright.
          */
         void deleteChannel(std::size_t index);
 
         /**
          * @brief Replace yieldChannels_ wholesale with a list of already-built channels
          * @param channels The channels to install, in order; ownership
-         *   of each is transferred to yieldChannels_
+         *   of each is transferred to yieldChannels_. None may be null.
+         * @throws std::invalid_argument if any entry of channels is
+         *   null -- checked before yieldChannels_ is touched, so a
+         *   rejected call leaves the existing yieldChannels_ untouched
          * @details
          * yieldChannels_ is discarded (freeing every channel it
          * previously held) and replaced by moving channels into its
