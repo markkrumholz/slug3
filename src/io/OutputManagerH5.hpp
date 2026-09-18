@@ -235,11 +235,16 @@ namespace io
          * @param time The output time at which this row was recorded, in yr
          * @param galaxy The galaxy whose yields should be written
          * @details
-         * If no yield channels were requested for this simulation (the
-         * galaxy_yields group does not exist), this is a no-op.
-         * Otherwise, after writing this row, also calls
-         * writeClusterYields() on every currently-alive (non-disrupted)
-         * cluster in galaxy.
+         * Writing the galaxy_yields row itself is a no-op if the
+         * galaxy_yields group does not exist (no yield channels were
+         * requested, or output.write_galaxy_yields is false) --
+         * writeClusterYields() is still called on every currently-alive
+         * (non-disrupted) cluster in galaxy regardless, since
+         * output.write_cluster_yields is independently togglable from
+         * output.write_galaxy_yields (see SimControls::readYields()'s
+         * own sanity check, which only rejects both being false at
+         * once); writeClusterYields() itself then no-ops per cluster if
+         * the cluster_yields group also does not exist.
          */
         void writeGalaxyYields(unsigned long trial, double time,
             core::Galaxy& galaxy) override;

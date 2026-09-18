@@ -1972,22 +1972,32 @@ void io::OutputManagerH5::writeGalaxyPhot(
 void io::OutputManagerH5::writeGalaxyYields(
     const unsigned long trial, const double time, core::Galaxy& galaxy)
 {
-    if (galaxyYieldsGroup_() < 0) { return; }
+    // Unlike writeGalaxy()'s/writeGalaxyPhot()'s own identical-looking
+    // early return, this one must not skip the writeClusterYields()
+    // fan-out below when galaxyYieldsGroup_() is null: write_galaxy_yields
+    // and write_cluster_yields are independently togglable for a
+    // galaxy-type simulation (SimControls::readYields()'s own sanity
+    // check only rejects both being false together -- see its own
+    // comment), so write_galaxy_yields = false with write_cluster_yields
+    // left true is a supported combination that must still write every
+    // currently-alive cluster's own row.
+    if (galaxyYieldsGroup_() >= 0)
+    {
+        const auto& yields = galaxy.yields();
 
-    const auto& yields = galaxy.yields();
-
-    // See writeGalaxy's own comment on this critical section
+        // See writeGalaxy's own comment on this critical section
 #ifdef _OPENMP
 #pragma omp critical(h5ThreadSafety)
 #endif
-    {
-        if (trial > maxTrial_) { maxTrial_ = trial; }
+        {
+            if (trial > maxTrial_) { maxTrial_ = trial; }
 
-        // NOLINTBEGIN(misc-include-cleaner)
-        utils::appendToDataset(galaxyYieldsGroup_(), "trial", H5T_NATIVE_ULONG, &trial);
-        utils::appendToDataset(galaxyYieldsGroup_(), "time", H5T_NATIVE_DOUBLE, &time);
-        utils::appendRowToDataset2d(galaxyYieldsGroup_(), "yields", H5T_NATIVE_DOUBLE, yields.data());
-        // NOLINTEND(misc-include-cleaner)
+            // NOLINTBEGIN(misc-include-cleaner)
+            utils::appendToDataset(galaxyYieldsGroup_(), "trial", H5T_NATIVE_ULONG, &trial);
+            utils::appendToDataset(galaxyYieldsGroup_(), "time", H5T_NATIVE_DOUBLE, &time);
+            utils::appendRowToDataset2d(galaxyYieldsGroup_(), "yields", H5T_NATIVE_DOUBLE, yields.data());
+            // NOLINTEND(misc-include-cleaner)
+        }
     }
 
     for (auto& cluster : galaxy.clusters()) { writeClusterYields(trial, time, cluster); }

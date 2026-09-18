@@ -1618,6 +1618,23 @@ static auto testSimControlsYieldsIsotopesKeyword() -> int
     }
     catch (const std::runtime_error&) { /* expected */ }
 
+    // yields.isotopes entirely non-empty but matching no isotope any
+    // loaded channel tabulates (unlike the earlier "Fe56"/"ni58"/"C12"
+    // case above, where C12 alone was ignored because Fe56/ni58 still
+    // matched something): Yields::rebuildYieldGrid() throws rather than
+    // silently leaving yields()->isotopes() empty -- see its own
+    // comment for why an entirely-empty result can only mean the whole
+    // list was wrong
+    try
+    {
+        const toml::table inputDeck = buildDeck(toml::array{ "C12" });
+        const io::SimControls controls(inputDeck);
+        std::cerr << "testSimControls: yieldsIsotopesKeyword: expected an exception "
+            "when yields.isotopes matches nothing any loaded channel tabulates\n";
+        result = 1;
+    }
+    catch (const std::runtime_error&) { /* expected */ }
+
     return result;
 }
 

@@ -2655,6 +2655,105 @@ static auto testWriteGalaxyYieldsH5() -> int
     return 0;
 }
 
+// Verify that output.write_galaxy_yields = false does not suppress
+// writeGalaxyYields()'s own writeClusterYields() fan-out: the
+// galaxy_yields group does not exist (so no galaxy-level row is
+// written), but output.write_cluster_yields is independently left at
+// its own default of true, so cluster_yields must still get a row for
+// every currently-alive cluster. Regression test for a bug where
+// writeGalaxyYields() returned early whenever galaxyYieldsGroup_() was
+// null, skipping the per-cluster loop entirely -- unlike
+// writeClusterYields()'s own no-op path, which only ever depends on
+// clusterYieldsGroup_() itself.
+static auto testWriteGalaxyYieldsFalseStillWritesClustersH5() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() /
+        "slugTestOutputManagerGalaxyYieldsFalseStillWritesClustersH5";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+    const std::string modelName = "test_model";
+    const auto expectedPath = outDir / (modelName + ".h5");
+    toml::table inputDeck = makeGalaxyPhysicsInputDeck(modelName, outDir);
+    addYieldsFixture(inputDeck);
+    inputDeck.at_path("output").as_table()->insert("write_galaxy_yields", false);
+
+    try
+    {
+        const io::SimControls controls(inputDeck);
+        if (controls.writeGalaxyYields() || !controls.writeClusterYields())
+        {
+            std::cerr << "testOutputManager: galaxy yields false still writes clusters h5: "
+                "test bug: expected writeGalaxyYields() false, writeClusterYields() true\n";
+            return 1;
+        }
+
+        utils::rng().seed(42);
+        core::Galaxy galaxy(controls);
+        galaxy.advance(galaxyWriteTime);
+        if (galaxy.clusters().empty())
+        {
+            std::cerr << "testOutputManager: galaxy yields false still writes clusters h5: "
+                "test bug: expected at least one cluster to have formed\n";
+            return 1;
+        }
+        constexpr unsigned long trial = 10;
+
+        {
+            io::OutputManagerH5 manager(controls);
+            manager.writeGalaxyYields(trial, galaxyWriteTime, galaxy);
+        }
+
+        // NOLINTBEGIN(misc-include-cleaner)
+        const hid_t file = H5Fopen(expectedPath.string().c_str(),
+            H5F_ACC_RDONLY, H5P_DEFAULT);
+        if (file < 0)
+        {
+            std::cerr << "testOutputManager: galaxy yields false still writes clusters h5: "
+                "unable to reopen " << expectedPath.string() << "\n";
+            return 1;
+        }
+
+        const bool hasGalaxyGroup = H5Lexists(file, "galaxy_yields", H5P_DEFAULT) > 0;
+        if (hasGalaxyGroup)
+        {
+            H5Fclose(file);
+            std::cerr << "testOutputManager: galaxy yields false still writes clusters h5: "
+                "unexpectedly created a galaxy_yields group\n";
+            return 1;
+        }
+
+        try
+        {
+            const hid_t clusterGrp = H5Gopen2(file, "cluster_yields", H5P_DEFAULT);
+            if (clusterGrp < 0) { throw std::runtime_error("missing cluster_yields group"); }
+            const auto uidCol = readColumnULong(clusterGrp, "uid");
+            H5Gclose(clusterGrp);
+            if (uidCol.size() != galaxy.clusters().size())
+            {
+                throw std::runtime_error("cluster_yields group has " +
+                    std::to_string(uidCol.size()) + " rows, expected " +
+                    std::to_string(galaxy.clusters().size()));
+            }
+        }
+        catch (const std::runtime_error& error)
+        {
+            H5Fclose(file);
+            std::cerr << "testOutputManager: galaxy yields false still writes clusters h5: "
+                << error.what() << "\n";
+            return 1;
+        }
+        H5Fclose(file);
+        // NOLINTEND(misc-include-cleaner)
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testOutputManager: galaxy yields false still writes clusters h5 "
+            "test failed: " << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
 // Verify that output.write_cluster_yields = false suppresses just the
 // cluster_yields H5 group, leaving galaxy_yields in place -- a
 // galaxy-type simulation, unlike a cluster-type one, needs a
@@ -3842,6 +3941,7 @@ auto testOutputManager() -> int
     result += testClusterYieldsGroupNotDecomposedH5();
     result += testWriteClusterYieldsH5();
     result += testWriteGalaxyYieldsH5();
+    result += testWriteGalaxyYieldsFalseStillWritesClustersH5();
     result += testOptOutClusterYieldsOutput();
     result += testClusterYieldsHeaderAscii();
     result += testClusterYieldsHeaderNotDecomposedAscii();

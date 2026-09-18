@@ -199,10 +199,13 @@ namespace io
          * @param galaxy The galaxy whose yields should be written; not
          *   const -- see writeGalaxy()'s own comment
          * @details
-         * If no yield channels were requested for this simulation, this
-         * is a no-op. Otherwise, after writing this row, also calls
-         * writeClusterYields() on every currently-alive (non-disrupted)
-         * cluster in galaxy.
+         * Writing the galaxy's own row is a no-op if no yield channels
+         * were requested, or output.write_galaxy_yields is false --
+         * writeClusterYields() is still called on every currently-alive
+         * (non-disrupted) cluster in galaxy regardless, since
+         * output.write_cluster_yields is independently togglable (see
+         * SimControls::readYields()'s own sanity check, which only
+         * rejects both being false at once).
          */
         virtual void writeGalaxyYields(unsigned long trial, double time,
             core::Galaxy& galaxy) = 0;

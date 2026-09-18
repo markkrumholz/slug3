@@ -16,6 +16,7 @@
 #include <cstddef>
 #include <iostream>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -103,6 +104,31 @@ namespace yields
                         [&candidate](const auto& wanted) { return wanted.get() == candidate.get(); });
                 });
             isotopes_.erase(toDrop.begin(), toDrop.end());
+
+            // Every yieldChannels_ entry's own isotopesOrig() is always
+            // non-empty in practice (this Yields is only ever
+            // constructed, by SimControls::readYields(), once at least
+            // one real yield channel/model has been loaded -- see this
+            // class's own constructor), so an empty isotopes_ here can
+            // only mean the caller's own isotopes list -- entirely, not
+            // just partially, as testSimControlsYieldsIsotopesKeyword()'s
+            // own "C12" case in testSimControls.cpp covers -- fails to
+            // match anything any loaded channel tabulates: almost
+            // certainly a mistake (e.g. every entry misspelled, or
+            // naming isotopes from a channel that was never actually
+            // requested). Caught here, before it can reach
+            // OutputManagerH5::openClusterYieldsGroup()/
+            // openGalaxyYieldsGroup(), which would otherwise try to
+            // create a zero-column "yields" dataset -- H5Pset_chunk()
+            // rejects a zero chunk dimension, so that would instead
+            // surface as an opaque "unable to create dataset" failure
+            // far from the actual cause.
+            if (isotopes_.empty())
+            {
+                throw std::runtime_error(
+                    "Yields::rebuildYieldGrid: the given isotopes list does not "
+                    "intersect any isotope tabulated by any loaded channel");
+            }
         }
 
         // Push isotopes_ (and each channel's own descriptor mMin_/mMax_)

@@ -175,13 +175,15 @@ namespace io
          * @param time The output time at which this row was recorded, in yr
          * @param galaxy The galaxy whose yields should be written
          * @details
-         * If no yield channels were requested for this simulation (the
-         * galaxy-yields file was not opened), this is a no-op.
-         * Otherwise writes one line, holding trial, time, and one
-         * column per isotope (or per channel-isotope pair, mirroring
-         * writeClusterYields()'s own column layout), to the
-         * galaxy-yields file, then calls writeClusterYields() on every
-         * currently-alive (non-disrupted) cluster in galaxy.
+         * Writing the galaxy's own line -- trial, time, and one column
+         * per isotope (or per channel-isotope pair, mirroring
+         * writeClusterYields()'s own column layout) -- is a no-op if
+         * the galaxy-yields file was not opened (no yield channels were
+         * requested, or output.write_galaxy_yields is false).
+         * writeClusterYields() is still called on every currently-alive
+         * (non-disrupted) cluster in galaxy regardless, since
+         * output.write_cluster_yields is independently togglable (see
+         * OutputManagerH5::writeGalaxyYields()'s own comment).
          */
         void writeGalaxyYields(unsigned long trial, double time,
             core::Galaxy& galaxy) override;

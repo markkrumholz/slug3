@@ -125,6 +125,9 @@ namespace yields
          *   practice: the mMin/mMax passed to each are exactly what
          *   that channel's own descriptor already validated, indirectly,
          *   the first time it was built)
+         * @throws std::runtime_error if isotopes is non-empty but
+         *   matches nothing any loaded channel tabulates, leaving
+         *   isotopes_ empty -- see @details
          * @details
          * First, collects every entry in yieldChannels_'s own
          * isotopesOrig() (not isotopes() -- see below) into one
@@ -145,7 +148,15 @@ namespace yields
          * model may cover a much larger set. An isotopes entry that
          * doesn't match anything in the union is simply ignored, rather
          * than treated as an error, since it may simply be an isotope
-         * no loaded channel happens to tabulate.
+         * no loaded channel happens to tabulate -- but if isotopes
+         * itself is non-empty and none of its entries match anything
+         * (isotopes_ would end up entirely empty), that throws instead:
+         * every yieldChannels_ entry's own isotopesOrig() is always
+         * non-empty in practice, so this can only mean the caller's own
+         * isotopes list is entirely wrong, almost certainly a mistake
+         * worth surfacing clearly, before it can instead reach
+         * OutputManagerH5's own group-creation code as an opaque
+         * zero-column HDF5 dataset failure.
          *
          * Then, for each entry i in yieldChannels_, calls
          * yieldChannels_[i]->rebuildYieldGrid(mMin, mMax, isotopes_),
