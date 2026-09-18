@@ -35,8 +35,9 @@ from .cloudy.hiiregparam import hiiregparam
 from .slug_group_reader import slug_group_reader
 from .slug_phot_reader import slug_phot_reader
 from .slug_spectra_reader import slug_spectra_reader
+from .slug_yields_reader import slug_yields_reader
 
-AnyGroupReader = slug_group_reader | slug_phot_reader | slug_spectra_reader
+AnyGroupReader = slug_group_reader | slug_phot_reader | slug_spectra_reader | slug_yields_reader
 
 # The six hiiregparam nebular-condition keyword names, in the order
 # run_cloudy's own signature lists them
@@ -392,6 +393,21 @@ class slug_reader:
         Lazy reader for the galaxy_cloudy group's datasets (trial,
         time, nII, ...), written by run_cloudy(spec_type="galaxy"), or
         None if this file has no galaxy_cloudy group (read-only).
+    cluster_yields : slug_yields_reader or None
+        Lazy reader for the cluster_yields group's per-isotope
+        nucleosynthetic yields (indexable by isotope name, e.g.
+        cluster_yields["Fe56"], or, if cluster_yields.decomposed is
+        True, by a (channel, model, isotope) triple -- see
+        slug_yields_reader's own docstring), or None if this file has
+        no cluster_yields group (read-only).
+    galaxy_yields : slug_yields_reader or None
+        Lazy reader for the galaxy_yields group's per-isotope
+        nucleosynthetic yields, indexed the same way as cluster_yields,
+        or None if this file has no galaxy_yields group (read-only).
+    isotopes : list of str or None
+        Alias for cluster_yields.isotopes if this file has a
+        cluster_yields group, else for galaxy_yields.isotopes if this
+        file has a galaxy_yields group, else None (read-only).
     filters : list of str or None
         Alias for cluster_phot.filters if this file has a cluster_phot
         group, else for galaxy_phot.filters if this file has a
@@ -624,6 +640,59 @@ class slug_reader:
     @galaxy_cloudy.setter
     def galaxy_cloudy(self, value: Any) -> None:
         raise AttributeError("galaxy_cloudy is read-only")
+
+    @property
+    def cluster_yields(self) -> slug_yields_reader | None:
+        """
+        slug_yields_reader or None : lazy reader for the cluster_yields
+        group's per-isotope nucleosynthetic yields, built the first
+        time this property is accessed and cached thereafter, or None
+        if this file has no cluster_yields group.
+        """
+        if "cluster_yields" not in self._groups:
+            return None
+        if self._groups["cluster_yields"] is None:
+            self._groups["cluster_yields"] = slug_yields_reader(self._file, "cluster_yields")
+        return cast(slug_yields_reader, self._groups["cluster_yields"])
+
+    @cluster_yields.setter
+    def cluster_yields(self, value: Any) -> None:
+        raise AttributeError("cluster_yields is read-only")
+
+    @property
+    def galaxy_yields(self) -> slug_yields_reader | None:
+        """
+        slug_yields_reader or None : lazy reader for the galaxy_yields
+        group's per-isotope nucleosynthetic yields, built the first
+        time this property is accessed and cached thereafter, or None
+        if this file has no galaxy_yields group.
+        """
+        if "galaxy_yields" not in self._groups:
+            return None
+        if self._groups["galaxy_yields"] is None:
+            self._groups["galaxy_yields"] = slug_yields_reader(self._file, "galaxy_yields")
+        return cast(slug_yields_reader, self._groups["galaxy_yields"])
+
+    @galaxy_yields.setter
+    def galaxy_yields(self, value: Any) -> None:
+        raise AttributeError("galaxy_yields is read-only")
+
+    @property
+    def isotopes(self) -> list[str] | None:
+        """
+        list of str or None : alias for cluster_yields.isotopes if
+        this file has a cluster_yields group, else for
+        galaxy_yields.isotopes if this file has a galaxy_yields group,
+        else None (read-only).
+        """
+        yields = self.cluster_yields if self.cluster_yields is not None else self.galaxy_yields
+        if yields is None:
+            return None
+        return yields.isotopes
+
+    @isotopes.setter
+    def isotopes(self, value: Any) -> None:
+        raise AttributeError("isotopes is read-only")
 
     @property
     def filters(self) -> list[str] | None:

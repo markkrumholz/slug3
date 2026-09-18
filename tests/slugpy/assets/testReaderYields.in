@@ -1,0 +1,47 @@
+# Test input deck for slugpy's own yields-reader tests
+# (test_yields_reader.py): a galaxy-type simulation with two real ccsn
+# channels, sukhbold16 and kobayashi06_11 -- small enough to be
+# committed directly, see data/yields/ -- deliberately both the same
+# channel type (rather than one of each) so a slug_yields_reader
+# wildcard query like ("ccsn", "", isotope) has more than one matching
+# column to actually exercise. A single run exercises both
+# galaxy_yields and (via its per-cluster passthrough) cluster_yields,
+# decomposed by channel (the default). Otherwise mirrors
+# tests/core/assets/testGalaxy.in.
+
+sim_type = "galaxy"
+
+[stars]
+IMF = "chabrier.toml"
+track_registry = "tests/tracks/assets/tracks.toml"
+tracks = "MIST_test"
+FeH = 0.0
+alphaFe = -0.2
+
+[spectra]
+model = "blackbody"
+
+[clusters]
+CMF = 1e3
+CLF = 1e6
+
+[galaxy]
+sfr = 1e-2
+
+[yields]
+[yields.channel1]
+channel = "ccsn"
+model = "sukhbold16"
+
+[yields.channel2]
+channel = "ccsn"
+model = "kobayashi06_11"
+
+[output]
+start_time = 1e6
+end_time = 5e6
+ntime = 3
+n_trial = 3
+
+[nebular]
+compute_neb = false
