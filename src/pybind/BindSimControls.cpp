@@ -21,6 +21,7 @@
 #include "../specsyn/Specsyn.hpp"
 #include "../tracks/Tracks3D.hpp"
 #include "../utils/MiscUtils.hpp"
+#include "../yields/Yields.hpp"
 #include <cstddef>
 #include <memory>
 #include <pybind11/cast.h>
@@ -595,6 +596,43 @@ controls=sc); sc.setExtinct(extinct)) -- an Extinct stores a live
 reference to whichever SimControls it was built against, for the rest
 of its lifetime, and this method cannot re-bind it.)doc";
 
+static constexpr std::string_view setYieldsDocstring = R"doc(Set the Yields built from yieldChannels.
+
+Parameters
+----------
+yields : Yields, optional
+    The Yields to use; ownership is transferred to this SimControls,
+    so yields is no longer usable from Python after this call. May be
+    None, to remove the current one.
+
+Throws
+------
+ValueError
+    If yields is not None and was constructed with a controls argument
+    other than this same SimControls.
+
+Details
+-------
+Lets a caller build its own Yields and install it on an
+already-constructed SimControls, without needing an input deck --
+including installing one for the first time on a SimControls whose
+yields property was previously None, or passing None to remove one
+already present. Does not touch yieldChannels either way, so the two
+can end up disagreeing if set independently.
+
+yields must have been constructed with its own controls argument set
+to this same SimControls (e.g. yields = slug.Yields(controls=sc);
+sc.setYields(yields)) -- a Yields stores a live reference to whichever
+SimControls it was built against, for the rest of its lifetime, and
+this method cannot re-bind it.
+
+Warning: a Yields object previously read back from the yields property
+is a non-owning reference into this SimControls's own storage. Calling
+this method replaces (or, with None, clears) that storage, so a
+Python Yields object read before this call becomes a dangling
+reference afterward -- don't retain one across a call to this method
+(or an assignment to the yields property) on the same SimControls.)doc";
+
 static constexpr std::string_view setNebularDocstring = R"doc(Set the nebular emission grid.
 
 Parameters
@@ -776,6 +814,48 @@ True (the default) unless output.write_galaxy_phot was set to false
 in the input deck. Only meaningful for a galaxy-type simulation. See
 writeCluster's own docstring on when assigning this does (and does
 not) take effect.)doc";
+
+static constexpr std::string_view writeClusterYieldsPropertyDocstring =
+R"doc(Whether the cluster_yields group/file is written.
+
+True (the default) unless output.write_cluster_yields was set to false
+in the input deck. See writeCluster's own docstring on when assigning
+this does (and does not) take effect.)doc";
+
+static constexpr std::string_view writeGalaxyYieldsPropertyDocstring =
+R"doc(Whether the galaxy_yields group/file is written.
+
+True (the default) unless output.write_galaxy_yields was set to false
+in the input deck. Only meaningful for a galaxy-type simulation. See
+writeCluster's own docstring on when assigning this does (and does
+not) take effect.)doc";
+
+static constexpr std::string_view yieldChannelsPropertyDocstring =
+R"doc(The nucleosynthetic yield channels requested via yields.channel1, yields.channel2, etc.
+
+Read-only; an empty list if no yields.channelN table was given at all.)doc";
+
+static constexpr std::string_view yieldsPropertyDocstring =
+R"doc(The Yields built from yieldChannels, or None if none was requested.
+
+Reading returns the Yields built once, at construction, or later
+installed via setYields() -- see Yields's own class docstring.
+Assigning a Yields (or None, to remove one already present) transfers
+its ownership to this SimControls, so it is no longer usable from
+Python after assignment -- see setYields()'s own docstring, including
+the ValueError raised if it was built against a different
+SimControls.)doc";
+
+static constexpr std::string_view yieldsChannelDecomposedPropertyDocstring =
+R"doc(Whether yields should be reported decomposed by channel.
+
+True (the default) unless yields.channel_decomposed was set to false
+in the input deck. Meaningful only if yields is not None. Unlike
+writeCluster/etc., this is read live by Cluster.computeYields()/
+Galaxy.computeYields() and OutputManagerH5's own cluster_yields/
+galaxy_yields group creation every time each runs, not cached once --
+so assigning this takes effect immediately, the same as z/intRelTol,
+rather than only affecting an object built afterward.)doc";
 
 static constexpr std::string_view inputDeckStrPropertyDocstring =
 R"doc(The input deck's own text.
@@ -991,6 +1071,14 @@ void bindSimControls(py::module_& m)
                 writeGalaxySpecPropertyDocstring.data(), py::arg("value"))
         .def("setWriteGalaxyPhot", &io::SimControls::setWriteGalaxyPhot,
                 writeGalaxyPhotPropertyDocstring.data(), py::arg("value"))
+        .def("setWriteClusterYields", &io::SimControls::setWriteClusterYields,
+                writeClusterYieldsPropertyDocstring.data(), py::arg("value"))
+        .def("setWriteGalaxyYields", &io::SimControls::setWriteGalaxyYields,
+                writeGalaxyYieldsPropertyDocstring.data(), py::arg("value"))
+        .def("setYieldsChannelDecomposed", &io::SimControls::setYieldsChannelDecomposed,
+                yieldsChannelDecomposedPropertyDocstring.data(), py::arg("value"))
+        .def("setYields", &io::SimControls::setYields,
+                setYieldsDocstring.data(), py::arg("yields"))
         // Properties: alternative, attribute-style access to the same
         // getters/setters bound as plain methods above (e.g.
         // sc.imf = "20.0" instead of sc.setIMF("20.0")). Getters that
@@ -1123,6 +1211,25 @@ void bindSimControls(py::module_& m)
                 &io::SimControls::writeGalaxyPhot,
                 &io::SimControls::setWriteGalaxyPhot,
                 writeGalaxyPhotPropertyDocstring.data())
+        .def_property("writeClusterYields",
+                &io::SimControls::writeClusterYields,
+                &io::SimControls::setWriteClusterYields,
+                writeClusterYieldsPropertyDocstring.data())
+        .def_property("writeGalaxyYields",
+                &io::SimControls::writeGalaxyYields,
+                &io::SimControls::setWriteGalaxyYields,
+                writeGalaxyYieldsPropertyDocstring.data())
+        .def_property("yieldsChannelDecomposed",
+                &io::SimControls::yieldsChannelDecomposed,
+                &io::SimControls::setYieldsChannelDecomposed,
+                yieldsChannelDecomposedPropertyDocstring.data())
+        .def_property_readonly("yieldChannels",
+                &io::SimControls::yieldChannels,
+                yieldChannelsPropertyDocstring.data())
+        .def_property("yields",
+                &io::SimControls::yields,
+                &io::SimControls::setYields,
+                yieldsPropertyDocstring.data(), py::return_value_policy::reference_internal)
         .def_property_readonly("inputDeckStr",
                 &io::SimControls::inputDeckStr,
                 inputDeckStrPropertyDocstring.data());

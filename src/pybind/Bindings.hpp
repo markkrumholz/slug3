@@ -82,6 +82,25 @@ void bindSimControls(py::module_& m);
 void bindExtinct(py::module_& m);
 
 /**
+ * @brief Bind elem::IsotopeData as IsotopeData, elem::isotopeTable(z, a)
+ *   as the module-level function isotopeTable, yields::Channel as
+ *   YieldChannelType, yields::YieldChannelDescriptor as
+ *   YieldChannelDescriptor, and yields::YieldChannel as YieldChannel
+ * @details
+ * Called before bindYields() below purely for readability (Yields
+ * chains YieldChannel objects together) -- unlike bindFilter()'s own
+ * ordering requirement relative to bindFilterIdeal()/
+ * bindFilterTabulated(), YieldChannel/IsotopeData are not a pybind
+ * base class of Yields, so nothing here actually depends on this order.
+ */
+void bindYieldChannel(py::module_& m);
+
+/**
+ * @brief Bind yields::Yields as Yields
+ */
+void bindYields(py::module_& m);
+
+/**
  * @brief Bind nebular::Nebular as Nebular
  */
 void bindNebular(py::module_& m);

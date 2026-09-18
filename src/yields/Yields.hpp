@@ -105,15 +105,98 @@ namespace yields
          * The new YieldChannel is loaded over controls_.fehDist()'s own
          * [min, max] range -- mirrors SimControls::readTracks()'s
          * identical use of fehDist_.getMin()/getMax() to pick the
-         * [Fe/H] range a model is loaded over. descriptor is also
-         * appended to descriptors_, so rebuildYieldGrid() can later
-         * recover each channel's own mMin_/mMax_ without assuming
-         * yieldChannels_ stays in lockstep with controls_.yieldChannels()
-         * (a caller is free to keep adding to controls_.yieldChannels()
-         * after this Yields is built, without those later entries
-         * retroactively describing channels already loaded here).
+         * [Fe/H] range a model is loaded over. The new YieldChannel
+         * itself caches a copy of descriptor (see its own descriptor()
+         * observer), so rebuildYieldGrid() can later recover each
+         * channel's own mMin_/mMax_ directly from the channel itself,
+         * without needing a separate, parallel record of its own here.
          */
         void addChannel(const YieldChannelDescriptor& descriptor);
+
+        /**
+         * @brief Add one already-built YieldChannel to yieldChannels_
+         * @param channel The channel to add; ownership is transferred
+         *   to yieldChannels_. Must not be null.
+         * @throws std::invalid_argument if channel is null
+         * @details
+         * Unlike addChannel(const YieldChannelDescriptor&), which
+         * constructs a fresh YieldChannel from a descriptor, this
+         * overload just moves an already-built channel into place --
+         * e.g. one built and rebuiltYieldGrid()-ed by a caller (from
+         * Python) with settings addChannel(descriptor) has no way to
+         * express itself. Does not call rebuildYieldGrid(): channel is
+         * appended as-is, whatever isotope list it was itself last
+         * built over, so a caller that wants it synchronized onto
+         * isotopes_ (or the reverse -- isotopes_ recomputed to include
+         * its own isotopesOrig()) must call rebuildYieldGrid()
+         * afterward, exactly as after the descriptor-taking overload.
+         */
+        void addChannel(std::unique_ptr<YieldChannel> channel);
+
+        /**
+         * @brief Remove one entry from yieldChannels_
+         * @param index Index, into yieldChannels_, of the channel to remove
+         * @throws std::out_of_range if index >= yieldChannels().size()
+         * @details
+         * Does not call rebuildYieldGrid(): isotopes_ (and every
+         * remaining channel's own isotopes()) is left describing the
+         * union that existed before index was removed, until a caller
+         * reruns rebuildYieldGrid() -- e.g. to drop an isotope that
+         * only the removed channel tabulated.
+         *
+         * A raw pointer or reference into yieldChannels()[index], held
+         * by a caller from before this call, dangles once this returns
+         * -- yieldChannels_ owns each YieldChannel via unique_ptr, so
+         * removing an entry destroys it. The same is true of
+         * setChannels() (both overloads), which discard every existing
+         * entry outright.
+         */
+        void deleteChannel(std::size_t index);
+
+        /**
+         * @brief Replace yieldChannels_ wholesale with a list of already-built channels
+         * @param channels The channels to install, in order; ownership
+         *   of each is transferred to yieldChannels_. None may be null.
+         * @throws std::invalid_argument if any entry of channels is
+         *   null -- checked before yieldChannels_ is touched, so a
+         *   rejected call leaves the existing yieldChannels_ untouched
+         * @details
+         * yieldChannels_ is discarded (freeing every channel it
+         * previously held) and replaced by moving channels into its
+         * place -- an O(1) transfer, not a per-element addChannel()
+         * loop, since every element here is already a built
+         * YieldChannel, not a descriptor to build one from. Does not
+         * call rebuildYieldGrid(): as with addChannel(unique_ptr<
+         * YieldChannel>), a caller that wants isotopes_ resynchronized
+         * onto the new channels must call it explicitly afterward.
+         */
+        void setChannels(std::vector<std::unique_ptr<YieldChannel>> channels);
+
+        /**
+         * @brief Replace yieldChannels_ wholesale with channels built from a list of descriptors
+         * @param descriptors The descriptors to build fresh channels
+         *   from, in order -- see addChannel(const
+         *   YieldChannelDescriptor&)'s own comment for what each one
+         *   means and how it's loaded
+         * @throws std::runtime_error if any descriptor fails to load
+         *   (e.g. an unknown channel/model, or a [Fe/H] range mismatch
+         *   -- see the YieldChannel constructor's own comment);
+         *   yieldChannels_ is left completely untouched in this case,
+         *   still describing whatever channels it held before this
+         *   call
+         * @details
+         * Every replacement channel is built fresh from disk, in
+         * order, into a temporary vector -- unlike the
+         * std::unique_ptr<YieldChannel> overload, which moves in
+         * already-built ones -- and yieldChannels_ is only replaced
+         * (via a single move) once every descriptor has succeeded, so
+         * a failure partway through never leaves yieldChannels_ a mix
+         * of some new channels and none of the old ones. Does not call
+         * rebuildYieldGrid(): as with the other overload, a caller
+         * must call it explicitly afterward to resynchronize isotopes_
+         * onto the new channels.
+         */
+        void setChannels(const std::vector<YieldChannelDescriptor>& descriptors);
 
         /**
          * @brief Rebuild isotopes_ from yieldChannels_, then push it back into every channel
@@ -160,12 +243,13 @@ namespace yields
          *
          * Then, for each entry i in yieldChannels_, calls
          * yieldChannels_[i]->rebuildYieldGrid(mMin, mMax, isotopes_),
-         * where mMin/mMax are descriptors_[i]'s own mMin_/mMax_ --
-         * descriptors_ is appended to by addChannel() in the same call,
-         * and so stays in lockstep with yieldChannels_ by construction,
-         * independent of whatever controls_.yieldChannels() looks like
-         * by the time this runs. This is what actually synchronizes
-         * every channel onto the same, shared isotopes_: passing it to rebuildYieldGrid()
+         * where mMin/mMax are yieldChannels_[i]->descriptor()'s own
+         * mMin_/mMax_ -- each channel caches its own descriptor (see
+         * YieldChannel::descriptor()'s own comment), so this reads it
+         * directly from the channel itself, independent of whatever
+         * controls_.yieldChannels() looks like by the time this runs.
+         * This is what actually synchronizes every channel onto the
+         * same, shared isotopes_: passing it to rebuildYieldGrid()
          * remaps that channel's own yieldData_ onto isotopes_'s exact
          * order, backfilling 0 for any isotope this channel's own model
          * doesn't tabulate (see YieldChannel::rebuildYieldGrid()'s own
@@ -287,7 +371,6 @@ namespace yields
         const io::SimControls& controls_; // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members) -- deliberately a live reference, not a copy, matching Extinct's/Specsyn's own identical controls_ members exactly -- see either one's own comment for why. Only ever used through the same non-copyable ownership pattern (unique_ptr in SimControls's own yields_) as those, so the usual objection (disabling implicit copy/move assignment) doesn't apply in practice.
         std::string registryName_;        /**< Name of the yield registry file */
         std::vector<std::unique_ptr<YieldChannel>> yieldChannels_; /**< Yield channels built via addChannel(), one per entry in controls_.yieldChannels() -- see yieldChannels()'s own comment */
-        std::vector<YieldChannelDescriptor> descriptors_; /**< Descriptor passed to addChannel() for each yieldChannels_ entry, same order -- lets rebuildYieldGrid() recover each channel's own mMin_/mMax_ without assuming controls_.yieldChannels() stays in lockstep, see addChannel()'s own comment */
         IsotopeList isotopes_; /**< Union of every yieldChannels_ entry's own isotopesOrig(), deduplicated and sorted -- see isotopes()'s own comment */
 
     };

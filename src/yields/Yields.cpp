@@ -63,7 +63,55 @@ namespace yields
     {
         yieldChannels_.push_back(std::make_unique<YieldChannel>(
             descriptor, controls_.fehDist().getMin(), controls_.fehDist().getMax(), registryName_));
-        descriptors_.push_back(descriptor);
+    }
+
+    void Yields::addChannel(std::unique_ptr<YieldChannel> channel)
+    {
+        if (!channel)
+        {
+            throw std::invalid_argument("Yields::addChannel: channel must not be null");
+        }
+        yieldChannels_.push_back(std::move(channel));
+    }
+
+    void Yields::deleteChannel(const std::size_t index)
+    {
+        if (index >= yieldChannels_.size())
+        {
+            throw std::out_of_range(
+                "Yields::deleteChannel: index " + std::to_string(index) +
+                " is out of range for yieldChannels() of size " +
+                std::to_string(yieldChannels_.size()));
+        }
+        yieldChannels_.erase(yieldChannels_.begin() + static_cast<std::ptrdiff_t>(index));
+    }
+
+    void Yields::setChannels(std::vector<std::unique_ptr<YieldChannel>> channels)
+    {
+        if (std::ranges::any_of(channels, [](const auto& channel) { return !channel; }))
+        {
+            throw std::invalid_argument("Yields::setChannels: channels must not contain any null entries");
+        }
+        yieldChannels_ = std::move(channels);
+    }
+
+    void Yields::setChannels(const std::vector<YieldChannelDescriptor>& descriptors)
+    {
+        // Built into a temporary vector, not straight into
+        // yieldChannels_ via addChannel(), so that a descriptor partway
+        // through that fails to load (e.g. an unknown model, or a
+        // [Fe/H] range mismatch -- see the YieldChannel constructor's
+        // own comment) leaves yieldChannels_ completely untouched,
+        // rather than a half-built mix of some new channels and none
+        // of the old ones.
+        std::vector<std::unique_ptr<YieldChannel>> newChannels;
+        newChannels.reserve(descriptors.size());
+        for (const auto& descriptor : descriptors)
+        {
+            newChannels.push_back(std::make_unique<YieldChannel>(
+                descriptor, controls_.fehDist().getMin(), controls_.fehDist().getMax(), registryName_));
+        }
+        yieldChannels_ = std::move(newChannels);
     }
 
     void Yields::rebuildYieldGrid(const IsotopeList& isotopes)
@@ -133,13 +181,14 @@ namespace yields
 
         // Push isotopes_ (and each channel's own descriptor mMin_/mMax_)
         // back down into every channel, synchronizing them all onto the
-        // same isotope list -- see this method's own comment. descriptors_
-        // is appended to by addChannel() in lockstep with yieldChannels_
-        // itself, so this doesn't need to assume anything about
-        // controls_.yieldChannels() staying in sync.
-        for (std::size_t i = 0; i < yieldChannels_.size(); ++i)
+        // same isotope list -- see this method's own comment. Each
+        // channel's own descriptor() already caches its own mMin_/
+        // mMax_, so this needs no separate, parallel record of its own
+        // to stay in sync with yieldChannels_.
+        for (const auto& channel : yieldChannels_)
         {
-            yieldChannels_[i]->rebuildYieldGrid(descriptors_[i].mMin_, descriptors_[i].mMax_, isotopes_); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i < yieldChannels_.size() == descriptors_.size() by construction, see this method's own comment
+            const auto descriptor = channel->descriptor();
+            channel->rebuildYieldGrid(descriptor.mMin_, descriptor.mMax_, isotopes_);
         }
     }
 

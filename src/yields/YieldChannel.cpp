@@ -258,6 +258,28 @@ namespace yields
         using MutableArray3D = std::mdspan<double, std::dextents<std::size_t, 3>>; // NOLINT(misc-include-cleaner)
 
         /**
+         * @brief Update a descriptor's own mMin_/mMax_ to match whichever mass range was just requested
+         * @param descriptor The descriptor to update in place
+         * @param mMin Minimum stellar mass just requested; leaves
+         *   descriptor.mMin_ untouched if nullopt
+         * @param mMax Maximum stellar mass just requested; leaves
+         *   descriptor.mMax_ untouched if nullopt
+         * @details
+         * Factored out of rebuildYieldGrid() itself purely to keep that
+         * method's own cognitive complexity under clang-tidy's
+         * threshold -- see rebuildYieldGrid()'s own comment for why
+         * leaving mMin/mMax at nullopt doesn't reset the corresponding
+         * field back to nullopt.
+         */
+        void syncDescriptorMassRange( //NOLINT(llvm-prefer-static-over-anonymous-namespace)
+            YieldChannelDescriptor& descriptor, const std::optional<double> mMin,
+            const std::optional<double> mMax)
+        {
+            if (mMin.has_value()) { descriptor.mMin_ = mMin; }
+            if (mMax.has_value()) { descriptor.mMax_ = mMax; }
+        }
+
+        /**
          * @brief For each rebuildYieldGrid() target isotope, its index in isotopesOrig_, if any
          * @details
          * isoMap[j] is the index into isotopesOrig_ (and origView's own
@@ -332,7 +354,7 @@ namespace yields
         const double fehMin,
         const double fehMax,
         const std::string& registryName) :
-        channel_(descriptor.channel_)
+        descriptor_(descriptor)
     {
         const std::string& modelName = descriptor.modelName_;
         const std::string channelName(channelStr.at(static_cast<std::size_t>(descriptor.channel_)));
@@ -496,6 +518,12 @@ namespace yields
                 "YieldChannel::rebuildYieldGrid: mMin (" + std::to_string(loMass) +
                 ") must be strictly less than mMax (" + std::to_string(hiMass) + ")");
         }
+
+        // Keep descriptor_ in sync with whichever mass range was just
+        // actually requested, once validation above has already
+        // succeeded -- see descriptor()'s own comment and
+        // syncDescriptorMassRange()'s own.
+        syncDescriptorMassRange(descriptor_, mMin, mMax);
 
         masses_.clear();
         masses_.push_back(loMass);
