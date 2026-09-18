@@ -21,6 +21,8 @@
 #include "../specsyn/Specsyn.hpp"
 #include "../tracks/Tracks3D.hpp"
 #include "../utils/MiscUtils.hpp"
+#include "../yields/YieldCommons.hpp"
+#include "../yields/Yields.hpp"
 #include <cstddef>
 #include <memory>
 #include <pybind11/cast.h>
@@ -777,6 +779,43 @@ in the input deck. Only meaningful for a galaxy-type simulation. See
 writeCluster's own docstring on when assigning this does (and does
 not) take effect.)doc";
 
+static constexpr std::string_view writeClusterYieldsPropertyDocstring =
+R"doc(Whether the cluster_yields group/file is written.
+
+True (the default) unless output.write_cluster_yields was set to false
+in the input deck. See writeCluster's own docstring on when assigning
+this does (and does not) take effect.)doc";
+
+static constexpr std::string_view writeGalaxyYieldsPropertyDocstring =
+R"doc(Whether the galaxy_yields group/file is written.
+
+True (the default) unless output.write_galaxy_yields was set to false
+in the input deck. Only meaningful for a galaxy-type simulation. See
+writeCluster's own docstring on when assigning this does (and does
+not) take effect.)doc";
+
+static constexpr std::string_view yieldChannelsPropertyDocstring =
+R"doc(The nucleosynthetic yield channels requested via yields.channel1, yields.channel2, etc.
+
+Read-only; an empty list if no yields.channelN table was given at all.)doc";
+
+static constexpr std::string_view yieldsPropertyDocstring =
+R"doc(The Yields built from yieldChannels, or None if none was requested.
+
+Read-only, built once, at construction -- see Yields's own class
+docstring.)doc";
+
+static constexpr std::string_view yieldsChannelDecomposedPropertyDocstring =
+R"doc(Whether yields should be reported decomposed by channel.
+
+True (the default) unless yields.channel_decomposed was set to false
+in the input deck. Meaningful only if yields is not None. Unlike
+writeCluster/etc., this is read live by Cluster.computeYields()/
+Galaxy.computeYields() and OutputManagerH5's own cluster_yields/
+galaxy_yields group creation every time each runs, not cached once --
+so assigning this takes effect immediately, the same as z/intRelTol,
+rather than only affecting an object built afterward.)doc";
+
 static constexpr std::string_view inputDeckStrPropertyDocstring =
 R"doc(The input deck's own text.
 
@@ -991,6 +1030,12 @@ void bindSimControls(py::module_& m)
                 writeGalaxySpecPropertyDocstring.data(), py::arg("value"))
         .def("setWriteGalaxyPhot", &io::SimControls::setWriteGalaxyPhot,
                 writeGalaxyPhotPropertyDocstring.data(), py::arg("value"))
+        .def("setWriteClusterYields", &io::SimControls::setWriteClusterYields,
+                writeClusterYieldsPropertyDocstring.data(), py::arg("value"))
+        .def("setWriteGalaxyYields", &io::SimControls::setWriteGalaxyYields,
+                writeGalaxyYieldsPropertyDocstring.data(), py::arg("value"))
+        .def("setYieldsChannelDecomposed", &io::SimControls::setYieldsChannelDecomposed,
+                yieldsChannelDecomposedPropertyDocstring.data(), py::arg("value"))
         // Properties: alternative, attribute-style access to the same
         // getters/setters bound as plain methods above (e.g.
         // sc.imf = "20.0" instead of sc.setIMF("20.0")). Getters that
@@ -1123,6 +1168,24 @@ void bindSimControls(py::module_& m)
                 &io::SimControls::writeGalaxyPhot,
                 &io::SimControls::setWriteGalaxyPhot,
                 writeGalaxyPhotPropertyDocstring.data())
+        .def_property("writeClusterYields",
+                &io::SimControls::writeClusterYields,
+                &io::SimControls::setWriteClusterYields,
+                writeClusterYieldsPropertyDocstring.data())
+        .def_property("writeGalaxyYields",
+                &io::SimControls::writeGalaxyYields,
+                &io::SimControls::setWriteGalaxyYields,
+                writeGalaxyYieldsPropertyDocstring.data())
+        .def_property("yieldsChannelDecomposed",
+                &io::SimControls::yieldsChannelDecomposed,
+                &io::SimControls::setYieldsChannelDecomposed,
+                yieldsChannelDecomposedPropertyDocstring.data())
+        .def_property_readonly("yieldChannels",
+                &io::SimControls::yieldChannels,
+                yieldChannelsPropertyDocstring.data())
+        .def_property_readonly("yields",
+                &io::SimControls::yields,
+                yieldsPropertyDocstring.data(), py::return_value_policy::reference_internal)
         .def_property_readonly("inputDeckStr",
                 &io::SimControls::inputDeckStr,
                 inputDeckStrPropertyDocstring.data());

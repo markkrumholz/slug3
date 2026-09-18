@@ -28,6 +28,8 @@ PYBIND11_MODULE(_slug, m, py::mod_gil_not_used()) {
     bindTracks2D(m);
     bindSimControls(m);
     bindExtinct(m);
+    bindYieldChannel(m);
+    bindYields(m);
     bindNebular(m);
     bindSpecsyn(m);
     bindCluster(m);

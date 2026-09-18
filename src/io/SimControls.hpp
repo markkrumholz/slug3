@@ -495,6 +495,47 @@ namespace io
          */
         void setWriteGalaxyPhot(bool value) { writeGalaxyPhot_ = value; }
 
+        /**
+         * @brief Set whether the cluster_yields group/file should be written
+         * @param value New value for writeClusterYields()
+         * @details
+         * See setWriteCluster()'s own comment on when this does (and
+         * does not) take effect.
+         */
+        void setWriteClusterYields(bool value) { writeClusterYields_ = value; }
+
+        /**
+         * @brief Set whether the galaxy_yields group/file should be written
+         * @param value New value for writeGalaxyYields()
+         * @details
+         * Only meaningful for a galaxy-type simulation. See
+         * setWriteCluster()'s own comment on when this does (and does
+         * not) take effect.
+         */
+        void setWriteGalaxyYields(bool value) { writeGalaxyYields_ = value; }
+
+        /**
+         * @brief Set whether yields should be reported decomposed by channel
+         * @param value New value for yieldsChannelDecomposed()
+         * @details
+         * Unlike setWriteCluster()/etc., this is read live by
+         * Cluster::computeYields()/Galaxy::computeYields() (to decide
+         * how many entries their own yields_/fieldYields_ accumulate)
+         * and by OutputManagerH5::openClusterYieldsGroup()/
+         * openGalaxyYieldsGroup() (to size the "yields" dataset's own
+         * column count) every time each runs, not cached once -- so
+         * this takes effect immediately, the same as setZ()/
+         * setIntRelTol(), rather than only affecting an object built
+         * afterward. Changing this on a SimControls with an
+         * already-running simulation partway through a cluster's/
+         * galaxy's own lifetime would leave that cluster's/galaxy's
+         * own yields_ inconsistent with the new setting until its next
+         * advance() call recomputes it from scratch -- not a concern
+         * for the ordinary use case of setting this once, before a run
+         * starts.
+         */
+        void setYieldsChannelDecomposed(bool value) { yieldsChannelDecomposed_ = value; }
+
         // Getters for the physics settings
         /**
          * @brief Get simulation initial mass function
