@@ -384,21 +384,6 @@ static void appendNebLinesRow(const io::SimControls& simControls, const hid_t gr
     utils::appendRowToDataset2d(group, "neb_lines_extinct", H5T_NATIVE_DOUBLE, lineLumExtinct.data());
 }
 
-// Format one isotope as "<symbol><A>", e.g. Fe56, H1, Na22 -- the
-// two-character elem::ElemData::symbol() with its trailing '\0'
-// stripped for a single-letter symbol, immediately followed by the
-// mass number. Used by openClusterYieldsGroup()/openGalaxyYieldsGroup()
-// to build the "isotopes" attribute on the cluster_yields/galaxy_yields
-// groups.
-static auto isotopeLabel(const elem::IsotopeData& iso) -> std::string
-{
-    const auto& symbol = iso.symbol();
-    std::string label(1, symbol[0]);
-    if (symbol[1] != '\0') { label += symbol[1]; }
-    label += std::to_string(iso.A());
-    return label;
-}
-
 // NOLINTEND(misc-include-cleaner)
 
 // H5 constructor: see this class's own header comment for what "the
@@ -1074,7 +1059,7 @@ void io::OutputManagerH5::openClusterYieldsGroup()
     const auto& isotopes = yields.isotopes();
     std::vector<std::string> isotopeNames;
     isotopeNames.reserve(isotopes.size());
-    for (const auto& iso : isotopes) { isotopeNames.push_back(isotopeLabel(iso.get())); }
+    for (const auto& iso : isotopes) { isotopeNames.push_back(iso.get().label()); }
 
     std::vector<std::string> channelNames;
     std::vector<std::string> modelNames;
@@ -1311,7 +1296,7 @@ void io::OutputManagerH5::openGalaxyYieldsGroup()
     const auto& isotopes = yields.isotopes();
     std::vector<std::string> isotopeNames;
     isotopeNames.reserve(isotopes.size());
-    for (const auto& iso : isotopes) { isotopeNames.push_back(isotopeLabel(iso.get())); }
+    for (const auto& iso : isotopes) { isotopeNames.push_back(iso.get().label()); }
 
     std::vector<std::string> channelNames;
     std::vector<std::string> modelNames;

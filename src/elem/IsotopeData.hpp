@@ -73,6 +73,23 @@ namespace elem
         [[nodiscard]] auto A() const noexcept // NOLINT(readability-identifier-naming)
             -> unsigned int { return A_; }
 
+        /**
+         * @brief Return this isotope formatted as "<symbol><A>"
+         * @return ElemData::symbol() (its trailing '\0' stripped, for a
+         *   single-letter symbol) immediately followed by A(), e.g.
+         *   "Fe56", "H1", "Na22" -- the inverse of the parsing
+         *   io::SimControls::readYields() does for its own
+         *   yields.isotopes keyword (see its own comment)
+         */
+        [[nodiscard]] auto label() const -> std::string
+        {
+            const auto& sym = symbol();
+            std::string result(1, sym[0]);
+            if (sym[1] != '\0') { result += sym[1]; }
+            result += std::to_string(A_);
+            return result;
+        }
+
         /** @brief Return the radioactive decay lifetime; 0 indicates a stable isotope */
         [[nodiscard]] auto lifetime() const noexcept -> double { return lifetime_; }
 

@@ -2704,6 +2704,22 @@ static auto testOptOutClusterYieldsOutput() -> int
                 "unexpectedly did not create the galaxy_yields group\n";
             return 1;
         }
+
+        // Same check on the ascii side: no _cluster_yields.txt file,
+        // but _galaxy_yields.txt still exists
+        const io::OutputManagerAscii asciiManager(controls);
+        if (std::filesystem::exists(outDir / (modelName + "_cluster_yields.txt")))
+        {
+            std::cerr << "testOutputManager: opt-out cluster yields output: ascii "
+                "unexpectedly created a _cluster_yields.txt file\n";
+            return 1;
+        }
+        if (!std::filesystem::exists(outDir / (modelName + "_galaxy_yields.txt")))
+        {
+            std::cerr << "testOutputManager: opt-out cluster yields output: ascii "
+                "unexpectedly did not create a _galaxy_yields.txt file\n";
+            return 1;
+        }
     }
     catch (const std::exception& error)
     {
@@ -2982,6 +2998,328 @@ static auto testWriteGalaxyAscii() -> int
     catch (const std::exception& error)
     {
         std::cerr << "testOutputManager: write galaxy ascii test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// ---------------------------------------------------------------------
+// cluster_yields/galaxy_yields ascii tests: OutputManagerAscii's own
+// mirror of the H5 cluster_yields/galaxy_yields tests above, using the
+// same sukhbold_test/kobayashi_test fixture (see addYieldsFixture()'s
+// own comment) -- one wide, fixed-width column per (channel, isotope)
+// pair (decomposed) or per isotope (not decomposed), named per
+// buildYieldsColumnNames()'s own convention in OutputManagerAscii.cpp.
+// ---------------------------------------------------------------------
+
+// Verify the cluster-yields ascii header names its decomposed columns
+// "ccsn1_<isotope>"/"ccsn2_<isotope>" (the fixture's two channels'
+// own global 1-based index, both channel type "ccsn"), with units
+// "Msun", for each of the fixture's own four isotopes.
+static auto testClusterYieldsHeaderAscii() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() / "slugTestOutputManagerClusterYieldsHeaderAscii";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+    const std::string modelName = "test_model";
+    toml::table inputDeck = makeClusterPhysicsInputDeck(modelName, outDir);
+    addYieldsFixture(inputDeck);
+
+    try
+    {
+        const io::SimControls controls(inputDeck);
+        { const io::OutputManagerAscii manager(controls); }
+
+        std::ifstream file(outDir / (modelName + "_cluster_yields.txt"));
+        std::string headerLine;
+        std::string unitsLine;
+        std::getline(file, headerLine);
+        std::getline(file, unitsLine);
+
+        for (const char* col : { "ccsn1_H1", "ccsn1_Fe56", "ccsn1_Ni56", "ccsn1_Ni58",
+            "ccsn2_H1", "ccsn2_Fe56", "ccsn2_Ni56", "ccsn2_Ni58" })
+        {
+            if (!headerLine.contains(col))
+            {
+                std::cerr << "testOutputManager: cluster yields header ascii: "
+                    "missing expected column '" << col << "' in header:\n" << headerLine << "\n";
+                return 1;
+            }
+        }
+        if (!unitsLine.contains("Msun"))
+        {
+            std::cerr << "testOutputManager: cluster yields header ascii: "
+                "units line missing expected 'Msun'\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testOutputManager: cluster yields header ascii test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Verify that, with yields.channel_decomposed = false, the
+// cluster-yields ascii header names its columns by isotope alone (no
+// "ccsnN_" prefix).
+static auto testClusterYieldsHeaderNotDecomposedAscii() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() /
+        "slugTestOutputManagerClusterYieldsHeaderNotDecomposedAscii";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+    const std::string modelName = "test_model";
+    toml::table inputDeck = makeClusterPhysicsInputDeck(modelName, outDir);
+    addYieldsFixture(inputDeck, false);
+
+    try
+    {
+        const io::SimControls controls(inputDeck);
+        { const io::OutputManagerAscii manager(controls); }
+
+        std::ifstream file(outDir / (modelName + "_cluster_yields.txt"));
+        std::string headerLine;
+        std::getline(file, headerLine);
+
+        for (const char* col : { "H1", "Fe56", "Ni56", "Ni58" })
+        {
+            if (!headerLine.contains(col))
+            {
+                std::cerr << "testOutputManager: cluster yields header not decomposed "
+                    "ascii: missing expected column '" << col << "' in header:\n" << headerLine << "\n";
+                return 1;
+            }
+        }
+        if (headerLine.contains("ccsn1") || headerLine.contains("ccsn2"))
+        {
+            std::cerr << "testOutputManager: cluster yields header not decomposed "
+                "ascii: header unexpectedly still has a channel prefix:\n" << headerLine << "\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testOutputManager: cluster yields header not decomposed ascii "
+            "test failed: " << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Verify that OutputManagerAscii::writeClusterYields writes a row
+// (trial, time, uid, one value per column) matching cluster.yields()
+// to the cluster-yields output file.
+static auto testWriteClusterYieldsAscii() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() / "slugTestOutputManagerWriteClusterYieldsAscii";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+    const std::string modelName = "test_model";
+    toml::table inputDeck = makeClusterPhysicsInputDeck(modelName, outDir);
+    addYieldsFixture(inputDeck);
+
+    try
+    {
+        const io::SimControls controls(inputDeck);
+        utils::rng().seed(42);
+        core::Cluster cluster(11, 2e3, 0.0, controls);
+        constexpr unsigned long trial = 7;
+        constexpr double writeTime = 1e5;
+        cluster.advance(writeTime);
+        if (cluster.yields().empty())
+        {
+            std::cerr << "testOutputManager: write cluster yields ascii: test bug: "
+                "expected a non-empty yields() row\n";
+            return 1;
+        }
+
+        {
+            io::OutputManagerAscii manager(controls);
+            manager.writeClusterYields(trial, writeTime, cluster);
+        }
+
+        std::ifstream file(outDir / (modelName + "_cluster_yields.txt"));
+        skipAsciiHeader(file);
+        std::string dataLine;
+        std::getline(file, dataLine);
+        std::istringstream lineStream(dataLine);
+
+        unsigned long readTrial = 0;
+        double readTime = NAN;
+        unsigned long readUid = 0;
+        lineStream >> readTrial >> readTime >> readUid;
+        std::vector<double> readYields(cluster.yields().size());
+        for (auto& value : readYields) { lineStream >> value; }
+
+        constexpr double tol = 1e-5;
+        if (readTrial != trial || std::abs(readTime - writeTime) > tol ||
+            readUid != cluster.uid())
+        {
+            std::cerr << "testOutputManager: write cluster yields ascii: trial/time/uid "
+                "row does not match\n";
+            return 1;
+        }
+        for (std::size_t i = 0; i < readYields.size(); ++i)
+        {
+            const double expected = cluster.yields().at(i);
+            const double atol = std::max(tol, tol * std::abs(expected));
+            if (std::abs(readYields.at(i) - expected) > atol)
+            {
+                std::cerr << "testOutputManager: write cluster yields ascii: column " << i <<
+                    " = " << readYields.at(i) << ", expected " << expected << "\n";
+                return 1;
+            }
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testOutputManager: write cluster yields ascii test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Verify that OutputManagerAscii::writeGalaxyYields writes a row
+// matching galaxy.yields() to the galaxy-yields output file, and also
+// writes a matching passthrough row -- via its own internal
+// writeClusterYields() calls -- to the cluster-yields output file for
+// every currently-alive cluster in the galaxy.
+static auto testWriteGalaxyYieldsAscii() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() / "slugTestOutputManagerWriteGalaxyYieldsAscii";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+    const std::string modelName = "test_model";
+    toml::table inputDeck = makeGalaxyPhysicsInputDeck(modelName, outDir);
+    addYieldsFixture(inputDeck);
+
+    try
+    {
+        const io::SimControls controls(inputDeck);
+        if (controls.yields() == nullptr)
+        {
+            std::cerr << "testOutputManager: write galaxy yields ascii: test bug: "
+                "expected yields() to be non-null\n";
+            return 1;
+        }
+
+        utils::rng().seed(42);
+        core::Galaxy galaxy(controls);
+        galaxy.advance(galaxyWriteTime);
+        if (galaxy.clusters().empty())
+        {
+            std::cerr << "testOutputManager: write galaxy yields ascii: test bug: "
+                "expected at least one cluster to have formed\n";
+            return 1;
+        }
+        constexpr unsigned long trial = 8;
+
+        {
+            io::OutputManagerAscii manager(controls);
+            manager.writeGalaxyYields(trial, galaxyWriteTime, galaxy);
+        }
+
+        constexpr double tol = 1e-5;
+
+        // galaxy_yields.txt: single row, no uid column
+        {
+            std::ifstream file(outDir / (modelName + "_galaxy_yields.txt"));
+            skipAsciiHeader(file);
+            std::string dataLine;
+            std::getline(file, dataLine);
+            std::istringstream lineStream(dataLine);
+            unsigned long readTrial = 0;
+            double readTime = NAN;
+            lineStream >> readTrial >> readTime;
+            std::vector<double> readYields(galaxy.yields().size());
+            for (auto& value : readYields) { lineStream >> value; }
+
+            if (readTrial != trial || std::abs(readTime - galaxyWriteTime) > tol)
+            {
+                std::cerr << "testOutputManager: write galaxy yields ascii: "
+                    "trial/time row does not match\n";
+                return 1;
+            }
+            for (std::size_t i = 0; i < readYields.size(); ++i)
+            {
+                const double expected = galaxy.yields().at(i);
+                const double atol = std::max(tol, tol * std::abs(expected));
+                if (std::abs(readYields.at(i) - expected) > atol)
+                {
+                    std::cerr << "testOutputManager: write galaxy yields ascii: column " <<
+                        i << " = " << readYields.at(i) << ", expected " << expected << "\n";
+                    return 1;
+                }
+            }
+        }
+
+        // cluster_yields.txt: one passthrough row per currently-alive cluster
+        {
+            std::ifstream file(outDir / (modelName + "_cluster_yields.txt"));
+            skipAsciiHeader(file);
+            std::map<unsigned long, std::vector<double>> rowsByUid;
+            std::string dataLine;
+            while (std::getline(file, dataLine))
+            {
+                if (dataLine.empty()) { continue; }
+                std::istringstream lineStream(dataLine);
+                unsigned long readTrialRow = 0;
+                double readTimeRow = NAN;
+                unsigned long readUid = 0;
+                lineStream >> readTrialRow >> readTimeRow >> readUid;
+                std::vector<double> values;
+                double value = NAN;
+                while (lineStream >> value) { values.push_back(value); }
+                rowsByUid.emplace(readUid, std::move(values));
+            }
+
+            if (rowsByUid.size() != galaxy.clusters().size())
+            {
+                std::cerr << "testOutputManager: write galaxy yields ascii: "
+                    "cluster_yields.txt has " << rowsByUid.size() << " rows, expected " <<
+                    galaxy.clusters().size() << "\n";
+                return 1;
+            }
+            for (auto& cluster : galaxy.clusters())
+            {
+                const auto it = rowsByUid.find(cluster.uid());
+                if (it == rowsByUid.end())
+                {
+                    std::cerr << "testOutputManager: write galaxy yields ascii: no "
+                        "cluster_yields.txt row for uid " << cluster.uid() << "\n";
+                    return 1;
+                }
+                const auto& values = it->second;
+                if (values.size() != cluster.yields().size())
+                {
+                    std::cerr << "testOutputManager: write galaxy yields ascii: row for uid " <<
+                        cluster.uid() << " has " << values.size() << " columns, expected " <<
+                        cluster.yields().size() << "\n";
+                    return 1;
+                }
+                for (std::size_t i = 0; i < values.size(); ++i)
+                {
+                    const double expected = cluster.yields().at(i);
+                    const double atol = std::max(tol, tol * std::abs(expected));
+                    if (std::abs(values.at(i) - expected) > atol)
+                    {
+                        std::cerr << "testOutputManager: write galaxy yields ascii: uid " <<
+                            cluster.uid() << " column " << i << " = " << values.at(i) <<
+                            ", expected " << expected << "\n";
+                        return 1;
+                    }
+                }
+            }
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testOutputManager: write galaxy yields ascii test failed: "
             << error.what() << "\n";
         return 1;
     }
@@ -3505,5 +3843,9 @@ auto testOutputManager() -> int
     result += testWriteClusterYieldsH5();
     result += testWriteGalaxyYieldsH5();
     result += testOptOutClusterYieldsOutput();
+    result += testClusterYieldsHeaderAscii();
+    result += testClusterYieldsHeaderNotDecomposedAscii();
+    result += testWriteClusterYieldsAscii();
+    result += testWriteGalaxyYieldsAscii();
     return result;
 }
