@@ -1,0 +1,36 @@
+# Test input deck for slugpy's own yields-reader tests
+# (test_yields_reader.py): a cluster-type simulation with
+# yields.channel_decomposed = false, so cluster_yields's own "yields"
+# dataset is summed over every channel rather than broken out
+# per-channel -- otherwise mirrors testReaderYields.in (one real yield
+# channel, ccsn/sukhbold16, is enough here).
+
+sim_type = "cluster"
+
+[stars]
+IMF = "chabrier.toml"
+track_registry = "tests/tracks/assets/tracks.toml"
+tracks = "MIST_test"
+FeH = 0.0
+alphaFe = -0.2
+
+[spectra]
+model = "blackbody"
+
+[clusters]
+CMF = 1e3
+
+[yields]
+channel_decomposed = false
+[yields.channel1]
+channel = "ccsn"
+model = "sukhbold16"
+
+[output]
+start_time = 1e6
+end_time = 5e6
+ntime = 3
+n_trial = 3
+
+[nebular]
+compute_neb = false

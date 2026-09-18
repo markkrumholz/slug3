@@ -1,0 +1,52 @@
+# yieldslib: a small example demonstrating nucleosynthetic yield
+# output (cluster_yields/galaxy_yields), for use as a test fixture
+# while developing slugpy's own reader support for those groups. A
+# galaxy-type simulation, so both the galaxy_yields group and (via its
+# per-cluster passthrough) the cluster_yields group are exercised in
+# the same output file. Uses MIST tracks and blackbody spectra (fast,
+# no large spectral-library chain needed) and two real yield channels
+# (ccsn and massive_star_winds, both from the sukhbold16 model) from
+# the real yields registry, decomposed by channel (the default). Run
+# this from within this directory with:
+#   slug yieldslib.toml
+
+sim_type = "galaxy"
+
+[stars]
+IMF = "chabrier.toml"
+tracks = "MIST"
+FeH = 0.0
+alphaFe = 0.0
+v_vcrit = 0.0
+
+[spectra]
+model = "blackbody"
+
+[phot]
+filters = ["Lbol"]
+
+[clusters]
+CMF = 1e3
+CLF = 1e6
+
+[galaxy]
+sfr = 1e-2
+
+[yields]
+[yields.channel1]
+channel = "ccsn"
+model = "sukhbold16"
+
+[yields.channel2]
+channel = "massive_star_winds"
+model = "sukhbold16"
+
+[output]
+model_name = "yieldslib"
+start_time = 1e6
+end_time = 5e6
+ntime = 3
+n_trial = 5
+
+[nebular]
+compute_neb = false
