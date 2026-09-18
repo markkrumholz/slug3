@@ -2808,14 +2808,14 @@ def test_simcontrols_yields_is_not_none_once_requested(yields_controls):
 
 
 def test_yields_isotopes_is_union_of_channels(yields_controls):
-    """Yields.isotopes() is the deduplicated, sorted union of both channels' own isotopes."""
-    isotopes = yields_controls.yields.isotopes()
+    """Yields.isotopes is the deduplicated, sorted union of both channels' own isotopes."""
+    isotopes = yields_controls.yields.isotopes
     assert [iso.label() for iso in isotopes] == YIELDS_ISOTOPES
 
 
 def test_yields_channel_count_matches_deck(yields_controls):
-    """Yields.yieldChannels() has one YieldChannel per deck entry, all synchronized onto isotopes()."""
-    channels = yields_controls.yields.yieldChannels()
+    """Yields.yieldChannels is one YieldChannel per deck entry, all synchronized onto isotopes()."""
+    channels = yields_controls.yields.yieldChannels
     assert len(channels) == 2
     for channel in channels:
         assert [iso.label() for iso in channel.isotopes()] == YIELDS_ISOTOPES
@@ -2824,8 +2824,8 @@ def test_yields_channel_count_matches_deck(yields_controls):
 def test_yields_yield_and_yield_sum_shapes(yields_controls):
     """yield_() returns one row per channel; yieldSum() sums those rows column-wise."""
     yields = yields_controls.yields
-    mass = yields.yieldChannels()[0].masses()[0]
-    feh = yields.yieldChannels()[0].feH()[0]
+    mass = yields.yieldChannels[0].masses()[0]
+    feh = yields.yieldChannels[0].feH()[0]
 
     rows = yields.yield_(mass, feh)
     assert len(rows) == 2
@@ -2844,14 +2844,199 @@ def test_yields_rebuild_yield_grid_restricts_isotopes(yields_controls):
         fe56 = slug.isotopeTable(26, 56)
         ni58 = slug.isotopeTable(28, 58)
         yields.rebuildYieldGrid(isotopes=[fe56, ni58])
-        assert [iso.label() for iso in yields.isotopes()] == ["Fe56", "Ni58"]
-        for channel in yields.yieldChannels():
+        assert [iso.label() for iso in yields.isotopes] == ["Fe56", "Ni58"]
+        for channel in yields.yieldChannels:
             assert [iso.label() for iso in channel.isotopes()] == ["Fe56", "Ni58"]
     finally:
         # Restore the shared, module-scoped fixture back to its
         # original, unrestricted isotope set, so this test doesn't leak
         # state into whichever other test happens to run after it.
         yields.rebuildYieldGrid()
+
+
+def test_yields_add_channel_pointer_appends_built_channel(yields_controls):
+    """addChannel(YieldChannel) moves an already-built channel into
+    yieldChannels, distinct from addChannel(descriptor)'s own
+    from-scratch construction, and resynchronizes isotopes()
+    afterward."""
+    yields = slug.Yields(controls=yields_controls, registry_name=YIELDS_REGISTRY)
+    assert len(yields.yieldChannels) == 2
+
+    descriptor = slug.YieldChannelDescriptor(slug.YieldChannelType.ccsn, "sukhbold_test")
+    channel = slug.YieldChannel(descriptor, 0.0, 0.0, registry_name=YIELDS_REGISTRY)
+    yields.addChannel(channel)
+
+    assert len(yields.yieldChannels) == 3
+    assert [iso.label() for iso in yields.yieldChannels[2].isotopes()] == YIELDS_ISOTOPES
+    # channel's own ownership was transferred to yields
+    with pytest.raises(ValueError):
+        channel.masses()
+
+
+def test_yields_delete_channel_removes_entry(yields_controls):
+    """deleteChannel(index) removes exactly that entry from
+    yieldChannels, leaving the rest in order."""
+    yields = slug.Yields(controls=yields_controls, registry_name=YIELDS_REGISTRY)
+    assert [d.model_name for d in yields_controls.yieldChannels] == ["sukhbold_test", "kobayashi_test"]
+
+    yields.deleteChannel(0)
+    assert len(yields.yieldChannels) == 1
+    assert yields.yieldChannels[0].descriptor().model_name == "kobayashi_test"
+
+
+def test_yields_delete_channel_out_of_range_raises(yields_controls):
+    """deleteChannel() on an out-of-range index raises IndexError rather
+    than crashing."""
+    yields = slug.Yields(controls=yields_controls, registry_name=YIELDS_REGISTRY)
+    with pytest.raises(IndexError):
+        yields.deleteChannel(100)
+
+
+def test_yields_set_channels_with_channel_list(yields_controls):
+    """setChannels(list of YieldChannel) replaces yieldChannels wholesale
+    by moving in already-built channels, rather than building fresh
+    ones from descriptors."""
+    yields = slug.Yields(controls=yields_controls, registry_name=YIELDS_REGISTRY)
+    descriptor = slug.YieldChannelDescriptor(slug.YieldChannelType.ccsn, "sukhbold_test")
+    channel = slug.YieldChannel(descriptor, 0.0, 0.0, registry_name=YIELDS_REGISTRY)
+
+    yields.setChannels([channel])
+
+    assert len(yields.yieldChannels) == 1
+    assert yields.yieldChannels[0].descriptor().model_name == "sukhbold_test"
+
+
+def test_yields_set_channels_with_descriptor_list(yields_controls):
+    """setChannels(list of YieldChannelDescriptor) replaces yieldChannels
+    wholesale by building fresh channels from each descriptor, exactly
+    as addChannel(descriptor) would, one at a time."""
+    yields = slug.Yields(controls=yields_controls, registry_name=YIELDS_REGISTRY)
+    descriptor = slug.YieldChannelDescriptor(slug.YieldChannelType.ccsn, "kobayashi_test")
+
+    yields.setChannels([descriptor])
+
+    assert len(yields.yieldChannels) == 1
+    assert yields.yieldChannels[0].descriptor().model_name == "kobayashi_test"
+
+
+def test_yields_yield_channels_property_setter_dispatches_by_element_type(yields_controls):
+    """Assigning to the yieldChannels property has the same effect as
+    setChannels(), for either accepted element type, and resynchronizes
+    isotopes() via rebuildYieldGrid() afterward."""
+    yields = slug.Yields(controls=yields_controls, registry_name=YIELDS_REGISTRY)
+
+    descriptor = slug.YieldChannelDescriptor(slug.YieldChannelType.ccsn, "sukhbold_test")
+    yields.yieldChannels = [descriptor]
+    assert len(yields.yieldChannels) == 1
+    assert yields.yieldChannels[0].descriptor().model_name == "sukhbold_test"
+    assert yields.isotopes == list(yields.yieldChannels[0].isotopesOrig())
+
+    other_descriptor = slug.YieldChannelDescriptor(slug.YieldChannelType.ccsn, "kobayashi_test")
+    channel = slug.YieldChannel(other_descriptor, 0.0, 0.0, registry_name=YIELDS_REGISTRY)
+    yields.yieldChannels = [channel]
+    assert len(yields.yieldChannels) == 1
+    assert yields.yieldChannels[0].descriptor().model_name == "kobayashi_test"
+
+
+def test_yields_yield_channels_property_setter_empty_list(yields_controls):
+    """Assigning an empty list to yieldChannels clears every channel and
+    leaves isotopes() empty, without raising (only a non-empty explicit
+    isotopes filter that matches nothing raises)."""
+    yields = slug.Yields(controls=yields_controls, registry_name=YIELDS_REGISTRY)
+    yields.yieldChannels = []
+    assert yields.yieldChannels == []
+    assert yields.isotopes == []
+
+
+def test_yields_isotopes_property_setter_restricts_isotopes(yields_controls):
+    """Assigning to the isotopes property has the same effect as
+    rebuildYieldGrid(isotopes=...): it narrows isotopes() (and every
+    channel's own isotopes()) down to the assigned list, and an empty
+    list resets it back to the full union."""
+    yields = slug.Yields(controls=yields_controls, registry_name=YIELDS_REGISTRY)
+    fe56 = slug.isotopeTable(26, 56)
+    ni58 = slug.isotopeTable(28, 58)
+
+    yields.isotopes = [fe56, ni58]
+    assert [iso.label() for iso in yields.isotopes] == ["Fe56", "Ni58"]
+    for channel in yields.yieldChannels:
+        assert [iso.label() for iso in channel.isotopes()] == ["Fe56", "Ni58"]
+
+    yields.isotopes = []
+    assert [iso.label() for iso in yields.isotopes] == YIELDS_ISOTOPES
+
+
+def test_yields_isotopes_property_setter_no_match_raises(yields_controls):
+    """Assigning a non-empty isotopes list that matches nothing any
+    loaded channel tabulates raises RuntimeError, mirroring
+    rebuildYieldGrid()'s own identical check."""
+    yields = slug.Yields(controls=yields_controls, registry_name=YIELDS_REGISTRY)
+    c12 = slug.isotopeTable(6, 12)
+    with pytest.raises(RuntimeError):
+        yields.isotopes = [c12]
+
+
+def test_simcontrols_set_yields_installs_new_yields():
+    """setYields() should install a working Yields on a SimControls
+    whose yields property was previously None (no [yields] table in
+    CLUSTER_DECK), transferring ownership of the Python-built Yields
+    (mirroring setSpecsyn()'s/setExtinct()'s/setNebular()'s own
+    ownership-transfer behavior)."""
+    controls = slug.SimControls(CLUSTER_DECK)
+    assert controls.yields is None
+
+    yields = slug.Yields(controls=controls, registry_name=YIELDS_REGISTRY)
+    descriptor = slug.YieldChannelDescriptor(slug.YieldChannelType.ccsn, "sukhbold_test")
+    yields.addChannel(descriptor)
+    controls.setYields(yields)
+
+    assert controls.yields is not None
+    assert len(controls.yields.yieldChannels) == 1
+    with pytest.raises(ValueError):
+        yields.registryName()
+
+
+def test_simcontrols_set_yields_none_removes_yields():
+    """setYields(None) should remove an already-installed Yields,
+    leaving the yields property None again."""
+    controls = slug.SimControls(CLUSTER_DECK)
+    yields = slug.Yields(controls=controls, registry_name=YIELDS_REGISTRY)
+    controls.setYields(yields)
+    assert controls.yields is not None
+
+    controls.setYields(None)
+    assert controls.yields is None
+
+
+def test_simcontrols_set_yields_mismatched_controls_raises(yields_controls):
+    """setYields() must reject a Yields built against a different
+    SimControls than the one it's being installed on -- a Yields stores
+    a live reference to whichever SimControls it was built against, so
+    installing one bound elsewhere would leave it silently reading that
+    other SimControls's own yieldChannels()/fehDist(), not this one's."""
+    controls = slug.SimControls(CLUSTER_DECK)
+    foreign_yields = slug.Yields(controls=yields_controls, registry_name=YIELDS_REGISTRY)
+
+    with pytest.raises(ValueError):
+        controls.setYields(foreign_yields)
+
+
+def test_simcontrols_yields_property_setter():
+    """The yields property should read back the current Yields (or
+    None), and assigning a Yields to it should have the same effect as
+    setYields(), transferring ownership -- assigning None should remove
+    one already present."""
+    controls = slug.SimControls(CLUSTER_DECK)
+    assert controls.yields is None
+
+    yields = slug.Yields(controls=controls, registry_name=YIELDS_REGISTRY)
+    controls.yields = yields
+    assert controls.yields is not None
+    with pytest.raises(ValueError):
+        yields.registryName()
+
+    controls.yields = None
+    assert controls.yields is None
 
 
 def test_simcontrols_yields_channel_decomposed_property(yields_controls):

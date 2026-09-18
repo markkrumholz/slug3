@@ -65,6 +65,34 @@ namespace yields
             descriptor, controls_.fehDist().getMin(), controls_.fehDist().getMax(), registryName_));
     }
 
+    void Yields::addChannel(std::unique_ptr<YieldChannel> channel)
+    {
+        yieldChannels_.push_back(std::move(channel));
+    }
+
+    void Yields::deleteChannel(const std::size_t index)
+    {
+        if (index >= yieldChannels_.size())
+        {
+            throw std::out_of_range(
+                "Yields::deleteChannel: index " + std::to_string(index) +
+                " is out of range for yieldChannels() of size " +
+                std::to_string(yieldChannels_.size()));
+        }
+        yieldChannels_.erase(yieldChannels_.begin() + static_cast<std::ptrdiff_t>(index));
+    }
+
+    void Yields::setChannels(std::vector<std::unique_ptr<YieldChannel>> channels)
+    {
+        yieldChannels_ = std::move(channels);
+    }
+
+    void Yields::setChannels(const std::vector<YieldChannelDescriptor>& descriptors)
+    {
+        yieldChannels_.clear();
+        for (const auto& descriptor : descriptors) { addChannel(descriptor); }
+    }
+
     void Yields::rebuildYieldGrid(const IsotopeList& isotopes)
     {
         // Union every loaded channel's own isotopesOrig() into one

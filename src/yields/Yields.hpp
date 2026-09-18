@@ -114,6 +114,74 @@ namespace yields
         void addChannel(const YieldChannelDescriptor& descriptor);
 
         /**
+         * @brief Add one already-built YieldChannel to yieldChannels_
+         * @param channel The channel to add; ownership is transferred
+         *   to yieldChannels_
+         * @details
+         * Unlike addChannel(const YieldChannelDescriptor&), which
+         * constructs a fresh YieldChannel from a descriptor, this
+         * overload just moves an already-built channel into place --
+         * e.g. one built and rebuiltYieldGrid()-ed by a caller (from
+         * Python) with settings addChannel(descriptor) has no way to
+         * express itself. Does not call rebuildYieldGrid(): channel is
+         * appended as-is, whatever isotope list it was itself last
+         * built over, so a caller that wants it synchronized onto
+         * isotopes_ (or the reverse -- isotopes_ recomputed to include
+         * its own isotopesOrig()) must call rebuildYieldGrid()
+         * afterward, exactly as after the descriptor-taking overload.
+         */
+        void addChannel(std::unique_ptr<YieldChannel> channel);
+
+        /**
+         * @brief Remove one entry from yieldChannels_
+         * @param index Index, into yieldChannels_, of the channel to remove
+         * @throws std::out_of_range if index >= yieldChannels().size()
+         * @details
+         * Does not call rebuildYieldGrid(): isotopes_ (and every
+         * remaining channel's own isotopes()) is left describing the
+         * union that existed before index was removed, until a caller
+         * reruns rebuildYieldGrid() -- e.g. to drop an isotope that
+         * only the removed channel tabulated.
+         */
+        void deleteChannel(std::size_t index);
+
+        /**
+         * @brief Replace yieldChannels_ wholesale with a list of already-built channels
+         * @param channels The channels to install, in order; ownership
+         *   of each is transferred to yieldChannels_
+         * @details
+         * yieldChannels_ is discarded (freeing every channel it
+         * previously held) and replaced by moving channels into its
+         * place -- an O(1) transfer, not a per-element addChannel()
+         * loop, since every element here is already a built
+         * YieldChannel, not a descriptor to build one from. Does not
+         * call rebuildYieldGrid(): as with addChannel(unique_ptr<
+         * YieldChannel>), a caller that wants isotopes_ resynchronized
+         * onto the new channels must call it explicitly afterward.
+         */
+        void setChannels(std::vector<std::unique_ptr<YieldChannel>> channels);
+
+        /**
+         * @brief Replace yieldChannels_ wholesale with channels built from a list of descriptors
+         * @param descriptors The descriptors to build fresh channels
+         *   from, in order -- see addChannel(const
+         *   YieldChannelDescriptor&)'s own comment for what each one
+         *   means and how it's loaded
+         * @throws std::runtime_error if propagated from some
+         *   addChannel(const YieldChannelDescriptor&) call -- see its
+         *   own comment
+         * @details
+         * yieldChannels_ is cleared, then addChannel(descriptor) is
+         * called once per entry of descriptors, in order -- unlike the
+         * std::unique_ptr<YieldChannel> overload, this builds every
+         * channel fresh from disk, rather than moving in already-built
+         * ones. Does not call rebuildYieldGrid(): as with the other
+         * overload, a caller must call it explicitly afterward to
+         * resynchronize isotopes_ onto the new channels.
+         */
+        void setChannels(const std::vector<YieldChannelDescriptor>& descriptors);
+
+        /**
          * @brief Rebuild isotopes_ from yieldChannels_, then push it back into every channel
          * @param isotopes Restricts isotopes_ to its own intersection
          *   with this list; an empty list (the default) means "keep

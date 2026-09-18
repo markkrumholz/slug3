@@ -13,10 +13,13 @@
 #include "../yields/YieldCommons.hpp"
 #include "../yields/Yields.hpp"
 #include <cstddef>
+#include <memory>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h> // NOLINT(misc-include-cleaner); needed for list/vector conversions
+#include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 // See BindYieldChannel.cpp's own identical helper -- duplicated here
@@ -86,7 +89,85 @@ RuntimeError
     If descriptor.channel/model_name is not found in the registry
     named by registryName(), or if this Yields's own SimControls's
     [Fe/H] range lies outside the range actually available for that
-    channel/model.)doc";
+    channel/model.
+
+Details
+-------
+Also calls rebuildYieldGrid() afterward, so isotopes() (and every
+channel this Yields owns, including the new one) stays synchronized.)doc";
+
+static constexpr std::string_view addChannelPointerDocstring =
+    R"doc(Add one already-built YieldChannel to yieldChannels().
+
+Parameters
+----------
+channel : YieldChannel
+    The channel to add; ownership is transferred to this Yields, so
+    channel is no longer usable from Python after this call.
+
+Details
+-------
+Unlike addChannel(), which builds a fresh YieldChannel from a
+descriptor, this overload moves an already-built channel into place.
+Also calls rebuildYieldGrid(), so isotopes() and every channel this
+Yields owns (including channel itself) stay synchronized afterward.)doc";
+
+static constexpr std::string_view deleteChannelDocstring =
+    R"doc(Remove one entry from yieldChannels().
+
+Parameters
+----------
+index : int
+    Index, into yieldChannels(), of the channel to remove.
+
+Throws
+------
+IndexError
+    If index is out of range for yieldChannels().
+
+Details
+-------
+Also calls rebuildYieldGrid() afterward, so isotopes() (and every
+remaining channel) stays synchronized once the removed channel's own
+isotopes no longer count toward the union.)doc";
+
+static constexpr std::string_view setChannelsPointersDocstring =
+    R"doc(Replace yieldChannels() wholesale with a list of already-built channels.
+
+Parameters
+----------
+channels : list of YieldChannel
+    The channels to install, in order; ownership of each is
+    transferred to this Yields, so none of them are usable from Python
+    after this call.
+
+Details
+-------
+yieldChannels() is discarded and replaced by channels, then
+rebuildYieldGrid() is called, synchronizing isotopes() (and every
+installed channel) onto the union of their own isotopesOrig().)doc";
+
+static constexpr std::string_view setChannelsDescriptorsDocstring =
+    R"doc(Replace yieldChannels() wholesale with channels built from a list of descriptors.
+
+Parameters
+----------
+descriptors : list of YieldChannelDescriptor
+    The descriptors to build fresh channels from, in order -- see
+    addChannel()'s own docstring for what each one means and how it's
+    loaded.
+
+Throws
+------
+RuntimeError
+    If propagated from building any of the fresh channels -- see
+    addChannel()'s own docstring.
+
+Details
+-------
+Unlike the YieldChannel-list overload, this builds every channel fresh
+from disk rather than moving in already-built ones. Also calls
+rebuildYieldGrid() afterward.)doc";
 
 static constexpr std::string_view rebuildYieldGridDocstring =
     R"doc(Rebuild isotopes() from yieldChannels(), then push it back into every channel.
@@ -120,24 +201,31 @@ Returns
 registry_name : str)doc";
 
 static constexpr std::string_view yieldChannelsDocstring =
-    R"doc(Get the yield channels loaded so far.
+    R"doc(The yield channels loaded so far.
 
-Returns
--------
-yield_channels : list of YieldChannel
-    In the same order as controls().yieldChannels().)doc";
+Reading returns the channels in the same order as
+controls().yieldChannels(). Assigning a list transfers ownership of
+each element to this Yields via setChannels() -- see its own
+docstring for the two accepted element types (YieldChannel or
+YieldChannelDescriptor) -- then calls rebuildYieldGrid(), so isotopes()
+(and every channel) stays synchronized onto the new list.)doc";
 
 static constexpr std::string_view isotopesDocstring =
-    R"doc(Get the union of every loaded channel's own isotopesOrig().
+    R"doc(The isotopes this Yields' yield grid is tabulated for.
 
-Returns
--------
-isotopes : list of IsotopeData
-    Every isotope that appears in at least one of yieldChannels()'s own
-    isotopesOrig() lists, deduplicated and sorted -- once
-    rebuildYieldGrid() has run (always true after the constructor
-    itself returns), this is also exactly what every yieldChannels()
-    entry's own isotopes() equals, in the same order.)doc";
+Reading returns the union of every loaded channel's own
+isotopesOrig(): every isotope that appears in at least one of
+yieldChannels()'s own isotopesOrig() lists, deduplicated and sorted --
+once rebuildYieldGrid() has run (always true after the constructor
+itself returns), this is also exactly what every yieldChannels() entry's
+own isotopes() equals, in the same order.
+
+Assigning a list calls rebuildYieldGrid() with it, narrowing isotopes()
+down to its own intersection with the assigned list (or, for an empty
+list, resetting isotopes() back to the full union above) -- see
+rebuildYieldGrid()'s own docstring for the RuntimeError raised if the
+assigned list is non-empty but matches nothing any loaded channel
+tabulates.)doc";
 
 static constexpr std::string_view yieldDocstring =
     R"doc(Get every channel's own yield, as one (n_channels, len(isotopes())) array.
@@ -201,8 +289,48 @@ void bindYields(py::module_& m)
                 // and Extinct's own identical py::keep_alive<1, 3> in
                 // BindExtinct.cpp for the same rationale.
                 py::keep_alive<1, 2>())
-        .def("addChannel", &yields::Yields::addChannel,
+        .def("addChannel",
+                [](yields::Yields& self, const yields::YieldChannelDescriptor& descriptor)
+                {
+                    self.addChannel(descriptor);
+                    self.rebuildYieldGrid();
+                },
                 addChannelDocstring.data(), py::arg("descriptor"))
+        .def("addChannel",
+                [](yields::Yields& self, std::unique_ptr<yields::YieldChannel> channel)
+                {
+                    self.addChannel(std::move(channel));
+                    self.rebuildYieldGrid();
+                },
+                addChannelPointerDocstring.data(), py::arg("channel"))
+        .def("deleteChannel",
+                [](yields::Yields& self, std::size_t index)
+                {
+                    try
+                    {
+                        self.deleteChannel(index);
+                    }
+                    catch (const std::out_of_range& e)
+                    {
+                        throw py::index_error(e.what());
+                    }
+                    self.rebuildYieldGrid();
+                },
+                deleteChannelDocstring.data(), py::arg("index"))
+        .def("setChannels",
+                [](yields::Yields& self, std::vector<std::unique_ptr<yields::YieldChannel>> channels)
+                {
+                    self.setChannels(std::move(channels));
+                    self.rebuildYieldGrid();
+                },
+                setChannelsPointersDocstring.data(), py::arg("channels"))
+        .def("setChannels",
+                [](yields::Yields& self, const std::vector<yields::YieldChannelDescriptor>& descriptors)
+                {
+                    self.setChannels(descriptors);
+                    self.rebuildYieldGrid();
+                },
+                setChannelsDescriptorsDocstring.data(), py::arg("descriptors"))
         .def("rebuildYieldGrid",
                 [](yields::Yields& self, const std::vector<const elem::IsotopeData*>& isotopes)
                 {
@@ -211,7 +339,7 @@ void bindYields(py::module_& m)
                 rebuildYieldGridDocstring.data(),
                 py::arg("isotopes") = std::vector<const elem::IsotopeData*>{})
         .def("registryName", &yields::Yields::registryName, registryNameDocstring.data())
-        .def("yieldChannels",
+        .def_property("yieldChannels",
                 [](const yields::Yields& self) -> std::vector<const yields::YieldChannel*>
                 {
                     std::vector<const yields::YieldChannel*> result;
@@ -219,14 +347,43 @@ void bindYields(py::module_& m)
                     for (const auto& channel : self.yieldChannels()) { result.push_back(channel.get()); }
                     return result;
                 },
+                [](yields::Yields& self, const py::sequence& channels)
+                {
+                    // def_property only supports one setter signature,
+                    // unlike setChannels()'s own two overloaded .def()
+                    // bindings above -- so dispatch by peeking at the
+                    // first element's type (without consuming/casting
+                    // it, to avoid partially releasing ownership of a
+                    // YieldChannel list before knowing which branch
+                    // actually applies) before committing to one cast
+                    // or the other. An empty channels is handled
+                    // identically by either overload (both simply clear
+                    // yieldChannels()), so the branch taken doesn't matter.
+                    const bool isDescriptors = channels.empty() ||
+                        py::isinstance<yields::YieldChannelDescriptor>(channels[0]);
+                    if (isDescriptors)
+                    {
+                        self.setChannels(py::cast<std::vector<yields::YieldChannelDescriptor>>(channels));
+                    }
+                    else
+                    {
+                        self.setChannels(
+                            py::cast<std::vector<std::unique_ptr<yields::YieldChannel>>>(channels));
+                    }
+                    self.rebuildYieldGrid();
+                },
                 yieldChannelsDocstring.data(), py::return_value_policy::reference_internal)
-        .def("isotopes",
+        .def_property("isotopes",
                 [](const yields::Yields& self) -> std::vector<const elem::IsotopeData*>
                 {
                     std::vector<const elem::IsotopeData*> result;
                     result.reserve(self.isotopes().size());
                     for (const auto& iso : self.isotopes()) { result.push_back(&iso.get()); }
                     return result;
+                },
+                [](yields::Yields& self, const std::vector<const elem::IsotopeData*>& isotopes)
+                {
+                    self.rebuildYieldGrid(toIsotopeList(isotopes));
                 },
                 isotopesDocstring.data(), py::return_value_policy::reference)
         .def("yield_",

@@ -1148,6 +1148,45 @@ namespace io
         }
 
         /**
+         * @brief Set the Yields built from yieldChannels()
+         * @param yields The Yields to use; ownership is transferred to
+         *   this SimControls. May be null, to remove the current one.
+         * @throws std::invalid_argument if yields is not null and was
+         *   constructed against a different SimControls than *this
+         *   (see Yields::controls()'s own comment)
+         * @details
+         * Lets a caller replace this SimControls's own Yields with its
+         * own, without needing an input deck -- including installing
+         * one for the first time on a SimControls whose yields() was
+         * previously null, or passing nullptr to remove one already
+         * present. Does not touch yieldChannels_ either way -- see
+         * yieldChannels()'s own comment; yields() and yieldChannels()
+         * can therefore end up disagreeing if set independently.
+         *
+         * Like Specsyn/Extinct/Nebular (see setSpecsyn()'s/
+         * setExtinct()'s/setNebular()'s own comments), a Yields stores
+         * a live reference to whichever SimControls it was built
+         * against, for the rest of its lifetime, and this method
+         * cannot re-bind it -- yields must therefore already have been
+         * constructed with its own controls argument equal to *this,
+         * which this method verifies (via Yields::controls()) rather
+         * than letting its yieldChannels()/fehDist() be silently read
+         * from whatever other SimControls it actually was built
+         * against.
+         */
+        void setYields(std::unique_ptr<yields::Yields> yields)
+        {
+            if (yields && &yields->controls() != this)
+            {
+                throw std::invalid_argument(
+                    "SimControls::setYields: yields was constructed "
+                    "against a different SimControls than this one -- "
+                    "construct it with this same SimControls instead");
+            }
+            yields_ = std::move(yields);
+        }
+
+        /**
          * @brief Set the minimum mass for fully stochastic treatment
          * @param minStochMass New minimum mass for fully stochastic
          *   treatment
