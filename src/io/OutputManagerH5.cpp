@@ -9,6 +9,7 @@
 #include "OutputManagerH5.hpp"
 #include "../core/Cluster.hpp"
 #include "../core/Galaxy.hpp"
+#include "../elem/IsotopeData.hpp"
 #include "../phot/FilterCollection.hpp"
 #include "../specsyn/Specsyn.hpp"
 #include "../utils/HDF5Utils.hpp"
@@ -16,6 +17,8 @@
 #include "../utils/RngThread.hpp"
 #include "../utils/ThreadVec.hpp"
 #include "../utils/UniqueIDManager.hpp"
+#include "../yields/YieldCommons.hpp"
+#include "../yields/Yields.hpp"
 #include "OutputManager.hpp"
 #include "SimControls.hpp"
 #include "hdf5.h" // NOLINT(misc-include-cleaner)
@@ -379,6 +382,21 @@ static void appendNebLinesRow(const io::SimControls& simControls, const hid_t gr
 
     if (simControls.extinct() == nullptr) { return; }
     utils::appendRowToDataset2d(group, "neb_lines_extinct", H5T_NATIVE_DOUBLE, lineLumExtinct.data());
+}
+
+// Format one isotope as "<symbol><A>", e.g. Fe56, H1, Na22 -- the
+// two-character elem::ElemData::symbol() with its trailing '\0'
+// stripped for a single-letter symbol, immediately followed by the
+// mass number. Used by openClusterYieldsGroup()/openGalaxyYieldsGroup()
+// to build the "isotopes" attribute on the cluster_yields/galaxy_yields
+// groups.
+static auto isotopeLabel(const elem::IsotopeData& iso) -> std::string
+{
+    const auto& symbol = iso.symbol();
+    std::string label(1, symbol[0]);
+    if (symbol[1] != '\0') { label += symbol[1]; }
+    label += std::to_string(iso.A());
+    return label;
 }
 
 // NOLINTEND(misc-include-cleaner)
@@ -779,9 +797,11 @@ void io::OutputManagerH5::openOutputFile(const std::filesystem::path& path)
     clustersGroup_() = -1;
     clusterSpectraGroup_() = -1;
     clusterPhotGroup_() = -1;
+    clusterYieldsGroup_() = -1;
     galaxyGroup_() = -1;
     galaxySpectraGroup_() = -1;
     galaxyPhotGroup_() = -1;
+    galaxyYieldsGroup_() = -1;
 
     // The HDF5 build linked here is not configured with its own
     // (opt-in) thread-safety support (see this class's own header
@@ -827,9 +847,11 @@ void io::OutputManagerH5::openOutputFile(const std::filesystem::path& path)
         openClustersGroup();
         openClusterSpectraGroup();
         openClusterPhotGroup();
+        openClusterYieldsGroup();
         openGalaxyGroup();
         openGalaxySpectraGroup();
         openGalaxyPhotGroup();
+        openGalaxyYieldsGroup();
     }
 }
 
@@ -1041,6 +1063,70 @@ void io::OutputManagerH5::openClusterPhotGroup()
     // NOLINTEND(misc-include-cleaner)
 }
 
+// Create the cluster_yields group and its datasets, if yield channels
+// were requested for this simulation
+void io::OutputManagerH5::openClusterYieldsGroup()
+{
+    if (simControls_.yields() == nullptr) { return; }
+    if (!simControls_.writeClusterYields()) { return; }
+
+    const auto& yields = *simControls_.yields();
+    const auto& isotopes = yields.isotopes();
+    std::vector<std::string> isotopeNames;
+    isotopeNames.reserve(isotopes.size());
+    for (const auto& iso : isotopes) { isotopeNames.push_back(isotopeLabel(iso.get())); }
+
+    std::vector<std::string> channelNames;
+    std::vector<std::string> modelNames;
+    const auto& channelDescriptors = simControls_.yieldChannels();
+    channelNames.reserve(channelDescriptors.size());
+    modelNames.reserve(channelDescriptors.size());
+    for (const auto& descriptor : channelDescriptors)
+    {
+        channelNames.emplace_back(
+            yields::channelStr.at(static_cast<std::size_t>(descriptor.channel_)));
+        modelNames.push_back(descriptor.modelName_);
+    }
+
+    const bool decomposed = simControls_.yieldsChannelDecomposed();
+    const auto nIso = static_cast<hsize_t>(isotopes.size());
+    const auto nCols = decomposed ?
+        nIso * static_cast<hsize_t>(channelDescriptors.size()) : nIso;
+
+    // NOLINTBEGIN(misc-include-cleaner)
+    clusterYieldsGroup_() = H5Gcreate2(file_(), "cluster_yields",
+        H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+    if (clusterYieldsGroup_() < 0)
+    {
+        H5Fclose(file_());
+        throw std::runtime_error(
+            "OutputManagerH5: unable to create cluster_yields group");
+    }
+
+    utils::writeStringArrayAttr(clusterYieldsGroup_(), "isotopes", isotopeNames);
+    utils::writeStringArrayAttr(clusterYieldsGroup_(), "channels", channelNames);
+    utils::writeStringArrayAttr(clusterYieldsGroup_(), "models", modelNames);
+    utils::writeBoolAttr(clusterYieldsGroup_(), "decomposed", decomposed);
+
+    const hid_t trialDset = utils::createExtensible1dDataset(
+        clusterYieldsGroup_(), "trial", H5T_NATIVE_ULONG);
+    utils::writeStringAttr(trialDset, "units", "");
+    H5Dclose(trialDset);
+    const hid_t timeDset = utils::createExtensible1dDataset(
+        clusterYieldsGroup_(), "time", H5T_NATIVE_DOUBLE);
+    utils::writeStringAttr(timeDset, "units", "yr");
+    H5Dclose(timeDset);
+    const hid_t uidDset = utils::createExtensible1dDataset(
+        clusterYieldsGroup_(), "uid", H5T_NATIVE_ULONG);
+    utils::writeStringAttr(uidDset, "units", "");
+    H5Dclose(uidDset);
+    const hid_t yieldsDset = utils::createExtensible2dDataset(
+        clusterYieldsGroup_(), "yields", H5T_NATIVE_DOUBLE, nCols);
+    utils::writeStringAttr(yieldsDset, "units", "Msun");
+    H5Dclose(yieldsDset);
+    // NOLINTEND(misc-include-cleaner)
+}
+
 // Create the galaxy group and its datasets, for a galaxy-type
 // simulation. A no-op for a cluster-type simulation, which has no
 // Galaxy object at all.
@@ -1212,6 +1298,68 @@ void io::OutputManagerH5::openGalaxyPhotGroup()
     // NOLINTEND(misc-include-cleaner)
 }
 
+// Create the galaxy_yields group and its datasets, for a galaxy-type
+// simulation with yield channels requested. A no-op for a cluster-type
+// simulation, which has no Galaxy object at all.
+void io::OutputManagerH5::openGalaxyYieldsGroup()
+{
+    if (simControls_.simType() != SimControls::SimType::galaxy) { return; }
+    if (simControls_.yields() == nullptr) { return; }
+    if (!simControls_.writeGalaxyYields()) { return; }
+
+    const auto& yields = *simControls_.yields();
+    const auto& isotopes = yields.isotopes();
+    std::vector<std::string> isotopeNames;
+    isotopeNames.reserve(isotopes.size());
+    for (const auto& iso : isotopes) { isotopeNames.push_back(isotopeLabel(iso.get())); }
+
+    std::vector<std::string> channelNames;
+    std::vector<std::string> modelNames;
+    const auto& channelDescriptors = simControls_.yieldChannels();
+    channelNames.reserve(channelDescriptors.size());
+    modelNames.reserve(channelDescriptors.size());
+    for (const auto& descriptor : channelDescriptors)
+    {
+        channelNames.emplace_back(
+            yields::channelStr.at(static_cast<std::size_t>(descriptor.channel_)));
+        modelNames.push_back(descriptor.modelName_);
+    }
+
+    const bool decomposed = simControls_.yieldsChannelDecomposed();
+    const auto nIso = static_cast<hsize_t>(isotopes.size());
+    const auto nCols = decomposed ?
+        nIso * static_cast<hsize_t>(channelDescriptors.size()) : nIso;
+
+    // NOLINTBEGIN(misc-include-cleaner)
+    galaxyYieldsGroup_() = H5Gcreate2(file_(), "galaxy_yields",
+        H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+    if (galaxyYieldsGroup_() < 0)
+    {
+        H5Fclose(file_());
+        throw std::runtime_error(
+            "OutputManagerH5: unable to create galaxy_yields group");
+    }
+
+    utils::writeStringArrayAttr(galaxyYieldsGroup_(), "isotopes", isotopeNames);
+    utils::writeStringArrayAttr(galaxyYieldsGroup_(), "channels", channelNames);
+    utils::writeStringArrayAttr(galaxyYieldsGroup_(), "models", modelNames);
+    utils::writeBoolAttr(galaxyYieldsGroup_(), "decomposed", decomposed);
+
+    const hid_t trialDset = utils::createExtensible1dDataset(
+        galaxyYieldsGroup_(), "trial", H5T_NATIVE_ULONG);
+    utils::writeStringAttr(trialDset, "units", "");
+    H5Dclose(trialDset);
+    const hid_t timeDset = utils::createExtensible1dDataset(
+        galaxyYieldsGroup_(), "time", H5T_NATIVE_DOUBLE);
+    utils::writeStringAttr(timeDset, "units", "yr");
+    H5Dclose(timeDset);
+    const hid_t yieldsDset = utils::createExtensible2dDataset(
+        galaxyYieldsGroup_(), "yields", H5T_NATIVE_DOUBLE, nCols);
+    utils::writeStringAttr(yieldsDset, "units", "Msun");
+    H5Dclose(yieldsDset);
+    // NOLINTEND(misc-include-cleaner)
+}
+
 // Close every thread's own file(s) -- see this class's own header
 // comment -- then, with OpenMP, consolidate them back into a single
 // outDir/modelName.h5 (or, per checkpoint, outDir/modelName_chkNNNNN.h5
@@ -1356,9 +1504,11 @@ void io::OutputManagerH5::closeOutputFile(const unsigned long trialsCompleted)
         if (clustersGroup_() >= 0) { H5Gclose(clustersGroup_()); }
         if (clusterSpectraGroup_() >= 0) { H5Gclose(clusterSpectraGroup_()); }
         if (clusterPhotGroup_() >= 0) { H5Gclose(clusterPhotGroup_()); }
+        if (clusterYieldsGroup_() >= 0) { H5Gclose(clusterYieldsGroup_()); }
         if (galaxyGroup_() >= 0) { H5Gclose(galaxyGroup_()); }
         if (galaxySpectraGroup_() >= 0) { H5Gclose(galaxySpectraGroup_()); }
         if (galaxyPhotGroup_() >= 0) { H5Gclose(galaxyPhotGroup_()); }
+        if (galaxyYieldsGroup_() >= 0) { H5Gclose(galaxyYieldsGroup_()); }
         utils::writeULongAttr(file_(), "trials_completed", trialsCompleted);
         utils::writeULongAttr(file_(), "restart_uid", utils::uniqueID().read());
         utils::writeULongAttr(file_(), "max_trial", maxTrial_);
@@ -1673,6 +1823,35 @@ void io::OutputManagerH5::writeClusterPhot(
     }
 }
 
+// Append one element to each of the trial/time/uid/yields cluster_yields
+// datasets. A no-op if no yield channels were requested for this
+// simulation (the cluster_yields group does not exist). Unlike
+// writeClusterSpec()/writeClusterPhot(), does not skip a disrupted
+// cluster -- see OutputManager::writeClusterYields()'s own comment for
+// why.
+void io::OutputManagerH5::writeClusterYields(
+    const unsigned long trial, const double time, core::Cluster& cluster)
+{
+    if (clusterYieldsGroup_() < 0) { return; }
+
+    const unsigned long uid = cluster.uid();
+    const auto& yields = cluster.yields();
+
+#ifdef _OPENMP
+#pragma omp critical(h5ThreadSafety)
+#endif
+    {
+        if (trial > maxTrial_) { maxTrial_ = trial; }
+
+        // NOLINTBEGIN(misc-include-cleaner)
+        utils::appendToDataset(clusterYieldsGroup_(), "trial", H5T_NATIVE_ULONG, &trial);
+        utils::appendToDataset(clusterYieldsGroup_(), "time", H5T_NATIVE_DOUBLE, &time);
+        utils::appendToDataset(clusterYieldsGroup_(), "uid", H5T_NATIVE_ULONG, &uid);
+        utils::appendRowToDataset2d(clusterYieldsGroup_(), "yields", H5T_NATIVE_DOUBLE, yields.data());
+        // NOLINTEND(misc-include-cleaner)
+    }
+}
+
 // Append one element to each of the trial/time/target_mass/actual_mass
 // galaxy datasets, then call writeCluster() on every currently-alive
 // (non-disrupted) cluster in galaxy, so each is also recorded in the
@@ -1798,4 +1977,33 @@ void io::OutputManagerH5::writeGalaxyPhot(
     }
 
     for (auto& cluster : galaxy.clusters()) { writeClusterPhot(trial, time, cluster); }
+}
+
+// Append one element to each of the trial/time/yields galaxy_yields
+// datasets, then call writeClusterYields() on every currently-alive
+// (non-disrupted) cluster in galaxy. A no-op if no yield channels were
+// requested for this simulation (the galaxy_yields group does not
+// exist).
+void io::OutputManagerH5::writeGalaxyYields(
+    const unsigned long trial, const double time, core::Galaxy& galaxy)
+{
+    if (galaxyYieldsGroup_() < 0) { return; }
+
+    const auto& yields = galaxy.yields();
+
+    // See writeGalaxy's own comment on this critical section
+#ifdef _OPENMP
+#pragma omp critical(h5ThreadSafety)
+#endif
+    {
+        if (trial > maxTrial_) { maxTrial_ = trial; }
+
+        // NOLINTBEGIN(misc-include-cleaner)
+        utils::appendToDataset(galaxyYieldsGroup_(), "trial", H5T_NATIVE_ULONG, &trial);
+        utils::appendToDataset(galaxyYieldsGroup_(), "time", H5T_NATIVE_DOUBLE, &time);
+        utils::appendRowToDataset2d(galaxyYieldsGroup_(), "yields", H5T_NATIVE_DOUBLE, yields.data());
+        // NOLINTEND(misc-include-cleaner)
+    }
+
+    for (auto& cluster : galaxy.clusters()) { writeClusterYields(trial, time, cluster); }
 }

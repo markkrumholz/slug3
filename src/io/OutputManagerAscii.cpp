@@ -1037,6 +1037,17 @@ void io::OutputManagerAscii::writeClusterPhot(
     }
 }
 
+// Not yet implemented -- see this method's own header comment. A
+// deliberate no-op for now, not a throw: unlike checkpoint()/
+// restartTrialsDone() (permanently unsupported for ascii output), this
+// is only temporarily missing, and a run with output.write_cluster_yields
+// left at its own default of true should not fail just because ascii
+// support for it hasn't landed yet.
+void io::OutputManagerAscii::writeClusterYields(unsigned long /*trial*/,
+    double /*time*/, core::Cluster& /*cluster*/)
+{
+}
+
 // Write one fixed-width row of galaxy data (trial, time, target_mass,
 // actual_mass -- no uid, since a galaxy has no individual identity)
 // to the galaxy output file, then call writeCluster() on every
@@ -1218,6 +1229,13 @@ void io::OutputManagerAscii::writeGalaxyPhot(
     }
 
     for (auto& cluster : galaxy.clusters()) { writeClusterPhot(trial, time, cluster); }
+}
+
+// Not yet implemented -- see writeClusterYields()'s own comment for why
+// this is a no-op rather than a throw.
+void io::OutputManagerAscii::writeGalaxyYields(unsigned long /*trial*/,
+    double /*time*/, core::Galaxy& /*galaxy*/)
+{
 }
 
 // See this method's own header comment: checkpointing is only ever

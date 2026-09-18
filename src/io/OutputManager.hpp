@@ -122,6 +122,28 @@ namespace io
             core::Cluster& cluster) = 0;
 
         /**
+         * @brief Write a cluster's nucleosynthetic yields as a row of the cluster-yields datasets
+         * @param trial Trial number to which this cluster belongs
+         * @param time The output time at which this row was recorded, in yr
+         * @param cluster The cluster whose yields should be written;
+         *   not const, matching writeClusterSpec()'s/writeClusterPhot()'s
+         *   own signature, even though core::Cluster::yields() itself
+         *   is never lazily (re)computed the way spec()/phot()/lbol()
+         *   are (see its own comment)
+         * @details
+         * If no yield channels were requested for this simulation, this
+         * is a no-op. Unlike writeClusterSpec()/writeClusterPhot(),
+         * does not skip a disrupted cluster: core::Cluster::yields()
+         * keeps accumulating every one of the cluster's own dead
+         * stars' contributions regardless of disruption (see its own
+         * comment), so a disrupted cluster's own row remains
+         * meaningful, and writing it does not double-count anything a
+         * galaxy-level yields total already includes.
+         */
+        virtual void writeClusterYields(unsigned long trial, double time,
+            core::Cluster& cluster) = 0;
+
+        /**
          * @brief Write a galaxy's data as a row of the galaxy output
          * @param trial Trial number to which this galaxy belongs
          * @param time The output time at which this row was recorded, in yr
@@ -168,6 +190,21 @@ namespace io
          * every currently-alive (non-disrupted) cluster in galaxy.
          */
         virtual void writeGalaxyPhot(unsigned long trial, double time,
+            core::Galaxy& galaxy) = 0;
+
+        /**
+         * @brief Write a galaxy's nucleosynthetic yields as a row of the galaxy-yields datasets
+         * @param trial Trial number to which this galaxy belongs
+         * @param time The output time at which this row was recorded, in yr
+         * @param galaxy The galaxy whose yields should be written; not
+         *   const -- see writeGalaxy()'s own comment
+         * @details
+         * If no yield channels were requested for this simulation, this
+         * is a no-op. Otherwise, after writing this row, also calls
+         * writeClusterYields() on every currently-alive (non-disrupted)
+         * cluster in galaxy.
+         */
+        virtual void writeGalaxyYields(unsigned long trial, double time,
             core::Galaxy& galaxy) = 0;
 
         /**

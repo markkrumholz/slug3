@@ -166,6 +166,19 @@ namespace utils
     void writeULongAttr(hid_t loc, const std::string& name, unsigned long value);
 
     /**
+     * @brief Write a scalar boolean attribute on an HDF5 object
+     * @param loc Handle to the object (a group, dataset, or file) to
+     *   attach the attribute to
+     * @param name Name of the attribute
+     * @param value Value of the attribute
+     * @throws std::runtime_error if the attribute cannot be created
+     * @details
+     * Stored as HDF5's own native hbool_t, mirroring writeULongAttr()'s
+     * identical pattern for unsigned long.
+     */
+    void writeBoolAttr(hid_t loc, const std::string& name, bool value);
+
+    /**
      * @brief Read a scalar unsigned long attribute from an HDF5 object
      * @param loc Handle to the object (a group, dataset, or file) the
      *   attribute is attached to

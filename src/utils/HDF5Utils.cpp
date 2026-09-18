@@ -279,6 +279,23 @@ void utils::writeULongAttr(const hid_t loc, const std::string& name,
     H5Sclose(space);
 }
 
+void utils::writeBoolAttr(const hid_t loc, const std::string& name, const bool value)
+{
+    const hid_t space = H5Screate(H5S_SCALAR);
+    const hid_t attr = H5Acreate2(loc, name.c_str(), H5T_NATIVE_HBOOL, space,
+        H5P_DEFAULT, H5P_DEFAULT);
+    if (attr < 0)
+    {
+        H5Sclose(space);
+        throw std::runtime_error(
+            "utils::writeBoolAttr: unable to create attribute " + name);
+    }
+    const hbool_t hVal = value ? 1 : 0;
+    H5Awrite(attr, H5T_NATIVE_HBOOL, static_cast<const void*>(&hVal));
+    H5Aclose(attr);
+    H5Sclose(space);
+}
+
 auto utils::readULongAttr(const hid_t loc, const std::string& name) -> unsigned long
 {
     const hid_t attr = H5Aopen(loc, name.c_str(), H5P_DEFAULT);

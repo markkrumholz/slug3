@@ -98,6 +98,22 @@ namespace io
             core::Cluster& cluster) override;
 
         /**
+         * @brief Not yet implemented for ascii output
+         * @param trial Unused; present only to satisfy
+         *   OutputManager::writeClusterYields()'s own signature
+         * @param time Unused; see trial's own comment
+         * @param cluster Unused; see trial's own comment
+         * @details
+         * A no-op for now: ascii support for nucleosynthetic yield
+         * output is coming in a follow-up commit, once its own file
+         * layout has been decided -- see
+         * OutputManager::writeClusterYields()'s own comment for what
+         * this will eventually write.
+         */
+        void writeClusterYields(unsigned long trial, double time,
+            core::Cluster& cluster) override;
+
+        /**
          * @brief Write a galaxy's data as a row of the galaxy output file
          * @param trial Trial number to which this galaxy belongs
          * @param time The output time at which this row was recorded, in yr
@@ -147,6 +163,18 @@ namespace io
          * every currently-alive (non-disrupted) cluster in galaxy.
          */
         void writeGalaxyPhot(unsigned long trial, double time,
+            core::Galaxy& galaxy) override;
+
+        /**
+         * @brief Not yet implemented for ascii output
+         * @param trial Unused; present only to satisfy
+         *   OutputManager::writeGalaxyYields()'s own signature
+         * @param time Unused; see trial's own comment
+         * @param galaxy Unused; see trial's own comment
+         * @details
+         * A no-op for now -- see writeClusterYields()'s own comment.
+         */
+        void writeGalaxyYields(unsigned long trial, double time,
             core::Galaxy& galaxy) override;
 
         /**
