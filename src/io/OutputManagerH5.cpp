@@ -9,7 +9,6 @@
 #include "OutputManagerH5.hpp"
 #include "../core/Cluster.hpp"
 #include "../core/Galaxy.hpp"
-#include "../elem/IsotopeData.hpp"
 #include "../phot/FilterCollection.hpp"
 #include "../specsyn/Specsyn.hpp"
 #include "../utils/HDF5Utils.hpp"

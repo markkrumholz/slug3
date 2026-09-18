@@ -290,7 +290,7 @@ void utils::writeBoolAttr(const hid_t loc, const std::string& name, const bool v
         throw std::runtime_error(
             "utils::writeBoolAttr: unable to create attribute " + name);
     }
-    const hbool_t hVal = value ? 1 : 0;
+    const hbool_t hVal = value;
     H5Awrite(attr, H5T_NATIVE_HBOOL, static_cast<const void*>(&hVal));
     H5Aclose(attr);
     H5Sclose(space);

@@ -9,7 +9,6 @@
 #include "OutputManagerAscii.hpp"
 #include "../core/Cluster.hpp"
 #include "../core/Galaxy.hpp"
-#include "../elem/IsotopeData.hpp"
 #include "../extinct/Extinct.hpp"
 #include "../phot/FilterCollection.hpp"
 #include "../specsyn/Specsyn.hpp"
@@ -220,7 +219,13 @@ static auto buildYieldsColumnNames(const io::SimControls& simControls) -> std::v
         const std::string prefix = std::string(
             yields::channelStr.at(static_cast<std::size_t>(channelDescriptors.at(c).channel_))) +
             std::to_string(c + 1);
-        for (const auto& isoLabel : isotopeLabels) { names.push_back(prefix + "_" + isoLabel); }
+        for (const auto& isoLabel : isotopeLabels)
+        {
+            std::string colName = prefix;
+            colName += '_';
+            colName += isoLabel;
+            names.push_back(std::move(colName));
+        }
     }
     return names;
 }
