@@ -1173,6 +1173,95 @@ static auto testSimControlsYields() -> int
     return result;
 }
 
+// Verify noDecay() defaults to false, is parsed from the optional
+// yields.no_decay key (read regardless of whether yieldChannels_ ends
+// up empty, like yields.channel_decomposed), and that setNoDecay()
+// updates it directly.
+static auto testSimControlsYieldsNoDecay() -> int
+{
+    constexpr std::string_view baseDeck = "tests/core/assets/testGalaxy.in";
+    int result = 0;
+
+    // Default: false, with no yields.channelN table at all
+    try
+    {
+        const toml::table inputDeck = toml::parse_file(baseDeck);
+        const io::SimControls controls(inputDeck);
+        if (controls.noDecay())
+        {
+            std::cerr << "testSimControls: yieldsNoDecay: expected noDecay() "
+                "== false by default (no [yields] table at all)\n";
+            result = 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: yieldsNoDecay: no-yields-table case "
+            "failed: " << error.what() << "\n";
+        result = 1;
+    }
+
+    // Default: false, with a real [yields] table but no explicit no_decay
+    try
+    {
+        toml::table inputDeck = toml::parse_file(baseDeck);
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{
+                { "channel", "ccsn" }, { "model", "sukhbold_test" } } },
+            { "registry", "tests/yields/assets/yields.toml" },
+        });
+        const io::SimControls controls(inputDeck);
+        if (controls.noDecay())
+        {
+            std::cerr << "testSimControls: yieldsNoDecay: expected noDecay() "
+                "== false by default (yields.no_decay not given)\n";
+            result = 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: yieldsNoDecay: default-with-channels "
+            "case failed: " << error.what() << "\n";
+        result = 1;
+    }
+
+    // Explicit yields.no_decay = true
+    try
+    {
+        toml::table inputDeck = toml::parse_file(baseDeck);
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{
+                { "channel", "ccsn" }, { "model", "sukhbold_test" } } },
+            { "registry", "tests/yields/assets/yields.toml" },
+            { "no_decay", true },
+        });
+        io::SimControls controls(inputDeck);
+        if (!controls.noDecay())
+        {
+            std::cerr << "testSimControls: yieldsNoDecay: expected noDecay() "
+                "== true when yields.no_decay = true\n";
+            result = 1;
+        }
+
+        // setNoDecay() must update it live
+        controls.setNoDecay(false);
+        if (controls.noDecay())
+        {
+            std::cerr << "testSimControls: yieldsNoDecay: expected noDecay() "
+                "== false after setNoDecay(false)\n";
+            result = 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: yieldsNoDecay: explicit-true case "
+            "failed: " << error.what() << "\n";
+        result = 1;
+    }
+
+    return result;
+}
+
 // Verify writeClusterYields()/writeGalaxyYields() default to true, are
 // parsed from output.write_cluster_yields/output.write_galaxy_yields
 // exactly like the other six output.write_* keys (see readOutput()'s
@@ -2313,6 +2402,7 @@ auto testSimControls() -> int
     result += testSimControlsSpectraChained();
     result += testSimControlsExtinctField();
     result += testSimControlsYields();
+    result += testSimControlsYieldsNoDecay();
     result += testSimControlsWriteYields();
     result += testSimControlsYieldsIsotopes();
     result += testSimControlsYieldsIsotopesKeyword();

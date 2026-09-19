@@ -538,6 +538,18 @@ namespace io
          */
         void setYieldsChannelDecomposed(bool value) { yieldsChannelDecomposed_ = value; }
 
+        /**
+         * @brief Set whether radioactive decay should be excluded from computed yields
+         * @param value New value for noDecay()
+         * @details
+         * See noDecay()'s own comment for what this controls. Like
+         * setYieldsChannelDecomposed(), this is read live by
+         * Yields::yield()/yieldSum() every time either runs, not cached
+         * once, so it takes effect immediately rather than only
+         * affecting a Yields built afterward.
+         */
+        void setNoDecay(bool value) { noDecay_ = value; }
+
         // Getters for the physics settings
         /**
          * @brief Get simulation initial mass function
@@ -736,6 +748,21 @@ namespace io
          * per-channel rows versus Yields::yieldSum()'s combined total.
          */
         [[nodiscard]] auto yieldsChannelDecomposed() const { return yieldsChannelDecomposed_; }
+
+        /**
+         * @brief Whether radioactive decay should be excluded from computed yields
+         * @return The value of the optional yields.no_decay key (see
+         *   readYields()), false by default
+         * @details
+         * Meaningful only if yields() is non-null. False (the default)
+         * means Yields::yield()/yieldSum() report the amount of each
+         * isotope actually present at the requested output time,
+         * including whatever radioactive decay has occurred since it
+         * was produced; true means they instead report the cumulative
+         * amount of each isotope ever produced, regardless of whether
+         * some of it has since decayed into something else.
+         */
+        [[nodiscard]] auto noDecay() const { return noDecay_; }
 
         /**
          * @brief Get the nebular emission control parameters
@@ -1386,9 +1413,10 @@ namespace io
          * (every tabulated isotope kept) if yields.isotopes is absent.
          *
          * Also reads the optional yields.channel_decomposed (default
-         * true) into yieldsChannelDecomposed_, regardless of whether
-         * yieldChannels_ ends up empty -- see its own observer's
-         * comment for what it controls.
+         * true) into yieldsChannelDecomposed_, and the optional
+         * yields.no_decay (default false) into noDecay_, regardless of
+         * whether yieldChannels_ ends up empty -- see each one's own
+         * observer's comment for what it controls.
          *
          * Finally, if yieldChannels_ ends up non-empty, checks that the
          * computed yields would actually be written somewhere: throws
@@ -1513,6 +1541,7 @@ namespace io
         std::vector<yields::YieldChannelDescriptor> yieldChannels_; /**< Yield channels requested via yields.channel1, yields.channel2, etc. -- see readYields()'s own comment */
         std::shared_ptr<yields::Yields> yields_; /**< Yields built from yieldChannels_, or nullptr if yieldChannels_ is empty */
         bool yieldsChannelDecomposed_ = true; /**< Whether yields should be reported decomposed by channel (true) or summed over all channels (false) -- see yieldsChannelDecomposed()'s own comment; from the optional yields.channel_decomposed key, see readYields() */
+        bool noDecay_ = false; /**< Whether radioactive decay should be excluded from computed yields -- see noDecay()'s own comment; from the optional yields.no_decay key, see readYields() */
 
         // Output wavelength grid (spectra.wl_min, spectra.wl_max,
         // spectra.nwl), read by readSpectra and passed through to

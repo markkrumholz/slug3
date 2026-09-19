@@ -3254,6 +3254,31 @@ def test_simcontrols_yields_channel_decomposed_property(yields_controls):
     assert yields_controls.yieldsChannelDecomposed is True
 
 
+def test_simcontrols_no_decay_property(yields_controls):
+    """noDecay defaults to False and is settable both via the property and the setter."""
+    assert yields_controls.noDecay is False
+    yields_controls.noDecay = True
+    assert yields_controls.noDecay is True
+    yields_controls.setNoDecay(False)
+    assert yields_controls.noDecay is False
+
+
+def test_simcontrols_no_decay_parsed_from_deck():
+    """yields.no_decay defaults to False when absent (even with a real
+    [yields] table), and parses to True when given explicitly."""
+    deck = tomlkit.parse(pathlib.Path(CLUSTER_DECK).read_text())
+    deck["yields"] = tomlkit.table()
+    deck["yields"]["channel1"] = {"channel": "ccsn", "model": "sukhbold_test"}
+    deck["yields"]["registry"] = YIELDS_REGISTRY
+
+    default_controls = slug.SimControls(tomlkit.dumps(deck))
+    assert default_controls.noDecay is False
+
+    deck["yields"]["no_decay"] = True
+    no_decay_controls = slug.SimControls(tomlkit.dumps(deck))
+    assert no_decay_controls.noDecay is True
+
+
 def test_simcontrols_write_yields_properties_default_true(yields_controls):
     """writeClusterYields/writeGalaxyYields default to True."""
     assert yields_controls.writeClusterYields is True

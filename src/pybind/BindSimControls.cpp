@@ -869,6 +869,20 @@ galaxy_yields group creation every time each runs, not cached once --
 so assigning this takes effect immediately, the same as z/intRelTol,
 rather than only affecting an object built afterward.)doc";
 
+static constexpr std::string_view noDecayPropertyDocstring =
+R"doc(Whether radioactive decay should be excluded from computed yields.
+
+False (the default) unless yields.no_decay was set to true in the
+input deck. Meaningful only if yields is not None. False means
+Yields.yield_()/yieldSum() report the amount of each isotope actually
+present at the requested output time, including whatever radioactive
+decay has occurred since it was produced; True means they instead
+report the cumulative amount of each isotope ever produced, regardless
+of whether some of it has since decayed into something else. Like
+yieldsChannelDecomposed, this is read live every time
+Yields.yield_()/yieldSum() runs, not cached once, so assigning this
+takes effect immediately.)doc";
+
 static constexpr std::string_view inputDeckStrPropertyDocstring =
 R"doc(The input deck's own text.
 
@@ -1084,6 +1098,8 @@ void bindSimControls(py::module_& m)
                 writeGalaxyYieldsPropertyDocstring.data(), py::arg("value"))
         .def("setYieldsChannelDecomposed", &io::SimControls::setYieldsChannelDecomposed,
                 yieldsChannelDecomposedPropertyDocstring.data(), py::arg("value"))
+        .def("setNoDecay", &io::SimControls::setNoDecay,
+                noDecayPropertyDocstring.data(), py::arg("value"))
         .def("setYields", &io::SimControls::setYields,
                 setYieldsDocstring.data(), py::arg("yields"))
         // Properties: alternative, attribute-style access to the same
@@ -1229,6 +1245,10 @@ void bindSimControls(py::module_& m)
                 &io::SimControls::yieldsChannelDecomposed,
                 &io::SimControls::setYieldsChannelDecomposed,
                 yieldsChannelDecomposedPropertyDocstring.data())
+        .def_property("noDecay",
+                &io::SimControls::noDecay,
+                &io::SimControls::setNoDecay,
+                noDecayPropertyDocstring.data())
         .def_property_readonly("yieldChannels",
                 &io::SimControls::yieldChannels,
                 yieldChannelsPropertyDocstring.data())

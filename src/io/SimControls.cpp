@@ -1100,6 +1100,12 @@ void io::SimControls::readYields(const toml::table& inputDeck)
     yieldsChannelDecomposed_ = utils::getTOMLKeyWithError<bool>(
         inputDeck, "yields.channel_decomposed").value_or(true);
 
+    // yields.no_decay: optional, read regardless of whether
+    // yieldChannels_ ends up empty (harmless either way), like
+    // yields.channel_decomposed above
+    noDecay_ = utils::getTOMLKeyWithError<bool>(
+        inputDeck, "yields.no_decay").value_or(false);
+
     if (yieldChannels_.empty()) { return; }
 
     // Sanity check: if yield channels were requested but the computed
