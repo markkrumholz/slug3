@@ -574,6 +574,14 @@ void io::SimControls::setFeH(const std::string& feH)
     {
         constFeHTracks_ = std::make_shared<tracks::Tracks2D>(tracks_->sliceConstFeH(fehDist_.getMin()));
     }
+    else
+    {
+        // The new fehDist_ is no longer degenerate -- constFeHTracks_
+        // would otherwise keep pointing at a stale slice from whichever
+        // single [Fe/H] value used to apply, silently contradicting
+        // tracks2D()'s own "nullptr if constFeH() is false" contract.
+        constFeHTracks_ = nullptr;
+    }
 }
 
 // Set the stellar tracks, recomputing tracks2D() (constFeHTracks_)

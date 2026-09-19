@@ -2188,6 +2188,53 @@ static auto testSimControlsSetFeHRejectsBroadening() -> int
     return 0;
 }
 
+// Verify that setFeH() resets tracks2D() (constFeHTracks_) back to
+// nullptr when the new [Fe/H] distribution is no longer degenerate --
+// otherwise it would keep pointing at a stale slice from whichever
+// single value used to apply, silently contradicting tracks2D()'s own
+// "nullptr if constFeH() is false" contract (a real bug CodeRabbit
+// caught on the PR that switched constFeHTracks_ from a plain Tracks2D
+// value to a shared_ptr<Tracks2D>).
+static auto testSimControlsSetFeHResetsTracks2DWhenNoLongerFixed() -> int
+{
+    const std::string fileName = "tests/core/assets/testClusterVarFeH.in";
+    const toml::table inputDeck = toml::parse_file(fileName);
+    io::SimControls sim(inputDeck);
+
+    if (sim.constFeH() || sim.tracks2D() != nullptr)
+    {
+        std::cerr << "testSimControls: setFeH: test bug: expected " << fileName
+            << "'s own variable stars.FeH to leave constFeH() false and "
+            "tracks2D() null at construction\n";
+        return 1;
+    }
+
+    sim.setFeH("-0.25");
+    if (!sim.constFeH() || sim.tracks2D() == nullptr)
+    {
+        std::cerr << "testSimControls: setFeH: expected narrowing to a fixed "
+            "value to make constFeH() true and build tracks2D()\n";
+        return 1;
+    }
+
+    sim.setFeH("tests/core/assets/testClusterFeHDist.toml");
+    if (sim.constFeH())
+    {
+        std::cerr << "testSimControls: setFeH: expected widening back to the "
+            "original variable distribution to make constFeH() false again\n";
+        return 1;
+    }
+    if (sim.tracks2D() != nullptr)
+    {
+        std::cerr << "testSimControls: setFeH: expected tracks2D() to be reset "
+            "to nullptr once constFeH() is false again, not left pointing at "
+            "the stale fixed-[Fe/H] slice\n";
+        return 1;
+    }
+
+    return 0;
+}
+
 // Verify that setSpecsyn()/setExtinct()/setNebular() each reject an
 // object constructed against a different SimControls than the one
 // it's being installed on -- each of Specsyn/Extinct/Nebular stores a
@@ -2274,6 +2321,7 @@ auto testSimControls() -> int
     result += testSimControlsYieldsDuplicateChannelWarning();
     result += testSimControlsSFRDist();
     result += testSimControlsSetFeHRejectsBroadening();
+    result += testSimControlsSetFeHResetsTracks2DWhenNoLongerFixed();
     result += testSimControlsSettersRejectMismatchedControls();
     return result;
 }
