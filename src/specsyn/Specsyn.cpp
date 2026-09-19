@@ -17,7 +17,6 @@
 #include "../pdfs/PDF.hpp"
 #include "../pdfs/PDFReflect.hpp"
 #include "../tracks/TrackCommons.hpp"
-#include "../tracks/Tracks3D.hpp"
 #include "../utils/Constants.hpp"
 #include "../utils/GKIntegratorData.hpp"
 #include "../utils/PDFIntegrator.hpp"
@@ -169,8 +168,8 @@ auto specsyn::Specsyn::continuousSpecIntegrand(
     const double feh
 ) const -> std::vector<double>
 {
-    const double logAge = std::max(std::log10(age), controls_.tracks().logTMin());
-    const auto isochrone = controls_.tracks().getIsochrone(logAge, feh);
+    const double logAge = std::max(std::log10(age), controls_.tracks()->logTMin());
+    const auto isochrone = controls_.tracks()->getIsochrone(logAge, feh);
     return specCtsImpl(isochrone, imf, 1.0, mMin, mMax, feh, true, computeLbol);
 }
 
@@ -283,7 +282,7 @@ auto specsyn::Specsyn::specCtsHelper(
         // cover this whole padded grid -- see
         // io::SimControls::readSpectra()'s own comment for why -- so
         // evaluating here never runs outside their own domain.
-        const auto& fehGrid = controls_.tracks().feH();
+        const auto& fehGrid = controls_.tracks()->feH();
         const std::size_t nFeh = fehGrid.size();
         const auto nQty = static_cast<std::size_t>(nInt);
 

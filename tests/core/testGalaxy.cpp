@@ -668,8 +668,8 @@ static auto testContinuousPopSpecReferenceCheck() -> int
         galaxy.advance(t1);
         const auto& newSpec = galaxy.spec();
 
-        const auto* synth = controls.specsyn();
-        const auto& tracks2D = controls.tracks2D();
+        const auto synth = controls.specsyn();
+        const auto tracks2D = controls.tracks2D();
         const auto& imf = controls.imf();
         const auto& sfr = controls.sfr();
 
@@ -683,8 +683,8 @@ static auto testContinuousPopSpecReferenceCheck() -> int
             if (mStep <= 0.0) { continue; }
 
             const double age = t1 - (0.5 * (tLo + tHi));
-            const double logAge = std::max(std::log10(age), tracks2D.logTMin());
-            const auto isochrone = tracks2D.getIsochrone(logAge);
+            const double logAge = std::max(std::log10(age), tracks2D->logTMin());
+            const auto isochrone = tracks2D->getIsochrone(logAge);
 
             const auto stepSpec = synth->specCts(
                 isochrone, imf, mStep, imf.getMin(), imf.getMax(), feh);
@@ -1110,7 +1110,7 @@ static auto testFieldStarsSpec() -> int
         // and hence the converged result at the bit level, so this
         // must call whichever overload Galaxy::computeSpec() itself
         // would for an exact match below.
-        const auto* synth = controls.specsyn();
+        const auto synth = controls.specsyn();
         std::vector<double> expectedSpec;
         if (controls.computeLbol())
         {
@@ -1125,12 +1125,12 @@ static auto testFieldStarsSpec() -> int
                 controls.imf().getMin(), controls.minStochMass());
         }
 
-        const auto& tracks2D = controls.tracks2D();
+        const auto tracks2D = controls.tracks2D();
         for (const auto& fs : galaxy.fieldStars())
         {
             const double logT = std::max(
-                std::log10(galaxy.curTime() - fs.formTime_), tracks2D.logTMin());
-            const auto props = tracks2D.getStar(fs.mass_, logT);
+                std::log10(galaxy.curTime() - fs.formTime_), tracks2D->logTMin());
+            const auto props = tracks2D->getStar(fs.mass_, logT);
             const auto starSpec = synth->spec(props, fs.feh_);
             for (std::size_t i = 0; i < expectedSpec.size(); ++i)
             { expectedSpec.at(i) += starSpec.at(i); }
@@ -1209,7 +1209,7 @@ static auto testFieldStarsExtinct() -> int
             return 1;
         }
 
-        const auto* ext = controls.extinct();
+        const auto ext = controls.extinct();
         if (ext == nullptr)
         {
             std::cerr << "testGalaxy: fieldStarsExtinct: test bug: expected "
@@ -1239,7 +1239,7 @@ static auto testFieldStarsExtinct() -> int
         // and summing the results, which would not generally agree at
         // the bit level, since floating-point addition is not
         // associative).
-        const auto* synth = controls.specsyn();
+        const auto synth = controls.specsyn();
 
         std::vector<double> contSpec;
         if (controls.computeLbol())
@@ -1255,12 +1255,12 @@ static auto testFieldStarsExtinct() -> int
                 controls.imf().getMin(), controls.minStochMass());
         }
 
-        const auto& tracks2D = controls.tracks2D();
+        const auto tracks2D = controls.tracks2D();
         for (const auto& fs : galaxy.fieldStars())
         {
             const double logT = std::max(
-                std::log10(galaxy.curTime() - fs.formTime_), tracks2D.logTMin());
-            const auto props = tracks2D.getStar(fs.mass_, logT);
+                std::log10(galaxy.curTime() - fs.formTime_), tracks2D->logTMin());
+            const auto props = tracks2D->getStar(fs.mass_, logT);
             const auto starSpec = synth->spec(props, fs.feh_);
             for (std::size_t i = 0; i < contSpec.size(); ++i)
             { contSpec.at(i) += starSpec.at(i); }
@@ -1310,7 +1310,7 @@ static auto testExtinctApplyExtinctionCtsDegenerate() -> int
         toml::table inputDeck = toml::parse_file(inputFile);
         inputDeck.at_path("extinct").as_table()->insert_or_assign("AV_field", avFieldValue);
         const io::SimControls controls(inputDeck);
-        const auto* ext = controls.extinct();
+        const auto ext = controls.extinct();
         if (ext == nullptr)
         {
             std::cerr << "testExtinctApplyExtinctionCtsDegenerate: test bug: "
@@ -1366,7 +1366,7 @@ static auto testExtinctApplyExtinctionCtsUniform() -> int
         inputDeck.at_path("extinct").as_table()->insert_or_assign(
             "AV_field", "tests/extinct/assets/testExtinctAVFieldUniform.toml");
         const io::SimControls controls(inputDeck);
-        const auto* ext = controls.extinct();
+        const auto ext = controls.extinct();
         if (ext == nullptr)
         {
             std::cerr << "testExtinctApplyExtinctionCtsUniform: test bug: "
@@ -1587,7 +1587,7 @@ static auto testContinuousPopNebularExtinct() -> int
                 "SimControls::nebular() to be non-null\n";
             return 1;
         }
-        const auto* ext = controls.extinct();
+        const auto ext = controls.extinct();
         if (ext == nullptr)
         {
             std::cerr << "testGalaxy: continuousPopNebularExtinct: test bug: "
@@ -1611,7 +1611,7 @@ static auto testContinuousPopNebularExtinct() -> int
         // Independently rebuild contSpec exactly as
         // Galaxy::addContinuousSpec() itself does -- see
         // testFieldStarsExtinct's own identical construction
-        const auto* synth = controls.specsyn();
+        const auto synth = controls.specsyn();
         std::vector<double> contSpec;
         if (controls.computeLbol())
         {
@@ -1956,7 +1956,7 @@ static auto testYieldsRateMultiFeh() -> int
         // own multi-feh implementation exactly, but built here from
         // scratch via the public API alone
         const auto& fehDist = controls.fehDist();
-        const auto& fehGrid = controls.tracks().feH();
+        const auto& fehGrid = controls.tracks()->feH();
         const std::size_t nFeh = fehGrid.size();
 
         std::vector<std::vector<double>> rateAtFeh(nFeh);

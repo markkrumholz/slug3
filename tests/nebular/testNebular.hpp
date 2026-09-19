@@ -81,7 +81,7 @@ inline auto testNebularLineLabelWl() -> int
     {
         const toml::table inputDeck = toml::parse_file(testNebularInputFile);
         const io::SimControls controls(inputDeck);
-        const auto* neb = controls.nebular();
+        const auto neb = controls.nebular();
 
         const std::vector<std::string> expectedLabel{"LINE1", "LINE2", "LINE3"};
         const std::vector<double> expectedWl{4000.0, 6000.0, 9000.0};
@@ -141,7 +141,7 @@ inline auto testNebularGetGalaxy() -> int
     {
         const toml::table inputDeck = toml::parse_file(testNebularInputFile);
         const io::SimControls controls(inputDeck);
-        const auto* neb = controls.nebular();
+        const auto neb = controls.nebular();
         const auto& wl = controls.specsyn()->wl();
 
         const std::vector<double> spec(wl.size(), 1.0);
@@ -253,7 +253,7 @@ inline auto testNebularGetClusterExactHit() -> int
     {
         const toml::table inputDeck = toml::parse_file(testNebularInputFile);
         const io::SimControls controls(inputDeck);
-        const auto* neb = controls.nebular();
+        const auto neb = controls.nebular();
         const auto& wl = controls.specsyn()->wl();
 
         const std::vector<double> spec(wl.size(), 1.0);
@@ -310,7 +310,7 @@ inline auto testNebularGetClusterOffGrid() -> int
     {
         const toml::table inputDeck = toml::parse_file(testNebularInputFile);
         const io::SimControls controls(inputDeck);
-        const auto* neb = controls.nebular();
+        const auto neb = controls.nebular();
         const auto& wl = controls.specsyn()->wl();
 
         const std::vector<double> spec(wl.size(), 1.0);
@@ -385,7 +385,7 @@ inline auto testNebularGetClusterAboveAgeRange() -> int
     {
         const toml::table inputDeck = toml::parse_file(testNebularInputFile);
         const io::SimControls controls(inputDeck);
-        const auto* neb = controls.nebular();
+        const auto neb = controls.nebular();
         const auto& wl = controls.specsyn()->wl();
 
         const std::vector<double> spec(wl.size(), 1.0);

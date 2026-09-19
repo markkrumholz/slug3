@@ -41,7 +41,7 @@ namespace core
             static_cast<size_t>(tracks::FieldIdx::nTrackQty)>;
         using Interp1dPtr = std::vector<std::unique_ptr<Segment>>;
         using Track2DVar = std::variant<tracks::Tracks2D,
-            std::reference_wrapper<const tracks::Tracks2D>>;
+            std::shared_ptr<const tracks::Tracks2D>>;
 
         /**
          * @brief Initialize a cluster
@@ -548,8 +548,11 @@ namespace core
         /**
          * Tracks for this cluster's [Fe/H]: either owned outright (when
          * the simulation has a variable [Fe/H], so each cluster needs
-         * its own slice) or a reference to the slice shared via
-         * SimControls (when [Fe/H] is fixed for the whole simulation).
+         * its own slice) or a shared_ptr to the slice SimControls
+         * itself owns (when [Fe/H] is fixed for the whole simulation)
+         * -- a shared_ptr, not a reference, so this Cluster keeps that
+         * slice alive on its own even if SimControls later recomputes
+         * its own copy (see SimControls::tracks2D()'s own comment).
          * Use tracks() rather than this member directly.
          */
         Track2DVar tracks_;         /**< 2d track holder */

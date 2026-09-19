@@ -933,6 +933,26 @@ def test_simcontrols_set_specsyn_installs_new_synthesizer(tmp_path):
         specsyn.wl()
 
 
+def test_simcontrols_specsyn_survives_replacement():
+    """A Specsyn read from the specsyn property is backed by a
+    shared_ptr, not a raw pointer into SimControls's own storage, so
+    it stays fully valid and keeps describing its own original data
+    even after a later setSpecsyn() call replaces it -- unlike the
+    argument passed directly to setSpecsyn() (see
+    test_simcontrols_set_specsyn_installs_new_synthesizer), which is
+    disowned by that call itself, this is about an object read back
+    *before* the replacement."""
+    controls = slug.SimControls(CLUSTER_DECK)
+    controls.setSpecsyn(slug.SpecsynBlackbody(3000.0, 9000.0, 50, controls))
+    old_specsyn = controls.specsyn
+    assert len(old_specsyn.wl()) == 50
+
+    controls.setSpecsyn(slug.SpecsynBlackbody(4000.0, 8000.0, 30, controls))
+
+    assert len(old_specsyn.wl()) == 50
+    assert len(controls.specsyn.wl()) == 30
+
+
 def test_simcontrols_set_specsyn_mismatched_controls_raises():
     """setSpecsyn() must reject a Specsyn built against a different
     SimControls than the one it's being installed on -- a Specsyn
@@ -1012,6 +1032,25 @@ def test_simcontrols_set_extinct_installs_new_curve():
         ext.wl()
 
 
+def test_simcontrols_extinct_survives_replacement():
+    """An Extinct read from the extinct property stays fully valid,
+    reflecting its own original curve, even after a later setExtinct()
+    call replaces or removes it -- see
+    test_simcontrols_specsyn_survives_replacement's own identical
+    reasoning."""
+    controls = slug.SimControls(CLUSTER_DECK)
+    controls.setExtinct(slug.Extinct("Calzetti_starburst", controls=controls))
+    old_extinct = controls.extinct
+    old_wl = list(old_extinct.wl())
+    assert len(old_wl) > 0
+
+    controls.setExtinct(slug.Extinct("Calzetti_starburst", controls=controls))
+    assert list(old_extinct.wl()) == pytest.approx(old_wl)
+
+    controls.setExtinct(None)
+    assert list(old_extinct.wl()) == pytest.approx(old_wl)
+
+
 def test_simcontrols_set_extinct_none_removes_curve():
     """setExtinct(None) should remove an already-installed extinction
     curve, leaving the extinct property None again."""
@@ -1054,6 +1093,21 @@ def test_simcontrols_set_nebular_installs_new_grid():
 
     with pytest.raises(ValueError):
         neb.lineWl()
+
+
+def test_simcontrols_nebular_survives_replacement():
+    """A Nebular read from the nebular property stays fully valid
+    after a later setNebular() call replaces or removes it -- see
+    test_simcontrols_specsyn_survives_replacement's own identical
+    reasoning."""
+    controls = slug.SimControls(CLUSTER_DECK)
+    controls.setNebular(slug.Nebular("tests/nebular/assets/nebular_test.h5", "MIST_test", controls))
+    old_nebular = controls.nebular
+    old_line_wl = list(old_nebular.lineWl())
+    assert len(old_line_wl) > 0
+
+    controls.setNebular(None)
+    assert list(old_nebular.lineWl()) == pytest.approx(old_line_wl)
 
 
 def test_simcontrols_set_nebular_none_removes_grid():
@@ -1100,6 +1154,25 @@ def test_simcontrols_set_filters_installs_new_collection():
     assert cluster.phot()[0] > 0.0
 
 
+def test_simcontrols_filters_survives_replacement():
+    """A FilterCollection read from the filters property stays fully
+    valid after a later setFilters() call replaces it -- see
+    test_simcontrols_specsyn_survives_replacement's own identical
+    reasoning."""
+    controls = slug.SimControls(CLUSTER_DECK)
+    first = slug.FilterCollection([], slug.PhotSystem.Flambda)
+    first.addFilter("Q(HI)")
+    controls.setFilters(first)
+    old_filters = controls.filters
+    assert list(old_filters.filterNames()) == ["Q(HI)"]
+
+    second = slug.FilterCollection([], slug.PhotSystem.Flambda)
+    controls.setFilters(second)
+
+    assert list(old_filters.filterNames()) == ["Q(HI)"]
+    assert list(controls.filters.filterNames()) == []
+
+
 def test_simcontrols_set_tracks_installs_new_tracks():
     """setTracks() should install new stellar tracks, transferring
     ownership of the Python-built Tracks3D, and a Cluster built
@@ -1125,6 +1198,27 @@ def test_simcontrols_set_tracks_installs_new_tracks():
     assert len(cluster.starMasses()) + len(cluster.deadStarMasses()) > 0
     assert len(cluster.spec()) > 0
     assert all(np.isfinite(v) for v in cluster.spec())
+
+
+def test_simcontrols_tracks_survives_replacement():
+    """A Tracks3D read from the tracks property stays fully valid
+    after a later setTracks() call replaces it -- see
+    test_simcontrols_specsyn_survives_replacement's own identical
+    reasoning. Unlike specsyn/extinct/nebular/filters/yields,
+    SimControls's own tracks_ used to be a plain value member (not a
+    pointer at all), so this specifically exercises the shared_ptr
+    conversion described in setTracks()'s own docstring."""
+    controls = slug.SimControls(CLUSTER_DECK)
+    old_tracks = controls.tracks
+    old_mmin = old_tracks.mMin()
+
+    new_tracks = slug.Tracks3D(TRACK_SET, -1.0, 0.5, KNOWN_VVCRIT, KNOWN_AFE, REGISTRY)
+    controls.setTracks(new_tracks)
+
+    assert old_tracks.mMin() == pytest.approx(old_mmin)
+    assert controls.tracks is not old_tracks
+    with pytest.raises(ValueError):
+        new_tracks.mMin()
 
 
 def test_simcontrols_set_min_stoch_mass_disables_stochastic_sampling():
@@ -2884,6 +2978,26 @@ def test_yields_delete_channel_removes_entry(yields_controls):
     assert yields.yieldChannels[0].descriptor().model_name == "kobayashi_test"
 
 
+def test_yields_channel_survives_deletion(yields_controls):
+    """A YieldChannel read from yieldChannels stays fully valid and
+    keeps returning its own correct data even after a later
+    deleteChannel() call removes it from its parent Yields -- it's
+    backed by a shared_ptr, not a raw pointer into Yields's own
+    storage. See test_simcontrols_specsyn_survives_replacement's own
+    identical reasoning for the SimControls-level version of this."""
+    yields = slug.Yields(controls=yields_controls, registry_name=YIELDS_REGISTRY)
+    removed_channel = yields.yieldChannels[0]
+    assert removed_channel.descriptor().model_name == "sukhbold_test"
+    old_masses = list(removed_channel.masses())
+    assert len(old_masses) > 0
+
+    yields.deleteChannel(0)
+
+    assert len(yields.yieldChannels) == 1
+    assert list(removed_channel.masses()) == pytest.approx(old_masses)
+    assert removed_channel.descriptor().model_name == "sukhbold_test"
+
+
 def test_yields_delete_channel_out_of_range_raises(yields_controls):
     """deleteChannel() on an out-of-range index raises IndexError rather
     than crashing."""
@@ -3108,6 +3222,20 @@ def test_simcontrols_yields_property_setter():
 
     controls.yields = None
     assert controls.yields is None
+
+
+def test_simcontrols_yields_survives_replacement():
+    """A Yields read from the yields property stays fully valid after
+    a later setYields() call replaces or removes it -- see
+    test_simcontrols_specsyn_survives_replacement's own identical
+    reasoning."""
+    controls = slug.SimControls(CLUSTER_DECK)
+    controls.setYields(slug.Yields(controls=controls, registry_name=YIELDS_REGISTRY))
+    old_yields = controls.yields
+    assert old_yields.registryName() == YIELDS_REGISTRY
+
+    controls.setYields(None)
+    assert old_yields.registryName() == YIELDS_REGISTRY
 
 
 def test_simcontrols_yields_channel_decomposed_property(yields_controls):

@@ -9,7 +9,6 @@
 #include "OutputManagerH5.hpp"
 #include "../core/Cluster.hpp"
 #include "../core/Galaxy.hpp"
-#include "../phot/FilterCollection.hpp"
 #include "../specsyn/Specsyn.hpp"
 #include "../utils/HDF5Utils.hpp"
 #include "../utils/MPIUtils.hpp" // NOLINT(misc-include-cleaner) -- every symbol from this header (utils::mpiRank()/mpiSize()/mpiBarrier()) is used directly, but only inside "#ifdef SLUG_MPI" blocks; a build not compiled with SLUG_MPI (every target except slug) elides all of them, making the check think this include is unused for that specific configuration
@@ -335,7 +334,7 @@ static void appendPhotNebRows(const io::SimControls& simControls, const hid_t gr
 // complexity budget.
 static void createNebLinesDatasets(const io::SimControls& simControls, const hid_t group)
 {
-    const auto* neb = simControls.nebular();
+    const auto neb = simControls.nebular();
     if (neb == nullptr) { return; }
 
     const auto& lineWl = neb->lineWl();

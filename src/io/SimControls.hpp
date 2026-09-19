@@ -105,16 +105,18 @@ namespace io
          */
         explicit SimControls(const toml::table& inputDeck);
 
-        // Non-copyable and non-movable: tracks_ and constFeHTracks_
-        // are themselves non-copyable (see Tracks3D/Tracks2D), and
-        // specsyn_/filters_ are held by unique_ptr, so this class was
-        // already implicitly non-copyable. It is additionally made
-        // non-movable here, since the spectral synthesizer readSpectra()
-        // builds, and the nebular emission grid readNebular() builds,
-        // each store a live reference back to *this (see Specsyn's own
-        // controls_ member, and Nebular's own simControls_ member) --
-        // this object's address must never change after construction
-        // for those references to stay valid.
+        // Non-copyable and non-movable: the spectral synthesizer
+        // readSpectra() builds, and the nebular emission grid
+        // readNebular() builds, each store a live reference back to
+        // *this (see Specsyn's own controls_ member, and Nebular's own
+        // simControls_ member) -- this object's address must never
+        // change after construction for those references to stay
+        // valid. (specsyn_/filters_/extinct_/nebular_/yields_/tracks_/
+        // constFeHTracks_ are all held by shared_ptr, so none of them
+        // force non-copyability/non-movability on their own the way an
+        // owned non-copyable value member would -- the live
+        // back-reference above is the only reason this class can't be
+        // either.)
         SimControls(const SimControls&) = delete;
         auto operator=(const SimControls&) -> SimControls& = delete;
         SimControls(SimControls&&) = delete;
@@ -610,23 +612,35 @@ namespace io
 
         /**
          * @brief Get simulation stellar tracks
-         * @return Pointer to the simulation stellar tracks
+         * @return A shared_ptr to the simulation stellar tracks; null
+         *   only if this SimControls was default-constructed (no input
+         *   deck, e.g. io::defaultControls() in the Python bindings) --
+         *   like specsyn()/extinct()/nebular()/yields(), no code is
+         *   expected to call this on such an instance. Once built from
+         *   an input deck, this is never null, and setTracks() does not
+         *   accept null either. Returned by shared_ptr, not raw
+         *   pointer/reference, so a caller that read this before a
+         *   later setTracks() call keeps its own copy of the original
+         *   tracks fully valid and usable, independent of whatever
+         *   tracks_ points to afterward.
          */
-        [[nodiscard]] auto tracks() const -> const auto& { return tracks_; }
+        [[nodiscard]] auto tracks() const -> std::shared_ptr<const tracks::Tracks3D> { return tracks_; }
 
         /**
          * @brief Get the tracks sliced to this simulation's fixed [Fe/H]
-         * @return A const reference to a Tracks2D object sliced at
-         *         fehDist_'s (single) value
+         * @return A shared_ptr to a Tracks2D object sliced at
+         *   fehDist_'s (single) value, or nullptr if constFeH() is
+         *   false
          * @details
          * Only valid to call if constFeH() is true. This slice is
          * computed once, in the constructor, and cached for the
          * lifetime of this SimControls object, so that Cluster objects
          * sharing a single [Fe/H] value across a simulation can all
          * query it directly instead of each computing (or racing to
-         * compute) their own copy.
+         * compute) their own copy. Returned by shared_ptr -- see
+         * tracks()'s own comment on why.
          */
-        [[nodiscard]] auto tracks2D() const -> const auto& { return constFeHTracks_; }
+        [[nodiscard]] auto tracks2D() const -> std::shared_ptr<const tracks::Tracks2D> { return constFeHTracks_; }
 
         /**
          * @brief Get minimum mass for fully stochastic treatment
@@ -642,17 +656,22 @@ namespace io
 
         /**
          * @brief Get the spectral synthesizer, if any
-         * @return A pointer to the spectral synthesizer requested via
-         *   spectra.model, or nullptr if spectra.model was not given
+         * @return A shared_ptr to the spectral synthesizer requested
+         *   via spectra.model, or nullptr if spectra.model was not
+         *   given. Returned by shared_ptr, not raw pointer -- see
+         *   tracks()'s own comment on why (a caller that read this
+         *   before a later setSpecsyn() call keeps its own copy fully
+         *   valid, independent of what specsyn_ points to afterward).
          */
-        [[nodiscard]] auto specsyn() const -> const specsyn::Specsyn* { return specsyn_.get(); }
+        [[nodiscard]] auto specsyn() const -> std::shared_ptr<const specsyn::Specsyn> { return specsyn_; }
 
         /**
          * @brief Get the filter collection used to compute photometry, if any
-         * @return A const reference to the filter collection requested
-         *   via phot.filters, or nullptr if phot.filters was not given
+         * @return A shared_ptr to the filter collection requested via
+         *   phot.filters, or nullptr if phot.filters was not given --
+         *   see tracks()'s own comment on why this is a shared_ptr
          */
-        [[nodiscard]] auto filters() const -> const auto& { return filters_; }
+        [[nodiscard]] auto filters() const -> std::shared_ptr<const phot::FilterCollection> { return filters_; }
 
         /**
          * @brief Get the distribution of V-band extinction for clustered stars, if any
@@ -677,11 +696,12 @@ namespace io
 
         /**
          * @brief Get the extinction curve, if any
-         * @return A pointer to the extinction curve requested via
+         * @return A shared_ptr to the extinction curve requested via
          *   extinct.model, or nullptr if neither extinct.AV nor
-         *   extinct.AV_field was given
+         *   extinct.AV_field was given -- see tracks()'s own comment
+         *   on why this is a shared_ptr
          */
-        [[nodiscard]] auto extinct() const -> const extinct::Extinct* { return extinct_.get(); }
+        [[nodiscard]] auto extinct() const -> std::shared_ptr<const extinct::Extinct> { return extinct_; }
 
         /**
          * @brief Get the yield channels requested via the input deck's own [yields] stanza
@@ -696,11 +716,12 @@ namespace io
 
         /**
          * @brief Get the Yields built from yieldChannels(), if any
-         * @return A pointer to the Yields built from yieldChannels()
+         * @return A shared_ptr to the Yields built from yieldChannels()
          *   and yields.registry (see readYields()), or nullptr if
-         *   yieldChannels() is empty
+         *   yieldChannels() is empty -- see tracks()'s own comment on
+         *   why this is a shared_ptr
          */
-        [[nodiscard]] auto yields() const -> const yields::Yields* { return yields_.get(); }
+        [[nodiscard]] auto yields() const -> std::shared_ptr<const yields::Yields> { return yields_; }
 
         /**
          * @brief Whether yields should be reported decomposed by channel, or summed over all channels
@@ -727,12 +748,13 @@ namespace io
 
         /**
          * @brief Get the nebular emission grid, if any
-         * @return A pointer to the nebular emission grid built from
+         * @return A shared_ptr to the nebular emission grid built from
          *   nebControls() and the [nebular] stanza's own table/track
          *   settings (see readNebular()), or nullptr if
-         *   nebControls().computeNeb_ is false
+         *   nebControls().computeNeb_ is false -- see tracks()'s own
+         *   comment on why this is a shared_ptr
          */
-        [[nodiscard]] auto nebular() const -> const nebular::Nebular* { return nebular_.get(); }
+        [[nodiscard]] auto nebular() const -> std::shared_ptr<const nebular::Nebular> { return nebular_; }
 
         /**
          * @brief Check whether the bolometric luminosity was requested as an output
@@ -1054,7 +1076,14 @@ namespace io
 
         /**
          * @brief Set the stellar tracks
-         * @param tracks The stellar tracks to use
+         * @param tracks The stellar tracks to use; ownership is
+         *   transferred to this SimControls. Must not be null --
+         *   unlike specsyn_/extinct_/nebular_/filters_/yields_,
+         *   tracks_ is never null once this SimControls is fully
+         *   constructed, and no code path anywhere in this codebase
+         *   checks for a "no tracks" state, so this method preserves
+         *   that invariant rather than accepting null to mean "remove."
+         * @throws std::invalid_argument if tracks is null
          * @details
          * Lets a caller replace this SimControls's stellar tracks with
          * its own, without needing an input deck. If constFeH() is
@@ -1063,7 +1092,7 @@ namespace io
          * its comment) so the cache never goes stale relative to
          * whichever of tracks_/fehDist_ changed most recently.
          */
-        void setTracks(tracks::Tracks3D tracks);
+        void setTracks(std::unique_ptr<tracks::Tracks3D> tracks);
 
         /**
          * @brief Set the extinction curve
@@ -1469,20 +1498,20 @@ namespace io
         pdfs::PDF sfrDist_;        /**< Distribution from which a single, constant star formation rate is drawn -- see sfrDist()'s own comment */
         pdfs::PDF clf_;            /**< Cluster lifetime function */
         double fCluster_ = 1.0;    /**< Fraction of stellar mass formed in stochastically-treated clusters (galaxy sims only) */
-        tracks::Tracks3D tracks_;  /**< Stellar tracks */
-        tracks::Tracks2D constFeHTracks_; /**< Tracks sliced at fehDist_'s value, if constFeH() */
+        std::shared_ptr<tracks::Tracks3D> tracks_;  /**< Stellar tracks -- never null once construction completes; see tracks()'s own comment on why this is a shared_ptr */
+        std::shared_ptr<tracks::Tracks2D> constFeHTracks_; /**< Tracks sliced at fehDist_'s value, if constFeH(); nullptr otherwise */
         double minStochMass_ = 0.0;   /**< Minimum mass for fully stochastic treatment */
         double fracStochMass_ = 1.0;  /**< Fraction of mass being treated stochastically */
-        std::unique_ptr<specsyn::Specsyn> specsyn_; /**< Spectral synthesizer, or nullptr if spectra.model was not given */
-        std::unique_ptr<phot::FilterCollection> filters_; /**< Photometric filters requested via phot.filters, or nullptr if none were given */
+        std::shared_ptr<specsyn::Specsyn> specsyn_; /**< Spectral synthesizer, or nullptr if spectra.model was not given */
+        std::shared_ptr<phot::FilterCollection> filters_; /**< Photometric filters requested via phot.filters, or nullptr if none were given */
         bool computeLbol_ = false; /**< True if "Lbol" was included in phot.filters; see Cluster::computeLbol() for where it is actually computed */
         pdfs::PDF avDist_; /**< Distribution of V-band extinction (A_V) for clustered stars -- see avDist()'s own comment for exactly when this is valid/a delta at 0/invalid */
         pdfs::PDF avDistField_; /**< Distribution of V-band extinction (A_V) for field stars -- see avDistField()'s own comment */
-        std::unique_ptr<extinct::Extinct> extinct_; /**< Extinction curve requested via extinct.model, or nullptr if neither extinct.AV nor extinct.AV_field was given */
+        std::shared_ptr<extinct::Extinct> extinct_; /**< Extinction curve requested via extinct.model, or nullptr if neither extinct.AV nor extinct.AV_field was given */
         nebular::NebularControls nebControls_; /**< Nebular emission control parameters, see nebControls() */
-        std::unique_ptr<nebular::Nebular> nebular_; /**< Nebular emission grid requested via the [nebular] stanza */
+        std::shared_ptr<nebular::Nebular> nebular_; /**< Nebular emission grid requested via the [nebular] stanza */
         std::vector<yields::YieldChannelDescriptor> yieldChannels_; /**< Yield channels requested via yields.channel1, yields.channel2, etc. -- see readYields()'s own comment */
-        std::unique_ptr<yields::Yields> yields_; /**< Yields built from yieldChannels_, or nullptr if yieldChannels_ is empty */
+        std::shared_ptr<yields::Yields> yields_; /**< Yields built from yieldChannels_, or nullptr if yieldChannels_ is empty */
         bool yieldsChannelDecomposed_ = true; /**< Whether yields should be reported decomposed by channel (true) or summed over all channels (false) -- see yieldsChannelDecomposed()'s own comment; from the optional yields.channel_decomposed key, see readYields() */
 
         // Output wavelength grid (spectra.wl_min, spectra.wl_max,

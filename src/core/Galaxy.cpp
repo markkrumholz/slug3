@@ -13,7 +13,7 @@
 #include "../nebular/Nebular.hpp"
 #include "../pdfs/PDF.hpp"
 #include "../pdfs/PDFReflect.hpp"
-#include "../phot/FilterCollection.hpp"
+#include "../specsyn/Specsyn.hpp"
 #include "../tracks/TrackCommons.hpp"
 #include "../utils/GKIntegrator.hpp"
 #include "../utils/GKIntegratorData.hpp"
@@ -63,7 +63,7 @@ core::Galaxy::Galaxy(const io::SimControls& controls) :
     // channel if SimControls::yieldsChannelDecomposed() is true, or
     // just one combined total per isotope otherwise -- mirrors
     // Cluster::Cluster()'s own identical sizing exactly
-    if (const auto* yields = controls.yields())
+    if (const auto yields = controls.yields())
     {
         const std::size_t n = yields->isotopes().size() *
             (controls.yieldsChannelDecomposed() ? yields->yieldChannels().size() : 1);
@@ -139,7 +139,7 @@ void core::Galaxy::advance(const double t)
     {
         const double formTime = sfr().draw(curTime_, t);
         const double feh = sc.fehDist().draw();
-        const double deathTime = formTime + sc.tracks().starLifetime(mass, feh);
+        const double deathTime = formTime + sc.tracks()->starLifetime(mass, feh);
         const double aV = sc.avDistField().valid() ? sc.avDistField().draw() : 0.0;
         newFieldStars.push_back({ mass, feh, formTime, deathTime, aV });
     }
@@ -217,7 +217,7 @@ void core::Galaxy::advance(const double t)
 void core::Galaxy::computeSpec()
 {
     const auto& sc = controls_.get();
-    const auto* synth = sc.specsyn();
+    const auto synth = sc.specsyn();
     if (synth == nullptr) { return; }
 
     spec_.assign(synth->wl().size(), 0.0);
@@ -232,7 +232,7 @@ void core::Galaxy::computeSpec()
     sumSpec(clusters_);
     sumSpec(disruptedClusters_);
 
-    const auto* ext = sc.extinct();
+    const auto ext = sc.extinct();
     if (ext != nullptr)
     {
         specExtinct_.assign(ext->wl().size(), 0.0);
@@ -251,8 +251,8 @@ void core::Galaxy::computeSpec()
     // Sum specNeb_/specNebExtinct_/lineLum_/lineLumExtinct_ over the
     // same clusters, exactly as spec_/specExtinct_ are above, if a nebular emission
     // grid was requested -- see addClusterSpecNeb()'s own comment.
-    const auto* neb = sc.nebular();
-    if (neb != nullptr) { addClusterSpecNeb(ext, neb); }
+    const auto neb = sc.nebular();
+    if (neb != nullptr) { addClusterSpecNeb(ext.get(), neb.get()); }
 
     // Add the purely continuous (non-clustered, below minStochMass())
     // share of the population's own spectrum, together with every
@@ -264,7 +264,7 @@ void core::Galaxy::computeSpec()
     // exactly the condition under which fieldStars_ can be non-empty in
     // the first place (see advance()'s own comment), so this single
     // guard covers both contributions.
-    if (sc.fCluster() < 1.0) { addContinuousSpec(ext, neb); }
+    if (sc.fCluster() < 1.0) { addContinuousSpec(ext.get(), neb.get()); }
 }
 
 // Sum specNeb_/lineLum_ (and specNebExtinct_/lineLumExtinct_) over
@@ -318,7 +318,7 @@ void core::Galaxy::addContinuousSpec(const extinct::Extinct* ext, const nebular:
     // == 1: there is no purely continuous share at all, though
     // fieldStars_ may still be non-empty and need adding below.
     const auto& sc = controls_.get();
-    const auto* synth = sc.specsyn();
+    const auto synth = sc.specsyn();
     const double fCluster = sc.fCluster();
 
     std::vector<double> contSpec;
@@ -403,12 +403,12 @@ void core::Galaxy::addContinuousNebSpec(const extinct::Extinct* ext, const nebul
 void core::Galaxy::computePhot()
 {
     const auto& sc = controls_.get();
-    const auto& filters = sc.filters();
+    const auto filters = sc.filters();
     if (filters == nullptr) { return; }
 
     phot_ = filters->phot(sc.specsyn()->wlObs(), spec());
 
-    const auto* ext = sc.extinct();
+    const auto ext = sc.extinct();
     if (ext != nullptr)
     {
         photExtinct_ = filters->phot(ext->wlObs(), specExtinct());
@@ -472,8 +472,8 @@ auto core::Galaxy::lbolCtsIntegrand(
 ) const -> std::vector<double>
 {
     const auto& sc = controls_.get();
-    const double logAge = std::max(std::log10(age), sc.tracks().logTMin());
-    const auto isochrone = sc.tracks().getIsochrone(logAge, feh);
+    const double logAge = std::max(std::log10(age), sc.tracks()->logTMin());
+    const auto isochrone = sc.tracks()->getIsochrone(logAge, feh);
 
     // Per-star Lbol, mirroring Cluster::lbolStar()'s own role for
     // Cluster::computeLbol()'s identical inner mass integral -- a
@@ -545,7 +545,7 @@ void core::Galaxy::computeLbolCts()
         // discrete results over [Fe/H] -- see
         // Specsyn::specCtsHelper()'s own comment for why, in place of
         // a joint 3D (feh, age, mass) cubature integral.
-        const auto& fehGrid = sc.tracks().feH();
+        const auto& fehGrid = sc.tracks()->feH();
         const std::size_t nFeh = fehGrid.size();
 
         std::vector<double> lbolAtFeh(nFeh);
@@ -573,7 +573,7 @@ void core::Galaxy::computeLbolCts()
 auto core::Galaxy::yieldsIntegrand(const double t, const double feh) const -> std::vector<double>
 {
     const auto& sc = controls_.get();
-    const auto* yields = sc.yields();
+    const auto yields = sc.yields();
     const bool decomposed = sc.yieldsChannelDecomposed();
 
     const std::size_t n = decomposed
@@ -581,7 +581,7 @@ auto core::Galaxy::yieldsIntegrand(const double t, const double feh) const -> st
         : yields->isotopes().size();
     std::vector<double> result(n, 0.0);
 
-    const auto massDeriv = sc.tracks().massAndDerivFromLifetime(std::log10(t), feh);
+    const auto massDeriv = sc.tracks()->massAndDerivFromLifetime(std::log10(t), feh);
     for (const auto& [m, dmDlogT] : massDeriv)
     {
         if (m > sc.minStochMass()) { continue; } // stochastically-sampled, handled separately
@@ -606,7 +606,7 @@ auto core::Galaxy::yieldsIntegrand(const double t, const double feh) const -> st
 auto core::Galaxy::yieldsRate(const double t, const double feh) const -> std::vector<double>
 {
     const auto& sc = controls_.get();
-    const auto* yields = sc.yields();
+    const auto yields = sc.yields();
     if (yields == nullptr) { return {}; }
 
     const std::size_t n = sc.yieldsChannelDecomposed()
@@ -648,7 +648,7 @@ auto core::Galaxy::yieldsRate(const double t) const -> std::vector<double>
     // since Interpolator1D's own NF is a compile-time template
     // parameter, but the number of components here is only known at
     // runtime -- see this method's own header comment.
-    const auto& fehGrid = sc.tracks().feH();
+    const auto& fehGrid = sc.tracks()->feH();
     const std::size_t nFeh = fehGrid.size();
 
     std::vector<std::vector<double>> rateAtFeh(nFeh);
@@ -689,7 +689,7 @@ auto core::Galaxy::yieldsRate(const double t) const -> std::vector<double>
 void core::Galaxy::computeYields()
 {
     const auto& sc = controls_.get();
-    const auto* yields = sc.yields();
+    const auto yields = sc.yields();
     if (yields == nullptr) { return; }
 
     // yields_ itself is rebuilt from scratch every call (like lbol_,
@@ -762,16 +762,16 @@ auto core::Galaxy::getFieldStarProps() const -> std::vector<specsyn::Specsyn::St
     const auto& sc = controls_.get();
     const std::size_t n = fieldStars_.size();
     std::vector<specsyn::Specsyn::StarData> props(n);
-    const double logTMin = sc.tracks().logTMin();
+    const double logTMin = sc.tracks()->logTMin();
 
     if (sc.constFeH())
     {
-        const auto& tracks2D = sc.tracks2D();
+        const auto tracks2D = sc.tracks2D();
         for (std::size_t i = 0; i < n; ++i)
         {
             const auto& fs = fieldStars_[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i < n == fieldStars_.size() by construction
             const double logT = std::max(std::log10(curTime_ - fs.formTime_), logTMin);
-            props[i] = tracks2D.getStar(fs.mass_, logT); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- props has size n by construction, and i is bounded by n
+            props[i] = tracks2D->getStar(fs.mass_, logT); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- props has size n by construction, and i is bounded by n
         }
         return props;
     }
@@ -793,12 +793,12 @@ auto core::Galaxy::getFieldStarProps() const -> std::vector<specsyn::Specsyn::St
     };
     std::ranges::sort(order, {}, roundedFeh);
 
-    const auto& tracks3D = sc.tracks();
+    const auto tracks3D = sc.tracks();
     for (const std::size_t i : order)
     {
         const auto& fs = fieldStars_[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i is an element of order, itself a permutation of [0, n), by construction
         const double logT = std::max(std::log10(curTime_ - fs.formTime_), logTMin);
-        props[i] = tracks3D.getStar(fs.mass_, logT, roundedFeh(i)); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
+        props[i] = tracks3D->getStar(fs.mass_, logT, roundedFeh(i)); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
     }
     return props;
 }

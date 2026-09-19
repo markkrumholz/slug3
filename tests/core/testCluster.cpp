@@ -91,7 +91,7 @@ static auto testClusterAdvance() -> int
         cluster.advance(ageYr);
 
         // Obtain the expected live mass range from SimControls
-        const auto lmr = controls.tracks().liveMassRange(logAge, 0.0);
+        const auto lmr = controls.tracks()->liveMassRange(logAge, 0.0);
         if (lmr.empty())
         {
             std::cerr << "testCluster: advance: liveMassRange is empty at age "
@@ -633,7 +633,7 @@ static auto testClusterNebular() -> int
             return 1;
         }
 
-        const auto* ext = controls.extinct();
+        const auto ext = controls.extinct();
         if (ext == nullptr)
         {
             std::cerr << "testCluster: nebular: test bug: expected "
@@ -715,7 +715,7 @@ static auto testClusterExtinctLines() -> int
             "table", std::string("tests/nebular/assets/nebular_test.h5"));
         const io::SimControls controls(inputDeck);
 
-        const auto* ext = controls.extinct();
+        const auto ext = controls.extinct();
         if (ext == nullptr)
         {
             std::cerr << "testCluster: extinct lines: test bug: expected "

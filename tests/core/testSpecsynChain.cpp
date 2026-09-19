@@ -173,7 +173,7 @@ static auto testSpecsynChainDispatch() -> int
     try
     {
         const auto sim = buildChainedSim();
-        const auto* synth = sim->specsyn();
+        const auto synth = sim->specsyn();
         if (synth == nullptr)
         {
             std::cerr << "testSpecsynChain: expected specsyn() to be populated\n";
