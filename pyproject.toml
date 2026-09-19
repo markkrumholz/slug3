@@ -27,6 +27,7 @@ dependencies = [
     "scipy",
     "tomlkit",
     "tqdm",
+    "urllib3",
 ]
 
 [project.optional-dependencies]
