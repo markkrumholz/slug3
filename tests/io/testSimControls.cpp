@@ -6,6 +6,7 @@
  * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
+#include "../src/elem/IsotopeTable.hpp"
 #include "../src/io/SimControls.hpp"
 #include "../src/pdfs/PDF.hpp"
 #include "../src/pdfs/PDFSegment.hpp"
@@ -1173,6 +1174,95 @@ static auto testSimControlsYields() -> int
     return result;
 }
 
+// Verify noDecay() defaults to false, is parsed from the optional
+// yields.no_decay key (read regardless of whether yieldChannels_ ends
+// up empty, like yields.channel_decomposed), and that setNoDecay()
+// updates it directly.
+static auto testSimControlsYieldsNoDecay() -> int
+{
+    constexpr std::string_view baseDeck = "tests/core/assets/testGalaxy.in";
+    int result = 0;
+
+    // Default: false, with no yields.channelN table at all
+    try
+    {
+        const toml::table inputDeck = toml::parse_file(baseDeck);
+        const io::SimControls controls(inputDeck);
+        if (controls.noDecay())
+        {
+            std::cerr << "testSimControls: yieldsNoDecay: expected noDecay() "
+                "== false by default (no [yields] table at all)\n";
+            result = 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: yieldsNoDecay: no-yields-table case "
+            "failed: " << error.what() << "\n";
+        result = 1;
+    }
+
+    // Default: false, with a real [yields] table but no explicit no_decay
+    try
+    {
+        toml::table inputDeck = toml::parse_file(baseDeck);
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{
+                { "channel", "ccsn" }, { "model", "sukhbold_test" } } },
+            { "registry", "tests/yields/assets/yields.toml" },
+        });
+        const io::SimControls controls(inputDeck);
+        if (controls.noDecay())
+        {
+            std::cerr << "testSimControls: yieldsNoDecay: expected noDecay() "
+                "== false by default (yields.no_decay not given)\n";
+            result = 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: yieldsNoDecay: default-with-channels "
+            "case failed: " << error.what() << "\n";
+        result = 1;
+    }
+
+    // Explicit yields.no_decay = true
+    try
+    {
+        toml::table inputDeck = toml::parse_file(baseDeck);
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{
+                { "channel", "ccsn" }, { "model", "sukhbold_test" } } },
+            { "registry", "tests/yields/assets/yields.toml" },
+            { "no_decay", true },
+        });
+        io::SimControls controls(inputDeck);
+        if (!controls.noDecay())
+        {
+            std::cerr << "testSimControls: yieldsNoDecay: expected noDecay() "
+                "== true when yields.no_decay = true\n";
+            result = 1;
+        }
+
+        // setNoDecay() must update it live
+        controls.setNoDecay(false);
+        if (controls.noDecay())
+        {
+            std::cerr << "testSimControls: yieldsNoDecay: expected noDecay() "
+                "== false after setNoDecay(false)\n";
+            result = 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: yieldsNoDecay: explicit-true case "
+            "failed: " << error.what() << "\n";
+        result = 1;
+    }
+
+    return result;
+}
+
 // Verify writeClusterYields()/writeGalaxyYields() default to true, are
 // parsed from output.write_cluster_yields/output.write_galaxy_yields
 // exactly like the other six output.write_* keys (see readOutput()'s
@@ -1337,12 +1427,15 @@ static auto testSimControlsYieldsIsotopes() -> int
         }
 
         const auto& isotopes = controls.yields()->isotopes();
+        // Co56 (27, 56) is not directly tabulated by either model, but
+        // Ni56 is unstable and decays into it, so rebuildYieldGrid()'s
+        // own force-expansion adds it -- see its own comment.
         const std::vector<std::pair<unsigned int, unsigned int>> expected{
-            { 1, 1 }, { 26, 56 }, { 28, 56 }, { 28, 58 } }; // h1, fe56, ni56, ni58
+            { 1, 1 }, { 26, 56 }, { 27, 56 }, { 28, 56 }, { 28, 58 } }; // h1, fe56, co56, ni56, ni58
         if (isotopes.size() != expected.size())
         {
             std::cerr << "testSimControls: yieldsIsotopes: expected " << expected.size() <<
-                " isotopes (h1, fe56, ni56, ni58), got " << isotopes.size() << "\n";
+                " isotopes (h1, fe56, co56, ni56, ni58), got " << isotopes.size() << "\n";
             result = 1;
         }
         else
@@ -1395,11 +1488,12 @@ static auto testSimControlsYieldsIsotopes() -> int
         }
 
         // sukhbold_test's own native h1/fe56/ni56 values at its own
-        // exact grid mass 18.2, remapped onto [h1, fe56, ni56, ni58] --
-        // ni58 (index 3) must be exactly 0, since sukhbold_test never
-        // tabulated it
+        // exact grid mass 18.2, remapped onto [h1, fe56, co56, ni56,
+        // ni58] -- co56 (index 2, force-expanded) and ni58 (index 4)
+        // must both be exactly 0, since sukhbold_test never tabulated
+        // either directly
         constexpr double yieldTol = 1e-10;
-        const std::vector<double> sukhboldExpected{ 5.93, 8.46e-2, 7.02e-2, 0.0 };
+        const std::vector<double> sukhboldExpected{ 5.93, 8.46e-2, 0.0, 7.02e-2, 0.0 };
         const auto sukhboldActual = loaded[0]->yield(18.2, 0.0);
         if (sukhboldActual.size() != sukhboldExpected.size())
         {
@@ -1418,10 +1512,11 @@ static auto testSimControlsYieldsIsotopes() -> int
         }
 
         // kobayashi_test's own native h1/fe56/ni58 values at its own
-        // exact grid mass 13.0, remapped onto [h1, fe56, ni56, ni58] --
-        // ni56 (index 2) must be exactly 0, since kobayashi_test never
-        // tabulated it
-        const std::vector<double> kobayashiExpected{ 6.16, 8.32e-2, 0.0, 2.23e-3 };
+        // exact grid mass 13.0, remapped onto [h1, fe56, co56, ni56,
+        // ni58] -- co56 (index 2, force-expanded) and ni56 (index 3)
+        // must both be exactly 0, since kobayashi_test never tabulated
+        // either directly
+        const std::vector<double> kobayashiExpected{ 6.16, 8.32e-2, 0.0, 0.0, 2.23e-3 };
         const auto kobayashiActual = loaded[1]->yield(13.0, 0.0);
         if (kobayashiActual.size() != kobayashiExpected.size())
         {
@@ -1451,7 +1546,7 @@ static auto testSimControlsYieldsIsotopes() -> int
 // Verify SimControls::readYields()'s own yields.isotopes handling:
 // parses each entry as a case-insensitive element symbol immediately
 // followed by a mass number, converts the whole list to a
-// yields::IsotopeList, and passes it to yields_->rebuildYieldGrid() so
+// elem::IsotopeList, and passes it to yields_->rebuildYieldGrid() so
 // that yields()->isotopes() ends up restricted to the intersection of
 // that list and whatever the loaded channels actually tabulate. Reuses
 // the same sukhbold_test/kobayashi_test fixture (isotope union h1,
@@ -1553,10 +1648,15 @@ static auto testSimControlsYieldsIsotopesKeyword() -> int
     {
         const toml::table inputDeck = buildDeck(toml::array{});
         const io::SimControls controls(inputDeck);
-        if (controls.yields() == nullptr || controls.yields()->isotopes().size() != 4)
+        // 5, not the 4-isotope union itself: Ni56 is unstable, so
+        // rebuildYieldGrid()'s own force-expansion also pulls in its
+        // decay daughter Co56 -- see testSimControlsYieldsIsotopes()'s
+        // own identical case.
+        if (controls.yields() == nullptr || controls.yields()->isotopes().size() != 5)
         {
             std::cerr << "testSimControls: yieldsIsotopesKeyword: expected an empty "
-                "yields.isotopes to leave all 4 unioned isotopes in place\n";
+                "yields.isotopes to leave all 4 unioned isotopes (plus Co56, "
+                "force-expanded) in place\n";
             result = 1;
         }
     }
@@ -1674,19 +1774,21 @@ static auto testSimControlsYieldsYieldAndSum() -> int
             return 1;
         }
 
-        // Isotope order is [h1, fe56, ni56, ni58] (see
-        // testSimControlsYieldsIsotopes()'s own identical check).
-        // Row 0 (sukhbold_test): its native mass-18.2 values
-        // (5.93, 8.46e-2, 7.02e-2 for h1/fe56/ni56), each scaled by
-        // 15.0/18.2 (extrapolating down to the overridden m_min), with
-        // 0 for ni58 (never tabulated by sukhbold_test). Row 1
-        // (kobayashi_test): its own real, native mass-15.0 values
-        // (6.79, 8.52e-2, 1.15e-3 for h1/fe56/ni58), with 0 for ni56
-        // (never tabulated by kobayashi_test).
+        // Isotope order is [h1, fe56, co56, ni56, ni58] (see
+        // testSimControlsYieldsIsotopes()'s own identical check --
+        // co56 is force-expanded in as Ni56's own decay daughter, not
+        // directly tabulated by either model). Row 0 (sukhbold_test):
+        // its native mass-18.2 values (5.93, 8.46e-2, 7.02e-2 for
+        // h1/fe56/ni56), each scaled by 15.0/18.2 (extrapolating down
+        // to the overridden m_min), with 0 for co56/ni58 (neither
+        // tabulated by sukhbold_test). Row 1 (kobayashi_test): its own
+        // real, native mass-15.0 values (6.79, 8.52e-2, 1.15e-3 for
+        // h1/fe56/ni58), with 0 for co56/ni56 (neither tabulated by
+        // kobayashi_test).
         const auto [view, data] = controls.yields()->yield(15.0, 0.0);
         const std::vector<double> row0{
-            5.93 * 15.0 / 18.2, 8.46e-2 * 15.0 / 18.2, 7.02e-2 * 15.0 / 18.2, 0.0 };
-        const std::vector<double> row1{ 6.79, 8.52e-2, 0.0, 1.15e-3 };
+            5.93 * 15.0 / 18.2, 8.46e-2 * 15.0 / 18.2, 0.0, 7.02e-2 * 15.0 / 18.2, 0.0 };
+        const std::vector<double> row1{ 6.79, 8.52e-2, 0.0, 0.0, 1.15e-3 };
 
         if (view.extent(0) != 2 || view.extent(1) != row0.size())
         {
@@ -1765,14 +1867,15 @@ static auto testSimControlsYieldsPartialRange() -> int
         });
         const io::SimControls controls(inputDeck);
 
-        // Isotope order is [h1, fe56, ni56, ni58] (see
+        // Isotope order is [h1, fe56, co56, ni56, ni58] (see
         // testSimControlsYieldsIsotopes()'s own identical check). Row 0
-        // (sukhbold_test) is its own real, native mass-18.2 values; row
+        // (sukhbold_test) is its own real, native mass-18.2 values
+        // (0 for co56, force-expanded but not directly tabulated); row
         // 1 (kobayashi_test) is all zero, since 18.2 is outside its own
         // [13.0, 18.0] range.
         const auto [view, data] = controls.yields()->yield(18.2, 0.0);
-        const std::vector<double> row0{ 5.93, 8.46e-2, 7.02e-2, 0.0 };
-        const std::vector<double> row1{ 0.0, 0.0, 0.0, 0.0 };
+        const std::vector<double> row0{ 5.93, 8.46e-2, 0.0, 7.02e-2, 0.0 };
+        const std::vector<double> row1{ 0.0, 0.0, 0.0, 0.0, 0.0 };
 
         if (view.extent(0) != 2 || view.extent(1) != row0.size())
         {
@@ -1799,6 +1902,129 @@ static auto testSimControlsYieldsPartialRange() -> int
     catch (const std::exception& error)
     {
         std::cerr << "testSimControls: yieldsPartialRange: failed: " << error.what() << "\n";
+        result = 1;
+    }
+
+    return result;
+}
+
+// Verify Yields::yield()/yieldSum()'s optional dtDecay argument actually
+// applies radioactive decay through Yields's own internal DecayChain,
+// using the same two-channel fixture as testSimControlsYieldsYieldAndSum()
+// (isotope order [h1, fe56, co56, ni56, ni58] -- co56 is force-expanded
+// in as Ni56's own decay daughter, not directly tabulated by either
+// model). Ni56 -> Co56 -> Fe56 is a real, non-branching,
+// branching-ratio-1 chain (see testDecayChain.hpp): co56's own transient
+// abundance is tracked explicitly and checked here, while Fe56 still
+// receives its own correct, delayed inflow via the closed-form two-step
+// Bateman solution. Also checks that controls_->noDecay() == true makes
+// dtDecay a pure no-op, and that dtDecay == 0 changes nothing even with
+// noDecay() == false.
+static auto testSimControlsYieldsDecayApplication() -> int
+{
+    constexpr std::string_view baseDeck = "tests/core/assets/testGalaxy.in";
+    constexpr double tol = 1e-9;
+    int result = 0;
+
+    try
+    {
+        toml::table inputDeck = toml::parse_file(baseDeck);
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{
+                { "channel", "ccsn" }, { "model", "sukhbold_test" }, { "m_min", 15.0 } } },
+            { "channel2", toml::table{ { "channel", "ccsn" }, { "model", "kobayashi_test" } } },
+            { "registry", "tests/yields/assets/yields.toml" },
+        });
+        const io::SimControls controls(inputDeck);
+
+        const auto& ni56 = elem::isotopeTable(28U, 56U);
+        const auto& co56 = elem::isotopeTable(27U, 56U);
+        const double l1 = 1.0 / ni56.lifetime();
+        const double l2 = 1.0 / co56.lifetime();
+        const double dt = 2.0 * ni56.lifetime();
+        const double n1 = std::exp(-l1 * dt);
+        const double n2 = l1 / (l2 - l1) * (std::exp(-l1 * dt) - std::exp(-l2 * dt));
+        const double n3 = 1.0 - n1 - n2;
+
+        // Undecayed (dtDecay == 0) values, isotope order
+        // [h1, fe56, co56, ni56, ni58]
+        const std::vector<double> row0{
+            5.93 * 15.0 / 18.2, 8.46e-2 * 15.0 / 18.2, 0.0, 7.02e-2 * 15.0 / 18.2, 0.0 };
+        const std::vector<double> row1{ 6.79, 8.52e-2, 0.0, 0.0, 1.15e-3 };
+        const double m0Ni56 = row0[3]; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- fixed-size literal above
+
+        // Decayed values: Ni56 shrinks to m0Ni56 * n1, Co56 gains
+        // m0Ni56 * n2 (its own transient share, now tracked), Fe56
+        // gains m0Ni56 * n3 (row1's own Ni56 is 0, so it contributes
+        // nothing to either).
+        const std::vector<double> row0Decayed{
+            row0[0], row0[1] + (m0Ni56 * n3), m0Ni56 * n2, m0Ni56 * n1, row0[4] // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- fixed-size literal above
+        };
+        const std::vector<double>& row1Decayed = row1; // unchanged: row1's own Ni56 is 0
+
+        const auto checkYield = [&](const char* label, double dtDecay,
+            const std::vector<double>& expected0, const std::vector<double>& expected1) -> int
+        {
+            int localResult = 0;
+            const auto [view, data] = controls.yields()->yield(15.0, 0.0, dtDecay);
+            for (std::size_t j = 0; j < expected0.size(); ++j)
+            {
+                if (std::abs(view[0, j] - expected0[j]) > tol) // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- j < expected0.size() by loop bound
+                {
+                    std::cerr << "testSimControls: yieldsDecayApplication: " << label <<
+                        ": yield()[0, " << j << "] = " << view[0, j] << ", expected " <<
+                        expected0[j] << "\n"; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- see above
+                    localResult = 1;
+                }
+                if (std::abs(view[1, j] - expected1[j]) > tol) // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- see above
+                {
+                    std::cerr << "testSimControls: yieldsDecayApplication: " << label <<
+                        ": yield()[1, " << j << "] = " << view[1, j] << ", expected " <<
+                        expected1[j] << "\n"; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- see above
+                    localResult = 1;
+                }
+            }
+
+            const auto sum = controls.yields()->yieldSum(15.0, 0.0, dtDecay);
+            for (std::size_t j = 0; j < expected0.size(); ++j)
+            {
+                const double expected = expected0[j] + expected1[j]; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- see above
+                if (std::abs(sum[j] - expected) > tol)
+                {
+                    std::cerr << "testSimControls: yieldsDecayApplication: " << label <<
+                        ": yieldSum()[" << j << "] = " << sum[j] << ", expected " <<
+                        expected << "\n";
+                    localResult = 1;
+                }
+            }
+            return localResult;
+        };
+
+        // dtDecay == 0 must be a no-op
+        result += checkYield("dtDecay=0", 0.0, row0, row1);
+        // dtDecay > 0, noDecay() == false (default): decay applied
+        result += checkYield("dtDecay>0, noDecay=false", dt, row0Decayed, row1Decayed);
+
+        // noDecay() == true: dtDecay must be ignored entirely, even
+        // though it is nonzero
+        io::SimControls noDecayControls(inputDeck);
+        noDecayControls.setNoDecay(true);
+        {
+            const auto [view, data] = noDecayControls.yields()->yield(15.0, 0.0, dt);
+            for (std::size_t j = 0; j < row0.size(); ++j)
+            {
+                if (std::abs(view[0, j] - row0[j]) > tol || std::abs(view[1, j] - row1[j]) > tol) // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- j < row0.size() by loop bound
+                {
+                    std::cerr << "testSimControls: yieldsDecayApplication: noDecay=true: "
+                        "expected dtDecay to be ignored at column " << j << "\n";
+                    result = 1;
+                }
+            }
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: yieldsDecayApplication: failed: " << error.what() << "\n";
         result = 1;
     }
 
@@ -2313,11 +2539,13 @@ auto testSimControls() -> int
     result += testSimControlsSpectraChained();
     result += testSimControlsExtinctField();
     result += testSimControlsYields();
+    result += testSimControlsYieldsNoDecay();
     result += testSimControlsWriteYields();
     result += testSimControlsYieldsIsotopes();
     result += testSimControlsYieldsIsotopesKeyword();
     result += testSimControlsYieldsYieldAndSum();
     result += testSimControlsYieldsPartialRange();
+    result += testSimControlsYieldsDecayApplication();
     result += testSimControlsYieldsDuplicateChannelWarning();
     result += testSimControlsSFRDist();
     result += testSimControlsSetFeHRejectsBroadening();

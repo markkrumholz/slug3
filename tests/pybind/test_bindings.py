@@ -82,10 +82,22 @@ Sections, in file order, and the fixtures each is built around:
   kobayashi_test, from the small, two-model fixture registry
   (tests/yields/assets/yields.toml -- the same one
   tests/io/testSimControls.cpp's own C++ tests use) whose isotope union
-  is h1/fe56/ni56/ni58 (Z-then-A order), so this needs no data fetched
-  separately. isotopeTable() itself is exercised independently of any
-  deck, since it just looks up the single, global isotope table by
-  (Z, A).
+  is h1/fe56/ni56/ni58, force-expanded (see Yields::rebuildYieldGrid()'s
+  own comment) to also include co56 -- Ni56's own decay daughter, not
+  itself tabulated by either model -- giving h1/fe56/co56/ni56/ni58 in
+  Z-then-A order, so this needs no data fetched separately.
+  isotopeTable() itself is exercised independently of any deck, since it
+  just looks up the single, global isotope table by (Z, A).
+
+  elem::DecayChain itself (the matrix-exponential radioactive-decay
+  solver Yields.yield_()/yieldSum()'s own dt_decay argument uses
+  internally) has no direct Python binding -- it is Yields's own
+  implementation detail, not something a Python caller constructs
+  standalone. Its physics is exercised end-to-end here through
+  test_yields_yield_and_yield_sum_dt_decay() and
+  test_yields_yield_ignores_dt_decay_when_no_decay_set() instead, and
+  directly, in more detail, by tests/elem/testDecayChain.hpp's own C++
+  tests.
 
 This file is run via pytest, invoked as a CTest test from CMakeLists.txt
 (see the test_PythonBindings target), so `ctest` alone runs both the
@@ -207,7 +219,7 @@ GALAXY_DYNAMICS_TIME = 3e5
 # (deliberately sharing some isotopes and differing in one) is
 # h1/fe56/ni56/ni58, in Z-then-A order.
 YIELDS_REGISTRY = "tests/yields/assets/yields.toml"
-YIELDS_ISOTOPES = ["H1", "Fe56", "Ni56", "Ni58"]
+YIELDS_ISOTOPES = ["H1", "Fe56", "Co56", "Ni56", "Ni58"] # Co56 force-expanded in as Ni56's own decay daughter -- see Yields::rebuildYieldGrid()'s own comment
 
 # slug's own bundled default deck, used by SimControls() when path is
 # omitted/empty (see the SimControls tests below). Unlike every other
@@ -1773,6 +1785,64 @@ def test_cluster_advance_backwards_raises(sim_controls):
         cluster.advance(1.0)
 
 
+def test_cluster_star_death_times(sim_controls):
+    """starDeathTimes() has one entry per starMasses() entry, each
+    equal to formTime() plus this cluster's own tracks' starLifetime()
+    at that mass and [Fe/H] -- or +/-inf for a mass outside the
+    tracks' own tabulated mass grid, mirroring
+    tests/core/testCluster.cpp's own testClusterStarDeathTimes(). The
+    whole list is sorted non-increasing (largest death time first),
+    and deadStarDeathTimes() starts out empty."""
+    cluster = slug.Cluster(CLUSTER_TARGET_MASS, 20, 0.0, sim_controls)
+    masses = cluster.starMasses()
+    death_times = cluster.starDeathTimes()
+
+    assert len(death_times) == len(masses)
+    assert len(cluster.deadStarDeathTimes()) == 0
+
+    tracks = sim_controls.tracks
+    prev = math.inf
+    for m, t in zip(masses, death_times):
+        if m < tracks.mMin():
+            expected = math.inf
+        elif m > tracks.mMax():
+            expected = -math.inf
+        else:
+            expected = cluster.formTime() + tracks.starLifetime(m, cluster.feH())
+        assert t == expected
+        assert t <= prev
+        prev = t
+
+
+def test_cluster_dead_star_death_times(sim_controls):
+    """After advance(), deadStarDeathTimes() matches deadStarMasses()
+    one-for-one, every entry is before the time advanced to, and every
+    remaining starDeathTimes() entry is at or after it -- mirroring
+    tests/core/testCluster.cpp's own testClusterDeadStarDeathTimes().
+    Uses a mass 100x CLUSTER_TARGET_MASS (rather than that constant
+    itself) to make at least one death at age_yr overwhelmingly likely
+    regardless of live rng state -- unlike the C++ suite, nothing here
+    seeds the rng for reproducibility (no such binding exists), so this
+    test cannot rely on a fixed draw the way testClusterDeadStarDeathTimes()
+    does."""
+    age_yr = 5e6
+    cluster = slug.Cluster(100.0 * CLUSTER_TARGET_MASS, 21, 0.0, sim_controls)
+    cluster.advance(age_yr)
+
+    dead = cluster.deadStarMasses()
+    t_died = cluster.deadStarDeathTimes()
+    assert len(dead) > 0
+    assert len(t_died) == len(dead)
+
+    tracks = sim_controls.tracks
+    for m, t in zip(dead, t_died):
+        assert t < age_yr
+        assert t == cluster.formTime() + tracks.starLifetime(m, cluster.feH())
+
+    for t in cluster.starDeathTimes():
+        assert t >= age_yr
+
+
 def test_cluster_tracks_returns_tracks2d(sim_controls):
     """tracks() should return a usable Tracks2D spanning the
     MIST_test mass grid."""
@@ -2931,6 +3001,85 @@ def test_yields_yield_and_yield_sum_shapes(yields_controls):
         assert total[j] == pytest.approx(rows[0][j] + rows[1][j])
 
 
+def test_yields_yield_and_yield_sum_dt_decay():
+    """yield_()/yieldSum()'s optional dt_decay argument applies radioactive
+    decay via Yields's own internal DecayChain. Mirrors
+    tests/io/testSimControls.cpp's testSimControlsYieldsDecayApplication():
+    Ni56 -> Co56 -> Fe56 is real and non-branching; Co56 is not itself
+    tabulated by either model here, but Yields::rebuildYieldGrid() force-
+    expands isotopes() to include it anyway (as Ni56's own decay daughter),
+    so its own transient abundance is tracked explicitly rather than
+    dropped, while Fe56 still receives its own correct, delayed inflow via
+    the closed-form two-step Bateman solution. Uses a dedicated deck
+    (channel1's m_min overridden to 15.0) rather than the shared
+    yields_controls fixture, so both channels answer the same query mass
+    at once."""
+    deck = tomlkit.parse(pathlib.Path(CLUSTER_DECK).read_text())
+    deck["yields"] = tomlkit.table()
+    deck["yields"]["channel1"] = {"channel": "ccsn", "model": "sukhbold_test", "m_min": 15.0}
+    deck["yields"]["channel2"] = {"channel": "ccsn", "model": "kobayashi_test"}
+    deck["yields"]["registry"] = YIELDS_REGISTRY
+    controls = slug.SimControls(tomlkit.dumps(deck))
+    yields = controls.yields
+    assert [iso.label() for iso in yields.isotopes] == YIELDS_ISOTOPES
+
+    ni56 = slug.isotopeTable(28, 56)
+    co56 = slug.isotopeTable(27, 56)
+    l1 = 1.0 / ni56.lifetime()
+    l2 = 1.0 / co56.lifetime()
+    dt = 2.0 * ni56.lifetime()
+    n1 = np.exp(-l1 * dt)
+    n2 = l1 / (l2 - l1) * (np.exp(-l1 * dt) - np.exp(-l2 * dt))
+    n3 = 1.0 - n1 - n2
+
+    # Isotope order [H1, Fe56, Co56, Ni56, Ni58]
+    row0 = [5.93 * 15.0 / 18.2, 8.46e-2 * 15.0 / 18.2, 0.0, 7.02e-2 * 15.0 / 18.2, 0.0]
+    row1 = [6.79, 8.52e-2, 0.0, 0.0, 1.15e-3]
+    m0_ni56 = row0[3]
+    row0_decayed = [row0[0], row0[1] + (m0_ni56 * n3), m0_ni56 * n2, m0_ni56 * n1, row0[4]]
+
+    # dt_decay == 0 is a no-op
+    rows = yields.yield_(15.0, 0.0, 0.0)
+    assert rows[0] == pytest.approx(row0, abs=1e-9)
+    assert rows[1] == pytest.approx(row1, abs=1e-9)
+    total = yields.yieldSum(15.0, 0.0, 0.0)
+    assert total == pytest.approx([row0[j] + row1[j] for j in range(5)], abs=1e-9)
+
+    # dt_decay > 0 applies decay
+    rows_decayed = yields.yield_(15.0, 0.0, dt)
+    assert rows_decayed[0] == pytest.approx(row0_decayed, abs=1e-9)
+    assert rows_decayed[1] == pytest.approx(row1, abs=1e-9)
+    total_decayed = yields.yieldSum(15.0, 0.0, dt)
+    assert total_decayed == pytest.approx(
+        [row0_decayed[j] + row1[j] for j in range(5)], abs=1e-9)
+
+
+def test_yields_yield_ignores_dt_decay_when_no_decay_set():
+    """noDecay = True on the owning SimControls makes dt_decay a pure
+    no-op for yield_()/yieldSum(), even when nonzero."""
+    deck = tomlkit.parse(pathlib.Path(CLUSTER_DECK).read_text())
+    deck["yields"] = tomlkit.table()
+    deck["yields"]["channel1"] = {"channel": "ccsn", "model": "sukhbold_test", "m_min": 15.0}
+    deck["yields"]["channel2"] = {"channel": "ccsn", "model": "kobayashi_test"}
+    deck["yields"]["registry"] = YIELDS_REGISTRY
+    deck["yields"]["no_decay"] = True
+    controls = slug.SimControls(tomlkit.dumps(deck))
+    yields = controls.yields
+
+    ni56 = slug.isotopeTable(28, 56)
+    dt = 2.0 * ni56.lifetime()
+
+    # Isotope order [H1, Fe56, Co56, Ni56, Ni58]
+    row0 = [5.93 * 15.0 / 18.2, 8.46e-2 * 15.0 / 18.2, 0.0, 7.02e-2 * 15.0 / 18.2, 0.0]
+    row1 = [6.79, 8.52e-2, 0.0, 0.0, 1.15e-3]
+
+    rows = yields.yield_(15.0, 0.0, dt)
+    assert rows[0] == pytest.approx(row0, abs=1e-9)
+    assert rows[1] == pytest.approx(row1, abs=1e-9)
+    total = yields.yieldSum(15.0, 0.0, dt)
+    assert total == pytest.approx([row0[j] + row1[j] for j in range(5)], abs=1e-9)
+
+
 def test_yields_rebuild_yield_grid_restricts_isotopes(yields_controls):
     """rebuildYieldGrid() on Yields itself can narrow isotopes() after construction."""
     yields = yields_controls.yields
@@ -3058,7 +3207,10 @@ def test_yields_yield_channels_property_setter_dispatches_by_element_type(yields
     yields.yieldChannels = [descriptor]
     assert len(yields.yieldChannels) == 1
     assert yields.yieldChannels[0].descriptor().model_name == "sukhbold_test"
-    assert yields.isotopes == list(yields.yieldChannels[0].isotopesOrig())
+    # sukhbold_test alone tabulates H1/Fe56/Ni56 -- Ni56 is unstable, so
+    # isotopes() force-expands to also include its own decay daughter
+    # Co56, one more entry than isotopesOrig() itself has.
+    assert [iso.label() for iso in yields.isotopes] == ["H1", "Fe56", "Co56", "Ni56"]
 
     other_descriptor = slug.YieldChannelDescriptor(slug.YieldChannelType.ccsn, "kobayashi_test")
     channel = slug.YieldChannel(other_descriptor, 0.0, 0.0, registry_name=YIELDS_REGISTRY)
@@ -3245,6 +3397,31 @@ def test_simcontrols_yields_channel_decomposed_property(yields_controls):
     assert yields_controls.yieldsChannelDecomposed is False
     yields_controls.setYieldsChannelDecomposed(True)
     assert yields_controls.yieldsChannelDecomposed is True
+
+
+def test_simcontrols_no_decay_property(yields_controls):
+    """noDecay defaults to False and is settable both via the property and the setter."""
+    assert yields_controls.noDecay is False
+    yields_controls.noDecay = True
+    assert yields_controls.noDecay is True
+    yields_controls.setNoDecay(False)
+    assert yields_controls.noDecay is False
+
+
+def test_simcontrols_no_decay_parsed_from_deck():
+    """yields.no_decay defaults to False when absent (even with a real
+    [yields] table), and parses to True when given explicitly."""
+    deck = tomlkit.parse(pathlib.Path(CLUSTER_DECK).read_text())
+    deck["yields"] = tomlkit.table()
+    deck["yields"]["channel1"] = {"channel": "ccsn", "model": "sukhbold_test"}
+    deck["yields"]["registry"] = YIELDS_REGISTRY
+
+    default_controls = slug.SimControls(tomlkit.dumps(deck))
+    assert default_controls.noDecay is False
+
+    deck["yields"]["no_decay"] = True
+    no_decay_controls = slug.SimControls(tomlkit.dumps(deck))
+    assert no_decay_controls.noDecay is True
 
 
 def test_simcontrols_write_yields_properties_default_true(yields_controls):

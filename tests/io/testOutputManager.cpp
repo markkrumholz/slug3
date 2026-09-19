@@ -2269,9 +2269,11 @@ static auto testWriteGalaxyH5() -> int
 // below reuses the small sukhbold_test/kobayashi_test fixture registry
 // (tests/yields/assets/yields.toml) already exercised by
 // testSimControlsYieldsIsotopes() in testSimControls.cpp: two ccsn
-// channels whose isotope union is h1/fe56/ni56/ni58 (Z-then-A order),
-// so "isotopes"/"channels"/"models" below are always the same four
-// expected values.
+// channels whose isotope union is h1/fe56/ni56/ni58, force-expanded (see
+// Yields::rebuildYieldGrid()'s own comment) to also include co56 --
+// Ni56's own decay daughter, not itself tabulated by either model --
+// giving h1/fe56/co56/ni56/ni58 (Z-then-A order), so "isotopes"/
+// "channels"/"models" below are always the same expected values.
 // ---------------------------------------------------------------------
 
 // Insert a yields.channel1/channel2 table (sukhbold_test/kobayashi_test,
@@ -2308,7 +2310,7 @@ static void checkYieldsGroup(const hid_t file, const char* groupName,
 
     try
     {
-        const std::vector<std::string> expectedIsotopes{ "H1", "Fe56", "Ni56", "Ni58" };
+        const std::vector<std::string> expectedIsotopes{ "H1", "Fe56", "Co56", "Ni56", "Ni58" };
         const std::vector<std::string> expectedChannels{ "ccsn", "ccsn" };
         const std::vector<std::string> expectedModels{ "sukhbold_test", "kobayashi_test" };
 

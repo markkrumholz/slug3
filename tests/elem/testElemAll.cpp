@@ -8,6 +8,7 @@
  * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
+#include "testDecayChain.hpp"
 #include "testElemData.hpp"
 #include "testIonizationData.hpp"
 #include "testIsotopeData.hpp"
@@ -23,6 +24,7 @@ auto main() -> int {
         result += testIonizationData();
         result += testIsotopeData();
         result += testIsotopeTable();
+        result += testDecayChain();
         return result;
     }
     catch (const std::exception& error)

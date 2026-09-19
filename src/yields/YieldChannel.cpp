@@ -7,6 +7,7 @@
  */
 
 #include "YieldChannel.hpp"
+#include "../elem/ElemCommons.hpp"
 #include "../elem/IsotopeTable.hpp"
 #include "../utils/HDF5Utils.hpp"
 #include "../utils/TOMLUtils.hpp"
@@ -501,7 +502,7 @@ namespace yields
     }
 
     void YieldChannel::rebuildYieldGrid(
-        const std::optional<double> mMin, const std::optional<double> mMax, IsotopeList isotopes)
+        const std::optional<double> mMin, const std::optional<double> mMax, elem::IsotopeList isotopes)
     {
         const double loMass = mMin.value_or(massesOrig_.front());
         const double hiMass = mMax.value_or(massesOrig_.back());
@@ -541,7 +542,7 @@ namespace yields
         // the caller's own list can reorder, subset, or extend relative
         // to isotopesOrig_).
         const bool remapIsotopes = !isotopes.empty();
-        IsotopeList newIsotopes = remapIsotopes ? std::move(isotopes) : isotopesOrig_;
+        elem::IsotopeList newIsotopes = remapIsotopes ? std::move(isotopes) : isotopesOrig_;
 
         IsotopeMap isoMap(newIsotopes.size());
         for (std::size_t j = 0; j < newIsotopes.size(); ++j)

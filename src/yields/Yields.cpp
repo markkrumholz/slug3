@@ -7,6 +7,9 @@
  */
 
 #include "Yields.hpp"
+#include "../elem/DecayChain.hpp"
+#include "../elem/ElemCommons.hpp"
+#include "../elem/IsotopeTable.hpp"
 #include "../io/SimControls.hpp"
 #include "YieldChannel.hpp"
 #include "YieldCommons.hpp"
@@ -16,6 +19,7 @@
 #include <cstddef>
 #include <iostream>
 #include <memory>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -23,6 +27,68 @@
 
 namespace yields
 {
+    namespace
+    {
+        /**
+         * @brief Force-expand an isotope list to include every decay-chain descendant of an unstable entry
+         * @param isotopes The list to expand, in place -- see
+         *   Yields::rebuildYieldGrid()'s own comment for why
+         * @throws std::runtime_error if some unstable isotope's own
+         *   daughters() names a (Z, A) pair not found in the global
+         *   elem::isotopeTable()
+         * @details
+         * Repeatedly scans for any entry not yet present that some
+         * already-present unstable isotope's own daughters() names,
+         * appending it, until a full pass adds nothing further -- a
+         * newly-added isotope can itself be unstable, with daughters()
+         * of its own, so this cannot stop after a single pass (e.g.
+         * Ni56 -> Co56 -> Fe56, discovering Co56 from Ni56's own
+         * daughters() only reveals Fe56 -- if not already present -- on
+         * the *next* pass, from Co56's).
+         */
+        void forceExpandDecayChain(elem::IsotopeList& isotopes)
+        {
+            bool addedAny = true;
+            while (addedAny)
+            {
+                addedAny = false;
+                // Iterate over a snapshot of isotopes' own current
+                // contents: appending to isotopes itself while iterating
+                // over it directly would invalidate the very iterators
+                // driving the loop.
+                const elem::IsotopeList current = isotopes;
+                for (const auto& iso : current)
+                {
+                    if (iso.get().stable()) { continue; }
+                    for (const auto& daughter : iso.get().daughters())
+                    {
+                        const bool present = std::ranges::any_of(isotopes,
+                            [&daughter](const auto& candidate)
+                            {
+                                return candidate.get().Z() == daughter.Z_ &&
+                                    candidate.get().A() == daughter.A_;
+                            });
+                        if (!present)
+                        {
+                            try
+                            {
+                                isotopes.emplace_back(elem::isotopeTable(daughter.Z_, daughter.A_));
+                            }
+                            catch (const std::out_of_range&)
+                            {
+                                throw std::runtime_error(
+                                    "Yields::rebuildYieldGrid: " + iso.get().label() +
+                                    "'s daughter (Z=" + std::to_string(daughter.Z_) + ", A=" +
+                                    std::to_string(daughter.A_) + ") is not in the isotope table");
+                            }
+                            addedAny = true;
+                        }
+                    }
+                }
+            }
+        }
+    } // namespace
+
     Yields::Yields(const io::SimControls& controls, std::string registryName) :
         controls_(controls),
         registryName_(std::move(registryName))
@@ -120,7 +186,7 @@ namespace yields
         yieldChannels_ = std::move(newChannels);
     }
 
-    void Yields::rebuildYieldGrid(const IsotopeList& isotopes)
+    void Yields::rebuildYieldGrid(const elem::IsotopeList& isotopes)
     {
         // Union every loaded channel's own isotopesOrig() into one
         // deduplicated, sorted isotopes_ -- see this method's own
@@ -143,6 +209,15 @@ namespace yields
         const auto dup = std::ranges::unique(isotopes_,
             [](const auto& lhs, const auto& rhs) { return lhs.get() == rhs.get(); });
         isotopes_.erase(dup.begin(), dup.end());
+
+        // Force-expand to decay-chain closure (see this method's own
+        // comment), then re-sort/re-dedup the same way as above.
+        forceExpandDecayChain(isotopes_);
+        std::ranges::sort(isotopes_,
+            [](const auto lhs, const auto rhs) { return lhs.get() < rhs.get(); }); // NOLINT(performance-unnecessary-value-param) -- see above
+        const auto dup2 = std::ranges::unique(isotopes_,
+            [](const auto& lhs, const auto& rhs) { return lhs.get() == rhs.get(); });
+        isotopes_.erase(dup2.begin(), dup2.end());
 
         // If the caller passed a non-empty isotopes list, restrict
         // isotopes_ down to its intersection with that list -- an
@@ -196,9 +271,13 @@ namespace yields
             const auto descriptor = channel->descriptor();
             channel->rebuildYieldGrid(descriptor.mMin_, descriptor.mMax_, isotopes_);
         }
+
+        // Rebuild decayChain_ to match the now-final isotopes_ -- see
+        // this method's own comment.
+        decayChain_.emplace(isotopes_);
     }
 
-    auto Yields::yield(const double mass, const double feH) const
+    auto Yields::yield(const double mass, const double feH, const double dtDecay) const
         -> std::pair<Array2D, std::vector<double>>
     {
         const std::size_t nchannels = yieldChannels_.size();
@@ -216,13 +295,31 @@ namespace yields
                 data[(i * niso) + j] = row[j]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,cppcoreguidelines-pro-bounds-constant-array-index) -- i < nchannels, j < niso == row.size() (asserted above) by construction
             }
         }
+
+        if (!controls_.noDecay())
+        {
+            assert(decayChain_.has_value()); // populated by rebuildYieldGrid(), always called at least once by the constructor
+            // Computed once and reused across every channel's own row,
+            // rather than recomputing the same O(m^3) matrix exponential
+            // once per channel via the dtDecay-taking applyDecay() --
+            // dtDecay is identical for every row here.
+            const auto propagator = decayChain_->propagator(dtDecay); // NOLINT(bugprone-unchecked-optional-access) -- see assert above
+            for (std::size_t i = 0; i < nchannels; ++i)
+            {
+                decayChain_->applyDecay(propagator, std::span<double>(data).subspan(i * niso, niso)); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index,bugprone-unchecked-optional-access) -- i < nchannels, so i * niso + niso <= nchannels * niso == data.size() by construction; decayChain_ engaged per assert above
+            }
+        }
+
         const Array2D view(data.data(), nchannels, niso);
         return { view, std::move(data) };
     }
 
-    auto Yields::yieldSum(const double mass, const double feH) const -> std::vector<double>
+    auto Yields::yieldSum(const double mass, const double feH, const double dtDecay) const -> std::vector<double>
     {
-        const auto [view, data] = yield(mass, feH);
+        // Decay is applied once below, to the summed total, not here --
+        // see this method's own comment for why passing 0 suffices
+        // (yield()'s own decay step is a no-op at dtDecay == 0).
+        const auto [view, data] = yield(mass, feH, 0.0);
         const std::size_t nchannels = view.extent(0);
         const std::size_t niso = view.extent(1);
         std::vector<double> result(niso, 0.0);
@@ -233,7 +330,36 @@ namespace yields
                 result[j] += view[i, j]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i < nchannels, j < niso by construction
             }
         }
+
+        if (!controls_.noDecay())
+        {
+            applyDecay(dtDecay, result);
+        }
+
         return result;
+    }
+
+    void Yields::applyDecay(const double dtDecay, const std::span<double> values) const
+    {
+        assert(values.size() == isotopes_.size());
+        assert(decayChain_.has_value()); // populated by rebuildYieldGrid(), always called at least once by the constructor
+        decayChain_->applyDecay(dtDecay, values); // NOLINT(bugprone-unchecked-optional-access) -- see assert above
+    }
+
+    void Yields::applyDecay(const double dtDecay, const std::span<double> values, const bool decomposed) const
+    {
+        if (!decomposed) { applyDecay(dtDecay, values); return; }
+        assert(decayChain_.has_value()); // populated by rebuildYieldGrid(), always called at least once by the constructor
+        const std::size_t niso = isotopes_.size();
+        const std::size_t nchannels = values.size() / niso;
+        // Computed once and reused across every channel's own row, same
+        // reasoning as yield()'s own identical pattern -- dtDecay is
+        // identical for every row here too.
+        const auto propagator = decayChain_->propagator(dtDecay); // NOLINT(bugprone-unchecked-optional-access) -- see assert above
+        for (std::size_t i = 0; i < nchannels; ++i)
+        {
+            decayChain_->applyDecay(propagator, values.subspan(i * niso, niso)); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index,bugprone-unchecked-optional-access) -- i < nchannels, so i * niso + niso <= nchannels * niso == values.size() by construction; decayChain_ engaged per assert above
+        }
     }
 
 } // namespace yields

@@ -168,6 +168,25 @@ namespace core
         [[nodiscard]] auto deadStarMasses() const -> const auto& { return mDead_; }
 
         /**
+         * @brief Return the death time of every currently-alive star
+         * @return Death time (formTime() + the star's own lifetime at
+         *   this cluster's [Fe/H]) of every entry of starMasses(), in
+         *   the same order -- see the constructor's own comment for
+         *   why that order is not, in general, starMasses()'s own
+         *   ascending-mass order
+         */
+        [[nodiscard]] auto starDeathTimes() const -> const auto& { return tDeath_; }
+
+        /**
+         * @brief Return the death times of stars that died in the most recent advance() call
+         * @return Death time of every entry of deadStarMasses(), in
+         *   the same order -- both are cleared and repopulated
+         *   together every advance() call, see updateLivingStars()'s
+         *   own comment
+         */
+        [[nodiscard]] auto deadStarDeathTimes() const -> const auto& { return tDied_; }
+
+        /**
          * @brief Get the stellar tracks at this cluster's [Fe/H]
          * @return A const reference to a Tracks2D object at this
          *         cluster's [Fe/H]
@@ -465,6 +484,33 @@ namespace core
         double birthNonStochMass_;  /**< Mass in non-stochastic part of IMF at birth */
         double birthMass_;          /**< Actual mass at birth */
 
+        /**
+         * @brief Death time of every currently-alive star in m_, in the same order
+         * @details
+         * Set at construction to formTime_ + this cluster's own
+         * starLifetime() for every entry of m_, then m_ and tDeath_ are
+         * jointly sorted by tDeath_, descending, so that the stars
+         * that will die soonest (smallest tDeath_) end up at the back
+         * of both lists -- letting updateLivingStars() find and remove
+         * every newly-dead star with a simple backward scan, rather
+         * than the mass-range-based search this class used before this
+         * member existed. Every entry popped off the back of both m_
+         * and tDeath_ by updateLivingStars() is moved to mDead_/tDied_
+         * respectively, keeping those two also in the same order as
+         * each other.
+         */
+        std::vector<double> tDeath_;
+
+        /**
+         * @brief Death time of every star in mDead_, in the same order
+         * @details
+         * Empty at construction (nothing has died yet); cleared and
+         * repopulated by every updateLivingStars() call exactly as
+         * mDead_ itself is -- see tDeath_'s and updateLivingStars()'s
+         * own comments.
+         */
+        std::vector<double> tDied_;
+
         // Times
         double disruptTime_;        /**< Time when this cluster will disrupt */
         double curTime_;            /**< Current time */
@@ -559,9 +605,16 @@ namespace core
 
         /**
          * @brief Update the lists of living and dead stars
-         * @param logAge log10 of the cluster age in yr
+         * @details
+         * Clears mDead_/tDied_, then pops stars off the back of m_/
+         * tDeath_ (moving each into mDead_/tDied_) for as long as the
+         * back of tDeath_ is less than curTime_ -- since m_/tDeath_
+         * are kept jointly sorted by tDeath_, descending (see
+         * tDeath_'s own comment), every remaining entry is guaranteed
+         * to have a tDeath_ still >= curTime_ once this stops, with no
+         * need to scan the rest of the list.
          */
-        void updateLivingStars(double logAge);
+        void updateLivingStars();
 
         /**
          * @brief Update spec_/specExtinct_/specNeb_/specNebExtinct_/lineLum_/lineLumExtinct_ from the current isochrone and star lists
@@ -635,12 +688,30 @@ namespace core
          * yields_ rather than overwriting it, unlike computeSpec()/
          * computePhot()/computeLbol().
          *
-         * Stochastic (individually-sampled) stars: loops over mDead_
-         * (the stars that died during the most recent advance() call
-         * -- see updateLivingStars()'s own comment) and, for each,
-         * adds controls().yields()'s own yield(mass, feH_) (if
+         * Before either population's own new contribution is added in,
+         * if controls().noDecay() is false, yields_'s own
+         * already-accumulated total (from every earlier call) is aged
+         * forward via Yields::applyDecay(), with dtDecay = curTime_ -
+         * lastYieldTime_. This is exact, not an approximation, by the
+         * decay operator's own compositional (semigroup) property:
+         * applying decay for dt1 then dt2 gives the same result as
+         * applying it once for dt1 + dt2, for whatever abundances are
+         * present at the start of each step -- so there is no need to
+         * separately track when each contribution was originally
+         * produced. Mirrors Galaxy::computeYields()'s own identical
+         * aging step for fieldYields_.
+         *
+         * Stochastic (individually-sampled) stars: loops over mDead_/
+         * tDied_ together (the stars that died during the most recent
+         * advance() call, and their own death times -- see
+         * updateLivingStars()'s own comment) and, for each, adds
+         * controls().yields()'s own yield(mass, feH_, dtDecay) (if
          * controls().yieldsChannelDecomposed()) or yieldSum(mass,
-         * feH_) (otherwise) into yields_.
+         * feH_, dtDecay) (otherwise) into yields_, where dtDecay is
+         * curTime_ minus that star's own death time if
+         * controls().noDecay() is false, or 0 if it is true (matching
+         * yieldStar()'s own identical dtDecay convention for the
+         * non-stochastic population below).
          *
          * Continuously-sampled (non-stochastic) stars: does nothing if
          * birthNonStochMass_ is 0 (no continuously-sampled population
@@ -705,18 +776,48 @@ namespace core
          *   contribution separate (yields.yield()) or combine them all
          *   into one per-isotope total (yields.yieldSum()) -- see
          *   controls().yieldsChannelDecomposed()'s own comment
-         * @return yields.yield(m, feH).second if decomposed, or
-         *   yields.yieldSum(m, feH) otherwise -- either way, a vector
-         *   the same length as yields_ itself
+         * @param controls This cluster's own controls_, passed
+         *   explicitly for the same reason yields is -- used only for
+         *   noDecay(), to decide whether dtDecay below is computed at
+         *   all
+         * @param curTime This cluster's own curTime_ at the time of
+         *   the call, passed explicitly for the same reason
+         * @param formTime This cluster's own formTime_, passed
+         *   explicitly for the same reason
+         * @param tracks2D This cluster's own tracks() -- passed
+         *   explicitly (rather than read via controls.tracks(),
+         *   Yields's own SimControls-owned Tracks3D) because
+         *   Tracks3D::starLifetime() reads through
+         *   Mesh3DInterpolator::sliceConstZ()'s single, mutable,
+         *   not-thread-safe cache, which this method -- called from
+         *   inside SimCluster::runTrial()'s own OpenMP-parallelized
+         *   loop -- cannot safely touch; tracks2D, already sliced once
+         *   via the thread-safe sliceConstFeH()/sliceConstZCopy() this
+         *   cluster's own tracks_ is built from, has no such cache to
+         *   race on
+         * @return yields.yield(m, feH, dtDecay).second if decomposed,
+         *   or yields.yieldSum(m, feH, dtDecay) otherwise -- either
+         *   way, a vector the same length as yields_ itself
          * @details
          * Exists so computeYields() can hand it to utils::PDFIntegrator,
          * mirroring lbolStar()'s own identical role for computeLbol()
          * -- see its own comment. Static for the same reason lbolStar()
          * is: it needs no instance state, so computeYields() can hand
          * PDFIntegrator a plain function pointer.
+         *
+         * dtDecay is 0 if controls.noDecay() is true. Otherwise it is
+         * curTime - formTime - tracks2D.starLifetime(m) -- the time
+         * elapsed since this particular mass m (part of the
+         * continuously-sampled population, so it has no tDeath_ entry
+         * of its own the way a stochastic star does) died, mirroring
+         * computeYields()'s own identical dtDecay convention for the
+         * stochastic population, which reads it directly out of
+         * tDied_ instead.
          */
         [[nodiscard]] static auto yieldStar(double m, double feH,
-            const yields::Yields& yields, bool decomposed) -> std::vector<double>;
+            const yields::Yields& yields, bool decomposed,
+            const io::SimControls& controls, double curTime, double formTime,
+            const tracks::Tracks2D& tracks2D) -> std::vector<double>;
 
     };
 

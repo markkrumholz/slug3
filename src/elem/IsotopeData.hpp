@@ -45,7 +45,10 @@ namespace elem
          *   the second character (e.g. {'H', '\0'})
          * @param z Atomic number
          * @param a Mass number
-         * @param lifetime Radioactive decay lifetime; 0 indicates a stable isotope
+         * @param lifetime Radioactive decay lifetime, in yr (matching
+         *   every other time quantity in this codebase, e.g.
+         *   Cluster::formTime_/curTime_, Tracks2D::starLifetime());
+         *   0 indicates a stable isotope
          * @param daughters List of decay channels (daughter nuclide and branching
          *   ratio). May be empty even for an unstable isotope (lifetime > 0): some
          *   isotopes are known to decay, but their decay channel isn't tabulated.
@@ -90,7 +93,7 @@ namespace elem
             return result;
         }
 
-        /** @brief Return the radioactive decay lifetime; 0 indicates a stable isotope */
+        /** @brief Return the radioactive decay lifetime, in yr; 0 indicates a stable isotope */
         [[nodiscard]] auto lifetime() const noexcept -> double { return lifetime_; }
 
         /** @brief Return the list of decay channels (daughter nuclide and branching ratio) */
@@ -126,7 +129,7 @@ namespace elem
 
     protected:
         unsigned int A_; // NOLINT(readability-identifier-naming) -- physics naming convention
-        double lifetime_; /**< Radioactive decay lifetime; 0 indicates a stable isotope */
+        double lifetime_; /**< Radioactive decay lifetime, in yr; 0 indicates a stable isotope */
         std::vector<IsotopeDecayData> daughters_; /**< Decay channels: daughter nuclide and branching ratio */
     };
 

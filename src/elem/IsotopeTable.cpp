@@ -7,6 +7,7 @@
  */
 
 #include "IsotopeTable.hpp"
+#include "../utils/Constants.hpp"
 #include "../utils/HDF5Utils.hpp"
 #include "../utils/MiscUtils.hpp"
 #include "IonizationData.hpp"
@@ -74,7 +75,19 @@ namespace elem
         {
             const auto z = static_cast<unsigned int>(zData.at(i));
             const auto a = static_cast<unsigned int>(aData.at(i));
-            const double lifetime = lifetimeData.at(i);
+
+            // The on-disk table stores lifetime in seconds (see
+            // data/tools/elem/build_isotope_table.py's own
+            // lifetime_units attribute), but every other time
+            // quantity in this codebase (Cluster/Galaxy's own
+            // formTime_/curTime_/tDeath_, Tracks2D/Tracks3D's own
+            // starLifetime(), etc.) is in yr -- converting here, once,
+            // at load time, keeps IsotopeData::lifetime() (and
+            // everything downstream of it, e.g. DecayChain's own
+            // rates_) consistent with that convention, rather than
+            // requiring every caller that computes a dtDecay in yr to
+            // convert it to seconds first.
+            const double lifetime = lifetimeData.at(i) / utils::yr;
 
             const auto begin = static_cast<std::size_t>(offsetData.at(i));
             const auto end = static_cast<std::size_t>(offsetData.at(i + 1));

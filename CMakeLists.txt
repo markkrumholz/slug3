@@ -132,6 +132,7 @@ add_executable(slug
     src/nebular/Nebular.cpp
     src/io/SimControls.cpp
     src/utils/ParseUtils.cpp
+    src/elem/DecayChain.cpp
     src/elem/IsotopeTable.cpp
     src/utils/HDF5Utils.cpp
     src/yields/YieldChannel.cpp
@@ -148,6 +149,7 @@ add_executable(slugTestInterpolation
     src/utils/HDF5Utils.cpp
 )
 add_executable(slugTestElem
+    src/elem/DecayChain.cpp
     src/elem/IsotopeTable.cpp
     tests/elem/testElemAll.cpp
     src/utils/HDF5Utils.cpp
@@ -265,6 +267,7 @@ add_executable(slugTestCore
     src/utils/HDF5Utils.cpp
     src/elem/IsotopeTable.cpp
     src/yields/YieldChannel.cpp
+    src/elem/DecayChain.cpp
     src/yields/Yields.cpp
 )
 # slugTestCoreFull: the slow, full-scale end-to-end counterpart to
@@ -324,6 +327,7 @@ add_executable(slugTestCoreFull
     src/utils/HDF5Utils.cpp
     src/elem/IsotopeTable.cpp
     src/yields/YieldChannel.cpp
+    src/elem/DecayChain.cpp
     src/yields/Yields.cpp
 )
 # slugTestCoreFull drives a real end-to-end run (real MIST tracks, real
@@ -379,6 +383,7 @@ add_executable(slugTestIo
     src/utils/HDF5Utils.cpp
     src/elem/IsotopeTable.cpp
     src/yields/YieldChannel.cpp
+    src/elem/DecayChain.cpp
     src/yields/Yields.cpp
 )
 add_executable(slugTestNebular
@@ -416,6 +421,7 @@ add_executable(slugTestNebular
     src/utils/HDF5Utils.cpp
     src/elem/IsotopeTable.cpp
     src/yields/YieldChannel.cpp
+    src/elem/DecayChain.cpp
     src/yields/Yields.cpp
 )
 add_executable(slugTestSpecsyn
@@ -459,6 +465,7 @@ add_executable(slugTestSpecsyn
     src/utils/HDF5Utils.cpp
     src/elem/IsotopeTable.cpp
     src/yields/YieldChannel.cpp
+    src/elem/DecayChain.cpp
     src/yields/Yields.cpp
 )
 
@@ -533,6 +540,7 @@ pybind11_add_module(slugPython
     src/tracks/Tracks3D.cpp
     src/utils/ParseUtils.cpp
     src/utils/HDF5Utils.cpp
+    src/elem/DecayChain.cpp
     src/elem/IsotopeTable.cpp
     src/yields/YieldChannel.cpp
     src/yields/Yields.cpp
@@ -622,6 +630,24 @@ target_include_directories(slugTestIo SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestNebular SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestSpecsyn SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugPython SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
+
+# Eigen (header-only; vendored as a git submodule at src/extern/eigen,
+# like pcg-cpp/tomlplusplus/pybind11/mdspan above, rather than requiring
+# a system install -- see elem::DecayChain for the one place this
+# project uses it, via <Eigen/Dense> and <unsupported/Eigen/
+# MatrixFunctions>). Scoped to only the targets that actually compile a
+# source transitively including DecayChain.hpp (directly, or via
+# SimControls.hpp -> Yields.hpp), unlike pcg-cpp/tomlplusplus/HDF5
+# above, which every target happens to need.
+target_include_directories(slug SYSTEM PRIVATE src/extern/eigen)
+target_include_directories(slugTestElem SYSTEM PRIVATE src/extern/eigen)
+target_include_directories(slugTestExtinct SYSTEM PRIVATE src/extern/eigen)
+target_include_directories(slugTestCore SYSTEM PRIVATE src/extern/eigen)
+target_include_directories(slugTestCoreFull SYSTEM PRIVATE src/extern/eigen)
+target_include_directories(slugTestIo SYSTEM PRIVATE src/extern/eigen)
+target_include_directories(slugTestNebular SYSTEM PRIVATE src/extern/eigen)
+target_include_directories(slugTestSpecsyn SYSTEM PRIVATE src/extern/eigen)
+target_include_directories(slugPython SYSTEM PRIVATE src/extern/eigen)
 
 # Link to GSL
 target_link_libraries(slug PRIVATE GSL::gsl)

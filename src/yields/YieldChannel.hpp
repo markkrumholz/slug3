@@ -9,6 +9,7 @@
 #ifndef YIELDCHANNEL_HPP
 #define YIELDCHANNEL_HPP
 
+#include "../elem/ElemCommons.hpp"
 #include "../utils/GridBracket.hpp"
 #include "../utils/ThreadVec.hpp"
 #include "YieldCommons.hpp"
@@ -167,7 +168,7 @@ namespace yields
         void rebuildYieldGrid(
             std::optional<double> mMin = std::nullopt,
             std::optional<double> mMax = std::nullopt,
-            IsotopeList isotopes = {});
+            elem::IsotopeList isotopes = {});
 
         // Observers
 
@@ -223,7 +224,7 @@ namespace yields
          *   (see its own comment). Empty until rebuildYieldGrid() is
          *   called at least once.
          */
-        [[nodiscard]] auto isotopes() const -> const IsotopeList& { return isotopes_; }
+        [[nodiscard]] auto isotopes() const -> const elem::IsotopeList& { return isotopes_; }
 
         /**
          * @brief Return the isotopes natively tabulated by the underlying model
@@ -235,7 +236,7 @@ namespace yields
          *   rebuildYieldGrid(), and already populated once the
          *   constructor returns (no need to call rebuildYieldGrid() first)
          */
-        [[nodiscard]] auto isotopesOrig() const -> const IsotopeList& { return isotopesOrig_; }
+        [[nodiscard]] auto isotopesOrig() const -> const elem::IsotopeList& { return isotopesOrig_; }
 
         /**
          * @brief Return the [Fe/H] values this channel's yields are tabulated at
@@ -363,8 +364,8 @@ namespace yields
         YieldChannelDescriptor descriptor_; /**< The descriptor this channel was built from, with mMin_/mMax_ kept in sync with rebuildYieldGrid()'s own most recent explicit values -- see descriptor()'s own comment */
         std::vector<double> masses_;       /**< Stellar masses (Msun) this channel's yields are tabulated at -- see masses()'s own comment */
         std::vector<double> massesOrig_;   /**< Stellar masses (Msun) as read from the model's own HDF5 file -- see massesOrig()'s own comment */
-        IsotopeList isotopes_;             /**< Isotopes yieldData_ is actually tabulated for -- see isotopes()'s own comment */
-        IsotopeList isotopesOrig_;         /**< Isotopes as read from the model's own HDF5 file -- see isotopesOrig()'s own comment */
+        elem::IsotopeList isotopes_;       /**< Isotopes yieldData_ is actually tabulated for -- see isotopes()'s own comment */
+        elem::IsotopeList isotopesOrig_;   /**< Isotopes as read from the model's own HDF5 file -- see isotopesOrig()'s own comment */
         std::vector<double> feH_;          /**< [Fe/H] values for all yields */ // NOLINT(readability-identifier-naming)
         std::vector<double> yieldData_;    /**< Backing storage for yld(), over masses_/isotopes_ -- see its own comment */
         std::vector<double> yieldDataOrig_; /**< Backing storage over massesOrig_/isotopesOrig_, from which yieldData_ is (re)derived -- see rebuildYieldGrid()'s own comment */

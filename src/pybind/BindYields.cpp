@@ -7,6 +7,7 @@
  */
 
 #include "Bindings.hpp"
+#include "../elem/ElemCommons.hpp"
 #include "../elem/IsotopeData.hpp"
 #include "../io/SimControls.hpp"
 #include "../yields/YieldChannel.hpp"
@@ -27,9 +28,9 @@
 // implementation detail of these two translation units' own bindings,
 // not part of the cross-file infrastructure Bindings.hpp otherwise
 // holds (resolveControls() and friends).
-static auto toIsotopeList(const std::vector<const elem::IsotopeData*>& isotopes) -> yields::IsotopeList
+static auto toIsotopeList(const std::vector<const elem::IsotopeData*>& isotopes) -> elem::IsotopeList
 {
-    yields::IsotopeList result;
+    elem::IsotopeList result;
     result.reserve(isotopes.size());
     for (const auto* iso : isotopes)
     {
@@ -267,13 +268,22 @@ mass : float
 feh : float
     [Fe/H]; need not lie within every yieldChannels() entry's own
     feH() range.
+dt_decay : float, optional
+    Elapsed time, in years (the same units as every isotope's own
+    lifetime()), over which to apply radioactive decay to the raw
+    per-channel yields before returning them; 0 (the default) applies
+    no decay at all. Ignored entirely if the SimControls this Yields
+    was built from has noDecay set to True, in which case every
+    returned value is the cumulative amount of each isotope ever
+    produced, regardless of any radioactive decay since.
 
 Returns
 -------
 yields : list of list of float
     yields[i][j] is the yield (Msun) of isotopes()[j] from
-    yieldChannels()[i], for a star of the given mass/feh. Row i is left
-    all zero if yieldChannels()[i] doesn't cover mass/feh.
+    yieldChannels()[i], for a star of the given mass/feh, after dt_decay
+    has elapsed. Row i is left all zero if yieldChannels()[i] doesn't
+    cover mass/feh.
 
 Throws
 ------
@@ -282,7 +292,7 @@ RuntimeError
     rebuildYieldGrid() was never called on that particular channel).)doc";
 
 static constexpr std::string_view yieldSumDocstring =
-    R"doc(Get the sum, over every channel, of yield_(mass, feh).
+    R"doc(Get the sum, over every channel, of yield_(mass, feh), decayed by dt_decay.
 
 Parameters
 ----------
@@ -290,12 +300,19 @@ mass : float
     Stellar mass (Msun); see yield_()'s own mass parameter.
 feh : float
     [Fe/H]; see yield_()'s own feh parameter.
+dt_decay : float, optional
+    Elapsed time, in years, over which to apply radioactive decay --
+    see yield_()'s own dt_decay parameter for exactly what this means
+    and when it's ignored. Applied once, to the summed total, rather
+    than once per channel -- numerically identical either way, since
+    decay is linear in each isotope's own mass.
 
 Returns
 -------
 yield_sum : list of float
     One yield (Msun) per entry of isotopes(), in the same order:
-    result[j] = sum over i of yield_(mass, feh)[i][j].
+    result[j] = sum over i of yield_(mass, feh, 0)[i][j], decayed by
+    dt_decay.
 
 Throws
 ------
@@ -435,9 +452,10 @@ void bindYields(py::module_& m)
                 },
                 isotopesDocstring.data(), py::return_value_policy::reference)
         .def("yield_",
-                [](const yields::Yields& self, double mass, double feH) -> std::vector<std::vector<double>>
+                [](const yields::Yields& self, double mass, double feH, double dtDecay)
+                    -> std::vector<std::vector<double>>
                 {
-                    const auto [view, data] = self.yield(mass, feH);
+                    const auto [view, data] = self.yield(mass, feH, dtDecay);
                     std::vector<std::vector<double>> result(
                         view.extent(0), std::vector<double>(view.extent(1)));
                     for (std::size_t i = 0; i < view.extent(0); ++i)
@@ -446,8 +464,8 @@ void bindYields(py::module_& m)
                     }
                     return result;
                 },
-                yieldDocstring.data(), py::arg("mass"), py::arg("feh"))
+                yieldDocstring.data(), py::arg("mass"), py::arg("feh"), py::arg("dt_decay") = 0.0)
         .def("yieldSum", &yields::Yields::yieldSum,
-                yieldSumDocstring.data(), py::arg("mass"), py::arg("feh"));
+                yieldSumDocstring.data(), py::arg("mass"), py::arg("feh"), py::arg("dt_decay") = 0.0);
 }
 // NOLINTEND(misc-include-cleaner)

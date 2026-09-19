@@ -624,7 +624,16 @@ auto core::Galaxy::yieldsRate(const double t, const double feh) const -> std::ve
         sfrAge, static_cast<IntegrandFn>(&Galaxy::yieldsIntegrand),
         n, false, sc.intMaxIter(), absTol, sc.intRelTol());
 
-    return integrator.integrate(0.0, t, this, feh);
+    // This is the instantaneous rate of mass return at time t --
+    // decay it forward to curTime_ (unless noDecay() is true) so that
+    // what computeYields() integrates over t is each moment's own
+    // present-day (curTime_), rather than as-produced, contribution.
+    auto result = integrator.integrate(0.0, t, this, feh);
+    if (!sc.noDecay())
+    {
+        yields->applyDecay(curTime_ - t, result, sc.yieldsChannelDecomposed());
+    }
+    return result;
 }
 
 // The continuous population's own instantaneous per-isotope yield
@@ -714,17 +723,40 @@ void core::Galaxy::computeYields()
         }
     }
 
+    // Age fieldYields_'s own already-accumulated total forward by the
+    // time elapsed since it was last updated, before adding in this
+    // step's new contributions below (each of which is added using its
+    // own exact dtDecay for the time since it was produced, since it
+    // is only now being added) -- mirrors Cluster::computeYields()'s
+    // own identical aging step for yields_, see its own comment for
+    // why this incremental approach is exact (not an approximation),
+    // by the decay operator's own compositional (semigroup) property:
+    // applying decay for dt1 then dt2 gives the same result as
+    // applying it once for dt1 + dt2, for whatever abundances are
+    // present at the start of each step -- no need to separately track
+    // when each contribution was originally produced.
+    const bool decomposed = sc.yieldsChannelDecomposed();
+    if (!sc.noDecay())
+    {
+        yields->applyDecay(curTime_ - lastYieldTime_, fieldYields_, decomposed);
+    }
+
     // Individually-tracked field stars that died during this step
     // alone (deadFieldStars_ only ever holds those, mirroring
     // Cluster::mDead_'s own per-step convention) -- accumulated onto
     // fieldYields_ rather than recomputed, since earlier steps' own
-    // dead field stars are no longer available to re-sum
-    const bool decomposed = sc.yieldsChannelDecomposed();
+    // dead field stars are no longer available to re-sum. dtDecay is
+    // the time elapsed since each field star actually died
+    // (curTime_ - deathTime_) if noDecay() is false, or 0 (no decay
+    // applied at all) if it is true -- mirroring
+    // Cluster::computeYields()'s own identical convention for its
+    // stochastic population.
     for (const auto& fieldStar : deadFieldStars_)
     {
+        const double dtDecay = sc.noDecay() ? 0.0 : curTime_ - fieldStar.deathTime_;
         const auto contribution = decomposed
-            ? yields->yield(fieldStar.mass_, fieldStar.feh_).second
-            : yields->yieldSum(fieldStar.mass_, fieldStar.feh_);
+            ? yields->yield(fieldStar.mass_, fieldStar.feh_, dtDecay).second
+            : yields->yieldSum(fieldStar.mass_, fieldStar.feh_, dtDecay);
         for (std::size_t k = 0; k < contribution.size(); ++k)
         {
             fieldYields_[k] += contribution[k]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,cppcoreguidelines-pro-bounds-constant-array-index) -- fieldYields_ and contribution are both sized identically by construction
