@@ -298,9 +298,14 @@ namespace yields
 
         if (!controls_.noDecay())
         {
+            // Computed once and reused across every channel's own row,
+            // rather than recomputing the same O(m^3) matrix exponential
+            // once per channel via the dtDecay-taking applyDecay() --
+            // dtDecay is identical for every row here.
+            const auto propagator = decayChain_->propagator(dtDecay);
             for (std::size_t i = 0; i < nchannels; ++i)
             {
-                applyDecay(dtDecay, std::span<double>(data).subspan(i * niso, niso)); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i < nchannels, so i * niso + niso <= nchannels * niso == data.size() by construction
+                decayChain_->applyDecay(propagator, std::span<double>(data).subspan(i * niso, niso)); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i < nchannels, so i * niso + niso <= nchannels * niso == data.size() by construction
             }
         }
 
@@ -343,11 +348,16 @@ namespace yields
     void Yields::applyDecay(const double dtDecay, const std::span<double> values, const bool decomposed) const
     {
         if (!decomposed) { applyDecay(dtDecay, values); return; }
+        assert(decayChain_.has_value()); // populated by rebuildYieldGrid(), always called at least once by the constructor
         const std::size_t niso = isotopes_.size();
         const std::size_t nchannels = values.size() / niso;
+        // Computed once and reused across every channel's own row, same
+        // reasoning as yield()'s own identical pattern -- dtDecay is
+        // identical for every row here too.
+        const auto propagator = decayChain_->propagator(dtDecay);
         for (std::size_t i = 0; i < nchannels; ++i)
         {
-            applyDecay(dtDecay, values.subspan(i * niso, niso)); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i < nchannels, so i * niso + niso <= nchannels * niso == values.size() by construction
+            decayChain_->applyDecay(propagator, values.subspan(i * niso, niso)); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i < nchannels, so i * niso + niso <= nchannels * niso == values.size() by construction
         }
     }
 

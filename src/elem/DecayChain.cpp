@@ -133,11 +133,27 @@ namespace elem
 
     void DecayChain::applyDecay(const double dtDecay, const std::span<double> values) const
     {
+        applyDecay(propagator(dtDecay), values);
+    }
+
+    auto DecayChain::propagator(const double dtDecay) const -> Eigen::MatrixXd
+    {
         if (dtDecay < 0.0)
         {
             throw std::invalid_argument(
-                "DecayChain::applyDecay: dtDecay must be non-negative, got " + std::to_string(dtDecay));
+                "DecayChain::propagator: dtDecay must be non-negative, got " + std::to_string(dtDecay));
         }
+        // Eigen's own .exp() asserts on a 0x0 matrix ("you are using an
+        // empty matrix") rather than just returning one -- guard it
+        // here so a DecayChain with no relevant isotopes at all (no
+        // unstable entries in the list it was built from) still works,
+        // matching applyDecay()'s own no-op behavior for that case.
+        if (depletionMatrix_.size() == 0) { return depletionMatrix_; }
+        return (depletionMatrix_ * dtDecay).exp();
+    }
+
+    void DecayChain::applyDecay(const Eigen::MatrixXd& propagator, const std::span<double> values) const
+    {
         const std::size_t m = relevantIndices_.size();
         if (m == 0) { return; }
 
@@ -147,7 +163,6 @@ namespace elem
             v[static_cast<Eigen::Index>(k)] = values[relevantIndices_[k]]; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- relevantIndices_[k] < values.size() == isotopes.size() by construction
         }
 
-        const Eigen::MatrixXd propagator = (depletionMatrix_ * dtDecay).exp();
         const Eigen::VectorXd result = propagator * v;
 
         for (std::size_t k = 0; k < m; ++k)

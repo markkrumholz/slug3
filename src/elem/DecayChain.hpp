@@ -137,6 +137,42 @@ namespace elem
          */
         void applyDecay(double dtDecay, std::span<double> values) const;
 
+        /**
+         * @brief Compute the matrix-exponential propagator for a given elapsed time
+         * @param dtDecay Elapsed time, in yr, to advance by -- same
+         *   meaning as the other applyDecay() overload's own dtDecay
+         * @returns exp(depletionMatrix_ * dtDecay), sized
+         *   relevantIndices_.size() square
+         * @throws std::invalid_argument if dtDecay is negative -- same
+         *   condition and reason as the other applyDecay() overload
+         * @details
+         * Exposed separately from applyDecay() so a caller that needs to
+         * advance more than one same-sized array by the *same* dtDecay
+         * (e.g. Yields::yield()'s own per-channel loop, or its
+         * decomposed applyDecay() overload) can compute this O(m^3)
+         * matrix exponential once and reuse it via the applyDecay(const
+         * Eigen::MatrixXd&, ...) overload below, rather than recomputing
+         * an identical propagator on every call. The dtDecay-taking
+         * applyDecay() overload above is exactly equivalent to
+         * applyDecay(propagator(dtDecay), values).
+         */
+        [[nodiscard]] auto propagator(double dtDecay) const -> Eigen::MatrixXd;
+
+        /**
+         * @brief Advance a per-isotope mass array forward using an already-computed propagator, in place
+         * @param propagator A matrix from propagator() (or
+         *   exp(depletionMatrix_ * dtDecay) computed some other way),
+         *   sized relevantIndices_.size() square
+         * @param values Same meaning as the dtDecay-taking applyDecay()
+         *   overload's own values parameter
+         * @details
+         * Skips computing the matrix exponential itself -- see
+         * propagator()'s own comment for why this overload exists.
+         * Does not itself validate that propagator actually corresponds
+         * to a non-negative dtDecay; that guard lives in propagator().
+         */
+        void applyDecay(const Eigen::MatrixXd& propagator, std::span<double> values) const;
+
     private:
         std::vector<std::size_t> relevantIndices_; /**< Index, into the isotope list this was built from, of each row/column of depletionMatrix_, in that same order -- see the constructor's own comment */
         Eigen::MatrixXd depletionMatrix_; /**< The constant depletion matrix M in dN/dt = M N, sized relevantIndices_.size() square -- see the constructor's own comment for how it is filled */
