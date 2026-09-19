@@ -632,6 +632,24 @@ target_include_directories(slugTestNebular SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestSpecsyn SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugPython SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 
+# Eigen (header-only; vendored as a git submodule at src/extern/eigen,
+# like pcg-cpp/tomlplusplus/pybind11/mdspan above, rather than requiring
+# a system install -- see elem::DecayChain for the one place this
+# project uses it, via <Eigen/Dense> and <unsupported/Eigen/
+# MatrixFunctions>). Scoped to only the targets that actually compile a
+# source transitively including DecayChain.hpp (directly, or via
+# SimControls.hpp -> Yields.hpp), unlike pcg-cpp/tomlplusplus/HDF5
+# above, which every target happens to need.
+target_include_directories(slug SYSTEM PRIVATE src/extern/eigen)
+target_include_directories(slugTestElem SYSTEM PRIVATE src/extern/eigen)
+target_include_directories(slugTestExtinct SYSTEM PRIVATE src/extern/eigen)
+target_include_directories(slugTestCore SYSTEM PRIVATE src/extern/eigen)
+target_include_directories(slugTestCoreFull SYSTEM PRIVATE src/extern/eigen)
+target_include_directories(slugTestIo SYSTEM PRIVATE src/extern/eigen)
+target_include_directories(slugTestNebular SYSTEM PRIVATE src/extern/eigen)
+target_include_directories(slugTestSpecsyn SYSTEM PRIVATE src/extern/eigen)
+target_include_directories(slugPython SYSTEM PRIVATE src/extern/eigen)
+
 # Link to GSL
 target_link_libraries(slug PRIVATE GSL::gsl)
 target_link_libraries(slugTestInterpolation PRIVATE GSL::gsl)

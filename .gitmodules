@@ -11,3 +11,6 @@
 [submodule "src/extern/mdspan"]
 	path = src/extern/mdspan
 	url = https://github.com/kokkos/mdspan.git
+[submodule "src/extern/eigen"]
+	path = src/extern/eigen
+	url = https://gitlab.com/libeigen/eigen.git
