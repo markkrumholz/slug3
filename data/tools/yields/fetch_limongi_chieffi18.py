@@ -44,6 +44,7 @@ Run from the repository root: python3 data/tools/yields/fetch_limongi_chieffi18.
 
 :copyright: Copyright (c) 2026 Mark Krumholz
 """
+import argparse
 import pathlib
 import sys
 
@@ -62,6 +63,8 @@ REFERENCE_URL = "https://ui.adsabs.harvard.edu/abs/2018ApJS..237...13L/abstract"
 
 VELOCITIES = [0, 150, 300]  # km/s, this source's own three rotation rates
 FEH_VALUES = [0, -1, -2, -3]
+
+FETCH_TIMEOUT_S = 60.0  # both connect and read; table8.dat/table9.dat are each well under 1 MB
 
 # table8.dat's own 9 mass columns, ascending, in the exact order the
 # file itself lists them; table9.dat only ever has the first 4 (see
@@ -92,7 +95,7 @@ def fetch_text(url: str) -> str:
     # real browser (e.g. a spoofed "Mozilla/5.0") without behaving like
     # one -- verified directly against this exact URL.
     http = urllib3.PoolManager()
-    resp = http.request("GET", url)
+    resp = http.request("GET", url, timeout=FETCH_TIMEOUT_S)
     if resp.status != 200:
         raise RuntimeError(f"Failed to fetch {url}: HTTP {resp.status}")
     # Not ASCII: like the Kobayashi et al. source files
@@ -187,7 +190,14 @@ def build_model(t8: TableByKey, t9: TableByKey, vel: int, feh: int) -> dict:
     }
 
 
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    return p.parse_args()
+
+
 def main() -> None:
+    parse_args()
     print(f"fetching {TABLE8_URL}")
     t8 = parse_table(fetch_text(TABLE8_URL), _T8_MASS_COLS)
     print(f"fetching {TABLE9_URL}")
