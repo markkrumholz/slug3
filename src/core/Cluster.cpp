@@ -10,7 +10,6 @@
 #include "../extinct/Extinct.hpp"
 #include "../io/SimControls.hpp"
 #include "../nebular/Nebular.hpp"
-#include "../phot/FilterCollection.hpp"
 #include "../tracks/TrackCommons.hpp"
 #include "../tracks/Tracks2D.hpp"
 #include "../utils/GKIntegratorData.hpp"
@@ -23,6 +22,7 @@
 #include <cstddef>
 #include <functional>
 #include <limits>
+#include <memory>
 #include <numeric>
 #include <sstream>
 #include <stdexcept>

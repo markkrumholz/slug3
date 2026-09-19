@@ -13,7 +13,7 @@
 #include "../nebular/Nebular.hpp"
 #include "../pdfs/PDF.hpp"
 #include "../pdfs/PDFReflect.hpp"
-#include "../phot/FilterCollection.hpp"
+#include "../specsyn/Specsyn.hpp"
 #include "../tracks/TrackCommons.hpp"
 #include "../utils/GKIntegrator.hpp"
 #include "../utils/GKIntegratorData.hpp"

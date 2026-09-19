@@ -10,7 +10,6 @@
 #include "../core/Cluster.hpp"
 #include "../core/Galaxy.hpp"
 #include "../extinct/Extinct.hpp"
-#include "../phot/FilterCollection.hpp"
 #include "../specsyn/Specsyn.hpp"
 #include "../utils/RngThread.hpp"
 #include "../yields/YieldCommons.hpp"
