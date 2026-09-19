@@ -10,8 +10,10 @@
 #define TESTISOTOPETABLE_HPP
 
 #include "../../src/elem/IsotopeTable.hpp"
+#include "../../src/utils/Constants.hpp"
 #include "../../src/utils/MiscUtils.hpp"
 #include <iostream>
+#include <numbers>
 #include <stdexcept>
 #include <utility>
 
@@ -93,8 +95,12 @@ inline auto testIsotopeTableStableEntry() -> int
  * @return 0 if the test passes, 1 if it fails.
  * @details
  * Tritium (Z=1, A=3) beta-decays to helium-3 (Z=2, A=3) with branching
- * ratio 1, and a mean lifetime of 5.605e8 s in slug2's own data --
- * this checks IsotopeTable reproduces both the lifetime and the
+ * ratio 1, and a mean lifetime of 5.605e8 s in slug2's own data (see
+ * data/tools/elem/build_isotope_table.py's own lifetime_units
+ * attribute) -- IsotopeTable itself converts that to yr at load time
+ * (see its own comment for why), so the expected value here is
+ * 5.605e8 / utils::yr, not the raw on-disk value. This checks
+ * IsotopeTable reproduces both the (converted) lifetime and the
  * daughter list exactly.
  */
 inline auto testIsotopeTableUnstableEntry() -> int
@@ -115,10 +121,11 @@ inline auto testIsotopeTableUnstableEntry() -> int
             "not be stable\n";
         return 1;
     }
-    if (!utils::approxEqual(h3.lifetime(), 5.605e8, 1e3))
+    constexpr double expectedLifetimeYr = 5.605e8 / utils::yr;
+    if (!utils::approxEqual(h3.lifetime(), expectedLifetimeYr, 1e3 / utils::yr))
     {
         std::cerr << "testIsotopeTableUnstableEntry: H-3 lifetime() = "
-            << h3.lifetime() << ", expected 5.605e8 s\n";
+            << h3.lifetime() << ", expected " << expectedLifetimeYr << " yr\n";
         return 1;
     }
     if (h3.daughters().size() != 1)
@@ -134,6 +141,44 @@ inline auto testIsotopeTableUnstableEntry() -> int
             << daughter.Z_ << ", " << daughter.A_ << ", "
             << daughter.branchingRatio_ << "), expected (2, 3, 1.0) "
             "(He-3, branching ratio 1)\n";
+        return 1;
+    }
+
+    return 0;
+}
+
+/**
+ * @brief Regression test that lifetime() is in yr, not the on-disk seconds
+ * @return 0 if the test passes, 1 if it fails.
+ * @details
+ * Independent of testIsotopeTableUnstableEntry()'s own precise,
+ * conversion-factor-derived check: this instead cross-checks
+ * lifetime() against a well-known real-world value from outside this
+ * codebase entirely -- Ni56's mean lifetime is its half-life
+ * (6.075 days) / ln(2) = 8.766 days -- to catch not just an unapplied
+ * conversion, but also e.g. an inverted or wrongly-scaled one, which a
+ * check built from the same utils::yr constant used to do the
+ * conversion would not. Before this conversion was added,
+ * lifetime() returned 757200 (seconds) here; expressed in days that
+ * would be 8.77e6, three orders of magnitude too large to pass the
+ * loose 20% tolerance below (chosen only to allow for the half-life
+ * figure's own limited precision, not for any real uncertainty in the
+ * conversion itself).
+ */
+inline auto testIsotopeTableNi56LifetimeInYears() -> int
+{
+    const auto& ni56 = elem::isotopeTable(28U, 56U);
+
+    constexpr double halfLifeDays = 6.075;
+    constexpr double expectedLifetimeDays = halfLifeDays / std::numbers::ln2;
+    const double lifetimeDays = ni56.lifetime() * 365.25;
+
+    if (!utils::approxEqual(lifetimeDays, expectedLifetimeDays, 0.2 * expectedLifetimeDays))
+    {
+        std::cerr << "testIsotopeTableNi56LifetimeInYears: Ni56 lifetime() = " <<
+            ni56.lifetime() << " yr (" << lifetimeDays << " days), expected " <<
+            "roughly " << expectedLifetimeDays << " days -- lifetime() may not "
+            "be correctly converted to yr\n";
         return 1;
     }
 
@@ -271,6 +316,7 @@ inline auto testIsotopeTable() -> int
     result += testIsotopeTableConstruction();
     result += testIsotopeTableStableEntry();
     result += testIsotopeTableUnstableEntry();
+    result += testIsotopeTableNi56LifetimeInYears();
     result += testIsotopeTableUnstableNoDaughterEntry();
     result += testIsotopeTableGlobalSingleton();
     result += testIsotopeTableLookup();

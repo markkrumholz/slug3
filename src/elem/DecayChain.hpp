@@ -120,10 +120,10 @@ namespace elem
 
         /**
          * @brief Return each product isotope's own abundance after time t
-         * @param t Elapsed time since one atom of products()[0] (the
+         * @param t Elapsed time, in yr (matching every isotope's own
+         *   lifetime()), since one atom of products()[0] (the
          *   starting isotope) was present, and no atoms of any other
-         *   product yet, in the same time units as every isotope's own
-         *   lifetime()
+         *   product yet
          * @return A vector of products().size() values, in products()'s
          *   own order: result[j] is the number of atoms of products()[j]
          *   expected to be present at time t, per atom of products()[0]

@@ -335,11 +335,11 @@ namespace yields
          *   yieldChannels() entry's own hasYield(mass) -- see @details
          * @param feH [Fe/H]; need not lie within every yieldChannels()
          *   entry's own feH() range -- see @details
-         * @param dtDecay Elapsed time (in the same units as every
-         *   isotope's own lifetime()) over which to apply radioactive
-         *   decay to the raw per-channel yields, before returning them;
-         *   0 (the default) applies no decay at all. Ignored entirely
-         *   if controls().noDecay() is true -- see @details
+         * @param dtDecay Elapsed time, in yr, over which to apply
+         *   radioactive decay to the raw per-channel yields, before
+         *   returning them; 0 (the default) applies no decay at all.
+         *   Ignored entirely if controls().noDecay() is true -- see
+         *   @details
          * @return A pair (view, data): data is the backing storage,
          *   data.data() the origin of view; view is an mdspan of shape
          *   (yieldChannels().size(), isotopes().size()), i.e.
@@ -423,9 +423,8 @@ namespace yields
 
         /**
          * @brief Apply radioactive decay, over dtDecay, to one array of per-isotope masses, in place
-         * @param dtDecay Elapsed time to apply each unstable isotope's
-         *   own decayChains_ entry over (in the same units as every
-         *   isotope's own lifetime())
+         * @param dtDecay Elapsed time, in yr, to apply each unstable
+         *   isotope's own decayChains_ entry over
          * @param values One mass (Msun) per entry of isotopes_, in the
          *   same order; overwritten in place with the post-decay masses
          * @details
