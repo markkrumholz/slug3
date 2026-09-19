@@ -1780,6 +1780,64 @@ def test_cluster_advance_backwards_raises(sim_controls):
         cluster.advance(1.0)
 
 
+def test_cluster_star_death_times(sim_controls):
+    """starDeathTimes() has one entry per starMasses() entry, each
+    equal to formTime() plus this cluster's own tracks' starLifetime()
+    at that mass and [Fe/H] -- or +/-inf for a mass outside the
+    tracks' own tabulated mass grid, mirroring
+    tests/core/testCluster.cpp's own testClusterStarDeathTimes(). The
+    whole list is sorted non-increasing (largest death time first),
+    and deadStarDeathTimes() starts out empty."""
+    cluster = slug.Cluster(CLUSTER_TARGET_MASS, 20, 0.0, sim_controls)
+    masses = cluster.starMasses()
+    death_times = cluster.starDeathTimes()
+
+    assert len(death_times) == len(masses)
+    assert len(cluster.deadStarDeathTimes()) == 0
+
+    tracks = sim_controls.tracks
+    prev = math.inf
+    for m, t in zip(masses, death_times):
+        if m < tracks.mMin():
+            expected = math.inf
+        elif m > tracks.mMax():
+            expected = -math.inf
+        else:
+            expected = cluster.formTime() + tracks.starLifetime(m, cluster.feH())
+        assert t == expected
+        assert t <= prev
+        prev = t
+
+
+def test_cluster_dead_star_death_times(sim_controls):
+    """After advance(), deadStarDeathTimes() matches deadStarMasses()
+    one-for-one, every entry is before the time advanced to, and every
+    remaining starDeathTimes() entry is at or after it -- mirroring
+    tests/core/testCluster.cpp's own testClusterDeadStarDeathTimes().
+    Uses a mass 100x CLUSTER_TARGET_MASS (rather than that constant
+    itself) to make at least one death at age_yr overwhelmingly likely
+    regardless of live rng state -- unlike the C++ suite, nothing here
+    seeds the rng for reproducibility (no such binding exists), so this
+    test cannot rely on a fixed draw the way testClusterDeadStarDeathTimes()
+    does."""
+    age_yr = 5e6
+    cluster = slug.Cluster(100.0 * CLUSTER_TARGET_MASS, 21, 0.0, sim_controls)
+    cluster.advance(age_yr)
+
+    dead = cluster.deadStarMasses()
+    t_died = cluster.deadStarDeathTimes()
+    assert len(dead) > 0
+    assert len(t_died) == len(dead)
+
+    tracks = sim_controls.tracks
+    for m, t in zip(dead, t_died):
+        assert t < age_yr
+        assert t == cluster.formTime() + tracks.starLifetime(m, cluster.feH())
+
+    for t in cluster.starDeathTimes():
+        assert t >= age_yr
+
+
 def test_cluster_tracks_returns_tracks2d(sim_controls):
     """tracks() should return a usable Tracks2D spanning the
     MIST_test mass grid."""

@@ -12,6 +12,7 @@
 #include "../nebular/Nebular.hpp"
 #include "../tracks/TrackCommons.hpp"
 #include "../tracks/Tracks2D.hpp"
+#include "../tracks/Tracks3D.hpp"
 #include "../utils/GKIntegratorData.hpp"
 #include "../utils/PDFIntegrator.hpp"
 #include "../utils/RngThread.hpp"
@@ -68,6 +69,64 @@ namespace
         }
         return result;
     }
+
+    /**
+     * @brief Jointly sort a cluster's stellar masses and death times by death time, descending
+     * @param m Stellar masses (Cluster::m_) -- reordered in place
+     * @param tDeath Death time of each entry of m, in the same order
+     *   (Cluster::tDeath_) -- reordered in place, alongside m
+     * @details
+     * Used by both Cluster constructors right after tDeath is first
+     * computed, so that m_/tDeath_ end up with the stars that will die
+     * soonest (smallest tDeath_) at the back of both lists -- see
+     * tDeath_'s own comment for why.
+     */
+    void sortByDeathTimeDescending(std::vector<double>& m, std::vector<double>& tDeath)
+    {
+        std::vector<std::size_t> order(m.size());
+        std::iota(order.begin(), order.end(), 0UL);
+        std::ranges::sort(order, std::ranges::greater{},
+            [&tDeath](const std::size_t i) { return tDeath[i]; }); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i < tDeath.size() == m.size() by construction, for every entry of order
+
+        std::vector<double> mSorted(m.size());
+        std::vector<double> tDeathSorted(tDeath.size());
+        for (std::size_t i = 0; i < order.size(); ++i)
+        {
+            mSorted[i] = m[order[i]]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- order[i] < m.size() by construction, i < order.size() == m.size()
+            tDeathSorted[i] = tDeath[order[i]]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
+        }
+        m = std::move(mSorted);
+        tDeath = std::move(tDeathSorted);
+    }
+
+    /**
+     * @brief A star's lifetime, treating masses outside the tracks' own mass grid specially
+     * @param tracks3D The Tracks3D to query -- controls().tracks()
+     * @param m Stellar mass, in Msun
+     * @param feh [Fe/H] to evaluate the lifetime at
+     * @return tracks3D.starLifetime(m, feh) if tracks3D.mMin() <= m <=
+     *   tracks3D.mMax(); +infinity if m is below tracks3D.mMin() (no
+     *   tabulated lifetime for so low a mass -- treated as living
+     *   forever, matching computeSpec()'s own treatment of such stars
+     *   as contributing zero luminosity rather than ever dying);
+     *   -infinity if m is above tracks3D.mMax() (no tabulated lifetime
+     *   for so massive a star either -- treated as already dead at
+     *   any time this simulation can resolve)
+     * @details
+     * Tracks3D::starLifetime() itself asserts its mass argument lies
+     * within the tracks' own tabulated mass grid, so calling it
+     * directly on every entry of m_ would crash whenever the IMF's own
+     * mass range extends beyond that grid (e.g. an IMF minimum below
+     * the tracks' own minimum mass, which readTracks() already warns
+     * about elsewhere). Used by both Cluster constructors (to build
+     * tDeath_) and yieldStar().
+     */
+    auto starLifetimeClamped(const tracks::Tracks3D& tracks3D, const double m, const double feh) -> double
+    {
+        if (m < tracks3D.mMin()) { return std::numeric_limits<double>::infinity(); }
+        if (m > tracks3D.mMax()) { return -std::numeric_limits<double>::infinity(); }
+        return tracks3D.starLifetime(m, feh);
+    }
 } // namespace
 
 // Constructor
@@ -114,6 +173,17 @@ core::Cluster::Cluster(const unsigned long uid,
     {
         tracks_ = sc.tracks()->sliceConstFeH(feH_);
     }
+
+    // Death time of every star in m_, then jointly sort m_/tDeath_ by
+    // tDeath_, descending, so updateLivingStars() can find newly-dead
+    // stars with a simple backward scan -- see tDeath_'s own comment.
+    // tDied_ starts out empty: nothing has died yet.
+    tDeath_.reserve(m_.size());
+    for (const double m : m_)
+    {
+        tDeath_.push_back(formTime_ + starLifetimeClamped(*sc.tracks(), m, feH_));
+    }
+    sortByDeathTimeDescending(m_, tDeath_);
 
     // If yield channels were requested, size yields_ to hold one
     // (currently zero) entry per isotope, times one row per channel
@@ -201,6 +271,16 @@ core::Cluster::Cluster(const unsigned long uid,
         tracks_ = sc.tracks()->sliceConstFeH(feH_);
     }
 
+    // Death time of every star in m_, then jointly sort m_/tDeath_ by
+    // tDeath_, descending -- see the primary constructor's own
+    // identical comment.
+    tDeath_.reserve(m_.size());
+    for (const double m : m_)
+    {
+        tDeath_.push_back(formTime_ + starLifetimeClamped(*sc.tracks(), m, feH_));
+    }
+    sortByDeathTimeDescending(m_, tDeath_);
+
     // If yield channels were requested, size yields_ to hold one
     // (currently zero) entry per isotope, times one row per channel
     // if SimControls::yieldsChannelDecomposed() is true (matching
@@ -254,7 +334,7 @@ void core::Cluster::advance(const double t)
     const auto logAge = std::max(std::log10(curTime_ - formTime_), tracks().logTMin());
 
     // Update list of alive and dead stars to new cluster age
-    updateLivingStars(logAge);
+    updateLivingStars();
 
     // Get isochrone for new time
     isochrone_ = tracks().getIsochrone(logAge);
@@ -289,61 +369,28 @@ void core::Cluster::advance(const double t)
     advanced_ = true;
 }
 
-// Update lists of alive and dead stars to current age
-// NOLINTBEGIN(misc-include-cleaner) -- clang-tidy < 19 lacks stdlib symbol
-// mappings for std::ranges::lower_bound / upper_bound; <algorithm> is correct.
-void core::Cluster::updateLivingStars(const double logAge)
+// Update lists of alive and dead stars to current age -- see this
+// method's own header comment for why a simple backward scan over
+// tDeath_ suffices, now that m_/tDeath_ are kept jointly sorted by
+// tDeath_, descending (see tDeath_'s own comment)
+void core::Cluster::updateLivingStars()
 {
-    // Clear the list of dead stars
+    // Clear the lists of dead stars/death times
     mDead_.clear();
+    tDied_.clear();
 
-    // Get the live mass range for this time
-   const auto liveMassRange = tracks().liveMassRange(logAge);
-
-    // Use live mass range to remove dead stars, being
-    // careful to handle special case when liveMassRange is
-    // empty, indicating all stars are dead
-    if (liveMassRange.empty())
-    { 
-        mDead_ = m_;
-        m_.clear();
-    }
-    else
+    // Pop stars off the back of m_/tDeath_ (the ones that will die
+    // soonest) for as long as they have already died as of curTime_;
+    // every remaining entry, once this stops, is guaranteed to have a
+    // tDeath_ still >= curTime_, since the list is sorted
+    while (!tDeath_.empty() && tDeath_.back() < curTime_)
     {
-        // If the first entry in liveMassRange is not the
-        // minimum mass in the tracks, kill stars with masses
-        // below this mass
-        if (liveMassRange.front().first != tracks().mMin())
-        {
-            auto it = std::ranges::upper_bound(
-                m_, liveMassRange.front().first);
-            mDead_.insert(mDead_.end(), m_.begin(), it);
-        }
-
-        // Loop over entries in liveMassRange, removing stars
-        // with masses larger than the second value in one entry
-        // and smaller than the first value in the next. Note that
-        // we write this as a range-based loop since we need to
-        // access both element i and element i+1 inside the same
-        // iteration.
-        for (size_t i = 0; i < liveMassRange.size()-1; i++)
-        {
-            auto itStart = std::ranges::lower_bound(
-                m_, liveMassRange[i].second); //NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-            auto itEnd = std::ranges::upper_bound(
-                m_, liveMassRange[i+1].first); //NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-            mDead_.insert(mDead_.end(), itStart, itEnd);
-            m_.erase(itStart, itEnd);
-        }
-
-        // Kill stars more massive than the highest mass in liveMassRange
-        auto it = std::ranges::lower_bound(m_, 
-            liveMassRange.back().second);
-        mDead_.insert(mDead_.end(), it, m_.end());
-        m_.erase(it, m_.end());
+        mDead_.push_back(m_.back());
+        tDied_.push_back(tDeath_.back());
+        m_.pop_back();
+        tDeath_.pop_back();
     }
 }
-// NOLINTEND(misc-include-cleaner)
 
 // Compute the population spectrum (and, if requested, nebular
 // emission and/or extinction) at the current isochrone, if a spectral
@@ -507,12 +554,19 @@ void core::Cluster::computeYields()
     const bool decomposed = sc.yieldsChannelDecomposed();
 
     // Stochastic (individually-sampled) stars that died during the
-    // most recent advance() call
-    for (const double mass : mDead_)
+    // most recent advance() call -- mDead_/tDied_ are the same length
+    // and in the same order (both filled together by
+    // updateLivingStars(), see its own comment). dtDecay is the time
+    // elapsed since each star actually died (curTime_ - tDied_[i]) if
+    // controls().noDecay() is false, or 0 (no decay applied at all) if
+    // it is true.
+    for (std::size_t i = 0; i < mDead_.size(); ++i)
     {
+        const double mass = mDead_[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i < mDead_.size() by loop bound
+        const double dtDecay = sc.noDecay() ? 0.0 : curTime_ - tDied_[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i < mDead_.size() == tDied_.size() by construction, see updateLivingStars()'s own comment
         if (decomposed)
         {
-            const auto& data = yields->yield(mass, feH_).second;
+            const auto& data = yields->yield(mass, feH_, dtDecay).second;
             for (std::size_t k = 0; k < data.size(); ++k)
             {
                 yields_[k] += data[k]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- yields_ and data are both sized nchannels * isotopes().size() by construction, see yields_'s own comment
@@ -520,7 +574,7 @@ void core::Cluster::computeYields()
         }
         else
         {
-            const auto sum = yields->yieldSum(mass, feH_);
+            const auto sum = yields->yieldSum(mass, feH_, dtDecay);
             for (std::size_t j = 0; j < sum.size(); ++j)
             {
                 yields_[j] += sum[j]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- yields_ and sum are both sized isotopes().size() by construction, see yields_'s own comment
@@ -555,7 +609,8 @@ void core::Cluster::computeYields()
     // below minStochMass() (the non-stochastic population's own upper
     // mass limit -- any part at or above it belongs to the stochastic
     // stars already handled above, via mDead_)
-    using YieldSegFn = std::vector<double> (*)(double, double, const yields::Yields&, bool);
+    using YieldSegFn = std::vector<double> (*)(double, double, const yields::Yields&, bool,
+        const io::SimControls&, double, double);
     const utils::PDFIntegrator<YieldSegFn> integrator(
         sc.imf(), static_cast<YieldSegFn>(&Cluster::yieldStar), yields_.size(),
         false, sc.intMaxIter(), sc.intAbsTol(), sc.intRelTol());
@@ -566,7 +621,8 @@ void core::Cluster::computeYields()
         const double m1 = std::min(hi, sc.minStochMass());
         if (m0 >= m1) { continue; } // empty once clipped below minStochMass()
 
-        const auto segResult = integrator.integrate(m0, m1, feH_, *yields, decomposed);
+        const auto segResult = integrator.integrate(m0, m1, feH_, *yields, decomposed,
+            sc, curTime_, formTime_);
         for (std::size_t k = 0; k < segResult.size(); ++k)
         {
             yields_[k] += segResult[k] * birthNonStochMass_; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- yields_ and segResult are both sized yields_.size() by construction (segResult via nInt_ above)
@@ -584,12 +640,16 @@ auto core::Cluster::lbolStar(const double m, const Segment& segment) -> std::arr
 }
 
 // Per-star nucleosynthetic yield, given a mass and [Fe/H] -- see this
-// method's own header comment for why m/feH/yields/decomposed are all
-// taken as explicit arguments rather than captured state
+// method's own header comment for why m/feH/yields/decomposed/
+// controls/curTime/formTime are all taken as explicit arguments rather
+// than captured state, and for the dtDecay convention below
 auto core::Cluster::yieldStar(
-    const double m, const double feH, const yields::Yields& yields, const bool decomposed)
+    const double m, const double feH, const yields::Yields& yields, const bool decomposed,
+    const io::SimControls& controls, const double curTime, const double formTime)
     -> std::vector<double>
 {
-    if (decomposed) { return yields.yield(m, feH).second; }
-    return yields.yieldSum(m, feH);
+    const double dtDecay = controls.noDecay() ? 0.0 :
+        curTime - formTime - starLifetimeClamped(*controls.tracks(), m, feH);
+    if (decomposed) { return yields.yield(m, feH, dtDecay).second; }
+    return yields.yieldSum(m, feH, dtDecay);
 }

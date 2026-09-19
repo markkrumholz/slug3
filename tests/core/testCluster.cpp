@@ -24,6 +24,7 @@
 #include <functional>
 #include <iostream>
 #include <iterator>
+#include <limits>
 #include <numeric>
 #include <string>
 #include <string_view>
@@ -109,12 +110,15 @@ static auto testClusterAdvance() -> int
         }
 
         // Verify that starMasses() contains no mass above mMaxAlive.
-        // The list is sorted, so checking the last element is sufficient.
+        // starMasses() is not documented to be sorted by mass (indeed,
+        // internally it is now kept sorted by death time -- see
+        // Cluster::tDeath_'s own comment), so check every element
+        // rather than assuming any particular order.
         const auto& alive = cluster.starMasses();
-        if (!alive.empty() && alive.back() > mMaxAlive)
+        if (const auto it = std::ranges::max_element(alive); it != alive.end() && *it > mMaxAlive)
         {
             std::cerr << "testCluster: advance: starMasses() contains mass "
-                << alive.back() << " > mMaxAlive " << mMaxAlive
+                << *it << " > mMaxAlive " << mMaxAlive
                 << " at age " << ageYr << " yr\n";
             return 1;
         }
@@ -150,6 +154,148 @@ static auto testClusterAdvance() -> int
     return 0;
 }
 
+// Verify Cluster::starDeathTimes() at construction (before advance()
+// has ever run): one entry per starMasses() entry, in the same order,
+// each equal to formTime() + this cluster's own tracks()' starLifetime
+// at that mass, and the whole list sorted non-increasing (largest
+// tDeath_ first, smallest last) -- see Cluster::tDeath_'s own comment
+// for why. Masses outside the tracks' own tabulated mass grid (the
+// IMF here extends below the tracks' own minimum -- see the
+// "minimum mass in selected tracks" warning readTracks() itself
+// prints) are treated specially: below the grid, "infinitely" long
+// lived; above it, already dead -- mirrored here via the same
+// clamping Cluster itself applies, computed independently through
+// SimControls' own public tracks() accessor rather than by calling
+// any private Cluster machinery.
+static auto testClusterStarDeathTimes() -> int
+{
+    try
+    {
+        const toml::table inputDeck = toml::parse_file(inputFile);
+        const io::SimControls controls(inputDeck);
+        const auto tr = controls.tracks();
+
+        utils::rng().seed(rngSeed);
+        const core::Cluster cluster(0, 1e4, 0.0, controls);
+
+        const auto& masses = cluster.starMasses();
+        const auto& deathTimes = cluster.starDeathTimes();
+        if (deathTimes.size() != masses.size())
+        {
+            std::cerr << "testCluster: starDeathTimes: size " << deathTimes.size() <<
+                " does not match starMasses() size " << masses.size() << "\n";
+            return 1;
+        }
+
+        if (!cluster.deadStarDeathTimes().empty())
+        {
+            std::cerr << "testCluster: starDeathTimes: expected deadStarDeathTimes() "
+                "to be empty before advance() has ever run\n";
+            return 1;
+        }
+
+        for (std::size_t i = 0; i < masses.size(); ++i)
+        {
+            const double m = masses[i];
+            double expected = NAN;
+            if (m < tr->mMin()) { expected = std::numeric_limits<double>::infinity(); }
+            else if (m > tr->mMax()) { expected = -std::numeric_limits<double>::infinity(); }
+            else { expected = cluster.formTime() + tr->starLifetime(m, cluster.feH()); }
+
+            if (deathTimes[i] != expected)
+            {
+                std::cerr << "testCluster: starDeathTimes: starDeathTimes()[" << i << "] = " <<
+                    deathTimes[i] << ", expected " << expected << " for mass " << m << "\n";
+                return 1;
+            }
+
+            if (i > 0 && deathTimes[i] > deathTimes[i - 1])
+            {
+                std::cerr << "testCluster: starDeathTimes: not sorted non-increasing at index " <<
+                    i << ": " << deathTimes[i - 1] << " then " << deathTimes[i] << "\n";
+                return 1;
+            }
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testCluster: starDeathTimes test failed: " << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Verify Cluster::deadStarDeathTimes() after advance(): matches
+// deadStarMasses() one-for-one, every entry is < curTime (== ageYr,
+// since formTime() is 0 here), and every remaining starDeathTimes()
+// entry is >= curTime -- exactly the invariant updateLivingStars()'s
+// own backward scan relies on.
+static auto testClusterDeadStarDeathTimes() -> int
+{
+    constexpr double ageYr = 5e6;
+
+    try
+    {
+        const toml::table inputDeck = toml::parse_file(inputFile);
+        const io::SimControls controls(inputDeck);
+        const auto tr = controls.tracks();
+
+        utils::rng().seed(rngSeed);
+        core::Cluster cluster(0, 1e4, 0.0, controls);
+        cluster.advance(ageYr);
+
+        const auto& dead = cluster.deadStarMasses();
+        const auto& tDied = cluster.deadStarDeathTimes();
+        if (dead.empty())
+        {
+            std::cerr << "testCluster: deadStarDeathTimes: expected some dead stars at "
+                << ageYr << " yr\n";
+            return 1;
+        }
+        if (tDied.size() != dead.size())
+        {
+            std::cerr << "testCluster: deadStarDeathTimes: size " << tDied.size() <<
+                " does not match deadStarMasses() size " << dead.size() << "\n";
+            return 1;
+        }
+
+        for (std::size_t i = 0; i < dead.size(); ++i)
+        {
+            if (tDied[i] >= ageYr)
+            {
+                std::cerr << "testCluster: deadStarDeathTimes: deadStarDeathTimes()[" << i <<
+                    "] = " << tDied[i] << " >= curTime " << ageYr << "\n";
+                return 1;
+            }
+            const double expected = cluster.formTime() + tr->starLifetime(dead[i], cluster.feH());
+            if (tDied[i] != expected)
+            {
+                std::cerr << "testCluster: deadStarDeathTimes: deadStarDeathTimes()[" << i <<
+                    "] = " << tDied[i] << ", expected " << expected <<
+                    " for mass " << dead[i] << "\n";
+                return 1;
+            }
+        }
+
+        for (const double t : cluster.starDeathTimes())
+        {
+            if (t < ageYr)
+            {
+                std::cerr << "testCluster: deadStarDeathTimes: starDeathTimes() contains " <<
+                    t << " < curTime " << ageYr << " (should have been moved to "
+                    "deadStarDeathTimes())\n";
+                return 1;
+            }
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testCluster: deadStarDeathTimes test failed: " << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
 // Verify min_stoch_mass behaviour: starMasses() should contain only stars at
 // or above min_stoch_mass, and their total mass should be within 10% of the
 // stochastic fraction of the target cluster mass.
@@ -170,11 +316,14 @@ static auto testClusterMinStochMass() -> int
         const auto& masses = cluster.starMasses();
 
         // Every returned star must be at or above min_stoch_mass.
-        // The list is sorted, so checking the first element is sufficient.
-        if (!masses.empty() && masses.front() < minStochMass)
+        // starMasses() is not documented to be sorted by mass -- see
+        // testClusterAdvance()'s own identical comment -- so check
+        // every element rather than assuming any particular order.
+        if (const auto it = std::ranges::min_element(masses);
+            it != masses.end() && *it < minStochMass)
         {
             std::cerr << "testCluster: minStochMass: starMasses() contains mass "
-                << masses.front() << " < minStochMass " << minStochMass << "\n";
+                << *it << " < minStochMass " << minStochMass << "\n";
             return 1;
         }
 
@@ -831,7 +980,11 @@ static auto testClusterExtinctLines() -> int
 // single ccsn/sukhbold_test yield channel added; at ageYr = 5e6,
 // testClusterAdvance() (same base deck/mass/age) already confirms
 // some stars have died, and the turnoff mass at that age (~70 Msun)
-// lies within sukhbold_test's own native range ([18.2, 100]).
+// lies within sukhbold_test's own native range ([18.2, 100]). Sets
+// yields.no_decay = true: this test is about the accumulation logic
+// (that every dead star's own yield ends up in yields_ exactly once),
+// not about radioactive decay -- see testClusterYieldsStochasticDecay()
+// for a dedicated test of the latter.
 static auto testClusterYieldsStochastic() -> int
 {
     constexpr double ageYr = 5e6;
@@ -844,6 +997,7 @@ static auto testClusterYieldsStochastic() -> int
         inputDeck.insert("yields", toml::table{
             { "channel1", toml::table{ { "channel", "ccsn" }, { "model", "sukhbold_test" } } },
             { "registry", std::string(yieldsRegistry) },
+            { "no_decay", true },
         });
         const io::SimControls controls(inputDeck);
 
@@ -922,7 +1076,10 @@ static auto testClusterYieldsStochastic() -> int
 // describes, to force fracStochMass_ to exactly 0 -- the whole
 // population ends up continuously-sampled, starMasses()/
 // deadStarMasses() both staying empty throughout, isolating this path
-// from testClusterYieldsStochastic()'s own.
+// from testClusterYieldsStochastic()'s own. Sets yields.no_decay =
+// true for the same reason testClusterYieldsStochastic() does -- see
+// its own comment; testClusterYieldsNonStochasticDecay() covers decay
+// for this (continuously-sampled) population specifically.
 static auto testClusterYieldsNonStochastic() -> int
 {
     constexpr double ageYr = 5e6;
@@ -936,6 +1093,7 @@ static auto testClusterYieldsNonStochastic() -> int
         inputDeck.insert("yields", toml::table{
             { "channel1", toml::table{ { "channel", "ccsn" }, { "model", "sukhbold_test" } } },
             { "registry", std::string(yieldsRegistry) },
+            { "no_decay", true },
         });
         const io::SimControls controls(inputDeck);
 
@@ -1040,7 +1198,10 @@ static auto testClusterYieldsNonStochastic() -> int
 // single advance(ageYr) into several steps (rather than guessing a
 // single split point likely to straddle a death, which proved fragile
 // against this rngSeed's own draw), deliberately never calling
-// yields() until after all of them.
+// yields() until after all of them. Sets yields.no_decay = true for
+// the same reason testClusterYieldsStochastic() does -- see its own
+// comment: this test is about mDead_ accumulation across advance()
+// calls, not decay.
 static auto testClusterYieldsMultipleAdvanceCalls() -> int
 {
     constexpr double ageYr = 5e6;
@@ -1060,6 +1221,7 @@ static auto testClusterYieldsMultipleAdvanceCalls() -> int
         inputDeck.insert("yields", toml::table{
             { "channel1", toml::table{ { "channel", "ccsn" }, { "model", "sukhbold_test" } } },
             { "registry", std::string(yieldsRegistry) },
+            { "no_decay", true },
         });
         const io::SimControls controls(inputDeck);
 
@@ -1119,11 +1281,229 @@ static auto testClusterYieldsMultipleAdvanceCalls() -> int
     return 0;
 }
 
+// Verify Cluster::yields()'s stochastic contribution when radioactive
+// decay is enabled (yields.no_decay left at its default, false) --
+// same base setup as testClusterYieldsStochastic(), but independently
+// recomputes the expected total using deadStarMasses()/
+// deadStarDeathTimes() together, passing dtDecay = curTime - tDied to
+// yieldSum() for each dead star, exactly as Cluster::computeYields()
+// itself does (see its own comment). curTime is ageYr here, since
+// formTime() is 0.
+static auto testClusterYieldsStochasticDecay() -> int
+{
+    constexpr double ageYr = 5e6;
+    constexpr double clusterMass = 1e4;
+    constexpr double tol = 1e-9;
+
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFile);
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{ { "channel", "ccsn" }, { "model", "sukhbold_test" } } },
+            { "registry", std::string(yieldsRegistry) },
+        });
+        const io::SimControls controls(inputDeck);
+
+        if (controls.noDecay())
+        {
+            std::cerr << "testCluster: yieldsStochasticDecay: test bug: expected "
+                "noDecay() == false by default\n";
+            return 1;
+        }
+
+        utils::rng().seed(rngSeed);
+        core::Cluster cluster(0, clusterMass, 0.0, controls);
+        cluster.advance(ageYr);
+
+        const auto& dead = cluster.deadStarMasses();
+        const auto& tDied = cluster.deadStarDeathTimes();
+        if (dead.empty())
+        {
+            std::cerr << "testCluster: yieldsStochasticDecay: expected some dead stars at "
+                << ageYr << " yr\n";
+            return 1;
+        }
+
+        const std::size_t niso = controls.yields()->isotopes().size();
+        std::vector<double> expected(niso, 0.0);
+        for (std::size_t i = 0; i < dead.size(); ++i)
+        {
+            const double dtDecay = ageYr - tDied[i];
+            const auto sum = controls.yields()->yieldSum(dead[i], cluster.feH(), dtDecay);
+            for (std::size_t j = 0; j < niso; ++j) { expected[j] += sum[j]; }
+        }
+
+        const auto& actual = cluster.yields();
+        if (actual.size() != expected.size())
+        {
+            std::cerr << "testCluster: yieldsStochasticDecay: yields() has size " <<
+                actual.size() << ", expected " << expected.size() << "\n";
+            return 1;
+        }
+        for (std::size_t j = 0; j < niso; ++j)
+        {
+            if (std::abs(actual[j] - expected[j]) > tol * std::max(1.0, std::abs(expected[j])))
+            {
+                std::cerr << "testCluster: yieldsStochasticDecay: yields()[" << j << "] = " <<
+                    actual[j] << ", expected " << expected[j] << "\n";
+                return 1;
+            }
+        }
+
+        // Sanity check that decay actually changed something relative
+        // to the no-decay total, computed the same way but with
+        // dtDecay = 0 -- otherwise this test could pass vacuously if,
+        // e.g., dtDecay were silently always 0.
+        std::vector<double> expectedNoDecay(niso, 0.0);
+        for (const double m : dead)
+        {
+            const auto sum = controls.yields()->yieldSum(m, cluster.feH(), 0.0);
+            for (std::size_t j = 0; j < niso; ++j) { expectedNoDecay[j] += sum[j]; }
+        }
+        bool anyDifference = false;
+        for (std::size_t j = 0; j < niso; ++j)
+        {
+            if (std::abs(expected[j] - expectedNoDecay[j]) > tol) { anyDifference = true; break; }
+        }
+        if (!anyDifference)
+        {
+            std::cerr << "testCluster: yieldsStochasticDecay: decayed and undecayed "
+                "totals are identical -- test is not exercising decay\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testCluster: yieldsStochasticDecay test failed: " << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Verify Cluster::yields()'s continuously-sampled contribution when
+// radioactive decay is enabled -- same base setup as
+// testClusterYieldsNonStochastic(), but independently recomputes the
+// expected total using dtDecay(m) = curTime - formTime -
+// tracks()->starLifetime(m, feH), exactly as Cluster::yieldStar()
+// itself does (see its own comment). No mass-grid clamping is needed
+// here (unlike testClusterStarDeathTimes()'s own): the mass range
+// integrated over is always a subset of the tracks' own tabulated
+// grid, by construction -- see computeYields()'s own comment.
+static auto testClusterYieldsNonStochasticDecay() -> int
+{
+    constexpr double ageYr = 5e6;
+    constexpr double clusterMass = 1e4;
+    constexpr double tol = 1e-9;
+
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFile);
+        inputDeck.at_path("stars").as_table()->insert_or_assign("min_stoch_mass", 120.0);
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{ { "channel", "ccsn" }, { "model", "sukhbold_test" } } },
+            { "registry", std::string(yieldsRegistry) },
+        });
+        const io::SimControls controls(inputDeck);
+
+        utils::rng().seed(rngSeed);
+        core::Cluster cluster(0, clusterMass, 0.0, controls);
+        cluster.advance(ageYr);
+        const auto& tr = cluster.tracks();
+
+        if (!cluster.deadStarMasses().empty())
+        {
+            std::cerr << "testCluster: yieldsNonStochasticDecay: expected an empty "
+                "deadStarMasses(): no star should ever be individually sampled\n";
+            return 1;
+        }
+
+        // Same live-mass-range-difference setup as
+        // testClusterYieldsNonStochastic() -- see its own comment
+        const auto birthRange = tr.liveMassRange(tr.logTMin());
+        const auto nowRange = tr.liveMassRange(std::max(std::log10(ageYr), tr.logTMin()));
+        if (birthRange.size() != 1 || nowRange.size() != 1 ||
+            birthRange.front().first != nowRange.front().first)
+        {
+            std::cerr << "testCluster: yieldsNonStochasticDecay: live mass range shape "
+                "assumption violated -- test needs updating\n";
+            return 1;
+        }
+        const double m0 = nowRange.front().second;
+        const double m1 = std::min(birthRange.front().second, controls.minStochMass());
+        if (m0 >= m1)
+        {
+            std::cerr << "testCluster: yieldsNonStochasticDecay: expected a non-empty "
+                "died-since-birth mass range at " << ageYr << " yr\n";
+            return 1;
+        }
+
+        const std::size_t niso = controls.yields()->isotopes().size();
+        const std::function<std::vector<double>(double)> integrand =
+            [&controls, &cluster, &tr](const double m) -> std::vector<double>
+            {
+                const double dtDecay = ageYr - cluster.formTime() - tr.starLifetime(m);
+                return controls.yields()->yieldSum(m, cluster.feH(), dtDecay);
+            };
+        const utils::PDFIntegrator<std::function<std::vector<double>(double)>> integrator(
+            controls.imf(), integrand, niso,
+            false, controls.intMaxIter(), controls.intAbsTol(), controls.intRelTol());
+        const auto integral = integrator.integrate(m0, m1);
+
+        const auto& actual = cluster.yields();
+        if (actual.size() != niso)
+        {
+            std::cerr << "testCluster: yieldsNonStochasticDecay: yields() has size " <<
+                actual.size() << ", expected " << niso << "\n";
+            return 1;
+        }
+        for (std::size_t j = 0; j < niso; ++j)
+        {
+            const double expected = integral[j] * clusterMass;
+            if (std::abs(actual[j] - expected) > tol * std::max(1.0, std::abs(expected)))
+            {
+                std::cerr << "testCluster: yieldsNonStochasticDecay: yields()[" << j << "] = " <<
+                    actual[j] << ", expected " << expected << "\n";
+                return 1;
+            }
+        }
+
+        // Sanity check that decay actually changed something relative
+        // to the no-decay total -- see
+        // testClusterYieldsStochasticDecay()'s own identical check
+        const std::function<std::vector<double>(double)> integrandNoDecay =
+            [&controls, &cluster](const double m) -> std::vector<double>
+            { return controls.yields()->yieldSum(m, cluster.feH(), 0.0); };
+        const utils::PDFIntegrator<std::function<std::vector<double>(double)>> integratorNoDecay(
+            controls.imf(), integrandNoDecay, niso,
+            false, controls.intMaxIter(), controls.intAbsTol(), controls.intRelTol());
+        const auto integralNoDecay = integratorNoDecay.integrate(m0, m1);
+        bool anyDifference = false;
+        for (std::size_t j = 0; j < niso; ++j)
+        {
+            if (std::abs(integral[j] - integralNoDecay[j]) > tol) { anyDifference = true; break; }
+        }
+        if (!anyDifference)
+        {
+            std::cerr << "testCluster: yieldsNonStochasticDecay: decayed and undecayed "
+                "totals are identical -- test is not exercising decay\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testCluster: yieldsNonStochasticDecay test failed: " << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
 auto testCluster() -> int
 {
     int result = 0;
     result += testClusterConstruction();
     result += testClusterAdvance();
+    result += testClusterStarDeathTimes();
+    result += testClusterDeadStarDeathTimes();
     result += testClusterMinStochMass();
     result += testClusterSpecFullyStochastic();
     result += testClusterSpecContinuousPopulation();
@@ -1136,5 +1516,7 @@ auto testCluster() -> int
     result += testClusterYieldsStochastic();
     result += testClusterYieldsNonStochastic();
     result += testClusterYieldsMultipleAdvanceCalls();
+    result += testClusterYieldsStochasticDecay();
+    result += testClusterYieldsNonStochasticDecay();
     return result;
 }

@@ -112,6 +112,24 @@ Returns
 masses : list of float
     Masses of dead stars, in Msun.)doc";
 
+static constexpr std::string_view starDeathTimesDocstring =
+    R"doc(Return the death time of every currently-alive star.
+
+Returns
+-------
+death_times : list of float
+    Death time of each entry of starMasses(), in the same order --
+    not, in general, starMasses()'s own order (both are kept sorted
+    together by death time internally, not by mass).)doc";
+
+static constexpr std::string_view deadStarDeathTimesDocstring =
+    R"doc(Return the death times of stars that died in the most recent advance() call.
+
+Returns
+-------
+death_times : list of float
+    Death time of each entry of deadStarMasses(), in the same order.)doc";
+
 static constexpr std::string_view tracksDocstring = R"doc(Return the stellar tracks at this cluster's [Fe/H].
 
 Returns
@@ -235,6 +253,10 @@ void bindCluster(py::module_& m)
                 starMassesDocstring.data())
         .def("deadStarMasses", &core::Cluster::deadStarMasses,
                 deadStarMassesDocstring.data())
+        .def("starDeathTimes", &core::Cluster::starDeathTimes,
+                starDeathTimesDocstring.data())
+        .def("deadStarDeathTimes", &core::Cluster::deadStarDeathTimes,
+                deadStarDeathTimesDocstring.data())
         .def("tracks", &core::Cluster::tracks,
                 tracksDocstring.data(),
                 py::return_value_policy::reference_internal)
