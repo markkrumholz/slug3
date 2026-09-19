@@ -2938,6 +2938,81 @@ def test_yields_yield_and_yield_sum_shapes(yields_controls):
         assert total[j] == pytest.approx(rows[0][j] + rows[1][j])
 
 
+def test_yields_yield_and_yield_sum_dt_decay():
+    """yield_()/yieldSum()'s optional dt_decay argument applies radioactive
+    decay through Yields.decayChains_. Mirrors
+    tests/io/testSimControls.cpp's testSimControlsYieldsDecayApplication():
+    Ni56 -> Co56 -> Fe56 is real and non-branching, but this fixture never
+    tabulates Co56, so the mass transiently in Co56 at time t is simply
+    dropped from the tracked total while Fe56 still receives its own
+    correct, delayed inflow via the closed-form two-step Bateman solution.
+    Uses a dedicated deck (channel1's m_min overridden to 15.0) rather than
+    the shared yields_controls fixture, so both channels answer the same
+    query mass at once."""
+    deck = tomlkit.parse(pathlib.Path(CLUSTER_DECK).read_text())
+    deck["yields"] = tomlkit.table()
+    deck["yields"]["channel1"] = {"channel": "ccsn", "model": "sukhbold_test", "m_min": 15.0}
+    deck["yields"]["channel2"] = {"channel": "ccsn", "model": "kobayashi_test"}
+    deck["yields"]["registry"] = YIELDS_REGISTRY
+    controls = slug.SimControls(tomlkit.dumps(deck))
+    yields = controls.yields
+
+    ni56 = slug.isotopeTable(28, 56)
+    co56 = slug.isotopeTable(27, 56)
+    l1 = 1.0 / ni56.lifetime()
+    l2 = 1.0 / co56.lifetime()
+    dt = 2.0 * ni56.lifetime()
+    n1 = np.exp(-l1 * dt)
+    n2 = l1 / (l2 - l1) * (np.exp(-l1 * dt) - np.exp(-l2 * dt))
+    n3 = 1.0 - n1 - n2
+
+    # Isotope order [H1, Fe56, Ni56, Ni58]
+    row0 = [5.93 * 15.0 / 18.2, 8.46e-2 * 15.0 / 18.2, 7.02e-2 * 15.0 / 18.2, 0.0]
+    row1 = [6.79, 8.52e-2, 0.0, 1.15e-3]
+    m0_ni56 = row0[2]
+    row0_decayed = [row0[0], row0[1] + m0_ni56 * n3, m0_ni56 * n1, row0[3]]
+
+    # dt_decay == 0 is a no-op
+    rows = yields.yield_(15.0, 0.0, 0.0)
+    assert rows[0] == pytest.approx(row0, abs=1e-9)
+    assert rows[1] == pytest.approx(row1, abs=1e-9)
+    total = yields.yieldSum(15.0, 0.0, 0.0)
+    assert total == pytest.approx([row0[j] + row1[j] for j in range(4)], abs=1e-9)
+
+    # dt_decay > 0 applies decay
+    rows_decayed = yields.yield_(15.0, 0.0, dt)
+    assert rows_decayed[0] == pytest.approx(row0_decayed, abs=1e-9)
+    assert rows_decayed[1] == pytest.approx(row1, abs=1e-9)
+    total_decayed = yields.yieldSum(15.0, 0.0, dt)
+    assert total_decayed == pytest.approx(
+        [row0_decayed[j] + row1[j] for j in range(4)], abs=1e-9)
+
+
+def test_yields_yield_ignores_dt_decay_when_no_decay_set():
+    """noDecay = True on the owning SimControls makes dt_decay a pure
+    no-op for yield_()/yieldSum(), even when nonzero."""
+    deck = tomlkit.parse(pathlib.Path(CLUSTER_DECK).read_text())
+    deck["yields"] = tomlkit.table()
+    deck["yields"]["channel1"] = {"channel": "ccsn", "model": "sukhbold_test", "m_min": 15.0}
+    deck["yields"]["channel2"] = {"channel": "ccsn", "model": "kobayashi_test"}
+    deck["yields"]["registry"] = YIELDS_REGISTRY
+    deck["yields"]["no_decay"] = True
+    controls = slug.SimControls(tomlkit.dumps(deck))
+    yields = controls.yields
+
+    ni56 = slug.isotopeTable(28, 56)
+    dt = 2.0 * ni56.lifetime()
+
+    row0 = [5.93 * 15.0 / 18.2, 8.46e-2 * 15.0 / 18.2, 7.02e-2 * 15.0 / 18.2, 0.0]
+    row1 = [6.79, 8.52e-2, 0.0, 1.15e-3]
+
+    rows = yields.yield_(15.0, 0.0, dt)
+    assert rows[0] == pytest.approx(row0, abs=1e-9)
+    assert rows[1] == pytest.approx(row1, abs=1e-9)
+    total = yields.yieldSum(15.0, 0.0, dt)
+    assert total == pytest.approx([row0[j] + row1[j] for j in range(4)], abs=1e-9)
+
+
 def test_yields_rebuild_yield_grid_restricts_isotopes(yields_controls):
     """rebuildYieldGrid() on Yields itself can narrow isotopes() after construction."""
     yields = yields_controls.yields

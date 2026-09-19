@@ -267,6 +267,7 @@ add_executable(slugTestCore
     src/utils/HDF5Utils.cpp
     src/elem/IsotopeTable.cpp
     src/yields/YieldChannel.cpp
+    src/elem/DecayChain.cpp
     src/yields/Yields.cpp
 )
 # slugTestCoreFull: the slow, full-scale end-to-end counterpart to
@@ -326,6 +327,7 @@ add_executable(slugTestCoreFull
     src/utils/HDF5Utils.cpp
     src/elem/IsotopeTable.cpp
     src/yields/YieldChannel.cpp
+    src/elem/DecayChain.cpp
     src/yields/Yields.cpp
 )
 # slugTestCoreFull drives a real end-to-end run (real MIST tracks, real
@@ -381,6 +383,7 @@ add_executable(slugTestIo
     src/utils/HDF5Utils.cpp
     src/elem/IsotopeTable.cpp
     src/yields/YieldChannel.cpp
+    src/elem/DecayChain.cpp
     src/yields/Yields.cpp
 )
 add_executable(slugTestNebular
@@ -418,6 +421,7 @@ add_executable(slugTestNebular
     src/utils/HDF5Utils.cpp
     src/elem/IsotopeTable.cpp
     src/yields/YieldChannel.cpp
+    src/elem/DecayChain.cpp
     src/yields/Yields.cpp
 )
 add_executable(slugTestSpecsyn
@@ -461,6 +465,7 @@ add_executable(slugTestSpecsyn
     src/utils/HDF5Utils.cpp
     src/elem/IsotopeTable.cpp
     src/yields/YieldChannel.cpp
+    src/elem/DecayChain.cpp
     src/yields/Yields.cpp
 )
 

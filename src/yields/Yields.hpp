@@ -9,12 +9,16 @@
 #ifndef YIELDS_HPP
 #define YIELDS_HPP
 
+#include "../elem/DecayChain.hpp"
 #include "../elem/ElemCommons.hpp"
+#include "../elem/IsotopeData.hpp"
 #include "YieldChannel.hpp"
 #include "YieldCommons.hpp"
 #include <cstddef>
+#include <map>
 #include <mdspan> // NOLINT(misc-include-cleaner)
 #include <memory>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -267,6 +271,13 @@ namespace yields
          * synchronized would still be empty, or already the same
          * (stale) list from a previous rebuildYieldGrid() call here.
          *
+         * Finally, decayChains_ is rebuilt from scratch to match the
+         * now-final isotopes_: cleared, then one DecayChain is
+         * constructed and inserted for every isotopes_ entry that is
+         * not stable (a stable isotope has nothing to decay, so needs
+         * no chain of its own) -- see applyDecay()'s own comment for
+         * how yield()/yieldSum() actually use these.
+         *
          * Called once by the constructor, right after every requested
          * channel has been added; also public, so a caller (e.g. from
          * Python, after addChannel() adds a further channel to an
@@ -324,6 +335,11 @@ namespace yields
          *   yieldChannels() entry's own hasYield(mass) -- see @details
          * @param feH [Fe/H]; need not lie within every yieldChannels()
          *   entry's own feH() range -- see @details
+         * @param dtDecay Elapsed time (in the same units as every
+         *   isotope's own lifetime()) over which to apply radioactive
+         *   decay to the raw per-channel yields, before returning them;
+         *   0 (the default) applies no decay at all. Ignored entirely
+         *   if controls().noDecay() is true -- see @details
          * @return A pair (view, data): data is the backing storage,
          *   data.data() the origin of view; view is an mdspan of shape
          *   (yieldChannels().size(), isotopes().size()), i.e.
@@ -351,6 +367,14 @@ namespace yields
          * stop being true -- addChannel() called again afterward
          * without a following rebuildYieldGrid()).
          *
+         * If controls().noDecay() is false (the default), applyDecay()
+         * is then called once per row, in place, with dtDecay -- see
+         * its own comment for exactly what this does. If
+         * controls().noDecay() is true, dtDecay is ignored and every
+         * row is left exactly as the raw yield tables report it: the
+         * cumulative amount of each isotope ever produced, regardless
+         * of any radioactive decay since.
+         *
          * Every call recomputes mass/feH's own yield from every channel
          * from scratch and returns freshly-allocated storage -- unlike
          * YieldChannel::yld(), this has no backing member of its own to
@@ -361,32 +385,94 @@ namespace yields
          * into the returned pair's own data, wherever the pair itself
          * ends up.
          */
-        [[nodiscard]] auto yield(double mass, double feH) const -> std::pair<Array2D, std::vector<double>>;
+        [[nodiscard]] auto yield(double mass, double feH, double dtDecay = 0.0) const
+            -> std::pair<Array2D, std::vector<double>>;
 
         /**
          * @brief Return the sum, over every channel, of yield(mass, feH)
          * @param mass Stellar mass (Msun); see yield()'s own comment
          * @param feH [Fe/H]; see yield()'s own comment
+         * @param dtDecay Elapsed time over which to apply radioactive
+         *   decay -- see yield()'s own comment for exactly what this
+         *   means and when it's ignored; applied once, to the summed
+         *   total, rather than once per channel -- see @details
          * @return A vector of isotopes().size() yields (Msun), in
          *   isotopes()'s own order: result[j] = sum over i of
-         *   yield(mass, feH)'s own view[i, j]
+         *   yield(mass, feH, 0)'s own view[i, j], decayed by dtDecay
+         *   (unless controls().noDecay() is true)
          * @throws std::runtime_error under the same conditions as yield()
          * @details
-         * Built by summing yield()'s own (nchannels, isotopes().size())
-         * array along its first axis, rather than calling every
-         * channel's own yield() a second time -- numerically identical
-         * to summing "the outputs of the calls to YieldChannel::yield"
-         * directly, since that is exactly what yield()'s own rows
-         * already are.
+         * Built by summing yield(mass, feH, 0)'s own raw (undecayed --
+         * see its own comment for why passing 0 here suffices)
+         * (nchannels, isotopes().size()) array along its first axis,
+         * rather than calling every channel's own yield() a second
+         * time, then applying decay once (if controls().noDecay() is
+         * false) to that summed total via applyDecay(), rather than
+         * once per channel: decay is linear in each isotope's own mass
+         * (applyDecay()'s own fExpect/deltaYield don't depend on which
+         * channel a given mass came from), so summing first and then
+         * decaying once is numerically identical to decaying every
+         * channel's own row and then summing -- just cheaper, since
+         * every unstable isotope's own DecayChain::yield(dtDecay) call
+         * is only ever evaluated once per yieldSum() call this way,
+         * not once per channel.
          */
-        [[nodiscard]] auto yieldSum(double mass, double feH) const -> std::vector<double>;
+        [[nodiscard]] auto yieldSum(double mass, double feH, double dtDecay = 0.0) const -> std::vector<double>;
 
     private:
+
+        /**
+         * @brief Apply radioactive decay, over dtDecay, to one array of per-isotope masses, in place
+         * @param dtDecay Elapsed time to apply each unstable isotope's
+         *   own decayChains_ entry over (in the same units as every
+         *   isotope's own lifetime())
+         * @param values One mass (Msun) per entry of isotopes_, in the
+         *   same order; overwritten in place with the post-decay masses
+         * @details
+         * For every unstable entry of isotopes_ (its own parent index
+         * p, mass values[p]), looks up its cached decayChains_ entry
+         * and calls its own yield(dtDecay) to get fExpect: the expected
+         * number of atoms of each of that chain's own products(), per
+         * atom of the parent isotope present at t=0 (see
+         * DecayChain::yield()'s own comment). For each entry k of
+         * fExpect/products(), resolves products()[k] to its own index
+         * in isotopes_ (by IsotopeData equality -- decayChains_'s own
+         * DecayChain may list products not tabulated by this Yields at
+         * all, e.g. isotopes downstream of ones no loaded channel's own
+         * model happens to produce; these are simply skipped, per this
+         * method's own @details on isotopes_ vs. products() ordering
+         * differing in general):
+         *
+         *   - If products()[k] resolves to isotopes_[p] itself (the
+         *     parent), the change in its own mass is values[p] *
+         *     (fExpect[k] - 1) -- negative (or zero, for fExpect[k] ==
+         *     1, i.e. dtDecay == 0), since fExpect[k] <= 1 is the
+         *     fraction of the parent's own original atoms that are
+         *     still the parent isotope after dtDecay; the remainder
+         *     has decayed into something else.
+         *   - Otherwise, the change in that other isotope's own mass is
+         *     +values[p] * fExpect[k]: the mass gained from the
+         *     parent's own decay into it.
+         *
+         * Every one of these changes, from every unstable isotope's own
+         * decay chain, is accumulated into one deltaYield vector before
+         * any of them are actually applied to values -- so an isotope
+         * that is itself both a direct nucleosynthetic product (already
+         * in values before this call) and a decay product of some
+         * other isotope in the same chain is not double-counted: its
+         * own depletion (if unstable) and every inflow it receives (as
+         * someone else's decay product) are all computed from the
+         * same, original (pre-decay) values, then summed once. Only
+         * after every unstable isotope's own contribution has been
+         * accumulated this way is deltaYield finally added into values.
+         */
+        void applyDecay(double dtDecay, std::span<double> values) const;
 
         const io::SimControls& controls_; // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members) -- deliberately a live reference, not a copy, matching Extinct's/Specsyn's own identical controls_ members exactly -- see either one's own comment for why. Only ever used through the same shared_ptr ownership pattern (shared_ptr<Yields> in SimControls's own yields_) as those, so the usual objection (disabling implicit copy/move assignment) doesn't apply in practice.
         std::string registryName_;        /**< Name of the yield registry file */
         std::vector<std::shared_ptr<YieldChannel>> yieldChannels_; /**< Yield channels built via addChannel(), one per entry in controls_.yieldChannels() -- see yieldChannels()'s own comment */
         elem::IsotopeList isotopes_; /**< Union of every yieldChannels_ entry's own isotopesOrig(), deduplicated and sorted -- see isotopes()'s own comment */
+        std::map<elem::IsotopeData, elem::DecayChain> decayChains_; /**< One DecayChain per unstable entry of isotopes_, keyed by that isotope itself -- (re)populated by rebuildYieldGrid(), see its own comment; used by applyDecay() */
 
     };
 

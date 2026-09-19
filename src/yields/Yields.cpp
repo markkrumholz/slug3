@@ -7,6 +7,7 @@
  */
 
 #include "Yields.hpp"
+#include "../elem/DecayChain.hpp"
 #include "../elem/ElemCommons.hpp"
 #include "../io/SimControls.hpp"
 #include "YieldChannel.hpp"
@@ -16,7 +17,9 @@
 #include <cassert>
 #include <cstddef>
 #include <iostream>
+#include <iterator>
 #include <memory>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -197,9 +200,20 @@ namespace yields
             const auto descriptor = channel->descriptor();
             channel->rebuildYieldGrid(descriptor.mMin_, descriptor.mMax_, isotopes_);
         }
+
+        // Rebuild decayChains_ to match the now-final isotopes_ -- see
+        // this method's own comment.
+        decayChains_.clear();
+        for (const auto& iso : isotopes_)
+        {
+            if (!iso.get().stable())
+            {
+                decayChains_.try_emplace(iso.get(), iso.get());
+            }
+        }
     }
 
-    auto Yields::yield(const double mass, const double feH) const
+    auto Yields::yield(const double mass, const double feH, const double dtDecay) const
         -> std::pair<Array2D, std::vector<double>>
     {
         const std::size_t nchannels = yieldChannels_.size();
@@ -217,13 +231,25 @@ namespace yields
                 data[(i * niso) + j] = row[j]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,cppcoreguidelines-pro-bounds-constant-array-index) -- i < nchannels, j < niso == row.size() (asserted above) by construction
             }
         }
+
+        if (!controls_.noDecay())
+        {
+            for (std::size_t i = 0; i < nchannels; ++i)
+            {
+                applyDecay(dtDecay, std::span<double>(data).subspan(i * niso, niso)); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i < nchannels, so i * niso + niso <= nchannels * niso == data.size() by construction
+            }
+        }
+
         const Array2D view(data.data(), nchannels, niso);
         return { view, std::move(data) };
     }
 
-    auto Yields::yieldSum(const double mass, const double feH) const -> std::vector<double>
+    auto Yields::yieldSum(const double mass, const double feH, const double dtDecay) const -> std::vector<double>
     {
-        const auto [view, data] = yield(mass, feH);
+        // Decay is applied once below, to the summed total, not here --
+        // see this method's own comment for why passing 0 suffices
+        // (yield()'s own decay step is a no-op at dtDecay == 0).
+        const auto [view, data] = yield(mass, feH, 0.0);
         const std::size_t nchannels = view.extent(0);
         const std::size_t niso = view.extent(1);
         std::vector<double> result(niso, 0.0);
@@ -234,7 +260,56 @@ namespace yields
                 result[j] += view[i, j]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i < nchannels, j < niso by construction
             }
         }
+
+        if (!controls_.noDecay())
+        {
+            applyDecay(dtDecay, result);
+        }
+
         return result;
+    }
+
+    void Yields::applyDecay(const double dtDecay, const std::span<double> values) const
+    {
+        assert(values.size() == isotopes_.size());
+        std::vector<double> deltaYield(values.size(), 0.0);
+        for (std::size_t p = 0; p < isotopes_.size(); ++p)
+        {
+            const auto& parent = isotopes_[p].get(); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- p < isotopes_.size() by construction
+            if (parent.stable()) { continue; } // nothing to decay, and no decayChains_ entry for it either -- see rebuildYieldGrid()'s own comment
+            const auto chainIt = decayChains_.find(parent);
+            assert(chainIt != decayChains_.end()); // every unstable isotopes_ entry has one, by rebuildYieldGrid()'s own construction
+            const auto fExpect = chainIt->second.yield(dtDecay);
+            const auto& products = chainIt->second.products();
+            const double parentMass = values[p]; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- p < isotopes_.size() == values.size() by construction
+            for (std::size_t k = 0; k < products.size(); ++k)
+            {
+                // products() (topologically sorted by DecayChain's own
+                // construction) is not in isotopes_'s own (Z-then-A)
+                // order, and may list isotopes isotopes_ doesn't
+                // tabulate at all -- resolve by IsotopeData equality,
+                // skipping any product not found, per this method's own
+                // comment.
+                const auto isoIt = std::ranges::find_if(isotopes_,
+                    [&products, k](const auto& candidate)
+                    { return candidate.get() == products[k].get(); }); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- k < products.size() by construction
+                if (isoIt == isotopes_.end()) { continue; }
+                const auto idx = static_cast<std::size_t>(std::distance(isotopes_.begin(), isoIt));
+                if (idx == p)
+                {
+                    // The parent isotope itself: fExpect[k] <= 1 is the
+                    // surviving fraction, so this is always <= 0 (see
+                    // this method's own comment for the sign).
+                    deltaYield[idx] += parentMass * (fExpect[k] - 1.0); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- idx < isotopes_.size() == deltaYield.size(), k < products.size() == fExpect.size(), by construction
+                }
+                else
+                {
+                    deltaYield[idx] += parentMass * fExpect[k]; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- see above
+                }
+            }
+        }
+
+        for (std::size_t j = 0; j < values.size(); ++j) { values[j] += deltaYield[j]; } // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- j < values.size() == deltaYield.size() by construction
     }
 
 } // namespace yields

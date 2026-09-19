@@ -6,6 +6,7 @@
  * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
+#include "../src/elem/IsotopeTable.hpp"
 #include "../src/io/SimControls.hpp"
 #include "../src/pdfs/PDF.hpp"
 #include "../src/pdfs/PDFSegment.hpp"
@@ -1894,6 +1895,128 @@ static auto testSimControlsYieldsPartialRange() -> int
     return result;
 }
 
+// Verify Yields::yield()/yieldSum()'s optional dtDecay argument actually
+// applies radioactive decay through Yields::decayChains_, using the same
+// two-channel fixture as testSimControlsYieldsYieldAndSum() (isotope
+// order [h1, fe56, ni56, ni58]). Ni56 -> Co56 -> Fe56 is a real,
+// non-branching, branching-ratio-1 chain (see testDecayChain.hpp), but
+// this fixture's own isotope union never tabulates Co56 -- so the mass
+// that transiently sits in Co56 at time t is dropped from the tracked
+// total entirely (Yields::applyDecay()'s documented "skip untracked
+// chain isotopes" behavior), while Fe56 still receives its own correct,
+// delayed inflow via the closed-form two-step Bateman solution. Also
+// checks that controls_->noDecay() == true makes dtDecay a pure no-op,
+// and that dtDecay == 0 changes nothing even with noDecay() == false.
+static auto testSimControlsYieldsDecayApplication() -> int
+{
+    constexpr std::string_view baseDeck = "tests/core/assets/testGalaxy.in";
+    constexpr double tol = 1e-9;
+    int result = 0;
+
+    try
+    {
+        toml::table inputDeck = toml::parse_file(baseDeck);
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{
+                { "channel", "ccsn" }, { "model", "sukhbold_test" }, { "m_min", 15.0 } } },
+            { "channel2", toml::table{ { "channel", "ccsn" }, { "model", "kobayashi_test" } } },
+            { "registry", "tests/yields/assets/yields.toml" },
+        });
+        const io::SimControls controls(inputDeck);
+
+        const auto& ni56 = elem::isotopeTable(28U, 56U);
+        const auto& co56 = elem::isotopeTable(27U, 56U);
+        const double l1 = 1.0 / ni56.lifetime();
+        const double l2 = 1.0 / co56.lifetime();
+        const double dt = 2.0 * ni56.lifetime();
+        const double n1 = std::exp(-l1 * dt);
+        const double n2 = l1 / (l2 - l1) * (std::exp(-l1 * dt) - std::exp(-l2 * dt));
+        const double n3 = 1.0 - n1 - n2;
+
+        // Undecayed (dtDecay == 0) values, isotope order [h1, fe56, ni56, ni58]
+        const std::vector<double> row0{
+            5.93 * 15.0 / 18.2, 8.46e-2 * 15.0 / 18.2, 7.02e-2 * 15.0 / 18.2, 0.0 };
+        const std::vector<double> row1{ 6.79, 8.52e-2, 0.0, 1.15e-3 };
+        const double m0Ni56 = row0[2]; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- fixed-size literal above
+
+        // Decayed values: Ni56 shrinks to m0Ni56 * n1, Fe56 gains
+        // m0Ni56 * n3 (row1's own Ni56 is 0, so it contributes nothing);
+        // the m0Ni56 * n2 fraction transiently in Co56 is simply
+        // untracked, so it does not appear anywhere in either row.
+        const std::vector<double> row0Decayed{
+            row0[0], row0[1] + m0Ni56 * n3, m0Ni56 * n1, row0[3] // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- fixed-size literal above
+        };
+        const std::vector<double>& row1Decayed = row1; // unchanged: row1's own Ni56 is 0
+
+        const auto checkYield = [&](const char* label, double dtDecay,
+            const std::vector<double>& expected0, const std::vector<double>& expected1) -> int
+        {
+            int localResult = 0;
+            const auto [view, data] = controls.yields()->yield(15.0, 0.0, dtDecay);
+            for (std::size_t j = 0; j < expected0.size(); ++j)
+            {
+                if (std::abs(view[0, j] - expected0[j]) > tol) // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- j < expected0.size() by loop bound
+                {
+                    std::cerr << "testSimControls: yieldsDecayApplication: " << label <<
+                        ": yield()[0, " << j << "] = " << view[0, j] << ", expected " <<
+                        expected0[j] << "\n"; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- see above
+                    localResult = 1;
+                }
+                if (std::abs(view[1, j] - expected1[j]) > tol) // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- see above
+                {
+                    std::cerr << "testSimControls: yieldsDecayApplication: " << label <<
+                        ": yield()[1, " << j << "] = " << view[1, j] << ", expected " <<
+                        expected1[j] << "\n"; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- see above
+                    localResult = 1;
+                }
+            }
+
+            const auto sum = controls.yields()->yieldSum(15.0, 0.0, dtDecay);
+            for (std::size_t j = 0; j < expected0.size(); ++j)
+            {
+                const double expected = expected0[j] + expected1[j]; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- see above
+                if (std::abs(sum[j] - expected) > tol)
+                {
+                    std::cerr << "testSimControls: yieldsDecayApplication: " << label <<
+                        ": yieldSum()[" << j << "] = " << sum[j] << ", expected " <<
+                        expected << "\n";
+                    localResult = 1;
+                }
+            }
+            return localResult;
+        };
+
+        // dtDecay == 0 must be a no-op
+        result += checkYield("dtDecay=0", 0.0, row0, row1);
+        // dtDecay > 0, noDecay() == false (default): decay applied
+        result += checkYield("dtDecay>0, noDecay=false", dt, row0Decayed, row1Decayed);
+
+        // noDecay() == true: dtDecay must be ignored entirely, even
+        // though it is nonzero
+        io::SimControls noDecayControls(inputDeck);
+        noDecayControls.setNoDecay(true);
+        {
+            const auto [view, data] = noDecayControls.yields()->yield(15.0, 0.0, dt);
+            for (std::size_t j = 0; j < row0.size(); ++j)
+            {
+                if (std::abs(view[0, j] - row0[j]) > tol || std::abs(view[1, j] - row1[j]) > tol) // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- j < row0.size() by loop bound
+                {
+                    std::cerr << "testSimControls: yieldsDecayApplication: noDecay=true: "
+                        "expected dtDecay to be ignored at column " << j << "\n";
+                    result = 1;
+                }
+            }
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: yieldsDecayApplication: failed: " << error.what() << "\n";
+        result = 1;
+    }
+
+    return result;
+}
+
 // Verify Yields::Yields() prints a "slug: warning" (to std::cout) when
 // the same channel is requested more than once, but does not forbid
 // it -- both channels must still be built normally. Also verifies the
@@ -2408,6 +2531,7 @@ auto testSimControls() -> int
     result += testSimControlsYieldsIsotopesKeyword();
     result += testSimControlsYieldsYieldAndSum();
     result += testSimControlsYieldsPartialRange();
+    result += testSimControlsYieldsDecayApplication();
     result += testSimControlsYieldsDuplicateChannelWarning();
     result += testSimControlsSFRDist();
     result += testSimControlsSetFeHRejectsBroadening();
