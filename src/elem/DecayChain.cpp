@@ -13,9 +13,10 @@
 #include <cstddef>
 #include <limits>
 #include <optional>
+#include <span>
 #include <stdexcept>
 #include <string>
-#include <unsupported/Eigen/MatrixFunctions>
+#include <unsupported/Eigen/MatrixFunctions> // NOLINT(misc-include-cleaner) -- provides Eigen::MatrixXd::exp(), used below; clang-tidy's IWYU mapping doesn't know this header
 #include <vector>
 
 namespace elem
@@ -111,7 +112,7 @@ namespace elem
             positionOf[relevantIndices_[p]] = p; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- relevantIndices_[p] < isotopes.size() by construction
         }
 
-        depletionMatrix_ = Eigen::MatrixXd::Zero(static_cast<Eigen::Index>(m), static_cast<Eigen::Index>(m));
+        depletionMatrix_ = Eigen::MatrixXd::Zero(static_cast<Eigen::Index>(m), static_cast<Eigen::Index>(m)); // NOLINT(misc-include-cleaner) -- Eigen::Index is provided by <Eigen/Dense> (already included above); clang-tidy's IWYU mapping just doesn't know that
         for (std::size_t p = 0; p < m; ++p)
         {
             const auto& parent = isotopes[relevantIndices_[p]].get(); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- relevantIndices_[p] < isotopes.size() by construction
@@ -125,7 +126,7 @@ namespace elem
                 // guaranteed relevant, by findRelevantIndices()'s own
                 // construction: every daughter of a relevant, unstable
                 // isotope was itself marked relevant there.
-                const auto qIdx = static_cast<Eigen::Index>(positionOf[*j]); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- see above
+                const auto qIdx = static_cast<Eigen::Index>(positionOf[*j]); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index,bugprone-unchecked-optional-access) -- see above: j is guaranteed to have a value here
                 depletionMatrix_(qIdx, pIdx) += daughter.branchingRatio_ / parent.lifetime();
             }
         }
@@ -157,7 +158,7 @@ namespace elem
         const std::size_t m = relevantIndices_.size();
         if (m == 0) { return; }
 
-        Eigen::VectorXd v(static_cast<Eigen::Index>(m));
+        Eigen::VectorXd v(static_cast<Eigen::Index>(m)); // NOLINT(misc-include-cleaner) -- Eigen::VectorXd is provided by <Eigen/Dense> (already included above); clang-tidy's IWYU mapping just doesn't know that
         for (std::size_t k = 0; k < m; ++k)
         {
             v[static_cast<Eigen::Index>(k)] = values[relevantIndices_[k]]; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- relevantIndices_[k] < values.size() == isotopes.size() by construction

@@ -11,7 +11,6 @@
 
 #include "../elem/DecayChain.hpp"
 #include "../elem/ElemCommons.hpp"
-#include "../elem/IsotopeData.hpp"
 #include "YieldChannel.hpp"
 #include "YieldCommons.hpp"
 #include <cstddef>

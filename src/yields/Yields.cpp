@@ -298,14 +298,15 @@ namespace yields
 
         if (!controls_.noDecay())
         {
+            assert(decayChain_.has_value()); // populated by rebuildYieldGrid(), always called at least once by the constructor
             // Computed once and reused across every channel's own row,
             // rather than recomputing the same O(m^3) matrix exponential
             // once per channel via the dtDecay-taking applyDecay() --
             // dtDecay is identical for every row here.
-            const auto propagator = decayChain_->propagator(dtDecay);
+            const auto propagator = decayChain_->propagator(dtDecay); // NOLINT(bugprone-unchecked-optional-access) -- see assert above
             for (std::size_t i = 0; i < nchannels; ++i)
             {
-                decayChain_->applyDecay(propagator, std::span<double>(data).subspan(i * niso, niso)); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i < nchannels, so i * niso + niso <= nchannels * niso == data.size() by construction
+                decayChain_->applyDecay(propagator, std::span<double>(data).subspan(i * niso, niso)); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index,bugprone-unchecked-optional-access) -- i < nchannels, so i * niso + niso <= nchannels * niso == data.size() by construction; decayChain_ engaged per assert above
             }
         }
 
@@ -342,7 +343,7 @@ namespace yields
     {
         assert(values.size() == isotopes_.size());
         assert(decayChain_.has_value()); // populated by rebuildYieldGrid(), always called at least once by the constructor
-        decayChain_->applyDecay(dtDecay, values);
+        decayChain_->applyDecay(dtDecay, values); // NOLINT(bugprone-unchecked-optional-access) -- see assert above
     }
 
     void Yields::applyDecay(const double dtDecay, const std::span<double> values, const bool decomposed) const
@@ -354,10 +355,10 @@ namespace yields
         // Computed once and reused across every channel's own row, same
         // reasoning as yield()'s own identical pattern -- dtDecay is
         // identical for every row here too.
-        const auto propagator = decayChain_->propagator(dtDecay);
+        const auto propagator = decayChain_->propagator(dtDecay); // NOLINT(bugprone-unchecked-optional-access) -- see assert above
         for (std::size_t i = 0; i < nchannels; ++i)
         {
-            decayChain_->applyDecay(propagator, values.subspan(i * niso, niso)); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i < nchannels, so i * niso + niso <= nchannels * niso == values.size() by construction
+            decayChain_->applyDecay(propagator, values.subspan(i * niso, niso)); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index,bugprone-unchecked-optional-access) -- i < nchannels, so i * niso + niso <= nchannels * niso == values.size() by construction; decayChain_ engaged per assert above
         }
     }
 

@@ -11,6 +11,7 @@
 
 #include "ElemCommons.hpp"
 #include <Eigen/Dense>
+#include <cstddef>
 #include <span>
 #include <vector>
 
@@ -156,7 +157,7 @@ namespace elem
          * applyDecay() overload above is exactly equivalent to
          * applyDecay(propagator(dtDecay), values).
          */
-        [[nodiscard]] auto propagator(double dtDecay) const -> Eigen::MatrixXd;
+        [[nodiscard]] auto propagator(double dtDecay) const -> Eigen::MatrixXd; // NOLINT(misc-include-cleaner) -- Eigen::MatrixXd is provided by <Eigen/Dense> (already included above); clang-tidy's IWYU mapping just doesn't know that
 
         /**
          * @brief Advance a per-isotope mass array forward using an already-computed propagator, in place
