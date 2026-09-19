@@ -61,7 +61,7 @@ namespace yields
 
     void Yields::addChannel(const YieldChannelDescriptor& descriptor)
     {
-        yieldChannels_.push_back(std::make_unique<YieldChannel>(
+        yieldChannels_.push_back(std::make_shared<YieldChannel>(
             descriptor, controls_.fehDist().getMin(), controls_.fehDist().getMax(), registryName_));
     }
 
@@ -71,7 +71,7 @@ namespace yields
         {
             throw std::invalid_argument("Yields::addChannel: channel must not be null");
         }
-        yieldChannels_.push_back(std::move(channel));
+        yieldChannels_.push_back(std::shared_ptr<YieldChannel>(std::move(channel)));
     }
 
     void Yields::deleteChannel(const std::size_t index)
@@ -92,7 +92,13 @@ namespace yields
         {
             throw std::invalid_argument("Yields::setChannels: channels must not contain any null entries");
         }
-        yieldChannels_ = std::move(channels);
+        std::vector<std::shared_ptr<YieldChannel>> newChannels;
+        newChannels.reserve(channels.size());
+        for (auto& channel : channels)
+        {
+            newChannels.push_back(std::shared_ptr<YieldChannel>(std::move(channel)));
+        }
+        yieldChannels_ = std::move(newChannels);
     }
 
     void Yields::setChannels(const std::vector<YieldChannelDescriptor>& descriptors)
@@ -104,11 +110,11 @@ namespace yields
         // own comment) leaves yieldChannels_ completely untouched,
         // rather than a half-built mix of some new channels and none
         // of the old ones.
-        std::vector<std::unique_ptr<YieldChannel>> newChannels;
+        std::vector<std::shared_ptr<YieldChannel>> newChannels;
         newChannels.reserve(descriptors.size());
         for (const auto& descriptor : descriptors)
         {
-            newChannels.push_back(std::make_unique<YieldChannel>(
+            newChannels.push_back(std::make_shared<YieldChannel>(
                 descriptor, controls_.fehDist().getMin(), controls_.fehDist().getMax(), registryName_));
         }
         yieldChannels_ = std::move(newChannels);

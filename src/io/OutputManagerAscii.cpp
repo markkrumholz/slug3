@@ -1032,7 +1032,7 @@ void io::OutputManagerAscii::writeClusterSpec(
 
     const unsigned long uid = cluster.uid();
     const auto& spec = cluster.spec();
-    const auto* ext = simControls_.extinct();
+    const auto ext = simControls_.extinct();
     const auto& specExtinct = cluster.specExtinct();
     // specExtinct is tabulated on a subset of wlObs_ -- the first
     // wlOffset() entries, and any past specExtinct's own end, fall
@@ -1095,8 +1095,8 @@ void io::OutputManagerAscii::writeClusterNebLines(
 {
     if (!clusterNebLinesFile_.is_open()) { return; }
 
-    const auto* neb = simControls_.nebular();
-    const auto* ext = simControls_.extinct();
+    const auto neb = simControls_.nebular();
+    const auto ext = simControls_.extinct();
     const auto& lineWl = neb->lineWl();
     const auto& lineLabel = neb->lineLabel();
     const auto& lineLum = cluster.lineLum();
@@ -1265,7 +1265,7 @@ void io::OutputManagerAscii::writeGalaxySpec(
     if (galaxySpectraFile_.is_open())
     {
         const auto& spec = galaxy.spec();
-        const auto* ext = simControls_.extinct();
+        const auto ext = simControls_.extinct();
         const auto& specExtinct = galaxy.specExtinct();
         // See writeClusterSpec's own comment on wlOffset()/spec_ex's
         // fallback to 0 outside the extinction curve's own coverage
@@ -1320,8 +1320,8 @@ void io::OutputManagerAscii::writeGalaxyNebLines(
 {
     if (!galaxyNebLinesFile_.is_open()) { return; }
 
-    const auto* neb = simControls_.nebular();
-    const auto* ext = simControls_.extinct();
+    const auto neb = simControls_.nebular();
+    const auto ext = simControls_.extinct();
     const auto& lineWl = neb->lineWl();
     const auto& lineLabel = neb->lineLabel();
     const auto& lineLum = galaxy.lineLum();

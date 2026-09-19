@@ -81,11 +81,16 @@ namespace yields
             std::string registryName = defaultRegistry);
 
         // Movable (moving yieldChannels_'s own ownership, and rebinding
-        // controls_ to the same referent) but neither copyable (
-        // yieldChannels_ holds move-only std::unique_ptr<YieldChannel>
-        // elements) nor assignable (controls_ can't be reseated,
-        // matching Extinct's/Specsyn's own identical controls_ members
-        // -- see either one's own comment).
+        // controls_ to the same referent) but not assignable (controls_
+        // can't be reseated, matching Extinct's/Specsyn's own identical
+        // controls_ members -- see either one's own comment).
+        // Deliberately kept non-copyable too, even though
+        // yieldChannels_'s own shared_ptr<YieldChannel> elements are
+        // themselves freely copyable: a shallow copy would leave two
+        // Yields instances sharing the same live YieldChannel objects
+        // while each computes its own, independent isotopes_ from them
+        // -- calling rebuildYieldGrid() on one would silently remap the
+        // shared channels' own yield grids out from under the other.
         Yields(const Yields&) = delete;
         Yields(Yields&&) = default;
         auto operator=(const Yields&) -> Yields& = delete;
@@ -144,12 +149,12 @@ namespace yields
          * reruns rebuildYieldGrid() -- e.g. to drop an isotope that
          * only the removed channel tabulated.
          *
-         * A raw pointer or reference into yieldChannels()[index], held
-         * by a caller from before this call, dangles once this returns
-         * -- yieldChannels_ owns each YieldChannel via unique_ptr, so
-         * removing an entry destroys it. The same is true of
-         * setChannels() (both overloads), which discard every existing
-         * entry outright.
+         * yieldChannels_ owns each YieldChannel via shared_ptr, not
+         * unique_ptr, so a copy of yieldChannels()[index] held by a
+         * caller from before this call stays fully valid afterward --
+         * it's simply no longer one of the entries yieldChannels()
+         * itself returns. The same is true of setChannels() (both
+         * overloads), which discard every existing entry outright.
          */
         void deleteChannel(std::size_t index);
 
@@ -162,11 +167,14 @@ namespace yields
          *   rejected call leaves the existing yieldChannels_ untouched
          * @details
          * yieldChannels_ is discarded (freeing every channel it
-         * previously held) and replaced by moving channels into its
-         * place -- an O(1) transfer, not a per-element addChannel()
-         * loop, since every element here is already a built
-         * YieldChannel, not a descriptor to build one from. Does not
-         * call rebuildYieldGrid(): as with addChannel(unique_ptr<
+         * previously held whose shared_ptr use_count drops to zero --
+         * see yieldChannels()'s own comment on why an entry can outlive
+         * this call) and replaced with channels, converting each
+         * incoming unique_ptr<YieldChannel> to the shared_ptr this
+         * class actually stores them as -- not a per-element
+         * addChannel() loop, since every element here is already a
+         * built YieldChannel, not a descriptor to build one from. Does
+         * not call rebuildYieldGrid(): as with addChannel(unique_ptr<
          * YieldChannel>), a caller that wants isotopes_ resynchronized
          * onto the new channels must call it explicitly afterward.
          */
@@ -283,9 +291,15 @@ namespace yields
         /**
          * @brief Return the yield channels loaded so far
          * @return A const reference to yieldChannels_, in the same
-         *   order as controls().yieldChannels()
+         *   order as controls().yieldChannels(). Each element is a
+         *   shared_ptr, not a unique_ptr: a caller (e.g. from Python)
+         *   that copies one out and retains it keeps that particular
+         *   YieldChannel fully valid even if a later deleteChannel()/
+         *   setChannels() call removes it from this Yields -- it's
+         *   simply no longer one of the entries this method itself
+         *   returns.
          */
-        [[nodiscard]] auto yieldChannels() const -> const std::vector<std::unique_ptr<YieldChannel>>&
+        [[nodiscard]] auto yieldChannels() const -> const std::vector<std::shared_ptr<YieldChannel>>&
         {
             return yieldChannels_;
         }
@@ -368,9 +382,9 @@ namespace yields
 
     private:
 
-        const io::SimControls& controls_; // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members) -- deliberately a live reference, not a copy, matching Extinct's/Specsyn's own identical controls_ members exactly -- see either one's own comment for why. Only ever used through the same non-copyable ownership pattern (unique_ptr in SimControls's own yields_) as those, so the usual objection (disabling implicit copy/move assignment) doesn't apply in practice.
+        const io::SimControls& controls_; // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members) -- deliberately a live reference, not a copy, matching Extinct's/Specsyn's own identical controls_ members exactly -- see either one's own comment for why. Only ever used through the same shared_ptr ownership pattern (shared_ptr<Yields> in SimControls's own yields_) as those, so the usual objection (disabling implicit copy/move assignment) doesn't apply in practice.
         std::string registryName_;        /**< Name of the yield registry file */
-        std::vector<std::unique_ptr<YieldChannel>> yieldChannels_; /**< Yield channels built via addChannel(), one per entry in controls_.yieldChannels() -- see yieldChannels()'s own comment */
+        std::vector<std::shared_ptr<YieldChannel>> yieldChannels_; /**< Yield channels built via addChannel(), one per entry in controls_.yieldChannels() -- see yieldChannels()'s own comment */
         IsotopeList isotopes_; /**< Union of every yieldChannels_ entry's own isotopesOrig(), deduplicated and sorted -- see isotopes()'s own comment */
 
     };

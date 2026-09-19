@@ -335,7 +335,7 @@ static void appendPhotNebRows(const io::SimControls& simControls, const hid_t gr
 // complexity budget.
 static void createNebLinesDatasets(const io::SimControls& simControls, const hid_t group)
 {
-    const auto* neb = simControls.nebular();
+    const auto neb = simControls.nebular();
     if (neb == nullptr) { return; }
 
     const auto& lineWl = neb->lineWl();

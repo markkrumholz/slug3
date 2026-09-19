@@ -30,6 +30,8 @@
 #include "../specsyn/SpecsynLibWR.hpp"
 #include "../specsyn/SpecsynUtils.hpp"
 #include "../tracks/TrackCommons.hpp"
+#include "../tracks/Tracks2D.hpp"
+#include "../tracks/Tracks3D.hpp"
 #include "../utils/ParseUtils.hpp"
 #include "../utils/RngThread.hpp"
 #include "../utils/TOMLUtils.hpp"
@@ -311,12 +313,12 @@ void io::SimControls::initPhysics(const toml::table& inputDeck)
     // stars in that gap have no track data, so they end up being
     // treated as having zero luminosity when spectra are computed
     // (see Cluster::computeSpec)
-    if (tracks_.mMin() > imf_.getMin())
+    if (tracks_->mMin() > imf_.getMin())
     {
         std::cout << "slug: warning: minimum mass in selected tracks is "
-            << tracks_.mMin() << " but IMF minimum mass is " << imf_.getMin()
+            << tracks_->mMin() << " but IMF minimum mass is " << imf_.getMin()
             << "; stars with masses from " << imf_.getMin() << " to "
-            << tracks_.mMin() << " will be treated as having zero luminosity\n";
+            << tracks_->mMin() << " will be treated as having zero luminosity\n";
     }
 
     // Read the spectral synthesis model to use, if any -- spectra.model
@@ -431,7 +433,7 @@ void io::SimControls::initPhysics(const toml::table& inputDeck)
     // internal cache
     if (constFeH())
     {
-        constFeHTracks_ = tracks_.sliceConstFeH(fehDist_.getMin());
+        constFeHTracks_ = std::make_shared<tracks::Tracks2D>(tracks_->sliceConstFeH(fehDist_.getMin()));
     }
 
     // Read minimum stochastic mass
@@ -553,15 +555,15 @@ void io::SimControls::readOutput(const toml::table& inputDeck)
 void io::SimControls::setFeH(const std::string& feH)
 {
     auto newFehDist = utils::initPDFFromString(feH);
-    if (newFehDist.getMin() < tracks_.fehMin() || newFehDist.getMax() > tracks_.fehMax())
+    if (newFehDist.getMin() < tracks_->fehMin() || newFehDist.getMax() > tracks_->fehMax())
     {
         throw std::runtime_error(
             "SimControls::setFeH: the requested [Fe/H] distribution, "
             "[" + std::to_string(newFehDist.getMin()) + ", " +
             std::to_string(newFehDist.getMax()) + "], is broader than "
             "the range the stellar tracks were loaded over, [" +
-            std::to_string(tracks_.fehMin()) + ", " +
-            std::to_string(tracks_.fehMax()) + "] (requested at "
+            std::to_string(tracks_->fehMin()) + ", " +
+            std::to_string(tracks_->fehMax()) + "] (requested at "
             "construction via stars.FeH), so the [Fe/H] distribution "
             "cannot be broadened past that without risking an "
             "out-of-range interpolation. Construct a new SimControls "
@@ -570,19 +572,23 @@ void io::SimControls::setFeH(const std::string& feH)
     fehDist_ = std::move(newFehDist);
     if (constFeH())
     {
-        constFeHTracks_ = tracks_.sliceConstFeH(fehDist_.getMin());
+        constFeHTracks_ = std::make_shared<tracks::Tracks2D>(tracks_->sliceConstFeH(fehDist_.getMin()));
     }
 }
 
 // Set the stellar tracks, recomputing tracks2D() (constFeHTracks_)
 // from the new tracks_ if fehDist_ is already fixed -- see setFeH()'s
 // own comment
-void io::SimControls::setTracks(tracks::Tracks3D tracks)
+void io::SimControls::setTracks(std::unique_ptr<tracks::Tracks3D> tracks)
 {
+    if (!tracks)
+    {
+        throw std::invalid_argument("SimControls::setTracks: tracks must not be null");
+    }
     tracks_ = std::move(tracks);
     if (constFeH())
     {
-        constFeHTracks_ = tracks_.sliceConstFeH(fehDist_.getMin());
+        constFeHTracks_ = std::make_shared<tracks::Tracks2D>(tracks_->sliceConstFeH(fehDist_.getMin()));
     }
 }
 
@@ -665,7 +671,7 @@ void io::SimControls::readTracks(const toml::table& inputDeck)
     auto afe = utils::getTOMLKeyWithError<double>(inputDeck, "stars.alphaFe");
 
     // Construct tracks from input data
-    tracks_ = tracks::Tracks3D(
+    tracks_ = std::make_shared<tracks::Tracks3D>(
         trackName.value(), // NOLINT(bugprone-unchecked-optional-access) -- we verified this was valid a few lines ago
         fehDist_.getMin(),
         fehDist_.getMax(),
@@ -699,7 +705,7 @@ void io::SimControls::readSpectra(const toml::table& inputDeck)
     // comment for why), so every atmosphere grid needs to cover them as
     // well, or spectral synthesis for a star at one of those padding
     // metallicities throws instead of returning a spectrum.
-    const auto& fehGrid = tracks_.feH();
+    const auto& fehGrid = tracks_->feH();
     const double fehMin = fehGrid.front();
     const double fehMax = fehGrid.back();
 
@@ -762,7 +768,7 @@ void io::SimControls::readSpectra(const toml::table& inputDeck)
     {
         if (model.value() == "blackbody")
         {
-            specsyn_ = std::make_unique<specsyn::SpecsynBlackbody>(wlMin_, wlMax_, nWl_, *this);
+            specsyn_ = std::make_shared<specsyn::SpecsynBlackbody>(wlMin_, wlMax_, nWl_, *this);
             return;
         }
 
@@ -790,13 +796,13 @@ void io::SimControls::readSpectra(const toml::table& inputDeck)
 
             if (wrGrid)
             {
-                specsyn_ = std::make_unique<specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise>>(
+                specsyn_ = std::make_shared<specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise>>(
                     model.value(), fehMin, fehMax, registryName,
                     wlMin_, wlMax_, nWl_, *this);
             }
             else
             {
-                specsyn_ = std::make_unique<specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::raise>>(
+                specsyn_ = std::make_shared<specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::raise>>(
                     model.value(), fehMin, fehMax,
                     afe, cfe,
                     std::numeric_limits<double>::quiet_NaN(), specsyn::defaultR,
@@ -823,7 +829,7 @@ void io::SimControls::readSpectra(const toml::table& inputDeck)
         }
     }
 
-    specsyn_ = std::make_unique<specsyn::SpecsynLibChained>(
+    specsyn_ = std::make_shared<specsyn::SpecsynLibChained>(
         models, fehMin, fehMax,
         afe, cfe, std::vector<double>{},
         specsyn::defaultR, registryName, wlMin_, wlMax_, nWl_, true, *this);
@@ -922,7 +928,7 @@ void io::SimControls::readFilters(const toml::table& inputDeck)
             "in the input deck)");
     }
 
-    filters_ = std::make_unique<phot::FilterCollection>(
+    filters_ = std::make_shared<phot::FilterCollection>(
         filterNames, photSystem, registryName);
 }
 
@@ -974,7 +980,7 @@ void io::SimControls::readExtinct(const toml::table& inputDeck)
             "not set in the input deck)");
     }
 
-    extinct_ = std::make_unique<extinct::Extinct>(
+    extinct_ = std::make_shared<extinct::Extinct>(
         model.value(), *this, registryName); // NOLINT(bugprone-unchecked-optional-access) -- required=true above guarantees model has a value or getTOMLKeyWithError already threw
 }
 
@@ -1112,7 +1118,7 @@ void io::SimControls::readYields(const toml::table& inputDeck)
     const auto registryInput = utils::getTOMLKeyWithError<std::string>(inputDeck, "yields.registry");
     const std::string registryName = registryInput.value_or(yields::defaultRegistry);
 
-    yields_ = std::make_unique<yields::Yields>(*this, registryName);
+    yields_ = std::make_shared<yields::Yields>(*this, registryName);
 
     // yields.isotopes: optional, restricts the isotopes yields_ ends up
     // tabulating to the intersection of every loaded channel's own
@@ -1184,6 +1190,6 @@ void io::SimControls::readNebular(const toml::table& inputDeck)
     const auto trackName = utils::getTOMLKeyWithError<std::string>(inputDeck, "stars.tracks", true);
     const auto vvcrit = utils::getTOMLKeyWithError<double>(inputDeck, "stars.v_vcrit");
 
-    nebular_ = std::make_unique<nebular::Nebular>(
+    nebular_ = std::make_shared<nebular::Nebular>(
         tableName, trackName.value(), *this, vvcrit.value_or(tracks::defaultVVcrit)); // NOLINT(bugprone-unchecked-optional-access) -- required=true above guarantees trackName has a value or getTOMLKeyWithError already threw
 }

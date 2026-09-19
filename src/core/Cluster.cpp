@@ -108,11 +108,11 @@ core::Cluster::Cluster(const unsigned long uid,
     // shares across every cluster.
     if (sc.constFeH())
     {
-        tracks_ = std::cref(sc.tracks2D());
+        tracks_ = sc.tracks2D();
     }
     else
     {
-        tracks_ = sc.tracks().sliceConstFeH(feH_);
+        tracks_ = sc.tracks()->sliceConstFeH(feH_);
     }
 
     // If yield channels were requested, size yields_ to hold one
@@ -121,7 +121,7 @@ core::Cluster::Cluster(const unsigned long uid,
     // Yields::yield()'s own (nchannels, nisotopes) layout), or just
     // one combined total per isotope otherwise (matching
     // Yields::yieldSum()) -- see yields_'s own comment
-    if (const auto* yields = sc.yields())
+    if (const auto yields = sc.yields())
     {
         const std::size_t n = yields->isotopes().size() *
             (sc.yieldsChannelDecomposed() ? yields->yieldChannels().size() : 1);
@@ -194,11 +194,11 @@ core::Cluster::Cluster(const unsigned long uid,
     // shares across every cluster.
     if (sc.constFeH())
     {
-        tracks_ = std::cref(sc.tracks2D());
+        tracks_ = sc.tracks2D();
     }
     else
     {
-        tracks_ = sc.tracks().sliceConstFeH(feH_);
+        tracks_ = sc.tracks()->sliceConstFeH(feH_);
     }
 
     // If yield channels were requested, size yields_ to hold one
@@ -207,7 +207,7 @@ core::Cluster::Cluster(const unsigned long uid,
     // Yields::yield()'s own (nchannels, nisotopes) layout), or just
     // one combined total per isotope otherwise (matching
     // Yields::yieldSum()) -- see yields_'s own comment
-    if (const auto* yields = sc.yields())
+    if (const auto yields = sc.yields())
     {
         const std::size_t n = yields->isotopes().size() *
             (sc.yieldsChannelDecomposed() ? yields->yieldChannels().size() : 1);
@@ -222,7 +222,7 @@ auto core::Cluster::tracks() const -> const tracks::Tracks2D&
     {
         return *owned;
     }
-    return std::get<std::reference_wrapper<const tracks::Tracks2D>>(tracks_).get();
+    return *std::get<std::shared_ptr<const tracks::Tracks2D>>(tracks_);
 }
 
 // Advance function
@@ -351,7 +351,7 @@ void core::Cluster::updateLivingStars(const double logAge)
 void core::Cluster::computeSpec()
 {
     const auto& sc = controls_.get();
-    const auto* synth = sc.specsyn();
+    const auto synth = sc.specsyn();
     if (synth == nullptr) { return; }
 
     spec_.assign(synth->wl().size(), 0.0);
@@ -384,7 +384,7 @@ void core::Cluster::computeSpec()
 
     // Add nebular continuum and line emission, if a nebular emission
     // grid was requested
-    const auto* neb = sc.nebular();
+    const auto neb = sc.nebular();
     if (neb != nullptr)
     {
         auto [nebSpec, nebLineLum] = neb->getCluster(spec_, feH_, curTime_ - formTime_);
@@ -394,7 +394,7 @@ void core::Cluster::computeSpec()
 
     // Extinguish the spectrum(s) just computed, if an extinction curve
     // was requested
-    const auto* ext = sc.extinct();
+    const auto ext = sc.extinct();
     if (ext != nullptr)
     {
         specExtinct_ = ext->applyExtinction(aV_, spec_);
@@ -416,12 +416,12 @@ void core::Cluster::computeSpec()
 void core::Cluster::computePhot()
 {
     const auto& sc = controls_.get();
-    const auto& filters = sc.filters();
+    const auto filters = sc.filters();
     if (filters == nullptr) { return; }
 
     phot_ = filters->phot(sc.specsyn()->wlObs(), spec());
 
-    const auto* ext = sc.extinct();
+    const auto ext = sc.extinct();
     if (ext != nullptr)
     {
         photExtinct_ = filters->phot(ext->wlObs(), specExtinct());
@@ -501,7 +501,7 @@ void core::Cluster::computeLbol()
 void core::Cluster::computeYields()
 {
     const auto& sc = controls_.get();
-    const auto* yields = sc.yields();
+    const auto yields = sc.yields();
     if (yields == nullptr) { return; }
 
     const bool decomposed = sc.yieldsChannelDecomposed();

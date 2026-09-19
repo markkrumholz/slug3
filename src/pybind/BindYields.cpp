@@ -139,15 +139,10 @@ Details
 -------
 Also calls rebuildYieldGrid() afterward, so isotopes() (and every
 remaining channel) stays synchronized once the removed channel's own
-isotopes no longer count toward the union.
-
-Warning: a YieldChannel object previously read back from yieldChannels()
-is a non-owning reference into this Yields's own storage. If it happens
-to be the entry index removes, that Python object becomes a dangling
-reference -- calling any of its methods afterward is undefined
-behavior. Don't retain a YieldChannel across a call to this method (or
-setChannels(), or assigning to the yieldChannels property) unless
-you've confirmed it wasn't the one removed/replaced.)doc";
+isotopes no longer count toward the union. A YieldChannel object
+previously read back from yieldChannels() stays fully valid even if it
+happens to be the entry index removes -- it's simply no longer one of
+the entries yieldChannels() itself returns afterward.)doc";
 
 static constexpr std::string_view setChannelsPointersDocstring =
     R"doc(Replace yieldChannels() wholesale with a list of already-built channels.
@@ -168,12 +163,11 @@ Details
 -------
 yieldChannels() is discarded and replaced by channels, then
 rebuildYieldGrid() is called, synchronizing isotopes() (and every
-installed channel) onto the union of their own isotopesOrig().
-
-Warning: every previously-installed YieldChannel is discarded by this
-call (not just reassigned), so a Python YieldChannel object read back
-from yieldChannels() before this call becomes a dangling reference
-afterward -- see deleteChannel()'s own docstring for the same caveat.)doc";
+installed channel) onto the union of their own isotopesOrig(). A
+YieldChannel object previously read back from yieldChannels() stays
+fully valid afterward, even though it's no longer one of the entries
+yieldChannels() itself returns -- see deleteChannel()'s own docstring
+for the same behavior.)doc";
 
 static constexpr std::string_view setChannelsDescriptorsDocstring =
     R"doc(Replace yieldChannels() wholesale with channels built from a list of descriptors.
@@ -198,12 +192,9 @@ Details
 -------
 Unlike the YieldChannel-list overload, this builds every channel fresh
 from disk rather than moving in already-built ones. Also calls
-rebuildYieldGrid() afterward.
-
-Warning: every previously-installed YieldChannel is discarded by this
-call, so a Python YieldChannel object read back from yieldChannels()
-before this call becomes a dangling reference afterward -- see
-deleteChannel()'s own docstring for the same caveat.)doc";
+rebuildYieldGrid() afterward. As with the YieldChannel-list overload, a
+YieldChannel object read back from yieldChannels() before this call
+stays fully valid afterward -- see deleteChannel()'s own docstring.)doc";
 
 static constexpr std::string_view rebuildYieldGridDocstring =
     R"doc(Rebuild isotopes() from yieldChannels(), then push it back into every channel.
@@ -240,16 +231,13 @@ static constexpr std::string_view yieldChannelsDocstring =
     R"doc(The yield channels loaded so far.
 
 Reading returns the channels in the same order as
-controls().yieldChannels(). Assigning a list transfers ownership of
+controls().yieldChannels(); each one stays fully valid even after being
+removed/replaced by a later deleteChannel()/setChannels() call -- see
+deleteChannel()'s own docstring. Assigning a list transfers ownership of
 each element to this Yields via setChannels() -- see its own
 docstring for the two accepted element types (YieldChannel or
 YieldChannelDescriptor) -- then calls rebuildYieldGrid(), so isotopes()
-(and every channel) stays synchronized onto the new list.
-
-Warning: each YieldChannel this returns is a non-owning reference into
-this Yields's own storage, not an independent object -- see
-deleteChannel()'s own docstring for what can make a previously-read
-one dangling.)doc";
+(and every channel) stays synchronized onto the new list.)doc";
 
 static constexpr std::string_view isotopesDocstring =
     R"doc(The isotopes this Yields' yield grid is tabulated for.
@@ -381,12 +369,9 @@ void bindYields(py::module_& m)
                 py::arg("isotopes") = std::vector<const elem::IsotopeData*>{})
         .def("registryName", &yields::Yields::registryName, registryNameDocstring.data())
         .def_property("yieldChannels",
-                [](const yields::Yields& self) -> std::vector<const yields::YieldChannel*>
+                [](const yields::Yields& self) -> std::vector<std::shared_ptr<const yields::YieldChannel>>
                 {
-                    std::vector<const yields::YieldChannel*> result;
-                    result.reserve(self.yieldChannels().size());
-                    for (const auto& channel : self.yieldChannels()) { result.push_back(channel.get()); }
-                    return result;
+                    return { self.yieldChannels().begin(), self.yieldChannels().end() };
                 },
                 [](yields::Yields& self, const py::sequence& channels)
                 {

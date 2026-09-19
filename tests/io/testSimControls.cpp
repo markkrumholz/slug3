@@ -480,17 +480,17 @@ static auto checkChabrierIMF(const pdfs::PDF& imf, const std::string& label) -> 
 // exhaustively verify Tracks3D's own behavior.
 static auto checkTracks(const io::SimControls& sim, const std::string& label) -> int
 {
-    const auto& tracks = sim.tracks();
+    const auto tracks = sim.tracks();
 
-    if (tracks.aFe() != -0.2 || tracks.vVcrit() != 0.0)
+    if (tracks->aFe() != -0.2 || tracks->vVcrit() != 0.0)
     {
         std::cerr << "testSimControls: " << label << ": tracks do not have "
-            "expected aFe/vVcrit; aFe = " << tracks.aFe()
-            << ", vVcrit = " << tracks.vVcrit() << "\n";
+            "expected aFe/vVcrit; aFe = " << tracks->aFe()
+            << ", vVcrit = " << tracks->vVcrit() << "\n";
         return 1;
     }
 
-    if (tracks.feH().size() != 1 || tracks.feH().front() != 0.0)
+    if (tracks->feH().size() != 1 || tracks->feH().front() != 0.0)
     {
         std::cerr << "testSimControls: " << label << ": tracks do not have "
             "the expected single [Fe/H] = 0.0 slice\n";
@@ -500,7 +500,7 @@ static auto checkTracks(const io::SimControls& sim, const std::string& label) ->
     // Confirm the tracks are actually usable by requesting a
     // track for a mass within their range
     constexpr double mass = 1.0;
-    const auto track = tracks.getTrack(mass, 0.0);
+    const auto track = tracks->getTrack(mass, 0.0);
     if (!track || track->xMin() >= track->xMax())
     {
         std::cerr << "testSimControls: " << label << ": getTrack(" << mass

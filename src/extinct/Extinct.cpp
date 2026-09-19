@@ -106,7 +106,7 @@ void extinct::Extinct::rebuildCacheImpl()
 
 void extinct::Extinct::initExtinctLines(const interp::Interpolator1D<1>& interp)
 {
-    const auto* neb = controls_.nebular();
+    const auto neb = controls_.nebular();
     if (neb == nullptr)
     {
         // No nebular emission grid was requested -- extinctLines_

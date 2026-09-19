@@ -455,7 +455,12 @@ Parameters
 tracks : Tracks3D
     The stellar tracks to use; ownership is transferred to this
     SimControls, so tracks is no longer usable from Python after this
-    call.
+    call. Must not be None.
+
+Throws
+------
+ValueError
+    If tracks is None.
 
 Details
 -------
@@ -531,29 +536,34 @@ this property (or setComputeLbol()) has since been set to True.)doc";
 static constexpr std::string_view specsynPropertyDocstring = R"doc(The spectral synthesizer, or None if none was requested.
 
 Reading returns the Specsyn requested via spectra.model (or None if
-spectra.model was not given). Assigning a Specsyn (or None, to remove
-one already present) transfers its ownership to this SimControls, so
-it is no longer usable from Python after assignment -- see
-setSpecsyn()'s own docstring, including the ValueError raised if it
+spectra.model was not given); a Specsyn read this way stays fully
+valid even after a later assignment replaces it, though it's simply no
+longer the one this property itself returns. Assigning a Specsyn (or
+None, to remove one already present) transfers its ownership to this
+SimControls, so it is no longer usable from Python after assignment --
+see setSpecsyn()'s own docstring, including the ValueError raised if it
 was built against a different SimControls.)doc";
 
 static constexpr std::string_view filtersPropertyDocstring = R"doc(The photometric filter collection, or None if none was requested.
 
 Reading returns the FilterCollection requested via phot.filters (or
-None if phot.filters was not given). Assigning a FilterCollection
-transfers its ownership to this SimControls, so it is no longer usable
-from Python after assignment -- see setFilters()'s own docstring.)doc";
+None if phot.filters was not given); a FilterCollection read this way
+stays fully valid even after a later assignment replaces it. Assigning
+a FilterCollection transfers its ownership to this SimControls, so it
+is no longer usable from Python after assignment -- see setFilters()'s
+own docstring.)doc";
 
 static constexpr std::string_view extinctPropertyDocstring = R"doc(The extinction curve, or None if none was requested.
 
 Reading returns the Extinct requested via extinct.model (or None if
 neither extinct.AV nor extinct.AV_field was given in the input deck),
-built once, at construction, or later installed via setExtinct().
-Assigning an Extinct (or None, to remove one already present)
-transfers its ownership to this SimControls, so it is no longer usable
-from Python after assignment -- see setExtinct()'s own docstring,
-including the ValueError raised if it was built against a different
-SimControls.)doc";
+built once, at construction, or later installed via setExtinct(); an
+Extinct read this way stays fully valid even after a later assignment
+replaces it. Assigning an Extinct (or None, to remove one already
+present) transfers its ownership to this SimControls, so it is no
+longer usable from Python after assignment -- see setExtinct()'s own
+docstring, including the ValueError raised if it was built against a
+different SimControls.)doc";
 
 static constexpr std::string_view nebularPropertyDocstring = R"doc(The nebular emission grid, or None if none was requested.
 
@@ -561,11 +571,12 @@ Reading returns the Nebular built from nebular.table/stars.tracks,
 unless the input deck explicitly set nebular.compute_neb = false (it
 defaults to true, so a deck that never mentions [nebular] at all still
 builds one), in which case this is None. Built once, at construction,
-or later installed via setNebular(). Assigning a Nebular (or None, to
-remove one already present) transfers its ownership to this
-SimControls, so it is no longer usable from Python after assignment --
-see setNebular()'s own docstring, including the ValueError raised if
-it was built against a different SimControls.)doc";
+or later installed via setNebular(); a Nebular read this way stays
+fully valid even after a later assignment replaces it. Assigning a
+Nebular (or None, to remove one already present) transfers its
+ownership to this SimControls, so it is no longer usable from Python
+after assignment -- see setNebular()'s own docstring, including the
+ValueError raised if it was built against a different SimControls.)doc";
 
 static constexpr std::string_view setExtinctDocstring = R"doc(Set the extinction curve.
 
@@ -626,12 +637,10 @@ sc.setYields(yields)) -- a Yields stores a live reference to whichever
 SimControls it was built against, for the rest of its lifetime, and
 this method cannot re-bind it.
 
-Warning: a Yields object previously read back from the yields property
-is a non-owning reference into this SimControls's own storage. Calling
-this method replaces (or, with None, clears) that storage, so a
-Python Yields object read before this call becomes a dangling
-reference afterward -- don't retain one across a call to this method
-(or an assignment to the yields property) on the same SimControls.)doc";
+A Yields object previously read back from the yields property stays
+fully valid even after this method replaces (or, with None, clears)
+this SimControls's own copy -- it's simply no longer the one the
+yields property itself returns afterward.)doc";
 
 static constexpr std::string_view setNebularDocstring = R"doc(Set the nebular emission grid.
 
@@ -666,6 +675,8 @@ reference to whichever SimControls it was built against.)doc";
 
 static constexpr std::string_view tracksPropertyDocstring = R"doc(The stellar tracks.
 
+Reading returns the Tracks3D loaded via stars.tracks; a Tracks3D read
+this way stays fully valid even after a later assignment replaces it.
 Assigning a Tracks3D transfers its ownership to this SimControls, so
 it is no longer usable from Python after assignment -- see
 setTracks()'s own docstring, including the tracks2D() cache rebuild
@@ -839,8 +850,9 @@ static constexpr std::string_view yieldsPropertyDocstring =
 R"doc(The Yields built from yieldChannels, or None if none was requested.
 
 Reading returns the Yields built once, at construction, or later
-installed via setYields() -- see Yields's own class docstring.
-Assigning a Yields (or None, to remove one already present) transfers
+installed via setYields() -- see Yields's own class docstring; a Yields
+read this way stays fully valid even after a later assignment replaces
+it. Assigning a Yields (or None, to remove one already present) transfers
 its ownership to this SimControls, so it is no longer usable from
 Python after assignment -- see setYields()'s own docstring, including
 the ValueError raised if it was built against a different
@@ -897,8 +909,7 @@ static void applyConstructorProperties(io::SimControls& sc,
     }
     if (!tracksArg.is_none())
     {
-        auto tracksPtr = py::cast<std::unique_ptr<tracks::Tracks3D>>(std::move(tracksArg));
-        sc.setTracks(std::move(*tracksPtr));
+        sc.setTracks(py::cast<std::unique_ptr<tracks::Tracks3D>>(std::move(tracksArg)));
     }
     if (!minStochMass.is_none()) { sc.setMinStochMass(py::cast<double>(minStochMass)); }
     if (!intRelTol.is_none()) { sc.setIntRelTol(py::cast<double>(intRelTol)); }
@@ -1035,11 +1046,7 @@ void bindSimControls(py::module_& m)
                 setSpecsynDocstring.data(), py::arg("specsyn"))
         .def("setFilters", &io::SimControls::setFilters,
                 setFiltersDocstring.data(), py::arg("filters"))
-        .def("setTracks",
-                [](io::SimControls& self, std::unique_ptr<tracks::Tracks3D> tracks)
-                {
-                    self.setTracks(std::move(*tracks));
-                },
+        .def("setTracks", &io::SimControls::setTracks,
                 setTracksDocstring.data(), py::arg("tracks"))
         .def("setExtinct", &io::SimControls::setExtinct,
                 setExtinctDocstring.data(), py::arg("extinct"))
@@ -1136,8 +1143,7 @@ void bindSimControls(py::module_& m)
                 nebularPropertyDocstring.data())
         .def_property("tracks",
                 &io::SimControls::tracks,
-                [](io::SimControls& self, std::unique_ptr<tracks::Tracks3D> tracks)
-                { self.setTracks(std::move(*tracks)); },
+                &io::SimControls::setTracks,
                 tracksPropertyDocstring.data())
         .def_property("minStochMass",
                 &io::SimControls::minStochMass,
