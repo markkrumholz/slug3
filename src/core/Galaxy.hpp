@@ -449,6 +449,21 @@ namespace core
          * but three orders of magnitude tighter, since yield
          * quantities are typically much smaller relative to their own
          * natural scale than Lbol is to its.
+         *
+         * If controls().noDecay() is false (the default), the raw
+         * integral above -- the instantaneous rate at which mass was
+         * returned to the ISM at simulation time t -- is decayed
+         * forward to curTime_ via Yields::applyDecay(), with dtDecay =
+         * curTime_ - t, before being returned: so the value returned
+         * here is each moment t's own present-day (as of curTime_)
+         * contribution, not its as-produced one. This assumes t <=
+         * curTime_, true of every call computeYields() itself makes
+         * (t ranges over [lastYieldTime_, curTime_] there); calling
+         * this directly with t > curTime_ (e.g. on a Galaxy that
+         * hasn't been advance()d yet, so curTime_ is still its initial
+         * 0) produces a negative dtDecay, which Yields::applyDecay()
+         * does not reject, but which is not a physically meaningful
+         * request (radioactive decay run backward in time).
          */
         [[nodiscard]] auto yieldsRate(double t, double feh) const -> std::vector<double>;
 
@@ -1028,20 +1043,33 @@ namespace core
          *   cluster in clusters_ and disruptedClusters_, since each
          *   cluster keeps growing that total on its own rather than
          *   reporting only what died this step.
+         * - Before either of the two field-star shares below is added
+         *   in, if controls().noDecay() is false, fieldYields_'s own
+         *   already-accumulated total (from every earlier call) is
+         *   aged forward via Yields::applyDecay(), with dtDecay =
+         *   curTime_ - lastYieldTime_. Unlike Cluster::yields_ (which
+         *   recomputes each dead star's own exact dtDecay from its own
+         *   individual death time every call), fieldYields_ only ever
+         *   keeps a single running per-isotope total, with no memory
+         *   of which isotope came from which star or when, so decay
+         *   has to be stepped forward incrementally like this instead.
          * - Individually-tracked field stars: every star in
          *   deadFieldStars_ (which, like Cluster::mDead_, only ever
          *   holds the stars that died during the most recent
          *   advance() call) has controls().yields()'s own yield() (if
          *   controls().yieldsChannelDecomposed()) or yieldSum()
-         *   (otherwise) evaluated at its own mass_/feh_, added onto
-         *   fieldYields_.
+         *   (otherwise) evaluated at its own mass_/feh_, with dtDecay =
+         *   curTime_ - deathTime_ (or 0 if controls().noDecay() is
+         *   true), added onto fieldYields_.
          * - The purely continuous (non-clustered, below
          *   minStochMass()) population: skipped entirely if
          *   minStochMass() == 0 (no such population exists at all) or
          *   fCluster() == 1 (no non-clustered population at all).
-         *   Otherwise, yieldsRate(double)'s own instantaneous rate is
-         *   integrated directly over real time from lastYieldTime_ to
-         *   curTime_ via a utils::GKIntegrator (unweighted -- unlike
+         *   Otherwise, yieldsRate(double)'s own instantaneous rate
+         *   (already decayed forward to curTime_ internally, at every
+         *   t it's evaluated at -- see its own comment) is integrated
+         *   directly over real time from lastYieldTime_ to curTime_
+         *   via a utils::GKIntegrator (unweighted -- unlike
          *   yieldsRate()'s own internal use of utils::PDFIntegrator to
          *   weight by the SF history, this integral is already over a
          *   rate, not a rate density), multiplied by (1 - fCluster())

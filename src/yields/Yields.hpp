@@ -419,8 +419,6 @@ namespace yields
          */
         [[nodiscard]] auto yieldSum(double mass, double feH, double dtDecay = 0.0) const -> std::vector<double>;
 
-    private:
-
         /**
          * @brief Apply radioactive decay, over dtDecay, to one array of per-isotope masses, in place
          * @param dtDecay Elapsed time, in yr, to apply each unstable
@@ -464,8 +462,18 @@ namespace yields
          * same, original (pre-decay) values, then summed once. Only
          * after every unstable isotope's own contribution has been
          * accumulated this way is deltaYield finally added into values.
+         *
+         * Public (unlike yield()/yieldSum()'s own internal use of it)
+         * so that a caller already holding a raw per-isotope array it
+         * knows is undecayed -- e.g. Galaxy's own fieldYields_, or a
+         * field star's instantaneous mass-return rate -- can apply the
+         * same decay physics to it directly, without needing to
+         * reconstruct a (mass, feH) query this Yields itself already
+         * evaluated.
          */
         void applyDecay(double dtDecay, std::span<double> values) const;
+
+    private:
 
         const io::SimControls& controls_; // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members) -- deliberately a live reference, not a copy, matching Extinct's/Specsyn's own identical controls_ members exactly -- see either one's own comment for why. Only ever used through the same shared_ptr ownership pattern (shared_ptr<Yields> in SimControls's own yields_) as those, so the usual objection (disabling implicit copy/move assignment) doesn't apply in practice.
         std::string registryName_;        /**< Name of the yield registry file */

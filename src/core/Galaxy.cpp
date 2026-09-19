@@ -29,10 +29,49 @@
 #include <iterator>
 #include <numbers>
 #include <numeric>
+#include <span>
 #include <sstream>
 #include <stdexcept>
 #include <utility>
 #include <vector>
+
+namespace
+{
+    /**
+     * @brief Apply radioactive decay to a possibly channel-decomposed per-isotope array
+     * @param yields The Yields whose own applyDecay() to call
+     * @param dtDecay Elapsed time, in yr, to apply
+     * @param values One entry per isotope (niso), or one channel-major
+     *   row of niso entries per channel (nchannels * niso total, in
+     *   Yields::yield()'s own (nchannels, niso) layout) if decomposed
+     * @param niso yields.isotopes().size()
+     * @param decomposed Whether values is channel-decomposed
+     * @details
+     * Yields::applyDecay() itself only ever accepts a single,
+     * niso-length array -- Yields::yield()/yieldSum() apply it once
+     * per channel row internally for exactly this reason (decay is
+     * evaluated per isotope, not per channel). Galaxy::fieldYields_
+     * and yieldsRate()'s own result can each be either shape,
+     * depending on controls().yieldsChannelDecomposed(), so this
+     * splits a decomposed array into its own channel-major rows and
+     * applies decay to each in turn, mirroring that same per-channel
+     * pattern one level up.
+     */
+    void applyDecayToValues(const yields::Yields& yields, const double dtDecay,
+        const std::span<double> values, const std::size_t niso, const bool decomposed)
+    {
+        if (!decomposed)
+        {
+            yields.applyDecay(dtDecay, values);
+            return;
+        }
+        const std::size_t nchannels = values.size() / niso;
+        for (std::size_t i = 0; i < nchannels; ++i)
+        {
+            yields.applyDecay(dtDecay, values.subspan(i * niso, niso));
+        }
+    }
+} // namespace
 
 // Constructor: everything but controls_ takes its in-class default
 // (curTime_/lbol_ = 0, every vector empty); sfr_ is resolved in the
@@ -624,7 +663,17 @@ auto core::Galaxy::yieldsRate(const double t, const double feh) const -> std::ve
         sfrAge, static_cast<IntegrandFn>(&Galaxy::yieldsIntegrand),
         n, false, sc.intMaxIter(), absTol, sc.intRelTol());
 
-    return integrator.integrate(0.0, t, this, feh);
+    // This is the instantaneous rate of mass return at time t --
+    // decay it forward to curTime_ (unless noDecay() is true) so that
+    // what computeYields() integrates over t is each moment's own
+    // present-day (curTime_), rather than as-produced, contribution.
+    auto result = integrator.integrate(0.0, t, this, feh);
+    if (!sc.noDecay())
+    {
+        applyDecayToValues(*yields, curTime_ - t, result,
+            yields->isotopes().size(), sc.yieldsChannelDecomposed());
+    }
+    return result;
 }
 
 // The continuous population's own instantaneous per-isotope yield
@@ -714,17 +763,39 @@ void core::Galaxy::computeYields()
         }
     }
 
+    // Age fieldYields_'s own already-accumulated total forward by the
+    // time elapsed since it was last updated, before adding in this
+    // step's new contributions below (which are each added in raw,
+    // undecayed, since they're only now being produced) -- unlike
+    // Cluster::yields_ (which recomputes each dead star's own exact
+    // dtDecay from its own individual death time every time
+    // computeYields() runs), fieldYields_ only ever keeps a single
+    // running per-isotope total, with no memory of which isotope came
+    // from which field star or when, so decay has to be stepped
+    // forward incrementally like this instead.
+    const bool decomposed = sc.yieldsChannelDecomposed();
+    if (!sc.noDecay())
+    {
+        applyDecayToValues(*yields, curTime_ - lastYieldTime_, fieldYields_,
+            yields->isotopes().size(), decomposed);
+    }
+
     // Individually-tracked field stars that died during this step
     // alone (deadFieldStars_ only ever holds those, mirroring
     // Cluster::mDead_'s own per-step convention) -- accumulated onto
     // fieldYields_ rather than recomputed, since earlier steps' own
-    // dead field stars are no longer available to re-sum
-    const bool decomposed = sc.yieldsChannelDecomposed();
+    // dead field stars are no longer available to re-sum. dtDecay is
+    // the time elapsed since each field star actually died
+    // (curTime_ - deathTime_) if noDecay() is false, or 0 (no decay
+    // applied at all) if it is true -- mirroring
+    // Cluster::computeYields()'s own identical convention for its
+    // stochastic population.
     for (const auto& fieldStar : deadFieldStars_)
     {
+        const double dtDecay = sc.noDecay() ? 0.0 : curTime_ - fieldStar.deathTime_;
         const auto contribution = decomposed
-            ? yields->yield(fieldStar.mass_, fieldStar.feh_).second
-            : yields->yieldSum(fieldStar.mass_, fieldStar.feh_);
+            ? yields->yield(fieldStar.mass_, fieldStar.feh_, dtDecay).second
+            : yields->yieldSum(fieldStar.mass_, fieldStar.feh_, dtDecay);
         for (std::size_t k = 0; k < contribution.size(); ++k)
         {
             fieldYields_[k] += contribution[k]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,cppcoreguidelines-pro-bounds-constant-array-index) -- fieldYields_ and contribution are both sized identically by construction

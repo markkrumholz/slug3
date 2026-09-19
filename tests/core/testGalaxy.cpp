@@ -8,6 +8,7 @@
 
 #include "../src/core/Cluster.hpp"
 #include "../src/core/Galaxy.hpp"
+#include "../src/elem/IsotopeTable.hpp"
 #include "../src/interpolation/Interpolator1D.hpp"
 #include "../src/io/SimControls.hpp"
 #include "../src/phot/FilterCollection.hpp"
@@ -1841,7 +1842,16 @@ static auto testYieldsRateHydrogenOrderOfMagnitude() -> int
 // degenerate (a single value) -- testGalaxyDynamics.in's own stars.FeH
 // = 0.0 is exactly this case. Reuses
 // testYieldsRateHydrogenOrderOfMagnitude()'s own yields/min_stoch_mass/
-// f_cluster setup.
+// f_cluster setup. Unlike that test (which only ever checks hydrogen,
+// stable and so unaffected by decay either way), this one checks
+// every isotope, including unstable ones (Ni56) -- so, unlike that
+// one, this advance()s the galaxy to age first, making curTime_ ==
+// age before either yieldsRate() call below: yieldsRate(t, feh)
+// itself decays its own raw rate forward by curTime_ - t (see its own
+// comment), and evaluating it here with t == age > curTime_ == 0 (had
+// this not advance()d first) would compute decay over a *negative*
+// elapsed time -- not physically meaningful, and, for a short-lived
+// isotope, prone to overflow into inf/NaN entirely.
 static auto testYieldsRateSingleFehDelegates() -> int
 {
     constexpr double age = 1e8;
@@ -1868,7 +1878,8 @@ static auto testYieldsRateSingleFehDelegates() -> int
         }
 
         utils::rng().seed(rngSeed);
-        const core::Galaxy galaxy(controls);
+        core::Galaxy galaxy(controls);
+        galaxy.advance(age);
 
         const auto rateNoFeh = galaxy.yieldsRate(age);
         const auto rateWithFeh = galaxy.yieldsRate(age, controls.fehDist().getMin());
@@ -1921,7 +1932,11 @@ static auto testYieldsRateSingleFehDelegates() -> int
 // Yields::yield()'s own [Fe/H] range check (mirroring its existing
 // hasYield(mass) check) that makes evaluating yieldsRate(t, feh) at
 // that padding point return zero from every channel rather than
-// hitting YieldChannel::yield()'s own out-of-range assert.
+// hitting YieldChannel::yield()'s own out-of-range assert. Like
+// testYieldsRateSingleFehDelegates() (see its own comment), this
+// checks every isotope including unstable ones, so the galaxy is
+// advance()d to age first, keeping every yieldsRate(t, feh) call's own
+// internal decay (curTime_ - t) non-negative.
 static auto testYieldsRateMultiFeh() -> int
 {
     constexpr double age = 1e8;
@@ -1950,7 +1965,8 @@ static auto testYieldsRateMultiFeh() -> int
         }
 
         utils::rng().seed(rngSeed);
-        const core::Galaxy galaxy(controls);
+        core::Galaxy galaxy(controls);
+        galaxy.advance(age);
 
         // Independent recomputation, mirroring Galaxy::yieldsRate(t)'s
         // own multi-feh implementation exactly, but built here from
@@ -2369,6 +2385,250 @@ static auto testGalaxyYieldsMultipleAdvanceCalls() -> int
     return 0;
 }
 
+// Verify Galaxy::computeYields()'s field-star share of Ni56 (unstable,
+// real lifetime ~0.024 yr -- vs. hydrogen, stable and so unaffected by
+// decay either way, which every non-decay yields test in this file
+// checks instead), with radioactive decay enabled (yields.no_decay
+// left at its default, false).
+//
+// Unlike testGalaxyYieldsFieldAndContinuous() (which cross-checks
+// hydrogen's own *undecayed* continuous share against a composite
+// Simpson's rule integral of yieldsRate(t)), this does not attempt the
+// analogous check for Ni56's *decayed* continuous share: with Ni56's
+// own lifetime many orders of magnitude shorter than age, the decayed
+// integrand galaxy.yieldsRate(t)[Ni56] is an extremely narrow spike
+// concentrated within a lifetime or so of t = curTime_ -- far too
+// narrow for a low-order quadrature (composite Simpson at any sample
+// count that still runs quickly, or, for that matter, Yields's own
+// internal adaptive Gauss-Kronrod) to resolve reliably. Physically,
+// this narrowness means the true continuous contribution is
+// necessarily tiny (bounded above by roughly the raw, undecayed
+// instantaneous rate at age times Ni56's own lifetime -- see
+// continuousUpperBound below), which is exactly why this test can
+// safely ignore it and still get a meaningful check: the field-star
+// share, by contrast, needs no integration at all (each field star's
+// own dtDecay = age - deathTime_ is an exact, known number, so
+// yieldSum() evaluates a closed-form expression, not a quadrature), so
+// galaxy.yields()[Ni56] is checked against fieldNi (the exact,
+// independently-recomputed field-star-only sum) to within a tolerance
+// set by that same physical bound on the continuous share.
+static auto testGalaxyYieldsFieldAndContinuousDecay() -> int
+{
+    constexpr double age = 1e8;
+
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFile);
+        inputDeck.at_path("clusters").as_table()->insert_or_assign("f_cluster", 0.0);
+        inputDeck.at_path("stars").as_table()->insert_or_assign("min_stoch_mass", 50.0);
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{ { "channel", "ccsn" }, { "model", "kobayashi_test" } } },
+            { "channel2", toml::table{ { "channel", "ccsn" }, { "model", "sukhbold_test" } } },
+            { "channel3", toml::table{ { "channel", "massive_star_winds" }, { "model", "sukhbold_test" } } },
+            { "channel_decomposed", false },
+            { "registry", std::string("tests/yields/assets/yields.toml") },
+        });
+        const io::SimControls controls(inputDeck);
+
+        if (controls.yields() == nullptr)
+        {
+            std::cerr << "testGalaxy: yieldsFieldAndContinuousDecay: expected "
+                "yields() non-null\n";
+            return 1;
+        }
+        const auto& isotopes = controls.yields()->isotopes();
+        const auto niIt = std::ranges::find_if(isotopes,
+            [](const auto& iso) { return iso.get().Z() == 28 && iso.get().A() == 56; });
+        if (niIt == isotopes.end())
+        {
+            std::cerr << "testGalaxy: yieldsFieldAndContinuousDecay: expected "
+                "Ni56 (Z=28, A=56) among isotopes()\n";
+            return 1;
+        }
+        const auto niIdx = static_cast<std::size_t>(std::distance(isotopes.begin(), niIt));
+
+        utils::rng().seed(rngSeed);
+        core::Galaxy galaxy(controls);
+        galaxy.advance(age);
+
+        if (galaxy.deadFieldStars().empty())
+        {
+            std::cerr << "testGalaxy: yieldsFieldAndContinuousDecay: expected "
+                "at least one dead field star by age " << age << "\n";
+            return 1;
+        }
+
+        double fieldNi = 0.0;
+        double fieldNiUndecayed = 0.0;
+        for (const auto& fs : galaxy.deadFieldStars())
+        {
+            fieldNi += controls.yields()->yieldSum(fs.mass_, fs.feh_, age - fs.deathTime_).at(niIdx);
+            fieldNiUndecayed += controls.yields()->yieldSum(fs.mass_, fs.feh_, 0.0).at(niIdx);
+        }
+        if (!(fieldNiUndecayed > 0.0))
+        {
+            std::cerr << "testGalaxy: yieldsFieldAndContinuousDecay: test bug: "
+                "expected a positive undecayed field-star Ni56 yield\n";
+            return 1;
+        }
+
+        // Physical upper bound on the continuous population's own
+        // present-day Ni56 contribution -- see this test's own header
+        // comment. galaxy.yieldsRate(age)[Ni56] here is the *decayed*
+        // rate (dtDecay = curTime_ - age = 0, so this is also the raw,
+        // undecayed instantaneous rate), and ni56.lifetime() is Ni56's
+        // own mean lifetime, in yr.
+        const auto& ni56 = elem::isotopeTable(28U, 56U);
+        const double continuousUpperBound = galaxy.yieldsRate(age).at(niIdx) * ni56.lifetime();
+
+        const double actualNi = galaxy.yields().at(niIdx);
+        const double tolerance = (10.0 * continuousUpperBound) + (1e-9 * fieldNiUndecayed);
+        if (std::abs(actualNi - fieldNi) > tolerance)
+        {
+            std::cerr << "testGalaxy: yieldsFieldAndContinuousDecay: "
+                "galaxy.yields()[Ni56] = " << actualNi << ", expected " <<
+                fieldNi << " (exact field-star share) within tolerance " <<
+                tolerance << " (continuous upper bound " <<
+                continuousUpperBound << ")\n";
+            return 1;
+        }
+
+        // Sanity check that decay actually changed something relative
+        // to the undecayed field-star total -- otherwise this test
+        // could pass vacuously if dtDecay were silently always 0. With
+        // age (1e8 yr) so many orders of magnitude beyond Ni56's own
+        // lifetime (~0.024 yr), essentially none should survive.
+        if (actualNi > 0.1 * fieldNiUndecayed)
+        {
+            std::cerr << "testGalaxy: yieldsFieldAndContinuousDecay: "
+                "galaxy.yields()[Ni56] = " << actualNi << " is not much "
+                "smaller than the undecayed field-star total " <<
+                fieldNiUndecayed << " -- decay does not appear to be applied\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testGalaxy: yieldsFieldAndContinuousDecay test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Verify that fieldYields_'s own already-accumulated total is
+// correctly aged forward (via Yields::applyDecay()) across multiple
+// advance() calls -- see Galaxy::computeYields()'s own comment for why
+// this incremental aging step exists at all (fieldYields_, unlike
+// Cluster::yields_, keeps no memory of which isotope came from which
+// star or when). Otherwise mirrors
+// testGalaxyYieldsFieldAndContinuousDecay() (same reasoning for why
+// only the field-star share, not the continuous one, is checked
+// precisely), but splits the single advance(age) into two steps at
+// age / 2, as testGalaxyYieldsMultipleAdvanceCalls() does for
+// hydrogen. Field-star contributions from *either* step are recomputed
+// with dtDecay = age - deathTime_ (decayed all the way to the final
+// age, regardless of which step the star actually died in) -- if the
+// aging step were missing entirely, the first step's own field stars
+// would be under-decayed relative to this (decayed only to age / 2,
+// not all the way to age), and, since Ni56's field-star contribution
+// is not negligible the way the continuous share is (see
+// testGalaxyYieldsFieldAndContinuousDecay()'s own comment), this test
+// would catch that.
+static auto testGalaxyYieldsMultipleAdvanceCallsDecay() -> int
+{
+    constexpr double age = 1e8;
+
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFile);
+        inputDeck.at_path("clusters").as_table()->insert_or_assign("f_cluster", 0.0);
+        inputDeck.at_path("stars").as_table()->insert_or_assign("min_stoch_mass", 50.0);
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{ { "channel", "ccsn" }, { "model", "kobayashi_test" } } },
+            { "channel2", toml::table{ { "channel", "ccsn" }, { "model", "sukhbold_test" } } },
+            { "channel3", toml::table{ { "channel", "massive_star_winds" }, { "model", "sukhbold_test" } } },
+            { "channel_decomposed", false },
+            { "registry", std::string("tests/yields/assets/yields.toml") },
+        });
+        const io::SimControls controls(inputDeck);
+
+        if (controls.yields() == nullptr)
+        {
+            std::cerr << "testGalaxy: yieldsMultipleAdvanceCallsDecay: expected "
+                "yields() non-null\n";
+            return 1;
+        }
+        const auto& isotopes = controls.yields()->isotopes();
+        const auto niIt = std::ranges::find_if(isotopes,
+            [](const auto& iso) { return iso.get().Z() == 28 && iso.get().A() == 56; });
+        if (niIt == isotopes.end())
+        {
+            std::cerr << "testGalaxy: yieldsMultipleAdvanceCallsDecay: expected "
+                "Ni56 (Z=28, A=56) among isotopes()\n";
+            return 1;
+        }
+        const auto niIdx = static_cast<std::size_t>(std::distance(isotopes.begin(), niIt));
+
+        utils::rng().seed(rngSeed);
+        core::Galaxy galaxy(controls);
+
+        double fieldNi = 0.0;
+        double fieldNiUndecayed = 0.0;
+
+        galaxy.advance(age / 2.0);
+        const auto deadFirst = galaxy.deadFieldStars();
+        if (deadFirst.empty())
+        {
+            std::cerr << "testGalaxy: yieldsMultipleAdvanceCallsDecay: test bug: "
+                "expected some dead field stars by " << (age / 2.0) <<
+                " yr, the first of two advance() calls\n";
+            return 1;
+        }
+        for (const auto& fs : deadFirst)
+        {
+            fieldNi += controls.yields()->yieldSum(fs.mass_, fs.feh_, age - fs.deathTime_).at(niIdx);
+            fieldNiUndecayed += controls.yields()->yieldSum(fs.mass_, fs.feh_, 0.0).at(niIdx);
+        }
+
+        galaxy.advance(age);
+        for (const auto& fs : galaxy.deadFieldStars())
+        {
+            fieldNi += controls.yields()->yieldSum(fs.mass_, fs.feh_, age - fs.deathTime_).at(niIdx);
+            fieldNiUndecayed += controls.yields()->yieldSum(fs.mass_, fs.feh_, 0.0).at(niIdx);
+        }
+        if (!(fieldNiUndecayed > 0.0))
+        {
+            std::cerr << "testGalaxy: yieldsMultipleAdvanceCallsDecay: test bug: "
+                "expected a positive undecayed field-star Ni56 yield\n";
+            return 1;
+        }
+
+        const auto& ni56 = elem::isotopeTable(28U, 56U);
+        const double continuousUpperBound = galaxy.yieldsRate(age).at(niIdx) * ni56.lifetime();
+
+        const double actualNi = galaxy.yields().at(niIdx);
+        const double tolerance = (10.0 * continuousUpperBound) + (1e-9 * fieldNiUndecayed);
+        if (std::abs(actualNi - fieldNi) > tolerance)
+        {
+            std::cerr << "testGalaxy: yieldsMultipleAdvanceCallsDecay: "
+                "galaxy.yields()[Ni56] = " << actualNi << ", expected " <<
+                fieldNi << " (exact field-star share) within tolerance " <<
+                tolerance << " (continuous upper bound " <<
+                continuousUpperBound << ") -- fieldYields_ may not be aged "
+                "forward correctly across advance() calls\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testGalaxy: yieldsMultipleAdvanceCallsDecay test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
 auto testGalaxy() -> int
 {
     int result = testGalaxyBasics();
@@ -2392,6 +2652,8 @@ auto testGalaxy() -> int
     result += testGalaxyYieldsClusteredOnly();
     result += testGalaxyYieldsFieldAndContinuous();
     result += testGalaxyYieldsMultipleAdvanceCalls();
+    result += testGalaxyYieldsFieldAndContinuousDecay();
+    result += testGalaxyYieldsMultipleAdvanceCallsDecay();
 
     try
     {
