@@ -8,6 +8,7 @@
  */
 
 #include "Bindings.hpp"
+#include "../elem/ElemCommons.hpp"
 #include "../elem/IsotopeData.hpp"
 #include "../elem/IsotopeTable.hpp"
 #include "../yields/YieldChannel.hpp"
@@ -26,12 +27,12 @@
 // Yields's own isotopes()/isotopesOrig(), to a reference into the
 // single, global elem::isotopeTable() -- so a raw pointer is always
 // safe to dereference, with no lifetime tie to anything else) into the
-// yields::IsotopeList rebuildYieldGrid() itself takes. Shared by
+// elem::IsotopeList rebuildYieldGrid() itself takes. Shared by
 // YieldChannel::rebuildYieldGrid()'s and Yields::rebuildYieldGrid()'s
 // own bindings (see BindYields.cpp for the latter).
-static auto toIsotopeList(const std::vector<const elem::IsotopeData*>& isotopes) -> yields::IsotopeList
+static auto toIsotopeList(const std::vector<const elem::IsotopeData*>& isotopes) -> elem::IsotopeList
 {
-    yields::IsotopeList result;
+    elem::IsotopeList result;
     result.reserve(isotopes.size());
     for (const auto* iso : isotopes)
     {

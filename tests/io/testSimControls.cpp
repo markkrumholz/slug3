@@ -1451,7 +1451,7 @@ static auto testSimControlsYieldsIsotopes() -> int
 // Verify SimControls::readYields()'s own yields.isotopes handling:
 // parses each entry as a case-insensitive element symbol immediately
 // followed by a mass number, converts the whole list to a
-// yields::IsotopeList, and passes it to yields_->rebuildYieldGrid() so
+// elem::IsotopeList, and passes it to yields_->rebuildYieldGrid() so
 // that yields()->isotopes() ends up restricted to the intersection of
 // that list and whatever the loaded channels actually tabulate. Reuses
 // the same sukhbold_test/kobayashi_test fixture (isotope union h1,

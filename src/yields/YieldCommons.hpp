@@ -9,15 +9,12 @@
 #ifndef YIELDCOMMONS_HPP
 #define YIELDCOMMONS_HPP
 
-#include "../elem/IsotopeData.hpp"
 #include <array>
 #include <cstddef>
 #include <filesystem>
-#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
-#include <vector>
 
 /**
  * @brief A namespace to hold items dealing with nucleosynthetic yields
@@ -55,17 +52,6 @@ namespace yields
     inline static const std::string defaultRegistry = // NOLINT(bugprone-throwing-static-initialization,cert-err58-cpp) -- built from fixed string literals, so the (theoretically throwing) path conversion can never actually throw here
         (std::filesystem::path("data") / std::filesystem::path("yields")
         / std::filesystem::path("yields.toml")); /**< Default registry */
-
-    /**
-     * @brief A list of isotopes, each a const reference into the
-     *   single, global elem::isotopeTable()
-     * @details
-     * Used throughout the yields classes (YieldChannel::isotopesOrig()/
-     * isotopes(), Yields::isotopes()) wherever "an ordered list of
-     * isotopes" is needed, since the fully-spelled-out type is long
-     * enough to make repeating it at every use site hurt readability.
-     */
-    using IsotopeList = std::vector<std::reference_wrapper<const elem::IsotopeData>>;
 
     /**
      * @struct YieldChannelDescriptor

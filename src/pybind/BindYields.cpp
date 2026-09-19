@@ -7,6 +7,7 @@
  */
 
 #include "Bindings.hpp"
+#include "../elem/ElemCommons.hpp"
 #include "../elem/IsotopeData.hpp"
 #include "../io/SimControls.hpp"
 #include "../yields/YieldChannel.hpp"
@@ -27,9 +28,9 @@
 // implementation detail of these two translation units' own bindings,
 // not part of the cross-file infrastructure Bindings.hpp otherwise
 // holds (resolveControls() and friends).
-static auto toIsotopeList(const std::vector<const elem::IsotopeData*>& isotopes) -> yields::IsotopeList
+static auto toIsotopeList(const std::vector<const elem::IsotopeData*>& isotopes) -> elem::IsotopeList
 {
-    yields::IsotopeList result;
+    elem::IsotopeList result;
     result.reserve(isotopes.size());
     for (const auto* iso : isotopes)
     {

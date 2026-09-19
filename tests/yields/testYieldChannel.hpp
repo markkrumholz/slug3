@@ -752,7 +752,7 @@ inline auto testYieldChannelIsotopeRemap() -> int
             yields::YieldChannelDescriptor{ yields::Channel::ccsn_, "kobayashi_test" },
             0.0, 0.0, registryName);
 
-        const yields::IsotopeList target{
+        const elem::IsotopeList target{
             elem::isotopeTable(26, 56), // fe56 -- native to kobayashi_test
             elem::isotopeTable(28, 56), // ni56 -- NOT native to kobayashi_test
             elem::isotopeTable(1, 1),   // h1 -- native to kobayashi_test

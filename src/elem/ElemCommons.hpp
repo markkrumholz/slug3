@@ -9,6 +9,10 @@
 #ifndef ELEMCOMMONS_HPP
 #define ELEMCOMMONS_HPP
 
+#include "IsotopeData.hpp"
+#include <functional>
+#include <vector>
+
 namespace elem
 {
     /**
@@ -36,6 +40,21 @@ namespace elem
         // NOLINTEND(readability-identifier-naming)
         nElem
     };
+
+    /**
+     * @brief A list of isotopes, each a const reference into the
+     *   single, global elem::isotopeTable()
+     * @details
+     * Used throughout the codebase wherever "an ordered list of
+     * isotopes" is needed (yields::YieldChannel::isotopesOrig()/
+     * isotopes(), yields::Yields::isotopes(), elem::DecayChain::
+     * products()), since the fully-spelled-out type is long enough to
+     * make repeating it at every use site hurt readability. Lives here,
+     * rather than in yields::YieldCommons.hpp (where it originated),
+     * since it's a general elem-level concept with no dependency on
+     * anything yields-specific.
+     */
+    using IsotopeList = std::vector<std::reference_wrapper<const IsotopeData>>;
 
 } // namespace elem
 

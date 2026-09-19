@@ -1378,7 +1378,7 @@ namespace io
          * since "a" is not a valid symbol, nor bare "Na", since it has
          * no mass number); an entry failing to parse this way throws.
          * Each parses to a reference into the single, global
-         * elem::isotopeTable(), and the resulting yields::IsotopeList is
+         * elem::isotopeTable(), and the resulting elem::IsotopeList is
          * passed to yields_->rebuildYieldGrid(), restricting yields_'s
          * own isotopes() to the intersection of that list and whatever
          * every loaded channel actually tabulates (see

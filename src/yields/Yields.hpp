@@ -9,6 +9,7 @@
 #ifndef YIELDS_HPP
 #define YIELDS_HPP
 
+#include "../elem/ElemCommons.hpp"
 #include "YieldChannel.hpp"
 #include "YieldCommons.hpp"
 #include <cstddef>
@@ -274,7 +275,7 @@ namespace yields
          * larger union of isotopes, or to change which isotopes subset
          * is kept.
          */
-        void rebuildYieldGrid(const IsotopeList& isotopes = {});
+        void rebuildYieldGrid(const elem::IsotopeList& isotopes = {});
 
         /**
          * @brief Return the SimControls this Yields reads its channel descriptors from
@@ -315,7 +316,7 @@ namespace yields
          *   every yieldChannels() entry's own isotopes() equals, in the
          *   same order -- see rebuildYieldGrid()'s own comment
          */
-        [[nodiscard]] auto isotopes() const -> const IsotopeList& { return isotopes_; }
+        [[nodiscard]] auto isotopes() const -> const elem::IsotopeList& { return isotopes_; }
 
         /**
          * @brief Return every channel's own yield, as one (nchannels, isotopes().size()) array
@@ -385,7 +386,7 @@ namespace yields
         const io::SimControls& controls_; // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members) -- deliberately a live reference, not a copy, matching Extinct's/Specsyn's own identical controls_ members exactly -- see either one's own comment for why. Only ever used through the same shared_ptr ownership pattern (shared_ptr<Yields> in SimControls's own yields_) as those, so the usual objection (disabling implicit copy/move assignment) doesn't apply in practice.
         std::string registryName_;        /**< Name of the yield registry file */
         std::vector<std::shared_ptr<YieldChannel>> yieldChannels_; /**< Yield channels built via addChannel(), one per entry in controls_.yieldChannels() -- see yieldChannels()'s own comment */
-        IsotopeList isotopes_; /**< Union of every yieldChannels_ entry's own isotopesOrig(), deduplicated and sorted -- see isotopes()'s own comment */
+        elem::IsotopeList isotopes_; /**< Union of every yieldChannels_ entry's own isotopesOrig(), deduplicated and sorted -- see isotopes()'s own comment */
 
     };
 

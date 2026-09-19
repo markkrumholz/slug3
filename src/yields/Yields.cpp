@@ -7,6 +7,7 @@
  */
 
 #include "Yields.hpp"
+#include "../elem/ElemCommons.hpp"
 #include "../io/SimControls.hpp"
 #include "YieldChannel.hpp"
 #include "YieldCommons.hpp"
@@ -120,7 +121,7 @@ namespace yields
         yieldChannels_ = std::move(newChannels);
     }
 
-    void Yields::rebuildYieldGrid(const IsotopeList& isotopes)
+    void Yields::rebuildYieldGrid(const elem::IsotopeList& isotopes)
     {
         // Union every loaded channel's own isotopesOrig() into one
         // deduplicated, sorted isotopes_ -- see this method's own

@@ -1145,7 +1145,7 @@ void io::SimControls::readYields(const toml::table& inputDeck)
             throw std::runtime_error("SimControls: yields.isotopes must be an array of strings");
         }
         const auto isotopeNames = utils::stringArrayContents(isotopesArr);
-        yields::IsotopeList isotopes;
+        elem::IsotopeList isotopes;
         isotopes.reserve(isotopeNames.size());
         for (const auto& name : isotopeNames)
         {

@@ -87,6 +87,13 @@ Sections, in file order, and the fixtures each is built around:
   deck, since it just looks up the single, global isotope table by
   (Z, A).
 
+- DecayChain: built directly from real isotopeTable() entries (no deck
+  needed) -- Ni56 -> Co56 -> Fe56 (stable), a real, simple,
+  non-branching, branching-ratio-1 chain, checked against the textbook
+  3-isotope Bateman solution computed independently in the tests
+  themselves; mirrors tests/elem/testDecayChain.hpp's own identical
+  C++ checks.
+
 This file is run via pytest, invoked as a CTest test from CMakeLists.txt
 (see the test_PythonBindings target), so `ctest` alone runs both the
 C++ and Python sides of the test suite. It requires the SLUG_DIR
@@ -3265,3 +3272,75 @@ def test_simcontrols_write_yields_properties_settable():
     assert controls.writeGalaxyYields is False
     controls.writeGalaxyYields = True
     assert controls.writeGalaxyYields is True
+
+
+# ---------------------------------------------------------------------
+# DecayChain
+# ---------------------------------------------------------------------
+
+
+def test_decay_chain_products_ni56():
+    """DecayChain.products() for Ni56 lists Ni56, Co56, Fe56 in order --
+    the real, simple, non-branching, branching-ratio-1 chain in the
+    isotope table (also used as DecayChain's own worked example)."""
+    ni56 = slug.isotopeTable(28, 56)
+    chain = slug.DecayChain(ni56)
+
+    labels = [iso.label() for iso in chain.products()]
+    assert labels == ["Ni56", "Co56", "Fe56"]
+
+
+def test_decay_chain_yield_at_zero():
+    """At t=0, all atoms are still the starting isotope."""
+    ni56 = slug.isotopeTable(28, 56)
+    chain = slug.DecayChain(ni56)
+
+    y = chain.yield_(0.0)
+    assert y == pytest.approx([1.0, 0.0, 0.0], abs=1e-12)
+
+
+def test_decay_chain_yield_matches_bateman():
+    """yield_(t) matches the textbook 3-isotope Bateman solution,
+    computed independently here from the real Ni56/Co56 lifetimes --
+    mirrors tests/elem/testDecayChain.hpp's own identical C++ check."""
+    ni56 = slug.isotopeTable(28, 56)
+    co56 = slug.isotopeTable(27, 56)
+    chain = slug.DecayChain(ni56)
+
+    l1 = 1.0 / ni56.lifetime()
+    l2 = 1.0 / co56.lifetime()
+
+    for t_mult in (0.1, 0.5, 1.0, 2.0, 5.0, 10.0):
+        t = t_mult * ni56.lifetime()
+        y = chain.yield_(t)
+
+        n1 = np.exp(-l1 * t)
+        n2 = l1 / (l2 - l1) * (np.exp(-l1 * t) - np.exp(-l2 * t))
+        n3 = 1.0 - n1 - n2
+
+        assert y == pytest.approx([n1, n2, n3], abs=1e-9)
+
+
+def test_decay_chain_mass_balance():
+    """Every step in the Ni56 chain has branching ratio 1, so
+    sum(yield_(t)) must stay 1 for any t."""
+    ni56 = slug.isotopeTable(28, 56)
+    chain = slug.DecayChain(ni56)
+
+    for t in (0.0, 1e5, 1e6, 1e7, 1e8, 1e9):
+        assert sum(chain.yield_(t)) == pytest.approx(1.0, abs=1e-9)
+
+
+def test_decay_chain_stable_isotope():
+    """A DecayChain built from an already-stable isotope (Fe56, the
+    end of the Ni56 chain) has itself as its only product, with
+    abundance 1 for any t."""
+    fe56 = slug.isotopeTable(26, 56)
+    chain = slug.DecayChain(fe56)
+
+    products = chain.products()
+    assert len(products) == 1
+    assert products[0].label() == "Fe56"
+
+    for t in (0.0, 1.0, 1e10):
+        assert chain.yield_(t) == pytest.approx([1.0], abs=1e-12)

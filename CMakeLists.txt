@@ -132,6 +132,7 @@ add_executable(slug
     src/nebular/Nebular.cpp
     src/io/SimControls.cpp
     src/utils/ParseUtils.cpp
+    src/elem/DecayChain.cpp
     src/elem/IsotopeTable.cpp
     src/utils/HDF5Utils.cpp
     src/yields/YieldChannel.cpp
@@ -148,6 +149,7 @@ add_executable(slugTestInterpolation
     src/utils/HDF5Utils.cpp
 )
 add_executable(slugTestElem
+    src/elem/DecayChain.cpp
     src/elem/IsotopeTable.cpp
     tests/elem/testElemAll.cpp
     src/utils/HDF5Utils.cpp
@@ -493,6 +495,7 @@ pybind11_add_module(slugPython
     src/pybind/BindOutputManagerAscii.cpp
     src/pybind/BindSimCluster.cpp
     src/pybind/BindSimGalaxy.cpp
+    src/pybind/BindDecayChain.cpp
     src/pybind/BindYieldChannel.cpp
     src/pybind/BindYields.cpp
     src/core/Cluster.cpp
@@ -533,6 +536,7 @@ pybind11_add_module(slugPython
     src/tracks/Tracks3D.cpp
     src/utils/ParseUtils.cpp
     src/utils/HDF5Utils.cpp
+    src/elem/DecayChain.cpp
     src/elem/IsotopeTable.cpp
     src/yields/YieldChannel.cpp
     src/yields/Yields.cpp
