@@ -1759,7 +1759,13 @@ static auto testGalaxySFRDistResolution() -> int
 // "slug: warning" on construction -- see
 // testSimControlsYieldsDuplicateChannelWarning()'s own identical
 // pattern) and the wind channel into one combined per-isotope total,
-// so hydrogen's own index can be read directly.
+// so hydrogen's own index can be read directly. Although hydrogen
+// itself is stable (and so unaffected by decay either way), the
+// galaxy is still advance()d to age first: Yields::applyDecay()
+// processes every isotope internally, including unstable ones (Ni56,
+// also in this fixture), so leaving curTime_ at its initial 0 while
+// evaluating yieldsRate(age, ...) -- t > curTime_ -- would still throw
+// from DecayChain::applyDecay()'s own negative-dt rejection.
 static auto testYieldsRateHydrogenOrderOfMagnitude() -> int
 {
     constexpr double age = 1e8; // 100 Myr
@@ -1800,7 +1806,8 @@ static auto testYieldsRateHydrogenOrderOfMagnitude() -> int
         const auto h1Idx = static_cast<std::size_t>(std::distance(isotopes.begin(), h1It));
 
         utils::rng().seed(rngSeed);
-        const core::Galaxy galaxy(controls);
+        core::Galaxy galaxy(controls);
+        galaxy.advance(age);
 
         const auto rate = galaxy.yieldsRate(age, 0.0);
         const double sfrVal = galaxy.sfr()(age);
@@ -1842,16 +1849,13 @@ static auto testYieldsRateHydrogenOrderOfMagnitude() -> int
 // degenerate (a single value) -- testGalaxyDynamics.in's own stars.FeH
 // = 0.0 is exactly this case. Reuses
 // testYieldsRateHydrogenOrderOfMagnitude()'s own yields/min_stoch_mass/
-// f_cluster setup. Unlike that test (which only ever checks hydrogen,
-// stable and so unaffected by decay either way), this one checks
-// every isotope, including unstable ones (Ni56) -- so, unlike that
-// one, this advance()s the galaxy to age first, making curTime_ ==
-// age before either yieldsRate() call below: yieldsRate(t, feh)
-// itself decays its own raw rate forward by curTime_ - t (see its own
-// comment), and evaluating it here with t == age > curTime_ == 0 (had
-// this not advance()d first) would compute decay over a *negative*
-// elapsed time -- not physically meaningful, and, for a short-lived
-// isotope, prone to overflow into inf/NaN entirely.
+// f_cluster setup, and, like that test (see its own updated comment),
+// advance()s the galaxy to age first: yieldsRate(t, feh) itself decays
+// its own raw rate forward by curTime_ - t (see its own comment), and
+// evaluating it here with t == age > curTime_ == 0 (had this not
+// advance()d first) would compute decay over a *negative* elapsed
+// time for every unstable isotope in the fixture (Ni56), which
+// DecayChain::applyDecay() itself now rejects outright.
 static auto testYieldsRateSingleFehDelegates() -> int
 {
     constexpr double age = 1e8;

@@ -9,13 +9,13 @@
 #include "DecayChain.hpp"
 #include "ElemCommons.hpp"
 #include "IsotopeData.hpp"
-#include "IsotopeTable.hpp"
-#include <cmath>
+#include <Eigen/Dense>
 #include <cstddef>
+#include <limits>
 #include <optional>
 #include <stdexcept>
 #include <string>
-#include <utility>
+#include <unsupported/Eigen/MatrixFunctions>
 #include <vector>
 
 namespace elem
@@ -23,46 +23,12 @@ namespace elem
     namespace
     {
         /**
-         * @brief Breadth-first expansion: every isotope reachable from isotope via daughters()
-         * @param isotope The starting isotope
-         * @returns isotope itself (index 0) followed by every isotope
-         *   reachable from it by following daughters() recursively --
-         *   see DecayChain::DecayChain()'s own comment, step 1
-         * @throws std::runtime_error if some isotope's own daughters()
-         *   names a (Z, A) pair not found in the global isotope table
-         */
-        auto buildChain(const IsotopeData& isotope) -> IsotopeList //NOLINT(llvm-prefer-static-over-anonymous-namespace)
-        {
-            IsotopeList isotopes;
-            isotopes.emplace_back(isotope);
-            for (std::size_t i = 0; i < isotopes.size(); ++i)
-            {
-                for (const auto& daughter : isotopes[i].get().daughters()) // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i < isotopes.size() by construction (loop condition)
-                {
-                    try
-                    {
-                        isotopes.emplace_back(isotopeTable(daughter.Z_, daughter.A_));
-                    }
-                    catch (const std::out_of_range&)
-                    {
-                        throw std::runtime_error(
-                            "DecayChain: " + isotopes[i].get().label() + // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- see above
-                            "'s daughter (Z=" + std::to_string(daughter.Z_) + ", A=" +
-                            std::to_string(daughter.A_) + ") is not in the isotope table");
-                    }
-                }
-            }
-            return isotopes;
-        }
-
-        /**
-         * @brief Find an isotope's own index in a chain, by (Z, A)
-         * @param isotopes The chain to search
+         * @brief Find an isotope's own index in a list, by (Z, A)
+         * @param isotopes The list to search
          * @param z Atomic number to look for
          * @param a Mass number to look for
          * @returns The index of the first entry of isotopes matching
-         *   (z, a), or nullopt if none does -- used by sortChain() to
-         *   locate where one isotope's own daughter currently sits
+         *   (z, a), or nullopt if none does
          */
         auto findIndex(const IsotopeList& isotopes, //NOLINT(llvm-prefer-static-over-anonymous-namespace)
             const unsigned int z, const unsigned int a) -> std::optional<std::size_t>
@@ -75,105 +41,119 @@ namespace elem
         }
 
         /**
-         * @brief Reorder isotopes in place until every entry's own daughters() appear later than it
-         * @param isotopes The list to reorder, in place -- see
-         *   DecayChain::DecayChain()'s own comment, step 2
+         * @brief Identify every isotope that decay can affect: unstable isotopes and their descendants
+         * @param isotopes The full isotope list to scan
+         * @returns The index, into isotopes, of every unstable entry and
+         *   every entry reachable from one by following daughters()
+         *   recursively, in ascending order -- see DecayChain::
+         *   DecayChain()'s own comment, step 1
+         * @throws std::runtime_error if some relevant isotope's own
+         *   daughters() names a (Z, A) pair not present in isotopes
          */
-        void sortChain(IsotopeList& isotopes) //NOLINT(llvm-prefer-static-over-anonymous-namespace)
+        auto findRelevantIndices(const IsotopeList& isotopes) -> std::vector<std::size_t> //NOLINT(llvm-prefer-static-over-anonymous-namespace)
         {
-            bool swappedAny = true;
-            while (swappedAny)
-            {
-                swappedAny = false;
-                for (std::size_t i = 0; i < isotopes.size() && !swappedAny; ++i)
-                {
-                    for (const auto& daughter : isotopes[i].get().daughters()) // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i < isotopes.size() by construction (loop condition)
-                    {
-                        const auto j = findIndex(isotopes, daughter.Z_, daughter.A_);
-                        if (j.has_value() && *j <= i)
-                        {
-                            std::swap(isotopes[i], isotopes[*j]); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i < isotopes.size() by construction, and *j <= i by the condition just checked
-                            swappedAny = true;
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-
-        /**
-         * @brief Compute each isotope's own decay rate (1/lifetime(), 0 if stable)
-         * @param isotopes The (already sorted) chain
-         * @returns One rate per entry of isotopes, in the same order --
-         *   see DecayChain::DecayChain()'s own comment, step 3
-         */
-        auto computeRates(const IsotopeList& isotopes) -> std::vector<double> //NOLINT(llvm-prefer-static-over-anonymous-namespace)
-        {
-            std::vector<double> rates(isotopes.size());
+            std::vector<bool> relevant(isotopes.size(), false);
+            std::vector<std::size_t> worklist;
             for (std::size_t i = 0; i < isotopes.size(); ++i)
             {
-                const auto& iso = isotopes[i].get(); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i < isotopes.size() by construction
-                rates[i] = iso.stable() ? 0.0 : 1.0 / iso.lifetime(); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- see above
-            }
-            return rates;
-        }
-
-        /**
-         * @brief Compute the cached Bateman equation prefactor for each isotope in the chain
-         * @param isotopes The (already sorted) chain
-         * @param rates isotopes' own decay rates, from computeRates()
-         * @returns One prefactor per entry of isotopes, in the same
-         *   order -- see DecayChain::DecayChain()'s own comment, step 3
-         */
-        auto computeFactors(const IsotopeList& isotopes, const std::vector<double>& rates) -> std::vector<double> //NOLINT(llvm-prefer-static-over-anonymous-namespace)
-        {
-            const std::size_t n = isotopes.size();
-            std::vector<double> fac(n, 0.0);
-            if (n > 0) { fac[0] = 1.0; }
-            for (std::size_t k = 1; k < n; ++k)
-            {
-                double branchingRatio = 0.0;
-                for (const auto& daughter : isotopes[k - 1].get().daughters()) // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- k - 1 < n == isotopes.size() since k < n
+                if (!isotopes[i].get().stable()) // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i < isotopes.size() by loop bound
                 {
-                    if (daughter.Z_ == isotopes[k].get().Z() && daughter.A_ == isotopes[k].get().A()) // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- k < n == isotopes.size() by construction
+                    relevant[i] = true; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- see above
+                    worklist.push_back(i);
+                }
+            }
+            while (!worklist.empty())
+            {
+                const std::size_t i = worklist.back();
+                worklist.pop_back();
+                for (const auto& daughter : isotopes[i].get().daughters()) // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i < isotopes.size(), pushed only from valid indices
+                {
+                    const auto j = findIndex(isotopes, daughter.Z_, daughter.A_);
+                    if (!j.has_value())
                     {
-                        branchingRatio = daughter.branchingRatio_;
-                        break;
+                        throw std::runtime_error(
+                            "DecayChain: " + isotopes[i].get().label() + // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- see above
+                            "'s daughter (Z=" + std::to_string(daughter.Z_) + ", A=" +
+                            std::to_string(daughter.A_) + ") is not present in the given isotope list");
+                    }
+                    if (!relevant[*j]) // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- *j < isotopes.size() == relevant.size() by construction
+                    {
+                        relevant[*j] = true; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- see above
+                        worklist.push_back(*j);
                     }
                 }
-                fac[k] = fac[k - 1] * branchingRatio * rates[k - 1]; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- k < n, k - 1 < n by construction
             }
-            return fac;
+
+            std::vector<std::size_t> result;
+            for (std::size_t i = 0; i < isotopes.size(); ++i)
+            {
+                if (relevant[i]) { result.push_back(i); } // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i < isotopes.size() == relevant.size() by loop bound
+            }
+            return result;
         }
     } // namespace
 
-    DecayChain::DecayChain(const IsotopeData& isotope)
+    DecayChain::DecayChain(const IsotopeList& isotopes)
     {
-        isotopes_ = buildChain(isotope);
-        sortChain(isotopes_);
-        rates_ = computeRates(isotopes_);
-        fac_ = computeFactors(isotopes_, rates_);
+        relevantIndices_ = findRelevantIndices(isotopes);
+        const std::size_t m = relevantIndices_.size();
+
+        // Reverse lookup: position within relevantIndices_ of each
+        // relevant isotope's own index into isotopes. Entries for a
+        // non-relevant isotope are left at this sentinel and never read
+        // -- every lookup below is only ever performed for a daughter
+        // of a relevant, unstable isotope, which findRelevantIndices()
+        // itself already guarantees is relevant too.
+        constexpr std::size_t notRelevant = std::numeric_limits<std::size_t>::max();
+        std::vector<std::size_t> positionOf(isotopes.size(), notRelevant);
+        for (std::size_t p = 0; p < m; ++p)
+        {
+            positionOf[relevantIndices_[p]] = p; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- relevantIndices_[p] < isotopes.size() by construction
+        }
+
+        depletionMatrix_ = Eigen::MatrixXd::Zero(static_cast<Eigen::Index>(m), static_cast<Eigen::Index>(m));
+        for (std::size_t p = 0; p < m; ++p)
+        {
+            const auto& parent = isotopes[relevantIndices_[p]].get(); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- relevantIndices_[p] < isotopes.size() by construction
+            if (parent.stable()) { continue; } // a relevant but stable isotope is a pure decay *product*, never a source
+            const auto pIdx = static_cast<Eigen::Index>(p);
+            depletionMatrix_(pIdx, pIdx) -= 1.0 / parent.lifetime();
+            for (const auto& daughter : parent.daughters())
+            {
+                const auto j = findIndex(isotopes, daughter.Z_, daughter.A_);
+                // j is guaranteed to have a value, and positionOf[*j] is
+                // guaranteed relevant, by findRelevantIndices()'s own
+                // construction: every daughter of a relevant, unstable
+                // isotope was itself marked relevant there.
+                const auto qIdx = static_cast<Eigen::Index>(positionOf[*j]); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- see above
+                depletionMatrix_(qIdx, pIdx) += daughter.branchingRatio_ / parent.lifetime();
+            }
+        }
     }
 
-    auto DecayChain::yield(const double t) const -> std::vector<double>
+    void DecayChain::applyDecay(const double dtDecay, const std::span<double> values) const
     {
-        const std::size_t n = isotopes_.size();
-        std::vector<double> result(n, 0.0);
-        for (std::size_t nIdx = 0; nIdx < n; ++nIdx)
+        if (dtDecay < 0.0)
         {
-            double sum = 0.0;
-            for (std::size_t i = 0; i <= nIdx; ++i)
-            {
-                double denom = 1.0;
-                for (std::size_t j = 0; j <= nIdx; ++j)
-                {
-                    if (j != i) { denom *= (rates_[j] - rates_[i]); } // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i, j <= nIdx < n == rates_.size() by construction
-                }
-                sum += std::exp(-rates_[i] * t) / denom; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i <= nIdx < n == rates_.size() by construction
-            }
-            result[nIdx] = fac_[nIdx] * sum; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,cppcoreguidelines-pro-bounds-constant-array-index) -- nIdx < n == result.size() == fac_.size() by construction
+            throw std::invalid_argument(
+                "DecayChain::applyDecay: dtDecay must be non-negative, got " + std::to_string(dtDecay));
         }
-        return result;
+        const std::size_t m = relevantIndices_.size();
+        if (m == 0) { return; }
+
+        Eigen::VectorXd v(static_cast<Eigen::Index>(m));
+        for (std::size_t k = 0; k < m; ++k)
+        {
+            v[static_cast<Eigen::Index>(k)] = values[relevantIndices_[k]]; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- relevantIndices_[k] < values.size() == isotopes.size() by construction
+        }
+
+        const Eigen::MatrixXd propagator = (depletionMatrix_ * dtDecay).exp();
+        const Eigen::VectorXd result = propagator * v;
+
+        for (std::size_t k = 0; k < m; ++k)
+        {
+            values[relevantIndices_[k]] = result[static_cast<Eigen::Index>(k)]; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- see above
+        }
     }
 
 } // namespace elem

@@ -500,7 +500,6 @@ pybind11_add_module(slugPython
     src/pybind/BindOutputManagerAscii.cpp
     src/pybind/BindSimCluster.cpp
     src/pybind/BindSimGalaxy.cpp
-    src/pybind/BindDecayChain.cpp
     src/pybind/BindYieldChannel.cpp
     src/pybind/BindYields.cpp
     src/core/Cluster.cpp

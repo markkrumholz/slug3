@@ -82,17 +82,22 @@ Sections, in file order, and the fixtures each is built around:
   kobayashi_test, from the small, two-model fixture registry
   (tests/yields/assets/yields.toml -- the same one
   tests/io/testSimControls.cpp's own C++ tests use) whose isotope union
-  is h1/fe56/ni56/ni58 (Z-then-A order), so this needs no data fetched
-  separately. isotopeTable() itself is exercised independently of any
-  deck, since it just looks up the single, global isotope table by
-  (Z, A).
+  is h1/fe56/ni56/ni58, force-expanded (see Yields::rebuildYieldGrid()'s
+  own comment) to also include co56 -- Ni56's own decay daughter, not
+  itself tabulated by either model -- giving h1/fe56/co56/ni56/ni58 in
+  Z-then-A order, so this needs no data fetched separately.
+  isotopeTable() itself is exercised independently of any deck, since it
+  just looks up the single, global isotope table by (Z, A).
 
-- DecayChain: built directly from real isotopeTable() entries (no deck
-  needed) -- Ni56 -> Co56 -> Fe56 (stable), a real, simple,
-  non-branching, branching-ratio-1 chain, checked against the textbook
-  3-isotope Bateman solution computed independently in the tests
-  themselves; mirrors tests/elem/testDecayChain.hpp's own identical
-  C++ checks.
+  elem::DecayChain itself (the matrix-exponential radioactive-decay
+  solver Yields.yield_()/yieldSum()'s own dt_decay argument uses
+  internally) has no direct Python binding -- it is Yields's own
+  implementation detail, not something a Python caller constructs
+  standalone. Its physics is exercised end-to-end here through
+  test_yields_yield_and_yield_sum_dt_decay() and
+  test_yields_yield_ignores_dt_decay_when_no_decay_set() instead, and
+  directly, in more detail, by tests/elem/testDecayChain.hpp's own C++
+  tests.
 
 This file is run via pytest, invoked as a CTest test from CMakeLists.txt
 (see the test_PythonBindings target), so `ctest` alone runs both the
@@ -214,7 +219,7 @@ GALAXY_DYNAMICS_TIME = 3e5
 # (deliberately sharing some isotopes and differing in one) is
 # h1/fe56/ni56/ni58, in Z-then-A order.
 YIELDS_REGISTRY = "tests/yields/assets/yields.toml"
-YIELDS_ISOTOPES = ["H1", "Fe56", "Ni56", "Ni58"]
+YIELDS_ISOTOPES = ["H1", "Fe56", "Co56", "Ni56", "Ni58"] # Co56 force-expanded in as Ni56's own decay daughter -- see Yields::rebuildYieldGrid()'s own comment
 
 # slug's own bundled default deck, used by SimControls() when path is
 # omitted/empty (see the SimControls tests below). Unlike every other
@@ -2998,15 +3003,17 @@ def test_yields_yield_and_yield_sum_shapes(yields_controls):
 
 def test_yields_yield_and_yield_sum_dt_decay():
     """yield_()/yieldSum()'s optional dt_decay argument applies radioactive
-    decay through Yields.decayChains_. Mirrors
+    decay via Yields's own internal DecayChain. Mirrors
     tests/io/testSimControls.cpp's testSimControlsYieldsDecayApplication():
-    Ni56 -> Co56 -> Fe56 is real and non-branching, but this fixture never
-    tabulates Co56, so the mass transiently in Co56 at time t is simply
-    dropped from the tracked total while Fe56 still receives its own
-    correct, delayed inflow via the closed-form two-step Bateman solution.
-    Uses a dedicated deck (channel1's m_min overridden to 15.0) rather than
-    the shared yields_controls fixture, so both channels answer the same
-    query mass at once."""
+    Ni56 -> Co56 -> Fe56 is real and non-branching; Co56 is not itself
+    tabulated by either model here, but Yields::rebuildYieldGrid() force-
+    expands isotopes() to include it anyway (as Ni56's own decay daughter),
+    so its own transient abundance is tracked explicitly rather than
+    dropped, while Fe56 still receives its own correct, delayed inflow via
+    the closed-form two-step Bateman solution. Uses a dedicated deck
+    (channel1's m_min overridden to 15.0) rather than the shared
+    yields_controls fixture, so both channels answer the same query mass
+    at once."""
     deck = tomlkit.parse(pathlib.Path(CLUSTER_DECK).read_text())
     deck["yields"] = tomlkit.table()
     deck["yields"]["channel1"] = {"channel": "ccsn", "model": "sukhbold_test", "m_min": 15.0}
@@ -3014,6 +3021,7 @@ def test_yields_yield_and_yield_sum_dt_decay():
     deck["yields"]["registry"] = YIELDS_REGISTRY
     controls = slug.SimControls(tomlkit.dumps(deck))
     yields = controls.yields
+    assert [iso.label() for iso in yields.isotopes] == YIELDS_ISOTOPES
 
     ni56 = slug.isotopeTable(28, 56)
     co56 = slug.isotopeTable(27, 56)
@@ -3024,18 +3032,18 @@ def test_yields_yield_and_yield_sum_dt_decay():
     n2 = l1 / (l2 - l1) * (np.exp(-l1 * dt) - np.exp(-l2 * dt))
     n3 = 1.0 - n1 - n2
 
-    # Isotope order [H1, Fe56, Ni56, Ni58]
-    row0 = [5.93 * 15.0 / 18.2, 8.46e-2 * 15.0 / 18.2, 7.02e-2 * 15.0 / 18.2, 0.0]
-    row1 = [6.79, 8.52e-2, 0.0, 1.15e-3]
-    m0_ni56 = row0[2]
-    row0_decayed = [row0[0], row0[1] + m0_ni56 * n3, m0_ni56 * n1, row0[3]]
+    # Isotope order [H1, Fe56, Co56, Ni56, Ni58]
+    row0 = [5.93 * 15.0 / 18.2, 8.46e-2 * 15.0 / 18.2, 0.0, 7.02e-2 * 15.0 / 18.2, 0.0]
+    row1 = [6.79, 8.52e-2, 0.0, 0.0, 1.15e-3]
+    m0_ni56 = row0[3]
+    row0_decayed = [row0[0], row0[1] + (m0_ni56 * n3), m0_ni56 * n2, m0_ni56 * n1, row0[4]]
 
     # dt_decay == 0 is a no-op
     rows = yields.yield_(15.0, 0.0, 0.0)
     assert rows[0] == pytest.approx(row0, abs=1e-9)
     assert rows[1] == pytest.approx(row1, abs=1e-9)
     total = yields.yieldSum(15.0, 0.0, 0.0)
-    assert total == pytest.approx([row0[j] + row1[j] for j in range(4)], abs=1e-9)
+    assert total == pytest.approx([row0[j] + row1[j] for j in range(5)], abs=1e-9)
 
     # dt_decay > 0 applies decay
     rows_decayed = yields.yield_(15.0, 0.0, dt)
@@ -3043,7 +3051,7 @@ def test_yields_yield_and_yield_sum_dt_decay():
     assert rows_decayed[1] == pytest.approx(row1, abs=1e-9)
     total_decayed = yields.yieldSum(15.0, 0.0, dt)
     assert total_decayed == pytest.approx(
-        [row0_decayed[j] + row1[j] for j in range(4)], abs=1e-9)
+        [row0_decayed[j] + row1[j] for j in range(5)], abs=1e-9)
 
 
 def test_yields_yield_ignores_dt_decay_when_no_decay_set():
@@ -3061,14 +3069,15 @@ def test_yields_yield_ignores_dt_decay_when_no_decay_set():
     ni56 = slug.isotopeTable(28, 56)
     dt = 2.0 * ni56.lifetime()
 
-    row0 = [5.93 * 15.0 / 18.2, 8.46e-2 * 15.0 / 18.2, 7.02e-2 * 15.0 / 18.2, 0.0]
-    row1 = [6.79, 8.52e-2, 0.0, 1.15e-3]
+    # Isotope order [H1, Fe56, Co56, Ni56, Ni58]
+    row0 = [5.93 * 15.0 / 18.2, 8.46e-2 * 15.0 / 18.2, 0.0, 7.02e-2 * 15.0 / 18.2, 0.0]
+    row1 = [6.79, 8.52e-2, 0.0, 0.0, 1.15e-3]
 
     rows = yields.yield_(15.0, 0.0, dt)
     assert rows[0] == pytest.approx(row0, abs=1e-9)
     assert rows[1] == pytest.approx(row1, abs=1e-9)
     total = yields.yieldSum(15.0, 0.0, dt)
-    assert total == pytest.approx([row0[j] + row1[j] for j in range(4)], abs=1e-9)
+    assert total == pytest.approx([row0[j] + row1[j] for j in range(5)], abs=1e-9)
 
 
 def test_yields_rebuild_yield_grid_restricts_isotopes(yields_controls):
@@ -3198,7 +3207,10 @@ def test_yields_yield_channels_property_setter_dispatches_by_element_type(yields
     yields.yieldChannels = [descriptor]
     assert len(yields.yieldChannels) == 1
     assert yields.yieldChannels[0].descriptor().model_name == "sukhbold_test"
-    assert yields.isotopes == list(yields.yieldChannels[0].isotopesOrig())
+    # sukhbold_test alone tabulates H1/Fe56/Ni56 -- Ni56 is unstable, so
+    # isotopes() force-expands to also include its own decay daughter
+    # Co56, one more entry than isotopesOrig() itself has.
+    assert [iso.label() for iso in yields.isotopes] == ["H1", "Fe56", "Co56", "Ni56"]
 
     other_descriptor = slug.YieldChannelDescriptor(slug.YieldChannelType.ccsn, "kobayashi_test")
     channel = slug.YieldChannel(other_descriptor, 0.0, 0.0, registry_name=YIELDS_REGISTRY)
@@ -3430,75 +3442,3 @@ def test_simcontrols_write_yields_properties_settable():
     assert controls.writeGalaxyYields is False
     controls.writeGalaxyYields = True
     assert controls.writeGalaxyYields is True
-
-
-# ---------------------------------------------------------------------
-# DecayChain
-# ---------------------------------------------------------------------
-
-
-def test_decay_chain_products_ni56():
-    """DecayChain.products() for Ni56 lists Ni56, Co56, Fe56 in order --
-    the real, simple, non-branching, branching-ratio-1 chain in the
-    isotope table (also used as DecayChain's own worked example)."""
-    ni56 = slug.isotopeTable(28, 56)
-    chain = slug.DecayChain(ni56)
-
-    labels = [iso.label() for iso in chain.products()]
-    assert labels == ["Ni56", "Co56", "Fe56"]
-
-
-def test_decay_chain_yield_at_zero():
-    """At t=0, all atoms are still the starting isotope."""
-    ni56 = slug.isotopeTable(28, 56)
-    chain = slug.DecayChain(ni56)
-
-    y = chain.yield_(0.0)
-    assert y == pytest.approx([1.0, 0.0, 0.0], abs=1e-12)
-
-
-def test_decay_chain_yield_matches_bateman():
-    """yield_(t) matches the textbook 3-isotope Bateman solution,
-    computed independently here from the real Ni56/Co56 lifetimes --
-    mirrors tests/elem/testDecayChain.hpp's own identical C++ check."""
-    ni56 = slug.isotopeTable(28, 56)
-    co56 = slug.isotopeTable(27, 56)
-    chain = slug.DecayChain(ni56)
-
-    l1 = 1.0 / ni56.lifetime()
-    l2 = 1.0 / co56.lifetime()
-
-    for t_mult in (0.1, 0.5, 1.0, 2.0, 5.0, 10.0):
-        t = t_mult * ni56.lifetime()
-        y = chain.yield_(t)
-
-        n1 = np.exp(-l1 * t)
-        n2 = l1 / (l2 - l1) * (np.exp(-l1 * t) - np.exp(-l2 * t))
-        n3 = 1.0 - n1 - n2
-
-        assert y == pytest.approx([n1, n2, n3], abs=1e-9)
-
-
-def test_decay_chain_mass_balance():
-    """Every step in the Ni56 chain has branching ratio 1, so
-    sum(yield_(t)) must stay 1 for any t."""
-    ni56 = slug.isotopeTable(28, 56)
-    chain = slug.DecayChain(ni56)
-
-    for t in (0.0, 1e5, 1e6, 1e7, 1e8, 1e9):
-        assert sum(chain.yield_(t)) == pytest.approx(1.0, abs=1e-9)
-
-
-def test_decay_chain_stable_isotope():
-    """A DecayChain built from an already-stable isotope (Fe56, the
-    end of the Ni56 chain) has itself as its only product, with
-    abundance 1 for any t."""
-    fe56 = slug.isotopeTable(26, 56)
-    chain = slug.DecayChain(fe56)
-
-    products = chain.products()
-    assert len(products) == 1
-    assert products[0].label() == "Fe56"
-
-    for t in (0.0, 1.0, 1e10):
-        assert chain.yield_(t) == pytest.approx([1.0], abs=1e-12)

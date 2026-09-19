@@ -101,11 +101,6 @@ void bindYieldChannel(py::module_& m);
 void bindYields(py::module_& m);
 
 /**
- * @brief Bind elem::DecayChain as DecayChain
- */
-void bindDecayChain(py::module_& m);
-
-/**
  * @brief Bind nebular::Nebular as Nebular
  */
 void bindNebular(py::module_& m);

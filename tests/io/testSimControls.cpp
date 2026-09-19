@@ -1427,12 +1427,15 @@ static auto testSimControlsYieldsIsotopes() -> int
         }
 
         const auto& isotopes = controls.yields()->isotopes();
+        // Co56 (27, 56) is not directly tabulated by either model, but
+        // Ni56 is unstable and decays into it, so rebuildYieldGrid()'s
+        // own force-expansion adds it -- see its own comment.
         const std::vector<std::pair<unsigned int, unsigned int>> expected{
-            { 1, 1 }, { 26, 56 }, { 28, 56 }, { 28, 58 } }; // h1, fe56, ni56, ni58
+            { 1, 1 }, { 26, 56 }, { 27, 56 }, { 28, 56 }, { 28, 58 } }; // h1, fe56, co56, ni56, ni58
         if (isotopes.size() != expected.size())
         {
             std::cerr << "testSimControls: yieldsIsotopes: expected " << expected.size() <<
-                " isotopes (h1, fe56, ni56, ni58), got " << isotopes.size() << "\n";
+                " isotopes (h1, fe56, co56, ni56, ni58), got " << isotopes.size() << "\n";
             result = 1;
         }
         else
@@ -1485,11 +1488,12 @@ static auto testSimControlsYieldsIsotopes() -> int
         }
 
         // sukhbold_test's own native h1/fe56/ni56 values at its own
-        // exact grid mass 18.2, remapped onto [h1, fe56, ni56, ni58] --
-        // ni58 (index 3) must be exactly 0, since sukhbold_test never
-        // tabulated it
+        // exact grid mass 18.2, remapped onto [h1, fe56, co56, ni56,
+        // ni58] -- co56 (index 2, force-expanded) and ni58 (index 4)
+        // must both be exactly 0, since sukhbold_test never tabulated
+        // either directly
         constexpr double yieldTol = 1e-10;
-        const std::vector<double> sukhboldExpected{ 5.93, 8.46e-2, 7.02e-2, 0.0 };
+        const std::vector<double> sukhboldExpected{ 5.93, 8.46e-2, 0.0, 7.02e-2, 0.0 };
         const auto sukhboldActual = loaded[0]->yield(18.2, 0.0);
         if (sukhboldActual.size() != sukhboldExpected.size())
         {
@@ -1508,10 +1512,11 @@ static auto testSimControlsYieldsIsotopes() -> int
         }
 
         // kobayashi_test's own native h1/fe56/ni58 values at its own
-        // exact grid mass 13.0, remapped onto [h1, fe56, ni56, ni58] --
-        // ni56 (index 2) must be exactly 0, since kobayashi_test never
-        // tabulated it
-        const std::vector<double> kobayashiExpected{ 6.16, 8.32e-2, 0.0, 2.23e-3 };
+        // exact grid mass 13.0, remapped onto [h1, fe56, co56, ni56,
+        // ni58] -- co56 (index 2, force-expanded) and ni56 (index 3)
+        // must both be exactly 0, since kobayashi_test never tabulated
+        // either directly
+        const std::vector<double> kobayashiExpected{ 6.16, 8.32e-2, 0.0, 0.0, 2.23e-3 };
         const auto kobayashiActual = loaded[1]->yield(13.0, 0.0);
         if (kobayashiActual.size() != kobayashiExpected.size())
         {
@@ -1643,10 +1648,15 @@ static auto testSimControlsYieldsIsotopesKeyword() -> int
     {
         const toml::table inputDeck = buildDeck(toml::array{});
         const io::SimControls controls(inputDeck);
-        if (controls.yields() == nullptr || controls.yields()->isotopes().size() != 4)
+        // 5, not the 4-isotope union itself: Ni56 is unstable, so
+        // rebuildYieldGrid()'s own force-expansion also pulls in its
+        // decay daughter Co56 -- see testSimControlsYieldsIsotopes()'s
+        // own identical case.
+        if (controls.yields() == nullptr || controls.yields()->isotopes().size() != 5)
         {
             std::cerr << "testSimControls: yieldsIsotopesKeyword: expected an empty "
-                "yields.isotopes to leave all 4 unioned isotopes in place\n";
+                "yields.isotopes to leave all 4 unioned isotopes (plus Co56, "
+                "force-expanded) in place\n";
             result = 1;
         }
     }
@@ -1764,19 +1774,21 @@ static auto testSimControlsYieldsYieldAndSum() -> int
             return 1;
         }
 
-        // Isotope order is [h1, fe56, ni56, ni58] (see
-        // testSimControlsYieldsIsotopes()'s own identical check).
-        // Row 0 (sukhbold_test): its native mass-18.2 values
-        // (5.93, 8.46e-2, 7.02e-2 for h1/fe56/ni56), each scaled by
-        // 15.0/18.2 (extrapolating down to the overridden m_min), with
-        // 0 for ni58 (never tabulated by sukhbold_test). Row 1
-        // (kobayashi_test): its own real, native mass-15.0 values
-        // (6.79, 8.52e-2, 1.15e-3 for h1/fe56/ni58), with 0 for ni56
-        // (never tabulated by kobayashi_test).
+        // Isotope order is [h1, fe56, co56, ni56, ni58] (see
+        // testSimControlsYieldsIsotopes()'s own identical check --
+        // co56 is force-expanded in as Ni56's own decay daughter, not
+        // directly tabulated by either model). Row 0 (sukhbold_test):
+        // its native mass-18.2 values (5.93, 8.46e-2, 7.02e-2 for
+        // h1/fe56/ni56), each scaled by 15.0/18.2 (extrapolating down
+        // to the overridden m_min), with 0 for co56/ni58 (neither
+        // tabulated by sukhbold_test). Row 1 (kobayashi_test): its own
+        // real, native mass-15.0 values (6.79, 8.52e-2, 1.15e-3 for
+        // h1/fe56/ni58), with 0 for co56/ni56 (neither tabulated by
+        // kobayashi_test).
         const auto [view, data] = controls.yields()->yield(15.0, 0.0);
         const std::vector<double> row0{
-            5.93 * 15.0 / 18.2, 8.46e-2 * 15.0 / 18.2, 7.02e-2 * 15.0 / 18.2, 0.0 };
-        const std::vector<double> row1{ 6.79, 8.52e-2, 0.0, 1.15e-3 };
+            5.93 * 15.0 / 18.2, 8.46e-2 * 15.0 / 18.2, 0.0, 7.02e-2 * 15.0 / 18.2, 0.0 };
+        const std::vector<double> row1{ 6.79, 8.52e-2, 0.0, 0.0, 1.15e-3 };
 
         if (view.extent(0) != 2 || view.extent(1) != row0.size())
         {
@@ -1855,14 +1867,15 @@ static auto testSimControlsYieldsPartialRange() -> int
         });
         const io::SimControls controls(inputDeck);
 
-        // Isotope order is [h1, fe56, ni56, ni58] (see
+        // Isotope order is [h1, fe56, co56, ni56, ni58] (see
         // testSimControlsYieldsIsotopes()'s own identical check). Row 0
-        // (sukhbold_test) is its own real, native mass-18.2 values; row
+        // (sukhbold_test) is its own real, native mass-18.2 values
+        // (0 for co56, force-expanded but not directly tabulated); row
         // 1 (kobayashi_test) is all zero, since 18.2 is outside its own
         // [13.0, 18.0] range.
         const auto [view, data] = controls.yields()->yield(18.2, 0.0);
-        const std::vector<double> row0{ 5.93, 8.46e-2, 7.02e-2, 0.0 };
-        const std::vector<double> row1{ 0.0, 0.0, 0.0, 0.0 };
+        const std::vector<double> row0{ 5.93, 8.46e-2, 0.0, 7.02e-2, 0.0 };
+        const std::vector<double> row1{ 0.0, 0.0, 0.0, 0.0, 0.0 };
 
         if (view.extent(0) != 2 || view.extent(1) != row0.size())
         {
@@ -1896,17 +1909,17 @@ static auto testSimControlsYieldsPartialRange() -> int
 }
 
 // Verify Yields::yield()/yieldSum()'s optional dtDecay argument actually
-// applies radioactive decay through Yields::decayChains_, using the same
-// two-channel fixture as testSimControlsYieldsYieldAndSum() (isotope
-// order [h1, fe56, ni56, ni58]). Ni56 -> Co56 -> Fe56 is a real,
-// non-branching, branching-ratio-1 chain (see testDecayChain.hpp), but
-// this fixture's own isotope union never tabulates Co56 -- so the mass
-// that transiently sits in Co56 at time t is dropped from the tracked
-// total entirely (Yields::applyDecay()'s documented "skip untracked
-// chain isotopes" behavior), while Fe56 still receives its own correct,
-// delayed inflow via the closed-form two-step Bateman solution. Also
-// checks that controls_->noDecay() == true makes dtDecay a pure no-op,
-// and that dtDecay == 0 changes nothing even with noDecay() == false.
+// applies radioactive decay through Yields's own internal DecayChain,
+// using the same two-channel fixture as testSimControlsYieldsYieldAndSum()
+// (isotope order [h1, fe56, co56, ni56, ni58] -- co56 is force-expanded
+// in as Ni56's own decay daughter, not directly tabulated by either
+// model). Ni56 -> Co56 -> Fe56 is a real, non-branching,
+// branching-ratio-1 chain (see testDecayChain.hpp): co56's own transient
+// abundance is tracked explicitly and checked here, while Fe56 still
+// receives its own correct, delayed inflow via the closed-form two-step
+// Bateman solution. Also checks that controls_->noDecay() == true makes
+// dtDecay a pure no-op, and that dtDecay == 0 changes nothing even with
+// noDecay() == false.
 static auto testSimControlsYieldsDecayApplication() -> int
 {
     constexpr std::string_view baseDeck = "tests/core/assets/testGalaxy.in";
@@ -1933,18 +1946,19 @@ static auto testSimControlsYieldsDecayApplication() -> int
         const double n2 = l1 / (l2 - l1) * (std::exp(-l1 * dt) - std::exp(-l2 * dt));
         const double n3 = 1.0 - n1 - n2;
 
-        // Undecayed (dtDecay == 0) values, isotope order [h1, fe56, ni56, ni58]
+        // Undecayed (dtDecay == 0) values, isotope order
+        // [h1, fe56, co56, ni56, ni58]
         const std::vector<double> row0{
-            5.93 * 15.0 / 18.2, 8.46e-2 * 15.0 / 18.2, 7.02e-2 * 15.0 / 18.2, 0.0 };
-        const std::vector<double> row1{ 6.79, 8.52e-2, 0.0, 1.15e-3 };
-        const double m0Ni56 = row0[2]; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- fixed-size literal above
+            5.93 * 15.0 / 18.2, 8.46e-2 * 15.0 / 18.2, 0.0, 7.02e-2 * 15.0 / 18.2, 0.0 };
+        const std::vector<double> row1{ 6.79, 8.52e-2, 0.0, 0.0, 1.15e-3 };
+        const double m0Ni56 = row0[3]; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- fixed-size literal above
 
-        // Decayed values: Ni56 shrinks to m0Ni56 * n1, Fe56 gains
-        // m0Ni56 * n3 (row1's own Ni56 is 0, so it contributes nothing);
-        // the m0Ni56 * n2 fraction transiently in Co56 is simply
-        // untracked, so it does not appear anywhere in either row.
+        // Decayed values: Ni56 shrinks to m0Ni56 * n1, Co56 gains
+        // m0Ni56 * n2 (its own transient share, now tracked), Fe56
+        // gains m0Ni56 * n3 (row1's own Ni56 is 0, so it contributes
+        // nothing to either).
         const std::vector<double> row0Decayed{
-            row0[0], row0[1] + m0Ni56 * n3, m0Ni56 * n1, row0[3] // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- fixed-size literal above
+            row0[0], row0[1] + (m0Ni56 * n3), m0Ni56 * n2, m0Ni56 * n1, row0[4] // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- fixed-size literal above
         };
         const std::vector<double>& row1Decayed = row1; // unchanged: row1's own Ni56 is 0
 

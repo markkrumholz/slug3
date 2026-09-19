@@ -1,7 +1,7 @@
 /**
  * @file DecayChain.hpp
  * @author Mark Krumholz
- * @brief Solves the Bateman equation for the radioactive decay of one isotope
+ * @brief Matrix-exponential solution for the radioactive decay of a set of isotopes
  * @date 2026-09-19
  * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
@@ -10,93 +10,90 @@
 #define DECAYCHAIN_HPP
 
 #include "ElemCommons.hpp"
-#include "IsotopeData.hpp"
+#include <Eigen/Dense>
+#include <span>
 #include <vector>
 
 namespace elem
 {
     /**
      * @class DecayChain
-     * @brief The full network of radioactive decay products of one
-     *   isotope, and the analytic (Bateman equation) solution for how
-     *   many atoms of each are present after any elapsed time
+     * @brief The radioactive decay network among a set of isotopes, and
+     *   the matrix-exponential solution for how their abundances evolve
+     *   over any elapsed time
      * @details
-     * Built once, from a single starting isotope, by following
-     * IsotopeData::daughters() recursively until every branch reaches a
-     * stable isotope (see the constructor's own comment) -- products()
-     * then lists every isotope reachable this way (including the
-     * starting one, at index 0), and yield(t) gives each one's own
-     * abundance, in atoms per atom of the starting isotope initially
-     * present, after time t has elapsed.
+     * Built once, from a whole list of isotopes (typically
+     * Yields::isotopes_ -- see its own rebuildYieldGrid() comment for
+     * why that list must already include every isotope reachable via
+     * IsotopeData::daughters() from any unstable isotope in it, not just
+     * the ones some yield channel directly tabulates). applyDecay()
+     * then advances a per-isotope mass array, laid out in the exact same
+     * order as the isotope list this was built from, forward by a given
+     * elapsed time.
      *
-     * The underlying math (see yield()'s own comment) is the standard
-     * closed-form Bateman equation solution for a linear decay chain
-     * N_1 -> N_2 -> ... -> N_n, generalized here only by reading the
-     * i -> i+1 branching ratio directly off IsotopeData::daughters()
-     * (1 for a simple, non-branching decay). This assumes every
-     * isotope's own decay rate in the chain is distinct: two isotopes
-     * sharing the same rate_ (in particular, two different *stable*
-     * isotopes both appearing in the same chain -- only possible if the
-     * starting isotope's own decay network branches into more than one
-     * distinct stable end product) would divide by zero in yield()'s
-     * own sum. Every isotope actually used for nucleosynthetic yields
-     * in this codebase (see elem::isotopeTable()'s own data) decays
-     * along a single, non-reconverging path, so this is not a practical
-     * concern here, but it is not checked for either.
+     * The underlying math is the solution of the linear ODE system
+     * dN/dt = M N, where N is the vector of abundances and M (see
+     * depletionMatrix_'s own comment) is the constant depletion matrix
+     * built once at construction: N(t) = exp(M t) N(0). Unlike a
+     * closed-form (Bateman equation) solution for a single linear decay
+     * chain, this handles an arbitrary acyclic decay network with no
+     * special-casing at all -- an isotope with more than one decay
+     * daughter (branching out), two different isotopes that both decay
+     * into the same daughter (converging, e.g. real alpha-decay chains
+     * where the same daughter is produced at more than one step), and
+     * an isotope that lists the same daughter more than once for
+     * different decay modes (their branching ratios simply add, via the
+     * same matrix entry) are all just particular shapes of M, not cases
+     * this class needs to detect or reject.
      */
     class DecayChain
     {
     public:
 
         /**
-         * @brief Build the decay chain (and cache the Bateman equation's
-         *   own prefactors) for one isotope
-         * @param isotope The isotope to build the decay chain for; must
-         *   be a reference into the single, global elem::isotopeTable()
-         *   (or otherwise outlive this DecayChain), since products()
-         *   returns references into the same table, resolved from
-         *   isotope's own (and its descendants' own) daughters()
-         * @throws std::runtime_error if daughters() names a (Z, A) pair
-         *   not found in elem::isotopeTable()
+         * @brief Build the depletion matrix for a list of isotopes
+         * @param isotopes The full isotope list applyDecay()'s own
+         *   values argument will be laid out over (typically
+         *   Yields::isotopes_) -- must already include every isotope
+         *   reachable via daughters() from any unstable entry in it (see
+         *   the class's own comment); need not outlive this DecayChain,
+         *   unlike the old per-isotope design -- only Z()/A()/lifetime()/
+         *   daughters() are read here, at construction, nothing is
+         *   retained by reference afterward
+         * @throws std::runtime_error if some isotope's own daughters()
+         *   names a (Z, A) pair not present in isotopes -- this should
+         *   not happen if isotopes was built by force-expanding to
+         *   decay-chain closure first, as Yields::rebuildYieldGrid()
+         *   does; see its own comment
          * @details
-         * Building isotopes_ (see products()'s own comment) -- and
-         * hence rates_/fac_, the two cached quantities yield() actually
-         * uses -- happens in three steps:
+         * Two passes over isotopes:
          *
-         * 1. isotopes_ starts as just isotope itself. Then, for each
-         *    entry already in isotopes_, in order (including entries
-         *    appended by this same step, so newly-added isotopes are
-         *    themselves expanded in turn), every one of its own
-         *    daughters() is resolved (via elem::isotopeTable()) and
-         *    appended to isotopes_. This naturally terminates once
-         *    every entry's own daughters() have been processed once --
-         *    a stable isotope's own empty daughters() list contributes
-         *    nothing further, so a branch stops growing exactly when it
-         *    reaches one.
+         * 1. Identify the *relevant* subset: every unstable isotope, and
+         *    every isotope reachable from one via daughters() (a
+         *    worklist/BFS closure restricted to isotopes itself -- this
+         *    does not go looking outside the given list, it only
+         *    resolves daughters() against entries already present in
+         *    it). A stable isotope with no unstable isotope decaying
+         *    into it is *not* relevant: decay can never change its
+         *    abundance, so it needs no row/column in the matrix at all.
+         *    relevantIndices_ records these isotopes' own indices into
+         *    isotopes, in ascending order.
          *
-         * 2. isotopes_ is then reordered until every entry's own
-         *    daughters() (by (Z, A)) all appear later in isotopes_ than
-         *    the entry itself: scanning for a violation (some entry i
-         *    with a daughter that resolves to an entry at or before
-         *    index i) and swapping the two elements whenever one is
-         *    found, repeating until a full scan finds none. This always
-         *    terminates -- there are no closed cycles in radioactive
-         *    decay -- and, combined with step 1's own construction
-         *    order, leaves isotopes_ topologically sorted: isotopes_[0]
-         *    is always the original starting isotope.
-         *
-         * 3. rates_[i] is set to 1 / isotopes_[i]'s own lifetime()
-         *    (0 for a stable isotope, matching lifetime()'s own
-         *    convention). fac_[0] is 1; fac_[k] (k >= 1) is fac_[k-1]
-         *    times rates_[k-1] times the branching ratio, read off
-         *    isotopes_[k-1]'s own daughters(), for its decay
-         *    specifically into isotopes_[k] (0 if isotopes_[k-1] does
-         *    not decay directly into isotopes_[k] -- e.g. if the two
-         *    are related only through some other isotope between them
-         *    in the chain). This is exactly prod_{i=1}^{k-1} b_{i,i+1}
-         *    rate_i in the Bateman equation's own 1-indexed notation.
+         * 2. Build depletionMatrix_, sized relevantIndices_.size()
+         *    square, zero everywhere except: for each relevant, unstable
+         *    isotope at matrix position p (i.e. relevantIndices_[p]),
+         *    depletionMatrix_(p, p) -= 1 / lifetime_p (its own decay
+         *    rate), and, for every entry in its own daughters() (its
+         *    daughter's own matrix position q), depletionMatrix_(q, p)
+         *    += branchingRatio / lifetime_p. Using += here, rather than
+         *    =, is what lets an isotope list the same daughter more than
+         *    once (summing to that daughter's own true total branching
+         *    ratio) and what lets two different isotopes converge on
+         *    the same daughter (each contributing its own inflow to the
+         *    same matrix entry) -- both fall out automatically, with no
+         *    separate handling.
          */
-        explicit DecayChain(const IsotopeData& isotope);
+        explicit DecayChain(const IsotopeList& isotopes);
 
         DecayChain(const DecayChain&) = default;
         auto operator=(const DecayChain&) -> DecayChain& = default;
@@ -105,52 +102,44 @@ namespace elem
         ~DecayChain() = default;
 
         /**
-         * @brief Return every isotope in this decay chain
-         * @return A const reference to isotopes_: the starting isotope
-         *   (index 0) followed by every isotope reachable from it by
-         *   following daughters() recursively, topologically sorted so
-         *   that every entry's own daughters() appear later in the list
-         *   than the entry itself -- see the constructor's own comment
+         * @brief Advance a per-isotope mass array forward by dtDecay, in place
+         * @param dtDecay Elapsed time, in yr (matching every isotope's
+         *   own lifetime()), to advance values by
+         * @param values One mass (Msun) per entry of the isotope list
+         *   this was constructed from, in the same order; overwritten
+         *   in place with the post-decay masses. Every entry not among
+         *   the *relevant* isotopes identified at construction (see the
+         *   constructor's own comment) is left completely untouched, on
+         *   purpose: decay cannot change it.
+         * @throws std::invalid_argument if dtDecay is negative --
+         *   radioactive decay run backward in time is not a physically
+         *   meaningful request, and can overflow the matrix exponential
+         *   below to inf/NaN for a short-lived enough isotope
          * @details
-         * yield(t)'s own returned vector is in this same order and of
-         * this same length, so products()[j] is the isotope
-         * yield(t)[j] gives the abundance of.
-         */
-        [[nodiscard]] auto products() const noexcept -> const IsotopeList& { return isotopes_; }
-
-        /**
-         * @brief Return each product isotope's own abundance after time t
-         * @param t Elapsed time, in yr (matching every isotope's own
-         *   lifetime()), since one atom of products()[0] (the
-         *   starting isotope) was present, and no atoms of any other
-         *   product yet
-         * @return A vector of products().size() values, in products()'s
-         *   own order: result[j] is the number of atoms of products()[j]
-         *   expected to be present at time t, per atom of products()[0]
-         *   present at t=0
-         * @details
-         * The standard closed-form Bateman equation solution for a
-         * linear decay chain, generalized only by reading the
-         * appropriate branching ratio into fac_ -- see the
-         * constructor's own comment for how rates_/fac_ are built.
-         * For product index n (0-indexed here; the Bateman equation
-         * itself is usually written 1-indexed):
+         * Gathers values at the relevant isotopes' own positions into an
+         * Eigen vector v, computes the propagator exp(depletionMatrix_ *
+         * dtDecay) (Eigen's own scaling-and-squaring/Pade
+         * implementation, unsupported/Eigen/MatrixFunctions -- well
+         * defined for any matrix, including one with repeated or
+         * degenerate eigenvalues, unlike a closed-form Bateman sum),
+         * multiplies it by v, and scatters the result back. A no-op if
+         * there are no relevant isotopes at all (nothing in the given
+         * list is unstable).
          *
-         *   result[n] = fac_[n] * sum_{i=0}^{n} exp(-rates_[i] * t) /
-         *       prod_{j=0, j != i}^{n} (rates_[j] - rates_[i])
-         *
-         * For n = 0 (the starting isotope itself), this reduces to
-         * fac_[0] * exp(-rates_[0] * t) = exp(-rates_[0] * t) (fac_[0]
-         * is always 1): simple exponential decay (or, if products()[0]
-         * is itself stable, rates_[0] = 0 and result[0] is 1 for every
-         * t, as expected).
+         * This is exact, not an approximation, when applied
+         * incrementally across multiple successive calls with the
+         * abundances present at the start of each one (rather than the
+         * ones originally present at t=0): exp(M dt1) * exp(M dt2) ==
+         * exp(M (dt1 + dt2)) for any fixed matrix M, a basic property of
+         * the matrix exponential -- see Cluster::computeYields()'s and
+         * Galaxy::computeYields()'s own comments for why they rely on
+         * this.
          */
-        [[nodiscard]] auto yield(double t) const -> std::vector<double>;
+        void applyDecay(double dtDecay, std::span<double> values) const;
 
     private:
-        IsotopeList isotopes_;      /**< Every isotope in the chain, topologically sorted -- see products()'s own comment */
-        std::vector<double> rates_; /**< Decay rate (1/lifetime(), 0 if stable) of each isotopes_ entry, in the same order */
-        std::vector<double> fac_;   /**< Cached Bateman equation prefactor for each isotopes_ entry, in the same order -- see the constructor's own comment */
+        std::vector<std::size_t> relevantIndices_; /**< Index, into the isotope list this was built from, of each row/column of depletionMatrix_, in that same order -- see the constructor's own comment */
+        Eigen::MatrixXd depletionMatrix_; /**< The constant depletion matrix M in dN/dt = M N, sized relevantIndices_.size() square -- see the constructor's own comment for how it is filled */
     };
 
 } // namespace elem

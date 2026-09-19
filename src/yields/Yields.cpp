@@ -9,6 +9,7 @@
 #include "Yields.hpp"
 #include "../elem/DecayChain.hpp"
 #include "../elem/ElemCommons.hpp"
+#include "../elem/IsotopeTable.hpp"
 #include "../io/SimControls.hpp"
 #include "YieldChannel.hpp"
 #include "YieldCommons.hpp"
@@ -17,7 +18,6 @@
 #include <cassert>
 #include <cstddef>
 #include <iostream>
-#include <iterator>
 #include <memory>
 #include <span>
 #include <stdexcept>
@@ -27,6 +27,68 @@
 
 namespace yields
 {
+    namespace
+    {
+        /**
+         * @brief Force-expand an isotope list to include every decay-chain descendant of an unstable entry
+         * @param isotopes The list to expand, in place -- see
+         *   Yields::rebuildYieldGrid()'s own comment for why
+         * @throws std::runtime_error if some unstable isotope's own
+         *   daughters() names a (Z, A) pair not found in the global
+         *   elem::isotopeTable()
+         * @details
+         * Repeatedly scans for any entry not yet present that some
+         * already-present unstable isotope's own daughters() names,
+         * appending it, until a full pass adds nothing further -- a
+         * newly-added isotope can itself be unstable, with daughters()
+         * of its own, so this cannot stop after a single pass (e.g.
+         * Ni56 -> Co56 -> Fe56, discovering Co56 from Ni56's own
+         * daughters() only reveals Fe56 -- if not already present -- on
+         * the *next* pass, from Co56's).
+         */
+        void forceExpandDecayChain(elem::IsotopeList& isotopes)
+        {
+            bool addedAny = true;
+            while (addedAny)
+            {
+                addedAny = false;
+                // Iterate over a snapshot of isotopes' own current
+                // contents: appending to isotopes itself while iterating
+                // over it directly would invalidate the very iterators
+                // driving the loop.
+                const elem::IsotopeList current = isotopes;
+                for (const auto& iso : current)
+                {
+                    if (iso.get().stable()) { continue; }
+                    for (const auto& daughter : iso.get().daughters())
+                    {
+                        const bool present = std::ranges::any_of(isotopes,
+                            [&daughter](const auto& candidate)
+                            {
+                                return candidate.get().Z() == daughter.Z_ &&
+                                    candidate.get().A() == daughter.A_;
+                            });
+                        if (!present)
+                        {
+                            try
+                            {
+                                isotopes.emplace_back(elem::isotopeTable(daughter.Z_, daughter.A_));
+                            }
+                            catch (const std::out_of_range&)
+                            {
+                                throw std::runtime_error(
+                                    "Yields::rebuildYieldGrid: " + iso.get().label() +
+                                    "'s daughter (Z=" + std::to_string(daughter.Z_) + ", A=" +
+                                    std::to_string(daughter.A_) + ") is not in the isotope table");
+                            }
+                            addedAny = true;
+                        }
+                    }
+                }
+            }
+        }
+    } // namespace
+
     Yields::Yields(const io::SimControls& controls, std::string registryName) :
         controls_(controls),
         registryName_(std::move(registryName))
@@ -148,6 +210,15 @@ namespace yields
             [](const auto& lhs, const auto& rhs) { return lhs.get() == rhs.get(); });
         isotopes_.erase(dup.begin(), dup.end());
 
+        // Force-expand to decay-chain closure (see this method's own
+        // comment), then re-sort/re-dedup the same way as above.
+        forceExpandDecayChain(isotopes_);
+        std::ranges::sort(isotopes_,
+            [](const auto lhs, const auto rhs) { return lhs.get() < rhs.get(); }); // NOLINT(performance-unnecessary-value-param) -- see above
+        const auto dup2 = std::ranges::unique(isotopes_,
+            [](const auto& lhs, const auto& rhs) { return lhs.get() == rhs.get(); });
+        isotopes_.erase(dup2.begin(), dup2.end());
+
         // If the caller passed a non-empty isotopes list, restrict
         // isotopes_ down to its intersection with that list -- an
         // empty isotopes (the default) leaves every channel's own
@@ -201,16 +272,9 @@ namespace yields
             channel->rebuildYieldGrid(descriptor.mMin_, descriptor.mMax_, isotopes_);
         }
 
-        // Rebuild decayChains_ to match the now-final isotopes_ -- see
+        // Rebuild decayChain_ to match the now-final isotopes_ -- see
         // this method's own comment.
-        decayChains_.clear();
-        for (const auto& iso : isotopes_)
-        {
-            if (!iso.get().stable())
-            {
-                decayChains_.try_emplace(iso.get(), iso.get());
-            }
-        }
+        decayChain_.emplace(isotopes_);
     }
 
     auto Yields::yield(const double mass, const double feH, const double dtDecay) const
@@ -272,44 +336,19 @@ namespace yields
     void Yields::applyDecay(const double dtDecay, const std::span<double> values) const
     {
         assert(values.size() == isotopes_.size());
-        std::vector<double> deltaYield(values.size(), 0.0);
-        for (std::size_t p = 0; p < isotopes_.size(); ++p)
-        {
-            const auto& parent = isotopes_[p].get(); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- p < isotopes_.size() by construction
-            if (parent.stable()) { continue; } // nothing to decay, and no decayChains_ entry for it either -- see rebuildYieldGrid()'s own comment
-            const auto chainIt = decayChains_.find(parent);
-            assert(chainIt != decayChains_.end()); // every unstable isotopes_ entry has one, by rebuildYieldGrid()'s own construction
-            const auto fExpect = chainIt->second.yield(dtDecay);
-            const auto& products = chainIt->second.products();
-            const double parentMass = values[p]; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- p < isotopes_.size() == values.size() by construction
-            for (std::size_t k = 0; k < products.size(); ++k)
-            {
-                // products() (topologically sorted by DecayChain's own
-                // construction) is not in isotopes_'s own (Z-then-A)
-                // order, and may list isotopes isotopes_ doesn't
-                // tabulate at all -- resolve by IsotopeData equality,
-                // skipping any product not found, per this method's own
-                // comment.
-                const auto isoIt = std::ranges::find_if(isotopes_,
-                    [&products, k](const auto& candidate)
-                    { return candidate.get() == products[k].get(); }); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- k < products.size() by construction
-                if (isoIt == isotopes_.end()) { continue; }
-                const auto idx = static_cast<std::size_t>(std::distance(isotopes_.begin(), isoIt));
-                if (idx == p)
-                {
-                    // The parent isotope itself: fExpect[k] <= 1 is the
-                    // surviving fraction, so this is always <= 0 (see
-                    // this method's own comment for the sign).
-                    deltaYield[idx] += parentMass * (fExpect[k] - 1.0); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- idx < isotopes_.size() == deltaYield.size(), k < products.size() == fExpect.size(), by construction
-                }
-                else
-                {
-                    deltaYield[idx] += parentMass * fExpect[k]; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- see above
-                }
-            }
-        }
+        assert(decayChain_.has_value()); // populated by rebuildYieldGrid(), always called at least once by the constructor
+        decayChain_->applyDecay(dtDecay, values);
+    }
 
-        for (std::size_t j = 0; j < values.size(); ++j) { values[j] += deltaYield[j]; } // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- j < values.size() == deltaYield.size() by construction
+    void Yields::applyDecay(const double dtDecay, const std::span<double> values, const bool decomposed) const
+    {
+        if (!decomposed) { applyDecay(dtDecay, values); return; }
+        const std::size_t niso = isotopes_.size();
+        const std::size_t nchannels = values.size() / niso;
+        for (std::size_t i = 0; i < nchannels; ++i)
+        {
+            applyDecay(dtDecay, values.subspan(i * niso, niso)); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i < nchannels, so i * niso + niso <= nchannels * niso == values.size() by construction
+        }
     }
 
 } // namespace yields
