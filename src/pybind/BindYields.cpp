@@ -269,13 +269,13 @@ feh : float
     [Fe/H]; need not lie within every yieldChannels() entry's own
     feH() range.
 dt_decay : float, optional
-    Elapsed time (in the same units as every isotope's own lifetime())
-    over which to apply radioactive decay to the raw per-channel
-    yields before returning them; 0 (the default) applies no decay at
-    all. Ignored entirely if the SimControls this Yields was built from
-    has noDecay set to True, in which case every returned value is the
-    cumulative amount of each isotope ever produced, regardless of any
-    radioactive decay since.
+    Elapsed time, in years (the same units as every isotope's own
+    lifetime()), over which to apply radioactive decay to the raw
+    per-channel yields before returning them; 0 (the default) applies
+    no decay at all. Ignored entirely if the SimControls this Yields
+    was built from has noDecay set to True, in which case every
+    returned value is the cumulative amount of each isotope ever
+    produced, regardless of any radioactive decay since.
 
 Returns
 -------
@@ -301,11 +301,11 @@ mass : float
 feh : float
     [Fe/H]; see yield_()'s own feh parameter.
 dt_decay : float, optional
-    Elapsed time over which to apply radioactive decay -- see
-    yield_()'s own dt_decay parameter for exactly what this means and
-    when it's ignored. Applied once, to the summed total, rather than
-    once per channel -- numerically identical either way, since decay
-    is linear in each isotope's own mass.
+    Elapsed time, in years, over which to apply radioactive decay --
+    see yield_()'s own dt_decay parameter for exactly what this means
+    and when it's ignored. Applied once, to the summed total, rather
+    than once per channel -- numerically identical either way, since
+    decay is linear in each isotope's own mass.
 
 Returns
 -------

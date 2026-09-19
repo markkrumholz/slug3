@@ -565,6 +565,23 @@ void core::Cluster::computeYields()
 
     const bool decomposed = sc.yieldsChannelDecomposed();
 
+    // Age yields_'s own already-accumulated total forward by the time
+    // elapsed since it was last updated, before adding in this step's
+    // new contributions below (each of which uses its own exact
+    // dtDecay for the time since it was produced, since it is only now
+    // being added) -- exact, not an approximation, by the decay
+    // operator's own compositional (semigroup) property: applying
+    // decay for dt1 then dt2 gives the same result as applying it once
+    // for dt1 + dt2, for whatever abundances are present at the start
+    // of each step, so there is no need to separately track when each
+    // contribution was originally produced. Mirrors
+    // Galaxy::computeYields()'s own identical aging step for
+    // fieldYields_.
+    if (!sc.noDecay())
+    {
+        yields->applyDecay(curTime_ - lastYieldTime_, yields_, decomposed);
+    }
+
     // Stochastic (individually-sampled) stars that died during the
     // most recent advance() call -- mDead_/tDied_ are the same length
     // and in the same order (both filled together by

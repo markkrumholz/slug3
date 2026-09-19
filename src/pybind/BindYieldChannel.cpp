@@ -81,7 +81,8 @@ static constexpr std::string_view lifetimeDocstring = R"doc(Get the radioactive 
 Returns
 -------
 lifetime : float
-    Radioactive decay lifetime; 0 indicates a stable isotope.)doc";
+    Radioactive decay lifetime in years; 0 indicates a stable
+    isotope.)doc";
 
 static constexpr std::string_view stableDocstring = R"doc(Check whether this isotope is stable.
 

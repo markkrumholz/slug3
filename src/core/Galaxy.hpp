@@ -1047,12 +1047,10 @@ namespace core
          *   in, if controls().noDecay() is false, fieldYields_'s own
          *   already-accumulated total (from every earlier call) is
          *   aged forward via Yields::applyDecay(), with dtDecay =
-         *   curTime_ - lastYieldTime_. Unlike Cluster::yields_ (which
-         *   recomputes each dead star's own exact dtDecay from its own
-         *   individual death time every call), fieldYields_ only ever
-         *   keeps a single running per-isotope total, with no memory
-         *   of which isotope came from which star or when, so decay
-         *   has to be stepped forward incrementally like this instead.
+         *   curTime_ - lastYieldTime_ -- mirrors Cluster::yields_'s own
+         *   identical aging step, see its own comment for why this is
+         *   exact, not an approximation, by the decay operator's own
+         *   compositional (semigroup) property.
          * - Individually-tracked field stars: every star in
          *   deadFieldStars_ (which, like Cluster::mDead_, only ever
          *   holds the stars that died during the most recent

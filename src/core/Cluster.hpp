@@ -688,6 +688,19 @@ namespace core
          * yields_ rather than overwriting it, unlike computeSpec()/
          * computePhot()/computeLbol().
          *
+         * Before either population's own new contribution is added in,
+         * if controls().noDecay() is false, yields_'s own
+         * already-accumulated total (from every earlier call) is aged
+         * forward via Yields::applyDecay(), with dtDecay = curTime_ -
+         * lastYieldTime_. This is exact, not an approximation, by the
+         * decay operator's own compositional (semigroup) property:
+         * applying decay for dt1 then dt2 gives the same result as
+         * applying it once for dt1 + dt2, for whatever abundances are
+         * present at the start of each step -- so there is no need to
+         * separately track when each contribution was originally
+         * produced. Mirrors Galaxy::computeYields()'s own identical
+         * aging step for fieldYields_.
+         *
          * Stochastic (individually-sampled) stars: loops over mDead_/
          * tDied_ together (the stars that died during the most recent
          * advance() call, and their own death times -- see

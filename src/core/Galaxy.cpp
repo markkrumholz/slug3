@@ -29,49 +29,10 @@
 #include <iterator>
 #include <numbers>
 #include <numeric>
-#include <span>
 #include <sstream>
 #include <stdexcept>
 #include <utility>
 #include <vector>
-
-namespace
-{
-    /**
-     * @brief Apply radioactive decay to a possibly channel-decomposed per-isotope array
-     * @param yields The Yields whose own applyDecay() to call
-     * @param dtDecay Elapsed time, in yr, to apply
-     * @param values One entry per isotope (niso), or one channel-major
-     *   row of niso entries per channel (nchannels * niso total, in
-     *   Yields::yield()'s own (nchannels, niso) layout) if decomposed
-     * @param niso yields.isotopes().size()
-     * @param decomposed Whether values is channel-decomposed
-     * @details
-     * Yields::applyDecay() itself only ever accepts a single,
-     * niso-length array -- Yields::yield()/yieldSum() apply it once
-     * per channel row internally for exactly this reason (decay is
-     * evaluated per isotope, not per channel). Galaxy::fieldYields_
-     * and yieldsRate()'s own result can each be either shape,
-     * depending on controls().yieldsChannelDecomposed(), so this
-     * splits a decomposed array into its own channel-major rows and
-     * applies decay to each in turn, mirroring that same per-channel
-     * pattern one level up.
-     */
-    void applyDecayToValues(const yields::Yields& yields, const double dtDecay,
-        const std::span<double> values, const std::size_t niso, const bool decomposed)
-    {
-        if (!decomposed)
-        {
-            yields.applyDecay(dtDecay, values);
-            return;
-        }
-        const std::size_t nchannels = values.size() / niso;
-        for (std::size_t i = 0; i < nchannels; ++i)
-        {
-            yields.applyDecay(dtDecay, values.subspan(i * niso, niso));
-        }
-    }
-} // namespace
 
 // Constructor: everything but controls_ takes its in-class default
 // (curTime_/lbol_ = 0, every vector empty); sfr_ is resolved in the
@@ -670,8 +631,7 @@ auto core::Galaxy::yieldsRate(const double t, const double feh) const -> std::ve
     auto result = integrator.integrate(0.0, t, this, feh);
     if (!sc.noDecay())
     {
-        applyDecayToValues(*yields, curTime_ - t, result,
-            yields->isotopes().size(), sc.yieldsChannelDecomposed());
+        yields->applyDecay(curTime_ - t, result, sc.yieldsChannelDecomposed());
     }
     return result;
 }
@@ -765,19 +725,20 @@ void core::Galaxy::computeYields()
 
     // Age fieldYields_'s own already-accumulated total forward by the
     // time elapsed since it was last updated, before adding in this
-    // step's new contributions below (which are each added in raw,
-    // undecayed, since they're only now being produced) -- unlike
-    // Cluster::yields_ (which recomputes each dead star's own exact
-    // dtDecay from its own individual death time every time
-    // computeYields() runs), fieldYields_ only ever keeps a single
-    // running per-isotope total, with no memory of which isotope came
-    // from which field star or when, so decay has to be stepped
-    // forward incrementally like this instead.
+    // step's new contributions below (each of which is added using its
+    // own exact dtDecay for the time since it was produced, since it
+    // is only now being added) -- mirrors Cluster::computeYields()'s
+    // own identical aging step for yields_, see its own comment for
+    // why this incremental approach is exact (not an approximation),
+    // by the decay operator's own compositional (semigroup) property:
+    // applying decay for dt1 then dt2 gives the same result as
+    // applying it once for dt1 + dt2, for whatever abundances are
+    // present at the start of each step -- no need to separately track
+    // when each contribution was originally produced.
     const bool decomposed = sc.yieldsChannelDecomposed();
     if (!sc.noDecay())
     {
-        applyDecayToValues(*yields, curTime_ - lastYieldTime_, fieldYields_,
-            yields->isotopes().size(), decomposed);
+        yields->applyDecay(curTime_ - lastYieldTime_, fieldYields_, decomposed);
     }
 
     // Individually-tracked field stars that died during this step
