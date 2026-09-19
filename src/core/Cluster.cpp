@@ -12,7 +12,6 @@
 #include "../nebular/Nebular.hpp"
 #include "../tracks/TrackCommons.hpp"
 #include "../tracks/Tracks2D.hpp"
-#include "../tracks/Tracks3D.hpp"
 #include "../utils/GKIntegratorData.hpp"
 #include "../utils/PDFIntegrator.hpp"
 #include "../utils/RngThread.hpp"
@@ -101,31 +100,44 @@ namespace
 
     /**
      * @brief A star's lifetime, treating masses outside the tracks' own mass grid specially
-     * @param tracks3D The Tracks3D to query -- controls().tracks()
+     * @param tracks2D The (already feH-sliced) Tracks2D to query --
+     *   this cluster's own tracks(), not controls().tracks() directly
+     *   -- see @details for why
      * @param m Stellar mass, in Msun
-     * @param feh [Fe/H] to evaluate the lifetime at
-     * @return tracks3D.starLifetime(m, feh) if tracks3D.mMin() <= m <=
-     *   tracks3D.mMax(); +infinity if m is below tracks3D.mMin() (no
+     * @return tracks2D.starLifetime(m) if tracks2D.mMin() <= m <=
+     *   tracks2D.mMax(); +infinity if m is below tracks2D.mMin() (no
      *   tabulated lifetime for so low a mass -- treated as living
      *   forever, matching computeSpec()'s own treatment of such stars
      *   as contributing zero luminosity rather than ever dying);
-     *   -infinity if m is above tracks3D.mMax() (no tabulated lifetime
+     *   -infinity if m is above tracks2D.mMax() (no tabulated lifetime
      *   for so massive a star either -- treated as already dead at
      *   any time this simulation can resolve)
      * @details
-     * Tracks3D::starLifetime() itself asserts its mass argument lies
+     * Tracks2D::starLifetime() itself asserts its mass argument lies
      * within the tracks' own tabulated mass grid, so calling it
      * directly on every entry of m_ would crash whenever the IMF's own
      * mass range extends beyond that grid (e.g. an IMF minimum below
      * the tracks' own minimum mass, which readTracks() already warns
      * about elsewhere). Used by both Cluster constructors (to build
      * tDeath_) and yieldStar().
+     *
+     * Takes a Tracks2D, not controls().tracks() (a Tracks3D) directly,
+     * on purpose: Tracks3D::starLifetime(m, feh) reads through
+     * Mesh3DInterpolator::sliceConstZ()'s own single, mutable,
+     * not-thread-safe cache (guarded by an assert(!omp_in_parallel())
+     * that fires under real multithreaded use -- e.g. SimCluster::
+     * runTrial()'s own "#pragma omp parallel for", which constructs a
+     * Cluster, and so calls this, on every thread at once), whereas a
+     * Tracks2D -- already sliced once, via the thread-safe
+     * Tracks3D::sliceConstFeH()/Mesh3DInterpolator::sliceConstZCopy()
+     * this cluster's own tracks_ is built from -- has no such shared,
+     * mutable cache of its own to race on.
      */
-    auto starLifetimeClamped(const tracks::Tracks3D& tracks3D, const double m, const double feh) -> double
+    auto starLifetimeClamped(const tracks::Tracks2D& tracks2D, const double m) -> double
     {
-        if (m < tracks3D.mMin()) { return std::numeric_limits<double>::infinity(); }
-        if (m > tracks3D.mMax()) { return -std::numeric_limits<double>::infinity(); }
-        return tracks3D.starLifetime(m, feh);
+        if (m < tracks2D.mMin()) { return std::numeric_limits<double>::infinity(); }
+        if (m > tracks2D.mMax()) { return -std::numeric_limits<double>::infinity(); }
+        return tracks2D.starLifetime(m);
     }
 } // namespace
 
@@ -181,7 +193,7 @@ core::Cluster::Cluster(const unsigned long uid,
     tDeath_.reserve(m_.size());
     for (const double m : m_)
     {
-        tDeath_.push_back(formTime_ + starLifetimeClamped(*sc.tracks(), m, feH_));
+        tDeath_.push_back(formTime_ + starLifetimeClamped(tracks(), m));
     }
     sortByDeathTimeDescending(m_, tDeath_);
 
@@ -277,7 +289,7 @@ core::Cluster::Cluster(const unsigned long uid,
     tDeath_.reserve(m_.size());
     for (const double m : m_)
     {
-        tDeath_.push_back(formTime_ + starLifetimeClamped(*sc.tracks(), m, feH_));
+        tDeath_.push_back(formTime_ + starLifetimeClamped(tracks(), m));
     }
     sortByDeathTimeDescending(m_, tDeath_);
 
@@ -610,7 +622,7 @@ void core::Cluster::computeYields()
     // mass limit -- any part at or above it belongs to the stochastic
     // stars already handled above, via mDead_)
     using YieldSegFn = std::vector<double> (*)(double, double, const yields::Yields&, bool,
-        const io::SimControls&, double, double);
+        const io::SimControls&, double, double, const tracks::Tracks2D&);
     const utils::PDFIntegrator<YieldSegFn> integrator(
         sc.imf(), static_cast<YieldSegFn>(&Cluster::yieldStar), yields_.size(),
         false, sc.intMaxIter(), sc.intAbsTol(), sc.intRelTol());
@@ -622,7 +634,7 @@ void core::Cluster::computeYields()
         if (m0 >= m1) { continue; } // empty once clipped below minStochMass()
 
         const auto segResult = integrator.integrate(m0, m1, feH_, *yields, decomposed,
-            sc, curTime_, formTime_);
+            sc, curTime_, formTime_, tracks());
         for (std::size_t k = 0; k < segResult.size(); ++k)
         {
             yields_[k] += segResult[k] * birthNonStochMass_; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- yields_ and segResult are both sized yields_.size() by construction (segResult via nInt_ above)
@@ -645,11 +657,11 @@ auto core::Cluster::lbolStar(const double m, const Segment& segment) -> std::arr
 // than captured state, and for the dtDecay convention below
 auto core::Cluster::yieldStar(
     const double m, const double feH, const yields::Yields& yields, const bool decomposed,
-    const io::SimControls& controls, const double curTime, const double formTime)
-    -> std::vector<double>
+    const io::SimControls& controls, const double curTime, const double formTime,
+    const tracks::Tracks2D& tracks2D) -> std::vector<double>
 {
     const double dtDecay = controls.noDecay() ? 0.0 :
-        curTime - formTime - starLifetimeClamped(*controls.tracks(), m, feH);
+        curTime - formTime - starLifetimeClamped(tracks2D, m);
     if (decomposed) { return yields.yield(m, feH, dtDecay).second; }
     return yields.yieldSum(m, feH, dtDecay);
 }

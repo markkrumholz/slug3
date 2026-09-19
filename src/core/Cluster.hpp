@@ -764,13 +764,24 @@ namespace core
          *   into one per-isotope total (yields.yieldSum()) -- see
          *   controls().yieldsChannelDecomposed()'s own comment
          * @param controls This cluster's own controls_, passed
-         *   explicitly for the same reason yields is -- used for
-         *   noDecay() and tracks()->starLifetime(m, feH), to compute
-         *   dtDecay below
+         *   explicitly for the same reason yields is -- used only for
+         *   noDecay(), to decide whether dtDecay below is computed at
+         *   all
          * @param curTime This cluster's own curTime_ at the time of
          *   the call, passed explicitly for the same reason
          * @param formTime This cluster's own formTime_, passed
          *   explicitly for the same reason
+         * @param tracks2D This cluster's own tracks() -- passed
+         *   explicitly (rather than read via controls.tracks(),
+         *   Yields's own SimControls-owned Tracks3D) because
+         *   Tracks3D::starLifetime() reads through
+         *   Mesh3DInterpolator::sliceConstZ()'s single, mutable,
+         *   not-thread-safe cache, which this method -- called from
+         *   inside SimCluster::runTrial()'s own OpenMP-parallelized
+         *   loop -- cannot safely touch; tracks2D, already sliced once
+         *   via the thread-safe sliceConstFeH()/sliceConstZCopy() this
+         *   cluster's own tracks_ is built from, has no such cache to
+         *   race on
          * @return yields.yield(m, feH, dtDecay).second if decomposed,
          *   or yields.yieldSum(m, feH, dtDecay) otherwise -- either
          *   way, a vector the same length as yields_ itself
@@ -782,17 +793,18 @@ namespace core
          * PDFIntegrator a plain function pointer.
          *
          * dtDecay is 0 if controls.noDecay() is true. Otherwise it is
-         * curTime - formTime - controls.tracks()->starLifetime(m, feH)
-         * -- the time elapsed since this particular mass m (part of
-         * the continuously-sampled population, so it has no tDeath_
-         * entry of its own the way a stochastic star does) died,
-         * mirroring computeYields()'s own identical dtDecay convention
-         * for the stochastic population, which reads it directly out
-         * of tDied_ instead.
+         * curTime - formTime - tracks2D.starLifetime(m) -- the time
+         * elapsed since this particular mass m (part of the
+         * continuously-sampled population, so it has no tDeath_ entry
+         * of its own the way a stochastic star does) died, mirroring
+         * computeYields()'s own identical dtDecay convention for the
+         * stochastic population, which reads it directly out of
+         * tDied_ instead.
          */
         [[nodiscard]] static auto yieldStar(double m, double feH,
             const yields::Yields& yields, bool decomposed,
-            const io::SimControls& controls, double curTime, double formTime) -> std::vector<double>;
+            const io::SimControls& controls, double curTime, double formTime,
+            const tracks::Tracks2D& tracks2D) -> std::vector<double>;
 
     };
 
