@@ -15,12 +15,12 @@ currently included in SLUG are:
 
     * ``massive_star_winds``: the winds produced by massive stars prior to supernova
       or collapse to black holes
-    * ``ccsn``: core collapse supernovae
+    * ``ccsn``: core-collapse supernovae
 
-Channels are described in term of the isotopes they produce when a star of a given
+Channels are described in terms of the isotopes they produce when a star of a given
 mass dies -- it is assumed that all mass return occurs instantaneously upon stellar
 death, rather than being resolved in time, for the practical reason that available
-tabulations of stellar nucleosyntheic yields almost never include time-resolved
+tabulations of stellar nucleosynthetic yields almost never include time-resolved
 predictions for element return rates, and even if they did these predictions would
 not necessarily be compatible with the evolutionary tracks used to compute stellar
 spectral and photometric output. This approximation means that, formally, the
@@ -33,13 +33,13 @@ Note that the yield as we define it here is the total mass returned, not the net
 increase in mass after subtracting off the mass that went into forming the star, and
 thus :math:`y_X(m, Z_\mathrm{Fe})` is strictly positive. Thus for example
 yields of :math:`^1\mathrm{H}` are positive, even though nuclear reactions in stars
-almost always mean that on net the redude the amount of :math:`^1\mathrm{H}` in the
+almost always mean that on net they reduce the amount of :math:`^1\mathrm{H}` in the
 Universe by converting it to heavier elements.
 
 For a given channel, the function :math:`y_X(m, Z_\mathrm{Fe})` is generally
-zero outside some mass range :math:`(m_\mathrm{min}, m_\mathrm{max})`, outisde of
+zero outside some mass range :math:`(m_\mathrm{min}, m_\mathrm{max})`, outside of
 which the process described by that particular channel ceases to occur -- for example
-there is a minimum stellar mass for core collapse supernovae, and :math:`y_X(m)` is
+there is a minimum stellar mass for core-collapse supernovae, and :math:`y_X(m)` is
 zero for masses below this range. The values of :math:`m_\mathrm{min}` and
 :math:`m_\mathrm{max}` can be chosen by the user, or left to the defaults provided by
 the individual models used to compute yields -- see :ref:`ssec-yield-models`.
@@ -52,7 +52,7 @@ every isotope and every yield channel requested (see :ref:`ssec-parameters-yield
 :ref:`sec-parameters`) and return the result in the output file -- see :ref:`sec-output`.
 For stars being treated individually and stochastically (see
 :ref:`ssec-pdfs-and-monte-carlo`), the yield is computed star-by-star and summed to
-produce the final yield :math:`Y_X` at any chosen output time :math:`t`. 
+produce the final yield :math:`Y_X` at any chosen output time :math:`t`.
 
 For stars that are not being treated stochastically, SLUG computes the yield by evaluating
 integrals over the continuous stellar populations. For cluster-type simulations where the
@@ -87,7 +87,7 @@ Here :math:`m_i(t')` is one of the (possibly multiple) solutions to the implicit
 
 .. math:: t_\mathrm{life}(m, Z_\mathrm{Fe}) = t',
 
-i.e., :math:`m_i(t')` is the mass of star whose lifetime is :math:`t'`, and if there are
+i.e., :math:`m_i(t')` is the mass of the star whose lifetime is :math:`t'`, and if there are
 no such stars the integrand is taken to be zero.
 
 .. _ssec-yield-models:
@@ -95,12 +95,12 @@ no such stars the integrand is taken to be zero.
 Standard Yield Models
 ---------------------
 
-The list of yield models available for use in SLUG are listed in a registry file. 
+The list of yield models available for use in SLUG is given in a registry file.
 The default registry, which is included in the repository, is ``data/yields/yields.toml``.
 The registry is a human-readable description of the available yields. Yields are
 organized by channel, with the list of available channels provided in the ``channels``
-keyword at the top level of the registry, and then models each channel listed in the
-``models`` keyword in the table for each channel.
+keyword at the top level of the registry, and then the models available for each channel
+listed in the ``models`` keyword in the table for that channel.
 
 The SLUG standard data files provide the following yield models. For each, the
 default mass range is the range of initial stellar masses covered by the tabulated
@@ -261,7 +261,7 @@ of how to build a model from another source.
 Radioactive Decay
 -----------------
 
-Some of isotopes whose yields can be computed are unstable, for example :math:`^{26}\mathrm{Al}`
+Some of the isotopes whose yields can be computed are unstable, for example :math:`^{26}\mathrm{Al}`
 or :math:`^{60}\mathrm{Fe}`. SLUG offers a choice as to how to treat these. One option is
 simply to report the total mass of each isotope produced, ignoring the fact that some of those
 isotopes will decay over time. The other option is to self-consistently compute the effects of

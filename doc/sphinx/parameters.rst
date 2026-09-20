@@ -339,7 +339,7 @@ computed.
     represents. See :ref:`sec-yields` for the list of available channels.
   * ``model`` (required): The name of the yield table to use for this channel, as
     listed in the yield registry (see ``registry`` below). See :ref:`sec-yields` for
-    the list of models included in the defualt data set. Each model has a specified
+    the list of models included in the default data set. Each model has a specified
     range in [Fe/H], and the range of [Fe/H] in ``stars.FeH`` must lie within the
     range covered by the model, or SLUG raises an error at startup.
   * ``m_min`` (optional, default=the lowest mass tabulated by the model): The
