@@ -10,7 +10,7 @@
 #define DECAYCHAIN_HPP
 
 #include "ElemCommons.hpp"
-#include <Eigen/Dense>
+#include <Eigen/Dense> // NOLINT(misc-include-cleaner) -- provides Eigen::MatrixXd/VectorXd, used throughout; clang-tidy's IWYU mapping doesn't know this header
 #include <cstddef>
 #include <span>
 #include <vector>
@@ -33,9 +33,19 @@ namespace elem
      * elapsed time.
      *
      * The underlying math is the solution of the linear ODE system
-     * dN/dt = M N, where N is the vector of abundances and M (see
-     * depletionMatrix_'s own comment) is the constant depletion matrix
-     * built once at construction: N(t) = exp(M t) N(0). Unlike a
+     * dN/dt = M N, where N is the vector of abundances -- numbers of
+     * nuclei, not masses -- and M (see depletionMatrix_'s own
+     * comment) is the constant depletion matrix built once at
+     * construction: N(t) = exp(M t) N(0). The branching ratios in M
+     * are fractions of *nuclei*, so a decay that changes the mass
+     * number (an alpha decay, which turns a parent of mass number A
+     * into a daughter of A - 4 plus a He4) moves less mass into each
+     * daughter than the parent loses in total, and only conserves
+     * mass overall once every product is counted. applyDecay()
+     * therefore takes masses, as its callers hold them, converts each
+     * to a number of nuclei (proportional to mass / mass number)
+     * before applying exp(M t), and converts back afterward -- see its
+     * own comment. Unlike a
      * closed-form (Bateman equation) solution for a single linear decay
      * chain, this handles an arbitrary acyclic decay network with no
      * special-casing at all -- an isotope with more than one decay
@@ -118,14 +128,32 @@ namespace elem
          *   below to inf/NaN for a short-lived enough isotope
          * @details
          * Gathers values at the relevant isotopes' own positions into an
-         * Eigen vector v, computes the propagator exp(depletionMatrix_ *
-         * dtDecay) (Eigen's own scaling-and-squaring/Pade
-         * implementation, unsupported/Eigen/MatrixFunctions -- well
-         * defined for any matrix, including one with repeated or
-         * degenerate eigenvalues, unlike a closed-form Bateman sum),
-         * multiplies it by v, and scatters the result back. A no-op if
-         * there are no relevant isotopes at all (nothing in the given
-         * list is unstable).
+         * Eigen vector v, converting each mass to a number of nuclei
+         * (up to a common constant factor) by dividing by that
+         * isotope's mass number A -- depletionMatrix_'s own branching
+         * ratios are fractions of nuclei, not of mass, so applying it
+         * directly to masses would not conserve mass for a decay that
+         * changes A (see the class comment). Computes the propagator
+         * exp(depletionMatrix_ * dtDecay) (Eigen's own
+         * scaling-and-squaring/Pade implementation,
+         * unsupported/Eigen/MatrixFunctions -- well defined for any
+         * matrix, including one with repeated or degenerate
+         * eigenvalues, unlike a closed-form Bateman sum), multiplies it
+         * by v, multiplies each entry of the result back by its
+         * isotope's A to recover a mass, and scatters the result back.
+         * The mass number A, rather than the true atomic mass, is used
+         * for the conversion because it makes a decay chain conserve
+         * total mass, provided the decay products are mass balanced (A
+         * is conserved by a beta decay, and splits as A_daughter + 4 by
+         * an alpha decay) and the branching ratios sum to one. The
+         * isotope data's own branching ratios are not always exactly
+         * normalized -- a rare branch can be listed on top of a
+         * dominant one that already has ratio 1 -- in which case the
+         * daughters gain slightly more mass than the parent loses, by
+         * that rare branch's fraction of the decayed mass (~1e-6 for
+         * the worst cases in the data, e.g. Bi210). A no-op if there
+         * are no relevant isotopes at all (nothing in the given list is
+         * unstable).
          *
          * This is exact, not an approximation, when applied
          * incrementally across multiple successive calls with the
@@ -176,6 +204,7 @@ namespace elem
 
     private:
         std::vector<std::size_t> relevantIndices_; /**< Index, into the isotope list this was built from, of each row/column of depletionMatrix_, in that same order -- see the constructor's own comment */
+        std::vector<double> massNumbers_; /**< Mass number A of each relevant isotope, in the same order as relevantIndices_ -- used by applyDecay() to convert between masses and numbers of nuclei */
         Eigen::MatrixXd depletionMatrix_; /**< The constant depletion matrix M in dN/dt = M N, sized relevantIndices_.size() square -- see the constructor's own comment for how it is filled */
     };
 
