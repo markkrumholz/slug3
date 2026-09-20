@@ -9,7 +9,7 @@
 #include "DecayChain.hpp"
 #include "ElemCommons.hpp"
 #include "IsotopeData.hpp"
-#include <Eigen/Dense>
+#include <Eigen/Dense> // NOLINT(misc-include-cleaner) -- provides Eigen::MatrixXd/VectorXd, used throughout; clang-tidy's IWYU mapping doesn't know this header
 #include <cstddef>
 #include <limits>
 #include <optional>
