@@ -99,6 +99,16 @@ namespace elem
         relevantIndices_ = findRelevantIndices(isotopes);
         const std::size_t m = relevantIndices_.size();
 
+        // Mass number of each relevant isotope, kept so applyDecay() can
+        // convert between masses (what its callers hold) and numbers of
+        // nuclei (what depletionMatrix_ describes the evolution of) --
+        // see the class comment
+        massNumbers_.reserve(m);
+        for (const std::size_t idx : relevantIndices_)
+        {
+            massNumbers_.push_back(static_cast<double>(isotopes[idx].get().A())); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- idx < isotopes.size() by findRelevantIndices()
+        }
+
         // Reverse lookup: position within relevantIndices_ of each
         // relevant isotope's own index into isotopes. Entries for a
         // non-relevant isotope are left at this sentinel and never read
@@ -158,17 +168,22 @@ namespace elem
         const std::size_t m = relevantIndices_.size();
         if (m == 0) { return; }
 
+        // Convert masses to numbers of nuclei (up to a common constant
+        // factor, which cancels) on entry: depletionMatrix_'s branching
+        // ratios are fractions of nuclei, so it must act on numbers, not
+        // masses -- see the class comment
         Eigen::VectorXd v(static_cast<Eigen::Index>(m)); // NOLINT(misc-include-cleaner) -- Eigen::VectorXd is provided by <Eigen/Dense> (already included above); clang-tidy's IWYU mapping just doesn't know that
         for (std::size_t k = 0; k < m; ++k)
         {
-            v[static_cast<Eigen::Index>(k)] = values[relevantIndices_[k]]; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- relevantIndices_[k] < values.size() == isotopes.size() by construction
+            v[static_cast<Eigen::Index>(k)] = values[relevantIndices_[k]] / massNumbers_[k]; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index,cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- relevantIndices_[k] < values.size() == isotopes.size() by construction; k < m == massNumbers_.size()
         }
 
         const Eigen::VectorXd result = propagator * v;
 
+        // ...and back to masses on exit
         for (std::size_t k = 0; k < m; ++k)
         {
-            values[relevantIndices_[k]] = result[static_cast<Eigen::Index>(k)]; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- see above
+            values[relevantIndices_[k]] = result[static_cast<Eigen::Index>(k)] * massNumbers_[k]; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index,cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
         }
     }
 
