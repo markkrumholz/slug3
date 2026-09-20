@@ -31,7 +31,7 @@ metallicity :math:`Z_\mathrm{Fe}` upon its death.
 
 Note that the yield as we define it here is the total mass returned, not the net
 increase in mass after subtracting off the mass that went into forming the star, and
-thus :math:`y_X(m, Z_\mathrm{Fe})` is strictly positive. Thus for example
+thus :math:`y_X(m, Z_\mathrm{Fe})` is strictly non-negative. Thus for example
 yields of :math:`^1\mathrm{H}` are positive, even though nuclear reactions in stars
 almost always mean that on net they reduce the amount of :math:`^1\mathrm{H}` in the
 Universe by converting it to heavier elements.
@@ -39,10 +39,11 @@ Universe by converting it to heavier elements.
 For a given channel, the function :math:`y_X(m, Z_\mathrm{Fe})` is generally
 zero outside some mass range :math:`(m_\mathrm{min}, m_\mathrm{max})`, outside of
 which the process described by that particular channel ceases to occur -- for example
-there is a minimum stellar mass for core-collapse supernovae, and :math:`y_X(m)` is
-zero for masses below this range. The values of :math:`m_\mathrm{min}` and
-:math:`m_\mathrm{max}` can be chosen by the user, or left to the defaults provided by
-the individual models used to compute yields -- see :ref:`ssec-yield-models`.
+there is a minimum stellar mass for core-collapse supernovae, and
+:math:`y_X(m, Z_\mathrm{Fe})` is zero for masses below this range. The values of
+:math:`m_\mathrm{min}` and :math:`m_\mathrm{max}` can be chosen by the user, or
+left to the defaults provided by the individual models used to compute yields --
+see :ref:`ssec-yield-models`.
 
 Computing Yields
 ----------------
@@ -51,44 +52,52 @@ When run with nucleosynthetic yields enabled, SLUG will compute :math:`y_X(m)` f
 every isotope and every yield channel requested (see :ref:`ssec-parameters-yields` in
 :ref:`sec-parameters`) and return the result in the output file -- see :ref:`sec-output`.
 For stars being treated individually and stochastically (see
-:ref:`ssec-pdfs-and-monte-carlo`), the yield is computed star-by-star and summed to
-produce the final yield :math:`Y_X` at any chosen output time :math:`t`.
+:ref:`ssec-pdfs-and-monte-carlo`), the yield is computed star-by-star as each star
+dies at the time dictated by the chosen :ref:`sec-tracks`. Individual stellar yields
+are then summed to produce the final yield :math:`Y_X` at any chosen output time :math:`t`.
 
 For stars that are not being treated stochastically, SLUG computes the yield by evaluating
 integrals over the continuous stellar populations. For cluster-type simulations where the
 stellar population is all the same age (see :ref:`ssec-cluster-vs-galaxy`), SLUG computes the
 total yield returned by a population of age :math:`t` by evaluating
 
-.. math:: Y_X(t) = \frac{M_*}{\left\langle m\right\rangle} \int_{-\infty}^{\infty} \left[\int_0^\infty y_X(m, Z_\mathrm{Fe}) \Theta(t - t_\mathrm{life}(m, Z_\mathrm{Fe})) \frac{dn}{dm} \, dm\right] \frac{dp}{dZ_\mathrm{Fe}} \, dZ_\mathrm{Fe},
+.. math:: Y_X(t) = \frac{M_*}{\left\langle m\right\rangle} \int_0^\infty y_X(m, Z_\mathrm{Fe}) \Theta(t - t_\mathrm{life}(m, Z_\mathrm{Fe})) \frac{dn}{dm} \, dm,
 
 where :math:`M_*` is the total mass of the stellar population, :math:`\langle m\rangle` is the
 mean stellar mass computed from the IMF :math:`dn/dm`, :math:`\Theta(x)` is the Heaviside step
-function (equal to unity for :math:`x > 0`, and zero for :math:`x < 0`),
+function (equal to unity for :math:`x > 0`, and zero for :math:`x < 0`), and
 :math:`t_\mathrm{life}(m, Z_\mathrm{Fe})` is the stellar lifetime as a function of
-stellar initial mass and Fe metallicity, and :math:`dp/dZ_\mathrm{Fe}` is the
-distribution of Fe metallicity for the stellar population. If only some of the IMF is being treated
-non-stochastically, the range of integration is limited to the range being treated
-non-stochastically, and the results of this integral are added to the results computed
-star-by-star over the stochastic mass range. This integral is modified in the presence
-of :ref:`ssec-radioactive-decay`.
+stellar initial mass and Fe metallicity, following the chosen set of :ref:`sec-tracks`.
+If only some of the IMF is being treated non-stochastically, the range of integration is
+limited to the range being treated non-stochastically, and the results of this integral
+are added to the results computed star-by-star over the stochastic mass range. This
+integral is modified in the presence of :ref:`ssec-radioactive-decay`.
 
 For composite stellar populations described by a star formation rate :math:`\dot{M}_*(t)` as
-a function of time :math:`t`, SLUG instead evaluates the total yield returned up to time
-:math:`t` as
+a function of time :math:`t`, and for the fraction :math:`1 - f_\mathrm{cluster}` of the
+population that is treated as continuously-distributed in time rather than arranged into
+clusters (see :ref:`ssec-parameters-cluster` in :ref:`sec-parameters`), SLUG instead
+evaluates the total yield returned up to time :math:`t` as
 
-.. math:: Y_X(t) = \int_0^t \dot{Y}_X(t') \, dt'
+.. math:: Y_X(t) = (1 - f_\mathrm{cluster}) \int_0^t \dot{Y}_X(t') \, dt'
 
 where :math:`\dot{Y}_X(t)` is the instantaneous rate of mass return at time :math:`t`, given
 by
 
-.. math:: \dot{Y}_X(t) = \frac{1}{\left\langle m \right\rangle} \int_{-\infty}^{\infty} \left[\int_0^t \dot{M}_*(t - t') \sum_i y_X(m_{i}(t'), Z_\mathrm{Fe}) \left|\frac{dt_\mathrm{life}}{dm}\right|_{m_{i}(t')}^{-1} \left.\frac{dn}{dm}\right|_{m_{i}(t')} \, dt'\right] \frac{dp}{dZ_\mathrm{Fe}} \, dZ_\mathrm{Fe}.
+.. math:: \dot{Y}_X(t) = \frac{1}{\left\langle m \right\rangle} \int_{0}^{\infty} \left[\int_0^t \dot{M}_*(t - t') \sum_i y_X(m_{i}(t'), Z_\mathrm{Fe}) \left|\frac{dt_\mathrm{life}}{dm}\right|_{m_{i}(t')}^{-1} \left.\frac{dn}{dm}\right|_{m_{i}(t')} \, dt'\right] \frac{dp}{dZ_\mathrm{Fe}} \, dZ_\mathrm{Fe}.
 
-Here :math:`m_i(t')` is one of the (possibly multiple) solutions to the implicit equation
+Here :math:`dp/dZ_\mathrm{Fe}` is the distribution of Fe metallicities, and :math:`m_i(t')` is
+one of the (possibly multiple) solutions to the implicit equation
 
 .. math:: t_\mathrm{life}(m, Z_\mathrm{Fe}) = t',
 
 i.e., :math:`m_i(t')` is the mass of the star whose lifetime is :math:`t'`, and if there are
-no such stars the integrand is taken to be zero.
+no such stars the integrand is taken to be zero. This continuous yield is added to the yield
+from the fraction :math:`f_\mathrm{cluster}` of the mass arranged into individual clusters,
+computed as described above. As with the cluster case, if only part of the stellar population
+is treated non-stochastically, the range of the integral over stellar mass :math:`dm` is
+modified to include only the non-stochastic part of the IMF, with the yields from stochastic
+stars handled individually and summed star-by-star.
 
 .. _ssec-yield-models:
 
@@ -98,9 +107,9 @@ Standard Yield Models
 The list of yield models available for use in SLUG is given in a registry file.
 The default registry, which is included in the repository, is ``data/yields/yields.toml``.
 The registry is a human-readable description of the available yields. Yields are
-organized by channel, with the list of available channels provided in the ``channels``
-keyword at the top level of the registry, and then the models available for each channel
-listed in the ``models`` keyword in the table for that channel.
+organized by channel, and then by models for that channel, with the list of models
+available for a given channel stored in the ``models`` keyword of a TOML table
+whose name is the ``channel`` to which those models apply.
 
 The SLUG standard data files provide the following yield models. For each, the
 default mass range is the range of initial stellar masses covered by the tabulated
@@ -272,6 +281,11 @@ radioactive decay by solving the generalized Bateman equations
 where :math:`N_i` is the number of nuclei of isotope :math:`i`, :math:`\lambda_i` is the
 radioactive decay rate of that isotope, and :math:`b_{j\to i}` is the branching ratio for
 isotope :math:`j` to isotope :math:`i`, to update the masses of each isotope as a function
-of time. See :ref:`ssec-parameters-yields` in :ref:`sec-parameters` for the keywords used to
+of time. With this option SLUG will initialize yields at the time of stellar death to the 
+values provided by the chosen model, but will evolve them forward from that time onward,
+and the value reported at each time will be the instantaneous isotope mass at that time.
+See :ref:`ssec-parameters-yields` in :ref:`sec-parameters` for the keywords used to
 control which treatment is adopted. SLUG implements its numerical solution to the Bateman
-equations using a matrix exponentiation method.
+equations using a matrix exponentiation method. The underlying isotopic data used in this
+compilation are taken from
+`Wolfram Research's Isotopic Data Compilation <https://reference.wolfram.com/language/ref/IsotopeData.html>`_.

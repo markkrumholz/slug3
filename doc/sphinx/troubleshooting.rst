@@ -7,7 +7,8 @@ Troubleshooting
 
 This page collects fixes for problems users commonly run into, organized by
 where they show up: building SLUG, locating its data files, writing an input
-deck, running a simulation, and post-processing with Cloudy. If your problem
+deck, setting up nucleosynthetic yields, running a simulation, and
+post-processing with Cloudy. If your problem
 isn't covered here, the individual pages linked from each section below go
 into much more detail.
 
@@ -99,6 +100,110 @@ with ``output.output_mode = "ascii"``:
 
 Switch to ``"h5"`` or ``"h5divided"`` output if you need checkpointing (see
 :ref:`ssec-parameters-output`).
+
+.. _ssec-troubleshooting-yields:
+
+Yield Errors
+----------------
+
+The ``[yields]`` section of the input deck (see :ref:`ssec-parameters-yields`) is
+checked at startup, so a mistake in it stops SLUG before any simulation runs, with a
+message that names the problem. The common ones are below; see :ref:`sec-yields` for
+the yield models available and what each covers.
+
+**The requested [Fe/H] is outside the range of the yield model**:
+
+::
+
+    slug: simulation failed: YieldChannel: requested [Fe/H] range [-0.500000,
+    -0.500000] extends outside the range available for channel 'ccsn', model
+    'sukhbold16' ([0.000000, 0.000000])
+
+The [Fe/H] of the simulated population (``stars.FeH``) must lie within the range
+of [Fe/H] that the yield model tabulates, and the message reports both the range
+you asked for and the range the model provides. A model tabulated at a single [Fe/H]
+can only be used with exactly that value: ``sukhbold16``, for example, is available
+only at [Fe/H] = 0. Either change ``stars.FeH`` or choose a model whose range covers
+it (see :ref:`ssec-yield-models` for the range of each standard model).
+
+**The registry has no such model**:
+
+::
+
+    slug: simulation failed: YieldChannel: registry .../data/yields/yields.toml has
+    no model 'kobayashi06_11' for channel 'massive_star_winds'
+
+Either the model name is misspelled, or the model is not available for the channel
+you paired it with -- the registry lists the models for each channel separately, and
+some models (like ``kobayashi06_11``, which has supernova yields only) provide only one.
+The registry named in the message is the one that was actually searched, which is
+useful if you have set ``yields.registry`` to a custom one. If the registry file itself
+cannot be found (``YieldChannel: registry ... not found``), the same file-resolution
+rules apply as for the data files described under "Data Files Not Found" above.
+
+**A channel or model is missing or not recognized**:
+
+::
+
+    SimControls: yields.channel1.channel = 'supernova' is not a recognized yield channel
+    getTOMLKeyWithError: required key yields.channel1.model not found
+
+Every ``[yields.channelN]`` table needs both a ``channel`` and a ``model``, and
+``channel`` must be one of the channels described in :ref:`sec-yields`. Note also that
+channels must be numbered consecutively from 1: SLUG stops at the first missing
+number and *silently ignores* any later table, so a ``[yields.channel3]`` with no
+``[yields.channel2]`` produces no error, but also contributes nothing to the output.
+If a channel you expected is missing from the output, check the numbering.
+
+**Problems with the isotope list**:
+
+::
+
+    Yields::rebuildYieldGrid: the given isotopes list does not intersect any isotope
+    tabulated by any loaded channel
+
+    SimControls: yields.isotopes entry 'H' is not a valid isotope specifier (expected
+    an element symbol followed by a mass number, e.g. 'H1', 'Na22', or 'fe56')
+
+    SimControls: yields.isotopes entry 'Xx12' names an unrecognized element symbol 'Xx'
+
+    SimControls: yields.isotopes entry 'Fe999' does not correspond to a known isotope
+    in the isotope table
+
+The first means that none of the isotopes you listed is tabulated by the yield models
+you selected, or is a decay product of an isotope they tabulate -- a typo is
+the most likely cause, but the isotope may simply not be one of those the model provides.
+The others mean that an entry in ``yields.isotopes`` is not a valid isotope name: each
+must be an element symbol followed by a mass number, with no space between them. A valid
+isotope that the models do not tabulate is not an error as long as at least one other entry
+matches. See the description of ``isotopes`` in :ref:`ssec-parameters-yields`.
+
+**The mass range of a channel is invalid**:
+
+::
+
+    YieldChannel::rebuildYieldGrid: mMin (30.000000) must be strictly less than mMax
+    (20.000000)
+
+``m_min`` and ``m_max`` must both be positive, and ``m_min`` must be less than
+``m_max``. Remember that an omitted ``m_max`` defaults to the highest mass tabulated by
+the model, so setting ``m_min`` above that mass produces this error unless you also give a
+larger ``m_max``.
+
+**Yields are requested but would never be written**:
+
+::
+
+    SimControls: yield channels were given, but output.write_cluster_yields and
+    output.write_galaxy_yields are both false (or this is a cluster-type simulation
+    and output.write_cluster_yields is false), so the computed yields would never be
+    written
+
+You have defined at least one yield channel but turned off every output that would
+contain the result. For a cluster simulation ``output.write_cluster_yields`` must be
+true; for a galaxy simulation at least one of ``output.write_cluster_yields`` and
+``output.write_galaxy_yields`` must be. Remove the yield channels if you do not actually
+want yields, or see :ref:`ssec-parameters-output`.
 
 Runtime Warnings and Errors
 ------------------------------

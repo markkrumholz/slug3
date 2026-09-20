@@ -336,12 +336,17 @@ computed.
   Each subtable has the following keywords:
 
   * ``channel`` (required): The type of nucleosynthetic source this channel
-    represents. See :ref:`sec-yields` for the list of available channels.
+    represents. See :ref:`sec-yields` for the list of available channels; SLUG
+    raises an error at startup if the value is not one of them.
   * ``model`` (required): The name of the yield table to use for this channel, as
     listed in the yield registry (see ``registry`` below). See :ref:`sec-yields` for
     the list of models included in the default data set. Each model has a specified
     range in [Fe/H], and the range of [Fe/H] in ``stars.FeH`` must lie within the
-    range covered by the model, or SLUG raises an error at startup.
+    range covered by the model, or SLUG raises an error at startup. The registry
+    lists the models available for each channel separately, so it is also an error
+    to name a model that the registry does not list for the ``channel`` you have
+    chosen; for example, ``kobayashi06_11`` is available for ``ccsn`` but not for
+    ``massive_star_winds``.
   * ``m_min`` (optional, default=the lowest mass tabulated by the model): The
     minimum initial stellar mass, in Msun, that contributes to this channel. If
     not specified, the minimum stellar mass contributing to the channel is the
@@ -354,7 +359,12 @@ computed.
     yields are extrapolated by scaling the yields of the nearest tabulated mass in
     proportion to the stellar mass. Together, ``m_min`` and ``m_max`` allow the mass
     range of one channel to be split between several different models, by giving
-    several channels of the same type with different mass ranges.
+    several channels of the same type with different mass ranges. Both ``m_min`` and
+    ``m_max`` must be positive, and ``m_min`` must be strictly less than ``m_max``
+    once the defaults have been applied, or SLUG raises an error at startup. In
+    particular, since an omitted ``m_max`` defaults to the highest mass tabulated by
+    the model, an ``m_min`` above that mass is an error unless a larger ``m_max`` is
+    given as well.
 
 * ``registry`` (optional, default="data/yields/yields.toml"): Overrides the
   default registry file used to look up the ``model`` of each channel.
@@ -374,13 +384,21 @@ computed.
   proton or alpha emitter; an included alpha emitter does, however, bring its ``He4``
   decay product with it. If ``isotopes`` is not given, every isotope tabulated by at
   least one of the requested models is included, plus any radioactive decay products of
-  those isotopes. An entry that none of the requested models tabulates is ignored, but
-  SLUG raises an error if no entry matches anything. An isotope that some requested
-  models tabulate and others do not has zero yield from the models that do not.
+  those isotopes. An entry that is a valid isotope but that none of the requested models
+  tabulates is ignored, but SLUG raises an error if no entry matches anything. Entries
+  that are not well formed are always errors, whether or not other entries are valid:
+  an entry with no mass number (e.g. ``"H"``), an unrecognized element symbol (e.g.
+  ``"Xx12"``), or a mass number for which SLUG's isotope table has no such isotope (e.g.
+  ``"Fe999"``), as is giving ``isotopes`` as anything other than an array of strings. An
+  isotope that some requested models tabulate and others do not has zero yield from the
+  models that do not.
 * ``channel_decomposed`` (optional, default=true): If true, yields are reported
   separately for each channel, so the output has one value per (channel, isotope) pair.
   If false, the yields from all channels are summed, so the output has only one value
   per isotope. See :ref:`sec-output` for details on how the outputs are formatted.
+  `Warning:` some yield models contain large numbers of isotopes, and using
+  ``channel_decomposed`` output with such tables plus multiple channels can produce
+  voluminous outputs.
 * ``no_decay`` (optional, default=false): If false, the reported yield of each isotope
   is the mass actually present at the output time, i.e., accounting for radioactive
   decay of the isotope since it was produced, and for the accumulation of the daughter
@@ -403,3 +421,10 @@ winds, using the same model for both, for only a few isotopes:
     [yields.channel2]
     channel = "massive_star_winds"
     model = "sukhbold16"
+
+Note that the output contains seven isotopes per channel, not five: because listing
+``Fe56`` also includes ``Ni56`` and ``Co56``, which decay into it (see ``isotopes``
+above), the isotopes reported are ``H1``, ``He4``, ``C12``, ``O16``, ``Fe56``, ``Co56``,
+and ``Ni56``. Since the two channels are reported separately by default, this gives
+fourteen columns of yield data in all. See :ref:`ssec-troubleshooting-yields` for the
+errors SLUG reports for problems with the ``[yields]`` section.
