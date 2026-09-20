@@ -470,11 +470,11 @@ namespace yields
          * further per-isotope resolution needed at this level at all --
          * unlike the old per-isotope-DecayChain design this replaced,
          * there is no possibility of a decay product isotopes_ doesn't
-         * track (force-expansion in rebuildYieldGrid() -- see its own
-         * comment -- guarantees every one is already present, unless a
-         * caller-supplied isotope restriction deliberately excluded it,
-         * in which case that share of the decayed mass is simply not
-         * part of values to begin with).
+         * track: rebuildYieldGrid() -- see its own comment -- keeps
+         * isotopes_ closed under decay, both when force-expanding the
+         * isotopes the channels tabulate and when expanding a
+         * caller-supplied isotope list, so every decay product of a
+         * retained isotope is always present.
          *
          * Public (unlike yield()/yieldSum()'s own internal use of it)
          * so that a caller already holding a raw per-isotope array it
