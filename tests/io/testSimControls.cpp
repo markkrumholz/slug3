@@ -1668,10 +1668,12 @@ static auto testSimControlsYieldsIsotopes() -> int
 // parses each entry as a case-insensitive element symbol immediately
 // followed by a mass number, converts the whole list to a
 // elem::IsotopeList, and passes it to yields_->rebuildYieldGrid() so
-// that yields()->isotopes() ends up restricted to the intersection of
-// that list and whatever the loaded channels actually tabulate. Reuses
-// the same sukhbold_test/kobayashi_test fixture (isotope union h1,
-// fe56, ni56, ni58) as testSimControlsYieldsIsotopes() above.
+// that yields()->isotopes() ends up narrowed to that list plus its
+// decay-chain context (see Yields::rebuildYieldGrid()'s own comment;
+// testSimControlsYieldsIsotopesDecayClosure() below covers that part
+// in detail). Reuses the same sukhbold_test/kobayashi_test fixture
+// (isotope union h1, fe56, ni56, ni58) as testSimControlsYieldsIsotopes()
+// above.
 static auto testSimControlsYieldsIsotopesKeyword() -> int
 {
     constexpr std::string_view baseDeck = "tests/core/assets/testGalaxy.in";
@@ -1692,8 +1694,10 @@ static auto testSimControlsYieldsIsotopesKeyword() -> int
     };
 
     // Mixed-case symbols, one entry ("C12") that matches no loaded
-    // channel's own isotopes at all: isotopes() ends up restricted to
-    // exactly {fe56, ni58} (Z-then-A order), dropping h1 and ni56, and
+    // channel's own isotopes at all: isotopes() ends up narrowed to
+    // exactly {fe56, co56, ni56, ni58} (Z-then-A order) -- the two
+    // requested isotopes, plus co56 and ni56, which decay into the
+    // requested fe56 (ni56 -> co56 -> fe56) -- dropping only h1, and
     // silently ignoring the C12 entry rather than throwing for it.
     try
     {
@@ -1707,11 +1711,11 @@ static auto testSimControlsYieldsIsotopesKeyword() -> int
 
         const auto& isotopes = controls.yields()->isotopes();
         const std::vector<std::pair<unsigned int, unsigned int>> expected{
-            { 26, 56 }, { 28, 58 } }; // fe56, ni58
+            { 26, 56 }, { 27, 56 }, { 28, 56 }, { 28, 58 } }; // fe56, co56, ni56, ni58
         if (isotopes.size() != expected.size())
         {
             std::cerr << "testSimControls: yieldsIsotopesKeyword: expected " <<
-                expected.size() << " isotopes (fe56, ni58), got " << isotopes.size() << "\n";
+                expected.size() << " isotopes (fe56, co56, ni56, ni58), got " << isotopes.size() << "\n";
             result = 1;
         }
         else
@@ -1732,10 +1736,12 @@ static auto testSimControlsYieldsIsotopesKeyword() -> int
 
         // sukhbold_test's own yield() (Yields::rebuildYieldGrid() ran
         // again with the narrowed isotope list, so YieldChannel::yield()
-        // now returns only 2 entries, in the same [fe56, ni58] order)
+        // now returns only 4 entries, in the same [fe56, co56, ni56,
+        // ni58] order): co56 (force-expanded) and ni58 are never
+        // tabulated by sukhbold_test, so are exactly 0
         constexpr double yieldTol = 1e-10;
         const auto& loaded = controls.yields()->yieldChannels();
-        const std::vector<double> sukhboldExpected{ 8.46e-2, 0.0 }; // fe56, ni58 (never tabulated)
+        const std::vector<double> sukhboldExpected{ 8.46e-2, 0.0, 7.02e-2, 0.0 }; // fe56, co56, ni56, ni58
         const auto sukhboldActual = loaded.at(0)->yield(18.2, 0.0);
         if (sukhboldActual.size() != sukhboldExpected.size())
         {
@@ -1856,6 +1862,180 @@ static auto testSimControlsYieldsIsotopesKeyword() -> int
     }
     catch (const std::runtime_error&) { /* expected */ }
 
+    return result;
+}
+
+// Verify that a user-supplied yields.isotopes list is expanded along
+// decay chains rather than simply intersected with what the channels
+// tabulate: every isotope that decays into a requested one (so its
+// yield is complete), and every decay product of anything kept (so
+// the decay network stays closed), is kept too. Uses only the
+// sukhbold_test model, whose own isotopes are h1, fe56, ni56 -- with
+// co56 force-expanded in as ni56's decay daughter -- so the decay
+// chain of interest is ni56 -> co56 -> fe56. In particular, {H1, Ni56}
+// is the request that used to fail, because keeping ni56 while
+// dropping co56 broke the decay network.
+static auto testSimControlsYieldsIsotopesDecayClosure() -> int
+{
+    constexpr std::string_view baseDeck = "tests/core/assets/testGalaxy.in";
+    int result = 0;
+
+    auto buildControls = [&](const toml::array& isotopesArr) -> std::unique_ptr<io::SimControls>
+    {
+        toml::table inputDeck = toml::parse_file(baseDeck);
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{
+                { "channel", "ccsn" }, { "model", "sukhbold_test" } } },
+            { "registry", "tests/yields/assets/yields.toml" },
+            { "isotopes", isotopesArr },
+        });
+        return std::make_unique<io::SimControls>(inputDeck);
+    };
+
+    const auto checkIsotopes = [&](const char* label, const toml::array& requested,
+        const std::vector<std::string>& expected) -> int
+    {
+        try
+        {
+            const auto controls = buildControls(requested);
+            std::vector<std::string> actual;
+            for (const auto& iso : controls->yields()->isotopes()) { actual.push_back(iso.get().label()); }
+            if (actual != expected)
+            {
+                std::cerr << "testSimControls: yieldsIsotopesDecayClosure: " << label <<
+                    ": isotopes() = [";
+                for (const auto& name : actual) { std::cerr << " " << name; }
+                std::cerr << " ], expected [";
+                for (const auto& name : expected) { std::cerr << " " << name; }
+                std::cerr << " ]\n";
+                return 1;
+            }
+        }
+        catch (const std::exception& error)
+        {
+            std::cerr << "testSimControls: yieldsIsotopesDecayClosure: " << label <<
+                ": threw: " << error.what() << "\n";
+            return 1;
+        }
+        return 0;
+    };
+
+    // Requesting a decay product keeps its parents (upstream)...
+    result += checkIsotopes("Fe56", toml::array{ "Fe56" }, { "Fe56", "Co56", "Ni56" });
+    result += checkIsotopes("Co56", toml::array{ "Co56" }, { "Fe56", "Co56", "Ni56" });
+    // ...and requesting a parent keeps its decay products (downstream)
+    result += checkIsotopes("Ni56", toml::array{ "Ni56" }, { "Fe56", "Co56", "Ni56" });
+    // The request that used to throw: an unstable isotope, alongside an
+    // unrelated stable one, with the intermediate left out
+    result += checkIsotopes("H1 + Ni56", toml::array{ "H1", "Ni56" }, { "H1", "Fe56", "Co56", "Ni56" });
+    // A stable isotope on no decay chain brings nothing else with it
+    result += checkIsotopes("H1", toml::array{ "H1" }, { "H1" });
+
+    // The requested Fe56's own yield picks up its parents' decay: with
+    // only Fe56 requested, and dtDecay long enough that all the Ni56 and
+    // Co56 has decayed, Fe56 holds the model's own Fe56 plus its Ni56
+    // (sukhbold_test at its own exact grid mass 18.2: fe56 = 8.46e-2,
+    // ni56 = 7.02e-2), and no Ni56 or Co56 is left.
+    try
+    {
+        const auto controls = buildControls(toml::array{ "Fe56" });
+        const double dtDecay = 1000.0 * elem::isotopeTable(27U, 56U).lifetime();
+        const auto [view, data] = controls->yields()->yield(18.2, 0.0, dtDecay);
+        constexpr double tol = 1e-9;
+        const std::vector<double> expected{ 8.46e-2 + 7.02e-2, 0.0, 0.0 }; // fe56, co56, ni56
+        for (std::size_t j = 0; j < expected.size(); ++j)
+        {
+            if (std::abs(view[0, j] - expected[j]) > tol) // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- j < expected.size() by loop bound
+            {
+                std::cerr << "testSimControls: yieldsIsotopesDecayClosure: fully decayed "
+                    "yield()[0, " << j << "] = " << view[0, j] << ", expected " << expected[j] << "\n"; // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- see above
+                result = 1;
+            }
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: yieldsIsotopesDecayClosure: decayed-yield case threw: "
+            << error.what() << "\n";
+        result = 1;
+    }
+    return result;
+}
+
+// Verify that emitted protons and alphas (H1, He4) do not count as
+// decay links when yields.isotopes pulls in the parents of a requested
+// isotope. The isotope data lists He4 as a daughter of every alpha
+// emitter (and H1 of every proton emitter), so without this every
+// alpha emitter the yield table tabulates would count as a "parent"
+// of a requested He4. Uses the real sukhbold16 table, which tabulates
+// H1, He4, and several alpha emitters and their decay products, e.g.
+// Sm147 -> Nd143 + He4 and Nd144 -> Ce140 + He4.
+static auto testSimControlsYieldsIsotopesEmittedParticles() -> int
+{
+    constexpr std::string_view baseDeck = "tests/core/assets/testGalaxy.in";
+    int result = 0;
+
+    const auto isotopeLabels = [&](const char* requested) -> std::vector<std::string>
+    {
+        toml::table inputDeck = toml::parse_file(baseDeck);
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{
+                { "channel", "ccsn" }, { "model", "sukhbold16" } } },
+            { "isotopes", toml::array{ requested } },
+        });
+        const io::SimControls controls(inputDeck);
+        std::vector<std::string> labels;
+        for (const auto& iso : controls.yields()->isotopes()) { labels.push_back(iso.get().label()); }
+        return labels;
+    };
+    const auto contains = [](const std::vector<std::string>& labels, const char* name) -> bool
+    {
+        return std::ranges::find(labels, std::string(name)) != labels.end();
+    };
+
+    try
+    {
+        // Requesting He4 or H1 must not pull in any proton/alpha emitter
+        for (const char* requested : { "He4", "H1" })
+        {
+            const auto labels = isotopeLabels(requested);
+            if (labels != std::vector<std::string>{ requested })
+            {
+                std::cerr << "testSimControls: yieldsIsotopesEmittedParticles: requesting " <<
+                    requested << " gave " << labels.size() << " isotopes, expected just " <<
+                    requested << "\n";
+                result = 1;
+            }
+        }
+
+        // Requesting Nd143 (Sm147 -> Nd143 + He4) keeps its real parent
+        // Sm147 and, as a decay product of that alpha emitter, He4 -- but
+        // not the unrelated Nd144 -> Ce140 chain, nor anything unrelated
+        const auto labels = isotopeLabels("Nd143");
+        for (const char* wanted : { "Nd143", "Sm147", "He4" })
+        {
+            if (!contains(labels, wanted))
+            {
+                std::cerr << "testSimControls: yieldsIsotopesEmittedParticles: requesting "
+                    "Nd143 did not keep " << wanted << "\n";
+                result = 1;
+            }
+        }
+        for (const char* unwanted : { "Nd144", "Ce140", "Fe56", "H1" })
+        {
+            if (contains(labels, unwanted))
+            {
+                std::cerr << "testSimControls: yieldsIsotopesEmittedParticles: requesting "
+                    "Nd143 unexpectedly kept " << unwanted << "\n";
+                result = 1;
+            }
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: yieldsIsotopesEmittedParticles: threw: " << error.what() << "\n";
+        result = 1;
+    }
     return result;
 }
 
@@ -2667,6 +2847,8 @@ auto testSimControls() -> int
     result += testSimControlsWriteYields();
     result += testSimControlsYieldsIsotopes();
     result += testSimControlsYieldsIsotopesKeyword();
+    result += testSimControlsYieldsIsotopesDecayClosure();
+    result += testSimControlsYieldsIsotopesEmittedParticles();
     result += testSimControlsYieldsYieldAndSum();
     result += testSimControlsYieldsPartialRange();
     result += testSimControlsYieldsDecayApplication();

@@ -1408,11 +1408,14 @@ namespace io
          * no mass number); an entry failing to parse this way throws.
          * Each parses to a reference into the single, global
          * elem::isotopeTable(), and the resulting elem::IsotopeList is
-         * passed to yields_->rebuildYieldGrid(), restricting yields_'s
-         * own isotopes() to the intersection of that list and whatever
-         * every loaded channel actually tabulates (see
-         * Yields::rebuildYieldGrid()'s own comment) -- left alone
-         * (every tabulated isotope kept) if yields.isotopes is absent.
+         * passed to yields_->rebuildYieldGrid(), narrowing yields_'s
+         * own isotopes() to those requested plus every isotope on a
+         * decay chain between one of them and whatever the loaded
+         * channels tabulate -- e.g. requesting Fe56 also gives Ni56 and
+         * Co56, which decay into it, though requesting H1 or He4 does
+         * not pull in every proton or alpha emitter (see
+         * Yields::rebuildYieldGrid()'s own comment for the exact rules) -- left alone (every
+         * tabulated isotope kept) if yields.isotopes is absent.
          *
          * Also reads the optional yields.channel_decomposed (default
          * true) into yieldsChannelDecomposed_, and the optional

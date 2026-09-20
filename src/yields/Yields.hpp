@@ -212,16 +212,18 @@ namespace yields
 
         /**
          * @brief Rebuild isotopes_ from yieldChannels_, then push it back into every channel
-         * @param isotopes Restricts isotopes_ to its own intersection
-         *   with this list; an empty list (the default) means "keep
-         *   every isotope any loaded channel tabulates" -- see @details
+         * @param isotopes The isotopes the caller wants; isotopes_ is
+         *   narrowed to these plus whatever decay-chain context they
+         *   need (see @details). An empty list (the default) means
+         *   "keep every isotope any loaded channel tabulates"
          * @throws std::invalid_argument if propagated from some
          *   channel's own rebuildYieldGrid() call (should not happen in
          *   practice: the mMin/mMax passed to each are exactly what
          *   that channel's own descriptor already validated, indirectly,
          *   the first time it was built)
          * @throws std::runtime_error if isotopes is non-empty but
-         *   matches nothing any loaded channel tabulates, leaving
+         *   matches nothing any loaded channel tabulates (or that is
+         *   a decay product of something one tabulates), leaving
          *   isotopes_ empty -- see @details
          * @details
          * First, collects every entry in yieldChannels_'s own
@@ -246,32 +248,47 @@ namespace yields
          * the same way as the initial union, once this closure is
          * complete.
          *
-         * If isotopes is non-empty, isotopes_ is then narrowed down to
-         * just the entries that also appear (by the same IsotopeData
-         * equality, i.e. matching (Z, A)) somewhere in isotopes --
-         * letting a caller (see SimControls::readYields()'s own
-         * yields.isotopes handling) restrict which isotopes actually
-         * end up tabulated, even though every loaded channel's own
-         * model (and the force-expansion above) may cover a much larger
-         * set. This restriction is applied *after* force-expansion, not
-         * before: an explicit restriction that excludes some decay
-         * descendant (e.g. asking for just Ni56, excluding Co56/Fe56)
-         * keeps excluding it -- applyDecay() then simply drops that
-         * share of the decayed mass when it later flows there, an
-         * explicit consequence of an explicit restriction, not a silent
-         * gap in the default (unrestricted) case force-expansion exists
-         * to close. An isotopes entry that doesn't match anything in the
-         * (force-expanded) union is simply ignored, rather than treated
-         * as an error, since it may simply be an isotope no loaded
-         * channel happens to tabulate -- but if isotopes itself is
-         * non-empty and none of its entries match anything (isotopes_
-         * would end up entirely empty), that throws instead: every
-         * yieldChannels_ entry's own isotopesOrig() is always non-empty
-         * in practice, so this can only mean the caller's own isotopes
-         * list is entirely wrong, almost certainly a mistake worth
-         * surfacing clearly, before it can instead reach
-         * OutputManagerH5's own group-creation code as an opaque
-         * zero-column HDF5 dataset failure.
+         * If isotopes is non-empty, isotopes_ is then narrowed to the
+         * requested isotopes plus their decay-chain context: it is
+         * *expanded*, not simply intersected with isotopes, so an
+         * explicit request can never leave the decay network broken.
+         * Applied to the decay-closed list above, this keeps
+         * (1) every entry that also appears (by IsotopeData equality,
+         * i.e. matching (Z, A)) in isotopes; (2) every entry that
+         * decays, directly or through intermediates, into one of
+         * those; and (3) every decay product, direct or indirect, of
+         * anything kept by (1) or (2). Everything else is dropped.
+         * In (2), an emitted proton or alpha (H1 or He4, which the
+         * isotope data lists as daughters of every proton or alpha
+         * emitter alongside the heavy daughter nuclide) does not
+         * count as a decay link, so requesting H1 or He4 does not pull
+         * in every emitter of them; in (3) they do count, so a kept
+         * alpha emitter brings He4 along, as elem::DecayChain
+         * requires.
+         * So, for example, requesting Fe56 from models that tabulate
+         * Ni56 also keeps Ni56 and Co56 (rule 2: they decay into Fe56,
+         * and the requested Fe56 yield includes their contribution),
+         * and requesting Ni56 alone also keeps Co56 and Fe56 (rule 3:
+         * its decay products, which elem::DecayChain requires be
+         * present). Rule 3 is not fed back into rule 2: an isotope
+         * kept only as a decay product does not pull in its own other
+         * parents, so its yield can omit decay contributions from
+         * parents that were neither requested nor on a chain leading
+         * to a requested isotope. Where it matters, request such an
+         * isotope explicitly.
+         *
+         * An isotopes entry that doesn't match anything in the
+         * (force-expanded) union is simply ignored, rather than
+         * treated as an error, since it may simply be an isotope no
+         * loaded channel happens to tabulate -- but if isotopes itself
+         * is non-empty and none of its entries match anything
+         * (isotopes_ would end up entirely empty), that throws
+         * instead: every yieldChannels_ entry's own isotopesOrig() is
+         * always non-empty in practice, so this can only mean the
+         * caller's own isotopes list is entirely wrong, almost
+         * certainly a mistake worth surfacing clearly, before it can
+         * instead reach OutputManagerH5's own group-creation code as
+         * an opaque zero-column HDF5 dataset failure.
          *
          * Then, for each entry i in yieldChannels_, calls
          * yieldChannels_[i]->rebuildYieldGrid(mMin, mMax, isotopes_),
@@ -304,8 +321,8 @@ namespace yields
          * Python, after addChannel() adds a further channel to an
          * already-built Yields) can rerun this to re-synchronize every
          * channel -- including ones added earlier -- onto the new,
-         * larger union of isotopes, or to change which isotopes subset
-         * is kept.
+         * larger union of isotopes, or to change which isotopes are
+         * kept.
          */
         void rebuildYieldGrid(const elem::IsotopeList& isotopes = {});
 
