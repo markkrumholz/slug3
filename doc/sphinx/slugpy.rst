@@ -72,8 +72,9 @@ an exhaustive list -- :ref:`sec-slugpy-full`) include:
 * ``clusters``: a dict-like interface to the clusters group's datasets, e.g., ``sim_result.clusters['target_mass']``.
 * ``cluster_spectra``: a dict-like interface to the cluster_spectra group's datasets, e.g., ``sim_result.cluster_spectra['spec']`` or ``sim_result.cluster_spectra['neb_lines']``. Append ``_neb`` for nebular output, e.g., ``sim_result.cluster_spectra['spec_neb']``, ``_ex`` for extincted output, and ``_neb_ex`` for output with both nebular processing and extinction.
 * ``cluster_phot``: a dict-like interface to the cluster_phot group's data, accessible per filter, e.g., ``sim_result.cluster_phot['HST.ACS_WFC.F435W']``; as with spectra, append ``_neb``, ``_ex``, or ``_neb_ex`` to the filter name to access the outputs with nebular processing, extinction, or both.
+* ``cluster_yields``: a dict-like interface to the cluster_yields group's data, accessible per isotope, e.g., ``sim_result.cluster_yields['Al26']``; for channel-decomposed outputs (see :ref:`sec-output`), the key can also be a triple of three strings specifying channel, model name, and isotope, e.g., ``sim_result.cluster_yields[('ccsn', 'sukhbold16', 'Al26')]``
 * ``cluster_cloudy``: a dict-like interface to the cluster_cloudy group's data, e.g., ``sim_result.cluster_cloudy['spec_trans_emit']``. See :ref:`sec-cloudy-slug`.
-* ``galaxy``, ``galaxy_spectra``, ``galaxy_phot``, ``galaxy_cloudy``: same as the ``cluster*`` fields of the same name, but for galaxy outputs.
+* ``galaxy``, ``galaxy_spectra``, ``galaxy_phot``, ``galaxy_yields``, ``galaxy_cloudy``: same as the ``cluster*`` fields of the same name, but for galaxy outputs.
 * ``filters``: list of all photometric filters available in this data set.
 * ``controls``: a ``SimControls`` object built from this data set's input deck.
 

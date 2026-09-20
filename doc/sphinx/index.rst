@@ -29,6 +29,7 @@ Contents:
    photometry
    nebular
    extinction
+   yields
    slugpy
    cloudy
    examples
