@@ -567,15 +567,14 @@ different SimControls.)doc";
 
 static constexpr std::string_view nebularPropertyDocstring = R"doc(The nebular emission grid, or None if none was requested.
 
-Reading returns the Nebular built from nebular.table/stars.tracks,
-if nebular emission is not being computed, in which case this is None.
-Nebular emission requires a spectral synthesizer, so nebular.compute_neb
-defaults to true if the input deck requested one (a deck that never
-mentions [nebular] at all still builds a Nebular), and to false if it
-did not; explicitly setting nebular.compute_neb = true without a
-spectral synthesizer is an error. Setting it false always leaves this
-None. Built once, at construction,
-or later installed via setNebular(); a Nebular read this way stays
+Reading returns the Nebular built from nebular.table/stars.tracks if
+nebular emission is being computed, and None otherwise. Nebular emission
+requires a spectral synthesizer, so nebular.compute_neb defaults to true
+if the input deck requested one (a deck that never mentions [nebular] at
+all still builds a Nebular), and to false if it did not; explicitly
+setting nebular.compute_neb = true without a spectral synthesizer is an
+error, and setting it false always leaves this None. Built once, at
+construction, or later installed via setNebular(); a Nebular read this way stays
 fully valid even after a later assignment replaces it. Assigning a
 Nebular (or None, to remove one already present) transfers its
 ownership to this SimControls, so it is no longer usable from Python
