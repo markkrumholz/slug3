@@ -242,6 +242,52 @@ actually written; call this row count ``n_rows``.
   emission grid, ``extinct.model``, and at least one real filter were all
   requested): The nebular-inclusive photometry after applying dust extinction.
 
+The ``cluster_yields`` Group
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Holds the nucleosynthetic yields of individually-tracked clusters, present only if
+at least one yield channel was requested (``yields.channel1``) and
+``output.write_cluster_yields`` was not set to false -- see :ref:`sec-yields` for
+how yields are computed. There is one row per (cluster, output time) pair; call
+this row count ``n_rows``. Each row gives the total mass of each isotope produced
+by every star in the cluster that has died by that output time. Thus, if
+``yields.no_decay`` is true, the yields of a given cluster never decrease from one
+output time to the next; otherwise the mass of an unstable isotope can also decrease
+as it decays. The
+``isotopes``, ``channels``, ``models``, and ``decomposed`` attributes describe
+how to interpret the columns of ``yields``.
+
+* ``isotopes`` (attribute, array of strings): The isotopes for which yields are
+  tabulated, each labeled by its element symbol followed by its mass number
+  (e.g. ``"Fe56"``), sorted by increasing atomic number and then increasing mass
+  number. This is the set of isotopes selected by ``yields.isotopes``, including the
+  isotopes SLUG adds to it because they are linked to a listed isotope by radioactive
+  decay (see :ref:`ssec-parameters-yields`) or, if ``yields.isotopes`` was not given,
+  every isotope tabulated by any requested yield model, plus their radioactive decay
+  products.
+* ``channels`` (attribute, array of strings): The type of each requested yield channel
+  (see :ref:`sec-yields`), in the order they were given in the input
+  deck, i.e. ``channels[i]`` is the ``channel`` keyword of ``yields.channel<i+1>``.
+* ``models`` (attribute, array of strings): The yield model used for each requested
+  yield channel, in the same order as ``channels``.
+* ``decomposed`` (attribute, boolean, stored as the integer 0 or 1): The value of
+  ``yields.channel_decomposed``, which determines the layout of ``yields``.
+* ``trial`` (unitless integer, shape ``(n_rows,)``): The trial number.
+* ``time`` (yr, shape ``(n_rows,)``): The output time these yields were computed at.
+* ``uid`` (unitless integer, shape ``(n_rows,)``): The unique identifier of the
+  cluster these yields belong to.
+* ``yields`` (Msun, shape ``(n_rows, n_cols)``): The yield of each isotope. If
+  ``decomposed`` is true, ``n_cols`` is the number of channels times the number
+  of isotopes, and the columns are ordered channel-major: the first
+  ``len(isotopes)`` columns are the yields of every isotope from the first channel, the
+  next ``len(isotopes)`` columns are the yields of every isotope from the second channel,
+  and so on. That is, column ``i * len(isotopes) + j`` holds the yield of
+  ``isotopes[j]`` from ``channels[i]``, using ``models[i]``. If ``decomposed`` is false,
+  ``n_cols`` is just the number of isotopes, and column ``j`` holds the yield
+  of ``isotopes[j]`` summed over all channels. Whether these are the amounts of each
+  isotope present at ``time`` or the total amounts ever produced depends on
+  ``yields.no_decay``.
+
 The ``galaxy`` Group
 ^^^^^^^^^^^^^^^^^^^^^
 
@@ -281,6 +327,25 @@ luminosity requested. Identical in structure and meaning to the
 ``phot``/``phot_extinct``/``phot_neb``/``phot_neb_extinct`` datasets -- but
 with no ``uid`` dataset: each row is one (trial, output time) pair (the whole
 galaxy's own integrated photometry), not one (cluster, output time) pair.
+
+The ``galaxy_yields`` Group
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Present only for a galaxy-type simulation with at least one yield channel
+requested and ``output.write_galaxy_yields`` not set to false. Identical in structure
+and meaning to the ``cluster_yields`` group above -- including its ``isotopes``,
+``channels``, ``models``, and ``decomposed`` attributes and its ``yields`` dataset --
+but with no ``uid`` dataset: each row is one (trial, output time) pair (the
+yields of the whole galaxy), not one (cluster, output time) pair. The yields in
+each row are summed over every star that has died in the galaxy by that time,
+whether it formed in an individually-tracked cluster (including clusters that have
+since disrupted), as a field star, or as part of the continuous (non-stochastic)
+stellar population.
+
+Note that in a galaxy-type simulation, the rows of ``cluster_yields`` are
+written only for clusters that have not yet disrupted at the output time in question,
+even though the yields of disrupted clusters are still included in the
+``galaxy_yields`` totals.
 
 The ``cluster_cloudy`` Group
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -436,6 +501,25 @@ means -- ``<filter>_ex``/``<filter>_neb``/``<filter>_neb_ex`` here correspond
 to that group's own ``phot_extinct``/``phot_neb``/``phot_neb_extinct``
 datasets.
 
+The ``<model_name>_cluster_yields.txt`` File
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Only written if at least one yield channel was requested and
+``output.write_cluster_yields`` was not set to false. One row per (cluster, output
+time) pair. Columns, in order: ``trial``, ``time`` (yr), ``uid``, then one column
+per isotope (if ``yields.channel_decomposed`` is false) or one column per (channel,
+isotope) pair (if it is true, the default), each in units of Msun. An isotope
+column is named after the isotope's label, e.g. ``Fe56``. A (channel, isotope) column
+is named ``<channel><N>_<isotope>``, where ``<channel>`` is the channel type
+(``ccsn`` or ``massive_star_winds``), ``<N>`` is the channel's own number in the input deck (so
+``channel2`` gives ``<N>`` = 2, even if it is the only channel of its type), and
+``<isotope>`` is the isotope label, e.g. ``ccsn1_Fe56`` or ``massive_star_winds2_H1``.
+Columns are ordered channel-major, with the isotopes in each channel sorted by
+increasing atomic number and then mass number, matching the ordering of the
+``yields`` dataset described in the ``cluster_yields`` HDF5 group above. Unlike
+the HDF5 output, the ASCII file has no separate record of which model was used for
+each channel; this is recorded in the input deck copy in the summary file.
+
 The ``<model_name>_galaxy.txt`` File
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -471,4 +555,11 @@ except with no ``uid`` column, and one row per (trial, output time) pair
 describing the whole galaxy's own integrated photometry rather than one
 individual cluster's.
 
+The ``<model_name>_galaxy_yields.txt`` File
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+Only written for a galaxy-type simulation with at least one yield channel
+requested and ``output.write_galaxy_yields`` not set to false. Identical to
+``<model_name>_cluster_yields.txt`` above -- same columns and meanings -- except with no
+``uid`` column, and one row per (trial, output time) pair describing the yields of
+the whole galaxy rather than one individual cluster's.

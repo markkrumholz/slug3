@@ -108,6 +108,12 @@ the simulation, how they are formatted, and where they are written.
   to write the integrated spectrum of the whole galaxy.
 * ``write_galaxy_phot`` (optional, default=true; galaxy simulations only): Whether
   to write the integrated photometry of the whole galaxy.
+* ``write_cluster_yields`` (optional, default=true): Whether to write the nucleosynthetic
+  yields of each individual star cluster; only meaningful if yield channels have been
+  requested (see ``yields.channelN`` below).
+* ``write_galaxy_yields`` (optional, default=true; galaxy simulations only): Whether
+  to write the nucleosynthetic yields of the whole galaxy; only meaningful if yield
+  channels have been requested (see ``yields.channelN`` below).
 * ``output_mode`` (optional, default="h5"): The output file format. Must be one of
   ``h5`` / ``hdf5`` (a single, consolidated HDF5 file), ``h5divided`` / ``hdf5divided``
   (HDF5 output, but skipping consolidation when SLUG is built with OpenMP, leaving
@@ -122,6 +128,9 @@ At least one of the ``write_*`` keywords relevant to the simulation's own
 ``sim_type`` must be left true, and if ``phot.filters`` was given, at least one of
 ``write_cluster_phot`` / ``write_galaxy_phot`` must be true -- otherwise SLUG raises
 an error at startup, since the corresponding output(s) would otherwise never be written.
+The same holds for yields: if any ``yields.channelN`` was given, ``write_cluster_yields``
+must be true for a cluster simulation, and at least one of ``write_cluster_yields`` /
+``write_galaxy_yields`` must be true for a galaxy simulation.
 
 .. _ssec-parameters-integrator:
 
@@ -304,3 +313,93 @@ to its own default if omitted.
 * ``table`` (optional, default=``data/nebular/nebular.h5``): Overrides the default
   nebular emission grid used to compute nebular contributions for this simulation's
   own track set.
+
+.. _ssec-parameters-yields:
+
+Yields Control Keywords
+-----------------------
+
+These keywords, in the ``[yields]`` section, control the calculation of the
+nucleosynthetic yields of the stellar population, i.e., the mass of each isotope that
+the population has returned to the interstellar medium. The entire section is
+optional: if no ``channelN`` table is given, no yields are computed and no yield output
+is written. Unlike spectra, photometry, and extinction, yields do not require spectral
+synthesis to be enabled. See :ref:`sec-yields` for the physics of how yields are
+computed.
+
+* ``channelN`` (at least ``channel1`` required to enable yields): Each yield
+  channel is described by its own subtable, ``[yields.channel1]``,
+  ``[yields.channel2]``, etc. Channels must be numbered consecutively starting at 1;
+  SLUG stops reading at the first number that is missing, so a ``channel3`` given
+  without a ``channel2`` is ignored. Depending on ``channel_decomposed`` (see below),
+  the yields from different channels are reported separately or summed together.
+  Each subtable has the following keywords:
+
+  * ``channel`` (required): The type of nucleosynthetic source this channel
+    represents. See :ref:`sec-yields` for the list of available channels.
+  * ``model`` (required): The name of the yield table to use for this channel, as
+    listed in the yield registry (see ``registry`` below). See :ref:`sec-yields` for
+    the list of models included in the defualt data set. Each model has a specified
+    range in [Fe/H], and the range of [Fe/H] in ``stars.FeH`` must lie within the
+    range covered by the model, or SLUG raises an error at startup.
+  * ``m_min`` (optional, default=the lowest mass tabulated by the model): The
+    minimum initial stellar mass, in Msun, that contributes to this channel. If
+    not specified, the minimum stellar mass contributing to the channel is the
+    minimum tabulated mass provided in the selected ``model``; the same applies
+    to ``m_max``.
+  * ``m_max`` (optional, default=the highest mass tabulated by the model): The
+    maximum initial stellar mass, in Msun, that contributes to this channel. Stars
+    with masses outside the range ``m_min`` to ``m_max`` contribute nothing to this
+    channel. If this range extends beyond the masses tabulated by the model, the
+    yields are extrapolated by scaling the yields of the nearest tabulated mass in
+    proportion to the stellar mass. Together, ``m_min`` and ``m_max`` allow the mass
+    range of one channel to be split between several different models, by giving
+    several channels of the same type with different mass ranges.
+
+* ``registry`` (optional, default="data/yields/yields.toml"): Overrides the
+  default registry file used to look up the ``model`` of each channel.
+* ``isotopes`` (optional): An array of strings selecting which isotopes are included
+  in the yield calculation and output. Each entry is an element symbol followed
+  immediately by a mass number, e.g. ``["H1", "He4", "Fe56"]``; symbols are not case
+  sensitive. SLUG automatically adds every isotope that is connected to the ones you
+  list by radioactive decay, so that the yield of each listed isotope is complete and
+  the decay calculation stays consistent: (i) every isotope that decays, directly or
+  through intermediates, into a listed isotope, and (ii) every decay product of any
+  isotope that is included. For example, listing ``Fe56`` also includes ``Ni56`` and
+  ``Co56``, which decay into it, and listing ``Ni56`` also includes ``Co56`` and
+  ``Fe56``. Only isotopes that the requested models tabulate, or that are decay
+  products of isotopes they tabulate, can be added this way. The emission of a proton or
+  alpha particle (``H1`` or ``He4``) is not counted as a decay link when searching for
+  the parents of a listed isotope, so listing ``H1`` or ``He4`` does not add every
+  proton or alpha emitter; an included alpha emitter does, however, bring its ``He4``
+  decay product with it. If ``isotopes`` is not given, every isotope tabulated by at
+  least one of the requested models is included, plus any radioactive decay products of
+  those isotopes. An entry that none of the requested models tabulates is ignored, but
+  SLUG raises an error if no entry matches anything. An isotope that some requested
+  models tabulate and others do not has zero yield from the models that do not.
+* ``channel_decomposed`` (optional, default=true): If true, yields are reported
+  separately for each channel, so the output has one value per (channel, isotope) pair.
+  If false, the yields from all channels are summed, so the output has only one value
+  per isotope. See :ref:`sec-output` for details on how the outputs are formatted.
+* ``no_decay`` (optional, default=false): If false, the reported yield of each isotope
+  is the mass actually present at the output time, i.e., accounting for radioactive
+  decay of the isotope since it was produced, and for the accumulation of the daughter
+  products of other isotopes' decays. If true, radioactive decay is ignored, and
+  the reported yield is the total mass of each isotope produced, whether or not it
+  has since decayed.
+
+For example, the following requests yields from both core-collapse supernovae and
+winds, using the same model for both, for only a few isotopes:
+
+.. code-block:: toml
+
+    [yields]
+    isotopes = ["H1", "He4", "C12", "O16", "Fe56"]
+
+    [yields.channel1]
+    channel = "ccsn"
+    model = "sukhbold16"
+
+    [yields.channel2]
+    channel = "massive_star_winds"
+    model = "sukhbold16"
