@@ -1136,10 +1136,12 @@ void io::SimControls::readYields(const toml::table& inputDeck)
 
     yields_ = std::make_shared<yields::Yields>(*this, registryName);
 
-    // yields.isotopes: optional, restricts the isotopes yields_ ends up
-    // tabulating to the intersection of every loaded channel's own
-    // isotopes and this list -- see parseIsotopeEntry()'s own comment
-    // for the exact "<symbol><mass number>" syntax each entry must
+    // yields.isotopes: optional, narrows the isotopes yields_ ends up
+    // tabulating to this list plus every isotope on a decay chain
+    // between it and what the loaded channels tabulate (e.g. Fe56 also
+    // brings in Ni56 and Co56) -- see Yields::rebuildYieldGrid()'s own
+    // comment for the exact rules, and parseIsotopeEntry()'s own
+    // comment for the exact "<symbol><mass number>" syntax each entry must
     // follow (e.g. "H1", "Na22", "fe56"; case-insensitive on the
     // symbol). Must be an array of strings; absent entirely leaves
     // yields_->isotopes() at the union rebuildYieldGrid() already

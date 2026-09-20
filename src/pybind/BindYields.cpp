@@ -203,18 +203,31 @@ static constexpr std::string_view rebuildYieldGridDocstring =
 Parameters
 ----------
 isotopes : list of IsotopeData, optional
-    Restricts isotopes() to its own intersection with this list; an
-    empty list (the default) means "keep every isotope any loaded
-    channel tabulates".
+    The isotopes wanted; isotopes() is narrowed to these plus whatever
+    decay-chain context they need (see Details). An empty list (the
+    default) means "keep every isotope any loaded channel tabulates".
 
 Throws
 ------
 RuntimeError
     If isotopes is non-empty but matches nothing any loaded channel
-    tabulates, leaving isotopes() empty.
+    tabulates (or that is a decay product of something one
+    tabulates), leaving isotopes() empty.
 
 Details
 -------
+A non-empty isotopes list is expanded, not just intersected with what
+the loaded channels tabulate. isotopes() keeps every requested isotope
+that a channel tabulates or that is a decay product of one that is,
+plus every isotope that decays, directly or through intermediates,
+into one of those (so requesting Fe56 also keeps Ni56 and Co56, whose
+decay contributes to it), plus every decay product of anything kept
+(so requesting Ni56 also keeps Co56 and Fe56, and the decay network
+always stays complete). An emitted proton or alpha (H1 or He4) does not
+count as a link when looking for parents, so requesting H1 or He4 does
+not pull in every proton or alpha emitter; but a kept emitter does keep
+its own H1 or He4 decay product. Entries matching nothing are ignored.
+
 Called once by the constructor, right after every requested channel
 has been added; also callable directly, e.g. after addChannel() adds a
 further channel to an already-built Yields, to re-synchronize every
@@ -251,11 +264,11 @@ itself returns), this is also exactly what every yieldChannels() entry's
 own isotopes() equals, in the same order.
 
 Assigning a list calls rebuildYieldGrid() with it, narrowing isotopes()
-down to its own intersection with the assigned list (or, for an empty
-list, resetting isotopes() back to the full union above) -- see
-rebuildYieldGrid()'s own docstring for the RuntimeError raised if the
-assigned list is non-empty but matches nothing any loaded channel
-tabulates.)doc";
+down to the assigned isotopes plus their decay-chain context (or, for an
+empty list, resetting isotopes() back to the full union above) -- see
+rebuildYieldGrid()'s own docstring for exactly which isotopes that
+keeps, and for the RuntimeError raised if the assigned list is
+non-empty but matches nothing any loaded channel tabulates.)doc";
 
 static constexpr std::string_view yieldDocstring =
     R"doc(Get every channel's own yield, as one (n_channels, len(isotopes())) array.

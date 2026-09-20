@@ -3121,19 +3121,38 @@ def test_yields_yield_ignores_dt_decay_when_no_decay_set():
 
 
 def test_yields_rebuild_yield_grid_restricts_isotopes(yields_controls):
-    """rebuildYieldGrid() on Yields itself can narrow isotopes() after construction."""
+    """rebuildYieldGrid() on Yields itself can narrow isotopes() after
+    construction -- to the requested isotopes plus their decay-chain
+    context: requesting Fe56 (which Ni56 decays into, via Co56) also
+    keeps Ni56 and Co56, while H1 (on no decay chain) is dropped."""
     yields = yields_controls.yields
+    expected = ["Fe56", "Co56", "Ni56", "Ni58"]
     try:
         fe56 = slug.isotopeTable(26, 56)
         ni58 = slug.isotopeTable(28, 58)
         yields.rebuildYieldGrid(isotopes=[fe56, ni58])
-        assert [iso.label() for iso in yields.isotopes] == ["Fe56", "Ni58"]
+        assert [iso.label() for iso in yields.isotopes] == expected
         for channel in yields.yieldChannels:
-            assert [iso.label() for iso in channel.isotopes()] == ["Fe56", "Ni58"]
+            assert [iso.label() for iso in channel.isotopes()] == expected
     finally:
         # Restore the shared, module-scoped fixture back to its
         # original, unrestricted isotope set, so this test doesn't leak
         # state into whichever other test happens to run after it.
+        yields.rebuildYieldGrid()
+
+
+def test_yields_rebuild_yield_grid_keeps_decay_chain_closed(yields_controls):
+    """Requesting an unstable isotope while leaving out its decay
+    products used to raise (DecayChain requires the isotope list be
+    closed under decay); rebuildYieldGrid() now keeps the decay products
+    too, so {H1, Ni56} yields H1 plus the whole Ni56 -> Co56 -> Fe56 chain."""
+    yields = yields_controls.yields
+    try:
+        h1 = slug.isotopeTable(1, 1)
+        ni56 = slug.isotopeTable(28, 56)
+        yields.rebuildYieldGrid(isotopes=[h1, ni56])
+        assert [iso.label() for iso in yields.isotopes] == ["H1", "Fe56", "Co56", "Ni56"]
+    finally:
         yields.rebuildYieldGrid()
 
 
@@ -3291,16 +3310,18 @@ def test_yields_yield_channels_property_setter_empty_list(yields_controls):
 def test_yields_isotopes_property_setter_restricts_isotopes(yields_controls):
     """Assigning to the isotopes property has the same effect as
     rebuildYieldGrid(isotopes=...): it narrows isotopes() (and every
-    channel's own isotopes()) down to the assigned list, and an empty
-    list resets it back to the full union."""
+    channel's own isotopes()) down to the assigned list plus its
+    decay-chain context (here, Fe56's parents Ni56 and Co56), and an
+    empty list resets it back to the full union."""
     yields = slug.Yields(controls=yields_controls, registry_name=YIELDS_REGISTRY)
     fe56 = slug.isotopeTable(26, 56)
     ni58 = slug.isotopeTable(28, 58)
+    expected = ["Fe56", "Co56", "Ni56", "Ni58"]
 
     yields.isotopes = [fe56, ni58]
-    assert [iso.label() for iso in yields.isotopes] == ["Fe56", "Ni58"]
+    assert [iso.label() for iso in yields.isotopes] == expected
     for channel in yields.yieldChannels:
-        assert [iso.label() for iso in channel.isotopes()] == ["Fe56", "Ni58"]
+        assert [iso.label() for iso in channel.isotopes()] == expected
 
     yields.isotopes = []
     assert [iso.label() for iso in yields.isotopes] == YIELDS_ISOTOPES

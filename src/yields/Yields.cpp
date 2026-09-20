@@ -19,6 +19,7 @@
 #include <cstddef>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -86,6 +87,165 @@ namespace yields
                     }
                 }
             }
+        }
+
+        /**
+         * @brief Whether a decay daughter is an emitted light particle (proton or alpha) rather than a chain member
+         * @param daughter The decay daughter to test
+         * @returns True for H1 or He4. The isotope data lists these as
+         *   daughters of every proton-emitting or alpha-emitting
+         *   isotope, alongside the heavy daughter nuclide, so treating
+         *   them as links in a decay chain would make (e.g.) every
+         *   alpha emitter a "parent" of a requested He4.
+         */
+        auto isEmittedParticle(const elem::IsotopeDecayData& daughter) -> bool
+        {
+            return (daughter.Z_ == 1U && daughter.A_ == 1U) || (daughter.Z_ == 2U && daughter.A_ == 4U);
+        }
+
+        /**
+         * @brief Find the entry of an isotope list matching a decay daughter, by (Z, A)
+         * @param isotopes The list to search
+         * @param daughter The decay daughter to look for
+         * @returns The index into isotopes of the matching entry, or
+         *   nullopt if there is none -- which, for isotopes decay-closed
+         *   by forceExpandDecayChain(), cannot happen for a daughter of
+         *   one of isotopes' own entries
+         */
+        auto indexOfDaughter(const elem::IsotopeList& isotopes,
+            const elem::IsotopeDecayData& daughter) -> std::optional<std::size_t>
+        {
+            for (std::size_t j = 0; j < isotopes.size(); ++j)
+            {
+                if (isotopes[j].get().Z() == daughter.Z_ && isotopes[j].get().A() == daughter.A_) { return j; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- j < isotopes.size() by loop bound
+            }
+            return std::nullopt;
+        }
+
+        /**
+         * @brief Whether isotope i has a decay link, other than an emitted proton or alpha, to a kept isotope
+         * @param isotopes The full isotope list
+         * @param i Index into isotopes of the candidate parent
+         * @param keep Which entries of isotopes are currently kept
+         * @returns True if some daughter of isotopes[i], not counting
+         *   H1 or He4 (see isEmittedParticle()), is itself kept
+         */
+        auto hasKeptLinkedDaughter(const elem::IsotopeList& isotopes, const std::size_t i,
+            const std::vector<bool>& keep) -> bool
+        {
+            return std::ranges::any_of(isotopes[i].get().daughters(), // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i < isotopes.size() by the caller's own loop bound
+                [&](const auto& daughter)
+                {
+                    if (isEmittedParticle(daughter)) { return false; }
+                    const auto j = indexOfDaughter(isotopes, daughter);
+                    return j.has_value() && keep[*j]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- *j < isotopes.size() == keep.size() by indexOfDaughter()
+                });
+        }
+
+        /**
+         * @brief One pass of rule 2 of restrictToRequested(): keep every not-yet-kept, unstable isotope with a kept decay link
+         * @param isotopes The full isotope list
+         * @param keep Which entries of isotopes are kept; updated in place
+         * @returns True if this pass kept anything new
+         */
+        auto keepParentsPass(const elem::IsotopeList& isotopes, std::vector<bool>& keep) -> bool
+        {
+            bool changed = false;
+            for (std::size_t i = 0; i < isotopes.size(); ++i)
+            {
+                if (keep[i] || isotopes[i].get().stable()) { continue; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i < isotopes.size() == keep.size() by loop bound
+                if (hasKeptLinkedDaughter(isotopes, i, keep))
+                {
+                    keep[i] = true; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
+                    changed = true;
+                }
+            }
+            return changed;
+        }
+
+        /**
+         * @brief One pass of rule 3 of restrictToRequested(): keep every decay daughter of a kept, unstable isotope
+         * @param isotopes The full isotope list
+         * @param keep Which entries of isotopes are kept; updated in place
+         * @returns True if this pass kept anything new
+         */
+        auto keepDaughtersPass(const elem::IsotopeList& isotopes, std::vector<bool>& keep) -> bool
+        {
+            bool changed = false;
+            for (std::size_t i = 0; i < isotopes.size(); ++i)
+            {
+                if (!keep[i] || isotopes[i].get().stable()) { continue; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i < isotopes.size() == keep.size() by loop bound
+                for (const auto& daughter : isotopes[i].get().daughters()) // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
+                {
+                    const auto j = indexOfDaughter(isotopes, daughter);
+                    if (j.has_value() && !keep[*j]) // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- *j < isotopes.size() == keep.size() by indexOfDaughter()
+                    {
+                        keep[*j] = true; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
+                        changed = true;
+                    }
+                }
+            }
+            return changed;
+        }
+
+        /**
+         * @brief Narrow a decay-closed isotope list to a requested list, plus whatever decay-chain context that request needs
+         * @param isotopes The full, already decay-closed (see
+         *   forceExpandDecayChain()) isotope list to narrow, in place
+         *   and in its own order
+         * @param requested The isotopes the caller asked for; entries
+         *   that do not appear in isotopes are ignored
+         * @details
+         * Keeps, out of isotopes:
+         *
+         * 1. every entry that also appears in requested (by (Z, A)
+         *    equality);
+         * 2. every entry that decays, directly or through intermediates,
+         *    into one of those -- so that a requested isotope's own
+         *    yield includes everything that decays into it (e.g.
+         *    requesting Fe56 also keeps Ni56 and Co56). A decay
+         *    daughter that is an emitted proton or alpha (H1 or He4; see
+         *    isEmittedParticle()) does not count as a link here, so
+         *    requesting H1 or He4 does not pull in every proton or
+         *    alpha emitter;
+         * 3. every decay product, direct or indirect, of anything kept
+         *    by 1 or 2 -- so that the kept list is itself closed under
+         *    decay, which elem::DecayChain requires. Unlike in rule 2,
+         *    emitted protons and alphas do count here, so a kept alpha
+         *    emitter brings He4 with it.
+         *
+         * Rule 3 is applied to the result of rules 1 and 2 only, not
+         * repeated with rule 2: an isotope kept only as someone's
+         * decay product is not itself a reason to keep its own other
+         * parents. If none of requested appears in isotopes, isotopes
+         * is left empty, for the caller to report.
+         */
+        void restrictToRequested(elem::IsotopeList& isotopes, const elem::IsotopeList& requested)
+        {
+            std::vector<bool> keep(isotopes.size(), false);
+            for (std::size_t i = 0; i < isotopes.size(); ++i)
+            {
+                keep[i] = std::ranges::any_of(requested, // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i < isotopes.size() == keep.size() by loop bound
+                    [&](const auto& wanted) { return wanted.get() == isotopes[i].get(); }); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
+            }
+            if (std::ranges::none_of(keep, [](const bool k) { return k; }))
+            {
+                isotopes.clear();
+                return;
+            }
+
+            // Rules 2 and 3, each repeated until a full pass adds nothing
+            // further (a newly kept isotope can itself have a parent, or
+            // decay products, of its own)
+            while (keepParentsPass(isotopes, keep)) {}
+            while (keepDaughtersPass(isotopes, keep)) {}
+
+            elem::IsotopeList result;
+            for (std::size_t i = 0; i < isotopes.size(); ++i)
+            {
+                if (keep[i]) { result.push_back(isotopes[i]); } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i < isotopes.size() == keep.size() by loop bound
+            }
+            isotopes = std::move(result);
         }
     } // namespace
 
@@ -219,20 +379,14 @@ namespace yields
             [](const auto& lhs, const auto& rhs) { return lhs.get() == rhs.get(); });
         isotopes_.erase(dup2.begin(), dup2.end());
 
-        // If the caller passed a non-empty isotopes list, restrict
-        // isotopes_ down to its intersection with that list -- an
-        // empty isotopes (the default) leaves every channel's own
-        // isotope free to appear, exactly as before this parameter
-        // existed.
+        // If the caller passed a non-empty isotopes list, narrow isotopes_
+        // to that list plus whatever decay-chain context it needs -- see
+        // restrictToRequested(). An empty isotopes (the default) leaves
+        // every channel's own isotope free to appear, exactly as before
+        // this parameter existed.
         if (!isotopes.empty())
         {
-            const auto toDrop = std::ranges::remove_if(isotopes_,
-                [&isotopes](const auto& candidate)
-                {
-                    return std::ranges::none_of(isotopes,
-                        [&candidate](const auto& wanted) { return wanted.get() == candidate.get(); });
-                });
-            isotopes_.erase(toDrop.begin(), toDrop.end());
+            restrictToRequested(isotopes_, isotopes);
 
             // Every yieldChannels_ entry's own isotopesOrig() is always
             // non-empty in practice (this Yields is only ever
