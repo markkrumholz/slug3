@@ -50,6 +50,8 @@ vvcrit : float, optional
 
 Throws
 ------
+ValueError
+    If controls.specsyn() is None.
 RuntimeError
     If table_name cannot be found, track_name has no group of its own
     in it, or -- for any of that group's own [Fe/H] values -- no

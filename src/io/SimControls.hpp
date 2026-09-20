@@ -769,7 +769,9 @@ namespace io
          * @return A const reference to the control parameters
          *   populated from the input deck's own [nebular] stanza (see
          *   readNebular()), or their own defaults for any key that
-         *   was not given
+         *   was not given -- except computeNeb_, which defaults to
+         *   true only if a spectral synthesizer is available (see
+         *   readNebular()'s own comment)
          */
         [[nodiscard]] auto nebControls() const -> const nebular::NebularControls& { return nebControls_; }
 
@@ -1445,6 +1447,17 @@ namespace io
          * back to nebular::defaultTable), and stars.tracks/
          * stars.v_vcrit -- the same keys, read the same way, as
          * readTracks() -- and uses them to construct nebular_.
+         *
+         * Nebular emission is added to a synthesized spectrum, so it
+         * requires a spectral synthesizer (specsyn_, already set by
+         * readSpectra() by the time this runs). nebular.compute_neb
+         * therefore defaults to nebular::defaultComputeNeb (true) if
+         * specsyn_ is set, and to false (leaving nebular_ null, and
+         * every other nebular.* key unread) if it is not. Explicitly
+         * setting nebular.compute_neb = true with no spectral
+         * synthesizer throws std::runtime_error, mirroring
+         * readFilters()'s/readExtinct()'s own identical requirement;
+         * explicitly setting it false is always allowed.
          */
         void readNebular(const toml::table& inputDeck);
 

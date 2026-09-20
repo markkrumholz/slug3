@@ -290,8 +290,11 @@ These keywords, in the ``[nebular]`` section, control the contribution of nebula
 sections above, every keyword here is independently optional and simply falls back
 to its own default if omitted.
 
-* ``compute_neb`` (optional, default=true): Whether nebular emission is computed at
-  all. If false, every other keyword in this section is ignored.
+* ``compute_neb`` (optional, default=true if spectral synthesis is enabled, false
+  otherwise): Whether nebular emission is computed at all. Nebular emission is added to
+  the synthesized spectra, so it requires spectral synthesis to be enabled (see
+  ``spectra.model`` above): explicitly setting ``compute_neb`` to true without it is
+  an error. If false, every other keyword in this section is ignored.
 * ``log_U`` (optional, default=-2.5): The base-10 logarithm of the ionization parameter.
 * ``cov_fac`` (optional, default=0.5): The nebular covering factor (the fraction of
   ionizing photons that actually ionize gas within the covering material, as
