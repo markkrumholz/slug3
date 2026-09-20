@@ -305,7 +305,9 @@ inline auto testDecayChainAlphaDecayConservesMass() -> int
  * the same decay-closed list Yields builds. All of the mass starts as
  * Pb210, and at every later time the total over every isotope in the
  * chain, including the accumulated He4, must still be that same 1 Msun,
- * since decay only moves mass between isotopes.
+ * since decay only moves mass between isotopes -- to within the
+ * isotope data's own branching-ratio normalization error, which the
+ * tolerance below allows for.
  *
  * Deliberately not a longer chain such as U238's, whose 97 isotopes
  * have lifetimes spanning over thirty orders of magnitude, far too

@@ -143,10 +143,17 @@ namespace elem
          * isotope's A to recover a mass, and scatters the result back.
          * The mass number A, rather than the true atomic mass, is used
          * for the conversion because it makes a decay chain conserve
-         * total mass exactly: A is conserved by a beta decay, and
-         * splits exactly as A_daughter + 4 by an alpha decay. A no-op
-         * if there are no relevant isotopes at all (nothing in the given
-         * list is unstable).
+         * total mass, provided the decay products are mass balanced (A
+         * is conserved by a beta decay, and splits as A_daughter + 4 by
+         * an alpha decay) and the branching ratios sum to one. The
+         * isotope data's own branching ratios are not always exactly
+         * normalized -- a rare branch can be listed on top of a
+         * dominant one that already has ratio 1 -- in which case the
+         * daughters gain slightly more mass than the parent loses, by
+         * that rare branch's fraction of the decayed mass (~1e-6 for
+         * the worst cases in the data, e.g. Bi210). A no-op if there
+         * are no relevant isotopes at all (nothing in the given list is
+         * unstable).
          *
          * This is exact, not an approximation, when applied
          * incrementally across multiple successive calls with the
