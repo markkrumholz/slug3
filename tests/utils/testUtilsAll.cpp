@@ -11,6 +11,7 @@
 #include "testGridBracket.hpp"
 #include "testPDFIntegrator.hpp"
 #include "testRngThread.hpp"
+#include "testTrackedDeck.hpp"
 #include "testUniqueIDManager.hpp"
 #include <exception>
 #include <iostream>
@@ -27,6 +28,7 @@ auto main() -> int {
         result += testGridBracketExactHits();
         result += testGridBracketInterpolation();
         result += testGridBracketCache();
+        result += testTrackedDeck();
         return result;
     }
     catch (const std::exception& error)
