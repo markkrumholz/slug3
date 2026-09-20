@@ -21,7 +21,7 @@ namespace nebular
     inline constexpr double defaultLogU = -2.5;      /**< Default log10 of the ionization parameter */
     inline constexpr double defaultCovFac = 0.5;     /**< Default nebular covering factor */
     inline constexpr double defaultLineWidth = 20.0; /**< Default assumed emission line width, in km/s */
-    inline constexpr bool defaultComputeNeb = true;  /**< Default for whether nebular emission is computed at all */
+    inline constexpr bool defaultComputeNeb = true;  /**< Default for whether nebular emission is computed at all, when a spectral synthesizer is available to compute it for; SimControls defaults to false when none is */
 
     inline const std::string defaultTable = // NOLINT(bugprone-throwing-static-initialization,cert-err58-cpp) -- built from fixed string literals, so the (theoretically throwing) path conversion can never actually throw here
         (std::filesystem::path("data") / std::filesystem::path("nebular")
@@ -42,7 +42,7 @@ namespace nebular
         double logU_ = defaultLogU;           /**< log10 of the ionization parameter */
         double covFac_ = defaultCovFac;       /**< Nebular covering factor */
         double lineWidth_ = defaultLineWidth; /**< Assumed width of emission lines, in km/s */
-        bool computeNeb_ = defaultComputeNeb; /**< Whether nebular emission is computed at all; if false, SimControls::nebular() is left null */
+        bool computeNeb_ = defaultComputeNeb; /**< Whether nebular emission is computed at all; if false, SimControls::nebular() is left null. Requires a spectral synthesizer -- see SimControls::readNebular() */
     };
 
 } // namespace nebular

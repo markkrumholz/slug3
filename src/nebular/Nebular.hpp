@@ -74,6 +74,8 @@ namespace nebular
          * lineLumPerQCluster_/lineLumPerQGalaxy_ (the table's own line
          * luminosities, read directly, for the table's full line list
          * in lineWl_/lineLabel_).
+         * @throws std::invalid_argument if simControls.specsyn() is
+         *   null: there would be no wavelength grid to resample onto
          * @throws std::runtime_error if tableName cannot be found (via
          *   utils::getFilePath), trackName has no group of its own in
          *   it, or -- for any of that group's own [Fe/H] values -- no

@@ -1107,6 +1107,46 @@ def test_simcontrols_set_nebular_installs_new_grid():
         neb.lineWl()
 
 
+def _deck_without_spectra(tmp_path, *, compute_neb):
+    """Write a copy of CLUSTER_DECK with its [spectra] section removed
+    and nebular.compute_neb set to compute_neb (or removed entirely
+    if compute_neb is None), returning its path as a str."""
+    deck_text = pathlib.Path(CLUSTER_DECK).read_text()
+    stripped = deck_text.replace('[spectra]\nmodel = "blackbody"\n\n', "")
+    assert stripped != deck_text, "expected to find and strip a [spectra] section"
+    neb_section = "[nebular]\ncompute_neb = false\n"
+    assert neb_section in stripped, "expected to find CLUSTER_DECK's [nebular] section"
+    replacement = "" if compute_neb is None else (
+        "[nebular]\ncompute_neb = " + ("true" if compute_neb else "false") + "\n")
+    deck_path = tmp_path / "no_spectra_neb.in"
+    deck_path.write_text(stripped.replace(neb_section, replacement))
+    return str(deck_path)
+
+
+def test_simcontrols_nebular_defaults_off_without_spectra(tmp_path):
+    """With no [spectra] section, nebular.compute_neb defaults to false
+    (nebular emission is added to a synthesized spectrum, so it needs
+    one) rather than trying to build a Nebular with nothing to resample
+    onto -- the nebular property is None even with no [nebular] section
+    at all. Explicitly setting compute_neb = true is an error."""
+    controls = slug.SimControls(_deck_without_spectra(tmp_path, compute_neb=None), "cluster")
+    assert controls.nebular is None
+
+    with pytest.raises(RuntimeError, match="compute_neb"):
+        slug.SimControls(_deck_without_spectra(tmp_path, compute_neb=True), "cluster")
+
+
+def test_nebular_requires_specsyn(tmp_path):
+    """Constructing a Nebular against a SimControls with no spectral
+    synthesizer raises ValueError, rather than dereferencing the null
+    specsyn() to get a wavelength grid."""
+    controls = slug.SimControls(_deck_without_spectra(tmp_path, compute_neb=False), "cluster")
+    assert controls.specsyn is None
+
+    with pytest.raises(ValueError, match="specsyn"):
+        slug.Nebular("tests/nebular/assets/nebular_test.h5", "MIST_test", controls)
+
+
 def test_simcontrols_nebular_survives_replacement():
     """A Nebular read from the nebular property stays fully valid
     after a later setNebular() call replaces or removes it -- see

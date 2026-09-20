@@ -338,8 +338,10 @@ void io::SimControls::initPhysics(const toml::table& inputDeck)
     // readSpectra/readFilters/readExtinct, nothing here is gated on
     // any input-deck key being present -- every nebular.* control
     // parameter independently falls back to its own default, and a
-    // Nebular is always constructed (stars.tracks is already
-    // mandatory, via readTracks() above). Done before readExtinct()
+    // Nebular is constructed by default whenever a spectral
+    // synthesizer (specsyn_, set above) is available for it to be
+    // paired with (stars.tracks is already mandatory, via
+    // readTracks() above). Done before readExtinct()
     // (which used to come first here) because readExtinct() itself
     // now needs nebular_ -- see Extinct's own constructor comment on
     // extinctLines_.
@@ -1165,13 +1167,33 @@ void io::SimControls::readYields(const toml::table& inputDeck)
 void io::SimControls::readNebular(const toml::table& inputDeck)
 {
     // nebular.compute_neb: whether nebular emission is computed at
-    // all, defaulting to true. If explicitly set false, every other
-    // nebular.* key is skipped (their defaults are irrelevant, since
-    // nebular_ is left null either way) -- mirrors readExtinct()'s own
-    // early return when neither extinct.AV nor extinct.AV_field was
-    // given.
+    // all. Nebular emission is added to a synthesized spectrum, and the
+    // Nebular grid is resampled onto the spectral synthesizer's own
+    // wavelength grid, so it requires specsyn_ (like phot.filters and
+    // extinct.AV -- see readFilters()/readExtinct()). The default
+    // therefore depends on whether one is available: true if specsyn_
+    // is set (nebular::defaultComputeNeb), false otherwise. Explicitly
+    // asking for nebular emission with no spectral synthesizer is an
+    // error, rather than being silently ignored.
     const auto computeNeb = utils::getTOMLKeyWithError<bool>(inputDeck, "nebular.compute_neb");
+    if (specsyn_ == nullptr)
+    {
+        if (computeNeb.value_or(false))
+        {
+            throw std::runtime_error(
+                "SimControls: nebular.compute_neb = true was given but no "
+                "spectral synthesizer was requested (spectra.model was not "
+                "set in the input deck)");
+        }
+        nebControls_.computeNeb_ = false;
+        return;
+    }
     nebControls_.computeNeb_ = computeNeb.value_or(nebular::defaultComputeNeb);
+
+    // If nebular.compute_neb is false, every other nebular.* key is
+    // skipped (their defaults are irrelevant, since nebular_ is left
+    // null either way) -- mirrors readExtinct()'s own early return when
+    // neither extinct.AV nor extinct.AV_field was given.
     if (!nebControls_.computeNeb_) { return; }
 
     // Every remaining nebular.* control parameter is independently

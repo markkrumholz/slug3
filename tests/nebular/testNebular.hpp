@@ -72,6 +72,48 @@ inline auto testNebularConstruct() -> int
 }
 
 /**
+ * @brief Unit test: constructing a Nebular against a SimControls with no spectral synthesizer throws
+ * @returns 0 if the test passes, 1 if it fails
+ * @details
+ * Nebular takes its own wavelength grid from simControls.specsyn()->wl(),
+ * so a null specsyn() must be rejected up front (with
+ * std::invalid_argument) rather than dereferenced -- the constructor is
+ * directly reachable from Python, not just via SimControls's own input
+ * deck path, which does its own check.
+ */
+inline auto testNebularNoSpecsynThrows() -> int
+{
+    toml::table inputDeck = toml::parse_file(testNebularInputFile);
+    inputDeck.erase("spectra");
+    // No spectral synthesizer, so nebular emission must be off for the
+    // SimControls itself to construct -- see SimControls::readNebular()
+    inputDeck.at_path("nebular").as_table()->insert_or_assign("compute_neb", false);
+    const io::SimControls controls(inputDeck);
+    if (controls.specsyn() != nullptr)
+    {
+        std::cerr << "testNebular: noSpecsynThrows: expected specsyn() to be null\n";
+        return 1;
+    }
+
+    try
+    {
+        const nebular::Nebular nebular(
+            "tests/nebular/assets/nebular_test.h5", "MIST_test", controls);
+        std::cerr << "testNebular: noSpecsynThrows: expected construction with a "
+            "null specsyn() to throw, but it succeeded\n";
+        return 1;
+    }
+    catch (const std::invalid_argument&) { /* expected */ }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testNebular: noSpecsynThrows: expected std::invalid_argument, got: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+/**
  * @brief Unit test: Nebular::lineLabel()/lineWl() match the fixture exactly
  * @returns 0 if the test passes, 1 if it fails
  */
@@ -445,6 +487,7 @@ inline auto testNebular() -> int
 {
     int result = 0;
     result += testNebularConstruct();
+    result += testNebularNoSpecsynThrows();
     result += testNebularLineLabelWl();
     result += testNebularGetGalaxy();
     result += testNebularGetCluster();

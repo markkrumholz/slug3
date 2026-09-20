@@ -742,6 +742,127 @@ static auto testSimControlsNoSpectraModel() -> int
     return 0;
 }
 
+// Verify that nebular.compute_neb defaults to false, rather than
+// crashing, when there is no spectral synthesizer to pair a nebular
+// emission grid with: a deck with neither a [spectra] nor a [nebular]
+// table must construct, with nebular() left null.
+static auto testSimControlsNebularDefaultNoSpectra() -> int
+{
+    const std::string fileName = "tests/core/assets/testCluster.in";
+    try
+    {
+        toml::table inputDeck = toml::parse_file(fileName);
+        inputDeck.erase("spectra");
+        inputDeck.erase("nebular");
+        const io::SimControls sim(inputDeck);
+        if (sim.specsyn() != nullptr)
+        {
+            std::cerr << "testSimControls: nebularDefaultNoSpectra: expected specsyn() "
+                "to be null with no spectra.model\n";
+            return 1;
+        }
+        if (sim.nebular() != nullptr || sim.nebControls().computeNeb_)
+        {
+            std::cerr << "testSimControls: nebularDefaultNoSpectra: expected nebular() "
+                "to be null and nebControls().computeNeb_ to be false when "
+                "nebular.compute_neb is not given and there is no spectral synthesizer\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: nebularDefaultNoSpectra: expected construction "
+            "with neither [spectra] nor [nebular] to succeed, but it threw: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Verify that explicitly setting nebular.compute_neb = true with no
+// spectral synthesizer is rejected with a clear error, while
+// explicitly setting it false is accepted
+static auto testSimControlsNebularExplicitNoSpectra() -> int
+{
+    const std::string fileName = "tests/core/assets/testCluster.in";
+
+    {
+        toml::table inputDeck = toml::parse_file(fileName);
+        inputDeck.erase("spectra");
+        inputDeck.at_path("nebular").as_table()->insert_or_assign("compute_neb", true);
+        try
+        {
+            const io::SimControls sim(inputDeck);
+            std::cerr << "testSimControls: nebularExplicitNoSpectra: expected "
+                "nebular.compute_neb = true with no spectral synthesizer to throw, "
+                "but construction succeeded\n";
+            return 1;
+        }
+        catch (const std::runtime_error& error)
+        {
+            if (std::string(error.what()).find("compute_neb") == std::string::npos)
+            {
+                std::cerr << "testSimControls: nebularExplicitNoSpectra: expected the "
+                    "error to mention compute_neb, got: " << error.what() << "\n";
+                return 1;
+            }
+        }
+    }
+
+    {
+        toml::table inputDeck = toml::parse_file(fileName);
+        inputDeck.erase("spectra");
+        inputDeck.at_path("nebular").as_table()->insert_or_assign("compute_neb", false);
+        try
+        {
+            const io::SimControls sim(inputDeck);
+            if (sim.nebular() != nullptr || sim.nebControls().computeNeb_)
+            {
+                std::cerr << "testSimControls: nebularExplicitNoSpectra: expected "
+                    "nebular.compute_neb = false to leave nebular() null\n";
+                return 1;
+            }
+        }
+        catch (const std::exception& error)
+        {
+            std::cerr << "testSimControls: nebularExplicitNoSpectra: expected "
+                "nebular.compute_neb = false with no spectral synthesizer to succeed, "
+                "but it threw: " << error.what() << "\n";
+            return 1;
+        }
+    }
+    return 0;
+}
+
+// Verify that nebular.compute_neb still defaults to true when a
+// spectral synthesizer is available: a deck with [spectra] but no
+// nebular.compute_neb key builds a Nebular (using the small synthetic
+// fixture tests/nebular/assets/nebular_test.h5, via nebular.table)
+static auto testSimControlsNebularDefaultWithSpectra() -> int
+{
+    const std::string fileName = "tests/nebular/assets/testNebular.in";
+    try
+    {
+        toml::table inputDeck = toml::parse_file(fileName);
+        inputDeck.at_path("nebular").as_table()->erase("compute_neb");
+        const io::SimControls sim(inputDeck);
+        if (sim.nebular() == nullptr || !sim.nebControls().computeNeb_)
+        {
+            std::cerr << "testSimControls: nebularDefaultWithSpectra: expected nebular() "
+                "to be non-null and nebControls().computeNeb_ to be true when "
+                "nebular.compute_neb is not given and a spectral synthesizer is available\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: nebularDefaultWithSpectra: expected construction "
+            "to succeed, but it threw: " << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
 // Verify that an unrecognized spectra.model value is rejected
 static auto testSimControlsInvalidSpectraModel() -> int
 {
@@ -2534,6 +2655,9 @@ auto testSimControls() -> int
     result += testSimControlsPhysicsGalaxy();
     result += testSimControlsFCluster();
     result += testSimControlsNoSpectraModel();
+    result += testSimControlsNebularDefaultNoSpectra();
+    result += testSimControlsNebularExplicitNoSpectra();
+    result += testSimControlsNebularDefaultWithSpectra();
     result += testSimControlsInvalidSpectraModel();
     result += testSimControlsSpectraLibrary();
     result += testSimControlsSpectraChained();

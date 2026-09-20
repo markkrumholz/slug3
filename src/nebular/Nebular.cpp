@@ -422,6 +422,17 @@ nebular::Nebular::Nebular(
 {
     static constexpr auto context = "Nebular";
 
+    // loadTable() takes wl_ from simControls_.specsyn()->wl(); check
+    // up front, rather than dereferencing a null pointer there (this
+    // constructor is also reachable directly from Python, not just via
+    // SimControls::readNebular(), which does its own check)
+    if (simControls.specsyn() == nullptr)
+    {
+        throw std::invalid_argument(
+            std::string(context) + ": simControls has no spectral synthesizer "
+            "(specsyn() is null) to provide the wavelength grid to resample onto");
+    }
+
     const auto tablePath = utils::getFilePath(tableName);
     if (tablePath.empty())
     {

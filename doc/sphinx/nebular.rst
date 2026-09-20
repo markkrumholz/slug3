@@ -40,7 +40,7 @@ The nebular emission calculation is controlled by four runtime parameters in
 the :ref:`ssec-parameters-nebular` section of :ref:`sec-parameters` (plus the
 ``table`` override, described above, of the underlying emission grid itself):
 
-* ``compute_neb``: defaults to true; setting to false disables nebular computation entirely
+* ``compute_neb``: defaults to true if spectral synthesis is enabled and false otherwise; setting to false disables nebular computation entirely. Setting it to true when spectral synthesis is not enabled is an error, since nebular emission is added to the synthesized spectrum
 * ``log_U``: the volume-averaged ionization parameter of the nebula; see :ref:`sec-cloudy-slug` for the precise definition of this parameter. Valid values are in the range -3 to -2.
 * ``cov_fac``: the covering factor of the nebula, which in practice means the fraction of output ionizing photons that are reprocessed into nebular emission. Photons that are not reprocessed are assumed to be absorbed by dust grains, to be reprocessed outside the observational aperture, or to form part of the photon background responsible for producing diffuse ionized gas.
 * ``line_width``: the width of the nebular emission lines that are inserted into the spectrum.
