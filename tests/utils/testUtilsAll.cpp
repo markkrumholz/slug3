@@ -9,6 +9,7 @@
  */
 
 #include "testGridBracket.hpp"
+#include "testMPIUtils.hpp"
 #include "testPDFIntegrator.hpp"
 #include "testRngThread.hpp"
 #include "testTrackedDeck.hpp"
@@ -29,6 +30,7 @@ auto main() -> int {
         result += testGridBracketInterpolation();
         result += testGridBracketCache();
         result += testTrackedDeck();
+        result += testMPIUtilsSingleProcess();
         return result;
     }
     catch (const std::exception& error)

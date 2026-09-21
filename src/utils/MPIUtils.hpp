@@ -39,6 +39,41 @@ namespace utils
      */
     inline constexpr unsigned long mpiUidStride = 1UL << 40U;
 
+    namespace detail
+    {
+        /**
+         * @brief Storage for this process's own MPI rank, filled in by initMPI()
+         * @return A reference to a function-local static, 0 until initMPI()
+         *   has run (and always 0 when this build was not compiled with
+         *   SLUG_MPI)
+         * @details
+         * Cached, rather than queried from MPI on each call to mpiRank(),
+         * because a process's rank never changes once MPI is up, and
+         * because MPI_THREAD_FUNNELED (see initMPI()) only allows MPI
+         * calls from the one thread that initialized MPI: mpiRank() and
+         * isIORank() are called from code that can run inside an OpenMP
+         * parallel region, or after MPI_Finalize(), where a fresh
+         * MPI_Comm_rank() call would not be valid.
+         */
+        inline auto cachedMPIRank() -> int&
+        {
+            static int rank = 0;
+            return rank;
+        }
+
+        /**
+         * @brief Storage for the number of MPI ranks, filled in by initMPI()
+         * @return A reference to a function-local static, 1 until initMPI()
+         *   has run (and always 1 when this build was not compiled with
+         *   SLUG_MPI) -- see cachedMPIRank() for why this is cached
+         */
+        inline auto cachedMPISize() -> int&
+        {
+            static int size = 1;
+            return size;
+        }
+    } // namespace detail
+
     /**
      * @brief Initialize MPI, if this build was compiled with SLUG_MPI
      * @param argc Address of main()'s own argc
@@ -63,12 +98,19 @@ namespace utils
      * -- slower than intended, but correct, rather than silently
      * relying on a implementation-specific tolerance the standard
      * itself does not promise.
+     *
+     * Also caches this process's own rank and the total number of
+     * ranks, which mpiRank(), mpiSize() and isIORank() then return
+     * without making any further MPI call -- so they are safe to call
+     * from any thread, and after finalizeMPI(), as well.
      */
     inline void initMPI([[maybe_unused]] int* argc, [[maybe_unused]] char*** argv)
     {
 #ifdef SLUG_MPI
         int provided = 0;
         MPI_Init_thread(argc, argv, MPI_THREAD_FUNNELED, &provided);
+        MPI_Comm_rank(MPI_COMM_WORLD, &detail::cachedMPIRank());
+        MPI_Comm_size(MPI_COMM_WORLD, &detail::cachedMPISize());
         if (provided < MPI_THREAD_FUNNELED)
         {
             std::cerr << "slug: warning: MPI implementation provided a lesser "
@@ -129,34 +171,36 @@ namespace utils
     /**
      * @brief Return this process's own MPI rank
      * @return This process's rank in MPI_COMM_WORLD, or 0 if this build
-     *   was not compiled with SLUG_MPI (or MPI was never initialized)
+     *   was not compiled with SLUG_MPI, or initMPI() has not run
+     * @details
+     * Reads a value cached by initMPI() rather than calling MPI, so it
+     * is safe to call from any thread, and after finalizeMPI().
      */
-    [[nodiscard]] inline auto mpiRank() -> int
-    {
-#ifdef SLUG_MPI
-        int rank = 0;
-        MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-        return rank;
-#else
-        return 0;
-#endif
-    }
+    [[nodiscard]] inline auto mpiRank() -> int { return detail::cachedMPIRank(); }
 
     /**
      * @brief Return the total number of MPI ranks in this run
      * @return The size of MPI_COMM_WORLD, or 1 if this build was not
-     *   compiled with SLUG_MPI (or MPI was never initialized)
+     *   compiled with SLUG_MPI, or initMPI() has not run
+     * @details Reads a value cached by initMPI() -- see mpiRank().
      */
-    [[nodiscard]] inline auto mpiSize() -> int
-    {
-#ifdef SLUG_MPI
-        int size = 1;
-        MPI_Comm_size(MPI_COMM_WORLD, &size);
-        return size;
-#else
-        return 1;
-#endif
-    }
+    [[nodiscard]] inline auto mpiSize() -> int { return detail::cachedMPISize(); }
+
+    /**
+     * @brief Return whether this process should print run-wide informational output
+     * @return True when this build was not compiled with SLUG_MPI, or
+     *   is running as a single rank, or is rank 0 of several; false on
+     *   every other rank
+     * @details
+     * Under MPI every rank runs the same setup code, so a message that
+     * is identical on every rank (a warning about the input deck, a
+     * run-wide summary) would otherwise be printed once per rank.
+     * Guard such a print with `if (utils::isIORank())`. Do not guard
+     * an error, or a message that reports something particular to this
+     * rank (e.g. its own trial range): suppressing those on every rank
+     * but 0 would hide real failures.
+     */
+    [[nodiscard]] inline auto isIORank() -> bool { return mpiRank() == 0; }
 
     /**
      * @brief Block until every MPI rank has reached this same call

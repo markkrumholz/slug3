@@ -114,6 +114,7 @@ def run_slug(deck_path, nranks, restart=False):
         f"{' '.join(cmd)} exited {result.returncode}\n"
         f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     )
+    return result
 
 
 def read_uids_and_trials(h5_path):
@@ -199,3 +200,24 @@ def test_mpi_restart_with_different_rank_count(tmp_path):
     assert len(all_uids) == total_n_trial
     assert len(set(all_uids)) == total_n_trial
     assert sorted(all_trials) == list(range(total_n_trial))
+
+
+@pytest.mark.parametrize("nranks", [2, 4])
+def test_mpi_run_wide_messages_are_printed_once(tmp_path, nranks):
+    """
+    Messages that are identical on every rank -- warnings about the
+    input deck, and the run's start and completion lines -- must reach
+    stdout exactly once however many ranks there are, not once per
+    rank (see utils::isIORank()). A stray key under [nebular] gives a
+    deck warning that every rank would otherwise repeat.
+    """
+    deck = tmp_path / "once.in"
+    deck.write_text("verbosity = 1\n" + DECK_TEMPLATE.format(
+        n_trial=8, model_name="mpi_once", out_dir=tmp_path,
+        output_mode="h5", checkpoint_interval=0,
+    ) + "stray_key = 1\n")
+    result = run_slug(deck, nranks=nranks)
+
+    assert result.stdout.count("input deck key 'nebular.stray_key'") == 1, result.stdout
+    assert result.stdout.count("slug: cluster simulation starting") == 1, result.stdout
+    assert result.stdout.count("slug: simulation complete") == 1, result.stdout
