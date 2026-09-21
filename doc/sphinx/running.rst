@@ -122,7 +122,7 @@ already completed, and resume to reach the target number. The :ref:`sec-slugpy` 
 reader also automatically handles runs whose outputs are divided across checkpoints.
 
 When checkpointing is enabled, SLUG will also safely complete the current trial and
-finalize its ouptut files if it receives ``SIGTERM``. This capability can be used to
+finalize its output files if it receives ``SIGTERM``. This capability can be used to
 force-write a final checkpoint shortly before hitting walltime limits when running
 in a queued environment.
 
