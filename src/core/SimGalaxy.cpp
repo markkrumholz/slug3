@@ -97,7 +97,7 @@ auto core::SimGalaxy::run() -> int
     const unsigned long numberingEnd = numberingStart + trialsRemaining;
 
     // Gated to rank 0 only -- see SimCluster::run()'s own identical comment
-    if (simControls_.verbosity() > 0 && utils::mpiRank() == 0)
+    if (simControls_.verbosity() > 0 && utils::isIORank())
     {
         std::cout << "slug: galaxy simulation starting with "
             << simControls_.nTrial() << " trials";
@@ -219,7 +219,10 @@ auto core::SimGalaxy::run() -> int
     outputManager_->notifyEarlyTermination(
         priorTrialsCompleted + trialsCompleted_.load(std::memory_order_relaxed));
 
-    if (simControls_.verbosity() > 0)
+    // I/O rank only, like the starting summary above: by here every
+    // rank has passed notifyEarlyTermination()'s own synchronization,
+    // so there is nothing rank-specific left to report
+    if (simControls_.verbosity() > 0 && utils::isIORank())
     {
         std::cout << "slug: simulation complete\n";
     }

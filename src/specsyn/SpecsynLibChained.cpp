@@ -9,6 +9,7 @@
 #include "SpecsynLibChained.hpp"
 #include "../io/SimControls.hpp"
 #include "../tracks/TrackCommons.hpp"
+#include "../utils/MPIUtils.hpp"
 #include "../utils/MiscUtils.hpp"
 #include "Specsyn.hpp"
 #include "SpecsynCommons.hpp"
@@ -757,7 +758,8 @@ namespace specsyn
             for (std::size_t i = 0; i < mins.size(); ++i)
             {
                 if (std::isnan(mins[i])) { continue; } // no [Fe/H] axis on this library
-                if (fehMin < mins[i] || fehMax > maxs[i])
+                // (I/O rank only: every MPI rank loads the same libraries)
+                if ((fehMin < mins[i] || fehMax > maxs[i]) && utils::isIORank())
                 {
                     std::cout << "slug: warning: chained spectral library " << names[i] <<
                         " covers only [Fe/H] = [" << mins[i] << ", " << maxs[i] <<

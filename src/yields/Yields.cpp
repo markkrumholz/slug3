@@ -11,6 +11,7 @@
 #include "../elem/ElemCommons.hpp"
 #include "../elem/IsotopeTable.hpp"
 #include "../io/SimControls.hpp"
+#include "../utils/MPIUtils.hpp"
 #include "YieldChannel.hpp"
 #include "YieldCommons.hpp"
 #include <algorithm>
@@ -268,7 +269,8 @@ namespace yields
         }
         for (std::size_t i = 0; i < channelCounts.size(); ++i)
         {
-            if (channelCounts.at(i) > 1)
+            // (I/O rank only: every MPI rank builds the same channels)
+            if (channelCounts.at(i) > 1 && utils::isIORank())
             {
                 std::cout << "slug: warning: " << channelCounts.at(i) <<
                     " yield channels requested for channel '" << channelStr.at(i) <<

@@ -32,6 +32,7 @@
 #include "../tracks/TrackCommons.hpp"
 #include "../tracks/Tracks2D.hpp"
 #include "../tracks/Tracks3D.hpp"
+#include "../utils/MPIUtils.hpp"
 #include "../utils/ParseUtils.hpp"
 #include "../utils/RngThread.hpp"
 #include "../utils/TOMLUtils.hpp"
@@ -232,6 +233,11 @@ void io::SimControls::reportUnusedKeys(const utils::TrackedDeck& deck)
         for (const auto& key : unusedKeys_) { message += "\n  " + describeUnusedDeckKey(key); }
         throw std::runtime_error(message);
     }
+    // The deck is the same on every MPI rank, so every rank has the
+    // same keys to report: print them once, from the I/O rank (the
+    // stored lists above are still populated on every rank, and the
+    // strict_input throw above still happens on every rank)
+    if (!utils::isIORank()) { return; }
     for (const auto& key : unusedKeys_)
     {
         std::cout << "slug: warning: " << describeUnusedDeckKey(key) << "\n";
@@ -361,7 +367,9 @@ void io::SimControls::initPhysics(const utils::TrackedDeck& inputDeck)
     // stars in that gap have no track data, so they end up being
     // treated as having zero luminosity when spectra are computed
     // (see Cluster::computeSpec)
-    if (tracks_->mMin() > imf_.getMin())
+    // (printed from the I/O rank only, since every MPI rank builds the
+    // same tracks and IMF and would otherwise repeat it)
+    if (tracks_->mMin() > imf_.getMin() && utils::isIORank())
     {
         std::cout << "slug: warning: minimum mass in selected tracks is "
             << tracks_->mMin() << " but IMF minimum mass is " << imf_.getMin()

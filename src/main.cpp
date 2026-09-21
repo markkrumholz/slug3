@@ -38,10 +38,11 @@ auto main(int argc, char *argv[]) -> int // NOLINT(bugprone-exception-escape) --
     // SimGalaxy::run() happens to land, which (for a fresh, non-restart
     // run) is inside a "#pragma omp parallel for" loop body, with no
     // guarantee that lands on this same thread. UniqueIDManager's own
-    // constructor calls mpiRank(), an MPI call; MPI_THREAD_FUNNELED
-    // (see initMPI()'s own comment) requires every MPI call to come
-    // from the one thread that called MPI_Init_thread -- this one, this
-    // early, before any parallel region has had a chance to open.
+    // constructor reads mpiRank(), which initMPI() cached above (so it
+    // makes no MPI call of its own, and would be safe from any thread
+    // anyway) -- constructing it here just keeps that one-time setup
+    // on the main thread, before any parallel region has had a chance
+    // to open.
     // Restarting instead constructs it explicitly, just as early (see
     // OutputManagerH5::restartSetup()'s own comment), so this call is a
     // harmless no-op in that case -- constructing a C++11 function-

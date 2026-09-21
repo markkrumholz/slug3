@@ -11,6 +11,7 @@
 #include "../tracks/TrackCommons.hpp"
 #include "../utils/GridBracket.hpp"
 #include "../utils/HDF5Utils.hpp"
+#include "../utils/MPIUtils.hpp"
 #include "../utils/MiscUtils.hpp"
 #include "Specsyn.hpp"
 #include "SpecsynCommons.hpp"
@@ -420,10 +421,15 @@ namespace specsyn
             if (!rangeCovered(candFehVals, fehMin, fehMax)) { continue; }
             auto candResult = buildExactMatchGrid(file, std::move(candFehVals), candGroupNames);
             if (!gridCoversRange(candResult, fehMin, fehMax)) { continue; }
-            std::cout << "slug: warning: spectral library " << spectraName <<
-                " has no [alpha/Fe] = " << afe << " data covering [Fe/H] = [" <<
-                fehMin << ", " << fehMax << "]; using nearest available " <<
-                "[alpha/Fe] = " << candidate << " instead\n";
+            // Printed from the I/O rank only: every MPI rank loads the
+            // same library and would otherwise repeat this
+            if (utils::isIORank())
+            {
+                std::cout << "slug: warning: spectral library " << spectraName <<
+                    " has no [alpha/Fe] = " << afe << " data covering [Fe/H] = [" <<
+                    fehMin << ", " << fehMax << "]; using nearest available " <<
+                    "[alpha/Fe] = " << candidate << " instead\n";
+            }
             return std::make_pair(candidate, std::move(candResult));
         }
         return std::nullopt;
