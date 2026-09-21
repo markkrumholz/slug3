@@ -18,6 +18,7 @@
 #include "../tracks/Tracks2D.hpp"
 #include "../tracks/Tracks3D.hpp"
 #include "../utils/ParseUtils.hpp"
+#include "../utils/TrackedDeck.hpp"
 #include "../yields/YieldCommons.hpp"
 #include "../yields/Yields.hpp"
 #include <cstddef>
@@ -158,6 +159,33 @@ namespace io
          * @return Verbosity level
          */
         [[nodiscard]] auto verbosity() const { return verbosity_; }
+
+        /**
+         * @brief Whether an input-deck key that is never used is an error
+         * @return The value of the optional top-level strict_input key,
+         *   false by default. If false, such a key only produces a
+         *   warning (see unusedKeys()).
+         */
+        [[nodiscard]] auto strictInput() const { return strictInput_; }
+
+        /**
+         * @brief Input-deck keys that were never used
+         * @return One report per key, in path order: its path, its line
+         *   in the deck (0 if the deck was not parsed from text), and a
+         *   hint for what it may have been meant to be (empty if none).
+         *   Empty for a deck with no stray keys. Filled in at the end of
+         *   construction, and empty for a default-constructed SimControls.
+         */
+        [[nodiscard]] auto unusedKeys() const -> const std::vector<utils::DeckKeyReport>& { return unusedKeys_; }
+
+        /**
+         * @brief Input-deck keys that were valid but deliberately not read
+         * @return One report per key, in path order, each with the reason
+         *   it was skipped, e.g. "nebular.compute_neb is false". These
+         *   are not stray: the key is fine, but nothing in this
+         *   simulation uses it.
+         */
+        [[nodiscard]] auto ignoredKeys() const -> const std::vector<utils::DeckKeyReport>& { return ignoredKeys_; }
 
          /**
          * @brief Return number of trials in the simulation
@@ -1273,7 +1301,7 @@ namespace io
          * of the constructor purely to keep its own cognitive
          * complexity down; see initPhysics() for the other half.
          */
-        void initControlFlow(const toml::table& inputDeck);
+        void initControlFlow(const utils::TrackedDeck& inputDeck);
 
         /**
          * @brief Parse every physics setting from the input deck
@@ -1289,13 +1317,13 @@ namespace io
          * the constructor purely to keep its own cognitive complexity
          * down; see initControlFlow() for the other half.
          */
-        void initPhysics(const toml::table& inputDeck);
+        void initPhysics(const utils::TrackedDeck& inputDeck);
 
         /**
          * @brief Compute output times
          * @param inputDeck A toml table holding the input deck
          */
-        void setOutputTimes(const toml::table& inputDeck);
+        void setOutputTimes(const utils::TrackedDeck& inputDeck);
 
         /**
          * @brief Parse the output content flags from the input deck
@@ -1317,14 +1345,14 @@ namespace io
          * OutputManager's own constructor, which now reads these via
          * writeCluster()/etc. instead of parsing them itself.
          */
-        void readOutput(const toml::table& inputDeck);
+        void readOutput(const utils::TrackedDeck& inputDeck);
 
         /**
          * @brief Load a set of tracks specified by input deck
          * @param inputDeck Name of input deck
          * @returns A Tracks3D object with the correct tracks loaded
          */
-        void readTracks(const toml::table& inputDeck);
+        void readTracks(const utils::TrackedDeck& inputDeck);
 
         /**
          * @brief Load the spectral synthesizer specified by input deck
@@ -1339,7 +1367,7 @@ namespace io
          * SimControls's own constructor, on an object that will not be
          * moved or destroyed before the synthesizer is.
          */
-        void readSpectra(const toml::table& inputDeck);
+        void readSpectra(const utils::TrackedDeck& inputDeck);
 
         /**
          * @brief Load the photometric filter collection specified by input deck
@@ -1351,7 +1379,7 @@ namespace io
          * so filters_ is left null if it (or the non-"Lbol" remainder
          * of it) is empty.
          */
-        void readFilters(const toml::table& inputDeck);
+        void readFilters(const utils::TrackedDeck& inputDeck);
 
         /**
          * @brief Load the extinction curve specified by input deck
@@ -1376,7 +1404,7 @@ namespace io
          * onto its own line wavelengths, if any (see Extinct's own
          * extinctLines_ member).
          */
-        void readExtinct(const toml::table& inputDeck);
+        void readExtinct(const utils::TrackedDeck& inputDeck);
 
         /**
          * @brief Load the nucleosynthetic yield channels specified by input deck
@@ -1435,7 +1463,7 @@ namespace io
          * from going unwritten the way it could in a galaxy-type
          * simulation.
          */
-        void readYields(const toml::table& inputDeck);
+        void readYields(const utils::TrackedDeck& inputDeck);
 
         /**
          * @brief Load the nebular emission controls and grid specified by input deck
@@ -1462,11 +1490,31 @@ namespace io
          * readFilters()'s/readExtinct()'s own identical requirement;
          * explicitly setting it false is always allowed.
          */
-        void readNebular(const toml::table& inputDeck);
+        void readNebular(const utils::TrackedDeck& inputDeck);
+
+        /**
+         * @brief Record, and report, the input-deck keys that were never read
+         * @param deck The deck every read went through, at the end of construction
+         * @throws std::runtime_error if strict_input is set and some key was never used
+         * @details
+         * Stores utils::TrackedDeck::unused() and ignored() in unusedKeys_
+         * and ignoredKeys_. Each unused key is reported as a
+         * "slug: warning:" naming the key, its line in the deck, and a
+         * hint if there is one; or, if strict_input is true, all of them
+         * are instead listed in a thrown error. Keys that were
+         * deliberately not read (marked ignored where that decision was
+         * made, e.g. by readNebular() for nebular.log_U when
+         * nebular.compute_neb is false) are reported only at
+         * verbosity() >= 1, as a "slug: note:" giving the reason.
+         */
+        void reportUnusedKeys(const utils::TrackedDeck& deck);
 
         // Simulation control parameters
         SimType simType_ = SimType::none;              /**< Simulation type */
         unsigned int verbosity_ = 0;                   /**< Level of verbosity */
+        bool strictInput_ = false;                     /**< Whether an input-deck key that is never used is an error, not a warning; from the optional top-level strict_input key */
+        std::vector<utils::DeckKeyReport> unusedKeys_;  /**< Input-deck keys that were never used; see unusedKeys() */
+        std::vector<utils::DeckKeyReport> ignoredKeys_; /**< Input-deck keys that were deliberately not read; see ignoredKeys() */
         unsigned long nTrial_ = 1;                     /**< Number of trials */
         OutputMode outputMode_ = OutputMode::h5;       /**< Output mode */
         std::string modelName_ = "slug_sim";           /**< Name of this model */

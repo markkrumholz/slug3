@@ -21,6 +21,7 @@
 #include "../specsyn/Specsyn.hpp"
 #include "../tracks/Tracks3D.hpp"
 #include "../utils/MiscUtils.hpp"
+#include "../utils/TrackedDeck.hpp"
 #include "../yields/Yields.hpp"
 #include <cstddef>
 #include <memory>
@@ -759,6 +760,74 @@ progressively more. Read live by every object that checks this
 SimControls's verbosity() -- no need to rebuild anything after
 assigning.)doc";
 
+static constexpr std::string_view strictInputPropertyDocstring =
+R"doc(Whether an input-deck key that is never used is an error.
+
+Read-only. This is the value of the optional top-level strict_input
+key of the deck this SimControls was built from, False by default.
+If False, a key that nothing reads (a typo, or a key in the wrong
+section) only produces a warning, and is listed in unusedKeys. If
+True, constructing the SimControls raises an error instead.
+
+Returns
+-------
+strict_input : bool)doc";
+
+static constexpr std::string_view unusedKeysPropertyDocstring =
+R"doc(Input-deck keys that were never used.
+
+Read-only. Filled in when the SimControls is constructed from a deck:
+every key the deck contains is recorded, and any that nothing read is
+listed here -- typically a misspelled key, or one given in the wrong
+section (e.g. n_trial under [output] rather than at the top level).
+Each such key also produces a warning when the deck is read. Empty for
+a deck with no stray keys, and for a default-constructed SimControls.
+
+Returns
+-------
+keys : list of dict
+    One dict per key, in order of path, with entries 'path' (str, the
+    dotted path of the key, e.g. "output.n_trial"), 'line' (int, its
+    line in the deck, or 0 if the deck was not parsed from text),
+    'column' (int, likewise), and 'hint' (str, a suggestion of what the
+    key was probably meant to be, e.g. "did you mean 'n_trial'?", or an
+    empty string if there is none).)doc";
+
+static constexpr std::string_view ignoredKeysPropertyDocstring =
+R"doc(Input-deck keys that were valid but deliberately not read.
+
+Read-only. Some keys are fine but have no effect for a particular
+simulation, e.g. nebular.log_U when nebular.compute_neb is false, or
+clusters.CLF in a cluster simulation. Unlike unusedKeys, these are not
+mistakes, so they produce no warning (only a note at verbosity 1 or
+higher).
+
+Returns
+-------
+keys : list of dict
+    One dict per key, in order of path, with entries 'path', 'line' and
+    'column' (as for unusedKeys) and 'reason' (str, why the key was not
+    read, e.g. "nebular.compute_neb is false").)doc";
+
+// Convert a list of input-deck key reports to a Python list of dicts.
+// Each dict has the key's path, line, and column, plus its hint (for an
+// unused key) or its reason (for an ignored one)
+static auto deckKeyReportsToPython(const std::vector<utils::DeckKeyReport>& reports, const bool ignored) -> py::list
+{
+    py::list result;
+    for (const auto& report : reports)
+    {
+        py::dict entry;
+        entry["path"] = report.path_;
+        entry["line"] = report.line_;
+        entry["column"] = report.column_;
+        if (ignored) { entry["reason"] = report.reason_; }
+        else { entry["hint"] = report.hint_; }
+        result.append(entry);
+    }
+    return result;
+}
+
 static constexpr std::string_view outTimesPropertyDocstring =
 R"doc(The output times, in years.
 
@@ -1261,6 +1330,15 @@ void bindSimControls(py::module_& m)
                 yieldsPropertyDocstring.data(), py::return_value_policy::reference_internal)
         .def_property_readonly("inputDeckStr",
                 &io::SimControls::inputDeckStr,
-                inputDeckStrPropertyDocstring.data());
+                inputDeckStrPropertyDocstring.data())
+        .def_property_readonly("strictInput",
+                &io::SimControls::strictInput,
+                strictInputPropertyDocstring.data())
+        .def_property_readonly("unusedKeys",
+                [](const io::SimControls& self) { return deckKeyReportsToPython(self.unusedKeys(), false); },
+                unusedKeysPropertyDocstring.data())
+        .def_property_readonly("ignoredKeys",
+                [](const io::SimControls& self) { return deckKeyReportsToPython(self.ignoredKeys(), true); },
+                ignoredKeysPropertyDocstring.data());
 }
 // NOLINTEND(misc-include-cleaner)

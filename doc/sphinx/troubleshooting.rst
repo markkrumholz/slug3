@@ -85,8 +85,10 @@ parse failure, e.g.:
 These all mean the same thing: a required keyword is missing, misspelled, or
 has an invalid value. See :ref:`sec-parameters` for the full, authoritative
 list of keywords, their exact spelling, and which section of the input deck
-each belongs in -- a keyword given at the wrong nesting level (e.g. outside
-its ``[section]``) is reported the same way as if it were missing entirely.
+each belongs in -- a *required* keyword given at the wrong nesting level (e.g. outside
+its ``[section]``) is reported the same way as if it were missing entirely, while an
+optional keyword given at the wrong level, or misspelled, is reported as an unused key
+(see below).
 
 One combination is rejected outright rather than merely defaulting:
 requesting checkpointing (``output.checkpoint_interval`` non-zero) together
@@ -100,6 +102,45 @@ with ``output.output_mode = "ascii"``:
 
 Switch to ``"h5"`` or ``"h5divided"`` output if you need checkpointing (see
 :ref:`ssec-parameters-output`).
+
+.. _ssec-troubleshooting-unused:
+
+Unused Keys in the Input Deck
+-------------------------------
+
+**"input deck key ... was never used"**: printed at startup for a key in the input
+deck that SLUG never reads, e.g.:
+
+::
+
+    slug: warning: input deck key 'output.n_trial' (line 18) was never used; did you mean 'n_trial'?
+
+The run continues, but the key had no effect, so the setting it was meant to control is
+at its default. The message names the key with its section (``output.n_trial`` is
+``n_trial`` in the ``[output]`` section) and the line it is on. The usual causes are:
+
+* The key is in the wrong section. Here ``n_trial`` belongs at the top level of the
+  deck, outside any ``[section]``, so it must appear above the first ``[section]``
+  header. The message says "did you mean" when it finds the same name where SLUG looks
+  for it. See :ref:`sec-parameters` for which section each keyword belongs in.
+* The key is misspelled, or has the wrong capitalization (keywords are case sensitive, so
+  ``alphafe`` is not ``alphaFe``). The message suggests the keyword you probably meant if
+  there is a close match. This only applies to optional keywords: a required keyword that is
+  misspelled is instead reported as missing, as described above.
+* A table is numbered wrongly. For example, a ``[yields.channel3]`` with no
+  ``[yields.channel2]`` is never read, because SLUG stops at the first missing number,
+  and its keys are each reported.
+
+Keys that are valid but not used for this particular simulation, such as
+``nebular.log_U`` when ``nebular.compute_neb`` is false, do *not* produce this warning;
+raise ``verbosity`` to 1 to see them listed, with the reason each was skipped (see
+:ref:`ssec-parameters-unused`). If you want a warning like this to stop SLUG instead, set
+``strict_input = true`` at the top level of the deck:
+
+::
+
+    SimControls: strict_input is set, but the input deck has keys that were never used:
+      input deck key 'output.n_trial' (line 19) was never used; did you mean 'n_trial'?
 
 .. _ssec-troubleshooting-yields:
 
@@ -151,9 +192,12 @@ rules apply as for the data files described under "Data Files Not Found" above.
 Every ``[yields.channelN]`` table needs both a ``channel`` and a ``model``, and
 ``channel`` must be one of the channels described in :ref:`sec-yields`. Note also that
 channels must be numbered consecutively from 1: SLUG stops at the first missing
-number and *silently ignores* any later table, so a ``[yields.channel3]`` with no
-``[yields.channel2]`` produces no error, but also contributes nothing to the output.
-If a channel you expected is missing from the output, check the numbering.
+number and ignores any later table, so a ``[yields.channel3]`` with no
+``[yields.channel2]`` does not stop the run, but contributes nothing to the output. Each
+of its keys is reported as unused, e.g.
+``slug: warning: input deck key 'yields.channel3.model' (line 30) was never used`` (see
+:ref:`ssec-troubleshooting-unused`). If a channel you expected is missing from the output,
+check the numbering.
 
 **Problems with the isotope list**:
 
