@@ -6,6 +6,7 @@
 # channel, ccsn/sukhbold16, is enough here).
 
 sim_type = "cluster"
+n_trial = 3
 
 [stars]
 IMF = "chabrier.toml"
@@ -30,7 +31,6 @@ model = "sukhbold16"
 start_time = 1e6
 end_time = 5e6
 ntime = 3
-n_trial = 3
 
 [nebular]
 compute_neb = false

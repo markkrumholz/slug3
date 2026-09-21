@@ -10,6 +10,7 @@
 # tests/core/assets/testGalaxy.in.
 
 sim_type = "galaxy"
+n_trial = 3
 
 [stars]
 IMF = "chabrier.toml"
@@ -41,7 +42,6 @@ model = "kobayashi06_11"
 start_time = 1e6
 end_time = 5e6
 ntime = 3
-n_trial = 3
 
 [nebular]
 compute_neb = false

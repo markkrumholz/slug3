@@ -65,12 +65,54 @@ and the number of trials to perform.
   :ref:`sec-running` for the distinction.
 * ``n_trial`` (optional, default=1): The number of independent Monte Carlo trials to run.
 * ``verbosity`` (optional, default=0): The level of diagnostic output SLUG prints while running.
-  Setting to 1 will cause SLUG to print when it starts, restarts, or ends, and setting to
-  2 or more will cause slug to print at the start of every trial.
+  Setting to 1 will cause SLUG to print when it starts, restarts, or ends, and to list any
+  keys in the input deck that were valid but not used for this simulation (see
+  :ref:`ssec-parameters-unused`); setting to 2 or more will cause slug to print at the
+  start of every trial.
+* ``strict_input`` (optional, default=false): If true, any key in the input deck that SLUG
+  never uses is an error and stops SLUG before it starts, instead of just a warning -- see
+  :ref:`ssec-parameters-unused`.
 * ``rng_seed`` (optional): An integer seed for SLUG's random number generator. If not
   given, SLUG seeds itself from the operating system's own entropy source, so
   repeated runs of the same input deck will not produce identical results unless a
   fixed seed is given.
+
+.. _ssec-parameters-unused:
+
+Unused Keywords
+---------------
+
+Any key in the input deck that SLUG never reads is reported when the deck is read. This
+almost always means a mistake: a misspelled keyword, or a keyword given in the wrong
+section, either of which would otherwise be silently ignored, leaving the default in
+place. For example, ``n_trial`` is a top-level keyword, so giving it in the ``[output]``
+section has no effect, and produces
+
+::
+
+    slug: warning: input deck key 'output.n_trial' (line 18) was never used; did you mean 'n_trial'?
+
+The message gives the full name of the key (the section, then the key), its line in the
+input deck, and, when SLUG can tell, the key it was probably meant to be: either the same
+name in a different section, or a close misspelling of a keyword that SLUG looked for and
+did not find. The run then continues, so check the output of any run whose deck produces
+this warning. If ``strict_input`` is true (see :ref:`ssec-parameters-toplevel`), SLUG
+instead stops with an error that lists every unused key.
+
+Some keys are valid but have no effect for a particular simulation, for example
+``nebular.log_U`` when ``nebular.compute_neb`` is false, ``clusters.CLF`` and the
+``[galaxy]`` section in a cluster simulation, or the ``[spectra]`` and ``[extinct]``
+settings when no spectral synthesis or extinction was requested. These are not mistakes,
+so they do not produce a warning. If ``verbosity`` is 1 or higher, SLUG instead prints a
+note for each one, giving the reason it was not used:
+
+::
+
+    slug: note: input deck key 'clusters.CLF' (line 12) was ignored: sim_type is "cluster"; this key is only used by galaxy simulations
+
+When SLUG is used from Python, the same information is available as the ``unusedKeys`` and
+``ignoredKeys`` properties of a ``SimControls`` object, and ``strictInput`` gives the value
+of ``strict_input``.
 
 .. _ssec-parameters-output:
 
@@ -331,7 +373,8 @@ computed.
   channel is described by its own subtable, ``[yields.channel1]``,
   ``[yields.channel2]``, etc. Channels must be numbered consecutively starting at 1;
   SLUG stops reading at the first number that is missing, so a ``channel3`` given
-  without a ``channel2`` is ignored. Depending on ``channel_decomposed`` (see below),
+  without a ``channel2`` is ignored (and reported as an unused key -- see
+  :ref:`ssec-parameters-unused`). Depending on ``channel_decomposed`` (see below),
   the yields from different channels are reported separately or summed together.
   Each subtable has the following keywords:
 

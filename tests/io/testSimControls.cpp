@@ -2815,6 +2815,225 @@ static auto testSimControlsSettersRejectMismatchedControls() -> int
     return 0;
 }
 
+// Paths of a list of input-deck key reports, in order
+static auto deckKeyPaths(const std::vector<utils::DeckKeyReport>& reports) -> std::vector<std::string>
+{
+    std::vector<std::string> paths;
+    for (const auto& report : reports) { paths.push_back(report.path_); }
+    return paths;
+}
+
+// Whether a list of input-deck key reports contains a key with this path
+static auto deckKeyListed(const std::vector<utils::DeckKeyReport>& reports, const std::string& path) -> bool
+{
+    return std::ranges::any_of(reports, [&path](const auto& report) { return report.path_ == path; });
+}
+
+// Verify that an input deck's stray keys are reported: a deck with no
+// stray keys reports none, a misplaced key (n_trial given under [output]
+// rather than at the top level) and a misspelled one (v_vcirt for
+// v_vcrit) are each reported with a hint for what was probably meant, and
+// both are still accepted (the run just warns) unless strict_input is set
+static auto testSimControlsUnusedKeys() -> int
+{
+    const std::string fileName = "tests/core/assets/testCluster.in";
+    int result = 0;
+
+    try
+    {
+        const io::SimControls clean(toml::parse_file(fileName));
+        if (!clean.unusedKeys().empty() || clean.strictInput())
+        {
+            std::cerr << "testSimControls: unusedKeys: expected a clean deck to report no unused keys "
+                "and strict_input to default to false\n";
+            result = 1;
+        }
+
+        toml::table inputDeck = toml::parse_file(fileName);
+        inputDeck.at_path("output").as_table()->insert_or_assign("n_trial", 5);
+        inputDeck.at_path("stars").as_table()->insert_or_assign("v_vcirt", 0.1);
+        const io::SimControls sim(inputDeck);
+        if (deckKeyPaths(sim.unusedKeys()) != std::vector<std::string>{ "output.n_trial", "stars.v_vcirt" })
+        {
+            std::cerr << "testSimControls: unusedKeys: expected exactly output.n_trial and "
+                "stars.v_vcirt to be reported, got " << sim.unusedKeys().size() << " keys\n";
+            return 1;
+        }
+        for (const auto& report : sim.unusedKeys())
+        {
+            const std::string expected = report.path_ == "output.n_trial" ?
+                "did you mean 'n_trial'?" : "did you mean 'stars.v_vcrit'?";
+            if (report.hint_ != expected)
+            {
+                std::cerr << "testSimControls: unusedKeys: hint for " << report.path_ << " was '" <<
+                    report.hint_ << "', expected '" << expected << "'\n";
+                result = 1;
+            }
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: unusedKeys: threw: " << error.what() << "\n";
+        return 1;
+    }
+    return result;
+}
+
+// Verify strict_input: an unused key then stops the run with an error
+// that names it, while a clean deck is unaffected by the flag
+static auto testSimControlsStrictInput() -> int
+{
+    const std::string fileName = "tests/core/assets/testCluster.in";
+
+    {
+        toml::table inputDeck = toml::parse_file(fileName);
+        inputDeck.insert_or_assign("strict_input", true);
+        try
+        {
+            const io::SimControls sim(inputDeck);
+            if (!sim.strictInput() || !sim.unusedKeys().empty())
+            {
+                std::cerr << "testSimControls: strictInput: expected a clean deck with strict_input "
+                    "set to construct, with strictInput() true and no unused keys\n";
+                return 1;
+            }
+        }
+        catch (const std::exception& error)
+        {
+            std::cerr << "testSimControls: strictInput: a clean deck failed under strict_input: " <<
+                error.what() << "\n";
+            return 1;
+        }
+    }
+
+    toml::table inputDeck = toml::parse_file(fileName);
+    inputDeck.insert_or_assign("strict_input", true);
+    inputDeck.at_path("output").as_table()->insert_or_assign("n_trial", 5);
+    try
+    {
+        const io::SimControls sim(inputDeck);
+        std::cerr << "testSimControls: strictInput: expected an unused key to throw under strict_input\n";
+        return 1;
+    }
+    catch (const std::runtime_error& error)
+    {
+        if (std::string(error.what()).find("output.n_trial") == std::string::npos)
+        {
+            std::cerr << "testSimControls: strictInput: expected the error to name output.n_trial, got: " <<
+                error.what() << "\n";
+            return 1;
+        }
+    }
+    return 0;
+}
+
+// Verify that keys which are valid but not read because of the
+// simulation's own settings are reported as ignored, with a reason, and
+// not as unused: a nebular key when compute_neb is false, spectral
+// synthesis keys when there is no spectra.model, galaxy keys in a
+// cluster simulation, and an extinction key when there is no extinct.AV
+static auto testSimControlsIgnoredKeys() -> int
+{
+    const std::string fileName = "tests/core/assets/testCluster.in";
+    toml::table inputDeck = toml::parse_file(fileName);
+    inputDeck.erase("spectra");
+    inputDeck.at_path("nebular").as_table()->insert_or_assign("log_U", -2.0);
+    inputDeck.at_path("stars").as_table()->insert_or_assign("CFe", 0.1);
+    inputDeck.at_path("clusters").as_table()->insert_or_assign("CLF", 1e6);
+    inputDeck.insert_or_assign("galaxy", toml::table{ { "sfr", 1.0 } });
+    inputDeck.insert_or_assign("extinct", toml::table{ { "model", "Calzetti_starburst" } });
+    inputDeck.insert_or_assign("spectra", toml::table{ { "wl_min", 1000.0 } });
+
+    try
+    {
+        const io::SimControls sim(inputDeck);
+        if (!sim.unusedKeys().empty())
+        {
+            std::cerr << "testSimControls: ignoredKeys: expected these keys to be ignored, not unused; "
+                "first unused key was " << sim.unusedKeys().front().path_ << "\n";
+            return 1;
+        }
+        int result = 0;
+        for (const char* path : { "nebular.log_U", "stars.CFe", "clusters.CLF", "galaxy.sfr",
+            "extinct.model", "spectra.wl_min" })
+        {
+            if (!deckKeyListed(sim.ignoredKeys(), path))
+            {
+                std::cerr << "testSimControls: ignoredKeys: expected " << path << " to be ignored\n";
+                result = 1;
+            }
+        }
+        for (const auto& report : sim.ignoredKeys())
+        {
+            if (report.reason_.empty())
+            {
+                std::cerr << "testSimControls: ignoredKeys: " << report.path_ << " has no reason\n";
+                result = 1;
+            }
+        }
+        return result;
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: ignoredKeys: threw: " << error.what() << "\n";
+        return 1;
+    }
+}
+
+// Verify that a yields.channelN table after a gap in the numbering (a
+// channel3 with no channel2), which SLUG has never read, is reported
+// rather than silently dropped, and that yields keys read only once a
+// channel exists (registry, isotopes) are merely ignored when there is
+// none
+static auto testSimControlsYieldsChannelGap() -> int
+{
+    constexpr std::string_view baseDeck = "tests/core/assets/testGalaxy.in";
+    toml::table inputDeck = toml::parse_file(baseDeck);
+    inputDeck.insert("yields", toml::table{
+        { "channel1", toml::table{ { "channel", "ccsn" }, { "model", "sukhbold_test" } } },
+        { "channel3", toml::table{ { "channel", "ccsn" }, { "model", "kobayashi_test" } } },
+        { "registry", "tests/yields/assets/yields.toml" },
+    });
+    try
+    {
+        const io::SimControls sim(inputDeck);
+        if (deckKeyPaths(sim.unusedKeys()) !=
+            std::vector<std::string>{ "yields.channel3.channel", "yields.channel3.model" })
+        {
+            std::cerr << "testSimControls: yieldsChannelGap: expected exactly the channel3 keys to be "
+                "reported unused, got " << sim.unusedKeys().size() << " keys\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: yieldsChannelGap: threw: " << error.what() << "\n";
+        return 1;
+    }
+
+    // With no channel1 at all, registry and isotopes go unread but are not mistakes...
+    toml::table noChannels = toml::parse_file(baseDeck);
+    noChannels.insert("yields", toml::table{
+        { "registry", "tests/yields/assets/yields.toml" }, { "isotopes", toml::array{ "Fe56" } } });
+    try
+    {
+        const io::SimControls sim(noChannels);
+        if (!sim.unusedKeys().empty() || !deckKeyListed(sim.ignoredKeys(), "yields.isotopes") ||
+            !deckKeyListed(sim.ignoredKeys(), "yields.registry"))
+        {
+            std::cerr << "testSimControls: yieldsChannelGap: expected yields.registry and "
+                "yields.isotopes to be ignored, and nothing unused, when there is no channel1\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: yieldsChannelGap: no-channel case threw: " << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
 auto testSimControls() -> int
 {
     int result = 0;
@@ -2857,5 +3076,9 @@ auto testSimControls() -> int
     result += testSimControlsSetFeHRejectsBroadening();
     result += testSimControlsSetFeHResetsTracks2DWhenNoLongerFixed();
     result += testSimControlsSettersRejectMismatchedControls();
+    result += testSimControlsUnusedKeys();
+    result += testSimControlsStrictInput();
+    result += testSimControlsIgnoredKeys();
+    result += testSimControlsYieldsChannelGap();
     return result;
 }

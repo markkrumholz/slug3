@@ -35,6 +35,7 @@
 #include "../utils/ParseUtils.hpp"
 #include "../utils/RngThread.hpp"
 #include "../utils/TOMLUtils.hpp"
+#include "../utils/TrackedDeck.hpp"
 #include "../yields/YieldCommons.hpp"
 #include "../yields/Yields.hpp"
 #include <algorithm>
@@ -78,9 +79,9 @@ auto io::SimControls::buildConstantSFR(const double sfr) -> pdfs::PDF
 }
 
 // Read an explicit array of output times from output.output_times
-static auto readOutputTimesArray(const toml::table& inputDeck) -> std::vector<double>
+static auto readOutputTimesArray(const utils::TrackedDeck& inputDeck) -> std::vector<double>
 {
-    const toml::array* arr = inputDeck.at_path("output.output_times").as_array();
+    const toml::array* arr = inputDeck.atPath("output.output_times").as_array();
     if (arr == nullptr)
     {
         throw std::runtime_error(
@@ -105,34 +106,30 @@ static auto readOutputTimesArray(const toml::table& inputDeck) -> std::vector<do
 // Generate a uniformly- or log-spaced grid of output times from
 // output.start_time, output.end_time, output.ntime, and the
 // optional output.log_time
-static auto generateOutputTimesRange(const toml::table& inputDeck) -> std::vector<double>
+static auto generateOutputTimesRange(const utils::TrackedDeck& inputDeck) -> std::vector<double>
 {
-    const auto startTimeInput = utils::getTOMLKeyWithError<double>(
-        inputDeck, "output.start_time", true);
+    const auto startTimeInput = inputDeck.value<double>("output.start_time", true);
     if (!startTimeInput.has_value())
     {
         throw std::runtime_error("SimControls: output.start_time not found");
     }
     const double startTime = startTimeInput.value();
 
-    const auto endTimeInput = utils::getTOMLKeyWithError<double>(
-        inputDeck, "output.end_time", true);
+    const auto endTimeInput = inputDeck.value<double>("output.end_time", true);
     if (!endTimeInput.has_value())
     {
         throw std::runtime_error("SimControls: output.end_time not found");
     }
     const double endTime = endTimeInput.value();
 
-    const auto nTimeInput = utils::getTOMLKeyWithError<unsigned long>(
-        inputDeck, "output.ntime", true);
+    const auto nTimeInput = inputDeck.value<unsigned long>("output.ntime", true);
     if (!nTimeInput.has_value())
     {
         throw std::runtime_error("SimControls: output.ntime not found");
     }
     const unsigned long nTime = nTimeInput.value();
 
-    const bool logTime = utils::getTOMLKeyWithError<bool>(
-        inputDeck, "output.log_time").value_or(false);
+    const bool logTime = inputDeck.value<bool>("output.log_time").value_or(false);
 
     if (startTime < 0.0 || endTime < 0.0)
     {
@@ -192,15 +189,64 @@ io::SimControls::SimControls(const toml::table& inputDeck)
     inputDeckStream << inputDeck;
     inputDeckStr_ = inputDeckStream.str();
 
-    initControlFlow(inputDeck);
-    initPhysics(inputDeck);
+    // From here on every read of the deck goes through a TrackedDeck,
+    // which records which keys are used so that any that never are can
+    // be reported at the end -- see reportUnusedKeys()
+    const utils::TrackedDeck trackedDeck(inputDeck);
+    initControlFlow(trackedDeck);
+    initPhysics(trackedDeck);
+    reportUnusedKeys(trackedDeck);
 }
 
-void io::SimControls::initControlFlow(const toml::table& inputDeck)
+// Text identifying an input-deck key in a message: its path, and its
+// line if the deck was parsed from text
+static auto describeDeckKey(const utils::DeckKeyReport& key) -> std::string
+{
+    std::string text = "'" + key.path_ + "'";
+    if (key.line_ != 0) { text += " (line " + std::to_string(key.line_) + ")"; }
+    return text;
+}
+
+// Message for a key that was never used: where it is, and what it might
+// have been meant to be
+static auto describeUnusedDeckKey(const utils::DeckKeyReport& key) -> std::string
+{
+    std::string text = "input deck key " + describeDeckKey(key) + " was never used";
+    if (!key.hint_.empty()) { text += "; " + key.hint_; }
+    return text;
+}
+
+// Record which input-deck keys were never read, and report them. A key
+// that is deliberately not read for a legitimate reason (e.g.
+// nebular.log_U when nebular.compute_neb is false) was marked ignored
+// where that decision was made, and is only mentioned at verbosity >= 1.
+// An unused key is a warning, or an error if strict_input is set.
+void io::SimControls::reportUnusedKeys(const utils::TrackedDeck& deck)
+{
+    unusedKeys_ = deck.unused();
+    ignoredKeys_ = deck.ignored();
+
+    if (strictInput_ && !unusedKeys_.empty())
+    {
+        std::string message = "SimControls: strict_input is set, but the input deck has keys that were never used:";
+        for (const auto& key : unusedKeys_) { message += "\n  " + describeUnusedDeckKey(key); }
+        throw std::runtime_error(message);
+    }
+    for (const auto& key : unusedKeys_)
+    {
+        std::cout << "slug: warning: " << describeUnusedDeckKey(key) << "\n";
+    }
+    if (verbosity_ < 1) { return; }
+    for (const auto& key : ignoredKeys_)
+    {
+        std::cout << "slug: note: input deck key " << describeDeckKey(key) << " was ignored: " << key.reason_ << "\n";
+    }
+}
+
+void io::SimControls::initControlFlow(const utils::TrackedDeck& inputDeck)
 {
     // Determine simulation type
-    const auto simTypeInput = utils::getTOMLKeyWithError<std::string>(
-        inputDeck, "sim_type", true);
+    const auto simTypeInput = inputDeck.value<std::string>("sim_type", true);
     if (!simTypeInput.has_value())
     {
         throw std::runtime_error("SimControls: sim_type not found");
@@ -214,12 +260,15 @@ void io::SimControls::initControlFlow(const toml::table& inputDeck)
 
     // Read verbosity
     const auto verbosityInput =
-        utils::getTOMLKeyWithError<unsigned int>(inputDeck, "verbosity");
+        inputDeck.value<unsigned int>("verbosity");
     if (verbosityInput.has_value()) { verbosity_ = verbosityInput.value(); }
 
+    // Read whether an input-deck key that is never used is an error,
+    // rather than just a warning -- see reportUnusedKeys()
+    strictInput_ = inputDeck.value<bool>("strict_input").value_or(false);
+
     // Read output mode
-    const auto outputMode = utils::getTOMLKeyWithError<std::string>(
-        inputDeck, "output.output_mode");
+    const auto outputMode = inputDeck.value<std::string>("output.output_mode");
     if (outputMode.has_value())
     {
         if (outputMode.value() == "h5" || outputMode.value() == "hdf5")
@@ -237,17 +286,17 @@ void io::SimControls::initControlFlow(const toml::table& inputDeck)
 
     // Read model name
     const auto modelNameInput =
-        utils::getTOMLKeyWithError<std::string>(inputDeck, "output.model_name");
+        inputDeck.value<std::string>("output.model_name");
     if (modelNameInput.has_value()) { modelName_ = modelNameInput.value(); }
 
     // Read output directory
     const auto outDirInput =
-        utils::getTOMLKeyWithError<std::string>(inputDeck, "output.out_dir");
+        inputDeck.value<std::string>("output.out_dir");
     if (outDirInput.has_value()) { outDir_ = outDirInput.value(); }
 
     // Read number of trials
     const auto nTrialInput =
-        utils::getTOMLKeyWithError<unsigned long>(inputDeck, "n_trial");
+        inputDeck.value<unsigned long>("n_trial");
     if (nTrialInput.has_value())
     {
         nTrial_ = nTrialInput.value();
@@ -261,8 +310,7 @@ void io::SimControls::initControlFlow(const toml::table& inputDeck)
     // comment) -- so a non-zero interval combined with ascii output is
     // rejected here, at construction, rather than left to fail later,
     // mid-run, the first time a checkpoint would actually be attempted.
-    const auto checkpointIntervalInput = utils::getTOMLKeyWithError<unsigned long>(
-        inputDeck, "output.checkpoint_interval");
+    const auto checkpointIntervalInput = inputDeck.value<unsigned long>("output.checkpoint_interval");
     if (checkpointIntervalInput.has_value())
     {
         checkpointInterval_ = checkpointIntervalInput.value();
@@ -283,25 +331,25 @@ void io::SimControls::initControlFlow(const toml::table& inputDeck)
 
     // If we have been given a specific RNG seed, use it
     const auto rngSeed =
-        utils::getTOMLKeyWithError<unsigned long>(inputDeck, "rng_seed");
+        inputDeck.value<unsigned long>("rng_seed");
     if (rngSeed.has_value()) { utils::rng().seed(rngSeed.value()); }
 
     // Read optional integrator tolerance controls; defaults match
     // PDFIntegrator's own defaults so omitting them is a no-op
-    const auto relTolInput = utils::getTOMLKeyWithError<double>(inputDeck, "integrator.rel_tol");
+    const auto relTolInput = inputDeck.value<double>("integrator.rel_tol");
     if (relTolInput.has_value()) { intRelTol_ = relTolInput.value(); }
-    const auto absTolInput = utils::getTOMLKeyWithError<double>(inputDeck, "integrator.abs_tol");
+    const auto absTolInput = inputDeck.value<double>("integrator.abs_tol");
     if (absTolInput.has_value()) { intAbsTol_ = absTolInput.value(); }
-    const auto maxIterInput = utils::getTOMLKeyWithError<std::size_t>(inputDeck, "integrator.max_iter");
+    const auto maxIterInput = inputDeck.value<std::size_t>("integrator.max_iter");
     if (maxIterInput.has_value()) { intMaxIter_ = maxIterInput.value(); }
 }
 
-void io::SimControls::initPhysics(const toml::table& inputDeck)
+void io::SimControls::initPhysics(const utils::TrackedDeck& inputDeck)
 {
     // Read IMF, CMF, and FeH
-    imf_ = utils::initPDFFromKey(inputDeck, "stars.IMF", imfPrefix);
-    cmf_ = utils::initPDFFromKey(inputDeck, "clusters.CMF");
-    fehDist_ = utils::initPDFFromKey(inputDeck, "stars.FeH");
+    imf_ = inputDeck.initPDF("stars.IMF", imfPrefix);
+    cmf_ = inputDeck.initPDF("clusters.CMF");
+    fehDist_ = inputDeck.initPDF("stars.FeH");
 
     // Read the tracks. Needs fehDist_ (just set above) to pick the
     // [Fe/H] range to load; done before readSpectra() (which used to
@@ -363,15 +411,15 @@ void io::SimControls::initPhysics(const toml::table& inputDeck)
     if (simType_ == SimType::galaxy)
     {
         // CLF
-        clf_ = utils::initPDFFromKey(inputDeck, "clusters.CLF");
+        clf_ = inputDeck.initPDF("clusters.CLF");
 
         // SFR: exactly one of galaxy.sfr (a rate as a function of
         // time -- possibly constant, possibly not, see below) or
         // galaxy.sfr_dist (a distribution to draw a single, constant-
         // for-the-whole-simulation rate from once per Galaxy -- see
         // sfrDist()'s own comment) is required.
-        const auto sfrNode = inputDeck.at_path("galaxy.sfr");
-        const auto sfrDistNode = inputDeck.at_path("galaxy.sfr_dist");
+        const auto sfrNode = inputDeck.atPath("galaxy.sfr");
+        const auto sfrDistNode = inputDeck.atPath("galaxy.sfr_dist");
         if (sfrNode && sfrDistNode)
         {
             throw std::runtime_error(
@@ -411,7 +459,7 @@ void io::SimControls::initPhysics(const toml::table& inputDeck)
             // galaxy.sfr, a numerical value here is interpreted as an
             // ordinary delta function, via the same utils::
             // initPDFFromKey() every other PDF-valued key uses
-            sfrDist_ = utils::initPDFFromKey(inputDeck, "galaxy.sfr_dist");
+            sfrDist_ = inputDeck.initPDF("galaxy.sfr_dist");
         }
         else
         {
@@ -423,9 +471,16 @@ void io::SimControls::initPhysics(const toml::table& inputDeck)
         // Fraction of stellar mass formed in stochastically-treated
         // clusters, optional, defaults to fCluster_'s own in-class
         // default of 1.0
-        const auto fClusterInput = utils::getTOMLKeyWithError<double>(
-            inputDeck, "clusters.f_cluster");
+        const auto fClusterInput = inputDeck.value<double>("clusters.f_cluster");
         if (fClusterInput.has_value()) { fCluster_ = fClusterInput.value(); }
+    }
+    else
+    {
+        // These keys only mean anything for a galaxy-type simulation
+        constexpr auto reason = "sim_type is \"cluster\"; this key is only used by galaxy simulations";
+        inputDeck.markIgnored("clusters.CLF", reason);
+        inputDeck.markIgnored("clusters.f_cluster", reason);
+        inputDeck.markIgnored("galaxy", reason);
     }
 
     // If this simulation has a fixed [Fe/H], precompute the slice at
@@ -439,7 +494,7 @@ void io::SimControls::initPhysics(const toml::table& inputDeck)
     }
 
     // Read minimum stochastic mass
-    auto minSM = utils::getTOMLKeyWithError<double>(inputDeck, "stars.min_stoch_mass");
+    auto minSM = inputDeck.value<double>("stars.min_stoch_mass");
     if (minSM.has_value())
     {
         minStochMass_ = minSM.value();
@@ -447,7 +502,7 @@ void io::SimControls::initPhysics(const toml::table& inputDeck)
     }
 }
 
-void io::SimControls::setOutputTimes(const toml::table& inputDeck)
+void io::SimControls::setOutputTimes(const utils::TrackedDeck& inputDeck)
 {
     // This routine computes the output times. A user can specify the
     // times of outputs in one of two ways:
@@ -485,10 +540,10 @@ void io::SimControls::setOutputTimes(const toml::table& inputDeck)
     // invalid, uninitialized PDF.
 
     // Determine which option(s) the user has specified
-    const bool hasTimes = static_cast<bool>(inputDeck.at_path("output.output_times"));
-    const bool hasStart = static_cast<bool>(inputDeck.at_path("output.start_time"));
-    const bool hasEnd = static_cast<bool>(inputDeck.at_path("output.end_time"));
-    const bool hasNTime = static_cast<bool>(inputDeck.at_path("output.ntime"));
+    const bool hasTimes = static_cast<bool>(inputDeck.atPath("output.output_times"));
+    const bool hasStart = static_cast<bool>(inputDeck.atPath("output.start_time"));
+    const bool hasEnd = static_cast<bool>(inputDeck.atPath("output.end_time"));
+    const bool hasNTime = static_cast<bool>(inputDeck.atPath("output.ntime"));
     const bool hasRange = hasStart || hasEnd || hasNTime;
 
     const int nOptions = static_cast<int>(hasTimes) + static_cast<int>(hasRange);
@@ -512,7 +567,7 @@ void io::SimControls::setOutputTimes(const toml::table& inputDeck)
     {
         try
         {
-            outTimeDist_ = utils::initPDFFromKey(inputDeck, "output.output_times");
+            outTimeDist_ = inputDeck.initPDF("output.output_times");
         }
         catch (const std::runtime_error&)
         {
@@ -532,13 +587,13 @@ void io::SimControls::setOutputTimes(const toml::table& inputDeck)
 }
 
 // Read an optional output.<key> boolean, defaulting to true if absent
-static auto readWriteFlag(const toml::table& inputDeck, const std::string& key) -> bool
+static auto readWriteFlag(const utils::TrackedDeck& inputDeck, const std::string& key) -> bool
 {
-    const auto value = utils::getTOMLKeyWithError<bool>(inputDeck, key);
+    const auto value = inputDeck.value<bool>(key);
     return !value.has_value() || value.value();
 }
 
-void io::SimControls::readOutput(const toml::table& inputDeck)
+void io::SimControls::readOutput(const utils::TrackedDeck& inputDeck)
 {
     writeCluster_ = readWriteFlag(inputDeck, "output.write_cluster");
     writeClusterSpec_ = readWriteFlag(inputDeck, "output.write_cluster_spec");
@@ -670,15 +725,15 @@ void io::SimControls::setSFR(const std::string& sfr)
 }
 
 // Track reader
-void io::SimControls::readTracks(const toml::table& inputDeck)
+void io::SimControls::readTracks(const utils::TrackedDeck& inputDeck)
 {
     // Get required tracks key
-    auto trackName = utils::getTOMLKeyWithError<std::string>(inputDeck, "stars.tracks", true);
+    auto trackName = inputDeck.value<std::string>("stars.tracks", true);
 
     // Check for optional parameters
-    auto registryName = utils::getTOMLKeyWithError<std::string>(inputDeck, "stars.track_registry");
-    auto vvcrit = utils::getTOMLKeyWithError<double>(inputDeck, "stars.v_vcrit");
-    auto afe = utils::getTOMLKeyWithError<double>(inputDeck, "stars.alphaFe");
+    auto registryName = inputDeck.value<std::string>("stars.track_registry");
+    auto vvcrit = inputDeck.value<double>("stars.v_vcrit");
+    auto afe = inputDeck.value<double>("stars.alphaFe");
 
     // Construct tracks from input data
     tracks_ = std::make_shared<tracks::Tracks3D>(
@@ -691,17 +746,22 @@ void io::SimControls::readTracks(const toml::table& inputDeck)
 }
 
 // Spectral synthesizer reader
-void io::SimControls::readSpectra(const toml::table& inputDeck)
+void io::SimControls::readSpectra(const utils::TrackedDeck& inputDeck)
 {
     // Check for an optional alternative registry
-    auto registryNameInput = utils::getTOMLKeyWithError<std::string>(
-        inputDeck, "spectra.registry");
+    auto registryNameInput = inputDeck.value<std::string>("spectra.registry");
     const std::string registryName = registryNameInput.value_or(specsyn::defaultRegistry);
 
     // spectra.model is optional -- if it is absent, this simulation
     // computes no spectra, and specsyn_ stays null
-    const auto modelNode = inputDeck.at_path("spectra.model");
-    if (!modelNode) { return; }
+    const auto modelNode = inputDeck.atPath("spectra.model");
+    if (!modelNode)
+    {
+        constexpr auto reason = "spectra.model was not given, so no spectra are computed";
+        inputDeck.markIgnored("spectra", reason);
+        inputDeck.markIgnored("stars.CFe", reason); // only used by spectral synthesis
+        return;
+    }
 
     // Load every library-based model over tracks_.feH()'s own
     // [min, max] range, not fehDist_'s own -- tracks_.feH() is always
@@ -733,9 +793,9 @@ void io::SimControls::readSpectra(const toml::table& inputDeck)
     // library's own native grid, so that every spectral synthesizer
     // built without explicit wavelength settings covers the same
     // physically-motivated range by default.
-    const auto wlMinInput = utils::getTOMLKeyWithError<double>(inputDeck, "spectra.wl_min");
-    const auto wlMaxInput = utils::getTOMLKeyWithError<double>(inputDeck, "spectra.wl_max");
-    const auto nWlInput = utils::getTOMLKeyWithError<unsigned long>(inputDeck, "spectra.nwl");
+    const auto wlMinInput = inputDeck.value<double>("spectra.wl_min");
+    const auto wlMaxInput = inputDeck.value<double>("spectra.wl_max");
+    const auto nWlInput = inputDeck.value<unsigned long>("spectra.nwl");
     if ((wlMinInput.has_value() || wlMaxInput.has_value()) &&
         !(wlMinInput.has_value() && wlMaxInput.has_value() && nWlInput.has_value()))
     {
@@ -749,16 +809,16 @@ void io::SimControls::readSpectra(const toml::table& inputDeck)
 
     // Optional redshift, read live by every Specsyn's/Extinct's own
     // wlObs() (see z()); 0 (no redshift) if not supplied
-    const auto zInput = utils::getTOMLKeyWithError<double>(inputDeck, "spectra.z");
+    const auto zInput = inputDeck.value<double>("spectra.z");
     z_ = zInput.value_or(0.0);
 
     // Optional stars.alphaFe and stars.CFe: if not supplied, fall back
     // to the library defaults. stars.alphaFe is the same key that
     // readTracks() also reads (tracks and spectra share the same AFe
     // value), while stars.CFe is spectra-only (tracks have no CFe axis).
-    const auto afeInput = utils::getTOMLKeyWithError<double>(inputDeck, "stars.alphaFe");
+    const auto afeInput = inputDeck.value<double>("stars.alphaFe");
     const double afe = afeInput.value_or(tracks::defaultAFe);
-    const auto cfeInput = utils::getTOMLKeyWithError<double>(inputDeck, "stars.CFe");
+    const auto cfeInput = inputDeck.value<double>("stars.CFe");
     const double cfe = cfeInput.value_or(specsyn::defaultCFe);
 
     // A single string names one model directly, unless it's one of two
@@ -846,14 +906,14 @@ void io::SimControls::readSpectra(const toml::table& inputDeck)
 }
 
 // Photometric filter collection reader
-void io::SimControls::readFilters(const toml::table& inputDeck)
+void io::SimControls::readFilters(const utils::TrackedDeck& inputDeck)
 {
     // phot.system: optional; if present, must name one of the defined
     // photometric systems. Flambda (a raw flux, needing no Vega
     // spectrum or other extra data) is the default if the key is
     // absent entirely.
     phot::PhotSystem photSystem = phot::PhotSystem::Flambda;
-    const auto systemNode = inputDeck.at_path("phot.system");
+    const auto systemNode = inputDeck.atPath("phot.system");
     if (systemNode)
     {
         const auto systemStr = systemNode.value<std::string>();
@@ -876,7 +936,7 @@ void io::SimControls::readFilters(const toml::table& inputDeck)
     }
 
     // phot.registry: optional string override of the default filter registry
-    const auto registryInput = utils::getTOMLKeyWithError<std::string>(inputDeck, "phot.registry");
+    const auto registryInput = inputDeck.value<std::string>("phot.registry");
     const std::string registryName = registryInput.value_or(phot::defaultRegistry);
 
     // phot.vega: optional string override of the default Vega
@@ -888,14 +948,14 @@ void io::SimControls::readFilters(const toml::table& inputDeck)
     // before any filter's own lazy Filter::fluxVega() can beat it to
     // the punch with the default file instead. The returned spectrum
     // itself is not needed here, only the side effect of loading it.
-    const auto vegaInput = utils::getTOMLKeyWithError<std::string>(inputDeck, "phot.vega");
+    const auto vegaInput = inputDeck.value<std::string>("phot.vega");
     if (vegaInput.has_value()) { phot::vegaSpectrum(vegaInput.value()); }
 
     // phot.filters: optional; a single string names one filter
     // directly, interpreted as an array of length 1; anything else
     // must be an array of strings
     std::vector<std::string> filterNames;
-    const auto filtersNode = inputDeck.at_path("phot.filters");
+    const auto filtersNode = inputDeck.atPath("phot.filters");
     if (filtersNode)
     {
         if (const auto single = filtersNode.value<std::string>(); single.has_value())
@@ -953,7 +1013,7 @@ static auto buildDeltaAV0() -> pdfs::PDF
 }
 
 // Extinction curve reader
-void io::SimControls::readExtinct(const toml::table& inputDeck)
+void io::SimControls::readExtinct(const utils::TrackedDeck& inputDeck)
 {
     // extinct.AV / extinct.AV_field: both optional; if neither is
     // given, this simulation applies no extinction at all, and
@@ -962,22 +1022,25 @@ void io::SimControls::readExtinct(const toml::table& inputDeck)
     // (below), and whichever of the two was not given is set to a
     // delta function PDF at 0 instead of being left invalid -- see
     // buildDeltaAV0()'s own comment for why.
-    const auto avNode = inputDeck.at_path("extinct.AV");
-    const auto avFieldNode = inputDeck.at_path("extinct.AV_field");
-    if (!avNode && !avFieldNode) { return; }
+    const auto avNode = inputDeck.atPath("extinct.AV");
+    const auto avFieldNode = inputDeck.atPath("extinct.AV_field");
+    if (!avNode && !avFieldNode)
+    {
+        inputDeck.markIgnored("extinct",
+            "neither extinct.AV nor extinct.AV_field was given, so no extinction is applied");
+        return;
+    }
 
-    avDist_ = avNode ? utils::initPDFFromKey(inputDeck, "extinct.AV") : buildDeltaAV0();
-    avDistField_ = avFieldNode ? utils::initPDFFromKey(inputDeck, "extinct.AV_field") : buildDeltaAV0();
+    avDist_ = avNode ? inputDeck.initPDF("extinct.AV") : buildDeltaAV0();
+    avDistField_ = avFieldNode ? inputDeck.initPDF("extinct.AV_field") : buildDeltaAV0();
 
     // extinct.model: required now that extinct.AV or extinct.AV_field
     // was given, names the extinction curve to use
-    const auto model = utils::getTOMLKeyWithError<std::string>(
-        inputDeck, "extinct.model", true);
+    const auto model = inputDeck.value<std::string>("extinct.model", true);
 
     // extinct.registry: optional override of the default extinction
     // curve registry
-    const auto registryInput = utils::getTOMLKeyWithError<std::string>(
-        inputDeck, "extinct.registry");
+    const auto registryInput = inputDeck.value<std::string>("extinct.registry");
     const std::string registryName = registryInput.value_or(extinct::defaultRegistry);
 
     // Extinction requires a spectral synthesizer to provide the
@@ -1057,7 +1120,7 @@ static auto parseIsotopeEntry(const std::string& entry) -> std::reference_wrappe
 }
 
 // Nucleosynthetic yield channel reader
-void io::SimControls::readYields(const toml::table& inputDeck)
+void io::SimControls::readYields(const utils::TrackedDeck& inputDeck)
 {
     yieldChannels_.clear();
 
@@ -1066,12 +1129,11 @@ void io::SimControls::readYields(const toml::table& inputDeck)
     for (std::size_t i = 1; ; ++i)
     {
         const std::string tableKey = "yields.channel" + std::to_string(i);
-        if (!inputDeck.at_path(tableKey)) { break; }
+        if (!inputDeck.atPath(tableKey)) { break; }
 
         // yields.channelN.channel: required, must match one of
         // yields::channelStr's own entries
-        const auto channelInput = utils::getTOMLKeyWithError<std::string>(
-            inputDeck, tableKey + ".channel", true);
+        const auto channelInput = inputDeck.value<std::string>(tableKey + ".channel", true);
         const auto* const channelIt = std::ranges::find(
             yields::channelStr, channelInput.value()); // NOLINT(bugprone-unchecked-optional-access) -- required=true above guarantees channelInput has a value or getTOMLKeyWithError already threw
         if (channelIt == yields::channelStr.end())
@@ -1086,12 +1148,11 @@ void io::SimControls::readYields(const toml::table& inputDeck)
         // yields.channelN.model: required, but not itself validated
         // here -- see YieldChannel::YieldChannel()'s own comment for
         // where that happens
-        const auto modelInput = utils::getTOMLKeyWithError<std::string>(
-            inputDeck, tableKey + ".model", true);
+        const auto modelInput = inputDeck.value<std::string>(tableKey + ".model", true);
 
         // yields.channelN.m_min/m_max: both independently optional
-        const auto mMinInput = utils::getTOMLKeyWithError<double>(inputDeck, tableKey + ".m_min");
-        const auto mMaxInput = utils::getTOMLKeyWithError<double>(inputDeck, tableKey + ".m_max");
+        const auto mMinInput = inputDeck.value<double>(tableKey + ".m_min");
+        const auto mMaxInput = inputDeck.value<double>(tableKey + ".m_max");
 
         yieldChannels_.push_back(yields::YieldChannelDescriptor{
             channel, modelInput.value(), mMinInput, mMaxInput}); // NOLINT(bugprone-unchecked-optional-access) -- required=true above guarantees modelInput has a value or getTOMLKeyWithError already threw
@@ -1099,16 +1160,22 @@ void io::SimControls::readYields(const toml::table& inputDeck)
 
     // yields.channel_decomposed: optional, read regardless of whether
     // yieldChannels_ ends up empty (harmless either way)
-    yieldsChannelDecomposed_ = utils::getTOMLKeyWithError<bool>(
-        inputDeck, "yields.channel_decomposed").value_or(true);
+    yieldsChannelDecomposed_ = inputDeck.value<bool>("yields.channel_decomposed").value_or(true);
 
     // yields.no_decay: optional, read regardless of whether
     // yieldChannels_ ends up empty (harmless either way), like
     // yields.channel_decomposed above
-    noDecay_ = utils::getTOMLKeyWithError<bool>(
-        inputDeck, "yields.no_decay").value_or(false);
+    noDecay_ = inputDeck.value<bool>("yields.no_decay").value_or(false);
 
-    if (yieldChannels_.empty()) { return; }
+    if (yieldChannels_.empty())
+    {
+        // Only the keys read after this point; a stray yields.channelN
+        // table is deliberately not covered, so that one is reported
+        constexpr auto reason = "no yields.channel1 was given, so no yields are computed";
+        inputDeck.markIgnored("yields.registry", reason);
+        inputDeck.markIgnored("yields.isotopes", reason);
+        return;
+    }
 
     // Sanity check: if yield channels were requested but the computed
     // yields would never be written anywhere, that's almost certainly
@@ -1131,7 +1198,7 @@ void io::SimControls::readYields(const toml::table& inputDeck)
     }
 
     // yields.registry: optional override of the default yield registry
-    const auto registryInput = utils::getTOMLKeyWithError<std::string>(inputDeck, "yields.registry");
+    const auto registryInput = inputDeck.value<std::string>("yields.registry");
     const std::string registryName = registryInput.value_or(yields::defaultRegistry);
 
     yields_ = std::make_shared<yields::Yields>(*this, registryName);
@@ -1146,7 +1213,7 @@ void io::SimControls::readYields(const toml::table& inputDeck)
     // symbol). Must be an array of strings; absent entirely leaves
     // yields_->isotopes() at the union rebuildYieldGrid() already
     // built above, unrestricted.
-    const auto isotopesNode = inputDeck.at_path("yields.isotopes");
+    const auto isotopesNode = inputDeck.atPath("yields.isotopes");
     if (isotopesNode)
     {
         const toml::array* const isotopesArr = isotopesNode.as_array();
@@ -1166,7 +1233,7 @@ void io::SimControls::readYields(const toml::table& inputDeck)
 }
 
 // Nebular emission controls and grid reader
-void io::SimControls::readNebular(const toml::table& inputDeck)
+void io::SimControls::readNebular(const utils::TrackedDeck& inputDeck)
 {
     // nebular.compute_neb: whether nebular emission is computed at
     // all. Nebular emission is added to a synthesized spectrum, and the
@@ -1177,7 +1244,7 @@ void io::SimControls::readNebular(const toml::table& inputDeck)
     // is set (nebular::defaultComputeNeb), false otherwise. Explicitly
     // asking for nebular emission with no spectral synthesizer is an
     // error, rather than being silently ignored.
-    const auto computeNeb = utils::getTOMLKeyWithError<bool>(inputDeck, "nebular.compute_neb");
+    const auto computeNeb = inputDeck.value<bool>("nebular.compute_neb");
     if (specsyn_ == nullptr)
     {
         if (computeNeb.value_or(false))
@@ -1188,6 +1255,8 @@ void io::SimControls::readNebular(const toml::table& inputDeck)
                 "set in the input deck)");
         }
         nebControls_.computeNeb_ = false;
+        inputDeck.markIgnored("nebular",
+            "no spectral synthesizer was requested (spectra.model was not given), so nebular emission is not computed");
         return;
     }
     nebControls_.computeNeb_ = computeNeb.value_or(nebular::defaultComputeNeb);
@@ -1196,7 +1265,11 @@ void io::SimControls::readNebular(const toml::table& inputDeck)
     // skipped (their defaults are irrelevant, since nebular_ is left
     // null either way) -- mirrors readExtinct()'s own early return when
     // neither extinct.AV nor extinct.AV_field was given.
-    if (!nebControls_.computeNeb_) { return; }
+    if (!nebControls_.computeNeb_)
+    {
+        inputDeck.markIgnored("nebular", "nebular.compute_neb is false");
+        return;
+    }
 
     // Every remaining nebular.* control parameter is independently
     // optional -- unlike readSpectra()'s/readExtinct()'s own
@@ -1205,18 +1278,18 @@ void io::SimControls::readNebular(const toml::table& inputDeck)
     // simply leaves nebControls_'s own field at whatever
     // NebularControls's own default member initializer already set
     // it to.
-    const auto logU = utils::getTOMLKeyWithError<double>(inputDeck, "nebular.log_U");
+    const auto logU = inputDeck.value<double>("nebular.log_U");
     if (logU) { nebControls_.logU_ = logU.value(); }
 
-    const auto covFac = utils::getTOMLKeyWithError<double>(inputDeck, "nebular.cov_fac");
+    const auto covFac = inputDeck.value<double>("nebular.cov_fac");
     if (covFac) { nebControls_.covFac_ = covFac.value(); }
 
-    const auto lineWidth = utils::getTOMLKeyWithError<double>(inputDeck, "nebular.line_width");
+    const auto lineWidth = inputDeck.value<double>("nebular.line_width");
     if (lineWidth) { nebControls_.lineWidth_ = lineWidth.value(); }
 
     // nebular.table: optional override of the default nebular
     // emission table to load this track set's own grid from
-    const auto tableInput = utils::getTOMLKeyWithError<std::string>(inputDeck, "nebular.table");
+    const auto tableInput = inputDeck.value<std::string>("nebular.table");
     const std::string tableName = tableInput.value_or(nebular::defaultTable);
 
     // stars.tracks/stars.v_vcrit: the same keys, read the same way, as
@@ -1225,8 +1298,8 @@ void io::SimControls::readNebular(const toml::table& inputDeck)
     // from tracks_ here; stars.tracks is already mandatory (readTracks()
     // would have thrown before this method ever ran if it were absent),
     // so re-reading it here as required is always safe.
-    const auto trackName = utils::getTOMLKeyWithError<std::string>(inputDeck, "stars.tracks", true);
-    const auto vvcrit = utils::getTOMLKeyWithError<double>(inputDeck, "stars.v_vcrit");
+    const auto trackName = inputDeck.value<std::string>("stars.tracks", true);
+    const auto vvcrit = inputDeck.value<double>("stars.v_vcrit");
 
     nebular_ = std::make_shared<nebular::Nebular>(
         tableName, trackName.value(), *this, vvcrit.value_or(tracks::defaultVVcrit)); // NOLINT(bugprone-unchecked-optional-access) -- required=true above guarantees trackName has a value or getTOMLKeyWithError already threw

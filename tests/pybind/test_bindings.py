@@ -110,6 +110,7 @@ resolves stars.IMF = "chabrier.toml" via SLUG_DIR + "data/imfs".
 """
 
 import gc
+import glob
 import math
 import pathlib
 import tomllib
@@ -1160,6 +1161,92 @@ def test_simcontrols_nebular_survives_replacement():
 
     controls.setNebular(None)
     assert list(old_nebular.lineWl()) == pytest.approx(old_line_wl)
+
+
+def _cluster_deck_text_with(section, line):
+    """CLUSTER_DECK's text with an extra line inserted just after the
+    header of the given [section], returning the new text and the
+    (1-based) line number the new line ends up on."""
+    lines = pathlib.Path(CLUSTER_DECK).read_text().splitlines()
+    header = lines.index(f"[{section}]")
+    lines.insert(header + 1, line)
+    return "\n".join(lines) + "\n", header + 2
+
+
+def test_simcontrols_unused_keys_reports_stray_keys():
+    """A key nothing reads is listed in unusedKeys with its line in the
+    deck and a hint for what it was probably meant to be: n_trial given
+    under [output] rather than at the top level, and a misspelled
+    stars.v_vcrit."""
+    text, _ = _cluster_deck_text_with("output", "n_trial = 5")
+    text = text.replace("[stars]\n", "[stars]\nv_vcirt = 0.1\n", 1)
+    line = text.splitlines().index("n_trial = 5") + 1  # after both insertions
+    controls = slug.SimControls(text)
+
+    keys = {key["path"]: key for key in controls.unusedKeys}
+    assert sorted(keys) == ["output.n_trial", "stars.v_vcirt"]
+    assert keys["output.n_trial"]["line"] == line
+    assert keys["output.n_trial"]["hint"] == "did you mean 'n_trial'?"
+    assert keys["stars.v_vcirt"]["hint"] == "did you mean 'stars.v_vcrit'?"
+    assert controls.strictInput is False
+
+
+def test_simcontrols_unused_keys_empty_for_clean_deck():
+    """A deck with no stray keys reports none, and none ignored."""
+    controls = slug.SimControls(CLUSTER_DECK)
+    assert controls.unusedKeys == []
+    assert controls.strictInput is False
+
+
+def test_simcontrols_strict_input_rejects_unused_keys():
+    """With strict_input = true, an unused key is an error naming it."""
+    text, _ = _cluster_deck_text_with("output", "n_trial = 5")
+    text = "strict_input = true\n" + text
+    with pytest.raises(RuntimeError, match="output.n_trial"):
+        slug.SimControls(text)
+
+
+def test_simcontrols_ignored_keys_have_reasons():
+    """A valid key that is not read because of the simulation's own
+    settings (nebular.log_U with compute_neb = false) is listed in
+    ignoredKeys with a reason, not in unusedKeys."""
+    text, _ = _cluster_deck_text_with("nebular", "log_U = -2.0")
+    controls = slug.SimControls(text)
+    assert controls.unusedKeys == []
+    ignored = {key["path"]: key for key in controls.ignoredKeys}
+    assert "nebular.log_U" in ignored
+    assert "compute_neb" in ignored["nebular.log_U"]["reason"]
+
+
+def test_repo_input_decks_have_no_unused_keys(monkeypatch):
+    """Every input deck in the repository's tests and examples leaves no
+    key unused, so a misplaced or misspelled key (like n_trial under
+    [output]) cannot creep back in unnoticed. Decks that cannot be
+    constructed at all -- ones that are invalid on purpose, or that need
+    data files that are not present -- are skipped."""
+    root = pathlib.Path.cwd()
+    decks = sorted(set(glob.glob("tests/**/*.in", recursive=True)) | set(glob.glob("examples/*/*.toml")))
+    checked = 0
+    problems = {}
+    for deck in decks:
+        try:
+            contents = tomllib.loads((root / deck).read_text())
+        except (tomllib.TOMLDecodeError, UnicodeDecodeError):
+            continue
+        if "sim_type" not in contents:
+            continue  # not an input deck
+        # Examples locate their own files relative to their own directory
+        deck_dir = root / pathlib.Path(deck).parent if deck.startswith("examples/") else root
+        monkeypatch.chdir(deck_dir)
+        try:
+            controls = slug.SimControls(str((root / deck).resolve()))
+        except (RuntimeError, ValueError):
+            continue
+        checked += 1
+        if controls.unusedKeys:
+            problems[deck] = [f"{key['path']} (line {key['line']})" for key in controls.unusedKeys]
+    assert checked >= 20, f"only {checked} decks could be checked; expected the repo's decks to be found"
+    assert not problems, f"input decks with keys that nothing reads: {problems}"
 
 
 def test_simcontrols_set_nebular_none_removes_grid():
