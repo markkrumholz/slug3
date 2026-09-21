@@ -1226,6 +1226,7 @@ def test_repo_input_decks_have_no_unused_keys(monkeypatch):
     data files that are not present -- are skipped."""
     root = pathlib.Path.cwd()
     decks = sorted(set(glob.glob("tests/**/*.in", recursive=True)) | set(glob.glob("examples/*/*.toml")))
+    found = 0
     checked = 0
     problems = {}
     for deck in decks:
@@ -1235,6 +1236,7 @@ def test_repo_input_decks_have_no_unused_keys(monkeypatch):
             continue
         if "sim_type" not in contents:
             continue  # not an input deck
+        found += 1
         # Examples locate their own files relative to their own directory
         deck_dir = root / pathlib.Path(deck).parent if deck.startswith("examples/") else root
         monkeypatch.chdir(deck_dir)
@@ -1245,7 +1247,13 @@ def test_repo_input_decks_have_no_unused_keys(monkeypatch):
         checked += 1
         if controls.unusedKeys:
             problems[deck] = [f"{key['path']} (line {key['line']})" for key in controls.unusedKeys]
-    assert checked >= 20, f"only {checked} decks could be checked; expected the repo's decks to be found"
+    # The number of decks found does not depend on which data files are
+    # installed, so it guards against the search itself being broken; how
+    # many of them can be constructed does depend on that (some need
+    # large data files that not every environment has), so only require
+    # a modest number
+    assert found >= 30, f"only {found} input decks were found; expected the repo's decks to be found"
+    assert checked >= 10, f"only {checked} of {found} decks could be constructed and checked"
     assert not problems, f"input decks with keys that nothing reads: {problems}"
 
 
