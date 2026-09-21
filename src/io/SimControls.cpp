@@ -748,12 +748,10 @@ void io::SimControls::readTracks(const utils::TrackedDeck& inputDeck)
 // Spectral synthesizer reader
 void io::SimControls::readSpectra(const utils::TrackedDeck& inputDeck)
 {
-    // Check for an optional alternative registry
-    auto registryNameInput = inputDeck.value<std::string>("spectra.registry");
-    const std::string registryName = registryNameInput.value_or(specsyn::defaultRegistry);
-
     // spectra.model is optional -- if it is absent, this simulation
-    // computes no spectra, and specsyn_ stays null
+    // computes no spectra, and specsyn_ stays null. Nothing else in
+    // [spectra] is read before this check, so that all of it (including
+    // spectra.registry) is reported as ignored rather than as used.
     const auto modelNode = inputDeck.atPath("spectra.model");
     if (!modelNode)
     {
@@ -762,6 +760,10 @@ void io::SimControls::readSpectra(const utils::TrackedDeck& inputDeck)
         inputDeck.markIgnored("stars.CFe", reason); // only used by spectral synthesis
         return;
     }
+
+    // Check for an optional alternative registry
+    auto registryNameInput = inputDeck.value<std::string>("spectra.registry");
+    const std::string registryName = registryNameInput.value_or(specsyn::defaultRegistry);
 
     // Load every library-based model over tracks_.feH()'s own
     // [min, max] range, not fehDist_'s own -- tracks_.feH() is always

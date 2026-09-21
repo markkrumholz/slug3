@@ -2942,7 +2942,8 @@ static auto testSimControlsIgnoredKeys() -> int
     inputDeck.at_path("clusters").as_table()->insert_or_assign("CLF", 1e6);
     inputDeck.insert_or_assign("galaxy", toml::table{ { "sfr", 1.0 } });
     inputDeck.insert_or_assign("extinct", toml::table{ { "model", "Calzetti_starburst" } });
-    inputDeck.insert_or_assign("spectra", toml::table{ { "wl_min", 1000.0 } });
+    inputDeck.insert_or_assign("spectra", toml::table{
+        { "wl_min", 1000.0 }, { "registry", "tests/specsyn/assets/spectra.toml" } });
 
     try
     {
@@ -2955,7 +2956,7 @@ static auto testSimControlsIgnoredKeys() -> int
         }
         int result = 0;
         for (const char* path : { "nebular.log_U", "stars.CFe", "clusters.CLF", "galaxy.sfr",
-            "extinct.model", "spectra.wl_min" })
+            "extinct.model", "spectra.wl_min", "spectra.registry" })
         {
             if (!deckKeyListed(sim.ignoredKeys(), path))
             {
