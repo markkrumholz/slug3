@@ -35,6 +35,7 @@ namespace yields
         // NOLINTBEGIN(readability-identifier-naming) -- trailing underscore on each enumerator matches this project's own member-variable convention, used here (rather than plain camelBack, this project's actual style for enum constants -- see elem::Symbols's own identical, deliberate deviation) at the user's own explicit request
         ccsn_,             /**< Core-collapse supernova ejecta */
         massiveStarWinds_, /**< Massive star winds (pre-supernova mass loss) */
+        agb_,              /**< Asymptotic giant branch stellar winds */
         nChannel_          /**< Number of known channels -- not a real channel */
         // NOLINTEND(readability-identifier-naming)
     };
@@ -46,7 +47,8 @@ namespace yields
     constexpr std::array<std::string_view,
         static_cast<std::size_t>(Channel::nChannel_)> channelStr{
         "ccsn",
-        "massive_star_winds"
+        "massive_star_winds",
+        "agb"
     };
 
     inline static const std::string defaultRegistry = // NOLINT(bugprone-throwing-static-initialization,cert-err58-cpp) -- built from fixed string literals, so the (theoretically throwing) path conversion can never actually throw here
