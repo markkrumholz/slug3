@@ -71,7 +71,7 @@ Fe_H = [-3.0, -2.0, -1.0, 0.0]
 masses = [13.0, 15.0, 20.0, 25.0, 30.0, 40.0, 60.0, 80.0, 120.0]
 
 [agb]
-models = ["agb-composite", "doherty14", "gilpons22", "karakas-pmz0", "karakas-pmz1e-3", "karakas-pmz1e-4", "karakas-pmz2e-3", "karakas-pmz2e-4", "karakas-pmz4e-3", "karakas-pmz5e-4", "karakas-pmz6e-3"]
+models = ["agb-composite", "cinquegrana22", "doherty14", "gilpons22", "karakas-pmz0", "karakas-pmz1e-3", "karakas-pmz1e-4", "karakas-pmz2e-3", "karakas-pmz2e-4", "karakas-pmz4e-3", "karakas-pmz5e-4", "karakas-pmz6e-3"]
 
 [agb.doherty14]
 reference = "Doherty, Gil-Pons, Lau, et al. 2014, MNRAS, 437, 195"
@@ -149,3 +149,10 @@ reference_url = ["https://ui.adsabs.harvard.edu/abs/2016ApJ...825...26K/abstract
 file = "agb-composite.h5"
 Fe_H = [-8.146128, -6.146128, -5.146128, -4.146128, -1.845098, -1.367977, -1.146128, -0.69897, -0.39794, -0.30103, 0.0, 0.330993]
 masses = [0.9, 0.95, 1.0, 1.1, 1.15, 1.2, 1.25, 1.5, 1.7, 1.75, 1.85, 1.9, 2.0, 2.1, 2.25, 2.36, 2.5, 2.75, 3.0, 3.25, 3.5, 3.75, 4.0, 4.25, 4.5, 4.75, 5.0, 5.5, 6.0, 6.5, 7.0, 7.5, 8.0, 8.5, 9.0]
+
+[agb.cinquegrana22]
+reference = "Cinquegrana, G. C. & Karakas, A. I. 2022, MNRAS, 510, 1557"
+reference_url = "https://ui.adsabs.harvard.edu/abs/2022MNRAS.510.1557C/abstract"
+file = "cinquegrana22.h5"
+Fe_H = [0.4559319556497244, 0.5528419686577808, 0.6320232147054056, 0.6989700043360189, 0.7569619513137056, 0.8081144737610868, 0.853871964321762]
+masses = [1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0, 7.5, 8.0]
