@@ -40,6 +40,7 @@ Run from the repository root:
 
 import argparse
 import math
+import os
 import pathlib
 import re
 import warnings
@@ -205,8 +206,7 @@ def collect_records(src_dir: pathlib.Path) -> list[YieldRecord]:
     for subdir, z_val in SUBDIRS:
         d = src_dir / subdir
         if not d.is_dir():
-            warnings.warn(f"Directory not found, skipping: {d}")
-            continue
+            raise FileNotFoundError(f"Required source directory not found: {d}")
         feh = math.log10(z_val / Z_SOLAR)
         for path in sorted(d.glob("yields_m*.dat")):
             rec = parse_file(path, feh)
@@ -400,7 +400,11 @@ def main() -> None:
     write_h5(h5_path, arrays)
     print(f"Wrote {h5_path}")
 
-    update_registry(registry_path, h5_filename, arrays)
+    # Store the HDF5 path relative to the registry's own directory, not just
+    # its basename, so a custom --h5-dir still resolves correctly when
+    # YieldChannel reads it back relative to registry_path.parent
+    registry_h5_path = os.path.relpath(h5_path, registry_path.parent)
+    update_registry(registry_path, registry_h5_path, arrays)
     print(f"Updated {registry_path}")
 
 

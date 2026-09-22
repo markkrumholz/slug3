@@ -58,6 +58,7 @@ Run from the repository root:
 """
 
 import argparse
+import os
 import pathlib
 import warnings
 from collections import defaultdict
@@ -166,8 +167,7 @@ def build_isotope_index(
     for fname in all_files:
         path = h5_dir / fname
         if not path.exists():
-            warnings.warn(f"Source file not found: {path}")
-            continue
+            raise FileNotFoundError(f"Required source file not found: {path}")
         with h5py.File(path) as h5:
             iz = h5["agb/isotope_z"][:].astype(int)
             ia = h5["agb/isotope_a"][:].astype(int)
@@ -246,8 +246,7 @@ def load_karakas(
     for fname, pmz in KARAKAS_PMZ_FILES:
         path = h5_dir / fname
         if not path.exists():
-            warnings.warn(f"Karakas file not found, skipping: {path}")
-            continue
+            raise FileNotFoundError(f"Required Karakas pmz file not found: {path}")
         for feh, mass_dict in read_source(path, iso_idx, n_iso).items():
             for mass, vec in mass_dict.items():
                 all_opts[feh][mass][pmz] = vec
@@ -525,8 +524,11 @@ def main() -> None:
     write_h5(h5_path, arrays)
     print(f"Wrote {h5_path}")
 
-    # Update registry
-    update_registry(registry_path, h5_filename, arrays)
+    # Update registry -- store the HDF5 path relative to the registry's own
+    # directory, not just its basename, so a custom --h5-dir still resolves
+    # correctly when YieldChannel reads it back relative to registry_path.parent
+    registry_h5_path = os.path.relpath(h5_path, registry_path.parent)
+    update_registry(registry_path, registry_h5_path, arrays)
     print(f"Updated {registry_path}")
 
 

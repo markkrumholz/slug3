@@ -58,6 +58,7 @@ Run from the repository root:
 
 import argparse
 import math
+import os
 import pathlib
 import tempfile
 import urllib.request
@@ -332,7 +333,7 @@ def build_arrays(records: list[YieldRecord]) -> dict:
 
 def write_h5(h5_path: pathlib.Path, arrays: dict) -> None:
     h5_path.parent.mkdir(parents=True, exist_ok=True)
-    with h5py.File(h5_path, "a") as h5:
+    with h5py.File(h5_path, "w") as h5:
         h5.attrs["reference"] = REFERENCE
         h5.attrs["reference_url"] = REFERENCE_URL
 
@@ -471,7 +472,11 @@ def main() -> None:
     print(f"\nWrote {h5_path}")
 
     registry_path = pathlib.Path(args.registry)
-    update_registry(registry_path, h5_filename, arrays)
+    # Store the HDF5 path relative to the registry's own directory, not just
+    # its basename, so a custom --h5-dir still resolves correctly when
+    # YieldChannel reads it back relative to registry_path.parent
+    registry_h5_path = os.path.relpath(h5_path, registry_path.parent)
+    update_registry(registry_path, registry_h5_path, arrays)
     print(f"Updated {registry_path}")
 
 

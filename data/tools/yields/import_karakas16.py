@@ -77,6 +77,7 @@ Run from the repository root:
 
 import argparse
 import math
+import os
 import pathlib
 import re
 import warnings
@@ -400,8 +401,7 @@ def collect_records(
     for subdir, _z, prefer_b95 in EXT_SUBDIRS:
         src = ext_dir / subdir
         if not src.is_dir():
-            warnings.warn(f"Directory not found, skipping: {src}")
-            continue
+            raise FileNotFoundError(f"Required source directory not found: {src}")
         files = _filter_prefer_b95(src) if prefer_b95 else sorted(src.glob("m*.dat"))
         for path in files:
             rec = parse_standard_file(path)
@@ -414,8 +414,7 @@ def collect_records(
     for subdir, z_val in SLUG2_SUBDIRS:
         src = slug2_dir / subdir
         if not src.is_dir():
-            warnings.warn(f"Directory not found, skipping: {src}")
-            continue
+            raise FileNotFoundError(f"Required source directory not found: {src}")
         feh = math.log10(z_val / Z_SOLAR)
         for path in sorted(src.glob("m*.dat")):  # sorted → noovershoot first
             rec = parse_headerless_file(path, z_val)
@@ -538,7 +537,7 @@ def build_arrays(records: list[YieldRecord]) -> dict:
 
 def write_h5(h5_path: pathlib.Path, arrays: dict) -> None:
     h5_path.parent.mkdir(parents=True, exist_ok=True)
-    with h5py.File(h5_path, "a") as h5:
+    with h5py.File(h5_path, "w") as h5:
         h5.attrs["reference"] = REFERENCES
         h5.attrs["reference_url"] = REFERENCE_URLS
 
@@ -678,7 +677,11 @@ def main() -> None:
         write_h5(h5_path, arrays)
         print(f"  Wrote {h5_path}")
 
-        update_registry(registry_path, model_name, h5_filename, arrays)
+        # Store the HDF5 path relative to the registry's own directory, not
+        # just its basename, so a custom --h5-dir still resolves correctly
+        # when YieldChannel reads it back relative to registry_path.parent
+        registry_h5_path = os.path.relpath(h5_path, registry_path.parent)
+        update_registry(registry_path, model_name, registry_h5_path, arrays)
         print(f"  Updated {registry_path}")
 
 

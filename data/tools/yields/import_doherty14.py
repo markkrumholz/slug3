@@ -38,6 +38,20 @@ union grid [6.5, 7.0, 7.5, 8.0, 8.5, 9.0] across all three
 metallicities. A zero entry means the source simply has no model for
 that mass at that metallicity, not that the yield is physically zero.
 
+CAVEAT: because YieldChannel interpolates linearly across the whole
+shared mass grid (its default mMin/mMax span the grid's global min/max,
+not a per-[Fe/H] valid range), selecting this model on its own for
+Z = 0.008 or Z = 0.004 will interpolate between a real data point and
+one of these zero-padded entries, producing a spurious partial yield
+in the gap (e.g. between 6.5 and 7.0 Msun at [Fe/H] = 0.0) rather than
+a hard zero. This is a limitation of the current single-shared-mass-grid
+HDF5/YieldChannel file format, not something this script alone can fix
+without extending that format to carry a per-[Fe/H] mass range. It does
+not affect the ``agb-composite`` model: import_agb_composite.py always
+prefers real Karakas & Lugaro data over Doherty at masses where both
+are tabulated, so the zero-padded cells here are never selected in the
+composite grid.
+
 Output HDF5 structure (one channel ``agb``):
 
     doherty14.h5
@@ -66,6 +80,7 @@ Run from the repository root:
 
 import argparse
 import math
+import os
 import pathlib
 import re
 
@@ -244,7 +259,7 @@ def feh_group_name(feh: float) -> str:
 
 def write_h5(h5_path: str, arrays: dict) -> None:
     pathlib.Path(h5_path).parent.mkdir(parents=True, exist_ok=True)
-    with h5py.File(h5_path, "a") as h5:
+    with h5py.File(h5_path, "w") as h5:
         h5.attrs["reference"] = REFERENCE
         h5.attrs["reference_url"] = REFERENCE_URL
 
@@ -335,7 +350,11 @@ def main() -> None:
     write_h5(h5_path, arrays)
     print(f"Wrote {h5_path}")
 
-    update_registry(args.registry, h5_filename, arrays)
+    # Store the HDF5 path relative to the registry's own directory, not just
+    # its basename, so a custom --h5-dir still resolves correctly when
+    # YieldChannel reads it back relative to registry_path.parent
+    registry_h5_path = os.path.relpath(h5_path, pathlib.Path(args.registry).parent)
+    update_registry(args.registry, registry_h5_path, arrays)
     print(f"Updated {args.registry}")
 
 
