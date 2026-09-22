@@ -31,7 +31,7 @@ CMF = 1e3
 CLF = 1e6
 
 [galaxy]
-sfr = 1e-2
+sfr = 1e-3
 
 [yields]
 [yields.channel1]
@@ -42,10 +42,14 @@ model = "sukhbold16"
 channel = "massive_star_winds"
 model = "sukhbold16"
 
+[yields.channel3]
+channel = "agb"
+model = "agb-composite"
+
 [output]
 model_name = "yieldslib"
 start_time = 1e6
-end_time = 5e6
+end_time = 5e7
 ntime = 3
 
 [nebular]
