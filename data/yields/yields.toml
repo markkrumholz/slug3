@@ -144,10 +144,10 @@ Fe_H = [-8.146128035678238, -6.146128035678238, -5.146128035678238, -4.146128035
 masses = [3.0, 4.0, 5.0, 6.0, 7.0, 7.5, 8.0, 8.5]
 
 [agb.agb-composite]
-reference = ["Karakas, A. I. & Lugaro, M. 2016, ApJ, 825, 26", "Karakas, A. I., Lugaro, M., Carlos, M., et al. 2018, MNRAS, 477, 421", "Doherty, C. L., Gil-Pons, P., Lau, H. H. B., et al. 2014, MNRAS, 437, 195", "Gil-Pons, P., Doherty, C. L., Campbell, S. W., et al. 2022, A&A, 668, A100"]
-reference_url = ["https://ui.adsabs.harvard.edu/abs/2016ApJ...825...26K/abstract", "https://ui.adsabs.harvard.edu/abs/2018MNRAS.477..421K/abstract", "https://ui.adsabs.harvard.edu/abs/2014MNRAS.437..195D/abstract", "https://ui.adsabs.harvard.edu/abs/2022A%26A...668A.100G/abstract"]
+reference = ["Karakas, A. I. & Lugaro, M. 2016, ApJ, 825, 26", "Karakas, A. I., Lugaro, M., Carlos, M., et al. 2018, MNRAS, 477, 421", "Doherty, C. L., Gil-Pons, P., Lau, H. H. B., et al. 2014, MNRAS, 437, 195", "Gil-Pons, P., Doherty, C. L., Campbell, S. W., et al. 2022, A&A, 668, A100", "Cinquegrana, G. C. & Karakas, A. I. 2022, MNRAS, 510, 1557"]
+reference_url = ["https://ui.adsabs.harvard.edu/abs/2016ApJ...825...26K/abstract", "https://ui.adsabs.harvard.edu/abs/2018MNRAS.477..421K/abstract", "https://ui.adsabs.harvard.edu/abs/2014MNRAS.437..195D/abstract", "https://ui.adsabs.harvard.edu/abs/2022A%26A...668A.100G/abstract", "https://ui.adsabs.harvard.edu/abs/2022MNRAS.510.1557C/abstract"]
 file = "agb-composite.h5"
-Fe_H = [-8.146128, -6.146128, -5.146128, -4.146128, -1.845098, -1.367977, -1.146128, -0.69897, -0.39794, -0.30103, 0.0, 0.330993]
+Fe_H = [-8.146128, -6.146128, -5.146128, -4.146128, -1.845098, -1.367977, -1.146128, -0.69897, -0.39794, -0.30103, 0.0, 0.330993, 0.455932, 0.552842, 0.632023, 0.69897, 0.756962, 0.808114, 0.853872]
 masses = [0.9, 0.95, 1.0, 1.1, 1.15, 1.2, 1.25, 1.5, 1.7, 1.75, 1.85, 1.9, 2.0, 2.1, 2.25, 2.36, 2.5, 2.75, 3.0, 3.25, 3.5, 3.75, 4.0, 4.25, 4.5, 4.75, 5.0, 5.5, 6.0, 6.5, 7.0, 7.5, 8.0, 8.5, 9.0]
 
 [agb.cinquegrana22]

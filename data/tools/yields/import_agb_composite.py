@@ -4,14 +4,19 @@
   - Karakas & Lugaro (2016, 2018): 7 metallicities, pmz selected per recipe
   - Doherty et al. (2014): adds higher-mass models and its own metallicities
   - Gil-Pons et al. (2022): very low metallicities (Z = 1e-6 to 1e-10)
+  - Cinquegrana & Karakas (2022): super-solar metallicities (Z = 0.04–0.10)
 
 Source files read from --h5-dir (default: data/yields):
     karakas-pmz{N}.h5  (8 files, one per pmz value)
     doherty14.h5
     gilpons22.h5
+    cinquegrana22.h5
 
 Priority for each (feh, mass) cell:
-    Karakas > Doherty > Gil-Pons
+    Karakas > Doherty > Gil-Pons > Cinquegrana
+
+Cinquegrana is used only where the other sources have no data (its metallicity
+range, Z = 0.04–0.10, lies above the Karakas ceiling of Z ≈ 0.03).
 
 For cells inside a source's mass range but absent from its grid, yields are
 linearly interpolated from the two bracketing data masses.  For cells outside
@@ -75,12 +80,14 @@ REFERENCES = [
     "Karakas, A. I., Lugaro, M., Carlos, M., et al. 2018, MNRAS, 477, 421",
     "Doherty, C. L., Gil-Pons, P., Lau, H. H. B., et al. 2014, MNRAS, 437, 195",
     "Gil-Pons, P., Doherty, C. L., Campbell, S. W., et al. 2022, A&A, 668, A100",
+    "Cinquegrana, G. C. & Karakas, A. I. 2022, MNRAS, 510, 1557",
 ]
 REFERENCE_URLS = [
     "https://ui.adsabs.harvard.edu/abs/2016ApJ...825...26K/abstract",
     "https://ui.adsabs.harvard.edu/abs/2018MNRAS.477..421K/abstract",
     "https://ui.adsabs.harvard.edu/abs/2014MNRAS.437..195D/abstract",
     "https://ui.adsabs.harvard.edu/abs/2022A%26A...668A.100G/abstract",
+    "https://ui.adsabs.harvard.edu/abs/2022MNRAS.510.1557C/abstract",
 ]
 
 # Karakas pmz files with their pmz values
@@ -96,6 +103,7 @@ KARAKAS_PMZ_FILES = [
 ]
 DOHERTY_FILE = "doherty14.h5"
 GILPONS_FILE = "gilpons22.h5"
+CINQUEGRANA_FILE = "cinquegrana22.h5"
 
 # Rounding precision for [Fe/H] keys (avoids float-comparison mismatches)
 _FEH_ROUND = 6
@@ -273,15 +281,21 @@ def merge_sources(
     karakas: dict[float, dict[float, np.ndarray]],
     doherty: dict[float, dict[float, np.ndarray]],
     gilpons: dict[float, dict[float, np.ndarray]],
+    cinquegrana: dict[float, dict[float, np.ndarray]],
 ) -> dict[float, dict[float, np.ndarray]]:
-    """Merge the three sources with priority: Karakas > Doherty > Gil-Pons.
+    """Merge sources with priority: Karakas > Doherty > Gil-Pons > Cinquegrana.
 
     The merge is mass-by-mass within each feh: a higher-priority source's
     yield vector for a given mass overwrites any lower-priority source's.
+    Cinquegrana fills metallicities outside the range of the other sources.
     """
     merged: dict[float, dict[float, np.ndarray]] = {}
 
-    # Gil-Pons first (lowest priority)
+    # Cinquegrana first (lowest priority; fills super-solar metallicities)
+    for feh, mass_dict in cinquegrana.items():
+        merged.setdefault(feh, {}).update(mass_dict)
+
+    # Gil-Pons (overrides Cinquegrana)
     for feh, mass_dict in gilpons.items():
         merged.setdefault(feh, {}).update(mass_dict)
 
@@ -289,7 +303,7 @@ def merge_sources(
     for feh, mass_dict in doherty.items():
         merged.setdefault(feh, {}).update(mass_dict)
 
-    # Karakas (highest priority; overrides both at shared feh/mass cells)
+    # Karakas (highest priority; overrides all at shared feh/mass cells)
     for feh, mass_dict in karakas.items():
         merged.setdefault(feh, {}).update(mass_dict)
 
@@ -434,7 +448,7 @@ def main() -> None:
 
     all_source_files = (
         [fname for fname, _ in KARAKAS_PMZ_FILES]
-        + [DOHERTY_FILE, GILPONS_FILE]
+        + [DOHERTY_FILE, GILPONS_FILE, CINQUEGRANA_FILE]
     )
 
     # Build common isotope index
@@ -468,19 +482,31 @@ def main() -> None:
     print(f"  fehs: {[round(f, 4) for f in gilpons_fehs]}")
     print(f"  mass range: {gilpons_masses[0]} – {gilpons_masses[-1]} Msun")
 
+    print("Loading Cinquegrana yields ...")
+    cinquegrana = read_source(h5_dir / CINQUEGRANA_FILE, iso_idx, n_iso)
+    cinquegrana_fehs = sorted(cinquegrana)
+    cinquegrana_masses = sorted({m for md in cinquegrana.values() for m in md})
+    print(f"  {sum(len(v) for v in cinquegrana.values())} (feh, mass) cells")
+    print(f"  fehs: {[round(f, 4) for f in cinquegrana_fehs]}")
+    print(f"  mass range: {cinquegrana_masses[0]} – {cinquegrana_masses[-1]} Msun")
+
     # Merge
-    print("Merging sources (priority: Karakas > Doherty > Gil-Pons) ...")
-    merged = merge_sources(karakas, doherty, gilpons)
+    print("Merging sources (priority: Karakas > Doherty > Gil-Pons > Cinquegrana) ...")
+    merged = merge_sources(karakas, doherty, gilpons, cinquegrana)
     all_fehs = sorted(merged)
     all_masses = sorted({m for md in merged.values() for m in md})
     print(f"  {len(all_fehs)} [Fe/H] values: {[round(f, 4) for f in all_fehs]}")
     print(f"  {len(all_masses)} masses: {all_masses[0]} – {all_masses[-1]} Msun")
 
-    # Report Doherty-only fehs (informational)
+    # Report source-only fehs (informational)
     karakas_feh_set = set(karakas_fehs)
     doherty_only = [f for f in doherty_fehs if f not in karakas_feh_set]
     if doherty_only:
         print(f"  Doherty-only fehs added: {[round(f, 4) for f in doherty_only]}")
+    other_feh_set = karakas_feh_set | set(doherty_fehs) | set(gilpons_fehs)
+    cinquegrana_only = [f for f in cinquegrana_fehs if f not in other_feh_set]
+    if cinquegrana_only:
+        print(f"  Cinquegrana-only fehs added: {[round(f, 4) for f in cinquegrana_only]}")
 
     # Build arrays
     print("Building composite grid (interpolating/zero-filling) ...")
