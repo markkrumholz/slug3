@@ -3534,6 +3534,73 @@ static auto testSimControlsYieldsChannelGap() -> int
     return 0;
 }
 
+// Verify Yields::hasYield(): with two ccsn channels covering disjoint
+// mass ranges (kobayashi_test, 13-18 Msun; sukhbold_test, 18.2-100
+// Msun), a massive_star_winds channel whose mass range is extended to
+// 10-150 Msun via m_min/m_max, and no agb channel, hasYield() should
+// be true for a given channel iff the mass lies within the range of
+// at least one channel of that type
+static auto testSimControlsYieldsHasYield() -> int
+{
+    constexpr std::string_view baseDeck = "tests/core/assets/testGalaxy.in";
+    toml::table inputDeck = toml::parse_file(baseDeck);
+    inputDeck.insert("yields", toml::table{
+        { "channel1", toml::table{ { "channel", "ccsn" }, { "model", "sukhbold_test" } } },
+        { "channel2", toml::table{ { "channel", "ccsn" }, { "model", "kobayashi_test" } } },
+        { "channel3", toml::table{
+            { "channel", "massive_star_winds" }, { "model", "sukhbold_test" },
+            { "m_min", 10.0 }, { "m_max", 150.0 } } },
+        { "registry", "tests/yields/assets/yields.toml" },
+    });
+
+    struct Case
+    {
+        double mass_;
+        yields::Channel channel_;
+        bool expected_;
+    };
+    constexpr std::array<Case, 11> cases = { {
+        { 15.0, yields::Channel::ccsn_, true },    // kobayashi_test only
+        { 50.0, yields::Channel::ccsn_, true },    // sukhbold_test only
+        { 18.0, yields::Channel::ccsn_, true },    // kobayashi_test upper edge
+        { 18.1, yields::Channel::ccsn_, false },   // gap between the two ccsn models
+        { 10.0, yields::Channel::ccsn_, false },   // below both ccsn models
+        { 120.0, yields::Channel::ccsn_, false },  // above both ccsn models
+        { 10.0, yields::Channel::massiveStarWinds_, true },  // extended lower edge
+        { 150.0, yields::Channel::massiveStarWinds_, true }, // extended upper edge
+        { 5.0, yields::Channel::massiveStarWinds_, false },
+        { 15.0, yields::Channel::agb_, false },    // no agb channel at all
+        { 50.0, yields::Channel::agb_, false },
+    } };
+
+    try
+    {
+        const io::SimControls controls(inputDeck);
+        if (controls.yields() == nullptr)
+        {
+            std::cerr << "testSimControls: yieldsHasYield: expected yields() non-null\n";
+            return 1;
+        }
+        int result = 0;
+        for (const auto& c : cases)
+        {
+            if (controls.yields()->hasYield(c.mass_, c.channel_) != c.expected_)
+            {
+                std::cerr << "testSimControls: yieldsHasYield: hasYield(" << c.mass_ << ", "
+                    << yields::channelStr.at(static_cast<std::size_t>(c.channel_))
+                    << ") returned " << !c.expected_ << ", expected " << c.expected_ << "\n";
+                result = 1;
+            }
+        }
+        return result;
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: yieldsHasYield: threw: " << error.what() << "\n";
+        return 1;
+    }
+}
+
 auto testSimControls() -> int
 {
     int result = 0;
@@ -3586,5 +3653,6 @@ auto testSimControls() -> int
     result += testSimControlsIgnoredKeys();
     result += testSimControlsYieldsChannelGap();
     result += testSimControlsFracStochMass();
+    result += testSimControlsYieldsHasYield();
     return result;
 }

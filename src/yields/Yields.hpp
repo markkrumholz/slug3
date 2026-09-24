@@ -523,6 +523,24 @@ namespace yields
         [[nodiscard]] auto yieldSum(double mass, double feH, double dtDecay = 0.0) const -> std::vector<double>;
 
         /**
+         * @brief Check whether a star of a given mass returns a yield through a given channel
+         * @param mass Stellar mass (Msun)
+         * @param channel The nucleosynthetic channel to check
+         * @return True if any entry of yieldChannels() whose own
+         *   channel() is channel has YieldChannel::hasYield(mass) true;
+         *   false otherwise, including if no entry of yieldChannels()
+         *   is of type channel at all
+         * @details
+         * Entries of yieldChannels() of any other channel type are
+         * skipped. More than one entry may be of type channel (e.g.
+         * two models covering different sub-ranges of one channel's
+         * mass range -- see the constructor's own comment), so this
+         * returns true if mass lies within the mass grid of any one of
+         * them, not necessarily all.
+         */
+        [[nodiscard]] auto hasYield(double mass, Channel channel) const -> bool;
+
+        /**
          * @brief Apply radioactive decay, over dtDecay, to one array of per-isotope masses, in place
          * @param dtDecay Elapsed time, in yr, to advance values by
          * @param values One mass (Msun) per entry of isotopes_, in the
