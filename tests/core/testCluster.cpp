@@ -1701,6 +1701,34 @@ static auto testClusterLbolContinuousMatchesStochastic() -> int
     }
 }
 
+// Verify that a newly constructed cluster, which has not yet been
+// advanced in time, reports zero cumulative supernovae.
+static auto testClusterCumSNeAtBirth() -> int
+{
+    try
+    {
+        const toml::table inputDeck = toml::parse_file(inputFile);
+        const io::SimControls controls(inputDeck);
+
+        utils::rng().seed(rngSeed);
+        const core::Cluster cluster(0, 1e4, 0.0, controls);
+
+        if (cluster.cumSNe() != 0.0)
+        {
+            std::cerr << "testCluster: cumSNe at birth: expected 0, got "
+                << cluster.cumSNe() << "\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testCluster: cumSNe at birth test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
 auto testCluster() -> int
 {
     int result = 0;
@@ -1725,5 +1753,6 @@ auto testCluster() -> int
     result += testClusterYieldsNonStochasticDecay();
     result += testClusterYieldsConverged();
     result += testClusterYieldsAboveTrackRange();
+    result += testClusterCumSNeAtBirth();
     return result;
 }

@@ -434,6 +434,22 @@ namespace core
         }
 
         /**
+         * @brief Return the cumulative number of supernovae up to the current time
+         * @return Number of supernovae that have occurred in this
+         *   cluster from its formation up to the current time
+         * @details
+         * The result is the sum of the supernovae from the
+         * stochastically-sampled part of the population (stochSN_),
+         * which is always an integer, and from the non-stochastic part
+         * (nonStochSN_), which in general is not -- hence the return
+         * type is double rather than an integer type.
+         */
+        [[nodiscard]] auto cumSNe() const -> double
+        {
+            return static_cast<double>(stochSN_) + nonStochSN_;
+        }
+
+        /**
          * @brief Return whether the cluster has disrupted
          * @return True if the cluster has disrupted
          */
@@ -590,6 +606,9 @@ namespace core
          * advance() call, not merely before yields_ is next read.
          */
         double lastYieldTime_ = 0.0;
+
+        unsigned long stochSN_ = 0;  /**< Cumulative number of supernovae from the stochastically-sampled part of the population */
+        double nonStochSN_ = 0.0;    /**< Cumulative (in general non-integer) number of supernovae from the non-stochastic part of the population */
 
         /**
          * Tracks for this cluster's [Fe/H]: either owned outright (when
