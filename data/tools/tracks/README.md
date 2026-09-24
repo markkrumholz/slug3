@@ -126,3 +126,29 @@ entry per file is written to `tracks.toml` so slug can load any of them.
    left to crash slug at that exact `[Fe/H]`).
 
 No further processing is currently needed for Stromlo.
+
+## Legacy starburst99 (sb99)
+
+These are the legacy tracks slug2 shipped, which it in turn inherited
+from starburst99: "old" (pre-SYCLIST) Geneva models with standard
+(`modc*`) and 2x standard (`mode*`) mass loss, and "old" (pre-PARSEC)
+Padova models with (`modp*`) and without (`mods*`) TP-AGB stars. Each
+source file holds a single metallicity; all five metallicities of a
+family go into one `sb99_mod{c,e,p,s}.h5` file (one group per
+metallicity) and one `sb99_mod{c,e,p,s}` registry entry.
+
+1. **`import_sb99.py`** -- reads the `mod*.dat` files from a local
+   copy of slug2's `lib/tracks/sb99` directory (passed as its one
+   positional argument) and writes the HDF5 files and registry
+   entries. It parses the Fortran fixed-width records by column
+   position (fields can run together) and drops rows with
+   non-increasing age. Because Tracks3D requires one shared mass grid
+   across all of a track set's metallicities, it also rectifies the
+   Geneva families' slightly mismatched grids: it drops the m = 1.701
+   He-flash variant tracks, and synthesizes the 9 Msun track at Z =
+   0.008 and the 10 Msun track at every other Z by row-by-row
+   interpolation between bracketing masses (recorded in each group's
+   `synthesized_masses` attribute). Needs `--overwrite` to regenerate
+   existing output files.
+
+No further processing is needed.

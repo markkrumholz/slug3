@@ -34,13 +34,18 @@ namespace
     // allRequiredDataFilesExist() already checks (MIST + every
     // spectral library) -- Stromlo, PARSEC_comp, and the three Geneva
     // files, the other track sets make_slug_grid.py's own TRACK_SETS
-    // builds decks for.
-    const std::array<std::string, 5> extraRequiredDataFiles = { { // NOLINT(bugprone-throwing-static-initialization,cert-err58-cpp) -- see requiredDataFiles's own identical NOLINT in testClusterSpecsynFullCommon.cpp
+    // builds decks for, plus the four legacy starburst99 (sb99_mod*)
+    // files data/tools/tracks/import_sb99.py produces.
+    const std::array<std::string, 9> extraRequiredDataFiles = { { // NOLINT(bugprone-throwing-static-initialization,cert-err58-cpp) -- see requiredDataFiles's own identical NOLINT in testClusterSpecsynFullCommon.cpp
         "data/tracks/stromlo.h5",
         "data/tracks/parsec_composite.h5",
         "data/tracks/geneva.h5",
         "data/tracks/geneva_Z0004.h5",
         "data/tracks/geneva_Z014.h5",
+        "data/tracks/sb99_modc.h5",
+        "data/tracks/sb99_mode.h5",
+        "data/tracks/sb99_modp.h5",
+        "data/tracks/sb99_mods.h5",
     }};
 
     auto extraRequiredDataFilesExist() -> bool
@@ -96,18 +101,20 @@ namespace
     };
 
     // Every combination the tracks registry offers for the six
-    // track sets make_slug_grid.py's own TRACK_SETS builds decks for
-    // -- see testClusterSpecsynFullGrid()'s own comment for why just
-    // these six. Each track set's own Fe_H and v_vcrit arrays are
+    // track sets make_slug_grid.py's own TRACK_SETS builds decks for,
+    // plus the four legacy starburst99 track sets -- see
+    // testClusterSpecsynFullGrid()'s own comment for why just these.
+    // Each track set's own Fe_H and v_vcrit arrays are
     // read straight from the registry, so this automatically tracks
     // the registry's own current grid (e.g. Stromlo's [Fe/H] max
     // dropping to +0.5 after PR #184) rather than needing to be kept
     // in sync by hand.
     auto allCombos() -> std::vector<Combo>
     {
-        static constexpr std::array<const char*, 6> trackSets = {
+        static constexpr std::array<const char*, 10> trackSets = {
             "MIST", "Stromlo", "PARSEC_comp",
-            "Geneva", "Geneva_Z0004", "Geneva_Z014"
+            "Geneva", "Geneva_Z0004", "Geneva_Z014",
+            "sb99_modc", "sb99_mode", "sb99_modp", "sb99_mods"
         };
         const auto registry = tracks::parseRegistry().first;
 
