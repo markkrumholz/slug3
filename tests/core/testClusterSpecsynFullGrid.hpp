@@ -25,11 +25,13 @@
  * touch, and only surfaced from an unrelated pipeline run trying
  * every combination the tracks registry actually offers.
  *
- * This test closes that gap systematically: for MIST, Stromlo, and
- * PARSEC_comp (the three track sets make_slug_grid.py's own
- * TRACK_SETS actually builds decks for -- PARSEC_vms/PARSEC_rot are
- * internal building blocks for PARSEC_comp, not something a real deck
- * selects directly), it reads that track set's own Fe_H and v_vcrit
+ * This test closes that gap systematically: for MIST, Stromlo,
+ * PARSEC_comp, and the three Geneva sets (the track sets
+ * make_slug_grid.py's own TRACK_SETS actually builds decks for --
+ * PARSEC_vms/PARSEC_rot are internal building blocks for PARSEC_comp,
+ * not something a real deck selects directly), plus the four legacy
+ * starburst99 sets (sb99_mod*, from data/tools/tracks/import_sb99.py),
+ * it reads that track set's own Fe_H and v_vcrit
  * arrays straight from the tracks registry (data/tracks/tracks.toml)
  * and runs one full simulation, from
  * tests/core/assets/testClusterSpecsynFullGrid.in (parsed fresh each
@@ -59,9 +61,10 @@
  * Skipped entirely (returning 0 immediately, with a diagnostic on
  * stderr) if any of the real, gitignored data files it needs --
  * every file allRequiredDataFilesExist() already checks, plus
- * data/tracks/stromlo.h5 and data/tracks/parsec_composite.h5, which
- * none of the single-combination tests need but this one does --
- * are not present on this machine.
+ * data/tracks/stromlo.h5, data/tracks/parsec_composite.h5, the
+ * three Geneva files, and the four sb99_mod*.h5 files, which none of
+ * the single-combination tests need but this one does -- are not
+ * present on this machine.
  */
 auto testClusterSpecsynFullGrid() -> int;
 
