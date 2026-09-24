@@ -213,6 +213,19 @@ add_executable(slugTestTracks
     tests/tracks/testTracksAll.cpp
     src/utils/HDF5Utils.cpp
 )
+# slugTestTracksFull: slow counterpart to slugTestTracks, run against
+# the real, gitignored track files in data/tracks rather than the
+# small fixtures in tests/tracks/assets -- built and run as its own
+# executable/CTest entry (LABELS "slow" below) for the same reason as
+# slugTestCoreFull. See testTracksFullAll.cpp.
+add_executable(slugTestTracksFull
+    src/interpolation/Mesh2DGrid.cpp
+    src/tracks/TrackUtils.cpp
+    src/tracks/Tracks2D.cpp
+    src/tracks/Tracks3D.cpp
+    tests/tracks/testTracksFullAll.cpp
+    src/utils/HDF5Utils.cpp
+)
 add_executable(slugTestYields
     src/elem/IsotopeTable.cpp
     src/yields/YieldChannel.cpp
@@ -592,7 +605,9 @@ target_include_directories(slugTestUtils PRIVATE src)
 target_include_directories(slugTestUtils SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
 
 target_include_directories(slugTestTracks PRIVATE src)
+target_include_directories(slugTestTracksFull PRIVATE src)
 target_include_directories(slugTestTracks SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
+target_include_directories(slugTestTracksFull SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
 
 target_include_directories(slugTestYields PRIVATE src)
 target_include_directories(slugTestYields SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
@@ -623,6 +638,7 @@ target_include_directories(slugTestPhot SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestPDFs SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestUtils SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestTracks SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
+target_include_directories(slugTestTracksFull SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestYields SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestCore SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestCoreFull SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
@@ -658,6 +674,7 @@ target_link_libraries(slugTestPhot PRIVATE GSL::gsl)
 target_link_libraries(slugTestPDFs PRIVATE GSL::gsl)
 target_link_libraries(slugTestUtils PRIVATE GSL::gsl)
 target_link_libraries(slugTestTracks PRIVATE GSL::gsl)
+target_link_libraries(slugTestTracksFull PRIVATE GSL::gsl)
 target_link_libraries(slugTestYields PRIVATE GSL::gsl)
 target_link_libraries(slugTestCore PRIVATE GSL::gsl)
 target_link_libraries(slugTestCoreFull PRIVATE GSL::gsl)
@@ -675,6 +692,7 @@ target_link_libraries(slugTestPhot PRIVATE slug_mdspan)
 target_link_libraries(slugTestPDFs PRIVATE slug_mdspan)
 target_link_libraries(slugTestUtils PRIVATE slug_mdspan)
 target_link_libraries(slugTestTracks PRIVATE slug_mdspan)
+target_link_libraries(slugTestTracksFull PRIVATE slug_mdspan)
 target_link_libraries(slugTestYields PRIVATE slug_mdspan)
 target_link_libraries(slugTestCore PRIVATE slug_mdspan)
 target_link_libraries(slugTestCoreFull PRIVATE slug_mdspan)
@@ -692,6 +710,7 @@ target_link_libraries(slugTestPhot PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugTestPDFs PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugTestUtils PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugTestTracks PRIVATE ${HDF5_CXX_LIBRARIES})
+target_link_libraries(slugTestTracksFull PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugTestYields PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugTestCore PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugTestCoreFull PRIVATE ${HDF5_CXX_LIBRARIES})
@@ -710,6 +729,7 @@ if(OpenMP_CXX_FOUND)
     target_link_libraries(slugTestPDFs PRIVATE OpenMP::OpenMP_CXX)
     target_link_libraries(slugTestUtils PRIVATE OpenMP::OpenMP_CXX)
     target_link_libraries(slugTestTracks PRIVATE OpenMP::OpenMP_CXX)
+    target_link_libraries(slugTestTracksFull PRIVATE OpenMP::OpenMP_CXX)
     target_link_libraries(slugTestYields PRIVATE OpenMP::OpenMP_CXX)
     target_link_libraries(slugTestCore PRIVATE OpenMP::OpenMP_CXX)
     target_link_libraries(slugTestCoreFull PRIVATE OpenMP::OpenMP_CXX)
@@ -847,6 +867,10 @@ add_test(NAME test_Specsyn COMMAND slugTestSpecsyn
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 add_test(NAME test_Tracks COMMAND slugTestTracks
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+# test_TracksFull reads data/tracks/tracks.toml by its default relative
+# path, so like test_Tracks it runs from the source tree root.
+add_test(NAME test_TracksFull COMMAND slugTestTracksFull
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 add_test(NAME test_Yields COMMAND slugTestYields
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
@@ -933,7 +957,8 @@ endif()
 
 # Tag every test "quick" or "slow", so `ctest -L quick` (or `ctest -LE
 # slow`) runs only the fast suite, skipping anything that takes
-# upwards of a minute to run -- currently just test_CoreFull, but
+# upwards of a minute to run -- currently test_CoreFull and
+# test_TracksFull, but
 # expected to grow as more full-scale end-to-end tests are added (see
 # testCoreFullAll.cpp). Plain `ctest`, with no -L/-LE filter, still
 # runs everything, quick and slow alike. A new slow test belongs in
@@ -948,7 +973,7 @@ set_tests_properties(
     test_Interpolation test_Elem test_Extinct test_Phot test_PDFs test_Utils test_Specsyn test_Tracks
     test_Yields test_Core test_Io test_Nebular test_PythonBindings test_Slugpy
     PROPERTIES LABELS "quick")
-set_tests_properties(test_CoreFull PROPERTIES LABELS "slow")
+set_tests_properties(test_CoreFull test_TracksFull PROPERTIES LABELS "slow")
 
 # Add command to copy assets to build dir
 add_custom_command(
