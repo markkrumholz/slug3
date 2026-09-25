@@ -25,6 +25,7 @@
 #include <cstddef>
 #include <exception>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <numbers>
 #include <optional>
@@ -3601,6 +3602,163 @@ static auto testSimControlsYieldsHasYield() -> int
     }
 }
 
+// Check hasSN() against a list of (mass, expected) cases, printing a
+// diagnostic for each mismatch; returns the number of mismatches
+static auto checkHasSN(const io::SimControls& controls, const std::string_view label,
+    const std::vector<std::pair<double, bool>>& cases) -> int
+{
+    int nFail = 0;
+    for (const auto& [mass, expected] : cases)
+    {
+        if (controls.hasSN(mass) != expected)
+        {
+            std::cerr << "testSimControls: feedback: " << label << ": hasSN(" << mass
+                << ") returned " << !expected << ", expected " << expected << "\n";
+            ++nFail;
+        }
+    }
+    return nFail;
+}
+
+// Verify readFeedback()'s parsing of feedback.sn_mass_range,
+// setSNMassLimits()'s validation, and hasSN()'s choice between
+// explicit mass limits and the ccsn yield channels
+static auto testSimControlsFeedback() -> int
+{
+    constexpr std::string_view baseDeck = "tests/core/assets/testGalaxy.in";
+    int result = 0;
+
+    // Build a deck from baseDeck, optionally adding the test fixture's
+    // two ccsn yield channels (kobayashi_test, 13-18 Msun;
+    // sukhbold_test, 18.2-100 Msun) and/or a [feedback] table
+    auto makeDeck = [baseDeck](const bool withYields, std::optional<toml::table> feedback)
+        -> toml::table {
+        toml::table deck = toml::parse_file(baseDeck);
+        if (withYields)
+        {
+            deck.insert("yields", toml::table{
+                { "channel1", toml::table{ { "channel", "ccsn" }, { "model", "sukhbold_test" } } },
+                { "channel2", toml::table{ { "channel", "ccsn" }, { "model", "kobayashi_test" } } },
+                { "registry", "tests/yields/assets/yields.toml" },
+            });
+        }
+        if (feedback.has_value()) { deck.insert("feedback", std::move(feedback.value())); }
+        return deck;
+    };
+
+    try
+    {
+        // No feedback.sn_mass_range and no yields: no star has a SN
+        {
+            const io::SimControls controls(makeDeck(false, std::nullopt));
+            if (!controls.snMassLimits().empty())
+            {
+                std::cerr << "testSimControls: feedback: expected empty snMassLimits() by default\n";
+                result = 1;
+            }
+            result += checkHasSN(controls, "no limits, no yields",
+                { { 5.0, false }, { 20.0, false }, { 100.0, false } });
+        }
+
+        // One explicit interval, including both of its edges
+        {
+            const io::SimControls controls(makeDeck(false,
+                toml::table{ { "sn_mass_range", toml::array{ 8.0, 40.0 } } }));
+            if (controls.snMassLimits() != std::vector<double>{ 8.0, 40.0 })
+            {
+                std::cerr << "testSimControls: feedback: unexpected snMassLimits() for one interval\n";
+                result = 1;
+            }
+            if (!controls.unusedKeys().empty())
+            {
+                std::cerr << "testSimControls: feedback: feedback.sn_mass_range reported unused\n";
+                result = 1;
+            }
+            result += checkHasSN(controls, "one interval",
+                { { 7.9, false }, { 8.0, true }, { 20.0, true }, { 40.0, true }, { 40.1, false } });
+        }
+
+        // Two disjoint explicit intervals, given partly as integers
+        {
+            const io::SimControls controls(makeDeck(false,
+                toml::table{ { "sn_mass_range", toml::array{ 8, 20.0, 25.0, 40 } } }));
+            result += checkHasSN(controls, "two intervals",
+                { { 5.0, false }, { 10.0, true }, { 22.0, false }, { 30.0, true }, { 50.0, false } });
+        }
+
+        // No explicit limits, but ccsn yields: defer to their mass ranges
+        {
+            const io::SimControls controls(makeDeck(true, std::nullopt));
+            result += checkHasSN(controls, "yields only",
+                { { 10.0, false }, { 15.0, true }, { 18.1, false }, { 50.0, true }, { 120.0, false } });
+        }
+
+        // Explicit limits and ccsn yields: explicit limits take precedence
+        {
+            const io::SimControls controls(makeDeck(true,
+                toml::table{ { "sn_mass_range", toml::array{ 8.0, 12.0 } } }));
+            result += checkHasSN(controls, "limits override yields",
+                { { 10.0, true }, { 15.0, false }, { 50.0, false } });
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: feedback: valid-deck case threw: " << error.what() << "\n";
+        return 1;
+    }
+
+    // Invalid feedback.sn_mass_range values must be rejected
+    const std::vector<std::pair<std::string_view, toml::table>> badDecks = {
+        { "odd number of elements", toml::table{ { "sn_mass_range", toml::array{ 8.0, 20.0, 25.0 } } } },
+        { "decreasing", toml::table{ { "sn_mass_range", toml::array{ 20.0, 8.0 } } } },
+        { "repeated value", toml::table{ { "sn_mass_range", toml::array{ 8.0, 20.0, 20.0, 40.0 } } } },
+        { "non-numeric element", toml::table{ { "sn_mass_range", toml::array{ 8.0, "twenty" } } } },
+        { "not an array", toml::table{ { "sn_mass_range", 8.0 } } },
+    };
+    for (const auto& [label, feedback] : badDecks)
+    {
+        try
+        {
+            const io::SimControls controls(makeDeck(false, feedback));
+            std::cerr << "testSimControls: feedback: expected feedback.sn_mass_range ("
+                << label << ") to throw, but it did not\n";
+            result = 1;
+        }
+        catch (const std::exception&) { /* expected */ } // NOLINT(bugprone-empty-catch) -- the throw is the expected outcome
+    }
+
+    // setSNMassLimits() directly: an invalid vector throws and leaves
+    // the existing limits unchanged; an empty vector is valid and
+    // makes hasSN() defer to yields again
+    try
+    {
+        io::SimControls controls(makeDeck(true, std::nullopt));
+        controls.setSNMassLimits({ 8.0, 12.0 });
+        try
+        {
+            controls.setSNMassLimits({ 8.0, std::numeric_limits<double>::quiet_NaN() });
+            std::cerr << "testSimControls: feedback: setSNMassLimits accepted a NaN limit\n";
+            result = 1;
+        }
+        catch (const std::invalid_argument&) { /* expected */ } // NOLINT(bugprone-empty-catch) -- the throw is the expected outcome
+        if (controls.snMassLimits() != std::vector<double>{ 8.0, 12.0 })
+        {
+            std::cerr << "testSimControls: feedback: rejected setSNMassLimits call changed snMassLimits()\n";
+            result = 1;
+        }
+        controls.setSNMassLimits({});
+        result += checkHasSN(controls, "setter cleared",
+            { { 10.0, false }, { 15.0, true } });
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: feedback: setter case threw: " << error.what() << "\n";
+        result = 1;
+    }
+
+    return result > 0 ? 1 : 0;
+}
+
 auto testSimControls() -> int
 {
     int result = 0;
@@ -3654,5 +3812,6 @@ auto testSimControls() -> int
     result += testSimControlsYieldsChannelGap();
     result += testSimControlsFracStochMass();
     result += testSimControlsYieldsHasYield();
+    result += testSimControlsFeedback();
     return result;
 }

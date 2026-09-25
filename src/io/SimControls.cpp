@@ -415,6 +415,10 @@ void io::SimControls::initPhysics(const utils::TrackedDeck& inputDeck)
     // readYields()'s own comment.
     readYields(inputDeck);
 
+    // Read the stellar feedback controls, if any -- see
+    // readFeedback()'s own comment.
+    readFeedback(inputDeck);
+
     // In a galaxy simulation, read CLF, SFR, and the stochastic
     // cluster mass fraction
     if (simType_ == SimType::galaxy)
@@ -1290,6 +1294,77 @@ void io::SimControls::readYields(const utils::TrackedDeck& inputDeck)
         }
         yields_->rebuildYieldGrid(isotopes);
     }
+}
+
+// Stellar feedback controls reader
+void io::SimControls::readFeedback(const utils::TrackedDeck& inputDeck)
+{
+    // feedback.sn_mass_range: optional; if given, must be an array of
+    // numbers, whose validity as mass limits setSNMassLimits() checks
+    const auto node = inputDeck.atPath("feedback.sn_mass_range");
+    if (!node) { return; }
+    const toml::array* arr = node.as_array();
+    if (arr == nullptr)
+    {
+        throw std::runtime_error(
+            "SimControls: feedback.sn_mass_range must be an array of numbers");
+    }
+    std::vector<double> limits;
+    limits.reserve(arr->size());
+    for (const auto& elem : *arr)
+    {
+        const auto val = elem.value<double>();
+        if (!val.has_value())
+        {
+            throw std::runtime_error(
+                "SimControls: feedback.sn_mass_range must be an array of numbers");
+        }
+        limits.push_back(val.value());
+    }
+    setSNMassLimits(std::move(limits));
+}
+
+void io::SimControls::setSNMassLimits(std::vector<double> limits)
+{
+    if (limits.size() % 2 != 0)
+    {
+        throw std::invalid_argument(
+            "setSNMassLimits: mass limits must have an even number of "
+            "elements, one (lower, upper) pair per mass interval");
+    }
+    // Written as !(a < b) rather than a >= b so that a NaN, for which
+    // every comparison is false, also counts as a violation
+    if (std::ranges::adjacent_find(limits,
+            [](const double a, const double b) -> bool { return !(a < b); }) != limits.end())
+    {
+        throw std::invalid_argument(
+            "setSNMassLimits: mass limits must be strictly increasing");
+    }
+    snMassLimits_ = std::move(limits);
+}
+
+auto io::SimControls::hasSN(const double mass) const -> bool
+{
+    // Explicit mass limits, if any, take precedence over yields
+    if (!snMassLimits_.empty())
+    {
+        for (std::size_t i = 0; i + 1 < snMassLimits_.size(); i += 2)
+        {
+            if (mass >= snMassLimits_[i] && mass <= snMassLimits_[i + 1]) // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i + 1 < size() by the loop condition
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Otherwise defer to the core-collapse supernova yield channels,
+    // if any
+    if (yields_ != nullptr)
+    {
+        return yields_->hasYield(mass, yields::Channel::ccsn_);
+    }
+    return false;
 }
 
 // Nebular emission controls and grid reader

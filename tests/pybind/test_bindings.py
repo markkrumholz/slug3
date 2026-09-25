@@ -3659,6 +3659,62 @@ def test_simcontrols_no_decay_parsed_from_deck():
     assert no_decay_controls.noDecay is True
 
 
+def _sn_controls(with_yields, sn_mass_range=None):
+    """A fresh SimControls built from CLUSTER_DECK, optionally with two
+    ccsn yield channels (sukhbold_test, 18.2-100 Msun; kobayashi_test,
+    13-18 Msun) and/or feedback.sn_mass_range."""
+    deck = tomlkit.parse(pathlib.Path(CLUSTER_DECK).read_text())
+    if with_yields:
+        deck["yields"] = tomlkit.table()
+        deck["yields"]["channel1"] = {"channel": "ccsn", "model": "sukhbold_test"}
+        deck["yields"]["channel2"] = {"channel": "ccsn", "model": "kobayashi_test"}
+        deck["yields"]["registry"] = YIELDS_REGISTRY
+    if sn_mass_range is not None:
+        deck["feedback"] = tomlkit.table()
+        deck["feedback"]["sn_mass_range"] = sn_mass_range
+    return slug.SimControls(tomlkit.dumps(deck))
+
+
+def test_simcontrols_sn_mass_limits_and_has_sn_from_deck():
+    """snMassLimits reflects feedback.sn_mass_range, and hasSN uses it in
+    preference to the ccsn yield channels, falling back to them (or to
+    False, with no yields) when it is absent."""
+    no_sn = _sn_controls(with_yields=False)
+    assert no_sn.snMassLimits == []
+    assert not no_sn.hasSN(20.0)
+
+    yields_only = _sn_controls(with_yields=True)
+    assert [yields_only.hasSN(m) for m in (10.0, 15.0, 18.1, 50.0)] == \
+        [False, True, False, True]
+
+    explicit = _sn_controls(with_yields=True, sn_mass_range=[8.0, 12.0, 20.0, 40.0])
+    assert explicit.snMassLimits == [8.0, 12.0, 20.0, 40.0]
+    assert [explicit.hasSN(m) for m in (8.0, 15.0, 30.0, 40.0, 50.0)] == \
+        [True, False, True, True, False]
+
+
+def test_simcontrols_sn_mass_limits_settable():
+    """snMassLimits is settable both via the property and the setter, and
+    an empty list makes hasSN defer to yields again."""
+    sc = _sn_controls(with_yields=True)
+    sc.snMassLimits = [8.0, 12.0]
+    assert sc.snMassLimits == [8.0, 12.0]
+    assert sc.hasSN(10.0) and not sc.hasSN(15.0)
+    sc.setSNMassLimits([])
+    assert sc.snMassLimits == []
+    assert not sc.hasSN(10.0) and sc.hasSN(15.0)
+
+
+@pytest.mark.parametrize("limits", [[8.0, 20.0, 25.0], [20.0, 8.0], [8.0, float("nan")]])
+def test_simcontrols_sn_mass_limits_invalid_raises(limits):
+    """An odd-length or non-strictly-increasing list raises ValueError and
+    leaves snMassLimits unchanged."""
+    sc = _sn_controls(with_yields=False, sn_mass_range=[8.0, 40.0])
+    with pytest.raises(ValueError):
+        sc.snMassLimits = limits
+    assert sc.snMassLimits == [8.0, 40.0]
+
+
 def test_simcontrols_write_yields_properties_default_true(yields_controls):
     """writeClusterYields/writeGalaxyYields default to True."""
     assert yields_controls.writeClusterYields is True

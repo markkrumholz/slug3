@@ -830,6 +830,48 @@ namespace io
         [[nodiscard]] auto noDecay() const { return noDecay_; }
 
         /**
+         * @brief Get the stellar mass limits over which supernovae occur
+         * @return The mass limits, in Msun: consecutive pairs
+         *   (lower, upper) of limits, each pair giving one mass
+         *   interval in which stars end their lives as supernovae --
+         *   more than one pair describes disjoint intervals. Empty if
+         *   no explicit limits were set, in which case hasSN() defers
+         *   to yields() instead -- see its own comment
+         */
+        [[nodiscard]] auto snMassLimits() const -> const std::vector<double>& { return snMassLimits_; }
+
+        /**
+         * @brief Set the stellar mass limits over which supernovae occur
+         * @param limits New mass limits, in Msun, in the format
+         *   described in snMassLimits()'s own comment
+         * @throws std::invalid_argument if limits has an odd number of
+         *   elements, or if its elements are not strictly increasing
+         *   (which also rejects any NaN element); snMassLimits_ is left
+         *   unchanged in this case
+         * @details
+         * An empty limits is valid, and means hasSN() defers to
+         * yields() -- see its own comment.
+         */
+        void setSNMassLimits(std::vector<double> limits);
+
+        /**
+         * @brief Check whether a star of a given mass ends its life as a supernova
+         * @param mass Stellar mass (Msun)
+         * @return Whether a star of this mass ends its life as a
+         *   supernova -- see @details for how this is decided
+         * @details
+         * If snMassLimits() is non-empty, returns true if mass lies
+         * within any of its (lower, upper) intervals, inclusive of both
+         * ends, and false otherwise, regardless of yields(). If
+         * snMassLimits() is empty and yields() is non-null, returns
+         * yields()->hasYield(mass, yields::Channel::ccsn_), i.e.
+         * whether mass lies within the mass range of any core-collapse
+         * supernova yield channel loaded. If snMassLimits() is empty
+         * and yields() is null, returns false.
+         */
+        [[nodiscard]] auto hasSN(double mass) const -> bool;
+
+        /**
          * @brief Get the nebular emission control parameters
          * @return A const reference to the control parameters
          *   populated from the input deck's own [nebular] stanza (see
@@ -1668,6 +1710,22 @@ namespace io
         void readYields(const utils::TrackedDeck& inputDeck);
 
         /**
+         * @brief Load the stellar feedback controls specified by input deck
+         * @param inputDeck A toml table holding the input deck
+         * @throws std::runtime_error if feedback.sn_mass_range is given
+         *   but is not an array of numbers
+         * @throws std::invalid_argument if feedback.sn_mass_range is not
+         *   a valid set of mass limits -- see setSNMassLimits()
+         * @details
+         * Reads the optional feedback.sn_mass_range key, an array of
+         * stellar masses in Msun in the format described in
+         * snMassLimits()'s own comment, and passes it to
+         * setSNMassLimits(). If it is not given, snMassLimits_ is left
+         * empty, so hasSN() defers to yields().
+         */
+        void readFeedback(const utils::TrackedDeck& inputDeck);
+
+        /**
          * @brief Load the nebular emission controls and grid specified by input deck
          * @param inputDeck A toml table holding the input deck
          * @details
@@ -1808,6 +1866,7 @@ namespace io
         std::shared_ptr<yields::Yields> yields_; /**< Yields built from yieldChannels_, or nullptr if yieldChannels_ is empty */
         bool yieldsChannelDecomposed_ = true; /**< Whether yields should be reported decomposed by channel (true) or summed over all channels (false) -- see yieldsChannelDecomposed()'s own comment; from the optional yields.channel_decomposed key, see readYields() */
         bool noDecay_ = false; /**< Whether radioactive decay should be excluded from computed yields -- see noDecay()'s own comment; from the optional yields.no_decay key, see readYields() */
+        std::vector<double> snMassLimits_; /**< Stellar mass limits, in Msun, over which supernovae occur -- see snMassLimits()'s own comment; from the optional feedback.sn_mass_range key, see readFeedback() */
 
         // Output wavelength grid (spectra.wl_min, spectra.wl_max,
         // spectra.nwl), read by readSpectra and passed through to
