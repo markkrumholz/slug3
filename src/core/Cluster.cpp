@@ -696,30 +696,42 @@ void core::Cluster::computeFeedback()
     // Stochastic (individually-sampled) stars that died during the
     // most recent advance() call
     stochSN_ += static_cast<unsigned long>(
-        std::ranges::count_if(mDead_, [&sc](const double m) -> bool { return sc.hasSN(m); }));
+        std::ranges::count_if(mDead_,
+            [&sc, this](const double m) -> bool { return sc.hasSN(m, feH_); }));
 
     // Continuously-sampled (non-stochastic) stars that died between
     // lastFeedbackTime_ and curTime_ -- mirrors computeYields()'s own
     // identical integration of yieldStar()
     if (birthNonStochMass_ <= 0.0) { return; }
 
-    using SNSegFn = std::array<double, 1> (*)(double, const io::SimControls&);
+    // The absolute tolerance is 0, not controls().intAbsTol(), so that
+    // convergence is governed by intRelTol() alone: this integral is a
+    // number of SNe per unit cluster mass, typically ~1e-3 or less --
+    // comparable to or below intAbsTol()'s own default (1e-3) -- so an
+    // absolute tolerance on that scale lets the integrator accept a
+    // first, badly under-resolved estimate of what is a step-function
+    // integrand (snStar() is 0 or 1). A pure relative tolerance still
+    // converges quickly: each subinterval is either constant (exact at
+    // once, including an identically zero one) or brackets a step,
+    // which bisection homes in on.
+    using SNSegFn = std::array<double, 1> (*)(double, const io::SimControls&, double);
     const utils::PDFIntegrator<SNSegFn> integrator(
         sc.imf(), static_cast<SNSegFn>(&Cluster::snStar), 1,
-        false, sc.intMaxIter(), sc.intAbsTol(), sc.intRelTol());
+        false, sc.intMaxIter(), 0.0, sc.intRelTol());
 
     for (const auto& [m0, m1] : nonStochDeadMassRanges(lastFeedbackTime_))
     {
-        const auto segResult = integrator.integrate(m0, m1, sc);
+        const auto segResult = integrator.integrate(m0, m1, sc, feH_);
         nonStochSN_ += segResult[0] * birthNonStochMass_; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- segResult is a std::array<double, 1>, so index 0 is always valid
     }
 }
 
 // Per-star supernova count, given a mass -- see this method's own
 // header comment
-auto core::Cluster::snStar(const double m, const io::SimControls& controls) -> std::array<double, 1>
+auto core::Cluster::snStar(const double m, const io::SimControls& controls, const double feH)
+    -> std::array<double, 1>
 {
-    return { controls.hasSN(m) ? 1.0 : 0.0 };
+    return { controls.hasSN(m, feH) ? 1.0 : 0.0 };
 }
 
 // Per-star bolometric luminosity, given a mass and isochrone segment

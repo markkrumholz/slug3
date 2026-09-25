@@ -450,8 +450,8 @@ namespace core
          * (see lastFeedbackTime_'s own comment for why), so both
          * counts are already current by the time this is called. Zero
          * until advance() has run at least once. Which stars count as
-         * supernovae is decided by SimControls::hasSN() -- see its own
-         * comment.
+         * supernovae is decided by SimControls::hasSN(mass, feH), at
+         * this cluster's own feH() -- see its own comment.
          */
         [[nodiscard]] auto cumSNe() const -> double
         {
@@ -810,7 +810,10 @@ namespace core
          * feedback quantity is the number of supernovae; for the
          * stochastic population, adds 1 to stochSN_ for each star in
          * mDead_ (the stars that died during the most recent
-         * advance() call) for which controls().hasSN() is true. For the
+         * advance() call) for which controls().hasSN(m, feH_) is true
+         * -- the [Fe/H]-aware overload, so that failed supernovae
+         * within a ccsn yield table's own mass range are not counted
+         * (see SimControls::hasSN(mass, feH)'s own comment). For the
          * non-stochastic population (if birthNonStochMass_ > 0),
          * finds the mass ranges that died between lastFeedbackTime_
          * and curTime_ via nonStochDeadMassRanges(), integrates
@@ -905,8 +908,10 @@ namespace core
          * @param controls The simulation controls -- controls(),
          *   passed explicitly for the same reason yieldStar() takes
          *   its own controls argument
-         * @return 1 if controls.hasSN(m) is true, 0 otherwise, wrapped
-         *   in a single-element array
+         * @param feH [Fe/H] of the star -- the cluster's own feH_,
+         *   passed explicitly for the same reason as controls
+         * @return 1 if controls.hasSN(m, feH) is true, 0 otherwise,
+         *   wrapped in a single-element array
          * @details
          * Exists so computeFeedback() can hand it to
          * utils::PDFIntegrator, mirroring lbolStar()'s/yieldStar()'s
@@ -915,7 +920,8 @@ namespace core
          * to the double-valued form PDFIntegrator requires. Static for
          * the same reason they are.
          */
-        [[nodiscard]] static auto snStar(double m, const io::SimControls& controls) -> std::array<double, 1>;
+        [[nodiscard]] static auto snStar(double m, const io::SimControls& controls, double feH)
+            -> std::array<double, 1>;
 
     };
 
