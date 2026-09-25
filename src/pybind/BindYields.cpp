@@ -334,6 +334,27 @@ Throws
 RuntimeError
     Under the same conditions as yield_().)doc";
 
+static constexpr std::string_view hasYieldDocstring =
+    R"doc(Check whether a star of a given mass returns a yield through a given channel.
+
+Parameters
+----------
+mass : float
+    Stellar mass (Msun).
+channel : YieldChannelType
+    The nucleosynthetic channel to check (e.g. YieldChannelType.ccsn).
+
+Returns
+-------
+has_yield : bool
+    True if any entry of yieldChannels() of type channel has its own
+    hasYield(mass) True; False otherwise, including if no entry of
+    yieldChannels() is of type channel at all. Entries of any other
+    channel type are ignored; if more than one entry is of type
+    channel (e.g. two models covering different sub-ranges of one
+    channel's mass range), mass need only lie within the mass grid of
+    one of them.)doc";
+
 // Disable linting for includes -- the pybind macro magic seems to confuse
 // the linter
 // NOLINTBEGIN(misc-include-cleaner)
@@ -558,6 +579,8 @@ void bindYields(py::module_& m)
         .def("requestedFehMin", &yields::Yields::requestedFehMin,
                 yieldsRequestedFehMinDocstring.data())
         .def("requestedFehMax", &yields::Yields::requestedFehMax,
-                yieldsRequestedFehMaxDocstring.data());
+                yieldsRequestedFehMaxDocstring.data())
+        .def("hasYield", &yields::Yields::hasYield,
+                hasYieldDocstring.data(), py::arg("mass"), py::arg("channel"));
 }
 // NOLINTEND(misc-include-cleaner)

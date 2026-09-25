@@ -3041,8 +3041,8 @@ def test_isotope_table_unknown_raises_keyerror():
 
 
 def test_yield_channel_type_enum_members():
-    """YieldChannelType has exactly the two currently-known channels."""
-    assert set(slug.YieldChannelType.__members__.keys()) == {"ccsn", "massive_star_winds"}
+    """YieldChannelType has exactly the three currently-known channels."""
+    assert set(slug.YieldChannelType.__members__.keys()) == {"ccsn", "massive_star_winds", "agb"}
 
 
 def test_yield_channel_descriptor_defaults():
@@ -3213,6 +3213,20 @@ def test_yields_yield_and_yield_sum_shapes(yields_controls):
     assert len(total) == len(YIELDS_ISOTOPES)
     for j in range(len(YIELDS_ISOTOPES)):
         assert total[j] == pytest.approx(rows[0][j] + rows[1][j])
+
+
+def test_yields_has_yield(yields_controls):
+    """hasYield is True for a ccsn mass within either ccsn channel's range
+    (kobayashi_test, 13-18 Msun; sukhbold_test, 18.2-100 Msun), False in
+    the gap between them or outside both, and False for any channel type
+    with no channels loaded at all."""
+    yields = yields_controls.yields
+    ccsn = slug.YieldChannelType.ccsn
+    assert [yields.hasYield(m, ccsn) for m in (10.0, 15.0, 18.1, 50.0, 120.0)] == \
+        [False, True, False, True, False]
+    assert not yields.hasYield(50.0, slug.YieldChannelType.massive_star_winds)
+    assert not yields.hasYield(mass=50.0, channel=slug.YieldChannelType.massive_star_winds)
+    assert not yields.hasYield(3.0, slug.YieldChannelType.agb)
 
 
 def test_yields_yield_and_yield_sum_dt_decay():

@@ -368,7 +368,8 @@ void bindYieldChannel(py::module_& m)
     py::enum_<yields::Channel>(m, "YieldChannelType", yieldChannelTypeDocstring.data())
         .value("ccsn", yields::Channel::ccsn_, "Core-collapse supernova ejecta")
         .value("massive_star_winds", yields::Channel::massiveStarWinds_,
-                "Massive star winds (pre-supernova mass loss)");
+                "Massive star winds (pre-supernova mass loss)")
+        .value("agb", yields::Channel::agb_, "Asymptotic giant branch stellar winds");
 
     py::class_<yields::YieldChannelDescriptor, py::smart_holder>(
             m, "YieldChannelDescriptor", descriptorClassDocstring.data())
