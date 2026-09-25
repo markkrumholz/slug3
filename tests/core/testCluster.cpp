@@ -1729,6 +1729,147 @@ static auto testClusterCumSNeAtBirth() -> int
     return 0;
 }
 
+// Verify cumSNe() for a fully stochastic cluster: with SNe restricted
+// to 8-40 Msun via feedback.sn_mass_range, the count at each time t
+// should equal the number of stars sampled at birth with a mass in
+// that range and a death time before t. advance() is called twice
+// before cumSNe() is first read, since the stochastic count relies on
+// deadStarMasses(), which each advance() call overwrites -- so this
+// also checks that no deaths are lost when cumSNe() is not read after
+// every advance() call.
+static auto testClusterCumSNeStochastic() -> int
+{
+    constexpr double clusterMass = 1e4;
+    constexpr double snMin = 8.0;
+    constexpr double snMax = 40.0;
+    constexpr std::array<double, 3> times = { 5e6, 1e7, 3e7 };
+
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFile);
+        inputDeck.insert("feedback", toml::table{
+            { "sn_mass_range", toml::array{ snMin, snMax } } });
+        const io::SimControls controls(inputDeck);
+
+        utils::rng().seed(rngSeed);
+        core::Cluster cluster(0, clusterMass, 0.0, controls);
+
+        // Expected count of SNe by time t, from the stars sampled at
+        // birth -- copied now, since advance() removes dead stars
+        const std::vector<double> masses = cluster.starMasses();
+        const std::vector<double> tDeath = cluster.starDeathTimes();
+        auto expectedSNe = [&masses, &tDeath](const double t) -> double {
+            double n = 0.0;
+            for (std::size_t i = 0; i < masses.size(); ++i)
+            {
+                if (masses[i] >= snMin && masses[i] <= snMax && tDeath[i] < t) { n += 1.0; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i < masses.size() == tDeath.size()
+            }
+            return n;
+        };
+
+        int result = 0;
+        cluster.advance(times[0]);
+        for (std::size_t k = 1; k < times.size(); ++k)
+        {
+            cluster.advance(times.at(k));
+            const double expected = expectedSNe(times.at(k));
+            if (cluster.cumSNe() != expected)
+            {
+                std::cerr << "testCluster: cumSNeStochastic: cumSNe() at t = " << times.at(k)
+                    << " is " << cluster.cumSNe() << ", expected " << expected << "\n";
+                result = 1;
+            }
+        }
+        if (expectedSNe(times.back()) <= 0.0)
+        {
+            std::cerr << "testCluster: cumSNeStochastic: test bug: expected some SNe by t = "
+                << times.back() << "\n";
+            result = 1;
+        }
+        return result;
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testCluster: cumSNeStochastic test failed: " << error.what() << "\n";
+        return 1;
+    }
+}
+
+// Verify cumSNe() for a fully continuously-sampled cluster: with SNe
+// restricted to 8-40 Msun via feedback.sn_mass_range, the count should
+// equal the cluster mass times the integral of the IMF over the part of
+// the mass range that has died since birth that lies within 8-40 Msun.
+// As in testClusterCumSNeStochastic, advance() is called twice before
+// cumSNe() is read, the first time at an age by which part of the
+// 8-40 Msun range has already died, so that the second call's own
+// increment must start from where the first left off.
+static auto testClusterCumSNeNonStochastic() -> int
+{
+    constexpr double clusterMass = 1e4;
+    constexpr double snMin = 8.0;
+    constexpr double snMax = 40.0;
+    constexpr double ageYr = 2e7;
+
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFile);
+        inputDeck.at_path("stars").as_table()->insert_or_assign("min_stoch_mass", 120.0);
+        inputDeck.insert("feedback", toml::table{
+            { "sn_mass_range", toml::array{ snMin, snMax } } });
+        const io::SimControls controls(inputDeck);
+
+        utils::rng().seed(rngSeed);
+        core::Cluster cluster(0, clusterMass, 0.0, controls);
+        cluster.advance(0.5 * ageYr);
+        cluster.advance(ageYr);
+
+        // Mass range that has died since birth -- see
+        // testClusterYieldsNonStochastic's own comment for why this is
+        // a single interval (turnoffNow, turnoffBirth] here
+        const auto& tr = cluster.tracks();
+        const auto birthRange = tr.liveMassRange(tr.logTMin());
+        const auto nowRange = tr.liveMassRange(std::log10(ageYr));
+        if (birthRange.size() != 1 || nowRange.size() != 1 ||
+            birthRange.front().first != nowRange.front().first)
+        {
+            std::cerr << "testCluster: cumSNeNonStochastic: live mass range shape "
+                "assumption violated -- test needs updating\n";
+            return 1;
+        }
+        const double m0 = std::max(nowRange.front().second, snMin);
+        const double m1 = std::min({ birthRange.front().second, controls.minStochMass(), snMax });
+        if (m0 >= m1)
+        {
+            std::cerr << "testCluster: cumSNeNonStochastic: test bug: expected the dead mass "
+                "range at " << ageYr << " yr to overlap [" << snMin << ", " << snMax << "]\n";
+            return 1;
+        }
+
+        // Number of stars per unit cluster mass in [m0, m1]
+        using OneFn = std::array<double, 1> (*)(double);
+        const utils::PDFIntegrator<OneFn> integrator(
+            controls.imf(), static_cast<OneFn>([](double) -> std::array<double, 1> { return { 1.0 }; }), 1,
+            false, controls.intMaxIter(), controls.intAbsTol(), controls.intRelTol());
+        const double expected = integrator.integrate(m0, m1)[0] * clusterMass; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- single-element array
+
+        // cumSNe()'s own integrand is a step function (hasSN), so it
+        // converges only to within the integrator's own tolerance
+        const double tol = 10.0 * controls.intRelTol();
+        if (std::abs(cluster.cumSNe() - expected) > tol * expected)
+        {
+            std::cerr << "testCluster: cumSNeNonStochastic: cumSNe() is " << cluster.cumSNe()
+                << ", expected " << expected << "\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testCluster: cumSNeNonStochastic test failed: " << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
 auto testCluster() -> int
 {
     int result = 0;
@@ -1754,5 +1895,7 @@ auto testCluster() -> int
     result += testClusterYieldsConverged();
     result += testClusterYieldsAboveTrackRange();
     result += testClusterCumSNeAtBirth();
+    result += testClusterCumSNeStochastic();
+    result += testClusterCumSNeNonStochastic();
     return result;
 }
