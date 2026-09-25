@@ -13,8 +13,10 @@
 #include "../utils/GridBracket.hpp"
 #include "../utils/ThreadVec.hpp"
 #include "YieldCommons.hpp"
+#include <algorithm>
 #include <cassert>
 #include <cstddef>
+#include <cstdint>
 #include <mdspan> // NOLINT(misc-include-cleaner)
 #include <optional>
 #include <stdexcept>
@@ -34,6 +36,9 @@ namespace yields
 
         /** @brief mdspan view of yieldData_ -- see yld()'s own comment */
         using Array3D = std::mdspan<const double, std::dextents<std::size_t, 3>>; // NOLINT(misc-include-cleaner)
+
+        /** @brief mdspan view of yieldActive_/yieldActiveOrig_ -- see yieldActive_'s own comment */
+        using ActiveArray2D = std::mdspan<const std::uint8_t, std::dextents<std::size_t, 2>>; // NOLINT(misc-include-cleaner)
 
         // Constructors and destructors
 
@@ -148,6 +153,10 @@ namespace yields
          * with no match in isotopesOrig_ (this channel's own model
          * never tabulated it) leaves that isotope's own yieldData_
          * entries at exactly 0, for every mass and [Fe/H].
+         *
+         * yieldActive_ is rebuilt alongside yieldData_, one masses_
+         * column at a time, from yieldActiveOrig_ -- see yieldActive_'s
+         * own comment for the rule.
          *
          * massCache_ is reset to 0 for every thread once masses_ has a
          * new size: an index cached against the old masses_ could
@@ -305,6 +314,44 @@ namespace yields
         }
 
         /**
+         * @brief Check whether a star of a given mass and [Fe/H] returns a non-zero yield through this channel
+         * @param mass Stellar mass to check (Msun)
+         * @param feH [Fe/H] to check; clamped to [feH().front(),
+         *   feH().back()] first if outside it
+         * @return False if hasYield(mass) is false; otherwise true if
+         *   any of the four (feH(), masses()) grid points at the
+         *   corners of the grid cell containing (feH, mass) has a
+         *   non-zero yield of any isotope (see yieldActive_'s own
+         *   comment), false if all four have zero yields of every
+         *   isotope
+         * @details
+         * Unlike hasYield(mass), which only checks mass against the
+         * overall extent of masses(), this also catches gaps within
+         * that extent: masses at which a model tabulates a yield, but
+         * that yield is zero for every isotope -- e.g. the failed
+         * supernovae in sukhbold16's own ccsn tables. A mass strictly
+         * between an active and an inactive grid point still counts as
+         * having a yield, since yield() interpolates a non-zero value
+         * there.
+         *
+         * Like hasYield(mass), returns false unconditionally if
+         * rebuildYieldGrid() has never been called. Uses massCache_/
+         * fehCache_ exactly as yield() does -- see its own comment.
+         */
+        [[nodiscard]] auto hasYield(const double mass, const double feH) const -> bool
+        {
+            if (!hasYield(mass)) { return false; }
+            const double feHClamped = std::clamp(feH, feH_.front(), feH_.back());
+            const auto bm = utils::findBracket(masses_, mass, massCache_());
+            const auto bf = utils::findBracket(feH_, feHClamped, fehCache_());
+            const ActiveArray2D active(yieldActive_.data(), feH_.size(), masses_.size());
+            // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- bm/bf indices are all < the corresponding grid's size by construction
+            return active[bf.lo_, bm.lo_] != 0 || active[bf.lo_, bm.hi_] != 0 ||
+                active[bf.hi_, bm.lo_] != 0 || active[bf.hi_, bm.hi_] != 0;
+            // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        }
+
+        /**
          * @brief Return the yield of every isotope for a star of given mass and [Fe/H]
          * @param mass Stellar mass (Msun); must satisfy hasYield(mass)
          * @param feH [Fe/H]; must lie within [feH().front(), feH().back()]
@@ -390,6 +437,42 @@ namespace yields
         std::vector<double> feH_;          /**< [Fe/H] values for all yields */ // NOLINT(readability-identifier-naming)
         std::vector<double> yieldData_;    /**< Backing storage for yld(), over masses_/isotopes_ -- see its own comment */
         std::vector<double> yieldDataOrig_; /**< Backing storage over massesOrig_/isotopesOrig_, from which yieldData_ is (re)derived -- see rebuildYieldGrid()'s own comment */
+
+        /**
+         * @brief Whether each (feH_, massesOrig_) grid point has a non-zero yield of any isotope
+         * @details
+         * Shape (feH_.size(), massesOrig_.size()) -- the same two
+         * leading axes as yieldDataOrig_ -- stored row-major, and
+         * accessed through an ActiveArray2D view. Entry [f, m] is 1 if
+         * any of yieldDataOrig_[f, m, :] (over every isotope in
+         * isotopesOrig_, not just whichever ones a later
+         * rebuildYieldGrid() call keeps) is non-zero, and 0 if all of
+         * them are zero -- e.g. a failed supernova in a ccsn yield
+         * table. Set once, in the constructor, from yieldDataOrig_.
+         *
+         * Stored as std::uint8_t (0 or 1) rather than bool because
+         * std::vector<bool> is a bit-packed specialization with no
+         * contiguous bool storage (and so no data()) to back an mdspan
+         * view.
+         */
+        std::vector<std::uint8_t> yieldActiveOrig_;
+
+        /**
+         * @brief Whether each (feH_, masses_) grid point has a non-zero yield of any isotope
+         * @details
+         * Shape (feH_.size(), masses_.size()) -- the same two leading
+         * axes as yieldData_ -- stored as yieldActiveOrig_ is (see its
+         * own comment). Rebuilt by rebuildYieldGrid(), alongside
+         * yieldData_: an entry extrapolated from a single massesOrig_
+         * column is active iff that column is active in
+         * yieldActiveOrig_; one interpolated between two massesOrig_
+         * columns is active iff either column that actually
+         * contributes (i.e. has non-zero interpolation weight) is
+         * active -- so a masses_ entry that exactly matches a
+         * massesOrig_ entry takes that entry's own value alone. Read by
+         * hasYield(mass, feH).
+         */
+        std::vector<std::uint8_t> yieldActive_;
         mutable utils::ThreadVec<std::size_t> massCache_; /**< Cached bracket index for masses_, see yield()'s own comment */
         mutable utils::ThreadVec<std::size_t> fehCache_;  /**< Cached bracket index for feH_, see yield()'s own comment */
 

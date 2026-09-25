@@ -872,6 +872,25 @@ namespace io
         [[nodiscard]] auto hasSN(double mass) const -> bool;
 
         /**
+         * @brief Check whether a star of a given mass and [Fe/H] ends its life as a supernova
+         * @param mass Stellar mass (Msun)
+         * @param feH [Fe/H] of the star
+         * @return Whether a star of this mass and [Fe/H] ends its life
+         *   as a supernova -- see @details for how this is decided
+         * @details
+         * Identical to hasSN(mass), including in giving snMassLimits(),
+         * if non-empty, precedence over yields() (in which case feH is
+         * ignored), except that when it defers to yields() it returns
+         * yields()->hasYield(mass, feH, yields::Channel::ccsn_) rather
+         * than yields()->hasYield(mass, yields::Channel::ccsn_) -- so it
+         * also catches gaps within the core-collapse supernova yield
+         * channels' own mass ranges where their tabulated yields are
+         * zero for every isotope, i.e. failed supernovae (see
+         * YieldChannel::hasYield(mass, feH)'s own comment).
+         */
+        [[nodiscard]] auto hasSN(double mass, double feH) const -> bool;
+
+        /**
          * @brief Get the nebular emission control parameters
          * @return A const reference to the control parameters
          *   populated from the input deck's own [nebular] stanza (see

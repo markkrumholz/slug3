@@ -1367,6 +1367,15 @@ auto io::SimControls::hasSN(const double mass) const -> bool
     return false;
 }
 
+auto io::SimControls::hasSN(const double mass, const double feH) const -> bool
+{
+    // Explicit mass limits, if any, take precedence over yields, and
+    // with no yields there is nothing [Fe/H]-dependent to check -- in
+    // either case hasSN(mass) gives the answer
+    if (!snMassLimits_.empty() || yields_ == nullptr) { return hasSN(mass); }
+    return yields_->hasYield(mass, feH, yields::Channel::ccsn_);
+}
+
 // Nebular emission controls and grid reader
 void io::SimControls::readNebular(const utils::TrackedDeck& inputDeck)
 {

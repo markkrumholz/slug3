@@ -534,6 +534,14 @@ namespace yields
             });
     }
 
+    auto Yields::hasYield(const double mass, const double feH, const Channel channel) const -> bool
+    {
+        return std::ranges::any_of(yieldChannels_,
+            [mass, feH, channel](const std::shared_ptr<YieldChannel>& yc) -> bool {
+                return yc->channel() == channel && yc->hasYield(mass, feH);
+            });
+    }
+
     void Yields::applyDecay(const double dtDecay, const std::span<double> values) const
     {
         assert(values.size() == isotopes_.size());

@@ -2,7 +2,7 @@ name = "Registry of nucleosynthetic yield models (test fixture)"
 channels = ["ccsn", "massive_star_winds"]
 
 [ccsn]
-models = ["sukhbold_test", "kobayashi_test"]
+models = ["sukhbold_test", "kobayashi_test", "gap_test"]
 
 [ccsn.sukhbold_test]
 reference = "Sukhbold, T., Ertl, T., Woosley, S. E., Brown, J. M., Janka, H.-T. 2016, ApJ, 821, 38"
@@ -17,6 +17,13 @@ reference_url = ["https://ui.adsabs.harvard.edu/abs/2006ApJ...653.1145K/abstract
 file = "yields_test_kobayashi.h5"
 Fe_H = [0.0]
 masses = [13.0, 15.0, 18.0]
+
+[ccsn.gap_test]
+reference = "Synthetic test fixture -- not a real yield model"
+reference_url = ""
+file = "yields_test_gap.h5"
+Fe_H = [-2.0, -1.0, 0.0]
+masses = [10.0, 20.0, 30.0, 40.0]
 
 [massive_star_winds]
 models = ["sukhbold_test"]

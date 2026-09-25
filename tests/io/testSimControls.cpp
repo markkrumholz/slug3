@@ -3759,6 +3759,97 @@ static auto testSimControlsFeedback() -> int
     return result > 0 ? 1 : 0;
 }
 
+// Verify Yields::hasYield(mass, feH, channel) and SimControls::hasSN(mass,
+// feH) against the synthetic gap_test ccsn model (masses 10-40 Msun,
+// whose 20 and 30 Msun yields are all zero at [Fe/H] = 0 -- see
+// make_yields_test_fixture.py): at [Fe/H] = 0, a 25 Msun star lies
+// within the model's mass range, so the mass-only hasYield()/hasSN()
+// report a yield/SN, but it lies in a failed-supernova gap, so the
+// [Fe/H]-aware versions do not. Also checks that explicit SN mass limits
+// still take precedence over yields in hasSN(mass, feH), and that
+// hasSN(mass, feH) is false with neither.
+static auto testSimControlsHasSNFeH() -> int
+{
+    constexpr std::string_view baseDeck = "tests/core/assets/testGalaxy.in";
+    const auto ccsn = yields::Channel::ccsn_;
+    int result = 0;
+    try
+    {
+        toml::table inputDeck = toml::parse_file(baseDeck);
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{ { "channel", "ccsn" }, { "model", "gap_test" } } },
+            { "registry", "tests/yields/assets/yields.toml" },
+        });
+        io::SimControls controls(inputDeck);
+        const auto yields = controls.yields();
+        if (yields == nullptr)
+        {
+            std::cerr << "testSimControls: hasSNFeH: expected yields() non-null\n";
+            return 1;
+        }
+
+        struct Case
+        {
+            std::string_view label_;
+            bool actual_;
+            bool expected_;
+        };
+        const std::array<Case, 9> cases = { {
+            { "yields()->hasYield(25, ccsn)", yields->hasYield(25.0, ccsn), true },
+            { "yields()->hasYield(25, 0, ccsn)", yields->hasYield(25.0, 0.0, ccsn), false },
+            { "yields()->hasYield(15, 0, ccsn)", yields->hasYield(15.0, 0.0, ccsn), true },
+            { "yields()->hasYield(35, 0, ccsn)", yields->hasYield(35.0, 0.0, ccsn), true },
+            { "yields()->hasYield(25, 0, massive_star_winds)",
+                yields->hasYield(25.0, 0.0, yields::Channel::massiveStarWinds_), false },
+            { "hasSN(25)", controls.hasSN(25.0), true },
+            { "hasSN(25, 0)", controls.hasSN(25.0, 0.0), false },
+            { "hasSN(15, 0)", controls.hasSN(15.0, 0.0), true },
+            { "hasSN(45, 0)", controls.hasSN(45.0, 0.0), false },
+        } };
+        for (const auto& c : cases)
+        {
+            if (c.actual_ != c.expected_)
+            {
+                std::cerr << "testSimControls: hasSNFeH: " << c.label_ << " returned "
+                    << c.actual_ << ", expected " << c.expected_ << "\n";
+                result = 1;
+            }
+        }
+
+        // Explicit limits take precedence over yields, [Fe/H] or not
+        controls.setSNMassLimits({ 20.0, 30.0 });
+        if (!controls.hasSN(25.0, 0.0) || controls.hasSN(15.0, 0.0))
+        {
+            std::cerr << "testSimControls: hasSNFeH: explicit limits [20, 30] did not "
+                "override yields in hasSN(mass, feH)\n";
+            result = 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: hasSNFeH: threw: " << error.what() << "\n";
+        return 1;
+    }
+
+    // No limits and no yields: no SNe
+    try
+    {
+        const io::SimControls controls(toml::parse_file(baseDeck));
+        if (controls.hasSN(25.0, 0.0))
+        {
+            std::cerr << "testSimControls: hasSNFeH: expected hasSN(25, 0) false "
+                "with no limits and no yields\n";
+            result = 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: hasSNFeH: no-yields case threw: " << error.what() << "\n";
+        return 1;
+    }
+    return result;
+}
+
 auto testSimControls() -> int
 {
     int result = 0;
@@ -3813,5 +3904,6 @@ auto testSimControls() -> int
     result += testSimControlsFracStochMass();
     result += testSimControlsYieldsHasYield();
     result += testSimControlsFeedback();
+    result += testSimControlsHasSNFeH();
     return result;
 }

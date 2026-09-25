@@ -3147,6 +3147,53 @@ def test_yield_channel_has_yield_and_yield():
     assert all(v >= 0.0 for v in row)
 
 
+def test_yield_channel_has_yield_feh_detects_gaps():
+    """hasYield(mass, feh) is False inside gap_test's failed-supernova gap
+    (20-30 Msun, all-zero yields at [Fe/H] = -1 and 0), where the
+    mass-only hasYield(mass) is True, but True where the gap closes
+    ([Fe/H] between -2 and -1), and False for an extrapolated mass
+    column built from an all-zero one."""
+    descriptor = slug.YieldChannelDescriptor(slug.YieldChannelType.ccsn, "gap_test")
+    channel = slug.YieldChannel(descriptor, -2.0, 0.0, registry_name=YIELDS_REGISTRY)
+    assert channel.hasYield(15.0, -0.5) is False  # grid not yet built
+    channel.rebuildYieldGrid()
+    assert channel.hasYield(25.0) is True
+    assert channel.hasYield(25.0, -0.5) is False
+    assert channel.hasYield(mass=25.0, feh=-1.5) is True
+    assert channel.hasYield(15.0, -0.5) is True
+
+    sukhbold = slug.YieldChannel(
+        slug.YieldChannelDescriptor(slug.YieldChannelType.ccsn, "sukhbold_test"),
+        0.0, 0.0, registry_name=YIELDS_REGISTRY)
+    sukhbold.rebuildYieldGrid(m_min=10.0, m_max=150.0)
+    assert sukhbold.hasYield(120.0) is True
+    assert sukhbold.hasYield(120.0, 0.0) is False
+    assert sukhbold.hasYield(50.0, 0.0) is True
+
+
+def test_yields_and_simcontrols_feh_aware_overloads():
+    """Yields.hasYield(mass, feh, channel) and SimControls.hasSN(mass, feh)
+    detect gap_test's failed-supernova gap, unlike their mass-only
+    overloads; explicit snMassLimits still override yields."""
+    deck = tomlkit.parse(pathlib.Path(CLUSTER_DECK).read_text())
+    deck["yields"] = tomlkit.table()
+    deck["yields"]["channel1"] = {"channel": "ccsn", "model": "gap_test"}
+    deck["yields"]["registry"] = YIELDS_REGISTRY
+    sc = slug.SimControls(tomlkit.dumps(deck))
+    ccsn = slug.YieldChannelType.ccsn
+
+    assert sc.yields.hasYield(25.0, ccsn) is True
+    assert sc.yields.hasYield(25.0, 0.0, ccsn) is False
+    assert sc.yields.hasYield(mass=15.0, feh=0.0, channel=ccsn) is True
+    assert sc.hasSN(25.0) is True
+    assert sc.hasSN(25.0, 0.0) is False
+    assert sc.hasSN(mass=15.0, feh=0.0) is True
+
+    sc.snMassLimits = [20.0, 30.0]
+    assert sc.hasSN(25.0, 0.0) is True
+    assert sc.hasSN(15.0, 0.0) is False
+
+
 def test_yield_channel_rebuild_yield_grid_restricts_isotopes():
     """Passing an explicit isotopes list to rebuildYieldGrid() reorders/subsets the isotope axis."""
     descriptor = slug.YieldChannelDescriptor(slug.YieldChannelType.ccsn, "sukhbold_test")

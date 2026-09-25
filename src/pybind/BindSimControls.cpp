@@ -1004,6 +1004,26 @@ has_sn : bool
     core-collapse supernova (ccsn) yield channel loaded. Otherwise,
     False.)doc";
 
+static constexpr std::string_view hasSNFeHDocstring =
+R"doc(Check whether a star of a given mass and [Fe/H] ends its life as a supernova.
+
+Parameters
+----------
+mass : float
+    Stellar mass (Msun).
+feh : float
+    [Fe/H] of the star.
+
+Returns
+-------
+has_sn : bool
+    If snMassLimits is non-empty, True if mass lies within any of its
+    (lower, upper) intervals, inclusive of both ends (feh is ignored).
+    Otherwise, if yields is not None,
+    yields.hasYield(mass, feh, YieldChannelType.ccsn) -- which, unlike
+    hasSN(mass), also catches failed supernovae within the ccsn yield
+    channels' own mass ranges. Otherwise, False.)doc";
+
 static constexpr std::string_view inputDeckStrPropertyDocstring =
 R"doc(The input deck's own text.
 
@@ -1250,8 +1270,10 @@ void bindSimControls(py::module_& m)
                 noDecayPropertyDocstring.data(), py::arg("value"))
         .def("setSNMassLimits", &io::SimControls::setSNMassLimits,
                 snMassLimitsPropertyDocstring.data(), py::arg("limits"))
-        .def("hasSN", &io::SimControls::hasSN,
+        .def("hasSN", py::overload_cast<double>(&io::SimControls::hasSN, py::const_),
                 hasSNDocstring.data(), py::arg("mass"))
+        .def("hasSN", py::overload_cast<double, double>(&io::SimControls::hasSN, py::const_),
+                hasSNFeHDocstring.data(), py::arg("mass"), py::arg("feh"))
         .def("setYields", &setYieldsKeepOnFailure,
                 setYieldsDocstring.data(), py::arg("yields"))
         // Properties: alternative, attribute-style access to the same

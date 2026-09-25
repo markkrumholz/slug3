@@ -315,6 +315,28 @@ has_yield : bool
     True if mass lies within [masses()[0], masses()[-1]]; always False
     before rebuildYieldGrid() has been called at least once.)doc";
 
+static constexpr std::string_view hasYieldFeHDocstring =
+    R"doc(Check whether a star of a given mass and [Fe/H] has a non-zero yield.
+
+Parameters
+----------
+mass : float
+    Stellar mass to check (Msun).
+feh : float
+    [Fe/H] to check; clamped to [feH()[0], feH()[-1]] first if outside
+    it.
+
+Returns
+-------
+has_yield : bool
+    False if hasYield(mass) is False. Otherwise True if any of the four
+    (feH(), masses()) grid points at the corners of the grid cell
+    containing (feh, mass) has a non-zero yield of any isotope, and
+    False if all four have zero yields of every isotope. Unlike
+    hasYield(mass), this catches gaps within the mass range where a
+    model tabulates an all-zero yield, e.g. failed supernovae. Always
+    False before rebuildYieldGrid() has been called at least once.)doc";
+
 static constexpr std::string_view yieldDocstring =
     R"doc(Get the yield of every isotope for a star of given mass and [Fe/H].
 
@@ -429,7 +451,10 @@ void bindYieldChannel(py::module_& m)
                 channelRequestedFehMinDocstring.data())
         .def("requestedFehMax", &yields::YieldChannel::requestedFehMax,
                 channelRequestedFehMaxDocstring.data())
-        .def("hasYield", &yields::YieldChannel::hasYield, hasYieldDocstring.data(), py::arg("mass"))
+        .def("hasYield", py::overload_cast<double>(&yields::YieldChannel::hasYield, py::const_),
+                hasYieldDocstring.data(), py::arg("mass"))
+        .def("hasYield", py::overload_cast<double, double>(&yields::YieldChannel::hasYield, py::const_),
+                hasYieldFeHDocstring.data(), py::arg("mass"), py::arg("feh"))
         .def("yield_", &yields::YieldChannel::yield, yieldDocstring.data(),
                 py::arg("mass"), py::arg("feh"));
 }
