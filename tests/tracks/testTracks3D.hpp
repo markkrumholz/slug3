@@ -19,9 +19,11 @@
 #include "../../src/tracks/Tracks3D.hpp"
 #include "hdf5.h" // NOLINT(misc-include-cleaner)
 #include "trackFieldFixture.hpp"
+#include <algorithm>
 #include <cmath>
 #include <exception>
 #include <iostream>
+#include <memory>
 #include <string>
 
 /**
@@ -359,6 +361,134 @@ inline auto testTracks3DMassAndDerivFromLifetime() -> int
     }
 
     return result;
+}
+
+/**
+ * @brief Unit test that Tracks3D's lazily-evaluated queries agree with an eagerly-built slice
+ * @return 0 if the test passes, 1 if it fails
+ * @details
+ * Every Tracks3D query at a given [Fe/H] evaluates a lazily-evaluated
+ * slice of the tracks (see Tracks3D's own class comment). At [Fe/H]
+ * values between the MIST_test set's own grid points and exactly on
+ * one, this compares starLifetime(), liveMassRange(), isAlive(),
+ * getTrack(), getIsochrone() and getStar() -- and the same queries on
+ * a Tracks2D returned by lazySliceConstFeH() -- against an eagerly-
+ * built slice from sliceConstFeH(), requiring agreement to 1e-10
+ * relative. Also checks that a lazySliceConstFeH() slice of a
+ * shared_ptr-owned Tracks3D keeps it alive, and so still gives the
+ * same answers, after every other reference to it is released.
+ */
+inline auto testTracks3DLazyMatchesEager() -> int
+{
+    const std::string registryName = "tests/tracks/assets/tracks.toml";
+    const std::string trackName = "MIST_test";
+    constexpr double tol = 1e-10;
+    const auto close = [tol](const double a, const double b) -> bool
+    { return std::abs(a - b) <= tol * std::max({ 1.0, std::abs(a), std::abs(b) }); };
+    int nBad = 0;
+    const auto fail = [&nBad](const std::string& msg) -> void
+    {
+        std::cerr << "testTracks3DLazyMatchesEager: " << msg << "\n";
+        ++nBad;
+    };
+
+    // Compare two tracks::Tracks2D::getTrack()/getIsochrone()-style
+    // Interpolator1D results at evenly spaced points
+    const auto compareInterp = [&](const auto* lazy, const auto* eager, const std::string& label)
+    {
+        if ((lazy == nullptr) != (eager == nullptr)) { fail(label + ": null mismatch"); return; }
+        if (lazy == nullptr) { return; }
+        if (!close(lazy->xMin(), eager->xMin()) || !close(lazy->xMax(), eager->xMax()))
+        {
+            fail(label + ": range mismatch");
+            return;
+        }
+        for (int p = 0; p <= 10; ++p)
+        {
+            const double q = eager->xMin() + ((eager->xMax() - eager->xMin()) * p / 10.0);
+            const auto a = (*lazy)(std::clamp(q, lazy->xMin(), lazy->xMax()));
+            const auto b = (*eager)(std::clamp(q, eager->xMin(), eager->xMax()));
+            for (size_t k = 0; k < a.size(); ++k)
+            {
+                if (!close(a.at(k), b.at(k))) { fail(label + ": value mismatch"); return; }
+            }
+        }
+    };
+
+    try
+    {
+        auto tracks3d = std::make_shared<const tracks::Tracks3D>(
+            trackName, -1.0, 0.5, 0.0, -0.2, registryName);
+        for (const double feh : { -0.8, -0.3, 0.0, 0.2 })
+        {
+            const auto eager = tracks3d->sliceConstFeH(feh);
+            const auto lazy = tracks3d->lazySliceConstFeH(feh);
+            const std::string fehLabel = "feh = " + std::to_string(feh);
+            for (const double m : { 0.5, 1.0, 2.7, 9.0, 40.0 })
+            {
+                const std::string label = fehLabel + ", m = " + std::to_string(m);
+                const double tl = eager.starLifetime(m);
+                if (!close(tracks3d->starLifetime(m, feh), tl) || !close(lazy.starLifetime(m), tl))
+                {
+                    fail(label + ": starLifetime mismatch");
+                }
+                const auto et = eager.getTrack(m);
+                compareInterp(tracks3d->getTrack(m, feh).get(), et.get(), label + ", getTrack");
+                compareInterp(lazy.getTrack(m).get(), et.get(), label + ", lazy getTrack");
+            }
+            for (const double logT : { 6.2, 7.0, 8.3, 9.5 })
+            {
+                const std::string label = fehLabel + ", logT = " + std::to_string(logT);
+                const auto el = eager.liveMassRange(logT);
+                const auto ll = tracks3d->liveMassRange(logT, feh);
+                bool limOk = el.size() == ll.size();
+                for (size_t r = 0; limOk && r < el.size(); ++r)
+                {
+                    limOk = close(el[r].first, ll[r].first) && close(el[r].second, ll[r].second);
+                }
+                if (!limOk) { fail(label + ": liveMassRange mismatch"); }
+                const auto ei = eager.getIsochrone(logT);
+                const auto li = tracks3d->getIsochrone(logT, feh);
+                const auto lli = lazy.getIsochrone(logT);
+                if (li.size() != ei.size() || lli.size() != ei.size())
+                {
+                    fail(label + ": isochrone segment count mismatch");
+                    continue;
+                }
+                for (size_t sg = 0; sg < ei.size(); ++sg)
+                {
+                    compareInterp(li[sg].get(), ei[sg].get(), label + ", getIsochrone");
+                    compareInterp(lli[sg].get(), ei[sg].get(), label + ", lazy getIsochrone");
+                }
+                for (const double m : { 0.3, 1.1, 3.0 })
+                {
+                    const bool alive = eager.isAlive(m, logT);
+                    if (tracks3d->isAlive(m, logT, feh) != alive) { fail(label + ": isAlive mismatch"); }
+                    if (!alive) { continue; }
+                    const auto es = eager.getStar(m, logT);
+                    const auto ls = tracks3d->getStar(m, logT, feh);
+                    for (size_t k = 0; k < es.size(); ++k)
+                    {
+                        if (!close(ls.at(k), es.at(k))) { fail(label + ": getStar mismatch"); break; }
+                    }
+                }
+            }
+        }
+
+        // A lazy slice keeps its shared_ptr-owned Tracks3D alive
+        const auto lazyKept = tracks3d->lazySliceConstFeH(-0.3);
+        const double expected = tracks3d->sliceConstFeH(-0.3).starLifetime(2.7);
+        tracks3d.reset();
+        if (!close(lazyKept.starLifetime(2.7), expected))
+        {
+            fail("lazySliceConstFeH() slice gave a different answer after its Tracks3D was released");
+        }
+    }
+    catch (const std::exception& e)
+    {
+        fail(std::string("unexpected exception: ") + e.what());
+    }
+    return nBad > 0 ? 1 : 0;
 }
 
 // NOLINTEND(misc-include-cleaner)

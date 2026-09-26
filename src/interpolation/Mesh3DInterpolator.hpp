@@ -20,15 +20,11 @@
 #include <cmath>
 #include <cstddef>
 #include <gsl/gsl_interp.h>
-#include <limits>
 #include <mdspan> // NOLINT(misc-include-cleaner)
 #include <memory>
 #include <span>
 #include <stdexcept>
 #include <vector>
-#ifdef _OPENMP
-#   include <omp.h>
-#endif
 
 // Disable linting for array bounds checking in this
 // file, since the overhead associated with enforcing
@@ -306,127 +302,24 @@ namespace interp
         }
 
         /**
-         * @brief Construct a 2D slice of the mesh at fixed y
-         * @param y0 The y coordinate at which to slice
-         * @returns A const reference to a Mesh2DInterpolator<NF>
-         *          representing the (x, z) slice of the mesh at y = y0
-         * @details
-         * If y0 exactly matches one of the mesh y values, the slice is
-         * built directly from the corresponding x and f mesh points.
-         * Otherwise, the x coordinates of the slice are found by linear
-         * interpolation between the two bracketing y planes, and the
-         * function values are found using the y-direction interpolators
-         * returned by yInterp(), evaluated at the sy arc-length coordinate
-         * that corresponds to y0 in each (i,k) column.
-         *
-         * The constructed Mesh2DInterpolator is cached, along with the
-         * value of y0 used to build it; if this function is called again
-         * with the same y0, the cached object is returned directly rather
-         * than being rebuilt. The reference returned remains valid only
-         * until the next call to sliceConstY with a different y0, or
-         * until this Mesh3DInterpolator is destroyed. Use
-         * sliceConstYCopy() instead if you need an independent,
-         * caller-owned object.
-         *
-         * This method is NOT thread-safe and must never be called from
-         * inside an openMP parallel region: it writes to the shared
-         * ySliceCache_/ySliceCacheVal_ cache, and two threads racing to
-         * populate that cache could corrupt it or return a slice built
-         * for the wrong y0. In a build with openMP enabled, calling
-         * this from inside a parallel region trips an assertion in
-         * debug builds; in release builds it is simply undefined
-         * behavior. The standard usage pattern -- building the cache
-         * once at startup before any parallel region for single-[Fe/H]
-         * runs, and using sliceConstYCopy() instead whenever multiple
-         * [Fe/H] values are in play -- never needs this method inside a
-         * parallel region in the first place. The cache was not made
-         * thread-private (unlike Mesh2DGrid's iSave_/jSave_ or
-         * Interpolator1D's acc_) because each cached slice can be tens
-         * of megabytes, and giving every thread its own copy would be
-         * expensive on a many-core node.
-         */
-        [[nodiscard]] auto sliceConstY(double y0) const -> const Mesh2DInterpolator<NF>&
-        {
-#ifdef _OPENMP
-            assert(!omp_in_parallel());
-#endif
-            // Return the cached slice if it was built for this y0
-            if (ySliceCache_ && ySliceCacheVal_ == y0) { return *ySliceCache_; }
-
-            ySliceCache_ = std::make_unique<Mesh2DInterpolator<NF>>(buildSliceY(y0));
-            ySliceCacheVal_ = y0;
-            return *ySliceCache_;
-        }
-
-        /**
          * @brief Construct a new, independent 2D slice of the mesh at fixed y
          * @param y0 The y coordinate at which to slice
          * @returns A newly-constructed Mesh2DInterpolator<NF> representing
          *          the (x, z) slice of the mesh at y = y0
          * @details
-         * Identical to sliceConstY() in every respect except that the
-         * result is not cached: a new Mesh2DInterpolator is built on
-         * every call and returned by value, for use in situations where
-         * the caller needs to own the slice independently of this
-         * Mesh3DInterpolator (e.g. to keep it alive after later calls
-         * to sliceConstY() with a different y0).
+         * Builds the slice eagerly: every (x, z) mesh point's own x and
+         * f values are interpolated to y = y0 -- using the y-direction
+         * interpolators returned by yInterp(), evaluated at the sy
+         * arc-length coordinate corresponding to y0 in each (i,k)
+         * column -- and a Mesh2DInterpolator is then built from them,
+         * with its own rib and spine interpolators. The result owns all
+         * of its own data, independently of this Mesh3DInterpolator.
+         * An exact match of y0 with a mesh y value copies that plane
+         * directly, without interpolating.
          */
         [[nodiscard]] auto sliceConstYCopy(double y0) const -> Mesh2DInterpolator<NF>
         {
             return buildSliceY(y0);
-        }
-
-        /**
-         * @brief Construct a 2D slice of the mesh at fixed z
-         * @param z0 The z coordinate at which to slice
-         * @returns A const reference to a Mesh2DInterpolator<NF>
-         *          representing the (x, y) slice of the mesh at z = z0
-         * @details
-         * If z0 exactly matches one of the mesh z values, the slice is
-         * built directly from the corresponding x and f mesh points.
-         * Otherwise, the x coordinates of the slice are found by linear
-         * interpolation between the two bracketing z planes, and the
-         * function values are found using the z-direction interpolators
-         * returned by zInterp(), evaluated at the sz arc-length coordinate
-         * that corresponds to z0 in each (i,j) column.
-         *
-         * The constructed Mesh2DInterpolator is cached, along with the
-         * value of z0 used to build it; if this function is called again
-         * with the same z0, the cached object is returned directly rather
-         * than being rebuilt. The reference returned remains valid only
-         * until the next call to sliceConstZ with a different z0, or
-         * until this Mesh3DInterpolator is destroyed. Use
-         * sliceConstZCopy() instead if you need an independent,
-         * caller-owned object.
-         *
-         * This method is NOT thread-safe and must never be called from
-         * inside an openMP parallel region: it writes to the shared
-         * zSliceCache_/zSliceCacheVal_ cache, and two threads racing to
-         * populate that cache could corrupt it or return a slice built
-         * for the wrong z0. In a build with openMP enabled, calling
-         * this from inside a parallel region trips an assertion in
-         * debug builds; in release builds it is simply undefined
-         * behavior. The standard usage pattern -- building the cache
-         * once at startup before any parallel region for single-[Fe/H]
-         * runs, and using sliceConstZCopy() instead whenever multiple
-         * [Fe/H] values are in play -- never needs this method inside a
-         * parallel region in the first place. The cache was not made
-         * thread-private (unlike Mesh2DGrid's iSave_/jSave_ or
-         * Interpolator1D's acc_) because each cached slice can be tens
-         * of megabytes, and giving every thread its own copy would be
-         * expensive on a many-core node.
-         */
-        [[nodiscard]] auto sliceConstZ(double z0) const -> const Mesh2DInterpolator<NF>&
-        {
-#ifdef _OPENMP
-            assert(!omp_in_parallel());
-#endif
-            // Return the cached slice if it was built for this z0
-            if (zSliceCache_ && zSliceCacheVal_ == z0) { return *zSliceCache_; }
-
-            zSliceCache_ = std::make_unique<Mesh2DInterpolator<NF>>(buildSliceZ(z0));
-            zSliceCacheVal_ = z0;
-            return *zSliceCache_;
         }
 
         /**
@@ -435,12 +328,19 @@ namespace interp
          * @returns A newly-constructed Mesh2DInterpolator<NF> representing
          *          the (x, y) slice of the mesh at z = z0
          * @details
-         * Identical to sliceConstZ() in every respect except that the
-         * result is not cached: a new Mesh2DInterpolator is built on
-         * every call and returned by value, for use in situations where
-         * the caller needs to own the slice independently of this
-         * Mesh3DInterpolator (e.g. to keep it alive after later calls
-         * to sliceConstZ() with a different z0).
+         * Builds the slice eagerly: every (x, y) mesh point's own x
+         * value is linearly interpolated between the two z planes
+         * bracketing z0, and its f values by the z-direction
+         * interpolators returned by zInterp(), evaluated at the sz
+         * arc-length coordinate interpolated likewise; a
+         * Mesh2DInterpolator is then built from them, with its own rib
+         * and spine interpolators. The result owns all of its own data,
+         * independently of this Mesh3DInterpolator -- but costs O(Nx *
+         * Ny) time and memory, with a large constant (see
+         * lazySliceConstZ() for a much cheaper alternative, when the
+         * slice need not outlive this object). An exact match of z0
+         * with a mesh z value copies that plane directly, without
+         * interpolating.
          */
         [[nodiscard]] auto sliceConstZCopy(double z0) const -> Mesh2DInterpolator<NF>
         {
@@ -607,16 +507,6 @@ namespace interp
             std::unique_ptr<Interpolator1D<NF>>
         > zInterpData_;                     /**< z-direction interpolators (Nx × Ny, row-major) */
 
-        // Caches for the most recently constructed y and z slices, so
-        // that repeated calls to sliceConstY/sliceConstZ with the same
-        // y0/z0 do not need to rebuild the slice. Mutable because they
-        // are lazily populated from const observer methods.
-        mutable std::unique_ptr<Mesh2DInterpolator<NF>> ySliceCache_;  /**< Cached result of the last sliceConstY call */
-        mutable std::unique_ptr<Mesh2DInterpolator<NF>> zSliceCache_;  /**< Cached result of the last sliceConstZ call */
-        mutable double ySliceCacheVal_ =
-            std::numeric_limits<double>::quiet_NaN();                 /**< y0 value for which ySliceCache_ was built */
-        mutable double zSliceCacheVal_ =
-            std::numeric_limits<double>::quiet_NaN();                 /**< z0 value for which zSliceCache_ was built */
 
         /**
          * @brief Copy the input coordinate and function-value data
@@ -796,9 +686,9 @@ namespace interp
          * @returns A newly-constructed Mesh2DInterpolator<NF> representing
          *          the (x, z) slice of the mesh at y = y0
          * @details
-         * This is the actual slice-construction logic shared by
-         * sliceConstY() and sliceConstYCopy(); see sliceConstY() for a
-         * full description of how the slice is built.
+         * This is the actual slice-construction logic of
+         * sliceConstYCopy(); see its own comment for a description of
+         * how the slice is built.
          * @throws std::runtime_error if the mesh has only one point in
          *         the z direction, since there is then no way to build a
          *         valid (x, z) slice (a Mesh2DInterpolator needs at least
@@ -834,7 +724,7 @@ namespace interp
             if (nz_ == 1)
             {
                 throw std::runtime_error(
-                    "Mesh3DInterpolator::sliceConstY: cannot slice at "
+                    "Mesh3DInterpolator::sliceConstYCopy: cannot slice at "
                     "fixed y because the mesh has only one point in the "
                     "z direction");
             }
@@ -900,9 +790,9 @@ namespace interp
          * @returns A newly-constructed Mesh2DInterpolator<NF> representing
          *          the (x, y) slice of the mesh at z = z0
          * @details
-         * This is the actual slice-construction logic shared by
-         * sliceConstZ() and sliceConstZCopy(); see sliceConstZ() for a
-         * full description of how the slice is built.
+         * This is the actual slice-construction logic of
+         * sliceConstZCopy(); see its own comment for a description of
+         * how the slice is built.
          * @throws std::runtime_error if the mesh has only one point in
          *         the y direction, since there is then no way to build a
          *         valid (x, y) slice (a Mesh2DInterpolator needs at least
@@ -938,7 +828,7 @@ namespace interp
             if (ny_ == 1)
             {
                 throw std::runtime_error(
-                    "Mesh3DInterpolator::sliceConstZ: cannot slice at "
+                    "Mesh3DInterpolator::sliceConstZCopy: cannot slice at "
                     "fixed z because the mesh has only one point in the "
                     "y direction");
             }

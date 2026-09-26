@@ -67,11 +67,17 @@ namespace tracks
          *            defaults to quiet_NaN if not specified
          * @param vVcrit The v/vcrit value of this set of tracks, if any;
          *               defaults to quiet_NaN if not specified
+         * @param owner If not null, an object this Tracks2D keeps alive
+         *              for as long as it exists -- e.g. the Tracks3D a
+         *              lazily-evaluated m2d refers to (see
+         *              Tracks3D::lazySliceConstFeH())
          */
         Tracks2D(M2DPtr&& m2d, double feH,
             double aFe = std::numeric_limits<double>::quiet_NaN(),
-            double vVcrit = std::numeric_limits<double>::quiet_NaN())
-        : interp_(std::move(m2d)), feH_(feH), aFe_(aFe), vVcrit_(vVcrit) {};
+            double vVcrit = std::numeric_limits<double>::quiet_NaN(),
+            std::shared_ptr<const void> owner = nullptr)
+        : interp_(std::move(m2d)), feH_(feH), aFe_(aFe), vVcrit_(vVcrit),
+          owner_(std::move(owner)) {};
 
         /**
          * @brief Construct an empty, invalid Tracks2D object
@@ -225,6 +231,7 @@ namespace tracks
         double feH_;    /**< [Fe/H] value of this set of tracks */
         double aFe_;    /**< [alpha/Fe] value of this set of tracks, or quiet_NaN if not available */
         double vVcrit_; /**< v/vcrit value of this set of tracks, or quiet_NaN if not available */
+        std::shared_ptr<const void> owner_; /**< Object kept alive for as long as this one -- see the M2DPtr constructor's own owner parameter */
 
     };
 
