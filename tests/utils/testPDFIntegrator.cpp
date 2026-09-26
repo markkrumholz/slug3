@@ -115,7 +115,8 @@ static auto testMemberFunction(const pdfs::PDF& imf) -> int
 // the delta; over the full range that is 0.6 * (lo + hi) / 2 +
 // 0.4 * xDelta. Checks the full range, a subrange excluding the delta,
 // a subrange ending exactly on it (included, as in
-// PDFSegmentDelta::integral()), a PDFReflect view (delta reflected),
+// PDFSegmentDelta::integral()), a zero-width interval at the delta
+// (0, as in PDF::integral(a, b)), a PDFReflect view (delta reflected),
 // and the log-transformed path.
 static auto testDeltaSegments() -> int
 {
@@ -148,6 +149,19 @@ static auto testDeltaSegments() -> int
     check("full range", mixed, 0.0, 1.0, false, (0.6 * 0.5) + (0.4 * 0.8));
     check("subrange excluding the delta", mixed, 0.0, 0.7, false, 0.6 * 0.7 * 0.7 / 2.0);
     check("subrange ending on the delta", mixed, 0.0, 0.8, false, (0.6 * 0.8 * 0.8 / 2.0) + (0.4 * 0.8));
+
+    // A zero-width interval at the delta's own location integrates to
+    // 0, matching PDF::integral(a, b)
+    {
+        const utils::PDFIntegrator integrator(mixed, &Multiplier::f, 1U);
+        const double got = integrator.integrate(0.8, 0.8, mult).at(0);
+        if (got != 0.0 || mixed.integral(0.8, 0.8) != 0.0)
+        {
+            std::cerr << "testPDFIntegrator: delta segments, zero-width interval: expected 0, got "
+                << got << "\n";
+            result = 1;
+        }
+    }
     const pdfs::PDFReflect reflected(mixed);
     check("reflected", reflected, 0.0, 1.0, false, (0.6 * 0.5) + (0.4 * 0.2));
     const pdfs::PDF mixedLog = makePDF(1.0, 2.0, 1.8);

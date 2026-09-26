@@ -207,7 +207,9 @@ namespace utils
          * @details
          * Clamps [a, b] to p_'s own support, records the result in
          * aReal_/bReal_ for integrand()'s own benefit (see its own
-         * comment for why), log-transforms a/b themselves if
+         * comment for why), and returns all zeros if the clamped
+         * interval is empty or has zero width (as PDF::integral(a, b)
+         * does); otherwise log-transforms a/b themselves if
          * logTransform_ is set, then constructs a GKIntegrator whose
          * own integrand is this class's integrand() (a pointer to
          * member function, so this is passed as the first extra
@@ -227,6 +229,15 @@ namespace utils
             b = std::min(b, p_.getMax());
             aReal_ = a;
             bReal_ = b;
+
+            // An empty (or zero-width) clamped interval integrates to 0,
+            // even with a delta-function segment at its one point,
+            // matching PDF::integral(a, b)
+            if (a >= b)
+            {
+                std::vector<double> zero(nInt_, 0.0); // not a braced return: {nInt_, 0.0} would be a two-element list
+                return zero;
+            }
 
             if (logTransform_)
             {
