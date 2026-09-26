@@ -15,6 +15,7 @@
 #include "../pdfs/PDFReflect.hpp"
 #include "../specsyn/Specsyn.hpp"
 #include "../tracks/TrackCommons.hpp"
+#include "../tracks/Tracks3D.hpp"
 #include "../utils/GKIntegrator.hpp"
 #include "../utils/GKIntegratorData.hpp"
 #include "../utils/PDFIntegrator.hpp"
@@ -27,12 +28,43 @@
 #include <cstddef>
 #include <functional>
 #include <iterator>
+#include <limits>
 #include <numbers>
 #include <numeric>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <utility>
 #include <vector>
+
+namespace
+{
+    /**
+     * @brief A field star's lifetime, treating masses outside the tracks' own mass grid specially
+     * @param tracks The tracks to query -- SimControls::tracks()
+     * @param m Stellar mass, in Msun
+     * @param feh [Fe/H] of the star
+     * @return tracks.starLifetime(m, feh) if tracks.mMin() <= m <=
+     *   tracks.mMax(); +infinity if m is below tracks.mMin() (treated
+     *   as living forever); -infinity if m is above tracks.mMax()
+     *   (treated as already dead)
+     * @details
+     * Mirrors Cluster's own starLifetimeClamped() (see its own
+     * comment), for the same reason: Tracks3D::starLifetime() asserts
+     * its mass argument lies within the tracks' own tabulated mass
+     * grid (and reads outside it if assertions are disabled), but the
+     * IMF's own mass range can extend beyond that grid -- e.g. an IMF
+     * minimum below the tracks' own minimum mass, which a field star
+     * can be drawn at whenever stars.min_stoch_mass is below the
+     * tracks' own minimum.
+     */
+    auto fieldStarLifetime(const tracks::Tracks3D& tracks, const double m, const double feh) -> double
+    {
+        if (m < tracks.mMin()) { return std::numeric_limits<double>::infinity(); }
+        if (m > tracks.mMax()) { return -std::numeric_limits<double>::infinity(); }
+        return tracks.starLifetime(m, feh);
+    }
+} // namespace
 
 // Constructor: everything but controls_ takes its in-class default
 // (curTime_/lbol_ = 0, every vector empty); sfr_ is resolved in the
@@ -126,7 +158,9 @@ void core::Galaxy::advance(const double t)
     // single, shared aV_), mirroring Cluster's own avDist().valid() ?
     // draw() : 0.0 convention for when no extinction was requested at
     // all. Its death time is then formTime + the tracks' own
-    // starLifetime() at that (mass, feh), both in yr. Sorting this
+    // starLifetime() at that (mass, feh), both in yr -- or +/-infinity
+    // for a mass below/above the tracks' own mass range, see
+    // fieldStarLifetime()'s own comment. Sorting this
     // step's own batch by formTime before appending it keeps
     // fieldStars_ sorted by formTime_ overall: every previously-
     // appended star's own formTime_ already falls at or before
@@ -139,7 +173,7 @@ void core::Galaxy::advance(const double t)
     {
         const double formTime = sfr().draw(curTime_, t);
         const double feh = sc.fehDist().draw();
-        const double deathTime = formTime + sc.tracks()->starLifetime(mass, feh);
+        const double deathTime = formTime + fieldStarLifetime(*sc.tracks(), mass, feh);
         const double aV = sc.avDistField().valid() ? sc.avDistField().draw() : 0.0;
         newFieldStars.push_back({ mass, feh, formTime, deathTime, aV });
     }
@@ -351,7 +385,11 @@ void core::Galaxy::addContinuousSpec(const extinct::Extinct* ext, const nebular:
         const auto props = getFieldStarProps();
         for (std::size_t j = 0; j < fieldStars_.size(); ++j)
         {
-            const auto starSpec = synth->spec(props[j], fieldStars_[j].feh_); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- props has size fieldStars_.size() by getFieldStarProps()'s own contract, and j is bounded by fieldStars_.size()
+            // A star outside the tracks' own mass range contributes
+            // nothing, as in Cluster::computeSpec()
+            const auto& starProps = props[j]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- props has size fieldStars_.size() by getFieldStarProps()'s own contract, and j is bounded by fieldStars_.size()
+            if (!starProps.has_value()) { continue; }
+            const auto starSpec = synth->spec(*starProps, fieldStars_[j].feh_); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- as above
             for (std::size_t i = 0; i < contSpec.size(); ++i) { contSpec[i] += starSpec[i]; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- starSpec has size wl().size() by Specsyn::spec()'s own contract, matching contSpec's size set just above
         }
     }
@@ -460,7 +498,8 @@ void core::Galaxy::computeLbol()
     // for why).
     for (const auto& props : getFieldStarProps())
     {
-        const double logL = props[static_cast<std::size_t>(tracks::FieldIdx::logL)]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- StarData is a fixed-size std::array, and logL is one of its compile-time-known indices
+        if (!props.has_value()) { continue; } // outside the tracks' own mass range: no luminosity, as in Cluster::computeLbol()
+        const double logL = (*props)[static_cast<std::size_t>(tracks::FieldIdx::logL)]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- StarData is a fixed-size std::array, and logL is one of its compile-time-known indices
         lbol_ += std::pow(10.0, logL);
     }
 }
@@ -758,7 +797,13 @@ void core::Galaxy::computeYields()
     // stochastic population.
     for (const auto& fieldStar : deadFieldStars_)
     {
-        const double dtDecay = sc.noDecay() ? 0.0 : curTime_ - fieldStar.deathTime_;
+        // A star above the tracks' own mass range has a death time of
+        // -infinity (see fieldStarLifetime()'s own comment), meaning it
+        // was already dead when it formed: its yield has been decaying
+        // since formTime_
+        const double timeDied = std::isfinite(fieldStar.deathTime_) ?
+            fieldStar.deathTime_ : fieldStar.formTime_;
+        const double dtDecay = sc.noDecay() ? 0.0 : curTime_ - timeDied;
         const auto contribution = decomposed
             ? yields->yield(fieldStar.mass_, fieldStar.feh_, dtDecay).second
             : yields->yieldSum(fieldStar.mass_, fieldStar.feh_, dtDecay);
@@ -794,12 +839,19 @@ void core::Galaxy::computeYields()
     }
 }
 
-auto core::Galaxy::getFieldStarProps() const -> std::vector<specsyn::Specsyn::StarData>
+auto core::Galaxy::getFieldStarProps() const -> std::vector<std::optional<specsyn::Specsyn::StarData>>
 {
     const auto& sc = controls_.get();
     const std::size_t n = fieldStars_.size();
-    std::vector<specsyn::Specsyn::StarData> props(n);
+    std::vector<std::optional<specsyn::Specsyn::StarData>> props(n);
     const double logTMin = sc.tracks()->logTMin();
+    const double mMin = sc.tracks()->mMin();
+    const double mMax = sc.tracks()->mMax();
+    // A star outside the tracks' own mass range has no properties to
+    // look up (see fieldStarLifetime()'s own comment); its entry is
+    // left empty
+    const auto inRange = [mMin, mMax](const FieldStar& fs) -> bool
+    { return fs.mass_ >= mMin && fs.mass_ <= mMax; };
 
     if (sc.constFeH())
     {
@@ -807,6 +859,7 @@ auto core::Galaxy::getFieldStarProps() const -> std::vector<specsyn::Specsyn::St
         for (std::size_t i = 0; i < n; ++i)
         {
             const auto& fs = fieldStars_[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i < n == fieldStars_.size() by construction
+            if (!inRange(fs)) { continue; }
             const double logT = std::max(std::log10(curTime_ - fs.formTime_), logTMin);
             props[i] = tracks2D->getStar(fs.mass_, logT); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- props has size n by construction, and i is bounded by n
         }
@@ -834,6 +887,7 @@ auto core::Galaxy::getFieldStarProps() const -> std::vector<specsyn::Specsyn::St
     for (const std::size_t i : order)
     {
         const auto& fs = fieldStars_[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i is an element of order, itself a permutation of [0, n), by construction
+        if (!inRange(fs)) { continue; }
         const double logT = std::max(std::log10(curTime_ - fs.formTime_), logTMin);
         props[i] = tracks3D->getStar(fs.mass_, logT, roundedFeh(i)); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
     }
