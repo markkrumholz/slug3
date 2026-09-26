@@ -9,7 +9,6 @@
 #include "../src/core/Cluster.hpp"
 #include "../src/core/Galaxy.hpp"
 #include "../src/elem/IsotopeTable.hpp"
-#include "../src/interpolation/Interpolator1D.hpp"
 #include "../src/io/SimControls.hpp"
 #include "../src/phot/FilterCollection.hpp"
 #include "../src/tracks/Tracks3D.hpp"
@@ -29,9 +28,11 @@
 #include <limits>
 #include <memory>
 #include <numeric>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <toml.hpp>
+#include <tuple>
 #include <vector>
 
 // Note: distinct from tests/core/assets/testGalaxy.in, which
@@ -514,6 +515,86 @@ static auto testContinuousPopSpecSingleFeh() -> int
         return 1;
     }
     return 0;
+}
+
+// Regression test for the continuous population's [Fe/H] integral
+// with a narrow [Fe/H] distribution -- flat over [-0.9, -0.6], which
+// contains no MIST_test [Fe/H] grid point (-1, -0.5, ...) strictly
+// inside it. A scheme that sampled only the tracks' grid points, each
+// weighted by fehDist's own density there, saw zero weight everywhere
+// and returned NaN. Checks that spec(), lbol() and yieldsRate(t) are
+// finite, and each within 1% of a run at the fixed
+// midpoint [Fe/H] = -0.75: over so narrow a range, the average of a
+// smoothly varying quantity is close to its value at the midpoint.
+static auto testContinuousPopNarrowFeh() -> int
+{
+    constexpr double age = 1e7;
+    constexpr double tol = 0.01;
+    const auto fehFile = std::filesystem::temp_directory_path() /
+        "slugTestGalaxyContinuousPopNarrowFeh.toml";
+    try
+    {
+        {
+            std::ofstream out(fehFile);
+            out << "breakpoints -0.9 -0.6\n\nsegment\ntype powerlaw\nslope 0\n";
+        }
+        // Continuous spec, Lbol and yield rate of a fully continuous
+        // galaxy at the fixed [Fe/H] fehFixed, or, if it is empty, the
+        // narrow [Fe/H] distribution in fehFile
+        auto run = [&](const std::optional<double> fehFixed) -> std::tuple<double, double, double>
+        {
+            toml::table inputDeck = toml::parse_file(inputFile);
+            inputDeck.at_path("clusters").as_table()->insert("f_cluster", 0.0);
+            inputDeck.at_path("stars").as_table()->insert_or_assign("min_stoch_mass", 120.0);
+            if (fehFixed.has_value())
+            {
+                inputDeck.at_path("stars").as_table()->insert_or_assign("FeH", *fehFixed);
+            }
+            else
+            {
+                inputDeck.at_path("stars").as_table()->insert_or_assign("FeH", fehFile.string());
+            }
+            inputDeck.insert("yields", toml::table{
+                { "channel1", toml::table{ { "channel", "ccsn" }, { "model", "sukhbold_test" } } },
+                { "channel_decomposed", false },
+                { "registry", std::string("tests/yields/assets/yields.toml") },
+            });
+            const io::SimControls controls(inputDeck);
+            utils::rng().seed(rngSeed);
+            core::Galaxy galaxy(controls);
+            galaxy.advance(t1);
+            const auto& spec = galaxy.spec();
+            const double specSum = std::reduce(spec.begin(), spec.end(), 0.0);
+            const double lbol = galaxy.lbol();
+            galaxy.advance(age);
+            const auto rate = galaxy.yieldsRate(age);
+            return { specSum, lbol, std::reduce(rate.begin(), rate.end(), 0.0) };
+        };
+        const auto [specNarrow, lbolNarrow, yieldNarrow] = run(std::nullopt);
+        const auto [specMid, lbolMid, yieldMid] = run(-0.75);
+        std::filesystem::remove(fehFile);
+
+        int result = 0;
+        const auto check = [&result](const char* label, const double narrow, const double mid)
+        {
+            if (!std::isfinite(narrow) || !(mid > 0.0) || std::abs(narrow / mid - 1.0) > tol)
+            {
+                std::cerr << "testGalaxy: continuousPopNarrowFeh: " << label << " = " << narrow
+                    << " with [Fe/H] flat in [-0.9, -0.6], vs " << mid << " at [Fe/H] = -0.75\n";
+                result = 1;
+            }
+        };
+        check("summed spec()", specNarrow, specMid);
+        check("lbol()", lbolNarrow, lbolMid);
+        check("summed yieldsRate()", yieldNarrow, yieldMid);
+        return result;
+    }
+    catch (const std::exception& error)
+    {
+        std::filesystem::remove(fehFile);
+        std::cerr << "testGalaxy: continuousPopNarrowFeh test failed: " << error.what() << "\n";
+        return 1;
+    }
 }
 
 // Same as testContinuousPopSpecSingleFeh, but overrides stars.FeH with
@@ -2120,29 +2201,17 @@ static auto testYieldsRateSingleFehDelegates() -> int
 }
 
 // Verify Galaxy::yieldsRate(t)'s multi-feh averaging against an
-// independent recomputation using the same public API the
-// implementation itself is built from: evaluates yieldsRate(t, feh) at
-// every SimControls::tracks()->feH() grid point directly, weights each
-// by SimControls::fehDist()'s own density there via a hand-built
-// interp::Interpolator1D<1> pair (one for the weights, one per
-// isotope for the weighted values), and compares the resulting
-// weighted average against yieldsRate(t)'s own result -- mirrors this
-// test suite's general "independent recomputation" style (e.g.
-// testContinuousPopSpecMultiFeh() and its own reference-check sibling)
-// rather than merely checking the result is finite. Reuses
-// testContinuousPopSpecMultiFeh()'s own [-1, 0] fixture, combined with
-// sukhbold_test/massive_star_winds (whose own [-1.0, 0.0] tabulated
-// range exactly matches it, unlike kobayashi_test's own single-point
-// Fe/H = 0.0 -- SimControls itself rejects a yield channel whose own
-// range doesn't cover fehDist's, at construction, so kobayashi_test
-// can't be used here at all). Tracks3D's own one-point padding beyond
-// fehDist's own range still reaches Fe/H = 0.5 (see
-// tests/tracks/assets/tracks.toml's own MIST_test grid), outside even
-// sukhbold_test/massive_star_winds's own [-1.0, 0.0] -- exercising
-// Yields::yield()'s own [Fe/H] range check (mirroring its existing
-// hasYield(mass) check) that makes evaluating yieldsRate(t, feh) at
-// that padding point return zero from every channel rather than
-// hitting YieldChannel::yield()'s own out-of-range assert. Like
+// independent brute-force recomputation from the same public API:
+// yieldsRate(t, feh) evaluated on a fine midpoint-rule grid over
+// SimControls::fehDist()'s own support, weighted by fehDist()'s own
+// density there, and normalized by the summed weights. yieldsRate(t)'s
+// own adaptive quadrature over [Fe/H] should agree with this reference
+// to within relTol. Reuses testContinuousPopSpecMultiFeh()'s own [-1, 0]
+// fixture, combined with sukhbold_test/massive_star_winds (whose own
+// [-1.0, 0.0] tabulated range exactly matches it, unlike
+// kobayashi_test's own single-point Fe/H = 0.0 -- SimControls itself
+// rejects a yield channel whose own range doesn't cover fehDist's, at
+// construction, so kobayashi_test can't be used here at all). Like
 // testYieldsRateSingleFehDelegates() (see its own comment), this
 // checks every isotope including unstable ones, so the galaxy is
 // advance()d to age first, keeping every yieldsRate(t, feh) call's own
@@ -2150,7 +2219,8 @@ static auto testYieldsRateSingleFehDelegates() -> int
 static auto testYieldsRateMultiFeh() -> int
 {
     constexpr double age = 1e8;
-    constexpr double relTol = 1e-9; // both sides use the exact same yieldsRate(t, feh) calls
+    constexpr double relTol = 1e-3;
+    constexpr std::size_t nRef = 200; // midpoint-rule points for the reference
 
     try
     {
@@ -2178,36 +2248,23 @@ static auto testYieldsRateMultiFeh() -> int
         core::Galaxy galaxy(controls);
         galaxy.advance(age);
 
-        // Independent recomputation, mirroring Galaxy::yieldsRate(t)'s
-        // own multi-feh implementation exactly, but built here from
-        // scratch via the public API alone
+        // Independent brute-force recomputation: midpoint rule over
+        // fehDist's own support, which never samples its endpoints
         const auto& fehDist = controls.fehDist();
-        const auto& fehGrid = controls.tracks()->feH();
-        const std::size_t nFeh = fehGrid.size();
-
-        std::vector<std::vector<double>> rateAtFeh(nFeh);
-        std::vector<double> fehWeight(nFeh);
-        for (std::size_t f = 0; f < nFeh; ++f)
+        const double fehLo = fehDist.getMin();
+        const double dFeh = (fehDist.getMax() - fehLo) / static_cast<double>(nRef);
+        std::vector<double> expected;
+        double weightSum = 0.0;
+        for (std::size_t f = 0; f < nRef; ++f)
         {
-            rateAtFeh.at(f) = galaxy.yieldsRate(age, fehGrid.at(f));
-            fehWeight.at(f) = fehDist(fehGrid.at(f));
+            const double feh = fehLo + ((static_cast<double>(f) + 0.5) * dFeh);
+            const double w = fehDist(feh);
+            const auto rate = galaxy.yieldsRate(age, feh);
+            if (expected.empty()) { expected.assign(rate.size(), 0.0); }
+            for (std::size_t k = 0; k < rate.size(); ++k) { expected.at(k) += w * rate.at(k); }
+            weightSum += w;
         }
-
-        const interp::Interpolator1D<1> weightInterp(fehGrid, fehWeight);
-        const double weightIntegral = weightInterp.integ(fehDist.getMin(), fehDist.getMax());
-
-        const std::size_t n = rateAtFeh.front().size();
-        std::vector<double> expected(n, 0.0);
-        std::vector<double> quantityAtFeh(nFeh);
-        for (std::size_t k = 0; k < n; ++k)
-        {
-            for (std::size_t f = 0; f < nFeh; ++f)
-            {
-                quantityAtFeh.at(f) = rateAtFeh.at(f).at(k) * fehWeight.at(f);
-            }
-            const interp::Interpolator1D<1> quantityInterp(fehGrid, quantityAtFeh);
-            expected.at(k) = quantityInterp.integ(fehDist.getMin(), fehDist.getMax()) / weightIntegral;
-        }
+        for (double& e : expected) { e /= weightSum; }
 
         const auto actual = galaxy.yieldsRate(age);
         if (actual.size() != expected.size())
@@ -2216,10 +2273,11 @@ static auto testYieldsRateMultiFeh() -> int
                 << actual.size() << " vs " << expected.size() << "\n";
             return 1;
         }
+        const double maxExpected = std::ranges::max(expected, {}, [](const double v) -> double { return std::abs(v); });
         for (std::size_t k = 0; k < expected.size(); ++k)
         {
             if (std::abs(actual.at(k) - expected.at(k)) >
-                relTol * std::max(1.0, std::abs(expected.at(k))))
+                relTol * std::max(std::abs(expected.at(k)), 1e-6 * maxExpected))
             {
                 std::cerr << "testGalaxy: yieldsRateMultiFeh: entry " << k <<
                     ": yieldsRate(t) = " << actual.at(k) << ", expected " <<
@@ -2846,6 +2904,7 @@ auto testGalaxy() -> int
     result += testFCluster();
     result += testContinuousPopSpecSingleFeh();
     result += testContinuousPopSpecMultiFeh();
+    result += testContinuousPopNarrowFeh();
     result += testContinuousPopSpecReferenceCheck();
     result += testContinuousPopLbolStandaloneMatchesSpec();
     result += testFieldStarsMassBudget();

@@ -32,13 +32,12 @@
 # runtime modest) rather than testGalaxySpecsynFullNonStochTimes.in's
 # own 7 -- exercising the real, non-degenerate FeH distribution
 # instead means Specsyn::specCtsHelper() runs its own nested age/mass
-# integral once per [Fe/H] grid point the tracks are defined at (7, for
-# this deck's own tracks/FeH-distribution combination), then
-# interpolates over [Fe/H] -- multiplying this deck's own cost by that
-# same factor relative to a single-FeH run at the same output time, so
-# a single output time keeps the combination tractable while still
-# exercising that whole code path -- see specCtsHelper()'s own header
-# comment for the full [Fe/H]-grid-loop rationale.
+# integral once per point of an outer quadrature over [Fe/H] (at least
+# 15, for GK15), multiplying this deck's own cost by that factor
+# relative to a single-FeH run at the same output time, so a single
+# output time keeps the combination tractable while still exercising
+# that whole code path -- see specCtsHelper()'s own header comment for
+# the full rationale.
 
 sim_type = "galaxy"
 n_trial = 1

@@ -12,7 +12,6 @@
  */
 
 #include "Specsyn.hpp"
-#include "../interpolation/Interpolator1D.hpp"
 #include "../io/SimControls.hpp"
 #include "../pdfs/PDF.hpp"
 #include "../pdfs/PDFReflect.hpp"
@@ -305,58 +304,24 @@ auto specsyn::Specsyn::specCtsHelper(
     }
     else
     {
-        // Integrate over [Fe/H] by running the same nested (age, mass)
-        // integral once at every grid point the tracks are actually
-        // defined at, then interpolating and integrating those
-        // discrete results over [Fe/H] -- see this function's own
-        // header comment for why, in place of a joint 3D (feh, age,
-        // mass) cubature integral.
-        //
-        // Deliberately uses the tracks' own full (padded) grid, not
-        // just the points inside [fehDist.getMin(), fehDist.getMax()]:
-        // those padding points carry real information about how the
-        // spectrum varies with [Fe/H] near the domain edges (the slope
-        // Interpolator1D's spline needs to shape correctly right up to
-        // the true edges), not just filler. The spectral synthesis
-        // libraries themselves are guaranteed wide enough in [Fe/H] to
-        // cover this whole padded grid -- see
-        // io::SimControls::readSpectra()'s own comment for why -- so
-        // evaluating here never runs outside their own domain.
-        const auto& fehGrid = controls_.tracks()->feH();
-        const std::size_t nFeh = fehGrid.size();
-        const auto nQty = static_cast<std::size_t>(nInt);
-
-        // rawResults[f] holds this call's nInt raw (lambda * dL/dlambda,
-        // plus optional Lbol in erg/s) integrator outputs at fehGrid[f];
-        // fehWeight[f] is fehDist evaluated at that same grid point (0
-        // for any padding grid points outside fehDist's own support --
-        // see pdfs::PDF::operator()'s own comment).
-        std::vector<std::vector<double>> rawResults(nFeh);
-        std::vector<double> fehWeight(nFeh);
-        for (std::size_t f = 0; f < nFeh; ++f)
+        // Integrate over [Fe/H] with a third, outermost PDFIntegrator,
+        // weighted by fehDist, whose integrand is the complete nested
+        // (age, mass) integral above at each [Fe/H] it visits. The
+        // tracks are evaluated lazily at arbitrary [Fe/H] (see
+        // tracks::Tracks3D's own class comment), so each such point
+        // costs about as much as one at a track grid point. Divided by
+        // fehDist's own integral over its support, in case fehDist is
+        // not normalized.
+        auto fehIntegrand = [&](const double feh) -> std::vector<double>
         {
-            rawResults[f] = integrator.integrate(
-                ageMin, curTime, this, imf, mMin, mMax, computeLbol, fehGrid[f]);
-            fehWeight[f] = fehDist(fehGrid[f]);
-        }
-
-        // Normalizing denominator: the integral of fehDist alone over
-        // its own domain (fehDist need not itself integrate to exactly
-        // 1 -- e.g. if given as an unnormalized weight function).
-        const interp::Interpolator1D<1> weightInterp(fehGrid, fehWeight);
-        const double weightIntegral = weightInterp.integ(fehDist.getMin(), fehDist.getMax());
-
-        result.assign(nQty, 0.0);
-        std::vector<double> quantityAtFeh(nFeh);
-        for (std::size_t k = 0; k < nQty; ++k)
-        {
-            for (std::size_t f = 0; f < nFeh; ++f)
-            {
-                quantityAtFeh[f] = rawResults[f][k] * fehWeight[f]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- rawResults[f] has size nInt == nQty by the integrator's own contract, and k is bounded by nQty
-            }
-            const interp::Interpolator1D<1> quantityInterp(fehGrid, quantityAtFeh);
-            result[k] = quantityInterp.integ(fehDist.getMin(), fehDist.getMax()) / weightIntegral; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- result has size nQty by the assign() just above, and k is bounded by nQty
-        }
+            return integrator.integrate(
+                ageMin, curTime, this, imf, mMin, mMax, computeLbol, feh);
+        };
+        const utils::PDFIntegrator<decltype(fehIntegrand), utils::GKOrder::GK15> fehIntegrator(
+            fehDist, fehIntegrand, nInt, false, intMaxIter(), absTol, intRelTol());
+        result = fehIntegrator.integrate(fehDist.getMin(), fehDist.getMax());
+        const double fehNorm = fehDist.integral(fehDist.getMin(), fehDist.getMax());
+        for (double& r : result) { r /= fehNorm; }
     }
 
     // Undo continuousSpecIntegrand()'s own lambda * dL/dlambda

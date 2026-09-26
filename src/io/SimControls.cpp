@@ -778,13 +778,9 @@ void io::SimControls::readSpectra(const utils::TrackedDeck& inputDeck)
     // at least as wide as fehDist_ (see Tracks3D::Tracks3D()'s own
     // comment: it pads a few grid points beyond
     // [fehDist_.getMin(), fehDist_.getMax()] on each side, for
-    // Mesh3DInterpolator's own benefit), and
-    // Specsyn::specCtsHelper()'s [Fe/H] integration deliberately
-    // evaluates spectra at every one of those padding grid points too
-    // (not just the ones inside fehDist_'s own domain -- see its own
-    // comment for why), so every atmosphere grid needs to cover them as
-    // well, or spectral synthesis for a star at one of those padding
-    // metallicities throws instead of returning a spectrum.
+    // Mesh3DInterpolator's own benefit), so this covers every [Fe/H]
+    // spectral synthesis can be asked for, with the same margin the
+    // tracks themselves have.
     const auto& fehGrid = tracks_->feH();
     const double fehMin = fehGrid.front();
     const double fehMax = fehGrid.back();
