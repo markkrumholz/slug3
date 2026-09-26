@@ -965,6 +965,146 @@ static auto testFieldStarsMassBudget() -> int
     return 0;
 }
 
+// Verify that field stars with masses outside the tracks' own mass grid
+// (0.1-300 Msun for MIST_test) get clamped lifetimes rather than
+// Tracks3D::starLifetime() being called out of range (which asserts,
+// or with assertions disabled returns garbage): with f_cluster = 0 and
+// stars.min_stoch_mass at the IMF's own 0.08 Msun minimum, every field
+// star below 0.1 Msun should have an infinite death time and never
+// die, while every other one has a finite death time; and with a
+// delta-function IMF at 400 Msun, every field star should have a death
+// time of -infinity, and so be dead after the first advance(). Also
+// checks that the consequences are handled: with the low-mass stars
+// living forever, spec() and lbol() must skip them rather than look up
+// their properties outside the tracks (both must be finite and
+// positive); and with the 400 Msun stars dead since formation, their
+// yields must decay since formTime_, not over an infinite time (every
+// yield must be finite).
+static auto testGalaxyFieldStarLifetimeClamped() -> int
+{
+    int result = 0;
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFile);
+        inputDeck.at_path("clusters").as_table()->insert("f_cluster", 0.0);
+        inputDeck.at_path("stars").as_table()->insert_or_assign("min_stoch_mass", 0.08);
+        const io::SimControls controls(inputDeck);
+        const double tracksMin = controls.tracks()->mMin();
+
+        utils::rng().seed(rngSeed);
+        core::Galaxy galaxy(controls);
+        galaxy.advance(t1);
+        galaxy.advance(1e6);
+
+        std::size_t nBelow = 0;
+        for (const auto& fs : galaxy.fieldStars())
+        {
+            if (fs.mass_ < tracksMin)
+            {
+                ++nBelow;
+                if (fs.deathTime_ != std::numeric_limits<double>::infinity())
+                {
+                    std::cerr << "testGalaxy: fieldStarLifetimeClamped: star of mass " << fs.mass_
+                        << " below the tracks' minimum has deathTime_ " << fs.deathTime_ << "\n";
+                    result = 1;
+                }
+            }
+            else if (!std::isfinite(fs.deathTime_))
+            {
+                std::cerr << "testGalaxy: fieldStarLifetimeClamped: star of mass " << fs.mass_
+                    << " within the tracks' range has non-finite deathTime_\n";
+                result = 1;
+            }
+        }
+        if (nBelow == 0)
+        {
+            std::cerr << "testGalaxy: fieldStarLifetimeClamped: test bug: expected some field "
+                "stars below the tracks' minimum mass\n";
+            result = 1;
+        }
+        for (const auto& fs : galaxy.deadFieldStars())
+        {
+            if (fs.mass_ < tracksMin)
+            {
+                std::cerr << "testGalaxy: fieldStarLifetimeClamped: star of mass " << fs.mass_
+                    << " below the tracks' minimum has died\n";
+                result = 1;
+            }
+        }
+        const auto& spec = galaxy.spec();
+        if (!std::ranges::all_of(spec, [](const double v) -> bool { return std::isfinite(v); }) ||
+            std::reduce(spec.begin(), spec.end(), 0.0) <= 0.0 ||
+            !std::isfinite(galaxy.lbol()) || galaxy.lbol() <= 0.0)
+        {
+            std::cerr << "testGalaxy: fieldStarLifetimeClamped: expected finite, positive "
+                "spec() and lbol() with field stars below the tracks' minimum mass\n";
+            result = 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testGalaxy: fieldStarLifetimeClamped: low-mass case threw: "
+            << error.what() << "\n";
+        return 1;
+    }
+
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFile);
+        inputDeck.at_path("clusters").as_table()->insert("f_cluster", 0.0);
+        inputDeck.at_path("stars").as_table()->insert_or_assign("IMF", 400.0);
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{
+                { "channel", "massive_star_winds" }, { "model", "sukhbold_test" },
+                { "m_max", 500.0 } } },
+            { "registry", std::string("tests/yields/assets/yields.toml") },
+        });
+        const io::SimControls controls(inputDeck);
+        if (controls.tracks()->mMax() >= 400.0)
+        {
+            std::cerr << "testGalaxy: fieldStarLifetimeClamped: test bug: expected the tracks' "
+                "maximum mass to be below 400 Msun\n";
+            return 1;
+        }
+
+        utils::rng().seed(rngSeed);
+        core::Galaxy galaxy(controls);
+        galaxy.advance(t1);
+        if (!galaxy.fieldStars().empty() || galaxy.deadFieldStars().empty())
+        {
+            std::cerr << "testGalaxy: fieldStarLifetimeClamped: expected every 400 Msun field "
+                "star to be dead after the first advance(), got " << galaxy.fieldStars().size()
+                << " alive and " << galaxy.deadFieldStars().size() << " dead\n";
+            result = 1;
+        }
+        galaxy.advance(2.0 * t1);
+        if (galaxy.yields().empty() ||
+            !std::ranges::all_of(galaxy.yields(), [](const double v) -> bool { return std::isfinite(v); }))
+        {
+            std::cerr << "testGalaxy: fieldStarLifetimeClamped: expected every yield to be "
+                "finite for field stars above the tracks' maximum mass\n";
+            result = 1;
+        }
+        for (const auto& fs : galaxy.deadFieldStars())
+        {
+            if (fs.deathTime_ != -std::numeric_limits<double>::infinity())
+            {
+                std::cerr << "testGalaxy: fieldStarLifetimeClamped: 400 Msun star has deathTime_ "
+                    << fs.deathTime_ << ", expected -infinity\n";
+                result = 1;
+                break;
+            }
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testGalaxy: fieldStarLifetimeClamped: high-mass case threw: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return result;
+}
+
 // Verify that field stars are both created and, given enough time,
 // destroyed: fieldStars() should be non-empty (every entry alive,
 // with mass_ >= minStochMass() and deathTime_ >= curTime()) shortly
@@ -2644,6 +2784,7 @@ auto testGalaxy() -> int
     result += testContinuousPopLbolStandaloneMatchesSpec();
     result += testFieldStarsMassBudget();
     result += testFieldStarsCreationAndDeath();
+    result += testGalaxyFieldStarLifetimeClamped();
     result += testFieldStarsSpec();
     result += testFieldStarsExtinct();
     result += testExtinctApplyExtinctionCtsDegenerate();

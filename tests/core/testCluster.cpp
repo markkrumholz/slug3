@@ -1497,6 +1497,61 @@ static auto testClusterYieldsNonStochasticDecay() -> int
     return 0;
 }
 
+// Verify that the yields of stochastic stars above the tracks' own mass
+// range are finite: such a star has a death time of -infinity (see
+// Cluster.cpp's starLifetimeClamped()), i.e. it was already dead when
+// the cluster formed, so its yield must decay since the cluster's
+// formation time rather than over an infinite time. Uses a
+// delta-function IMF at 400 Msun (above MIST_test's 300 Msun maximum)
+// and a massive_star_winds yield channel extended to 500 Msun, with
+// radioactive decay applied.
+static auto testClusterYieldsAboveTrackRange() -> int
+{
+    constexpr double stellarMass = 400.0;
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFile);
+        inputDeck.at_path("stars").as_table()->insert_or_assign("IMF", stellarMass);
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{
+                { "channel", "massive_star_winds" }, { "model", "sukhbold_test" },
+                { "m_max", 500.0 } } },
+            { "registry", std::string(yieldsRegistry) },
+        });
+        const io::SimControls controls(inputDeck);
+        if (controls.noDecay() || controls.tracks()->mMax() >= stellarMass)
+        {
+            std::cerr << "testCluster: yieldsAboveTrackRange: test bug: expected decay to be "
+                "applied and the tracks' maximum mass to be below " << stellarMass << " Msun\n";
+            return 1;
+        }
+
+        utils::rng().seed(rngSeed);
+        core::Cluster cluster(0, 1e4, 0.0, controls);
+        cluster.advance(1e6);
+
+        const auto& yields = cluster.yields();
+        if (cluster.deadStarMasses().empty() || !cluster.starMasses().empty())
+        {
+            std::cerr << "testCluster: yieldsAboveTrackRange: expected every star to be dead\n";
+            return 1;
+        }
+        if (!std::ranges::all_of(yields, [](const double v) -> bool { return std::isfinite(v) && v >= 0.0; }) ||
+            std::reduce(yields.begin(), yields.end(), 0.0) <= 0.0)
+        {
+            std::cerr << "testCluster: yieldsAboveTrackRange: expected finite, non-negative "
+                "yields with a positive total\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testCluster: yieldsAboveTrackRange test failed: " << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
 // Verify that the continuously-sampled (non-stochastic) and
 // individually-sampled (stochastic) treatments of the same population
 // agree: a fully continuous 1e5 Msun cluster (stars.min_stoch_mass at
@@ -1590,5 +1645,6 @@ auto testCluster() -> int
     result += testClusterYieldsMultipleAdvanceCalls();
     result += testClusterYieldsStochasticDecay();
     result += testClusterYieldsNonStochasticDecay();
+    result += testClusterYieldsAboveTrackRange();
     return result;
 }

@@ -591,11 +591,16 @@ void core::Cluster::computeYields()
     // updateLivingStars(), see its own comment). dtDecay is the time
     // elapsed since each star actually died (curTime_ - tDied_[i]) if
     // controls().noDecay() is false, or 0 (no decay applied at all) if
-    // it is true.
+    // it is true. A star above the tracks' own mass range has a death
+    // time of -infinity (see starLifetimeClamped()'s own comment),
+    // meaning it was already dead when the cluster formed, so its yield
+    // decays since formTime_.
     for (std::size_t i = 0; i < mDead_.size(); ++i)
     {
         const double mass = mDead_[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i < mDead_.size() by loop bound
-        const double dtDecay = sc.noDecay() ? 0.0 : curTime_ - tDied_[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i < mDead_.size() == tDied_.size() by construction, see updateLivingStars()'s own comment
+        const double tDied = tDied_[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i < mDead_.size() == tDied_.size() by construction, see updateLivingStars()'s own comment
+        const double timeDied = std::isfinite(tDied) ? tDied : formTime_;
+        const double dtDecay = sc.noDecay() ? 0.0 : curTime_ - timeDied;
         if (decomposed)
         {
             const auto& data = yields->yield(mass, feH_, dtDecay).second;
