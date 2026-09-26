@@ -15,6 +15,7 @@
 #include "../pdfs/PDFReflect.hpp"
 #include "../specsyn/Specsyn.hpp"
 #include "../tracks/TrackCommons.hpp"
+#include "../tracks/Tracks3D.hpp"
 #include "../utils/GKIntegrator.hpp"
 #include "../utils/GKIntegratorData.hpp"
 #include "../utils/PDFIntegrator.hpp"
@@ -27,12 +28,42 @@
 #include <cstddef>
 #include <functional>
 #include <iterator>
+#include <limits>
 #include <numbers>
 #include <numeric>
 #include <sstream>
 #include <stdexcept>
 #include <utility>
 #include <vector>
+
+namespace
+{
+    /**
+     * @brief A field star's lifetime, treating masses outside the tracks' own mass grid specially
+     * @param tracks The tracks to query -- SimControls::tracks()
+     * @param m Stellar mass, in Msun
+     * @param feh [Fe/H] of the star
+     * @return tracks.starLifetime(m, feh) if tracks.mMin() <= m <=
+     *   tracks.mMax(); +infinity if m is below tracks.mMin() (treated
+     *   as living forever); -infinity if m is above tracks.mMax()
+     *   (treated as already dead)
+     * @details
+     * Mirrors Cluster's own starLifetimeClamped() (see its own
+     * comment), for the same reason: Tracks3D::starLifetime() asserts
+     * its mass argument lies within the tracks' own tabulated mass
+     * grid (and reads outside it if assertions are disabled), but the
+     * IMF's own mass range can extend beyond that grid -- e.g. an IMF
+     * minimum below the tracks' own minimum mass, which a field star
+     * can be drawn at whenever stars.min_stoch_mass is below the
+     * tracks' own minimum.
+     */
+    auto fieldStarLifetime(const tracks::Tracks3D& tracks, const double m, const double feh) -> double
+    {
+        if (m < tracks.mMin()) { return std::numeric_limits<double>::infinity(); }
+        if (m > tracks.mMax()) { return -std::numeric_limits<double>::infinity(); }
+        return tracks.starLifetime(m, feh);
+    }
+} // namespace
 
 // Constructor: everything but controls_ takes its in-class default
 // (curTime_/lbol_ = 0, every vector empty); sfr_ is resolved in the
@@ -126,7 +157,9 @@ void core::Galaxy::advance(const double t)
     // single, shared aV_), mirroring Cluster's own avDist().valid() ?
     // draw() : 0.0 convention for when no extinction was requested at
     // all. Its death time is then formTime + the tracks' own
-    // starLifetime() at that (mass, feh), both in yr. Sorting this
+    // starLifetime() at that (mass, feh), both in yr -- or +/-infinity
+    // for a mass below/above the tracks' own mass range, see
+    // fieldStarLifetime()'s own comment. Sorting this
     // step's own batch by formTime before appending it keeps
     // fieldStars_ sorted by formTime_ overall: every previously-
     // appended star's own formTime_ already falls at or before
@@ -139,7 +172,7 @@ void core::Galaxy::advance(const double t)
     {
         const double formTime = sfr().draw(curTime_, t);
         const double feh = sc.fehDist().draw();
-        const double deathTime = formTime + sc.tracks()->starLifetime(mass, feh);
+        const double deathTime = formTime + fieldStarLifetime(*sc.tracks(), mass, feh);
         const double aV = sc.avDistField().valid() ? sc.avDistField().draw() : 0.0;
         newFieldStars.push_back({ mass, feh, formTime, deathTime, aV });
     }
