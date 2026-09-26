@@ -480,24 +480,12 @@ namespace core
          * @details
          * If SimControls::fehDist() is degenerate (a single value,
          * SimControls::fehDist().getMin() == getMax()), simply calls
-         * the (t, feh) overload at that value. Otherwise, mirrors
-         * computeLbolCts()'s own multi-feh handling (see its own
-         * comment) generalized to a vector-valued result the same way
-         * Specsyn::specCtsHelper() does for a full spectrum (see its
-         * own comment): evaluates yieldsRate(t, feh) at every [Fe/H]
-         * grid point SimControls::tracks() is actually defined at,
-         * weights each by SimControls::fehDist()'s own density there,
-         * then -- since Interpolator1D's own template parameter fixes
-         * how many quantities it interpolates at compile time, but the
-         * number of components here (isotopes, times channels if
-         * decomposed) is only known at runtime -- builds one
-         * Interpolator1D<1> per output component (plus one more for
-         * the weights themselves) to integrate each of those discrete,
-         * [Fe/H]-grid-sampled curves over SimControls::fehDist()'s own
-         * [min, max] range, dividing each component's own weighted
-         * integral by the weights' own integral (the same normalized
-         * weighted-average construction computeLbolCts()/
-         * specCtsHelper() both use).
+         * the (t, feh) overload at that value. Otherwise, integrates
+         * the (t, feh) overload over [Fe/H] with a PDFIntegrator
+         * weighted by SimControls::fehDist(), divided by fehDist()'s
+         * own integral over its support -- the same construction
+         * computeLbolCts() and Specsyn::specCtsHelper() use (see the
+         * latter's own comment for why).
          */
         [[nodiscard]] auto yieldsRate(double t) const -> std::vector<double>;
 
@@ -922,11 +910,11 @@ namespace core
          * PDFIntegrator over age alone whose own integrand --
          * lbolCtsIntegrand() -- performs a complete inner 1D integral
          * over mass via a fresh isochrone built at its own age, and --
-         * when fehDist is non-degenerate -- running that same nested
-         * integral once per grid point in tracks().feH() and
-         * integrating those discrete results over [Fe/H] via
-         * interp::Interpolator1D; see its own comment for the full
-         * rationale, which applies here unchanged), just integrating a
+         * when fehDist is non-degenerate -- integrating that same
+         * nested integral over [Fe/H] with a third, outermost
+         * PDFIntegrator weighted by fehDist; see its own comment for
+         * the full rationale, which applies here unchanged), just
+         * integrating a
          * single quantity (Lbol alone, via lbolCtsIntegrand()) instead
          * of a spectrum plus Lbol together, and directly in Lsun
          * throughout: unlike specCtsHelper(), there is no spectral

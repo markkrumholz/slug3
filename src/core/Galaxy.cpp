@@ -8,7 +8,6 @@
 
 #include "Galaxy.hpp"
 #include "../extinct/Extinct.hpp"
-#include "../interpolation/Interpolator1D.hpp"
 #include "../io/SimControls.hpp"
 #include "../nebular/Nebular.hpp"
 #include "../pdfs/PDF.hpp"
@@ -582,28 +581,15 @@ void core::Galaxy::computeLbolCts()
     }
     else
     {
-        // Integrate over [Fe/H] by running the same nested (age, mass)
-        // integral once at every grid point the tracks are actually
-        // defined at, then interpolating and integrating those
-        // discrete results over [Fe/H] -- see
-        // Specsyn::specCtsHelper()'s own comment for why, in place of
-        // a joint 3D (feh, age, mass) cubature integral.
-        const auto& fehGrid = sc.tracks()->feH();
-        const std::size_t nFeh = fehGrid.size();
-
-        std::vector<double> lbolAtFeh(nFeh);
-        std::vector<double> fehWeight(nFeh);
-        for (std::size_t f = 0; f < nFeh; ++f)
-        {
-            const auto result = integrator.integrate(ageMin, curTime_, this, imf, fehGrid[f]);
-            fehWeight[f] = fehDist(fehGrid[f]);
-            lbolAtFeh[f] = result[0] * fehWeight[f]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- result has exactly 1 element, by construction (nInt == 1)
-        }
-
-        const interp::Interpolator1D<1> weightInterp(fehGrid, fehWeight);
-        const double weightIntegral = weightInterp.integ(fehDist.getMin(), fehDist.getMax());
-        const interp::Interpolator1D<1> lbolInterp(fehGrid, lbolAtFeh);
-        lbolRaw = lbolInterp.integ(fehDist.getMin(), fehDist.getMax()) / weightIntegral;
+        // Integrate over [Fe/H] with an outer PDFIntegrator weighted by
+        // fehDist -- see Specsyn::specCtsHelper()'s own identical
+        // treatment
+        auto fehIntegrand = [&](const double feh) -> std::vector<double>
+        { return integrator.integrate(ageMin, curTime_, this, imf, feh); };
+        const utils::PDFIntegrator<decltype(fehIntegrand), utils::GKOrder::GK15> fehIntegrator(
+            fehDist, fehIntegrand, 1, false, sc.intMaxIter(), absTol, sc.intRelTol());
+        const auto result = fehIntegrator.integrate(fehDist.getMin(), fehDist.getMax());
+        lbolRaw = result[0] / fehDist.integral(fehDist.getMin(), fehDist.getMax()); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- result has exactly 1 element, by construction (nInt == 1)
     }
 
     // imf is normalized by number, so lbolRaw is per star formed;
@@ -699,44 +685,24 @@ auto core::Galaxy::yieldsRate(const double t) const -> std::vector<double>
         return yieldsRate(t, fehDist.getMin());
     }
 
-    // Multi-feh: evaluate yieldsRate(t, feh) at every [Fe/H] grid
-    // point the tracks are actually defined at, then interpolate and
-    // integrate those discrete results over [Fe/H] -- mirrors
-    // computeLbolCts()'s own identical technique, generalized to a
-    // vector-valued result the same way Specsyn::specCtsHelper() does
-    // for a full spectrum: one Interpolator1D<1> per output component,
-    // since Interpolator1D's own NF is a compile-time template
-    // parameter, but the number of components here is only known at
-    // runtime -- see this method's own header comment.
-    const auto& fehGrid = sc.tracks()->feH();
-    const std::size_t nFeh = fehGrid.size();
-
-    std::vector<std::vector<double>> rateAtFeh(nFeh);
-    std::vector<double> fehWeight(nFeh);
-    for (std::size_t f = 0; f < nFeh; ++f)
-    {
-        rateAtFeh[f] = yieldsRate(t, fehGrid[f]); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- f < nFeh == fehGrid.size() by construction
-        fehWeight[f] = fehDist(fehGrid[f]); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- f < nFeh == fehGrid.size() by construction
-    }
-
-    // Normalizing denominator: the integral of fehDist alone over its
-    // own domain (fehDist need not itself integrate to exactly 1)
-    const interp::Interpolator1D<1> weightInterp(fehGrid, fehWeight);
-    const double weightIntegral = weightInterp.integ(fehDist.getMin(), fehDist.getMax());
-
-    const std::size_t n = rateAtFeh.front().size();
-    std::vector<double> result(n, 0.0);
-    std::vector<double> quantityAtFeh(nFeh);
-    for (std::size_t k = 0; k < n; ++k)
-    {
-        for (std::size_t f = 0; f < nFeh; ++f)
-        {
-            quantityAtFeh[f] = rateAtFeh[f][k] * fehWeight[f]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,cppcoreguidelines-pro-bounds-constant-array-index) -- rateAtFeh[f] has size n by construction (every yieldsRate(t, feh) call returns the same-sized vector), and k/f are both bounded by their own loop
-        }
-        const interp::Interpolator1D<1> quantityInterp(fehGrid, quantityAtFeh);
-        result[k] = quantityInterp.integ(fehDist.getMin(), fehDist.getMax()) / weightIntegral; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- result has size n by construction, and k is bounded by n
-    }
-
+    // Multi-feh: integrate yieldsRate(t, feh) over [Fe/H] with a
+    // PDFIntegrator weighted by fehDist -- see computeLbolCts()'s own
+    // identical treatment. The number of components is only known once
+    // yieldsRate() has run, so it is taken from yields() directly,
+    // exactly as yieldsRate(t, feh) itself sizes its own result.
+    const auto yields = sc.yields();
+    if (yields == nullptr) { return {}; }
+    const std::size_t n = sc.yieldsChannelDecomposed()
+        ? yields->yieldChannels().size() * yields->isotopes().size()
+        : yields->isotopes().size();
+    const double absTol = sc.intAbsTol() * 1e-6 * sfr().integral(0.0, t);
+    auto fehIntegrand = [this, t](const double feh) -> std::vector<double>
+    { return yieldsRate(t, feh); };
+    const utils::PDFIntegrator<decltype(fehIntegrand), utils::GKOrder::GK15> fehIntegrator(
+        fehDist, fehIntegrand, n, false, sc.intMaxIter(), absTol, sc.intRelTol());
+    auto result = fehIntegrator.integrate(fehDist.getMin(), fehDist.getMax());
+    const double fehNorm = fehDist.integral(fehDist.getMin(), fehDist.getMax());
+    for (double& r : result) { r /= fehNorm; }
     return result;
 }
 

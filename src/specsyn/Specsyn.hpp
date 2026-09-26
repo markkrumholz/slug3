@@ -252,10 +252,10 @@ namespace specsyn
          * -- a distinction this function exists specifically to
          * preserve for every caller except
          * Specsyn::continuousSpecIntegrand() (via specWlForIntegration()
-         * below), which alone needs the tracks' own [Fe/H] grid
-         * (padded beyond any single library's own real coverage, for
-         * interpolation purposes -- see Specsyn::specCtsHelper()'s own
-         * comment) to still produce a usable spectrum.
+         * below), which evaluates at whatever [Fe/H] values
+         * Specsyn::specCtsHelper()'s own [Fe/H] quadrature chooses, and
+         * so still needs a usable spectrum there even where one chained
+         * library's own real coverage stops short.
          */
         [[nodiscard]] virtual auto specForIntegration(const StarData& props, double feh) const
         -> std::vector<double>
@@ -457,14 +457,10 @@ namespace specsyn
          *
          * If fehDist is degenerate (fehDist.getMin() == fehDist.getMax(),
          * a single metallicity shared by every star), runs this nested
-         * integral once. Otherwise, rather than folding [Fe/H] into
-         * either integral as a further continuous dimension, integrates
-         * over [Fe/H] via a separate mechanism entirely -- see
-         * specCtsHelper()'s own comment for why -- running the same
-         * nested (age, mass) integral once at every [Fe/H] grid point
-         * the tracks are actually defined at (controls_.tracks().feH()),
-         * then interpolating and integrating those discrete results
-         * over [Fe/H] with interp::Interpolator1D.
+         * integral once. Otherwise, integrates over [Fe/H] with a
+         * third, outermost 1D PDFIntegrator weighted by fehDist, whose
+         * integrand is the complete nested (age, mass) integral at each
+         * [Fe/H] it visits -- see specCtsHelper()'s own comment.
          *
          * The time dimension is integrated as age instead, via a
          * pdfs::PDFReflect view of sfr pivoted at curTime / 2 (so
@@ -658,9 +654,9 @@ namespace specsyn
          *   specCts() overload's own long-standing behavior, unchanged.
          *   If true, evaluates each star via specWlForIntegration()
          *   instead (see its own comment for why: the [Fe/H] this is
-         *   called at may fall outside a real spectral library's own
-         *   tabulated coverage, at the tracks' padded grid points --
-         *   see specCtsHelper()'s own comment), and skips the final
+         *   called at, chosen by specCtsHelper()'s own [Fe/H]
+         *   quadrature, may fall outside one chained library's own
+         *   tabulated coverage), and skips the final
          *   mTot/wl_ step entirely, leaving the result in the same
          *   lambda * dL/dlambda form specCtsHelper()'s own final
          *   division loop expects to undo itself, once, after its own
@@ -746,48 +742,37 @@ namespace specsyn
          * converting it to the Lsun Cluster::lbol() itself uses.
          *
          * In the general (non-degenerate fehDist) case, [Fe/H] is
-         * integrated by running the same nested (age, mass) integral
-         * once at every grid point in controls_.tracks().feH() -- rather than
-         * folding it into the cubature as a third continuous
-         * dimension. This was a deliberate change from an earlier,
-         * simpler design that did use a joint 3D (feh, age, mass)
-         * pAdaptive integral: that design was found, on the real,
-         * permanent slow test (7 output times, a real non-degenerate
-         * [Fe/H] distribution, the full nWl-element spectrum as the
-         * integrand's vector-valued output), to grow memory without
-         * bound at most output times, in some cases exceeding 6 GB in
-         * under a minute. The cause is intrinsic to cubature's own
-         * pAdaptive algorithm (see src/extern/cubature/pcubature.c):
-         * unlike hAdaptive, which subdivides the domain into
-         * independent boxes of bounded cost, pAdaptive is a single
-         * global tensor-product Clenshaw-Curtis rule that increases
-         * per-dimension resolution and permanently caches every
-         * function value it has ever computed, at every resolution
-         * level, until the whole integral converges. The size of one
-         * "add another resolution level" step scales as fdim (here,
-         * wl_.size(), often ~1e3) times the product of the *other*
-         * dimensions' current resolutions -- with three genuinely
-         * non-trivial dimensions (feh, age, mass) all needing
-         * refinement simultaneously, a single such step can require a
-         * multi-GB allocation. This risk was actually already latent
-         * with only 2 dimensions log-transformed correctly, but with
-         * only 2 dimensions ever refining simultaneously it stayed
-         * small enough in practice never to be observed.
+         * integrated by a third, outermost 1D PDFIntegrator (GK15),
+         * weighted by fehDist, whose integrand runs the complete nested
+         * (age, mass) integral at each [Fe/H] it visits -- not by
+         * folding [Fe/H] into a joint 3D (feh, age, mass) cubature
+         * integral. An earlier design did use a joint 3D pAdaptive
+         * integral, and was found, on the real, permanent slow test (7
+         * output times, a real non-degenerate [Fe/H] distribution, the
+         * full nWl-element spectrum as the integrand's vector-valued
+         * output), to grow memory without bound, in some cases
+         * exceeding 6 GB in under a minute: cubature's pAdaptive
+         * algorithm (see src/extern/cubature/pcubature.c) is a single
+         * global tensor-product rule that caches every function value
+         * it has ever computed, and with three dimensions refining
+         * simultaneously, one refinement step alone can need a
+         * multi-GB allocation. Nesting three 1D integrals avoids this,
+         * since each level only ever holds one GK15 panel's worth of
+         * vector-valued results at a time.
          *
-         * Decomposing the [Fe/H] direction into a discrete grid instead
-         * turns that single fragile 3D integral into nFeh independent
-         * nested (age, mass) integrals -- each identical in character
-         * and cost to the already-robust degenerate-fehDist case above --
-         * plus cheap post-hoc 1D interpolation over [Fe/H]. Total cost
-         * is therefore nFeh times the cost of one such integral, plus
-         * interp::Interpolator1D's own small overhead; nFeh is
-         * typically modest (e.g. 7, for the real permanent slow test's
-         * own [Fe/H] distribution). controls_.tracks() is itself always
-         * constructed with fehMin/fehMax = fehDist.getMin()/getMax()
-         * (see io::SimControls::readTracks()), so controls_.tracks().feH()
-         * is guaranteed to bracket fehDist's own domain -- safe to use
-         * directly as the Interpolator1D x-grid, without further
-         * clamping, whenever fehDist is non-degenerate.
+         * A later design instead ran the nested (age, mass) integral
+         * once at every grid point in controls_.tracks().feH(), then
+         * interpolated those results over [Fe/H] and integrated the
+         * interpolant. That was cheaper (one integral per grid point,
+         * typically ~7, rather than at least 15), but biased: on the
+         * real slow test's own [Fe/H] distribution, its spectra
+         * differed from a converged integral by ~2% rms and up to ~10%,
+         * regardless of the inner tolerance. It also returned NaN for
+         * any fehDist with no track grid point strictly inside its own
+         * support (every grid weight being zero). Evaluating the
+         * tracks at arbitrary [Fe/H] is cheap now (see
+         * tracks::Tracks3D's own class comment), so a direct quadrature
+         * over fehDist costs only ~2-3x as much, and converges.
          */
         [[nodiscard]] auto specCtsHelper(
             const pdfs::PDF& sfr,
@@ -819,11 +804,11 @@ namespace specsyn
          *   age's own integrated bolometric luminosity -- see
          *   specCtsImpl()'s own computeLbol parameter
          * @param feh The single [Fe/H] value this call is evaluated
-         *   at -- specCtsHelper() calls this once per grid point in
-         *   controls_.tracks().feH() when fehDist is non-degenerate
-         *   (see its own comment for why), or once, at fehDist.getMin()
-         *   == fehDist.getMax(), when it is degenerate. Either way,
-         *   [Fe/H] is fixed for the whole call.
+         *   at -- one of the points specCtsHelper()'s own [Fe/H]
+         *   quadrature visits when fehDist is non-degenerate (see its
+         *   own comment), or fehDist.getMin() == fehDist.getMax() when
+         *   it is degenerate. Either way, [Fe/H] is fixed for the whole
+         *   call.
          * @return wl_.size() values (lambda * dL/dlambda, see specWl()),
          *   plus -- only if computeLbol -- one further value, this
          *   age's own integrated bolometric luminosity, in erg/s (see
