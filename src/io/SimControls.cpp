@@ -506,7 +506,7 @@ void io::SimControls::initPhysics(const utils::TrackedDeck& inputDeck)
     if (minSM.has_value())
     {
         minStochMass_ = minSM.value();
-        fracStochMass_ = imf_.integral(minStochMass_, imf_.getMax());
+        updateFracStochMass();
     }
 }
 

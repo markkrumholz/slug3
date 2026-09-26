@@ -21,6 +21,7 @@
 #include "../utils/TrackedDeck.hpp"
 #include "../yields/YieldCommons.hpp"
 #include "../yields/Yields.hpp"
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -690,9 +691,39 @@ namespace io
 
         /**
          * @brief Get fraction of stellar mass being treated stochastically
-         * @return Fraction of stellar mass being treated stochastically
+         * @return Fraction of stellar mass being treated stochastically:
+         *   the fraction of the total mass of a population drawn from
+         *   imf() that is in stars of mass >= minStochMass() -- see
+         *   updateFracStochMass()'s own comment
          */
         [[nodiscard]] auto fracStochMass() const { return fracStochMass_; }
+
+        /**
+         * @brief Get the mass per star, averaged over the whole IMF, of the part of the IMF treated non-stochastically
+         * @return The integral of m p(m) dm from imf().getMin() to
+         *   minStochMass() (clamped to imf()'s own range), where p is
+         *   imf() itself (normalized by number, so that p integrates to
+         *   1 over imf()'s whole range); 0 if minStochMass() <=
+         *   imf().getMin(), i.e. if nothing is treated
+         *   non-stochastically
+         * @details
+         * This is the normalization that converts an integral of a
+         * per-star quantity f(m) against imf() over the
+         * non-stochastic mass range, int f(m) p(m) dm, into that
+         * quantity per unit *mass* of non-stochastic stars: a
+         * non-stochastic population of total mass M contains
+         * M * p(m) dm / nonStochIMFMass() stars in [m, m + dm], so the
+         * total of f over it is M * int f(m) p(m) dm /
+         * nonStochIMFMass(). Equal to (1 - fracStochMass()) times the
+         * mean stellar mass of the whole IMF.
+         */
+        [[nodiscard]] auto nonStochIMFMass() const -> double
+        {
+            const double mMin = imf_.getMin();
+            const double mMax = std::min(minStochMass_, imf_.getMax());
+            if (mMax <= mMin) { return 0.0; }
+            return imf_.expectationValue(mMin, mMax) * imf_.integral(mMin, mMax);
+        }
 
         /**
          * @brief Get the spectral synthesizer, if any
@@ -847,7 +878,11 @@ namespace io
          * @throws std::runtime_error if imf is not numeric and does
          *   not name a file that can be found
          */
-        void setIMF(const std::string& imf) { imf_ = utils::initPDFFromString(imf, imfPrefix); }
+        void setIMF(const std::string& imf)
+        {
+            imf_ = utils::initPDFFromString(imf, imfPrefix);
+            updateFracStochMass();
+        }
 
         /**
          * @brief Set the cluster mass function
@@ -1277,17 +1312,44 @@ namespace io
          * @param minStochMass New minimum mass for fully stochastic
          *   treatment
          * @details
-         * Also recomputes fracStochMass() as
-         * imf().integral(minStochMass, imf().getMax()), exactly as
-         * the constructor does when stars.min_stoch_mass is given.
+         * Also recomputes fracStochMass() via updateFracStochMass(),
+         * exactly as the constructor does when stars.min_stoch_mass is
+         * given.
          */
         void setMinStochMass(double minStochMass)
         {
             minStochMass_ = minStochMass;
-            fracStochMass_ = imf_.integral(minStochMass_, imf_.getMax());
+            updateFracStochMass();
         }
 
     private:
+
+        /**
+         * @brief Recompute fracStochMass_ from imf_ and minStochMass_
+         * @details
+         * Sets fracStochMass_ to the fraction of the total mass of a
+         * population drawn from imf_ that lies in stars of mass >=
+         * minStochMass_: massStoch / massTot, where massTot is
+         * imf_'s own mean mass over its whole range, and massStoch is
+         * its mean mass over [minStochMass_, imf_.getMax()] times the
+         * fraction (by number) of stars in that range. (imf_ is
+         * normalized by number, so imf_.integral() alone gives a
+         * fraction by number, not by mass.) 1 if minStochMass_ <=
+         * imf_.getMin() and 0 if minStochMass_ >= imf_.getMax(), the
+         * latter handled explicitly since PDF::expectationValue() over
+         * an empty range is 0/0.
+         */
+        void updateFracStochMass()
+        {
+            const double mMin = imf_.getMin();
+            const double mMax = imf_.getMax();
+            if (minStochMass_ <= mMin) { fracStochMass_ = 1.0; return; }
+            if (minStochMass_ >= mMax) { fracStochMass_ = 0.0; return; }
+            const double massTot = imf_.expectationValue(mMin, mMax);
+            const double massStoch = imf_.expectationValue(minStochMass_, mMax) *
+                imf_.integral(minStochMass_, mMax);
+            fracStochMass_ = massStoch / massTot;
+        }
 
         /**
          * @brief Parse every control-flow setting from the input deck

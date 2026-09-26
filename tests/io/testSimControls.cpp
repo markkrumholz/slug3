@@ -2981,6 +2981,84 @@ static auto testSimControlsIgnoredKeys() -> int
     }
 }
 
+// Verify fracStochMass() and nonStochIMFMass() against a direct
+// numerical integration of m * imf(m) (trapezoidal, in log mass) for
+// the Chabrier IMF with stars.min_stoch_mass = 10: fracStochMass()
+// must be the fraction of the IMF's total *mass* above 10 Msun (not
+// the fraction by number, imf().integral(10, max), which is ~35 times
+// smaller), and nonStochIMFMass() the integral of m * imf(m) below 10
+// Msun. Also checks the edge cases min_stoch_mass >= the IMF's maximum
+// (fracStochMass() == 0) and <= its minimum (fracStochMass() == 1,
+// nonStochIMFMass() == 0), via setMinStochMass().
+static auto testSimControlsFracStochMass() -> int
+{
+    constexpr std::string_view baseDeck = "tests/core/assets/testGalaxy.in";
+    constexpr double mStoch = 10.0;
+    constexpr double tol = 1e-4;
+    try
+    {
+        toml::table inputDeck = toml::parse_file(baseDeck);
+        inputDeck.at_path("stars").as_table()->insert_or_assign("min_stoch_mass", mStoch);
+        io::SimControls controls(inputDeck);
+        const auto& imf = controls.imf();
+
+        // Integral of m * imf(m) dm over [a, b], by the trapezoidal rule
+        // in ln m (m * imf(m) dm = m^2 * imf(m) dln m)
+        auto massIntegral = [&imf](const double a, const double b) -> double {
+            constexpr int n = 200000;
+            const double la = std::log(a);
+            const double dl = (std::log(b) - la) / n;
+            double sum = 0.0;
+            for (int i = 0; i <= n; ++i)
+            {
+                const double m = std::exp(la + (i * dl));
+                const double w = (i == 0 || i == n) ? 0.5 : 1.0;
+                sum += w * m * m * imf(m);
+            }
+            return sum * dl;
+        };
+        const double massBelow = massIntegral(imf.getMin(), mStoch);
+        const double massAbove = massIntegral(mStoch, imf.getMax());
+        const double expectedFrac = massAbove / (massBelow + massAbove);
+
+        int result = 0;
+        if (std::abs(controls.fracStochMass() - expectedFrac) > tol * expectedFrac)
+        {
+            std::cerr << "testSimControls: fracStochMass: fracStochMass() is "
+                << controls.fracStochMass() << ", expected " << expectedFrac << "\n";
+            result = 1;
+        }
+        if (std::abs(controls.nonStochIMFMass() - massBelow) > tol * massBelow)
+        {
+            std::cerr << "testSimControls: fracStochMass: nonStochIMFMass() is "
+                << controls.nonStochIMFMass() << ", expected " << massBelow << "\n";
+            result = 1;
+        }
+
+        controls.setMinStochMass(2.0 * imf.getMax());
+        if (controls.fracStochMass() != 0.0)
+        {
+            std::cerr << "testSimControls: fracStochMass: expected 0 with min_stoch_mass "
+                "above the IMF's maximum, got " << controls.fracStochMass() << "\n";
+            result = 1;
+        }
+        controls.setMinStochMass(0.5 * imf.getMin());
+        if (controls.fracStochMass() != 1.0 || controls.nonStochIMFMass() != 0.0)
+        {
+            std::cerr << "testSimControls: fracStochMass: expected fracStochMass() 1 and "
+                "nonStochIMFMass() 0 with min_stoch_mass below the IMF's minimum, got "
+                << controls.fracStochMass() << " and " << controls.nonStochIMFMass() << "\n";
+            result = 1;
+        }
+        return result;
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: fracStochMass: threw: " << error.what() << "\n";
+        return 1;
+    }
+}
+
 // Verify that a yields.channelN table after a gap in the numbering (a
 // channel3 with no channel2), which SLUG has never read, is reported
 // rather than silently dropped, and that yields keys read only once a
@@ -3081,5 +3159,6 @@ auto testSimControls() -> int
     result += testSimControlsStrictInput();
     result += testSimControlsIgnoredKeys();
     result += testSimControlsYieldsChannelGap();
+    result += testSimControlsFracStochMass();
     return result;
 }

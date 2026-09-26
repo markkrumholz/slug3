@@ -28,6 +28,29 @@
 #include <utility>
 #include <vector>
 
+namespace
+{
+    /**
+     * @brief Integral of m p(m) dm over a mass range, for an IMF p normalized by number
+     * @param imf The IMF
+     * @param mMin Lower mass limit, in Msun; clamped up to imf.getMin()
+     * @param mMax Upper mass limit, in Msun; clamped down to imf.getMax()
+     * @return The mass per star, averaged over the whole of imf, in
+     *   stars within [mMin, mMax] -- the normalization that converts
+     *   an integral of a per-star quantity against imf over [mMin,
+     *   mMax] into that quantity per unit mass of stars in [mMin,
+     *   mMax] (see io::SimControls::nonStochIMFMass()'s own comment);
+     *   0 if the clamped range is empty
+     */
+    auto imfMassIntegral(const pdfs::PDF& imf, const double mMin, const double mMax) -> double
+    {
+        const double a = std::max(mMin, imf.getMin());
+        const double b = std::min(mMax, imf.getMax());
+        if (b <= a) { return 0.0; }
+        return imf.expectationValue(a, b) * imf.integral(a, b);
+    }
+} // namespace
+
 auto specsyn::Specsyn::intRelTol() const -> double { return controls_.intRelTol(); }
 
 auto specsyn::Specsyn::intAbsTol() const -> double { return controls_.intAbsTol(); }
@@ -133,15 +156,20 @@ auto specsyn::Specsyn::specCtsImpl(
 
     if (!forIntegration)
     {
-        // Scale by mTot and divide back out by wl_ elementwise, undoing
-        // specWl()'s multiplication to recover dL/dlambda. Skipped when
+        // Scale by mTot per unit IMF mass in [mMin, mMax] (converting
+        // the per-star integral above into a total for a population of
+        // mass mTot -- see imfMassIntegral()'s own comment), and divide
+        // back out by wl_ elementwise, undoing specWl()'s
+        // multiplication to recover dL/dlambda. Skipped when
         // forIntegration is true: continuousSpecIntegrand()'s own
-        // caller (specCtsHelper()) does this exact division itself,
-        // once, after its own outer age integral is complete -- see
-        // specCtsImpl()'s own header comment.
+        // caller (specCtsHelper()) does this exact scaling and division
+        // itself, once, after its own outer age integral is complete --
+        // see specCtsImpl()'s own header comment.
+        const double massInt = imfMassIntegral(imf, mMin, mMax);
+        const double scale = massInt > 0.0 ? mTot / massInt : 0.0;
         for (std::size_t i = 0; i < nWl; ++i)
         {
-            result[i] = result[i] * mTot / wl_[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- wl_ has size nWl, and i is bounded by nWl
+            result[i] = result[i] * scale / wl_[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- wl_ has size nWl, and i is bounded by nWl
         }
     }
     return result;
@@ -328,7 +356,12 @@ auto specsyn::Specsyn::specCtsHelper(
     // continuously-treated share of the population -- see specCts()'s
     // own comment for why the second factor is needed alongside mMin/
     // mMax already restricting the integral itself.
-    const double ctsFrac = (1.0 - fCluster) * (1.0 - controls_.fracStochMass());
+    // The last factor converts the per-star mass integral into one
+    // per unit mass of stars in [mMin, mMax] -- see imfMassIntegral()'s
+    // own comment
+    const double massInt = imfMassIntegral(imf, mMin, mMax);
+    const double ctsFrac = massInt > 0.0 ?
+        (1.0 - fCluster) * (1.0 - controls_.fracStochMass()) / massInt : 0.0;
     for (std::size_t i = 0; i < wl_.size(); ++i)
     {
         result[i] = result[i] * ctsFrac / wl_[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- wl_.size() <= result.size() by construction (result.size() == wl_.size() + computeLbol), and i is bounded by wl_.size()
