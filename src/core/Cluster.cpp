@@ -549,7 +549,10 @@ void core::Cluster::computeLbol()
             const auto segResult = integrator.integrate(a, b, *seg);
             lbolCts += segResult[0]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- segResult is a std::array<double, 1>, so index 0 is always valid
         }
-        lbol_ += lbolCts * birthNonStochMass_;
+        // imf() is normalized by number, so lbolCts is per star;
+        // convert to per unit non-stochastic mass -- see
+        // SimControls::nonStochIMFMass()'s own comment
+        lbol_ += lbolCts * birthNonStochMass_ / sc.nonStochIMFMass();
     }
 }
 
@@ -649,6 +652,10 @@ void core::Cluster::computeYields()
         sc.imf(), static_cast<YieldSegFn>(&Cluster::yieldStar), yields_.size(),
         false, sc.intMaxIter(), sc.intAbsTol(), sc.intRelTol());
 
+    // imf() is normalized by number, so each integral is per star;
+    // scale to this cluster's own non-stochastic mass -- see
+    // SimControls::nonStochIMFMass()'s own comment
+    const double scale = birthNonStochMass_ / sc.nonStochIMFMass();
     for (const auto& [lo, hi] : subtractMassRanges(liveMassRangeLast, liveMassRangeNow))
     {
         const double m0 = lo;
@@ -659,7 +666,7 @@ void core::Cluster::computeYields()
             sc, curTime_, formTime_, tracks());
         for (std::size_t k = 0; k < segResult.size(); ++k)
         {
-            yields_[k] += segResult[k] * birthNonStochMass_; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- yields_ and segResult are both sized yields_.size() by construction (segResult via nInt_ above)
+            yields_[k] += segResult[k] * scale; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- yields_ and segResult are both sized yields_.size() by construction (segResult via nInt_ above)
         }
     }
 }
