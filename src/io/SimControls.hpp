@@ -906,7 +906,8 @@ namespace io
          * @throws std::runtime_error if feH is not numeric and does
          *   not name a file that can be found, or if its own
          *   [min, max] range is broader than tracks_'s own
-         *   [fehMin(), fehMax()]
+         *   [fehMin(), fehMax()], or tracks_'s own range is NaN (a
+         *   default-constructed Tracks3D)
          * @details
          * Rejects (rather than accepts and later failing to
          * interpolate) any new distribution whose [min, max] range is
@@ -1181,16 +1182,39 @@ namespace io
          *   constructed, and no code path anywhere in this codebase
          *   checks for a "no tracks" state, so this method preserves
          *   that invariant rather than accepting null to mean "remove."
-         * @throws std::invalid_argument if tracks is null
+         * @throws std::invalid_argument if tracks is null, or if its
+         *   own [fehMin(), fehMax()] (the [Fe/H] range it was loaded
+         *   over) does not cover fehDist()'s own [min, max], or is NaN
+         *   (a default-constructed Tracks3D)
          * @details
          * Lets a caller replace this SimControls's stellar tracks with
-         * its own, without needing an input deck. If constFeH() is
+         * its own, without needing an input deck. Rejecting tracks that
+         * do not cover fehDist() is the counterpart of setFeH()'s own
+         * check: every [Fe/H] the simulation can ask the tracks about
+         * is drawn from, or integrated over, fehDist(). On rejection,
+         * this SimControls is left unchanged. If constFeH() is
          * true, also recomputes tracks2D() (the [Fe/H]-sliced cache)
          * from the new tracks, mirroring setFeH()'s own amendment (see
          * its comment) so the cache never goes stale relative to
          * whichever of tracks_/fehDist_ changed most recently.
          */
         void setTracks(std::unique_ptr<tracks::Tracks3D> tracks);
+
+        /**
+         * @brief Check that stellar tracks cover the current [Fe/H] distribution
+         * @param tracks The stellar tracks to check
+         * @throws std::invalid_argument if tracks' own [fehMin(),
+         *   fehMax()] does not cover fehDist()'s own [min, max], or is
+         *   NaN (a default-constructed Tracks3D)
+         * @details
+         * The check setTracks() applies before installing new tracks.
+         * Public so that a caller can validate tracks it does not want
+         * to give up ownership of on failure -- e.g. the Python
+         * bindings, which would otherwise transfer a Tracks3D's
+         * ownership into setTracks()'s own argument before the check
+         * runs.
+         */
+        void checkTracksCoverFeH(const tracks::Tracks3D& tracks) const;
 
         /**
          * @brief Set the extinction curve

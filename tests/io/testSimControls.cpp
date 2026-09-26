@@ -13,6 +13,7 @@
 #include "../src/pdfs/PDFSegmentLognormal.hpp"
 #include "../src/pdfs/PDFSegmentPowerlaw.hpp"
 #include "../src/specsyn/SpecsynBlackbody.hpp"
+#include "../src/tracks/Tracks3D.hpp"
 #include "../src/utils/MiscUtils.hpp"
 #include "testSimControls.hpp"
 #include <algorithm>
@@ -2715,6 +2716,81 @@ static auto testSimControlsSetFeHRejectsBroadening() -> int
     return 0;
 }
 
+// Verify that setTracks() rejects tracks whose own [fehMin(), fehMax()]
+// does not cover fehDist() -- the counterpart of setFeH()'s own check
+// (see testSimControlsSetFeHRejectsBroadening()) -- including a
+// default-constructed Tracks3D, whose NaN range must be rejected rather
+// than slipping through every comparison; that a rejected call leaves
+// tracks() unchanged; and that tracks which do cover fehDist() are
+// accepted, including after fehDist() has been narrowed with setFeH().
+static auto testSimControlsSetTracksRejectsUncoveredFeH() -> int
+{
+    const std::string fileName = "tests/core/assets/testClusterVarFeH.in";
+    const toml::table inputDeck = toml::parse_file(fileName);
+    io::SimControls sim(inputDeck);
+    constexpr std::string_view registry = "tests/tracks/assets/tracks.toml";
+    auto mist = [&registry](const double fehMin, const double fehMax)
+    {
+        return std::make_unique<tracks::Tracks3D>(
+            "MIST_test", fehMin, fehMax, 0.0, -0.2, std::string(registry));
+    };
+
+    if (sim.fehDist().getMin() != -0.5 || sim.fehDist().getMax() != 0.5)
+    {
+        std::cerr << "testSimControls: setTracks: test bug: expected " << fileName
+            << "'s own stars.FeH to be [-0.5, 0.5]\n";
+        return 1;
+    }
+
+    // Tracks loaded over [-1, 0] do not cover [-0.5, 0.5]; nor does a
+    // default-constructed Tracks3D, whose range is NaN. Either must be
+    // rejected, leaving tracks() as it was
+    const auto* before = sim.tracks().get();
+    for (auto* label : { "[-1, 0]", "default-constructed" })
+    {
+        auto candidate = std::string_view(label) == "[-1, 0]" ?
+            mist(-1.0, 0.0) : std::make_unique<tracks::Tracks3D>();
+        try
+        {
+            sim.setTracks(std::move(candidate));
+            std::cerr << "testSimControls: setTracks: expected " << label
+                << " tracks, not covering fehDist() [-0.5, 0.5], to throw\n";
+            return 1;
+        }
+        catch (const std::invalid_argument&) { /* expected */ }
+        if (sim.tracks().get() != before)
+        {
+            std::cerr << "testSimControls: setTracks: expected tracks() to be "
+                "unchanged after rejecting " << label << " tracks\n";
+            return 1;
+        }
+    }
+
+    try
+    {
+        // Tracks covering [-0.5, 0.5] are accepted
+        sim.setTracks(mist(-1.0, 0.5));
+        if (sim.tracks()->fehMin() != -1.0 || sim.tracks()->fehMax() != 0.5)
+        {
+            std::cerr << "testSimControls: setTracks: expected the new [-1, 0.5] "
+                "tracks to be installed\n";
+            return 1;
+        }
+
+        // After narrowing fehDist() to -0.25, the [-1, 0] tracks
+        // rejected above now cover it, and are accepted
+        sim.setFeH("-0.25");
+        sim.setTracks(mist(-1.0, 0.0));
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: setTracks: expected tracks covering "
+            "fehDist() to be accepted, but it threw: " << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
 // Verify that setFeH() resets tracks2D() (constFeHTracks_) back to
 // nullptr when the new [Fe/H] distribution is no longer degenerate --
 // otherwise it would keep pointing at a stale slice from whichever
@@ -3180,6 +3256,7 @@ auto testSimControls() -> int
     result += testSimControlsYieldsDuplicateChannelWarning();
     result += testSimControlsSFRDist();
     result += testSimControlsSetFeHRejectsBroadening();
+    result += testSimControlsSetTracksRejectsUncoveredFeH();
     result += testSimControlsSetFeHResetsTracks2DWhenNoLongerFixed();
     result += testSimControlsSettersRejectMismatchedControls();
     result += testSimControlsUnusedKeys();

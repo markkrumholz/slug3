@@ -620,7 +620,9 @@ void io::SimControls::readOutput(const utils::TrackedDeck& inputDeck)
 void io::SimControls::setFeH(const std::string& feH)
 {
     auto newFehDist = utils::initPDFFromString(feH);
-    if (newFehDist.getMin() < tracks_->fehMin() || newFehDist.getMax() > tracks_->fehMax())
+    // Written so that a NaN range (a default-constructed Tracks3D) is
+    // rejected, not silently accepted
+    if (!(tracks_->fehMin() <= newFehDist.getMin() && newFehDist.getMax() <= tracks_->fehMax()))
     {
         throw std::runtime_error(
             "SimControls::setFeH: the requested [Fe/H] distribution, "
@@ -652,12 +654,32 @@ void io::SimControls::setFeH(const std::string& feH)
 // Set the stellar tracks, recomputing tracks2D() (constFeHTracks_)
 // from the new tracks_ if fehDist_ is already fixed -- see setFeH()'s
 // own comment
+// Throw unless tracks cover the current [Fe/H] distribution -- see
+// this method's own header comment
+void io::SimControls::checkTracksCoverFeH(const tracks::Tracks3D& tracks) const
+{
+    // The same requirement setFeH() enforces from the other side;
+    // written so that a NaN range (a default-constructed Tracks3D) is
+    // rejected rather than passing every comparison
+    if (!(tracks.fehMin() <= fehDist_.getMin() && fehDist_.getMax() <= tracks.fehMax()))
+    {
+        throw std::invalid_argument(
+            "SimControls::setTracks: the new stellar tracks were loaded over "
+            "[Fe/H] in [" + std::to_string(tracks.fehMin()) + ", " +
+            std::to_string(tracks.fehMax()) + "], which does not cover the "
+            "current [Fe/H] distribution, [" + std::to_string(fehDist_.getMin()) +
+            ", " + std::to_string(fehDist_.getMax()) + "]. Load the tracks over "
+            "a range covering it, or narrow the distribution with setFeH() first.");
+    }
+}
+
 void io::SimControls::setTracks(std::unique_ptr<tracks::Tracks3D> tracks)
 {
     if (!tracks)
     {
         throw std::invalid_argument("SimControls::setTracks: tracks must not be null");
     }
+    checkTracksCoverFeH(*tracks);
     tracks_ = std::move(tracks);
     if (constFeH())
     {
