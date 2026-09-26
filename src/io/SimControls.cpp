@@ -680,11 +680,16 @@ void io::SimControls::setTracks(std::unique_ptr<tracks::Tracks3D> tracks)
         throw std::invalid_argument("SimControls::setTracks: tracks must not be null");
     }
     checkTracksCoverFeH(*tracks);
-    tracks_ = std::move(tracks);
+    // Build the fixed-[Fe/H] slice, which can itself throw, before
+    // changing any state, so that a failure leaves this SimControls
+    // unchanged rather than holding the new tracks with a stale slice
+    decltype(constFeHTracks_) newConstFeHTracks;
     if (constFeH())
     {
-        constFeHTracks_ = std::make_shared<tracks::Tracks2D>(tracks_->sliceConstFeH(fehDist_.getMin()));
+        newConstFeHTracks = std::make_shared<tracks::Tracks2D>(tracks->sliceConstFeH(fehDist_.getMin()));
     }
+    tracks_ = std::move(tracks);
+    if (newConstFeHTracks) { constFeHTracks_ = std::move(newConstFeHTracks); }
 }
 
 // Set the clustered-star A_V distribution, rebuilding extinct_'s own
