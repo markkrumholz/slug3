@@ -10,7 +10,9 @@
 #include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <cstddef>
 #include <cstdlib>
+#include <span>
 #include <stdexcept>
 #include <tuple>
 #include <utility>
@@ -39,12 +41,12 @@ namespace interp
             // Copy x data; note that we copy explicitly using
             // indices so that this works even if x is non-contiguous
             xData_.resize(x.extent(0) * x.extent(1));
-            x_ = Array2D(xData_.data(), x.extent(0), x.extent(1));
             for (size_t i = 0; i < x.extent(0); ++i) {
                 for (size_t j = 0; j < x.extent(1); ++j) {
-                    x_[i,j] = x[i,j];
+                    xData_[(i * x.extent(1)) + j] = x[i,j];
                 }
             }
+            x_ = XView(xData_, x.extent(0), x.extent(1));
 
             // Copy y data
             yData_.resize(y.size());
@@ -56,7 +58,8 @@ namespace interp
         else
         {
             // Just copy metadata
-            x_ = x;
+            x_ = XView(std::span<const double>(x.data_handle(), x.size()),
+                x.extent(0), x.extent(1));
             y_ = y;
         }
 
@@ -67,14 +70,56 @@ namespace interp
         setConvexity();
     }
 
+    // Construct from an XView, computing slopes and spine lengths
+    // lazily -- see this constructor's own header comment
+    Mesh2DGrid::Mesh2DGrid(const XView& x, const Array1D& y) :
+        x_(x),
+        yData_(y.size())
+    {
+        for (size_t j = 0; j < y.size(); ++j) { yData_[j] = y[j]; }
+        y_ = Array1D(yData_.data(), yData_.size());
+        m_ = MView(x_, yData_);
+        s_ = SView(x_, yData_);
+
+        // Edge-row summaries, computed exactly as
+        // computeSlopesAndLengths() does
+        xMin_ = x_[0,0];
+        xMax_ = x_[nx()-1,0];
+        for (size_t j = 1; j < ny(); ++j) {
+            xMin_ = std::min(xMin_, x_[0,j]);
+            xMax_ = std::max(xMax_, x_[nx()-1,j]);
+        }
+        yMin_ = y_[0];
+        yMax_ = y_[ny() - 1];
+        setConvexity();
+    }
+
+    // Point x_/y_/m_/s_ at this object's own storage -- see this
+    // method's own header comment
+    void Mesh2DGrid::rebindViews()
+    {
+        const size_t nxLoc = x_.extent(0);
+        const size_t nyLoc = x_.extent(1);
+        if (!yData_.empty()) { y_ = Array1D(yData_.data(), yData_.size()); }
+        if (!xData_.empty()) { x_ = XView(xData_, nxLoc, nyLoc); }
+        const std::span<const double> ySpan(y_.data_handle(), nyLoc);
+        if (!mData_.empty()) { m_ = MView(mData_, nyLoc); }
+        else { m_ = MView(x_, ySpan); }
+        if (!sData_.empty()) { s_ = SView(sData_, nyLoc); }
+        else { s_ = SView(x_, ySpan); }
+    }
+
     // Copy constructor. x_/y_/m_/s_ are non-owning views into
-    // xData_/yData_/mData_/sData_, so after copying the underlying
+    // xData_/yData_/mData_/sData_ (or, for a lazily-evaluated grid,
+    // computed from x_ and yData_), so after copying the underlying
     // vectors they must be re-pointed at this object's own copies
-    // rather than left pointing at other's. iSave_ and jSave_ are
+    // rather than left pointing at other's -- see rebindViews(). iSave_ and jSave_ are
     // deliberately omitted here so they default-construct fresh
     // (ThreadVec is non-copyable by design; see the declaration in
     // Mesh2DGrid.hpp for why).
     Mesh2DGrid::Mesh2DGrid(const Mesh2DGrid& other) :
+        x_(other.x_),
+        y_(other.y_),
         xData_(other.xData_),
         yData_(other.yData_),
         xMin_(other.xMin_),
@@ -85,10 +130,7 @@ namespace interp
         mData_(other.mData_),
         sData_(other.sData_)
     {
-        x_ = Array2D(xData_.data(), other.x_.extent(0), other.x_.extent(1));
-        y_ = Array1D(yData_.data(), other.y_.extent(0));
-        m_ = Array2D(mData_.data(), other.m_.extent(0), other.m_.extent(1));
-        s_ = Array2D(sData_.data(), other.s_.extent(0), other.s_.extent(1));
+        rebindViews();
     }
 
     // Move constructor. Unlike the copy constructor, x_/y_/m_/s_ can
@@ -166,29 +208,31 @@ namespace interp
     {
         // Compute the slopes
         mData_.resize(nx() * (ny() - 1));
-        m_ = Array2D(mData_.data(), nx(), ny()-1);
         for (size_t j = 0; j < ny()-1; ++j) {
             for (size_t i = 0; i < nx(); ++i) {
+                double& mij = mData_[(i * (ny() - 1)) + j];
                 if (x_[i,j+1] != x_[i,j]) {
-	                m_[i,j] = (y_[j+1] - y_[j]) / (x_[i,j+1] - x_[i,j]);
+	                mij = (y_[j+1] - y_[j]) / (x_[i,j+1] - x_[i,j]);
                 } else {
-                    m_[i,j] = bigNum;
+                    mij = bigNum;
                 }
             }
         }
+        m_ = MView(mData_, ny());
 
         // Compute spine segment lengths
         sData_.resize(nx() * ny());
-        s_ = Array2D(sData_.data(), nx(), ny());
         for (size_t i = 0; i < nx(); ++i) {
-            s_[i,0] = 0.0;
+            const size_t row = i * ny();
+            sData_[row] = 0.0;
             for (size_t j = 1; j < ny(); ++j) {
-                s_[i,j] = s_[i,j-1] + std::sqrt(
+                sData_[row + j] = sData_[row + j - 1] + std::sqrt(
                     std::pow(x_[i,j] - x_[i,j-1], 2) +
                     std::pow(y_[j] - y_[j-1], 2)  
                 );
             }
         }
+        s_ = SView(sData_, ny());
 
         // Compute outer extent of mesh
         xMin_ = x_[0,0];

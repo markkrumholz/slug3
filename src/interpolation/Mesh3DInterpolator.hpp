@@ -12,6 +12,7 @@
 #define MESH3DINTERPOLATOR_HPP
 
 #include "Interpolator1D.hpp"
+#include "Mesh2DGrid.hpp"
 #include "Mesh2DInterpolator.hpp"
 #include <algorithm>
 #include <array>
@@ -22,6 +23,7 @@
 #include <limits>
 #include <mdspan> // NOLINT(misc-include-cleaner)
 #include <memory>
+#include <span>
 #include <stdexcept>
 #include <vector>
 #ifdef _OPENMP
@@ -445,7 +447,142 @@ namespace interp
             return buildSliceZ(z0);
         }
 
+        /**
+         * @brief Construct a lazily-evaluated 2D slice of the mesh at fixed z
+         * @param z0 The z coordinate at which to slice
+         * @returns A Mesh2DInterpolator<NF> representing the (x, y)
+         *          slice of the mesh at z = z0, which computes its
+         *          mesh coordinates and function values on demand
+         * @details
+         * Represents exactly the same slice as sliceConstZCopy(), but
+         * without building it: the slice's x coordinates are
+         * interpolated between the two z planes bracketing z0 only
+         * when read (see Mesh2DGrid::XView), and its function values
+         * only at the mesh points a query actually needs, each by the
+         * same zInterp()/sz() interpolation sliceConstZCopy() applies
+         * to every point (see LazyValueSource). So it costs O(Ny) time
+         * and memory to construct, rather than the O(Nx * Ny) time and
+         * memory (with a large constant: one pair of Interpolator1D
+         * objects per rib and per spine) of sliceConstZCopy(), at the
+         * price of some extra work per query; and it has no shared
+         * mutable state, so any number of threads can construct and
+         * query their own slices concurrently. Query results agree with
+         * sliceConstZCopy()'s to within floating-point rounding. The
+         * returned object refers to this Mesh3DInterpolator's own heap
+         * storage (which survives a move of this object, but not its
+         * destruction), so it must not outlive it.
+         */
+        [[nodiscard]] auto lazySliceConstZ(double z0) const -> Mesh2DInterpolator<NF>
+        {
+            assert(z0 >= zMin() && z0 <= zMax());
+            if (nz_ > 1 && ny_ == 1)
+            {
+                throw std::runtime_error(
+                    "Mesh3DInterpolator::lazySliceConstZ: cannot slice at "
+                    "fixed z because the mesh has only one point in the "
+                    "y direction");
+            }
+
+            // Bracketing planes, and interpolation weight between them;
+            // an exact match with a mesh z value (including the
+            // single-plane case) uses that plane alone, as
+            // buildSliceZ() does
+            size_t k0 = 0;
+            bool exact = (nz_ == 1);
+            for (size_t k = 0; k < nz_ && !exact; ++k)
+            {
+                if (zData_[k] == z0) { k0 = k; exact = true; }
+            }
+            double t = 0.0;
+            if (!exact)
+            {
+                k0 = static_cast<size_t>(
+                    std::ranges::upper_bound(zData_, z0) - zData_.begin()) - 1; // NOLINT(misc-include-cleaner) -- <algorithm> is included
+                t = (z0 - zData_[k0]) / (zData_[k0 + 1] - zData_[k0]);
+            }
+
+            const std::span<const double> xs(xData_);
+            const Mesh2DGrid::XView xView = exact ?
+                Mesh2DGrid::XView(xs.subspan(k0), std::span<const double>(),
+                    ny_ * nz_, nz_, nx_, ny_, 0.0) :
+                Mesh2DGrid::XView(xs.subspan(k0), xs.subspan(k0 + 1),
+                    ny_ * nz_, nz_, nx_, ny_, t);
+            std::vector<double> yCopy(yData_.begin(), yData_.end());
+            const auto yView = std::mdspan<double, std::dextents<size_t, 1>>(yCopy.data(), ny_);
+            return Mesh2DInterpolator<NF>(xView, yView,
+                std::make_shared<const ZSliceSource>(f(), sz(), zInterp(), k0, t, exact),
+                interpType_, monotonic_);
+        }
+
     private:
+
+        /**
+         * @brief Supplies the function values of a z slice on demand, for lazySliceConstZ()
+         * @details
+         * value(i,j) is exactly what buildSliceZ() stores at mesh point
+         * (i,j): f at z plane k0 directly for an exact match, and
+         * otherwise zInterp()[i,j] evaluated at the sz coordinate
+         * interpolated between planes k0 and k0 + 1 with weight t.
+         */
+        class ZSliceSource : public LazyValueSource<NF>
+        {
+        public:
+            using FView = std::mdspan<const double, std::dextents<size_t, 4>>;  /**< Type of Mesh3DInterpolator::f() */
+            using SzView = std::mdspan<const double, std::dextents<size_t, 3>>; /**< Type of Mesh3DInterpolator::sz() */
+            using ZInterpView = std::mdspan<const std::unique_ptr<Interpolator1D<NF>>,
+                std::dextents<size_t, 2>>;                                        /**< Type of Mesh3DInterpolator::zInterp() */
+
+            /**
+             * @brief Construct a ZSliceSource
+             * @param f The sliced mesh's f() view
+             * @param sz The sliced mesh's sz() view
+             * @param zInterp The sliced mesh's zInterp() view
+             * @param k0 Index of the (lower) z plane
+             * @param t Interpolation weight between planes k0 and k0 + 1
+             * @param exact True if the slice is exactly at plane k0
+             * @details
+             * Holds views of the mesh's heap buffers rather than a
+             * pointer to the mesh itself, so it stays valid if the mesh
+             * is moved; the buffers must outlive this object.
+             */
+            ZSliceSource(const FView f, const SzView sz, const ZInterpView zInterp,
+                const size_t k0, const double t, const bool exact) :
+                f_(f), sz_(sz), zInterp_(zInterp), k0_(k0), t_(t), exact_(exact) {}
+
+            /**
+             * @brief Return the function values at one mesh point of the slice
+             * @param i Index of the point in the x direction
+             * @param j Index of the point in the y direction
+             * @returns The NF function values at mesh point (i,j)
+             */
+            [[nodiscard]] auto value(const size_t i, const size_t j) const
+                -> std::array<double, NF> override
+            {
+                std::array<double, NF> result{};
+                if (exact_)
+                {
+                    for (size_t n = 0; n < NF; ++n) { result[n] = f_[i, j, k0_, n]; } // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- n is a loop index bounded by compile-time constant NF
+                    return result;
+                }
+                const double szTarget = sz_[i, j, k0_] +
+                    (t_ * (sz_[i, j, k0_ + 1] - sz_[i, j, k0_]));
+                const auto fInterp = (*(zInterp_[i, j]))(szTarget);
+                if constexpr (NF == 1) { result[0] = fInterp; }
+                else
+                {
+                    for (size_t n = 0; n < NF; ++n) { result[n] = fInterp[n]; } // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- n is a loop index bounded by compile-time constant NF
+                }
+                return result;
+            }
+
+        private:
+            FView f_;                        /**< Function values of the mesh being sliced */
+            SzView sz_;                      /**< z arc-lengths of the mesh being sliced */
+            ZInterpView zInterp_;            /**< z-direction interpolators of the mesh being sliced */
+            size_t k0_;                      /**< Index of the (lower) z plane */
+            double t_;                       /**< Interpolation weight between planes k0_ and k0_ + 1 */
+            bool exact_;                     /**< True if the slice is exactly at plane k0_ */
+        };
 
         bool monotonic_;                    /**< True if interpolation is monotonicity-preserving */
         const gsl_interp_type* interpType_; /**< Type of interpolation used */

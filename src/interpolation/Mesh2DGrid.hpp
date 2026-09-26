@@ -168,10 +168,13 @@
 
 #include "../utils/ThreadVec.hpp"
 #include <cassert>
+#include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <limits>
 #include <mdspan> // NOLINT(misc-include-cleaner)
+#include <span>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -204,10 +207,209 @@ namespace interp
 
         // Shorten array types
         using Array2D = std::mdspan<double, std::dextents<size_t, 2>>; // NOLINT(misc-include-cleaner)
-        using Array1D = std::mdspan<double, std::dextents<size_t, 1>>;
+        using Array1D = std::mdspan<double, std::dextents<size_t, 1>>; // NOLINT(misc-include-cleaner) -- <mdspan> is included; see Array2D above
 
         // Shorthand for numeric limits
         static constexpr double bigNum = std::numeric_limits<double>::max(); /**< Shorthand for big number */
+
+        /**
+         * @brief Read-only view of the x coordinates of the mesh points
+         * @details
+         * Either a plain view of an (Nx, Ny) row-major array, or a
+         * lazy linear interpolation between two (Nx, Ny) planes read
+         * through arbitrary strides -- e.g. two adjacent z planes of a
+         * Mesh3DInterpolator's own (Nx, Ny, Nz) x array -- evaluated
+         * afresh on every access. The latter lets a Mesh2DGrid
+         * represent a slice of a 3D mesh at an arbitrary z without
+         * ever storing that slice's own x values; see the Mesh2DGrid
+         * constructor taking an XView.
+         */
+        class XView
+        {
+        public:
+            XView() = default;
+
+            /**
+             * @brief Construct a plain view of a row-major array
+             * @param data The (Nx, Ny) row-major array
+             * @param nx Number of points in the x direction
+             * @param ny Number of points in the y direction
+             */
+            XView(std::span<const double> data, const size_t nx, const size_t ny) :
+                p0_(data), strideI_(ny), strideJ_(1), nx_(nx), ny_(ny) {}
+
+            /**
+             * @brief Construct a lazy linear interpolation between two strided planes
+             * @param p0 Storage holding the first plane
+             * @param p1 Storage holding the second plane, laid out
+             *   identically to p0
+             * @param strideI Distance, in elements, between points
+             *   adjacent in the x direction
+             * @param strideJ Distance, in elements, between points
+             *   adjacent in the y direction
+             * @param nx Number of points in the x direction
+             * @param ny Number of points in the y direction
+             * @param t Interpolation weight: element (i,j) is
+             *   p0(i,j) + t * (p1(i,j) - p0(i,j))
+             */
+            XView(std::span<const double> p0, std::span<const double> p1,
+                const size_t strideI, const size_t strideJ,
+                const size_t nx, const size_t ny, const double t) :
+                p0_(p0), p1_(p1), strideI_(strideI), strideJ_(strideJ),
+                nx_(nx), ny_(ny), t_(t) {}
+
+            /**
+             * @brief Return the x coordinate of mesh point (i,j)
+             * @param i Index in the x direction
+             * @param j Index in the y direction
+             * @returns The x coordinate
+             */
+            [[nodiscard]] auto operator[](const size_t i, const size_t j) const -> double
+            {
+                const size_t off = (i * strideI_) + (j * strideJ_);
+                const double v0 = p0_[off];
+                if (p1_.empty()) { return v0; }
+                return v0 + (t_ * (p1_[off] - v0));
+            }
+
+            /**
+             * @brief Return the number of points in one direction
+             * @param r 0 for the x direction, 1 for the y direction
+             * @returns The number of points
+             */
+            [[nodiscard]] auto extent(const size_t r) const -> size_t { return r == 0 ? nx_ : ny_; }
+
+            /**
+             * @brief Return the total number of points
+             * @returns Nx * Ny
+             */
+            [[nodiscard]] auto size() const -> size_t { return nx_ * ny_; }
+
+            /**
+             * @brief Return whether this is a lazy interpolation between two planes
+             * @returns True if lazy, false if a plain view
+             */
+            [[nodiscard]] auto lazy() const -> bool { return !p1_.empty(); }
+
+        private:
+            std::span<const double> p0_; /**< First (or only) plane */
+            std::span<const double> p1_; /**< Second plane; empty for a plain view */
+            size_t strideI_ = 0;         /**< Element stride in the x direction */
+            size_t strideJ_ = 0;         /**< Element stride in the y direction */
+            size_t nx_ = 0;              /**< Number of points in the x direction */
+            size_t ny_ = 0;              /**< Number of points in the y direction */
+            double t_ = 0.0;             /**< Interpolation weight between p0_ and p1_ */
+        };
+
+        /**
+         * @brief Read-only view of the slopes of the mesh spines
+         * @details
+         * Either a plain view of stored (Nx, Ny-1) values, or computed
+         * on each access from an XView and the y coordinates, using
+         * exactly the same formula computeSlopesAndLengths() uses to
+         * fill the stored values.
+         */
+        class MView
+        {
+        public:
+            MView() = default;
+
+            /**
+             * @brief Construct a plain view of stored slopes
+             * @param data The (Nx, Ny-1) row-major array of slopes
+             * @param ny Number of points in the y direction
+             */
+            MView(std::span<const double> data, const size_t ny) :
+                data_(data), ny_(ny) {}
+
+            /**
+             * @brief Construct a view computing slopes on demand
+             * @param x The x coordinates of the mesh points
+             * @param y The y coordinates of the mesh points
+             */
+            MView(const XView& x, std::span<const double> y) :
+                x_(x), y_(y), ny_(y.size()), lazy_(true) {}
+
+            /**
+             * @brief Return the slope of the spine segment from (i,j) to (i,j+1)
+             * @param i Index in the x direction
+             * @param j Index in the y direction
+             * @returns The slope dy/dx, or bigNum if the segment is vertical
+             */
+            [[nodiscard]] auto operator[](const size_t i, const size_t j) const -> double
+            {
+                if (!lazy_) { return data_[(i * (ny_ - 1)) + j]; }
+                const double x0 = x_[i,j];
+                const double x1 = x_[i,j+1];
+                if (x1 != x0) { return (y_[j+1] - y_[j]) / (x1 - x0); }
+                return bigNum;
+            }
+
+        private:
+            std::span<const double> data_; /**< Stored slopes, if not lazy */
+            XView x_;                      /**< x coordinates, if lazy */
+            std::span<const double> y_;    /**< y coordinates, if lazy */
+            size_t ny_ = 0;                /**< Number of points in the y direction */
+            bool lazy_ = false;            /**< True if computed on demand */
+        };
+
+        /**
+         * @brief Read-only view of the cumulative lengths along the mesh spines
+         * @details
+         * Element (i,j) is the length along spine i from (i,0) to
+         * (i,j). Either a plain view of stored (Nx, Ny) values, or
+         * computed on each access from an XView and the y coordinates
+         * -- in O(j) time, accumulating segment by segment in exactly
+         * the same order computeSlopesAndLengths() does, so that the
+         * result is identical to the stored value.
+         */
+        class SView
+        {
+        public:
+            SView() = default;
+
+            /**
+             * @brief Construct a plain view of stored lengths
+             * @param data The (Nx, Ny) row-major array of lengths
+             * @param ny Number of points in the y direction
+             */
+            SView(std::span<const double> data, const size_t ny) :
+                data_(data), ny_(ny) {}
+
+            /**
+             * @brief Construct a view computing lengths on demand
+             * @param x The x coordinates of the mesh points
+             * @param y The y coordinates of the mesh points
+             */
+            SView(const XView& x, std::span<const double> y) :
+                x_(x), y_(y), ny_(y.size()), lazy_(true) {}
+
+            /**
+             * @brief Return the cumulative length along spine i up to point j
+             * @param i Index in the x direction
+             * @param j Index in the y direction
+             * @returns The length
+             */
+            [[nodiscard]] auto operator[](const size_t i, const size_t j) const -> double
+            {
+                if (!lazy_) { return data_[(i * ny_) + j]; }
+                double s = 0.0;
+                for (size_t jj = 1; jj <= j; ++jj)
+                {
+                    s += std::sqrt(
+                        std::pow(x_[i,jj] - x_[i,jj-1], 2) +
+                        std::pow(y_[jj] - y_[jj-1], 2));
+                }
+                return s;
+            }
+
+        private:
+            std::span<const double> data_; /**< Stored lengths, if not lazy */
+            XView x_;                      /**< x coordinates, if lazy */
+            std::span<const double> y_;    /**< y coordinates, if lazy */
+            size_t ny_ = 0;                /**< Number of points in the y direction */
+            bool lazy_ = false;            /**< True if computed on demand */
+        };
 
         /**
          * @brief An enum to hold intesection types
@@ -262,6 +464,26 @@ namespace interp
         Mesh2DGrid(const Array2D& x,
             const Array1D& y,
             bool copyData = true);
+
+        /**
+         * @brief Construct a Mesh2DGrid whose x coordinates are read through an XView
+         * @param x The x coordinates of the mesh points; not copied,
+         *   so whatever storage it refers to must outlive this object
+         * @param y A 1d array giving the y coordinates of the mesh
+         *   points; copied
+         * @details
+         * Intended for an XView that lazily interpolates between two
+         * planes of a 3D mesh (see XView's own comment): the slopes and
+         * spine lengths are then also computed on demand (see MView/
+         * SView), so constructing the grid costs only O(Ny) time and
+         * memory -- for the edge-row summaries (xMin(), xMax(),
+         * convex()) -- rather than O(Nx * Ny). Performs no safety
+         * checks on x: each row of x must be non-decreasing and span a
+         * non-zero range, and y must be non-decreasing, as for the
+         * other constructor -- which a linear interpolation between
+         * two planes that each satisfy this automatically does.
+         */
+        Mesh2DGrid(const XView& x, const Array1D& y);
         virtual ~Mesh2DGrid() = default;
 
         // Copy and move constructors are written out by hand (rather
@@ -1025,10 +1247,20 @@ namespace interp
             bool& lastIntersectRight
         ) const -> bool;
         
+        /**
+         * @brief Point x_/y_/m_/s_ at this object's own storage
+         * @details
+         * Used after copying: x_/m_/s_ (if stored, not lazy) refer to
+         * xData_/mData_/sData_, and y_ to yData_ if non-empty, so a
+         * copy's views must be rebuilt to refer to its own copies of
+         * those vectors rather than the original's.
+         */
+        void rebindViews();
+
         // Input data
-        Array2D x_;                  /**< A 2d array giving the x coordinates of the mesh points */
+        XView x_;                    /**< The x coordinates of the mesh points */
         Array1D y_;                  /**< A 1d array giving the y coordinates of the mesh points */
-        std::vector<double> xData_;  /**< Data holder for x_ */
+        std::vector<double> xData_;  /**< Data holder for x_, if stored */
         std::vector<double> yData_;  /**< Data holder for y_ */
 
         // Descriptors
@@ -1039,10 +1271,10 @@ namespace interp
         bool convex_ = true;          /**< True if mesh is convex */
 
         // Derived data
-        Array2D m_;                     /**< Slopes of mesh spines */
-        Array2D s_;                     /**< Lengths of each spine segment */
-        std::vector<double> mData_;     /**< Data holder for m_ */
-        std::vector<double> sData_;     /**< Data holder for s_ */
+        MView m_;                       /**< Slopes of mesh spines */
+        SView s_;                       /**< Cumulative lengths along mesh spines */
+        std::vector<double> mData_;     /**< Data holder for m_, if stored */
+        std::vector<double> sData_;     /**< Data holder for s_, if stored */
 
         // Mutables
         //
