@@ -27,8 +27,18 @@ namespace tracks
     /**
      * @class Tracks3D
      * @brief A class representing a 3D set of stellar tracks
+     * @details
+     * Every query at a given [Fe/H] (starLifetime(), getIsochrone(),
+     * etc.) evaluates a lazily-evaluated slice of the tracks at that
+     * [Fe/H], built afresh for that one query -- see
+     * interp::Mesh3DInterpolator::lazySliceConstZ() -- so no query
+     * builds a full 2D slice, and none touches any shared mutable
+     * state: all are safe to call concurrently from multiple threads.
+     * Derives from std::enable_shared_from_this so that
+     * lazySliceConstFeH() can keep this object alive for as long as a
+     * slice it returns is.
      */
-    class Tracks3D
+    class Tracks3D : public std::enable_shared_from_this<Tracks3D>
     {
     public:
 
@@ -155,7 +165,7 @@ namespace tracks
          *   maximum rather than returning it directly
          */
        [[nodiscard]] auto starLifetime(const double m, const double feh) const
-       { return std::pow(10.0, interp_->sliceConstZ(feh).xMax(m)); }
+       { return std::pow(10.0, interp_->lazySliceConstZ(feh).xMax(m)); }
 
        /**
         * @brief Return the range of stellar masses that are alive at a given time and [Fe/H]
@@ -164,7 +174,7 @@ namespace tracks
         * @return The range of stellar masses alive at the given time and [Fe/H]
         */
        [[nodiscard]] auto liveMassRange(const double t, const double feh) const
-       { return interp_->sliceConstZ(feh).yLim(t); }
+       { return interp_->lazySliceConstZ(feh).yLim(t); }
 
        /**
         * @brief Return the mass(es) and dm/d(logT) of the star(s) whose lifetime is a given value, at a given [Fe/H]
@@ -173,12 +183,12 @@ namespace tracks
         * @return See Tracks2D::massAndDerivFromLifetime()'s own comment
         * @details
         * Mirrors liveMassRange()'s own identical pattern: slices
-        * interp_ to feh, then delegates to that slice's own
+        * interp_ (lazily) to feh, then delegates to that slice's own
         * yEdgeSlope(logT, false) -- see Tracks2D::
         * massAndDerivFromLifetime()'s own comment for what it returns.
         */
        [[nodiscard]] auto massAndDerivFromLifetime(const double logT, const double feh) const
-       { return interp_->sliceConstZ(feh).yEdgeSlope(logT, false); }
+       { return interp_->lazySliceConstZ(feh).yEdgeSlope(logT, false); }
 
        /**
         * @brief Check whether a star of a given mass is alive at a given time and [Fe/H]
@@ -188,7 +198,7 @@ namespace tracks
         * @return True if a star of mass m is alive at logT and feh, false otherwise
         */
        [[nodiscard]] auto isAlive(const double m, const double logT, const double feh) const -> bool
-       { return interp_->sliceConstZ(feh).contains(logT, m); }
+       { return interp_->lazySliceConstZ(feh).contains(logT, m); }
 
         /**
          * @brief Return the track for a star of a given mass and [Fe/H]
@@ -197,7 +207,7 @@ namespace tracks
          * @return An unique_ptr to an Interpolator1D describing the track for a given mass
          */
         [[nodiscard]] auto getTrack(const double m, const double feh) const
-        { return interp_->sliceConstZ(feh).interpConstY(m); }
+        { return interp_->lazySliceConstZ(feh).interpConstY(m); }
 
         /**
          * @brief Return the isochrone at a given log time and [Fe/H]
@@ -210,7 +220,7 @@ namespace tracks
          * may be multiple disjoint segments to the isochrone.
          */
         [[nodiscard]] auto getIsochrone(const double logT, const double feh) const
-        { return interp_->sliceConstZ(feh).interpConstX(logT); }
+        { return interp_->lazySliceConstZ(feh).interpConstX(logT); }
 
         /**
          * @brief Return the properties of a star of a given mass, age, and [Fe/H]
@@ -228,20 +238,21 @@ namespace tracks
          */
         [[nodiscard]] auto getStar(const double m, const double logT,
             const double feh, const bool linear = false) const
-        { return interp_->sliceConstZ(feh)(logT, m, linear); }
+        { return interp_->lazySliceConstZ(feh)(logT, m, linear); }
 
         /**
          * @brief Construct a Tracks2D object for a slice at fixed [Fe/H]
          * @param feh [Fe/H] value at which to slice
          * @return A Tracks2D object representing the (mass, time) slice at the given [Fe/H]
          * @details
-         * Unlike getTrack() and getIsochrone(), which evaluate the cached
-         * slice owned by this Tracks3D object, this method builds a new,
-         * independent Mesh2DInterpolator (via Mesh3DInterpolator::sliceConstZCopy)
-         * and uses it to construct a Tracks2D object that owns its own
-         * memory, and so remains valid even after this Tracks3D object is
-         * destroyed or after later calls to getTrack()/getIsochrone() with
-         * a different [Fe/H] value.
+         * Builds a new, independent Mesh2DInterpolator (via
+         * Mesh3DInterpolator::sliceConstZCopy) and uses it to construct
+         * a Tracks2D object that owns all of its own memory, and so
+         * remains valid even after this Tracks3D object is destroyed.
+         * Queries on it are as fast as possible, but building it costs
+         * O(Nmass * Ntime) time and memory, with a large constant
+         * (hundreds of MB for the largest track sets) -- see
+         * lazySliceConstFeH() for a much cheaper alternative.
          */
         [[nodiscard]] auto sliceConstFeH(const double feh) const -> Tracks2D
         {
@@ -249,6 +260,32 @@ namespace tracks
                 interp::Mesh2DInterpolator<static_cast<size_t>(FieldIdx::nTrackQty)>>(
                 interp_->sliceConstZCopy(feh));
             return { std::move(m2d), feh, AFe_, vVcrit_ };
+        }
+
+        /**
+         * @brief Construct a lazily-evaluated Tracks2D object for a slice at fixed [Fe/H]
+         * @param feh [Fe/H] value at which to slice
+         * @return A Tracks2D object representing the (mass, time) slice
+         *   at the given [Fe/H], evaluated lazily
+         * @details
+         * Represents the same slice as sliceConstFeH(), but via
+         * Mesh3DInterpolator::lazySliceConstZ(): it costs only
+         * O(Nmass) time and memory to construct, rather than O(Nmass *
+         * Ntime) with a large constant, at the price of some extra
+         * work per query, and query results agree with
+         * sliceConstFeH()'s to within floating-point rounding. It
+         * refers to this Tracks3D object's own data, so if this object
+         * is owned by a std::shared_ptr (as SimControls::tracks() is),
+         * the returned Tracks2D holds a reference to it, keeping it
+         * alive for as long as the Tracks2D exists; otherwise, the
+         * caller must ensure this object outlives the returned one.
+         */
+        [[nodiscard]] auto lazySliceConstFeH(const double feh) const -> Tracks2D
+        {
+            Tracks2D::M2DPtr m2d = std::make_unique<
+                interp::Mesh2DInterpolator<static_cast<size_t>(FieldIdx::nTrackQty)>>(
+                interp_->lazySliceConstZ(feh));
+            return { std::move(m2d), feh, AFe_, vVcrit_, weak_from_this().lock() };
         }
 
     private:

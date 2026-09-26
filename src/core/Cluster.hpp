@@ -594,8 +594,11 @@ namespace core
         /**
          * Tracks for this cluster's [Fe/H]: either owned outright (when
          * the simulation has a variable [Fe/H], so each cluster needs
-         * its own slice) or a shared_ptr to the slice SimControls
-         * itself owns (when [Fe/H] is fixed for the whole simulation)
+         * its own slice -- a lazily-evaluated one, see
+         * Tracks3D::lazySliceConstFeH(), costing O(Nmass) memory
+         * rather than a full slice's hundreds of MB) or a shared_ptr to
+         * the slice SimControls itself owns (when [Fe/H] is fixed for
+         * the whole simulation)
          * -- a shared_ptr, not a reference, so this Cluster keeps that
          * slice alive on its own even if SimControls later recomputes
          * its own copy (see SimControls::tracks2D()'s own comment).

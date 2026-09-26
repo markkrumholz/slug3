@@ -24,6 +24,7 @@ auto main() -> int {
         result += testTracks3DGetStar();
         result += testTracks3DFeHRangeGuard();
         result += testTracks3DMassAndDerivFromLifetime();
+        result += testTracks3DLazyMatchesEager();
         result += testTrackUtils();
         return result;
     }

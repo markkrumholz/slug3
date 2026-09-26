@@ -965,25 +965,12 @@ namespace core
          * single, already-built Tracks2D slice shared across every
          * call.
          *
-         * Otherwise, evaluating SimControls::tracks()'s own
-         * getStar(mass_, logT, feh_) at each star's own (in general,
-         * distinct) feh_ directly would rebuild a fresh
-         * tracks::Tracks3D::sliceConstZ() slice on nearly every call
-         * (its own single-entry cache only helps when consecutive
-         * calls share the same feh -- see its own comment), which is
-         * prohibitively expensive for a field-star population of any
-         * size. Instead, rounds each star's own feh_ to the nearest
-         * multiple of 0.25, sorts the stars by that rounded value
-         * (mapping back to the original order once every star has
-         * been evaluated), and evaluates every star at its own rounded
-         * feh_ (not its raw, drawn value) -- consecutive stars sharing
-         * the same rounded feh_ then hit sliceConstZ()'s own cache, so
-         * the number of slices actually built is bounded by the number
-         * of distinct rounded feh_ values present, not the number of
-         * stars. This evaluates every field star at a [Fe/H] snapped
-         * to the nearest 0.25 dex grid point rather than its own exact
-         * drawn value -- a deliberate, small approximation traded for
-         * tractable cost.
+         * Otherwise, calls SimControls::tracks()'s own getStar(mass_,
+         * logT, feh_) at each star's own (in general, distinct) feh_ --
+         * which evaluates a lazily-evaluated slice of the tracks at
+         * that feh_, touching only the few mesh points around the star
+         * itself (see tracks::Tracks3D's own class comment), so this is
+         * cheap too, and safe to call from multiple threads.
          *
          * Either way, logT (log10 of the star's own age,
          * curTime() - formTime_) is floored at

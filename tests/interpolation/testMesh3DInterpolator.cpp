@@ -106,9 +106,9 @@ testSliceXInterp(const interp::Mesh2DInterpolator<nF>& slice,
     return 0; // Success
 }
 
-// Test a y-degenerate mesh (ny = 1): sliceConstY should work
+// Test a y-degenerate mesh (ny = 1): sliceConstYCopy should work
 // trivially (no interpolation needed, since the mesh already lies
-// entirely at the single y value), while sliceConstZ and
+// entirely at the single y value), while lazySliceConstZ and
 // sliceConstZCopy should throw, since there is no way to build a
 // valid (x, y) slice when the y axis has only one point
 static auto
@@ -140,11 +140,6 @@ testYDegenerateMesh() -> int
     const interp::Mesh3DInterpolator<nF> m3dYDeg(
         xYDeg, yYDeg, zYDeg, fYDeg, gsl_interp_linear);
 
-    const auto& sliceYDeg = m3dYDeg.sliceConstY(7.0);
-    if (testSliceXInterp(sliceYDeg, xTest, 7.0, true, zQuery, 0.0, 4.0) == 1)
-    {
-        return 1;
-    }
     const auto sliceYDegCopy = m3dYDeg.sliceConstYCopy(7.0);
     if (testSliceXInterp(sliceYDegCopy, xTest, 7.0, true, zQuery, 0.0, 4.0) == 1)
     {
@@ -153,9 +148,9 @@ testYDegenerateMesh() -> int
 
     try
     {
-        const auto& badSlice = m3dYDeg.sliceConstZ(2.0);
+        const auto badSlice = m3dYDeg.lazySliceConstZ(2.0);
         (void)badSlice;
-        std::cerr << "testMesh3DInterpolator: sliceConstZ on a "
+        std::cerr << "testMesh3DInterpolator: lazySliceConstZ on a "
             "y-degenerate mesh should have thrown, but did not\n";
         return 1;
     }
@@ -174,7 +169,8 @@ testYDegenerateMesh() -> int
 }
 
 // Test a z-degenerate mesh (nz = 1): the mirror image of the
-// y-degenerate case above
+// y-degenerate case above, except that both sliceConstZCopy and
+// lazySliceConstZ are tested at the single z value
 static auto
 testZDegenerateMesh() -> int
 {
@@ -204,7 +200,7 @@ testZDegenerateMesh() -> int
     const interp::Mesh3DInterpolator<nF> m3dZDeg(
         xZDeg, yZDeg, zZDeg, fZDeg, gsl_interp_linear);
 
-    const auto& sliceZDeg = m3dZDeg.sliceConstZ(9.0);
+    const auto sliceZDeg = m3dZDeg.lazySliceConstZ(9.0);
     if (testSliceXInterp(sliceZDeg, xTest, 9.0, false, yQuery, 0.0, 3.0) == 1)
     {
         return 1;
@@ -215,15 +211,6 @@ testZDegenerateMesh() -> int
         return 1;
     }
 
-    try
-    {
-        const auto& badSlice = m3dZDeg.sliceConstY(1.0);
-        (void)badSlice;
-        std::cerr << "testMesh3DInterpolator: sliceConstY on a "
-            "z-degenerate mesh should have thrown, but did not\n";
-        return 1;
-    }
-    catch (const std::runtime_error&) { /* this is the expected outcome */ } // NOLINT(bugprone-empty-catch) -- verifying that this call throws is the entire point of this test
     try
     {
         auto badSlice = m3dZDeg.sliceConstYCopy(1.0);
@@ -605,7 +592,7 @@ auto testMesh3DInterpolator() -> int
     // mesh, and a value that falls strictly between two grid points
     for (const auto& y0 : { 0.0, 1.7, 3.0 })
     {
-        const auto& slice = m3d.sliceConstY(y0);
+        const auto& slice = m3d.sliceConstYCopy(y0);
         if (testSliceXInterp(slice, xTest, y0, true, zQuery, 0.0, 4.0) == 1)
         {
             return 1;
@@ -616,7 +603,7 @@ auto testMesh3DInterpolator() -> int
     // mesh, and a value that falls strictly between two grid points
     for (const auto& z0 : { 0.0, 2.3, 4.0 })
     {
-        const auto& slice = m3d.sliceConstZ(z0);
+        const auto& slice = m3d.sliceConstZCopy(z0);
         if (testSliceXInterp(slice, xTest, z0, false, yQuery, 0.0, 3.0) == 1)
         {
             return 1;
@@ -624,7 +611,7 @@ auto testMesh3DInterpolator() -> int
     }
 
     // Test that values of x outside the mesh range produce no segments
-    const auto& sliceOut = m3d.sliceConstY(1.0);
+    const auto& sliceOut = m3d.sliceConstYCopy(1.0);
     if (!sliceOut.interpConstX(-1.0).empty() || !sliceOut.interpConstX(3.0).empty())
     {
         std::cerr << "testMesh3DInterpolator: expected no segments for "

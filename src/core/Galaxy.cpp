@@ -512,7 +512,11 @@ auto core::Galaxy::lbolCtsIntegrand(
 {
     const auto& sc = controls_.get();
     const double logAge = std::max(std::log10(age), sc.tracks()->logTMin());
-    const auto isochrone = sc.tracks()->getIsochrone(logAge, feh);
+    // Called many times per integral: with a fixed [Fe/H], use the
+    // slice SimControls has precomputed, rather than having
+    // tracks() slice the tracks lazily on every call
+    const auto isochrone = sc.constFeH() ?
+        sc.tracks2D()->getIsochrone(logAge) : sc.tracks()->getIsochrone(logAge, feh);
 
     // Per-star Lbol, mirroring Cluster::lbolStar()'s own role for
     // Cluster::computeLbol()'s identical inner mass integral -- a
@@ -625,7 +629,10 @@ auto core::Galaxy::yieldsIntegrand(const double t, const double feh) const -> st
         : yields->isotopes().size();
     std::vector<double> result(n, 0.0);
 
-    const auto massDeriv = sc.tracks()->massAndDerivFromLifetime(std::log10(t), feh);
+    // See lbolCtsIntegrand()'s own identical choice of tracks
+    const auto massDeriv = sc.constFeH() ?
+        sc.tracks2D()->massAndDerivFromLifetime(std::log10(t)) :
+        sc.tracks()->massAndDerivFromLifetime(std::log10(t), feh);
     for (const auto& [m, dmDlogT] : massDeriv)
     {
         if (m > sc.minStochMass()) { continue; } // stochastically-sampled, handled separately
@@ -866,30 +873,16 @@ auto core::Galaxy::getFieldStarProps() const -> std::vector<std::optional<specsy
         return props;
     }
 
-    // Non-degenerate [Fe/H]: sort by feh_ rounded to the nearest
-    // multiple of 0.25 first, so consecutive calls to
-    // tracks().getStar() -- which internally rebuilds a fresh
-    // tracks::Tracks3D::sliceConstZ() slice whenever its own
-    // single-entry cache misses -- mostly hit that cache instead,
-    // bounding the number of slices actually built by the number of
-    // distinct rounded feh_ values present rather than the number of
-    // stars -- see this method's own header comment.
-    constexpr double fehGridSpacing = 0.25;
-    std::vector<std::size_t> order(n);
-    std::iota(order.begin(), order.end(), 0);
-    const auto roundedFeh = [this](const std::size_t i)
-    {
-        return std::round(fieldStars_[i].feh_ / fehGridSpacing) * fehGridSpacing; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- only ever called with i < fieldStars_.size(), by construction below
-    };
-    std::ranges::sort(order, {}, roundedFeh);
-
+    // Non-degenerate [Fe/H]: evaluate each star at its own feh_, via
+    // tracks()' own lazily-evaluated slices -- see this method's own
+    // header comment
     const auto tracks3D = sc.tracks();
-    for (const std::size_t i : order)
+    for (std::size_t i = 0; i < n; ++i)
     {
-        const auto& fs = fieldStars_[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i is an element of order, itself a permutation of [0, n), by construction
+        const auto& fs = fieldStars_[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i < n == fieldStars_.size() by construction
         if (!inRange(fs)) { continue; }
         const double logT = std::max(std::log10(curTime_ - fs.formTime_), logTMin);
-        props[i] = tracks3D->getStar(fs.mass_, logT, roundedFeh(i)); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
+        props[i] = tracks3D->getStar(fs.mass_, logT, fs.feh_); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- props has size n by construction, and i is bounded by n
     }
     return props;
 }

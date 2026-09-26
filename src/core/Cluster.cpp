@@ -121,17 +121,9 @@ namespace
      * about elsewhere). Used by both Cluster constructors (to build
      * tDeath_) and yieldStar().
      *
-     * Takes a Tracks2D, not controls().tracks() (a Tracks3D) directly,
-     * on purpose: Tracks3D::starLifetime(m, feh) reads through
-     * Mesh3DInterpolator::sliceConstZ()'s own single, mutable,
-     * not-thread-safe cache (guarded by an assert(!omp_in_parallel())
-     * that fires under real multithreaded use -- e.g. SimCluster::
-     * runTrial()'s own "#pragma omp parallel for", which constructs a
-     * Cluster, and so calls this, on every thread at once), whereas a
-     * Tracks2D -- already sliced once, via the thread-safe
-     * Tracks3D::sliceConstFeH()/Mesh3DInterpolator::sliceConstZCopy()
-     * this cluster's own tracks_ is built from -- has no such shared,
-     * mutable cache of its own to race on.
+     * Takes this cluster's own Tracks2D, already sliced at its own
+     * [Fe/H], rather than controls().tracks() (a Tracks3D), which
+     * would need to slice the tracks afresh at feH_ on every call.
      */
     auto starLifetimeClamped(const tracks::Tracks2D& tracks2D, const double m) -> double
     {
@@ -172,18 +164,20 @@ core::Cluster::Cluster(const unsigned long uid,
         disruptTime_ = formTime_ + sc.clf().draw();
     }
 
-    // If this simulation has a variable metallicity, generate tracks
-    // for the metallicity of this cluster and save them for future
-    // use. Otherwise, [Fe/H] is fixed for the whole simulation, so
-    // just point at the slice SimControls has already precomputed and
-    // shares across every cluster.
+    // If this simulation has a variable metallicity, use a
+    // lazily-evaluated slice of the tracks at this cluster's own
+    // metallicity -- cheap to construct and to hold, unlike a full
+    // slice (see Tracks3D::lazySliceConstFeH()). Otherwise, [Fe/H] is
+    // fixed for the whole simulation, so just point at the slice
+    // SimControls has already precomputed and shares across every
+    // cluster.
     if (sc.constFeH())
     {
         tracks_ = sc.tracks2D();
     }
     else
     {
-        tracks_ = sc.tracks()->sliceConstFeH(feH_);
+        tracks_ = sc.tracks()->lazySliceConstFeH(feH_);
     }
 
     // Death time of every star in m_, then jointly sort m_/tDeath_ by
@@ -269,18 +263,20 @@ core::Cluster::Cluster(const unsigned long uid,
         disruptTime_ = formTime_ + sc.clf().draw();
     }
 
-    // If this simulation has a variable metallicity, generate tracks
-    // for the metallicity of this cluster and save them for future
-    // use. Otherwise, [Fe/H] is fixed for the whole simulation, so
-    // just point at the slice SimControls has already precomputed and
-    // shares across every cluster.
+    // If this simulation has a variable metallicity, use a
+    // lazily-evaluated slice of the tracks at this cluster's own
+    // metallicity -- cheap to construct and to hold, unlike a full
+    // slice (see Tracks3D::lazySliceConstFeH()). Otherwise, [Fe/H] is
+    // fixed for the whole simulation, so just point at the slice
+    // SimControls has already precomputed and shares across every
+    // cluster.
     if (sc.constFeH())
     {
         tracks_ = sc.tracks2D();
     }
     else
     {
-        tracks_ = sc.tracks()->sliceConstFeH(feH_);
+        tracks_ = sc.tracks()->lazySliceConstFeH(feH_);
     }
 
     // Death time of every star in m_, then jointly sort m_/tDeath_ by

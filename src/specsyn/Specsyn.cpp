@@ -204,7 +204,12 @@ auto specsyn::Specsyn::continuousSpecIntegrand(
 ) const -> std::vector<double>
 {
     const double logAge = std::max(std::log10(age), controls_.tracks()->logTMin());
-    const auto isochrone = controls_.tracks()->getIsochrone(logAge, feh);
+    // Called many times per integral: with a fixed [Fe/H], use the
+    // slice controls_ has precomputed, rather than having tracks()
+    // slice the tracks lazily on every call
+    const auto isochrone = controls_.constFeH() ?
+        controls_.tracks2D()->getIsochrone(logAge) :
+        controls_.tracks()->getIsochrone(logAge, feh);
     return specCtsImpl(isochrone, imf, 1.0, mMin, mMax, feh, true, computeLbol);
 }
 
