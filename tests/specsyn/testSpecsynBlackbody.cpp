@@ -142,8 +142,10 @@ static auto makeConstPropsIsochrone(const double logTeff, const double logL,
 // value, using a real IMF (data/imfs/chabrier.toml) and a made-up,
 // mass-independent isochrone (see makeConstPropsIsochrone): since
 // spec() does not depend on mass in this construction, it factors out
-// of the population integral entirely, so
-// specCts() == mTot * PDF::integral(mMin, mMax) * spec(props)
+// of the population integral entirely, so specCts() is just the number
+// of stars in a population of total mass mTot in [mMin, mMax] -- mTot
+// divided by the mean stellar mass in that range,
+// PDF::expectationValue(mMin, mMax) -- times spec(props)
 static auto testSpecCts(const specsyn::SpecsynBlackbody& synth) -> int
 {
     constexpr double logTeff = 4.0;
@@ -171,7 +173,7 @@ static auto testSpecCts(const specsyn::SpecsynBlackbody& synth) -> int
         return 1;
     }
 
-    const double weight = mTot * imf.integral(mMin, mMax);
+    const double weight = mTot / imf.expectationValue(mMin, mMax);
     for (std::size_t i = 0; i < result.size(); ++i)
     {
         const double expected = weight * starSpec.at(i);

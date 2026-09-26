@@ -351,7 +351,11 @@ namespace specsyn
          * @param isochrone The isochrone for the population, as
          *   returned by Tracks2D::getIsochrone
          * @param imf The initial mass function of the population
-         * @param mTot Total mass of the population, in Msun
+         * @param mTot Total mass of the population, in Msun -- i.e.
+         *   of its stars in [mMin, mMax]; the integral of the per-star
+         *   spectrum against imf over [mMin, mMax] is scaled by mTot
+         *   divided by the integral of m imf(m) dm over that same range,
+         *   since imf is normalized by number, not mass
          * @param mMin Minimum stellar mass in the population, in Msun
          * @param mMax Maximum stellar mass in the population, in Msun
          * @param feh [Fe/H] value of the population, passed through
@@ -400,8 +404,9 @@ namespace specsyn
          * @param fCluster The fraction of star-forming mass treated
          *   stochastically, in individual Cluster objects (see
          *   io::SimControls::fCluster()); the result is scaled by
-         *   (1 - fCluster) * (1 - controls_.fracStochMass()) -- see
-         *   this function's own comment for the second factor
+         *   (1 - fCluster) * (1 - controls_.fracStochMass()), divided
+         *   by the integral of m imf(m) dm over [mMin, mMax] -- see this
+         *   function's own comment for the second and third factors
          * @param mMin Minimum stellar mass to integrate over, in Msun
          *   -- see the isochrone specCts() overload's own mMin
          *   parameter; passed straight through to the inner mass
@@ -495,6 +500,13 @@ namespace specsyn
          * i.e. every non-clustered star is treated continuously, with
          * no field-star population above minStochMass at all),
          * fracStochMass() is exactly 0, and this factor is a no-op.
+         * Finally, the result is divided by the integral of m imf(m)
+         * dm over [mMin, mMax]: imf is normalized by number, so the
+         * integral against it is per star, and this converts it into
+         * one per unit mass of stars in [mMin, mMax], matching the
+         * mass-based (1 - fCluster) * (1 - fracStochMass()) share it is
+         * scaled by -- mirroring the isochrone specCts() overload's own
+         * mTot scaling.
          *
          * A thin wrapper over specCtsHelper() (computeLbol = false) --
          * see specAndLbolCts() for the sibling that also returns the

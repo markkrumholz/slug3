@@ -1163,7 +1163,7 @@ static auto testClusterYieldsNonStochastic() -> int
         }
         for (std::size_t j = 0; j < niso; ++j)
         {
-            const double expected = integral[j] * clusterMass;
+            const double expected = integral[j] * clusterMass / controls.nonStochIMFMass(); // imf() is normalized by number, so the integral is per star
             if (std::abs(actual[j] - expected) > tol * std::max(1.0, std::abs(expected)))
             {
                 std::cerr << "testCluster: yieldsNonStochastic: yields()[" << j << "] = " <<
@@ -1458,7 +1458,7 @@ static auto testClusterYieldsNonStochasticDecay() -> int
         }
         for (std::size_t j = 0; j < niso; ++j)
         {
-            const double expected = integral[j] * clusterMass;
+            const double expected = integral[j] * clusterMass / controls.nonStochIMFMass(); // imf() is normalized by number, so the integral is per star
             if (std::abs(actual[j] - expected) > tol * std::max(1.0, std::abs(expected)))
             {
                 std::cerr << "testCluster: yieldsNonStochasticDecay: yields()[" << j << "] = " <<
@@ -1497,6 +1497,77 @@ static auto testClusterYieldsNonStochasticDecay() -> int
     return 0;
 }
 
+// Verify that the continuously-sampled (non-stochastic) and
+// individually-sampled (stochastic) treatments of the same population
+// agree: a fully continuous 1e5 Msun cluster (stars.min_stoch_mass at
+// the IMF's own maximum) should have the same lbol() and total spectrum
+// (summed over wavelength) as the mean of several fully stochastic ones
+// (min_stoch_mass at the IMF's own minimum), to within their stochastic
+// scatter (~3% per draw at this mass and age). This is a regression
+// test for the continuous-population integrals omitting the IMF's own
+// mean stellar mass (imf() is normalized by number, so an integral
+// against it is per star, not per unit mass), which made the continuous
+// population ~30% too faint.
+static auto testClusterLbolContinuousMatchesStochastic() -> int
+{
+    constexpr double clusterMass = 1e5;
+    constexpr double ageYr = 1e7;
+    constexpr int nDraw = 4;
+    constexpr double tol = 0.05;
+
+    try
+    {
+        auto makeControls = [](const double minStochMass) -> io::SimControls {
+            toml::table inputDeck = toml::parse_file(inputFileLbol);
+            inputDeck.at_path("stars").as_table()->insert_or_assign("min_stoch_mass", minStochMass);
+            return io::SimControls(inputDeck);
+        };
+        auto lbolAndSpecSum = [](core::Cluster& cluster) -> std::pair<double, double> {
+            const auto& spec = cluster.spec();
+            return { cluster.lbol(), std::reduce(spec.begin(), spec.end(), 0.0) };
+        };
+
+        const io::SimControls ctsControls = makeControls(120.0);
+        utils::rng().seed(rngSeed);
+        core::Cluster ctsCluster(0, clusterMass, 0.0, ctsControls);
+        ctsCluster.advance(ageYr);
+        const auto [ctsLbol, ctsSpec] = lbolAndSpecSum(ctsCluster);
+
+        const io::SimControls stochControls = makeControls(0.08);
+        double stochLbol = 0.0;
+        double stochSpec = 0.0;
+        for (int i = 0; i < nDraw; ++i)
+        {
+            core::Cluster stochCluster(static_cast<unsigned long>(i), clusterMass, 0.0, stochControls);
+            stochCluster.advance(ageYr);
+            const auto [l, s] = lbolAndSpecSum(stochCluster);
+            stochLbol += l / nDraw;
+            stochSpec += s / nDraw;
+        }
+
+        int result = 0;
+        if (std::abs(ctsLbol / stochLbol - 1.0) > tol)
+        {
+            std::cerr << "testCluster: lbolContinuousMatchesStochastic: continuous lbol() "
+                << ctsLbol << " vs mean stochastic " << stochLbol << "\n";
+            result = 1;
+        }
+        if (std::abs(ctsSpec / stochSpec - 1.0) > tol)
+        {
+            std::cerr << "testCluster: lbolContinuousMatchesStochastic: continuous summed "
+                "spec() " << ctsSpec << " vs mean stochastic " << stochSpec << "\n";
+            result = 1;
+        }
+        return result;
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testCluster: lbolContinuousMatchesStochastic test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+}
+
 auto testCluster() -> int
 {
     int result = 0;
@@ -1511,6 +1582,7 @@ auto testCluster() -> int
     result += testClusterPhotAbsent();
     result += testClusterExtinct();
     result += testClusterLbol();
+    result += testClusterLbolContinuousMatchesStochastic();
     result += testClusterNebular();
     result += testClusterExtinctLines();
     result += testClusterYieldsStochastic();

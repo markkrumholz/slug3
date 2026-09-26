@@ -563,7 +563,12 @@ void core::Galaxy::computeLbolCts()
         lbolRaw = lbolInterp.integ(fehDist.getMin(), fehDist.getMax()) / weightIntegral;
     }
 
-    lbolCts_ = lbolRaw * (1.0 - fCluster) * (1.0 - sc.fracStochMass());
+    // imf is normalized by number, so lbolRaw is per star formed;
+    // convert to per unit non-stochastic mass formed -- see
+    // SimControls::nonStochIMFMass()'s own comment
+    const double massInt = sc.nonStochIMFMass();
+    lbolCts_ = massInt > 0.0 ?
+        lbolRaw * (1.0 - fCluster) * (1.0 - sc.fracStochMass()) / massInt : 0.0;
     lbolCtsCurrent_ = true;
 }
 
