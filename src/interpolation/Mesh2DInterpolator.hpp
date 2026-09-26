@@ -198,7 +198,11 @@ namespace interp
          * storage x refers to, and source, must outlive this object.
          * Query results agree with those of an eagerly-constructed
          * Mesh2DInterpolator over the same values to within
-         * floating-point rounding.
+         * floating-point rounding. That requires a local
+         * interpolation scheme, whose value within a cell depends only
+         * on a few neighbouring points, so interpType must be
+         * gsl_interp_linear, gsl_interp_steffen, or gsl_interp_akima;
+         * any other type throws std::runtime_error.
          */
         Mesh2DInterpolator(
             const Mesh2DGrid::XView& x,
@@ -211,7 +215,17 @@ namespace interp
         monotonic_(monotonic),
         mesh_(x, y),
         lazySource_(std::move(source))
-        { }
+        {
+            if (interpType_ != gsl_interp_linear &&
+                interpType_ != gsl_interp_steffen &&
+                interpType_ != gsl_interp_akima)
+            {
+                throw std::runtime_error(
+                    "Mesh2DInterpolator: lazily-evaluated meshes support "
+                    "only local interpolation types (linear, steffen, "
+                    "akima)");
+            }
+        }
 
         virtual ~Mesh2DInterpolator() = default;
 
@@ -560,10 +574,11 @@ namespace interp
          * @brief Number of mesh points on either side of a query's own cell used by a lazily-built local interpolator
          * @details
          * The steffen interpolant within a cell [c, c+1] depends only on
-         * the points c-1 through c+2, so a local interpolator including
-         * those reproduces the full rib/spine interpolator there; one
-         * extra point on each side is included as a margin against
-         * duplicate coordinates, which Interpolator1D collapses.
+         * the points c-1 through c+2, and the akima one on c-2 through
+         * c+3, so a local interpolator including stencilHalfWidth
+         * distinct coordinates on each side of the cell (counting c
+         * itself on the lower side) reproduces the full rib/spine
+         * interpolator there.
          */
         static constexpr size_t stencilHalfWidth = 3;
 
@@ -579,9 +594,14 @@ namespace interp
          * @details
          * Finds the cell [c, c+1] containing q by binary search over
          * coord (coordinates are non-decreasing along a rib or spine),
-         * then builds an Interpolator1D over points c -
-         * stencilHalfWidth + 1 through c + stencilHalfWidth (clipped to
-         * [0, n-1]) and evaluates it at q.
+         * then builds an Interpolator1D over the points from the one
+         * giving stencilHalfWidth distinct coordinates in [.., c] to
+         * the one giving stencilHalfWidth distinct coordinates in
+         * [c+1, ..] (clipped to [0, n-1]), and evaluates it at q. The
+         * lower end is extended to the start of any run of duplicate
+         * coordinates it falls in, since Interpolator1D keeps the first
+         * point of such a run, so the local interpolator sees the same
+         * deduplicated points as the full rib/spine one.
          */
         [[nodiscard]] auto evalLocal(const auto& coord, const auto& value,
             const size_t n, const double q) const
@@ -594,8 +614,17 @@ namespace interp
                 if (coord(mid) <= q) { lo = mid; }
                 else { hi = mid; }
             }
-            const size_t first = lo >= stencilHalfWidth - 1 ? lo - (stencilHalfWidth - 1) : 0;
-            const size_t last = std::min(n - 1, lo + stencilHalfWidth);
+            size_t first = lo;
+            for (size_t nDistinct = 1; first > 0 && nDistinct < stencilHalfWidth; --first)
+            {
+                if (coord(first - 1) != coord(first)) { ++nDistinct; }
+            }
+            while (first > 0 && coord(first - 1) == coord(first)) { --first; }
+            size_t last = lo;
+            for (size_t nDistinct = 0; last < n - 1 && nDistinct < stencilHalfWidth; ++last)
+            {
+                if (coord(last + 1) != coord(last)) { ++nDistinct; }
+            }
             std::vector<double> c(last - first + 1);
             std::array<std::vector<double>, NF> f;
             for (auto& fk : f) { fk.resize(c.size()); }

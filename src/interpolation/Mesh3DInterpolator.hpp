@@ -468,8 +468,9 @@ namespace interp
          * mutable state, so any number of threads can construct and
          * query their own slices concurrently. Query results agree with
          * sliceConstZCopy()'s to within floating-point rounding. The
-         * returned object refers to this Mesh3DInterpolator's own
-         * storage, so it must not outlive it.
+         * returned object refers to this Mesh3DInterpolator's own heap
+         * storage (which survives a move of this object, but not its
+         * destruction), so it must not outlive it.
          */
         [[nodiscard]] auto lazySliceConstZ(double z0) const -> Mesh2DInterpolator<NF>
         {
@@ -509,7 +510,7 @@ namespace interp
             std::vector<double> yCopy(yData_.begin(), yData_.end());
             const auto yView = std::mdspan<double, std::dextents<size_t, 1>>(yCopy.data(), ny_);
             return Mesh2DInterpolator<NF>(xView, yView,
-                std::make_shared<const ZSliceSource>(this, k0, t, exact),
+                std::make_shared<const ZSliceSource>(f(), sz(), zInterp(), k0, t, exact),
                 interpType_, monotonic_);
         }
 
@@ -526,16 +527,27 @@ namespace interp
         class ZSliceSource : public LazyValueSource<NF>
         {
         public:
+            using FView = std::mdspan<const double, std::dextents<size_t, 4>>;  /**< Type of Mesh3DInterpolator::f() */
+            using SzView = std::mdspan<const double, std::dextents<size_t, 3>>; /**< Type of Mesh3DInterpolator::sz() */
+            using ZInterpView = std::mdspan<const std::unique_ptr<Interpolator1D<NF>>,
+                std::dextents<size_t, 2>>;                                        /**< Type of Mesh3DInterpolator::zInterp() */
+
             /**
              * @brief Construct a ZSliceSource
-             * @param mesh The mesh being sliced; must outlive this object
+             * @param f The sliced mesh's f() view
+             * @param sz The sliced mesh's sz() view
+             * @param zInterp The sliced mesh's zInterp() view
              * @param k0 Index of the (lower) z plane
              * @param t Interpolation weight between planes k0 and k0 + 1
              * @param exact True if the slice is exactly at plane k0
+             * @details
+             * Holds views of the mesh's heap buffers rather than a
+             * pointer to the mesh itself, so it stays valid if the mesh
+             * is moved; the buffers must outlive this object.
              */
-            ZSliceSource(const Mesh3DInterpolator* mesh, const size_t k0,
-                const double t, const bool exact) :
-                mesh_(mesh), k0_(k0), t_(t), exact_(exact) {}
+            ZSliceSource(const FView f, const SzView sz, const ZInterpView zInterp,
+                const size_t k0, const double t, const bool exact) :
+                f_(f), sz_(sz), zInterp_(zInterp), k0_(k0), t_(t), exact_(exact) {}
 
             /**
              * @brief Return the function values at one mesh point of the slice
@@ -549,14 +561,12 @@ namespace interp
                 std::array<double, NF> result{};
                 if (exact_)
                 {
-                    const auto fv = mesh_->f();
-                    for (size_t n = 0; n < NF; ++n) { result[n] = fv[i, j, k0_, n]; } // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- n is a loop index bounded by compile-time constant NF
+                    for (size_t n = 0; n < NF; ++n) { result[n] = f_[i, j, k0_, n]; } // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- n is a loop index bounded by compile-time constant NF
                     return result;
                 }
-                const auto szView = mesh_->sz();
-                const double szTarget = szView[i, j, k0_] +
-                    (t_ * (szView[i, j, k0_ + 1] - szView[i, j, k0_]));
-                const auto fInterp = (*(mesh_->zInterp()[i, j]))(szTarget);
+                const double szTarget = sz_[i, j, k0_] +
+                    (t_ * (sz_[i, j, k0_ + 1] - sz_[i, j, k0_]));
+                const auto fInterp = (*(zInterp_[i, j]))(szTarget);
                 if constexpr (NF == 1) { result[0] = fInterp; }
                 else
                 {
@@ -566,7 +576,9 @@ namespace interp
             }
 
         private:
-            const Mesh3DInterpolator* mesh_; /**< The mesh being sliced */
+            FView f_;                        /**< Function values of the mesh being sliced */
+            SzView sz_;                      /**< z arc-lengths of the mesh being sliced */
+            ZInterpView zInterp_;            /**< z-direction interpolators of the mesh being sliced */
             size_t k0_;                      /**< Index of the (lower) z plane */
             double t_;                       /**< Interpolation weight between planes k0_ and k0_ + 1 */
             bool exact_;                     /**< True if the slice is exactly at plane k0_ */

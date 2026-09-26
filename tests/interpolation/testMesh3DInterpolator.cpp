@@ -22,6 +22,7 @@
 #include <ranges>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
@@ -323,17 +324,17 @@ static auto compareInterp1D(const interp::Interpolator1D<NF>* lazy,
     return nBad;
 }
 
-// Verify that Mesh3DInterpolator::lazySliceConstZ() agrees with
-// sliceConstZCopy() for every kind of query a Tracks3D makes of a
-// slice -- interpConstY (a track), interpConstX (an isochrone),
-// operator() (a single star), xMax(y), yLim(x), yEdgeSlope(x) and
-// contains(x, y) -- at z values between grid planes and exactly on
-// them. Uses a mesh large enough for steffen interpolation's local
-// stencils to matter (15 x 8 x 4), with curved x coordinates and
-// non-linear function values, so that agreement is a real test of the
-// lazy slice's own local rib/spine interpolators rather than of
-// interpolating an affine function exactly.
-static auto testLazySliceMatchesEager() -> int
+// Build the mesh used by the lazy-slice tests: large enough for
+// steffen interpolation's local stencils to matter (15 x 8 x 4), with
+// curved x coordinates and non-linear function values, so that
+// agreement between lazy and eager slices is a real test of the lazy
+// slice's own local rib/spine interpolators rather than of
+// interpolating an affine function exactly. If dupRun is true, the x
+// coordinates at i = 5 through 8 are all set equal to that at i = 5 (a
+// run of duplicates along every rib, which Interpolator1D collapses),
+// with f left distinct.
+static auto makeLazyTestMesh(const bool dupRun,
+    const gsl_interp_type* interpType = gsl_interp_steffen) -> interp::Mesh3DInterpolator<nF>
 {
     constexpr size_t nxL = 15;
     constexpr size_t nyL = 8;
@@ -362,13 +363,33 @@ static auto testLazySliceMatchesEager() -> int
             }
         }
     }
-    const interp::Mesh3DInterpolator<nF> m3d(x, y, z, f);
+    if (dupRun)
+    {
+        for (size_t i = 6; i <= 8; ++i) {
+            for (size_t j = 0; j < nyL; ++j) {
+                for (size_t k = 0; k < nzL; ++k) { x[i,j,k] = x[5,j,k]; }
+            }
+        }
+    }
+    return { x, y, z, f, interpType };
+}
 
+// Compare lazySliceConstZ() against sliceConstZCopy() of the same mesh
+// for every kind of query a Tracks3D makes of a slice (see
+// testLazySliceMatchesEager()'s own comment), at z values between grid
+// planes and exactly on them; lazyMesh and eagerMesh must hold the same
+// data (they differ only in testLazySliceSurvivesMove()). Returns the
+// number of mismatches.
+static auto compareLazyEager(const interp::Mesh3DInterpolator<nF>& lazyMesh,
+    const interp::Mesh3DInterpolator<nF>& eagerMesh) -> int
+{
+    const auto z = eagerMesh.z();
+    const size_t nzL = z.extent(0);
     int nBad = 0;
     for (const double z0 : { -0.83, -0.3, 0.4, 0.95, 1.05, z[0], z[2], z[nzL-1] })
     {
-        const auto eager = m3d.sliceConstZCopy(z0);
-        const auto lazy = m3d.lazySliceConstZ(z0);
+        const auto eager = eagerMesh.sliceConstZCopy(z0);
+        const auto lazy = lazyMesh.lazySliceConstZ(z0);
         const std::string zLabel = "z = " + std::to_string(z0);
 
         if (!closeEnough(lazy.xMin(), eager.xMin()) || !closeEnough(lazy.xMax(), eager.xMax()) ||
@@ -465,7 +486,82 @@ static auto testLazySliceMatchesEager() -> int
             }
         }
     }
-    return nBad > 0 ? 1 : 0;
+    return nBad;
+}
+
+// Verify that Mesh3DInterpolator::lazySliceConstZ() agrees with
+// sliceConstZCopy() for every kind of query a Tracks3D makes of a
+// slice -- interpConstY (a track), interpConstX (an isochrone),
+// operator() (a single star), xMax(y), yLim(x), yEdgeSlope(x) and
+// contains(x, y) -- both on a mesh with distinct coordinates along
+// every rib and on one with a run of duplicate coordinates, which the
+// lazy slice's local stencils must widen past to see the same
+// deduplicated points as the eager slice's full rib interpolators.
+static auto testLazySliceMatchesEager() -> int
+{
+    int result = 0;
+    for (const bool dupRun : { false, true })
+    {
+        const auto m3d = makeLazyTestMesh(dupRun);
+        const int nBad = compareLazyEager(m3d, m3d);
+        if (nBad > 0)
+        {
+            std::cerr << "testMesh3DInterpolator: lazySlice: " << nBad << " mismatches"
+                << (dupRun ? " with duplicate rib coordinates\n" : "\n");
+            result = 1;
+        }
+    }
+    return result;
+}
+
+// Verify that a lazy slice stays valid after the Mesh3DInterpolator it
+// was taken from is moved: its queries must still agree with eager
+// slices of the moved-to object.
+static auto testLazySliceSurvivesMove() -> int
+{
+    auto m3d = makeLazyTestMesh(false);
+    const auto lazy = m3d.lazySliceConstZ(0.4);
+    const interp::Mesh3DInterpolator<nF> moved(std::move(m3d));
+    const auto eager = moved.sliceConstZCopy(0.4);
+    int nBad = 0;
+    for (const double y0 : { 1.3, 7.7, 25.0 })
+    {
+        nBad += compareInterp1D<nF>(lazy.interpConstY(y0).get(), eager.interpConstY(y0).get(),
+            "after move, interpConstY(" + std::to_string(y0) + ")");
+    }
+    const double x0 = 0.5 * (eager.xMin() + eager.xMax());
+    const auto ls = lazy.interpConstX(x0);
+    const auto es = eager.interpConstX(x0);
+    if (ls.size() != es.size()) { ++nBad; }
+    for (size_t sgm = 0; sgm < std::min(ls.size(), es.size()); ++sgm)
+    {
+        nBad += compareInterp1D<nF>(ls[sgm].get(), es[sgm].get(), "after move, interpConstX");
+    }
+    if (nBad > 0)
+    {
+        std::cerr << "testMesh3DInterpolator: lazySliceSurvivesMove: " << nBad << " mismatches\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Verify that lazySliceConstZ() rejects a mesh built with a global
+// interpolation type (cspline), for which a local stencil cannot
+// reproduce the full rib/spine interpolant.
+static auto testLazySliceRejectsGlobalInterp() -> int
+{
+    const auto m3d = makeLazyTestMesh(false, gsl_interp_cspline);
+    try
+    {
+        [[maybe_unused]] const auto lazy = m3d.lazySliceConstZ(0.4);
+    }
+    catch (const std::runtime_error&)
+    {
+        return 0;
+    }
+    std::cerr << "testMesh3DInterpolator: lazySliceRejectsGlobalInterp: expected a "
+        "cspline mesh's lazy slice to throw\n";
+    return 1;
 }
 
 auto testMesh3DInterpolator() -> int
@@ -542,6 +638,8 @@ auto testMesh3DInterpolator() -> int
     if (testZDegenerateMesh() == 1) { return 1; }
     if (testFullyDegenerateMeshRejected() == 1) { return 1; }
     if (testLazySliceMatchesEager() == 1) { return 1; }
+    if (testLazySliceSurvivesMove() == 1) { return 1; }
+    if (testLazySliceRejectsGlobalInterp() == 1) { return 1; }
 
     return 0; // Success
 }
