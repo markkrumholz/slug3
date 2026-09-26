@@ -9,7 +9,7 @@
 # entries -- so this half exercises Specsyn::specCtsHelper()'s
 # singleFeh branch (a single nested age/mass integral) once per output
 # time, rather than its non-degenerate-fehDist branch (one such
-# integral per [Fe/H] grid point, interpolated over) that
+# integral per point of an outer quadrature over [Fe/H]) that
 # testGalaxySpecsynFullNonStochFeH.in exercises instead.
 
 sim_type = "galaxy"

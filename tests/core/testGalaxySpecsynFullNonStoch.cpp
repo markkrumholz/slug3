@@ -22,7 +22,7 @@
  * needs to wait that long to verify correctness), driven by two mostly
  * independent axes of cost (more output times; a non-degenerate [Fe/H]
  * distribution, which multiplies the whole nested integral by the
- * number of [Fe/H] grid points the tracks are defined at). Running
+ * number of points the outer quadrature over [Fe/H] visits). Running
  * those two axes separately -- testGalaxySpecsynFullNonStochTimes.in
  * (7 output times, [Fe/H] pinned to a single value) and
  * testGalaxySpecsynFullNonStochFeH.in (a single output time, the real
