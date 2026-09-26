@@ -13,7 +13,9 @@
 #include "../yields/YieldChannel.hpp"
 #include "../yields/YieldCommons.hpp"
 #include "../yields/Yields.hpp"
+#include <algorithm>
 #include <cstddef>
+#include <limits>
 #include <memory>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h> // NOLINT(misc-include-cleaner); needed for list/vector conversions
@@ -357,6 +359,30 @@ Returns
 float
     The maximum counterpart of requestedFehMin().)doc";
 
+// For the ownership-transferring Python paths that install
+// already-built YieldChannels (setChannels() and the yieldChannels
+// property): run Yields::checkInstalledCoverage() on the would-be
+// channel list through borrowed references first, then transfer
+// ownership, so that a rejected call leaves every YieldChannel usable
+// from Python. Every element must already be known to be a
+// YieldChannel or None; a None element is left for
+// Yields::setChannels() itself to reject.
+static auto checkedChannels(const yields::Yields& self, const py::sequence& channels)
+    -> std::vector<std::unique_ptr<yields::YieldChannel>>
+{
+    double candMin = -std::numeric_limits<double>::infinity();
+    double candMax = std::numeric_limits<double>::infinity();
+    for (const auto& element : channels)
+    {
+        if (element.is_none()) { continue; }
+        const auto& channel = py::cast<const yields::YieldChannel&>(element);
+        candMin = std::max(candMin, channel.requestedFehMin());
+        candMax = std::min(candMax, channel.requestedFehMax());
+    }
+    self.checkInstalledCoverage(candMin, candMax);
+    return py::cast<std::vector<std::unique_ptr<yields::YieldChannel>>>(channels);
+}
+
 void bindYields(py::module_& m)
 {
     py::class_<yields::Yields, py::smart_holder>(m, "Yields", classDocstring.data())
@@ -378,9 +404,23 @@ void bindYields(py::module_& m)
                 },
                 addChannelDocstring.data(), py::arg("descriptor"))
         .def("addChannel",
-                [](yields::Yields& self, std::unique_ptr<yields::YieldChannel> channel)
+                [](yields::Yields& self, const py::object& channelArg)
                 {
-                    self.addChannel(std::move(channel));
+                    // None is passed straight through, for
+                    // Yields::addChannel() itself to reject
+                    if (channelArg.is_none())
+                    {
+                        self.addChannel(std::unique_ptr<yields::YieldChannel>());
+                        return;
+                    }
+                    // Check coverage through a borrowed reference
+                    // before transferring ownership -- see
+                    // checkedChannels()'s own comment
+                    const auto& channel = py::cast<const yields::YieldChannel&>(channelArg);
+                    self.checkInstalledCoverage(
+                        std::max(self.requestedFehMin(), channel.requestedFehMin()),
+                        std::min(self.requestedFehMax(), channel.requestedFehMax()));
+                    self.addChannel(py::cast<std::unique_ptr<yields::YieldChannel>>(channelArg));
                     self.rebuildYieldGrid();
                 },
                 addChannelPointerDocstring.data(), py::arg("channel"))
@@ -398,13 +438,11 @@ void bindYields(py::module_& m)
                     self.rebuildYieldGrid();
                 },
                 deleteChannelDocstring.data(), py::arg("index"))
-        .def("setChannels",
-                [](yields::Yields& self, std::vector<std::unique_ptr<yields::YieldChannel>> channels)
-                {
-                    self.setChannels(std::move(channels));
-                    self.rebuildYieldGrid();
-                },
-                setChannelsPointersDocstring.data(), py::arg("channels"))
+        // The descriptor overload is registered first: the channel
+        // overload below takes a plain sequence, so that it can check
+        // coverage before transferring ownership (see
+        // checkedChannels()'s own comment), and would otherwise also
+        // accept a list of descriptors
         .def("setChannels",
                 [](yields::Yields& self, const std::vector<yields::YieldChannelDescriptor>& descriptors)
                 {
@@ -412,6 +450,22 @@ void bindYields(py::module_& m)
                     self.rebuildYieldGrid();
                 },
                 setChannelsDescriptorsDocstring.data(), py::arg("descriptors"))
+        .def("setChannels",
+                [](yields::Yields& self, const py::sequence& channels)
+                {
+                    for (const auto& element : channels)
+                    {
+                        if (!element.is_none() && !py::isinstance<yields::YieldChannel>(element))
+                        {
+                            throw py::type_error(
+                                "setChannels must be given a list of only YieldChannel or "
+                                "only YieldChannelDescriptor objects");
+                        }
+                    }
+                    self.setChannels(checkedChannels(self, channels));
+                    self.rebuildYieldGrid();
+                },
+                setChannelsPointersDocstring.data(), py::arg("channels"))
         .def("rebuildYieldGrid",
                 [](yields::Yields& self, const std::vector<const elem::IsotopeData*>& isotopes)
                 {
@@ -461,8 +515,7 @@ void bindYields(py::module_& m)
                     }
                     else if (allChannels)
                     {
-                        self.setChannels(
-                            py::cast<std::vector<std::unique_ptr<yields::YieldChannel>>>(channels));
+                        self.setChannels(checkedChannels(self, channels));
                     }
                     else
                     {

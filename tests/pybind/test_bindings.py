@@ -1430,6 +1430,22 @@ def test_simcontrols_set_specsyn_and_yields_reject_narrower_feh():
     assert narrow.requestedFehMin() == -0.5
     assert controls.yields.requestedFehMin() == -1.0
 
+    # Mutating the installed Yields with a pre-built channel narrower
+    # than the [Fe/H] distribution is rejected by every ownership-
+    # transferring path, leaving the channel usable and the Yields
+    # unchanged
+    descriptor = slug.YieldChannelDescriptor(slug.YieldChannelType.ccsn, "sukhbold_test")
+    channel = slug.YieldChannel(descriptor, -0.5, 0.0, registry_name=YIELDS_REGISTRY)
+    installed = controls.yields
+    n_channels = len(installed.yieldChannels)
+    for install in (installed.addChannel, installed.setChannels,
+                    lambda c: setattr(installed, "yieldChannels", c)):
+        arg = channel if install == installed.addChannel else [channel]
+        with pytest.raises(ValueError, match="installed in its SimControls"):
+            install(arg)
+        assert channel.requestedFehMin() == -0.5
+        assert len(installed.yieldChannels) == n_channels
+
 
 def test_simcontrols_set_min_stoch_mass_disables_stochastic_sampling():
     """setMinStochMass() with a value above the IMF's own maximum mass

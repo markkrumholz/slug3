@@ -16,6 +16,8 @@
 #include "../src/specsyn/SpecsynLibNoWind.hpp"
 #include "../src/tracks/Tracks3D.hpp"
 #include "../src/utils/MiscUtils.hpp"
+#include "../src/yields/YieldChannel.hpp"
+#include "../src/yields/YieldCommons.hpp"
 #include "../src/yields/Yields.hpp"
 #include "testSimControls.hpp"
 #include <algorithm>
@@ -25,6 +27,7 @@
 #include <iostream>
 #include <memory>
 #include <numbers>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -2985,7 +2988,45 @@ static auto testSimControlsSetYieldsRejectsNarrowerFeh() -> int
         catch (const std::invalid_argument&) { /* expected */ }
 
         // A Yields built over the full fehDist() is accepted
-        sim.setYields(std::make_unique<yields::Yields>(sim, registry));
+        auto installed = std::make_unique<yields::Yields>(sim, registry);
+        auto* raw = installed.get();
+        sim.setYields(std::move(installed));
+
+        // Mutating the installed Yields with a pre-built channel built
+        // for [-0.5, 0], narrower than fehDist() [-1, 0], is rejected
+        // (via addChannel() and setChannels() alike), leaving its
+        // channels unchanged; a standalone Yields accepts it
+        const yields::YieldChannelDescriptor desc{
+            yields::Channel::ccsn_, "sukhbold_test", std::nullopt, std::nullopt };
+        auto narrowChannel = [&]()
+        { return std::make_unique<yields::YieldChannel>(desc, -0.5, 0.0, registry); };
+        const auto nBefore = raw->yieldChannels().size();
+        try
+        {
+            raw->addChannel(narrowChannel());
+            std::cerr << "testSimControls: setYields: expected adding a [-0.5, 0] channel "
+                "to the installed Yields to be rejected\n";
+            return 1;
+        }
+        catch (const std::invalid_argument&) { /* expected */ }
+        try
+        {
+            std::vector<std::unique_ptr<yields::YieldChannel>> channels;
+            channels.push_back(narrowChannel());
+            raw->setChannels(std::move(channels));
+            std::cerr << "testSimControls: setYields: expected replacing the installed "
+                "Yields' channels with a [-0.5, 0] channel to be rejected\n";
+            return 1;
+        }
+        catch (const std::invalid_argument&) { /* expected */ }
+        if (raw->yieldChannels().size() != nBefore)
+        {
+            std::cerr << "testSimControls: setYields: expected the installed Yields' "
+                "channels unchanged after rejected mutations\n";
+            return 1;
+        }
+        yields::Yields standalone(sim, registry);
+        standalone.addChannel(narrowChannel());
     }
     catch (const std::exception& error)
     {
