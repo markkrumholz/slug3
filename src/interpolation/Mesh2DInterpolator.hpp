@@ -13,7 +13,9 @@
 
 #include "Interpolator1D.hpp"
 #include "Mesh2DGrid.hpp"
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <gsl/gsl_interp.h>
 #include <mdspan> // NOLINT(misc-include-cleaner)
@@ -30,6 +32,39 @@
 
 namespace interp
 {
+
+    /**
+     * @class LazyValueSource
+     * @brief Supplies the function values at the points of a Mesh2DInterpolator's mesh on demand
+     * @tparam NF Number of quantities interpolated
+     * @details
+     * Lets a Mesh2DInterpolator represent a mesh whose function
+     * values are never stored in full -- e.g. a slice of a
+     * Mesh3DInterpolator at an arbitrary z, whose values are
+     * themselves interpolated in z only at the points a query
+     * actually needs (see Mesh3DInterpolator::lazySliceConstZ()).
+     * Implementations must be safe to call concurrently from multiple
+     * threads.
+     */
+    template <size_t NF>
+    class LazyValueSource
+    {
+    public:
+        LazyValueSource() = default;
+        virtual ~LazyValueSource() = default;
+        LazyValueSource(const LazyValueSource&) = default;
+        LazyValueSource(LazyValueSource&&) = default;
+        auto operator=(const LazyValueSource&) -> LazyValueSource& = default;
+        auto operator=(LazyValueSource&&) -> LazyValueSource& = default;
+
+        /**
+         * @brief Return the function values at one mesh point
+         * @param i Index of the point in the x direction
+         * @param j Index of the point in the y direction
+         * @returns The NF function values at mesh point (i,j)
+         */
+        [[nodiscard]] virtual auto value(size_t i, size_t j) const -> std::array<double, NF> = 0;
+    };
 
     /**
      * @class Mesh2DInterpolator
@@ -142,6 +177,40 @@ namespace interp
             std::mdspan(f.data_handle(), f.extent(0), f.extent(1), 1), // NOLINT(misc-include-cleaner)
             interpType,
             monotonic)
+        { }
+
+        /**
+         * @brief Construct a Mesh2DInterpolator whose mesh coordinates and function values are evaluated lazily
+         * @param x The x coordinates of the mesh points (see
+         *   Mesh2DGrid::XView); not copied
+         * @param y A 1d array giving the y coordinates of the mesh points
+         * @param source Supplies the function value at each mesh point
+         *   on demand
+         * @param interpType The type of interpolation to use
+         * @param monotonic Enforce that interpolation is monotonicity-preserving
+         * @details
+         * Unlike the other constructors, this builds no rib or spine
+         * interpolators, and stores no function values: construction
+         * costs O(Ny) (see Mesh2DGrid's own XView constructor), and
+         * each query instead evaluates source only at the few mesh
+         * points it needs, building a small local interpolator over
+         * just those points (see evalRib()/evalSpine()). Whatever
+         * storage x refers to, and source, must outlive this object.
+         * Query results agree with those of an eagerly-constructed
+         * Mesh2DInterpolator over the same values to within
+         * floating-point rounding.
+         */
+        Mesh2DInterpolator(
+            const Mesh2DGrid::XView& x,
+            const Array1D& y,
+            std::shared_ptr<const LazyValueSource<NF>> source,
+            const gsl_interp_type* interpType = gsl_interp_steffen,
+            const bool monotonic = false
+        ) :
+        interpType_(monotonic ? gsl_interp_linear : interpType),
+        monotonic_(monotonic),
+        mesh_(x, y),
+        lazySource_(std::move(source))
         { }
 
         virtual ~Mesh2DInterpolator() = default;
@@ -329,8 +398,7 @@ namespace interp
 
                 // Evaluate spline and save
                 const auto fInterp = pt.t == Mesh2DGrid::IntersectionType::rib ?
-                    (*(ribInterp_[pt.idx]))(s) :
-                    (*(spineInterp_[pt.idx]))(s);
+                    evalRib(pt.idx, s) : evalSpine(pt.idx, s);
                 if constexpr (NF == 1) { f[0].push_back(fInterp); }
                 else
                 {
@@ -386,7 +454,7 @@ namespace interp
             {
                 const auto& pt = intersect[i];
                 x[i] = pt.x;
-                auto fInterp = (*(spineInterp_[pt.idx]))(pt.s);
+                auto fInterp = evalSpine(pt.idx, pt.s);
                 if constexpr (NF == 1) { f[0][i] = fInterp; }
                 else
                 { 
@@ -442,8 +510,7 @@ namespace interp
                     (pt.t == Mesh2DGrid::IntersectionType::spine &&
                     monotonic_) ? pt.y : pt.xs;
                 return pt.t == Mesh2DGrid::IntersectionType::rib ?
-                    (*(ribInterp_[pt.idx]))(s) :
-                    (*(spineInterp_[pt.idx]))(s);
+                    evalRib(pt.idx, s) : evalSpine(pt.idx, s);
             }
 
             // Accumulators
@@ -464,8 +531,7 @@ namespace interp
 
                 // Evaluate spline and save
                 const auto fInterp = pt.t == Mesh2DGrid::IntersectionType::rib ?
-                    (*(ribInterp_[pt.idx]))(s) :
-                    (*(spineInterp_[pt.idx]))(s);
+                    evalRib(pt.idx, s) : evalSpine(pt.idx, s);
                 if constexpr (NF == 1) { f[0].push_back(fInterp); }
                 else
                 {
@@ -490,6 +556,117 @@ namespace interp
 
     private:
 
+        /**
+         * @brief Number of mesh points on either side of a query's own cell used by a lazily-built local interpolator
+         * @details
+         * The steffen interpolant within a cell [c, c+1] depends only on
+         * the points c-1 through c+2, so a local interpolator including
+         * those reproduces the full rib/spine interpolator there; one
+         * extra point on each side is included as a margin against
+         * duplicate coordinates, which Interpolator1D collapses.
+         */
+        static constexpr size_t stencilHalfWidth = 3;
+
+        /**
+         * @brief Evaluate a local interpolator over part of one rib or spine
+         * @param coord Coordinate of each point along the rib/spine
+         *   (callable taking a point index)
+         * @param value Function values at each point (callable taking a
+         *   point index)
+         * @param n Number of points along the rib/spine
+         * @param q Query coordinate
+         * @returns The interpolated value(s) at q
+         * @details
+         * Finds the cell [c, c+1] containing q by binary search over
+         * coord (coordinates are non-decreasing along a rib or spine),
+         * then builds an Interpolator1D over points c -
+         * stencilHalfWidth + 1 through c + stencilHalfWidth (clipped to
+         * [0, n-1]) and evaluates it at q.
+         */
+        [[nodiscard]] auto evalLocal(const auto& coord, const auto& value,
+            const size_t n, const double q) const
+        {
+            size_t lo = 0;
+            size_t hi = n - 1;
+            while (hi - lo > 1)
+            {
+                const size_t mid = (lo + hi) / 2;
+                if (coord(mid) <= q) { lo = mid; }
+                else { hi = mid; }
+            }
+            const size_t first = lo >= stencilHalfWidth - 1 ? lo - (stencilHalfWidth - 1) : 0;
+            const size_t last = std::min(n - 1, lo + stencilHalfWidth);
+            std::vector<double> c(last - first + 1);
+            std::array<std::vector<double>, NF> f;
+            for (auto& fk : f) { fk.resize(c.size()); }
+            for (size_t k = 0; k < c.size(); ++k)
+            {
+                c[k] = coord(first + k);
+                const auto v = value(first + k);
+                for (size_t n2 = 0; n2 < NF; ++n2) { f[n2][k] = v[n2]; } // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- n2 is a loop index bounded by compile-time constant NF
+            }
+            const Interpolator1D<NF> local(c, f, interpType_);
+            return local(q);
+        }
+
+        /**
+         * @brief Evaluate the interpolator along one rib at a given x
+         * @param j Index of the rib
+         * @param x Query x coordinate
+         * @returns The interpolated value(s)
+         * @details
+         * Uses the prebuilt rib interpolator if there is one, and
+         * otherwise (for a lazily-evaluated mesh) a local one built by
+         * evalLocal().
+         */
+        [[nodiscard]] auto evalRib(const size_t j, const double x) const
+        {
+            if (!lazySource_) { return (*(ribInterp_[j]))(x); }
+            const auto& xv = mesh_.xData();
+            return evalLocal(
+                [&xv, j](const size_t i) -> double { return xv[i, j]; },
+                [this, j](const size_t i) { return lazySource_->value(i, j); },
+                mesh_.nx(), x);
+        }
+
+        /**
+         * @brief Evaluate the interpolator along one spine at a given coordinate
+         * @param i Index of the spine
+         * @param s Query coordinate along the spine -- the cumulative
+         *   length along it, or y if monotonic_
+         * @returns The interpolated value(s)
+         * @details
+         * As evalRib(), for a spine. For a lazily-evaluated mesh, the
+         * spine's own coordinates are accumulated once, in O(Ny), in
+         * the same order as Mesh2DGrid::SView.
+         */
+        [[nodiscard]] auto evalSpine(const size_t i, const double s) const
+        {
+            if (!lazySource_) { return (*(spineInterp_[i]))(s); }
+            const size_t nyLoc = mesh_.ny();
+            std::vector<double> coord(nyLoc);
+            if (monotonic_)
+            {
+                for (size_t j = 0; j < nyLoc; ++j) { coord[j] = mesh_.yData()[j]; }
+            }
+            else
+            {
+                const auto& xv = mesh_.xData();
+                const auto& yv = mesh_.yData();
+                coord[0] = 0.0;
+                for (size_t j = 1; j < nyLoc; ++j)
+                {
+                    coord[j] = coord[j-1] + std::sqrt(
+                        std::pow(xv[i,j] - xv[i,j-1], 2) +
+                        std::pow(yv[j] - yv[j-1], 2));
+                }
+            }
+            return evalLocal(
+                [&coord](const size_t j) -> double { return coord[j]; },
+                [this, i](const size_t j) { return lazySource_->value(i, j); },
+                nyLoc, s);
+        }
+
         // Control parameters
         const gsl_interp_type *interpType_; /**< Type of interpolation used */
         bool monotonic_;                    /**< True if interpolation is monotonicity-preserving */
@@ -506,6 +683,8 @@ namespace interp
         std::vector<
             std::unique_ptr<Interpolator1D<NF>>
         > spineInterp_;               /**< Interpolators for spines */
+        std::shared_ptr<const LazyValueSource<NF>>
+            lazySource_;              /**< Supplies function values on demand, for a lazily-evaluated mesh; null otherwise */
     };
 
 } // namespace interp
