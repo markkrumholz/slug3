@@ -287,12 +287,10 @@ Throws
 ------
 RuntimeError
     If feh is not numeric and does not name a file that can be found,
-    or if its own [min, max] range is broader than the feH property's
-    current one -- the stellar tracks are only ever loaded, once, at
-    construction, over the [Fe/H] range requested then, so widening it
-    afterward risks interpolating outside the range of data actually
-    loaded. Narrowing, or otherwise staying within, the current range
-    is always accepted.)doc";
+    or if its own [min, max] range is broader than the [Fe/H] range the
+    current stellar tracks were loaded over -- widening past it risks
+    interpolating outside the range of data actually loaded. Narrowing,
+    or otherwise staying within, that range is always accepted.)doc";
 
 static constexpr std::string_view setCLFDocstring = R"doc(Set the cluster lifetime function.
 
@@ -461,7 +459,10 @@ tracks : Tracks3D
 Throws
 ------
 ValueError
-    If tracks is None.
+    If tracks is None, or if the [Fe/H] range tracks was loaded over
+    does not cover the current [Fe/H] distribution (the feH
+    property's own [min, max]). This SimControls is then left
+    unchanged, and tracks stays usable from Python.
 
 Details
 -------
@@ -971,6 +972,19 @@ deck actually built this SimControls.)doc";
 // lambda below purely to keep bindSimControls()'s own cognitive
 // complexity down; see constructorDocstring for the user-facing
 // contract this implements
+// setTracks(), for Python: checks that the new tracks cover the
+// current [Fe/H] distribution (SimControls::checkTracksCoverFeH())
+// through a borrowed reference first, so that a rejected Tracks3D
+// stays usable from Python, rather than having its ownership moved
+// into setTracks()'s own argument, and then destroyed, before the
+// check even runs. None is passed straight through, so setTracks()
+// reports it as usual.
+static void setTracksKeepOnFailure(io::SimControls& sc, py::object tracksArg)
+{
+    if (!tracksArg.is_none()) { sc.checkTracksCoverFeH(py::cast<const tracks::Tracks3D&>(tracksArg)); }
+    sc.setTracks(py::cast<std::unique_ptr<tracks::Tracks3D>>(std::move(tracksArg)));
+}
+
 static void applyConstructorProperties(io::SimControls& sc,
     const py::object& imf, const py::object& cmf, const py::object& feH,
     const py::object& clf, const py::object& sfr, const py::object& computeLbol,
@@ -993,10 +1007,7 @@ static void applyConstructorProperties(io::SimControls& sc,
         sc.setFilters(
             py::cast<std::unique_ptr<phot::FilterCollection>>(std::move(filtersArg)));
     }
-    if (!tracksArg.is_none())
-    {
-        sc.setTracks(py::cast<std::unique_ptr<tracks::Tracks3D>>(std::move(tracksArg)));
-    }
+    if (!tracksArg.is_none()) { setTracksKeepOnFailure(sc, std::move(tracksArg)); }
     if (!minStochMass.is_none()) { sc.setMinStochMass(py::cast<double>(minStochMass)); }
     if (!intRelTol.is_none()) { sc.setIntRelTol(py::cast<double>(intRelTol)); }
     if (!intAbsTol.is_none()) { sc.setIntAbsTol(py::cast<double>(intAbsTol)); }
@@ -1132,7 +1143,7 @@ void bindSimControls(py::module_& m)
                 setSpecsynDocstring.data(), py::arg("specsyn"))
         .def("setFilters", &io::SimControls::setFilters,
                 setFiltersDocstring.data(), py::arg("filters"))
-        .def("setTracks", &io::SimControls::setTracks,
+        .def("setTracks", &setTracksKeepOnFailure,
                 setTracksDocstring.data(), py::arg("tracks"))
         .def("setExtinct", &io::SimControls::setExtinct,
                 setExtinctDocstring.data(), py::arg("extinct"))
@@ -1231,7 +1242,7 @@ void bindSimControls(py::module_& m)
                 nebularPropertyDocstring.data())
         .def_property("tracks",
                 &io::SimControls::tracks,
-                &io::SimControls::setTracks,
+                &setTracksKeepOnFailure,
                 tracksPropertyDocstring.data())
         .def_property("minStochMass",
                 &io::SimControls::minStochMass,

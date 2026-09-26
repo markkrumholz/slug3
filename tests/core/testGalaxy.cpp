@@ -1196,11 +1196,13 @@ static auto testGalaxyFieldStarLifetimeClamped() -> int
 // out of range with assertions disabled). This can happen only if
 // SimControls::setTracks() replaces the tracks after field stars have
 // been drawn: here stars are drawn with [Fe/H] flat in [-0.5, 0.5]
-// (testClusterFeHDist.toml), and then the tracks are replaced by
-// MIST_test loaded for [Fe/H] in [-1, -0.25], whose own grid stops
-// below 0.5, with the [Fe/H] distribution narrowed to match (so that
-// the continuous population, integrated over that distribution, stays
-// within the new tracks). spec() and lbol() must then still be finite.
+// (testClusterFeHDist.toml), then the [Fe/H] distribution is narrowed
+// to [-0.5, -0.25] and the tracks replaced by MIST_test loaded for
+// [Fe/H] in [-1, -0.25], whose own grid stops below 0.5. (The
+// distribution must be narrowed first: setFeH() only accepts a
+// distribution within the current tracks' range, and setTracks() only
+// accepts tracks covering the current distribution.) spec() and lbol()
+// must then still be finite.
 static auto testGalaxyFieldStarFeHOutsideTracks() -> int
 {
     try
@@ -1219,11 +1221,11 @@ static auto testGalaxyFieldStarFeHOutsideTracks() -> int
             "slugTestGalaxyFieldStarFeHOutsideTracks.toml";
         {
             std::ofstream out(fehFile);
-            out << "breakpoints -1.0 -0.25\n\nsegment\ntype powerlaw\nslope 0\n";
+            out << "breakpoints -0.5 -0.25\n\nsegment\ntype powerlaw\nslope 0\n";
         }
+        controls.setFeH(fehFile.string());
         controls.setTracks(std::make_unique<tracks::Tracks3D>(
             "MIST_test", -1.0, -0.25, 0.0, -0.2, "tests/tracks/assets/tracks.toml"));
-        controls.setFeH(fehFile.string());
         std::filesystem::remove(fehFile);
         const double fehMax = controls.tracks()->feH().back();
         const auto nOutside = std::ranges::count_if(galaxy.fieldStars(),

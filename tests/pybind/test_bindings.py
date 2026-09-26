@@ -1368,6 +1368,24 @@ def test_simcontrols_tracks_survives_replacement():
         new_tracks.mMin()
 
 
+def test_simcontrols_set_tracks_rejects_uncovered_feh():
+    """setTracks() and the tracks property should both raise ValueError
+    for tracks whose [Fe/H] range does not cover the current [Fe/H]
+    distribution (CLUSTER_DECK's fixed [Fe/H] = 0.0 is outside
+    [-1.0, -0.75]), leaving the SimControls' own tracks unchanged and
+    the rejected Tracks3D still usable from Python -- ownership is only
+    transferred once the check has passed."""
+    controls = slug.SimControls(CLUSTER_DECK)
+    old_tracks = controls.tracks
+
+    for install in (controls.setTracks, lambda t: setattr(controls, "tracks", t)):
+        rejected = slug.Tracks3D(TRACK_SET, -1.0, -0.75, KNOWN_VVCRIT, KNOWN_AFE, REGISTRY)
+        with pytest.raises(ValueError, match="does not cover"):
+            install(rejected)
+        assert rejected.mMin() > 0.0
+        assert controls.tracks.mMin() == pytest.approx(old_tracks.mMin())
+
+
 def test_simcontrols_set_min_stoch_mass_disables_stochastic_sampling():
     """setMinStochMass() with a value above the IMF's own maximum mass
     should drive the stochastic mass fraction (recomputed internally

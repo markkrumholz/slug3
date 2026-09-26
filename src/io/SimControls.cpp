@@ -620,7 +620,9 @@ void io::SimControls::readOutput(const utils::TrackedDeck& inputDeck)
 void io::SimControls::setFeH(const std::string& feH)
 {
     auto newFehDist = utils::initPDFFromString(feH);
-    if (newFehDist.getMin() < tracks_->fehMin() || newFehDist.getMax() > tracks_->fehMax())
+    // Written so that a NaN range (a default-constructed Tracks3D) is
+    // rejected, not silently accepted
+    if (!(tracks_->fehMin() <= newFehDist.getMin() && newFehDist.getMax() <= tracks_->fehMax())) // NOLINT(readability-simplify-boolean-expr) -- the De Morgan form would accept a NaN range, since every comparison with NaN is false
     {
         throw std::runtime_error(
             "SimControls::setFeH: the requested [Fe/H] distribution, "
@@ -652,17 +654,42 @@ void io::SimControls::setFeH(const std::string& feH)
 // Set the stellar tracks, recomputing tracks2D() (constFeHTracks_)
 // from the new tracks_ if fehDist_ is already fixed -- see setFeH()'s
 // own comment
+// Throw unless tracks cover the current [Fe/H] distribution -- see
+// this method's own header comment
+void io::SimControls::checkTracksCoverFeH(const tracks::Tracks3D& tracks) const
+{
+    // The same requirement setFeH() enforces from the other side;
+    // written so that a NaN range (a default-constructed Tracks3D) is
+    // rejected rather than passing every comparison
+    if (!(tracks.fehMin() <= fehDist_.getMin() && fehDist_.getMax() <= tracks.fehMax())) // NOLINT(readability-simplify-boolean-expr) -- the De Morgan form would accept a NaN range, since every comparison with NaN is false
+    {
+        throw std::invalid_argument(
+            "SimControls::setTracks: the new stellar tracks were loaded over "
+            "[Fe/H] in [" + std::to_string(tracks.fehMin()) + ", " +
+            std::to_string(tracks.fehMax()) + "], which does not cover the "
+            "current [Fe/H] distribution, [" + std::to_string(fehDist_.getMin()) +
+            ", " + std::to_string(fehDist_.getMax()) + "]. Load the tracks over "
+            "a range covering it, or narrow the distribution with setFeH() first.");
+    }
+}
+
 void io::SimControls::setTracks(std::unique_ptr<tracks::Tracks3D> tracks)
 {
     if (!tracks)
     {
         throw std::invalid_argument("SimControls::setTracks: tracks must not be null");
     }
-    tracks_ = std::move(tracks);
+    checkTracksCoverFeH(*tracks);
+    // Build the fixed-[Fe/H] slice, which can itself throw, before
+    // changing any state, so that a failure leaves this SimControls
+    // unchanged rather than holding the new tracks with a stale slice
+    decltype(constFeHTracks_) newConstFeHTracks;
     if (constFeH())
     {
-        constFeHTracks_ = std::make_shared<tracks::Tracks2D>(tracks_->sliceConstFeH(fehDist_.getMin()));
+        newConstFeHTracks = std::make_shared<tracks::Tracks2D>(tracks->sliceConstFeH(fehDist_.getMin()));
     }
+    tracks_ = std::move(tracks);
+    if (newConstFeHTracks) { constFeHTracks_ = std::move(newConstFeHTracks); }
 }
 
 // Set the clustered-star A_V distribution, rebuilding extinct_'s own
