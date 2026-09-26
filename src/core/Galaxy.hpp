@@ -954,9 +954,11 @@ namespace core
          *   order), of that star's properties at curTime() -- see
          *   tracks::Tracks2D::getStar()/tracks::Tracks3D::getStar()'s
          *   own comment for what a StarData holds -- or empty for a
-         *   star whose mass lies outside the tracks' own mass range, so
-         *   has no properties to look up (such a star is treated as
-         *   contributing no light, as in Cluster::computeSpec())
+         *   star whose mass lies outside the tracks' own mass range, or
+         *   (with a non-degenerate [Fe/H]) whose feh_ lies outside the
+         *   tracks' own [Fe/H] grid, so has no properties to look up
+         *   (such a star is treated as contributing no light, as in
+         *   Cluster::computeSpec())
          * @details
          * If the simulation has a fixed [Fe/H] (SimControls::constFeH()),
          * loops over fieldStars() directly, calling

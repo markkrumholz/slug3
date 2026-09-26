@@ -12,6 +12,7 @@
 #include "../src/interpolation/Interpolator1D.hpp"
 #include "../src/io/SimControls.hpp"
 #include "../src/phot/FilterCollection.hpp"
+#include "../src/tracks/Tracks3D.hpp"
 #include "../src/utils/Constants.hpp"
 #include "../src/utils/MiscUtils.hpp"
 #include "../src/utils/RngThread.hpp"
@@ -21,9 +22,12 @@
 #include <cmath>
 #include <cstddef>
 #include <exception>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <iterator>
 #include <limits>
+#include <memory>
 #include <numeric>
 #include <string>
 #include <string_view>
@@ -1103,6 +1107,68 @@ static auto testGalaxyFieldStarLifetimeClamped() -> int
         return 1;
     }
     return result;
+}
+
+// Verify that getFieldStarProps() skips a field star whose [Fe/H] lies
+// outside the [Fe/H] grid of the tracks currently in use, rather than
+// looking it up there (which asserts in Mesh3DInterpolator, or reads
+// out of range with assertions disabled). This can happen only if
+// SimControls::setTracks() replaces the tracks after field stars have
+// been drawn: here stars are drawn with [Fe/H] flat in [-0.5, 0.5]
+// (testClusterFeHDist.toml), and then the tracks are replaced by
+// MIST_test loaded for [Fe/H] in [-1, -0.25], whose own grid stops
+// below 0.5, with the [Fe/H] distribution narrowed to match (so that
+// the continuous population, integrated over that distribution, stays
+// within the new tracks). spec() and lbol() must then still be finite.
+static auto testGalaxyFieldStarFeHOutsideTracks() -> int
+{
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFile);
+        inputDeck.at_path("clusters").as_table()->insert("f_cluster", 0.0);
+        inputDeck.at_path("stars").as_table()->insert_or_assign("FeH",
+            "tests/core/assets/testClusterFeHDist.toml");
+        io::SimControls controls(inputDeck);
+
+        utils::rng().seed(rngSeed);
+        core::Galaxy galaxy(controls);
+        galaxy.advance(t1);
+
+        const auto fehFile = std::filesystem::temp_directory_path() /
+            "slugTestGalaxyFieldStarFeHOutsideTracks.toml";
+        {
+            std::ofstream out(fehFile);
+            out << "breakpoints -1.0 -0.25\n\nsegment\ntype powerlaw\nslope 0\n";
+        }
+        controls.setTracks(std::make_unique<tracks::Tracks3D>(
+            "MIST_test", -1.0, -0.25, 0.0, -0.2, "tests/tracks/assets/tracks.toml"));
+        controls.setFeH(fehFile.string());
+        std::filesystem::remove(fehFile);
+        const double fehMax = controls.tracks()->feH().back();
+        const auto nOutside = std::ranges::count_if(galaxy.fieldStars(),
+            [fehMax](const core::Galaxy::FieldStar& fs) -> bool { return fs.feh_ > fehMax; });
+        if (nOutside == 0)
+        {
+            std::cerr << "testGalaxy: fieldStarFeHOutsideTracks: test bug: expected some "
+                "field stars above the new tracks' maximum [Fe/H] " << fehMax << "\n";
+            return 1;
+        }
+
+        const auto& spec = galaxy.spec();
+        if (!std::ranges::all_of(spec, [](const double v) -> bool { return std::isfinite(v) && v >= 0.0; }) ||
+            !std::isfinite(galaxy.lbol()))
+        {
+            std::cerr << "testGalaxy: fieldStarFeHOutsideTracks: expected finite spec() and "
+                "lbol() with field stars outside the tracks' [Fe/H] grid\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testGalaxy: fieldStarFeHOutsideTracks test failed: " << error.what() << "\n";
+        return 1;
+    }
+    return 0;
 }
 
 // Verify that field stars are both created and, given enough time,
@@ -2785,6 +2851,7 @@ auto testGalaxy() -> int
     result += testFieldStarsMassBudget();
     result += testFieldStarsCreationAndDeath();
     result += testGalaxyFieldStarLifetimeClamped();
+    result += testGalaxyFieldStarFeHOutsideTracks();
     result += testFieldStarsSpec();
     result += testFieldStarsExtinct();
     result += testExtinctApplyExtinctionCtsDegenerate();

@@ -875,12 +875,17 @@ auto core::Galaxy::getFieldStarProps() const -> std::vector<std::optional<specsy
 
     // Non-degenerate [Fe/H]: evaluate each star at its own feh_, via
     // tracks()' own lazily-evaluated slices -- see this method's own
-    // header comment
+    // header comment. A star whose feh_ lies outside the tracks' own
+    // [Fe/H] grid (possible only if SimControls::setTracks() replaced
+    // the tracks after it was drawn) is skipped like one outside their
+    // mass range
     const auto tracks3D = sc.tracks();
+    const double fehLo = tracks3D->feH().front();
+    const double fehHi = tracks3D->feH().back();
     for (std::size_t i = 0; i < n; ++i)
     {
         const auto& fs = fieldStars_[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i < n == fieldStars_.size() by construction
-        if (!inRange(fs)) { continue; }
+        if (!inRange(fs) || fs.feh_ < fehLo || fs.feh_ > fehHi) { continue; }
         const double logT = std::max(std::log10(curTime_ - fs.formTime_), logTMin);
         props[i] = tracks3D->getStar(fs.mass_, logT, fs.feh_); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- props has size n by construction, and i is bounded by n
     }
