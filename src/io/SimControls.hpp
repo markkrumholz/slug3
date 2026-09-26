@@ -907,7 +907,10 @@ namespace io
          *   not name a file that can be found, or if its own
          *   [min, max] range is broader than tracks_'s own
          *   [fehMin(), fehMax()], or tracks_'s own range is NaN (a
-         *   default-constructed Tracks3D)
+         *   default-constructed Tracks3D), or it extends beyond the
+         *   [requestedFehMin(), requestedFehMax()] range of the
+         *   installed specsyn() or yields(), if any; this SimControls
+         *   is then left unchanged
          * @details
          * Rejects (rather than accepts and later failing to
          * interpolate) any new distribution whose [min, max] range is

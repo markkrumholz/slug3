@@ -2995,6 +2995,84 @@ static auto testSimControlsSetYieldsRejectsNarrowerFeh() -> int
     return 0;
 }
 
+// Verify that setFeH() rejects widening fehDist() beyond the [Fe/H]
+// range the installed Yields or spectral synthesizer was constructed
+// for, even when the tracks would allow it: after setTracks() installs
+// tracks loaded over [-1, 0.5], widening fehDist() from [-1, 0] to
+// [-0.5, 0.5] passes the tracks check, but must still be rejected while
+// the installed Yields covers only [-1, 0], and again while a
+// synthesizer built for [-1, 0] is installed, leaving fehDist()
+// unchanged each time; once both are removed or replaced by ones
+// covering it, the widening succeeds.
+static auto testSimControlsSetFeHRejectsBeyondSpecsynYields() -> int
+{
+    const std::string fileName = "tests/core/assets/testCluster.in";
+    const std::string specRegistry = "tests/specsyn/assets/spectra.toml";
+    const std::string fehWide = "tests/core/assets/testClusterFeHDist.toml"; // flat [-0.5, 0.5]
+    toml::table inputDeck = toml::parse_file(fileName);
+    inputDeck.at_path("stars").as_table()->insert_or_assign(
+        "FeH", "tests/core/assets/testClusterSpecsynFullFeHDist.toml"); // flat [-1, 0]
+    auto* spectraTable = inputDeck.at_path("spectra").as_table();
+    spectraTable->insert_or_assign("registry", specRegistry);
+    spectraTable->insert_or_assign("model", std::string("BOSZ_test"));
+    inputDeck.insert_or_assign("yields", toml::table{
+        { "channel1", toml::table{ { "channel", "ccsn" }, { "model", "sukhbold_test" } } },
+        { "registry", std::string("tests/yields/assets/yields.toml") },
+    });
+    try
+    {
+        io::SimControls sim(inputDeck);
+        auto bosz = [&](const double fehMin, const double fehMax)
+        {
+            return std::make_unique<specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::raise>>(
+                "BOSZ_test", fehMin, fehMax, 0.0, 0.0, 0.0, specsyn::defaultR, specRegistry,
+                0.0, 0.0, 0, sim);
+        };
+        auto expectRejected = [&](const char* label) -> bool
+        {
+            try
+            {
+                sim.setFeH(fehWide);
+                std::cerr << "testSimControls: setFeH: expected widening to [-0.5, 0.5] "
+                    "to be rejected " << label << "\n";
+                return false;
+            }
+            catch (const std::runtime_error&) { /* expected */ }
+            if (sim.fehDist().getMin() != -1.0 || sim.fehDist().getMax() != 0.0)
+            {
+                std::cerr << "testSimControls: setFeH: expected fehDist() to remain [-1, 0] "
+                    "after the rejected widening " << label << "\n";
+                return false;
+            }
+            return true;
+        };
+
+        sim.setTracks(std::make_unique<tracks::Tracks3D>(
+            "MIST_test", -1.0, 0.5, 0.0, -0.2, "tests/tracks/assets/tracks.toml"));
+        if (!expectRejected("while the installed Yields covers only [-1, 0]")) { return 1; }
+
+        sim.setYields(nullptr);
+        sim.setSpecsyn(nullptr);
+        sim.setSpecsyn(bosz(-1.0, 0.0));
+        if (!expectRejected("while the installed synthesizer covers only [-1, 0]")) { return 1; }
+
+        sim.setSpecsyn(bosz(-1.0, 0.5));
+        sim.setFeH(fehWide);
+        if (sim.fehDist().getMin() != -0.5 || sim.fehDist().getMax() != 0.5)
+        {
+            std::cerr << "testSimControls: setFeH: expected widening to [-0.5, 0.5] to "
+                "succeed once the synthesizer covers it and no Yields is installed\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: setFeH: unexpected exception: " << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
 // Verify that setSpecsyn()/setExtinct()/setNebular() each reject an
 // object constructed against a different SimControls than the one
 // it's being installed on -- each of Specsyn/Extinct/Nebular stores a
@@ -3418,6 +3496,7 @@ auto testSimControls() -> int
     result += testSimControlsSettersRejectMismatchedControls();
     result += testSimControlsSetSpecsynRejectsNarrowerFeh();
     result += testSimControlsSetYieldsRejectsNarrowerFeh();
+    result += testSimControlsSetFeHRejectsBeyondSpecsynYields();
     result += testSimControlsUnusedKeys();
     result += testSimControlsStrictInput();
     result += testSimControlsIgnoredKeys();

@@ -636,19 +636,39 @@ void io::SimControls::setFeH(const std::string& feH)
             "out-of-range interpolation. Construct a new SimControls "
             "with a wider stars.FeH range instead if you need one.");
     }
+
+    // Nor beyond the [Fe/H] range the installed spectral synthesizer or
+    // Yields was constructed for (see checkSpecsynReplacement()'s own
+    // comment): e.g. after setTracks() has installed wider tracks, the
+    // tracks check above would otherwise let fehDist_ widen past them
+    const auto checkCovered = [&newFehDist](const std::string& what, const double lo, const double hi)
+    {
+        if (!(lo <= newFehDist.getMin() && newFehDist.getMax() <= hi)) // NOLINT(readability-simplify-boolean-expr) -- the De Morgan form would accept a NaN range, since every comparison with NaN is false
+        {
+            throw std::runtime_error(
+                "SimControls::setFeH: the requested [Fe/H] distribution, [" +
+                std::to_string(newFehDist.getMin()) + ", " + std::to_string(newFehDist.getMax()) +
+                "], extends beyond the range the installed " + what + " was constructed "
+                "for, [" + std::to_string(lo) + ", " + std::to_string(hi) + "]. Install a " +
+                what + " constructed for a range covering it first.");
+        }
+    };
+    if (specsyn_) { checkCovered("spectral synthesizer", specsyn_->requestedFehMin(), specsyn_->requestedFehMax()); }
+    if (yields_) { checkCovered("Yields", yields_->requestedFehMin(), yields_->requestedFehMax()); }
+
+    // Build the fixed-[Fe/H] slice, which can itself throw, before
+    // changing any state; if the new distribution is not degenerate,
+    // the slice is cleared instead -- otherwise constFeHTracks_ would
+    // keep pointing at a stale slice from whichever single [Fe/H] value
+    // used to apply, silently contradicting tracks2D()'s own "nullptr
+    // if constFeH() is false" contract
+    decltype(constFeHTracks_) newConstFeHTracks;
+    if (newFehDist.getMin() == newFehDist.getMax())
+    {
+        newConstFeHTracks = std::make_shared<tracks::Tracks2D>(tracks_->sliceConstFeH(newFehDist.getMin()));
+    }
     fehDist_ = std::move(newFehDist);
-    if (constFeH())
-    {
-        constFeHTracks_ = std::make_shared<tracks::Tracks2D>(tracks_->sliceConstFeH(fehDist_.getMin()));
-    }
-    else
-    {
-        // The new fehDist_ is no longer degenerate -- constFeHTracks_
-        // would otherwise keep pointing at a stale slice from whichever
-        // single [Fe/H] value used to apply, silently contradicting
-        // tracks2D()'s own "nullptr if constFeH() is false" contract.
-        constFeHTracks_ = nullptr;
-    }
+    constFeHTracks_ = std::move(newConstFeHTracks);
 }
 
 // Set the stellar tracks, recomputing tracks2D() (constFeHTracks_)

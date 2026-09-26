@@ -289,8 +289,11 @@ RuntimeError
     If feh is not numeric and does not name a file that can be found,
     or if its own [min, max] range is broader than the [Fe/H] range the
     current stellar tracks were loaded over -- widening past it risks
-    interpolating outside the range of data actually loaded. Narrowing,
-    or otherwise staying within, that range is always accepted.)doc";
+    interpolating outside the range of data actually loaded -- or
+    extends beyond the requestedFehMin()/requestedFehMax() range of the
+    installed spectral synthesizer or Yields, if any. Narrowing, or
+    otherwise staying within, those ranges is always accepted. On
+    rejection, this SimControls is left unchanged.)doc";
 
 static constexpr std::string_view setCLFDocstring = R"doc(Set the cluster lifetime function.
 
