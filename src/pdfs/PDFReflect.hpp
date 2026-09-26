@@ -12,6 +12,7 @@
 #include "PDF.hpp"
 #include <functional>
 #include <limits>
+#include <utility>
 #include <vector>
 
 namespace pdfs {
@@ -127,6 +128,17 @@ namespace pdfs {
         [[nodiscard]] auto expectationValue() const -> double override
         {
             return reflect(pdf_.get().expectationValue());
+        }
+
+        /**
+         * @brief Get the location and weight of every delta-function segment of the reflected PDF
+         * @return pdf.deltas(), with each location reflected
+         */
+        [[nodiscard]] auto deltas() const -> std::vector<std::pair<double, double>> override
+        {
+            auto result = pdf_.get().deltas();
+            for (auto& [x, w] : result) { x = reflect(x); }
+            return result;
         }
 
         /**

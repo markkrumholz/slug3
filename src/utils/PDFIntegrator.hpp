@@ -16,6 +16,7 @@
 #include <cmath>
 #include <cstddef>
 #include <functional>
+#include <ranges>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -206,13 +207,20 @@ namespace utils
          * @details
          * Clamps [a, b] to p_'s own support, records the result in
          * aReal_/bReal_ for integrand()'s own benefit (see its own
-         * comment for why), log-transforms a/b themselves if
+         * comment for why), and returns all zeros if the clamped
+         * interval is empty or has zero width (as PDF::integral(a, b)
+         * does); otherwise log-transforms a/b themselves if
          * logTransform_ is set, then constructs a GKIntegrator whose
          * own integrand is this class's integrand() (a pointer to
          * member function, so this is passed as the first extra
          * argument to GKIntegrator::integrate() below -- see
          * GKIntegrator's own @tparam F comment), passing maxIter_/
-         * absTol_/relTol_ through unchanged, and returns its result.
+         * absTol_/relTol_ through unchanged. Finally adds the
+         * contribution of each of p_'s own delta-function segments
+         * (see pdfs::PDF::deltas()) lying within [a, b], inclusive:
+         * p_'s density excludes them, but each contributes its own
+         * weight times f at its own location, since the integral of
+         * f(x) delta(x - x0) is f(x0).
          */
         template <class... Args>
         [[nodiscard]] auto integrate(double a, double b, Args&&... args) const -> std::vector<double>
@@ -221,6 +229,15 @@ namespace utils
             b = std::min(b, p_.getMax());
             aReal_ = a;
             bReal_ = b;
+
+            // An empty (or zero-width) clamped interval integrates to 0,
+            // even with a delta-function segment at its one point,
+            // matching PDF::integral(a, b)
+            if (a >= b)
+            {
+                std::vector<double> zero(nInt_, 0.0); // not a braced return: {nInt_, 0.0} would be a two-element list
+                return zero;
+            }
 
             if (logTransform_)
             {
@@ -236,10 +253,22 @@ namespace utils
                 b = std::log(b);
             }
 
+            // Delta-function contributions, evaluated before args are
+            // forwarded (and possibly moved from) below
+            std::vector<double> deltaSum(nInt_, 0.0);
+            for (const auto& [x0, w] : p_.deltas())
+            {
+                if (x0 < aReal_ || x0 > bReal_) { continue; }
+                const auto val = invokeF(x0, args...);
+                for (auto&& [d, v] : std::views::zip(deltaSum, val)) { d += w * v; }
+            }
+
             using IntegrandFn = decltype(&PDFIntegrator::template integrand<Args...>);
             const GKIntegrator<IntegrandFn, Order> integ(
                 &PDFIntegrator::template integrand<Args...>, nInt_, maxIter_, absTol_, relTol_);
-            return integ.integrate(a, b, this, std::forward<Args>(args)...);
+            auto result = integ.integrate(a, b, this, std::forward<Args>(args)...);
+            for (auto&& [r, d] : std::views::zip(result, deltaSum)) { r += d; }
+            return result;
         }
 
     private:

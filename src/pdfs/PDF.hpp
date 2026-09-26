@@ -27,6 +27,7 @@
 #include <random>
 #include <ranges>
 #include <stdexcept>
+#include <utility>
 #include <valarray>
 #include <vector>
 
@@ -255,6 +256,25 @@ namespace pdfs {
          * @return The integral of the PDF segment over the specified range.
          */
         [[nodiscard]] auto integral() const -> double { return wgt_.sum(); }
+        /**
+         * @brief Get the location and weight of every delta-function segment
+         * @return One (location, weight) pair per delta-function segment,
+         *   in segment order; empty if there are none
+         * @details
+         * A delta-function segment is one whose own support is a single
+         * point (getMin() == getMax()). operator() never includes such
+         * a segment (a density is undefined there), but integral()
+         * does, so any quadrature against operator() must add these
+         * point masses separately -- see utils::PDFIntegrator::integrate().
+         */
+        [[nodiscard]] virtual auto deltas() const -> std::vector<std::pair<double, double>>
+        {
+            std::vector<std::pair<double, double>> result;
+            for (auto const& [s,w] : std::views::zip(seg_,wgt_)) {
+                if (s->getMin() == s->getMax()) { result.emplace_back(s->getMin(), w); }
+            }
+            return result;
+        }
 
         // Drawing functions
         /**
