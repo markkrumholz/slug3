@@ -622,7 +622,7 @@ void io::SimControls::setFeH(const std::string& feH)
     auto newFehDist = utils::initPDFFromString(feH);
     // Written so that a NaN range (a default-constructed Tracks3D) is
     // rejected, not silently accepted
-    if (!(tracks_->fehMin() <= newFehDist.getMin() && newFehDist.getMax() <= tracks_->fehMax()))
+    if (!(tracks_->fehMin() <= newFehDist.getMin() && newFehDist.getMax() <= tracks_->fehMax())) // NOLINT(readability-simplify-boolean-expr) -- the De Morgan form would accept a NaN range, since every comparison with NaN is false
     {
         throw std::runtime_error(
             "SimControls::setFeH: the requested [Fe/H] distribution, "
@@ -661,7 +661,7 @@ void io::SimControls::checkTracksCoverFeH(const tracks::Tracks3D& tracks) const
     // The same requirement setFeH() enforces from the other side;
     // written so that a NaN range (a default-constructed Tracks3D) is
     // rejected rather than passing every comparison
-    if (!(tracks.fehMin() <= fehDist_.getMin() && fehDist_.getMax() <= tracks.fehMax()))
+    if (!(tracks.fehMin() <= fehDist_.getMin() && fehDist_.getMax() <= tracks.fehMax())) // NOLINT(readability-simplify-boolean-expr) -- the De Morgan form would accept a NaN range, since every comparison with NaN is false
     {
         throw std::invalid_argument(
             "SimControls::setTracks: the new stellar tracks were loaded over "
