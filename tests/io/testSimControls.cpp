@@ -3050,6 +3050,33 @@ static auto testSimControlsFracStochMass() -> int
                 << controls.fracStochMass() << " and " << controls.nonStochIMFMass() << "\n";
             result = 1;
         }
+
+        // A delta-function IMF at 20 Msun: entirely non-stochastic, with
+        // nonStochIMFMass() equal to its own point mass, if
+        // min_stoch_mass is above 20 Msun, and entirely stochastic if
+        // below it. (Also checks that setIMF() recomputes
+        // fracStochMass().)
+        constexpr double deltaMass = 20.0;
+        controls.setMinStochMass(30.0);
+        controls.setIMF("20.0");
+        if (controls.fracStochMass() != 0.0 ||
+            std::abs(controls.nonStochIMFMass() - deltaMass) > tol * deltaMass)
+        {
+            std::cerr << "testSimControls: fracStochMass: expected fracStochMass() 0 and "
+                "nonStochIMFMass() " << deltaMass << " for a delta-function IMF at "
+                << deltaMass << " Msun with min_stoch_mass = 30, got " << controls.fracStochMass()
+                << " and " << controls.nonStochIMFMass() << "\n";
+            result = 1;
+        }
+        controls.setMinStochMass(10.0);
+        if (controls.fracStochMass() != 1.0 || controls.nonStochIMFMass() != 0.0)
+        {
+            std::cerr << "testSimControls: fracStochMass: expected fracStochMass() 1 and "
+                "nonStochIMFMass() 0 for a delta-function IMF at " << deltaMass
+                << " Msun with min_stoch_mass = 10, got " << controls.fracStochMass()
+                << " and " << controls.nonStochIMFMass() << "\n";
+            result = 1;
+        }
         return result;
     }
     catch (const std::exception& error)

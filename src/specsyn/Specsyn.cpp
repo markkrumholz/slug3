@@ -40,10 +40,17 @@ namespace
      *   an integral of a per-star quantity against imf over [mMin,
      *   mMax] into that quantity per unit mass of stars in [mMin,
      *   mMax] (see io::SimControls::nonStochIMFMass()'s own comment);
-     *   0 if the clamped range is empty
+     *   0 if imf has no stars in the clamped range
      */
     auto imfMassIntegral(const pdfs::PDF& imf, const double mMin, const double mMax) -> double
     {
+        // A range covering all of imf uses its whole-range integral
+        // and mean directly -- see SimControls::nonStochIMFMass()'s
+        // own identical special case for why (a delta-function imf)
+        if (mMin <= imf.getMin() && mMax >= imf.getMax())
+        {
+            return imf.expectationValue() * imf.integral();
+        }
         const double a = std::max(mMin, imf.getMin());
         const double b = std::min(mMax, imf.getMax());
         if (b <= a) { return 0.0; }

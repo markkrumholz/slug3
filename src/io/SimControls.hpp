@@ -21,7 +21,6 @@
 #include "../utils/TrackedDeck.hpp"
 #include "../yields/YieldCommons.hpp"
 #include "../yields/Yields.hpp"
-#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -705,7 +704,9 @@ namespace io
          *   imf() itself (normalized by number, so that p integrates to
          *   1 over imf()'s whole range); 0 if minStochMass() <=
          *   imf().getMin(), i.e. if nothing is treated
-         *   non-stochastically
+         *   non-stochastically. For a delta-function IMF at a mass m0
+         *   below minStochMass(), this is m0 itself -- the range
+         *   [m0, m0] has zero width, but contains the whole IMF
          * @details
          * This is the normalization that converts an integral of a
          * per-star quantity f(m) against imf() over the
@@ -720,9 +721,14 @@ namespace io
         [[nodiscard]] auto nonStochIMFMass() const -> double
         {
             const double mMin = imf_.getMin();
-            const double mMax = std::min(minStochMass_, imf_.getMax());
-            if (mMax <= mMin) { return 0.0; }
-            return imf_.expectationValue(mMin, mMax) * imf_.integral(mMin, mMax);
+            if (minStochMass_ <= mMin) { return 0.0; }
+            // If the whole IMF is non-stochastic, use its whole-range
+            // integral and mean directly: PDF::integral(a, b) is 0 for
+            // any zero-width [a, b], which would otherwise give 0 for a
+            // delta-function IMF (zero-width support, but all of its
+            // stars in it)
+            if (minStochMass_ >= imf_.getMax()) { return imf_.expectationValue() * imf_.integral(); }
+            return imf_.expectationValue(mMin, minStochMass_) * imf_.integral(mMin, minStochMass_);
         }
 
         /**
