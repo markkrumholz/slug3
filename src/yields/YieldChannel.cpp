@@ -355,6 +355,8 @@ namespace yields
         const double fehMin,
         const double fehMax,
         const std::string& registryName) :
+        requestedFehMin_(fehMin),
+        requestedFehMax_(fehMax),
         descriptor_(descriptor)
     {
         const std::string& modelName = descriptor.modelName_;

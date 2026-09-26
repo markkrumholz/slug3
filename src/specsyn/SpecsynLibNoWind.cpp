@@ -465,6 +465,8 @@ namespace specsyn
             getMicroDefault(spectraName, registryName) : microTurb),
         r_(r)
     {
+        this->setRequestedFehRange(fehMin, fehMax);
+
         // Step 1: find the set of spectra matching the input criteria
         auto [fehVals, groupNames] = findMatchingSpectra(
             spectraName, fehMin, fehMax, afe, cfe, microTurb_, r, registryName);

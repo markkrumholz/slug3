@@ -247,6 +247,25 @@ namespace yields
         [[nodiscard]] auto feH() const -> const std::vector<double>& { return feH_; }
 
         /**
+         * @brief Return the minimum [Fe/H] this channel was constructed to cover
+         * @return The fehMin the constructor was given
+         * @details
+         * Unlike feH().front(), which reports the data actually
+         * loaded (which may extend below it -- see the constructor's
+         * own comment), this is the range the caller asked for. See
+         * Yields::requestedFehMin(), which combines these across
+         * channels.
+         */
+        [[nodiscard]] auto requestedFehMin() const -> double { return requestedFehMin_; }
+
+        /**
+         * @brief Return the maximum [Fe/H] this channel was constructed to cover
+         * @return The fehMax the constructor was given -- see
+         *   requestedFehMin()'s own comment
+         */
+        [[nodiscard]] auto requestedFehMax() const -> double { return requestedFehMax_; }
+
+        /**
          * @brief Return the yield data as a 3D view
          * @return An mdspan of shape (feH().size(), masses().size(),
          *   isotopes().size()) into yieldData_, i.e. yld()[f, m, i] is
@@ -361,6 +380,8 @@ namespace yields
 
     private:
 
+        double requestedFehMin_; /**< See requestedFehMin() */
+        double requestedFehMax_; /**< See requestedFehMax() */
         YieldChannelDescriptor descriptor_; /**< The descriptor this channel was built from, with mMin_/mMax_ kept in sync with rebuildYieldGrid()'s own most recent explicit values -- see descriptor()'s own comment */
         std::vector<double> masses_;       /**< Stellar masses (Msun) this channel's yields are tabulated at -- see masses()'s own comment */
         std::vector<double> massesOrig_;   /**< Stellar masses (Msun) as read from the model's own HDF5 file -- see massesOrig()'s own comment */

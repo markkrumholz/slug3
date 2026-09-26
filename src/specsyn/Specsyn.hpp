@@ -139,6 +139,28 @@ namespace specsyn
         { return std::numeric_limits<double>::infinity(); }
 
         /**
+         * @brief Return the minimum [Fe/H] this synthesizer was constructed to cover
+         * @return The fehMin its constructor was given, or -infinity
+         *   for a synthesizer with no [Fe/H] axis (SpecsynBlackbody,
+         *   SpecsynLibWD)
+         * @details
+         * Unlike fehMin(), which reports the real data a library
+         * holds, this is the range the caller asked for, fixed at
+         * construction. SimControls::setSpecsyn() compares it against
+         * the currently installed synthesizer's own, to reject a
+         * replacement built for a narrower [Fe/H] range.
+         */
+        [[nodiscard]] auto requestedFehMin() const -> double { return requestedFehMin_; }
+
+        /**
+         * @brief Return the maximum [Fe/H] this synthesizer was constructed to cover
+         * @return The fehMax its constructor was given, or +infinity
+         *   for a synthesizer with no [Fe/H] axis -- see
+         *   requestedFehMin()'s own comment
+         */
+        [[nodiscard]] auto requestedFehMax() const -> double { return requestedFehMax_; }
+
+        /**
          * @brief Return the minimum log(g) this synthesizer has real spectral data for
          * @return -infinity by default (no restriction) -- overridden
          *   by SpecsynLibNoWind/SpecsynLibWD (their own logg().front());
@@ -632,7 +654,24 @@ namespace specsyn
 
         std::vector<double> wl_;     /**< Wavelength grid for the spectral synthesizer, in Angstrom */
 
+        /**
+         * @brief Record the [Fe/H] range this synthesizer was constructed to cover
+         * @param fehMin The fehMin its constructor was given
+         * @param fehMax The fehMax its constructor was given
+         * @details
+         * Called by every derived constructor that takes an [Fe/H]
+         * range; see requestedFehMin()'s own comment.
+         */
+        void setRequestedFehRange(const double fehMin, const double fehMax)
+        {
+            requestedFehMin_ = fehMin;
+            requestedFehMax_ = fehMax;
+        }
+
     private:
+
+        double requestedFehMin_ = -std::numeric_limits<double>::infinity(); /**< See requestedFehMin() */
+        double requestedFehMax_ = std::numeric_limits<double>::infinity();  /**< See requestedFehMax() */
 
         /**
          * @brief Shared implementation behind both specCts() overloads and continuousSpecIntegrand()

@@ -13,8 +13,10 @@
 #include "../src/pdfs/PDFSegmentLognormal.hpp"
 #include "../src/pdfs/PDFSegmentPowerlaw.hpp"
 #include "../src/specsyn/SpecsynBlackbody.hpp"
+#include "../src/specsyn/SpecsynLibNoWind.hpp"
 #include "../src/tracks/Tracks3D.hpp"
 #include "../src/utils/MiscUtils.hpp"
+#include "../src/yields/Yields.hpp"
 #include "testSimControls.hpp"
 #include <algorithm>
 #include <cmath>
@@ -2838,6 +2840,161 @@ static auto testSimControlsSetFeHResetsTracks2DWhenNoLongerFixed() -> int
     return 0;
 }
 
+// Verify that setSpecsyn() rejects a spectral synthesizer constructed
+// for a narrower [Fe/H] range than the installed one's own
+// requestedFehMin()/requestedFehMax(), leaving specsyn() unchanged;
+// accepts one covering at least the same range, including a
+// SpecsynBlackbody (no [Fe/H] axis, so an unbounded range); and, with
+// no synthesizer installed, requires the replacement to cover
+// fehDist() instead.
+static auto testSimControlsSetSpecsynRejectsNarrowerFeh() -> int
+{
+    const std::string fileName = "tests/core/assets/testCluster.in";
+    const std::string registry = "tests/specsyn/assets/spectra.toml";
+    toml::table inputDeck = toml::parse_file(fileName);
+    inputDeck.at_path("stars").as_table()->insert_or_assign(
+        "FeH", "tests/core/assets/testClusterFeHDist.toml");
+    auto* spectraTable = inputDeck.at_path("spectra").as_table();
+    spectraTable->insert_or_assign("registry", registry);
+    spectraTable->insert_or_assign("model", std::string("BOSZ_test"));
+    try
+    {
+        io::SimControls sim(inputDeck);
+        const double curMin = sim.specsyn()->requestedFehMin();
+        const double curMax = sim.specsyn()->requestedFehMax();
+        if (!(curMin <= sim.fehDist().getMin() && sim.fehDist().getMax() <= curMax))
+        {
+            std::cerr << "testSimControls: setSpecsyn: test bug: expected the deck's own "
+                "synthesizer to cover fehDist(), got [" << curMin << ", " << curMax << "]\n";
+            return 1;
+        }
+        auto bosz = [&](const double fehMin, const double fehMax)
+        {
+            return std::make_unique<specsyn::SpecsynLibNoWind<specsyn::OOBPolicy::raise>>(
+                "BOSZ_test", fehMin, fehMax, 0.0, 0.0, 0.0, specsyn::defaultR, registry,
+                0.0, 0.0, 0, sim);
+        };
+
+        // Narrower than the installed synthesizer: rejected
+        const auto* before = sim.specsyn().get();
+        try
+        {
+            sim.setSpecsyn(bosz(-0.25, 0.25));
+            std::cerr << "testSimControls: setSpecsyn: expected a synthesizer built for "
+                "[-0.25, 0.25] to be rejected, since the installed one covers ["
+                << curMin << ", " << curMax << "]\n";
+            return 1;
+        }
+        catch (const std::invalid_argument&) { /* expected */ }
+        if (sim.specsyn().get() != before)
+        {
+            std::cerr << "testSimControls: setSpecsyn: expected specsyn() unchanged after "
+                "a rejected replacement\n";
+            return 1;
+        }
+
+        // The same range, then an unbounded one: accepted
+        sim.setSpecsyn(bosz(curMin, curMax));
+        sim.setSpecsyn(std::make_unique<specsyn::SpecsynBlackbody>(3000.0, 9000.0, 50, sim));
+
+        // With none installed, a replacement must cover fehDist()
+        sim.setSpecsyn(nullptr);
+        try
+        {
+            sim.setSpecsyn(bosz(-0.25, 0.25));
+            std::cerr << "testSimControls: setSpecsyn: expected a synthesizer built for "
+                "[-0.25, 0.25] to be rejected with none installed, since it does not "
+                "cover fehDist() [-0.5, 0.5]\n";
+            return 1;
+        }
+        catch (const std::invalid_argument&) { /* expected */ }
+        sim.setSpecsyn(bosz(-0.5, 0.5));
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: setSpecsyn: unexpected exception: " << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Verify that setYields() rejects a Yields built while fehDist() was
+// narrowed, once fehDist() has been broadened again -- the replacement
+// covers a narrower [Fe/H] range than the installed Yields -- and,
+// with no Yields installed, one not covering fehDist(); that a rejected
+// call leaves yields() unchanged; and that a Yields covering the full
+// range is accepted. Also checks that Yields::requestedFehMin()/Max()
+// report the range its channels were built for.
+static auto testSimControlsSetYieldsRejectsNarrowerFeh() -> int
+{
+    const std::string fileName = "tests/core/assets/testCluster.in";
+    const std::string registry = "tests/yields/assets/yields.toml";
+    const std::string fehFull = "tests/core/assets/testClusterSpecsynFullFeHDist.toml"; // flat [-1, 0]
+    toml::table inputDeck = toml::parse_file(fileName);
+    inputDeck.at_path("stars").as_table()->insert_or_assign("FeH", fehFull);
+    inputDeck.insert_or_assign("yields", toml::table{
+        { "channel1", toml::table{ { "channel", "ccsn" }, { "model", "sukhbold_test" } } },
+        { "registry", registry },
+    });
+    try
+    {
+        io::SimControls sim(inputDeck);
+        if (sim.yields()->requestedFehMin() != -1.0 || sim.yields()->requestedFehMax() != 0.0)
+        {
+            std::cerr << "testSimControls: setYields: expected the deck's own Yields to "
+                "report requestedFeh range [-1, 0], got [" << sim.yields()->requestedFehMin()
+                << ", " << sim.yields()->requestedFehMax() << "]\n";
+            return 1;
+        }
+
+        // Build a Yields while fehDist() is narrowed to -0.5, then
+        // broaden fehDist() back out
+        sim.setFeH("-0.5");
+        auto narrow = std::make_unique<yields::Yields>(sim, registry);
+        sim.setFeH(fehFull);
+
+        const auto* before = sim.yields().get();
+        try
+        {
+            sim.setYields(std::move(narrow));
+            std::cerr << "testSimControls: setYields: expected a Yields built while "
+                "fehDist() was narrowed to -0.5 to be rejected\n";
+            return 1;
+        }
+        catch (const std::invalid_argument&) { /* expected */ }
+        if (sim.yields().get() != before)
+        {
+            std::cerr << "testSimControls: setYields: expected yields() unchanged after a "
+                "rejected replacement\n";
+            return 1;
+        }
+
+        // With none installed, the same narrow Yields must still be
+        // rejected, since it does not cover fehDist() [-1, 0]
+        sim.setYields(nullptr);
+        sim.setFeH("-0.5");
+        narrow = std::make_unique<yields::Yields>(sim, registry);
+        sim.setFeH(fehFull);
+        try
+        {
+            sim.setYields(std::move(narrow));
+            std::cerr << "testSimControls: setYields: expected a Yields built for [-0.5, "
+                "-0.5] to be rejected with none installed\n";
+            return 1;
+        }
+        catch (const std::invalid_argument&) { /* expected */ }
+
+        // A Yields built over the full fehDist() is accepted
+        sim.setYields(std::make_unique<yields::Yields>(sim, registry));
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: setYields: unexpected exception: " << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
 // Verify that setSpecsyn()/setExtinct()/setNebular() each reject an
 // object constructed against a different SimControls than the one
 // it's being installed on -- each of Specsyn/Extinct/Nebular stores a
@@ -3259,6 +3416,8 @@ auto testSimControls() -> int
     result += testSimControlsSetTracksRejectsUncoveredFeH();
     result += testSimControlsSetFeHResetsTracks2DWhenNoLongerFixed();
     result += testSimControlsSettersRejectMismatchedControls();
+    result += testSimControlsSetSpecsynRejectsNarrowerFeh();
+    result += testSimControlsSetYieldsRejectsNarrowerFeh();
     result += testSimControlsUnusedKeys();
     result += testSimControlsStrictInput();
     result += testSimControlsIgnoredKeys();

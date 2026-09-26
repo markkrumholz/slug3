@@ -13,7 +13,9 @@
 #include "../elem/ElemCommons.hpp"
 #include "YieldChannel.hpp"
 #include "YieldCommons.hpp"
+#include <algorithm>
 #include <cstddef>
+#include <limits>
 #include <mdspan> // NOLINT(misc-include-cleaner)
 #include <memory>
 #include <optional>
@@ -366,6 +368,38 @@ namespace yields
          *   same order -- see rebuildYieldGrid()'s own comment
          */
         [[nodiscard]] auto isotopes() const -> const elem::IsotopeList& { return isotopes_; }
+
+        /**
+         * @brief Return the minimum [Fe/H] every loaded channel was constructed to cover
+         * @return The largest requestedFehMin() among yieldChannels(),
+         *   or -infinity if there are none
+         * @details
+         * Channels can be added after construction (addChannel(),
+         * setChannels()), each with its own requested range, so this
+         * Yields covers only the intersection of them all.
+         * SimControls::setYields() compares it against the currently
+         * installed Yields' own, to reject a replacement built for a
+         * narrower [Fe/H] range.
+         */
+        [[nodiscard]] auto requestedFehMin() const -> double
+        {
+            double result = -std::numeric_limits<double>::infinity();
+            for (const auto& channel : yieldChannels_) { result = std::max(result, channel->requestedFehMin()); }
+            return result;
+        }
+
+        /**
+         * @brief Return the maximum [Fe/H] every loaded channel was constructed to cover
+         * @return The smallest requestedFehMax() among yieldChannels(),
+         *   or +infinity if there are none -- see requestedFehMin()'s
+         *   own comment
+         */
+        [[nodiscard]] auto requestedFehMax() const -> double
+        {
+            double result = std::numeric_limits<double>::infinity();
+            for (const auto& channel : yieldChannels_) { result = std::min(result, channel->requestedFehMax()); }
+            return result;
+        }
 
         /**
          * @brief Return every channel's own yield, as one (nchannels, isotopes().size()) array

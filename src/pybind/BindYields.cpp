@@ -335,6 +335,28 @@ RuntimeError
 // Disable linting for includes -- the pybind macro magic seems to confuse
 // the linter
 // NOLINTBEGIN(misc-include-cleaner)
+static constexpr std::string_view yieldsRequestedFehMinDocstring = R"doc(Return the minimum [Fe/H] this Yields was constructed to cover.
+
+Returns
+-------
+float
+    The largest requestedFehMin() among yieldChannels, or -inf if
+    there are none: channels can be added after construction, each
+    with its own range, so this Yields covers only their intersection.
+
+Details
+-------
+SimControls.setSpecsyn()/setYields() compare this against the
+currently installed object's own, to reject a replacement built for a
+narrower [Fe/H] range.)doc";
+
+static constexpr std::string_view yieldsRequestedFehMaxDocstring = R"doc(Return the maximum [Fe/H] this Yields was constructed to cover.
+
+Returns
+-------
+float
+    The maximum counterpart of requestedFehMin().)doc";
+
 void bindYields(py::module_& m)
 {
     py::class_<yields::Yields, py::smart_holder>(m, "Yields", classDocstring.data())
@@ -479,6 +501,10 @@ void bindYields(py::module_& m)
                 },
                 yieldDocstring.data(), py::arg("mass"), py::arg("feh"), py::arg("dt_decay") = 0.0)
         .def("yieldSum", &yields::Yields::yieldSum,
-                yieldSumDocstring.data(), py::arg("mass"), py::arg("feh"), py::arg("dt_decay") = 0.0);
+                yieldSumDocstring.data(), py::arg("mass"), py::arg("feh"), py::arg("dt_decay") = 0.0)
+        .def("requestedFehMin", &yields::Yields::requestedFehMin,
+                yieldsRequestedFehMinDocstring.data())
+        .def("requestedFehMax", &yields::Yields::requestedFehMax,
+                yieldsRequestedFehMaxDocstring.data());
 }
 // NOLINTEND(misc-include-cleaner)
