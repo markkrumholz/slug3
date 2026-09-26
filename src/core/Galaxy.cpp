@@ -31,6 +31,7 @@
 #include <limits>
 #include <numbers>
 #include <numeric>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <utility>
@@ -384,7 +385,11 @@ void core::Galaxy::addContinuousSpec(const extinct::Extinct* ext, const nebular:
         const auto props = getFieldStarProps();
         for (std::size_t j = 0; j < fieldStars_.size(); ++j)
         {
-            const auto starSpec = synth->spec(props[j], fieldStars_[j].feh_); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- props has size fieldStars_.size() by getFieldStarProps()'s own contract, and j is bounded by fieldStars_.size()
+            // A star outside the tracks' own mass range contributes
+            // nothing, as in Cluster::computeSpec()
+            const auto& starProps = props[j]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- props has size fieldStars_.size() by getFieldStarProps()'s own contract, and j is bounded by fieldStars_.size()
+            if (!starProps.has_value()) { continue; }
+            const auto starSpec = synth->spec(*starProps, fieldStars_[j].feh_); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- as above
             for (std::size_t i = 0; i < contSpec.size(); ++i) { contSpec[i] += starSpec[i]; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- starSpec has size wl().size() by Specsyn::spec()'s own contract, matching contSpec's size set just above
         }
     }
@@ -493,7 +498,8 @@ void core::Galaxy::computeLbol()
     // for why).
     for (const auto& props : getFieldStarProps())
     {
-        const double logL = props[static_cast<std::size_t>(tracks::FieldIdx::logL)]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- StarData is a fixed-size std::array, and logL is one of its compile-time-known indices
+        if (!props.has_value()) { continue; } // outside the tracks' own mass range: no luminosity, as in Cluster::computeLbol()
+        const double logL = (*props)[static_cast<std::size_t>(tracks::FieldIdx::logL)]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- StarData is a fixed-size std::array, and logL is one of its compile-time-known indices
         lbol_ += std::pow(10.0, logL);
     }
 }
@@ -786,7 +792,13 @@ void core::Galaxy::computeYields()
     // stochastic population.
     for (const auto& fieldStar : deadFieldStars_)
     {
-        const double dtDecay = sc.noDecay() ? 0.0 : curTime_ - fieldStar.deathTime_;
+        // A star above the tracks' own mass range has a death time of
+        // -infinity (see fieldStarLifetime()'s own comment), meaning it
+        // was already dead when it formed: its yield has been decaying
+        // since formTime_
+        const double timeDied = std::isfinite(fieldStar.deathTime_) ?
+            fieldStar.deathTime_ : fieldStar.formTime_;
+        const double dtDecay = sc.noDecay() ? 0.0 : curTime_ - timeDied;
         const auto contribution = decomposed
             ? yields->yield(fieldStar.mass_, fieldStar.feh_, dtDecay).second
             : yields->yieldSum(fieldStar.mass_, fieldStar.feh_, dtDecay);
@@ -822,12 +834,19 @@ void core::Galaxy::computeYields()
     }
 }
 
-auto core::Galaxy::getFieldStarProps() const -> std::vector<specsyn::Specsyn::StarData>
+auto core::Galaxy::getFieldStarProps() const -> std::vector<std::optional<specsyn::Specsyn::StarData>>
 {
     const auto& sc = controls_.get();
     const std::size_t n = fieldStars_.size();
-    std::vector<specsyn::Specsyn::StarData> props(n);
+    std::vector<std::optional<specsyn::Specsyn::StarData>> props(n);
     const double logTMin = sc.tracks()->logTMin();
+    const double mMin = sc.tracks()->mMin();
+    const double mMax = sc.tracks()->mMax();
+    // A star outside the tracks' own mass range has no properties to
+    // look up (see fieldStarLifetime()'s own comment); its entry is
+    // left empty
+    const auto inRange = [mMin, mMax](const FieldStar& fs) -> bool
+    { return fs.mass_ >= mMin && fs.mass_ <= mMax; };
 
     if (sc.constFeH())
     {
@@ -835,6 +854,7 @@ auto core::Galaxy::getFieldStarProps() const -> std::vector<specsyn::Specsyn::St
         for (std::size_t i = 0; i < n; ++i)
         {
             const auto& fs = fieldStars_[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i < n == fieldStars_.size() by construction
+            if (!inRange(fs)) { continue; }
             const double logT = std::max(std::log10(curTime_ - fs.formTime_), logTMin);
             props[i] = tracks2D->getStar(fs.mass_, logT); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- props has size n by construction, and i is bounded by n
         }
@@ -862,6 +882,7 @@ auto core::Galaxy::getFieldStarProps() const -> std::vector<specsyn::Specsyn::St
     for (const std::size_t i : order)
     {
         const auto& fs = fieldStars_[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i is an element of order, itself a permutation of [0, n), by construction
+        if (!inRange(fs)) { continue; }
         const double logT = std::max(std::log10(curTime_ - fs.formTime_), logTMin);
         props[i] = tracks3D->getStar(fs.mass_, logT, roundedFeh(i)); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
     }

@@ -973,7 +973,13 @@ static auto testFieldStarsMassBudget() -> int
 // star below 0.1 Msun should have an infinite death time and never
 // die, while every other one has a finite death time; and with a
 // delta-function IMF at 400 Msun, every field star should have a death
-// time of -infinity, and so be dead after the first advance().
+// time of -infinity, and so be dead after the first advance(). Also
+// checks that the consequences are handled: with the low-mass stars
+// living forever, spec() and lbol() must skip them rather than look up
+// their properties outside the tracks (both must be finite and
+// positive); and with the 400 Msun stars dead since formation, their
+// yields must decay since formTime_, not over an infinite time (every
+// yield must be finite).
 static auto testGalaxyFieldStarLifetimeClamped() -> int
 {
     int result = 0;
@@ -1025,6 +1031,15 @@ static auto testGalaxyFieldStarLifetimeClamped() -> int
                 result = 1;
             }
         }
+        const auto& spec = galaxy.spec();
+        if (!std::ranges::all_of(spec, [](const double v) -> bool { return std::isfinite(v); }) ||
+            std::reduce(spec.begin(), spec.end(), 0.0) <= 0.0 ||
+            !std::isfinite(galaxy.lbol()) || galaxy.lbol() <= 0.0)
+        {
+            std::cerr << "testGalaxy: fieldStarLifetimeClamped: expected finite, positive "
+                "spec() and lbol() with field stars below the tracks' minimum mass\n";
+            result = 1;
+        }
     }
     catch (const std::exception& error)
     {
@@ -1038,6 +1053,12 @@ static auto testGalaxyFieldStarLifetimeClamped() -> int
         toml::table inputDeck = toml::parse_file(inputFile);
         inputDeck.at_path("clusters").as_table()->insert("f_cluster", 0.0);
         inputDeck.at_path("stars").as_table()->insert_or_assign("IMF", 400.0);
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{
+                { "channel", "massive_star_winds" }, { "model", "sukhbold_test" },
+                { "m_max", 500.0 } } },
+            { "registry", std::string("tests/yields/assets/yields.toml") },
+        });
         const io::SimControls controls(inputDeck);
         if (controls.tracks()->mMax() >= 400.0)
         {
@@ -1054,6 +1075,14 @@ static auto testGalaxyFieldStarLifetimeClamped() -> int
             std::cerr << "testGalaxy: fieldStarLifetimeClamped: expected every 400 Msun field "
                 "star to be dead after the first advance(), got " << galaxy.fieldStars().size()
                 << " alive and " << galaxy.deadFieldStars().size() << " dead\n";
+            result = 1;
+        }
+        galaxy.advance(2.0 * t1);
+        if (galaxy.yields().empty() ||
+            !std::ranges::all_of(galaxy.yields(), [](const double v) -> bool { return std::isfinite(v); }))
+        {
+            std::cerr << "testGalaxy: fieldStarLifetimeClamped: expected every yield to be "
+                "finite for field stars above the tracks' maximum mass\n";
             result = 1;
         }
         for (const auto& fs : galaxy.deadFieldStars())

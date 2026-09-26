@@ -15,6 +15,7 @@
 #include "Cluster.hpp"
 #include <cstddef>
 #include <functional>
+#include <optional>
 #include <variant>
 #include <vector>
 
@@ -952,7 +953,10 @@ namespace core
          * @return A vector, one element per entry in fieldStars() (same
          *   order), of that star's properties at curTime() -- see
          *   tracks::Tracks2D::getStar()/tracks::Tracks3D::getStar()'s
-         *   own comment for what a StarData holds
+         *   own comment for what a StarData holds -- or empty for a
+         *   star whose mass lies outside the tracks' own mass range, so
+         *   has no properties to look up (such a star is treated as
+         *   contributing no light, as in Cluster::computeSpec())
          * @details
          * If the simulation has a fixed [Fe/H] (SimControls::constFeH()),
          * loops over fieldStars() directly, calling
@@ -989,7 +993,7 @@ namespace core
          * star whose formTime_ is exactly curTime_ (formed during the
          * very advance() call that produced this evaluation).
          */
-        [[nodiscard]] auto getFieldStarProps() const -> std::vector<specsyn::Specsyn::StarData>;
+        [[nodiscard]] auto getFieldStarProps() const -> std::vector<std::optional<specsyn::Specsyn::StarData>>;
 
         /**
          * @brief The instantaneous per-isotope yield rate of the purely continuous population, per unit stellar mass, at a given age and [Fe/H]
