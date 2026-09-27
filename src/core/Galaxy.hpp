@@ -807,7 +807,12 @@ namespace core
          * own spectrum, Lbol and yields (see
          * Specsyn::specCtsHelper()'s own comment). contSpec itself is
          * already integrated over [Fe/H], so only the nebular tables'
-         * own [Fe/H] dependence is integrated here.
+         * own [Fe/H] dependence is integrated here. The spectrum and
+         * line luminosities are each divided by the smallest nonzero
+         * magnitude they have at fehDist()'s own mean before
+         * integrating, so that both are dimensionless and on a common
+         * scale for intAbsTol() -- see the implementation's own
+         * comment for why a relative tolerance alone is not enough.
          */
         void addContinuousNebSpec(const extinct::Extinct* ext, const nebular::Nebular* neb,
             const std::vector<double>& contSpec);
