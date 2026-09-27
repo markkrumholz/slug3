@@ -1696,6 +1696,100 @@ static auto testExtinctApplyExtinctionCtsUniform() -> int
     return 0;
 }
 
+// Verify that the purely continuous population's nebular emission is
+// averaged over a non-degenerate [Fe/H] distribution, not evaluated at
+// its mean: with f_cluster = 0 and min_stoch_mass at the IMF's own
+// maximum (so spec() is exactly the continuous spectrum handed to
+// Nebular::getGalaxy()) and [Fe/H] flat in [-0.5, 0.5], specNeb() and
+// lineLum() must match, to within intRelTol(), a fine midpoint-rule
+// average of
+// getGalaxy(spec(), feh) over [Fe/H]. nebular_test_nonlinear.h5
+// tabulates values scaling as (1 + [Fe/H])^2 at [Fe/H] = -0.5, 0, 0.5
+// (see data/tools/cloudy/make_nebular_test_fixture.py --nonlinear), so
+// getGalaxy() is piecewise linear in [Fe/H] with a kink at 0, and that
+// average differs from getGalaxy() at the mean, 0 -- checked too, so
+// this test can tell the two apart. (nebular_test.h5 itself is exactly
+// linear in [Fe/H], for which the two would always agree.)
+static auto testGalaxyNebularMultiFeh() -> int
+{
+    constexpr std::size_t nRef = 200;
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFile);
+        inputDeck.at_path("clusters").as_table()->insert("f_cluster", 0.0);
+        inputDeck.at_path("stars").as_table()->insert_or_assign("min_stoch_mass", 120.0);
+        inputDeck.at_path("stars").as_table()->insert_or_assign(
+            "FeH", "tests/core/assets/testClusterFeHDist.toml");
+        inputDeck.at_path("nebular").as_table()->insert_or_assign("compute_neb", true);
+        inputDeck.at_path("nebular").as_table()->insert_or_assign(
+            "table", std::string("tests/nebular/assets/nebular_test_nonlinear.h5"));
+        const io::SimControls controls(inputDeck);
+        utils::rng().seed(rngSeed);
+        core::Galaxy galaxy(controls);
+        galaxy.advance(t1);
+
+        // The [Fe/H] integral is converged only to the integrator's own
+        // relative tolerance; the midpoint-rule reference is exact to
+        // rounding (getGalaxy() is linear on each cell, and the kink at
+        // 0 falls on a cell boundary)
+        const double tol = controls.intRelTol();
+        const auto neb = controls.nebular();
+        const auto& fehDist = controls.fehDist();
+        const auto spec = galaxy.spec();
+        std::vector<double> refSpec(spec.size(), 0.0);
+        std::vector<double> refLine(neb->lineWl().size(), 0.0);
+        double weightSum = 0.0;
+        const double dFeh = (fehDist.getMax() - fehDist.getMin()) / static_cast<double>(nRef);
+        for (std::size_t f = 0; f < nRef; ++f)
+        {
+            const double feh = fehDist.getMin() + ((static_cast<double>(f) + 0.5) * dFeh);
+            const double w = fehDist(feh);
+            const auto [s, l] = neb->getGalaxy(spec, feh);
+            for (std::size_t i = 0; i < s.size(); ++i) { refSpec.at(i) += w * s.at(i); }
+            for (std::size_t i = 0; i < l.size(); ++i) { refLine.at(i) += w * l.at(i); }
+            weightSum += w;
+        }
+        for (double& v : refSpec) { v /= weightSum; }
+        for (double& v : refLine) { v /= weightSum; }
+
+        // Largest relative difference between two vectors, over
+        // entries not negligible compared with ref's own largest
+        auto maxRelDiff = [](const std::vector<double>& got, const std::vector<double>& ref) -> double
+        {
+            const double scale = std::ranges::max(ref, {}, [](const double v) -> double { return std::abs(v); });
+            double worst = 0.0;
+            for (std::size_t i = 0; i < ref.size(); ++i)
+            {
+                if (std::abs(ref.at(i)) <= 1e-6 * std::abs(scale)) { continue; }
+                worst = std::max(worst, std::abs((got.at(i) / ref.at(i)) - 1.0));
+            }
+            return worst;
+        };
+
+        const double specDiff = maxRelDiff(galaxy.specNeb(), refSpec);
+        const double lineDiff = maxRelDiff(galaxy.lineLum(), refLine);
+        if (specDiff > tol || lineDiff > tol)
+        {
+            std::cerr << "testGalaxy: nebularMultiFeh: specNeb()/lineLum() differ from the "
+                "[Fe/H]-averaged getGalaxy() by up to " << specDiff << "/" << lineDiff << "\n";
+            return 1;
+        }
+        const auto [meanSpec, meanLine] = neb->getGalaxy(spec, fehDist.expectationValue());
+        if (maxRelDiff(meanLine, refLine) <= 5.0 * tol)
+        {
+            std::cerr << "testGalaxy: nebularMultiFeh: test bug: getGalaxy() at the mean [Fe/H] "
+                "matches the [Fe/H] average too closely to tell the two apart\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testGalaxy: nebularMultiFeh test failed: " << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
 // Verify that Galaxy's own specNeb()/specNebExtinct()/lineLum()/
 // lineLumExtinct() equal the independently-summed per-cluster
 // specNeb()/specNebExtinct()/lineLum()/lineLumExtinct() -- mirrors
@@ -2918,6 +3012,7 @@ auto testGalaxy() -> int
     result += testExtinctApplyExtinctionCtsDegenerate();
     result += testExtinctApplyExtinctionCtsUniform();
     result += testGalaxyNebular();
+    result += testGalaxyNebularMultiFeh();
     result += testContinuousPopNebularExtinct();
     result += testYieldsRateHydrogenOrderOfMagnitude();
     result += testYieldsRateSingleFehDelegates();

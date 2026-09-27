@@ -25,7 +25,16 @@ expected value for any in-range (feH, age) request is just the
 corresponding formula, no matter where the request falls relative to
 the tabulated grid points.
 
-Run from the repository root: python3 data/tools/cloudy/make_nebular_test_fixture.py
+With --nonlinear, every (1 + feH) factor above becomes (1 + feH)**2
+instead, written by default to tests/nebular/assets/
+nebular_test_nonlinear.h5: nonlinear in [Fe/H], so that an average of
+getGalaxy()/getCluster() over an [Fe/H] distribution differs from its
+value at the distribution's mean (for a linear dependence the two are
+always equal). Between tabulated points Nebular still interpolates
+linearly, so the exact expected result is the piecewise-linear
+interpolant of (1 + feH)**2 through FEH_VALS, not (1 + feH)**2 itself.
+
+Run from the repository root: python3 data/tools/cloudy/make_nebular_test_fixture.py [--nonlinear]
 
 :copyright: Copyright (c) 2026 Mark Krumholz
 """
@@ -59,36 +68,63 @@ CTM_CLUS0 = 1.0e-21   # erg/s/Angstrom per ionizing photon, at feH = 0, age = 1e
 LINE_CLUS0 = 1.0e-19  # erg/s per ionizing photon, at feH = 0, age = 1e6 yr, per line index (1-based)
 
 
-def galaxy_ctm(feh: float) -> np.ndarray:
-    """Galaxy continuum per ionizing photon, on WL_NATIVE, at feH."""
-    return np.full_like(WL_NATIVE, CTM_GAL0 * (1.0 + feh))
+def feh_factor(feh: float, nonlinear: bool) -> float:
+    """[Fe/H] scaling shared by every value: (1 + feh), or its square
+    if nonlinear.
+
+    Parameters
+    ----------
+    feh : float
+        [Fe/H] of the group being written.
+    nonlinear : bool
+        Whether to square the factor -- see the module docstring.
+
+    Returns
+    -------
+    float
+        The scaling factor.
+    """
+    return (1.0 + feh) ** 2 if nonlinear else 1.0 + feh
 
 
-def galaxy_line(feh: float) -> np.ndarray:
-    """Galaxy per-line luminosity per ionizing photon, at feH."""
+def galaxy_ctm(factor: float) -> np.ndarray:
+    """Galaxy continuum per ionizing photon, on WL_NATIVE, for [Fe/H] factor."""
+    return np.full_like(WL_NATIVE, CTM_GAL0 * factor)
+
+
+def galaxy_line(factor: float) -> np.ndarray:
+    """Galaxy per-line luminosity per ionizing photon, for [Fe/H] factor."""
     idx1 = np.arange(1, len(LINE_WL) + 1)
-    return LINE_GAL0 * idx1 * (1.0 + feh)
+    return LINE_GAL0 * idx1 * factor
 
 
-def cluster_ctm(feh: float) -> np.ndarray:
-    """Cluster continuum per ionizing photon, on (TIME, WL_NATIVE), at feH."""
-    per_time = CTM_CLUS0 * (1.0 + feh) * (TIME / 1.0e6)  # (ntime,)
+def cluster_ctm(factor: float) -> np.ndarray:
+    """Cluster continuum per ionizing photon, on (TIME, WL_NATIVE), for [Fe/H] factor."""
+    per_time = CTM_CLUS0 * factor * (TIME / 1.0e6)       # (ntime,)
     return np.outer(per_time, np.ones_like(WL_NATIVE))   # (ntime, nwl)
 
 
-def cluster_line(feh: float) -> np.ndarray:
-    """Cluster per-line luminosity per ionizing photon, on (TIME, line), at feH."""
+def cluster_line(factor: float) -> np.ndarray:
+    """Cluster per-line luminosity per ionizing photon, on (TIME, line), for [Fe/H] factor."""
     idx1 = np.arange(1, len(LINE_WL) + 1)
-    per_time = LINE_CLUS0 * (1.0 + feh) * (TIME / 1.0e6)  # (ntime,)
+    per_time = LINE_CLUS0 * factor * (TIME / 1.0e6)      # (ntime,)
     return np.outer(per_time, idx1)                       # (ntime, nline)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
-        "-o", "--output", default="tests/nebular/assets/nebular_test.h5",
-        help="path of the HDF5 fixture to write")
-    path = parser.parse_args().output
+        "-o", "--output", default=None,
+        help="path of the HDF5 fixture to write (default: "
+             "tests/nebular/assets/nebular_test.h5, or "
+             "nebular_test_nonlinear.h5 there with --nonlinear)")
+    parser.add_argument(
+        "--nonlinear", action="store_true",
+        help="scale by (1 + feH)**2 instead of (1 + feH) -- see the module docstring")
+    args = parser.parse_args()
+    nonlinear = args.nonlinear
+    path = args.output or ("tests/nebular/assets/nebular_test_nonlinear.h5" if nonlinear
+                           else "tests/nebular/assets/nebular_test.h5")
     with h5py.File(path, "w") as fout:
         fout.create_dataset("wl", data=WL_NATIVE)
         fout.create_dataset("line_wl", data=LINE_WL)
@@ -108,13 +144,14 @@ def main() -> None:
             logu_grp = vvcrit_grp.create_group(f"logU{LOG_U:+.2f}")
             logu_grp.attrs["logU"] = LOG_U
 
+            factor = feh_factor(feh, nonlinear)
             galaxy_grp = logu_grp.create_group("galaxy")
-            galaxy_grp.create_dataset("spec", data=galaxy_ctm(feh))
-            galaxy_grp.create_dataset("line_lum", data=galaxy_line(feh))
+            galaxy_grp.create_dataset("spec", data=galaxy_ctm(factor))
+            galaxy_grp.create_dataset("line_lum", data=galaxy_line(factor))
 
             cluster_grp = logu_grp.create_group("cluster")
-            cluster_grp.create_dataset("spec", data=cluster_ctm(feh))
-            cluster_grp.create_dataset("line_lum", data=cluster_line(feh))
+            cluster_grp.create_dataset("spec", data=cluster_ctm(factor))
+            cluster_grp.create_dataset("line_lum", data=cluster_line(factor))
 
     print(f"wrote {path}")
 
