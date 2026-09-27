@@ -928,6 +928,48 @@ static auto testSimControlsSpectraLibrary() -> int
     return 0;
 }
 
+// Verify that a library-based spectral synthesizer is loaded over the
+// [Fe/H] range the tracks were requested for, not their padded grid:
+// with stars.FeH flat in [-0.5, 0.5], MIST_test's own loaded grid pads
+// out to -1 (for the tracks' own interpolation), but BOSZ_test (with
+// planes every 0.25 dex) should hold data only for [-0.5, 0.5], the
+// only [Fe/H] spectra can ever be requested at.
+static auto testSimControlsSpectraSkipTrackPadding() -> int
+{
+    const std::string fileName = "tests/core/assets/testCluster.in";
+    toml::table inputDeck = toml::parse_file(fileName);
+    inputDeck.at_path("stars").as_table()->insert_or_assign(
+        "FeH", "tests/core/assets/testClusterFeHDist.toml");
+    auto* spectraTable = inputDeck.at_path("spectra").as_table();
+    spectraTable->insert_or_assign("registry", std::string("tests/specsyn/assets/spectra.toml"));
+    spectraTable->insert_or_assign("model", std::string("BOSZ_test"));
+    try
+    {
+        const io::SimControls sim(inputDeck);
+        if (!(sim.tracks()->feH().front() < -0.5))
+        {
+            std::cerr << "testSimControls: spectraSkipTrackPadding: test bug: expected the "
+                "tracks' own grid to be padded below -0.5, got " << sim.tracks()->feH().front()
+                << "\n";
+            return 1;
+        }
+        if (sim.specsyn()->fehMin() != -0.5 || sim.specsyn()->fehMax() != 0.5)
+        {
+            std::cerr << "testSimControls: spectraSkipTrackPadding: expected BOSZ_test loaded "
+                "over [-0.5, 0.5], got [" << sim.specsyn()->fehMin() << ", "
+                << sim.specsyn()->fehMax() << "]\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: spectraSkipTrackPadding: unexpected exception: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
 // Verify that an array-valued spectra.model resolves to a working
 // SpecsynLibChained -- chaining TLUSTY_test and BOSZ_test, the same
 // two non-WR-grid libraries used above, just as a priority-ordered
@@ -3517,6 +3559,7 @@ auto testSimControls() -> int
     result += testSimControlsNebularDefaultWithSpectra();
     result += testSimControlsInvalidSpectraModel();
     result += testSimControlsSpectraLibrary();
+    result += testSimControlsSpectraSkipTrackPadding();
     result += testSimControlsSpectraChained();
     result += testSimControlsExtinctField();
     result += testSimControlsYields();

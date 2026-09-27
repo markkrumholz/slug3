@@ -360,7 +360,7 @@ void io::SimControls::initPhysics(const utils::TrackedDeck& inputDeck)
     // Read the tracks. Needs fehDist_ (just set above) to pick the
     // [Fe/H] range to load; done before readSpectra() (which used to
     // come first here) because readSpectra() itself now needs
-    // tracks_.feH() -- see its own comment.
+    // tracks_'s own requested [Fe/H] range -- see its own comment.
     readTracks(inputDeck);
 
     // Warn if the tracks don't extend down to the IMF's minimum mass:
@@ -381,7 +381,8 @@ void io::SimControls::initPhysics(const utils::TrackedDeck& inputDeck)
     // is optional, since not every simulation needs spectra computed.
     // Needs tracks_ (just set above) to pick the [Fe/H] range a
     // library-based model is loaded over -- see readSpectra()'s own
-    // comment for why that's tracks_.feH()'s own range, not fehDist_'s.
+    // comment for why that's the tracks' requested range, not their
+    // padded grid.
     readSpectra(inputDeck);
 
     // Read the photometric filter collection to use, if any --
@@ -820,17 +821,23 @@ void io::SimControls::readSpectra(const utils::TrackedDeck& inputDeck)
     auto registryNameInput = inputDeck.value<std::string>("spectra.registry");
     const std::string registryName = registryNameInput.value_or(specsyn::defaultRegistry);
 
-    // Load every library-based model over tracks_.feH()'s own
-    // [min, max] range, not fehDist_'s own -- tracks_.feH() is always
-    // at least as wide as fehDist_ (see Tracks3D::Tracks3D()'s own
-    // comment: it pads a few grid points beyond
-    // [fehDist_.getMin(), fehDist_.getMax()] on each side, for
-    // Mesh3DInterpolator's own benefit), so this covers every [Fe/H]
-    // spectral synthesis can be asked for, with the same margin the
-    // tracks themselves have.
-    const auto& fehGrid = tracks_->feH();
-    const double fehMin = fehGrid.front();
-    const double fehMax = fehGrid.back();
+    // Load every library-based model over the [Fe/H] range the tracks
+    // were requested for (tracks_->fehMin()/fehMax(), equal to
+    // fehDist_'s own range at construction), not the tracks' own
+    // padded grid (tracks_->feH(), which extends a few grid points
+    // further on each side purely for Mesh3DInterpolator's own
+    // benefit -- see Tracks3D::Tracks3D()'s own comment). Spectra are
+    // only ever requested at [Fe/H] drawn from, or integrated over,
+    // fehDist_, which setFeH() can never widen past the tracks'
+    // requested range, so this covers every [Fe/H] spectral synthesis
+    // can be asked for. Loading the padding as well would cost extra
+    // library planes that are never used, could make a library that
+    // covers fehDist_ but not the padding substitute a different
+    // [alpha/Fe] grid to cover it (see SpecsynLibNoWind's own
+    // constructor), and would make SpecsynLibChained warn about
+    // clamping that can never happen.
+    const double fehMin = tracks_->fehMin();
+    const double fehMax = tracks_->fehMax();
 
     // Optional user-requested output wavelength grid: spectra.wl_min
     // and spectra.wl_max (in Angstrom), and spectra.nwl (the number
