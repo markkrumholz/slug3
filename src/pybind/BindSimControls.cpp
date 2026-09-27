@@ -289,8 +289,11 @@ RuntimeError
     If feh is not numeric and does not name a file that can be found,
     or if its own [min, max] range is broader than the [Fe/H] range the
     current stellar tracks were loaded over -- widening past it risks
-    interpolating outside the range of data actually loaded. Narrowing,
-    or otherwise staying within, that range is always accepted.)doc";
+    interpolating outside the range of data actually loaded -- or
+    extends beyond the requestedFehMin()/requestedFehMax() range of the
+    installed spectral synthesizer or Yields, if any. Narrowing, or
+    otherwise staying within, those ranges is always accepted. On
+    rejection, this SimControls is left unchanged.)doc";
 
 static constexpr std::string_view setCLFDocstring = R"doc(Set the cluster lifetime function.
 
@@ -426,6 +429,12 @@ ValueError
     passed as a constructor keyword argument (SimControls(...,
     specsyn=...)): the SimControls being constructed does not exist
     yet at the point specsyn would need to be built against it.
+    Also raised if specsyn's requestedFehMin()/requestedFehMax() range
+    does not contain the currently installed synthesizer's own (or, if
+    there is none, the current [Fe/H] distribution): a synthesizer
+    built for a narrower [Fe/H] range could not cover every [Fe/H] the
+    simulation may ask about. Either way, this SimControls is left
+    unchanged and specsyn stays usable from Python.
 
 Details
 -------
@@ -625,7 +634,11 @@ Throws
 ------
 ValueError
     If yields is not None and was constructed with a controls argument
-    other than this same SimControls.
+    other than this same SimControls, or if its
+    requestedFehMin()/requestedFehMax() range does not contain the
+    currently installed Yields' own (or, if there is none, the current
+    [Fe/H] distribution). Either way, this SimControls is left
+    unchanged and yields stays usable from Python.
 
 Details
 -------
@@ -985,6 +998,23 @@ static void setTracksKeepOnFailure(io::SimControls& sc, py::object tracksArg)
     sc.setTracks(py::cast<std::unique_ptr<tracks::Tracks3D>>(std::move(tracksArg)));
 }
 
+// setSpecsyn()/setYields(), for Python: run SimControls'
+// checkSpecsynReplacement()/checkYieldsReplacement() through a
+// borrowed reference first, so that a rejected object stays usable
+// from Python -- see setTracksKeepOnFailure()'s own comment. None is
+// passed straight through, to remove the current object.
+static void setSpecsynKeepOnFailure(io::SimControls& sc, py::object specsynArg)
+{
+    if (!specsynArg.is_none()) { sc.checkSpecsynReplacement(py::cast<const specsyn::Specsyn&>(specsynArg)); }
+    sc.setSpecsyn(py::cast<std::unique_ptr<specsyn::Specsyn>>(std::move(specsynArg)));
+}
+
+static void setYieldsKeepOnFailure(io::SimControls& sc, py::object yieldsArg)
+{
+    if (!yieldsArg.is_none()) { sc.checkYieldsReplacement(py::cast<const yields::Yields&>(yieldsArg)); }
+    sc.setYields(py::cast<std::unique_ptr<yields::Yields>>(std::move(yieldsArg)));
+}
+
 static void applyConstructorProperties(io::SimControls& sc,
     const py::object& imf, const py::object& cmf, const py::object& feH,
     const py::object& clf, const py::object& sfr, const py::object& computeLbol,
@@ -1000,7 +1030,7 @@ static void applyConstructorProperties(io::SimControls& sc,
     if (!computeLbol.is_none()) { sc.setComputeLbol(py::cast<bool>(computeLbol)); }
     if (!specsynArg.is_none())
     {
-        sc.setSpecsyn(py::cast<std::unique_ptr<specsyn::Specsyn>>(std::move(specsynArg)));
+        setSpecsynKeepOnFailure(sc, std::move(specsynArg));
     }
     if (!filtersArg.is_none())
     {
@@ -1139,7 +1169,7 @@ void bindSimControls(py::module_& m)
                 setSFRDocstring.data(), py::arg("sfr"))
         .def("setSFRDist", &io::SimControls::setSFRDist,
                 setSFRDistDocstring.data(), py::arg("sfr_dist"))
-        .def("setSpecsyn", &io::SimControls::setSpecsyn,
+        .def("setSpecsyn", &setSpecsynKeepOnFailure,
                 setSpecsynDocstring.data(), py::arg("specsyn"))
         .def("setFilters", &io::SimControls::setFilters,
                 setFiltersDocstring.data(), py::arg("filters"))
@@ -1183,7 +1213,7 @@ void bindSimControls(py::module_& m)
                 yieldsChannelDecomposedPropertyDocstring.data(), py::arg("value"))
         .def("setNoDecay", &io::SimControls::setNoDecay,
                 noDecayPropertyDocstring.data(), py::arg("value"))
-        .def("setYields", &io::SimControls::setYields,
+        .def("setYields", &setYieldsKeepOnFailure,
                 setYieldsDocstring.data(), py::arg("yields"))
         // Properties: alternative, attribute-style access to the same
         // getters/setters bound as plain methods above (e.g.
@@ -1226,7 +1256,7 @@ void bindSimControls(py::module_& m)
                 computeLbolPropertyDocstring.data())
         .def_property("specsyn",
                 &io::SimControls::specsyn,
-                &io::SimControls::setSpecsyn,
+                &setSpecsynKeepOnFailure,
                 specsynPropertyDocstring.data())
         .def_property("filters",
                 &io::SimControls::filters,
@@ -1337,7 +1367,7 @@ void bindSimControls(py::module_& m)
                 yieldChannelsPropertyDocstring.data())
         .def_property("yields",
                 &io::SimControls::yields,
-                &io::SimControls::setYields,
+                &setYieldsKeepOnFailure,
                 yieldsPropertyDocstring.data(), py::return_value_policy::reference_internal)
         .def_property_readonly("inputDeckStr",
                 &io::SimControls::inputDeckStr,

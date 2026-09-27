@@ -497,6 +497,8 @@ namespace specsyn
         // their eventual length isn't known until then. See fehMin_'s
         // own comment.
     {
+        setRequestedFehRange(fehMin, fehMax);
+
         if (spectraName.empty())
         {
             throw std::runtime_error(

@@ -1386,6 +1386,67 @@ def test_simcontrols_set_tracks_rejects_uncovered_feh():
         assert controls.tracks.mMin() == pytest.approx(old_tracks.mMin())
 
 
+def test_simcontrols_set_specsyn_and_yields_reject_narrower_feh():
+    """setSpecsyn()/setYields() should raise ValueError for an object
+    built for a narrower [Fe/H] range (requestedFehMin()/Max()) than the
+    installed one -- or, with none installed, than the [Fe/H]
+    distribution -- leaving the rejected object usable from Python.
+    The deck's own blackbody synthesizer has no [Fe/H] axis, so its
+    range is unbounded and any library-based replacement is narrower;
+    after removing it, a library covering the distribution is accepted.
+    A Yields built while the distribution was narrowed is rejected once
+    it has been broadened again."""
+    deck = tomlkit.parse(pathlib.Path(CLUSTER_DECK).read_text())
+    deck["stars"]["FeH"] = "tests/core/assets/testClusterSpecsynFullFeHDist.toml"
+    deck["yields"] = tomlkit.table()
+    deck["yields"]["channel1"] = {"channel": "ccsn", "model": "sukhbold_test"}
+    deck["yields"]["registry"] = YIELDS_REGISTRY
+    controls = slug.SimControls(tomlkit.dumps(deck))
+
+    assert controls.specsyn.requestedFehMin() == -np.inf
+    assert controls.specsyn.requestedFehMax() == np.inf
+
+    def bosz():
+        return slug.SpecsynLibNoWind(
+            "BOSZ_test", -1.0, 0.0, afe=0.0, micro_turb=0.0,
+            registry_name="tests/specsyn/assets/spectra.toml", controls=controls)
+
+    rejected = bosz()
+    with pytest.raises(ValueError, match="does not contain"):
+        controls.setSpecsyn(rejected)
+    assert rejected.requestedFehMin() == -1.0
+    assert controls.specsyn.requestedFehMin() == -np.inf
+    controls.setSpecsyn(None)
+    controls.setSpecsyn(bosz())
+    assert controls.specsyn.requestedFehMin() == -1.0
+
+    assert controls.yields.requestedFehMin() == -1.0
+    assert controls.yields.requestedFehMax() == 0.0
+    controls.feH = "-0.5"
+    narrow = slug.Yields(controls=controls, registry_name=YIELDS_REGISTRY)
+    controls.feH = "tests/core/assets/testClusterSpecsynFullFeHDist.toml"
+    with pytest.raises(ValueError, match="does not contain"):
+        controls.setYields(narrow)
+    assert narrow.requestedFehMin() == -0.5
+    assert controls.yields.requestedFehMin() == -1.0
+
+    # Mutating the installed Yields with a pre-built channel narrower
+    # than the [Fe/H] distribution is rejected by every ownership-
+    # transferring path, leaving the channel usable and the Yields
+    # unchanged
+    descriptor = slug.YieldChannelDescriptor(slug.YieldChannelType.ccsn, "sukhbold_test")
+    channel = slug.YieldChannel(descriptor, -0.5, 0.0, registry_name=YIELDS_REGISTRY)
+    installed = controls.yields
+    n_channels = len(installed.yieldChannels)
+    for install in (installed.addChannel, installed.setChannels,
+                    lambda c: setattr(installed, "yieldChannels", c)):
+        arg = channel if install == installed.addChannel else [channel]
+        with pytest.raises(ValueError, match="installed in its SimControls"):
+            install(arg)
+        assert channel.requestedFehMin() == -0.5
+        assert len(installed.yieldChannels) == n_channels
+
+
 def test_simcontrols_set_min_stoch_mass_disables_stochastic_sampling():
     """setMinStochMass() with a value above the IMF's own maximum mass
     should drive the stochastic mass fraction (recomputed internally

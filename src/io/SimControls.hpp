@@ -907,7 +907,10 @@ namespace io
          *   not name a file that can be found, or if its own
          *   [min, max] range is broader than tracks_'s own
          *   [fehMin(), fehMax()], or tracks_'s own range is NaN (a
-         *   default-constructed Tracks3D)
+         *   default-constructed Tracks3D), or it extends beyond the
+         *   [requestedFehMin(), requestedFehMax()] range of the
+         *   installed specsyn() or yields(), if any; this SimControls
+         *   is then left unchanged
          * @details
          * Rejects (rather than accepts and later failing to
          * interpolate) any new distribution whose [min, max] range is
@@ -1119,7 +1122,9 @@ namespace io
          *   reference bound elsewhere can't be re-bound after the
          *   fact, so installing it here would leave it reading that
          *   other SimControls's own tolerances/redshift live, not
-         *   this one's
+         *   this one's -- or was constructed for a narrower [Fe/H]
+         *   range than the current one (see checkSpecsynReplacement());
+         *   this SimControls is then left unchanged
          * @details
          * Lets a caller replace this SimControls's spectral synthesizer
          * with its own, without needing an input deck. If this
@@ -1136,13 +1141,7 @@ namespace io
          */
         void setSpecsyn(std::unique_ptr<specsyn::Specsyn> specsyn)
         {
-            if (specsyn && &specsyn->controls() != this)
-            {
-                throw std::invalid_argument(
-                    "SimControls::setSpecsyn: specsyn was constructed "
-                    "against a different SimControls than this one -- "
-                    "construct it with this same SimControls instead");
-            }
+            if (specsyn) { checkSpecsynReplacement(*specsyn); }
 
             if (!extinct_)
             {
@@ -1304,7 +1303,10 @@ namespace io
          *   this SimControls. May be null, to remove the current one.
          * @throws std::invalid_argument if yields is not null and was
          *   constructed against a different SimControls than *this
-         *   (see Yields::controls()'s own comment)
+         *   (see Yields::controls()'s own comment), or covers a
+         *   narrower [Fe/H] range than the current one (see
+         *   checkYieldsReplacement()); this SimControls is then left
+         *   unchanged
          * @details
          * Lets a caller replace this SimControls's own Yields with its
          * own, without needing an input deck -- including installing
@@ -1327,14 +1329,93 @@ namespace io
          */
         void setYields(std::unique_ptr<yields::Yields> yields)
         {
-            if (yields && &yields->controls() != this)
+            if (yields) { checkYieldsReplacement(*yields); }
+            yields_ = std::move(yields);
+        }
+
+        /**
+         * @brief Check that a spectral synthesizer may replace the current one
+         * @param specsyn The candidate spectral synthesizer
+         * @throws std::invalid_argument if specsyn was constructed
+         *   against a different SimControls than *this (see
+         *   setSpecsyn()'s own comment), or if its own
+         *   [requestedFehMin(), requestedFehMax()] does not contain
+         *   the current specsyn()'s own -- or, if there is no current
+         *   one, fehDist()'s own [min, max] (no [Fe/H] check at all if
+         *   fehDist() is not valid, e.g. a SimControls built without
+         *   an input deck, since there is then no [Fe/H] to cover)
+         * @details
+         * The checks setSpecsyn() applies before installing specsyn.
+         * The [Fe/H] check stops a synthesizer built for a narrower
+         * range (e.g. while fehDist() was temporarily narrowed, or
+         * from Python with its own explicit feh_min/feh_max) from
+         * replacing one that covers every [Fe/H] the simulation can
+         * ask about. Public so that a caller can validate a
+         * synthesizer it does not want to give up ownership of on
+         * failure -- e.g. the Python bindings, which would otherwise
+         * transfer ownership into setSpecsyn()'s own argument before
+         * the check runs.
+         */
+        void checkSpecsynReplacement(const specsyn::Specsyn& specsyn) const
+        {
+            if (&specsyn.controls() != this)
+            {
+                throw std::invalid_argument(
+                    "SimControls::setSpecsyn: specsyn was constructed "
+                    "against a different SimControls than this one -- "
+                    "construct it with this same SimControls instead");
+            }
+            if (specsyn_)
+            {
+                checkFehRangeContains("SimControls::setSpecsyn", "spectral synthesizer",
+                    specsyn.requestedFehMin(), specsyn.requestedFehMax(),
+                    specsyn_->requestedFehMin(), specsyn_->requestedFehMax(),
+                    "the current spectral synthesizer's own");
+            }
+            else if (fehDist_.valid())
+            {
+                checkFehRangeContains("SimControls::setSpecsyn", "spectral synthesizer",
+                    specsyn.requestedFehMin(), specsyn.requestedFehMax(),
+                    fehDist_.getMin(), fehDist_.getMax(), "the current [Fe/H] distribution");
+            }
+        }
+
+        /**
+         * @brief Check that a Yields may replace the current one
+         * @param yields The candidate Yields
+         * @throws std::invalid_argument if yields was constructed
+         *   against a different SimControls than *this (see
+         *   setYields()'s own comment), or if its own
+         *   [requestedFehMin(), requestedFehMax()] does not contain
+         *   the current yields()'s own -- or, if there is no current
+         *   one and fehDist() is valid, fehDist()'s own [min, max]
+         * @details
+         * The checks setYields() applies before installing yields --
+         * see checkSpecsynReplacement()'s own comment, which applies
+         * here identically.
+         */
+        void checkYieldsReplacement(const yields::Yields& yields) const
+        {
+            if (&yields.controls() != this)
             {
                 throw std::invalid_argument(
                     "SimControls::setYields: yields was constructed "
                     "against a different SimControls than this one -- "
                     "construct it with this same SimControls instead");
             }
-            yields_ = std::move(yields);
+            if (yields_)
+            {
+                checkFehRangeContains("SimControls::setYields", "Yields",
+                    yields.requestedFehMin(), yields.requestedFehMax(),
+                    yields_->requestedFehMin(), yields_->requestedFehMax(),
+                    "the current Yields' own");
+            }
+            else if (fehDist_.valid())
+            {
+                checkFehRangeContains("SimControls::setYields", "Yields",
+                    yields.requestedFehMin(), yields.requestedFehMax(),
+                    fehDist_.getMin(), fehDist_.getMax(), "the current [Fe/H] distribution");
+            }
         }
 
         /**
@@ -1353,6 +1434,35 @@ namespace io
         }
 
     private:
+
+        /**
+         * @brief Throw unless a replacement object's requested [Fe/H] range contains a reference range
+         * @param who Name of the calling method, for the error message
+         * @param what Description of the object, for the error message
+         * @param newMin The replacement's own requested minimum [Fe/H]
+         * @param newMax The replacement's own requested maximum [Fe/H]
+         * @param refMin Minimum [Fe/H] the replacement must cover
+         * @param refMax Maximum [Fe/H] the replacement must cover
+         * @param refWhat Description of the reference range, for the error message
+         * @details
+         * Used by checkSpecsynReplacement()/checkYieldsReplacement();
+         * defined here, not in SimControls.cpp, since both are called
+         * from the inline setSpecsyn()/setYields(), which targets not
+         * linking SimControls.cpp still use.
+         */
+        static void checkFehRangeContains(const std::string& who, const std::string& what,
+            const double newMin, const double newMax,
+            const double refMin, const double refMax, const std::string& refWhat)
+        {
+            if (!(newMin <= refMin && refMax <= newMax)) // NOLINT(readability-simplify-boolean-expr) -- the De Morgan form would accept a NaN range, since every comparison with NaN is false
+            {
+                throw std::invalid_argument(
+                    who + ": the new " + what + " was constructed for [Fe/H] in [" +
+                    std::to_string(newMin) + ", " + std::to_string(newMax) + "], which "
+                    "does not contain " + refWhat + ", [" + std::to_string(refMin) + ", " +
+                    std::to_string(refMax) + "]. Construct it for a range covering that.");
+            }
+        }
 
         /**
          * @brief Recompute fracStochMass_ from imf_ and minStochMass_

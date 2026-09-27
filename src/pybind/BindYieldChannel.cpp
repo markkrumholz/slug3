@@ -274,6 +274,26 @@ isotopes_orig : list of IsotopeData
     unlike isotopes(), never affected by rebuildYieldGrid(), and
     already populated once the constructor returns.)doc";
 
+static constexpr std::string_view channelRequestedFehMinDocstring = R"doc(Return the minimum [Fe/H] this channel was constructed to cover.
+
+Returns
+-------
+float
+    The feh_min the constructor was given. Unlike feH()[0], the
+    lowest [Fe/H] actually loaded, this is the range the caller asked
+    for.
+
+Details
+-------
+Yields.requestedFehMin() combines these across channels.)doc";
+
+static constexpr std::string_view channelRequestedFehMaxDocstring = R"doc(Return the maximum [Fe/H] this channel was constructed to cover.
+
+Returns
+-------
+float
+    The maximum counterpart of requestedFehMin().)doc";
+
 static constexpr std::string_view fehDocstring = R"doc(Get the [Fe/H] values this channel's yields are tabulated at.
 
 Returns
@@ -404,6 +424,10 @@ void bindYieldChannel(py::module_& m)
                 },
                 isotopesOrigDocstring.data(), py::return_value_policy::reference)
         .def("feH", &yields::YieldChannel::feH, fehDocstring.data())
+        .def("requestedFehMin", &yields::YieldChannel::requestedFehMin,
+                channelRequestedFehMinDocstring.data())
+        .def("requestedFehMax", &yields::YieldChannel::requestedFehMax,
+                channelRequestedFehMaxDocstring.data())
         .def("hasYield", &yields::YieldChannel::hasYield, hasYieldDocstring.data(), py::arg("mass"))
         .def("yield_", &yields::YieldChannel::yield, yieldDocstring.data(),
                 py::arg("mass"), py::arg("feh"));

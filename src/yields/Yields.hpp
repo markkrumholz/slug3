@@ -13,7 +13,9 @@
 #include "../elem/ElemCommons.hpp"
 #include "YieldChannel.hpp"
 #include "YieldCommons.hpp"
+#include <algorithm>
 #include <cstddef>
+#include <limits>
 #include <mdspan> // NOLINT(misc-include-cleaner)
 #include <memory>
 #include <optional>
@@ -126,7 +128,11 @@ namespace yields
          * @brief Add one already-built YieldChannel to yieldChannels_
          * @param channel The channel to add; ownership is transferred
          *   to yieldChannels_. Must not be null.
-         * @throws std::invalid_argument if channel is null
+         * @throws std::invalid_argument if channel is null, or if this
+         *   Yields is installed in controls() and adding channel would
+         *   leave it no longer covering controls().fehDist() -- see
+         *   checkInstalledCoverage(); either way yieldChannels_ is left
+         *   untouched
          * @details
          * Unlike addChannel(const YieldChannelDescriptor&), which
          * constructs a fresh YieldChannel from a descriptor, this
@@ -141,6 +147,30 @@ namespace yields
          * afterward, exactly as after the descriptor-taking overload.
          */
         void addChannel(std::unique_ptr<YieldChannel> channel);
+
+        /**
+         * @brief Check that a candidate [Fe/H] coverage still covers the installed simulation's own [Fe/H] distribution
+         * @param candMin Minimum [Fe/H] this Yields would cover after a
+         *   change -- the largest requestedFehMin() among its channels
+         * @param candMax Maximum [Fe/H] this Yields would cover after a
+         *   change -- the smallest requestedFehMax() among its channels
+         * @throws std::invalid_argument if this Yields is the one
+         *   installed in controls() (controls().yields()), controls()'s
+         *   fehDist() is valid, and [candMin, candMax] does not contain
+         *   fehDist()'s own [min, max]
+         * @details
+         * Used by addChannel(unique_ptr<YieldChannel>) and
+         * setChannels(vector<unique_ptr<YieldChannel>>), whose
+         * channels may have been built for any [Fe/H] range, before
+         * they change anything. A Yields not installed in its
+         * SimControls is unrestricted: SimControls::setYields()
+         * checks its coverage when it is installed. The descriptor-
+         * taking overloads need no check, since they build every
+         * channel over fehDist()'s own current range. Public so that a
+         * caller can validate channels it does not want to give up
+         * ownership of on failure -- e.g. the Python bindings.
+         */
+        void checkInstalledCoverage(double candMin, double candMax) const;
 
         /**
          * @brief Remove one entry from yieldChannels_
@@ -167,8 +197,11 @@ namespace yields
          * @param channels The channels to install, in order; ownership
          *   of each is transferred to yieldChannels_. None may be null.
          * @throws std::invalid_argument if any entry of channels is
-         *   null -- checked before yieldChannels_ is touched, so a
-         *   rejected call leaves the existing yieldChannels_ untouched
+         *   null, or if this Yields is installed in controls() and
+         *   channels would leave it no longer covering
+         *   controls().fehDist() (see checkInstalledCoverage()) --
+         *   checked before yieldChannels_ is touched, so a rejected
+         *   call leaves the existing yieldChannels_ untouched
          * @details
          * yieldChannels_ is discarded (freeing every channel it
          * previously held whose shared_ptr use_count drops to zero --
@@ -366,6 +399,38 @@ namespace yields
          *   same order -- see rebuildYieldGrid()'s own comment
          */
         [[nodiscard]] auto isotopes() const -> const elem::IsotopeList& { return isotopes_; }
+
+        /**
+         * @brief Return the minimum [Fe/H] every loaded channel was constructed to cover
+         * @return The largest requestedFehMin() among yieldChannels(),
+         *   or -infinity if there are none
+         * @details
+         * Channels can be added after construction (addChannel(),
+         * setChannels()), each with its own requested range, so this
+         * Yields covers only the intersection of them all.
+         * SimControls::setYields() compares it against the currently
+         * installed Yields' own, to reject a replacement built for a
+         * narrower [Fe/H] range.
+         */
+        [[nodiscard]] auto requestedFehMin() const -> double
+        {
+            double result = -std::numeric_limits<double>::infinity();
+            for (const auto& channel : yieldChannels_) { result = std::max(result, channel->requestedFehMin()); }
+            return result;
+        }
+
+        /**
+         * @brief Return the maximum [Fe/H] every loaded channel was constructed to cover
+         * @return The smallest requestedFehMax() among yieldChannels(),
+         *   or +infinity if there are none -- see requestedFehMin()'s
+         *   own comment
+         */
+        [[nodiscard]] auto requestedFehMax() const -> double
+        {
+            double result = std::numeric_limits<double>::infinity();
+            for (const auto& channel : yieldChannels_) { result = std::min(result, channel->requestedFehMax()); }
+            return result;
+        }
 
         /**
          * @brief Return every channel's own yield, as one (nchannels, isotopes().size()) array

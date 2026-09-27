@@ -107,6 +107,29 @@ abs_tol : float
     Absolute convergence tolerance passed to the cubature integrator
     used by specCts().)doc";
 
+static constexpr std::string_view specsynRequestedFehMinDocstring = R"doc(Return the minimum [Fe/H] this spectral synthesizer was constructed to cover.
+
+Returns
+-------
+float
+    The feh_min its constructor was given, or -inf for a synthesizer
+    with no [Fe/H] axis (SpecsynBlackbody, SpecsynLibWD). Unlike
+    the data coverage a library actually holds, this is the range the
+    caller asked for.
+
+Details
+-------
+SimControls.setSpecsyn()/setYields() compare this against the
+currently installed object's own, to reject a replacement built for a
+narrower [Fe/H] range.)doc";
+
+static constexpr std::string_view specsynRequestedFehMaxDocstring = R"doc(Return the maximum [Fe/H] this spectral synthesizer was constructed to cover.
+
+Returns
+-------
+float
+    The maximum counterpart of requestedFehMin().)doc";
+
 static constexpr std::string_view specsynIntMaxIterDocstring = R"doc(Return the maximum number of evaluations for PDF integration.
 
 See intRelTol()'s own docstring: read live from the SimControls this
@@ -387,7 +410,11 @@ void bindSpecsyn(py::module_& m)
         .def("intAbsTol", &specsyn::Specsyn::intAbsTol,
                 specsynIntAbsTolDocstring.data())
         .def("intMaxIter", &specsyn::Specsyn::intMaxIter,
-                specsynIntMaxIterDocstring.data());
+                specsynIntMaxIterDocstring.data())
+        .def("requestedFehMin", &specsyn::Specsyn::requestedFehMin,
+                specsynRequestedFehMinDocstring.data())
+        .def("requestedFehMax", &specsyn::Specsyn::requestedFehMax,
+                specsynRequestedFehMaxDocstring.data());
 
     // SpecsynBlackbody
     py::class_<specsyn::SpecsynBlackbody, specsyn::Specsyn, py::smart_holder>(

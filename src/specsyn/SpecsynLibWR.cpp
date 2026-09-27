@@ -204,6 +204,8 @@ namespace specsyn
         logRt_(this->dim2_),
         logTeff_(this->dim3_)
     {
+        this->setRequestedFehRange(fehMin, fehMax);
+
         // Determine which WR subtype this library covers from
         // spectraName (e.g. "POWR_WNE" -> WRType::WNE, "POWR_WNL_H40"
         // -> WRType::WNLH40), checked case-insensitively since nothing

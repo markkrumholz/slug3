@@ -19,6 +19,7 @@
 #include <cassert>
 #include <cstddef>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <span>
@@ -299,7 +300,24 @@ namespace yields
         {
             throw std::invalid_argument("Yields::addChannel: channel must not be null");
         }
+        checkInstalledCoverage(std::max(requestedFehMin(), channel->requestedFehMin()),
+            std::min(requestedFehMax(), channel->requestedFehMax()));
         yieldChannels_.push_back(std::shared_ptr<YieldChannel>(std::move(channel)));
+    }
+
+    void Yields::checkInstalledCoverage(const double candMin, const double candMax) const
+    {
+        const auto& feh = controls_.fehDist();
+        if (controls_.yields().get() != this || !feh.valid()) { return; }
+        if (!(candMin <= feh.getMin() && feh.getMax() <= candMax)) // NOLINT(readability-simplify-boolean-expr) -- the De Morgan form would accept a NaN range, since every comparison with NaN is false
+        {
+            throw std::invalid_argument(
+                "Yields: this Yields is installed in its SimControls, and the requested "
+                "channels would leave it covering only [Fe/H] in [" + std::to_string(candMin) +
+                ", " + std::to_string(candMax) + "], not the [Fe/H] distribution, [" +
+                std::to_string(feh.getMin()) + ", " + std::to_string(feh.getMax()) +
+                "]. Build the channels for a range covering it.");
+        }
     }
 
     void Yields::deleteChannel(const std::size_t index)
@@ -320,6 +338,14 @@ namespace yields
         {
             throw std::invalid_argument("Yields::setChannels: channels must not contain any null entries");
         }
+        double candMin = -std::numeric_limits<double>::infinity();
+        double candMax = std::numeric_limits<double>::infinity();
+        for (const auto& channel : channels)
+        {
+            candMin = std::max(candMin, channel->requestedFehMin());
+            candMax = std::min(candMax, channel->requestedFehMax());
+        }
+        checkInstalledCoverage(candMin, candMax);
         std::vector<std::shared_ptr<YieldChannel>> newChannels;
         newChannels.reserve(channels.size());
         for (auto& channel : channels)
