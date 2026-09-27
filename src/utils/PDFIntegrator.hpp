@@ -12,6 +12,7 @@
 #include "../pdfs/PDF.hpp"
 #include "GKIntegrator.hpp"
 #include "GKIntegratorData.hpp"
+#include "MiscUtils.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -333,6 +334,58 @@ namespace utils
         mutable double aReal_ = 0.0;
         mutable double bReal_ = 0.0;
     };
+
+    /**
+     * @brief Integrate p(x) f(x) over [a, b], with f made dimensionless first
+     * @tparam F A callable taking a double and returning a
+     *   std::vector<double> of nInt values
+     * @tparam Order Gauss-Kronrod order, as for PDFIntegrator
+     * @param p The PDF p(x) weighting the integrand
+     * @param f The integrand f(x)
+     * @param nInt The number of values f returns
+     * @param a Lower limit of integration
+     * @param b Upper limit of integration
+     * @param scalePoints Points at which to evaluate f to find its
+     *   scale (see integrandScale())
+     * @param maxIter Maximum number of bisection iterations, as for
+     *   PDFIntegrator
+     * @param absTol Absolute tolerance on the integral of the
+     *   dimensionless integrand, per unit integral of p over [a, b] --
+     *   typically SimControls::intAbsTol()
+     * @param relTol Relative tolerance, as for PDFIntegrator
+     * @return The integral of p(x) f(x) over [a, b], in f's own units
+     * @details
+     * For a vector-valued integrand whose elements span many orders of
+     * magnitude, and may include exact zeros, neither tolerance works
+     * alone: an element that integrates to (nearly) zero can never
+     * meet the relative tolerance, while an absolute tolerance in f's
+     * own units is either meaningless for the small elements or
+     * (when the integral itself is much smaller than 1, e.g. over a
+     * narrow sub-range of p's support) met by the first, unresolved
+     * estimate. So f is divided by integrandScale(f, scalePoints), its
+     * smallest nonzero element at those points, and integrated with
+     * absolute tolerance absTol times p's own integral over [a, b] --
+     * the size of the integral of a unit-scale integrand -- and the
+     * result is scaled back.
+     */
+    template <class F, GKOrder Order = GKOrder::GK15>
+    auto integrateScaled(const pdfs::PDF& p, const F& f, const std::size_t nInt,
+        const double a, const double b, const std::vector<double>& scalePoints,
+        const std::size_t maxIter, const double absTol, const double relTol) -> std::vector<double>
+    {
+        const double scale = integrandScale(f, scalePoints);
+        const auto scaled = [&f, scale](const double x) -> std::vector<double>
+        {
+            auto v = f(x);
+            for (double& e : v) { e /= scale; }
+            return v;
+        };
+        const PDFIntegrator<decltype(scaled), Order> integrator(
+            p, scaled, nInt, false, maxIter, absTol * p.integral(a, b), relTol);
+        auto result = integrator.integrate(a, b);
+        for (double& e : result) { e *= scale; }
+        return result;
+    }
 
 } // namespace utils
 

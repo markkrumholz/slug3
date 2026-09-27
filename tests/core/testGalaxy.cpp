@@ -2302,6 +2302,76 @@ static auto testYieldsRateSingleFehDelegates() -> int
     return 0;
 }
 
+// Verify that the purely continuous population's yields are converged
+// at the integrator's own default tolerances: with f_cluster = 0 and
+// min_stoch_mass at the IMF's own maximum (so every star is continuous)
+// and ccsn + massive_star_winds yields, the yields after each of
+// several steps must match a reference computed with tight tolerances
+// to within a few times intRelTol(). The yield rate per unit stellar mass is far
+// below intAbsTol(); before the yield integrals' integrands were made
+// dimensionless (see utils::integrateScaled()), their first,
+// unresolved estimates were accepted here. no_decay keeps the
+// reference cheap to compute.
+static auto testGalaxyYieldsConverged() -> int
+{
+    const std::vector<double> ages{ 4e6, 6e6, 1e7 };
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFile);
+        inputDeck.at_path("clusters").as_table()->insert("f_cluster", 0.0);
+        inputDeck.at_path("stars").as_table()->insert_or_assign("min_stoch_mass", 120.0);
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{ { "channel", "ccsn" }, { "model", "sukhbold_test" } } },
+            { "channel2", toml::table{ { "channel", "massive_star_winds" }, { "model", "sukhbold_test" } } },
+            { "registry", std::string("tests/yields/assets/yields.toml") },
+            { "no_decay", true },
+        });
+        // intAbsTol() is left at its default -- that is what is under
+        // test -- but intRelTol() is tightened, so that a properly
+        // converged result is well within the threshold below while an
+        // unresolved first estimate is well outside it
+        io::SimControls controls(inputDeck);
+        controls.setIntRelTol(1e-3);
+        const double threshold = 3.0 * controls.intRelTol();
+        io::SimControls tight(inputDeck);
+        tight.setIntAbsTol(1e-7);
+        tight.setIntRelTol(1e-5);
+        tight.setIntMaxIter(2000);
+
+        utils::rng().seed(rngSeed);
+        core::Galaxy galaxy(controls);
+        utils::rng().seed(rngSeed);
+        core::Galaxy reference(tight);
+        for (const double age : ages)
+        {
+            galaxy.advance(age);
+            reference.advance(age);
+            const auto& got = galaxy.yields();
+            const auto& ref = reference.yields();
+            const double scale = std::abs(std::ranges::max(ref, {}, [](const double v) -> double { return std::abs(v); }));
+            double worst = 0.0;
+            for (std::size_t i = 0; i < ref.size(); ++i)
+            {
+                if (!std::isfinite(got.at(i))) { worst = std::numeric_limits<double>::infinity(); break; }
+                worst = std::max(worst, std::abs(ref.at(i)) <= 1e-6 * scale ?
+                    std::abs(got.at(i) - ref.at(i)) / scale : std::abs((got.at(i) / ref.at(i)) - 1.0));
+            }
+            if (worst > threshold)
+            {
+                std::cerr << "testGalaxy: yieldsConverged: at age " << age << " yr, yields "
+                    "differ from a tightly converged reference by up to " << worst << "\n";
+                return 1;
+            }
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testGalaxy: yieldsConverged test failed: " << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
 // Verify Galaxy::yieldsRate(t)'s multi-feh averaging against an
 // independent brute-force recomputation from the same public API:
 // yieldsRate(t, feh) evaluated on a fine midpoint-rule grid over
@@ -3023,6 +3093,7 @@ auto testGalaxy() -> int
     result += testYieldsRateHydrogenOrderOfMagnitude();
     result += testYieldsRateSingleFehDelegates();
     result += testYieldsRateMultiFeh();
+    result += testGalaxyYieldsConverged();
     result += testGalaxyYieldsClusteredOnly();
     result += testGalaxyYieldsFieldAndContinuous();
     result += testGalaxyYieldsMultipleAdvanceCalls();

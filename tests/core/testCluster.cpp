@@ -1380,6 +1380,84 @@ static auto testClusterYieldsStochasticDecay() -> int
     return 0;
 }
 
+// Largest per-isotope difference between two yield vectors: relative
+// for entries above 1e-6 of ref's own largest magnitude, and absolute
+// in units of that magnitude for the rest; infinite if got has any
+// non-finite entry
+static auto maxYieldDiff(const std::vector<double>& got, const std::vector<double>& ref) -> double
+{
+    const double scale = std::abs(std::ranges::max(ref, {}, [](const double v) -> double { return std::abs(v); }));
+    double worst = 0.0;
+    for (std::size_t i = 0; i < ref.size(); ++i)
+    {
+        if (!std::isfinite(got.at(i))) { return std::numeric_limits<double>::infinity(); }
+        const double diff = std::abs(ref.at(i)) <= 1e-6 * scale ?
+            std::abs(got.at(i) - ref.at(i)) / scale :
+            std::abs((got.at(i) / ref.at(i)) - 1.0);
+        worst = std::max(worst, diff);
+    }
+    return worst;
+}
+
+// Verify that the continuously-sampled population's yields are
+// converged at the integrator's own default tolerances: with
+// min_stoch_mass at the IMF's own maximum (so every star is
+// continuously sampled) and ccsn + massive_star_winds yields, the
+// yields after each of several steps must match a reference computed
+// with tight tolerances to within a few times intRelTol(). Each step integrates
+// over only the narrow range of masses that died since the last one,
+// so the raw per-star integral is far below intAbsTol(); before its
+// integrand was made dimensionless (see utils::integrateScaled()),
+// the integrator accepted its first, unresolved estimate here.
+// no_decay keeps the reference cheap to compute.
+static auto testClusterYieldsConverged() -> int
+{
+    const std::vector<double> ages{ 4e6, 6e6, 1e7, 2e7, 5e7 };
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFile);
+        inputDeck.at_path("stars").as_table()->insert_or_assign("min_stoch_mass", 120.0);
+        inputDeck.insert("yields", toml::table{
+            { "channel1", toml::table{ { "channel", "ccsn" }, { "model", "sukhbold_test" } } },
+            { "channel2", toml::table{ { "channel", "massive_star_winds" }, { "model", "sukhbold_test" } } },
+            { "registry", std::string(yieldsRegistry) },
+            { "no_decay", true },
+        });
+        // intAbsTol() is left at its default -- that is what is under
+        // test -- but intRelTol() is tightened, so that a properly
+        // converged result is well within the threshold below while an
+        // unresolved first estimate is well outside it
+        io::SimControls controls(inputDeck);
+        controls.setIntRelTol(1e-3);
+        const double threshold = 3.0 * controls.intRelTol();
+        io::SimControls tight(inputDeck);
+        tight.setIntAbsTol(1e-8);
+        tight.setIntRelTol(1e-6);
+        tight.setIntMaxIter(2000);
+
+        core::Cluster cluster(0, 1e4, 0.0, controls);
+        core::Cluster reference(0, 1e4, 0.0, tight);
+        for (const double age : ages)
+        {
+            cluster.advance(age);
+            reference.advance(age);
+            const double diff = maxYieldDiff(cluster.yields(), reference.yields());
+            if (diff > threshold)
+            {
+                std::cerr << "testCluster: yieldsConverged: at age " << age << " yr, yields "
+                    "differ from a tightly converged reference by up to " << diff << "\n";
+                return 1;
+            }
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testCluster: yieldsConverged test failed: " << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
 // Verify Cluster::yields()'s continuously-sampled contribution when
 // radioactive decay is enabled -- same base setup as
 // testClusterYieldsNonStochastic(), but independently recomputes the
@@ -1645,6 +1723,7 @@ auto testCluster() -> int
     result += testClusterYieldsMultipleAdvanceCalls();
     result += testClusterYieldsStochasticDecay();
     result += testClusterYieldsNonStochasticDecay();
+    result += testClusterYieldsConverged();
     result += testClusterYieldsAboveTrackRange();
     return result;
 }
