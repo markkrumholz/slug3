@@ -767,13 +767,10 @@ namespace core
          * Adds the combined contSpec to spec_ unconditionally, and (if
          * ext is non-null) its own expected attenuation to specExtinct_.
          * If neb is non-null, also passes this same combined
-         * contribution (before extinction) through neb->getGalaxy(), at
-         * SimControls::fehDist()'s own expectationValue() -- getGalaxy()
-         * takes a single scalar [Fe/H], not a distribution, so a
-         * non-degenerate fehDist() (a genuine spread, not a fixed
-         * value) is represented by its own mean here, rather than
-         * attempting a full nebular emission integral over [Fe/H] --
-         * adding the resulting stellar + nebular spectrum to specNeb_
+         * contribution (before extinction) through neb->getGalaxy(),
+         * averaged over SimControls::fehDist() (see
+         * addContinuousNebSpec()'s own comment), adding the resulting
+         * stellar + nebular spectrum to specNeb_
          * and its own line luminosities to lineLum_; if ext is also
          * non-null, extinguishes that same nebular-reprocessed spectrum
          * via applyExtinctionCts(), exactly as the plain (non-nebular)
@@ -801,6 +798,21 @@ namespace core
          * See addContinuousSpec()'s own comment for exactly what this
          * does -- split out purely to keep that function's own
          * cognitive complexity down, not for any reuse elsewhere.
+         *
+         * neb->getGalaxy() takes a single [Fe/H]. For a fixed
+         * fehDist(), it is called once, there; otherwise its spectrum
+         * and line luminosities are integrated over fehDist() with a
+         * PDFIntegrator, and divided by fehDist()'s own integral --
+         * the same treatment of [Fe/H] as the continuous population's
+         * own spectrum, Lbol and yields (see
+         * Specsyn::specCtsHelper()'s own comment). contSpec itself is
+         * already integrated over [Fe/H], so only the nebular tables'
+         * own [Fe/H] dependence is integrated here. The spectrum and
+         * line luminosities are each divided by the smallest nonzero
+         * magnitude they have at fehDist()'s own mean before
+         * integrating, so that both are dimensionless and on a common
+         * scale for intAbsTol() -- see the implementation's own
+         * comment for why a relative tolerance alone is not enough.
          */
         void addContinuousNebSpec(const extinct::Extinct* ext, const nebular::Nebular* neb,
             const std::vector<double>& contSpec);

@@ -33,6 +33,7 @@
 #include <optional>
 #include <sstream>
 #include <stdexcept>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -62,6 +63,23 @@ namespace
         if (m < tracks.mMin()) { return std::numeric_limits<double>::infinity(); }
         if (m > tracks.mMax()) { return -std::numeric_limits<double>::infinity(); }
         return tracks.starLifetime(m, feh);
+    }
+
+    /**
+     * @brief The smallest nonzero magnitude among a vector's elements
+     * @param v The vector to scan
+     * @return min |v[i]| over every nonzero v[i], or 1 if every element
+     *   is zero (or v is empty)
+     * @details
+     * Used by Galaxy::addContinuousNebSpec() to put its nebular
+     * spectrum and line luminosities on a common, dimensionless scale
+     * before integrating over [Fe/H] -- see its own comment.
+     */
+    auto minNonZero(const std::vector<double>& v) -> double
+    {
+        double m = std::numeric_limits<double>::infinity();
+        for (const double x : v) { if (x != 0.0) { m = std::min(m, std::abs(x)); } }
+        return std::isfinite(m) ? m : 1.0;
     }
 } // namespace
 
@@ -412,14 +430,51 @@ void core::Galaxy::addContinuousSpec(const extinct::Extinct* ext, const nebular:
 }
 
 // See Galaxy.hpp's own header comment for this method's exact
-// contract. sc.fehDist().expectationValue() stands in for the full
-// [Fe/H] distribution getGalaxy() itself can't take directly -- see
-// addContinuousSpec()'s own header comment for why.
+// contract, including how getGalaxy()'s single [Fe/H] is averaged
+// over fehDist()
 void core::Galaxy::addContinuousNebSpec(const extinct::Extinct* ext, const nebular::Nebular* neb,
     const std::vector<double>& contSpec)
 {
     const auto& sc = controls_.get();
-    auto [nebContSpec, nebContLineLum] = neb->getGalaxy(contSpec, sc.fehDist().expectationValue());
+    const auto& fehDist = sc.fehDist();
+    std::vector<double> nebContSpec;
+    std::vector<double> nebContLineLum;
+    if (fehDist.getMin() == fehDist.getMax())
+    {
+        std::tie(nebContSpec, nebContLineLum) = neb->getGalaxy(contSpec, fehDist.getMin());
+    }
+    else
+    {
+        // Spectrum and line luminosities are integrated together, as
+        // one concatenated vector. They have different units, and some
+        // entries may be exactly zero -- for which a relative
+        // tolerance alone can never be met -- so each half is first
+        // made dimensionless, divided by the smallest nonzero
+        // magnitude it has at fehDist()'s own mean (1 if it has none),
+        // letting intAbsTol() serve directly as a common absolute
+        // tolerance; the result is scaled back afterward
+        const auto [meanSpec, meanLine] = neb->getGalaxy(contSpec, fehDist.expectationValue());
+        const double specScale = minNonZero(meanSpec);
+        const double lineScale = minNonZero(meanLine);
+        const std::size_t nWl = contSpec.size();
+        const std::size_t nLine = neb->lineWl().size();
+        auto fehIntegrand = [neb, &contSpec, specScale, lineScale](const double feh) -> std::vector<double>
+        {
+            auto [s, l] = neb->getGalaxy(contSpec, feh);
+            for (double& v : s) { v /= specScale; }
+            for (const double v : l) { s.push_back(v / lineScale); }
+            return s;
+        };
+        const utils::PDFIntegrator<decltype(fehIntegrand), utils::GKOrder::GK15> fehIntegrator(
+            fehDist, fehIntegrand, nWl + nLine, false, sc.intMaxIter(), sc.intAbsTol(), sc.intRelTol());
+        auto result = fehIntegrator.integrate(fehDist.getMin(), fehDist.getMax());
+        const double fehNorm = fehDist.integral(fehDist.getMin(), fehDist.getMax());
+        const auto split = result.begin() + static_cast<std::ptrdiff_t>(nWl);
+        nebContSpec.assign(result.begin(), split);
+        nebContLineLum.assign(split, result.end());
+        for (double& v : nebContSpec) { v *= specScale / fehNorm; }
+        for (double& v : nebContLineLum) { v *= lineScale / fehNorm; }
+    }
     for (std::size_t i = 0; i < specNeb_.size(); ++i) { specNeb_[i] += nebContSpec[i]; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- nebContSpec has size wl().size() by Nebular::getGalaxy()'s own contract, matching specNeb_'s size set in computeSpec()
     for (std::size_t i = 0; i < lineLum_.size(); ++i) { lineLum_[i] += nebContLineLum[i]; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- nebContLineLum has size neb->lineWl().size() by Nebular::getGalaxy()'s own contract, matching lineLum_'s size set in computeSpec()
     if (ext == nullptr) { return; }
