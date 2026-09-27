@@ -704,32 +704,31 @@ void core::Cluster::computeFeedback()
     // identical integration of yieldStar()
     if (birthNonStochMass_ <= 0.0) { return; }
 
-    // The absolute tolerance is 0, not controls().intAbsTol(), so that
-    // convergence is governed by intRelTol() alone: this integral is a
-    // number of SNe per unit cluster mass, typically ~1e-3 or less --
-    // comparable to or below intAbsTol()'s own default (1e-3) -- so an
-    // absolute tolerance on that scale lets the integrator accept a
-    // first, badly under-resolved estimate of what is a step-function
-    // integrand (snStar() is 0 or 1). A pure relative tolerance still
-    // converges quickly: each subinterval is either constant (exact at
-    // once, including an identically zero one) or brackets a step,
-    // which bisection homes in on.
-    using SNSegFn = std::array<double, 1> (*)(double, const io::SimControls&, double);
-    const utils::PDFIntegrator<SNSegFn> integrator(
-        sc.imf(), static_cast<SNSegFn>(&Cluster::snStar), 1,
-        false, sc.intMaxIter(), 0.0, sc.intRelTol());
+    // imf() is normalized by number, so each integral is a number of
+    // SNe per star; scale to this cluster's own non-stochastic mass --
+    // see SimControls::nonStochIMFMass()'s own comment
+    const double scale = birthNonStochMass_ / sc.nonStochIMFMass();
 
+    // Integrated exactly as computeYields() integrates yieldStar(), via
+    // utils::integrateScaled(): only a small fraction of stars die in
+    // one step, so the raw per-star integral is far below intAbsTol(),
+    // and an absolute tolerance in its own units would accept a first,
+    // unresolved estimate of this step-function integrand (snStar() is
+    // 0 or 1); integrateScaled() instead sets the absolute tolerance
+    // relative to imf()'s own integral over the range
+    const auto snAt = [&sc, this](const double m) -> std::vector<double> { return snStar(m, sc, feH_); };
     for (const auto& [m0, m1] : nonStochDeadMassRanges(lastFeedbackTime_))
     {
-        const auto segResult = integrator.integrate(m0, m1, sc, feH_);
-        nonStochSN_ += segResult[0] * birthNonStochMass_; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- segResult is a std::array<double, 1>, so index 0 is always valid
+        const auto segResult = utils::integrateScaled(sc.imf(), snAt, 1, m0, m1,
+            { m0, 0.5 * (m0 + m1), m1 }, sc.intMaxIter(), sc.intAbsTol(), sc.intRelTol());
+        nonStochSN_ += segResult.at(0) * scale;
     }
 }
 
 // Per-star supernova count, given a mass -- see this method's own
 // header comment
 auto core::Cluster::snStar(const double m, const io::SimControls& controls, const double feH)
-    -> std::array<double, 1>
+    -> std::vector<double>
 {
     return { controls.hasSN(m, feH) ? 1.0 : 0.0 };
 }

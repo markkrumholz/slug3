@@ -818,9 +818,10 @@ namespace core
          * finds the mass ranges that died between lastFeedbackTime_
          * and curTime_ via nonStochDeadMassRanges(), integrates
          * snStar() against controls().imf() over each via
-         * PDFIntegrator, exactly as computeYields() integrates
-         * yieldStar(), and adds birthNonStochMass_ times the sum of
-         * those integrals into nonStochSN_.
+         * utils::integrateScaled(), exactly as computeYields()
+         * integrates yieldStar(), and adds the sum of those integrals,
+         * times birthNonStochMass_ / controls().nonStochIMFMass() (imf()
+         * being normalized by number, not mass), into nonStochSN_.
          */
         void computeFeedback();
 
@@ -911,17 +912,17 @@ namespace core
          * @param feH [Fe/H] of the star -- the cluster's own feH_,
          *   passed explicitly for the same reason as controls
          * @return 1 if controls.hasSN(m, feH) is true, 0 otherwise,
-         *   wrapped in a single-element array
+         *   wrapped in a single-element vector
          * @details
-         * Exists so computeFeedback() can hand it to
-         * utils::PDFIntegrator, mirroring lbolStar()'s/yieldStar()'s
-         * own identical roles for computeLbol()/computeYields() -- a
-         * thin wrapper converting SimControls::hasSN()'s bool result
-         * to the double-valued form PDFIntegrator requires. Static for
-         * the same reason they are.
+         * Exists so computeFeedback() can integrate it with
+         * utils::integrateScaled(), mirroring yieldStar()'s own role
+         * for computeYields() -- a thin wrapper converting
+         * SimControls::hasSN()'s bool result to the vector-valued form
+         * integrateScaled() requires. Static for the same reason
+         * yieldStar() is.
          */
         [[nodiscard]] static auto snStar(double m, const io::SimControls& controls, double feH)
-            -> std::array<double, 1>;
+            -> std::vector<double>;
 
     };
 

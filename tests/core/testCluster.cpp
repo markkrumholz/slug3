@@ -1797,8 +1797,10 @@ static auto testClusterCumSNeStochastic() -> int
 
 // Verify cumSNe() for a fully continuously-sampled cluster: with SNe
 // restricted to 8-40 Msun via feedback.sn_mass_range, the count should
-// equal the cluster mass times the integral of the IMF over the part of
-// the mass range that has died since birth that lies within 8-40 Msun.
+// equal the number of stars in the part of the mass range that has
+// died since birth that lies within 8-40 Msun: the IMF's own integral
+// there (a number fraction) times the cluster's own number of stars,
+// its mass divided by nonStochIMFMass().
 // As in testClusterCumSNeStochastic, advance() is called twice before
 // cumSNe() is read, the first time at an age by which part of the
 // 8-40 Msun range has already died, so that the second call's own
@@ -1845,12 +1847,13 @@ static auto testClusterCumSNeNonStochastic() -> int
             return 1;
         }
 
-        // Number of stars per unit cluster mass in [m0, m1]
-        using OneFn = std::array<double, 1> (*)(double);
-        const utils::PDFIntegrator<OneFn> integrator(
-            controls.imf(), static_cast<OneFn>([](double) -> std::array<double, 1> { return { 1.0 }; }), 1,
-            false, controls.intMaxIter(), controls.intAbsTol(), controls.intRelTol());
-        const double expected = integrator.integrate(m0, m1)[0] * clusterMass; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- single-element array
+        // Number of stars in [m0, m1]: imf() is normalized by number,
+        // so its integral over [m0, m1] is the fraction of stars there,
+        // and the cluster holds clusterMass / nonStochIMFMass() stars
+        // (every star being non-stochastic here) -- see
+        // SimControls::nonStochIMFMass()'s own comment
+        const double expected = controls.imf().integral(m0, m1) * clusterMass /
+            controls.nonStochIMFMass();
 
         // cumSNe()'s own integrand is a step function (hasSN), so it
         // converges only to within the integrator's own tolerance
@@ -1942,7 +1945,9 @@ static auto testClusterCumSNeYieldGap() -> int
 // 30-40 Msun parts of its mass range, not the 20-30 Msun failed-supernova
 // gap: at an age by which the turnoff mass mTO has fallen below 20 Msun
 // (but, for this test track set, not below 10 Msun), it should equal the
-// cluster mass times the IMF integral over [mTO, 20] plus [30, 40]
+// number of stars in [mTO, 20] plus [30, 40] -- the cluster's own number
+// of stars, its mass divided by nonStochIMFMass(), times the IMF's own
+// integral over those ranges
 static auto testClusterCumSNeYieldGapNonStochastic() -> int
 {
     constexpr double clusterMass = 1e4;
@@ -1972,12 +1977,10 @@ static auto testClusterCumSNeYieldGapNonStochastic() -> int
             return 1;
         }
 
-        using OneFn = std::array<double, 1> (*)(double);
-        const utils::PDFIntegrator<OneFn> integrator(
-            controls.imf(), static_cast<OneFn>([](double) -> std::array<double, 1> { return { 1.0 }; }), 1,
-            false, controls.intMaxIter(), controls.intAbsTol(), controls.intRelTol());
-        const double expected = clusterMass *
-            (integrator.integrate(mTO, 20.0)[0] + integrator.integrate(30.0, 40.0)[0]); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- single-element arrays
+        // Number of stars in those ranges -- see
+        // testClusterCumSNeNonStochastic()'s own identical computation
+        const double expected = clusterMass / controls.nonStochIMFMass() *
+            (controls.imf().integral(mTO, 20.0) + controls.imf().integral(30.0, 40.0));
 
         const double tol = 2.0 * controls.intRelTol();
         if (std::abs(cluster.cumSNe() - expected) > tol * expected)
