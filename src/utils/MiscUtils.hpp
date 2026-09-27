@@ -177,26 +177,27 @@ namespace utils
      * @param f The integrand
      * @param points The points to evaluate f at
      * @return The smallest nonzero magnitude among every element of
-     *   f(x), over every x in points (or, if the largest magnitude
-     *   exceeds it by more than a factor 1e200, the geometric mean of
-     *   the two); or 1 if all are zero
+     *   f(x), over every x in points, but at least 1e-300 times the
+     *   largest; or 1 if all are zero
      * @details
      * Dividing an integrand by this scale makes it dimensionless and
      * puts its smallest nonzero elements at order unity, so that
      * SimControls::intAbsTol(), times the integral of the weighting
      * function over the integration range, is a meaningful absolute
      * tolerance for every element -- see minNonZeroMagnitude()'s own
-     * comment. If the elements span more than 200 orders of
-     * magnitude (e.g. a subnormal entry alongside an ordinary one),
-     * dividing by the smallest could overflow the largest, so the
-     * geometric mean of the smallest and largest is used instead,
-     * keeping both ends representable -- at the cost of a looser
-     * absolute tolerance for the smallest elements.
+     * comment. The floor at 1e-300 times the largest magnitude only
+     * matters if the elements span more than 300 orders of magnitude
+     * (e.g. a subnormal entry alongside an ordinary one): it keeps the
+     * largest scaled element at most 1e300, so it never overflows,
+     * while the smallest stays representable for any span up to about
+     * 1e600 -- beyond that (a subnormal alongside a value near the
+     * largest double) the smallest may underflow to 0, a negligible
+     * contribution in any case.
      */
     template <class F>
     auto integrandScale(const F& f, const std::vector<double>& points) -> double
     {
-        constexpr double maxDynamicRange = 1e200;
+        constexpr double maxScaled = 1e300;
         double scale = std::numeric_limits<double>::infinity();
         double maxAbs = 0.0;
         for (const double x : points)
@@ -206,8 +207,7 @@ namespace utils
             for (const double e : v) { maxAbs = std::max(maxAbs, std::abs(e)); }
         }
         if (!std::isfinite(scale)) { return 1.0; }
-        if (maxAbs / maxDynamicRange > scale) { return std::sqrt(scale) * std::sqrt(maxAbs); }
-        return scale;
+        return std::max(scale, maxAbs / maxScaled);
     }
 
 } // namespace utils
