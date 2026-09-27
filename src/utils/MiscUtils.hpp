@@ -9,10 +9,12 @@
 #ifndef MISCUTILS_HPP
 #define MISCUTILS_HPP
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdlib>
 #include <filesystem>
+#include <limits>
 #include <string>
 #include <vector>
 namespace utils
@@ -142,6 +144,70 @@ namespace utils
             result[i] = std::exp(logXMin + (static_cast<double>(i) * dLogX)); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i < n - 1 < n == result.size() by the loop bound
         }
         return result;
+    }
+
+    /**
+     * @brief The smallest nonzero magnitude among a set of values
+     * @param v The values to scan
+     * @param fallback Value to return if every element of v is zero
+     *   (or v is empty)
+     * @return min |v[i]| over every nonzero v[i], or fallback if there
+     *   are none
+     * @details
+     * Used to put a vector-valued integrand whose elements span many
+     * orders of magnitude, and may include exact zeros, on a common
+     * dimensionless scale before integrating it, so that a single
+     * absolute tolerance (SimControls::intAbsTol()) is meaningful for
+     * every element: an element that integrates to (nearly) zero can
+     * then still meet the absolute tolerance, rather than failing the
+     * relative one forever. Pass fallback = +infinity to combine the
+     * results over several vectors with std::min.
+     */
+    inline auto minNonZeroMagnitude(const std::vector<double>& v, const double fallback = 1.0) -> double
+    {
+        double m = std::numeric_limits<double>::infinity();
+        for (const double x : v) { if (x != 0.0) { m = std::min(m, std::abs(x)); } }
+        return std::isfinite(m) ? m : fallback;
+    }
+
+    /**
+     * @brief A characteristic scale for a vector-valued integrand, from a few sample evaluations
+     * @tparam F A callable taking a double and returning a
+     *   std::vector<double>
+     * @param f The integrand
+     * @param points The points to evaluate f at
+     * @return The smallest nonzero magnitude among every element of
+     *   f(x), over every x in points, but at least 1e-300 times the
+     *   largest; or 1 if all are zero
+     * @details
+     * Dividing an integrand by this scale makes it dimensionless and
+     * puts its smallest nonzero elements at order unity, so that
+     * SimControls::intAbsTol(), times the integral of the weighting
+     * function over the integration range, is a meaningful absolute
+     * tolerance for every element -- see minNonZeroMagnitude()'s own
+     * comment. The floor at 1e-300 times the largest magnitude only
+     * matters if the elements span more than 300 orders of magnitude
+     * (e.g. a subnormal entry alongside an ordinary one): it keeps the
+     * largest scaled element at most 1e300, so it never overflows,
+     * while the smallest stays representable for any span up to about
+     * 1e600 -- beyond that (a subnormal alongside a value near the
+     * largest double) the smallest may underflow to 0, a negligible
+     * contribution in any case.
+     */
+    template <class F>
+    auto integrandScale(const F& f, const std::vector<double>& points) -> double
+    {
+        constexpr double maxScaled = 1e300;
+        double scale = std::numeric_limits<double>::infinity();
+        double maxAbs = 0.0;
+        for (const double x : points)
+        {
+            const auto v = f(x);
+            scale = std::min(scale, minNonZeroMagnitude(v, scale));
+            for (const double e : v) { maxAbs = std::max(maxAbs, std::abs(e)); }
+        }
+        if (!std::isfinite(scale)) { return 1.0; }
+        return std::max(scale, maxAbs / maxScaled);
     }
 
 } // namespace utils

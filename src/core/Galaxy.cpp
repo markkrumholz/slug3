@@ -17,6 +17,7 @@
 #include "../tracks/Tracks3D.hpp"
 #include "../utils/GKIntegrator.hpp"
 #include "../utils/GKIntegratorData.hpp"
+#include "../utils/MiscUtils.hpp"
 #include "../utils/PDFIntegrator.hpp"
 #include "../utils/UniqueIDManager.hpp"
 #include "../yields/Yields.hpp"
@@ -63,23 +64,6 @@ namespace
         if (m < tracks.mMin()) { return std::numeric_limits<double>::infinity(); }
         if (m > tracks.mMax()) { return -std::numeric_limits<double>::infinity(); }
         return tracks.starLifetime(m, feh);
-    }
-
-    /**
-     * @brief The smallest nonzero magnitude among a vector's elements
-     * @param v The vector to scan
-     * @return min |v[i]| over every nonzero v[i], or 1 if every element
-     *   is zero (or v is empty)
-     * @details
-     * Used by Galaxy::addContinuousNebSpec() to put its nebular
-     * spectrum and line luminosities on a common, dimensionless scale
-     * before integrating over [Fe/H] -- see its own comment.
-     */
-    auto minNonZero(const std::vector<double>& v) -> double
-    {
-        double m = std::numeric_limits<double>::infinity();
-        for (const double x : v) { if (x != 0.0) { m = std::min(m, std::abs(x)); } }
-        return std::isfinite(m) ? m : 1.0;
     }
 } // namespace
 
@@ -454,8 +438,8 @@ void core::Galaxy::addContinuousNebSpec(const extinct::Extinct* ext, const nebul
         // letting intAbsTol() serve directly as a common absolute
         // tolerance; the result is scaled back afterward
         const auto [meanSpec, meanLine] = neb->getGalaxy(contSpec, fehDist.expectationValue());
-        const double specScale = minNonZero(meanSpec);
-        const double lineScale = minNonZero(meanLine);
+        const double specScale = utils::minNonZeroMagnitude(meanSpec);
+        const double lineScale = utils::minNonZeroMagnitude(meanLine);
         const std::size_t nWl = contSpec.size();
         const std::size_t nLine = neb->lineWl().size();
         auto fehIntegrand = [neb, &contSpec, specScale, lineScale](const double feh) -> std::vector<double>
@@ -709,18 +693,19 @@ auto core::Galaxy::yieldsRate(const double t, const double feh) const -> std::ve
     // about t / 2, so this dimension's own coordinate becomes age
     // directly
     const pdfs::PDFReflect sfrAge(sfr(), 0.5 * t);
-    const double absTol = sc.intAbsTol() * 1e-6 * sfr().integral(0.0, t);
 
-    using IntegrandFn = std::vector<double> (Galaxy::*)(double, double) const;
-    const utils::PDFIntegrator<IntegrandFn, utils::GKOrder::GK15> integrator(
-        sfrAge, static_cast<IntegrandFn>(&Galaxy::yieldsIntegrand),
-        n, false, sc.intMaxIter(), absTol, sc.intRelTol());
+    // The integrand is made dimensionless first, scaled by its
+    // smallest nonzero element at a few log-spaced ages (deaths only
+    // begin a few Myr in) -- see utils::integrateScaled()'s own comment
+    const auto rateAt = [this, feh](const double age) -> std::vector<double>
+    { return yieldsIntegrand(age, feh); };
 
     // This is the instantaneous rate of mass return at time t --
     // decay it forward to curTime_ (unless noDecay() is true) so that
     // what computeYields() integrates over t is each moment's own
     // present-day (curTime_), rather than as-produced, contribution.
-    auto result = integrator.integrate(0.0, t, this, feh);
+    auto result = utils::integrateScaled(sfrAge, rateAt, n, 0.0, t,
+        { t, 0.3 * t, 0.1 * t, 0.03 * t, 0.01 * t }, sc.intMaxIter(), sc.intAbsTol(), sc.intRelTol());
     if (!sc.noDecay())
     {
         yields->applyDecay(curTime_ - t, result, sc.yieldsChannelDecomposed());
@@ -750,15 +735,23 @@ auto core::Galaxy::yieldsRate(const double t) const -> std::vector<double>
     const std::size_t n = sc.yieldsChannelDecomposed()
         ? yields->yieldChannels().size() * yields->isotopes().size()
         : yields->isotopes().size();
-    const double absTol = sc.intAbsTol() * 1e-6 * sfr().integral(0.0, t);
-    auto fehIntegrand = [this, t](const double feh) -> std::vector<double>
-    { return yieldsRate(t, feh); };
-    const utils::PDFIntegrator<decltype(fehIntegrand), utils::GKOrder::GK15> fehIntegrator(
-        fehDist, fehIntegrand, n, false, sc.intMaxIter(), absTol, sc.intRelTol());
-    auto result = fehIntegrator.integrate(fehDist.getMin(), fehDist.getMax());
+    // Dimensionless scaling, as in yieldsRate(t, feh), here from the
+    // rate at fehDist's own mean -- see utils::integrateScaled()
+    const auto rateAt = [this, t](const double feh) -> std::vector<double> { return yieldsRate(t, feh); };
+    auto result = utils::integrateScaled(fehDist, rateAt, n, fehDist.getMin(), fehDist.getMax(),
+        { fehDist.expectationValue() }, sc.intMaxIter(), sc.intAbsTol(), sc.intRelTol());
     const double fehNorm = fehDist.integral(fehDist.getMin(), fehDist.getMax());
     for (double& r : result) { r /= fehNorm; }
     return result;
+}
+
+// yieldsRate(t), divided by scale -- see this method's own header
+// comment
+auto core::Galaxy::scaledYieldsRate(const double t, const double scale) const -> std::vector<double>
+{
+    auto rate = yieldsRate(t);
+    for (double& v : rate) { v /= scale; }
+    return rate;
 }
 
 // Update yields_/fieldYields_ from the stars that died since
@@ -848,16 +841,23 @@ void core::Galaxy::computeYields()
     // non-clustered star is stochastically sampled (minStochMass() ==
     // 0) or because there is no non-clustered population to begin
     // with (fCluster() == 1)
-    if (sc.minStochMass() > 0.0 && sc.fCluster() < 1.0)
+    if (sc.minStochMass() > 0.0 && sc.fCluster() < 1.0 && curTime_ > lastYieldTime_)
     {
-        using YieldsRateFn = std::vector<double> (Galaxy::*)(double) const;
-        const utils::GKIntegrator<YieldsRateFn, utils::GKOrder::GK15> integrator(
-            static_cast<YieldsRateFn>(&Galaxy::yieldsRate), fieldYields_.size(),
-            sc.intMaxIter(), sc.intAbsTol(), sc.intRelTol());
-        const auto result = integrator.integrate(lastYieldTime_, curTime_, this);
+        // Dimensionless scaling, as in yieldsRate(t, feh) -- here from
+        // the rate at a few times across the step, with absolute
+        // tolerance intAbsTol() times the step's own length
+        const double dt = curTime_ - lastYieldTime_;
+        const auto rateAt = [this](const double t) -> std::vector<double> { return yieldsRate(t); };
+        const double rScale = utils::integrandScale(rateAt, { lastYieldTime_ + (0.25 * dt),
+            lastYieldTime_ + (0.5 * dt), lastYieldTime_ + (0.75 * dt), curTime_ });
+        using ScaledRateFn = std::vector<double> (Galaxy::*)(double, double) const;
+        const utils::GKIntegrator<ScaledRateFn, utils::GKOrder::GK15> integrator(
+            static_cast<ScaledRateFn>(&Galaxy::scaledYieldsRate), fieldYields_.size(),
+            sc.intMaxIter(), sc.intAbsTol() * dt, sc.intRelTol());
+        const auto result = integrator.integrate(lastYieldTime_, curTime_, this, rScale);
         for (std::size_t k = 0; k < result.size(); ++k)
         {
-            fieldYields_[k] += result[k] * (1.0 - sc.fCluster()); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,cppcoreguidelines-pro-bounds-constant-array-index) -- fieldYields_ and result are both sized identically by construction
+            fieldYields_[k] += result[k] * rScale * (1.0 - sc.fCluster()); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,cppcoreguidelines-pro-bounds-constant-array-index) -- fieldYields_ and result are both sized identically by construction
         }
     }
 

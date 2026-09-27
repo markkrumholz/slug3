@@ -443,13 +443,15 @@ namespace core
          * SimControls::fehDist()'s own range itself -- see the
          * feh-less yieldsRate(double) overload for that.
          *
-         * The integral's own absolute tolerance is
-         * SimControls::intAbsTol() * 1e-6 * sfr().integral(0, t) -- the
-         * same "scale the tolerance by the star formation history's
-         * own integral" idea computeLbolCts() uses for its own absTol,
-         * but three orders of magnitude tighter, since yield
-         * quantities are typically much smaller relative to their own
-         * natural scale than Lbol is to its.
+         * Isotope yield rates span many orders of magnitude, and some
+         * are zero, so the integrand is first made dimensionless:
+         * divided by its smallest nonzero element at a few
+         * log-spaced ages (see utils::integrandScale()), with absolute
+         * tolerance SimControls::intAbsTol() * sfr().integral(0, t),
+         * the integral of a unit-scale integrand; the result is
+         * scaled back afterward. The [Fe/H] integral in the
+         * yieldsRate(double) overload, and computeYields()'s own
+         * integral of it over time, are scaled the same way.
          *
          * If controls().noDecay() is false (the default), the raw
          * integral above -- the instantaneous rate at which mass was
@@ -554,6 +556,21 @@ namespace core
         void advance(double t);
 
     private:
+
+        /**
+         * @brief yieldsRate(t), divided by a scale
+         * @param t Simulation time, in yr -- see yieldsRate(double)'s
+         *   own t parameter
+         * @param scale The value to divide every element by
+         * @return yieldsRate(t), elementwise divided by scale
+         * @details
+         * The dimensionless integrand of computeYields()'s own integral
+         * of yieldsRate() over time -- see utils::integrateScaled()'s
+         * own comment for why it is scaled. A member function, rather
+         * than a lambda, so that it can be passed to GKIntegrator the
+         * same way as every other integrand in this class.
+         */
+        [[nodiscard]] auto scaledYieldsRate(double t, double scale) const -> std::vector<double>;
 
         double curTime_ = 0.0;                  /**< Current simulation time */
         std::vector<Cluster> clusters_;          /**< Currently alive (non-disrupted) clusters */

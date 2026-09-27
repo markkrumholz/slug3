@@ -638,28 +638,30 @@ void core::Cluster::computeYields()
         liveMassRangeNow.emplace_back(seg->xMin(), seg->xMax());
     }
 
-    // Masses alive at lastYieldTime_ but dead now, clipped to lie
-    // below minStochMass() (the non-stochastic population's own upper
-    // mass limit -- any part at or above it belongs to the stochastic
-    // stars already handled above, via mDead_)
-    using YieldSegFn = std::vector<double> (*)(double, double, const yields::Yields&, bool,
-        const io::SimControls&, double, double, const tracks::Tracks2D&);
-    const utils::PDFIntegrator<YieldSegFn> integrator(
-        sc.imf(), static_cast<YieldSegFn>(&Cluster::yieldStar), yields_.size(),
-        false, sc.intMaxIter(), sc.intAbsTol(), sc.intRelTol());
-
     // imf() is normalized by number, so each integral is per star;
     // scale to this cluster's own non-stochastic mass -- see
     // SimControls::nonStochIMFMass()'s own comment
     const double scale = birthNonStochMass_ / sc.nonStochIMFMass();
+
+    // Masses alive at lastYieldTime_ but dead now, clipped to lie
+    // below minStochMass() (the non-stochastic population's own upper
+    // mass limit -- any part at or above it belongs to the stochastic
+    // stars already handled above, via mDead_)
+    const auto yieldAt = [&](const double m) -> std::vector<double>
+    { return yieldStar(m, feH_, *yields, decomposed, sc, curTime_, formTime_, tracks()); };
     for (const auto& [lo, hi] : subtractMassRanges(liveMassRangeLast, liveMassRangeNow))
     {
         const double m0 = lo;
         const double m1 = std::min(hi, sc.minStochMass());
         if (m0 >= m1) { continue; } // empty once clipped below minStochMass()
 
-        const auto segResult = integrator.integrate(m0, m1, feH_, *yields, decomposed,
-            sc, curTime_, formTime_, tracks());
+        // Isotope yields span many orders of magnitude, and some are
+        // zero, and only a small fraction of stars die in one step, so
+        // the integrand is made dimensionless first, scaled by its
+        // smallest nonzero yield at either end or the middle of the
+        // range -- see utils::integrateScaled()'s own comment
+        const auto segResult = utils::integrateScaled(sc.imf(), yieldAt, yields_.size(),
+            m0, m1, { m0, 0.5 * (m0 + m1), m1 }, sc.intMaxIter(), sc.intAbsTol(), sc.intRelTol());
         for (std::size_t k = 0; k < segResult.size(); ++k)
         {
             yields_[k] += segResult[k] * scale; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- yields_ and segResult are both sized yields_.size() by construction (segResult via nInt_ above)
