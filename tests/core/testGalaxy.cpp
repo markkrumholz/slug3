@@ -1752,16 +1752,22 @@ static auto testGalaxyNebularMultiFeh() -> int
         for (double& v : refSpec) { v /= weightSum; }
         for (double& v : refLine) { v /= weightSum; }
 
-        // Largest relative difference between two vectors, over
-        // entries not negligible compared with ref's own largest
+        // Largest difference between two vectors: relative for entries
+        // not negligible compared with ref's own largest magnitude,
+        // and, for the rest, absolute in units of that magnitude (so a
+        // spuriously large value where ref is ~0 is still caught);
+        // infinite if got has any non-finite entry
         auto maxRelDiff = [](const std::vector<double>& got, const std::vector<double>& ref) -> double
         {
-            const double scale = std::ranges::max(ref, {}, [](const double v) -> double { return std::abs(v); });
+            const double scale = std::abs(std::ranges::max(ref, {}, [](const double v) -> double { return std::abs(v); }));
             double worst = 0.0;
             for (std::size_t i = 0; i < ref.size(); ++i)
             {
-                if (std::abs(ref.at(i)) <= 1e-6 * std::abs(scale)) { continue; }
-                worst = std::max(worst, std::abs((got.at(i) / ref.at(i)) - 1.0));
+                if (!std::isfinite(got.at(i))) { return std::numeric_limits<double>::infinity(); }
+                const double diff = std::abs(ref.at(i)) <= 1e-6 * scale ?
+                    std::abs(got.at(i) - ref.at(i)) / scale :
+                    std::abs((got.at(i) / ref.at(i)) - 1.0);
+                worst = std::max(worst, diff);
             }
             return worst;
         };
