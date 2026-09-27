@@ -177,21 +177,37 @@ namespace utils
      * @param f The integrand
      * @param points The points to evaluate f at
      * @return The smallest nonzero magnitude among every element of
-     *   f(x), over every x in points, or 1 if all are zero
+     *   f(x), over every x in points (or, if the largest magnitude
+     *   exceeds it by more than a factor 1e200, the geometric mean of
+     *   the two); or 1 if all are zero
      * @details
      * Dividing an integrand by this scale makes it dimensionless and
      * puts its smallest nonzero elements at order unity, so that
      * SimControls::intAbsTol(), times the integral of the weighting
      * function over the integration range, is a meaningful absolute
      * tolerance for every element -- see minNonZeroMagnitude()'s own
-     * comment.
+     * comment. If the elements span more than 200 orders of
+     * magnitude (e.g. a subnormal entry alongside an ordinary one),
+     * dividing by the smallest could overflow the largest, so the
+     * geometric mean of the smallest and largest is used instead,
+     * keeping both ends representable -- at the cost of a looser
+     * absolute tolerance for the smallest elements.
      */
     template <class F>
     auto integrandScale(const F& f, const std::vector<double>& points) -> double
     {
+        constexpr double maxDynamicRange = 1e200;
         double scale = std::numeric_limits<double>::infinity();
-        for (const double x : points) { scale = std::min(scale, minNonZeroMagnitude(f(x), scale)); }
-        return std::isfinite(scale) ? scale : 1.0;
+        double maxAbs = 0.0;
+        for (const double x : points)
+        {
+            const auto v = f(x);
+            scale = std::min(scale, minNonZeroMagnitude(v, scale));
+            for (const double e : v) { maxAbs = std::max(maxAbs, std::abs(e)); }
+        }
+        if (!std::isfinite(scale)) { return 1.0; }
+        if (maxAbs / maxDynamicRange > scale) { return std::sqrt(scale) * std::sqrt(maxAbs); }
+        return scale;
     }
 
 } // namespace utils

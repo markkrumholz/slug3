@@ -169,6 +169,32 @@ static auto testDeltaSegments() -> int
     return result;
 }
 
+// Verify that integrateScaled() stays finite, and correct, for an
+// integrand whose elements span more than the range of a double: a
+// constant {1e-300, 1e300} integrated against a flat PDF must give
+// {1e-300, 1e300} times the PDF's own integral over the range, rather
+// than overflowing when divided by its smallest element (see
+// utils::integrandScale()'s own comment).
+static auto testIntegrateScaledExtremeRange() -> int
+{
+    const pdfs::PDF flat(std::make_unique<pdfs::PDFSegmentPowerlaw>(0.0, 1.0, 0.0));
+    const auto f = [](const double /*x*/) -> std::vector<double> { return { 1e-300, 1e300 }; };
+    const auto result = utils::integrateScaled(flat, f, 2U, 0.2, 0.7, { 0.2, 0.45, 0.7 },
+        0, 1e-3, 1e-6);
+    const double weight = flat.integral(0.2, 0.7);
+    for (std::size_t k = 0; k < 2; ++k)
+    {
+        const double expected = f(0.0).at(k) * weight;
+        if (!std::isfinite(result.at(k)) || std::abs((result.at(k) / expected) - 1.0) > 1e-6)
+        {
+            std::cerr << "testPDFIntegrator: integrateScaled extreme range, element " << k
+                << ": expected " << expected << ", got " << result.at(k) << "\n";
+            return 1;
+        }
+    }
+    return 0;
+}
+
 auto testPDFIntegrator() -> int
 {
     const pdfs::PDF imf = pdfs::parsePDFDescriptor("data/imfs/chabrier.toml");
@@ -177,5 +203,6 @@ auto testPDFIntegrator() -> int
     result += testPlainFunction(imf);
     result += testMemberFunction(imf);
     result += testDeltaSegments();
+    result += testIntegrateScaledExtremeRange();
     return result;
 }
