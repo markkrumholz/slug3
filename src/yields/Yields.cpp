@@ -129,13 +129,15 @@ namespace yields
          * @param isotopes The full isotope list
          * @param i Index into isotopes of the candidate parent
          * @param keep Which entries of isotopes are currently kept
+         * @param skipped Isotopes decaying instantly -- daughters are
+         *   resolved through these, see elem::effectiveDaughters()
          * @returns True if some daughter of isotopes[i], not counting
          *   H1 or He4 (see isEmittedParticle()), is itself kept
          */
         auto hasKeptLinkedDaughter(const elem::IsotopeList& isotopes, const std::size_t i,
-            const std::vector<bool>& keep) -> bool
+            const std::vector<bool>& keep, const elem::IsotopeList& skipped) -> bool
         {
-            return std::ranges::any_of(isotopes[i].get().daughters(), // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i < isotopes.size() by the caller's own loop bound
+            return std::ranges::any_of(elem::effectiveDaughters(isotopes[i].get(), skipped), // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i < isotopes.size() by the caller's own loop bound
                 [&](const auto& daughter)
                 {
                     if (isEmittedParticle(daughter)) { return false; }
@@ -150,13 +152,14 @@ namespace yields
          * @param keep Which entries of isotopes are kept; updated in place
          * @returns True if this pass kept anything new
          */
-        auto keepParentsPass(const elem::IsotopeList& isotopes, std::vector<bool>& keep) -> bool
+        auto keepParentsPass(const elem::IsotopeList& isotopes, std::vector<bool>& keep,
+            const elem::IsotopeList& skipped) -> bool
         {
             bool changed = false;
             for (std::size_t i = 0; i < isotopes.size(); ++i)
             {
                 if (keep[i] || isotopes[i].get().stable()) { continue; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i < isotopes.size() == keep.size() by loop bound
-                if (hasKeptLinkedDaughter(isotopes, i, keep))
+                if (hasKeptLinkedDaughter(isotopes, i, keep, skipped))
                 {
                     keep[i] = true; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
                     changed = true;
@@ -171,13 +174,14 @@ namespace yields
          * @param keep Which entries of isotopes are kept; updated in place
          * @returns True if this pass kept anything new
          */
-        auto keepDaughtersPass(const elem::IsotopeList& isotopes, std::vector<bool>& keep) -> bool
+        auto keepDaughtersPass(const elem::IsotopeList& isotopes, std::vector<bool>& keep,
+            const elem::IsotopeList& skipped) -> bool
         {
             bool changed = false;
             for (std::size_t i = 0; i < isotopes.size(); ++i)
             {
                 if (!keep[i] || isotopes[i].get().stable()) { continue; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i < isotopes.size() == keep.size() by loop bound
-                for (const auto& daughter : isotopes[i].get().daughters()) // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
+                for (const auto& daughter : elem::effectiveDaughters(isotopes[i].get(), skipped)) // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
                 {
                     const auto j = indexOfDaughter(isotopes, daughter);
                     if (j.has_value() && !keep[*j]) // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- *j < isotopes.size() == keep.size() by indexOfDaughter()
@@ -197,6 +201,10 @@ namespace yields
          *   and in its own order
          * @param requested The isotopes the caller asked for; entries
          *   that do not appear in isotopes are ignored
+         * @param skipped Isotopes decaying instantly, already removed
+         *   from isotopes; decay links are followed through them (see
+         *   elem::effectiveDaughters()), so e.g. X -> (skipped Y) ->
+         *   requested Z still keeps X
          * @details
          * Keeps, out of isotopes:
          *
@@ -222,7 +230,8 @@ namespace yields
          * parents. If none of requested appears in isotopes, isotopes
          * is left empty, for the caller to report.
          */
-        void restrictToRequested(elem::IsotopeList& isotopes, const elem::IsotopeList& requested)
+        void restrictToRequested(elem::IsotopeList& isotopes, const elem::IsotopeList& requested,
+            const elem::IsotopeList& skipped)
         {
             std::vector<bool> keep(isotopes.size(), false);
             for (std::size_t i = 0; i < isotopes.size(); ++i)
@@ -239,8 +248,8 @@ namespace yields
             // Rules 2 and 3, each repeated until a full pass adds nothing
             // further (a newly kept isotope can itself have a parent, or
             // decay products, of its own)
-            while (keepParentsPass(isotopes, keep)) {}
-            while (keepDaughtersPass(isotopes, keep)) {}
+            while (keepParentsPass(isotopes, keep, skipped)) {}
+            while (keepDaughtersPass(isotopes, keep, skipped)) {}
 
             elem::IsotopeList result;
             for (std::size_t i = 0; i < isotopes.size(); ++i)
@@ -407,6 +416,20 @@ namespace yields
             [](const auto& lhs, const auto& rhs) { return lhs.get() == rhs.get(); });
         isotopes_.erase(dup2.begin(), dup2.end());
 
+        // Move every isotope shorter-lived than minIsotopeLifetime()
+        // out of isotopes_ and into skippedIsotopes_: it is treated as
+        // decaying instantly -- see this method's own comment. Stable
+        // isotopes (lifetime() == 0) are never skipped
+        requestedIsotopes_ = isotopes;
+        skippedIsotopes_.clear();
+        const double minLifetime = controls_.minIsotopeLifetime();
+        std::erase_if(isotopes_, [&](const auto& iso)
+        {
+            const bool skip = !iso.get().stable() && iso.get().lifetime() < minLifetime;
+            if (skip) { skippedIsotopes_.push_back(iso); }
+            return skip;
+        });
+
         // If the caller passed a non-empty isotopes list, narrow isotopes_
         // to that list plus whatever decay-chain context it needs -- see
         // restrictToRequested(). An empty isotopes (the default) leaves
@@ -414,7 +437,7 @@ namespace yields
         // this parameter existed.
         if (!isotopes.empty())
         {
-            restrictToRequested(isotopes_, isotopes);
+            restrictToRequested(isotopes_, isotopes, skippedIsotopes_);
 
             // Every yieldChannels_ entry's own isotopesOrig() is always
             // non-empty in practice (this Yields is only ever
@@ -451,12 +474,12 @@ namespace yields
         for (const auto& channel : yieldChannels_)
         {
             const auto descriptor = channel->descriptor();
-            channel->rebuildYieldGrid(descriptor.mMin_, descriptor.mMax_, isotopes_);
+            channel->rebuildYieldGrid(descriptor.mMin_, descriptor.mMax_, isotopes_, skippedIsotopes_);
         }
 
         // Rebuild decayChain_ to match the now-final isotopes_ -- see
         // this method's own comment.
-        decayChain_.emplace(isotopes_);
+        decayChain_.emplace(isotopes_, skippedIsotopes_);
     }
 
     auto Yields::yield(const double mass, const double feH, const double dtDecay) const

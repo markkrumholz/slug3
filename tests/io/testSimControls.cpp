@@ -21,6 +21,7 @@
 #include "../src/yields/Yields.hpp"
 #include "testSimControls.hpp"
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <exception>
@@ -1587,6 +1588,7 @@ static auto testSimControlsYieldsIsotopes() -> int
             { "channel2", toml::table{
                 { "channel", "ccsn" }, { "model", "kobayashi_test" } } },
             { "registry", "tests/yields/assets/yields.toml" },
+            { "min_isotope_lifetime", 0.0 }, // track Co56/Ni56 explicitly rather than skipping them
         });
         const io::SimControls controls(inputDeck);
 
@@ -1737,6 +1739,7 @@ static auto testSimControlsYieldsIsotopesKeyword() -> int
             { "channel2", toml::table{
                 { "channel", "ccsn" }, { "model", "kobayashi_test" } } },
             { "registry", "tests/yields/assets/yields.toml" },
+            { "min_isotope_lifetime", 0.0 }, // track Co56/Ni56 explicitly rather than skipping them
             { "isotopes", isotopesArr },
         });
         return inputDeck;
@@ -1851,6 +1854,7 @@ static auto testSimControlsYieldsIsotopesKeyword() -> int
             { "channel1", toml::table{
                 { "channel", "ccsn" }, { "model", "sukhbold_test" } } },
             { "registry", "tests/yields/assets/yields.toml" },
+            { "min_isotope_lifetime", 0.0 }, // track Co56/Ni56 explicitly rather than skipping them
             { "isotopes", "fe56" },
         });
         const io::SimControls controls(inputDeck);
@@ -1936,6 +1940,7 @@ static auto testSimControlsYieldsIsotopesDecayClosure() -> int
             { "channel1", toml::table{
                 { "channel", "ccsn" }, { "model", "sukhbold_test" } } },
             { "registry", "tests/yields/assets/yields.toml" },
+            { "min_isotope_lifetime", 0.0 }, // track Co56/Ni56 explicitly rather than skipping them
             { "isotopes", isotopesArr },
         });
         return std::make_unique<io::SimControls>(inputDeck);
@@ -2115,6 +2120,7 @@ static auto testSimControlsYieldsYieldAndSum() -> int
             { "channel2", toml::table{
                 { "channel", "ccsn" }, { "model", "kobayashi_test" } } },
             { "registry", "tests/yields/assets/yields.toml" },
+            { "min_isotope_lifetime", 0.0 }, // track Co56/Ni56 explicitly rather than skipping them
         });
         const io::SimControls controls(inputDeck);
 
@@ -2214,6 +2220,7 @@ static auto testSimControlsYieldsPartialRange() -> int
             { "channel1", toml::table{ { "channel", "ccsn" }, { "model", "sukhbold_test" } } },
             { "channel2", toml::table{ { "channel", "ccsn" }, { "model", "kobayashi_test" } } },
             { "registry", "tests/yields/assets/yields.toml" },
+            { "min_isotope_lifetime", 0.0 }, // track Co56/Ni56 explicitly rather than skipping them
         });
         const io::SimControls controls(inputDeck);
 
@@ -2284,6 +2291,7 @@ static auto testSimControlsYieldsDecayApplication() -> int
                 { "channel", "ccsn" }, { "model", "sukhbold_test" }, { "m_min", 15.0 } } },
             { "channel2", toml::table{ { "channel", "ccsn" }, { "model", "kobayashi_test" } } },
             { "registry", "tests/yields/assets/yields.toml" },
+            { "min_isotope_lifetime", 0.0 }, // track Co56/Ni56 explicitly rather than skipping them
         });
         const io::SimControls controls(inputDeck);
 
@@ -2379,6 +2387,176 @@ static auto testSimControlsYieldsDecayApplication() -> int
     }
 
     return result;
+}
+
+// Verify yields.min_isotope_lifetime / SimControls::
+// setMinIsotopeLifetime(): the default (1e4 yr) skips Co56 and Ni56
+// (lifetimes well under a yr) from the sukhbold_test/kobayashi_test
+// isotope list, leaving H1/Fe56/Ni58 and moving Co56/Ni56 into
+// skippedIsotopes(); an explicit 0 keeps them. Long after the skipped
+// isotopes' lifetimes (1e3 yr here), yieldSum() must agree between the
+// two: the skipped list credits the tabulated Ni56 straight to Fe56,
+// the full one decays it there explicitly. A negative key throws.
+// setMinIsotopeLifetime() rebuilds yields() at once, keeping a
+// yields.isotopes restriction; a negative value, or one that would
+// skip every requested isotope, throws and leaves the old value and
+// isotope list in place.
+static auto testSimControlsMinIsotopeLifetime() -> int
+{
+    constexpr std::string_view baseDeck = "tests/core/assets/testGalaxy.in";
+    const auto makeDeck = [&](const std::optional<double> minLifetime,
+        const std::optional<std::string>& isotope) -> toml::table
+    {
+        toml::table inputDeck = toml::parse_file(baseDeck);
+        toml::table yieldsTbl{
+            { "channel1", toml::table{ { "channel", "ccsn" }, { "model", "sukhbold_test" } } },
+            { "channel2", toml::table{ { "channel", "ccsn" }, { "model", "kobayashi_test" } } },
+            { "registry", "tests/yields/assets/yields.toml" },
+        };
+        if (minLifetime.has_value()) { yieldsTbl.insert("min_isotope_lifetime", *minLifetime); }
+        if (isotope.has_value()) { yieldsTbl.insert("isotopes", toml::array{ *isotope }); }
+        inputDeck.insert("yields", std::move(yieldsTbl));
+        return inputDeck;
+    };
+    const auto labels = [](const elem::IsotopeList& isotopes) -> std::vector<std::string>
+    {
+        std::vector<std::string> result;
+        for (const auto& iso : isotopes) { result.push_back(iso.get().label()); }
+        return result;
+    };
+    const auto join = [](const std::vector<std::string>& names) -> std::string
+    {
+        std::string result;
+        for (const auto& name : names) { result += " " + name; }
+        return result;
+    };
+
+    try
+    {
+        // Default: Co56 and Ni56 skipped
+        io::SimControls skipping(makeDeck(std::nullopt, std::nullopt));
+        io::SimControls full(makeDeck(0.0, std::nullopt));
+        if (skipping.minIsotopeLifetime() != yields::defaultMinIsotopeLifetime ||
+            yields::defaultMinIsotopeLifetime != 1e4 || full.minIsotopeLifetime() != 0.0)
+        {
+            std::cerr << "testSimControls: minIsotopeLifetime: expected 1e4 by default and 0 when "
+                "set to 0, got " << skipping.minIsotopeLifetime() << " and " <<
+                full.minIsotopeLifetime() << "\n";
+            return 1;
+        }
+        const std::vector<std::string> expectedKept{ "H1", "Fe56", "Ni58" };
+        const std::vector<std::string> expectedSkipped{ "Co56", "Ni56" };
+        const std::vector<std::string> expectedFull{ "H1", "Fe56", "Co56", "Ni56", "Ni58" };
+        if (labels(skipping.yields()->isotopes()) != expectedKept ||
+            labels(skipping.yields()->skippedIsotopes()) != expectedSkipped ||
+            labels(full.yields()->isotopes()) != expectedFull ||
+            !full.yields()->skippedIsotopes().empty())
+        {
+            std::cerr << "testSimControls: minIsotopeLifetime: expected isotopes()/skippedIsotopes() ="
+                << join(expectedKept) << " /" << join(expectedSkipped) << " by default and" <<
+                join(expectedFull) << " / (none) with 0, got" << join(labels(skipping.yields()->isotopes())) <<
+                " /" << join(labels(skipping.yields()->skippedIsotopes())) << " and" <<
+                join(labels(full.yields()->isotopes())) << " /" <<
+                join(labels(full.yields()->skippedIsotopes())) << "\n";
+            return 1;
+        }
+
+        // Long after Co56/Ni56 have decayed, both agree on every kept
+        // isotope (full's own order is H1, Fe56, Co56, Ni56, Ni58)
+        constexpr double dt = 1e3;
+        const auto skippedSum = skipping.yields()->yieldSum(15.0, 0.0, dt);
+        const auto fullSum = full.yields()->yieldSum(15.0, 0.0, dt);
+        const std::array<std::size_t, 3> fullIndex{ 0, 1, 4 };
+        for (std::size_t k = 0; k < fullIndex.size(); ++k)
+        {
+            if (!utils::approxEqual(skippedSum.at(k), fullSum.at(fullIndex.at(k)), 1e-9) ||
+                fullSum.at(fullIndex.at(k)) <= 0.0)
+            {
+                std::cerr << "testSimControls: minIsotopeLifetime: yieldSum() of " <<
+                    expectedKept.at(k) << " after " << dt << " yr = " << skippedSum.at(k) <<
+                    " with skipping, " << fullSum.at(fullIndex.at(k)) << " without; expected "
+                    "them equal and positive\n";
+                return 1;
+            }
+        }
+
+        // setMinIsotopeLifetime(): rebuilds at once; negative rejected
+        skipping.setMinIsotopeLifetime(0.0);
+        if (labels(skipping.yields()->isotopes()) != expectedFull)
+        {
+            std::cerr << "testSimControls: minIsotopeLifetime: expected setMinIsotopeLifetime(0) "
+                "to rebuild isotopes() to" << join(expectedFull) << ", got" <<
+                join(labels(skipping.yields()->isotopes())) << "\n";
+            return 1;
+        }
+        try
+        {
+            skipping.setMinIsotopeLifetime(-1.0);
+            std::cerr << "testSimControls: minIsotopeLifetime: expected a negative value to throw\n";
+            return 1;
+        }
+        catch (const std::invalid_argument&) { /* expected */ }
+        if (skipping.minIsotopeLifetime() != 0.0)
+        {
+            std::cerr << "testSimControls: minIsotopeLifetime: expected a rejected value to leave "
+                "minIsotopeLifetime() at 0\n";
+            return 1;
+        }
+
+        // A yields.isotopes restriction is kept across rebuilds
+        io::SimControls restricted(makeDeck(0.0, "fe56"));
+        const std::vector<std::string> fe56Full{ "Fe56", "Co56", "Ni56" };
+        const std::vector<std::string> fe56Skipped{ "Fe56" };
+        if (labels(restricted.yields()->isotopes()) != fe56Full)
+        {
+            std::cerr << "testSimControls: minIsotopeLifetime: test bug: expected a Fe56 "
+                "restriction to keep" << join(fe56Full) << "\n";
+            return 1;
+        }
+        restricted.setMinIsotopeLifetime(1e4);
+        if (labels(restricted.yields()->isotopes()) != fe56Skipped)
+        {
+            std::cerr << "testSimControls: minIsotopeLifetime: expected setMinIsotopeLifetime(1e4) "
+                "to keep the Fe56 restriction, giving" << join(fe56Skipped) << ", got" <<
+                join(labels(restricted.yields()->isotopes())) << "\n";
+            return 1;
+        }
+
+        // Skipping every requested isotope throws, restoring the old
+        // value and isotope list
+        io::SimControls ni56Only(makeDeck(0.0, "ni56"));
+        const auto before = labels(ni56Only.yields()->isotopes());
+        try
+        {
+            ni56Only.setMinIsotopeLifetime(1e4);
+            std::cerr << "testSimControls: minIsotopeLifetime: expected skipping the only "
+                "requested isotope, Ni56, to throw\n";
+            return 1;
+        }
+        catch (const std::runtime_error&) { /* expected */ }
+        if (ni56Only.minIsotopeLifetime() != 0.0 || labels(ni56Only.yields()->isotopes()) != before)
+        {
+            std::cerr << "testSimControls: minIsotopeLifetime: expected a failed rebuild to "
+                "restore minIsotopeLifetime() 0 and isotopes()" << join(before) << "\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: minIsotopeLifetime: unexpected exception: " << error.what() << "\n";
+        return 1;
+    }
+
+    // A negative yields.min_isotope_lifetime throws
+    try
+    {
+        const io::SimControls controls(makeDeck(-1.0, std::nullopt));
+        std::cerr << "testSimControls: minIsotopeLifetime: expected a negative "
+            "yields.min_isotope_lifetime to throw\n";
+        return 1;
+    }
+    catch (const std::runtime_error&) { /* expected */ }
+    return 0;
 }
 
 // Verify Yields::Yields() prints a "slug: warning" (to std::cout) when
@@ -4019,6 +4197,7 @@ auto testSimControls() -> int
     result += testSimControlsYieldsYieldAndSum();
     result += testSimControlsYieldsPartialRange();
     result += testSimControlsYieldsDecayApplication();
+    result += testSimControlsMinIsotopeLifetime();
     result += testSimControlsYieldsDuplicateChannelWarning();
     result += testSimControlsSFRDist();
     result += testSimControlsSetFeHRejectsBroadening();

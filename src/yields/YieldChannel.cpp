@@ -312,18 +312,74 @@ namespace yields
         }
 
         /**
-         * @brief For each rebuildYieldGrid() target isotope, its index in isotopesOrig_, if any
+         * @brief For each rebuildYieldGrid() target isotope, the isotopesOrig_ columns it reads from, with weights
          * @details
-         * isoMap[j] is the index into isotopesOrig_ (and origView's own
-         * third axis) that target isotope j reads from, or nullopt if
-         * isotopesOrig_ has no matching isotope at all -- see
-         * rebuildYieldGrid()'s own comment. extrapolateMassColumn()/
-         * interpolateMassColumn() both take this instead of a plain
-         * isotope count, so they can skip (leaving newView at its
-         * already-zero-initialized default) any target isotope with no
-         * source column to read.
+         * isoMap[j] lists (index into isotopesOrig_ -- and origView's
+         * own third axis --, weight) pairs; target isotope j's yield is
+         * the weighted sum of those columns. Usually this is the single
+         * matching isotope with weight 1, or nothing at all if
+         * isotopesOrig_ has no matching isotope (leaving newView at its
+         * already-zero-initialized default); a skipped isotope's own
+         * column instead contributes to each of its descendants -- see
+         * rebuildYieldGrid()'s own comment.
          */
-        using IsotopeMap = std::vector<std::optional<std::size_t>>; //NOLINT(llvm-prefer-static-over-anonymous-namespace)
+        using IsotopeMap = std::vector<std::vector<std::pair<std::size_t, double>>>; //NOLINT(llvm-prefer-static-over-anonymous-namespace)
+
+        /**
+         * @brief Build the IsotopeMap rebuildYieldGrid() remaps yieldDataOrig_ with
+         * @param isotopesOrig The channel's own isotopesOrig_
+         * @param newIsotopes The isotope list being remapped onto
+         * @param remapIsotopes False if newIsotopes is isotopesOrig
+         *   itself (the identity map), true otherwise
+         * @param skippedIsotopes Isotopes decaying instantly; ignored
+         *   unless remapIsotopes is true
+         * @returns See IsotopeMap's own comment, and
+         *   YieldChannel::rebuildYieldGrid()'s
+         */
+        auto buildIsotopeMap(const elem::IsotopeList& isotopesOrig, //NOLINT(llvm-prefer-static-over-anonymous-namespace)
+            const elem::IsotopeList& newIsotopes, const bool remapIsotopes,
+            const elem::IsotopeList& skippedIsotopes) -> IsotopeMap
+        {
+            IsotopeMap isoMap(newIsotopes.size());
+            for (std::size_t j = 0; j < newIsotopes.size(); ++j)
+            {
+                if (!remapIsotopes) { isoMap[j].emplace_back(j, 1.0); continue; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- j < newIsotopes.size() == isoMap.size() by loop bound
+                const auto it = std::ranges::find_if(isotopesOrig,
+                    [&](const auto& orig) { return orig.get() == newIsotopes[j].get(); }); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
+                if (it != isotopesOrig.end())
+                {
+                    isoMap[j].emplace_back(static_cast<std::size_t>(std::distance(isotopesOrig.begin(), it)), 1.0); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
+                }
+                // else: this channel's own model never tabulated
+                // newIsotopes[j] -- isoMap[j] stays empty, leaving that
+                // isotope's own yieldData_ entries at 0 (see
+                // extrapolateMassColumn()/interpolateMassColumn())
+            }
+            if (!remapIsotopes) { return isoMap; }
+
+            // Each tabulated isotope that is skipped (treated as decaying
+            // instantly) instead contributes its yield to its first
+            // non-skipped descendants -- see YieldChannel::
+            // rebuildYieldGrid()'s own comment. The branching ratios are
+            // fractions of nuclei; A_d / A_s converts them to fractions
+            // of mass
+            for (std::size_t s = 0; s < isotopesOrig.size(); ++s)
+            {
+                const auto& orig = isotopesOrig[s].get(); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- s < isotopesOrig.size() by loop bound
+                if (std::ranges::none_of(skippedIsotopes,
+                        [&](const auto& skipped) { return skipped.get() == orig; })) { continue; }
+                for (const auto& daughter : elem::effectiveDaughters(orig, skippedIsotopes))
+                {
+                    const auto it = std::ranges::find_if(newIsotopes, [&](const auto& iso)
+                        { return iso.get().Z() == daughter.Z_ && iso.get().A() == daughter.A_; });
+                    if (it == newIsotopes.end()) { continue; }
+                    const auto j = static_cast<std::size_t>(std::distance(newIsotopes.begin(), it));
+                    isoMap[j].emplace_back(s, daughter.branchingRatio_ * // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- j < newIsotopes.size() == isoMap.size() by construction
+                        static_cast<double>(daughter.A_) / static_cast<double>(orig.A()));
+                }
+            }
+            return isoMap;
+        }
 
         /**
          * @brief Fill one masses_ column of newView by extrapolating a massesOrig_ column
@@ -349,9 +405,10 @@ namespace yields
                 newActive[f, mi] = origActive[f, src]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- f/mi/src all in range by construction, see rebuildYieldGrid()'s own comment
                 for (std::size_t j = 0; j < isoMap.size(); ++j)
                 {
-                    const auto& srcIso = isoMap[j];
-                    if (!srcIso.has_value()) { continue; } // no matching isotope in isotopesOrig_ -- leave at 0
-                    newView[f, mi, j] = ratio * origView[f, src, *srcIso]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- f/mi/src/j/*srcIso all in range by construction, see rebuildYieldGrid()'s own comment
+                    for (const auto& [srcIso, weight] : isoMap[j]) // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- j < isoMap.size() by loop bound
+                    {
+                        newView[f, mi, j] += weight * ratio * origView[f, src, srcIso]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- f/mi/src/j/srcIso all in range by construction, see rebuildYieldGrid()'s own comment
+                    }
                 }
             }
         }
@@ -386,11 +443,12 @@ namespace yields
                 // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
                 for (std::size_t j = 0; j < isoMap.size(); ++j)
                 {
-                    const auto& srcIso = isoMap[j];
-                    if (!srcIso.has_value()) { continue; } // no matching isotope in isotopesOrig_ -- leave at 0
-                    newView[f, mi, j] = // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- f/mi/j/bracket/*srcIso all in range by construction, see rebuildYieldGrid()'s own comment
-                        (1.0 - bracket.t_) * origView[f, bracket.lo_, *srcIso] +
-                        bracket.t_ * origView[f, bracket.hi_, *srcIso];
+                    for (const auto& [srcIso, weight] : isoMap[j]) // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- j < isoMap.size() by loop bound
+                    {
+                        newView[f, mi, j] += weight * ( // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- f/mi/j/bracket/srcIso all in range by construction, see rebuildYieldGrid()'s own comment
+                            (1.0 - bracket.t_) * origView[f, bracket.lo_, srcIso] +
+                            bracket.t_ * origView[f, bracket.hi_, srcIso]);
+                    }
                 }
             }
         }
@@ -552,7 +610,8 @@ namespace yields
     }
 
     void YieldChannel::rebuildYieldGrid(
-        const std::optional<double> mMin, const std::optional<double> mMax, elem::IsotopeList isotopes)
+        const std::optional<double> mMin, const std::optional<double> mMax, elem::IsotopeList isotopes,
+        const elem::IsotopeList& skippedIsotopes)
     {
         const double loMass = mMin.value_or(massesOrig_.front());
         const double hiMass = mMax.value_or(massesOrig_.back());
@@ -594,21 +653,7 @@ namespace yields
         const bool remapIsotopes = !isotopes.empty();
         elem::IsotopeList newIsotopes = remapIsotopes ? std::move(isotopes) : isotopesOrig_;
 
-        IsotopeMap isoMap(newIsotopes.size());
-        for (std::size_t j = 0; j < newIsotopes.size(); ++j)
-        {
-            if (!remapIsotopes) { isoMap[j] = j; continue; }
-            const auto it = std::ranges::find_if(isotopesOrig_,
-                [&](const auto& orig) { return orig.get() == newIsotopes[j].get(); });
-            if (it != isotopesOrig_.end())
-            {
-                isoMap[j] = static_cast<std::size_t>(std::distance(isotopesOrig_.begin(), it));
-            }
-            // else: this channel's own model never tabulated
-            // newIsotopes[j] -- isoMap[j] stays nullopt, leaving that
-            // isotope's own yieldData_ entries at 0 (see
-            // extrapolateMassColumn()/interpolateMassColumn())
-        }
+        const IsotopeMap isoMap = buildIsotopeMap(isotopesOrig_, newIsotopes, remapIsotopes, skippedIsotopes);
 
         const std::size_t nfeh = feH_.size();
         const std::size_t nmassOrig = massesOrig_.size();

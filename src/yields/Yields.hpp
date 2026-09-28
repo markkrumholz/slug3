@@ -281,6 +281,22 @@ namespace yields
          * the same way as the initial union, once this closure is
          * complete.
          *
+         * Every unstable entry whose lifetime() is below
+         * controls().minIsotopeLifetime() is then moved out of
+         * isotopes_ into skippedIsotopes_: it is treated as decaying
+         * instantly, so it needs no row of its own, and dropping it
+         * both shrinks the decay network and removes the short
+         * timescales that force fine subdivision of time integrals
+         * over decaying yields. Its tabulated yield goes instead to
+         * its first non-skipped descendants (see
+         * YieldChannel::rebuildYieldGrid()), and decays into it go
+         * straight to those descendants too (see
+         * elem::DecayChain::DecayChain()). The decay links used by the
+         * narrowing rules below pass through skipped isotopes the same
+         * way (see elem::effectiveDaughters()). This applies whether
+         * or not controls().noDecay() is set; a minIsotopeLifetime()
+         * of 0 skips nothing.
+         *
          * If isotopes is non-empty, isotopes_ is then narrowed to the
          * requested isotopes plus their decay-chain context: it is
          * *expanded*, not simply intersected with isotopes, so an
@@ -324,7 +340,8 @@ namespace yields
          * an opaque zero-column HDF5 dataset failure.
          *
          * Then, for each entry i in yieldChannels_, calls
-         * yieldChannels_[i]->rebuildYieldGrid(mMin, mMax, isotopes_),
+         * yieldChannels_[i]->rebuildYieldGrid(mMin, mMax, isotopes_,
+         * skippedIsotopes_),
          * where mMin/mMax are yieldChannels_[i]->descriptor()'s own
          * mMin_/mMax_ -- each channel caches its own descriptor (see
          * YieldChannel::descriptor()'s own comment), so this reads it
@@ -346,8 +363,13 @@ namespace yields
          *
          * Finally, decayChain_ is rebuilt from scratch to match the
          * now-final isotopes_: a single elem::DecayChain, constructed
-         * from the whole of isotopes_ at once -- see applyDecay()'s own
-         * comment for how yield()/yieldSum() actually use it.
+         * from the whole of isotopes_ (and skippedIsotopes_) at once --
+         * see applyDecay()'s own comment for how yield()/yieldSum()
+         * actually use it.
+         *
+         * isotopes is saved as requestedIsotopes(), so a later rebuild
+         * (e.g. by SimControls::setMinIsotopeLifetime()) can reapply
+         * the same restriction.
          *
          * Called once by the constructor, right after every requested
          * channel has been added; also public, so a caller (e.g. from
@@ -399,6 +421,24 @@ namespace yields
          *   same order -- see rebuildYieldGrid()'s own comment
          */
         [[nodiscard]] auto isotopes() const -> const elem::IsotopeList& { return isotopes_; }
+
+        /**
+         * @brief Return the isotopes treated as decaying instantly
+         * @return A const reference to skippedIsotopes_: every
+         *   unstable isotope the loaded channels tabulate or decay
+         *   into whose lifetime is below controls().
+         *   minIsotopeLifetime(), as of the last rebuildYieldGrid() --
+         *   see its own comment. Disjoint from isotopes()
+         */
+        [[nodiscard]] auto skippedIsotopes() const -> const elem::IsotopeList& { return skippedIsotopes_; }
+
+        /**
+         * @brief Return the isotope list the last rebuildYieldGrid() call was given
+         * @return A const reference to requestedIsotopes_; empty if
+         *   isotopes() is unrestricted -- see rebuildYieldGrid()'s own
+         *   comment
+         */
+        [[nodiscard]] auto requestedIsotopes() const -> const elem::IsotopeList& { return requestedIsotopes_; }
 
         /**
          * @brief Return the minimum [Fe/H] every loaded channel was constructed to cover
@@ -622,6 +662,8 @@ namespace yields
         std::string registryName_;        /**< Name of the yield registry file */
         std::vector<std::shared_ptr<YieldChannel>> yieldChannels_; /**< Yield channels built via addChannel(), one per entry in controls_.yieldChannels() -- see yieldChannels()'s own comment */
         elem::IsotopeList isotopes_; /**< Union of every yieldChannels_ entry's own isotopesOrig(), deduplicated and sorted -- see isotopes()'s own comment */
+        elem::IsotopeList skippedIsotopes_; /**< Isotopes treated as decaying instantly -- see skippedIsotopes()'s own comment */
+        elem::IsotopeList requestedIsotopes_; /**< The isotopes argument of the last rebuildYieldGrid() call -- see requestedIsotopes()'s own comment */
         std::optional<elem::DecayChain> decayChain_; /**< Built from the whole of isotopes_ at once -- (re)populated by rebuildYieldGrid(), see its own comment; used by applyDecay(). optional (rather than a plain value) because DecayChain has no default constructor, but decayChain_ must be re-buildable in place whenever rebuildYieldGrid() reruns */
 
     };

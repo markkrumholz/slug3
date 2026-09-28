@@ -9,6 +9,7 @@
 #ifndef ISOTOPETABLE_HPP
 #define ISOTOPETABLE_HPP
 
+#include "ElemCommons.hpp"
 #include "IsotopeData.hpp"
 #include <cstddef>
 #include <cstdlib>
@@ -17,6 +18,7 @@
 #include <map>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace elem
 {
@@ -105,6 +107,25 @@ namespace elem
     {
         return isotopeTable().table().at({z, a});
     }
+
+    /**
+     * @brief An isotope's decay daughters, with skipped (instantly decaying) isotopes resolved into their own descendants
+     * @param parent The isotope whose daughters to resolve
+     * @param skippedIsotopes Isotopes treated as decaying instantly --
+     *   see DecayChain::DecayChain()'s own comment
+     * @returns One entry per decay path from parent to its first
+     *   descendant not in skippedIsotopes: parent.daughters() itself,
+     *   except that each daughter found in skippedIsotopes (by (Z, A))
+     *   is replaced, recursively, by that daughter's own resolved
+     *   daughters, with branching ratios multiplied along the path.
+     *   Every path ends at a non-skipped isotope, since every decay
+     *   chain ends in a stable nucleus and stable nuclei are never
+     *   skipped. The same descendant can appear more than once, via
+     *   different paths; callers sum such entries, as they already do
+     *   for an isotope listing the same daughter more than once.
+     */
+    [[nodiscard]] auto effectiveDaughters(const IsotopeData& parent,
+        const IsotopeList& skippedIsotopes) -> std::vector<IsotopeDecayData>;
 
 } // namespace elem
 

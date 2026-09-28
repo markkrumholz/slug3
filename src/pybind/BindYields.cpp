@@ -42,6 +42,16 @@ static auto toIsotopeList(const std::vector<const elem::IsotopeData*>& isotopes)
     return result;
 }
 
+// Convert an elem::IsotopeList into the raw-pointer list the bindings
+// below return to Python (see isotopes's own def_property)
+static auto isotopePointers(const elem::IsotopeList& isotopes) -> std::vector<const elem::IsotopeData*>
+{
+    std::vector<const elem::IsotopeData*> result;
+    result.reserve(isotopes.size());
+    for (const auto& iso : isotopes) { result.push_back(&iso.get()); }
+    return result;
+}
+
 // Numpy-style docstrings for the Python bindings below
 static constexpr std::string_view classDocstring =
     R"doc(Chains together the nucleosynthetic yield channels a SimControls requests.
@@ -254,6 +264,27 @@ each element to this Yields via setChannels() -- see its own
 docstring for the two accepted element types (YieldChannel or
 YieldChannelDescriptor) -- then calls rebuildYieldGrid(), so isotopes()
 (and every channel) stays synchronized onto the new list.)doc";
+
+static constexpr std::string_view skippedIsotopesDocstring =
+    R"doc(The isotopes treated as decaying instantly.
+
+Returns
+-------
+list of IsotopeData
+    Every unstable isotope the loaded channels tabulate or decay into
+    whose lifetime is below controls().minIsotopeLifetime, as of the last
+    rebuildYieldGrid(). None of these appear in isotopes; their yields
+    are credited to their first longer-lived descendants instead.)doc";
+
+static constexpr std::string_view requestedIsotopesDocstring =
+    R"doc(The isotope list the last rebuildYieldGrid() call was given.
+
+Returns
+-------
+list of IsotopeData
+    Empty if isotopes is unrestricted. SimControls.minIsotopeLifetime
+    passes this back to rebuildYieldGrid() when it rebuilds, to keep the
+    same restriction.)doc";
 
 static constexpr std::string_view isotopesDocstring =
     R"doc(The isotopes this Yields' yield grid is tabulated for.
@@ -570,18 +601,18 @@ void bindYields(py::module_& m)
                 },
                 yieldChannelsDocstring.data(), py::return_value_policy::reference_internal)
         .def_property("isotopes",
-                [](const yields::Yields& self) -> std::vector<const elem::IsotopeData*>
-                {
-                    std::vector<const elem::IsotopeData*> result;
-                    result.reserve(self.isotopes().size());
-                    for (const auto& iso : self.isotopes()) { result.push_back(&iso.get()); }
-                    return result;
-                },
+                [](const yields::Yields& self) { return isotopePointers(self.isotopes()); },
                 [](yields::Yields& self, const std::vector<const elem::IsotopeData*>& isotopes)
                 {
                     self.rebuildYieldGrid(toIsotopeList(isotopes));
                 },
                 isotopesDocstring.data(), py::return_value_policy::reference)
+        .def_property_readonly("skippedIsotopes",
+                [](const yields::Yields& self) { return isotopePointers(self.skippedIsotopes()); },
+                skippedIsotopesDocstring.data(), py::return_value_policy::reference)
+        .def("requestedIsotopes",
+                [](const yields::Yields& self) { return isotopePointers(self.requestedIsotopes()); },
+                requestedIsotopesDocstring.data(), py::return_value_policy::reference)
         .def("yield_",
                 [](const yields::Yields& self, double mass, double feH, double dtDecay)
                     -> std::vector<std::vector<double>>

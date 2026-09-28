@@ -2279,7 +2279,9 @@ static auto testWriteGalaxyH5() -> int
 // Insert a yields.channel1/channel2 table (sukhbold_test/kobayashi_test,
 // both channel "ccsn", from the small fixture registry) into inputDeck,
 // plus yields.channel_decomposed if decomposed has a value -- shared by
-// every cluster_yields/galaxy_yields test below.
+// every cluster_yields/galaxy_yields test below. Sets
+// yields.min_isotope_lifetime to 0 so that Co56/Ni56 are tracked
+// explicitly rather than skipped as instantly decaying.
 static void addYieldsFixture(toml::table& inputDeck,
     const std::optional<bool> decomposed = std::nullopt)
 {
@@ -2289,6 +2291,7 @@ static void addYieldsFixture(toml::table& inputDeck,
         { "channel2", toml::table{
             { "channel", "ccsn" }, { "model", "kobayashi_test" } } },
         { "registry", "tests/yields/assets/yields.toml" },
+        { "min_isotope_lifetime", 0.0 },
     };
     if (decomposed.has_value()) { yieldsTbl.insert("channel_decomposed", decomposed.value()); }
     inputDeck.insert("yields", std::move(yieldsTbl));

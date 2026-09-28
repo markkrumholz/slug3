@@ -51,6 +51,8 @@ namespace yields
         "agb"
     };
 
+    constexpr double defaultMinIsotopeLifetime = 1.0e4; /**< Default minimum isotope lifetime, in yr, below which an isotope is treated as decaying instantly -- see io::SimControls::minIsotopeLifetime() */
+
     inline static const std::string defaultRegistry = // NOLINT(bugprone-throwing-static-initialization,cert-err58-cpp) -- built from fixed string literals, so the (theoretically throwing) path conversion can never actually throw here
         (std::filesystem::path("data") / std::filesystem::path("yields")
         / std::filesystem::path("yields.toml")); /**< Default registry */

@@ -418,9 +418,12 @@ computed.
   list by radioactive decay, so that the yield of each listed isotope is complete and
   the decay calculation stays consistent: (i) every isotope that decays, directly or
   through intermediates, into a listed isotope, and (ii) every decay product of any
-  isotope that is included. For example, listing ``Fe56`` also includes ``Ni56`` and
-  ``Co56``, which decay into it, and listing ``Ni56`` also includes ``Co56`` and
-  ``Fe56``. Only isotopes that the requested models tabulate, or that are decay
+  isotope that is included. For example, with ``min_isotope_lifetime = 0`` (see below),
+  listing ``Fe56`` also includes ``Ni56`` and ``Co56``, which decay into it, and listing
+  ``Ni56`` also includes ``Co56`` and ``Fe56``. Isotopes shorter-lived than
+  ``min_isotope_lifetime`` are never included, even if listed; decay links are
+  followed through them, so their long-lived parents and descendants are still
+  included. Only isotopes that the requested models tabulate, or that are decay
   products of isotopes they tabulate, can be added this way. The emission of a proton or
   alpha particle (``H1`` or ``He4``) is not counted as a decay link when searching for
   the parents of a listed isotope, so listing ``H1`` or ``He4`` does not add every
@@ -448,6 +451,24 @@ computed.
   products of other isotopes' decays. If true, radioactive decay is ignored, and
   the reported yield is the total mass of each isotope produced, whether or not it
   has since decayed.
+* ``min_isotope_lifetime`` (optional, default=1e4): Minimum lifetime, in yr, of the
+  radioactive isotopes that SLUG tracks explicitly. Any unstable isotope with a shorter
+  lifetime is treated as decaying the instant it is produced: it is removed from the
+  isotope list, and it does not appear in the output. Its own yield is added to those of
+  its first descendants whose lifetimes are at least ``min_isotope_lifetime`` (or that
+  are stable), and decays of other isotopes that would produce it produce those
+  descendants directly. This approximation is accurate for yields at times long
+  compared to ``min_isotope_lifetime``, and it can make the calculation of decayed
+  yields much faster. Larger values (up to ~1e5) are faster still, and are
+  appropriate if yields are only needed at times of several Myr or more; values much
+  larger than this begin to approximate isotopes that have not yet decayed by the ages of
+  interest, and so should be avoided. Set ``min_isotope_lifetime = 0`` to track every
+  isotope explicitly, though this can be very slow and, because it forces the time
+  integrals to resolve extremely short lifetimes, may also be less accurate at a given
+  integration tolerance. This applies whether or not ``no_decay`` is set, so with ``no_decay =
+  true`` the reported yields are those that would be present if every isotope shorter
+  lived than ``min_isotope_lifetime`` had decayed, and no others. Must be non-negative,
+  or SLUG raises an error at startup.
 
 For example, the following requests yields from both core-collapse supernovae and
 winds, using the same model for both, for only a few isotopes:
@@ -465,9 +486,10 @@ winds, using the same model for both, for only a few isotopes:
     channel = "massive_star_winds"
     model = "sukhbold16"
 
-Note that the output contains seven isotopes per channel, not five: because listing
-``Fe56`` also includes ``Ni56`` and ``Co56``, which decay into it (see ``isotopes``
-above), the isotopes reported are ``H1``, ``He4``, ``C12``, ``O16``, ``Fe56``, ``Co56``,
-and ``Ni56``. Since the two channels are reported separately by default, this gives
-fourteen columns of yield data in all. See :ref:`ssec-troubleshooting-yields` for the
+Since the two channels are reported separately by default, this gives ten columns of
+yield data in all. ``Ni56`` and ``Co56``, which decay into ``Fe56``, are not reported,
+because their lifetimes are shorter than the default ``min_isotope_lifetime``; their
+yields are included in that of ``Fe56``. Adding ``min_isotope_lifetime = 0`` would
+instead report seven isotopes per channel, since listing ``Fe56`` would then also
+include ``Ni56`` and ``Co56`` (see ``isotopes`` above), for fourteen columns in all. See :ref:`ssec-troubleshooting-yields` for the
 errors SLUG reports for problems with the ``[yields]`` section.

@@ -10,9 +10,11 @@
 #include "../utils/Constants.hpp"
 #include "../utils/HDF5Utils.hpp"
 #include "../utils/MiscUtils.hpp"
+#include "ElemCommons.hpp"
 #include "IonizationData.hpp"
 #include "IsotopeData.hpp"
 #include "hdf5.h" // NOLINT(misc-include-cleaner) -- see HDF5Utils.hpp's own comment on including hdf5.h wholesale
+#include <algorithm>
 #include <cstddef>
 #include <stdexcept>
 #include <string>
@@ -115,6 +117,31 @@ namespace elem
                     ", A=" + std::to_string(a) + ") in " + filePath.string());
             }
         }
+    }
+
+    auto effectiveDaughters(const IsotopeData& parent, const IsotopeList& skippedIsotopes)
+        -> std::vector<IsotopeDecayData>
+    {
+        std::vector<IsotopeDecayData> result;
+        for (const auto& daughter : parent.daughters())
+        {
+            const auto skipped = std::ranges::find_if(skippedIsotopes, [&daughter](const auto& iso)
+                { return iso.get().Z() == daughter.Z_ && iso.get().A() == daughter.A_; });
+            if (skipped == skippedIsotopes.end())
+            {
+                result.push_back(daughter);
+                continue;
+            }
+            // A skipped daughter decays instantly: pass its share of
+            // parent's decays on to its own resolved daughters. This
+            // recursion terminates because decay networks are acyclic
+            for (const auto& descendant : effectiveDaughters(skipped->get(), skippedIsotopes))
+            {
+                result.push_back({ .Z_ = descendant.Z_, .A_ = descendant.A_,
+                    .branchingRatio_ = daughter.branchingRatio_ * descendant.branchingRatio_ });
+            }
+        }
+        return result;
     }
 
 } // namespace elem
