@@ -3189,7 +3189,8 @@ static auto testGalaxyCumSNeContinuous() -> int
                 sum += imf(m) * std::max(0.0, t - tracks->starLifetime(m)) * dm;
             }
             const double expected = psi / imf.expectationValue() * sum;
-            if (!(expected > 0.0) || std::abs((galaxy.cumSNe() / expected) - 1.0) > tol)
+            if (!(expected > 0.0) || !std::isfinite(galaxy.cumSNe()) ||
+                std::abs((galaxy.cumSNe() / expected) - 1.0) > tol)
             {
                 std::cerr << "testGalaxy: cumSNeContinuous: at t = " << t << " yr, cumSNe() is "
                     << galaxy.cumSNe() << ", expected " << expected << "\n";

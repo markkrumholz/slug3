@@ -845,9 +845,9 @@ namespace io
          * @param limits New mass limits, in Msun, in the format
          *   described in snMassLimits()'s own comment
          * @throws std::invalid_argument if limits has an odd number of
-         *   elements, or if its elements are not strictly increasing
-         *   (which also rejects any NaN element); snMassLimits_ is left
-         *   unchanged in this case
+         *   elements, if any element is not finite and strictly
+         *   positive, or if its elements are not strictly increasing;
+         *   snMassLimits_ is left unchanged in this case
          * @details
          * An empty limits is valid, and means hasSN() defers to
          * yields() -- see its own comment.

@@ -3734,13 +3734,23 @@ static auto testSimControlsFeedback() -> int
     {
         io::SimControls controls(makeDeck(true, std::nullopt));
         controls.setSNMassLimits({ 8.0, 12.0 });
-        try
+        // A NaN, non-positive, or infinite limit is rejected
+        const std::vector<std::vector<double>> badLimits{
+            { 8.0, std::numeric_limits<double>::quiet_NaN() },
+            { -5.0, 40.0 },
+            { 0.0, 40.0 },
+            { 8.0, std::numeric_limits<double>::infinity() } };
+        for (const auto& bad : badLimits)
         {
-            controls.setSNMassLimits({ 8.0, std::numeric_limits<double>::quiet_NaN() });
-            std::cerr << "testSimControls: feedback: setSNMassLimits accepted a NaN limit\n";
-            result = 1;
+            try
+            {
+                controls.setSNMassLimits(bad);
+                std::cerr << "testSimControls: feedback: setSNMassLimits accepted invalid limits ["
+                    << bad.at(0) << ", " << bad.at(1) << "]\n";
+                result = 1;
+            }
+            catch (const std::invalid_argument&) { /* expected */ } // NOLINT(bugprone-empty-catch) -- the throw is the expected outcome
         }
-        catch (const std::invalid_argument&) { /* expected */ } // NOLINT(bugprone-empty-catch) -- the throw is the expected outcome
         if (controls.snMassLimits() != std::vector<double>{ 8.0, 12.0 })
         {
             std::cerr << "testSimControls: feedback: rejected setSNMassLimits call changed snMassLimits()\n";

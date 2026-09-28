@@ -1332,6 +1332,11 @@ void io::SimControls::setSNMassLimits(std::vector<double> limits)
             "setSNMassLimits: mass limits must have an even number of "
             "elements, one (lower, upper) pair per mass interval");
     }
+    if (std::ranges::any_of(limits, [](const double m) -> bool { return !std::isfinite(m) || m <= 0.0; }))
+    {
+        throw std::invalid_argument(
+            "setSNMassLimits: mass limits must be finite and strictly positive");
+    }
     // Written as !(a < b) rather than a >= b so that a NaN, for which
     // every comparison is false, also counts as a violation
     if (std::ranges::adjacent_find(limits,
