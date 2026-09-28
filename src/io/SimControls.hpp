@@ -944,12 +944,15 @@ namespace io
          *   way stars.IMF is resolved by the constructor
          * @throws std::runtime_error if imf is not numeric and does
          *   not name a file that can be found
+         * @throws std::invalid_argument if the new IMF's maximum mass
+         *   exceeds the current stellar tracks' maximum mass, mMax();
+         *   this SimControls is then left unchanged
+         * @details
+         * Like the constructor, also prints a warning (from the I/O
+         * rank only) if the new IMF extends below the tracks' minimum
+         * mass -- see checkIMFWithinTracks()'s own comment.
          */
-        void setIMF(const std::string& imf)
-        {
-            imf_ = utils::initPDFFromString(imf, imfPrefix);
-            updateFracStochMass();
-        }
+        void setIMF(const std::string& imf);
 
         /**
          * @brief Set the cluster mass function
@@ -1245,7 +1248,8 @@ namespace io
          * @throws std::invalid_argument if tracks is null, or if its
          *   own [fehMin(), fehMax()] (the [Fe/H] range it was loaded
          *   over) does not cover fehDist()'s own [min, max], or is NaN
-         *   (a default-constructed Tracks3D)
+         *   (a default-constructed Tracks3D), or if its maximum mass,
+         *   mMax(), is below the current IMF's maximum mass
          * @details
          * Lets a caller replace this SimControls's stellar tracks with
          * its own, without needing an input deck. Rejecting tracks that
@@ -1275,6 +1279,21 @@ namespace io
          * runs.
          */
         void checkTracksCoverFeH(const tracks::Tracks3D& tracks) const;
+
+        /**
+         * @brief Check that stellar tracks extend up to the current IMF's maximum mass
+         * @param tracks The stellar tracks to check
+         * @throws std::invalid_argument if the current IMF's maximum
+         *   mass exceeds tracks.mMax()
+         * @details
+         * The IMF half of the check setTracks() applies before
+         * installing new tracks, public for the same reason as
+         * checkTracksCoverFeH(). Does nothing if no IMF has been set
+         * yet, or if tracks is default-constructed (NaN [Fe/H] range,
+         * no mass range at all), which checkTracksCoverFeH() rejects. Unlike setTracks() itself, prints no warning about the
+         * IMF's minimum mass -- see checkIMFWithinTracks().
+         */
+        void checkTracksCoverIMF(const tracks::Tracks3D& tracks) const;
 
         /**
          * @brief Set the extinction curve
@@ -1524,6 +1543,26 @@ namespace io
                     std::to_string(refMax) + "]. Construct it for a range covering that.");
             }
         }
+
+        /**
+         * @brief Check an IMF's mass range against stellar tracks' mass range
+         * @param who Name of the calling method, for the error message
+         * @param imf The IMF to check
+         * @param tracks The stellar tracks to check it against
+         * @throws std::invalid_argument if imf.getMax() > tracks.mMax()
+         * @details
+         * Stars above the tracks' maximum mass have no track data at
+         * all, so rather than treat them case by case wherever the
+         * code needs a lifetime or spectrum, such an IMF is rejected
+         * outright. Stars below the tracks' minimum mass are instead
+         * only warned about (from the I/O rank only, since every MPI
+         * rank builds the same tracks and IMF and would otherwise
+         * repeat it): they are long-lived and faint, and are treated
+         * as having zero luminosity when spectra are computed (see
+         * Cluster::computeSpec).
+         */
+        static void checkIMFWithinTracks(const std::string& who, const pdfs::PDF& imf,
+            const tracks::Tracks3D& tracks);
 
         /**
          * @brief Recompute fracStochMass_ from imf_ and minStochMass_

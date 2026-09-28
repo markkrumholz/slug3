@@ -99,7 +99,7 @@ namespace
     }
 
     /**
-     * @brief A star's lifetime, treating masses outside the tracks' own mass grid specially
+     * @brief A star's lifetime, treating masses below the tracks' own mass grid specially
      * @param tracks2D The (already feH-sliced) Tracks2D to query --
      *   this cluster's own tracks(), not controls().tracks() directly
      *   -- see @details for why
@@ -108,17 +108,15 @@ namespace
      *   tracks2D.mMax(); +infinity if m is below tracks2D.mMin() (no
      *   tabulated lifetime for so low a mass -- treated as living
      *   forever, matching computeSpec()'s own treatment of such stars
-     *   as contributing zero luminosity rather than ever dying);
-     *   -infinity if m is above tracks2D.mMax() (no tabulated lifetime
-     *   for so massive a star either -- treated as already dead at
-     *   any time this simulation can resolve)
+     *   as contributing zero luminosity rather than ever dying)
      * @details
      * Tracks2D::starLifetime() itself asserts its mass argument lies
      * within the tracks' own tabulated mass grid, so calling it
      * directly on every entry of m_ would crash whenever the IMF's own
-     * mass range extends beyond that grid (e.g. an IMF minimum below
-     * the tracks' own minimum mass, which readTracks() already warns
-     * about elsewhere). Used by both Cluster constructors (to build
+     * minimum mass is below the tracks' own (which SimControls warns
+     * about). m cannot exceed tracks2D.mMax(): SimControls rejects an
+     * IMF extending above the tracks' maximum mass, which is the same
+     * at every [Fe/H]. Used by both Cluster constructors (to build
      * tDeath_) and yieldStar().
      *
      * Takes this cluster's own Tracks2D, already sliced at its own
@@ -128,7 +126,6 @@ namespace
     auto starLifetimeClamped(const tracks::Tracks2D& tracks2D, const double m) -> double
     {
         if (m < tracks2D.mMin()) { return std::numeric_limits<double>::infinity(); }
-        if (m > tracks2D.mMax()) { return -std::numeric_limits<double>::infinity(); }
         return tracks2D.starLifetime(m);
     }
 } // namespace
@@ -592,16 +589,12 @@ void core::Cluster::computeYields()
     // updateLivingStars(), see its own comment). dtDecay is the time
     // elapsed since each star actually died (curTime_ - tDied_[i]) if
     // controls().noDecay() is false, or 0 (no decay applied at all) if
-    // it is true. A star above the tracks' own mass range has a death
-    // time of -infinity (see starLifetimeClamped()'s own comment),
-    // meaning it was already dead when the cluster formed, so its yield
-    // decays since formTime_.
+    // it is true.
     for (std::size_t i = 0; i < mDead_.size(); ++i)
     {
         const double mass = mDead_[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i < mDead_.size() by loop bound
         const double tDied = tDied_[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i < mDead_.size() == tDied_.size() by construction, see updateLivingStars()'s own comment
-        const double timeDied = std::isfinite(tDied) ? tDied : formTime_;
-        const double dtDecay = sc.noDecay() ? 0.0 : curTime_ - timeDied;
+        const double dtDecay = sc.noDecay() ? 0.0 : curTime_ - tDied;
         if (decomposed)
         {
             const auto& data = yields->yield(mass, feH_, dtDecay).second;

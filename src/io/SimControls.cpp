@@ -363,19 +363,10 @@ void io::SimControls::initPhysics(const utils::TrackedDeck& inputDeck)
     // tracks_'s own requested [Fe/H] range -- see its own comment.
     readTracks(inputDeck);
 
-    // Warn if the tracks don't extend down to the IMF's minimum mass:
-    // stars in that gap have no track data, so they end up being
-    // treated as having zero luminosity when spectra are computed
-    // (see Cluster::computeSpec)
-    // (printed from the I/O rank only, since every MPI rank builds the
-    // same tracks and IMF and would otherwise repeat it)
-    if (tracks_->mMin() > imf_.getMin() && utils::isIORank())
-    {
-        std::cout << "slug: warning: minimum mass in selected tracks is "
-            << tracks_->mMin() << " but IMF minimum mass is " << imf_.getMin()
-            << "; stars with masses from " << imf_.getMin() << " to "
-            << tracks_->mMin() << " will be treated as having zero luminosity\n";
-    }
+    // Reject an IMF extending above the tracks' maximum mass, and warn
+    // if it extends below their minimum mass -- see
+    // checkIMFWithinTracks()'s own comment
+    checkIMFWithinTracks("SimControls", imf_, *tracks_);
 
     // Read the spectral synthesis model to use, if any -- spectra.model
     // is optional, since not every simulation needs spectra computed.
@@ -698,6 +689,23 @@ void io::SimControls::checkTracksCoverFeH(const tracks::Tracks3D& tracks) const
     }
 }
 
+// Throw if the current IMF extends above tracks' maximum mass -- see
+// this method's own header comment
+void io::SimControls::checkTracksCoverIMF(const tracks::Tracks3D& tracks) const
+{
+    // A default-constructed Tracks3D (NaN [Fe/H] range) has no mass
+    // range to check at all; checkTracksCoverFeH() rejects it
+    if (!imf_.valid() || std::isnan(tracks.fehMin())) { return; }
+    if (imf_.getMax() > tracks.mMax())
+    {
+        throw std::invalid_argument(
+            "SimControls::setTracks: the new stellar tracks' maximum mass, " +
+            std::to_string(tracks.mMax()) + ", is below the current IMF's maximum "
+            "mass, " + std::to_string(imf_.getMax()) + ". Load tracks extending to "
+            "at least that mass, or lower the IMF's maximum mass with setIMF() first.");
+    }
+}
+
 void io::SimControls::setTracks(std::unique_ptr<tracks::Tracks3D> tracks)
 {
     if (!tracks)
@@ -705,6 +713,7 @@ void io::SimControls::setTracks(std::unique_ptr<tracks::Tracks3D> tracks)
         throw std::invalid_argument("SimControls::setTracks: tracks must not be null");
     }
     checkTracksCoverFeH(*tracks);
+    if (imf_.valid()) { checkIMFWithinTracks("SimControls::setTracks", imf_, *tracks); }
     // Build the fixed-[Fe/H] slice, which can itself throw, before
     // changing any state, so that a failure leaves this SimControls
     // unchanged rather than holding the new tracks with a stale slice
@@ -715,6 +724,40 @@ void io::SimControls::setTracks(std::unique_ptr<tracks::Tracks3D> tracks)
     }
     tracks_ = std::move(tracks);
     if (newConstFeHTracks) { constFeHTracks_ = std::move(newConstFeHTracks); }
+}
+
+// Throw if imf extends above tracks' maximum mass, and warn if it
+// extends below their minimum mass -- see this method's own header
+// comment
+void io::SimControls::checkIMFWithinTracks(const std::string& who, const pdfs::PDF& imf,
+    const tracks::Tracks3D& tracks)
+{
+    if (imf.getMax() > tracks.mMax())
+    {
+        throw std::invalid_argument(
+            who + ": IMF maximum mass, " + std::to_string(imf.getMax()) +
+            ", exceeds the maximum mass in the selected stellar tracks, " +
+            std::to_string(tracks.mMax()) + "; stars above the tracks' maximum "
+            "mass are not supported. Lower the IMF's maximum mass, or use tracks "
+            "extending to at least that mass.");
+    }
+    if (tracks.mMin() > imf.getMin() && utils::isIORank())
+    {
+        std::cout << "slug: warning: minimum mass in selected tracks is "
+            << tracks.mMin() << " but IMF minimum mass is " << imf.getMin()
+            << "; stars with masses from " << imf.getMin() << " to "
+            << tracks.mMin() << " will be treated as having zero luminosity\n";
+    }
+}
+
+// Set the IMF, checking it against the current tracks before changing
+// any state, so that a rejected IMF leaves this SimControls unchanged
+void io::SimControls::setIMF(const std::string& imf)
+{
+    pdfs::PDF newIMF = utils::initPDFFromString(imf, imfPrefix);
+    if (tracks_) { checkIMFWithinTracks("SimControls::setIMF", newIMF, *tracks_); }
+    imf_ = std::move(newIMF);
+    updateFracStochMass();
 }
 
 // Set the clustered-star A_V distribution, rebuilding extinct_'s own

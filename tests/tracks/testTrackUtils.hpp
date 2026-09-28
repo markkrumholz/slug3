@@ -40,8 +40,9 @@ inline auto testParseRegistry() -> int
         auto [registry, registryPath] = tracks::parseRegistry(registryName);
 
         const toml::array* trackSets = registry["track_sets"].as_array();
-        if (!trackSets || trackSets->size() != 1 ||
-            !registry.contains("MIST_test"))
+        if (!trackSets || trackSets->size() != 2 ||
+            !registry.contains("MIST_test") ||
+            !registry.contains("MIST_test_lowmass"))
         {
             std::cerr << "testParseRegistry: parsed registry "
                 << registryName << " does not have the expected "

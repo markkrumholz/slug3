@@ -1386,6 +1386,54 @@ def test_simcontrols_set_tracks_rejects_uncovered_feh():
         assert controls.tracks.mMin() == pytest.approx(old_tracks.mMin())
 
 
+LOWMASS_TRACK_SET = "MIST_test_lowmass"  # MIST_test truncated at 100 Msun
+
+
+def lowmass_tracks():
+    """Build MIST_test_lowmass tracks covering CLUSTER_DECK's [Fe/H]."""
+    return slug.Tracks3D(LOWMASS_TRACK_SET, -0.5, 0.5, KNOWN_VVCRIT, KNOWN_AFE, REGISTRY)
+
+
+def test_simcontrols_imf_must_lie_within_tracks():
+    """setIMF() should raise ValueError for an IMF extending above the
+    current tracks' maximum mass, and setTracks() for tracks whose
+    maximum mass is below the current IMF's, each leaving the
+    SimControls unchanged and (for setTracks()) the rejected Tracks3D
+    still usable from Python."""
+    controls = slug.SimControls(CLUSTER_DECK)
+    imf_max = controls.imf.getMax()
+    with pytest.raises(ValueError, match="exceeds the maximum mass"):
+        controls.setIMF("400.0")
+    assert controls.imf.getMax() == pytest.approx(imf_max)
+
+    controls.imf = "300.0"
+    for install in (controls.setTracks, lambda t: setattr(controls, "tracks", t)):
+        rejected = lowmass_tracks()
+        with pytest.raises(ValueError, match="maximum mass"):
+            install(rejected)
+        assert rejected.mMax() == pytest.approx(100.0)
+        assert controls.tracks.mMax() == pytest.approx(300.0)
+
+    controls.imf = "50.0"
+    controls.tracks = lowmass_tracks()
+    assert controls.tracks.mMax() == pytest.approx(100.0)
+
+
+@pytest.mark.parametrize("imf, tracks_max", [("50.0", 100.0), ("250.0", 300.0)])
+def test_simcontrols_constructor_imf_and_tracks_any_order(imf, tracks_max):
+    """Passing both imf and tracks to the constructor should accept a
+    pair where the IMF lies within the tracks, regardless of the deck's
+    own IMF: a 50 Msun IMF with tracks ending at 100 Msun (the IMF must
+    be applied first, since the tracks would fail against the deck's
+    120 Msun IMF), and a 250 Msun IMF with tracks ending at 300 Msun
+    (the tracks are applied first)."""
+    tracks = lowmass_tracks() if tracks_max < 300.0 else slug.Tracks3D(
+        TRACK_SET, -0.5, 0.5, KNOWN_VVCRIT, KNOWN_AFE, REGISTRY)
+    controls = slug.SimControls(CLUSTER_DECK, imf=imf, tracks=tracks)
+    assert controls.imf.getMax() == pytest.approx(float(imf))
+    assert controls.tracks.mMax() == pytest.approx(tracks_max)
+
+
 def test_simcontrols_set_specsyn_and_yields_reject_narrower_feh():
     """setSpecsyn()/setYields() should raise ValueError for an object
     built for a narrower [Fe/H] range (requestedFehMin()/Max()) than the

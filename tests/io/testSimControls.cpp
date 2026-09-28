@@ -2839,6 +2839,127 @@ static auto testSimControlsSetTracksRejectsUncoveredFeH() -> int
     return 0;
 }
 
+// Verify that an IMF extending above the stellar tracks' maximum mass
+// is rejected wherever the IMF or tracks can change: by the
+// constructor, by setIMF() (against the current tracks), and by
+// setTracks() (against the current IMF); that a rejected setIMF() or
+// setTracks() leaves this SimControls unchanged; and that an IMF
+// reaching exactly the tracks' maximum mass is accepted. Uses
+// MIST_test (maximum 300 Msun) and MIST_test_lowmass (the same tracks
+// truncated at 100 Msun; see
+// data/tools/tracks/make_lowmass_track_fixture.py).
+static auto testSimControlsIMFWithinTracks() -> int
+{
+    const std::string fileName = "tests/core/assets/testClusterVarFeH.in";
+    constexpr std::string_view registry = "tests/tracks/assets/tracks.toml";
+
+    // Constructor: a delta-function IMF at 400 Msun is above
+    // MIST_test's maximum and must throw; one at exactly 300 must not
+    for (const double mass : { 400.0, 300.0 })
+    {
+        toml::table inputDeck = toml::parse_file(fileName);
+        inputDeck.at_path("stars").as_table()->insert_or_assign("IMF", mass);
+        try
+        {
+            const io::SimControls sim(inputDeck);
+            if (mass > sim.tracks()->mMax())
+            {
+                std::cerr << "testSimControls: IMFWithinTracks: expected a " << mass
+                    << " Msun IMF, above the tracks' maximum mass, to throw\n";
+                return 1;
+            }
+        }
+        catch (const std::invalid_argument& error)
+        {
+            if (mass <= 300.0)
+            {
+                std::cerr << "testSimControls: IMFWithinTracks: expected a " << mass
+                    << " Msun IMF to be accepted, but it threw: " << error.what() << "\n";
+                return 1;
+            }
+        }
+    }
+
+    try
+    {
+        io::SimControls sim(toml::parse_file(fileName));
+        const double tracksMax = sim.tracks()->mMax();
+        if (tracksMax != 300.0)
+        {
+            std::cerr << "testSimControls: IMFWithinTracks: test bug: expected MIST_test's "
+                "maximum mass to be 300, got " << tracksMax << "\n";
+            return 1;
+        }
+
+        // setIMF(): 400 Msun is rejected, leaving the IMF unchanged; 300
+        // is accepted
+        const double imfMaxBefore = sim.imf().getMax();
+        try
+        {
+            sim.setIMF("400.0");
+            std::cerr << "testSimControls: IMFWithinTracks: expected setIMF(\"400.0\") to throw\n";
+            return 1;
+        }
+        catch (const std::invalid_argument&) { /* expected */ }
+        if (sim.imf().getMax() != imfMaxBefore)
+        {
+            std::cerr << "testSimControls: IMFWithinTracks: expected a rejected setIMF() to "
+                "leave the IMF unchanged\n";
+            return 1;
+        }
+        sim.setIMF("300.0");
+
+        // setTracks(): with the IMF at 300 Msun, tracks ending at 100
+        // Msun are rejected, leaving tracks() unchanged
+        auto lowmass = [&registry]()
+        {
+            return std::make_unique<tracks::Tracks3D>(
+                "MIST_test_lowmass", -0.5, 0.5, 0.0, -0.2, std::string(registry));
+        };
+        const auto* before = sim.tracks().get();
+        try
+        {
+            sim.setTracks(lowmass());
+            std::cerr << "testSimControls: IMFWithinTracks: expected setTracks() with a "
+                "maximum mass of 100 below the IMF's 300 to throw\n";
+            return 1;
+        }
+        catch (const std::invalid_argument&) { /* expected */ }
+        if (sim.tracks().get() != before)
+        {
+            std::cerr << "testSimControls: IMFWithinTracks: expected a rejected setTracks() "
+                "to leave tracks() unchanged\n";
+            return 1;
+        }
+
+        // Lowering the IMF first lets the same tracks through; the IMF
+        // then cannot be raised back above their new maximum
+        sim.setIMF("50.0");
+        sim.setTracks(lowmass());
+        if (sim.tracks()->mMax() != 100.0)
+        {
+            std::cerr << "testSimControls: IMFWithinTracks: expected MIST_test_lowmass's "
+                "maximum mass to be 100, got " << sim.tracks()->mMax() << "\n";
+            return 1;
+        }
+        try
+        {
+            sim.setIMF("300.0");
+            std::cerr << "testSimControls: IMFWithinTracks: expected setIMF(\"300.0\") to "
+                "throw against tracks ending at 100 Msun\n";
+            return 1;
+        }
+        catch (const std::invalid_argument&) { /* expected */ }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: IMFWithinTracks: unexpected exception: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
 // Verify that setFeH() resets tracks2D() (constFeHTracks_) back to
 // nullptr when the new [Fe/H] distribution is no longer degenerate --
 // otherwise it would keep pointing at a stale slice from whichever
@@ -3902,6 +4023,7 @@ auto testSimControls() -> int
     result += testSimControlsSFRDist();
     result += testSimControlsSetFeHRejectsBroadening();
     result += testSimControlsSetTracksRejectsUncoveredFeH();
+    result += testSimControlsIMFWithinTracks();
     result += testSimControlsSetFeHResetsTracks2DWhenNoLongerFixed();
     result += testSimControlsSettersRejectMismatchedControls();
     result += testSimControlsSetSpecsynRejectsNarrowerFeh();

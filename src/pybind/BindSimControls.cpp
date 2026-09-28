@@ -136,7 +136,11 @@ intMaxIter : int, optional
     SimControls described above (from path, or the bundled default
     deck) is otherwise fully built -- e.g.
     SimControls(imf="20.0") is equivalent to
-    SimControls() followed by sc.imf = "20.0". specsyn/filters/tracks
+    SimControls() followed by sc.imf = "20.0" (except that if imf
+    and tracks are both given, they are applied in whichever order
+    lets each pass the other's mass-range check, so that a valid
+    pair is accepted regardless of the deck's own IMF and tracks).
+    specsyn/filters/tracks
     transfer ownership exactly as their own setter/property does, so
     the object passed in is no longer usable from Python afterward.
     specsyn, unlike filters/tracks, cannot usefully be passed here in
@@ -260,7 +264,16 @@ imf : str
 Throws
 ------
 RuntimeError
-    If imf is not numeric and does not name a file that can be found.)doc";
+    If imf is not numeric and does not name a file that can be found.
+ValueError
+    If the new IMF's maximum mass exceeds the current stellar tracks'
+    maximum mass. This SimControls is then left unchanged.
+
+Details
+-------
+Like construction from an input deck, also prints a warning if the
+new IMF extends below the tracks' minimum mass; stars in that range
+are treated as having zero luminosity.)doc";
 
 static constexpr std::string_view setCMFDocstring = R"doc(Set the cluster mass function.
 
@@ -470,8 +483,9 @@ Throws
 ValueError
     If tracks is None, or if the [Fe/H] range tracks was loaded over
     does not cover the current [Fe/H] distribution (the feH
-    property's own [min, max]). This SimControls is then left
-    unchanged, and tracks stays usable from Python.
+    property's own [min, max]), or if the tracks' maximum mass is
+    below the current IMF's maximum mass. This SimControls is then
+    left unchanged, and tracks stays usable from Python.
 
 Details
 -------
@@ -1041,15 +1055,21 @@ deck actually built this SimControls.)doc";
 // complexity down; see constructorDocstring for the user-facing
 // contract this implements
 // setTracks(), for Python: checks that the new tracks cover the
-// current [Fe/H] distribution (SimControls::checkTracksCoverFeH())
-// through a borrowed reference first, so that a rejected Tracks3D
+// current [Fe/H] distribution and IMF mass range
+// (SimControls::checkTracksCoverFeH()/checkTracksCoverIMF()) through
+// a borrowed reference first, so that a rejected Tracks3D
 // stays usable from Python, rather than having its ownership moved
 // into setTracks()'s own argument, and then destroyed, before the
 // check even runs. None is passed straight through, so setTracks()
 // reports it as usual.
 static void setTracksKeepOnFailure(io::SimControls& sc, py::object tracksArg)
 {
-    if (!tracksArg.is_none()) { sc.checkTracksCoverFeH(py::cast<const tracks::Tracks3D&>(tracksArg)); }
+    if (!tracksArg.is_none())
+    {
+        const auto& tracks = py::cast<const tracks::Tracks3D&>(tracksArg);
+        sc.checkTracksCoverFeH(tracks);
+        sc.checkTracksCoverIMF(tracks);
+    }
     sc.setTracks(py::cast<std::unique_ptr<tracks::Tracks3D>>(std::move(tracksArg)));
 }
 
@@ -1077,7 +1097,14 @@ static void applyConstructorProperties(io::SimControls& sc,
     const py::object& minStochMass, const py::object& intRelTol,
     const py::object& intAbsTol, const py::object& intMaxIter)
 {
-    if (!imf.is_none()) { sc.setIMF(py::cast<std::string>(imf)); }
+    // imf and tracks are each checked against the other's current
+    // value when set (see setIMF()/setTracks()), so if both are given,
+    // set tracks first only if they already cover the current IMF;
+    // otherwise the new IMF must lie within the current tracks for
+    // the pair to be valid at all, so set it first
+    const bool tracksFirst = !imf.is_none() && !tracksArg.is_none() &&
+        py::cast<const tracks::Tracks3D&>(tracksArg).mMax() >= sc.imf().getMax();
+    if (!imf.is_none() && !tracksFirst) { sc.setIMF(py::cast<std::string>(imf)); }
     if (!cmf.is_none()) { sc.setCMF(py::cast<std::string>(cmf)); }
     if (!feH.is_none()) { sc.setFeH(py::cast<std::string>(feH)); }
     if (!clf.is_none()) { sc.setCLF(py::cast<std::string>(clf)); }
@@ -1093,6 +1120,7 @@ static void applyConstructorProperties(io::SimControls& sc,
             py::cast<std::unique_ptr<phot::FilterCollection>>(std::move(filtersArg)));
     }
     if (!tracksArg.is_none()) { setTracksKeepOnFailure(sc, std::move(tracksArg)); }
+    if (tracksFirst) { sc.setIMF(py::cast<std::string>(imf)); }
     if (!minStochMass.is_none()) { sc.setMinStochMass(py::cast<double>(minStochMass)); }
     if (!intRelTol.is_none()) { sc.setIntRelTol(py::cast<double>(intRelTol)); }
     if (!intAbsTol.is_none()) { sc.setIntAbsTol(py::cast<double>(intAbsTol)); }
