@@ -15,7 +15,6 @@
 #include "../specsyn/Specsyn.hpp"
 #include "../tracks/TrackCommons.hpp"
 #include "../tracks/Tracks3D.hpp"
-#include "../utils/GKIntegrator.hpp"
 #include "../utils/GKIntegratorData.hpp"
 #include "../utils/MiscUtils.hpp"
 #include "../utils/PDFIntegrator.hpp"
@@ -29,7 +28,6 @@
 #include <functional>
 #include <iterator>
 #include <limits>
-#include <numbers>
 #include <numeric>
 #include <optional>
 #include <sstream>
@@ -64,6 +62,52 @@ namespace
         if (m < tracks.mMin()) { return std::numeric_limits<double>::infinity(); }
         if (m > tracks.mMax()) { return -std::numeric_limits<double>::infinity(); }
         return tracks.starLifetime(m, feh);
+    }
+
+    /**
+     * @brief The yields released by one dying star, laid out as Galaxy::yields()
+     * @param yields The yields to evaluate -- SimControls::yields();
+     *   must outlive the returned callable
+     * @param decomposed SimControls::yieldsChannelDecomposed()
+     * @return A callable f(m, feh) returning the undecayed yields of a
+     *   star of mass m and [Fe/H] feh -- per channel if decomposed,
+     *   summed over channels otherwise -- the f
+     *   Galaxy::continuousDeathQuantity()/deathRate() take
+     */
+    auto yieldsOfStar(const yields::Yields& yields, const bool decomposed)
+    {
+        return [&yields, decomposed](const double m, const double feh) -> std::vector<double>
+        { return decomposed ? yields.yield(m, feh).second : yields.yieldSum(m, feh); };
+    }
+
+    /**
+     * @brief The number of values yieldsOfStar() returns
+     * @param yields See yieldsOfStar()'s own yields parameter
+     * @param decomposed See yieldsOfStar()'s own decomposed parameter
+     * @return yieldChannels().size() * isotopes().size() if
+     *   decomposed, else isotopes().size()
+     */
+    auto yieldsLength(const yields::Yields& yields, const bool decomposed) -> std::size_t
+    {
+        return decomposed ? yields.yieldChannels().size() * yields.isotopes().size() :
+            yields.isotopes().size();
+    }
+
+    /**
+     * @brief A per-time hook decaying a yield rate forward to a given time
+     * @param yields See yieldsOfStar()'s own yields parameter
+     * @param decomposed See yieldsOfStar()'s own decomposed parameter
+     * @param noDecay SimControls::noDecay() -- if true, the hook
+     *   leaves every rate unchanged
+     * @param tNow The time to decay forward to, in yr
+     * @return A callable g(t, rate) applying Yields::applyDecay() with
+     *   dtDecay = tNow - t to rate in place -- the g
+     *   Galaxy::continuousDeathQuantity()/deathRate() take
+     */
+    auto decayTo(const yields::Yields& yields, const bool decomposed, const bool noDecay, const double tNow)
+    {
+        return [&yields, decomposed, noDecay, tNow](const double t, std::vector<double>& rate) -> void
+        { if (!noDecay) { yields.applyDecay(tNow - t, rate, decomposed); } };
     }
 } // namespace
 
@@ -640,77 +684,16 @@ void core::Galaxy::computeLbolCts()
     lbolCtsCurrent_ = true;
 }
 
-// Per-unit-stellar-mass instantaneous yield rate of the purely
-// continuous population, at a given age and [Fe/H] -- see this
-// method's own header comment
-auto core::Galaxy::yieldsIntegrand(const double t, const double feh) const -> std::vector<double>
-{
-    const auto& sc = controls_.get();
-    const auto yields = sc.yields();
-    const bool decomposed = sc.yieldsChannelDecomposed();
-
-    const std::size_t n = decomposed
-        ? yields->yieldChannels().size() * yields->isotopes().size()
-        : yields->isotopes().size();
-    std::vector<double> result(n, 0.0);
-
-    // See lbolCtsIntegrand()'s own identical choice of tracks
-    const auto massDeriv = sc.constFeH() ?
-        sc.tracks2D()->massAndDerivFromLifetime(std::log10(t)) :
-        sc.tracks()->massAndDerivFromLifetime(std::log10(t), feh);
-    for (const auto& [m, dmDlogT] : massDeriv)
-    {
-        if (m > sc.minStochMass()) { continue; } // stochastically-sampled, handled separately
-
-        const double dmDt = dmDlogT / (t * std::numbers::ln10); // chain rule
-        const std::vector<double> y = decomposed
-            ? yields->yield(m, feh).second
-            : yields->yieldSum(m, feh);
-        const double weight = std::abs(dmDt) * sc.imf()(m) / sc.imf().expectationValue();
-        for (std::size_t k = 0; k < result.size(); ++k)
-        {
-            result[k] += y[k] * weight; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- y and result are both sized n by construction, and k is bounded by result.size()
-        }
-    }
-
-    return result;
-}
-
 // The continuous population's own instantaneous per-isotope yield
-// rate, integrated over the star formation history -- see this
-// method's own header comment
+// rate at a single [Fe/H] -- see this method's own header comment
 auto core::Galaxy::yieldsRate(const double t, const double feh) const -> std::vector<double>
 {
     const auto& sc = controls_.get();
     const auto yields = sc.yields();
     if (yields == nullptr) { return {}; }
-
-    const std::size_t n = sc.yieldsChannelDecomposed()
-        ? yields->yieldChannels().size() * yields->isotopes().size()
-        : yields->isotopes().size();
-
-    // See computeLbolCts()'s own comment for why this reflects sfr()
-    // about t / 2, so this dimension's own coordinate becomes age
-    // directly
-    const pdfs::PDFReflect sfrAge(sfr(), 0.5 * t);
-
-    // The integrand is made dimensionless first, scaled by its
-    // smallest nonzero element at a few log-spaced ages (deaths only
-    // begin a few Myr in) -- see utils::integrateScaled()'s own comment
-    const auto rateAt = [this, feh](const double age) -> std::vector<double>
-    { return yieldsIntegrand(age, feh); };
-
-    // This is the instantaneous rate of mass return at time t --
-    // decay it forward to curTime_ (unless noDecay() is true) so that
-    // what computeYields() integrates over t is each moment's own
-    // present-day (curTime_), rather than as-produced, contribution.
-    auto result = utils::integrateScaled(sfrAge, rateAt, n, 0.0, t,
-        { t, 0.3 * t, 0.1 * t, 0.03 * t, 0.01 * t }, sc.intMaxIter(), sc.intAbsTol(), sc.intRelTol());
-    if (!sc.noDecay())
-    {
-        yields->applyDecay(curTime_ - t, result, sc.yieldsChannelDecomposed());
-    }
-    return result;
+    const bool decomposed = sc.yieldsChannelDecomposed();
+    return deathRate(t, yieldsOfStar(*yields, decomposed), yieldsLength(*yields, decomposed),
+        decayTo(*yields, decomposed, sc.noDecay(), curTime_), std::optional<double>(feh));
 }
 
 // The continuous population's own instantaneous per-isotope yield
@@ -718,40 +701,11 @@ auto core::Galaxy::yieldsRate(const double t, const double feh) const -> std::ve
 auto core::Galaxy::yieldsRate(const double t) const -> std::vector<double>
 {
     const auto& sc = controls_.get();
-    const auto& fehDist = sc.fehDist();
-
-    if (fehDist.getMin() == fehDist.getMax())
-    {
-        return yieldsRate(t, fehDist.getMin());
-    }
-
-    // Multi-feh: integrate yieldsRate(t, feh) over [Fe/H] with a
-    // PDFIntegrator weighted by fehDist -- see computeLbolCts()'s own
-    // identical treatment. The number of components is only known once
-    // yieldsRate() has run, so it is taken from yields() directly,
-    // exactly as yieldsRate(t, feh) itself sizes its own result.
     const auto yields = sc.yields();
     if (yields == nullptr) { return {}; }
-    const std::size_t n = sc.yieldsChannelDecomposed()
-        ? yields->yieldChannels().size() * yields->isotopes().size()
-        : yields->isotopes().size();
-    // Dimensionless scaling, as in yieldsRate(t, feh), here from the
-    // rate at fehDist's own mean -- see utils::integrateScaled()
-    const auto rateAt = [this, t](const double feh) -> std::vector<double> { return yieldsRate(t, feh); };
-    auto result = utils::integrateScaled(fehDist, rateAt, n, fehDist.getMin(), fehDist.getMax(),
-        { fehDist.expectationValue() }, sc.intMaxIter(), sc.intAbsTol(), sc.intRelTol());
-    const double fehNorm = fehDist.integral(fehDist.getMin(), fehDist.getMax());
-    for (double& r : result) { r /= fehNorm; }
-    return result;
-}
-
-// yieldsRate(t), divided by scale -- see this method's own header
-// comment
-auto core::Galaxy::scaledYieldsRate(const double t, const double scale) const -> std::vector<double>
-{
-    auto rate = yieldsRate(t);
-    for (double& v : rate) { v /= scale; }
-    return rate;
+    const bool decomposed = sc.yieldsChannelDecomposed();
+    return deathRate(t, yieldsOfStar(*yields, decomposed), yieldsLength(*yields, decomposed),
+        decayTo(*yields, decomposed, sc.noDecay(), curTime_), std::nullopt);
 }
 
 // Update yields_/fieldYields_ from the stars that died since
@@ -834,31 +788,17 @@ void core::Galaxy::computeYields()
         }
     }
 
-    // Purely continuous (non-clustered, below minStochMass()) share:
-    // integrate yieldsRate(t)'s own instantaneous rate directly over
-    // real time from lastYieldTime_ to curTime_ -- skipped whenever
-    // there is no such population at all, either because every
-    // non-clustered star is stochastically sampled (minStochMass() ==
-    // 0) or because there is no non-clustered population to begin
-    // with (fCluster() == 1)
-    if (sc.minStochMass() > 0.0 && sc.fCluster() < 1.0 && curTime_ > lastYieldTime_)
+    // Purely continuous (non-clustered, below minStochMass()) share,
+    // released between lastYieldTime_ and curTime_ and decayed forward
+    // to curTime_ -- see continuousDeathQuantity()'s own comment, which
+    // also covers the cases with no such population at all
+    // (minStochMass() == 0 or fCluster() == 1)
+    const auto continuous = continuousDeathQuantity(yieldsOfStar(*yields, decomposed),
+        fieldYields_.size(), lastYieldTime_, curTime_,
+        decayTo(*yields, decomposed, sc.noDecay(), curTime_));
+    for (std::size_t k = 0; k < continuous.size(); ++k)
     {
-        // Dimensionless scaling, as in yieldsRate(t, feh) -- here from
-        // the rate at a few times across the step, with absolute
-        // tolerance intAbsTol() times the step's own length
-        const double dt = curTime_ - lastYieldTime_;
-        const auto rateAt = [this](const double t) -> std::vector<double> { return yieldsRate(t); };
-        const double rScale = utils::integrandScale(rateAt, { lastYieldTime_ + (0.25 * dt),
-            lastYieldTime_ + (0.5 * dt), lastYieldTime_ + (0.75 * dt), curTime_ });
-        using ScaledRateFn = std::vector<double> (Galaxy::*)(double, double) const;
-        const utils::GKIntegrator<ScaledRateFn, utils::GKOrder::GK15> integrator(
-            static_cast<ScaledRateFn>(&Galaxy::scaledYieldsRate), fieldYields_.size(),
-            sc.intMaxIter(), sc.intAbsTol() * dt, sc.intRelTol());
-        const auto result = integrator.integrate(lastYieldTime_, curTime_, this, rScale);
-        for (std::size_t k = 0; k < result.size(); ++k)
-        {
-            fieldYields_[k] += result[k] * rScale * (1.0 - sc.fCluster()); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,cppcoreguidelines-pro-bounds-constant-array-index) -- fieldYields_ and result are both sized identically by construction
-        }
+        fieldYields_[k] += continuous[k]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,cppcoreguidelines-pro-bounds-constant-array-index) -- fieldYields_ and continuous are both sized identically by construction
     }
 
     for (std::size_t k = 0; k < yields_.size(); ++k)

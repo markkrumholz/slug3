@@ -2372,82 +2372,6 @@ static auto testGalaxyYieldsConverged() -> int
     return 0;
 }
 
-// Verify that Galaxy::continuousDeathQuantity(), given each star's
-// yields as its quantity and radioactive decay as its per-time hook,
-// reproduces the purely continuous population's yields as computed by
-// computeYields() -- the same integral with the time, age and [Fe/H]
-// integrations in a different order -- for a fixed [Fe/H] without decay
-// and for a flat [Fe/H] distribution with decay. f_cluster = 0 and
-// min_stoch_mass at the IMF's own maximum make yields() exactly that
-// continuous contribution; tight tolerances make both converge.
-static auto testContinuousDeathQuantityMatchesYields() -> int
-{
-    constexpr double age = 1e7;
-    constexpr double tol = 1e-3;
-    for (const bool multiFeh : { false, true })
-    {
-        try
-        {
-            toml::table inputDeck = toml::parse_file(inputFile);
-            inputDeck.at_path("clusters").as_table()->insert("f_cluster", 0.0);
-            inputDeck.at_path("stars").as_table()->insert_or_assign("min_stoch_mass", 120.0);
-            if (multiFeh)
-            {
-                inputDeck.at_path("stars").as_table()->insert_or_assign(
-                    "FeH", "tests/core/assets/testClusterSpecsynFullFeHDist.toml"); // flat [-1, 0]
-            }
-            inputDeck.insert("yields", toml::table{
-                { "channel1", toml::table{ { "channel", "ccsn" }, { "model", "sukhbold_test" } } },
-                { "channel2", toml::table{ { "channel", "massive_star_winds" }, { "model", "sukhbold_test" } } },
-                { "registry", std::string("tests/yields/assets/yields.toml") },
-                { "no_decay", !multiFeh },
-            });
-            io::SimControls controls(inputDeck);
-            controls.setIntAbsTol(1e-6);
-            controls.setIntRelTol(1e-4);
-
-            utils::rng().seed(rngSeed);
-            core::Galaxy galaxy(controls);
-            galaxy.advance(age);
-
-            // Same layout as yields(): decomposed by channel or summed
-            const auto yields = controls.yields();
-            const bool decomposed = controls.yieldsChannelDecomposed();
-            const std::size_t n = decomposed ?
-                yields->yieldChannels().size() * yields->isotopes().size() : yields->isotopes().size();
-            const auto yieldsOf = [&yields, decomposed](const double m, const double feh) -> std::vector<double>
-            { return decomposed ? yields->yield(m, feh).second : yields->yieldSum(m, feh); };
-            const auto decay = [&yields, &controls, age, decomposed](const double t, std::vector<double>& rate)
-            { if (!controls.noDecay()) { yields->applyDecay(age - t, rate, decomposed); } };
-            const auto got = galaxy.continuousDeathQuantity(yieldsOf, n, 0.0, age, decay);
-
-            const auto& ref = galaxy.yields();
-            const double scale = std::abs(std::ranges::max(ref, {}, [](const double v) -> double { return std::abs(v); }));
-            double worst = 0.0;
-            for (std::size_t i = 0; i < ref.size(); ++i)
-            {
-                if (!std::isfinite(got.at(i))) { worst = std::numeric_limits<double>::infinity(); break; }
-                worst = std::max(worst, std::abs(ref.at(i)) <= 1e-6 * scale ?
-                    std::abs(got.at(i) - ref.at(i)) / scale : std::abs((got.at(i) / ref.at(i)) - 1.0));
-            }
-            if (worst > tol)
-            {
-                std::cerr << "testGalaxy: continuousDeathQuantityMatchesYields ("
-                    << (multiFeh ? "flat [Fe/H], decay" : "fixed [Fe/H], no decay")
-                    << "): differs from computeYields() by up to " << worst << "\n";
-                return 1;
-            }
-        }
-        catch (const std::exception& error)
-        {
-            std::cerr << "testGalaxy: continuousDeathQuantityMatchesYields test failed: "
-                << error.what() << "\n";
-            return 1;
-        }
-    }
-    return 0;
-}
-
 // Verify Galaxy::yieldsRate(t)'s multi-feh averaging against an
 // independent brute-force recomputation from the same public API:
 // yieldsRate(t, feh) evaluated on a fine midpoint-rule grid over
@@ -3169,7 +3093,6 @@ auto testGalaxy() -> int
     result += testYieldsRateHydrogenOrderOfMagnitude();
     result += testYieldsRateSingleFehDelegates();
     result += testYieldsRateMultiFeh();
-    result += testContinuousDeathQuantityMatchesYields();
     result += testGalaxyYieldsConverged();
     result += testGalaxyYieldsClusteredOnly();
     result += testGalaxyYieldsFieldAndContinuous();
