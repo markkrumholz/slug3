@@ -3148,6 +3148,63 @@ static auto testGalaxyCumSNeFieldStars() -> int
     }
 }
 
+// Verify the continuously-sampled field population's own supernova
+// count: with f_cluster = 0 and min_stoch_mass at the IMF's own maximum
+// (so every star is continuous), a constant star formation rate psi,
+// and supernovae from 8-40 Msun, cumSNe() after advance(t) must equal
+// psi / <m> times the integral over 8-40 Msun of imf(m) *
+// max(0, t - lifetime(m)) -- the number of stars formed per unit mass
+// (imf() being normalized by number) that have died by t -- evaluated
+// independently here with a fine midpoint rule in mass. advance() is
+// called twice, so that the second call's own increment must start
+// from where the first left off (lastFeedbackTime_).
+static auto testGalaxyCumSNeContinuous() -> int
+{
+    constexpr double snMin = 8.0;
+    constexpr double snMax = 40.0;
+    constexpr std::size_t nRef = 4000;
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFile);
+        inputDeck.at_path("clusters").as_table()->insert("f_cluster", 0.0);
+        inputDeck.at_path("stars").as_table()->insert_or_assign("min_stoch_mass", 120.0);
+        inputDeck.insert("feedback", toml::table{ { "sn_mass_range", toml::array{ snMin, snMax } } });
+        io::SimControls controls(inputDeck);
+        controls.setIntRelTol(1e-3);
+        const double tol = 3.0 * controls.intRelTol();
+
+        utils::rng().seed(rngSeed);
+        core::Galaxy galaxy(controls);
+        const auto& imf = controls.imf();
+        const auto tracks = controls.tracks2D();
+        for (const double t : { 1e7, 2e7 })
+        {
+            galaxy.advance(t);
+            const double psi = galaxy.sfr().integral(0.0, t) / t; // constant star formation rate
+            const double dm = (snMax - snMin) / static_cast<double>(nRef);
+            double sum = 0.0;
+            for (std::size_t i = 0; i < nRef; ++i)
+            {
+                const double m = snMin + ((static_cast<double>(i) + 0.5) * dm);
+                sum += imf(m) * std::max(0.0, t - tracks->starLifetime(m)) * dm;
+            }
+            const double expected = psi / imf.expectationValue() * sum;
+            if (!(expected > 0.0) || std::abs((galaxy.cumSNe() / expected) - 1.0) > tol)
+            {
+                std::cerr << "testGalaxy: cumSNeContinuous: at t = " << t << " yr, cumSNe() is "
+                    << galaxy.cumSNe() << ", expected " << expected << "\n";
+                return 1;
+            }
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testGalaxy: cumSNeContinuous test failed: " << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
 auto testGalaxy() -> int
 {
     int result = testGalaxyBasics();
@@ -3179,6 +3236,7 @@ auto testGalaxy() -> int
     result += testGalaxyYieldsFieldAndContinuousDecay();
     result += testGalaxyYieldsMultipleAdvanceCallsDecay();
     result += testGalaxyCumSNeFieldStars();
+    result += testGalaxyCumSNeContinuous();
 
     try
     {
