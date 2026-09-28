@@ -1701,6 +1701,303 @@ static auto testClusterLbolContinuousMatchesStochastic() -> int
     }
 }
 
+// Verify that a newly constructed cluster, which has not yet been
+// advanced in time, reports zero cumulative supernovae.
+static auto testClusterCumSNeAtBirth() -> int
+{
+    try
+    {
+        const toml::table inputDeck = toml::parse_file(inputFile);
+        const io::SimControls controls(inputDeck);
+
+        utils::rng().seed(rngSeed);
+        const core::Cluster cluster(0, 1e4, 0.0, controls);
+
+        if (cluster.cumSNe() != 0.0)
+        {
+            std::cerr << "testCluster: cumSNe at birth: expected 0, got "
+                << cluster.cumSNe() << "\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testCluster: cumSNe at birth test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Verify cumSNe() for a fully stochastic cluster: with SNe restricted
+// to 8-40 Msun via feedback.sn_mass_range, the count at each time t
+// should equal the number of stars sampled at birth with a mass in
+// that range and a death time before t. advance() is called twice
+// before cumSNe() is first read, since the stochastic count relies on
+// deadStarMasses(), which each advance() call overwrites -- so this
+// also checks that no deaths are lost when cumSNe() is not read after
+// every advance() call.
+static auto testClusterCumSNeStochastic() -> int
+{
+    constexpr double clusterMass = 1e4;
+    constexpr double snMin = 8.0;
+    constexpr double snMax = 40.0;
+    constexpr std::array<double, 3> times = { 5e6, 1e7, 3e7 };
+
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFile);
+        inputDeck.insert("feedback", toml::table{
+            { "sn_mass_range", toml::array{ snMin, snMax } } });
+        const io::SimControls controls(inputDeck);
+
+        utils::rng().seed(rngSeed);
+        core::Cluster cluster(0, clusterMass, 0.0, controls);
+
+        // Expected count of SNe by time t, from the stars sampled at
+        // birth -- copied now, since advance() removes dead stars
+        const std::vector<double> masses = cluster.starMasses();
+        const std::vector<double> tDeath = cluster.starDeathTimes();
+        auto expectedSNe = [&masses, &tDeath](const double t) -> double {
+            double n = 0.0;
+            for (std::size_t i = 0; i < masses.size(); ++i)
+            {
+                if (masses[i] >= snMin && masses[i] <= snMax && tDeath[i] < t) { n += 1.0; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- i < masses.size() == tDeath.size()
+            }
+            return n;
+        };
+
+        int result = 0;
+        cluster.advance(times[0]);
+        for (std::size_t k = 1; k < times.size(); ++k)
+        {
+            cluster.advance(times.at(k));
+            const double expected = expectedSNe(times.at(k));
+            if (cluster.cumSNe() != expected)
+            {
+                std::cerr << "testCluster: cumSNeStochastic: cumSNe() at t = " << times.at(k)
+                    << " is " << cluster.cumSNe() << ", expected " << expected << "\n";
+                result = 1;
+            }
+        }
+        if (expectedSNe(times.back()) <= 0.0)
+        {
+            std::cerr << "testCluster: cumSNeStochastic: test bug: expected some SNe by t = "
+                << times.back() << "\n";
+            result = 1;
+        }
+        return result;
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testCluster: cumSNeStochastic test failed: " << error.what() << "\n";
+        return 1;
+    }
+}
+
+// Verify cumSNe() for a fully continuously-sampled cluster: with SNe
+// restricted to 8-40 Msun via feedback.sn_mass_range, the count should
+// equal the number of stars in the part of the mass range that has
+// died since birth that lies within 8-40 Msun: the IMF's own integral
+// there (a number fraction) times the cluster's own number of stars,
+// its mass divided by nonStochIMFMass().
+// As in testClusterCumSNeStochastic, advance() is called twice before
+// cumSNe() is read, the first time at an age by which part of the
+// 8-40 Msun range has already died, so that the second call's own
+// increment must start from where the first left off.
+static auto testClusterCumSNeNonStochastic() -> int
+{
+    constexpr double clusterMass = 1e4;
+    constexpr double snMin = 8.0;
+    constexpr double snMax = 40.0;
+    constexpr double ageYr = 2e7;
+
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFile);
+        inputDeck.at_path("stars").as_table()->insert_or_assign("min_stoch_mass", 120.0);
+        inputDeck.insert("feedback", toml::table{
+            { "sn_mass_range", toml::array{ snMin, snMax } } });
+        const io::SimControls controls(inputDeck);
+
+        utils::rng().seed(rngSeed);
+        core::Cluster cluster(0, clusterMass, 0.0, controls);
+        cluster.advance(0.5 * ageYr);
+        cluster.advance(ageYr);
+
+        // Mass range that has died since birth -- see
+        // testClusterYieldsNonStochastic's own comment for why this is
+        // a single interval (turnoffNow, turnoffBirth] here
+        const auto& tr = cluster.tracks();
+        const auto birthRange = tr.liveMassRange(tr.logTMin());
+        const auto nowRange = tr.liveMassRange(std::log10(ageYr));
+        if (birthRange.size() != 1 || nowRange.size() != 1 ||
+            birthRange.front().first != nowRange.front().first)
+        {
+            std::cerr << "testCluster: cumSNeNonStochastic: live mass range shape "
+                "assumption violated -- test needs updating\n";
+            return 1;
+        }
+        const double m0 = std::max(nowRange.front().second, snMin);
+        const double m1 = std::min({ birthRange.front().second, controls.minStochMass(), snMax });
+        if (m0 >= m1)
+        {
+            std::cerr << "testCluster: cumSNeNonStochastic: test bug: expected the dead mass "
+                "range at " << ageYr << " yr to overlap [" << snMin << ", " << snMax << "]\n";
+            return 1;
+        }
+
+        // Number of stars in [m0, m1]: imf() is normalized by number,
+        // so its integral over [m0, m1] is the fraction of stars there,
+        // and the cluster holds clusterMass / nonStochIMFMass() stars
+        // (every star being non-stochastic here) -- see
+        // SimControls::nonStochIMFMass()'s own comment
+        const double expected = controls.imf().integral(m0, m1) * clusterMass /
+            controls.nonStochIMFMass();
+
+        // cumSNe()'s own integrand is a step function (hasSN), so it
+        // converges only to within the integrator's own tolerance
+        const double tol = 2.0 * controls.intRelTol();
+        if (std::abs(cluster.cumSNe() - expected) > tol * expected)
+        {
+            std::cerr << "testCluster: cumSNeNonStochastic: cumSNe() is " << cluster.cumSNe()
+                << ", expected " << expected << "\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testCluster: cumSNeNonStochastic test failed: " << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Add the synthetic gap_test ccsn yield model to an input deck -- masses
+// 10-40 Msun, with all-zero yields (failed supernovae) at 20 and 30 Msun
+// at [Fe/H] = 0, so that at testCluster.in's own [Fe/H] = 0, SNe occur
+// for 10-20 and 30-40 Msun but not in between (see
+// make_yields_test_fixture.py)
+static void addGapYields(toml::table& inputDeck)
+{
+    inputDeck.insert("yields", toml::table{
+        { "channel1", toml::table{ { "channel", "ccsn" }, { "model", "gap_test" } } },
+        { "registry", std::string(yieldsRegistry) },
+        { "no_decay", true },
+    });
+}
+
+// Verify that cumSNe() for a fully stochastic cluster whose SNe are set
+// by the gap_test ccsn yields (no explicit feedback.sn_mass_range)
+// counts exactly the stars with hasSN(m, feH()) true -- excluding those
+// in the 20-30 Msun failed-supernova gap, which the mass-only hasSN(m)
+// would count
+static auto testClusterCumSNeYieldGap() -> int
+{
+    constexpr double clusterMass = 1e4;
+    constexpr double ageYr = 3e7;
+
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFile);
+        addGapYields(inputDeck);
+        const io::SimControls controls(inputDeck);
+
+        utils::rng().seed(rngSeed);
+        core::Cluster cluster(0, clusterMass, 0.0, controls);
+        const std::vector<double> masses = cluster.starMasses();
+        const std::vector<double> tDeath = cluster.starDeathTimes();
+        cluster.advance(0.5 * ageYr);
+        cluster.advance(ageYr);
+
+        double expected = 0.0;
+        double nInGap = 0.0;
+        for (std::size_t i = 0; i < masses.size(); ++i)
+        {
+            if (tDeath.at(i) >= ageYr) { continue; }
+            if (controls.hasSN(masses.at(i), cluster.feH())) { expected += 1.0; }
+            else if (controls.hasSN(masses.at(i))) { nInGap += 1.0; }
+        }
+        if (nInGap <= 0.0 || expected <= 0.0)
+        {
+            std::cerr << "testCluster: cumSNeYieldGap: test bug: expected some dead stars "
+                "both inside and outside the failed-supernova gap\n";
+            return 1;
+        }
+        if (cluster.cumSNe() != expected)
+        {
+            std::cerr << "testCluster: cumSNeYieldGap: cumSNe() is " << cluster.cumSNe()
+                << ", expected " << expected << " (the mass-only hasSN() would give "
+                << expected + nInGap << ")\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testCluster: cumSNeYieldGap test failed: " << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Verify that cumSNe() for a fully continuously-sampled cluster whose
+// SNe are set by the gap_test ccsn yields counts only the 10-20 and
+// 30-40 Msun parts of its mass range, not the 20-30 Msun failed-supernova
+// gap: at an age by which the turnoff mass mTO has fallen below 20 Msun
+// (but, for this test track set, not below 10 Msun), it should equal the
+// number of stars in [mTO, 20] plus [30, 40] -- the cluster's own number
+// of stars, its mass divided by nonStochIMFMass(), times the IMF's own
+// integral over those ranges
+static auto testClusterCumSNeYieldGapNonStochastic() -> int
+{
+    constexpr double clusterMass = 1e4;
+    constexpr double ageYr = 3e7;
+
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFile);
+        inputDeck.at_path("stars").as_table()->insert_or_assign("min_stoch_mass", 120.0);
+        addGapYields(inputDeck);
+        const io::SimControls controls(inputDeck);
+
+        utils::rng().seed(rngSeed);
+        core::Cluster cluster(0, clusterMass, 0.0, controls);
+        cluster.advance(0.5 * ageYr);
+        cluster.advance(ageYr);
+
+        const auto& tr = cluster.tracks();
+        const auto nowRange = tr.liveMassRange(std::log10(ageYr));
+        const auto birthRange = tr.liveMassRange(tr.logTMin());
+        const double mTO = nowRange.empty() ? 0.0 : nowRange.front().second;
+        if (nowRange.size() != 1 || mTO <= 10.0 || mTO >= 20.0 ||
+            birthRange.size() != 1 || birthRange.front().second <= 40.0)
+        {
+            std::cerr << "testCluster: cumSNeYieldGapNonStochastic: test bug: expected a turnoff "
+                "mass between 10 and 20 Msun at " << ageYr << " yr\n";
+            return 1;
+        }
+
+        // Number of stars in those ranges -- see
+        // testClusterCumSNeNonStochastic()'s own identical computation
+        const double expected = clusterMass / controls.nonStochIMFMass() *
+            (controls.imf().integral(mTO, 20.0) + controls.imf().integral(30.0, 40.0));
+
+        const double tol = 2.0 * controls.intRelTol();
+        if (std::abs(cluster.cumSNe() - expected) > tol * expected)
+        {
+            std::cerr << "testCluster: cumSNeYieldGapNonStochastic: cumSNe() is "
+                << cluster.cumSNe() << ", expected " << expected << "\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testCluster: cumSNeYieldGapNonStochastic test failed: " << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
 auto testCluster() -> int
 {
     int result = 0;
@@ -1725,5 +2022,10 @@ auto testCluster() -> int
     result += testClusterYieldsNonStochasticDecay();
     result += testClusterYieldsConverged();
     result += testClusterYieldsAboveTrackRange();
+    result += testClusterCumSNeAtBirth();
+    result += testClusterCumSNeStochastic();
+    result += testClusterCumSNeNonStochastic();
+    result += testClusterCumSNeYieldGap();
+    result += testClusterCumSNeYieldGapNonStochastic();
     return result;
 }

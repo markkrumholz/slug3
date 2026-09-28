@@ -22,6 +22,7 @@ auto main() -> int {
         result += testYieldChannelUnknownModel();
         result += testYieldChannelYieldBeforeRebuild();
         result += testYieldChannelHasYield();
+        result += testYieldChannelHasYieldFeH();
         result += testYieldChannelInterpolation();
         result += testYieldChannelMassGridExtrapolation();
         result += testYieldChannelMassGridNarrowing();

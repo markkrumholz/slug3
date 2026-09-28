@@ -18,6 +18,7 @@
 #include <cstddef>
 #include <functional>
 #include <memory>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -434,6 +435,30 @@ namespace core
         }
 
         /**
+         * @brief Return the cumulative number of supernovae up to the current time
+         * @return Number of supernovae that have occurred in this
+         *   cluster from its formation up to the current time
+         * @details
+         * The result is the sum of the supernovae from the
+         * stochastically-sampled part of the population (stochSN_),
+         * which is always an integer, and from the non-stochastic part
+         * (nonStochSN_), which in general is not -- hence the return
+         * type is double rather than an integer type.
+         *
+         * Like yields(), not computed lazily here: advance() itself
+         * calls computeFeedback() eagerly at the end of every call
+         * (see lastFeedbackTime_'s own comment for why), so both
+         * counts are already current by the time this is called. Zero
+         * until advance() has run at least once. Which stars count as
+         * supernovae is decided by SimControls::hasSN(mass, feH), at
+         * this cluster's own feH() -- see its own comment.
+         */
+        [[nodiscard]] auto cumSNe() const -> double
+        {
+            return static_cast<double>(stochSN_) + nonStochSN_;
+        }
+
+        /**
          * @brief Return whether the cluster has disrupted
          * @return True if the cluster has disrupted
          */
@@ -592,6 +617,22 @@ namespace core
         double lastYieldTime_ = 0.0;
 
         /**
+         * @brief Simulation time through which the feedback quantities (stochSN_, nonStochSN_) have been updated
+         * @details
+         * Plays exactly the same role for computeFeedback() as
+         * lastYieldTime_ does for computeYields() -- see its own
+         * comment, including for why advance() must update the
+         * feedback quantities eagerly, at the end of every call,
+         * rather than leaving it to a lazy call from cumSNe(): the
+         * stochastic population's own contribution relies on mDead_,
+         * which the next advance() call overwrites.
+         */
+        double lastFeedbackTime_ = 0.0;
+
+        unsigned long stochSN_ = 0;  /**< Cumulative number of supernovae from the stochastically-sampled part of the population; see computeFeedback() */
+        double nonStochSN_ = 0.0;    /**< Cumulative (in general non-integer) number of supernovae from the non-stochastic part of the population; see computeFeedback() */
+
+        /**
          * Tracks for this cluster's [Fe/H]: either owned outright (when
          * the simulation has a variable [Fe/H], so each cluster needs
          * its own slice -- a lazily-evaluated one, see
@@ -719,21 +760,10 @@ namespace core
          * Continuously-sampled (non-stochastic) stars: does nothing if
          * birthNonStochMass_ is 0 (no continuously-sampled population
          * at all), mirroring computeLbol()'s own identical guard.
-         * Otherwise finds the live mass range at lastYieldTime_ (via
-         * tracks().liveMassRange(), clamping lastYieldTime_ up to
-         * formTime_ first, so the very first call -- lastYieldTime_
-         * still at its initial 0 -- reads the live range at this
-         * cluster's own birth, not simulation time 0) and subtracts
-         * from it the live mass range now (read directly off
-         * isochrone_'s own segments, rather than calling
-         * tracks().liveMassRange() a second time). The result is the
-         * set of mass ranges that were alive at lastYieldTime_ but are
-         * dead now -- possibly several disjoint ranges -- each then
-         * clipped to lie below controls().minStochMass() (the
-         * non-stochastic population's own upper mass limit; the part
-         * above it, if any, belongs to the stochastic stars already
-         * handled above, via mDead_). For each surviving, non-empty
-         * range [m0, m1], integrates yieldStar() (see its own comment)
+         * Otherwise finds the non-stochastic mass ranges that died
+         * between lastYieldTime_ and curTime_ via
+         * nonStochDeadMassRanges() (see its own comment). For each
+         * such range [m0, m1], integrates yieldStar() (see its own comment)
          * against controls().imf() over [m0, m1] via PDFIntegrator,
          * exactly as computeLbol() integrates lbolStar() over the
          * analogous non-stochastic mass range, and adds
@@ -743,6 +773,57 @@ namespace core
          * mass" pattern computeLbol()/Specsyn::specCts() both use.
          */
         void computeYields();
+
+        /**
+         * @brief Find the non-stochastic mass ranges that died between a given time and curTime_
+         * @param lastTime Earlier simulation time, in yr (e.g.
+         *   lastYieldTime_ or lastFeedbackTime_)
+         * @return Mass ranges (m0, m1), sorted ascending and
+         *   non-overlapping, each non-empty (m0 < m1): the masses in
+         *   the continuously-sampled (non-stochastic) part of the
+         *   population that were alive at lastTime but are dead at
+         *   curTime_
+         * @details
+         * Finds the live mass range at lastTime (via
+         * tracks().liveMassRange(), clamping lastTime up to formTime_
+         * first, so a lastTime still at its initial 0 reads the live
+         * range at this cluster's own birth, not simulation time 0)
+         * and subtracts from it the live mass range now (read
+         * directly off isochrone_'s own segments, already current as
+         * of curTime_, rather than calling tracks().liveMassRange() a
+         * second time). The result -- possibly several disjoint
+         * ranges -- is then clipped to lie below
+         * controls().minStochMass(), the non-stochastic population's
+         * own upper mass limit (any part above it belongs to the
+         * stochastic stars, handled separately via mDead_), and any
+         * range left empty by that clipping is dropped.
+         */
+        [[nodiscard]] auto nonStochDeadMassRanges(double lastTime) const
+            -> std::vector<std::pair<double, double>>;
+
+        /**
+         * @brief Add the feedback from every star that died since lastFeedbackTime_ into the cumulative feedback quantities
+         * @details
+         * Called eagerly from advance() itself, at the end of every
+         * call, exactly like computeYields() -- see
+         * lastFeedbackTime_'s own comment for why. Currently the only
+         * feedback quantity is the number of supernovae; for the
+         * stochastic population, adds 1 to stochSN_ for each star in
+         * mDead_ (the stars that died during the most recent
+         * advance() call) for which controls().hasSN(m, feH_) is true
+         * -- the [Fe/H]-aware overload, so that failed supernovae
+         * within a ccsn yield table's own mass range are not counted
+         * (see SimControls::hasSN(mass, feH)'s own comment). For the
+         * non-stochastic population (if birthNonStochMass_ > 0),
+         * finds the mass ranges that died between lastFeedbackTime_
+         * and curTime_ via nonStochDeadMassRanges(), integrates
+         * snStar() against controls().imf() over each via
+         * utils::integrateScaled(), exactly as computeYields()
+         * integrates yieldStar(), and adds the sum of those integrals,
+         * times birthNonStochMass_ / controls().nonStochIMFMass() (imf()
+         * being normalized by number, not mass), into nonStochSN_.
+         */
+        void computeFeedback();
 
         /**
          * @brief Bolometric luminosity of a single star, given its mass and isochrone segment
@@ -821,6 +902,27 @@ namespace core
             const yields::Yields& yields, bool decomposed,
             const io::SimControls& controls, double curTime, double formTime,
             const tracks::Tracks2D& tracks2D) -> std::vector<double>;
+
+        /**
+         * @brief Number of supernovae produced by a single star, given its mass
+         * @param m Stellar mass, in Msun
+         * @param controls The simulation controls -- controls(),
+         *   passed explicitly for the same reason yieldStar() takes
+         *   its own controls argument
+         * @param feH [Fe/H] of the star -- the cluster's own feH_,
+         *   passed explicitly for the same reason as controls
+         * @return 1 if controls.hasSN(m, feH) is true, 0 otherwise,
+         *   wrapped in a single-element vector
+         * @details
+         * Exists so computeFeedback() can integrate it with
+         * utils::integrateScaled(), mirroring yieldStar()'s own role
+         * for computeYields() -- a thin wrapper converting
+         * SimControls::hasSN()'s bool result to the vector-valued form
+         * integrateScaled() requires. Static for the same reason
+         * yieldStar() is.
+         */
+        [[nodiscard]] static auto snStar(double m, const io::SimControls& controls, double feH)
+            -> std::vector<double>;
 
     };
 

@@ -969,6 +969,61 @@ yieldsChannelDecomposed, this is read live every time
 Yields.yield_()/yieldSum() runs, not cached once, so assigning this
 takes effect immediately.)doc";
 
+static constexpr std::string_view snMassLimitsPropertyDocstring =
+R"doc(The stellar mass limits over which supernovae occur.
+
+A list of masses in Msun, read from feedback.sn_mass_range in the
+input deck (empty if that key was not given). Consecutive pairs
+(lower, upper) each give one mass interval, inclusive of both ends, in
+which stars end their lives as supernovae; more than one pair
+describes disjoint intervals. If empty, hasSN() defers to the
+core-collapse supernova yield channels in yields instead.
+
+Raises
+------
+ValueError
+    On assignment (or setSNMassLimits()), if the list has an odd
+    number of elements or its elements are not strictly increasing
+    (which also rejects NaN); the existing limits are left unchanged
+    in this case.)doc";
+
+static constexpr std::string_view hasSNDocstring =
+R"doc(Check whether a star of a given mass ends its life as a supernova.
+
+Parameters
+----------
+mass : float
+    Stellar mass (Msun).
+
+Returns
+-------
+has_sn : bool
+    If snMassLimits is non-empty, True if mass lies within any of its
+    (lower, upper) intervals, inclusive of both ends. Otherwise, if
+    yields is not None, whether mass lies within the mass range of any
+    core-collapse supernova (ccsn) yield channel loaded. Otherwise,
+    False.)doc";
+
+static constexpr std::string_view hasSNFeHDocstring =
+R"doc(Check whether a star of a given mass and [Fe/H] ends its life as a supernova.
+
+Parameters
+----------
+mass : float
+    Stellar mass (Msun).
+feh : float
+    [Fe/H] of the star.
+
+Returns
+-------
+has_sn : bool
+    If snMassLimits is non-empty, True if mass lies within any of its
+    (lower, upper) intervals, inclusive of both ends (feh is ignored).
+    Otherwise, if yields is not None,
+    yields.hasYield(mass, feh, YieldChannelType.ccsn) -- which, unlike
+    hasSN(mass), also catches failed supernovae within the ccsn yield
+    channels' own mass ranges. Otherwise, False.)doc";
+
 static constexpr std::string_view inputDeckStrPropertyDocstring =
 R"doc(The input deck's own text.
 
@@ -1213,6 +1268,12 @@ void bindSimControls(py::module_& m)
                 yieldsChannelDecomposedPropertyDocstring.data(), py::arg("value"))
         .def("setNoDecay", &io::SimControls::setNoDecay,
                 noDecayPropertyDocstring.data(), py::arg("value"))
+        .def("setSNMassLimits", &io::SimControls::setSNMassLimits,
+                snMassLimitsPropertyDocstring.data(), py::arg("limits"))
+        .def("hasSN", py::overload_cast<double>(&io::SimControls::hasSN, py::const_),
+                hasSNDocstring.data(), py::arg("mass"))
+        .def("hasSN", py::overload_cast<double, double>(&io::SimControls::hasSN, py::const_),
+                hasSNFeHDocstring.data(), py::arg("mass"), py::arg("feh"))
         .def("setYields", &setYieldsKeepOnFailure,
                 setYieldsDocstring.data(), py::arg("yields"))
         // Properties: alternative, attribute-style access to the same
@@ -1362,6 +1423,10 @@ void bindSimControls(py::module_& m)
                 &io::SimControls::noDecay,
                 &io::SimControls::setNoDecay,
                 noDecayPropertyDocstring.data())
+        .def_property("snMassLimits",
+                &io::SimControls::snMassLimits,
+                &io::SimControls::setSNMassLimits,
+                snMassLimitsPropertyDocstring.data())
         .def_property_readonly("yieldChannels",
                 &io::SimControls::yieldChannels,
                 yieldChannelsPropertyDocstring.data())

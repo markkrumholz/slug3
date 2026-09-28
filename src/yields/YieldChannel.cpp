@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <mdspan> // NOLINT(misc-include-cleaner)
 #include <optional>
 #include <ranges>
@@ -258,6 +259,36 @@ namespace yields
         /** @brief mdspan view used for both yieldData_/yieldDataOrig_ in rebuildYieldGrid() */
         using MutableArray3D = std::mdspan<double, std::dextents<std::size_t, 3>>; // NOLINT(misc-include-cleaner)
 
+        /** @brief mutable mdspan view used for yieldActive_ in rebuildYieldGrid() */
+        using MutableActiveArray2D = std::mdspan<std::uint8_t, std::dextents<std::size_t, 2>>; // NOLINT(misc-include-cleaner)
+
+        /**
+         * @brief Find which (feH, mass) grid points of a yield array have any non-zero yield
+         * @param view Yield data, shape (nfeh, nmass, niso)
+         * @return A row-major (nfeh, nmass) array, 1 where any of
+         *   view[f, m, :] is non-zero and 0 where all are zero -- see
+         *   YieldChannel::yieldActiveOrig_'s own comment
+         */
+        auto findActive(const YieldChannel::Array3D& view) -> std::vector<std::uint8_t> //NOLINT(llvm-prefer-static-over-anonymous-namespace)
+        {
+            const std::size_t nfeh = view.extent(0);
+            const std::size_t nmass = view.extent(1);
+            const std::size_t niso = view.extent(2);
+            std::vector<std::uint8_t> active(nfeh * nmass, 0);
+            const MutableActiveArray2D activeView(active.data(), nfeh, nmass);
+            for (std::size_t f = 0; f < nfeh; ++f)
+            {
+                for (std::size_t m = 0; m < nmass; ++m)
+                {
+                    for (std::size_t iso = 0; iso < niso; ++iso)
+                    {
+                        if (view[f, m, iso] != 0.0) { activeView[f, m] = 1; break; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- f/m/iso all < the corresponding extent by the loop bounds
+                    }
+                }
+            }
+            return active;
+        }
+
         /**
          * @brief Update a descriptor's own mMin_/mMax_ to match whichever mass range was just requested
          * @param descriptor The descriptor to update in place
@@ -303,14 +334,19 @@ namespace yields
          * @param mi Index into masses_ (and newView's second axis) to fill
          * @param src Index into massesOrig_ (and origView's second axis) of the nearest native column
          * @param ratio Requested mass divided by massesOrig_[src] -- see rebuildYieldGrid()'s own comment
+         * @param origActive yieldActiveOrig_, shape (nfeh, massesOrig_.size())
+         * @param newActive yieldActive_, shape (nfeh, masses_.size()) -- column mi is written, set
+         *   to origActive's own column src (see YieldChannel::yieldActive_'s own comment)
          */
         void extrapolateMassColumn( //NOLINT(llvm-prefer-static-over-anonymous-namespace)
             const YieldChannel::Array3D& origView, const MutableArray3D& newView,
             const std::size_t nfeh, const IsotopeMap& isoMap,
-            const std::size_t mi, const std::size_t src, const double ratio)
+            const std::size_t mi, const std::size_t src, const double ratio,
+            const YieldChannel::ActiveArray2D& origActive, const MutableActiveArray2D& newActive)
         {
             for (std::size_t f = 0; f < nfeh; ++f)
             {
+                newActive[f, mi] = origActive[f, src]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- f/mi/src all in range by construction, see rebuildYieldGrid()'s own comment
                 for (std::size_t j = 0; j < isoMap.size(); ++j)
                 {
                     const auto& srcIso = isoMap[j];
@@ -330,14 +366,24 @@ namespace yields
          * @param bracket Bracketing indices/weight (into massesOrig_) from utils::findBracket --
          *   weight 0 or 1 reduces this to an exact copy of one massesOrig_ column, see
          *   rebuildYieldGrid()'s own comment
+         * @param origActive yieldActiveOrig_, shape (nfeh, massesOrig_.size())
+         * @param newActive yieldActive_, shape (nfeh, masses_.size()) -- column mi is written, set
+         *   to 1 if either bracketing column with non-zero weight is active in origActive (see
+         *   YieldChannel::yieldActive_'s own comment)
          */
         void interpolateMassColumn( //NOLINT(llvm-prefer-static-over-anonymous-namespace)
             const YieldChannel::Array3D& origView, const MutableArray3D& newView,
             const std::size_t nfeh, const IsotopeMap& isoMap,
-            const std::size_t mi, const utils::Bracket& bracket)
+            const std::size_t mi, const utils::Bracket& bracket,
+            const YieldChannel::ActiveArray2D& origActive, const MutableActiveArray2D& newActive)
         {
             for (std::size_t f = 0; f < nfeh; ++f)
             {
+                // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- f/mi/bracket all in range by construction, see rebuildYieldGrid()'s own comment
+                const bool loActive = bracket.t_ != 1.0 && origActive[f, bracket.lo_] != 0;
+                const bool hiActive = bracket.t_ != 0.0 && origActive[f, bracket.hi_] != 0;
+                newActive[f, mi] = (loActive || hiActive) ? 1 : 0;
+                // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
                 for (std::size_t j = 0; j < isoMap.size(); ++j)
                 {
                     const auto& srcIso = isoMap[j];
@@ -486,6 +532,8 @@ namespace yields
             // Step 5: read the yield data for every bracketed [Fe/H]
             // group -- see readYieldData()'s own comment
             yieldDataOrig_ = readYieldData(grp, groupNames, massesOrig_.size(), isotopesOrig_.size());
+            yieldActiveOrig_ = findActive(Array3D(
+                yieldDataOrig_.data(), feH_.size(), massesOrig_.size(), isotopesOrig_.size()));
         }
         catch (...)
         {
@@ -571,6 +619,9 @@ namespace yields
 
         yieldData_.assign(nfeh * nmass * niso, 0.0);
         const MutableArray3D newView(yieldData_.data(), nfeh, nmass, niso);
+        const ActiveArray2D origActive(yieldActiveOrig_.data(), nfeh, nmassOrig);
+        yieldActive_.assign(nfeh * nmass, 0);
+        const MutableActiveArray2D newActive(yieldActive_.data(), nfeh, nmass);
 
         // Extrapolation (mt outside massesOrig_'s own range) can't just
         // be utils::findBracket, unlike the interior case: it clamps
@@ -587,12 +638,14 @@ namespace yields
                 const bool below = mt < massesOrig_.front();
                 const std::size_t src = below ? 0 : nmassOrig - 1;
                 const double ratio = mt / (below ? massesOrig_.front() : massesOrig_.back());
-                extrapolateMassColumn(origView, newView, nfeh, isoMap, mi, src, ratio);
+                extrapolateMassColumn(origView, newView, nfeh, isoMap, mi, src, ratio,
+                    origActive, newActive);
             }
             else
             {
                 const auto bracket = utils::findBracket(massesOrig_, mt, cache);
-                interpolateMassColumn(origView, newView, nfeh, isoMap, mi, bracket);
+                interpolateMassColumn(origView, newView, nfeh, isoMap, mi, bracket,
+                    origActive, newActive);
             }
         }
 

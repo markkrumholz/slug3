@@ -418,6 +418,31 @@ namespace core
         }
 
         /**
+         * @brief Return the cumulative number of supernovae in this galaxy up to the current time
+         * @return Number of supernovae that have occurred in this
+         *   galaxy from its formation up to the current time: the sum
+         *   of Cluster::cumSNe() over every cluster in clusters() and
+         *   disruptedClusters(), plus fieldStarStochSNe_ (from the
+         *   individually-sampled field stars) and fieldStarNonStochSNe_
+         *   (from the continuously-sampled field population)
+         * @details
+         * Like Cluster::cumSNe() (see its own comment), a double
+         * rather than an integer type, since the non-stochastic
+         * contributions are in general non-integer, and not computed
+         * lazily here: advance() itself updates every cluster's own
+         * count, and calls computeFeedback() to update
+         * fieldStarStochSNe_ and fieldStarNonStochSNe_, eagerly at
+         * every call.
+         */
+        [[nodiscard]] auto cumSNe() const -> double
+        {
+            double nSN = static_cast<double>(fieldStarStochSNe_) + fieldStarNonStochSNe_;
+            for (const auto& cluster : clusters_) { nSN += cluster.cumSNe(); }
+            for (const auto& cluster : disruptedClusters_) { nSN += cluster.cumSNe(); }
+            return nSN;
+        }
+
+        /**
          * @brief The instantaneous rate at which the continuous population returns each isotope, at a given time and [Fe/H]
          * @param t Simulation time, in yr, since this galaxy's own
          *   formation (time 0) -- not necessarily curTime(); this is a
@@ -845,6 +870,20 @@ namespace core
          */
         double lastYieldTime_ = 0.0;
 
+        unsigned long fieldStarStochSNe_ = 0;  /**< Cumulative number of supernovae from the individually-sampled field stars; see computeFeedback() */
+        double fieldStarNonStochSNe_ = 0.0;    /**< Cumulative (in general non-integer) number of supernovae from the continuously-sampled field population; see computeFeedback() */
+
+        /**
+         * @brief Simulation time through which fieldStarNonStochSNe_ has been updated
+         * @details
+         * Mirrors lastYieldTime_'s own role (see its own comment) for
+         * computeFeedback(): starts at 0, and advance() sets it to
+         * curTime_ right after every call to computeFeedback(), which
+         * adds the continuous population's supernovae between it and
+         * curTime_.
+         */
+        double lastFeedbackTime_ = 0.0;
+
         /**
          * @brief Simulation controls (physics and control-flow settings) this galaxy was built from
          * @details
@@ -1204,6 +1243,26 @@ namespace core
          * own final value is the clustered total plus fieldYields_.
          */
         void computeYields();
+
+        /**
+         * @brief Add the feedback from every field star that died during the most recent advance() call into the cumulative feedback quantities
+         * @details
+         * Called eagerly from advance() itself, at the end of every
+         * call, right after computeYields() and for the same reason
+         * (see lastYieldTime_'s own comment): it relies on
+         * deadFieldStars_, which the next advance() call overwrites.
+         * Currently the only feedback quantity is the number of
+         * supernovae. From the individually-sampled field stars: adds
+         * 1 to fieldStarStochSNe_ for each star in deadFieldStars_ for
+         * which controls().hasSN(mass_, feh_) is true. From the
+         * continuously-sampled field population: adds
+         * continuousDeathQuantity() of the indicator hasSN(m, feh)
+         * over (lastFeedbackTime_, curTime_] to fieldStarNonStochSNe_;
+         * advance() then sets lastFeedbackTime_ to curTime_. Each
+         * cluster's own supernovae are counted by that cluster's own
+         * Cluster::computeFeedback(), run from its own advance().
+         */
+        void computeFeedback();
 
     };
 

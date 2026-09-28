@@ -3041,8 +3041,8 @@ def test_isotope_table_unknown_raises_keyerror():
 
 
 def test_yield_channel_type_enum_members():
-    """YieldChannelType has exactly the two currently-known channels."""
-    assert set(slug.YieldChannelType.__members__.keys()) == {"ccsn", "massive_star_winds"}
+    """YieldChannelType has exactly the three currently-known channels."""
+    assert set(slug.YieldChannelType.__members__.keys()) == {"ccsn", "massive_star_winds", "agb"}
 
 
 def test_yield_channel_descriptor_defaults():
@@ -3147,6 +3147,53 @@ def test_yield_channel_has_yield_and_yield():
     assert all(v >= 0.0 for v in row)
 
 
+def test_yield_channel_has_yield_feh_detects_gaps():
+    """hasYield(mass, feh) is False inside gap_test's failed-supernova gap
+    (20-30 Msun, all-zero yields at [Fe/H] = -1 and 0), where the
+    mass-only hasYield(mass) is True, but True where the gap closes
+    ([Fe/H] between -2 and -1), and False for an extrapolated mass
+    column built from an all-zero one."""
+    descriptor = slug.YieldChannelDescriptor(slug.YieldChannelType.ccsn, "gap_test")
+    channel = slug.YieldChannel(descriptor, -2.0, 0.0, registry_name=YIELDS_REGISTRY)
+    assert channel.hasYield(15.0, -0.5) is False  # grid not yet built
+    channel.rebuildYieldGrid()
+    assert channel.hasYield(25.0) is True
+    assert channel.hasYield(25.0, -0.5) is False
+    assert channel.hasYield(mass=25.0, feh=-1.5) is True
+    assert channel.hasYield(15.0, -0.5) is True
+
+    sukhbold = slug.YieldChannel(
+        slug.YieldChannelDescriptor(slug.YieldChannelType.ccsn, "sukhbold_test"),
+        0.0, 0.0, registry_name=YIELDS_REGISTRY)
+    sukhbold.rebuildYieldGrid(m_min=10.0, m_max=150.0)
+    assert sukhbold.hasYield(120.0) is True
+    assert sukhbold.hasYield(120.0, 0.0) is False
+    assert sukhbold.hasYield(50.0, 0.0) is True
+
+
+def test_yields_and_simcontrols_feh_aware_overloads():
+    """Yields.hasYield(mass, feh, channel) and SimControls.hasSN(mass, feh)
+    detect gap_test's failed-supernova gap, unlike their mass-only
+    overloads; explicit snMassLimits still override yields."""
+    deck = tomlkit.parse(pathlib.Path(CLUSTER_DECK).read_text())
+    deck["yields"] = tomlkit.table()
+    deck["yields"]["channel1"] = {"channel": "ccsn", "model": "gap_test"}
+    deck["yields"]["registry"] = YIELDS_REGISTRY
+    sc = slug.SimControls(tomlkit.dumps(deck))
+    ccsn = slug.YieldChannelType.ccsn
+
+    assert sc.yields.hasYield(25.0, ccsn) is True
+    assert sc.yields.hasYield(25.0, 0.0, ccsn) is False
+    assert sc.yields.hasYield(mass=15.0, feh=0.0, channel=ccsn) is True
+    assert sc.hasSN(25.0) is True
+    assert sc.hasSN(25.0, 0.0) is False
+    assert sc.hasSN(mass=15.0, feh=0.0) is True
+
+    sc.snMassLimits = [20.0, 30.0]
+    assert sc.hasSN(25.0, 0.0) is True
+    assert sc.hasSN(15.0, 0.0) is False
+
+
 def test_yield_channel_rebuild_yield_grid_restricts_isotopes():
     """Passing an explicit isotopes list to rebuildYieldGrid() reorders/subsets the isotope axis."""
     descriptor = slug.YieldChannelDescriptor(slug.YieldChannelType.ccsn, "sukhbold_test")
@@ -3213,6 +3260,20 @@ def test_yields_yield_and_yield_sum_shapes(yields_controls):
     assert len(total) == len(YIELDS_ISOTOPES)
     for j in range(len(YIELDS_ISOTOPES)):
         assert total[j] == pytest.approx(rows[0][j] + rows[1][j])
+
+
+def test_yields_has_yield(yields_controls):
+    """hasYield is True for a ccsn mass within either ccsn channel's range
+    (kobayashi_test, 13-18 Msun; sukhbold_test, 18.2-100 Msun), False in
+    the gap between them or outside both, and False for any channel type
+    with no channels loaded at all."""
+    yields = yields_controls.yields
+    ccsn = slug.YieldChannelType.ccsn
+    assert [yields.hasYield(m, ccsn) for m in (10.0, 15.0, 18.1, 50.0, 120.0)] == \
+        [False, True, False, True, False]
+    assert not yields.hasYield(50.0, slug.YieldChannelType.massive_star_winds)
+    assert not yields.hasYield(mass=50.0, channel=slug.YieldChannelType.massive_star_winds)
+    assert not yields.hasYield(3.0, slug.YieldChannelType.agb)
 
 
 def test_yields_yield_and_yield_sum_dt_decay():
@@ -3657,6 +3718,62 @@ def test_simcontrols_no_decay_parsed_from_deck():
     deck["yields"]["no_decay"] = True
     no_decay_controls = slug.SimControls(tomlkit.dumps(deck))
     assert no_decay_controls.noDecay is True
+
+
+def _sn_controls(with_yields, sn_mass_range=None):
+    """A fresh SimControls built from CLUSTER_DECK, optionally with two
+    ccsn yield channels (sukhbold_test, 18.2-100 Msun; kobayashi_test,
+    13-18 Msun) and/or feedback.sn_mass_range."""
+    deck = tomlkit.parse(pathlib.Path(CLUSTER_DECK).read_text())
+    if with_yields:
+        deck["yields"] = tomlkit.table()
+        deck["yields"]["channel1"] = {"channel": "ccsn", "model": "sukhbold_test"}
+        deck["yields"]["channel2"] = {"channel": "ccsn", "model": "kobayashi_test"}
+        deck["yields"]["registry"] = YIELDS_REGISTRY
+    if sn_mass_range is not None:
+        deck["feedback"] = tomlkit.table()
+        deck["feedback"]["sn_mass_range"] = sn_mass_range
+    return slug.SimControls(tomlkit.dumps(deck))
+
+
+def test_simcontrols_sn_mass_limits_and_has_sn_from_deck():
+    """snMassLimits reflects feedback.sn_mass_range, and hasSN uses it in
+    preference to the ccsn yield channels, falling back to them (or to
+    False, with no yields) when it is absent."""
+    no_sn = _sn_controls(with_yields=False)
+    assert no_sn.snMassLimits == []
+    assert not no_sn.hasSN(20.0)
+
+    yields_only = _sn_controls(with_yields=True)
+    assert [yields_only.hasSN(m) for m in (10.0, 15.0, 18.1, 50.0)] == \
+        [False, True, False, True]
+
+    explicit = _sn_controls(with_yields=True, sn_mass_range=[8.0, 12.0, 20.0, 40.0])
+    assert explicit.snMassLimits == [8.0, 12.0, 20.0, 40.0]
+    assert [explicit.hasSN(m) for m in (8.0, 15.0, 30.0, 40.0, 50.0)] == \
+        [True, False, True, True, False]
+
+
+def test_simcontrols_sn_mass_limits_settable():
+    """snMassLimits is settable both via the property and the setter, and
+    an empty list makes hasSN defer to yields again."""
+    sc = _sn_controls(with_yields=True)
+    sc.snMassLimits = [8.0, 12.0]
+    assert sc.snMassLimits == [8.0, 12.0]
+    assert sc.hasSN(10.0) and not sc.hasSN(15.0)
+    sc.setSNMassLimits([])
+    assert sc.snMassLimits == []
+    assert not sc.hasSN(10.0) and sc.hasSN(15.0)
+
+
+@pytest.mark.parametrize("limits", [[8.0, 20.0, 25.0], [20.0, 8.0], [8.0, float("nan")]])
+def test_simcontrols_sn_mass_limits_invalid_raises(limits):
+    """An odd-length or non-strictly-increasing list raises ValueError and
+    leaves snMassLimits unchanged."""
+    sc = _sn_controls(with_yields=False, sn_mass_range=[8.0, 40.0])
+    with pytest.raises(ValueError):
+        sc.snMassLimits = limits
+    assert sc.snMassLimits == [8.0, 40.0]
 
 
 def test_simcontrols_write_yields_properties_default_true(yields_controls):

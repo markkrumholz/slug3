@@ -40,6 +40,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -373,6 +374,122 @@ inline auto testYieldChannelHasYield() -> int
     {
         std::cerr << "testYieldChannelHasYield: failed to construct YieldChannel from "
             << registryName << ": " << e.what() << "\n";
+        return 1;
+    }
+
+    return result;
+}
+
+/**
+ * @brief Check YieldChannel::hasYield(mass, feH) against a list of cases
+ * @param yc The channel to check
+ * @param label Label for diagnostics
+ * @param cases (mass, feH, expected) triples
+ * @return 0 if every case matches, 1 otherwise (after printing a
+ *   diagnostic for each mismatch)
+ */
+inline auto checkHasYieldFeH(const yields::YieldChannel& yc, const std::string& label,
+    const std::vector<std::tuple<double, double, bool>>& cases) -> int
+{
+    int result = 0;
+    for (const auto& [mass, feH, expected] : cases)
+    {
+        if (yc.hasYield(mass, feH) != expected)
+        {
+            std::cerr << "testYieldChannelHasYieldFeH: " << label << ": hasYield(" << mass
+                << ", " << feH << ") returned " << !expected << ", expected " << expected << "\n";
+            result = 1;
+        }
+    }
+    return result;
+}
+
+/**
+ * @brief Unit test for YieldChannel::hasYield(mass, feH)
+ * @return 0 if the test passes, 1 if it fails
+ * @details
+ * Uses tests/yields/assets/yields.toml's synthetic "gap_test" model
+ * (masses [10, 20, 30, 40], [Fe/H] [-2, -1, 0]), whose 20 and 30 Msun
+ * yields are all zero at [Fe/H] = -1 and 0, and whose 30 Msun yield is
+ * also all zero at [Fe/H] = -2 -- see make_yields_test_fixture.py's own
+ * docstring. Checks, with no query ever falling exactly on a grid
+ * point (where which cell the query lands in is ambiguous):
+ *
+ * - on gap_test's own native mass grid, that a mass between 20 and 30
+ *   Msun has no yield for [Fe/H] between -1 and 0 (all four corners of
+ *   its cell are inactive), even though hasYield(mass) is true there,
+ *   but does for [Fe/H] between -2 and -1 (the 20 Msun, [Fe/H] = -2
+ *   corner is active); that masses in the neighboring cells do; and
+ *   that [Fe/H] outside [-2, 0] is clamped to that range. Since every
+ *   masses() entry here matches a massesOrig() entry exactly, this
+ *   also checks that such an entry takes only its own
+ *   yieldActiveOrig_ value, not that of a zero-weight neighbor (which
+ *   would make the 20 or 30 Msun entry active);
+ * - after rebuilding gap_test's mass grid over [25, 35] (masses()
+ *   [25, 30, 35]), that the interpolated 25 Msun entry is inactive at
+ *   [Fe/H] -1 and 0 (both of the 20 and 30 Msun columns it is
+ *   interpolated from are), while the interpolated 35 Msun entry is
+ *   active (the 40 Msun column it is partly interpolated from is);
+ * - after rebuilding sukhbold_test's mass grid over [10, 150] (masses()
+ *   [10, 18.2, 100, 150]), whose 100 Msun ccsn yield is all zero (a
+ *   failed supernova), that the 150 Msun entry, extrapolated from the
+ *   inactive 100 Msun column, is inactive, so masses between 100 and
+ *   150 Msun have no yield, while the 10 Msun entry, extrapolated from
+ *   the active 18.2 Msun column, is active; and
+ * - that hasYield(mass, feH) is false before rebuildYieldGrid() has
+ *   ever been called.
+ */
+inline auto testYieldChannelHasYieldFeH() -> int
+{
+    const std::string registryName = "tests/yields/assets/yields.toml";
+    int result = 0;
+
+    try
+    {
+        yields::YieldChannel gap(
+            yields::YieldChannelDescriptor{ yields::Channel::ccsn_, "gap_test" },
+            -2.0, 0.0, registryName);
+        if (gap.hasYield(15.0, -0.5))
+        {
+            std::cerr << "testYieldChannelHasYieldFeH: hasYield(mass, feH) true before "
+                "rebuildYieldGrid()\n";
+            result = 1;
+        }
+
+        gap.rebuildYieldGrid();
+        if (!gap.hasYield(25.0))
+        {
+            std::cerr << "testYieldChannelHasYieldFeH: test bug: expected hasYield(25) true\n";
+            result = 1;
+        }
+        result += checkHasYieldFeH(gap, "gap_test, native grid", {
+            { 25.0, -0.5, false }, { 25.0, -1.5, true },
+            { 15.0, -0.5, true }, { 35.0, -0.5, true }, { 35.0, -1.5, true },
+            { 5.0, -0.5, false }, { 45.0, -0.5, false },
+            { 25.0, 0.5, false }, { 25.0, -3.0, true },
+        });
+
+        gap.rebuildYieldGrid(25.0, 35.0);
+        result += checkHasYieldFeH(gap, "gap_test, masses [25, 35]", {
+            { 27.0, -0.5, false }, { 32.0, -0.5, true }, { 27.0, -1.5, true },
+        });
+
+        yields::YieldChannel sukhbold(
+            yields::YieldChannelDescriptor{ yields::Channel::ccsn_, "sukhbold_test" },
+            0.0, 0.0, registryName);
+        sukhbold.rebuildYieldGrid(10.0, 150.0);
+        result += checkHasYieldFeH(sukhbold, "sukhbold_test, masses [10, 150]", {
+            { 12.0, 0.0, true }, { 50.0, 0.0, true }, { 120.0, 0.0, false },
+        });
+        if (!sukhbold.hasYield(120.0))
+        {
+            std::cerr << "testYieldChannelHasYieldFeH: test bug: expected hasYield(120) true\n";
+            result = 1;
+        }
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "testYieldChannelHasYieldFeH: unexpected exception: " << e.what() << "\n";
         return 1;
     }
 

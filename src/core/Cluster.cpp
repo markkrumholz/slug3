@@ -45,7 +45,7 @@ namespace
      *   several pieces by one or more subtrahend ranges falling
      *   inside it)
      * @details
-     * Used by Cluster::computeYields() to find which masses were alive
+     * Used by Cluster::nonStochDeadMassRanges() to find which masses were alive
      * at one time but are dead at another -- see its own comment.
      */
     auto subtractMassRanges(
@@ -363,6 +363,11 @@ void core::Cluster::advance(const double t)
     computeYields();
     lastYieldTime_ = curTime_;
 
+    // Update the cumulative feedback quantities eagerly too, for the
+    // same reason -- see lastFeedbackTime_'s own comment
+    computeFeedback();
+    lastFeedbackTime_ = curTime_;
+
     // Mark spec_/specExtinct_/phot_/photExtinct_/lbol_ as stale; they
     // are recomputed lazily, on demand, the next time spec()/
     // specExtinct()/phot()/photExtinct()/lbol() is actually called
@@ -620,41 +625,17 @@ void core::Cluster::computeYields()
     // identical guard: nothing to do if there is no such population
     if (birthNonStochMass_ <= 0.0) { return; }
 
-    // Live mass range at lastYieldTime_, clamped up to formTime_ so
-    // the very first call (lastYieldTime_ still at its initial 0)
-    // reads the live range at this cluster's own birth rather than
-    // simulation time 0 -- see lastYieldTime_'s own comment
-    const double lastTime = std::max(lastYieldTime_, formTime_);
-    const auto logAgeLast = std::max(std::log10(lastTime - formTime_), tracks().logTMin());
-    const auto liveMassRangeLast = tracks().liveMassRange(logAgeLast);
-
-    // Live mass range now, read directly off isochrone_'s own segments
-    // (already current as of curTime_, from advance()) rather than
-    // calling tracks().liveMassRange() a second time
-    std::vector<std::pair<double, double>> liveMassRangeNow;
-    liveMassRangeNow.reserve(isochrone_.size());
-    for (const auto& seg : isochrone_)
-    {
-        liveMassRangeNow.emplace_back(seg->xMin(), seg->xMax());
-    }
-
     // imf() is normalized by number, so each integral is per star;
     // scale to this cluster's own non-stochastic mass -- see
     // SimControls::nonStochIMFMass()'s own comment
     const double scale = birthNonStochMass_ / sc.nonStochIMFMass();
 
-    // Masses alive at lastYieldTime_ but dead now, clipped to lie
-    // below minStochMass() (the non-stochastic population's own upper
-    // mass limit -- any part at or above it belongs to the stochastic
-    // stars already handled above, via mDead_)
+    // Masses alive at lastYieldTime_ but dead now -- see
+    // nonStochDeadMassRanges()'s own comment
     const auto yieldAt = [&](const double m) -> std::vector<double>
     { return yieldStar(m, feH_, *yields, decomposed, sc, curTime_, formTime_, tracks()); };
-    for (const auto& [lo, hi] : subtractMassRanges(liveMassRangeLast, liveMassRangeNow))
+    for (const auto& [m0, m1] : nonStochDeadMassRanges(lastYieldTime_))
     {
-        const double m0 = lo;
-        const double m1 = std::min(hi, sc.minStochMass());
-        if (m0 >= m1) { continue; } // empty once clipped below minStochMass()
-
         // Isotope yields span many orders of magnitude, and some are
         // zero, and only a small fraction of stars die in one step, so
         // the integrand is made dimensionless first, scaled by its
@@ -667,6 +648,89 @@ void core::Cluster::computeYields()
             yields_[k] += segResult[k] * scale; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- yields_ and segResult are both sized yields_.size() by construction (segResult via nInt_ above)
         }
     }
+}
+
+// Non-stochastic mass ranges alive at lastTime but dead at curTime_
+// -- see this method's own header comment
+auto core::Cluster::nonStochDeadMassRanges(const double lastTime) const
+    -> std::vector<std::pair<double, double>>
+{
+    // Live mass range at lastTime, clamped up to formTime_ so a
+    // lastTime still at its initial 0 reads the live range at this
+    // cluster's own birth rather than simulation time 0 -- see
+    // lastYieldTime_'s own comment
+    const double tLast = std::max(lastTime, formTime_);
+    const auto logAgeLast = std::max(std::log10(tLast - formTime_), tracks().logTMin());
+    const auto liveMassRangeLast = tracks().liveMassRange(logAgeLast);
+
+    // Live mass range now, read directly off isochrone_'s own segments
+    // (already current as of curTime_, from advance()) rather than
+    // calling tracks().liveMassRange() a second time
+    std::vector<std::pair<double, double>> liveMassRangeNow;
+    liveMassRangeNow.reserve(isochrone_.size());
+    for (const auto& seg : isochrone_)
+    {
+        liveMassRangeNow.emplace_back(seg->xMin(), seg->xMax());
+    }
+
+    // Masses alive at lastTime but dead now, clipped to lie below
+    // minStochMass() (the non-stochastic population's own upper mass
+    // limit -- any part at or above it belongs to the stochastic
+    // stars, handled via mDead_), dropping any range left empty
+    const double mStoch = controls_.get().minStochMass();
+    std::vector<std::pair<double, double>> result;
+    for (const auto& [lo, hi] : subtractMassRanges(liveMassRangeLast, liveMassRangeNow))
+    {
+        const double m1 = std::min(hi, mStoch);
+        if (lo < m1) { result.emplace_back(lo, m1); }
+    }
+    return result;
+}
+
+// Update the cumulative feedback quantities from the stars that died
+// since lastFeedbackTime_ -- see this method's own header comment
+void core::Cluster::computeFeedback()
+{
+    const auto& sc = controls_.get();
+
+    // Stochastic (individually-sampled) stars that died during the
+    // most recent advance() call
+    stochSN_ += static_cast<unsigned long>(
+        std::ranges::count_if(mDead_,
+            [&sc, this](const double m) -> bool { return sc.hasSN(m, feH_); }));
+
+    // Continuously-sampled (non-stochastic) stars that died between
+    // lastFeedbackTime_ and curTime_ -- mirrors computeYields()'s own
+    // identical integration of yieldStar()
+    if (birthNonStochMass_ <= 0.0) { return; }
+
+    // imf() is normalized by number, so each integral is a number of
+    // SNe per star; scale to this cluster's own non-stochastic mass --
+    // see SimControls::nonStochIMFMass()'s own comment
+    const double scale = birthNonStochMass_ / sc.nonStochIMFMass();
+
+    // Integrated exactly as computeYields() integrates yieldStar(), via
+    // utils::integrateScaled(): only a small fraction of stars die in
+    // one step, so the raw per-star integral is far below intAbsTol(),
+    // and an absolute tolerance in its own units would accept a first,
+    // unresolved estimate of this step-function integrand (snStar() is
+    // 0 or 1); integrateScaled() instead sets the absolute tolerance
+    // relative to imf()'s own integral over the range
+    const auto snAt = [&sc, this](const double m) -> std::vector<double> { return snStar(m, sc, feH_); };
+    for (const auto& [m0, m1] : nonStochDeadMassRanges(lastFeedbackTime_))
+    {
+        const auto segResult = utils::integrateScaled(sc.imf(), snAt, 1, m0, m1,
+            { m0, 0.5 * (m0 + m1), m1 }, sc.intMaxIter(), sc.intAbsTol(), sc.intRelTol());
+        nonStochSN_ += segResult.at(0) * scale;
+    }
+}
+
+// Per-star supernova count, given a mass -- see this method's own
+// header comment
+auto core::Cluster::snStar(const double m, const io::SimControls& controls, const double feH)
+    -> std::vector<double>
+{
+    return { controls.hasSN(m, feH) ? 1.0 : 0.0 };
 }
 
 // Per-star bolometric luminosity, given a mass and isochrone segment

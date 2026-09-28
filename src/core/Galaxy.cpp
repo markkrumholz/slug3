@@ -284,6 +284,28 @@ void core::Galaxy::advance(const double t)
     // loss that used to result otherwise.
     computeYields();
     lastYieldTime_ = curTime_;
+
+    // 10) Update the cumulative feedback quantities eagerly too, for
+    // the same reason -- see computeFeedback()'s own comment
+    computeFeedback();
+    lastFeedbackTime_ = curTime_;
+}
+
+// Update the field-star feedback quantities from the field stars that
+// died during the most recent advance() call -- see this method's own
+// header comment
+void core::Galaxy::computeFeedback()
+{
+    const auto& sc = controls_.get();
+    fieldStarStochSNe_ += static_cast<unsigned long>(std::ranges::count_if(deadFieldStars_,
+        [&sc](const FieldStar& fs) -> bool { return sc.hasSN(fs.mass_, fs.feh_); }));
+
+    // Continuously-sampled field population: each dying star releases
+    // one supernova if controls().hasSN() says so -- see
+    // continuousDeathQuantity()'s own comment
+    const auto snOfStar = [&sc](const double m, const double feh) -> std::vector<double>
+    { return { sc.hasSN(m, feh) ? 1.0 : 0.0 }; };
+    fieldStarNonStochSNe_ += continuousDeathQuantity(snOfStar, 1, lastFeedbackTime_, curTime_).at(0);
 }
 
 // Sum spec_/specExtinct_ (and, if a nebular emission grid was

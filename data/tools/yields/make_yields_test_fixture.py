@@ -41,6 +41,20 @@ points, some don't" at once needs a grid with more than 2 points, which
 only Kobayashi's own (7-mass) data provides among what this project has
 already imported.
 
+Also generates tests/yields/assets/yields_test_gap.h5 (registered as
+"gap_test", ccsn only), a fully synthetic fixture -- not extracted from
+any real model -- for exercising YieldChannel::hasYield(mass, feh)'s
+detection of failed-supernova gaps: masses where a yield table has an
+entry, but every isotope's yield is zero (as in the real Sukhbold et
+al. 2016 tables, which have several such gaps within their mass range).
+It has 4 masses (10, 20, 30, 40 Msun) and 3 [Fe/H] groups (-2, -1, 0),
+with the same 3 isotopes as sukhbold_test. The 20 and 30 Msun entries
+are all zero at [Fe/H] = -1 and 0, and the 20 Msun entry is also
+non-zero at [Fe/H] = -2, so the gap between 20 and 30 Msun is closed
+for [Fe/H] between -2 and -1 but open for [Fe/H] between -1 and 0.
+Every other entry is non-zero. The non-zero values themselves (a fixed
+set of per-isotope values scaled by mass/10) are arbitrary.
+
 Run from the repository root, after data/yields/sukhbold16.h5 and
 data/yields/kobayashi06_11.h5 already exist (see import_yield_tables.py):
     python3 data/tools/yields/make_yields_test_fixture.py
@@ -82,6 +96,54 @@ KOBAYASHI_REFERENCE_URL = [
     "https://ui.adsabs.harvard.edu/abs/2006ApJ...653.1145K/abstract",
     "https://ui.adsabs.harvard.edu/abs/2011MNRAS.414.3231K/abstract",
 ]
+
+
+GAP_DEST_H5 = "tests/yields/assets/yields_test_gap.h5"
+GAP_MODEL_NAME = "gap_test"
+GAP_CHANNEL = "ccsn"
+GAP_MASSES = [10.0, 20.0, 30.0, 40.0]
+GAP_FEH = {"feh_neg2": -2.0, "feh_neg1": -1.0, "feh_0": 0.0}
+GAP_ISOTOPES = ISOTOPES
+GAP_BASE_YIELD = [1.0, 0.1, 0.05]  # per-isotope yield at 10 Msun, scaled by mass/10
+# Masses whose yields are all zero, per [Fe/H] group -- see the module docstring
+GAP_INACTIVE = {"feh_neg2": [30.0], "feh_neg1": [20.0, 30.0], "feh_0": [20.0, 30.0]}
+GAP_REFERENCE = "Synthetic test fixture -- not a real yield model"
+
+
+def make_gap_yields(feh_group: str) -> np.ndarray:
+    """Return the synthetic gap_test yield array for one [Fe/H] group.
+
+    Parameters
+    ----------
+    feh_group : str
+        Key into GAP_FEH / GAP_INACTIVE.
+
+    Returns
+    -------
+    numpy.ndarray
+        Yields of shape (n_isotopes, n_masses), all zero at the masses
+        listed in GAP_INACTIVE[feh_group].
+    """
+    yields = np.array([[y * m / 10.0 for m in GAP_MASSES] for y in GAP_BASE_YIELD])
+    for m in GAP_INACTIVE[feh_group]:
+        yields[:, GAP_MASSES.index(m)] = 0.0
+    return yields
+
+
+def write_gap_h5() -> None:
+    """Write the synthetic gap_test fixture -- see the module docstring."""
+    pathlib.Path(GAP_DEST_H5).parent.mkdir(parents=True, exist_ok=True)
+    with h5py.File(GAP_DEST_H5, "w") as dest:
+        dest.attrs["reference"] = GAP_REFERENCE
+        dest.attrs["reference_url"] = ""
+        grp = dest.create_group(GAP_CHANNEL)
+        grp.create_dataset("masses", data=np.array(GAP_MASSES))
+        grp.create_dataset("isotope_z", data=np.array([z for z, _ in GAP_ISOTOPES], dtype=np.float64))
+        grp.create_dataset("isotope_a", data=np.array([a for _, a in GAP_ISOTOPES], dtype=np.float64))
+        for group_name, feh in GAP_FEH.items():
+            feh_grp = grp.create_group(group_name)
+            feh_grp.attrs["Fe_H"] = feh
+            feh_grp.create_dataset("yield", data=make_gap_yields(group_name))
 
 
 def extract_channel(src: h5py.File, channel: str) -> dict:
@@ -164,6 +226,8 @@ def write_registry() -> None:
         models = [MODEL_NAME]
         if channel == KOBAYASHI_CHANNEL:
             models.append(KOBAYASHI_MODEL_NAME)
+        if channel == GAP_CHANNEL:
+            models.append(GAP_MODEL_NAME)
         channel_table["models"] = models
         model_table = tomlkit.table()
         model_table["reference"] = "Sukhbold, T., Ertl, T., Woosley, S. E., Brown, J. M., Janka, H.-T. 2016, ApJ, 821, 38"
@@ -182,6 +246,15 @@ def write_registry() -> None:
             kobayashi_table["masses"] = KOBAYASHI_MASSES
             channel_table[KOBAYASHI_MODEL_NAME] = kobayashi_table
 
+        if channel == GAP_CHANNEL:
+            gap_table = tomlkit.table()
+            gap_table["reference"] = GAP_REFERENCE
+            gap_table["reference_url"] = ""
+            gap_table["file"] = pathlib.Path(GAP_DEST_H5).name
+            gap_table["Fe_H"] = sorted(GAP_FEH.values())
+            gap_table["masses"] = GAP_MASSES
+            channel_table[GAP_MODEL_NAME] = gap_table
+
         doc[channel] = channel_table
 
     pathlib.Path(DEST_REGISTRY).write_text(tomlkit.dumps(doc))
@@ -197,6 +270,9 @@ def main() -> None:
         kobayashi_extracted = extract_kobayashi_channel(src)
     write_kobayashi_h5(kobayashi_extracted)
     print(f"wrote {KOBAYASHI_DEST_H5}")
+
+    write_gap_h5()
+    print(f"wrote {GAP_DEST_H5}")
 
     write_registry()
     print(f"wrote {DEST_REGISTRY}")

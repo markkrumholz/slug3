@@ -523,6 +523,44 @@ namespace yields
         [[nodiscard]] auto yieldSum(double mass, double feH, double dtDecay = 0.0) const -> std::vector<double>;
 
         /**
+         * @brief Check whether a star of a given mass returns a yield through a given channel
+         * @param mass Stellar mass (Msun)
+         * @param channel The nucleosynthetic channel to check
+         * @return True if any entry of yieldChannels() whose own
+         *   channel() is channel has YieldChannel::hasYield(mass) true;
+         *   false otherwise, including if no entry of yieldChannels()
+         *   is of type channel at all
+         * @details
+         * Entries of yieldChannels() of any other channel type are
+         * skipped. More than one entry may be of type channel (e.g.
+         * two models covering different sub-ranges of one channel's
+         * mass range -- see the constructor's own comment), so this
+         * returns true if mass lies within the mass grid of any one of
+         * them, not necessarily all.
+         */
+        [[nodiscard]] auto hasYield(double mass, Channel channel) const -> bool;
+
+        /**
+         * @brief Check whether a star of a given mass and [Fe/H] returns a non-zero yield through a given channel
+         * @param mass Stellar mass (Msun)
+         * @param feH [Fe/H]
+         * @param channel The nucleosynthetic channel to check
+         * @return True if any entry of yieldChannels() whose own
+         *   channel() is channel has YieldChannel::hasYield(mass, feH)
+         *   true; false otherwise, including if no entry of
+         *   yieldChannels() is of type channel at all
+         * @details
+         * Identical to hasYield(mass, channel), except that it calls
+         * each matching channel's own hasYield(mass, feH) rather than
+         * hasYield(mass) -- so, unlike hasYield(mass, channel), it
+         * also catches gaps within a channel's own mass range where
+         * the tabulated yield is zero for every isotope (e.g. failed
+         * supernovae) -- see YieldChannel::hasYield(mass, feH)'s own
+         * comment.
+         */
+        [[nodiscard]] auto hasYield(double mass, double feH, Channel channel) const -> bool;
+
+        /**
          * @brief Apply radioactive decay, over dtDecay, to one array of per-isotope masses, in place
          * @param dtDecay Elapsed time, in yr, to advance values by
          * @param values One mass (Msun) per entry of isotopes_, in the

@@ -18,6 +18,7 @@
 #include "../src/utils/UniqueIDManager.hpp"
 #include "testGalaxy.hpp"
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <exception>
@@ -3069,6 +3070,142 @@ static auto testGalaxyYieldsMultipleAdvanceCallsDecay() -> int
     return 0;
 }
 
+// Verify Galaxy::cumSNe()'s stochastic part: with SNe restricted to
+// 8-30 Msun via feedback.sn_mass_range, cumSNe() should equal the sum of
+// every cluster's own cumSNe() plus the number of individually-sampled
+// field stars that have died so far with hasSN(mass_, feh_) true.
+// deadFieldStars() only ever holds the deaths from the most recent
+// advance() call, so the expected field-star count is accumulated over
+// every step. Uses f_cluster = 0.5 but keeps inputFile's own low sfr
+// (unlike testFieldStarsCreationAndDeath, which raises it), so that
+// the galaxy can be advanced to 20 Myr -- late enough for many field
+// stars to have died -- without forming so many stars and clusters
+// that the test becomes slow. Also lowers min_stoch_mass to 0.1 Msun,
+// the test tracks' own minimum mass (not the IMF's own 0.08 Msun
+// minimum: a field star below the tracks' mass range has no lifetime to
+// compute its death time from), making almost the whole population --
+// in particular every star massive enough to be a SN -- stochastic,
+// since only the stochastic part of cumSNe() is tested here (the
+// continuous field population's own share is not yet computed).
+// Checks that the dead field stars include
+// both some that count as SNe and some (above 30 Msun) that do not, so
+// the hasSN() filter is actually exercised, and that the clusters
+// contribute some SNe too, so the sum over clusters is exercised.
+static auto testGalaxyCumSNeFieldStars() -> int
+{
+    constexpr std::array<double, 3> times = { 5e6, 1e7, 2e7 };
+
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFile);
+        inputDeck.at_path("clusters").as_table()->insert("f_cluster", 0.5);
+        inputDeck.at_path("stars").as_table()->insert_or_assign("min_stoch_mass", 0.1);
+        inputDeck.insert("feedback", toml::table{
+            { "sn_mass_range", toml::array{ 8.0, 30.0 } } });
+        const io::SimControls controls(inputDeck);
+
+        utils::rng().seed(rngSeed);
+        core::Galaxy galaxy(controls);
+
+        int result = 0;
+        double fieldSNe = 0.0;
+        double fieldNonSNe = 0.0;
+        double clusterSNe = 0.0;
+        for (const double t : times)
+        {
+            galaxy.advance(t);
+            for (const auto& fs : galaxy.deadFieldStars())
+            {
+                if (controls.hasSN(fs.mass_, fs.feh_)) { fieldSNe += 1.0; }
+                else { fieldNonSNe += 1.0; }
+            }
+
+            clusterSNe = 0.0;
+            for (const auto& cluster : galaxy.clusters()) { clusterSNe += cluster.cumSNe(); }
+            for (const auto& cluster : galaxy.disruptedClusters()) { clusterSNe += cluster.cumSNe(); }
+            const double expected = fieldSNe + clusterSNe;
+            if (std::abs(galaxy.cumSNe() - expected) > 1e-9 * std::max(1.0, expected))
+            {
+                std::cerr << "testGalaxy: cumSNeFieldStars: cumSNe() at t = " << t << " is "
+                    << galaxy.cumSNe() << ", expected " << expected << "\n";
+                result = 1;
+            }
+        }
+        if (fieldSNe <= 0.0 || fieldNonSNe <= 0.0 || clusterSNe <= 0.0)
+        {
+            std::cerr << "testGalaxy: cumSNeFieldStars: test bug: expected dead field stars "
+                "both inside and outside the SN mass range, and some cluster SNe; got "
+                << fieldSNe << " field SNe, " << fieldNonSNe << " other field deaths, and "
+                << clusterSNe << " cluster SNe\n";
+            result = 1;
+        }
+        return result;
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testGalaxy: cumSNeFieldStars test failed: " << error.what() << "\n";
+        return 1;
+    }
+}
+
+// Verify the continuously-sampled field population's own supernova
+// count: with f_cluster = 0 and min_stoch_mass at the IMF's own maximum
+// (so every star is continuous), a constant star formation rate psi,
+// and supernovae from 8-40 Msun, cumSNe() after advance(t) must equal
+// psi / <m> times the integral over 8-40 Msun of imf(m) *
+// max(0, t - lifetime(m)) -- the number of stars formed per unit mass
+// (imf() being normalized by number) that have died by t -- evaluated
+// independently here with a fine midpoint rule in mass. advance() is
+// called twice, so that the second call's own increment must start
+// from where the first left off (lastFeedbackTime_).
+static auto testGalaxyCumSNeContinuous() -> int
+{
+    constexpr double snMin = 8.0;
+    constexpr double snMax = 40.0;
+    constexpr std::size_t nRef = 4000;
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFile);
+        inputDeck.at_path("clusters").as_table()->insert("f_cluster", 0.0);
+        inputDeck.at_path("stars").as_table()->insert_or_assign("min_stoch_mass", 120.0);
+        inputDeck.insert("feedback", toml::table{ { "sn_mass_range", toml::array{ snMin, snMax } } });
+        io::SimControls controls(inputDeck);
+        controls.setIntRelTol(1e-3);
+        const double tol = 3.0 * controls.intRelTol();
+
+        utils::rng().seed(rngSeed);
+        core::Galaxy galaxy(controls);
+        const auto& imf = controls.imf();
+        const auto tracks = controls.tracks2D();
+        for (const double t : { 1e7, 2e7 })
+        {
+            galaxy.advance(t);
+            const double psi = galaxy.sfr().integral(0.0, t) / t; // constant star formation rate
+            const double dm = (snMax - snMin) / static_cast<double>(nRef);
+            double sum = 0.0;
+            for (std::size_t i = 0; i < nRef; ++i)
+            {
+                const double m = snMin + ((static_cast<double>(i) + 0.5) * dm);
+                sum += imf(m) * std::max(0.0, t - tracks->starLifetime(m)) * dm;
+            }
+            const double expected = psi / imf.expectationValue() * sum;
+            if (!(expected > 0.0) || !std::isfinite(galaxy.cumSNe()) ||
+                std::abs((galaxy.cumSNe() / expected) - 1.0) > tol)
+            {
+                std::cerr << "testGalaxy: cumSNeContinuous: at t = " << t << " yr, cumSNe() is "
+                    << galaxy.cumSNe() << ", expected " << expected << "\n";
+                return 1;
+            }
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testGalaxy: cumSNeContinuous test failed: " << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
 auto testGalaxy() -> int
 {
     int result = testGalaxyBasics();
@@ -3099,6 +3236,8 @@ auto testGalaxy() -> int
     result += testGalaxyYieldsMultipleAdvanceCalls();
     result += testGalaxyYieldsFieldAndContinuousDecay();
     result += testGalaxyYieldsMultipleAdvanceCallsDecay();
+    result += testGalaxyCumSNeFieldStars();
+    result += testGalaxyCumSNeContinuous();
 
     try
     {
