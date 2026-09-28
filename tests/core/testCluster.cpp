@@ -1301,6 +1301,7 @@ static auto testClusterYieldsStochasticDecay() -> int
         inputDeck.insert("yields", toml::table{
             { "channel1", toml::table{ { "channel", "ccsn" }, { "model", "sukhbold_test" } } },
             { "registry", std::string(yieldsRegistry) },
+            { "min_isotope_lifetime", 0.0 }, // track Co56/Ni56 explicitly rather than skipping them
         });
         const io::SimControls controls(inputDeck);
 
@@ -1480,6 +1481,7 @@ static auto testClusterYieldsNonStochasticDecay() -> int
         inputDeck.insert("yields", toml::table{
             { "channel1", toml::table{ { "channel", "ccsn" }, { "model", "sukhbold_test" } } },
             { "registry", std::string(yieldsRegistry) },
+            { "min_isotope_lifetime", 0.0 }, // track Co56/Ni56 explicitly rather than skipping them
         });
         const io::SimControls controls(inputDeck);
 

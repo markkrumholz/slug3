@@ -67,15 +67,22 @@ namespace elem
          *   values argument will be laid out over (typically
          *   Yields::isotopes_) -- must already include every isotope
          *   reachable via daughters() from any unstable entry in it (see
-         *   the class's own comment); need not outlive this DecayChain,
+         *   the class's own comment), other than those in
+         *   skippedIsotopes; need not outlive this DecayChain,
          *   unlike the old per-isotope design -- only Z()/A()/lifetime()/
          *   daughters() are read here, at construction, nothing is
          *   retained by reference afterward
+         * @param skippedIsotopes Short-lived isotopes to treat as
+         *   decaying instantly (see Yields::rebuildYieldGrid()'s own
+         *   comment); must not overlap isotopes. Empty by default,
+         *   meaning every decay is followed explicitly
          * @throws std::runtime_error if some isotope's own daughters()
-         *   names a (Z, A) pair not present in isotopes -- this should
-         *   not happen if isotopes was built by force-expanding to
-         *   decay-chain closure first, as Yields::rebuildYieldGrid()
-         *   does; see its own comment
+         *   names a (Z, A) pair present in neither isotopes nor
+         *   skippedIsotopes (or a skipped daughter's own descendants
+         *   do the same) -- this should not happen if the two lists
+         *   together were built by force-expanding to decay-chain
+         *   closure first, as Yields::rebuildYieldGrid() does; see its
+         *   own comment
          * @details
          * Two passes over isotopes:
          *
@@ -103,8 +110,17 @@ namespace elem
          *    the same daughter (each contributing its own inflow to the
          *    same matrix entry) -- both fall out automatically, with no
          *    separate handling.
+         *
+         * Both passes follow effectiveDaughters(parent, skippedIsotopes)
+         * rather than parent.daughters() directly: a daughter in
+         * skippedIsotopes gets no row/column of its own, and the decay
+         * rate that would have flowed into it flows instead straight to
+         * its first non-skipped descendants, weighted by the product of
+         * branching ratios along the way. This is exact in the limit
+         * where every skipped isotope's lifetime is negligible compared
+         * to the elapsed times applyDecay() is asked about.
          */
-        explicit DecayChain(const IsotopeList& isotopes);
+        explicit DecayChain(const IsotopeList& isotopes, const IsotopeList& skippedIsotopes = {});
 
         DecayChain(const DecayChain&) = default;
         auto operator=(const DecayChain&) -> DecayChain& = default;

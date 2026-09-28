@@ -760,6 +760,30 @@ void io::SimControls::setIMF(const std::string& imf)
     updateFracStochMass();
 }
 
+// Set the minimum isotope lifetime, rebuilding yields_ to match -- see
+// this method's own header comment
+void io::SimControls::setMinIsotopeLifetime(const double value)
+{
+    if (std::isnan(value) || value < 0.0)
+    {
+        throw std::invalid_argument(
+            "SimControls::setMinIsotopeLifetime: value must be non-negative, got " + std::to_string(value));
+    }
+    const double oldValue = minIsotopeLifetime_;
+    minIsotopeLifetime_ = value;
+    if (!yields_) { return; }
+    try
+    {
+        yields_->rebuildYieldGrid(yields_->requestedIsotopes());
+    }
+    catch (...)
+    {
+        minIsotopeLifetime_ = oldValue;
+        yields_->rebuildYieldGrid(yields_->requestedIsotopes());
+        throw;
+    }
+}
+
 // Set the clustered-star A_V distribution, rebuilding extinct_'s own
 // cached quantities if an extinction curve is already present -- see
 // setAVDist()'s own header comment for why this call is harmless
@@ -1273,6 +1297,17 @@ void io::SimControls::readYields(const utils::TrackedDeck& inputDeck)
     // yieldChannels_ ends up empty (harmless either way), like
     // yields.channel_decomposed above
     noDecay_ = inputDeck.value<bool>("yields.no_decay").value_or(false);
+
+    // yields.min_isotope_lifetime: optional, likewise read regardless;
+    // must be read before yields_ is built below, since
+    // Yields::rebuildYieldGrid() uses it
+    minIsotopeLifetime_ = inputDeck.value<double>("yields.min_isotope_lifetime")
+        .value_or(yields::defaultMinIsotopeLifetime);
+    if (std::isnan(minIsotopeLifetime_) || minIsotopeLifetime_ < 0.0)
+    {
+        throw std::runtime_error("SimControls: yields.min_isotope_lifetime must be non-negative, got " +
+            std::to_string(minIsotopeLifetime_));
+    }
 
     if (yieldChannels_.empty())
     {

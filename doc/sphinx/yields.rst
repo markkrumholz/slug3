@@ -298,3 +298,10 @@ control which treatment is adopted. SLUG implements its numerical solution to th
 equations using a matrix exponentiation method. The underlying isotopic data used in this
 compilation are taken from
 `Wolfram Research's Isotopic Data Compilation <https://reference.wolfram.com/language/ref/IsotopeData.html>`_.
+Note that computing radioactive decay for isotopes with a very wide range of lifetimes
+can be numerically expensive, and in extreme cases can lead to numerical instability.
+To mitigate this cost, SLUG lets users specify a minimum isotope lifetime to retain;
+isotopes with lifetimes below this value are approximated as decaying instantly into
+their daughter nuclei. See :ref:`ssec-parameters-yields`  in :ref:`sec-parameters` for
+the keyword that controls which isotopes are kept and which are approximated as decaying
+instantaneously.

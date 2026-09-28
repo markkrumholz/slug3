@@ -105,6 +105,10 @@ namespace yields
          *   should be built over; an empty vector (the default) means
          *   "use isotopesOrig_ itself, unchanged" -- see below for what
          *   a non-empty list does
+         * @param skippedIsotopes Short-lived isotopes treated as
+         *   decaying instantly (see Yields::rebuildYieldGrid()'s own
+         *   comment); must not overlap isotopes. Ignored if isotopes is
+         *   empty. Empty by default
          * @throws std::invalid_argument if the resolved mMin or mMax is
          *   not finite and strictly positive (a stellar mass), or if
          *   the resolved mMin is not strictly less than the resolved mMax
@@ -154,6 +158,16 @@ namespace yields
          * never tabulated it) leaves that isotope's own yieldData_
          * entries at exactly 0, for every mass and [Fe/H].
          *
+         * A tabulated isotope in skippedIsotopes has no yieldData_
+         * column of its own; instead, since it is treated as decaying
+         * instantly, its yield is added to those of its first
+         * non-skipped descendants in isotopes_ (see
+         * elem::effectiveDaughters()), each weighted by the branching
+         * ratio along the path times the ratio of the descendant's
+         * mass number to its own, converting the fraction of nuclei
+         * into a fraction of mass. A descendant not in isotopes_ (e.g.
+         * excluded by a restricted isotope list) receives nothing.
+         *
          * yieldActive_ is rebuilt alongside yieldData_, one masses_
          * column at a time, from yieldActiveOrig_ -- see yieldActive_'s
          * own comment for the rule.
@@ -177,7 +191,8 @@ namespace yields
         void rebuildYieldGrid(
             std::optional<double> mMin = std::nullopt,
             std::optional<double> mMax = std::nullopt,
-            elem::IsotopeList isotopes = {});
+            elem::IsotopeList isotopes = {},
+            const elem::IsotopeList& skippedIsotopes = {});
 
         // Observers
 

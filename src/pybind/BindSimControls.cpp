@@ -983,6 +983,30 @@ yieldsChannelDecomposed, this is read live every time
 Yields.yield_()/yieldSum() runs, not cached once, so assigning this
 takes effect immediately.)doc";
 
+static constexpr std::string_view minIsotopeLifetimePropertyDocstring =
+R"doc(Minimum isotope lifetime, in yr, below which isotopes decay instantly.
+
+1e4 unless yields.min_isotope_lifetime was set in the input deck.
+Meaningful only if yields is not None. Every unstable isotope with a
+shorter lifetime is dropped from yields.isotopes and treated as
+decaying the instant it is produced: its tabulated yield goes to its
+first longer-lived descendants, and decays into it go straight on to
+those descendants too. This is accurate for yields at times long
+compared to this lifetime, and makes decay much cheaper to compute. 0
+skips nothing; +inf makes every unstable isotope decay instantly.
+
+Assigning any non-negative float rebuilds yields (if not None) at once,
+keeping its current isotope restriction (Yields.requestedIsotopes).
+
+Raises
+------
+ValueError
+    If the assigned value is negative or NaN. The old value is then
+    kept.
+RuntimeError
+    If the rebuild fails, e.g. because every requested isotope would be
+    skipped. The old value is then restored.)doc";
+
 static constexpr std::string_view snMassLimitsPropertyDocstring =
 R"doc(The stellar mass limits over which supernovae occur.
 
@@ -1296,6 +1320,8 @@ void bindSimControls(py::module_& m)
                 yieldsChannelDecomposedPropertyDocstring.data(), py::arg("value"))
         .def("setNoDecay", &io::SimControls::setNoDecay,
                 noDecayPropertyDocstring.data(), py::arg("value"))
+        .def("setMinIsotopeLifetime", &io::SimControls::setMinIsotopeLifetime,
+                minIsotopeLifetimePropertyDocstring.data(), py::arg("value"))
         .def("setSNMassLimits", &io::SimControls::setSNMassLimits,
                 snMassLimitsPropertyDocstring.data(), py::arg("limits"))
         .def("hasSN", py::overload_cast<double>(&io::SimControls::hasSN, py::const_),
@@ -1451,6 +1477,10 @@ void bindSimControls(py::module_& m)
                 &io::SimControls::noDecay,
                 &io::SimControls::setNoDecay,
                 noDecayPropertyDocstring.data())
+        .def_property("minIsotopeLifetime",
+                &io::SimControls::minIsotopeLifetime,
+                &io::SimControls::setMinIsotopeLifetime,
+                minIsotopeLifetimePropertyDocstring.data())
         .def_property("snMassLimits",
                 &io::SimControls::snMassLimits,
                 &io::SimControls::setSNMassLimits,

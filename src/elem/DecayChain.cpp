@@ -9,6 +9,7 @@
 #include "DecayChain.hpp"
 #include "ElemCommons.hpp"
 #include "IsotopeData.hpp"
+#include "IsotopeTable.hpp"
 #include <Eigen/Dense> // NOLINT(misc-include-cleaner) -- provides Eigen::MatrixXd/VectorXd, used throughout; clang-tidy's IWYU mapping doesn't know this header
 #include <cstddef>
 #include <limits>
@@ -44,14 +45,17 @@ namespace elem
         /**
          * @brief Identify every isotope that decay can affect: unstable isotopes and their descendants
          * @param isotopes The full isotope list to scan
+         * @param skippedIsotopes Isotopes decaying instantly -- see
+         *   effectiveDaughters()
          * @returns The index, into isotopes, of every unstable entry and
-         *   every entry reachable from one by following daughters()
-         *   recursively, in ascending order -- see DecayChain::
+         *   every entry reachable from one by following
+         *   effectiveDaughters() recursively, in ascending order -- see DecayChain::
          *   DecayChain()'s own comment, step 1
          * @throws std::runtime_error if some relevant isotope's own
          *   daughters() names a (Z, A) pair not present in isotopes
          */
-        auto findRelevantIndices(const IsotopeList& isotopes) -> std::vector<std::size_t> //NOLINT(llvm-prefer-static-over-anonymous-namespace)
+        auto findRelevantIndices(const IsotopeList& isotopes, //NOLINT(llvm-prefer-static-over-anonymous-namespace)
+            const IsotopeList& skippedIsotopes) -> std::vector<std::size_t>
         {
             std::vector<bool> relevant(isotopes.size(), false);
             std::vector<std::size_t> worklist;
@@ -67,7 +71,7 @@ namespace elem
             {
                 const std::size_t i = worklist.back();
                 worklist.pop_back();
-                for (const auto& daughter : isotopes[i].get().daughters()) // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i < isotopes.size(), pushed only from valid indices
+                for (const auto& daughter : effectiveDaughters(isotopes[i].get(), skippedIsotopes)) // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i < isotopes.size(), pushed only from valid indices
                 {
                     const auto j = findIndex(isotopes, daughter.Z_, daughter.A_);
                     if (!j.has_value())
@@ -94,9 +98,9 @@ namespace elem
         }
     } // namespace
 
-    DecayChain::DecayChain(const IsotopeList& isotopes)
+    DecayChain::DecayChain(const IsotopeList& isotopes, const IsotopeList& skippedIsotopes)
     {
-        relevantIndices_ = findRelevantIndices(isotopes);
+        relevantIndices_ = findRelevantIndices(isotopes, skippedIsotopes);
         const std::size_t m = relevantIndices_.size();
 
         // Mass number of each relevant isotope, kept so applyDecay() can
@@ -129,13 +133,17 @@ namespace elem
             if (parent.stable()) { continue; } // a relevant but stable isotope is a pure decay *product*, never a source
             const auto pIdx = static_cast<Eigen::Index>(p);
             depletionMatrix_(pIdx, pIdx) -= 1.0 / parent.lifetime();
-            for (const auto& daughter : parent.daughters())
+            // Daughters in skippedIsotopes are replaced by their own
+            // first non-skipped descendants, with branching ratios
+            // multiplied along the way -- see effectiveDaughters()
+            for (const auto& daughter : effectiveDaughters(parent, skippedIsotopes))
             {
                 const auto j = findIndex(isotopes, daughter.Z_, daughter.A_);
                 // j is guaranteed to have a value, and positionOf[*j] is
                 // guaranteed relevant, by findRelevantIndices()'s own
-                // construction: every daughter of a relevant, unstable
-                // isotope was itself marked relevant there.
+                // construction: every (effective) daughter of a
+                // relevant, unstable isotope was itself marked relevant
+                // there.
                 const auto qIdx = static_cast<Eigen::Index>(positionOf[*j]); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index,bugprone-unchecked-optional-access) -- see above: j is guaranteed to have a value here
                 depletionMatrix_(qIdx, pIdx) += daughter.branchingRatio_ / parent.lifetime();
             }

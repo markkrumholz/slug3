@@ -578,6 +578,28 @@ namespace io
          */
         void setNoDecay(bool value) { noDecay_ = value; }
 
+        /**
+         * @brief Set the minimum isotope lifetime below which isotopes are treated as decaying instantly
+         * @param value New value for minIsotopeLifetime(), in yr; any
+         *   non-negative value, including +infinity (every unstable
+         *   isotope decays instantly), is allowed
+         * @throws std::invalid_argument if value is negative or NaN;
+         *   this SimControls is then left unchanged
+         * @details
+         * Unlike setNoDecay(), this changes which isotopes yields()
+         * tabulates, so if yields() is non-null it is rebuilt at once,
+         * via Yields::rebuildYieldGrid(), passing that Yields' own
+         * requestedIsotopes() so that any isotope restriction (e.g.
+         * from yields.isotopes) is kept. If that rebuild throws (e.g.
+         * because every requested isotope would now be skipped), the
+         * old value is restored, yields() rebuilt with it, and the
+         * exception rethrown. Clusters or galaxies already holding
+         * yields computed on the old isotope list are not updated --
+         * as with any rebuildYieldGrid() call, set this before a run
+         * starts.
+         */
+        void setMinIsotopeLifetime(double value);
+
         // Getters for the physics settings
         /**
          * @brief Get simulation initial mass function
@@ -828,6 +850,22 @@ namespace io
          * some of it has since decayed into something else.
          */
         [[nodiscard]] auto noDecay() const { return noDecay_; }
+
+        /**
+         * @brief Minimum isotope lifetime below which isotopes are treated as decaying instantly
+         * @return The value of the optional yields.min_isotope_lifetime
+         *   key (see readYields()), in yr; yields::
+         *   defaultMinIsotopeLifetime (1e4 yr) by default
+         * @details
+         * Meaningful only if yields() is non-null. Every unstable
+         * isotope with a shorter lifetime is dropped from yields()'s
+         * isotope list and treated as decaying the instant it is
+         * produced -- see Yields::rebuildYieldGrid()'s own comment.
+         * This is accurate for yields at times long compared to this
+         * lifetime, and makes decay much cheaper to compute. 0 skips
+         * nothing.
+         */
+        [[nodiscard]] auto minIsotopeLifetime() const { return minIsotopeLifetime_; }
 
         /**
          * @brief Get the stellar mass limits over which supernovae occur
@@ -1748,8 +1786,10 @@ namespace io
          * tabulated isotope kept) if yields.isotopes is absent.
          *
          * Also reads the optional yields.channel_decomposed (default
-         * true) into yieldsChannelDecomposed_, and the optional
-         * yields.no_decay (default false) into noDecay_, regardless of
+         * true) into yieldsChannelDecomposed_, the optional
+         * yields.no_decay (default false) into noDecay_, and the
+         * optional yields.min_isotope_lifetime (default 1e4 yr; must be
+         * non-negative) into minIsotopeLifetime_, regardless of
          * whether yieldChannels_ ends up empty -- see each one's own
          * observer's comment for what it controls.
          *
@@ -1924,6 +1964,7 @@ namespace io
         std::shared_ptr<yields::Yields> yields_; /**< Yields built from yieldChannels_, or nullptr if yieldChannels_ is empty */
         bool yieldsChannelDecomposed_ = true; /**< Whether yields should be reported decomposed by channel (true) or summed over all channels (false) -- see yieldsChannelDecomposed()'s own comment; from the optional yields.channel_decomposed key, see readYields() */
         bool noDecay_ = false; /**< Whether radioactive decay should be excluded from computed yields -- see noDecay()'s own comment; from the optional yields.no_decay key, see readYields() */
+        double minIsotopeLifetime_ = yields::defaultMinIsotopeLifetime; /**< Minimum isotope lifetime, in yr, below which isotopes are treated as decaying instantly -- see minIsotopeLifetime()'s own comment; from the optional yields.min_isotope_lifetime key, see readYields() */
         std::vector<double> snMassLimits_; /**< Stellar mass limits, in Msun, over which supernovae occur -- see snMassLimits()'s own comment; from the optional feedback.sn_mass_range key, see readFeedback() */
 
         // Output wavelength grid (spectra.wl_min, spectra.wl_max,

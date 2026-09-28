@@ -303,12 +303,15 @@ def galaxy_dynamics_controls():
 @pytest.fixture(scope="module")
 def yields_controls():
     """A SimControls object built from CLUSTER_DECK plus two ccsn
-    channels (sukhbold_test/kobayashi_test) from YIELDS_REGISTRY."""
+    channels (sukhbold_test/kobayashi_test) from YIELDS_REGISTRY, with
+    min_isotope_lifetime = 0 so that Co56/Ni56 are tracked explicitly
+    (YIELDS_ISOTOPES) rather than skipped as instantly decaying."""
     deck = tomlkit.parse(pathlib.Path(CLUSTER_DECK).read_text())
     deck["yields"] = tomlkit.table()
     deck["yields"]["channel1"] = {"channel": "ccsn", "model": "sukhbold_test"}
     deck["yields"]["channel2"] = {"channel": "ccsn", "model": "kobayashi_test"}
     deck["yields"]["registry"] = YIELDS_REGISTRY
+    deck["yields"]["min_isotope_lifetime"] = 0.0
     return slug.SimControls(tomlkit.dumps(deck))
 
 
@@ -3342,6 +3345,7 @@ def test_yields_yield_and_yield_sum_dt_decay():
     deck["yields"]["channel1"] = {"channel": "ccsn", "model": "sukhbold_test", "m_min": 15.0}
     deck["yields"]["channel2"] = {"channel": "ccsn", "model": "kobayashi_test"}
     deck["yields"]["registry"] = YIELDS_REGISTRY
+    deck["yields"]["min_isotope_lifetime"] = 0.0  # track Co56/Ni56 explicitly
     controls = slug.SimControls(tomlkit.dumps(deck))
     yields = controls.yields
     assert [iso.label() for iso in yields.isotopes] == YIELDS_ISOTOPES
@@ -3385,6 +3389,7 @@ def test_yields_yield_ignores_dt_decay_when_no_decay_set():
     deck["yields"]["channel1"] = {"channel": "ccsn", "model": "sukhbold_test", "m_min": 15.0}
     deck["yields"]["channel2"] = {"channel": "ccsn", "model": "kobayashi_test"}
     deck["yields"]["registry"] = YIELDS_REGISTRY
+    deck["yields"]["min_isotope_lifetime"] = 0.0  # track Co56/Ni56 explicitly
     deck["yields"]["no_decay"] = True
     controls = slug.SimControls(tomlkit.dumps(deck))
     yields = controls.yields
@@ -3766,6 +3771,75 @@ def test_simcontrols_no_decay_parsed_from_deck():
     deck["yields"]["no_decay"] = True
     no_decay_controls = slug.SimControls(tomlkit.dumps(deck))
     assert no_decay_controls.noDecay is True
+
+
+def _min_lifetime_controls(min_isotope_lifetime=None, isotopes=None):
+    """A fresh SimControls built from CLUSTER_DECK with the
+    sukhbold_test/kobayashi_test ccsn channels, optionally setting
+    yields.min_isotope_lifetime and yields.isotopes."""
+    deck = tomlkit.parse(pathlib.Path(CLUSTER_DECK).read_text())
+    deck["yields"] = tomlkit.table()
+    deck["yields"]["channel1"] = {"channel": "ccsn", "model": "sukhbold_test"}
+    deck["yields"]["channel2"] = {"channel": "ccsn", "model": "kobayashi_test"}
+    deck["yields"]["registry"] = YIELDS_REGISTRY
+    if min_isotope_lifetime is not None:
+        deck["yields"]["min_isotope_lifetime"] = min_isotope_lifetime
+    if isotopes is not None:
+        deck["yields"]["isotopes"] = isotopes
+    return slug.SimControls(tomlkit.dumps(deck))
+
+
+def test_simcontrols_min_isotope_lifetime_default_skips_short_lived():
+    """minIsotopeLifetime defaults to 1e4 yr, which skips Co56 and Ni56:
+    they move from yields.isotopes to yields.skippedIsotopes, and long
+    after they would have decayed, yieldSum() matches a SimControls that
+    tracks them explicitly (min_isotope_lifetime = 0)."""
+    skipping = _min_lifetime_controls()
+    full = _min_lifetime_controls(0.0)
+    assert skipping.minIsotopeLifetime == pytest.approx(1e4)
+    assert [iso.label() for iso in skipping.yields.isotopes] == ["H1", "Fe56", "Ni58"]
+    assert [iso.label() for iso in skipping.yields.skippedIsotopes] == ["Co56", "Ni56"]
+    assert [iso.label() for iso in full.yields.isotopes] == YIELDS_ISOTOPES
+    assert full.yields.skippedIsotopes == []
+
+    skipped_sum = skipping.yields.yieldSum(15.0, 0.0, 1e3)
+    full_sum = full.yields.yieldSum(15.0, 0.0, 1e3)
+    np.testing.assert_allclose(skipped_sum, [full_sum[0], full_sum[1], full_sum[4]], rtol=1e-9)
+
+
+def test_simcontrols_min_isotope_lifetime_property_rebuilds_yields():
+    """Assigning minIsotopeLifetime (property or setter) rebuilds yields
+    at once, keeping a yields.isotopes restriction; a negative or NaN
+    value raises ValueError and leaves it unchanged."""
+    controls = _min_lifetime_controls(0.0, ["fe56"])
+    assert [iso.label() for iso in controls.yields.isotopes] == ["Fe56", "Co56", "Ni56"]
+    assert [iso.label() for iso in controls.yields.requestedIsotopes()] == ["Fe56"]
+
+    controls.minIsotopeLifetime = 1e4
+    assert controls.minIsotopeLifetime == pytest.approx(1e4)
+    assert [iso.label() for iso in controls.yields.isotopes] == ["Fe56"]
+    controls.setMinIsotopeLifetime(0.0)
+    assert [iso.label() for iso in controls.yields.isotopes] == ["Fe56", "Co56", "Ni56"]
+
+    for bad in (-1.0, float("nan")):
+        with pytest.raises(ValueError):
+            controls.minIsotopeLifetime = bad
+        assert controls.minIsotopeLifetime == 0.0
+
+
+def test_simcontrols_min_isotope_lifetime_rejects_skipping_every_request():
+    """A minIsotopeLifetime that would skip every requested isotope
+    raises RuntimeError, restoring the old value and isotope list; a
+    negative yields.min_isotope_lifetime in the deck is rejected too."""
+    controls = _min_lifetime_controls(0.0, ["ni56"])
+    before = [iso.label() for iso in controls.yields.isotopes]
+    with pytest.raises(RuntimeError):
+        controls.minIsotopeLifetime = 1e4
+    assert controls.minIsotopeLifetime == 0.0
+    assert [iso.label() for iso in controls.yields.isotopes] == before
+
+    with pytest.raises(RuntimeError, match="min_isotope_lifetime"):
+        _min_lifetime_controls(-1.0)
 
 
 def _sn_controls(with_yields, sn_mass_range=None):

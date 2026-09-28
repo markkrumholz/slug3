@@ -367,6 +367,138 @@ inline auto testDecayChainPb210ChainConservesMass() -> int
 }
 
 /**
+ * @brief Build the decay-closed isotope list starting from one isotope
+ * @param start The isotope to start from
+ * @return start, followed by every isotope reachable from it via
+ *   daughters(), each listed once
+ */
+inline auto decayClosure(const elem::IsotopeData& start) -> elem::IsotopeList
+{
+    elem::IsotopeList isotopes{ start };
+    for (std::size_t i = 0; i < isotopes.size(); ++i) // grows while iterating; index, not iterator
+    {
+        for (const auto& daughter : isotopes[i].get().daughters())
+        {
+            const auto& next = elem::isotopeTable(daughter.Z_, daughter.A_);
+            const bool present = std::ranges::any_of(isotopes,
+                [&next](const auto& iso) { return iso.get() == next; });
+            if (!present) { isotopes.emplace_back(next); }
+        }
+    }
+    return isotopes;
+}
+
+/**
+ * @brief Unit test that skipping short-lived isotopes reproduces the full chain at late times
+ * @return 0 if the test passes, 1 if it fails.
+ * @details
+ * Builds two DecayChains over the Pb210 chain (see
+ * testDecayChainPb210ChainConservesMass()): one following every decay
+ * explicitly, and one with every isotope of lifetime < 1 yr (Bi210,
+ * Po210, and the Tl206/Hg206 side branches, the longest-lived being
+ * Po210 at ~0.55 yr) passed as skippedIsotopes, so that Pb210 decays
+ * straight to Pb206 + He4. Starting from 1 Msun of Pb210, the two must
+ * agree on every non-skipped isotope once the elapsed time is long
+ * compared to the skipped lifetimes: the only difference is the mass
+ * still in flight through the skipped isotopes in the full chain,
+ * which is at most ~(skipped lifetime / Pb210 lifetime) ~ 2% of the
+ * remaining Pb210, and so vanishes once the Pb210 itself is gone. At
+ * t = 0.1 yr, comparable to the skipped lifetimes, they must instead
+ * differ noticeably, showing that the skipping actually took effect.
+ *
+ * Also checks effectiveDaughters() directly: with those isotopes
+ * skipped, Pb210's effective daughters must be Pb206 and He4, each
+ * with total branching ratio 1 (to within the data's own
+ * normalization error -- see testDecayChainPb210ChainConservesMass()).
+ */
+inline auto testDecayChainSkippedIsotopesMatchFullChain() -> int
+{
+    constexpr double minLifetime = 1.0;
+    const auto& pb210 = elem::isotopeTable(82U, 210U);
+    const auto& pb206 = elem::isotopeTable(82U, 206U);
+    const auto& he4 = elem::isotopeTable(2U, 4U);
+    const elem::IsotopeList full = decayClosure(pb210);
+    elem::IsotopeList kept;
+    elem::IsotopeList skipped;
+    for (const auto& iso : full)
+    {
+        const bool skip = !iso.get().stable() && iso.get().lifetime() < minLifetime;
+        (skip ? skipped : kept).push_back(iso);
+    }
+    if (skipped.size() < 2 || kept.size() != 3)
+    {
+        std::cerr << "testDecayChainSkippedIsotopesMatchFullChain: test bug: expected at least "
+            "two skipped isotopes and exactly Pb210, Pb206, He4 kept, got " << skipped.size() <<
+            " skipped and " << kept.size() << " kept\n";
+        return 1;
+    }
+
+    // effectiveDaughters(): Pb210 -> Pb206 + He4, each with total ratio 1
+    double brPb206 = 0.0;
+    double brHe4 = 0.0;
+    for (const auto& daughter : elem::effectiveDaughters(pb210, skipped))
+    {
+        if (daughter.Z_ == pb206.Z() && daughter.A_ == pb206.A()) { brPb206 += daughter.branchingRatio_; }
+        else if (daughter.Z_ == he4.Z() && daughter.A_ == he4.A()) { brHe4 += daughter.branchingRatio_; }
+        else
+        {
+            std::cerr << "testDecayChainSkippedIsotopesMatchFullChain: unexpected effective daughter "
+                "(Z=" << daughter.Z_ << ", A=" << daughter.A_ << ") of Pb210\n";
+            return 1;
+        }
+    }
+    if (!utils::approxEqual(brPb206, 1.0, 1e-5) || !utils::approxEqual(brHe4, 1.0, 1e-5))
+    {
+        std::cerr << std::setprecision(15) << "testDecayChainSkippedIsotopesMatchFullChain: "
+            "expected Pb210's effective branching ratios to Pb206 and He4 to be 1, got " <<
+            brPb206 << " and " << brHe4 << "\n";
+        return 1;
+    }
+
+    const elem::DecayChain fullChain(full);
+    const elem::DecayChain skippedChain(kept, skipped);
+    const auto massOf = [](const elem::IsotopeList& isotopes, const std::vector<double>& values,
+        const elem::IsotopeData& target) -> double
+    {
+        for (std::size_t i = 0; i < isotopes.size(); ++i)
+        {
+            if (isotopes[i].get() == target) { return values[i]; }
+        }
+        return 0.0;
+    };
+
+    // (elapsed time in yr, maximum allowed |difference| in Msun, whether
+    // the two must instead differ by more than that)
+    struct Case { double t_; double tol_; bool expectDiffer_; };
+    for (const Case c : { Case{ 0.1, 1e-3, true }, Case{ 10.0, 2e-2, false },
+        Case{ 100.0, 2e-3, false }, Case{ 1000.0, 1e-7, false } })
+    {
+        std::vector<double> fullValues(full.size(), 0.0);
+        std::vector<double> keptValues(kept.size(), 0.0);
+        fullValues[0] = 1.0; // Pb210 is the first entry of both lists
+        keptValues[0] = 1.0;
+        fullChain.applyDecay(c.t_, fullValues);
+        skippedChain.applyDecay(c.t_, keptValues);
+
+        double maxDiff = 0.0;
+        for (const auto& iso : kept)
+        {
+            maxDiff = std::max(maxDiff,
+                std::abs(massOf(full, fullValues, iso.get()) - massOf(kept, keptValues, iso.get())));
+        }
+        if (c.expectDiffer_ ? maxDiff <= c.tol_ : maxDiff > c.tol_)
+        {
+            std::cerr << std::setprecision(15) << "testDecayChainSkippedIsotopesMatchFullChain: at t = " <<
+                c.t_ << " yr, max |difference| between full and skipped chains = " << maxDiff <<
+                (c.expectDiffer_ ? ", expected more than " : ", expected at most ") << c.tol_ << "\n";
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+/**
  * @brief Unit test that applyDecay() is a no-op when no isotope in the list is unstable
  * @return 0 if the test passes, 1 if it fails.
  */
@@ -454,6 +586,7 @@ inline auto testDecayChain() -> int
     result += testDecayChainSm148ConvergingNetwork();
     result += testDecayChainAlphaDecayConservesMass();
     result += testDecayChainPb210ChainConservesMass();
+    result += testDecayChainSkippedIsotopesMatchFullChain();
     result += testDecayChainNoUnstableIsotopes();
     result += testDecayChainNegativeDtThrows();
     result += testDecayChainMissingDaughterThrows();

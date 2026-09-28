@@ -2331,11 +2331,14 @@ static auto testGalaxyYieldsConverged() -> int
 // testYieldsRateSingleFehDelegates() (see its own comment), this
 // checks every isotope including unstable ones, so the galaxy is
 // advance()d to age first, keeping every yieldsRate(t, feh) call's own
-// internal decay (curTime_ - t) non-negative.
+// internal decay (curTime_ - t) non-negative. intRelTol is tightened
+// to 1e-3, below relTol, since the default (1e-2) is looser than
+// relTol; any tighter makes the reference loop's own 200
+// yieldsRate(t, feh) calls very slow.
 static auto testYieldsRateMultiFeh() -> int
 {
     constexpr double age = 1e8;
-    constexpr double relTol = 1e-3;
+    constexpr double relTol = 3e-3;
     constexpr std::size_t nRef = 200; // midpoint-rule points for the reference
 
     try
@@ -2351,7 +2354,8 @@ static auto testYieldsRateMultiFeh() -> int
             { "channel_decomposed", false },
             { "registry", std::string("tests/yields/assets/yields.toml") },
         });
-        const io::SimControls controls(inputDeck);
+        io::SimControls controls(inputDeck);
+        controls.setIntRelTol(1e-3);
 
         if (controls.fehDist().getMin() == controls.fehDist().getMax())
         {
@@ -2811,6 +2815,7 @@ static auto testGalaxyYieldsFieldAndContinuousDecay() -> int
             { "channel3", toml::table{ { "channel", "massive_star_winds" }, { "model", "sukhbold_test" } } },
             { "channel_decomposed", false },
             { "registry", std::string("tests/yields/assets/yields.toml") },
+            { "min_isotope_lifetime", 0.0 }, // track Co56/Ni56 explicitly rather than skipping them
         });
         const io::SimControls controls(inputDeck);
 
@@ -2934,6 +2939,7 @@ static auto testGalaxyYieldsMultipleAdvanceCallsDecay() -> int
             { "channel3", toml::table{ { "channel", "massive_star_winds" }, { "model", "sukhbold_test" } } },
             { "channel_decomposed", false },
             { "registry", std::string("tests/yields/assets/yields.toml") },
+            { "min_isotope_lifetime", 0.0 }, // track Co56/Ni56 explicitly rather than skipping them
         });
         const io::SimControls controls(inputDeck);
 
