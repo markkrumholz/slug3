@@ -478,7 +478,12 @@ namespace yields
             }
         }
 
-        if (!controls_.noDecay())
+        // Skipped at dtDecay == 0 as well as with noDecay(): the
+        // propagator is then the identity, but computing it is still a
+        // full O(m^3) matrix exponential, and callers (e.g. every
+        // integrand evaluation in Galaxy's continuous yields, and
+        // yieldSum() below) pass dtDecay == 0 far more often than not
+        if (!controls_.noDecay() && dtDecay != 0.0)
         {
             assert(decayChain_.has_value()); // populated by rebuildYieldGrid(), always called at least once by the constructor
             // Computed once and reused across every channel's own row,
@@ -500,7 +505,7 @@ namespace yields
     {
         // Decay is applied once below, to the summed total, not here --
         // see this method's own comment for why passing 0 suffices
-        // (yield()'s own decay step is a no-op at dtDecay == 0).
+        // (yield() skips its own decay step entirely at dtDecay == 0).
         const auto [view, data] = yield(mass, feH, 0.0);
         const std::size_t nchannels = view.extent(0);
         const std::size_t niso = view.extent(1);
@@ -513,7 +518,7 @@ namespace yields
             }
         }
 
-        if (!controls_.noDecay())
+        if (!controls_.noDecay() && dtDecay != 0.0)
         {
             applyDecay(dtDecay, result);
         }
