@@ -11,10 +11,16 @@
 
 #include "../io/SimControls.hpp"
 #include "../pdfs/PDF.hpp"
+#include "../pdfs/PDFReflect.hpp"
+#include "../pdfs/PDFSegmentPowerlaw.hpp"
 #include "../specsyn/Specsyn.hpp"
+#include "../utils/PDFIntegrator.hpp"
 #include "Cluster.hpp"
+#include <cmath>
 #include <cstddef>
 #include <functional>
+#include <memory>
+#include <numbers>
 #include <optional>
 #include <variant>
 #include <vector>
@@ -417,79 +423,126 @@ namespace core
          *   formation (time 0) -- not necessarily curTime(); this is a
          *   standalone calculation, independent of advance()/curTime()
          * @param feh [Fe/H] to evaluate at
-         * @return A vector laid out exactly as
-         *   Galaxy::yieldsIntegrand()'s own comment describes (one
+         * @return The total rate (Msun/yr) at which the continuously
+         *   sampled population -- over this galaxy's own star formation
+         *   history sfr() from 0 to t, and all at [Fe/H] feh -- returns
+         *   each isotope to the ISM at t, laid out as yields() (one
          *   channel-major row per isotope if
-         *   controls().yieldsChannelDecomposed(), or just
-         *   isotopes().size() combined entries otherwise): the total
-         *   rate (Msun/yr) at which the continuously-sampled
-         *   population -- integrated over this galaxy's own star
-         *   formation history sfr() from 0 to t -- currently returns
-         *   each isotope (and, if decomposed, channel) to the ISM.
-         *   Does not include the stochastically-sampled (individual
-         *   cluster/field star) population's own contribution. An
-         *   empty vector if controls().yields() is null (no yield
-         *   channels were requested).
+         *   controls().yieldsChannelDecomposed(), or isotopes().size()
+         *   combined entries otherwise), decayed forward to curTime_
+         *   unless controls().noDecay(). Excludes the stochastically
+         *   sampled (cluster and field star) population, and the
+         *   1 - fCluster() share applied by computeYields(). An empty
+         *   vector if controls().yields() is null.
          * @details
-         * A no-op returning {} if controls().yields() is null.
-         * Otherwise, mirrors computeLbolCts()'s own general structure (see its
-         * own comment): builds a pdfs::PDFReflect view of sfr()
-         * pivoted at 0.5 * t, so its own coordinate becomes age
-         * directly, then integrates yieldsIntegrand() (weighted by
-         * that reflected sfr, i.e. by the star formation rate at each
-         * age) over [0, t] via a single utils::PDFIntegrator
-         * (GKOrder::GK15) call. Unlike computeLbolCts(), this takes
-         * feh as an explicit parameter rather than averaging over
-         * SimControls::fehDist()'s own range itself -- see the
-         * feh-less yieldsRate(double) overload for that.
-         *
-         * Isotope yield rates span many orders of magnitude, and some
-         * are zero, so the integrand is first made dimensionless:
-         * divided by its smallest nonzero element at a few
-         * log-spaced ages (see utils::integrandScale()), with absolute
-         * tolerance SimControls::intAbsTol() * sfr().integral(0, t),
-         * the integral of a unit-scale integrand; the result is
-         * scaled back afterward. The [Fe/H] integral in the
-         * yieldsRate(double) overload, and computeYields()'s own
-         * integral of it over time, are scaled the same way.
-         *
-         * If controls().noDecay() is false (the default), the raw
-         * integral above -- the instantaneous rate at which mass was
-         * returned to the ISM at simulation time t -- is decayed
-         * forward to curTime_ via Yields::applyDecay(), with dtDecay =
-         * curTime_ - t, before being returned: so the value returned
-         * here is each moment t's own present-day (as of curTime_)
-         * contribution, not its as-produced one. This assumes t <=
-         * curTime_, true of every call computeYields() itself makes
-         * (t ranges over [lastYieldTime_, curTime_] there); calling
-         * this directly with t > curTime_ (e.g. on a Galaxy that
-         * hasn't been advance()d yet, so curTime_ is still its initial
-         * 0) produces a negative dtDecay, which Yields::applyDecay()
-         * does not reject, but which is not a physically meaningful
-         * request (radioactive decay run backward in time).
+         * deathRate() with each dying star's own yields as its
+         * quantity, radioactive decay forward to curTime_ as its hook,
+         * and a fixed [Fe/H] -- see continuousDeathQuantity()'s own
+         * comment. The decay uses dtDecay = curTime_ - t, so assumes
+         * t <= curTime_: on a Galaxy not yet advance()d past t it would
+         * run decay backward in time, which Yields::applyDecay() does
+         * not reject but which is not physically meaningful.
          */
         [[nodiscard]] auto yieldsRate(double t, double feh) const -> std::vector<double>;
 
         /**
          * @brief The instantaneous rate at which the continuous population returns each isotope, at a given time, averaged over [Fe/H]
-         * @param t Simulation time, in yr, since this galaxy's own
-         *   formation (time 0) -- see the (t, feh) overload's own
-         *   comment
-         * @return See the (t, feh) overload's own comment for the
-         *   returned vector's layout; here, averaged over
-         *   SimControls::fehDist()'s own range rather than evaluated
-         *   at a single [Fe/H]
+         * @param t Simulation time, in yr -- see the (t, feh)
+         *   overload's own comment
+         * @return As the (t, feh) overload, but averaged over
+         *   SimControls::fehDist() rather than at a single [Fe/H]
          * @details
-         * If SimControls::fehDist() is degenerate (a single value,
-         * SimControls::fehDist().getMin() == getMax()), simply calls
-         * the (t, feh) overload at that value. Otherwise, integrates
-         * the (t, feh) overload over [Fe/H] with a PDFIntegrator
-         * weighted by SimControls::fehDist(), divided by fehDist()'s
-         * own integral over its support -- the same construction
-         * computeLbolCts() and Specsyn::specCtsHelper() use (see the
-         * latter's own comment for why).
+         * deathRate() as in the (t, feh) overload, but with its [Fe/H]
+         * integral innermost (fehAveragedDeathIntegrand()), so that
+         * decay is applied once, to the [Fe/H]-averaged rate -- see
+         * continuousDeathQuantity()'s own comment. For a degenerate
+         * fehDist(), identical to the (t, feh) overload at its value.
          */
         [[nodiscard]] auto yieldsRate(double t) const -> std::vector<double>;
+
+        /**
+         * @brief A per-time hook for continuousDeathQuantity() that leaves each instantaneous rate unchanged
+         * @details
+         * The default for continuousDeathQuantity()'s own G -- for a
+         * quantity (e.g. a supernova count) that needs no processing
+         * between its release and the end of the integration, unlike
+         * radioactive yields, whose hook applies decay.
+         */
+        struct NoDeathRateHook
+        {
+            /**
+             * @brief Leave rate unchanged
+             * @param t Simulation time, in yr, at which rate applies
+             * @param rate The instantaneous rate at t
+             */
+            void operator()(double /*t*/, std::vector<double>& /*rate*/) const {}
+        };
+
+        /**
+         * @brief The cumulative amount of a quantity released at stellar death by the continuous population between two times
+         * @tparam F Callable as f(m, feh), m a stellar mass in Msun and
+         *   feh its [Fe/H], returning a std::vector<double> of n values:
+         *   the amount of each quantity one star of that mass and [Fe/H]
+         *   releases when it dies (e.g. its yields, or 1 or 0 for
+         *   whether it produces a supernova)
+         * @tparam G Callable as g(t, rate), t a simulation time in yr
+         *   and rate a std::vector<double>& holding the instantaneous
+         *   rate of release at t, modifying rate in place before it is
+         *   integrated over time -- e.g. radioactive decay forward to
+         *   tNow; NoDeathRateHook (the default) for none
+         * @param f The quantity released per star
+         * @param n The number of values f returns
+         * @param tLast Start of the time interval, in yr since this
+         *   galaxy's own formation
+         * @param tNow End of the time interval, in yr
+         * @param g The per-time hook
+         * @return The total of each quantity released by the continuous
+         *   population's own stars that died during (tLast, tNow], for
+         *   this galaxy's own star formation history; all zero if
+         *   tNow <= tLast, or if there is no continuous population
+         *   (SimControls::minStochMass() == 0 or fCluster() == 1)
+         * @details
+         * Integrates, from the outermost integral in:
+         * - over simulation time t in (tLast, tNow], of the rate at
+         *   which the quantity is released at t (deathRate()), after
+         *   g(t, rate) -- weighted by a flat distribution over the
+         *   step, so that utils::integrateScaled() applies unchanged --
+         *   then scales by the step's own length and by
+         *   1 - SimControls::fCluster(), the continuous population's
+         *   own share of the star formation rate;
+         * - over stellar age, weighted by the star formation rate at
+         *   t minus that age (deathRate());
+         * - over [Fe/H], weighted by SimControls::fehDist(), unless
+         *   that is degenerate (fehAveragedDeathIntegrand());
+         * - innermost, the rate at which stars of that age and [Fe/H]
+         *   die, each releasing f(m, feh) (deathIntegrand()).
+         *
+         * Integrating time outermost and [Fe/H] innermost means g is
+         * applied once per time point, after the [Fe/H] integral
+         * (the time and [Fe/H] integrals commute), rather than at every
+         * [Fe/H] point -- the expensive step for radioactive decay.
+         * Every integral makes its integrand dimensionless first -- see
+         * utils::integrateScaled()'s own comment.
+         */
+        template <class F, class G = NoDeathRateHook>
+        [[nodiscard]] auto continuousDeathQuantity(const F& f, const std::size_t n, const double tLast,
+            const double tNow, const G& g = G{}) const -> std::vector<double>
+        {
+            const auto& sc = controls_.get();
+            std::vector<double> result(n, 0.0);
+            if (tNow <= tLast || sc.minStochMass() <= 0.0 || sc.fCluster() >= 1.0) { return result; }
+
+            const double dt = tNow - tLast;
+            const pdfs::PDF step(std::make_unique<pdfs::PDFSegmentPowerlaw>(tLast, tNow, 0.0));
+            const auto rateAt = [&](const double t) -> std::vector<double>
+            { return deathRate(t, f, n, g, std::nullopt); };
+            result = utils::integrateScaled(step, rateAt, n, tLast, tNow,
+                { tLast + (0.25 * dt), tLast + (0.5 * dt), tLast + (0.75 * dt), tNow },
+                sc.intMaxIter(), sc.intAbsTol(), sc.intRelTol());
+            const double factor = (1.0 - sc.fCluster()) * dt / step.integral(tLast, tNow);
+            for (double& r : result) { r *= factor; }
+            return result;
+        }
 
         /**
          * @brief Return the total target stellar mass formed so far
@@ -558,19 +611,123 @@ namespace core
     private:
 
         /**
-         * @brief yieldsRate(t), divided by a scale
-         * @param t Simulation time, in yr -- see yieldsRate(double)'s
-         *   own t parameter
-         * @param scale The value to divide every element by
-         * @return yieldsRate(t), elementwise divided by scale
+         * @brief The rate, per unit stellar mass formed, at which stars of a given age and [Fe/H] release a quantity at death
+         * @tparam F See continuousDeathQuantity()'s own F
+         * @param age Stellar age, in yr
+         * @param feh [Fe/H] of the stars
+         * @param f See continuousDeathQuantity()'s own f
+         * @param n The number of values f returns
+         * @return The sum, over every mass m below
+         *   SimControls::minStochMass() dying at this age (from the
+         *   tracks' own massAndDerivFromLifetime()), of
+         *   |dm/dt| * imf(m) / <m> * f(m, feh), <m> being imf()'s own
+         *   mean mass: the rate, per yr and per unit stellar mass
+         *   formed, at which the continuous population releases each
+         *   quantity
          * @details
-         * The dimensionless integrand of computeYields()'s own integral
-         * of yieldsRate() over time -- see utils::integrateScaled()'s
-         * own comment for why it is scaled. A member function, rather
-         * than a lambda, so that it can be passed to GKIntegrator the
-         * same way as every other integrand in this class.
+         * The innermost layer of continuousDeathQuantity(). Uses the
+         * shared fixed-[Fe/H] tracks2D() slice when
+         * SimControls::constFeH() is true, and tracks() at feh
+         * otherwise -- see lbolCtsIntegrand()'s own identical choice.
          */
-        [[nodiscard]] auto scaledYieldsRate(double t, double scale) const -> std::vector<double>;
+        template <class F>
+        [[nodiscard]] auto deathIntegrand(const double age, const double feh, const F& f,
+            const std::size_t n) const -> std::vector<double>
+        {
+            const auto& sc = controls_.get();
+            std::vector<double> result(n, 0.0);
+            const auto massDeriv = sc.constFeH() ?
+                sc.tracks2D()->massAndDerivFromLifetime(std::log10(age)) :
+                sc.tracks()->massAndDerivFromLifetime(std::log10(age), feh);
+            for (const auto& [m, dmDlogT] : massDeriv)
+            {
+                if (m > sc.minStochMass()) { continue; } // stochastically sampled, handled separately
+                const double dmDt = dmDlogT / (age * std::numbers::ln10); // chain rule
+                const double weight = std::abs(dmDt) * sc.imf()(m) / sc.imf().expectationValue();
+                const std::vector<double> y = f(m, feh);
+                for (std::size_t k = 0; k < result.size(); ++k)
+                {
+                    result[k] += y[k] * weight; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- f returns n values by its own contract, and result has size n
+                }
+            }
+            return result;
+        }
+
+        /**
+         * @brief deathIntegrand(), averaged over SimControls::fehDist()
+         * @tparam F See continuousDeathQuantity()'s own F
+         * @param age Stellar age, in yr
+         * @param f See continuousDeathQuantity()'s own f
+         * @param n The number of values f returns
+         * @return deathIntegrand(age, feh, f, n) at fehDist()'s own
+         *   single value if it is degenerate; otherwise its integral
+         *   over fehDist() (via utils::integrateScaled(), scaled at
+         *   fehDist()'s own mean), divided by fehDist()'s own integral
+         * @details
+         * The [Fe/H] layer of continuousDeathQuantity() -- innermost of
+         * the integrals, so that its hook is applied only after this
+         * integral has converged; see continuousDeathQuantity()'s own
+         * comment.
+         */
+        template <class F>
+        [[nodiscard]] auto fehAveragedDeathIntegrand(const double age, const F& f,
+            const std::size_t n) const -> std::vector<double>
+        {
+            const auto& sc = controls_.get();
+            const auto& fehDist = sc.fehDist();
+            if (fehDist.getMin() == fehDist.getMax()) { return deathIntegrand(age, fehDist.getMin(), f, n); }
+            const auto integrandAt = [&](const double feh) -> std::vector<double>
+            { return deathIntegrand(age, feh, f, n); };
+            auto result = utils::integrateScaled(fehDist, integrandAt, n, fehDist.getMin(),
+                fehDist.getMax(), { fehDist.expectationValue() }, sc.intMaxIter(), sc.intAbsTol(),
+                sc.intRelTol());
+            const double fehNorm = fehDist.integral(fehDist.getMin(), fehDist.getMax());
+            for (double& r : result) { r /= fehNorm; }
+            return result;
+        }
+
+        /**
+         * @brief The instantaneous rate at which the continuous population releases a quantity at stellar death, at a given time
+         * @tparam F See continuousDeathQuantity()'s own F
+         * @tparam G See continuousDeathQuantity()'s own G
+         * @param t Simulation time, in yr
+         * @param f See continuousDeathQuantity()'s own f
+         * @param n The number of values f returns
+         * @param g See continuousDeathQuantity()'s own g -- applied to
+         *   the result before it is returned
+         * @param fehFixed If set, evaluate at this single [Fe/H]
+         *   (deathIntegrand()) rather than averaging over
+         *   SimControls::fehDist() (fehAveragedDeathIntegrand())
+         * @return The integral, over stellar age in [0, t], of the
+         *   [Fe/H]-averaged (or fixed-[Fe/H]) deathIntegrand() weighted
+         *   by the star formation rate at t minus that age -- the rate,
+         *   per yr, at which the whole population (clustered and not;
+         *   continuousDeathQuantity() applies the 1 - fCluster() share)
+         *   releases each quantity at t -- after g(t, rate)
+         * @details
+         * The age layer of continuousDeathQuantity(). Integrates over
+         * age via a pdfs::PDFReflect view of sfr() pivoted at t / 2 --
+         * see computeLbolCts()'s own comment -- with
+         * utils::integrateScaled(), scaled at a few log-spaced ages
+         * (deaths only begin a few Myr in).
+         */
+        template <class F, class G>
+        [[nodiscard]] auto deathRate(const double t, const F& f, const std::size_t n, const G& g,
+            const std::optional<double> fehFixed) const -> std::vector<double>
+        {
+            const auto& sc = controls_.get();
+            const pdfs::PDFReflect sfrAge(sfr(), 0.5 * t);
+            const auto integrandAt = [&](const double age) -> std::vector<double>
+            {
+                return fehFixed.has_value() ? deathIntegrand(age, *fehFixed, f, n) :
+                    fehAveragedDeathIntegrand(age, f, n);
+            };
+            auto result = utils::integrateScaled(sfrAge, integrandAt, n, 0.0, t,
+                { t, 0.3 * t, 0.1 * t, 0.03 * t, 0.01 * t }, sc.intMaxIter(), sc.intAbsTol(),
+                sc.intRelTol());
+            g(t, result);
+            return result;
+        }
 
         double curTime_ = 0.0;                  /**< Current simulation time */
         std::vector<Cluster> clusters_;          /**< Currently alive (non-disrupted) clusters */
@@ -1002,42 +1159,6 @@ namespace core
         [[nodiscard]] auto getFieldStarProps() const -> std::vector<std::optional<specsyn::Specsyn::StarData>>;
 
         /**
-         * @brief The instantaneous per-isotope yield rate of the purely continuous population, per unit stellar mass, at a given age and [Fe/H]
-         * @param t Age of the stellar population, in yr (a lifetime,
-         *   in the same sense as Tracks3D::massAndDerivFromLifetime()'s
-         *   own logT)
-         * @param feh [Fe/H] of the population
-         * @return A vector laid out exactly as Cluster::yields()'s own
-         *   comment describes: one channel-major row of
-         *   controls().yields()->isotopes().size() entries per entry
-         *   in controls().yields()->yieldChannels() if
-         *   controls().yieldsChannelDecomposed() is true, or just
-         *   isotopes().size() combined entries otherwise -- each the
-         *   instantaneous rate, per unit stellar mass, at which a star
-         *   dying at age t returns that isotope (and, if decomposed,
-         *   channel) -- 0 for every entry if no star with lifetime t
-         *   is currently in the continuously-sampled (non-stochastic,
-         *   below controls().minStochMass()) share of the population.
-         *   Caller must ensure controls().yields() is non-null.
-         * @details
-         * Evaluates y(m(t), feh) * |dm/dt| * (dn/dm)(m(t)) /
-         * controls().imf().expectationValue() -- y() from
-         * controls().yields()'s own yield() (if
-         * controls().yieldsChannelDecomposed()) or yieldSum()
-         * (otherwise), dn/dm from controls().imf()'s own operator(),
-         * and m(t)/dm/dt from
-         * controls().tracks()'s own massAndDerivFromLifetime(log10(t),
-         * feh), which converts the dm/d(log10 t) it returns to dm/dt
-         * via the chain rule (dm/dt = dm/d(log10 t) / (t ln 10)) --
-         * summed over every mass massAndDerivFromLifetime() returns
-         * (there can be more than one star with the same lifetime),
-         * skipping any mass at or above controls().minStochMass() (the
-         * stochastically-sampled share, handled separately, per-star,
-         * rather than through this per-unit-mass rate).
-         */
-        [[nodiscard]] auto yieldsIntegrand(double t, double feh) const -> std::vector<double>;
-
-        /**
          * @brief Update yields_/fieldYields_ from the stars that died since lastYieldTime_
          * @details
          * Called eagerly from advance() itself, at the end of every
@@ -1070,18 +1191,12 @@ namespace core
          *   curTime_ - deathTime_ (or 0 if controls().noDecay() is
          *   true), added onto fieldYields_.
          * - The purely continuous (non-clustered, below
-         *   minStochMass()) population: skipped entirely if
-         *   minStochMass() == 0 (no such population exists at all) or
-         *   fCluster() == 1 (no non-clustered population at all).
-         *   Otherwise, yieldsRate(double)'s own instantaneous rate
-         *   (already decayed forward to curTime_ internally, at every
-         *   t it's evaluated at -- see its own comment) is integrated
-         *   directly over real time from lastYieldTime_ to curTime_
-         *   via a utils::GKIntegrator (unweighted -- unlike
-         *   yieldsRate()'s own internal use of utils::PDFIntegrator to
-         *   weight by the SF history, this integral is already over a
-         *   rate, not a rate density), multiplied by (1 - fCluster())
-         *   (the non-clustered share), and added onto fieldYields_.
+         *   minStochMass()) population: continuousDeathQuantity(),
+         *   with each dying star's own yields as its quantity and
+         *   radioactive decay forward to curTime_ as its per-time hook,
+         *   over (lastYieldTime_, curTime_], added onto fieldYields_
+         *   -- zero if there is no such population (minStochMass() ==
+         *   0 or fCluster() == 1); see its own comment.
          *
          * fieldYields_ accumulates across calls (never zeroed) since,
          * unlike the clustered total, earlier steps' own dead field
