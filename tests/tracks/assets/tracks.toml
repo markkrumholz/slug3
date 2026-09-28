@@ -1,9 +1,16 @@
 name = "Registry of track sets (test fixture)"
-track_sets = ["MIST_test"]
+track_sets = ["MIST_test", "MIST_test_lowmass"]
 
 [MIST_test]
 file = "MIST_test.h5"
 version = "test fixture"
 Fe_H = [-1.0, -0.5, -0.25, 0.0, 0.5]
+alpha_Fe = [-0.2]
+v_vcrit = [0.0]
+
+[MIST_test_lowmass]
+file = "MIST_test_lowmass.h5"
+version = "test fixture"
+Fe_H = [-0.5, 0.0, 0.5]
 alpha_Fe = [-0.2]
 v_vcrit = [0.0]

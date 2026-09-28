@@ -39,28 +39,26 @@
 namespace
 {
     /**
-     * @brief A field star's lifetime, treating masses outside the tracks' own mass grid specially
+     * @brief A field star's lifetime, treating masses below the tracks' own mass grid specially
      * @param tracks The tracks to query -- SimControls::tracks()
      * @param m Stellar mass, in Msun
      * @param feh [Fe/H] of the star
      * @return tracks.starLifetime(m, feh) if tracks.mMin() <= m <=
      *   tracks.mMax(); +infinity if m is below tracks.mMin() (treated
-     *   as living forever); -infinity if m is above tracks.mMax()
-     *   (treated as already dead)
+     *   as living forever)
      * @details
      * Mirrors Cluster's own starLifetimeClamped() (see its own
      * comment), for the same reason: Tracks3D::starLifetime() asserts
      * its mass argument lies within the tracks' own tabulated mass
      * grid (and reads outside it if assertions are disabled), but the
-     * IMF's own mass range can extend beyond that grid -- e.g. an IMF
-     * minimum below the tracks' own minimum mass, which a field star
-     * can be drawn at whenever stars.min_stoch_mass is below the
-     * tracks' own minimum.
+     * IMF's own minimum mass can be below the tracks' own, and a field
+     * star can be drawn there whenever stars.min_stoch_mass is below
+     * the tracks' own minimum. m cannot exceed tracks.mMax():
+     * SimControls rejects an IMF extending above it.
      */
     auto fieldStarLifetime(const tracks::Tracks3D& tracks, const double m, const double feh) -> double
     {
         if (m < tracks.mMin()) { return std::numeric_limits<double>::infinity(); }
-        if (m > tracks.mMax()) { return -std::numeric_limits<double>::infinity(); }
         return tracks.starLifetime(m, feh);
     }
 
@@ -203,8 +201,8 @@ void core::Galaxy::advance(const double t)
     // single, shared aV_), mirroring Cluster's own avDist().valid() ?
     // draw() : 0.0 convention for when no extinction was requested at
     // all. Its death time is then formTime + the tracks' own
-    // starLifetime() at that (mass, feh), both in yr -- or +/-infinity
-    // for a mass below/above the tracks' own mass range, see
+    // starLifetime() at that (mass, feh), both in yr -- or +infinity
+    // for a mass below the tracks' own mass range, see
     // fieldStarLifetime()'s own comment. Sorting this
     // step's own batch by formTime before appending it keeps
     // fieldStars_ sorted by formTime_ overall: every previously-
@@ -794,13 +792,7 @@ void core::Galaxy::computeYields()
     // stochastic population.
     for (const auto& fieldStar : deadFieldStars_)
     {
-        // A star above the tracks' own mass range has a death time of
-        // -infinity (see fieldStarLifetime()'s own comment), meaning it
-        // was already dead when it formed: its yield has been decaying
-        // since formTime_
-        const double timeDied = std::isfinite(fieldStar.deathTime_) ?
-            fieldStar.deathTime_ : fieldStar.formTime_;
-        const double dtDecay = sc.noDecay() ? 0.0 : curTime_ - timeDied;
+        const double dtDecay = sc.noDecay() ? 0.0 : curTime_ - fieldStar.deathTime_;
         const auto contribution = decomposed
             ? yields->yield(fieldStar.mass_, fieldStar.feh_, dtDecay).second
             : yields->yieldSum(fieldStar.mass_, fieldStar.feh_, dtDecay);
@@ -838,8 +830,12 @@ auto core::Galaxy::getFieldStarProps() const -> std::vector<std::optional<specsy
     const double mMin = sc.tracks()->mMin();
     const double mMax = sc.tracks()->mMax();
     // A star outside the tracks' own mass range has no properties to
-    // look up (see fieldStarLifetime()'s own comment); its entry is
-    // left empty
+    // look up; its entry is left empty. Below mMin this is an ordinary
+    // case (see fieldStarLifetime()'s own comment); above mMax it can
+    // happen only if SimControls::setIMF() lowered the IMF's maximum
+    // and setTracks() then installed tracks ending below stars already
+    // drawn from the old IMF, the mass counterpart of the [Fe/H] check
+    // below
     const auto inRange = [mMin, mMax](const FieldStar& fs) -> bool
     { return fs.mass_ >= mMin && fs.mass_ <= mMax; };
 
