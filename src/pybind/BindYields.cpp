@@ -58,12 +58,14 @@ static constexpr std::string_view classDocstring =
 
 Built from controls.yieldChannels(): one YieldChannel per descriptor,
 added via addChannel(). The constructor also calls rebuildYieldGrid()
-once, which collects every loaded channel's own isotopesOrig() into
-one deduplicated, sorted isotopes() (the union of every isotope any
-requested channel covers), then pushes that same isotopes() back down
-into every channel's own rebuildYieldGrid() -- so every YieldChannel
-this Yields owns ends up synchronized onto the same isotope list, in
-the same order.)doc";
+once, which collects every loaded channel's own isotopesOrig(), and
+their decay products, into one deduplicated, sorted list, then splits
+off every unstable isotope shorter-lived than
+controls.minIsotopeLifetime into skippedIsotopes (treated as decaying
+instantly), leaving the rest as isotopes. It then pushes isotopes back
+down into every channel's own rebuildYieldGrid() -- so every
+YieldChannel this Yields owns ends up synchronized onto the same
+isotope list, in the same order.)doc";
 
 static constexpr std::string_view constructorDocstring =
     R"doc(Construct a Yields from a SimControls's own yieldChannels().
@@ -217,7 +219,9 @@ Parameters
 isotopes : list of IsotopeData, optional
     The isotopes wanted; isotopes() is narrowed to these plus whatever
     decay-chain context they need (see Details). An empty list (the
-    default) means "keep every isotope any loaded channel tabulates".
+    default) means "keep every isotope any loaded channel tabulates,
+    and their decay products", except those skipped (see Details).
+    Saved as requestedIsotopes().
 
 Throws
 ------
@@ -239,6 +243,15 @@ always stays complete). An emitted proton or alpha (H1 or He4) does not
 count as a link when looking for parents, so requesting H1 or He4 does
 not pull in every proton or alpha emitter; but a kept emitter does keep
 its own H1 or He4 decay product. Entries matching nothing are ignored.
+
+Every unstable isotope shorter-lived than controls().minIsotopeLifetime
+is never kept, whether requested or not: it is listed in
+skippedIsotopes instead and treated as decaying instantly, its yield
+going to its first longer-lived descendants. Decay links are followed
+through such isotopes when applying the rules above. For example, with
+the default threshold (1e4 yr), Ni56 and Co56 are skipped, so
+requesting Fe56 keeps only Fe56, whose yield then includes the
+tabulated Ni56.
 
 Called once by the constructor, right after every requested channel
 has been added; also callable directly, e.g. after addChannel() adds a
@@ -289,16 +302,19 @@ list of IsotopeData
 static constexpr std::string_view isotopesDocstring =
     R"doc(The isotopes this Yields' yield grid is tabulated for.
 
-Reading returns the union of every loaded channel's own
-isotopesOrig(): every isotope that appears in at least one of
-yieldChannels()'s own isotopesOrig() lists, deduplicated and sorted --
-once rebuildYieldGrid() has run (always true after the constructor
-itself returns), this is also exactly what every yieldChannels() entry's
-own isotopes() equals, in the same order.
+Reading returns the isotopes tracked explicitly: by default, every
+isotope that appears in at least one of yieldChannels()'s own
+isotopesOrig() lists, or is a decay product of one, deduplicated and
+sorted, minus the unstable isotopes shorter-lived than
+controls().minIsotopeLifetime, which are listed in skippedIsotopes
+instead (e.g. Ni56 and Co56 at the default 1e4 yr) -- see
+rebuildYieldGrid(). Once rebuildYieldGrid() has run (always true after
+the constructor itself returns), this is also exactly what every
+yieldChannels() entry's own isotopes() equals, in the same order.
 
 Assigning a list calls rebuildYieldGrid() with it, narrowing isotopes()
 down to the assigned isotopes plus their decay-chain context (or, for an
-empty list, resetting isotopes() back to the full union above) -- see
+empty list, resetting isotopes() back to the default above) -- see
 rebuildYieldGrid()'s own docstring for exactly which isotopes that
 keeps, and for the RuntimeError raised if the assigned list is
 non-empty but matches nothing any loaded channel tabulates.)doc";
