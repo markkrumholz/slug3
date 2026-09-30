@@ -328,14 +328,14 @@ namespace specsyn
     private:
 
         /**
-         * @brief Hand wnlTeffRanges_ down to every chained SpecsynLibWR library's own copy
+         * @brief Hand wnlTeffRanges_ and normalLogTeffMax_ down to every chained SpecsynLibWR library's own copy
          * @details
          * Factored out of the constructor purely to keep its own
          * cognitive complexity down. Called once, after wnlTeffRanges_
-         * has been fully computed and wrLibs_ populated -- see
-         * wnlTeffRanges_'s own comment for why every chained
-         * SpecsynLibWR library needs its own copy of the same combined
-         * range data classifyGridType uses.
+         * and normalLogTeffMax_ have been fully computed and wrLibs_
+         * populated -- see wnlTeffRanges_'s own comment for why every
+         * chained SpecsynLibWR library needs its own copy of the same
+         * combined range data classifyGridType uses.
          */
         void propagateWNLTeffRanges();
 
@@ -606,6 +606,22 @@ namespace specsyn
          * {quiet_NaN(), quiet_NaN()}.
          */
         std::array<std::pair<double, double>, 3> wnlTeffRanges_;
+
+        /**
+         * @brief The highest log(Teff) covered by any chained ordinary-star (GridType::normalGrid) library
+         * @details
+         * See SpecsynLibWR::getWRType's own normalLogTeffMax parameter,
+         * which this is passed to (from classifyGridType, via spec()).
+         * Like wnlTeffRanges_, and for the same reason, computed once,
+         * unconditionally (regardless of tClamp -- unlike
+         * logTeffMax_[normalGrid], which holds the same value only when
+         * tClamp is true), in the constructor, and handed to every
+         * chained SpecsynLibWR library via its own
+         * setNormalLogTeffMax(), so wrLibs_'s own spec() calls agree
+         * with classifyGridType. quiet_NaN() if no ordinary-star
+         * library is chained at all.
+         */
+        double normalLogTeffMax_;
 
         /**
          * @brief The [Fe/H] range of each individual chained library, indexed by GridType then chain position

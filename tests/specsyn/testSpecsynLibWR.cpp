@@ -35,6 +35,7 @@
 #include "testSpecsynLibWR.hpp"
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <iostream>
 #include <limits>
@@ -425,6 +426,7 @@ static auto testSpecWNLTypeMismatchThrow(const std::string& wnlSpectraName) -> i
 static auto testGetWRTypeWNLHBuckets() -> int
 {
     using WRType = specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise>::WRType;
+    constexpr double nan = std::numeric_limits<double>::quiet_NaN(); // no normal-grid ceiling known
     const std::array<std::pair<double, WRType>, 6> cases = {{
         { 0.0,  WRType::WNLH20 },
         { 0.29, WRType::WNLH20 },
@@ -442,7 +444,7 @@ static auto testGetWRTypeWNLHBuckets() -> int
     {
         const auto props = makeWRStarData(20.0, 5.7, 4.7, 3e-5, 0.7, 0.0, 0.01, hSurf);
         const auto actual =
-            specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise>::getWRType(props, wnlRanges);
+            specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise>::getWRType(props, wnlRanges, nan);
         if (actual != expected)
         {
             std::cerr << "testSpecsynLibWR: getWRType(hSurf = " << hSurf
@@ -480,7 +482,7 @@ static auto testGetWRTypeOutOfRangeFallsThroughToNone() -> int
     {
         const auto props = makeWRStarData(20.0, 5.0, 4.08, 3e-5, 0.7, 0.0, 0.01, 0.4);
         const auto actual =
-            specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise>::getWRType(props, wnlRanges);
+            specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise>::getWRType(props, wnlRanges, nan);
         if (actual != WRType::None)
         {
             std::cerr << "testSpecsynLibWR: getWRType for a WNL-composition star "
@@ -498,11 +500,76 @@ static auto testGetWRTypeOutOfRangeFallsThroughToNone() -> int
         // WRType::None here.
         const auto props = makeWRStarData(20.0, 5.7, 4.65, 3e-5, 0.7, 0.0, 0.01, 0.1);
         const auto actual =
-            specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise>::getWRType(props, unknownH20Range);
+            specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise>::getWRType(props, unknownH20Range, nan);
         if (actual != WRType::None)
         {
             std::cerr << "testSpecsynLibWR: getWRType for a WNLH20-composition star "
                 "with an unknown (NaN) WNLH20 range should return WRType::None\n";
+            result = 1;
+        }
+    }
+    return result;
+}
+
+// Check getWRType's hydrogen-rich guard (surface H mass fraction >
+// 0.6) against each branch of its own rule, using a near-primordial
+// surface (X = 0.7, Y = 0.28, C > N) that, above 50000 K, the log(Teff)
+// escape hatch alone would call WC:
+//   - at or below the ordinary-star grids' own ceiling (here
+//     log10(55000 K), TLUSTY_O's): not WR;
+//   - above it but within the WNLH60 grid: WNLH60;
+//   - with no ceiling known (NaN): 50000 K stands in for it;
+//   - with a ceiling below 50000 K: 50000 K still sets the cut, so
+//     the guard never turns a star below 50000 K into a WR star, nor
+//     a star above it into an ordinary one;
+//   - hotter than the WNLH60 grid, or with that grid's own range
+//     unknown: falls through to the pre-existing rule (WC here);
+//   - X exactly at or below 0.6: guard does not apply at all.
+static auto testGetWRTypeHRichGuard() -> int
+{
+    using WRType = specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise>::WRType;
+    constexpr double nan = std::numeric_limits<double>::quiet_NaN();
+    const double tlustyOMax = std::log10(55000.0);
+    const double coolMax = std::log10(40000.0);
+    const std::array<std::pair<double, double>, 3> wnlRanges = {{
+        { 4.4, 5.05 }, { 4.4, 5.05 }, { 4.4, 5.05 },
+    }};
+    const std::array<std::pair<double, double>, 3> unknownH60Range = {{
+        { 4.4, 5.05 }, { 4.4, 5.05 }, { nan, nan },
+    }};
+
+    struct Case
+    {
+        const char* label_;
+        double hSurf_;
+        double heSurf_;
+        double logTeff_;
+        double normalLogTeffMax_;
+        const std::array<std::pair<double, double>, 3>* ranges_;
+        WRType expected_;
+    };
+    const std::array<Case, 8> cases{ {
+        { "below ordinary-star ceiling", 0.7, 0.28, 4.72, tlustyOMax, &wnlRanges, WRType::None },
+        { "above ordinary-star ceiling", 0.7, 0.28, 4.80, tlustyOMax, &wnlRanges, WRType::WNLH60 },
+        { "no ceiling known", 0.7, 0.28, 4.72, nan, &wnlRanges, WRType::WNLH60 },
+        { "ceiling below 50000 K, star above", 0.7, 0.28, 4.72, coolMax, &wnlRanges, WRType::WNLH60 },
+        { "ceiling below 50000 K, star below", 0.7, 0.28, 4.65, coolMax, &wnlRanges, WRType::None },
+        { "hotter than WNLH60 grid", 0.7, 0.28, 5.20, tlustyOMax, &wnlRanges, WRType::WC },
+        { "WNLH60 range unknown", 0.7, 0.28, 4.80, tlustyOMax, &unknownH60Range, WRType::WC },
+        { "X = 0.6, guard does not apply", 0.6, 0.39, 4.80, tlustyOMax, &wnlRanges, WRType::WC },
+    } };
+
+    int result = 0;
+    for (const auto& c : cases)
+    {
+        const auto props = makeWRStarData(60.0, 6.0, c.logTeff_, 3e-6, c.heSurf_, 1e-4, 2.5e-5, c.hSurf_);
+        const auto actual = specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise>::getWRType(
+            props, *c.ranges_, c.normalLogTeffMax_);
+        if (actual != c.expected_)
+        {
+            std::cerr << "testSpecsynLibWR: testGetWRTypeHRichGuard (" << c.label_
+                << "): getWRType returned WRType " << static_cast<int>(actual)
+                << ", expected " << static_cast<int>(c.expected_) << "\n";
             result = 1;
         }
     }
@@ -561,6 +628,7 @@ auto testSpecsynLibWR() -> int
     result += testSpecWNLTypeMismatchThrow(wnlH20SpectraName);
     result += testGetWRTypeWNLHBuckets();
     result += testGetWRTypeOutOfRangeFallsThroughToNone();
+    result += testGetWRTypeHRichGuard();
     result += testNWlOnly();
     return result;
 }

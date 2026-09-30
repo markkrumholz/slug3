@@ -480,6 +480,67 @@ static auto testClassifyWRRescue() -> int
     return result;
 }
 
+// Check end to end that a hot, hydrogen-rich star -- surface X = 0.7,
+// Y = 0.28, C > N, i.e. an essentially unprocessed very massive O
+// star -- at log(Teff) = 4.75 (~56000 K, hotter than every chained
+// ordinary-star library here; TLUSTY_test tops out at log(Teff) =
+// 4.477) is classified WNLH60, per SpecsynLibWR::getWRType's own
+// hydrogen-rich guard, rather than WC, as the log(Teff) > 50000 K
+// escape hatch alone would have made it. The chain holds both
+// POWR_WC_test and POWR_WNL_H60_test, whose Gaussian SEDs peak at 5000
+// and 15000 Angstrom respectively (see make_powr_test_fixture.py), so
+// the peak of the returned spectrum identifies which one produced it.
+// Checked with tClamp both true and false, since the chain's own
+// normal-grid log(Teff) ceiling (which getWRType is handed) is
+// computed regardless of tClamp.
+static auto testClassifyHRichHotStarIsWNLH60() -> int
+{
+    auto props = makeWRStarData(20.0, 5.7, 4.75, 3e-5);
+    props.at(static_cast<std::size_t>(tracks::FieldIdx::hSurf)) = 0.7;
+    props.at(static_cast<std::size_t>(tracks::FieldIdx::heSurf)) = 0.28;
+    props.at(static_cast<std::size_t>(tracks::FieldIdx::cSurf)) = 1e-4;
+    props.at(static_cast<std::size_t>(tracks::FieldIdx::nSurf)) = 2.5e-5;
+    constexpr double wrFeh = -0.5; // inside the POWR fixtures' own Fe_H = [-1.0, 0.0]
+    constexpr double wrLuminosity = 501187.23362727246 * solarLuminosity; // 10^5.7 Lsun
+
+    int result = 0;
+    for (const bool tClamp : { true, false })
+    {
+        const specsyn::SpecsynLibChained chain(
+            { "POWR_WC_test", "POWR_WNL_H60_test", "TLUSTY_test" }, -3.0, 1.0, 0.0, 0.0,
+            {}, specsyn::defaultR, registryName, 0.0, 0.0, 0, tClamp, testControls);
+        std::vector<double> spec;
+        try
+        {
+            spec = chain.spec(props, wrFeh);
+        }
+        catch (const std::exception& e)
+        {
+            std::cerr << "testSpecsynLibChained: testClassifyHRichHotStarIsWNLH60 "
+                "(tClamp = " << tClamp << "): unexpected exception: " << e.what() << "\n";
+            result += 1;
+            continue;
+        }
+        if (checkSpectrum(spec, chain.wl(), wrLuminosity,
+                "a hot H-rich star classified WNLH60") != 0)
+        {
+            result += 1;
+            continue;
+        }
+        const auto peak = std::ranges::max_element(spec) - spec.begin();
+        const double wlPeak = chain.wl().at(static_cast<std::size_t>(peak));
+        if (wlPeak < 12000.0 || wlPeak > 18000.0)
+        {
+            std::cerr << "testSpecsynLibChained: testClassifyHRichHotStarIsWNLH60 "
+                "(tClamp = " << tClamp << "): spectrum peaks at " << wlPeak
+                << " Angstrom, expected near POWR_WNL_H60_test's own 15000 Angstrom "
+                "(not POWR_WC_test's 5000)\n";
+            result += 1;
+        }
+    }
+    return result;
+}
+
 // Check that a WR-classified star whose feh is entirely outside every
 // wrLibs_ library's own Fe_H range is clamped to that range (both
 // sub- and super-solar), rather than throwing -- SpecsynLibChained::
@@ -966,6 +1027,7 @@ auto testSpecsynLibChained() -> int
     result += testChainWithSparseWD();
     result += testClassifyWRRescue();
     result += testClassifyWRFehOutOfRangeClamps();
+    result += testClassifyHRichHotStarIsWNLH60();
     result += testClassifyWD();
     result += testNormalLoggSpecForce();
     result += testNormalTeffFloorClamp();
