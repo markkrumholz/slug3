@@ -71,10 +71,12 @@ covered by the chained atmosphere models available for that subtype (see
 resembles a WNL star, but whose temperature no available WNL grid covers, falls
 through to the next test rather than being forced into an ill-fitting classification.
 A star that is not classified as WNL by this test, but whose :math:`T_\mathrm{eff}`
-exceeds 50000 K, is instead classified as a hydrogen-poor Wolf-Rayet star, of subtype
-WNE if its surface carbon mass fraction is less than its surface nitrogen mass
-fraction, or WC otherwise. A star failing every one of these tests is not a
-Wolf-Rayet star.
+exceeds 50000 K, is instead classified as a Wolf-Rayet star of subtype WNE if its
+surface carbon mass fraction is less than its surface nitrogen mass fraction, or WC
+otherwise. These subtypes are intended for hydrogen-poor stars, but this final test
+can also apply to a star with surface hydrogen mass fraction above 0.6 if it is too
+hot to be classified as WNL-H60 by the first test, or if no WNL-H60 models are
+available. A star failing every one of these tests is not a Wolf-Rayet star.
 
 A star that is not a Wolf-Rayet star is next tested for being a white dwarf. This
 classification applies only if the star's (:math:`T_\mathrm{eff}`, :math:`\log g`)
