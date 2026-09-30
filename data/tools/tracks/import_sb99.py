@@ -57,6 +57,14 @@ To put every metallicity on one common grid, this script:
   Synthesized masses are recorded in each group's
   ``synthesized_masses`` attribute.
 
+The Z = 0.0004 Padova files (modp0004.dat and mods0004.dat) start
+every track at surface X + Y = 1 exactly, leaving no room for their own
+metals, so 1 - X - Y is zero or slightly negative throughout. For those
+two files only, this script multiplies every row's X and Y by 1 - Z
+(see fix_abundance_offset), so that X + Y = 1 - Z at the ZAMS as in
+every other file; the factor is recorded in each group's
+``abundance_rescale`` attribute (1.0 where no rescaling was applied).
+
 Finally, any row whose age does not strictly exceed that of every
 previous row is dropped, since slug requires strictly increasing
 ages. Most such rows are padding at the ends of low-mass tracks, which
@@ -265,6 +273,63 @@ DROP_MASSES = (1.701,)
 # Surface abundance fields, which must never all be zero in a valid row
 ABUNDANCE_FIELDS = ('h_surf', 'he_surf', 'c_surf', 'n_surf', 'o_surf')
 
+# Source files whose surface H and He mass fractions leave no room for
+# metals: every track starts at X + Y = 1 exactly, despite the file's
+# own Z = 0.0004 (and its own nonzero C, N, and O). Every other file
+# starts at X + Y = 1 - Z, as it should. See fix_abundance_offset.
+ABUNDANCE_OFFSET_FILES = ("modp0004.dat", "mods0004.dat")
+
+
+def fix_abundance_offset(tracks, z_val, label):
+    """Rescale surface H and He so that X + Y = 1 - Z at the ZAMS.
+
+    Parameters
+    ----------
+    tracks : list of (float, numpy.ndarray)
+        Tracks as returned by read_sb99_file; modified in place
+    z_val : float
+        Metallicity Z of the file the tracks were read from
+    label : str
+        Description of the file, used in the error message
+
+    Returns
+    -------
+    float
+        The factor by which every X and Y value was multiplied, 1 - Z
+
+    Raises
+    ------
+    ValueError
+        If any track does not start at exactly X + Y = 1, i.e. if the
+        file does not have the defect this function corrects
+
+    Notes
+    -----
+    The files in ABUNDANCE_OFFSET_FILES start every track at X + Y = 1,
+    so 1 - X - Y (the usual estimate of a star's surface metallicity) is
+    zero at the ZAMS, and negative (down to about -3.5e-4) wherever
+    evolution pushes X + Y slightly above 1 -- physically impossible,
+    and enough to make e.g. log(Z) NaN. Every row's X and Y are
+    multiplied by the same factor, 1 - Z, rather than each row being
+    forced to X + Y = 1 - Z individually: this moves the ZAMS to
+    exactly X + Y = 1 - Z while preserving each row's own evolution
+    relative to it, including the genuine surface metal enrichment of
+    late phases (X + Y as low as 0.997 in these files).
+    """
+    xi, yi = FIELDS.index('h_surf'), FIELDS.index('he_surf')
+    for m, arr in tracks:
+        zams = arr[0, xi] + arr[0, yi]
+        if abs(zams - 1.0) > 1.0e-6:
+            raise ValueError(f"{label}: expected the track for mass {m} to "
+                             f"start at X + Y = 1, found {zams}; the "
+                             "source file may have changed, so the "
+                             "abundance correction may no longer apply")
+    fac = 1.0 - z_val
+    for _, arr in tracks:
+        arr[:, xi] *= fac
+        arr[:, yi] *= fac
+    return fac
+
 # Fields interpolated in log space when synthesizing a track; all
 # others are interpolated linearly
 LOG_FIELDS = ('age', 'mass')
@@ -400,7 +465,7 @@ def check_abundances(arr, label):
 
 
 def write_family_h5(out_path, descriptions, masses, rectified,
-                    verbose=False):
+                    rescales, verbose=False):
     """Write one family of starburst99 tracks to an HDF5 file in slug format.
 
     Parameters
@@ -414,6 +479,11 @@ def write_family_h5(out_path, descriptions, masses, rectified,
         Common mass grid, as returned by rectify_mass_grids
     rectified : dict
         Rectified tracks, as returned by rectify_mass_grids
+    rescales : dict
+        Mapping from metallicity Z to the factor by which
+        fix_abundance_offset rescaled that metallicity's surface H and
+        He, for the metallicities it was applied to; stored as each
+        group's abundance_rescale attribute (1.0 for all others)
     verbose : bool
         If True, report any tracks from which rows were pruned
 
@@ -457,6 +527,7 @@ def write_family_h5(out_path, descriptions, masses, rectified,
             grp.attrs['field_names']        = FIELDS
             grp.attrs['description']        = descriptions[z_val]
             grp.attrs['synthesized_masses'] = np.array(synth, dtype=float)
+            grp.attrs['abundance_rescale']  = rescales.get(z_val, 1.0)
 
             grp.create_dataset('masses', data=masses)
             for m, p in zip(masses, pruned):
@@ -523,15 +594,23 @@ def main():
         else:
             if args.verbose:
                 print(f"Importing {', '.join(fnames)} -> {out_path}")
-            descriptions, tracks_by_z = {}, {}
+            descriptions, tracks_by_z, rescales = {}, {}, {}
             for fname in fnames:
                 z_val = z_from_filename(fname)
                 descriptions[z_val], tracks_by_z[z_val] = read_sb99_file(
                     os.path.join(args.srcdir, fname))
+                if fname in ABUNDANCE_OFFSET_FILES:
+                    rescales[z_val] = fix_abundance_offset(
+                        tracks_by_z[z_val], z_val, fname)
+                    if args.verbose:
+                        print(f"  {fname}: rescaled surface H and He by "
+                              f"{rescales[z_val]} so that X + Y = 1 - Z "
+                              "at the ZAMS")
             masses, rectified = rectify_mass_grids(tracks_by_z,
                                                    verbose=args.verbose)
             fehs = write_family_h5(out_path, descriptions, masses,
-                                   rectified, verbose=args.verbose)
+                                   rectified, rescales,
+                                   verbose=args.verbose)
 
         # Build the registry entry
         tab = tomlkit.table()

@@ -148,7 +148,10 @@ metallicity) and one `sb99_mod{c,e,p,s}` registry entry.
    He-flash variant tracks, and synthesizes the 9 Msun track at Z =
    0.008 and the 10 Msun track at every other Z by row-by-row
    interpolation between bracketing masses (recorded in each group's
-   `synthesized_masses` attribute). Needs `--overwrite` to regenerate
-   existing output files.
+   `synthesized_masses` attribute). It also corrects the Z = 0.0004
+   Padova files (`modp0004.dat`, `mods0004.dat`), which start every
+   track at surface X + Y = 1 despite Z > 0, by multiplying their X and
+   Y by 1 - Z (recorded in each group's `abundance_rescale` attribute).
+   Needs `--overwrite` to regenerate existing output files.
 
 No further processing is needed.
