@@ -281,6 +281,11 @@ namespace specsyn
          *   own range is unknown, so a star that would otherwise land
          *   in it never actually does -- see this function's own
          *   comment for why that matters.
+         * @param normalLogTeffMax The highest log(Teff) covered by any
+         *   chained ordinary-star (non-WR, non-WD) library -- see
+         *   normalLogTeffMax_'s own comment for how this is normally
+         *   populated. NaN if unknown, in which case log10(50000 K)
+         *   is used in its place (see step 2 below).
          * @return The star's WRType
          * @details
          * Follows Roy et al. 2020's classification scheme on surface
@@ -351,10 +356,35 @@ namespace specsyn
          * to introduce no new misclassification among MIST's own
          * tracks, which have nothing between the post-AGB ~1.1 Msun
          * ceiling and the genuine-WR ~17 Msun floor to begin with.
+         * A second guard applies to that same escape hatch from the
+         * other side: very massive, near-zero-age main-sequence O stars
+         * (and, at low metallicity, massive stars that lose almost no
+         * mass over their whole lives) are hotter than 50000 K while
+         * their surfaces are still essentially primordial -- surface H
+         * mass fraction ~0.7-0.75, and C > N, so the log(Teff) check
+         * alone would call them WC. A star with surface H mass fraction
+         * above 0.6 is therefore never WNE/WC: it is an ordinary star
+         * wherever the ordinary-star grids can cover it (log(Teff) up
+         * to the hotter of 50000 K and normalLogTeffMax, e.g. 55000 K
+         * for TLUSTY_O), and an H-rich WNL star (WNLH60) above that --
+         * matching the WNh spectra observed for the most massive
+         * main-sequence stars, and the only chained grids that reach
+         * such temperatures for an H-rich star. Taking the hotter of
+         * the two as the ceiling means this guard can only ever remove
+         * stars from the WR grids below it, never add any.
+         *
          * Checked sequentially:
          *   1) Mass < 5 Msun: not a Wolf-Rayet star at all
          *      (WRType::None) -- see the mass-floor discussion above.
-         *   2) Surface He mass fraction in [0.4, 0.9] and log(Teff)
+         *   2) Surface H mass fraction > 0.6: WRType::None if log(Teff)
+         *      <= max(log10(50000 K), normalLogTeffMax) (just
+         *      log10(50000 K) if normalLogTeffMax is NaN); otherwise
+         *      WRType::WNLH60 if log(Teff) is within wnlTeffRanges[2];
+         *      otherwise (hotter than even the WNLH60 grid, or that
+         *      grid's range unknown) falls through to step 3, i.e. the
+         *      classification this guard was added in front of. See
+         *      the H-rich guard discussion above.
+         *   3) Surface He mass fraction in [0.4, 0.9] and log(Teff)
          *      within the log(Teff) range of the WNL bucket implied by
          *      surface H mass fraction (< 0.3 for WNLH20; [0.3, 0.5]
          *      for WNLH40; > 0.5 for WNLH60, per wnlTeffRanges[0/1/2]
@@ -364,19 +394,20 @@ namespace specsyn
          *      retain a substantial hydrogen envelope. If the He mass
          *      fraction condition holds but the log(Teff) gate does
          *      not (see this function's own comment above for why that
-         *      can happen), falls through to step 3 rather than
+         *      can happen), falls through to step 4 rather than
          *      returning here.
-         *   3) log(Teff) > log10(50000 K): WRType::WNE if surface C
+         *   4) log(Teff) > log10(50000 K): WRType::WNE if surface C
          *      mass fraction < surface N mass fraction
          *      (nitrogen-sequence, hydrogen-free), else WRType::WC.
          *      Georgy et al. 2012 further split the WC case into WC,
          *      WO, and WNC subtypes; PoWR has no spectral models for
          *      WO or WNC, so all three are lumped into WC here.
-         *   4) Otherwise: WRType::None.
+         *   5) Otherwise: WRType::None.
          */
         [[nodiscard]] static auto getWRType(
             const Specsyn::StarData& props,
-            const std::array<std::pair<double, double>, 3>& wnlTeffRanges) -> WRType;
+            const std::array<std::pair<double, double>, 3>& wnlTeffRanges,
+            double normalLogTeffMax) -> WRType;
 
         /**
          * @brief Which WR subtype this library's models are for
@@ -406,6 +437,21 @@ namespace specsyn
         void setWNLTeffRanges(const std::array<std::pair<double, double>, 3>& ranges)
         {
             wnlTeffRanges_ = ranges;
+        }
+
+        /**
+         * @brief Tell this library the highest log(Teff) covered by the chained ordinary-star libraries
+         * @param logTeffMax See getWRType's own normalLogTeffMax parameter
+         * @details
+         * Called by SpecsynLibChained alongside setWNLTeffRanges(),
+         * for the same reason: this library's own spec() must call
+         * getWRType with the same value classifyGridType uses. See
+         * normalLogTeffMax_'s own comment for what happens when this is
+         * never called.
+         */
+        void setNormalLogTeffMax(const double logTeffMax)
+        {
+            normalLogTeffMax_ = logTeffMax;
         }
 
         /**
@@ -530,6 +576,20 @@ namespace specsyn
             {std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::quiet_NaN()},
             {std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::quiet_NaN()},
         }};
+
+        /**
+         * @brief The highest log(Teff) covered by any chained ordinary-star library, as known to this instance
+         * @details
+         * See getWRType's own normalLogTeffMax parameter for how this
+         * is used. quiet_NaN() by default -- a standalone SpecsynLibWR
+         * (e.g. in this class's own unit tests) has no sibling
+         * ordinary-star library to know about, so getWRType then falls
+         * back on log10(50000 K) -- until SpecsynLibChained overwrites
+         * it via setNormalLogTeffMax() with the real ceiling across
+         * every chained ordinary-star library, exactly as it does for
+         * wnlTeffRanges_ (see its own comment).
+         */
+        double normalLogTeffMax_ = std::numeric_limits<double>::quiet_NaN();
     };
 
 } // namespace specsyn

@@ -472,18 +472,41 @@ namespace specsyn
     template <OOBPolicy Policy>
     auto SpecsynLibWR<Policy>::getWRType(
         const Specsyn::StarData& props,
-        const std::array<std::pair<double, double>, 3>& wnlTeffRanges) -> WRType
+        const std::array<std::pair<double, double>, 3>& wnlTeffRanges,
+        const double normalLogTeffMax) -> WRType
     {
         // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- StarData is a fixed-size std::array, and every index used here is compile-time-known
         const double heSurf = props[static_cast<size_t>(tracks::FieldIdx::heSurf)];
+        const double hSurf = props[static_cast<size_t>(tracks::FieldIdx::hSurf)];
         const double logTeff = props[static_cast<size_t>(tracks::FieldIdx::logTe)];
         const double mass = props[static_cast<size_t>(tracks::FieldIdx::mass)];
         constexpr double massMin = 5.0; // Msun -- see this function's own comment
         if (mass < massMin) { return WRType::None; }
 
+        // Hydrogen-rich stars (X > 0.6) are never WNE/WC -- see this
+        // function's own comment. Below the hotter of 50,000 K and the
+        // normal grids' own log(Teff) ceiling they are ordinary stars;
+        // above it, H-rich WNL stars (always the H60 bucket, since
+        // X > 0.6 > 0.5), if that bucket's own grid covers them
+        constexpr double logTeffHotMin = 4.6989700043360187; // log10(50000)
+        constexpr double hRichMin = 0.6;
+        if (hSurf > hRichMin)
+        {
+            const double ceiling = std::isnan(normalLogTeffMax) ?
+                logTeffHotMin : std::max(logTeffHotMin, normalLogTeffMax);
+            if (logTeff <= ceiling) { return WRType::None; }
+            const auto [h60Min, h60Max] = wnlTeffRanges.at(2);
+            if (!std::isnan(h60Min) && logTeff >= h60Min && logTeff <= h60Max)
+            {
+                return WRType::WNLH60;
+            }
+            // Hotter than even the H60 grid (or its range is unknown):
+            // fall through to the checks below, i.e. the pre-existing
+            // classification, rather than inventing a new outcome
+        }
+
         if (heSurf >= 0.4 && heSurf <= 0.9)
         {
-            const double hSurf = props[static_cast<size_t>(tracks::FieldIdx::hSurf)];
             std::size_t idx = 0;
             WRType candidate = WRType::WNLH20;
             if (hSurf < 0.3) { idx = 0; candidate = WRType::WNLH20; }
@@ -503,7 +526,6 @@ namespace specsyn
             // this He window could still genuinely be a WC/WO star.
         }
 
-        constexpr double logTeffHotMin = 4.6989700043360187; // log10(50000)
         if (logTeff > logTeffHotMin)
         {
             const double cSurf = props[static_cast<size_t>(tracks::FieldIdx::cSurf)];
@@ -552,7 +574,7 @@ namespace specsyn
     {
         // Step 1: a WRType mismatch means this library's spectra don't
         // apply to this star at all
-        if (getWRType(props, wnlTeffRanges_) != type_)
+        if (getWRType(props, wnlTeffRanges_, normalLogTeffMax_) != type_)
         {
             return SpecsynLib<Policy>::outOfBoundsResult(
                 "SpecsynLibWR: star's WRType does not match this library's type");

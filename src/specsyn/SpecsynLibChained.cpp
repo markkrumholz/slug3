@@ -381,6 +381,8 @@ namespace specsyn
          * @param loggMin Per-GridType log(g) minimums; see logTeffMax
          * @param wnlTeffRanges See SpecsynLibWR::getWRType's own
          *   wnlTeffRanges parameter, which this is simply forwarded to
+         * @param normalLogTeffMax See SpecsynLibWR::getWRType's own
+         *   normalLogTeffMax parameter, which this is simply forwarded to
          * @returns The GridType whose clamp spec() should apply to props
          * @details
          * A Wolf-Rayet star (per SpecsynLibWR::getWRType) is always
@@ -418,9 +420,10 @@ namespace specsyn
             const std::array<double, gridTypeCount>& logTeffMax,
             const std::array<double, gridTypeCount>& loggMin,
             const std::array<double, gridTypeCount>& loggMax,
-            const std::array<std::pair<double, double>, 3>& wnlTeffRanges) -> GridType
+            const std::array<std::pair<double, double>, 3>& wnlTeffRanges,
+            const double normalLogTeffMax) -> GridType
         {
-            if (SpecsynLibWR<OOBPolicy::raise>::getWRType(props, wnlTeffRanges) !=
+            if (SpecsynLibWR<OOBPolicy::raise>::getWRType(props, wnlTeffRanges, normalLogTeffMax) !=
                 SpecsynLibWR<OOBPolicy::raise>::WRType::None)
             {
                 return GridType::wrGrid;
@@ -488,7 +491,8 @@ namespace specsyn
             {std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::quiet_NaN()},
             {std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::quiet_NaN()},
             {std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::quiet_NaN()},
-        }})
+        }}),
+        normalLogTeffMax_(std::numeric_limits<double>::quiet_NaN())
         // fehMin_/fehMax_/loggLibMin_/loggLibMax_/libNames_ each
         // default-construct to nGridType empty vectors, which is
         // exactly what they need to start as -- updateFeHRanges()/
@@ -606,6 +610,17 @@ namespace specsyn
         // above are.
         for (const auto& lib : allLibs) { updateWNLTeffRanges(*lib, wnlTeffRanges_); }
 
+        // normalLogTeffMax_, likewise unconditionally (regardless of
+        // tClamp) -- see its own comment. Widens a scratch per-GridType
+        // range rather than logTeffMin_/logTeffMax_ themselves, since
+        // those must stay at quiet_NaN() when tClamp is false.
+        {
+            auto scratchMin = filledArray<nGridType>(std::numeric_limits<double>::quiet_NaN());
+            auto scratchMax = filledArray<nGridType>(std::numeric_limits<double>::quiet_NaN());
+            for (const auto& lib : allLibs) { updateLogTeffRange(*lib, scratchMin, scratchMax); }
+            normalLogTeffMax_ = scratchMax[static_cast<std::size_t>(GridType::normalGrid)]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- normalGrid < nGridType by construction
+        }
+
         // Sort every library, still in its own original relative
         // order within spectraName, into whichever of wrLibs_/wdLibs_/
         // normalLibs_ matches its own already-known GridType, carrying
@@ -657,6 +672,7 @@ namespace specsyn
             if (auto* wr = dynamic_cast<SpecsynLibWR<OOBPolicy::coerce>*>(lib.get()))
             {
                 wr->setWNLTeffRanges(wnlTeffRanges_);
+                wr->setNormalLogTeffMax(normalLogTeffMax_);
             }
         }
     }
@@ -786,7 +802,7 @@ namespace specsyn
     auto SpecsynLibChained::spec(const StarData& props, const double feh) const -> std::vector<double>
     {
         const double rawLogg = getSAandLogg(props).second;
-        const auto type = classifyGridType(props, rawLogg, logTeffMin_, logTeffMax_, loggMin_, loggMax_, wnlTeffRanges_);
+        const auto type = classifyGridType(props, rawLogg, logTeffMin_, logTeffMax_, loggMin_, loggMax_, wnlTeffRanges_, normalLogTeffMax_);
         const auto& chain = chainFor(type);
 
         if (chain.empty())
