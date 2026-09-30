@@ -166,7 +166,8 @@ namespace specsyn
          * at all, so that alone is grounds for the OOB policy. Then
          * derives the (FeH, logRt, logTeff) point this star maps to --
          * D_infinity by linear interpolation on dInf_, a wind velocity
-         * from the star's luminosity and mass-loss rate, and the
+         * from the user-selected WR wind model (controls().winds()->
+         * vWindWR(), see computeRawLogRt()), and the
          * transformed radius from that wind velocity, D_infinity, and
          * the star's radius (Todt et al. 2015, eq. 2, one of the PoWR
          * references) -- and checks that point against FeH_ and
@@ -485,15 +486,27 @@ namespace specsyn
          * @param props Stellar properties; see spec()'s own props parameter
          * @param feh [Fe/H] value of the star; needed to look up D_infinity
          * @return The star's raw (unclamped, possibly outside logRt_'s
-         *   own range) log(R_t), by Todt et al. 2015, eq. 2
+         *   own range) log(R_t), by Todt et al. 2015, eq. 2 -- or
+         *   logRt_.front(), the grid's own lowest log(R_t), if the
+         *   wind velocity is zero (see @details)
          * @details
          * Factored out of spec() (which calls this, then moves the
          * result to the nearest populated logRt_ value) so specForce()
          * can reuse the exact same derivation without duplicating it --
          * see spec()'s own implementation comment for the full physical
          * derivation this performs (D_infinity by interpolation on
-         * dInf_, wind velocity from luminosity and mass-loss rate, then
-         * the transformed radius itself).
+         * dInf_, wind velocity, then the transformed radius itself).
+         *
+         * The wind velocity comes from controls().winds()->vWindWR(),
+         * i.e. whichever WR wind model the user selected via
+         * controls().wrWindModel(). A null controls().winds() (possible
+         * from Python, by setting SimControls.winds to None) is treated
+         * as zero wind velocity, the same as WRwindModel::none_. Since
+         * R_t scales as v_wind^(2/3), zero wind velocity would make
+         * log(R_t) -infinity (or NaN, if mdot is also zero), so that
+         * case instead returns logRt_.front() directly; the caller then
+         * moves it to the nearest populated grid value exactly as it
+         * would any other raw log(R_t).
          */
         [[nodiscard]] auto computeRawLogRt(const Specsyn::StarData& props, double feh) const -> double;
 

@@ -28,6 +28,8 @@
  * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
+#include "../../src/feedback/FeedbackCommons.hpp"
+#include "../../src/feedback/Winds.hpp"
 #include "../../src/io/SimControls.hpp"
 #include "../../src/specsyn/SpecsynLibWR.hpp"
 #include "../../src/tracks/TrackCommons.hpp"
@@ -39,6 +41,8 @@
 #include <cstddef>
 #include <iostream>
 #include <limits>
+#include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -53,10 +57,32 @@ namespace
     const std::string wnlH60SpectraName = "POWR_WNL_H60_test";
     constexpr double solarLuminosity = utils::Lsun;
 
+    // Build a SimControls whose winds() uses the given WR wind model
+    // (see feedback::Winds::vWindWR()). SimControls is neither copyable
+    // nor movable, and a Winds holds a live reference back to it, so
+    // each one is built in place, as a function-local static, rather
+    // than returned by value.
+    template <feedback::WRwindModel Model>
+    auto controlsWithWinds() -> const io::SimControls&
+    {
+        static io::SimControls controls;
+        if (controls.winds() == nullptr)
+        {
+            controls.setWRWindModel(Model);
+            controls.setWinds(std::make_unique<feedback::Winds>(controls));
+        }
+        return controls;
+    }
+
     // Every SpecsynLibWR constructor call in this file now needs an
     // explicit controls argument -- see testSpecsynLib.cpp's own
-    // identical comment on testControls for why.
-    const io::SimControls testControls;
+    // identical comment on testControls for why. Uses
+    // WRwindModel::lOverc_, the single-scattering wind velocity
+    // (mdot * vWind = L / c) that every logRt derivation quoted in this
+    // file's own tests (and data/tools/spectra/make_powr_test_fixture.py's
+    // own derivation notes) assumes -- see testRawLogRtWindModels() for
+    // the other models.
+    const io::SimControls& testControls = controlsWithWinds<feedback::WRwindModel::lOverc_>();
 
     /**
      * @brief Build a StarData for a Wolf-Rayet star
@@ -613,6 +639,125 @@ static auto testNWlOnly() -> int
     return 0;
 }
 
+namespace
+{
+    // spec()'s out-of-bounds message for a star outside the grid's
+    // logTeff range reports the raw (pre-snapping) logRt that
+    // computeRawLogRt() derived -- the only place that private value
+    // is observable from outside the class. Returns nullopt if spec()
+    // does not throw, or its message has no "logRt = " field.
+    auto rawLogRtFromOOBMessage(
+        const specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise>& lib,
+        const specsyn::Specsyn::StarData& props) -> std::optional<double>
+    {
+        try
+        {
+            [[maybe_unused]] const auto result = lib.spec(props, -0.5);
+        }
+        catch (const std::runtime_error& e)
+        {
+            const std::string msg = e.what();
+            const std::string key = "logRt = ";
+            const auto pos = msg.find(key);
+            if (pos == std::string::npos) { return std::nullopt; }
+            return std::stod(msg.substr(pos + key.size()));
+        }
+        return std::nullopt;
+    }
+} // namespace
+
+// computeRawLogRt() must take its wind velocity from whichever model
+// controls().winds() selects, and floor at the grid's own lowest logRt
+// (0.5 for POWR_WNE_test) when that velocity is zero -- via either
+// WRwindModel::none_ or a null winds() -- rather than returning -inf
+// or NaN. Uses testSpecTeffGridBoundsThrow's own star (M = 20 Msun,
+// L = 10^5.0 Lsun, Teff = 10^6.0 K, Mdot = 1e-4 Msun/yr), whose logTeff
+// falls outside the grid so spec() throws and reports its raw logRt
+// (see rawLogRtFromOOBMessage()). The l_over_c and nugis_lamers_00
+// expected values were computed independently (same formulas, GSL
+// constants, and this fixture's dinf = 1): -3.371549 (vWind = 20.3
+// km/s) and -1.749066 (vWind clamped to 5500 km/s) respectively.
+static auto testRawLogRtWindModels() -> int
+{
+    const io::SimControls nullWindsControls; // winds() is null
+    struct Case
+    {
+        const char* label_;
+        const io::SimControls* controls_;
+        double expected_;
+    };
+    const std::array<Case, 4> cases{ {
+        { "null winds()", &nullWindsControls, 0.5 },
+        { "none", &controlsWithWinds<feedback::WRwindModel::none_>(), 0.5 },
+        { "l_over_c", &controlsWithWinds<feedback::WRwindModel::lOverc_>(), -3.371549 },
+        { "nugis_lamers_00", &controlsWithWinds<feedback::WRwindModel::nugisLamers00_>(), -1.749066 },
+    } };
+
+    const auto props = makeWRStarData(20.0, 5.0, 6.0, 1e-4);
+    int result = 0;
+    for (const auto& c : cases)
+    {
+        const specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise> lib(
+            spectraName, -3.0, 1.0, registryName, 0.0, 0.0, 0, *c.controls_);
+        const auto rawLogRt = rawLogRtFromOOBMessage(lib, props);
+        if (!rawLogRt.has_value())
+        {
+            std::cerr << "testSpecsynLibWR: testRawLogRtWindModels (" << c.label_
+                << "): spec() did not throw with a logRt in its message\n";
+            result = 1;
+            continue;
+        }
+        // 1e-5 absorbs the 6 decimal places std::to_string gives in
+        // spec()'s own message
+        if (!std::isfinite(rawLogRt.value()) ||
+            std::abs(rawLogRt.value() - c.expected_) > 1e-5)
+        {
+            std::cerr << "testSpecsynLibWR: testRawLogRtWindModels (" << c.label_
+                << "): raw logRt = " << rawLogRt.value() << ", expected "
+                << c.expected_ << "\n";
+            result = 1;
+        }
+    }
+    return result;
+}
+
+// End to end: an in-grid WNE star (testSpecWNESuccess's own) with zero
+// wind velocity -- via a null winds() or WRwindModel::none_ -- must
+// still get a full, finite spectrum, since computeRawLogRt() floors its
+// logRt at the grid's own lowest value rather than producing NaN
+static auto testSpecZeroWindSucceeds() -> int
+{
+    const io::SimControls nullWindsControls; // winds() is null
+    int result = 0;
+    for (const auto* controls : { &nullWindsControls,
+            &controlsWithWinds<feedback::WRwindModel::none_>() })
+    {
+        const specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise> lib(
+            spectraName, -3.0, 1.0, registryName, 0.0, 0.0, 0, *controls);
+        const auto props = makeWRStarData(20.0, 5.7, 4.7, 3e-5);
+        std::vector<double> spectrum;
+        try
+        {
+            spectrum = lib.spec(props, -0.5);
+        }
+        catch (const std::exception& e)
+        {
+            std::cerr << "testSpecsynLibWR: testSpecZeroWindSucceeds: unexpected "
+                "exception from spec(): " << e.what() << "\n";
+            result = 1;
+            continue;
+        }
+        if (spectrum.size() != lib.wl().size() ||
+            !std::ranges::all_of(spectrum, [](const double v) { return std::isfinite(v); }))
+        {
+            std::cerr << "testSpecsynLibWR: testSpecZeroWindSucceeds: expected a "
+                "full-size, all-finite spectrum\n";
+            result = 1;
+        }
+    }
+    return result;
+}
+
 auto testSpecsynLibWR() -> int
 {
     int result = 0;
@@ -630,5 +775,7 @@ auto testSpecsynLibWR() -> int
     result += testGetWRTypeOutOfRangeFallsThroughToNone();
     result += testGetWRTypeHRichGuard();
     result += testNWlOnly();
+    result += testRawLogRtWindModels();
+    result += testSpecZeroWindSucceeds();
     return result;
 }
