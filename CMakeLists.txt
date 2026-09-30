@@ -245,6 +245,7 @@ add_executable(slugTestCore
     src/extinct/Extinct.cpp
     src/nebular/Nebular.cpp
     src/io/SimControls.cpp
+    src/feedback/Winds.cpp
     src/interpolation/Mesh2DGrid.cpp
     src/pdfs/PDFFileParser.cpp
     src/pdfs/PDFSegment.cpp
@@ -301,6 +302,7 @@ add_executable(slugTestCoreFull
     src/extinct/Extinct.cpp
     src/nebular/Nebular.cpp
     src/io/SimControls.cpp
+    src/feedback/Winds.cpp
     src/interpolation/Mesh2DGrid.cpp
     src/pdfs/PDFFileParser.cpp
     src/pdfs/PDFSegment.cpp
@@ -364,6 +366,7 @@ add_executable(slugTestIo
     src/extinct/Extinct.cpp
     src/nebular/Nebular.cpp
     src/io/SimControls.cpp
+    src/feedback/Winds.cpp
     src/interpolation/Mesh2DGrid.cpp
     src/pdfs/PDFFileParser.cpp
     src/pdfs/PDFSegment.cpp
@@ -404,6 +407,7 @@ add_executable(slugTestNebular
     src/extinct/Extinct.cpp
     src/nebular/Nebular.cpp
     src/io/SimControls.cpp
+    src/feedback/Winds.cpp
     src/interpolation/Mesh2DGrid.cpp
     src/pdfs/PDFFileParser.cpp
     src/pdfs/PDFSegment.cpp
@@ -507,6 +511,7 @@ add_executable(slugTestSpecsyn
     src/extinct/Extinct.cpp
     src/nebular/Nebular.cpp
     src/io/SimControls.cpp
+    src/feedback/Winds.cpp
     src/interpolation/Mesh2DGrid.cpp
     src/phot/FilterCollection.cpp
     src/phot/VegaSpectrum.cpp
@@ -564,6 +569,7 @@ pybind11_add_module(slugPython
     src/pybind/BindSimGalaxy.cpp
     src/pybind/BindYieldChannel.cpp
     src/pybind/BindYields.cpp
+    src/pybind/BindWinds.cpp
     src/core/Cluster.cpp
     src/core/Galaxy.cpp
     src/core/SimCluster.cpp
@@ -571,6 +577,7 @@ pybind11_add_module(slugPython
     src/extinct/Extinct.cpp
     src/nebular/Nebular.cpp
     src/io/SimControls.cpp
+    src/feedback/Winds.cpp
     src/io/OutputManager.cpp
     src/io/OutputManagerAscii.cpp
     src/io/OutputManagerH5.cpp

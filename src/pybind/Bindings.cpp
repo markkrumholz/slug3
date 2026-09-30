@@ -30,6 +30,7 @@ PYBIND11_MODULE(_slug, m, py::mod_gil_not_used()) {
     bindExtinct(m);
     bindYieldChannel(m);
     bindYields(m);
+    bindWinds(m);
     bindNebular(m);
     bindSpecsyn(m);
     bindCluster(m);

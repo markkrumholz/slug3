@@ -41,10 +41,10 @@ namespace feedback
          * @brief Construct a Winds object
          * @param controls Simulation controls; stored live for the
          *   rest of this object's lifetime (see controls_'s own
-         *   comment). Not yet read by anything -- this is where the
-         *   controls selecting among wind-model choices will
-         *   eventually be read from, once more than one model exists.
-         *   Must outlive this Winds.
+         *   comment), and read on every call for the choice of wind
+         *   model (e.g. controls.wrWindModel(), see vWindWR()), so a
+         *   change to it takes effect immediately. Must outlive this
+         *   Winds.
          */
         explicit Winds(const io::SimControls& controls) :
             controls_(controls) { }
@@ -75,11 +75,24 @@ namespace feedback
          *   specsyn::SpecsynLibWR::getWRType); this method does not
          *   itself check that
          * @return The star's WR wind terminal velocity, in cm/s,
-         *   clamped to the range spanned by Nugis & Lamers's own
-         *   calibration sample, 740-5500 km/s (see @details)
+         *   computed by whichever model controls_.wrWindModel()
+         *   selects (see @details)
          * @details
-         * Implements the empirical wind-velocity prescription of
-         * Nugis & Lamers (2000), A&A, 360, 227
+         * The model used is read live from controls_.wrWindModel()
+         * on every call:
+         *   - WRwindModel::none_: no WR wind at all; returns exactly 0.
+         *   - WRwindModel::lOverc_: the single-scattering momentum
+         *     limit, v_wind = L / (mdot c), with L the star's
+         *     luminosity and mdot its mass-loss rate -- the same
+         *     velocity SpecsynLibWR uses to derive a star's
+         *     transformed radius (see its computeRawLogRt()). Not
+         *     clamped.
+         *   - WRwindModel::nugisLamers00_ (the default): as described
+         *     below.
+         *
+         * WRwindModel::nugisLamers00_ implements the empirical
+         * wind-velocity prescription of Nugis & Lamers (2000), A&A,
+         * 360, 227
          * (https://ui.adsabs.harvard.edu/abs/2000A%26A...360..227N/abstract).
          * The star's own terminal wind speed v_wind is expressed
          * relative to its core escape speed

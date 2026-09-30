@@ -20,13 +20,16 @@
  * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
+#include "../../src/feedback/FeedbackCommons.hpp"
 #include "../../src/feedback/Winds.hpp"
 #include "../../src/io/SimControls.hpp"
 #include "../../src/tracks/TrackCommons.hpp"
 #include "../../src/utils/MiscUtils.hpp"
 #include "testWinds.hpp"
+#include <array>
 #include <cstddef>
 #include <iostream>
+#include <stdexcept>
 #include <string_view>
 
 namespace
@@ -38,6 +41,8 @@ namespace
 
     /**
      * @brief Build a StarData for a Wolf-Rayet wind velocity test
+     * @details
+     * mdot defaults to 0, since only the l_over_c model reads it
      */
     auto makeStarData(
         const double mass,
@@ -46,10 +51,12 @@ namespace
         const double hSurf,
         const double heSurf,
         const double cSurf,
-        const double nSurf) -> specsyn::Specsyn::StarData
+        const double nSurf,
+        const double mdot = 0.0) -> specsyn::Specsyn::StarData
     {
         specsyn::Specsyn::StarData props{};
         props.at(static_cast<std::size_t>(tracks::FieldIdx::mass)) = mass;
+        props.at(static_cast<std::size_t>(tracks::FieldIdx::mdot)) = mdot;
         props.at(static_cast<std::size_t>(tracks::FieldIdx::logL)) = logL;
         props.at(static_cast<std::size_t>(tracks::FieldIdx::logTe)) = logTeff;
         props.at(static_cast<std::size_t>(tracks::FieldIdx::hSurf)) = hSurf;
@@ -188,6 +195,134 @@ static auto testVWindWRClampToUpper() -> int
     return 0;
 }
 
+// The default wind model, for a SimControls that never set one, must
+// be nugis_lamers_00 -- every test above relies on this, since
+// testControls is default-constructed
+static auto testWRWindModelDefault() -> int
+{
+    if (testControls.wrWindModel() != feedback::WRwindModel::nugisLamers00_)
+    {
+        std::cerr << "testWRWindModelDefault: default wrWindModel() is '"
+            << feedback::wrWindModelToString(testControls.wrWindModel())
+            << "', expected 'nugis_lamers_00'\n";
+        return 1;
+    }
+    return 0;
+}
+
+// WRwindModel::none_ must give exactly zero, for any star -- including
+// one the nugis_lamers_00 model would clamp up to its 740 km/s floor,
+// so this also checks the clamp is not applied to the none_ case
+static auto testVWindWRNone() -> int
+{
+    io::SimControls controls;
+    controls.setWRWindModel(feedback::WRwindModel::none_);
+    const feedback::Winds winds(controls);
+    int result = 0;
+    for (const auto& props : {
+            makeStarData(19.2440, 5.90241, 5.33139, 0.0, 0.98412906, 0.00017037, 0.01056297, 2e-5),
+            makeStarData(200.0, 7.1, 4.7, 0.033, 0.944, 0.0, 0.01, 1e-4) })
+    {
+        const double actual = winds.vWindWR(props);
+        if (actual != 0.0)
+        {
+            std::cerr << "testVWindWRNone: vWindWR() = " << actual << " cm/s, expected exactly 0\n";
+            result = 1;
+        }
+    }
+    return result;
+}
+
+// WRwindModel::lOverc_ must give v = L / (mdot c), unclamped -- the
+// expected value (338.47 km/s, well below nugis_lamers_00's own 740
+// km/s floor) was computed independently from logL = 5.7, mdot = 3e-5
+// Msun/yr, and the same GSL constants Winds.cpp uses
+static auto testVWindWRLOverC() -> int
+{
+    io::SimControls controls;
+    controls.setWRWindModel(feedback::WRwindModel::lOverc_);
+    const feedback::Winds winds(controls);
+    const auto props = makeStarData(20.0, 5.7, 4.7, 0.0, 0.98, 0.0, 0.01, 3e-5);
+
+    constexpr double expectedCgs = 3.3846722723e7; // 338.47 km/s
+    return checkApproxEqual(winds.vWindWR(props), expectedCgs, "testVWindWRLOverC");
+}
+
+// The wind model is read live from controls_ on every call, so
+// changing it on the SimControls must change what the very same Winds
+// object returns next, with no rebuild. Uses the same star as
+// testVWindWRWNEUnclamped (plus mdot = 2e-5 Msun/yr, which only
+// l_over_c reads), for which all three models give clearly distinct
+// answers: 0, 809.13 km/s (l_over_c), and 1000.35 km/s
+// (nugis_lamers_00). Cycles through them twice, so switching back to
+// an earlier model is checked too.
+static auto testVWindWRModelSwitchLive() -> int
+{
+    io::SimControls controls;
+    const feedback::Winds winds(controls);
+    const auto props = makeStarData(
+        19.2440, 5.90241, 5.33139, 0.0, 0.98412906, 0.00017037, 0.01056297, 2e-5);
+
+    struct Case
+    {
+        feedback::WRwindModel model_;
+        double expected_; // cm/s
+    };
+    const std::array<Case, 6> cases{ {
+        { feedback::WRwindModel::none_, 0.0 },
+        { feedback::WRwindModel::lOverc_, 8.0912921551e7 },
+        { feedback::WRwindModel::nugisLamers00_, 1.0003508346e8 },
+        { feedback::WRwindModel::lOverc_, 8.0912921551e7 },
+        { feedback::WRwindModel::none_, 0.0 },
+        { feedback::WRwindModel::nugisLamers00_, 1.0003508346e8 },
+    } };
+
+    int result = 0;
+    for (const auto& c : cases)
+    {
+        controls.setWRWindModel(c.model_);
+        const double actual = winds.vWindWR(props);
+        const bool ok = (c.expected_ == 0.0) ? (actual == 0.0) :
+            utils::approxEqual(actual, c.expected_, relTol * c.expected_);
+        if (!ok)
+        {
+            std::cerr << "testVWindWRModelSwitchLive: with wrWindModel() = '"
+                << feedback::wrWindModelToString(c.model_) << "', vWindWR() = "
+                << actual << " cm/s, expected " << c.expected_ << " cm/s\n";
+            result = 1;
+        }
+    }
+    return result;
+}
+
+// wrWindModelFromString()/wrWindModelToString() must round-trip every
+// model through its input-deck name, and reject any other name
+static auto testWRWindModelStrings() -> int
+{
+    int result = 0;
+    for (const auto model : { feedback::WRwindModel::none_,
+            feedback::WRwindModel::lOverc_, feedback::WRwindModel::nugisLamers00_ })
+    {
+        if (feedback::wrWindModelFromString(feedback::wrWindModelToString(model)) != model)
+        {
+            std::cerr << "testWRWindModelStrings: '" << feedback::wrWindModelToString(model)
+                << "' did not round-trip\n";
+            result = 1;
+        }
+    }
+    for (const std::string_view bad : { "", "None", "nugis_lamers", "lOverc" })
+    {
+        try
+        {
+            static_cast<void>(feedback::wrWindModelFromString(bad));
+            std::cerr << "testWRWindModelStrings: '" << bad << "' was accepted\n";
+            result = 1;
+        }
+        catch (const std::invalid_argument&) { /* expected */ } // NOLINT(bugprone-empty-catch) -- the throw is the expected outcome
+    }
+    return result;
+}
+
 // Winds retains a live reference to the SimControls it was
 // constructed with, matching Specsyn's/Extinct's/Yields's own
 // identical pattern -- checked here the same way
@@ -213,6 +348,11 @@ auto testWinds() -> int
     result += testVWindWRGammaEGreaterThanOne();
     result += testVWindWRClampToLower();
     result += testVWindWRClampToUpper();
+    result += testWRWindModelDefault();
+    result += testVWindWRNone();
+    result += testVWindWRLOverC();
+    result += testVWindWRModelSwitchLive();
+    result += testWRWindModelStrings();
     result += testWindsControlsAccessor();
     return result;
 }

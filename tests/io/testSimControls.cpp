@@ -7,6 +7,8 @@
  */
 
 #include "../src/elem/IsotopeTable.hpp"
+#include "../src/feedback/FeedbackCommons.hpp"
+#include "../src/feedback/Winds.hpp"
 #include "../src/io/SimControls.hpp"
 #include "../src/pdfs/PDF.hpp"
 #include "../src/pdfs/PDFSegment.hpp"
@@ -4068,6 +4070,153 @@ static auto testSimControlsFeedback() -> int
     return result > 0 ? 1 : 0;
 }
 
+// Verify readFeedback()'s parsing of feedback.wr_winds, that it always
+// builds winds() against this same SimControls, and setWinds()'s
+// ownership check
+static auto testSimControlsFeedbackWRWinds() -> int
+{
+    constexpr std::string_view baseDeck = "tests/core/assets/testGalaxy.in";
+    int result = 0;
+
+    auto makeDeck = [baseDeck](std::optional<toml::table> feedback) -> toml::table {
+        toml::table deck = toml::parse_file(baseDeck);
+        if (feedback.has_value()) { deck.insert("feedback", std::move(feedback.value())); }
+        return deck;
+    };
+
+    // winds() must be built, against *this, whether or not a
+    // [feedback] table was given at all
+    auto checkWinds = [&result](const io::SimControls& controls, const std::string_view label) {
+        if (controls.winds() == nullptr)
+        {
+            std::cerr << "testSimControls: feedbackWRWinds: " << label << ": winds() is null\n";
+            result = 1;
+        }
+        else if (&controls.winds()->controls() != &controls)
+        {
+            std::cerr << "testSimControls: feedbackWRWinds: " << label
+                << ": winds() was not built against this SimControls\n";
+            result = 1;
+        }
+    };
+
+    try
+    {
+        // No feedback.wr_winds: defaults to nugis_lamers_00
+        {
+            const io::SimControls controls(makeDeck(std::nullopt));
+            if (controls.wrWindModel() != feedback::WRwindModel::nugisLamers00_)
+            {
+                std::cerr << "testSimControls: feedbackWRWinds: expected nugis_lamers_00 by default, got '"
+                    << feedback::wrWindModelToString(controls.wrWindModel()) << "'\n";
+                result = 1;
+            }
+            checkWinds(controls, "no [feedback] table");
+        }
+
+        // Each valid name selects its own model, is not reported
+        // unused, and still builds winds() -- including alongside
+        // feedback.sn_mass_range, which must not stop wr_winds being read
+        const std::array<std::pair<std::string_view, feedback::WRwindModel>, 3> valid{ {
+            { "none", feedback::WRwindModel::none_ },
+            { "l_over_c", feedback::WRwindModel::lOverc_ },
+            { "nugis_lamers_00", feedback::WRwindModel::nugisLamers00_ },
+        } };
+        for (const bool withSNRange : { false, true })
+        {
+            for (const auto& [name, model] : valid)
+            {
+                toml::table feedbackTable{ { "wr_winds", name } };
+                if (withSNRange) { feedbackTable.insert("sn_mass_range", toml::array{ 8.0, 40.0 }); }
+                const io::SimControls controls(makeDeck(feedbackTable));
+                if (controls.wrWindModel() != model)
+                {
+                    std::cerr << "testSimControls: feedbackWRWinds: wr_winds = '" << name
+                        << "' gave wrWindModel() = '"
+                        << feedback::wrWindModelToString(controls.wrWindModel()) << "'\n";
+                    result = 1;
+                }
+                if (!controls.unusedKeys().empty())
+                {
+                    std::cerr << "testSimControls: feedbackWRWinds: wr_winds = '" << name
+                        << "' reported unused\n";
+                    result = 1;
+                }
+                checkWinds(controls, name);
+            }
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: feedbackWRWinds: valid-deck case threw: " << error.what() << "\n";
+        return 1;
+    }
+
+    // An unrecognized name, or a value that is not a string, must be
+    // rejected
+    const std::vector<std::pair<std::string_view, toml::table>> badDecks = {
+        { "unrecognized name", toml::table{ { "wr_winds", "nugis_lamers" } } },
+        { "wrong case", toml::table{ { "wr_winds", "None" } } },
+        { "not a string", toml::table{ { "wr_winds", 1.0 } } },
+    };
+    for (const auto& [label, feedbackTable] : badDecks)
+    {
+        try
+        {
+            const io::SimControls controls(makeDeck(feedbackTable));
+            std::cerr << "testSimControls: feedbackWRWinds: expected feedback.wr_winds ("
+                << label << ") to throw, but it did not\n";
+            result = 1;
+        }
+        catch (const std::exception&) { /* expected */ } // NOLINT(bugprone-empty-catch) -- the throw is the expected outcome
+    }
+
+    // setWinds(): rejects a Winds built against a different SimControls
+    // (leaving winds() unchanged), accepts one built against this one,
+    // and accepts nullptr to remove it
+    try
+    {
+        io::SimControls controls(makeDeck(std::nullopt));
+        const io::SimControls otherControls(makeDeck(std::nullopt));
+        const auto* const original = controls.winds().get();
+        try
+        {
+            controls.setWinds(std::make_unique<feedback::Winds>(otherControls));
+            std::cerr << "testSimControls: feedbackWRWinds: setWinds accepted a foreign Winds\n";
+            result = 1;
+        }
+        catch (const std::invalid_argument&) { /* expected */ } // NOLINT(bugprone-empty-catch) -- the throw is the expected outcome
+        if (controls.winds().get() != original)
+        {
+            std::cerr << "testSimControls: feedbackWRWinds: rejected setWinds call changed winds()\n";
+            result = 1;
+        }
+
+        auto replacement = std::make_unique<feedback::Winds>(controls);
+        const auto* const replacementPtr = replacement.get();
+        controls.setWinds(std::move(replacement));
+        if (controls.winds().get() != replacementPtr)
+        {
+            std::cerr << "testSimControls: feedbackWRWinds: setWinds did not install the new Winds\n";
+            result = 1;
+        }
+
+        controls.setWinds(nullptr);
+        if (controls.winds() != nullptr)
+        {
+            std::cerr << "testSimControls: feedbackWRWinds: setWinds(nullptr) did not remove winds()\n";
+            result = 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: feedbackWRWinds: setWinds case threw: " << error.what() << "\n";
+        result = 1;
+    }
+
+    return result > 0 ? 1 : 0;
+}
+
 // Verify Yields::hasYield(mass, feH, channel) and SimControls::hasSN(mass,
 // feH) against the synthetic gap_test ccsn model (masses 10-40 Msun,
 // whose 20 and 30 Msun yields are all zero at [Fe/H] = 0 -- see
@@ -4215,6 +4364,7 @@ auto testSimControls() -> int
     result += testSimControlsFracStochMass();
     result += testSimControlsYieldsHasYield();
     result += testSimControlsFeedback();
+    result += testSimControlsFeedbackWRWinds();
     result += testSimControlsHasSNFeH();
     return result;
 }
