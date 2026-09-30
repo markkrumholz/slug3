@@ -57,6 +57,18 @@ To put every metallicity on one common grid, this script:
   Synthesized masses are recorded in each group's
   ``synthesized_masses`` attribute.
 
+The source files' surface abundances are not always self-consistent:
+a few rows (mostly at abrupt transitions into the Wolf-Rayet phase)
+have negative abundances, X + Y > 1, or C + N + O > 1 - X - Y, and the
+Z = 0.0004 Padova files (modp0004.dat and mods0004.dat) start every
+track at X + Y = 1 exactly, leaving no room for their own metals. Every
+file's abundances are therefore cleaned (see clean_abundances) so that
+every row has non-negative abundances, 1 - X - Y > 0, and
+C + N + O <= 1 - X - Y. What this changed is recorded in each group's
+``abundance_rescale`` (the factor applied to every row's X and Y, 1.0
+unless the file is one of the two above), ``n_rows_floored``,
+``n_rows_xy_rescaled``, and ``n_rows_cno_rescaled`` attributes.
+
 Finally, any row whose age does not strictly exceed that of every
 previous row is dropped, since slug requires strictly increasing
 ages. Most such rows are padding at the ends of low-mass tracks, which
@@ -265,6 +277,117 @@ DROP_MASSES = (1.701,)
 # Surface abundance fields, which must never all be zero in a valid row
 ABUNDANCE_FIELDS = ('h_surf', 'he_surf', 'c_surf', 'n_surf', 'o_surf')
 
+# Source files whose surface H and He mass fractions leave no room for
+# metals: every track starts at X + Y = 1 exactly, despite the file's
+# own Z = 0.0004 (and its own nonzero C, N, and O). Every other file
+# starts at X + Y = 1 - Z, as it should. See clean_abundances.
+ABUNDANCE_OFFSET_FILES = ("modp0004.dat", "mods0004.dat")
+
+
+def clean_abundances(tracks, z_val, label, offset_file=False):
+    """Clean one file's surface abundances into a self-consistent set.
+
+    Parameters
+    ----------
+    tracks : list of (float, numpy.ndarray)
+        Tracks as returned by read_sb99_file; modified in place
+    z_val : float
+        Metallicity Z of the file the tracks were read from
+    label : str
+        Description of the file, used in messages
+    offset_file : bool
+        True if the file is one of ABUNDANCE_OFFSET_FILES, whose every
+        track starts at X + Y = 1 instead of 1 - Z (see Notes)
+
+    Returns
+    -------
+    dict
+        Provenance for the HDF5 group: ``abundance_rescale``, the
+        factor applied to every row's X and Y (1 - Z for an offset
+        file, else 1.0); and ``n_rows_floored``, ``n_rows_xy_rescaled``,
+        and ``n_rows_cno_rescaled``, the number of source rows changed
+        by steps 1, 2, and 4 below, respectively
+
+    Raises
+    ------
+    ValueError
+        If offset_file is True but some track does not start at exactly
+        X + Y = 1, i.e. the file no longer has the defect being
+        corrected -- the source data may have changed
+
+    Notes
+    -----
+    The source files are not always self-consistent: a few rows (mostly
+    at abrupt transitions into the Wolf-Rayet phase) have negative
+    abundances or X + Y > 1, and the files in ABUNDANCE_OFFSET_FILES
+    start every track at X + Y = 1, so that 1 - X - Y -- a star's
+    surface metallicity -- is zero or negative. Every row is cleaned by,
+    in order:
+
+    1. Flooring each negative abundance (X, Y, C, N, O) at 0.
+    2. If X + Y >= 1, rescaling X and Y (keeping X / Y fixed) so that
+       X + Y = 1 exactly.
+    3. Multiplying X and Y by 1 - Z -- for every row of an offset file,
+       and otherwise only for rows changed by step 2. For an offset
+       file this moves the ZAMS to X + Y = 1 - Z, like every other
+       file, with one common factor so each row's evolution relative to
+       the ZAMS (including genuine late-phase surface metal enrichment)
+       is preserved. Rows of other files not changed by step 2 already
+       have X + Y < 1 and are left alone, since they already start at
+       X + Y = 1 - Z.
+    4. If C + N + O > 1 - X - Y, rescaling C, N, and O (keeping their
+       ratios fixed) so that C + N + O = 1 - X - Y exactly.
+
+    Afterward every row has X, Y, C, N, O >= 0, 1 - X - Y > 0, and
+    C + N + O <= 1 - X - Y. Since each of these is a linear inequality
+    (or its strict version), any linear interpolation between cleaned
+    rows -- as synthesize_track does -- satisfies them too.
+    """
+    ab = [FIELDS.index(f) for f in ABUNDANCE_FIELDS]
+    xi, yi = ab[0], ab[1]
+    cno = ab[2:]
+
+    if offset_file:
+        for m, arr in tracks:
+            zams = arr[0, xi] + arr[0, yi]
+            if abs(zams - 1.0) > 1.0e-6:
+                raise ValueError(f"{label}: expected the track for mass {m} to "
+                                 f"start at X + Y = 1, found {zams}; the "
+                                 "source file may have changed, so the "
+                                 "abundance correction may no longer apply")
+
+    fac = 1.0 - z_val
+    n_floored = n_xy = n_cno = 0
+    for _, arr in tracks:
+        # Step 1: floor negative abundances at 0
+        neg = np.any(arr[:, ab] < 0.0, axis=1)
+        n_floored += int(neg.sum())
+        arr[:, ab] = np.maximum(arr[:, ab], 0.0)
+
+        # Step 2: rescale X + Y >= 1 to exactly 1, keeping X / Y fixed
+        xy = arr[:, xi] + arr[:, yi]
+        over = xy >= 1.0
+        n_xy += int(over.sum())
+        arr[over, xi] /= xy[over]
+        arr[over, yi] /= xy[over]
+
+        # Step 3: multiply X and Y by 1 - Z
+        scale = np.ones(arr.shape[0], dtype=bool) if offset_file else over
+        arr[scale, xi] *= fac
+        arr[scale, yi] *= fac
+
+        # Step 4: rescale C + N + O > 1 - X - Y down to exactly 1 - X - Y
+        zsurf = 1.0 - arr[:, xi] - arr[:, yi]
+        cno_sum = arr[:, cno].sum(axis=1)
+        high = cno_sum > zsurf
+        n_cno += int(high.sum())
+        arr[np.ix_(high, cno)] *= (zsurf[high] / cno_sum[high])[:, None]
+
+    return {'abundance_rescale': fac if offset_file else 1.0,
+            'n_rows_floored': n_floored,
+            'n_rows_xy_rescaled': n_xy,
+            'n_rows_cno_rescaled': n_cno}
+
 # Fields interpolated in log space when synthesizing a track; all
 # others are interpolated linearly
 LOG_FIELDS = ('age', 'mass')
@@ -400,7 +523,7 @@ def check_abundances(arr, label):
 
 
 def write_family_h5(out_path, descriptions, masses, rectified,
-                    verbose=False):
+                    cleaning, verbose=False):
     """Write one family of starburst99 tracks to an HDF5 file in slug format.
 
     Parameters
@@ -414,6 +537,10 @@ def write_family_h5(out_path, descriptions, masses, rectified,
         Common mass grid, as returned by rectify_mass_grids
     rectified : dict
         Rectified tracks, as returned by rectify_mass_grids
+    cleaning : dict
+        Mapping from metallicity Z to the provenance dict
+        clean_abundances returned for that metallicity's file; each of
+        its entries is stored as a group attribute of the same name
     verbose : bool
         If True, report any tracks from which rows were pruned
 
@@ -457,6 +584,8 @@ def write_family_h5(out_path, descriptions, masses, rectified,
             grp.attrs['field_names']        = FIELDS
             grp.attrs['description']        = descriptions[z_val]
             grp.attrs['synthesized_masses'] = np.array(synth, dtype=float)
+            for key, val in cleaning[z_val].items():
+                grp.attrs[key] = val
 
             grp.create_dataset('masses', data=masses)
             for m, p in zip(masses, pruned):
@@ -523,15 +652,26 @@ def main():
         else:
             if args.verbose:
                 print(f"Importing {', '.join(fnames)} -> {out_path}")
-            descriptions, tracks_by_z = {}, {}
+            descriptions, tracks_by_z, cleaning = {}, {}, {}
             for fname in fnames:
                 z_val = z_from_filename(fname)
                 descriptions[z_val], tracks_by_z[z_val] = read_sb99_file(
                     os.path.join(args.srcdir, fname))
+                cleaning[z_val] = clean_abundances(
+                    tracks_by_z[z_val], z_val, fname,
+                    offset_file=fname in ABUNDANCE_OFFSET_FILES)
+                if args.verbose:
+                    c = cleaning[z_val]
+                    print(f"  {fname}: X, Y scaled by "
+                          f"{c['abundance_rescale']}; rows with negative "
+                          f"abundances floored: {c['n_rows_floored']}; "
+                          f"X + Y rescaled: {c['n_rows_xy_rescaled']}; "
+                          f"C + N + O rescaled: {c['n_rows_cno_rescaled']}")
             masses, rectified = rectify_mass_grids(tracks_by_z,
                                                    verbose=args.verbose)
             fehs = write_family_h5(out_path, descriptions, masses,
-                                   rectified, verbose=args.verbose)
+                                   rectified, cleaning,
+                                   verbose=args.verbose)
 
         # Build the registry entry
         tab = tomlkit.table()
