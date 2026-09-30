@@ -137,6 +137,7 @@ add_executable(slug
     src/utils/HDF5Utils.cpp
     src/yields/YieldChannel.cpp
     src/yields/Yields.cpp
+    src/feedback/Winds.cpp
 )
 
 # Test executables
@@ -437,6 +438,54 @@ add_executable(slugTestNebular
     src/elem/DecayChain.cpp
     src/yields/Yields.cpp
 )
+# slugTestFeedback needs the same full SimControls dependency closure as
+# slugTestNebular above -- Winds only stores a live const io::SimControls&
+# (see Winds.hpp's own comment), but SimControls.hpp itself includes the
+# complete definitions of Specsyn/Extinct/Nebular/Tracks2D/Tracks3D/
+# FilterCollection/Yields (its own shared_ptr members need complete types
+# at ~SimControls(), which is defined inline in the header), so any target
+# that constructs or destroys a SimControls -- even a default-constructed
+# one, as in tests/feedback/testWinds.cpp -- needs all of them linked in.
+add_executable(slugTestFeedback
+    src/feedback/Winds.cpp
+    src/extinct/Extinct.cpp
+    src/nebular/Nebular.cpp
+    src/io/SimControls.cpp
+    src/interpolation/Mesh2DGrid.cpp
+    src/pdfs/PDFFileParser.cpp
+    src/pdfs/PDFSegment.cpp
+    src/pdfs/PDFSegmentDelta.cpp
+    src/pdfs/PDFSegmentExponential.cpp
+    src/pdfs/PDFSegmentLognormal.cpp
+    src/pdfs/PDFSegmentNormal.cpp
+    src/pdfs/PDFSegmentPowerlaw.cpp
+    src/pdfs/PDFSegmentSchechter.cpp
+    src/phot/FilterCollection.cpp
+    src/phot/VegaSpectrum.cpp
+    src/phot/FilterIdeal.cpp
+    src/phot/FilterTabulated.cpp
+    src/specsyn/SpecsynBlackbody.cpp
+    src/specsyn/Specsyn.cpp
+    src/specsyn/SpecsynUtils.cpp
+    src/specsyn/SpecsynLib.cpp
+    src/utils/GridBracket.cpp
+    src/specsyn/SpecsynLibNoWind.cpp
+    src/specsyn/SpecsynLib2D.cpp
+    src/specsyn/SpecsynLibWD.cpp
+    src/specsyn/SpecsynLibWR.cpp
+    src/specsyn/SpecsynLibChained.cpp
+    src/tracks/TrackUtils.cpp
+    src/tracks/Tracks2D.cpp
+    src/tracks/Tracks3D.cpp
+    src/utils/ParseUtils.cpp
+    tests/feedback/testFeedbackAll.cpp
+    tests/feedback/testWinds.cpp
+    src/utils/HDF5Utils.cpp
+    src/elem/IsotopeTable.cpp
+    src/yields/YieldChannel.cpp
+    src/elem/DecayChain.cpp
+    src/yields/Yields.cpp
+)
 add_executable(slugTestSpecsyn
     src/specsyn/SpecsynBlackbody.cpp
     src/specsyn/Specsyn.cpp
@@ -624,6 +673,9 @@ target_include_directories(slugTestIo SYSTEM PRIVATE src/extern/pcg-cpp/include 
 target_include_directories(slugTestNebular PRIVATE src)
 target_include_directories(slugTestNebular SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
 
+target_include_directories(slugTestFeedback PRIVATE src)
+target_include_directories(slugTestFeedback SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
+
 target_include_directories(slugTestSpecsyn PRIVATE src)
 target_include_directories(slugTestSpecsyn SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
 
@@ -644,6 +696,7 @@ target_include_directories(slugTestCore SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestCoreFull SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestIo SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestNebular SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
+target_include_directories(slugTestFeedback SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugTestSpecsyn SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 target_include_directories(slugPython SYSTEM PRIVATE ${HDF5_INCLUDE_DIRS})
 
@@ -662,6 +715,7 @@ target_include_directories(slugTestCore SYSTEM PRIVATE src/extern/eigen)
 target_include_directories(slugTestCoreFull SYSTEM PRIVATE src/extern/eigen)
 target_include_directories(slugTestIo SYSTEM PRIVATE src/extern/eigen)
 target_include_directories(slugTestNebular SYSTEM PRIVATE src/extern/eigen)
+target_include_directories(slugTestFeedback SYSTEM PRIVATE src/extern/eigen)
 target_include_directories(slugTestSpecsyn SYSTEM PRIVATE src/extern/eigen)
 target_include_directories(slugPython SYSTEM PRIVATE src/extern/eigen)
 
@@ -680,6 +734,7 @@ target_link_libraries(slugTestCore PRIVATE GSL::gsl)
 target_link_libraries(slugTestCoreFull PRIVATE GSL::gsl)
 target_link_libraries(slugTestIo PRIVATE GSL::gsl)
 target_link_libraries(slugTestNebular PRIVATE GSL::gsl)
+target_link_libraries(slugTestFeedback PRIVATE GSL::gsl)
 target_link_libraries(slugTestSpecsyn PRIVATE GSL::gsl)
 target_link_libraries(slugPython PRIVATE GSL::gsl)
 
@@ -698,6 +753,7 @@ target_link_libraries(slugTestCore PRIVATE slug_mdspan)
 target_link_libraries(slugTestCoreFull PRIVATE slug_mdspan)
 target_link_libraries(slugTestIo PRIVATE slug_mdspan)
 target_link_libraries(slugTestNebular PRIVATE slug_mdspan)
+target_link_libraries(slugTestFeedback PRIVATE slug_mdspan)
 target_link_libraries(slugTestSpecsyn PRIVATE slug_mdspan)
 target_link_libraries(slugPython PRIVATE slug_mdspan)
 
@@ -716,6 +772,7 @@ target_link_libraries(slugTestCore PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugTestCoreFull PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugTestIo PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugTestNebular PRIVATE ${HDF5_CXX_LIBRARIES})
+target_link_libraries(slugTestFeedback PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugTestSpecsyn PRIVATE ${HDF5_CXX_LIBRARIES})
 target_link_libraries(slugPython PRIVATE ${HDF5_CXX_LIBRARIES})
 
@@ -735,6 +792,7 @@ if(OpenMP_CXX_FOUND)
     target_link_libraries(slugTestCoreFull PRIVATE OpenMP::OpenMP_CXX)
     target_link_libraries(slugTestIo PRIVATE OpenMP::OpenMP_CXX)
     target_link_libraries(slugTestNebular PRIVATE OpenMP::OpenMP_CXX)
+    target_link_libraries(slugTestFeedback PRIVATE OpenMP::OpenMP_CXX)
     target_link_libraries(slugTestSpecsyn PRIVATE OpenMP::OpenMP_CXX)
     target_link_libraries(slugPython PRIVATE OpenMP::OpenMP_CXX)
 endif()
@@ -896,6 +954,11 @@ set_tests_properties(test_Io PROPERTIES
 add_test(NAME test_Nebular COMMAND slugTestNebular
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+# test_Feedback constructs only a default SimControls (no file loads of
+# its own), so unlike test_Nebular/test_Specsyn it needs no
+# WORKING_DIRECTORY.
+add_test(NAME test_Feedback COMMAND slugTestFeedback)
+
 # test_CoreFull is the slow, full-scale end-to-end counterpart to
 # test_Core -- see testCoreFullAll.cpp and slugTestCoreFull's own
 # comments above for why it's built and run as a separate executable/
@@ -971,7 +1034,7 @@ endif()
 # executable would make it impossible to skip on its own.
 set_tests_properties(
     test_Interpolation test_Elem test_Extinct test_Phot test_PDFs test_Utils test_Specsyn test_Tracks
-    test_Yields test_Core test_Io test_Nebular test_PythonBindings test_Slugpy
+    test_Yields test_Core test_Io test_Nebular test_Feedback test_PythonBindings test_Slugpy
     PROPERTIES LABELS "quick")
 set_tests_properties(test_CoreFull test_TracksFull PROPERTIES LABELS "slow")
 
