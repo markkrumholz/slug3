@@ -101,6 +101,11 @@ void bindYieldChannel(py::module_& m);
 void bindYields(py::module_& m);
 
 /**
+ * @brief Bind feedback::Winds as Winds
+ */
+void bindWinds(py::module_& m);
+
+/**
  * @brief Bind nebular::Nebular as Nebular
  */
 void bindNebular(py::module_& m);

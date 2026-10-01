@@ -10,6 +10,8 @@
 #define SIMCONTROLS_HPP
 
 #include "../extinct/Extinct.hpp"
+#include "../feedback/FeedbackCommons.hpp"
+#include "../feedback/Winds.hpp"
 #include "../nebular/Nebular.hpp"
 #include "../nebular/NebularCommons.hpp"
 #include "../pdfs/PDF.hpp"
@@ -929,6 +931,33 @@ namespace io
         [[nodiscard]] auto hasSN(double mass, double feH) const -> bool;
 
         /**
+         * @brief Get the Wolf-Rayet wind velocity model
+         * @return The model selected by the optional feedback.wr_winds
+         *   key (see readFeedback()), or set via setWRWindModel();
+         *   feedback::WRwindModel::nugisLamers00_ by default
+         * @details
+         * Read live by Winds::vWindWR() on every call -- see its own
+         * comment for what each model does -- so changing it takes
+         * effect immediately, with no need to rebuild winds().
+         */
+        [[nodiscard]] auto wrWindModel() const -> feedback::WRwindModel { return wrWindModel_; }
+
+        /**
+         * @brief Set the Wolf-Rayet wind velocity model
+         * @param model The new model -- see wrWindModel()'s own comment
+         */
+        void setWRWindModel(const feedback::WRwindModel model) { wrWindModel_ = model; }
+
+        /**
+         * @brief Get the stellar wind calculator
+         * @return A shared_ptr to the Winds built by readFeedback(), or
+         *   later installed via setWinds(); nullptr for a SimControls
+         *   built without an input deck, until one is installed -- see
+         *   tracks()'s own comment on why this is a shared_ptr
+         */
+        [[nodiscard]] auto winds() const -> std::shared_ptr<const feedback::Winds> { return winds_; }
+
+        /**
          * @brief Get the nebular emission control parameters
          * @return A const reference to the control parameters
          *   populated from the input deck's own [nebular] stanza (see
@@ -1452,6 +1481,29 @@ namespace io
         }
 
         /**
+         * @brief Set the stellar wind calculator
+         * @param winds The Winds to use, or nullptr to remove the
+         *   current one; ownership is transferred to this SimControls
+         * @throws std::invalid_argument if winds is not null and was
+         *   constructed against a different SimControls than *this --
+         *   see checkWindsReplacement(); winds() is left unchanged in
+         *   this case
+         * @details
+         * Lets a caller replace this SimControls's wind calculator with
+         * its own, without needing an input deck. Like a Yields (see
+         * setYields()'s own comment), a Winds stores a live reference
+         * to whichever SimControls it was built against -- it reads
+         * wrWindModel() from it on every call -- and this method cannot
+         * re-bind it, so winds must already have been constructed with
+         * its own controls argument equal to *this.
+         */
+        void setWinds(std::unique_ptr<feedback::Winds> winds)
+        {
+            if (winds) { checkWindsReplacement(*winds); }
+            winds_ = std::move(winds);
+        }
+
+        /**
          * @brief Check that a spectral synthesizer may replace the current one
          * @param specsyn The candidate spectral synthesizer
          * @throws std::invalid_argument if specsyn was constructed
@@ -1533,6 +1585,30 @@ namespace io
                 checkFehRangeContains("SimControls::setYields", "Yields",
                     yields.requestedFehMin(), yields.requestedFehMax(),
                     fehDist_.getMin(), fehDist_.getMax(), "the current [Fe/H] distribution");
+            }
+        }
+
+        /**
+         * @brief Check that a Winds may replace the current one
+         * @param winds The candidate Winds
+         * @throws std::invalid_argument if winds was constructed
+         *   against a different SimControls than *this (see
+         *   setWinds()'s own comment)
+         * @details
+         * The check setWinds() applies before installing winds. Public
+         * for the same reason as checkSpecsynReplacement() -- see its
+         * own comment. Unlike it and checkYieldsReplacement(), there is
+         * no [Fe/H] range to check: a Winds has no [Fe/H]-dependent
+         * data of its own.
+         */
+        void checkWindsReplacement(const feedback::Winds& winds) const
+        {
+            if (&winds.controls() != this)
+            {
+                throw std::invalid_argument(
+                    "SimControls::setWinds: winds was constructed "
+                    "against a different SimControls than this one -- "
+                    "construct it with this same SimControls instead");
             }
         }
 
@@ -1808,18 +1884,28 @@ namespace io
         void readYields(const utils::TrackedDeck& inputDeck);
 
         /**
-         * @brief Load the stellar feedback controls specified by input deck
+         * @brief Load the stellar feedback controls specified by input deck, and build winds_
          * @param inputDeck A toml table holding the input deck
          * @throws std::runtime_error if feedback.sn_mass_range is given
-         *   but is not an array of numbers
+         *   but is not an array of numbers, or if feedback.wr_winds is
+         *   given but is not a string
          * @throws std::invalid_argument if feedback.sn_mass_range is not
-         *   a valid set of mass limits -- see setSNMassLimits()
+         *   a valid set of mass limits -- see setSNMassLimits() -- or if
+         *   feedback.wr_winds is not one of feedback::wrWindModelStr's
+         *   own entries
          * @details
-         * Reads the optional feedback.sn_mass_range key, an array of
-         * stellar masses in Msun in the format described in
-         * snMassLimits()'s own comment, and passes it to
-         * setSNMassLimits(). If it is not given, snMassLimits_ is left
-         * empty, so hasSN() defers to yields().
+         * Reads two optional keys:
+         *   - feedback.sn_mass_range: an array of stellar masses in Msun
+         *     in the format described in snMassLimits()'s own comment,
+         *     passed to setSNMassLimits(). If it is not given,
+         *     snMassLimits_ is left empty, so hasSN() defers to
+         *     yields().
+         *   - feedback.wr_winds: the Wolf-Rayet wind velocity model,
+         *     one of "none", "l_over_c", or "nugis_lamers_00" (see
+         *     feedback::wrWindModelStr), stored in wrWindModel_. If it
+         *     is not given, wrWindModel_ keeps its default,
+         *     feedback::WRwindModel::nugisLamers00_.
+         * Then, whatever was given, builds winds_ against *this.
          */
         void readFeedback(const utils::TrackedDeck& inputDeck);
 
@@ -1964,8 +2050,10 @@ namespace io
         std::shared_ptr<yields::Yields> yields_; /**< Yields built from yieldChannels_, or nullptr if yieldChannels_ is empty */
         bool yieldsChannelDecomposed_ = true; /**< Whether yields should be reported decomposed by channel (true) or summed over all channels (false) -- see yieldsChannelDecomposed()'s own comment; from the optional yields.channel_decomposed key, see readYields() */
         bool noDecay_ = false; /**< Whether radioactive decay should be excluded from computed yields -- see noDecay()'s own comment; from the optional yields.no_decay key, see readYields() */
+        feedback::WRwindModel wrWindModel_ = feedback::WRwindModel::nugisLamers00_; /**< Wolf-Rayet wind velocity model -- see wrWindModel()'s own comment; from the optional feedback.wr_winds key, see readFeedback(). Declared here, beside the other one-byte members, rather than with snMassLimits_/winds_, so it fills existing alignment padding instead of adding more */
         double minIsotopeLifetime_ = yields::defaultMinIsotopeLifetime; /**< Minimum isotope lifetime, in yr, below which isotopes are treated as decaying instantly -- see minIsotopeLifetime()'s own comment; from the optional yields.min_isotope_lifetime key, see readYields() */
         std::vector<double> snMassLimits_; /**< Stellar mass limits, in Msun, over which supernovae occur -- see snMassLimits()'s own comment; from the optional feedback.sn_mass_range key, see readFeedback() */
+        std::shared_ptr<feedback::Winds> winds_; /**< Stellar wind calculator, built by readFeedback(), or nullptr for a SimControls built without an input deck */
 
         // Output wavelength grid (spectra.wl_min, spectra.wl_max,
         // spectra.nwl), read by readSpectra and passed through to

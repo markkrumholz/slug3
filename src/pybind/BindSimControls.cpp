@@ -15,6 +15,8 @@
 
 #include "Bindings.hpp"
 #include "../extinct/Extinct.hpp"
+#include "../feedback/FeedbackCommons.hpp"
+#include "../feedback/Winds.hpp"
 #include "../io/SimControls.hpp"
 #include "../nebular/Nebular.hpp"
 #include "../phot/FilterCollection.hpp"
@@ -1062,6 +1064,50 @@ has_sn : bool
     hasSN(mass), also catches failed supernovae within the ccsn yield
     channels' own mass ranges. Otherwise, False.)doc";
 
+static constexpr std::string_view wrWindModelPropertyDocstring =
+R"doc(The Wolf-Rayet wind velocity model.
+
+One of "none", "l_over_c", or "nugis_lamers_00", read from
+feedback.wr_winds in the input deck ("nugis_lamers_00" if that key was
+not given). Read live by Winds.vWindWR() on every call -- see its own
+docstring for what each model does -- so assigning a new value (or
+calling setWRWindModel()) takes effect immediately, with no need to
+rebuild winds.
+
+Raises
+------
+ValueError
+    On assignment (or setWRWindModel()), if the value is not one of
+    the three names above; the existing model is left unchanged in
+    this case.)doc";
+
+static constexpr std::string_view windsPropertyDocstring =
+R"doc(The stellar wind calculator, or None if none is installed.
+
+Reading returns the Winds built at construction, or later installed via
+setWinds(); None only for a SimControls that was never given one.
+Assigning a Winds (or None, to remove one already present) transfers
+ownership in exactly the same way as setWinds() -- see its own
+docstring.)doc";
+
+static constexpr std::string_view setWindsDocstring = R"doc(Set the stellar wind calculator.
+
+Parameters
+----------
+winds : Winds, optional
+    The Winds to use; ownership is transferred to this SimControls,
+    so winds is no longer usable from Python after this call. May be
+    None, to remove the one already present.
+
+Raises
+------
+ValueError
+    If winds is not None and was constructed with a controls argument
+    other than this same SimControls -- a Winds stores a live reference
+    to whichever SimControls it was built against, and reads its
+    wrWindModel from there. The current winds is left unchanged, and
+    winds stays usable from Python, in this case.)doc";
+
 static constexpr std::string_view inputDeckStrPropertyDocstring =
 R"doc(The input deck's own text.
 
@@ -1112,6 +1158,25 @@ static void setYieldsKeepOnFailure(io::SimControls& sc, py::object yieldsArg)
 {
     if (!yieldsArg.is_none()) { sc.checkYieldsReplacement(py::cast<const yields::Yields&>(yieldsArg)); }
     sc.setYields(py::cast<std::unique_ptr<yields::Yields>>(std::move(yieldsArg)));
+}
+
+static void setWindsKeepOnFailure(io::SimControls& sc, py::object windsArg)
+{
+    if (!windsArg.is_none()) { sc.checkWindsReplacement(py::cast<const feedback::Winds&>(windsArg)); }
+    sc.setWinds(py::cast<std::unique_ptr<feedback::Winds>>(std::move(windsArg)));
+}
+
+// wrWindModel, for Python: translated to/from its input-deck name (see
+// feedback::wrWindModelStr), matching the PDF sampling property's own
+// string-valued convention
+static void setWRWindModelFromString(io::SimControls& sc, const std::string& model)
+{
+    sc.setWRWindModel(feedback::wrWindModelFromString(model));
+}
+
+static auto wrWindModelAsString(const io::SimControls& sc) -> std::string
+{
+    return std::string(feedback::wrWindModelToString(sc.wrWindModel()));
 }
 
 static void applyConstructorProperties(io::SimControls& sc,
@@ -1330,6 +1395,10 @@ void bindSimControls(py::module_& m)
                 hasSNFeHDocstring.data(), py::arg("mass"), py::arg("feh"))
         .def("setYields", &setYieldsKeepOnFailure,
                 setYieldsDocstring.data(), py::arg("yields"))
+        .def("setWRWindModel", &setWRWindModelFromString,
+                wrWindModelPropertyDocstring.data(), py::arg("model"))
+        .def("setWinds", &setWindsKeepOnFailure,
+                setWindsDocstring.data(), py::arg("winds"))
         // Properties: alternative, attribute-style access to the same
         // getters/setters bound as plain methods above (e.g.
         // sc.imf = "20.0" instead of sc.setIMF("20.0")). Getters that
@@ -1492,6 +1561,14 @@ void bindSimControls(py::module_& m)
                 &io::SimControls::yields,
                 &setYieldsKeepOnFailure,
                 yieldsPropertyDocstring.data(), py::return_value_policy::reference_internal)
+        .def_property("wrWindModel",
+                &wrWindModelAsString,
+                &setWRWindModelFromString,
+                wrWindModelPropertyDocstring.data())
+        .def_property("winds",
+                &io::SimControls::winds,
+                &setWindsKeepOnFailure,
+                windsPropertyDocstring.data(), py::return_value_policy::reference_internal)
         .def_property_readonly("inputDeckStr",
                 &io::SimControls::inputDeckStr,
                 inputDeckStrPropertyDocstring.data())

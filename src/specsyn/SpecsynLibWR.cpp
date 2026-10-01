@@ -7,6 +7,7 @@
  */
 
 #include "SpecsynLibWR.hpp"
+#include "../feedback/Winds.hpp"
 #include "../io/SimControls.hpp"
 #include "../tracks/TrackCommons.hpp"
 #include "../utils/Constants.hpp"
@@ -540,19 +541,26 @@ namespace specsyn
     template <OOBPolicy Policy>
     auto SpecsynLibWR<Policy>::computeRawLogRt(const Specsyn::StarData& props, const double feh) const -> double
     {
-        // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- StarData is a fixed-size std::array, and every index used here is compile-time-known
-        const double logL = props[static_cast<size_t>(tracks::FieldIdx::logL)];
-        const double mdot = props[static_cast<size_t>(tracks::FieldIdx::mdot)]; // Msun/yr
-        // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        const double mdot = props[static_cast<size_t>(tracks::FieldIdx::mdot)]; // Msun/yr // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- StarData is a fixed-size std::array, and this index is compile-time-known
 
         // D_infinity by linear interpolation in [Fe/H] on dInf_
         const auto bFeh = findBracket(FeH_, feh);
         const double dInf = ((1.0 - bFeh.t_) * dInf_[bFeh.lo_]) + (bFeh.t_ * dInf_[bFeh.hi_]); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- bFeh.lo_/hi_ < dInf_.size() by construction (both sized nfeh)
 
-        // Wind velocity vWind = L / (mdot c), in cgs
-        const double lumCgs = std::pow(10.0, logL) * utils::Lsun;      // erg/s
-        const double mdotCgs = mdot * utils::Msun / utils::yr;         // g/s
-        const double vWind = lumCgs / (mdotCgs * utils::c);            // cm/s
+        // Wind velocity, in cgs, from whichever WR wind model the user
+        // selected (see feedback::Winds::vWindWR()). A null winds() --
+        // possible from Python, via SimControls.winds = None -- is
+        // treated as no wind at all, the same as WRwindModel::none_
+        const auto winds = this->controls().winds();
+        const double vWind = winds ? winds->vWindWR(props) : 0.0; // cm/s
+
+        // No wind: Rt ~ vWind^(2/3) -> 0, so log10(Rt) would be -inf (or
+        // NaN, via 0/0, if mdot is also 0); floor at this grid's own
+        // lowest log(R_t) instead. The caller then moves that to the
+        // nearest populated grid value, exactly as for any other raw
+        // log(R_t), since the grid is not fully sampled at every
+        // log(Teff)
+        if (vWind == 0.0) { return logRt_.front(); }
 
         // Transformed radius Rt (Todt et al. 2015, eq. 2), via the
         // star's own radius -- derived from its surface area, itself
@@ -606,20 +614,20 @@ namespace specsyn
         const auto bFeh = findBracket(FeH_, feh);
         const auto bTeff = findBracket(logTeff_, logTeff);
 
-        // vWind above is a single-scattering estimate (wind momentum
-        // mdot * vWind = L / c) rather than a true wind speed: fits
-        // like Nugis & Lamers (2000) -- the actual source of MIST's WR
-        // mass loss rates -- give a more direct estimate, but
-        // extrapolating them outside the limited [Fe/H] range they
-        // were fit over produces nonsense (wind speeds approaching c).
-        // Single scattering is a cruder but non-crazy stand-in that
-        // holds up over most of parameter space; the tradeoff is that
-        // a handful of high-mdot/L points (like this one) push logRt
-        // below any real WR grid's coverage, since real WR winds are
-        // multiply scattered and so faster (and hence a larger
-        // transformed radius) than this estimate implies. There is no
-        // well-established correction for this, so rather than reject
-        // these stars outright, move logRt to real data instead.
+        // The wind velocity behind rawLogRt comes from whichever WR
+        // wind model the user selected (see computeRawLogRt()), and no
+        // choice of model guarantees rawLogRt lands inside this grid's
+        // own coverage: WRwindModel::none_ (or a null winds()) puts it
+        // at the grid's own floor by construction; l_over_c is a
+        // single-scattering estimate (wind momentum mdot * vWind =
+        // L / c) that underestimates the speed of real, multiply
+        // scattered WR winds, pushing a handful of high-mdot/L points
+        // below any real WR grid's coverage; and even nugis_lamers_00,
+        // though clamped to its own calibration sample's velocity
+        // range, is not fit to PoWR's own (logRt, logTeff) coverage.
+        // There is no well-established correction for this, so rather
+        // than reject these stars outright, move logRt to real data
+        // instead.
         //
         // PoWR's own (feh, logRt, logTeff) grids are ragged, not
         // rectangular, and get sparser still at the hottest edge --

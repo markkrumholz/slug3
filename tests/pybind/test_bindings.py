@@ -3739,6 +3739,135 @@ def test_simcontrols_yields_survives_replacement():
     assert old_yields.registryName() == YIELDS_REGISTRY
 
 
+# A real Wolf-Rayet (WNE) snapshot from MIST (feh=0, afe=0, vvcrit=0,
+# initial mass 48 Msun), in Winds.vWindWR()'s props order (mass, mdot,
+# logL, logTe, h_surf, he_surf, c_surf, n_surf, o_surf), with mdot =
+# 2e-5 Msun/yr -- the same star tests/feedback/testWinds.cpp's own
+# testVWindWRModelSwitchLive uses. Its expected velocity (cm/s) under
+# each WR wind model was computed independently of slug, from the same
+# formulas and GSL constants; the three are deliberately all distinct.
+WR_WIND_PROPS = [19.2440, 2e-5, 5.90241, 5.33139, 0.0, 0.98412906, 0.00017037, 0.01056297, 0.0]
+WR_WIND_EXPECTED = {
+    "none": 0.0,
+    "l_over_c": 8.0912921551e7,
+    "nugis_lamers_00": 1.0003508346e8,
+}
+
+
+def _deck_with_wr_winds(model):
+    """CLUSTER_DECK's own text, plus feedback.wr_winds = model."""
+    deck = tomlkit.parse(pathlib.Path(CLUSTER_DECK).read_text())
+    deck["feedback"] = tomlkit.table()
+    deck["feedback"]["wr_winds"] = model
+    return tomlkit.dumps(deck)
+
+
+def test_simcontrols_wr_wind_model_default_and_winds_built():
+    """With no feedback.wr_winds, wrWindModel defaults to
+    nugis_lamers_00, and a Winds is always built."""
+    controls = slug.SimControls(CLUSTER_DECK)
+    assert controls.wrWindModel == "nugis_lamers_00"
+    assert controls.winds is not None
+
+
+@pytest.mark.parametrize("model", ["none", "l_over_c", "nugis_lamers_00"])
+def test_simcontrols_wr_wind_model_from_deck(model):
+    """feedback.wr_winds selects the named model, without being
+    reported as an unused key."""
+    controls = slug.SimControls(_deck_with_wr_winds(model))
+    assert controls.wrWindModel == model
+    assert controls.winds is not None
+    assert not controls.unusedKeys
+
+
+def test_simcontrols_wr_wind_model_invalid_deck_raises():
+    """An unrecognized feedback.wr_winds name is rejected."""
+    with pytest.raises(ValueError):
+        slug.SimControls(_deck_with_wr_winds("nugis_lamers"))
+
+
+def test_simcontrols_wr_wind_model_property_and_setter():
+    """wrWindModel is settable both via the property and
+    setWRWindModel(); an unrecognized name raises ValueError and
+    leaves the current model unchanged."""
+    controls = slug.SimControls(CLUSTER_DECK)
+    controls.wrWindModel = "l_over_c"
+    assert controls.wrWindModel == "l_over_c"
+    controls.setWRWindModel("none")
+    assert controls.wrWindModel == "none"
+
+    with pytest.raises(ValueError):
+        controls.wrWindModel = "None"
+    with pytest.raises(ValueError):
+        controls.setWRWindModel("nugis_lamers")
+    assert controls.wrWindModel == "none"
+
+
+def test_winds_vwindwr_follows_wr_wind_model_live():
+    """The very same Winds returns each model's own answer as
+    wrWindModel is changed on its SimControls, with no rebuild --
+    including switching back to a model used earlier."""
+    controls = slug.SimControls(CLUSTER_DECK)
+    winds = controls.winds
+    for model in ["none", "l_over_c", "nugis_lamers_00", "l_over_c", "none", "nugis_lamers_00"]:
+        controls.wrWindModel = model
+        expected = WR_WIND_EXPECTED[model]
+        if expected == 0.0:
+            assert winds.vWindWR(WR_WIND_PROPS) == 0.0
+        else:
+            assert winds.vWindWR(WR_WIND_PROPS) == pytest.approx(expected, rel=1e-4)
+
+
+@pytest.mark.parametrize("model", ["none", "l_over_c", "nugis_lamers_00"])
+def test_winds_vwindwr_matches_deck_selected_model(model):
+    """A Winds built from a deck selecting a model gives that model's
+    own answer."""
+    controls = slug.SimControls(_deck_with_wr_winds(model))
+    assert controls.winds.vWindWR(props=WR_WIND_PROPS) == pytest.approx(
+        WR_WIND_EXPECTED[model], rel=1e-4, abs=0.0)
+
+
+def test_winds_vwindwr_wrong_length_raises():
+    """props must have exactly 9 elements."""
+    controls = slug.SimControls(CLUSTER_DECK)
+    with pytest.raises(RuntimeError):
+        controls.winds.vWindWR(WR_WIND_PROPS[:-1])
+
+
+def test_simcontrols_set_winds():
+    """setWinds()/the winds property install a Python-built Winds
+    (transferring ownership), reject one built against a different
+    SimControls (leaving it usable and the current one unchanged), and
+    accept None to remove the current one."""
+    controls = slug.SimControls(CLUSTER_DECK)
+    other_controls = slug.SimControls(CLUSTER_DECK)
+    controls.wrWindModel = "l_over_c"
+
+    foreign = slug.Winds(controls=other_controls)
+    with pytest.raises(ValueError):
+        controls.setWinds(foreign)
+    # Rejected: still usable, and reads its own SimControls's model
+    assert foreign.vWindWR(WR_WIND_PROPS) == pytest.approx(
+        WR_WIND_EXPECTED["nugis_lamers_00"], rel=1e-4)
+    assert controls.winds.vWindWR(WR_WIND_PROPS) == pytest.approx(
+        WR_WIND_EXPECTED["l_over_c"], rel=1e-4)
+
+    winds = slug.Winds(controls=controls)
+    controls.setWinds(winds)
+    with pytest.raises(ValueError):
+        winds.vWindWR(WR_WIND_PROPS)
+    assert controls.winds.vWindWR(WR_WIND_PROPS) == pytest.approx(
+        WR_WIND_EXPECTED["l_over_c"], rel=1e-4)
+
+    controls.setWinds(None)
+    assert controls.winds is None
+
+    controls.winds = slug.Winds(controls=controls)
+    assert controls.winds is not None
+    controls.winds = None
+    assert controls.winds is None
+
+
 def test_simcontrols_yields_channel_decomposed_property(yields_controls):
     """yieldsChannelDecomposed defaults to True and is settable both via the property and the setter."""
     assert yields_controls.yieldsChannelDecomposed is True

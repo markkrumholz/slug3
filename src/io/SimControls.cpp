@@ -12,6 +12,8 @@
 #include "../elem/IsotopeData.hpp"
 #include "../elem/IsotopeTable.hpp"
 #include "../extinct/Extinct.hpp"
+#include "../feedback/FeedbackCommons.hpp"
+#include "../feedback/Winds.hpp"
 #include "../nebular/Nebular.hpp"
 #include "../nebular/NebularCommons.hpp"
 #include "../pdfs/PDF.hpp"
@@ -1380,26 +1382,42 @@ void io::SimControls::readFeedback(const utils::TrackedDeck& inputDeck)
     // feedback.sn_mass_range: optional; if given, must be an array of
     // numbers, whose validity as mass limits setSNMassLimits() checks
     const auto node = inputDeck.atPath("feedback.sn_mass_range");
-    if (!node) { return; }
-    const toml::array* arr = node.as_array();
-    if (arr == nullptr)
+    if (node)
     {
-        throw std::runtime_error(
-            "SimControls: feedback.sn_mass_range must be an array of numbers");
-    }
-    std::vector<double> limits;
-    limits.reserve(arr->size());
-    for (const auto& elem : *arr)
-    {
-        const auto val = elem.value<double>();
-        if (!val.has_value())
+        const toml::array* arr = node.as_array();
+        if (arr == nullptr)
         {
             throw std::runtime_error(
                 "SimControls: feedback.sn_mass_range must be an array of numbers");
         }
-        limits.push_back(val.value());
+        std::vector<double> limits;
+        limits.reserve(arr->size());
+        for (const auto& elem : *arr)
+        {
+            const auto val = elem.value<double>();
+            if (!val.has_value())
+            {
+                throw std::runtime_error(
+                    "SimControls: feedback.sn_mass_range must be an array of numbers");
+            }
+            limits.push_back(val.value());
+        }
+        setSNMassLimits(std::move(limits));
     }
-    setSNMassLimits(std::move(limits));
+
+    // feedback.wr_winds: optional; if given, must name one of
+    // feedback::wrWindModelStr's own entries, otherwise wrWindModel_
+    // keeps its default
+    const auto wrWindsInput = inputDeck.value<std::string>("feedback.wr_winds");
+    if (wrWindsInput.has_value())
+    {
+        wrWindModel_ = feedback::wrWindModelFromString(wrWindsInput.value());
+    }
+
+    // The wind calculator itself: always built, whatever was given
+    // above, since it reads wrWindModel_ live on every call rather
+    // than being configured once here
+    winds_ = std::make_shared<feedback::Winds>(*this);
 }
 
 void io::SimControls::setSNMassLimits(std::vector<double> limits)
