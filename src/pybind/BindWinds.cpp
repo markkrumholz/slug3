@@ -78,9 +78,11 @@ vwind : float
     Terminal wind velocity, in cm/s, from whichever model the
     SimControls this Winds was built against selects via its
     obWindModel property: "none" gives exactly 0; "vink_01" gives
-    1.3 or 2.6 times the escape speed sqrt(2 G M / R) (below or above
-    the Vink et al. 2001 bistability jump temperature, respectively),
-    times (10^feh)^0.13; "vink_sander_21" gives the Vink & Sander
+    1.3 or 2.6 times the effective escape speed
+    sqrt(2 G M (1 - Gamma_e) / R) (below or above the Vink et al. 2001
+    bistability jump temperature, respectively), times (10^feh)^0.13,
+    or exactly 0 if the electron-scattering Eddington factor
+    Gamma_e >= 1; "vink_sander_21" gives the Vink & Sander
     (2021) fits, again switching at the same jump temperature.
 
 Raises

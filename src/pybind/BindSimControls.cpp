@@ -1107,6 +1107,38 @@ Assigning a Winds (or None, to remove one already present) transfers
 ownership in exactly the same way as setWinds() -- see its own
 docstring.)doc";
 
+static constexpr std::string_view setWRWindModelDocstring = R"doc(Set the Wolf-Rayet wind velocity model.
+
+Equivalent to assigning the wrWindModel property -- see its own
+docstring for what each model does.
+
+Parameters
+----------
+model : str
+    One of "none", "l_over_c", or "nugis_lamers_00".
+
+Raises
+------
+ValueError
+    If model is not one of the three names above; the existing model
+    is left unchanged in this case.)doc";
+
+static constexpr std::string_view setOBWindModelDocstring = R"doc(Set the O and B star wind velocity model.
+
+Equivalent to assigning the obWindModel property -- see its own
+docstring for what each model does.
+
+Parameters
+----------
+model : str
+    One of "none", "vink_01", or "vink_sander_21".
+
+Raises
+------
+ValueError
+    If model is not one of the three names above; the existing model
+    is left unchanged in this case.)doc";
+
 static constexpr std::string_view setWindsDocstring = R"doc(Set the stellar wind calculator.
 
 Parameters
@@ -1424,9 +1456,9 @@ void bindSimControls(py::module_& m)
         .def("setYields", &setYieldsKeepOnFailure,
                 setYieldsDocstring.data(), py::arg("yields"))
         .def("setWRWindModel", &setWRWindModelFromString,
-                wrWindModelPropertyDocstring.data(), py::arg("model"))
+                setWRWindModelDocstring.data(), py::arg("model"))
         .def("setOBWindModel", &setOBWindModelFromString,
-                obWindModelPropertyDocstring.data(), py::arg("model"))
+                setOBWindModelDocstring.data(), py::arg("model"))
         .def("setWinds", &setWindsKeepOnFailure,
                 setWindsDocstring.data(), py::arg("winds"))
         // Properties: alternative, attribute-style access to the same

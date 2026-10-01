@@ -30,6 +30,7 @@
 #include "../../src/utils/MiscUtils.hpp"
 #include "testWinds.hpp"
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <iostream>
 #include <stdexcept>
@@ -126,18 +127,18 @@ namespace
 
     const std::array<OBCase, 5> obCases{ {
         // Hot O star (44.7 kK), well above the jump: hot-side formulas
-        { "hot O star", 40.0, 5.35, 4.65, 0.0, 3.6136865402e8, 4.1399967482e8 },
+        { "hot O star", 40.0, 5.35, 4.65, 0.0, 3.3409153218e8, 4.1399967482e8 },
         // Cool B supergiant (17.8 kK), well below the jump: cool-side formulas
-        { "cool B supergiant", 20.0, 5.2, 4.25, 0.0, 5.5450502307e7, 5.8681336962e7 },
+        { "cool B supergiant", 20.0, 5.2, 4.25, 0.0, 4.9419941235e7, 5.8681336962e7 },
         // The hot O star at [Fe/H] = -1: still hot side, but checks
         // each model's own metallicity scaling
-        { "hot O star, [Fe/H] = -1", 40.0, 5.35, 4.65, -1.0, 2.6788628411e8, 2.6730064087e8 },
+        { "hot O star, [Fe/H] = -1", 40.0, 5.35, 4.65, -1.0, 2.4766547434e8, 2.6730064087e8 },
         // A 24.5 kK star, which lies between the two jump temperatures
         // above: cool side at [Fe/H] = 0, but hot side at [Fe/H] = -1,
         // so these two together check that the jump temperature itself
         // moves with [Fe/H]
-        { "24.5 kK star, [Fe/H] = 0", 25.0, 5.1, 4.3891660844, 0.0, 9.0474579963e7, 1.3588040631e8 },
-        { "24.5 kK star, [Fe/H] = -1", 25.0, 5.1, 4.3891660844, -1.0, 1.3413946541e8, 1.7538114554e8 },
+        { "24.5 kK star, [Fe/H] = 0", 25.0, 5.1, 4.3891660844, 0.0, 8.4354905590e7, 1.3588040631e8 },
+        { "24.5 kK star, [Fe/H] = -1", 25.0, 5.1, 4.3891660844, -1.0, 1.2506631084e8, 1.7538114554e8 },
     } };
 } // namespace
 
@@ -476,6 +477,33 @@ static auto testVWindOBModelSwitchLive() -> int
     return result;
 }
 
+// A super-Eddington star (Gamma_e ~ 16.4: 5 Msun, log L = 6.5) has no
+// effective escape speed, so vink01_ must give exactly 0 for it,
+// rather than NaN; vinkSander21_, which does not use the escape speed,
+// must still give a positive, finite velocity
+static auto testVWindOBVink01SuperEddington() -> int
+{
+    io::SimControls controls;
+    const feedback::Winds winds(controls);
+    const auto props = makeOBStarData(5.0, 6.5, 4.65);
+    int result = 0;
+    controls.setOBWindModel(feedback::OBwindModel::vink01_);
+    if (const double actual = winds.vWindOB(props, 0.0); actual != 0.0)
+    {
+        std::cerr << "testVWindOBVink01SuperEddington: vink_01: vWindOB() = " << actual
+            << " cm/s, expected exactly 0\n";
+        result = 1;
+    }
+    controls.setOBWindModel(feedback::OBwindModel::vinkSander21_);
+    if (const double actual = winds.vWindOB(props, 0.0); !(std::isfinite(actual) && actual > 0.0))
+    {
+        std::cerr << "testVWindOBVink01SuperEddington: vink_sander_21: vWindOB() = " << actual
+            << " cm/s, expected positive and finite\n";
+        result = 1;
+    }
+    return result;
+}
+
 // obWindModelFromString()/obWindModelToString() must round-trip every
 // model through its input-deck name, and reject any other name
 static auto testOBWindModelStrings() -> int
@@ -538,6 +566,7 @@ auto testWinds() -> int
     result += testVWindOBNone();
     result += testVWindOBModels();
     result += testVWindOBModelSwitchLive();
+    result += testVWindOBVink01SuperEddington();
     result += testOBWindModelStrings();
     result += testWindsControlsAccessor();
     return result;

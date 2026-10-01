@@ -38,6 +38,24 @@ namespace feedback
                 lCgs / (4.0 * std::numbers::pi * utils::sigmaSB * teff * teff * teff * teff)); // cm
         }
 
+        // Electron-scattering Eddington factor,
+        // Gamma_e = 7.66e-5 (L/Lsun) / (M/Msun) * 0.401 (X + Y/2 + Z/4),
+        // with Z = 1 - X - Y -- i.e. sigma_e = 0.401 (X + Y/2 + Z/4)
+        // cm^2/g, fully ionized gas (= 0.2 (1 + X) for Z = 0)
+        auto eddingtonFactor(const specsyn::Specsyn::StarData& props) -> double // NOLINT(llvm-prefer-static-over-anonymous-namespace) -- see vWindLOverC's own identical NOLINT
+        {
+            // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- StarData is a fixed-size std::array, and every index used here is compile-time-known
+            const double mass = props[static_cast<std::size_t>(tracks::FieldIdx::mass)];     // Msun
+            const double logL = props[static_cast<std::size_t>(tracks::FieldIdx::logL)];     // log10(L/Lsun)
+            const double hSurf = props[static_cast<std::size_t>(tracks::FieldIdx::hSurf)];   // X
+            const double heSurf = props[static_cast<std::size_t>(tracks::FieldIdx::heSurf)]; // Y
+            // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+
+            const double zSurf = 1.0 - hSurf - heSurf; // Z
+            return 7.66e-5 * std::pow(10.0, logL) / mass * 0.401 *
+                (hSurf + (0.5 * heSurf) + (0.25 * zSurf));
+        }
+
         // Vink et al. (2001) bistability jump temperature, in K, at
         // metallicity [Fe/H] -- see vWindOB's own comment
         auto tJump(const double feh) -> double // NOLINT(llvm-prefer-static-over-anonymous-namespace) -- see vWindLOverC's own identical NOLINT
@@ -75,10 +93,7 @@ namespace feedback
             // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
 
             const double zSurf = 1.0 - hSurf - heSurf; // Z
-
-            const double lLsun = std::pow(10.0, logL);
-            const double gammaE = 7.66e-5 * lLsun / mass * 0.401 *
-                (hSurf + (0.5 * heSurf) + (0.25 * zSurf));
+            const double gammaE = eddingtonFactor(props);
 
             // Gamma_e > 1 (equivalently, 1 - Gamma_e < 0): v_esc's own
             // radicand is negative, so v_esc is undefined -- skip straight
@@ -116,8 +131,15 @@ namespace feedback
             const double logTeff = props[static_cast<std::size_t>(tracks::FieldIdx::logTe)];
             // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
 
-            const double radius = stellarRadius(logL, logTeff);                       // cm
-            const double vEsc = std::sqrt(2.0 * utils::G * mass * utils::Msun / radius); // cm/s
+            // Gamma_e >= 1: the effective mass M (1 - Gamma_e), and hence
+            // the effective escape speed, is zero (or undefined), so
+            // there is no wind -- see vWindOB's own comment
+            const double gammaE = eddingtonFactor(props);
+            if (gammaE >= 1.0) { return 0.0; }
+
+            const double radius = stellarRadius(logL, logTeff); // cm
+            const double vEsc = std::sqrt(
+                2.0 * utils::G * mass * utils::Msun * (1.0 - gammaE) / radius); // cm/s
             const double ratio = (std::pow(10.0, logTeff) < tJump(feh)) ? 1.3 : 2.6;  // v_wind / v_esc
             return ratio * vEsc * std::pow(10.0, 0.13 * feh);                         // cm/s
         }
