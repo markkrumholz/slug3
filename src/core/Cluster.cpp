@@ -14,7 +14,6 @@
 #include "../specsyn/Specsyn.hpp"
 #include "../tracks/TrackCommons.hpp"
 #include "../tracks/Tracks2D.hpp"
-#include "../utils/Constants.hpp"
 #include "../utils/GKIntegratorData.hpp"
 #include "../utils/PDFIntegrator.hpp"
 #include "../utils/RngThread.hpp"
@@ -368,13 +367,16 @@ void core::Cluster::advance(const double t)
     computeFeedback();
     lastFeedbackTime_ = curTime_;
 
-    // Mark spec_/specExtinct_/phot_/photExtinct_/lbol_ as stale; they
-    // are recomputed lazily, on demand, the next time spec()/
-    // specExtinct()/phot()/photExtinct()/lbol() is actually called
-    // (see specCurrent_/photCurrent_/lbolCurrent_'s own comments).
+    // Mark spec_/specExtinct_/phot_/photExtinct_/lbol_ and the wind
+    // fluxes as stale; they are recomputed lazily, on demand, the next
+    // time spec()/specExtinct()/phot()/photExtinct()/lbol()/
+    // mDotWind()/pDotWind()/eDotWind() is actually called (see
+    // specCurrent_/photCurrent_/lbolCurrent_/windsCurrent_'s own
+    // comments).
     specCurrent_ = false;
     photCurrent_ = false;
     lbolCurrent_ = false;
+    windsCurrent_ = false;
 
     // Check for disruption
     if (curTime_ > disruptTime_) { isDisrupted_ = true; }
@@ -683,9 +685,9 @@ auto core::Cluster::nonStochDeadMassRanges(const double lastTime) const
     return result;
 }
 
-// Update the cumulative feedback quantities from the stars that died
-// since lastFeedbackTime_ -- see this method's own header comment
-void core::Cluster::computeFeedback()
+// Recompute the stellar wind fluxes from the living stars -- see this
+// method's own header comment
+void core::Cluster::computeWinds()
 {
     const auto& sc = controls_.get();
 
@@ -714,14 +716,16 @@ void core::Cluster::computeFeedback()
 
     // Continuously-sampled (non-stochastic) part of the population:
     // integrate windStar against the IMF over each isochrone segment,
-    // exactly as computeLbol() integrates lbolStar
+    // as computeLbol() integrates lbolStar -- but via
+    // utils::integrateScaled() rather than a bare PDFIntegrator: mDot,
+    // pDot, and eDot differ in units and by tens of orders of
+    // magnitude, and pDot and eDot are exactly 0 if every wind model
+    // is off, so no single absolute tolerance in their own units is
+    // meaningful for all three (with one, mDot alone would meet it on
+    // the first, unrefined estimate) -- see integrateScaled()'s own
+    // comment
     if (birthNonStochMass_ > 0.0)
     {
-        using WindSegFn = std::array<double, 3> (*)(double, const Segment&, const feedback::Winds*, double);
-        const utils::PDFIntegrator<WindSegFn, utils::GKOrder::GK15> integrator(
-            sc.imf(), static_cast<WindSegFn>(&Cluster::windStar), 3,
-            false, sc.intMaxIter(), sc.intAbsTol(), sc.intRelTol());
-
         const double mMin = sc.imf().getMin();
         const double mMax = sc.minStochMass();
         std::array<double, 3> windCts{};
@@ -731,7 +735,13 @@ void core::Cluster::computeFeedback()
             const double b = std::min(mMax, seg->xMax());
             if (a >= b) { continue; } // empty intersection with [mMin, mMax]
 
-            const auto segResult = integrator.integrate(a, b, *seg, winds, feH_);
+            const auto windAt = [&seg, winds, this](const double m) -> std::vector<double>
+            {
+                const auto w = windStar(m, *seg, winds, feH_);
+                return { w.begin(), w.end() };
+            };
+            const auto segResult = utils::integrateScaled(sc.imf(), windAt, 3, a, b,
+                { a, std::sqrt(a * b), b }, sc.intMaxIter(), sc.intAbsTol(), sc.intRelTol());
             for (std::size_t i = 0; i < windCts.size(); ++i) { windCts.at(i) += segResult.at(i); }
         }
         // imf() is normalized by number, so windCts is per star;
@@ -742,6 +752,13 @@ void core::Cluster::computeFeedback()
         pDotWind_ += windCts[1] * scale; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
         eDotWind_ += windCts[2] * scale; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
     }
+}
+
+// Update the cumulative feedback quantities from the stars that died
+// since lastFeedbackTime_ -- see this method's own header comment
+void core::Cluster::computeFeedback()
+{
+    const auto& sc = controls_.get();
 
     // Stochastic (individually-sampled) stars that died during the
     // most recent advance() call
@@ -797,11 +814,7 @@ auto core::Cluster::lbolStar(const double m, const Segment& segment) -> std::arr
 auto core::Cluster::windStar(const double m, const Segment& segment,
     const feedback::Winds* const winds, const double feH) -> std::array<double, 3>
 {
-    const specsyn::Specsyn::StarData props = segment(m);
-    const double mDot = props[static_cast<std::size_t>(tracks::FieldIdx::mdot)]; // Msun/yr // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- StarData is a fixed-size std::array, and this index is compile-time-known
-    const double vWind = (winds != nullptr) ? winds->vWind(props, feH) : 0.0;     // cm/s
-    const double mDotCgs = mDot * utils::Msun / utils::yr;                          // g/s
-    return { mDot, mDotCgs * vWind, 0.5 * mDotCgs * vWind * vWind };
+    return feedback::windFluxes(segment(m), winds, feH);
 }
 
 // Per-star nucleosynthetic yield, given a mass and [Fe/H] -- see this

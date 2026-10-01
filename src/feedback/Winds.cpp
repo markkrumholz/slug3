@@ -269,4 +269,13 @@ namespace feedback
         return vWindOther(props);
     }
 
+    auto windFluxes(const specsyn::Specsyn::StarData& props, const Winds* const winds,
+        const double feh) -> std::array<double, 3>
+    {
+        const double mDot = props[static_cast<std::size_t>(tracks::FieldIdx::mdot)]; // Msun/yr // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- StarData is a fixed-size std::array, and this index is compile-time-known
+        const double vWind = (winds != nullptr) ? winds->vWind(props, feh) : 0.0;   // cm/s
+        const double mDotCgs = mDot * utils::Msun / utils::yr;                        // g/s
+        return { mDot, mDotCgs * vWind, 0.5 * mDotCgs * vWind * vWind };
+    }
+
 } // namespace feedback

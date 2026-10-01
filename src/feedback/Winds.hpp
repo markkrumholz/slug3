@@ -10,6 +10,7 @@
 #define WINDS_HPP
 
 #include "../specsyn/Specsyn.hpp"
+#include <array>
 
 namespace io
 {
@@ -295,6 +296,28 @@ namespace feedback
 
         const io::SimControls& controls_; // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members) -- deliberately a live reference, not a copy, matching Specsyn's/Extinct's/Yields's own identical controls_ members exactly -- see any of their own comments for why. Only ever used through the same non-copyable-by-assignment pattern as those, so the usual objection (disabling implicit copy/move assignment) doesn't apply in practice.
     };
+
+    /**
+     * @brief Stellar wind mass, momentum, and energy fluxes of a single star
+     * @param props Stellar properties, as for Winds::vWind()
+     * @param winds The wind calculator to take the wind velocity from
+     *   (e.g. SimControls::winds()); may be null, in which case the
+     *   wind velocity is taken to be 0, so pDot and eDot are 0 but
+     *   mDot is not
+     * @param feh The star's metallicity [Fe/H]
+     * @return { mDot, pDot, eDot }: the star's mass loss rate, in
+     *   Msun/yr, read directly from props; its wind momentum flux
+     *   mDot * v_wind, in g cm s^-2; and its wind energy flux
+     *   (1/2) mDot v_wind^2, in erg s^-1, where v_wind =
+     *   winds->vWind(props, feh), in cm/s
+     * @details
+     * The single per-star calculation shared by every population that
+     * reports wind fluxes: core::Cluster's stochastic and
+     * non-stochastic stars, and core::Galaxy's field stars and purely
+     * continuous population.
+     */
+    [[nodiscard]] auto windFluxes(const specsyn::Specsyn::StarData& props, const Winds* winds,
+        double feh) -> std::array<double, 3>;
 
 } // namespace feedback
 

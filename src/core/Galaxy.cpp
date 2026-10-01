@@ -15,7 +15,6 @@
 #include "../specsyn/Specsyn.hpp"
 #include "../tracks/TrackCommons.hpp"
 #include "../tracks/Tracks3D.hpp"
-#include "../utils/Constants.hpp"
 #include "../utils/GKIntegratorData.hpp"
 #include "../utils/MiscUtils.hpp"
 #include "../utils/PDFIntegrator.hpp"
@@ -262,12 +261,14 @@ void core::Galaxy::advance(const double t)
         std::make_move_iterator(deadBegin), std::make_move_iterator(fieldStars_.end()));
     fieldStars_.erase(deadBegin, fieldStars_.end());
 
-    // 7) Mark spec_/specExtinct_/phot_/photExtinct_/lbol_/lbolCts_ as
-    // stale; recomputed lazily, on demand, the next time spec()/
-    // specExtinct()/phot()/photExtinct()/lbol() is actually called
+    // 7) Mark spec_/specExtinct_/phot_/photExtinct_/lbol_/lbolCts_ and
+    // the wind fluxes as stale; recomputed lazily, on demand, the next
+    // time spec()/specExtinct()/phot()/photExtinct()/lbol()/
+    // mDotWind()/pDotWind()/eDotWind() is actually called
     specCurrent_ = false;
     photCurrent_ = false;
     lbolCurrent_ = false;
+    windsCurrent_ = false;
     lbolCtsCurrent_ = false;
 
     // 8) Update current time, and cache every surviving field star's
@@ -293,16 +294,15 @@ void core::Galaxy::advance(const double t)
     lastFeedbackTime_ = curTime_;
 }
 
-// Update the field-star feedback quantities from the field stars that
-// died during the most recent advance() call -- see this method's own
-// header comment
-void core::Galaxy::computeFeedback()
+// Recompute the stellar wind fluxes from every population -- see this
+// method's own header comment
+void core::Galaxy::computeWinds()
 {
     const auto& sc = controls_.get();
 
     // Stellar wind fluxes: instantaneous rates at curTime_, so
-    // recomputed from scratch -- first every cluster's own totals,
-    // already current from its own advance()
+    // recomputed from scratch -- first every cluster's own totals
+    // (each computed lazily by the cluster itself, on this request)
     mDotWind_ = 0.0;
     pDotWind_ = 0.0;
     eDotWind_ = 0.0;
@@ -317,20 +317,40 @@ void core::Galaxy::computeFeedback()
     }
 
     // Then every currently-alive field star, from its cached
-    // properties, exactly as Cluster::windStar() does for a single
-    // star
-    const auto winds = sc.winds();
+    // properties
+    const auto windsPtr = sc.winds();
+    const feedback::Winds* const winds = windsPtr.get();
     for (std::size_t j = 0; j < fieldStars_.size(); ++j)
     {
         const auto& props = fieldStarProps_[j]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- fieldStarProps_ has size fieldStars_.size(), set together by advance(), and j is bounded by fieldStars_.size()
         if (!props.has_value()) { continue; } // outside the tracks' own range: no wind, as in Cluster::computeFeedback()
-        const double mDot = (*props)[static_cast<std::size_t>(tracks::FieldIdx::mdot)]; // Msun/yr // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- StarData is a fixed-size std::array, and this index is compile-time-known
-        const double vWind = (winds != nullptr) ? winds->vWind(*props, fieldStars_[j].feh_) : 0.0; // cm/s // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- as above
-        const double mDotCgs = mDot * utils::Msun / utils::yr; // g/s
+        const auto [mDot, pDot, eDot] = feedback::windFluxes(*props, winds, fieldStars_[j].feh_); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- as above
         mDotWind_ += mDot;
-        pDotWind_ += mDotCgs * vWind;
-        eDotWind_ += 0.5 * mDotCgs * vWind * vWind;
+        pDotWind_ += pDot;
+        eDotWind_ += eDot;
     }
+
+    // Finally the purely continuous (non-clustered, non-stochastic)
+    // population, via integrateCts() -- skipped when there is none,
+    // since integrateCts() would only scale its result to 0
+    if (sc.fCluster() < 1.0 && sc.fracStochMass() < 1.0)
+    {
+        const auto windStar = [winds](const double m, const specsyn::Specsyn::Segment& segment,
+            const double feh) -> std::array<double, 3>
+        { return feedback::windFluxes(segment(m), winds, feh); };
+        const auto windCts = integrateCts(windStar, 3);
+        mDotWind_ += windCts.at(0);
+        pDotWind_ += windCts.at(1);
+        eDotWind_ += windCts.at(2);
+    }
+}
+
+// Update the field-star feedback quantities from the field stars that
+// died during the most recent advance() call -- see this method's own
+// header comment
+void core::Galaxy::computeFeedback()
+{
+    const auto& sc = controls_.get();
 
     // Supernovae
     fieldStarStochSNe_ += static_cast<unsigned long>(std::ranges::count_if(deadFieldStars_,

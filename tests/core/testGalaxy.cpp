@@ -3228,12 +3228,13 @@ static auto testGalaxyCumSNeContinuous() -> int
 // clusters() and disruptedClusters()) plus each living field star's
 // own mDot, mDot v_wind, and (1/2) mDot v_wind^2 -- the latter computed
 // independently here, via tracks2D()->getStar() and
-// controls.winds()->vWind(), in cgs. Uses testGalaxyCumSNeFieldStars's
-// own setup (f_cluster = 0.5, min_stoch_mass = 0.1 Msun), so that
-// almost the whole non-clustered population is individual field stars
-// -- the purely continuous population's own wind is not yet included
-// in Galaxy's totals -- and checks at three times, so that the
-// fluxes are seen to be recomputed (not accumulated) at each step.
+// controls.winds()->vWind(), in cgs. Uses f_cluster = 0.5 and
+// min_stoch_mass = 0.08 Msun (the IMF's own minimum), so that the
+// whole non-clustered population is individual field stars, with no
+// purely continuous population at all (fracStochMass() = 1; see
+// testGalaxyWindsContinuous for that population) -- and checks at
+// three times, so that the fluxes are seen to be recomputed (not
+// accumulated) at each step.
 // Also checks that both the clusters and the field stars contribute,
 // so both halves of the sum are exercised.
 static auto testGalaxyWinds() -> int
@@ -3245,8 +3246,14 @@ static auto testGalaxyWinds() -> int
     {
         toml::table inputDeck = toml::parse_file(inputFile);
         inputDeck.at_path("clusters").as_table()->insert("f_cluster", 0.5);
-        inputDeck.at_path("stars").as_table()->insert_or_assign("min_stoch_mass", 0.1);
+        inputDeck.at_path("stars").as_table()->insert_or_assign("min_stoch_mass", 0.08);
         const io::SimControls controls(inputDeck);
+        if (controls.fracStochMass() != 1.0)
+        {
+            std::cerr << "testGalaxy: winds: test bug: expected no purely continuous "
+                "population (fracStochMass() == 1), got " << controls.fracStochMass() << "\n";
+            return 1;
+        }
 
         utils::rng().seed(rngSeed);
         core::Galaxy galaxy(controls);
@@ -3323,6 +3330,107 @@ static auto testGalaxyWinds() -> int
     }
 }
 
+// Verify Galaxy::mDotWind()/pDotWind()/eDotWind() for a purely
+// continuous population (f_cluster = 0, min_stoch_mass = 120 Msun, so
+// no clusters and no field stars): each must equal an independent
+// brute-force evaluation of the same double integral integrateCts()
+// computes -- a trapezoidal rule in log(age), from
+// min(1e4 yr, 1e-3 t) to t, weighted by the star formation rate at
+// t - age, of a trapezoidal rule in log(m) over each isochrone
+// segment, weighted by the IMF, of feedback::windFluxes() -- divided
+// by nonStochIMFMass(). The galaxy's own integrator tolerance is
+// tightened well below the default 1e-2 so that the comparison is
+// meaningful; the remaining tolerance allows for the brute-force
+// rule's own discretization error.
+static auto testGalaxyWindsContinuous() -> int
+{
+    constexpr double t = 5e6;
+    constexpr double intRelTol = 1e-4;
+    constexpr int nAge = 800;
+    constexpr int nMass = 800;
+    constexpr double tol = 5e-3;
+
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFile);
+        inputDeck.at_path("clusters").as_table()->insert("f_cluster", 0.0);
+        inputDeck.at_path("stars").as_table()->insert_or_assign("min_stoch_mass", 120.0);
+        io::SimControls controls(inputDeck);
+        controls.setIntRelTol(intRelTol);
+        if (controls.fracStochMass() != 0.0 || !controls.constFeH())
+        {
+            std::cerr << "testGalaxy: windsContinuous: test bug: expected an entirely "
+                "continuous population at a single [Fe/H]\n";
+            return 1;
+        }
+
+        utils::rng().seed(rngSeed);
+        core::Galaxy galaxy(controls);
+        galaxy.advance(t);
+        if (!galaxy.clusters().empty() || !galaxy.disruptedClusters().empty() ||
+            !galaxy.fieldStars().empty())
+        {
+            std::cerr << "testGalaxy: windsContinuous: test bug: expected no clusters or "
+                "field stars\n";
+            return 1;
+        }
+
+        const auto tracks2D = controls.tracks2D();
+        const auto winds = controls.winds();
+        const auto& imf = controls.imf();
+        const auto& sfr = controls.sfr();
+        const double feh = controls.fehDist().getMin();
+        const double ageMin = std::min(1e4, 1e-3 * t);
+        const double dlnAge = std::log(t / ageMin) / nAge;
+        std::array<double, 3> expected{};
+        for (int i = 0; i <= nAge; ++i)
+        {
+            const double age = std::clamp(ageMin * std::exp(i * dlnAge), ageMin, t);
+            const double ageWeight = ((i == 0 || i == nAge) ? 0.5 : 1.0) * dlnAge * age * sfr(t - age);
+            const auto isochrone = tracks2D->getIsochrone(std::max(std::log10(age), tracks2D->logTMin()));
+            for (const auto& seg : isochrone)
+            {
+                const double a = std::max(imf.getMin(), seg->xMin());
+                const double b = std::min(controls.minStochMass(), seg->xMax());
+                if (a >= b) { continue; }
+                const double dlnm = std::log(b / a) / nMass;
+                for (int k = 0; k <= nMass; ++k)
+                {
+                    const double m = std::clamp(a * std::exp(k * dlnm), a, b);
+                    const double weight = ageWeight *
+                        ((k == 0 || k == nMass) ? 0.5 : 1.0) * dlnm * m * imf(m);
+                    const auto w = feedback::windFluxes((*seg)(m), winds.get(), feh);
+                    for (std::size_t q = 0; q < w.size(); ++q) { expected.at(q) += weight * w.at(q); }
+                }
+            }
+        }
+        for (double& e : expected) { e /= controls.nonStochIMFMass(); }
+
+        const std::array<std::pair<std::string_view, double>, 3> actual{ {
+            { "mDotWind", galaxy.mDotWind() },
+            { "pDotWind", galaxy.pDotWind() },
+            { "eDotWind", galaxy.eDotWind() },
+        } };
+        int result = 0;
+        for (std::size_t q = 0; q < actual.size(); ++q)
+        {
+            const auto& [name, value] = actual.at(q);
+            if (!(expected.at(q) > 0.0) || std::abs(value / expected.at(q) - 1.0) > tol)
+            {
+                std::cerr << "testGalaxy: windsContinuous: " << name << "() = " << value
+                    << ", expected " << expected.at(q) << "\n";
+                result = 1;
+            }
+        }
+        return result;
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testGalaxy: windsContinuous test failed: " << error.what() << "\n";
+        return 1;
+    }
+}
+
 auto testGalaxy() -> int
 {
     int result = testGalaxyBasics();
@@ -3357,6 +3465,7 @@ auto testGalaxy() -> int
     result += testGalaxyCumSNeFieldStars();
     result += testGalaxyCumSNeContinuous();
     result += testGalaxyWinds();
+    result += testGalaxyWindsContinuous();
 
     try
     {

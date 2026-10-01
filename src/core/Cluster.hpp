@@ -469,15 +469,17 @@ namespace core
          *   Msun/yr, at the current time; 0 until advance() has run at
          *   least once
          * @details
-         * Updated by computeFeedback() -- see its own comment for how.
-         * advance() already calls computeFeedback() eagerly at the end
-         * of every call, so this is normally current already; if
-         * lastFeedbackTime_ is somehow not curTime_ (and advance() has
-         * run at all), it calls computeFeedback() first.
+         * Computed lazily, like lbol() (see spec()'s own comment):
+         * advance() only marks the wind fluxes stale (windsCurrent_),
+         * and the first of mDotWind()/pDotWind()/eDotWind() called
+         * afterward recomputes all three via computeWinds() -- see its
+         * own comment for how. Unlike cumSNe(), nothing here depends on
+         * which stars died during a particular advance() call, so
+         * there is no need to pay for this on every step.
          */
         [[nodiscard]] auto mDotWind() -> double
         {
-            updateFeedback();
+            if (!windsCurrent_) { computeWinds(); windsCurrent_ = true; }
             return mDotWind_;
         }
 
@@ -491,7 +493,7 @@ namespace core
          */
         [[nodiscard]] auto pDotWind() -> double
         {
-            updateFeedback();
+            if (!windsCurrent_) { computeWinds(); windsCurrent_ = true; }
             return pDotWind_;
         }
 
@@ -506,7 +508,7 @@ namespace core
          */
         [[nodiscard]] auto eDotWind() -> double
         {
-            updateFeedback();
+            if (!windsCurrent_) { computeWinds(); windsCurrent_ = true; }
             return eDotWind_;
         }
 
@@ -644,6 +646,15 @@ namespace core
          * Mirrors specCurrent_'s own comment, for lbol().
          */
         bool lbolCurrent_ = true;
+
+        /**
+         * @brief Whether mDotWind_/pDotWind_/eDotWind_ are current as of curTime_
+         * @details
+         * Mirrors lbolCurrent_'s own role, for mDotWind()/pDotWind()/
+         * eDotWind(): starts true (all three are 0 before advance() has
+         * run at all), and advance() sets it false.
+         */
+        bool windsCurrent_ = true;
 
         /**
          * @brief Simulation time through which yields_ has been updated
@@ -877,41 +888,28 @@ namespace core
          * integrates yieldStar(), and adds the sum of those integrals,
          * times birthNonStochMass_ / controls().nonStochIMFMass() (imf()
          * being normalized by number, not mass), into nonStochSN_.
-         *
-         * Also recomputes the instantaneous stellar wind fluxes
-         * mDotWind_, pDotWind_, and eDotWind_ from scratch (they are
-         * rates at curTime_, not cumulative quantities). Zeroes all
-         * three, then, for the stochastic population, adds windStar()
-         * for each living star in m_ that has an isochrone segment
-         * (skipping any that do not, as computeLbol() does); and, for
-         * the non-stochastic population (if birthNonStochMass_ > 0),
-         * integrates windStar() against controls().imf() over each
-         * isochrone segment via utils::PDFIntegrator and adds the
-         * result, scaled by birthNonStochMass_ /
-         * controls().nonStochIMFMass() -- exactly as computeLbol()
-         * does with lbolStar().
          */
         void computeFeedback();
 
         /**
-         * @brief Bring the feedback quantities up to date, if they are not already
+         * @brief Recompute the stellar wind fluxes mDotWind_, pDotWind_, and eDotWind_ at curTime_
          * @details
-         * Calls computeFeedback() and sets lastFeedbackTime_ to
-         * curTime_ if advance() has run at least once and
-         * lastFeedbackTime_ != curTime_; otherwise does nothing. The
-         * advanced_ check matters: before the first advance(),
-         * isochrone_ is empty, so computeFeedback()'s
-         * nonStochDeadMassRanges() call would count the whole
-         * non-stochastic population as having died.
+         * Called lazily from mDotWind()/pDotWind()/eDotWind() -- see
+         * windsCurrent_'s own comment. The fluxes are instantaneous
+         * rates at curTime_, not cumulative quantities, so this zeroes
+         * all three and recomputes them from scratch: for the
+         * stochastic population, adds windStar() for each living star
+         * in m_ that has an isochrone segment (skipping any that do
+         * not, as computeLbol() does); and, for the non-stochastic
+         * population (if birthNonStochMass_ > 0), integrates windStar()
+         * against controls().imf() over each isochrone segment, as
+         * computeLbol() does with lbolStar() -- but via
+         * utils::integrateScaled(), since mDot, pDot, and eDot differ
+         * in units and by tens of orders of magnitude, and adds the
+         * result, scaled by birthNonStochMass_ /
+         * controls().nonStochIMFMass().
          */
-        void updateFeedback()
-        {
-            if (advanced_ && lastFeedbackTime_ != curTime_)
-            {
-                computeFeedback();
-                lastFeedbackTime_ = curTime_;
-            }
-        }
+        void computeWinds();
 
         /**
          * @brief Stellar wind mass, momentum, and energy fluxes of a single star

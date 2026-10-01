@@ -448,20 +448,20 @@ namespace core
          * @brief Return the galaxy's total stellar wind mass flux
          * @return The summed mass loss rate, in Msun/yr, at the current
          *   time, of every cluster in clusters() and
-         *   disruptedClusters() (via Cluster::mDotWind()) and every
-         *   currently-alive field star; 0 until advance() has run
+         *   disruptedClusters() (via Cluster::mDotWind()), every
+         *   currently-alive field star, and the purely continuous
+         *   (non-clustered, non-stochastic) population; 0 until
+         *   advance() has run
          * @details
-         * Updated by computeFeedback() -- see its own comment.
-         * advance() already calls computeFeedback() eagerly at the end
-         * of every call, so this is normally current already; if
-         * lastFeedbackTime_ is somehow not curTime_, it calls
-         * computeFeedback() first, mirroring Cluster::mDotWind(). Does
-         * not yet include the purely continuous (non-clustered,
-         * non-stochastic) population.
+         * Computed lazily, like lbol() and Cluster::mDotWind():
+         * advance() only marks the wind fluxes stale (windsCurrent_),
+         * and the first of mDotWind()/pDotWind()/eDotWind() called
+         * afterward recomputes all three via computeWinds() -- see its
+         * own comment for how.
          */
         [[nodiscard]] auto mDotWind() -> double
         {
-            updateFeedback();
+            if (!windsCurrent_) { computeWinds(); windsCurrent_ = true; }
             return mDotWind_;
         }
 
@@ -474,7 +474,7 @@ namespace core
          */
         [[nodiscard]] auto pDotWind() -> double
         {
-            updateFeedback();
+            if (!windsCurrent_) { computeWinds(); windsCurrent_ = true; }
             return pDotWind_;
         }
 
@@ -487,7 +487,7 @@ namespace core
          */
         [[nodiscard]] auto eDotWind() -> double
         {
-            updateFeedback();
+            if (!windsCurrent_) { computeWinds(); windsCurrent_ = true; }
             return eDotWind_;
         }
 
@@ -773,7 +773,8 @@ namespace core
          *   curTime_ is 0
          * @details
          * Used by computeLbolCts() (with f the per-star bolometric
-         * luminosity). Mirrors Specsyn::specCtsHelper()'s own nested
+         * luminosity) and computeWinds() (with f
+         * feedback::windFluxes()). Mirrors Specsyn::specCtsHelper()'s own nested
          * structure: the age integral runs over a pdfs::PDFReflect view
          * of sfr() pivoted at curTime_ / 2, so its own coordinate is
          * age directly, from ageMin = min(1e4 yr, 1e-3 curTime_) to
@@ -1036,6 +1037,15 @@ namespace core
          * Mirrors specCurrent_'s own comment, for lbol().
          */
         bool lbolCurrent_ = true;
+
+        /**
+         * @brief Whether mDotWind_/pDotWind_/eDotWind_ are current as of curTime_
+         * @details
+         * Mirrors lbolCurrent_'s own role, for mDotWind()/pDotWind()/
+         * eDotWind(): starts true (all three are 0 before advance() has
+         * run at all), and advance() sets it false.
+         */
+        bool windsCurrent_ = true;
 
         /**
          * @brief The continuous population's own bolometric luminosity, in Lsun (matching lbol_'s own units)
@@ -1434,39 +1444,25 @@ namespace core
          * advance() then sets lastFeedbackTime_ to curTime_. Each
          * cluster's own supernovae are counted by that cluster's own
          * Cluster::computeFeedback(), run from its own advance().
-         *
-         * Also recomputes the instantaneous stellar wind fluxes
-         * mDotWind_, pDotWind_, and eDotWind_ from scratch: zeroes all
-         * three, adds Cluster::mDotWind()/pDotWind()/eDotWind() for
-         * every cluster in clusters_ and disruptedClusters_, then, for
-         * every currently-alive field star with properties in
-         * fieldStarProps_, adds mDot, mDot v_wind, and
-         * (1/2) mDot v_wind^2 (mDot from the star's own properties,
-         * v_wind from controls().winds()->vWind() at the star's own
-         * feh_, or 0 if winds() is null; pDot and eDot in cgs, as in
-         * Cluster::windStar()). The purely continuous (non-clustered,
-         * non-stochastic) population is not yet included.
          */
         void computeFeedback();
 
         /**
-         * @brief Bring the feedback quantities up to date, if they are not already
+         * @brief Recompute the stellar wind fluxes mDotWind_, pDotWind_, and eDotWind_ at curTime_
          * @details
-         * Calls computeFeedback() and sets lastFeedbackTime_ to
-         * curTime_ if lastFeedbackTime_ != curTime_; otherwise does
-         * nothing. Mirrors Cluster::updateFeedback(), except that no
-         * separate has-advanced check is needed: curTime_ and
-         * lastFeedbackTime_ both start at 0, so they only differ
-         * after some advance().
+         * Called lazily from mDotWind()/pDotWind()/eDotWind() -- see
+         * windsCurrent_'s own comment. Zeroes all three, then adds
+         * Cluster::mDotWind()/pDotWind()/eDotWind() for every cluster
+         * in clusters_ and disruptedClusters_ (each itself computed
+         * lazily, on this first request), then
+         * feedback::windFluxes() for every currently-alive field star
+         * with properties in fieldStarProps_, at the star's own feh_,
+         * and finally, if there is a purely continuous (non-clustered,
+         * non-stochastic) population at all (fCluster() < 1 and
+         * fracStochMass() < 1), integrateCts() of
+         * feedback::windFluxes() over it.
          */
-        void updateFeedback()
-        {
-            if (lastFeedbackTime_ != curTime_)
-            {
-                computeFeedback();
-                lastFeedbackTime_ = curTime_;
-            }
-        }
+        void computeWinds();
 
     };
 
