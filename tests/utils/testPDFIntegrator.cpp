@@ -18,8 +18,10 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <exception>
 #include <iostream>
 #include <memory>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -201,6 +203,67 @@ static auto testIntegrateScaledExtremeRange() -> int
     return 0;
 }
 
+// Verify integrateScaled()'s logTransform option: integrating
+// f(x) = {x, 1e-20 x^2} against a flat PDF over [10, 1000] (two
+// decades), with and without logTransform, must reproduce the analytic
+// results w (a + b) / 2 and 1e-20 w (a^2 + a b + b^2) / 3 (w being the
+// PDF's own integral over [a, b]) -- elements 20 orders of magnitude
+// apart, so the scaling also matters
+static auto testIntegrateScaledLogTransform() -> int
+{
+    constexpr double a = 10.0;
+    constexpr double b = 1000.0;
+    constexpr double tol = 1e-6;
+    const pdfs::PDF flat(std::make_unique<pdfs::PDFSegmentPowerlaw>(1.0, 1e4, 0.0));
+    const double weight = flat.integral(a, b);
+    const std::array<double, 2> expected{ weight * (a + b) / 2.0,
+        1e-20 * weight * ((a * a) + (a * b) + (b * b)) / 3.0 };
+    const auto f = [](const double x) -> std::vector<double> { return { x, 1e-20 * x * x }; };
+
+    int result = 0;
+    for (const bool logTransform : { false, true })
+    {
+        const auto got = utils::integrateScaled(flat, f, 2U, a, b, { a, 100.0, b },
+            0, 1e-3, tol * 1e-2, logTransform);
+        for (std::size_t k = 0; k < expected.size(); ++k)
+        {
+            if (std::abs((got.at(k) / expected.at(k)) - 1.0) > tol)
+            {
+                std::cerr << "testPDFIntegrator: integrateScaled logTransform = " << logTransform
+                    << ", element " << k << ": expected " << expected.at(k) << ", got "
+                    << got.at(k) << "\n";
+                result = 1;
+            }
+        }
+    }
+
+    // logTransform must actually reach PDFIntegrator: over [0, 1000],
+    // which PDFIntegrator cannot log-transform, it must throw, while
+    // the same call without logTransform must not
+    const pdfs::PDF flatFromZero(std::make_unique<pdfs::PDFSegmentPowerlaw>(0.0, 1e4, 0.0));
+    try
+    {
+        static_cast<void>(utils::integrateScaled(flatFromZero, f, 2U, 0.0, b, { 1.0, b },
+            0, 1e-3, tol, false));
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testPDFIntegrator: integrateScaled over [0, " << b
+            << "] without logTransform threw: " << error.what() << "\n";
+        result = 1;
+    }
+    try
+    {
+        static_cast<void>(utils::integrateScaled(flatFromZero, f, 2U, 0.0, b, { 1.0, b },
+            0, 1e-3, tol, true));
+        std::cerr << "testPDFIntegrator: integrateScaled over [0, " << b
+            << "] with logTransform did not throw\n";
+        result = 1;
+    }
+    catch (const std::runtime_error&) { /* expected */ } // NOLINT(bugprone-empty-catch) -- the throw is the expected outcome
+    return result;
+}
+
 auto testPDFIntegrator() -> int
 {
     const pdfs::PDF imf = pdfs::parsePDFDescriptor("data/imfs/chabrier.toml");
@@ -210,5 +273,6 @@ auto testPDFIntegrator() -> int
     result += testMemberFunction(imf);
     result += testDeltaSegments();
     result += testIntegrateScaledExtremeRange();
+    result += testIntegrateScaledLogTransform();
     return result;
 }
