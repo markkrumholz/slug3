@@ -3956,6 +3956,119 @@ def test_winds_vwindob_wrong_length_raises():
         controls.winds.vWindOB(OB_WIND_PROPS[:-1], OB_WIND_FEH)
 
 
+# The Sun (1 Msun, L = Lsun, Teff = 5772 K), in Winds' props order --
+# the same star tests/feedback/testWinds.cpp's own testVWindOther
+# starts with. Its surface escape speed (cm/s) was computed
+# independently of slug, from the same GSL constants.
+SUN_PROPS = [1.0, 0.0, 0.0, 3.7613263224, 0.7, 0.28, 0.002, 0.0007, 0.0]
+SUN_VESC = 6.1769410538e7
+
+
+def _deck_with_feedback(**keys):
+    """CLUSTER_DECK's own text, plus a [feedback] table holding keys."""
+    deck = tomlkit.parse(pathlib.Path(CLUSTER_DECK).read_text())
+    deck["feedback"] = tomlkit.table()
+    for key, value in keys.items():
+        deck["feedback"][key] = value
+    return tomlkit.dumps(deck)
+
+
+def test_simcontrols_agb_other_wind_model_defaults():
+    """With neither key given, agbWindModel defaults to slug2 and
+    otherWindModel to vesc."""
+    controls = slug.SimControls(CLUSTER_DECK)
+    assert controls.agbWindModel == "slug2"
+    assert controls.otherWindModel == "vesc"
+
+
+@pytest.mark.parametrize("key,prop,model", [
+    ("agb_winds", "agbWindModel", "none"),
+    ("agb_winds", "agbWindModel", "slug2"),
+    ("other_winds", "otherWindModel", "none"),
+    ("other_winds", "otherWindModel", "vesc"),
+])
+def test_simcontrols_agb_other_wind_model_from_deck(key, prop, model):
+    """feedback.agb_winds/feedback.other_winds select the named model,
+    without being reported as an unused key."""
+    controls = slug.SimControls(_deck_with_feedback(**{key: model}))
+    assert getattr(controls, prop) == model
+    assert controls.winds is not None
+    assert not controls.unusedKeys
+
+
+@pytest.mark.parametrize("key,model", [
+    ("agb_winds", "vesc"), ("agb_winds", "None"),
+    ("other_winds", "slug2"), ("other_winds", "v_esc"),
+])
+def test_simcontrols_agb_other_wind_model_invalid_deck_raises(key, model):
+    """An unrecognized feedback.agb_winds/other_winds name is rejected."""
+    with pytest.raises(ValueError):
+        slug.SimControls(_deck_with_feedback(**{key: model}))
+
+
+def test_simcontrols_agb_other_wind_model_property_and_setter():
+    """agbWindModel/otherWindModel are settable both via the property
+    and their setters; an unrecognized name raises ValueError and
+    leaves the current model unchanged."""
+    controls = slug.SimControls(CLUSTER_DECK)
+    controls.agbWindModel = "none"
+    assert controls.agbWindModel == "none"
+    controls.setAGBWindModel("slug2")
+    assert controls.agbWindModel == "slug2"
+    with pytest.raises(ValueError):
+        controls.agbWindModel = "vesc"
+    assert controls.agbWindModel == "slug2"
+
+    controls.otherWindModel = "none"
+    assert controls.otherWindModel == "none"
+    controls.setOtherWindModel("vesc")
+    assert controls.otherWindModel == "vesc"
+    with pytest.raises(ValueError):
+        controls.setOtherWindModel("slug2")
+    assert controls.otherWindModel == "vesc"
+
+
+@pytest.mark.parametrize("log_l,feh,expected", [
+    (4.0, 0.0, 9.4e5),
+    (3.5, 0.0, 7.0490055677e5),
+    (4.2, -0.5, 5.9309990381e5),
+    (3.8, 0.3, 1.1833898871e6),
+])
+def test_winds_vwindagb(log_l, feh, expected):
+    """vWindAGB gives 9.4 km/s (L / 1e4 Lsun)^(1/4) (10^feh)^(1/2) under
+    slug2 (expected values computed independently of slug), and exactly
+    0 under none, read live from the SimControls."""
+    controls = slug.SimControls(CLUSTER_DECK)
+    winds = controls.winds
+    props = [1.5, 0.0, log_l, 3.5, 0.7, 0.28, 0.002, 0.0007, 0.0]
+    assert winds.vWindAGB(props=props, feh=feh) == pytest.approx(expected, rel=1e-4)
+    controls.agbWindModel = "none"
+    assert winds.vWindAGB(props, feh) == 0.0
+
+
+def test_winds_vwindother():
+    """vWindOther gives the surface escape speed under vesc (the Sun's
+    own 617.7 km/s), and exactly 0 under none, read live from the
+    SimControls."""
+    controls = slug.SimControls(CLUSTER_DECK)
+    winds = controls.winds
+    assert winds.vWindOther(props=SUN_PROPS) == pytest.approx(SUN_VESC, rel=1e-4)
+    controls.otherWindModel = "none"
+    assert winds.vWindOther(SUN_PROPS) == 0.0
+
+
+@pytest.mark.parametrize("method,args", [
+    ("vWindAGB", (0.0,)),
+    ("vWindOther", ()),
+])
+def test_winds_agb_other_wrong_length_raises(method, args):
+    """props must have exactly 9 elements, and the error names the
+    method actually called."""
+    controls = slug.SimControls(CLUSTER_DECK)
+    with pytest.raises(RuntimeError, match=method):
+        getattr(controls.winds, method)(SUN_PROPS[:-1], *args)
+
+
 def test_simcontrols_yields_channel_decomposed_property(yields_controls):
     """yieldsChannelDecomposed defaults to True and is settable both via the property and the setter."""
     assert yields_controls.yieldsChannelDecomposed is True

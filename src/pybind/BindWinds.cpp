@@ -23,9 +23,9 @@
 static constexpr std::string_view classDocstring = R"doc(A calculator for stellar wind feedback quantities.
 
 Reads the choice of wind model live from the SimControls it was built
-against (SimControls.wrWindModel and SimControls.obWindModel), on every
-call, so changing that choice takes effect immediately without
-rebuilding this object.)doc";
+against (SimControls.wrWindModel, obWindModel, agbWindModel, and
+otherWindModel), on every call, so changing that choice takes effect
+immediately without rebuilding this object.)doc";
 
 static constexpr std::string_view constructorDocstring = R"doc(Construct a Winds.
 
@@ -90,6 +90,52 @@ Raises
 RuntimeError
     If props does not have exactly 9 elements.)doc";
 
+static constexpr std::string_view vWindAGBDocstring = R"doc(Compute the terminal wind velocity of an AGB star.
+
+Parameters
+----------
+props : list of float
+    Stellar properties, in the same 9-element layout vWindWR() takes.
+    The star is assumed to already be an AGB star; this is not checked.
+feh : float
+    The star's metallicity [Fe/H].
+
+Returns
+-------
+vwind : float
+    Terminal wind velocity, in cm/s, from whichever model the
+    SimControls this Winds was built against selects via its
+    agbWindModel property: "none" gives exactly 0; "slug2" gives
+    9.4 km/s * (L / 1e4 Lsun)^(1/4) * (10^feh)^(1/2), the Elitzur &
+    Ivezic (2001) scaling with the Goldman et al. (2017) normalization.
+
+Raises
+------
+RuntimeError
+    If props does not have exactly 9 elements.)doc";
+
+static constexpr std::string_view vWindOtherDocstring = R"doc(Compute the terminal wind velocity of any other star.
+
+For stars not covered by vWindWR(), vWindOB(), or vWindAGB().
+
+Parameters
+----------
+props : list of float
+    Stellar properties, in the same 9-element layout vWindWR() takes.
+
+Returns
+-------
+vwind : float
+    Terminal wind velocity, in cm/s, from whichever model the
+    SimControls this Winds was built against selects via its
+    otherWindModel property: "none" gives exactly 0; "vesc" gives the
+    surface escape speed sqrt(2 G M / R), with R from L and Teff.
+
+Raises
+------
+RuntimeError
+    If props does not have exactly 9 elements.)doc";
+
 // Disable linting for includes -- the pybind macro magic seems to confuse
 // the linter
 // NOLINTBEGIN(misc-include-cleaner)
@@ -131,6 +177,14 @@ void bindWinds(py::module_& m)
         .def("vWindOB",
                 [](const feedback::Winds& self, const std::vector<double>& props, const double feh) -> double
                 { return self.vWindOB(toStarData(props, "vWindOB"), feh); },
-                vWindOBDocstring.data(), py::arg("props"), py::arg("feh"));
+                vWindOBDocstring.data(), py::arg("props"), py::arg("feh"))
+        .def("vWindAGB",
+                [](const feedback::Winds& self, const std::vector<double>& props, const double feh) -> double
+                { return self.vWindAGB(toStarData(props, "vWindAGB"), feh); },
+                vWindAGBDocstring.data(), py::arg("props"), py::arg("feh"))
+        .def("vWindOther",
+                [](const feedback::Winds& self, const std::vector<double>& props) -> double
+                { return self.vWindOther(toStarData(props, "vWindOther")); },
+                vWindOtherDocstring.data(), py::arg("props"));
 }
 // NOLINTEND(misc-include-cleaner)

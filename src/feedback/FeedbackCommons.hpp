@@ -132,6 +132,113 @@ namespace feedback
         return obWindModelStr.at(static_cast<std::size_t>(model));
     }
 
+    /**
+     * @brief enum of the available AGB star wind velocity models
+     * @details
+     * Selects how Winds::vWindAGB() computes an AGB star's terminal
+     * wind velocity -- see that method's own comment for what each
+     * one does.
+     */
+    enum class AGBwindModel : std::uint8_t
+    {
+        // NOLINTBEGIN(readability-identifier-naming) -- trailing underscore on each enumerator matches yields::Channel's own identical convention (see its own comment)
+        none_, /**< No AGB wind: velocity is zero */
+        slug2_ /**< The prescription used by slug2 (Elitzur & Ivezic 2001 scaling, Goldman et al. 2017 normalization) */
+        // NOLINTEND(readability-identifier-naming)
+    };
+
+    /**
+     * @brief Names of each AGBwindModel, as used by the input deck's
+     *   feedback.agb_winds key and the Python bindings, in the same
+     *   order as the enumerators themselves
+     */
+    constexpr std::array<std::string_view, 2> agbWindModelStr{
+        "none",
+        "slug2"
+    };
+
+    /**
+     * @brief Translate an AGB wind model name into an AGBwindModel
+     * @param name One of the entries of agbWindModelStr
+     * @return The corresponding AGBwindModel
+     * @throws std::invalid_argument if name is not one of the entries
+     *   of agbWindModelStr
+     */
+    inline auto agbWindModelFromString(const std::string_view name) -> AGBwindModel
+    {
+        const auto* const it = std::ranges::find(agbWindModelStr, name);
+        if (it == agbWindModelStr.end())
+        {
+            throw std::invalid_argument("'" + std::string(name) +
+                "' is not a recognized AGB wind model (expected none or slug2)");
+        }
+        return static_cast<AGBwindModel>(std::distance(agbWindModelStr.begin(), it));
+    }
+
+    /**
+     * @brief Translate an AGBwindModel into its name
+     * @param model The model to translate
+     * @return The entry of agbWindModelStr corresponding to model
+     */
+    inline auto agbWindModelToString(const AGBwindModel model) -> std::string_view
+    {
+        return agbWindModelStr.at(static_cast<std::size_t>(model));
+    }
+
+    /**
+     * @brief enum of the available wind velocity models for all stars
+     *   not covered by WRwindModel, OBwindModel, or AGBwindModel
+     * @details
+     * Selects how Winds::vWindOther() computes such a star's terminal
+     * wind velocity -- see that method's own comment for what each
+     * one does.
+     */
+    enum class OtherwindModel : std::uint8_t
+    {
+        // NOLINTBEGIN(readability-identifier-naming) -- trailing underscore on each enumerator matches yields::Channel's own identical convention (see its own comment)
+        none_, /**< No wind: velocity is zero */
+        vesc_  /**< Wind velocity equal to the surface escape speed */
+        // NOLINTEND(readability-identifier-naming)
+    };
+
+    /**
+     * @brief Names of each OtherwindModel, as used by the input deck's
+     *   feedback.other_winds key and the Python bindings, in the same
+     *   order as the enumerators themselves
+     */
+    constexpr std::array<std::string_view, 2> otherWindModelStr{
+        "none",
+        "vesc"
+    };
+
+    /**
+     * @brief Translate an other-star wind model name into an OtherwindModel
+     * @param name One of the entries of otherWindModelStr
+     * @return The corresponding OtherwindModel
+     * @throws std::invalid_argument if name is not one of the entries
+     *   of otherWindModelStr
+     */
+    inline auto otherWindModelFromString(const std::string_view name) -> OtherwindModel
+    {
+        const auto* const it = std::ranges::find(otherWindModelStr, name);
+        if (it == otherWindModelStr.end())
+        {
+            throw std::invalid_argument("'" + std::string(name) +
+                "' is not a recognized other-star wind model (expected none or vesc)");
+        }
+        return static_cast<OtherwindModel>(std::distance(otherWindModelStr.begin(), it));
+    }
+
+    /**
+     * @brief Translate an OtherwindModel into its name
+     * @param model The model to translate
+     * @return The entry of otherWindModelStr corresponding to model
+     */
+    inline auto otherWindModelToString(const OtherwindModel model) -> std::string_view
+    {
+        return otherWindModelStr.at(static_cast<std::size_t>(model));
+    }
+
 } // namespace feedback
 
 #endif // FEEDBACKCOMMONS_HPP
