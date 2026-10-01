@@ -8,10 +8,13 @@
 
 #include "Cluster.hpp"
 #include "../extinct/Extinct.hpp"
+#include "../feedback/Winds.hpp"
 #include "../io/SimControls.hpp"
 #include "../nebular/Nebular.hpp"
+#include "../specsyn/Specsyn.hpp"
 #include "../tracks/TrackCommons.hpp"
 #include "../tracks/Tracks2D.hpp"
+#include "../utils/Constants.hpp"
 #include "../utils/GKIntegratorData.hpp"
 #include "../utils/PDFIntegrator.hpp"
 #include "../utils/RngThread.hpp"
@@ -686,6 +689,60 @@ void core::Cluster::computeFeedback()
 {
     const auto& sc = controls_.get();
 
+    // Stellar wind fluxes: instantaneous rates at curTime_, so
+    // recomputed from scratch, from the living stars
+    mDotWind_ = 0.0;
+    pDotWind_ = 0.0;
+    eDotWind_ = 0.0;
+    const auto windsPtr = sc.winds();
+    const feedback::Winds* const winds = windsPtr.get();
+
+    // Individually-sampled (stochastic) stars, skipping any with no
+    // isochrone segment -- mirrors computeLbol()'s own identical loop
+    for (const double m : m_)
+    {
+        const auto seg = std::ranges::find_if(isochrone_,
+            [m](const auto& segment) -> bool
+            { return m >= segment->xMin() && m <= segment->xMax(); });
+        if (seg == isochrone_.end()) { continue; }
+
+        const auto [mDot, pDot, eDot] = windStar(m, **seg, winds, feH_);
+        mDotWind_ += mDot;
+        pDotWind_ += pDot;
+        eDotWind_ += eDot;
+    }
+
+    // Continuously-sampled (non-stochastic) part of the population:
+    // integrate windStar against the IMF over each isochrone segment,
+    // exactly as computeLbol() integrates lbolStar
+    if (birthNonStochMass_ > 0.0)
+    {
+        using WindSegFn = std::array<double, 3> (*)(double, const Segment&, const feedback::Winds*, double);
+        const utils::PDFIntegrator<WindSegFn, utils::GKOrder::GK15> integrator(
+            sc.imf(), static_cast<WindSegFn>(&Cluster::windStar), 3,
+            false, sc.intMaxIter(), sc.intAbsTol(), sc.intRelTol());
+
+        const double mMin = sc.imf().getMin();
+        const double mMax = sc.minStochMass();
+        std::array<double, 3> windCts{};
+        for (const auto& seg : isochrone_)
+        {
+            const double a = std::max(mMin, seg->xMin());
+            const double b = std::min(mMax, seg->xMax());
+            if (a >= b) { continue; } // empty intersection with [mMin, mMax]
+
+            const auto segResult = integrator.integrate(a, b, *seg, winds, feH_);
+            for (std::size_t i = 0; i < windCts.size(); ++i) { windCts.at(i) += segResult.at(i); }
+        }
+        // imf() is normalized by number, so windCts is per star;
+        // convert to per unit non-stochastic mass -- see
+        // SimControls::nonStochIMFMass()'s own comment
+        const double scale = birthNonStochMass_ / sc.nonStochIMFMass();
+        mDotWind_ += windCts[0] * scale; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- windCts is a std::array<double, 3>
+        pDotWind_ += windCts[1] * scale; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
+        eDotWind_ += windCts[2] * scale; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
+    }
+
     // Stochastic (individually-sampled) stars that died during the
     // most recent advance() call
     stochSN_ += static_cast<unsigned long>(
@@ -733,6 +790,18 @@ auto core::Cluster::lbolStar(const double m, const Segment& segment) -> std::arr
 {
     const auto logL = segment(m, static_cast<size_t>(tracks::FieldIdx::logL));
     return { std::pow(10.0, logL) };
+}
+
+// Per-star wind mass, momentum, and energy fluxes, given a mass and
+// isochrone segment -- see this method's own header comment
+auto core::Cluster::windStar(const double m, const Segment& segment,
+    const feedback::Winds* const winds, const double feH) -> std::array<double, 3>
+{
+    const specsyn::Specsyn::StarData props = segment(m);
+    const double mDot = props[static_cast<std::size_t>(tracks::FieldIdx::mdot)]; // Msun/yr // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- StarData is a fixed-size std::array, and this index is compile-time-known
+    const double vWind = (winds != nullptr) ? winds->vWind(props, feH) : 0.0;     // cm/s
+    const double mDotCgs = mDot * utils::Msun / utils::yr;                          // g/s
+    return { mDot, mDotCgs * vWind, 0.5 * mDotCgs * vWind * vWind };
 }
 
 // Per-star nucleosynthetic yield, given a mass and [Fe/H] -- see this
