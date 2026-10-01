@@ -117,7 +117,7 @@ namespace feedback
             // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
 
             const double radius = stellarRadius(logL, logTeff);                       // cm
-            const double vEsc = std::sqrt(utils::G * mass * utils::Msun / radius);    // cm/s
+            const double vEsc = std::sqrt(2.0 * utils::G * mass * utils::Msun / radius); // cm/s
             const double ratio = (std::pow(10.0, logTeff) < tJump(feh)) ? 1.3 : 2.6;  // v_wind / v_esc
             return ratio * vEsc * std::pow(10.0, 0.13 * feh);                         // cm/s
         }

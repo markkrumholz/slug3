@@ -179,9 +179,12 @@ namespace feedback
          * hot-side one for Teff >= T_jump.
          *
          * OBwindModel::vink01_ takes v_wind as a fixed multiple of the
-         * star's escape speed v_esc = sqrt(G M / R), where M is the
-         * star's current mass and R its radius, obtained from L and
-         * T_eff via the Stefan-Boltzmann law:
+         * star's surface escape speed v_esc = sqrt(2 G M / R), where M
+         * is the star's current mass and R its radius, obtained from L
+         * and T_eff via the Stefan-Boltzmann law. (Following the usual
+         * convention of Lamers et al., on which Vink et al.'s ratios
+         * are based, this includes the factor of 2, but neglects the
+         * (1 - Gamma_e) electron-scattering correction.)
          *
          *   v_wind = 1.3 v_esc (10^[Fe/H])^0.13   [Teff <  T_jump]
          *   v_wind = 2.6 v_esc (10^[Fe/H])^0.13   [Teff >= T_jump]
