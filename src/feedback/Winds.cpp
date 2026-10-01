@@ -56,6 +56,20 @@ namespace feedback
                 (hSurf + (0.5 * heSurf) + (0.25 * zSurf));
         }
 
+        // Surface escape speed, in cm/s, sqrt(2 G M / R), with R from
+        // stellarRadius()
+        auto surfaceEscapeSpeed(const specsyn::Specsyn::StarData& props) -> double // NOLINT(llvm-prefer-static-over-anonymous-namespace) -- see vWindLOverC's own identical NOLINT
+        {
+            // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- StarData is a fixed-size std::array, and every index used here is compile-time-known
+            const double mass = props[static_cast<std::size_t>(tracks::FieldIdx::mass)]; // Msun
+            const double logL = props[static_cast<std::size_t>(tracks::FieldIdx::logL)]; // log10(L/Lsun)
+            const double logTeff = props[static_cast<std::size_t>(tracks::FieldIdx::logTe)];
+            // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+
+            const double radius = stellarRadius(logL, logTeff);                   // cm
+            return std::sqrt(2.0 * utils::G * mass * utils::Msun / radius);       // cm/s
+        }
+
         // Vink et al. (2001) bistability jump temperature, in K, at
         // metallicity [Fe/H] -- see vWindOB's own comment
         auto tJump(const double feh) -> double // NOLINT(llvm-prefer-static-over-anonymous-namespace) -- see vWindLOverC's own identical NOLINT
@@ -125,11 +139,7 @@ namespace feedback
         // OBwindModel::vink01_: see vWindOB's own comment
         auto vWindVink01(const specsyn::Specsyn::StarData& props, const double feh) -> double // NOLINT(llvm-prefer-static-over-anonymous-namespace) -- see vWindLOverC's own identical NOLINT
         {
-            // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- StarData is a fixed-size std::array, and every index used here is compile-time-known
-            const double mass = props[static_cast<std::size_t>(tracks::FieldIdx::mass)]; // Msun
-            const double logL = props[static_cast<std::size_t>(tracks::FieldIdx::logL)]; // log10(L/Lsun)
-            const double logTeff = props[static_cast<std::size_t>(tracks::FieldIdx::logTe)];
-            // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            const double logTeff = props[static_cast<std::size_t>(tracks::FieldIdx::logTe)]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- StarData is a fixed-size std::array, and this index is compile-time-known
 
             // Gamma_e >= 1: the effective mass M (1 - Gamma_e), and hence
             // the effective escape speed, is zero (or undefined), so
@@ -137,11 +147,21 @@ namespace feedback
             const double gammaE = eddingtonFactor(props);
             if (gammaE >= 1.0) { return 0.0; }
 
-            const double radius = stellarRadius(logL, logTeff); // cm
-            const double vEsc = std::sqrt(
-                2.0 * utils::G * mass * utils::Msun * (1.0 - gammaE) / radius); // cm/s
+            // Effective escape speed, sqrt(2 G M (1 - Gamma_e) / R)
+            const double vEsc = surfaceEscapeSpeed(props) * std::sqrt(1.0 - gammaE); // cm/s
             const double ratio = (std::pow(10.0, logTeff) < tJump(feh)) ? 1.3 : 2.6;  // v_wind / v_esc
             return ratio * vEsc * std::pow(10.0, 0.13 * feh);                         // cm/s
+        }
+
+        // AGBwindModel::slug2_: see vWindAGB's own comment
+        auto vWindSlug2AGB(const specsyn::Specsyn::StarData& props, const double feh) -> double // NOLINT(llvm-prefer-static-over-anonymous-namespace) -- see vWindLOverC's own identical NOLINT
+        {
+            const double logL = props[static_cast<std::size_t>(tracks::FieldIdx::logL)]; // log10(L/Lsun) // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- StarData is a fixed-size std::array, and this index is compile-time-known
+
+            // v_wind = 9.4 km/s (L / 10^4 Lsun)^(1/4) (10^[Fe/H])^(1/2)
+            constexpr double vNorm = 9.4 * kmToCm; // cm/s, at L = 10^4 Lsun, [Fe/H] = 0
+            constexpr double logLNorm = 4.0;
+            return vNorm * std::pow(10.0, (0.25 * (logL - logLNorm)) + (0.5 * feh)); // cm/s
         }
 
         // OBwindModel::vinkSander21_: see vWindOB's own comment
@@ -179,6 +199,26 @@ namespace feedback
             case OBwindModel::vinkSander21_: return vWindVinkSander21(props, feh);
         }
         throw std::logic_error("Winds::vWindOB: unrecognized OB wind model"); // unreachable; exhaustive switch above
+    }
+
+    auto Winds::vWindAGB(const specsyn::Specsyn::StarData& props, const double feh) const -> double
+    {
+        switch (controls_.agbWindModel())
+        {
+            case AGBwindModel::none_:  return 0.0;
+            case AGBwindModel::slug2_: return vWindSlug2AGB(props, feh);
+        }
+        throw std::logic_error("Winds::vWindAGB: unrecognized AGB wind model"); // unreachable; exhaustive switch above
+    }
+
+    auto Winds::vWindOther(const specsyn::Specsyn::StarData& props) const -> double
+    {
+        switch (controls_.otherWindModel())
+        {
+            case OtherwindModel::none_: return 0.0;
+            case OtherwindModel::vesc_: return surfaceEscapeSpeed(props);
+        }
+        throw std::logic_error("Winds::vWindOther: unrecognized other-star wind model"); // unreachable; exhaustive switch above
     }
 
 } // namespace feedback

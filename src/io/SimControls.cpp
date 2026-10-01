@@ -1422,9 +1422,21 @@ void io::SimControls::readFeedback(const utils::TrackedDeck& inputDeck)
         obWindModel_ = feedback::obWindModelFromString(obWindsInput.value());
     }
 
+    // feedback.agb_winds and feedback.other_winds: likewise
+    const auto agbWindsInput = inputDeck.value<std::string>("feedback.agb_winds");
+    if (agbWindsInput.has_value())
+    {
+        agbWindModel_ = feedback::agbWindModelFromString(agbWindsInput.value());
+    }
+    const auto otherWindsInput = inputDeck.value<std::string>("feedback.other_winds");
+    if (otherWindsInput.has_value())
+    {
+        otherWindModel_ = feedback::otherWindModelFromString(otherWindsInput.value());
+    }
+
     // The wind calculator itself: always built, whatever was given
-    // above, since it reads wrWindModel_/obWindModel_ live on every
-    // call rather than being configured once here
+    // above, since it reads each wind model live on every call rather
+    // than being configured once here
     winds_ = std::make_shared<feedback::Winds>(*this);
 }
 

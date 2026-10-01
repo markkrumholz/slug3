@@ -4320,6 +4320,112 @@ static auto testSimControlsFeedbackOBWinds() -> int
     return result > 0 ? 1 : 0;
 }
 
+// Verify readFeedback()'s parsing of feedback.agb_winds and
+// feedback.other_winds: defaults, each valid name (alone, and with
+// all four wind keys given at once, each to a non-default value), and
+// rejection of bad values
+static auto testSimControlsFeedbackAGBOtherWinds() -> int
+{
+    constexpr std::string_view baseDeck = "tests/core/assets/testGalaxy.in";
+    int result = 0;
+
+    auto makeDeck = [baseDeck](std::optional<toml::table> feedback) -> toml::table {
+        toml::table deck = toml::parse_file(baseDeck);
+        if (feedback.has_value()) { deck.insert("feedback", std::move(feedback.value())); }
+        return deck;
+    };
+
+    auto checkModels = [&result](const io::SimControls& controls, const std::string_view label,
+            const feedback::AGBwindModel agb, const feedback::OtherwindModel other) {
+        if (controls.agbWindModel() != agb)
+        {
+            std::cerr << "testSimControls: feedbackAGBOtherWinds: " << label << ": agbWindModel() = '"
+                << feedback::agbWindModelToString(controls.agbWindModel()) << "', expected '"
+                << feedback::agbWindModelToString(agb) << "'\n";
+            result = 1;
+        }
+        if (controls.otherWindModel() != other)
+        {
+            std::cerr << "testSimControls: feedbackAGBOtherWinds: " << label << ": otherWindModel() = '"
+                << feedback::otherWindModelToString(controls.otherWindModel()) << "', expected '"
+                << feedback::otherWindModelToString(other) << "'\n";
+            result = 1;
+        }
+        if (!controls.unusedKeys().empty())
+        {
+            std::cerr << "testSimControls: feedbackAGBOtherWinds: " << label << ": keys reported unused\n";
+            result = 1;
+        }
+        if (controls.winds() == nullptr)
+        {
+            std::cerr << "testSimControls: feedbackAGBOtherWinds: " << label << ": winds() is null\n";
+            result = 1;
+        }
+    };
+
+    try
+    {
+        // Defaults: slug2 and vesc
+        checkModels(io::SimControls(makeDeck(std::nullopt)), "defaults",
+            feedback::AGBwindModel::slug2_, feedback::OtherwindModel::vesc_);
+
+        // Each valid name, one key at a time
+        checkModels(io::SimControls(makeDeck(toml::table{ { "agb_winds", "none" } })),
+            "agb_winds = none", feedback::AGBwindModel::none_, feedback::OtherwindModel::vesc_);
+        checkModels(io::SimControls(makeDeck(toml::table{ { "agb_winds", "slug2" } })),
+            "agb_winds = slug2", feedback::AGBwindModel::slug2_, feedback::OtherwindModel::vesc_);
+        checkModels(io::SimControls(makeDeck(toml::table{ { "other_winds", "none" } })),
+            "other_winds = none", feedback::AGBwindModel::slug2_, feedback::OtherwindModel::none_);
+        checkModels(io::SimControls(makeDeck(toml::table{ { "other_winds", "vesc" } })),
+            "other_winds = vesc", feedback::AGBwindModel::slug2_, feedback::OtherwindModel::vesc_);
+
+        // All four wind keys at once, each non-default: each must be
+        // read into its own model, independently of the others
+        const io::SimControls all(makeDeck(toml::table{
+            { "wr_winds", "l_over_c" }, { "ob_winds", "vink_01" },
+            { "agb_winds", "none" }, { "other_winds", "none" } }));
+        checkModels(all, "all four keys", feedback::AGBwindModel::none_, feedback::OtherwindModel::none_);
+        if (all.wrWindModel() != feedback::WRwindModel::lOverc_ ||
+            all.obWindModel() != feedback::OBwindModel::vink01_)
+        {
+            std::cerr << "testSimControls: feedbackAGBOtherWinds: all four keys: "
+                "wrWindModel()/obWindModel() not read correctly\n";
+            result = 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: feedbackAGBOtherWinds: valid-deck case threw: " << error.what() << "\n";
+        return 1;
+    }
+
+    // An unrecognized name, or a value that is not a string, must be
+    // rejected
+    const std::vector<std::pair<std::string_view, toml::table>> badDecks = {
+        { "agb_winds unrecognized", toml::table{ { "agb_winds", "slug" } } },
+        { "agb_winds wrong case", toml::table{ { "agb_winds", "None" } } },
+        { "agb_winds other-star name", toml::table{ { "agb_winds", "vesc" } } },
+        { "agb_winds not a string", toml::table{ { "agb_winds", 2.0 } } },
+        { "other_winds unrecognized", toml::table{ { "other_winds", "v_esc" } } },
+        { "other_winds wrong case", toml::table{ { "other_winds", "None" } } },
+        { "other_winds AGB name", toml::table{ { "other_winds", "slug2" } } },
+        { "other_winds not a string", toml::table{ { "other_winds", 1.0 } } },
+    };
+    for (const auto& [label, feedbackTable] : badDecks)
+    {
+        try
+        {
+            const io::SimControls controls(makeDeck(feedbackTable));
+            std::cerr << "testSimControls: feedbackAGBOtherWinds: expected " << label
+                << " to throw, but it did not\n";
+            result = 1;
+        }
+        catch (const std::exception&) { /* expected */ } // NOLINT(bugprone-empty-catch) -- the throw is the expected outcome
+    }
+
+    return result > 0 ? 1 : 0;
+}
+
 // Verify Yields::hasYield(mass, feH, channel) and SimControls::hasSN(mass,
 // feH) against the synthetic gap_test ccsn model (masses 10-40 Msun,
 // whose 20 and 30 Msun yields are all zero at [Fe/H] = 0 -- see
@@ -4469,6 +4575,7 @@ auto testSimControls() -> int
     result += testSimControlsFeedback();
     result += testSimControlsFeedbackWRWinds();
     result += testSimControlsFeedbackOBWinds();
+    result += testSimControlsFeedbackAGBOtherWinds();
     result += testSimControlsHasSNFeH();
     return result;
 }

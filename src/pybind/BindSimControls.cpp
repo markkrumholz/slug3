@@ -1098,6 +1098,40 @@ ValueError
     the three names above; the existing model is left unchanged in
     this case.)doc";
 
+static constexpr std::string_view agbWindModelPropertyDocstring =
+R"doc(The AGB star wind velocity model.
+
+One of "none" or "slug2", read from feedback.agb_winds in the input
+deck ("slug2" if that key was not given). Read live by Winds.vWindAGB()
+on every call -- see its own docstring for what each model does -- so
+assigning a new value (or calling setAGBWindModel()) takes effect
+immediately, with no need to rebuild winds.
+
+Raises
+------
+ValueError
+    On assignment (or setAGBWindModel()), if the value is not one of
+    the two names above; the existing model is left unchanged in this
+    case.)doc";
+
+static constexpr std::string_view otherWindModelPropertyDocstring =
+R"doc(The wind velocity model for all stars not covered by wrWindModel,
+obWindModel, or agbWindModel.
+
+One of "none" or "vesc", read from feedback.other_winds in the input
+deck ("vesc" if that key was not given). Read live by
+Winds.vWindOther() on every call -- see its own docstring for what
+each model does -- so assigning a new value (or calling
+setOtherWindModel()) takes effect immediately, with no need to rebuild
+winds.
+
+Raises
+------
+ValueError
+    On assignment (or setOtherWindModel()), if the value is not one of
+    the two names above; the existing model is left unchanged in this
+    case.)doc";
+
 static constexpr std::string_view windsPropertyDocstring =
 R"doc(The stellar wind calculator, or None if none is installed.
 
@@ -1139,6 +1173,38 @@ ValueError
     If model is not one of the three names above; the existing model
     is left unchanged in this case.)doc";
 
+static constexpr std::string_view setAGBWindModelDocstring = R"doc(Set the AGB star wind velocity model.
+
+Equivalent to assigning the agbWindModel property -- see its own
+docstring for what each model does.
+
+Parameters
+----------
+model : str
+    One of "none" or "slug2".
+
+Raises
+------
+ValueError
+    If model is not one of the two names above; the existing model is
+    left unchanged in this case.)doc";
+
+static constexpr std::string_view setOtherWindModelDocstring = R"doc(Set the wind velocity model for all other stars.
+
+Equivalent to assigning the otherWindModel property -- see its own
+docstring for what each model does.
+
+Parameters
+----------
+model : str
+    One of "none" or "vesc".
+
+Raises
+------
+ValueError
+    If model is not one of the two names above; the existing model is
+    left unchanged in this case.)doc";
+
 static constexpr std::string_view setWindsDocstring = R"doc(Set the stellar wind calculator.
 
 Parameters
@@ -1154,8 +1220,9 @@ ValueError
     If winds is not None and was constructed with a controls argument
     other than this same SimControls -- a Winds stores a live reference
     to whichever SimControls it was built against, and reads its
-    wrWindModel and obWindModel from there. The current winds is left
-    unchanged, and winds stays usable from Python, in this case.)doc";
+    wind models (wrWindModel, obWindModel, etc.) from there. The current
+    winds is left unchanged, and winds stays usable from Python, in this
+    case.)doc";
 
 static constexpr std::string_view inputDeckStrPropertyDocstring =
 R"doc(The input deck's own text.
@@ -1237,6 +1304,28 @@ static void setOBWindModelFromString(io::SimControls& sc, const std::string& mod
 static auto obWindModelAsString(const io::SimControls& sc) -> std::string
 {
     return std::string(feedback::obWindModelToString(sc.obWindModel()));
+}
+
+// agbWindModel and otherWindModel, for Python: likewise, via
+// feedback::agbWindModelStr and feedback::otherWindModelStr
+static void setAGBWindModelFromString(io::SimControls& sc, const std::string& model)
+{
+    sc.setAGBWindModel(feedback::agbWindModelFromString(model));
+}
+
+static auto agbWindModelAsString(const io::SimControls& sc) -> std::string
+{
+    return std::string(feedback::agbWindModelToString(sc.agbWindModel()));
+}
+
+static void setOtherWindModelFromString(io::SimControls& sc, const std::string& model)
+{
+    sc.setOtherWindModel(feedback::otherWindModelFromString(model));
+}
+
+static auto otherWindModelAsString(const io::SimControls& sc) -> std::string
+{
+    return std::string(feedback::otherWindModelToString(sc.otherWindModel()));
 }
 
 static void applyConstructorProperties(io::SimControls& sc,
@@ -1459,6 +1548,10 @@ void bindSimControls(py::module_& m)
                 setWRWindModelDocstring.data(), py::arg("model"))
         .def("setOBWindModel", &setOBWindModelFromString,
                 setOBWindModelDocstring.data(), py::arg("model"))
+        .def("setAGBWindModel", &setAGBWindModelFromString,
+                setAGBWindModelDocstring.data(), py::arg("model"))
+        .def("setOtherWindModel", &setOtherWindModelFromString,
+                setOtherWindModelDocstring.data(), py::arg("model"))
         .def("setWinds", &setWindsKeepOnFailure,
                 setWindsDocstring.data(), py::arg("winds"))
         // Properties: alternative, attribute-style access to the same
@@ -1631,6 +1724,14 @@ void bindSimControls(py::module_& m)
                 &obWindModelAsString,
                 &setOBWindModelFromString,
                 obWindModelPropertyDocstring.data())
+        .def_property("agbWindModel",
+                &agbWindModelAsString,
+                &setAGBWindModelFromString,
+                agbWindModelPropertyDocstring.data())
+        .def_property("otherWindModel",
+                &otherWindModelAsString,
+                &setOtherWindModelFromString,
+                otherWindModelPropertyDocstring.data())
         .def_property("winds",
                 &io::SimControls::winds,
                 &setWindsKeepOnFailure,

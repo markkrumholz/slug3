@@ -532,6 +532,186 @@ static auto testOBWindModelStrings() -> int
     return result;
 }
 
+// The default AGB and other-star wind models, for a SimControls that
+// never set them, must be slug2 and vesc
+static auto testAGBOtherWindModelDefaults() -> int
+{
+    int result = 0;
+    if (testControls.agbWindModel() != feedback::AGBwindModel::slug2_)
+    {
+        std::cerr << "testAGBOtherWindModelDefaults: default agbWindModel() is '"
+            << feedback::agbWindModelToString(testControls.agbWindModel())
+            << "', expected 'slug2'\n";
+        result = 1;
+    }
+    if (testControls.otherWindModel() != feedback::OtherwindModel::vesc_)
+    {
+        std::cerr << "testAGBOtherWindModelDefaults: default otherWindModel() is '"
+            << feedback::otherWindModelToString(testControls.otherWindModel())
+            << "', expected 'vesc'\n";
+        result = 1;
+    }
+    return result;
+}
+
+// AGBwindModel::slug2_ must match v = 9.4 km/s (L / 10^4 Lsun)^(1/4)
+// (10^[Fe/H])^(1/2), with expected values computed independently. The
+// first case is the normalization point itself (exactly 9.4 km/s); the
+// others vary L and [Fe/H] in both directions. Only logL is read, so
+// the other properties are arbitrary. AGBwindModel::none_ must give
+// exactly 0 for every one of the same stars
+static auto testVWindAGB() -> int
+{
+    struct AGBCase
+    {
+        double logL_;
+        double feh_;
+        double expected_; // cm/s
+    };
+    const std::array<AGBCase, 4> cases{ {
+        { 4.0, 0.0, 9.4e5 },
+        { 3.5, 0.0, 7.0490055677e5 },
+        { 4.2, -0.5, 5.9309990381e5 },
+        { 3.8, 0.3, 1.1833898871e6 },
+    } };
+
+    io::SimControls controls;
+    const feedback::Winds winds(controls);
+    int result = 0;
+    for (const auto& c : cases)
+    {
+        const auto props = makeOBStarData(1.5, c.logL_, 3.5);
+        const std::string label = "testVWindAGB: logL = " + std::to_string(c.logL_) +
+            ", [Fe/H] = " + std::to_string(c.feh_);
+        controls.setAGBWindModel(feedback::AGBwindModel::slug2_);
+        result |= checkApproxEqual(winds.vWindAGB(props, c.feh_), c.expected_, label);
+        controls.setAGBWindModel(feedback::AGBwindModel::none_);
+        if (const double actual = winds.vWindAGB(props, c.feh_); actual != 0.0)
+        {
+            std::cerr << label << ": none: vWindAGB() = " << actual << " cm/s, expected exactly 0\n";
+            result = 1;
+        }
+    }
+    return result;
+}
+
+// OtherwindModel::vesc_ must give the surface escape speed
+// sqrt(2 G M / R), with expected values computed independently: the
+// Sun (617.7 km/s, its well-known escape speed, which also checks the
+// factor of 2), a red giant, and an M dwarf. OtherwindModel::none_
+// must give exactly 0 for every one of the same stars
+static auto testVWindOther() -> int
+{
+    struct OtherCase
+    {
+        std::string_view label_;
+        double mass_;     // Msun
+        double logL_;     // log10(L/Lsun)
+        double logTeff_;  // log10(Teff/K)
+        double expected_; // cm/s
+    };
+    const std::array<OtherCase, 3> cases{ {
+        { "Sun", 1.0, 0.0, 3.7613263224, 6.1769410538e7 },
+        { "red giant", 1.2, 2.5, 3.6, 1.1067199979e7 },
+        { "M dwarf", 0.5, -1.4, 3.58, 6.4406861476e7 },
+    } };
+
+    io::SimControls controls;
+    const feedback::Winds winds(controls);
+    int result = 0;
+    for (const auto& c : cases)
+    {
+        const auto props = makeOBStarData(c.mass_, c.logL_, c.logTeff_);
+        controls.setOtherWindModel(feedback::OtherwindModel::vesc_);
+        result |= checkApproxEqual(winds.vWindOther(props), c.expected_,
+            "testVWindOther: " + std::string(c.label_));
+        controls.setOtherWindModel(feedback::OtherwindModel::none_);
+        if (const double actual = winds.vWindOther(props); actual != 0.0)
+        {
+            std::cerr << "testVWindOther: " << c.label_ << ": none: vWindOther() = "
+                << actual << " cm/s, expected exactly 0\n";
+            result = 1;
+        }
+    }
+    return result;
+}
+
+// Each wind method must read only its own model: setting every other
+// model to none_ must not change what a given method returns
+static auto testWindModelsIndependent() -> int
+{
+    io::SimControls controls;
+    const feedback::Winds winds(controls);
+    const auto props = makeOBStarData(1.0, 0.0, 3.7613263224);
+    const double agbBefore = winds.vWindAGB(props, 0.0);
+    const double otherBefore = winds.vWindOther(props);
+
+    int result = 0;
+    controls.setWRWindModel(feedback::WRwindModel::none_);
+    controls.setOBWindModel(feedback::OBwindModel::none_);
+    controls.setOtherWindModel(feedback::OtherwindModel::none_);
+    if (winds.vWindAGB(props, 0.0) != agbBefore)
+    {
+        std::cerr << "testWindModelsIndependent: vWindAGB() changed when other models were set to none\n";
+        result = 1;
+    }
+    controls.setOtherWindModel(feedback::OtherwindModel::vesc_);
+    controls.setAGBWindModel(feedback::AGBwindModel::none_);
+    if (winds.vWindOther(props) != otherBefore)
+    {
+        std::cerr << "testWindModelsIndependent: vWindOther() changed when other models were set to none\n";
+        result = 1;
+    }
+    return result;
+}
+
+// agbWindModelFromString()/otherWindModelFromString() and their
+// ToString() counterparts must round-trip every model through its
+// input-deck name, and reject any other name
+static auto testAGBOtherWindModelStrings() -> int
+{
+    int result = 0;
+    for (const auto model : { feedback::AGBwindModel::none_, feedback::AGBwindModel::slug2_ })
+    {
+        if (feedback::agbWindModelFromString(feedback::agbWindModelToString(model)) != model)
+        {
+            std::cerr << "testAGBOtherWindModelStrings: '" << feedback::agbWindModelToString(model)
+                << "' did not round-trip\n";
+            result = 1;
+        }
+    }
+    for (const auto model : { feedback::OtherwindModel::none_, feedback::OtherwindModel::vesc_ })
+    {
+        if (feedback::otherWindModelFromString(feedback::otherWindModelToString(model)) != model)
+        {
+            std::cerr << "testAGBOtherWindModelStrings: '" << feedback::otherWindModelToString(model)
+                << "' did not round-trip\n";
+            result = 1;
+        }
+    }
+    for (const std::string_view bad : { "", "None", "slug", "vesc", "vink_01" })
+    {
+        try
+        {
+            static_cast<void>(feedback::agbWindModelFromString(bad));
+            std::cerr << "testAGBOtherWindModelStrings: AGB model '" << bad << "' was accepted\n";
+            result = 1;
+        }
+        catch (const std::invalid_argument&) { /* expected */ } // NOLINT(bugprone-empty-catch) -- the throw is the expected outcome
+    }
+    for (const std::string_view bad : { "", "None", "v_esc", "slug2", "vink_01" })
+    {
+        try
+        {
+            static_cast<void>(feedback::otherWindModelFromString(bad));
+            std::cerr << "testAGBOtherWindModelStrings: other-star model '" << bad << "' was accepted\n";
+            result = 1;
+        }
+        catch (const std::invalid_argument&) { /* expected */ } // NOLINT(bugprone-empty-catch) -- the throw is the expected outcome
+    }
+    return result;
+}
+
 // Winds retains a live reference to the SimControls it was
 // constructed with, matching Specsyn's/Extinct's/Yields's own
 // identical pattern -- checked here the same way
@@ -568,6 +748,11 @@ auto testWinds() -> int
     result += testVWindOBModelSwitchLive();
     result += testVWindOBVink01SuperEddington();
     result += testOBWindModelStrings();
+    result += testAGBOtherWindModelDefaults();
+    result += testVWindAGB();
+    result += testVWindOther();
+    result += testWindModelsIndependent();
+    result += testAGBOtherWindModelStrings();
     result += testWindsControlsAccessor();
     return result;
 }

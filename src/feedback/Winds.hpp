@@ -31,7 +31,8 @@ namespace feedback
      * (wind mechanical power, ionizing/non-ionizing photon rates,
      * etc.) slug can compute from a star's interpolated track
      * properties. For now it provides only terminal wind velocities:
-     * vWindWR() for Wolf-Rayet stars, and vWindOB() for O and B stars.
+     * vWindWR() for Wolf-Rayet stars, vWindOB() for O and B stars,
+     * vWindAGB() for AGB stars, and vWindOther() for all other stars.
      */
     class Winds
     {
@@ -208,6 +209,61 @@ namespace feedback
          * Neither model is clamped.
          */
         [[nodiscard]] auto vWindOB(const specsyn::Specsyn::StarData& props, double feh) const -> double;
+
+        /**
+         * @brief Compute the terminal wind velocity of an AGB star
+         * @param props Stellar properties, as for vWindWR() -- assumed
+         *   to already be an AGB star; this method does not itself
+         *   check that
+         * @param feh The star's metallicity [Fe/H]
+         * @return The star's terminal wind velocity, in cm/s, computed
+         *   by whichever model controls_.agbWindModel() selects (see
+         *   @details)
+         * @details
+         * The model used is read live from controls_.agbWindModel()
+         * on every call:
+         *   - AGBwindModel::none_: no AGB wind at all; returns exactly 0.
+         *   - AGBwindModel::slug2_: the prescription used by slug2,
+         *     described below.
+         *
+         * AGBwindModel::slug2_ uses the Elitzur & Ivezic (2001, MNRAS,
+         * 327, 403) scaling v_wind ~ R_gd^(-1/2) L^(1/4) for dust-driven
+         * winds, where R_gd is the gas-to-dust ratio. The
+         * proportionality constant comes from the empirical calibration
+         * of Goldman et al. (2017, MNRAS, 465, 403), which gives
+         * v_wind = 9.4 km/s at L = 10^4 Lsun and a Milky Way / Solar
+         * gas-to-dust ratio. Taking R_gd to scale inversely with
+         * metallicity Z = 10^[Fe/H] gives
+         *
+         *   v_wind = 9.4 km/s (L / 10^4 Lsun)^(1/4) (10^[Fe/H])^(1/2).
+         *
+         * Note that this L scaling is not what Goldman et al. find
+         * empirically: this combination of the Elitzur & Ivezic
+         * scaling with the Goldman et al. normalization follows a
+         * recommendation from Jacco van Loon. The metallicity scaling
+         * almost certainly fails for metal-poor stars, whose winds are
+         * not dust-driven, but no better estimate is available for
+         * that case. Not clamped.
+         */
+        [[nodiscard]] auto vWindAGB(const specsyn::Specsyn::StarData& props, double feh) const -> double;
+
+        /**
+         * @brief Compute the terminal wind velocity of a star not
+         *   covered by vWindWR(), vWindOB(), or vWindAGB()
+         * @param props Stellar properties, as for vWindWR()
+         * @return The star's terminal wind velocity, in cm/s, computed
+         *   by whichever model controls_.otherWindModel() selects (see
+         *   @details)
+         * @details
+         * The model used is read live from controls_.otherWindModel()
+         * on every call:
+         *   - OtherwindModel::none_: no wind at all; returns exactly 0.
+         *   - OtherwindModel::vesc_: the star's surface escape speed,
+         *     v_wind = sqrt(2 G M / R), where M is the star's current
+         *     mass and R its radius, obtained from L and T_eff via the
+         *     Stefan-Boltzmann law.
+         */
+        [[nodiscard]] auto vWindOther(const specsyn::Specsyn::StarData& props) const -> double;
 
     private:
 
