@@ -445,6 +445,53 @@ namespace core
         }
 
         /**
+         * @brief Return the galaxy's total stellar wind mass flux
+         * @return The summed mass loss rate, in Msun/yr, at the current
+         *   time, of every cluster in clusters() and
+         *   disruptedClusters() (via Cluster::mDotWind()) and every
+         *   currently-alive field star; 0 until advance() has run
+         * @details
+         * Updated by computeFeedback() -- see its own comment.
+         * advance() already calls computeFeedback() eagerly at the end
+         * of every call, so this is normally current already; if
+         * lastFeedbackTime_ is somehow not curTime_, it calls
+         * computeFeedback() first, mirroring Cluster::mDotWind(). Does
+         * not yet include the purely continuous (non-clustered,
+         * non-stochastic) population.
+         */
+        [[nodiscard]] auto mDotWind() -> double
+        {
+            updateFeedback();
+            return mDotWind_;
+        }
+
+        /**
+         * @brief Return the galaxy's total stellar wind momentum flux
+         * @return The summed wind momentum flux, in g cm s^-2, at the
+         *   current time, over the same stars as mDotWind()
+         * @details
+         * See mDotWind()'s own comment.
+         */
+        [[nodiscard]] auto pDotWind() -> double
+        {
+            updateFeedback();
+            return pDotWind_;
+        }
+
+        /**
+         * @brief Return the galaxy's total stellar wind energy flux
+         * @return The summed wind kinetic energy flux, in erg s^-1, at
+         *   the current time, over the same stars as mDotWind()
+         * @details
+         * See mDotWind()'s own comment.
+         */
+        [[nodiscard]] auto eDotWind() -> double
+        {
+            updateFeedback();
+            return eDotWind_;
+        }
+
+        /**
          * @brief The instantaneous rate at which the continuous population returns each isotope, at a given time and [Fe/H]
          * @param t Simulation time, in yr, since this galaxy's own
          *   formation (time 0) -- not necessarily curTime(); this is a
@@ -622,7 +669,9 @@ namespace core
          * far (in clusters() and disruptedClusters()) to t, moves any
          * cluster that disrupted during this step from clusters() to
          * disruptedClusters(), moves any field star that has died as
-         * of t from fieldStars() to deadFieldStars(), then marks
+         * of t from fieldStars() to deadFieldStars(), updates
+         * curTime() to t and caches every surviving field star's own
+         * properties in fieldStarProps_ (see its own comment), then marks
          * spec_/specExtinct_/specNeb_/specNebExtinct_/lineLum_/lineLumExtinct_/phot_/
          * photExtinct_/photNeb_/photNebExtinct_/lbol_/lbolCts_ as stale
          * (see specCurrent_/photCurrent_/lbolCurrent_/
@@ -630,8 +679,9 @@ namespace core
          * itself -- they are instead recomputed lazily, on demand, the
          * next time spec()/specExtinct()/specNeb()/specNebExtinct()/
          * lineLum()/lineLumExtinct()/phot()/photExtinct()/photNeb()/
-         * photNebExtinct()/lbol() is actually called -- before finally
-         * updating curTime() to t.
+         * photNebExtinct()/lbol() is actually called. Finally updates
+         * the yields and feedback quantities eagerly, via
+         * computeYields() and computeFeedback().
          */
         void advance(double t);
 
@@ -919,6 +969,22 @@ namespace core
         std::vector<Cluster> clusters_;          /**< Currently alive (non-disrupted) clusters */
         std::vector<Cluster> disruptedClusters_; /**< Disrupted clusters */
         std::vector<FieldStar> fieldStars_;      /**< Currently alive field stars, sorted by formTime_ -- see advance()'s own comment */
+
+        /**
+         * @brief Cached stellar properties of every currently-alive field star, at curTime_
+         * @details
+         * One entry per element of fieldStars_ (same order), as
+         * returned by getFieldStarProps() -- see its own comment,
+         * including for why an entry may be empty. Recomputed eagerly
+         * by advance(), right after it updates curTime_, and then
+         * read by addContinuousSpec(), computeLbol(), and
+         * computeFeedback(), so the track lookups are paid for once
+         * per advance() rather than once per use. Consequently, if
+         * SimControls::setTracks() replaces the tracks between one
+         * advance() and the next, these properties still reflect the
+         * tracks in place at that advance().
+         */
+        std::vector<std::optional<specsyn::Specsyn::StarData>> fieldStarProps_;
         std::vector<FieldStar> deadFieldStars_;  /**< Field stars that have died as of curTime_ */
 
         /**
@@ -1033,6 +1099,9 @@ namespace core
 
         unsigned long fieldStarStochSNe_ = 0;  /**< Cumulative number of supernovae from the individually-sampled field stars; see computeFeedback() */
         double fieldStarNonStochSNe_ = 0.0;    /**< Cumulative (in general non-integer) number of supernovae from the continuously-sampled field population; see computeFeedback() */
+        double mDotWind_ = 0.0;                /**< Total stellar wind mass flux at the current time, in Msun/yr; see mDotWind() */
+        double pDotWind_ = 0.0;                /**< Total stellar wind momentum flux at the current time, in g cm s^-2; see pDotWind() */
+        double eDotWind_ = 0.0;                /**< Total stellar wind energy flux at the current time, in erg s^-1; see eDotWind() */
 
         /**
          * @brief Simulation time through which fieldStarNonStochSNe_ has been updated
@@ -1121,7 +1190,7 @@ namespace core
          * specCts() otherwise, leaving lbolCts_/lbolCtsCurrent_
          * untouched.
          *
-         * Then adds every entry of getFieldStarProps() (evaluated via
+         * Then adds every entry of fieldStarProps_ (evaluated via
          * Specsyn::spec() star by star, at that star's own feh_)
          * directly into this same contSpec, before extinction or
          * nebular emission is applied to it -- rather than handling
@@ -1226,7 +1295,7 @@ namespace core
          * that.
          *
          * Finally, adds every currently-alive field star's own
-         * contribution (10^logL, read directly off getFieldStarProps())
+         * contribution (10^logL, read directly off fieldStarProps_)
          * -- independent of lbolCtsCurrent_/lbolCts_, since this is
          * cheap and direct either way, unlike the continuous
          * population's own Specsyn-mediated integral.
@@ -1295,6 +1364,9 @@ namespace core
          * own identical floor, to avoid taking log10(0) for a field
          * star whose formTime_ is exactly curTime_ (formed during the
          * very advance() call that produced this evaluation).
+         *
+         * Called once per advance(), to fill fieldStarProps_; every
+         * other use reads that cache instead.
          */
         [[nodiscard]] auto getFieldStarProps() const -> std::vector<std::optional<specsyn::Specsyn::StarData>>;
 
@@ -1362,8 +1434,39 @@ namespace core
          * advance() then sets lastFeedbackTime_ to curTime_. Each
          * cluster's own supernovae are counted by that cluster's own
          * Cluster::computeFeedback(), run from its own advance().
+         *
+         * Also recomputes the instantaneous stellar wind fluxes
+         * mDotWind_, pDotWind_, and eDotWind_ from scratch: zeroes all
+         * three, adds Cluster::mDotWind()/pDotWind()/eDotWind() for
+         * every cluster in clusters_ and disruptedClusters_, then, for
+         * every currently-alive field star with properties in
+         * fieldStarProps_, adds mDot, mDot v_wind, and
+         * (1/2) mDot v_wind^2 (mDot from the star's own properties,
+         * v_wind from controls().winds()->vWind() at the star's own
+         * feh_, or 0 if winds() is null; pDot and eDot in cgs, as in
+         * Cluster::windStar()). The purely continuous (non-clustered,
+         * non-stochastic) population is not yet included.
          */
         void computeFeedback();
+
+        /**
+         * @brief Bring the feedback quantities up to date, if they are not already
+         * @details
+         * Calls computeFeedback() and sets lastFeedbackTime_ to
+         * curTime_ if lastFeedbackTime_ != curTime_; otherwise does
+         * nothing. Mirrors Cluster::updateFeedback(), except that no
+         * separate has-advanced check is needed: curTime_ and
+         * lastFeedbackTime_ both start at 0, so they only differ
+         * after some advance().
+         */
+        void updateFeedback()
+        {
+            if (lastFeedbackTime_ != curTime_)
+            {
+                computeFeedback();
+                lastFeedbackTime_ = curTime_;
+            }
+        }
 
     };
 
