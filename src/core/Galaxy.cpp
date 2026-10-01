@@ -11,7 +11,6 @@
 #include "../io/SimControls.hpp"
 #include "../nebular/Nebular.hpp"
 #include "../pdfs/PDF.hpp"
-#include "../pdfs/PDFReflect.hpp"
 #include "../specsyn/Specsyn.hpp"
 #include "../tracks/TrackCommons.hpp"
 #include "../tracks/Tracks3D.hpp"
@@ -606,101 +605,23 @@ void core::Galaxy::computeLbol()
     }
 }
 
-auto core::Galaxy::lbolCtsIntegrand(
-    const double age,
-    const pdfs::PDF& imf,
-    const double feh
-) const -> std::vector<double>
+// Compute lbolCts_ directly, via integrateCts() -- see this method's
+// own header comment
+void core::Galaxy::computeLbolCts()
 {
-    const auto& sc = controls_.get();
-    const double logAge = std::max(std::log10(age), sc.tracks()->logTMin());
-    // Called many times per integral: with a fixed [Fe/H], use the
-    // slice SimControls has precomputed, rather than having
-    // tracks() slice the tracks lazily on every call
-    const auto isochrone = sc.constFeH() ?
-        sc.tracks2D()->getIsochrone(logAge) : sc.tracks()->getIsochrone(logAge, feh);
-
     // Per-star Lbol, mirroring Cluster::lbolStar()'s own role for
-    // Cluster::computeLbol()'s identical inner mass integral -- a
-    // local, capture-free lambda rather than a call into any Specsyn,
-    // since a Specsyn may not exist at all here (see computeLbolCts()'s
-    // own comment).
-    const auto lbolStar = [](const double m, const specsyn::Specsyn::Segment& segment) -> std::array<double, 1>
+    // Cluster::computeLbol() -- a capture-free lambda rather than a
+    // call into any Specsyn, since a Specsyn may not exist at all here
+    // (see this method's own header comment). [Fe/H] is unused: the
+    // isochrone segment already reflects it.
+    const auto lbolStar = [](const double m, const specsyn::Specsyn::Segment& segment,
+        const double /*feh*/) -> std::array<double, 1>
     {
         const auto props = segment(m);
         const double logL = props[static_cast<std::size_t>(tracks::FieldIdx::logL)]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- StarData is a fixed-size std::array, and logL is one of its compile-time-known indices
         return { std::pow(10.0, logL) };
     };
-    using LbolSegFn = decltype(lbolStar);
-
-    const utils::PDFIntegrator<LbolSegFn, utils::GKOrder::GK15> integrator(
-        imf, lbolStar, 1, false, sc.intMaxIter(), sc.intAbsTol(), sc.intRelTol());
-
-    double lbolRaw = 0.0;
-    for (const auto& seg : isochrone)
-    {
-        const double a = std::max(imf.getMin(), seg->xMin());
-        const double b = std::min(sc.minStochMass(), seg->xMax());
-        if (a >= b) { continue; } // empty intersection with [imf.getMin(), minStochMass()]
-
-        const auto segResult = integrator.integrate(a, b, *seg);
-        lbolRaw += segResult[0]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- segResult is a std::array<double, 1>, so index 0 is always valid
-    }
-    return { lbolRaw };
-}
-
-void core::Galaxy::computeLbolCts()
-{
-    const auto& sc = controls_.get();
-    const auto& sfrPdf = sfr();
-    const auto& imf = sc.imf();
-    const auto& fehDist = sc.fehDist();
-    const double fCluster = sc.fCluster();
-
-    // See Specsyn::specCtsHelper()'s own comment for why this reflects
-    // sfr about curTime_ / 2 (so this dimension's own coordinate
-    // becomes age directly), why ageMin = min(1e4 yr, 1e-3 * curTime_)
-    // rather than anything derived from tracks().logTMin(), and
-    // log-transforms whenever curTime_ exceeds that floor; see
-    // computeLbolCts()'s own header comment for why absTol has no
-    // utils::Lsun factor here, unlike Specsyn::specCtsHelper()'s own.
-    const pdfs::PDFReflect sfrAge(sfrPdf, 0.5 * curTime_);
-    const double ageMin = std::min(1e4, 1e-3 * curTime_);
-    const bool logAge = curTime_ > ageMin;
-
-    const bool singleFeh = (fehDist.getMin() == fehDist.getMax());
-    const double absTol = sc.intAbsTol() * sfrPdf.integral(0.0, curTime_);
-
-    using IntegrandFn = std::vector<double> (Galaxy::*)(double, const pdfs::PDF&, double) const;
-    const utils::PDFIntegrator<IntegrandFn, utils::GKOrder::GK15> integrator(
-        sfrAge, static_cast<IntegrandFn>(&Galaxy::lbolCtsIntegrand),
-        1, logAge, sc.intMaxIter(), absTol, sc.intRelTol());
-
-    double lbolRaw = 0.0;
-    if (singleFeh)
-    {
-        const auto result = integrator.integrate(ageMin, curTime_, this, imf, fehDist.getMin());
-        lbolRaw = result[0]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- result has exactly 1 element, by construction (nInt == 1)
-    }
-    else
-    {
-        // Integrate over [Fe/H] with an outer PDFIntegrator weighted by
-        // fehDist -- see Specsyn::specCtsHelper()'s own identical
-        // treatment
-        auto fehIntegrand = [&](const double feh) -> std::vector<double>
-        { return integrator.integrate(ageMin, curTime_, this, imf, feh); };
-        const utils::PDFIntegrator<decltype(fehIntegrand), utils::GKOrder::GK15> fehIntegrator(
-            fehDist, fehIntegrand, 1, false, sc.intMaxIter(), absTol, sc.intRelTol());
-        const auto result = fehIntegrator.integrate(fehDist.getMin(), fehDist.getMax());
-        lbolRaw = result[0] / fehDist.integral(fehDist.getMin(), fehDist.getMax()); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- result has exactly 1 element, by construction (nInt == 1)
-    }
-
-    // imf is normalized by number, so lbolRaw is per star formed;
-    // convert to per unit non-stochastic mass formed -- see
-    // SimControls::nonStochIMFMass()'s own comment
-    const double massInt = sc.nonStochIMFMass();
-    lbolCts_ = massInt > 0.0 ?
-        lbolRaw * (1.0 - fCluster) * (1.0 - sc.fracStochMass()) / massInt : 0.0;
+    lbolCts_ = integrateCts(lbolStar, 1).at(0);
     lbolCtsCurrent_ = true;
 }
 

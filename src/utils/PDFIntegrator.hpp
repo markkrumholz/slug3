@@ -353,6 +353,9 @@ namespace utils
      *   dimensionless integrand, per unit integral of p over [a, b] --
      *   typically SimControls::intAbsTol()
      * @param relTol Relative tolerance, as for PDFIntegrator
+     * @param logTransform Whether to integrate in ln(x) rather than x,
+     *   as for PDFIntegrator (which then requires a and b to be
+     *   strictly positive); defaults to false
      * @return The integral of p(x) f(x) over [a, b], in f's own units
      * @details
      * For a vector-valued integrand whose elements span many orders of
@@ -366,12 +369,17 @@ namespace utils
      * smallest nonzero element at those points, and integrated with
      * absolute tolerance absTol times p's own integral over [a, b] --
      * the size of the integral of a unit-scale integrand -- and the
-     * result is scaled back.
+     * result is scaled back. With logTransform, that same tolerance
+     * still applies unchanged: PDFIntegrator includes the Jacobian x
+     * in its own integrand, so the integral it computes, and hence the
+     * size of a unit-scale integrand's integral, is the same either
+     * way.
      */
     template <class F, GKOrder Order = GKOrder::GK15>
     auto integrateScaled(const pdfs::PDF& p, const F& f, const std::size_t nInt,
         const double a, const double b, const std::vector<double>& scalePoints,
-        const std::size_t maxIter, const double absTol, const double relTol) -> std::vector<double>
+        const std::size_t maxIter, const double absTol, const double relTol,
+        const bool logTransform = false) -> std::vector<double>
     {
         const double scale = integrandScale(f, scalePoints);
         const auto scaled = [&f, scale](const double x) -> std::vector<double>
@@ -381,7 +389,7 @@ namespace utils
             return v;
         };
         const PDFIntegrator<decltype(scaled), Order> integrator(
-            p, scaled, nInt, false, maxIter, absTol * p.integral(a, b), relTol);
+            p, scaled, nInt, logTransform, maxIter, absTol * p.integral(a, b), relTol);
         auto result = integrator.integrate(a, b);
         for (double& e : result) { e *= scale; }
         return result;

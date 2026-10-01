@@ -883,6 +883,68 @@ static auto testContinuousPopLbolStandaloneMatchesSpec() -> int
     return 0;
 }
 
+// Same as testContinuousPopLbolStandaloneMatchesSpec, but with a
+// non-degenerate [Fe/H] distribution (testClusterFeHDist.toml: uniform
+// over -0.5 to 0.5), so that the standalone path (computeLbolCts(),
+// via integrateCts()) also integrates over [Fe/H] -- a branch no other
+// test reaches, since every other variable-[Fe/H] Galaxy test calls
+// spec() before lbol(), which computes Lbol as a byproduct instead.
+static auto testContinuousPopLbolStandaloneMatchesSpecMultiFeh() -> int
+{
+    constexpr double relTolerance = 0.02; // both paths target the same SimControls::intRelTol() independently
+
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFile);
+        inputDeck.at_path("clusters").as_table()->insert("f_cluster", 0.0);
+        inputDeck.at_path("stars").as_table()->insert_or_assign("min_stoch_mass", 120.0);
+        inputDeck.at_path("stars").as_table()->insert_or_assign(
+            "FeH", "tests/core/assets/testClusterFeHDist.toml");
+        const io::SimControls controls(inputDeck);
+        if (controls.fehDist().getMin() == controls.fehDist().getMax())
+        {
+            std::cerr << "testGalaxy: continuousPopLbolStandaloneMatchesSpecMultiFeh: "
+                "test bug: expected a non-degenerate [Fe/H] distribution\n";
+            return 1;
+        }
+
+        utils::rng().seed(rngSeed);
+        core::Galaxy galaxyViaSpec(controls);
+        galaxyViaSpec.advance(t1);
+        static_cast<void>(galaxyViaSpec.spec()); // forces computeSpec(), which sets lbolCts_ as a byproduct
+        const double lbolViaSpec = galaxyViaSpec.lbol();
+
+        utils::rng().seed(rngSeed);
+        core::Galaxy galaxyStandalone(controls);
+        galaxyStandalone.advance(t1);
+        const double lbolStandalone = galaxyStandalone.lbol(); // spec() never called: forces the standalone computeLbolCts() path
+
+        if (!std::isfinite(lbolViaSpec) || !(lbolViaSpec > 0.0) ||
+            !std::isfinite(lbolStandalone) || !(lbolStandalone > 0.0))
+        {
+            std::cerr << "testGalaxy: continuousPopLbolStandaloneMatchesSpecMultiFeh: "
+                "expected finite, positive lbol() on both paths, got " << lbolViaSpec
+                << " (via spec) and " << lbolStandalone << " (standalone)\n";
+            return 1;
+        }
+        if (std::abs(lbolViaSpec - lbolStandalone) > relTolerance * lbolViaSpec)
+        {
+            std::cerr << "testGalaxy: continuousPopLbolStandaloneMatchesSpecMultiFeh: "
+                "lbol() via the spec-computed path (" << lbolViaSpec <<
+                " Lsun) deviates from the standalone path (" << lbolStandalone <<
+                " Lsun) by more than " << relTolerance * 100 << "%\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testGalaxy: continuousPopLbolStandaloneMatchesSpecMultiFeh test "
+            "failed: " << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
 // Verify that Galaxy::advance() correctly incorporates
 // SimControls::fCluster() into its own mass accounting: with
 // fCluster < 1, only fCluster of the target stellar mass should be
@@ -3165,6 +3227,7 @@ auto testGalaxy() -> int
     result += testContinuousPopNarrowFeh();
     result += testContinuousPopSpecReferenceCheck();
     result += testContinuousPopLbolStandaloneMatchesSpec();
+    result += testContinuousPopLbolStandaloneMatchesSpecMultiFeh();
     result += testFieldStarsMassBudget();
     result += testFieldStarsCreationAndDeath();
     result += testGalaxyFieldStarLifetimeClamped();
