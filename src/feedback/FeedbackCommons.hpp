@@ -76,6 +76,62 @@ namespace feedback
         return wrWindModelStr.at(static_cast<std::size_t>(model));
     }
 
+    /**
+     * @brief enum of the available O and B star wind velocity models
+     * @details
+     * Selects how Winds::vWindOB() computes an O or B star's terminal
+     * wind velocity -- see that method's own comment for what each
+     * one does.
+     */
+    enum class OBwindModel : std::uint8_t
+    {
+        // NOLINTBEGIN(readability-identifier-naming) -- trailing underscore on each enumerator matches yields::Channel's own identical convention (see its own comment)
+        none_,        /**< No OB wind: velocity is zero */
+        vink01_,      /**< Vink, de Koter, & Lamers (2001) prescription */
+        vinkSander21_ /**< Vink & Sander (2021) prescription */
+        // NOLINTEND(readability-identifier-naming)
+    };
+
+    /**
+     * @brief Names of each OBwindModel, as used by the input deck's
+     *   feedback.ob_winds key and the Python bindings, in the same
+     *   order as the enumerators themselves
+     */
+    constexpr std::array<std::string_view, 3> obWindModelStr{
+        "none",
+        "vink_01",
+        "vink_sander_21"
+    };
+
+    /**
+     * @brief Translate an OB wind model name into an OBwindModel
+     * @param name One of the entries of obWindModelStr
+     * @return The corresponding OBwindModel
+     * @throws std::invalid_argument if name is not one of the entries
+     *   of obWindModelStr
+     */
+    inline auto obWindModelFromString(const std::string_view name) -> OBwindModel
+    {
+        const auto* const it = std::ranges::find(obWindModelStr, name);
+        if (it == obWindModelStr.end())
+        {
+            throw std::invalid_argument("'" + std::string(name) +
+                "' is not a recognized OB wind model (expected none, "
+                "vink_01, or vink_sander_21)");
+        }
+        return static_cast<OBwindModel>(std::distance(obWindModelStr.begin(), it));
+    }
+
+    /**
+     * @brief Translate an OBwindModel into its name
+     * @param model The model to translate
+     * @return The entry of obWindModelStr corresponding to model
+     */
+    inline auto obWindModelToString(const OBwindModel model) -> std::string_view
+    {
+        return obWindModelStr.at(static_cast<std::size_t>(model));
+    }
+
 } // namespace feedback
 
 #endif // FEEDBACKCOMMONS_HPP
