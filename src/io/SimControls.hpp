@@ -949,6 +949,24 @@ namespace io
         void setWRWindModel(const feedback::WRwindModel model) { wrWindModel_ = model; }
 
         /**
+         * @brief Get the O and B star wind velocity model
+         * @return The model selected by the optional feedback.ob_winds
+         *   key (see readFeedback()), or set via setOBWindModel();
+         *   feedback::OBwindModel::vinkSander21_ by default
+         * @details
+         * Read live by Winds::vWindOB() on every call -- see its own
+         * comment for what each model does -- so changing it takes
+         * effect immediately, with no need to rebuild winds().
+         */
+        [[nodiscard]] auto obWindModel() const -> feedback::OBwindModel { return obWindModel_; }
+
+        /**
+         * @brief Set the O and B star wind velocity model
+         * @param model The new model -- see obWindModel()'s own comment
+         */
+        void setOBWindModel(const feedback::OBwindModel model) { obWindModel_ = model; }
+
+        /**
          * @brief Get the stellar wind calculator
          * @return A shared_ptr to the Winds built by readFeedback(), or
          *   later installed via setWinds(); nullptr for a SimControls
@@ -1887,14 +1905,15 @@ namespace io
          * @brief Load the stellar feedback controls specified by input deck, and build winds_
          * @param inputDeck A toml table holding the input deck
          * @throws std::runtime_error if feedback.sn_mass_range is given
-         *   but is not an array of numbers, or if feedback.wr_winds is
-         *   given but is not a string
+         *   but is not an array of numbers, or if feedback.wr_winds or
+         *   feedback.ob_winds is given but is not a string
          * @throws std::invalid_argument if feedback.sn_mass_range is not
          *   a valid set of mass limits -- see setSNMassLimits() -- or if
          *   feedback.wr_winds is not one of feedback::wrWindModelStr's
-         *   own entries
+         *   own entries, or feedback.ob_winds is not one of
+         *   feedback::obWindModelStr's own entries
          * @details
-         * Reads two optional keys:
+         * Reads three optional keys:
          *   - feedback.sn_mass_range: an array of stellar masses in Msun
          *     in the format described in snMassLimits()'s own comment,
          *     passed to setSNMassLimits(). If it is not given,
@@ -1905,6 +1924,11 @@ namespace io
          *     feedback::wrWindModelStr), stored in wrWindModel_. If it
          *     is not given, wrWindModel_ keeps its default,
          *     feedback::WRwindModel::nugisLamers00_.
+         *   - feedback.ob_winds: the O and B star wind velocity model,
+         *     one of "none", "vink_01", or "vink_sander_21" (see
+         *     feedback::obWindModelStr), stored in obWindModel_. If it
+         *     is not given, obWindModel_ keeps its default,
+         *     feedback::OBwindModel::vinkSander21_.
          * Then, whatever was given, builds winds_ against *this.
          */
         void readFeedback(const utils::TrackedDeck& inputDeck);
@@ -2051,6 +2075,7 @@ namespace io
         bool yieldsChannelDecomposed_ = true; /**< Whether yields should be reported decomposed by channel (true) or summed over all channels (false) -- see yieldsChannelDecomposed()'s own comment; from the optional yields.channel_decomposed key, see readYields() */
         bool noDecay_ = false; /**< Whether radioactive decay should be excluded from computed yields -- see noDecay()'s own comment; from the optional yields.no_decay key, see readYields() */
         feedback::WRwindModel wrWindModel_ = feedback::WRwindModel::nugisLamers00_; /**< Wolf-Rayet wind velocity model -- see wrWindModel()'s own comment; from the optional feedback.wr_winds key, see readFeedback(). Declared here, beside the other one-byte members, rather than with snMassLimits_/winds_, so it fills existing alignment padding instead of adding more */
+        feedback::OBwindModel obWindModel_ = feedback::OBwindModel::vinkSander21_; /**< O and B star wind velocity model -- see obWindModel()'s own comment; from the optional feedback.ob_winds key, see readFeedback(). Declared beside wrWindModel_ for the same alignment-padding reason */
         double minIsotopeLifetime_ = yields::defaultMinIsotopeLifetime; /**< Minimum isotope lifetime, in yr, below which isotopes are treated as decaying instantly -- see minIsotopeLifetime()'s own comment; from the optional yields.min_isotope_lifetime key, see readYields() */
         std::vector<double> snMassLimits_; /**< Stellar mass limits, in Msun, over which supernovae occur -- see snMassLimits()'s own comment; from the optional feedback.sn_mass_range key, see readFeedback() */
         std::shared_ptr<feedback::Winds> winds_; /**< Stellar wind calculator, built by readFeedback(), or nullptr for a SimControls built without an input deck */

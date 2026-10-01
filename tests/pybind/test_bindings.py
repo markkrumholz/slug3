@@ -3868,6 +3868,94 @@ def test_simcontrols_set_winds():
     assert controls.winds is None
 
 
+# A hot O star (40 Msun, log L = 5.35, Teff = 44.7 kK, [Fe/H] = 0), in
+# Winds.vWindOB()'s props order -- the same star
+# tests/feedback/testWinds.cpp's own obCases starts with. Only mass,
+# logL, and logTe matter to the OB wind models. Its expected velocity
+# (cm/s) under each OB wind model was computed independently of slug,
+# from the same formulas and GSL constants; the three are deliberately
+# all distinct.
+OB_WIND_PROPS = [40.0, 0.0, 5.35, 4.65, 0.7, 0.28, 0.002, 0.0007, 0.0]
+OB_WIND_FEH = 0.0
+OB_WIND_EXPECTED = {
+    "none": 0.0,
+    "vink_01": 3.3409153218e8,
+    "vink_sander_21": 4.1399967482e8,
+}
+
+
+def _deck_with_ob_winds(model):
+    """CLUSTER_DECK's own text, plus feedback.ob_winds = model."""
+    deck = tomlkit.parse(pathlib.Path(CLUSTER_DECK).read_text())
+    deck["feedback"] = tomlkit.table()
+    deck["feedback"]["ob_winds"] = model
+    return tomlkit.dumps(deck)
+
+
+def test_simcontrols_ob_wind_model_default():
+    """With no feedback.ob_winds, obWindModel defaults to
+    vink_sander_21."""
+    controls = slug.SimControls(CLUSTER_DECK)
+    assert controls.obWindModel == "vink_sander_21"
+
+
+@pytest.mark.parametrize("model", ["none", "vink_01", "vink_sander_21"])
+def test_simcontrols_ob_wind_model_from_deck(model):
+    """feedback.ob_winds selects the named model, without being
+    reported as an unused key, and without changing wrWindModel."""
+    controls = slug.SimControls(_deck_with_ob_winds(model))
+    assert controls.obWindModel == model
+    assert controls.wrWindModel == "nugis_lamers_00"
+    assert controls.winds is not None
+    assert not controls.unusedKeys
+
+
+def test_simcontrols_ob_wind_model_invalid_deck_raises():
+    """An unrecognized feedback.ob_winds name is rejected."""
+    with pytest.raises(ValueError):
+        slug.SimControls(_deck_with_ob_winds("vink01"))
+
+
+def test_simcontrols_ob_wind_model_property_and_setter():
+    """obWindModel is settable both via the property and
+    setOBWindModel(); an unrecognized name raises ValueError and
+    leaves the current model unchanged."""
+    controls = slug.SimControls(CLUSTER_DECK)
+    controls.obWindModel = "vink_01"
+    assert controls.obWindModel == "vink_01"
+    controls.setOBWindModel("none")
+    assert controls.obWindModel == "none"
+
+    with pytest.raises(ValueError):
+        controls.obWindModel = "None"
+    with pytest.raises(ValueError):
+        controls.setOBWindModel("nugis_lamers_00")
+    assert controls.obWindModel == "none"
+
+
+def test_winds_vwindob_follows_ob_wind_model_live():
+    """The very same Winds returns each model's own answer as
+    obWindModel is changed on its SimControls, with no rebuild --
+    including switching back to a model used earlier."""
+    controls = slug.SimControls(CLUSTER_DECK)
+    winds = controls.winds
+    for model in ["none", "vink_01", "vink_sander_21", "vink_01", "none", "vink_sander_21"]:
+        controls.obWindModel = model
+        expected = OB_WIND_EXPECTED[model]
+        actual = winds.vWindOB(props=OB_WIND_PROPS, feh=OB_WIND_FEH)
+        if expected == 0.0:
+            assert actual == 0.0
+        else:
+            assert actual == pytest.approx(expected, rel=1e-4)
+
+
+def test_winds_vwindob_wrong_length_raises():
+    """props must have exactly 9 elements."""
+    controls = slug.SimControls(CLUSTER_DECK)
+    with pytest.raises(RuntimeError, match="vWindOB"):
+        controls.winds.vWindOB(OB_WIND_PROPS[:-1], OB_WIND_FEH)
+
+
 def test_simcontrols_yields_channel_decomposed_property(yields_controls):
     """yieldsChannelDecomposed defaults to True and is settable both via the property and the setter."""
     assert yields_controls.yieldsChannelDecomposed is True

@@ -15,7 +15,10 @@
  * classified points for representative WNE/WC/WNL-composition cases
  * whose raw (pre-clamp) velocity happens to already fall inside
  * [740, 5500] km/s, so those tests also exercise std::clamp's own
- * pass-through branch, not just its two boundary branches.
+ * pass-through branch, not just its two boundary branches. The O/B
+ * star (vWindOB()) expected values were computed the same way, from
+ * the Vink et al. (2001) and Vink & Sander (2021) formulas -- see
+ * OBCase's own comment.
  * @date 2026-09-30
  * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
@@ -27,9 +30,11 @@
 #include "../../src/utils/MiscUtils.hpp"
 #include "testWinds.hpp"
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <iostream>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 
 namespace
@@ -78,12 +83,63 @@ namespace
     {
         if (!utils::approxEqual(actual, expected, relTol * expected))
         {
-            std::cerr << "testWinds: " << label << ": vWindWR() = " << actual
+            std::cerr << "testWinds: " << label << ": got " << actual
                 << " cm/s, expected " << expected << " cm/s\n";
             return 1;
         }
         return 0;
     }
+
+    /**
+     * @brief Build a StarData for an O/B star wind velocity test
+     * @details
+     * Neither OB wind model reads anything beyond mass, logL, and
+     * logTeff, so the surface abundances are given fixed, roughly
+     * solar values, and mdot is left at 0
+     */
+    auto makeOBStarData(const double mass, const double logL, const double logTeff)
+        -> specsyn::Specsyn::StarData
+    {
+        return makeStarData(mass, logL, logTeff, 0.7, 0.28, 0.002, 0.0007);
+    }
+
+    /**
+     * @brief An O/B star wind test case: a star, its [Fe/H], and its
+     *   expected velocity (cm/s) under each non-trivial OB wind model
+     * @details
+     * Every expected value was computed independently, by a small
+     * Python script implementing the formulas documented in
+     * Winds::vWindOB()'s own comment against the same GSL constants
+     * and utils::Lsun Winds.cpp uses -- not by calling vWindOB()
+     * itself. The bistability jump temperature is 25882.76 K at
+     * [Fe/H] = 0 and 23580.25 K at [Fe/H] = -1.
+     */
+    struct OBCase
+    {
+        std::string_view label_;
+        double mass_;    // Msun
+        double logL_;    // log10(L/Lsun)
+        double logTeff_; // log10(Teff/K)
+        double feh_;
+        double vink01_;       // cm/s
+        double vinkSander21_; // cm/s
+    };
+
+    const std::array<OBCase, 5> obCases{ {
+        // Hot O star (44.7 kK), well above the jump: hot-side formulas
+        { "hot O star", 40.0, 5.35, 4.65, 0.0, 3.3409153218e8, 4.1399967482e8 },
+        // Cool B supergiant (17.8 kK), well below the jump: cool-side formulas
+        { "cool B supergiant", 20.0, 5.2, 4.25, 0.0, 4.9419941235e7, 5.8681336962e7 },
+        // The hot O star at [Fe/H] = -1: still hot side, but checks
+        // each model's own metallicity scaling
+        { "hot O star, [Fe/H] = -1", 40.0, 5.35, 4.65, -1.0, 2.4766547434e8, 2.6730064087e8 },
+        // A 24.5 kK star, which lies between the two jump temperatures
+        // above: cool side at [Fe/H] = 0, but hot side at [Fe/H] = -1,
+        // so these two together check that the jump temperature itself
+        // moves with [Fe/H]
+        { "24.5 kK star, [Fe/H] = 0", 25.0, 5.1, 4.3891660844, 0.0, 8.4354905590e7, 1.3588040631e8 },
+        { "24.5 kK star, [Fe/H] = -1", 25.0, 5.1, 4.3891660844, -1.0, 1.2506631084e8, 1.7538114554e8 },
+    } };
 } // namespace
 
 // A plausible WNE star (cSurf < nSurf), taken from a real MIST track
@@ -323,6 +379,159 @@ static auto testWRWindModelStrings() -> int
     return result;
 }
 
+// The default OB wind model, for a SimControls that never set one,
+// must be vink_sander_21
+static auto testOBWindModelDefault() -> int
+{
+    if (testControls.obWindModel() != feedback::OBwindModel::vinkSander21_)
+    {
+        std::cerr << "testOBWindModelDefault: default obWindModel() is '"
+            << feedback::obWindModelToString(testControls.obWindModel())
+            << "', expected 'vink_sander_21'\n";
+        return 1;
+    }
+    return 0;
+}
+
+// OBwindModel::none_ must give exactly zero, for every test star
+static auto testVWindOBNone() -> int
+{
+    io::SimControls controls;
+    controls.setOBWindModel(feedback::OBwindModel::none_);
+    const feedback::Winds winds(controls);
+    int result = 0;
+    for (const auto& c : obCases)
+    {
+        const double actual = winds.vWindOB(makeOBStarData(c.mass_, c.logL_, c.logTeff_), c.feh_);
+        if (actual != 0.0)
+        {
+            std::cerr << "testVWindOBNone: " << c.label_ << ": vWindOB() = " << actual
+                << " cm/s, expected exactly 0\n";
+            result = 1;
+        }
+    }
+    return result;
+}
+
+// OBwindModel::vink01_ and vinkSander21_ must each match their
+// independently computed values for every test star
+static auto testVWindOBModels() -> int
+{
+    io::SimControls controls;
+    const feedback::Winds winds(controls);
+    int result = 0;
+    for (const auto& c : obCases)
+    {
+        const auto props = makeOBStarData(c.mass_, c.logL_, c.logTeff_);
+        controls.setOBWindModel(feedback::OBwindModel::vink01_);
+        result |= checkApproxEqual(winds.vWindOB(props, c.feh_), c.vink01_,
+            std::string("testVWindOBModels: vink_01: ") + std::string(c.label_));
+        controls.setOBWindModel(feedback::OBwindModel::vinkSander21_);
+        result |= checkApproxEqual(winds.vWindOB(props, c.feh_), c.vinkSander21_,
+            std::string("testVWindOBModels: vink_sander_21: ") + std::string(c.label_));
+    }
+    return result;
+}
+
+// The OB wind model is read live from controls_ on every call, so
+// changing it must change what the same Winds returns next, with no
+// rebuild -- and independently of the WR wind model, which is set to
+// none_ throughout to check that it does not leak into vWindOB()
+static auto testVWindOBModelSwitchLive() -> int
+{
+    io::SimControls controls;
+    controls.setWRWindModel(feedback::WRwindModel::none_);
+    const feedback::Winds winds(controls);
+    const auto& star = obCases.front();
+    const auto props = makeOBStarData(star.mass_, star.logL_, star.logTeff_);
+
+    struct Case
+    {
+        feedback::OBwindModel model_;
+        double expected_; // cm/s
+    };
+    const std::array<Case, 6> cases{ {
+        { feedback::OBwindModel::none_, 0.0 },
+        { feedback::OBwindModel::vink01_, star.vink01_ },
+        { feedback::OBwindModel::vinkSander21_, star.vinkSander21_ },
+        { feedback::OBwindModel::vink01_, star.vink01_ },
+        { feedback::OBwindModel::none_, 0.0 },
+        { feedback::OBwindModel::vinkSander21_, star.vinkSander21_ },
+    } };
+
+    int result = 0;
+    for (const auto& c : cases)
+    {
+        controls.setOBWindModel(c.model_);
+        const double actual = winds.vWindOB(props, star.feh_);
+        const bool ok = (c.expected_ == 0.0) ? (actual == 0.0) :
+            utils::approxEqual(actual, c.expected_, relTol * c.expected_);
+        if (!ok)
+        {
+            std::cerr << "testVWindOBModelSwitchLive: with obWindModel() = '"
+                << feedback::obWindModelToString(c.model_) << "', vWindOB() = "
+                << actual << " cm/s, expected " << c.expected_ << " cm/s\n";
+            result = 1;
+        }
+    }
+    return result;
+}
+
+// A super-Eddington star (Gamma_e ~ 16.4: 5 Msun, log L = 6.5) has no
+// effective escape speed, so vink01_ must give exactly 0 for it,
+// rather than NaN; vinkSander21_, which does not use the escape speed,
+// must still give a positive, finite velocity
+static auto testVWindOBVink01SuperEddington() -> int
+{
+    io::SimControls controls;
+    const feedback::Winds winds(controls);
+    const auto props = makeOBStarData(5.0, 6.5, 4.65);
+    int result = 0;
+    controls.setOBWindModel(feedback::OBwindModel::vink01_);
+    if (const double actual = winds.vWindOB(props, 0.0); actual != 0.0)
+    {
+        std::cerr << "testVWindOBVink01SuperEddington: vink_01: vWindOB() = " << actual
+            << " cm/s, expected exactly 0\n";
+        result = 1;
+    }
+    controls.setOBWindModel(feedback::OBwindModel::vinkSander21_);
+    if (const double actual = winds.vWindOB(props, 0.0); !(std::isfinite(actual) && actual > 0.0))
+    {
+        std::cerr << "testVWindOBVink01SuperEddington: vink_sander_21: vWindOB() = " << actual
+            << " cm/s, expected positive and finite\n";
+        result = 1;
+    }
+    return result;
+}
+
+// obWindModelFromString()/obWindModelToString() must round-trip every
+// model through its input-deck name, and reject any other name
+static auto testOBWindModelStrings() -> int
+{
+    int result = 0;
+    for (const auto model : { feedback::OBwindModel::none_,
+            feedback::OBwindModel::vink01_, feedback::OBwindModel::vinkSander21_ })
+    {
+        if (feedback::obWindModelFromString(feedback::obWindModelToString(model)) != model)
+        {
+            std::cerr << "testOBWindModelStrings: '" << feedback::obWindModelToString(model)
+                << "' did not round-trip\n";
+            result = 1;
+        }
+    }
+    for (const std::string_view bad : { "", "None", "vink01", "vink_sander", "nugis_lamers_00" })
+    {
+        try
+        {
+            static_cast<void>(feedback::obWindModelFromString(bad));
+            std::cerr << "testOBWindModelStrings: '" << bad << "' was accepted\n";
+            result = 1;
+        }
+        catch (const std::invalid_argument&) { /* expected */ } // NOLINT(bugprone-empty-catch) -- the throw is the expected outcome
+    }
+    return result;
+}
+
 // Winds retains a live reference to the SimControls it was
 // constructed with, matching Specsyn's/Extinct's/Yields's own
 // identical pattern -- checked here the same way
@@ -353,6 +562,12 @@ auto testWinds() -> int
     result += testVWindWRLOverC();
     result += testVWindWRModelSwitchLive();
     result += testWRWindModelStrings();
+    result += testOBWindModelDefault();
+    result += testVWindOBNone();
+    result += testVWindOBModels();
+    result += testVWindOBModelSwitchLive();
+    result += testVWindOBVink01SuperEddington();
+    result += testOBWindModelStrings();
     result += testWindsControlsAccessor();
     return result;
 }

@@ -1081,6 +1081,23 @@ ValueError
     the three names above; the existing model is left unchanged in
     this case.)doc";
 
+static constexpr std::string_view obWindModelPropertyDocstring =
+R"doc(The O and B star wind velocity model.
+
+One of "none", "vink_01", or "vink_sander_21", read from
+feedback.ob_winds in the input deck ("vink_sander_21" if that key was
+not given). Read live by Winds.vWindOB() on every call -- see its own
+docstring for what each model does -- so assigning a new value (or
+calling setOBWindModel()) takes effect immediately, with no need to
+rebuild winds.
+
+Raises
+------
+ValueError
+    On assignment (or setOBWindModel()), if the value is not one of
+    the three names above; the existing model is left unchanged in
+    this case.)doc";
+
 static constexpr std::string_view windsPropertyDocstring =
 R"doc(The stellar wind calculator, or None if none is installed.
 
@@ -1089,6 +1106,38 @@ setWinds(); None only for a SimControls that was never given one.
 Assigning a Winds (or None, to remove one already present) transfers
 ownership in exactly the same way as setWinds() -- see its own
 docstring.)doc";
+
+static constexpr std::string_view setWRWindModelDocstring = R"doc(Set the Wolf-Rayet wind velocity model.
+
+Equivalent to assigning the wrWindModel property -- see its own
+docstring for what each model does.
+
+Parameters
+----------
+model : str
+    One of "none", "l_over_c", or "nugis_lamers_00".
+
+Raises
+------
+ValueError
+    If model is not one of the three names above; the existing model
+    is left unchanged in this case.)doc";
+
+static constexpr std::string_view setOBWindModelDocstring = R"doc(Set the O and B star wind velocity model.
+
+Equivalent to assigning the obWindModel property -- see its own
+docstring for what each model does.
+
+Parameters
+----------
+model : str
+    One of "none", "vink_01", or "vink_sander_21".
+
+Raises
+------
+ValueError
+    If model is not one of the three names above; the existing model
+    is left unchanged in this case.)doc";
 
 static constexpr std::string_view setWindsDocstring = R"doc(Set the stellar wind calculator.
 
@@ -1105,8 +1154,8 @@ ValueError
     If winds is not None and was constructed with a controls argument
     other than this same SimControls -- a Winds stores a live reference
     to whichever SimControls it was built against, and reads its
-    wrWindModel from there. The current winds is left unchanged, and
-    winds stays usable from Python, in this case.)doc";
+    wrWindModel and obWindModel from there. The current winds is left
+    unchanged, and winds stays usable from Python, in this case.)doc";
 
 static constexpr std::string_view inputDeckStrPropertyDocstring =
 R"doc(The input deck's own text.
@@ -1177,6 +1226,17 @@ static void setWRWindModelFromString(io::SimControls& sc, const std::string& mod
 static auto wrWindModelAsString(const io::SimControls& sc) -> std::string
 {
     return std::string(feedback::wrWindModelToString(sc.wrWindModel()));
+}
+
+// obWindModel, for Python: likewise, via feedback::obWindModelStr
+static void setOBWindModelFromString(io::SimControls& sc, const std::string& model)
+{
+    sc.setOBWindModel(feedback::obWindModelFromString(model));
+}
+
+static auto obWindModelAsString(const io::SimControls& sc) -> std::string
+{
+    return std::string(feedback::obWindModelToString(sc.obWindModel()));
 }
 
 static void applyConstructorProperties(io::SimControls& sc,
@@ -1396,7 +1456,9 @@ void bindSimControls(py::module_& m)
         .def("setYields", &setYieldsKeepOnFailure,
                 setYieldsDocstring.data(), py::arg("yields"))
         .def("setWRWindModel", &setWRWindModelFromString,
-                wrWindModelPropertyDocstring.data(), py::arg("model"))
+                setWRWindModelDocstring.data(), py::arg("model"))
+        .def("setOBWindModel", &setOBWindModelFromString,
+                setOBWindModelDocstring.data(), py::arg("model"))
         .def("setWinds", &setWindsKeepOnFailure,
                 setWindsDocstring.data(), py::arg("winds"))
         // Properties: alternative, attribute-style access to the same
@@ -1565,6 +1627,10 @@ void bindSimControls(py::module_& m)
                 &wrWindModelAsString,
                 &setWRWindModelFromString,
                 wrWindModelPropertyDocstring.data())
+        .def_property("obWindModel",
+                &obWindModelAsString,
+                &setOBWindModelFromString,
+                obWindModelPropertyDocstring.data())
         .def_property("winds",
                 &io::SimControls::winds,
                 &setWindsKeepOnFailure,

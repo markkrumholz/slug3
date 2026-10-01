@@ -4217,6 +4217,109 @@ static auto testSimControlsFeedbackWRWinds() -> int
     return result > 0 ? 1 : 0;
 }
 
+// Verify readFeedback()'s parsing of feedback.ob_winds, independently
+// of feedback.wr_winds (setWinds() itself is covered by
+// testSimControlsFeedbackWRWinds, and does not depend on either model)
+static auto testSimControlsFeedbackOBWinds() -> int
+{
+    constexpr std::string_view baseDeck = "tests/core/assets/testGalaxy.in";
+    int result = 0;
+
+    auto makeDeck = [baseDeck](std::optional<toml::table> feedback) -> toml::table {
+        toml::table deck = toml::parse_file(baseDeck);
+        if (feedback.has_value()) { deck.insert("feedback", std::move(feedback.value())); }
+        return deck;
+    };
+
+    try
+    {
+        // No feedback.ob_winds: defaults to vink_sander_21
+        {
+            const io::SimControls controls(makeDeck(std::nullopt));
+            if (controls.obWindModel() != feedback::OBwindModel::vinkSander21_)
+            {
+                std::cerr << "testSimControls: feedbackOBWinds: expected vink_sander_21 by default, got '"
+                    << feedback::obWindModelToString(controls.obWindModel()) << "'\n";
+                result = 1;
+            }
+        }
+
+        // Each valid name selects its own model, is not reported
+        // unused, and still builds winds() -- both alone and alongside
+        // feedback.wr_winds, which must each be read independently of
+        // the other
+        const std::array<std::pair<std::string_view, feedback::OBwindModel>, 3> valid{ {
+            { "none", feedback::OBwindModel::none_ },
+            { "vink_01", feedback::OBwindModel::vink01_ },
+            { "vink_sander_21", feedback::OBwindModel::vinkSander21_ },
+        } };
+        for (const bool withWRWinds : { false, true })
+        {
+            for (const auto& [name, model] : valid)
+            {
+                toml::table feedbackTable{ { "ob_winds", name } };
+                if (withWRWinds) { feedbackTable.insert("wr_winds", "l_over_c"); }
+                const io::SimControls controls(makeDeck(feedbackTable));
+                if (controls.obWindModel() != model)
+                {
+                    std::cerr << "testSimControls: feedbackOBWinds: ob_winds = '" << name
+                        << "' gave obWindModel() = '"
+                        << feedback::obWindModelToString(controls.obWindModel()) << "'\n";
+                    result = 1;
+                }
+                const auto expectedWR = withWRWinds ?
+                    feedback::WRwindModel::lOverc_ : feedback::WRwindModel::nugisLamers00_;
+                if (controls.wrWindModel() != expectedWR)
+                {
+                    std::cerr << "testSimControls: feedbackOBWinds: ob_winds = '" << name
+                        << "' changed wrWindModel() to '"
+                        << feedback::wrWindModelToString(controls.wrWindModel()) << "'\n";
+                    result = 1;
+                }
+                if (!controls.unusedKeys().empty())
+                {
+                    std::cerr << "testSimControls: feedbackOBWinds: ob_winds = '" << name
+                        << "' reported unused\n";
+                    result = 1;
+                }
+                if (controls.winds() == nullptr)
+                {
+                    std::cerr << "testSimControls: feedbackOBWinds: ob_winds = '" << name
+                        << "': winds() is null\n";
+                    result = 1;
+                }
+            }
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: feedbackOBWinds: valid-deck case threw: " << error.what() << "\n";
+        return 1;
+    }
+
+    // An unrecognized name, or a value that is not a string, must be
+    // rejected
+    const std::vector<std::pair<std::string_view, toml::table>> badDecks = {
+        { "unrecognized name", toml::table{ { "ob_winds", "vink01" } } },
+        { "wrong case", toml::table{ { "ob_winds", "None" } } },
+        { "WR model name", toml::table{ { "ob_winds", "nugis_lamers_00" } } },
+        { "not a string", toml::table{ { "ob_winds", 1.0 } } },
+    };
+    for (const auto& [label, feedbackTable] : badDecks)
+    {
+        try
+        {
+            const io::SimControls controls(makeDeck(feedbackTable));
+            std::cerr << "testSimControls: feedbackOBWinds: expected feedback.ob_winds ("
+                << label << ") to throw, but it did not\n";
+            result = 1;
+        }
+        catch (const std::exception&) { /* expected */ } // NOLINT(bugprone-empty-catch) -- the throw is the expected outcome
+    }
+
+    return result > 0 ? 1 : 0;
+}
+
 // Verify Yields::hasYield(mass, feH, channel) and SimControls::hasSN(mass,
 // feH) against the synthetic gap_test ccsn model (masses 10-40 Msun,
 // whose 20 and 30 Msun yields are all zero at [Fe/H] = 0 -- see
@@ -4365,6 +4468,7 @@ auto testSimControls() -> int
     result += testSimControlsYieldsHasYield();
     result += testSimControlsFeedback();
     result += testSimControlsFeedbackWRWinds();
+    result += testSimControlsFeedbackOBWinds();
     result += testSimControlsHasSNFeH();
     return result;
 }

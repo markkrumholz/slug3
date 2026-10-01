@@ -30,8 +30,8 @@ namespace feedback
      * eventually provide the full set of stellar feedback quantities
      * (wind mechanical power, ionizing/non-ionizing photon rates,
      * etc.) slug can compute from a star's interpolated track
-     * properties. For now it provides only vWindWR(), the terminal
-     * wind velocity of a Wolf-Rayet star.
+     * properties. For now it provides only terminal wind velocities:
+     * vWindWR() for Wolf-Rayet stars, and vWindOB() for O and B stars.
      */
     class Winds
     {
@@ -146,6 +146,68 @@ namespace feedback
          * (L, Y, Z) values.
          */
         [[nodiscard]] auto vWindWR(const specsyn::Specsyn::StarData& props) const -> double;
+
+        /**
+         * @brief Compute the terminal wind velocity of an O or B star
+         * @param props Stellar properties, as for vWindWR() -- assumed
+         *   to already be an O or B star; this method does not itself
+         *   check that
+         * @param feh The star's metallicity [Fe/H], used as a proxy
+         *   for log(Z/Zsun) by both non-trivial models below
+         * @return The star's terminal wind velocity, in cm/s, computed
+         *   by whichever model controls_.obWindModel() selects (see
+         *   @details)
+         * @details
+         * The model used is read live from controls_.obWindModel() on
+         * every call:
+         *   - OBwindModel::none_: no OB wind at all; returns exactly 0.
+         *   - OBwindModel::vink01_: Vink, de Koter, & Lamers (2001),
+         *     A&A, 369, 574
+         *     (https://ui.adsabs.harvard.edu/abs/2001A%26A...369..574V).
+         *   - OBwindModel::vinkSander21_: Vink & Sander (2021), MNRAS,
+         *     504, 2051
+         *     (https://ui.adsabs.harvard.edu/abs/2021MNRAS.504.2051V).
+         *
+         * Both non-trivial models switch between two prescriptions at
+         * the bistability jump temperature of Vink et al. (2001), eqs.
+         * (14) and (15),
+         *
+         *   log rho = -13.636 + 0.889 [Fe/H],
+         *   T_jump  = 61.2 + 2.59 log rho   [kK],
+         *
+         * using the cool-side prescription for Teff < T_jump and the
+         * hot-side one for Teff >= T_jump.
+         *
+         * OBwindModel::vink01_ takes v_wind as a fixed multiple of the
+         * star's effective escape speed
+         *
+         *   v_esc = sqrt(2 G M (1 - Gamma_e) / R),
+         *
+         * the convention of Lamers et al. on which Vink et al.'s
+         * ratios are based. Here M is the star's current mass, R its
+         * radius, obtained from L and T_eff via the Stefan-Boltzmann
+         * law, and Gamma_e its electron-scattering Eddington factor,
+         * computed exactly as for vWindWR()'s nugisLamers00_ model
+         * (fully ionized gas of the star's own surface composition).
+         * A star with Gamma_e >= 1 has no effective escape speed, and
+         * so gets v_wind = 0. Then
+         *
+         *   v_wind = 1.3 v_esc (10^[Fe/H])^0.13   [Teff <  T_jump]
+         *   v_wind = 2.6 v_esc (10^[Fe/H])^0.13   [Teff >= T_jump]
+         *
+         * OBwindModel::vinkSander21_ uses the fits of Vink & Sander
+         * (2021), eqs. (3) and (4), with v_wind in km/s, L in Lsun,
+         * and Teff in K:
+         *
+         *   log v_wind = -7.79 - 0.07 log L + 2.57 log Teff - 0.003 [Fe/H]   [Teff <  T_jump]
+         *   log v_wind =  0.39 - 0.04 log L + 0.74 log Teff + 0.19  [Fe/H]   [Teff >= T_jump]
+         *
+         * Vink & Sander fit eq. (4) only for Teff <= 20 kK and eq. (3)
+         * only for Teff >= 25 kK; using T_jump to divide the two
+         * extends each to meet the other inside the gap between them.
+         * Neither model is clamped.
+         */
+        [[nodiscard]] auto vWindOB(const specsyn::Specsyn::StarData& props, double feh) const -> double;
 
     private:
 

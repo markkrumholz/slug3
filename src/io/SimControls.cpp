@@ -1414,9 +1414,17 @@ void io::SimControls::readFeedback(const utils::TrackedDeck& inputDeck)
         wrWindModel_ = feedback::wrWindModelFromString(wrWindsInput.value());
     }
 
+    // feedback.ob_winds: likewise, but naming one of
+    // feedback::obWindModelStr's own entries
+    const auto obWindsInput = inputDeck.value<std::string>("feedback.ob_winds");
+    if (obWindsInput.has_value())
+    {
+        obWindModel_ = feedback::obWindModelFromString(obWindsInput.value());
+    }
+
     // The wind calculator itself: always built, whatever was given
-    // above, since it reads wrWindModel_ live on every call rather
-    // than being configured once here
+    // above, since it reads wrWindModel_/obWindModel_ live on every
+    // call rather than being configured once here
     winds_ = std::make_shared<feedback::Winds>(*this);
 }
 
