@@ -16,9 +16,11 @@
 #include "../specsyn/Specsyn.hpp"
 #include "../utils/PDFIntegrator.hpp"
 #include "Cluster.hpp"
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <functional>
+#include <iterator>
 #include <memory>
 #include <numbers>
 #include <optional>
@@ -636,6 +638,165 @@ namespace core
     private:
 
         /**
+         * @brief The inner (mass) layer of integrateCts(): a per-star quantity integrated over the continuous population of a single age and [Fe/H]
+         * @tparam F A callable f(m, segment, feh), with m a stellar mass
+         *   in Msun, segment a specsyn::Specsyn::Segment (one segment
+         *   of an isochrone) whose domain contains m, and feh the
+         *   [Fe/H], returning a container (e.g. std::array or
+         *   std::vector) of nInt doubles: the per-star quantities to
+         *   integrate
+         * @param age Stellar age, in yr -- see integrateCts()'s own
+         *   comment for why this is age, not time
+         * @param feh The single [Fe/H] value this call is evaluated at
+         * @param f The per-star quantity, as described above
+         * @param nInt The number of values f returns
+         * @return The integral, over masses in
+         *   [imf().getMin(), minStochMass()] alive at this age, of
+         *   imf()(m) f(m, segment, feh) -- per star formed, since imf()
+         *   is normalized by number
+         * @details
+         * Floors log10(age) at the tracks' own logTMin(), then builds
+         * the isochrone at that (log age, feh) -- from the shared
+         * fixed-[Fe/H] tracks2D() slice when SimControls::constFeH()
+         * is true, since this is called many times per integral, and
+         * from tracks() at feh otherwise -- and integrates f against
+         * imf() separately over each of its segments' own intersection
+         * with [imf().getMin(), minStochMass()] (the purely continuous
+         * share of the population -- see Specsyn::specCts()'s own
+         * comment), summing the results. Per-segment integration
+         * mirrors Specsyn::continuousSpecIntegrand()'s: an isochrone
+         * may have gaps between segments that the quadrature has no
+         * way to know to avoid, and a dead mass is simply never
+         * visited, since it falls in no segment's own domain.
+         *
+         * Each segment's integral uses utils::integrateScaled(), with
+         * f's scale taken at the segment's own two ends and its
+         * geometric midpoint, so that SimControls::intAbsTol() is a
+         * meaningful absolute tolerance whatever f's own units and
+         * however many orders of magnitude its elements span -- see
+         * integrateScaled()'s own comment.
+         */
+        template <class F>
+        [[nodiscard]] auto integrateCtsIntegrand(const double age, const double feh, const F& f,
+            const std::size_t nInt) const -> std::vector<double>
+        {
+            const auto& sc = controls_.get();
+            const auto& imf = sc.imf();
+            const double logAge = std::max(std::log10(age), sc.tracks()->logTMin());
+            const auto isochrone = sc.constFeH() ?
+                sc.tracks2D()->getIsochrone(logAge) : sc.tracks()->getIsochrone(logAge, feh);
+
+            std::vector<double> result(nInt, 0.0);
+            for (const auto& seg : isochrone)
+            {
+                const double a = std::max(imf.getMin(), seg->xMin());
+                const double b = std::min(sc.minStochMass(), seg->xMax());
+                if (a >= b) { continue; } // empty intersection with [imf.getMin(), minStochMass()]
+
+                const auto fAt = [&f, &seg, feh](const double m) -> std::vector<double>
+                {
+                    const auto v = f(m, *seg, feh);
+                    std::vector<double> out(std::begin(v), std::end(v));
+                    return out;
+                };
+                const auto segResult = utils::integrateScaled(imf, fAt, nInt, a, b,
+                    { a, std::sqrt(a * b), b }, sc.intMaxIter(), sc.intAbsTol(), sc.intRelTol());
+                for (std::size_t k = 0; k < nInt; ++k) { result.at(k) += segResult.at(k); }
+            }
+            return result;
+        }
+
+        /**
+         * @brief Integrate a per-star quantity over the whole purely continuous (non-clustered, non-stochastic) population, at curTime_
+         * @tparam F See integrateCtsIntegrand()'s own F
+         * @param f The per-star quantity -- see integrateCtsIntegrand()
+         * @param nInt The number of values f returns
+         * @return The total of each of f's values over every star in
+         *   the purely continuous population alive at curTime_: the
+         *   integral, over stellar age in [0, curTime_] weighted by the
+         *   star formation rate at curTime_ minus that age, of
+         *   integrateCtsIntegrand() (averaged over
+         *   SimControls::fehDist() if it is non-degenerate), scaled to
+         *   this population's own share of the stellar mass formed --
+         *   (1 - fCluster()) (1 - fracStochMass()) / nonStochIMFMass()
+         *   -- or all zeros if nonStochIMFMass() is not positive or
+         *   curTime_ is 0
+         * @details
+         * Used by computeLbolCts() (with f the per-star bolometric
+         * luminosity). Mirrors Specsyn::specCtsHelper()'s own nested
+         * structure: the age integral runs over a pdfs::PDFReflect view
+         * of sfr() pivoted at curTime_ / 2, so its own coordinate is
+         * age directly, from ageMin = min(1e4 yr, 1e-3 curTime_) to
+         * curTime_, log-transformed (see specCtsHelper()'s own comment
+         * for both choices); and, if fehDist() is non-degenerate, that
+         * whole age integral is itself integrated over fehDist() and
+         * divided by fehDist()'s own integral, mirroring
+         * fehAveragedDeathIntegrand().
+         *
+         * Every layer uses utils::integrateScaled() rather than a bare
+         * PDFIntegrator, so that SimControls::intAbsTol() is a
+         * meaningful absolute tolerance whatever f's own units, and
+         * even when f's elements span many orders of magnitude or are
+         * zero (e.g. wind mass, momentum, and energy fluxes, with some
+         * wind models off) -- see integrateScaled()'s own comment. The
+         * age layer takes its scale at five log-spaced ages from
+         * ageMin to curTime_, and the [Fe/H] layer at fehDist()'s own
+         * expectation value.
+         */
+        template <class F>
+        [[nodiscard]] auto integrateCts(const F& f, const std::size_t nInt) const -> std::vector<double>
+        {
+            const auto& sc = controls_.get();
+            const double massInt = sc.nonStochIMFMass();
+            if (!(curTime_ > 0.0) || !(massInt > 0.0)) { return std::vector<double>(nInt, 0.0); } // NOLINT(modernize-return-braced-init-list) -- braces would select vector's initializer_list constructor, giving {double(nInt), 0.0}
+
+            // See Specsyn::specCtsHelper()'s own comment for why this
+            // reflects sfr() about curTime_ / 2 (so this layer's own
+            // coordinate is age directly), why ageMin is
+            // min(1e4 yr, 1e-3 curTime_), and why it is log-transformed
+            const pdfs::PDFReflect sfrAge(sfr(), 0.5 * curTime_);
+            const double ageMin = std::min(1e4, 1e-3 * curTime_);
+            constexpr int nAgeScale = 5;
+            std::vector<double> ageScalePoints;
+            ageScalePoints.reserve(nAgeScale);
+            for (int i = 0; i < nAgeScale; ++i)
+            {
+                ageScalePoints.push_back(ageMin * std::pow(curTime_ / ageMin,
+                    static_cast<double>(i) / (nAgeScale - 1)));
+            }
+
+            const auto ageIntegral = [&](const double feh) -> std::vector<double>
+            {
+                const auto atAge = [&, feh](const double age) -> std::vector<double>
+                { return integrateCtsIntegrand(age, feh, f, nInt); };
+                return utils::integrateScaled(sfrAge, atAge, nInt, ageMin, curTime_, ageScalePoints,
+                    sc.intMaxIter(), sc.intAbsTol(), sc.intRelTol(), true);
+            };
+
+            const auto& fehDist = sc.fehDist();
+            std::vector<double> result;
+            if (fehDist.getMin() == fehDist.getMax())
+            {
+                result = ageIntegral(fehDist.getMin());
+            }
+            else
+            {
+                result = utils::integrateScaled(fehDist, ageIntegral, nInt, fehDist.getMin(),
+                    fehDist.getMax(), { fehDist.expectationValue() }, sc.intMaxIter(),
+                    sc.intAbsTol(), sc.intRelTol());
+                const double fehNorm = fehDist.integral(fehDist.getMin(), fehDist.getMax());
+                for (double& r : result) { r /= fehNorm; }
+            }
+
+            // imf() is normalized by number, so result is per star
+            // formed; convert to this population's own total -- see
+            // SimControls::nonStochIMFMass()'s own comment
+            const double scale = (1.0 - sc.fCluster()) * (1.0 - sc.fracStochMass()) / massInt;
+            for (double& r : result) { r *= scale; }
+            return result;
+        }
+
+        /**
          * @brief The rate, per unit stellar mass formed, at which stars of a given age and [Fe/H] release a quantity at death
          * @tparam F See continuousDeathQuantity()'s own F
          * @param age Stellar age, in yr
@@ -653,7 +814,7 @@ namespace core
          * The innermost layer of continuousDeathQuantity(). Uses the
          * shared fixed-[Fe/H] tracks2D() slice when
          * SimControls::constFeH() is true, and tracks() at feh
-         * otherwise -- see lbolCtsIntegrand()'s own identical choice.
+         * otherwise -- see integrateCtsIntegrand()'s own identical choice.
          */
         template <class F>
         [[nodiscard]] auto deathIntegrand(const double age, const double feh, const F& f,
@@ -732,7 +893,7 @@ namespace core
          * @details
          * The age layer of continuousDeathQuantity(). Integrates over
          * age via a pdfs::PDFReflect view of sfr() pivoted at t / 2 --
-         * see computeLbolCts()'s own comment -- with
+         * see integrateCts()'s own comment -- with
          * utils::integrateScaled(), scaled at a few log-spaced ages
          * (deaths only begin a few Myr in).
          */
@@ -1073,52 +1234,6 @@ namespace core
         void computeLbol();
 
         /**
-         * @brief The integrand for computeLbolCts()'s own standalone Lbol integral's outer (age) integral
-         * @param age The stellar age, in yr, to evaluate at -- see
-         *   Specsyn::continuousSpecIntegrand()'s own age parameter for
-         *   the identical convention (not time -- computeLbolCts()
-         *   integrates this dimension via a pdfs::PDFReflect view of
-         *   sfr, pivoted so that the coordinate PDFIntegrator hands
-         *   back already is age)
-         * @param imf The initial mass function of the population --
-         *   see computeLbolCts()'s own imf parameter; used both as the
-         *   inner mass integral's own weighting PDF and, via
-         *   getMin(), its own lower integration bound (see this
-         *   function's own comment for its own upper bound)
-         * @param feh The single [Fe/H] value this call is evaluated
-         *   at -- see Specsyn::continuousSpecIntegrand()'s own feh
-         *   parameter for the identical convention
-         * @return A single-element vector holding this age's own
-         *   integrated bolometric luminosity, in Lsun -- unlike
-         *   Specsyn::continuousSpecIntegrand()'s own Lbol element, no
-         *   further unit conversion is needed afterward, since this
-         *   integral's own absolute tolerance is already specified
-         *   directly in Lsun (see computeLbolCts()'s own comment for
-         *   why that differs from the shared-with-a-spectrum case)
-         * @details
-         * Mirrors Specsyn::continuousSpecIntegrand()'s own structure
-         * exactly (see its own comment): floors log10(age), builds the
-         * isochrone at that (log age, feh), then integrates each of its
-         * segments' own bolometric luminosity against imf, over
-         * [imf.getMin(), controls_.minStochMass()] (the purely
-         * continuous share of the population -- see Specsyn::
-         * specCts()'s own comment for why controls_.minStochMass()
-         * rather than imf.getMax()), via a nested PDFIntegrator
-         * (GKOrder::GK15) --
-         * a local, capture-free lambda mirroring Cluster::lbolStar()'s
-         * own role, rather than calling into any Specsyn (which may
-         * not exist at all when this runs -- see computeLbolCts()'s
-         * own comment), reading each star's own log(L/Lsun) directly
-         * off its isochrone segment and summing 10^that over the
-         * segments a star of that mass could belong to. No explicit
-         * live/dead mass check is needed: exactly as in
-         * continuousSpecIntegrand(), a dead mass is simply never
-         * visited, since it falls in none of the isochrone's own
-         * segment domains.
-         */
-        [[nodiscard]] auto lbolCtsIntegrand(double age, const pdfs::PDF& imf, double feh) const -> std::vector<double>;
-
-        /**
          * @brief Compute lbolCts_ directly, without going through a full spectrum
          * @details
          * Called by computeLbol() when Lbol is wanted but computeSpec()
@@ -1130,34 +1245,20 @@ namespace core
          * lbol() is requested without spec() ever having been
          * requested first this step.
          *
-         * Mirrors Specsyn::specCtsHelper()'s own nested-1D structure
-         * exactly (the reflected-and-log-transformed age coordinate, a
-         * PDFIntegrator over age alone whose own integrand --
-         * lbolCtsIntegrand() -- performs a complete inner 1D integral
-         * over mass via a fresh isochrone built at its own age, and --
-         * when fehDist is non-degenerate -- integrating that same
-         * nested integral over [Fe/H] with a third, outermost
-         * PDFIntegrator weighted by fehDist; see its own comment for
-         * the full rationale, which applies here unchanged), just
-         * integrating a
-         * single quantity (Lbol alone, via lbolCtsIntegrand()) instead
-         * of a spectrum plus Lbol together, and directly in Lsun
-         * throughout: unlike specCtsHelper(), there is no spectral
-         * absolute tolerance for an erg/s-scale intermediate to share,
-         * so reqAbsError is simply intAbsTol() * sfr().integral(0,
-         * curTime()), with no utils::Lsun factor. Its own
-         * lbolCtsIntegrand() builds isochrones directly (see its own
-         * comment), independent of any Specsyn, since a Specsyn may not
-         * exist at all here.
-         *
-         * Sets lbolCts_ to the integral's own result, scaled by
-         * (1 - fCluster()) * (1 - fracStochMass()) for the purely
-         * continuously-treated share of the population, matching
-         * Specsyn::specAndLbolCts()'s own identical scaling --
-         * necessary for the two to agree when both are exercised for
-         * the same population (see testContinuousPopLbolStandaloneMatchesSpec
-         * in tests/core/testGalaxy.cpp). Sets lbolCtsCurrent_ to true
-         * afterward.
+         * Sets lbolCts_ to integrateCts() of the per-star bolometric
+         * luminosity, 10^logL in Lsun, read directly off each
+         * isochrone segment by a local, capture-free lambda mirroring
+         * Cluster::lbolStar()'s own role -- rather than calling into
+         * any Specsyn, which may not exist at all here.
+         * integrateCts() already applies the
+         * (1 - fCluster()) * (1 - fracStochMass()) / nonStochIMFMass()
+         * scaling to the purely continuously-treated share of the
+         * population, matching Specsyn::specAndLbolCts()'s own -- so
+         * the two agree, to integrator tolerance, when both are
+         * exercised for the same population (see
+         * testContinuousPopLbolStandaloneMatchesSpec and its
+         * multi-[Fe/H] counterpart in tests/core/testGalaxy.cpp). Sets
+         * lbolCtsCurrent_ to true afterward.
          */
         void computeLbolCts();
 
