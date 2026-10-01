@@ -26,16 +26,21 @@
 #include "../../src/feedback/FeedbackCommons.hpp"
 #include "../../src/feedback/Winds.hpp"
 #include "../../src/io/SimControls.hpp"
+#include "../../src/specsyn/Specsyn.hpp"
+#include "../../src/specsyn/SpecsynLibChained.hpp"
 #include "../../src/tracks/TrackCommons.hpp"
 #include "../../src/utils/MiscUtils.hpp"
 #include "testWinds.hpp"
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <iostream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <toml.hpp>
+#include <utility>
 
 namespace
 {
@@ -712,6 +717,162 @@ static auto testAGBOtherWindModelStrings() -> int
     return result;
 }
 
+namespace
+{
+    // Which per-type method Winds::vWind() should dispatch a star to
+    enum class WindClass : std::uint8_t { wr, ob, agb, other };
+
+    auto windClassName(const WindClass c) -> std::string_view
+    {
+        switch (c)
+        {
+            case WindClass::wr:    return "vWindWR";
+            case WindClass::ob:    return "vWindOB";
+            case WindClass::agb:   return "vWindAGB";
+            case WindClass::other: return "vWindOther";
+        }
+        return "?";
+    }
+
+    /**
+     * @brief Check that winds.vWind(props, feh) dispatches to the
+     *   method expected, and to none of the other three
+     * @details
+     * vWind() must return exactly what the expected method returns.
+     * So that a match is actually informative, each of the other
+     * three methods must also give a different answer for the same
+     * star (under default models, which are all non-trivial);
+     * otherwise the test case itself is reported as ambiguous.
+     */
+    auto checkDispatch(const feedback::Winds& winds, const specsyn::Specsyn::StarData& props,
+        const double feh, const WindClass expected, const std::string_view label) -> int
+    {
+        const std::array<std::pair<WindClass, double>, 4> perType{ {
+            { WindClass::wr, winds.vWindWR(props) },
+            { WindClass::ob, winds.vWindOB(props, feh) },
+            { WindClass::agb, winds.vWindAGB(props, feh) },
+            { WindClass::other, winds.vWindOther(props) },
+        } };
+        const double actual = winds.vWind(props, feh);
+        const double expectedV = perType.at(static_cast<std::size_t>(expected)).second;
+        int result = 0;
+        for (const auto& [c, v] : perType)
+        {
+            if (c == expected && actual != v)
+            {
+                std::cerr << "testVWindDispatch: " << label << ": vWind() = " << actual
+                    << " cm/s, but " << windClassName(c) << "() = " << v << " cm/s\n";
+                result = 1;
+            }
+            else if (c != expected && v == expectedV)
+            {
+                std::cerr << "testVWindDispatch: " << label << ": vWind() matches "
+                    << windClassName(c) << "() as well as " << windClassName(expected)
+                    << "(); test case does not discriminate\n";
+                result = 1;
+            }
+        }
+        return result;
+    }
+} // namespace
+
+// Winds::vWind() must dispatch, in order: Wolf-Rayet stars (per
+// SpecsynLibWR::getWRType) to vWindWR, Teff > 11 kK to vWindOB,
+// log g < 3.5 to vWindAGB, and everything else to vWindOther. The
+// log g values quoted below were computed independently from (M, L,
+// Teff), with the same constants Winds.cpp uses. The default
+// SimControls has no specsyn, so only the WNE/WC branch of
+// getWRType can classify a star as WR here -- see
+// testVWindDispatchChainedWNL for the WNL branch
+static auto testVWindDispatch() -> int
+{
+    const feedback::Winds winds(testControls);
+    struct Case
+    {
+        std::string_view label_;
+        specsyn::Specsyn::StarData props_;
+        WindClass expected_;
+    };
+    const std::array<Case, 9> cases{ {
+        // WNE (214 kK, X = 0, C < N), from a real MIST track -- the
+        // same star testVWindWRWNEUnclamped uses
+        { "WNE star", makeStarData(19.2440, 5.90241, 5.33139, 0.0, 0.98412906, 0.00017037, 0.01056297),
+            WindClass::wr },
+        // Hot, H-rich O star (44.7 kK, X = 0.7): getWRType's H-rich
+        // guard keeps it out of WR
+        { "hot O star", makeOBStarData(40.0, 5.35, 4.65), WindClass::ob },
+        // Either side of the 11 kK boundary, both with log g ~ 4
+        { "11.5 kK star", makeOBStarData(3.0, 2.0, 4.0606978404), WindClass::ob },
+        { "10.5 kK star (log g = 3.95)", makeOBStarData(3.0, 2.0, 4.0211892991), WindClass::other },
+        // Cool, low-gravity giants
+        { "AGB star (log g = 0.07)", makeOBStarData(1.5, 3.5, 3.5), WindClass::agb },
+        { "red giant (log g = 1.37)", makeOBStarData(1.2, 2.5, 3.6), WindClass::agb },
+        // Either side of the log g = 3.5 boundary, at 5000 K
+        { "log g = 3.45 star", makeOBStarData(1.0, 0.738670, 3.6989700043), WindClass::agb },
+        { "log g = 3.55 star", makeOBStarData(1.0, 0.638670, 3.6989700043), WindClass::other },
+        // The Sun (log g = 4.44)
+        { "Sun", makeOBStarData(1.0, 0.0, 3.7613263224), WindClass::other },
+    } };
+
+    int result = 0;
+    for (const auto& c : cases)
+    {
+        result |= checkDispatch(winds, c.props_, 0.0, c.expected_, c.label_);
+    }
+    return result;
+}
+
+// With a chained spectral library that includes a WNL grid, vWind()
+// must pass that library's own wnlTeffRanges()/normalLogTeffMax() to
+// getWRType, so a WNL-composition star inside the chained WNL grid's
+// log(Teff) range is classified WR (vWindWR) -- whereas the very same
+// star, under a SimControls with no specsyn, is not WR, and (being
+// hotter than 11 kK) goes to vWindOB instead
+static auto testVWindDispatchChainedWNL() -> int
+{
+    toml::table inputDeck = toml::parse_file("tests/core/assets/testCluster.in");
+    auto* spectraTable = inputDeck.at_path("spectra").as_table();
+    spectraTable->insert_or_assign("registry", std::string("tests/specsyn/assets/spectra.toml"));
+    spectraTable->insert_or_assign("model", toml::array{ "POWR_WNL_H40_test", "TLUSTY_test" });
+
+    int result = 0;
+    try
+    {
+        const io::SimControls controls(inputDeck);
+        const auto* chained = dynamic_cast<const specsyn::SpecsynLibChained*>(controls.specsyn().get());
+        if (chained == nullptr)
+        {
+            std::cerr << "testVWindDispatchChainedWNL: specsyn() is not a SpecsynLibChained\n";
+            return 1;
+        }
+
+        // A WNLH40-composition star (X = 0.4, Y = 0.58), inside the
+        // chained WNLH40 grid's own log(Teff) range (4.6 to 4.8 for
+        // this fixture) but below getWRType's log10(50000 K) = 4.699
+        // WNE/WC threshold, so that only the WNL branch -- and hence
+        // only the chained library's own range -- can make it WR
+        constexpr double logTeff = 4.65;
+        const auto [lo, hi] = chained->wnlTeffRanges()[1];
+        if (!(lo <= logTeff && logTeff <= hi))
+        {
+            std::cerr << "testVWindDispatchChainedWNL: log(Teff) = " << logTeff
+                << " is outside the chained WNLH40 range [" << lo << ", " << hi << "]\n";
+            return 1;
+        }
+        const auto props = makeStarData(20.0, 5.8, logTeff, 0.4, 0.58, 0.0005, 0.01);
+
+        result |= checkDispatch(*controls.winds(), props, 0.0, WindClass::wr, "WNLH40 star, chained specsyn");
+        result |= checkDispatch(feedback::Winds(testControls), props, 0.0, WindClass::ob,
+            "WNLH40 star, no specsyn");
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testVWindDispatchChainedWNL: threw: " << error.what() << "\n";
+        return 1;
+    }
+    return result;
+}
+
 // Winds retains a live reference to the SimControls it was
 // constructed with, matching Specsyn's/Extinct's/Yields's own
 // identical pattern -- checked here the same way
@@ -753,6 +914,8 @@ auto testWinds() -> int
     result += testVWindOther();
     result += testWindModelsIndependent();
     result += testAGBOtherWindModelStrings();
+    result += testVWindDispatch();
+    result += testVWindDispatchChainedWNL();
     result += testWindsControlsAccessor();
     return result;
 }

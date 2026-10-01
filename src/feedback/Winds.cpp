@@ -9,14 +9,20 @@
 #include "Winds.hpp"
 #include "../io/SimControls.hpp"
 #include "../specsyn/Specsyn.hpp"
+#include "../specsyn/SpecsynCommons.hpp"
+#include "../specsyn/SpecsynLibChained.hpp"
+#include "../specsyn/SpecsynLibWR.hpp"
 #include "../tracks/TrackCommons.hpp"
 #include "../utils/Constants.hpp"
 #include "FeedbackCommons.hpp"
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <numbers>
 #include <stdexcept>
+#include <utility>
 
 namespace feedback
 {
@@ -219,6 +225,48 @@ namespace feedback
             case OtherwindModel::vesc_: return surfaceEscapeSpeed(props);
         }
         throw std::logic_error("Winds::vWindOther: unrecognized other-star wind model"); // unreachable; exhaustive switch above
+    }
+
+    auto Winds::vWind(const specsyn::Specsyn::StarData& props, const double feh) const -> double
+    {
+        using WRLib = specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise>;
+
+        // Wolf-Rayet classification inputs: the chained spectral
+        // library's own, if there is one, so this agrees with the
+        // spectral synthesis; NaN (unknown) otherwise
+        constexpr double nan = std::numeric_limits<double>::quiet_NaN();
+        std::array<std::pair<double, double>, 3> wnlTeffRanges{ { { nan, nan }, { nan, nan }, { nan, nan } } };
+        double normalLogTeffMax = nan;
+        const auto specsyn = controls_.specsyn();
+        if (const auto* chained = dynamic_cast<const specsyn::SpecsynLibChained*>(specsyn.get());
+            chained != nullptr)
+        {
+            wnlTeffRanges = chained->wnlTeffRanges();
+            normalLogTeffMax = chained->normalLogTeffMax();
+        }
+        if (WRLib::getWRType(props, wnlTeffRanges, normalLogTeffMax) != WRLib::WRType::None)
+        {
+            return vWindWR(props);
+        }
+
+        // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- StarData is a fixed-size std::array, and every index used here is compile-time-known
+        const double mass = props[static_cast<std::size_t>(tracks::FieldIdx::mass)]; // Msun
+        const double logL = props[static_cast<std::size_t>(tracks::FieldIdx::logL)]; // log10(L/Lsun)
+        const double logTeff = props[static_cast<std::size_t>(tracks::FieldIdx::logTe)];
+        // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+
+        // O and B stars
+        constexpr double tOBMin = 1.1e4; // K
+        if (std::pow(10.0, logTeff) > tOBMin) { return vWindOB(props, feh); }
+
+        // AGB stars: log g from the Stefan-Boltzmann radius
+        constexpr double loggAGBMax = 3.5; // log10(g / cm s^-2)
+        const double radius = stellarRadius(logL, logTeff); // cm
+        const double logg = std::log10(utils::G * mass * utils::Msun / (radius * radius));
+        if (logg < loggAGBMax) { return vWindAGB(props, feh); }
+
+        // Everything else
+        return vWindOther(props);
     }
 
 } // namespace feedback
