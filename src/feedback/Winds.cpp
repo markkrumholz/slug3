@@ -273,6 +273,12 @@ namespace feedback
         const double feh) -> std::array<double, 3>
     {
         const double mDot = props[static_cast<std::size_t>(tracks::FieldIdx::mdot)]; // Msun/yr // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- StarData is a fixed-size std::array, and this index is compile-time-known
+        // A star with no mass loss has no wind momentum or energy flux,
+        // whatever its nominal wind velocity -- checked before calling
+        // vWind(), since some models (e.g. WRwindModel::lOverc_, v =
+        // L / (mdot c)) diverge at mdot = 0, which would otherwise give
+        // 0 * inf = NaN here
+        if (mDot == 0.0) { return { 0.0, 0.0, 0.0 }; }
         const double vWind = (winds != nullptr) ? winds->vWind(props, feh) : 0.0;   // cm/s
         const double mDotCgs = mDot * utils::Msun / utils::yr;                        // g/s
         return { mDot, mDotCgs * vWind, 0.5 * mDotCgs * vWind * vWind };

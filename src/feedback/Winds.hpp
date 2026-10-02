@@ -309,7 +309,9 @@ namespace feedback
      *   Msun/yr, read directly from props; its wind momentum flux
      *   mDot * v_wind, in g cm s^-2; and its wind energy flux
      *   (1/2) mDot v_wind^2, in erg s^-1, where v_wind =
-     *   winds->vWind(props, feh), in cm/s
+     *   winds->vWind(props, feh), in cm/s. If mDot is 0, all three
+     *   are 0 and vWind() is not called at all, since some wind models
+     *   (e.g. WRwindModel::lOverc_) give an infinite velocity there
      * @details
      * The single per-star calculation shared by every population that
      * reports wind fluxes: core::Cluster's stochastic and

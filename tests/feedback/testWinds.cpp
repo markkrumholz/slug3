@@ -309,6 +309,34 @@ static auto testVWindWRLOverC() -> int
     return checkApproxEqual(winds.vWindWR(props), expectedCgs, "testVWindWRLOverC");
 }
 
+// windFluxes() must return exactly zero fluxes, not NaN, for a star
+// with mdot = 0 -- even under WRwindModel::lOverc_, whose v = L /
+// (mdot c) is infinite there (checked first, so the test can't pass
+// vacuously)
+static auto testWindFluxesZeroMdotLOverC() -> int
+{
+    io::SimControls controls;
+    controls.setWRWindModel(feedback::WRwindModel::lOverc_);
+    const feedback::Winds winds(controls);
+    const auto props = makeStarData(
+        19.2440, 5.90241, 5.33139, 0.0, 0.98412906, 0.00017037, 0.01056297, 0.0);
+
+    if (!std::isinf(winds.vWind(props, 0.0)))
+    {
+        std::cerr << "testWindFluxesZeroMdotLOverC: expected vWind() to be infinite at mdot = 0, got "
+            << winds.vWind(props, 0.0) << "\n";
+        return 1;
+    }
+    const auto [mDot, pDot, eDot] = feedback::windFluxes(props, &winds, 0.0);
+    if (mDot != 0.0 || pDot != 0.0 || eDot != 0.0)
+    {
+        std::cerr << "testWindFluxesZeroMdotLOverC: expected { 0, 0, 0 }, got { " << mDot << ", "
+            << pDot << ", " << eDot << " }\n";
+        return 1;
+    }
+    return 0;
+}
+
 // The wind model is read live from controls_ on every call, so
 // changing it on the SimControls must change what the very same Winds
 // object returns next, with no rebuild. Uses the same star as
@@ -901,6 +929,7 @@ auto testWinds() -> int
     result += testWRWindModelDefault();
     result += testVWindWRNone();
     result += testVWindWRLOverC();
+    result += testWindFluxesZeroMdotLOverC();
     result += testVWindWRModelSwitchLive();
     result += testWRWindModelStrings();
     result += testOBWindModelDefault();
