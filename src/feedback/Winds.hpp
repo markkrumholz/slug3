@@ -277,11 +277,12 @@ namespace feedback
          * method, checking in order:
          *   1. Wolf-Rayet star, per specsyn::SpecsynLibWR::getWRType():
          *      vWindWR(). If controls_.specsyn() is a
-         *      specsyn::SpecsynLibChained, getWRType() is given that
+         *      specsyn::SpecsynLibChained or a standalone
+         *      specsyn::SpecsynLibWR, getWRType() is given that
          *      library's own wnlTeffRanges() and normalLogTeffMax(), so
          *      a star is classified as WR here exactly when the
          *      spectral synthesis treats it as one; otherwise (no
-         *      specsyn, or one that is not chained), both are NaN, so
+         *      specsyn, or an ordinary-star one), both are NaN, so
          *      no star is classified as WNL (see getWRType()'s own
          *      comment).
          *   2. Teff > 11 kK: an O or B star, vWindOB().

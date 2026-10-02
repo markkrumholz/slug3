@@ -231,9 +231,9 @@ namespace feedback
     {
         using WRLib = specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise>;
 
-        // Wolf-Rayet classification inputs: the chained spectral
-        // library's own, if there is one, so this agrees with the
-        // spectral synthesis; NaN (unknown) otherwise
+        // Wolf-Rayet classification inputs: the spectral library's
+        // own, if it is chained or a standalone WR library, so this
+        // agrees with the spectral synthesis; NaN (unknown) otherwise
         constexpr double nan = std::numeric_limits<double>::quiet_NaN();
         std::array<std::pair<double, double>, 3> wnlTeffRanges{ { { nan, nan }, { nan, nan }, { nan, nan } } };
         double normalLogTeffMax = nan;
@@ -243,6 +243,11 @@ namespace feedback
         {
             wnlTeffRanges = chained->wnlTeffRanges();
             normalLogTeffMax = chained->normalLogTeffMax();
+        }
+        else if (const auto* wrLib = dynamic_cast<const WRLib*>(specsyn.get()); wrLib != nullptr)
+        {
+            wnlTeffRanges = wrLib->wnlTeffRanges();
+            normalLogTeffMax = wrLib->normalLogTeffMax();
         }
         if (WRLib::getWRType(props, wnlTeffRanges, normalLogTeffMax) != WRLib::WRType::None)
         {

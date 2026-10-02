@@ -27,7 +27,9 @@
 #include "../../src/feedback/Winds.hpp"
 #include "../../src/io/SimControls.hpp"
 #include "../../src/specsyn/Specsyn.hpp"
+#include "../../src/specsyn/SpecsynCommons.hpp"
 #include "../../src/specsyn/SpecsynLibChained.hpp"
+#include "../../src/specsyn/SpecsynLibWR.hpp"
 #include "../../src/tracks/TrackCommons.hpp"
 #include "../../src/utils/MiscUtils.hpp"
 #include "testWinds.hpp"
@@ -901,6 +903,46 @@ static auto testVWindDispatchChainedWNL() -> int
     return result;
 }
 
+// Likewise for a standalone (unchained) WNL spectral library: vWind()
+// must pass that library's own wnlTeffRanges() to getWRType, so the
+// same WNLH40 star testVWindDispatchChainedWNL uses -- inside this
+// grid's own log(Teff) range -- is classified WR (vWindWR), not O/B
+static auto testVWindDispatchStandaloneWNL() -> int
+{
+    toml::table inputDeck = toml::parse_file("tests/core/assets/testCluster.in");
+    auto* spectraTable = inputDeck.at_path("spectra").as_table();
+    spectraTable->insert_or_assign("registry", std::string("tests/specsyn/assets/spectra.toml"));
+    spectraTable->insert_or_assign("model", std::string("POWR_WNL_H40_test"));
+
+    try
+    {
+        const io::SimControls controls(inputDeck);
+        using WRLib = specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise>;
+        const auto* wrLib = dynamic_cast<const WRLib*>(controls.specsyn().get());
+        if (wrLib == nullptr)
+        {
+            std::cerr << "testVWindDispatchStandaloneWNL: specsyn() is not a SpecsynLibWR\n";
+            return 1;
+        }
+
+        constexpr double logTeff = 4.65;
+        const auto [lo, hi] = wrLib->wnlTeffRanges()[1];
+        if (!(lo <= logTeff && logTeff <= hi))
+        {
+            std::cerr << "testVWindDispatchStandaloneWNL: log(Teff) = " << logTeff
+                << " is outside the standalone WNLH40 range [" << lo << ", " << hi << "]\n";
+            return 1;
+        }
+        const auto props = makeStarData(20.0, 5.8, logTeff, 0.4, 0.58, 0.0005, 0.01);
+        return checkDispatch(*controls.winds(), props, 0.0, WindClass::wr, "WNLH40 star, standalone WR specsyn");
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testVWindDispatchStandaloneWNL: threw: " << error.what() << "\n";
+        return 1;
+    }
+}
+
 // Winds retains a live reference to the SimControls it was
 // constructed with, matching Specsyn's/Extinct's/Yields's own
 // identical pattern -- checked here the same way
@@ -945,6 +987,7 @@ auto testWinds() -> int
     result += testAGBOtherWindModelStrings();
     result += testVWindDispatch();
     result += testVWindDispatchChainedWNL();
+    result += testVWindDispatchStandaloneWNL();
     result += testWindsControlsAccessor();
     return result;
 }
