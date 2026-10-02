@@ -961,10 +961,15 @@ set_tests_properties(test_Io PROPERTIES
 add_test(NAME test_Nebular COMMAND slugTestNebular
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
-# test_Feedback constructs only a default SimControls (no file loads of
-# its own), so unlike test_Nebular/test_Specsyn it needs no
-# WORKING_DIRECTORY.
-add_test(NAME test_Feedback COMMAND slugTestFeedback)
+# test_Feedback builds a SimControls from an input deck (tests/core/
+# assets/testCluster.in, with a chained spectral library from
+# tests/specsyn/assets) to check Winds::vWind's Wolf-Rayet dispatch
+# against a real SpecsynLibChained, so it needs the same
+# WORKING_DIRECTORY and SLUG_DIR as test_Io.
+add_test(NAME test_Feedback COMMAND slugTestFeedback
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+set_tests_properties(test_Feedback PROPERTIES
+    ENVIRONMENT "SLUG_DIR=${CMAKE_SOURCE_DIR}")
 
 # test_CoreFull is the slow, full-scale end-to-end counterpart to
 # test_Core -- see testCoreFullAll.cpp and slugTestCoreFull's own

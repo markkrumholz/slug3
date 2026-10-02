@@ -456,6 +456,33 @@ namespace specsyn
         }
 
         /**
+         * @brief Get the log(Teff) range of each WNL bucket this library classifies stars with
+         * @return A const reference to wnlTeffRanges_ -- see its own
+         *   comment; suitable for passing directly to getWRType's own
+         *   wnlTeffRanges parameter
+         * @details
+         * Exposed so that code outside spectral synthesis (e.g.
+         * feedback::Winds::vWind()) can classify Wolf-Rayet stars
+         * exactly as this library's own spec() does, including when
+         * it is used standalone rather than inside SpecsynLibChained
+         * -- mirroring SpecsynLibChained::wnlTeffRanges().
+         */
+        [[nodiscard]] auto wnlTeffRanges() const -> const std::array<std::pair<double, double>, 3>&
+        {
+            return wnlTeffRanges_;
+        }
+
+        /**
+         * @brief Get the ordinary-star log(Teff) ceiling this library classifies stars with
+         * @return normalLogTeffMax_ -- see its own comment; suitable
+         *   for passing directly to getWRType's own normalLogTeffMax
+         *   parameter
+         * @details
+         * Exposed for the same reason as wnlTeffRanges().
+         */
+        [[nodiscard]] auto normalLogTeffMax() const -> double { return normalLogTeffMax_; }
+
+        /**
          * @brief This library's log10(T_*) grid points
          * @details
          * Exposed for SpecsynLibChained's benefit, which needs to scan

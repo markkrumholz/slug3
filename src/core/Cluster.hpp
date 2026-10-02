@@ -27,6 +27,11 @@ namespace yields
     class Yields;
 } // namespace yields
 
+namespace feedback
+{
+    class Winds;
+} // namespace feedback
+
 namespace core
 {
 
@@ -459,6 +464,55 @@ namespace core
         }
 
         /**
+         * @brief Return the population's total stellar wind mass flux
+         * @return The summed mass loss rate of every living star, in
+         *   Msun/yr, at the current time; 0 until advance() has run at
+         *   least once
+         * @details
+         * Computed lazily, like lbol() (see spec()'s own comment):
+         * advance() only marks the wind fluxes stale (windsCurrent_),
+         * and the first of mDotWind()/pDotWind()/eDotWind() called
+         * afterward recomputes all three via computeWinds() -- see its
+         * own comment for how. Unlike cumSNe(), nothing here depends on
+         * which stars died during a particular advance() call, so
+         * there is no need to pay for this on every step.
+         */
+        [[nodiscard]] auto mDotWind() -> double
+        {
+            if (!windsCurrent_) { computeWinds(); windsCurrent_ = true; }
+            return mDotWind_;
+        }
+
+        /**
+         * @brief Return the population's total stellar wind momentum flux
+         * @return The summed wind momentum flux, mdot * v_wind, of
+         *   every living star, in g cm s^-2 (dyn), at the current
+         *   time; 0 until advance() has run at least once
+         * @details
+         * See mDotWind()'s own comment.
+         */
+        [[nodiscard]] auto pDotWind() -> double
+        {
+            if (!windsCurrent_) { computeWinds(); windsCurrent_ = true; }
+            return pDotWind_;
+        }
+
+        /**
+         * @brief Return the population's total stellar wind energy flux
+         * @return The summed wind kinetic energy flux,
+         *   (1/2) mdot * v_wind^2, of every living star, in erg s^-1,
+         *   at the current time; 0 until advance() has run at least
+         *   once
+         * @details
+         * See mDotWind()'s own comment.
+         */
+        [[nodiscard]] auto eDotWind() -> double
+        {
+            if (!windsCurrent_) { computeWinds(); windsCurrent_ = true; }
+            return eDotWind_;
+        }
+
+        /**
          * @brief Return whether the cluster has disrupted
          * @return True if the cluster has disrupted
          */
@@ -594,6 +648,15 @@ namespace core
         bool lbolCurrent_ = true;
 
         /**
+         * @brief Whether mDotWind_/pDotWind_/eDotWind_ are current as of curTime_
+         * @details
+         * Mirrors lbolCurrent_'s own role, for mDotWind()/pDotWind()/
+         * eDotWind(): starts true (all three are 0 before advance() has
+         * run at all), and advance() sets it false.
+         */
+        bool windsCurrent_ = true;
+
+        /**
          * @brief Simulation time through which yields_ has been updated
          * @details
          * Initialized to 0 rather than curTime_ (formTime_'s own
@@ -631,6 +694,9 @@ namespace core
 
         unsigned long stochSN_ = 0;  /**< Cumulative number of supernovae from the stochastically-sampled part of the population; see computeFeedback() */
         double nonStochSN_ = 0.0;    /**< Cumulative (in general non-integer) number of supernovae from the non-stochastic part of the population; see computeFeedback() */
+        double mDotWind_ = 0.0;      /**< Total stellar wind mass flux at the current time, in Msun/yr; see mDotWind() */
+        double pDotWind_ = 0.0;      /**< Total stellar wind momentum flux at the current time, in g cm s^-2; see pDotWind() */
+        double eDotWind_ = 0.0;      /**< Total stellar wind energy flux at the current time, in erg s^-1; see eDotWind() */
 
         /**
          * Tracks for this cluster's [Fe/H]: either owned outright (when
@@ -824,6 +890,50 @@ namespace core
          * being normalized by number, not mass), into nonStochSN_.
          */
         void computeFeedback();
+
+        /**
+         * @brief Recompute the stellar wind fluxes mDotWind_, pDotWind_, and eDotWind_ at curTime_
+         * @details
+         * Called lazily from mDotWind()/pDotWind()/eDotWind() -- see
+         * windsCurrent_'s own comment. The fluxes are instantaneous
+         * rates at curTime_, not cumulative quantities, so this zeroes
+         * all three and recomputes them from scratch: for the
+         * stochastic population, adds windStar() for each living star
+         * in m_ that has an isochrone segment (skipping any that do
+         * not, as computeLbol() does); and, for the non-stochastic
+         * population (if birthNonStochMass_ > 0), integrates windStar()
+         * against controls().imf() over each isochrone segment, as
+         * computeLbol() does with lbolStar() -- but via
+         * utils::integrateScaled(), since mDot, pDot, and eDot differ
+         * in units and by tens of orders of magnitude, and adds the
+         * result, scaled by birthNonStochMass_ /
+         * controls().nonStochIMFMass().
+         */
+        void computeWinds();
+
+        /**
+         * @brief Stellar wind mass, momentum, and energy fluxes of a single star
+         * @param m Stellar mass, in Msun; must lie within segment's
+         *   valid domain (segment.xMin() <= m <= segment.xMax())
+         * @param segment A single isochrone segment to evaluate at mass m
+         * @param winds The wind calculator -- controls().winds(), passed
+         *   explicitly for the same reason segment is (see lbolStar());
+         *   may be null, in which case the wind velocity is taken to be
+         *   0 (so pDot and eDot are 0, but mDot is not)
+         * @param feH [Fe/H] at which to evaluate the wind velocity --
+         *   this cluster's own feH_
+         * @return { mDot, pDot, eDot }: the star's mass loss rate in
+         *   Msun/yr, read directly from the isochrone; its wind
+         *   momentum flux mDot * v_wind, in g cm s^-2; and its wind
+         *   energy flux (1/2) mDot v_wind^2, in erg s^-1, where v_wind
+         *   = winds->vWind(props, feH), in cm/s
+         * @details
+         * Exists so computeFeedback() can hand it to
+         * utils::PDFIntegrator, mirroring lbolStar()'s own identical
+         * role for computeLbol(); static for the same reason.
+         */
+        [[nodiscard]] static auto windStar(double m, const Segment& segment,
+            const feedback::Winds* winds, double feH) -> std::array<double, 3>;
 
         /**
          * @brief Bolometric luminosity of a single star, given its mass and isochrone segment

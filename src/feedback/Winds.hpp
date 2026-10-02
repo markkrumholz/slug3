@@ -10,6 +10,7 @@
 #define WINDS_HPP
 
 #include "../specsyn/Specsyn.hpp"
+#include <array>
 
 namespace io
 {
@@ -265,10 +266,61 @@ namespace feedback
          */
         [[nodiscard]] auto vWindOther(const specsyn::Specsyn::StarData& props) const -> double;
 
+        /**
+         * @brief Compute the terminal wind velocity of any star,
+         *   dispatching to the appropriate per-type method
+         * @param props Stellar properties, as for vWindWR()
+         * @param feh The star's metallicity [Fe/H]
+         * @return The star's terminal wind velocity, in cm/s
+         * @details
+         * Classifies the star, and dispatches to the corresponding
+         * method, checking in order:
+         *   1. Wolf-Rayet star, per specsyn::SpecsynLibWR::getWRType():
+         *      vWindWR(). If controls_.specsyn() is a
+         *      specsyn::SpecsynLibChained or a standalone
+         *      specsyn::SpecsynLibWR, getWRType() is given that
+         *      library's own wnlTeffRanges() and normalLogTeffMax(), so
+         *      a star is classified as WR here exactly when the
+         *      spectral synthesis treats it as one; otherwise (no
+         *      specsyn, or an ordinary-star one), both are NaN, so
+         *      no star is classified as WNL (see getWRType()'s own
+         *      comment).
+         *   2. Teff > 11 kK: an O or B star, vWindOB().
+         *   3. log g < 3.5 (g in cm/s^2, from the star's mass and its
+         *      radius via the Stefan-Boltzmann law): an AGB star,
+         *      vWindAGB().
+         *   4. Anything else: vWindOther().
+         */
+        [[nodiscard]] auto vWind(const specsyn::Specsyn::StarData& props, double feh) const -> double;
+
     private:
 
         const io::SimControls& controls_; // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members) -- deliberately a live reference, not a copy, matching Specsyn's/Extinct's/Yields's own identical controls_ members exactly -- see any of their own comments for why. Only ever used through the same non-copyable-by-assignment pattern as those, so the usual objection (disabling implicit copy/move assignment) doesn't apply in practice.
     };
+
+    /**
+     * @brief Stellar wind mass, momentum, and energy fluxes of a single star
+     * @param props Stellar properties, as for Winds::vWind()
+     * @param winds The wind calculator to take the wind velocity from
+     *   (e.g. SimControls::winds()); may be null, in which case the
+     *   wind velocity is taken to be 0, so pDot and eDot are 0 but
+     *   mDot is not
+     * @param feh The star's metallicity [Fe/H]
+     * @return { mDot, pDot, eDot }: the star's mass loss rate, in
+     *   Msun/yr, read directly from props; its wind momentum flux
+     *   mDot * v_wind, in g cm s^-2; and its wind energy flux
+     *   (1/2) mDot v_wind^2, in erg s^-1, where v_wind =
+     *   winds->vWind(props, feh), in cm/s. If mDot is 0, all three
+     *   are 0 and vWind() is not called at all, since some wind models
+     *   (e.g. WRwindModel::lOverc_) give an infinite velocity there
+     * @details
+     * The single per-star calculation shared by every population that
+     * reports wind fluxes: core::Cluster's stochastic and
+     * non-stochastic stars, and core::Galaxy's field stars and purely
+     * continuous population.
+     */
+    [[nodiscard]] auto windFluxes(const specsyn::Specsyn::StarData& props, const Winds* winds,
+        double feh) -> std::array<double, 3>;
 
 } // namespace feedback
 

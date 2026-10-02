@@ -8,6 +8,7 @@
 
 #include "Galaxy.hpp"
 #include "../extinct/Extinct.hpp"
+#include "../feedback/Winds.hpp"
 #include "../io/SimControls.hpp"
 #include "../nebular/Nebular.hpp"
 #include "../pdfs/PDF.hpp"
@@ -25,6 +26,7 @@
 #include <cmath>
 #include <cstddef>
 #include <functional>
+#include <initializer_list>
 #include <iterator>
 #include <limits>
 #include <numeric>
@@ -259,16 +261,20 @@ void core::Galaxy::advance(const double t)
         std::make_move_iterator(deadBegin), std::make_move_iterator(fieldStars_.end()));
     fieldStars_.erase(deadBegin, fieldStars_.end());
 
-    // 7) Mark spec_/specExtinct_/phot_/photExtinct_/lbol_/lbolCts_ as
-    // stale; recomputed lazily, on demand, the next time spec()/
-    // specExtinct()/phot()/photExtinct()/lbol() is actually called
+    // 7) Mark spec_/specExtinct_/phot_/photExtinct_/lbol_/lbolCts_ and
+    // the wind fluxes as stale; recomputed lazily, on demand, the next
+    // time spec()/specExtinct()/phot()/photExtinct()/lbol()/
+    // mDotWind()/pDotWind()/eDotWind() is actually called
     specCurrent_ = false;
     photCurrent_ = false;
     lbolCurrent_ = false;
+    windsCurrent_ = false;
     lbolCtsCurrent_ = false;
 
-    // 8) Update current time
+    // 8) Update current time, and cache every surviving field star's
+    // own properties at it -- see fieldStarProps_'s own comment
     curTime_ = t;
+    fieldStarProps_ = getFieldStarProps();
 
     // 9) Update yields_/fieldYields_ now, eagerly -- unlike
     // spec_/phot_/lbol_ (recomputed lazily, from scratch, on demand),
@@ -288,12 +294,65 @@ void core::Galaxy::advance(const double t)
     lastFeedbackTime_ = curTime_;
 }
 
+// Recompute the stellar wind fluxes from every population -- see this
+// method's own header comment
+void core::Galaxy::computeWinds()
+{
+    const auto& sc = controls_.get();
+
+    // Stellar wind fluxes: instantaneous rates at curTime_, so
+    // recomputed from scratch -- first every cluster's own totals
+    // (each computed lazily by the cluster itself, on this request)
+    mDotWind_ = 0.0;
+    pDotWind_ = 0.0;
+    eDotWind_ = 0.0;
+    for (auto* clusterList : { &clusters_, &disruptedClusters_ })
+    {
+        for (auto& cluster : *clusterList)
+        {
+            mDotWind_ += cluster.mDotWind();
+            pDotWind_ += cluster.pDotWind();
+            eDotWind_ += cluster.eDotWind();
+        }
+    }
+
+    // Then every currently-alive field star, from its cached
+    // properties
+    const auto windsPtr = sc.winds();
+    const feedback::Winds* const winds = windsPtr.get();
+    for (std::size_t j = 0; j < fieldStars_.size(); ++j)
+    {
+        const auto& props = fieldStarProps_[j]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- fieldStarProps_ has size fieldStars_.size(), set together by advance(), and j is bounded by fieldStars_.size()
+        if (!props.has_value()) { continue; } // outside the tracks' own range: no wind, as in Cluster::computeFeedback()
+        const auto [mDot, pDot, eDot] = feedback::windFluxes(*props, winds, fieldStars_[j].feh_); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- as above
+        mDotWind_ += mDot;
+        pDotWind_ += pDot;
+        eDotWind_ += eDot;
+    }
+
+    // Finally the purely continuous (non-clustered, non-stochastic)
+    // population, via integrateCts() -- skipped when there is none,
+    // since integrateCts() would only scale its result to 0
+    if (sc.fCluster() < 1.0 && sc.fracStochMass() < 1.0)
+    {
+        const auto windStar = [winds](const double m, const specsyn::Specsyn::Segment& segment,
+            const double feh) -> std::array<double, 3>
+        { return feedback::windFluxes(segment(m), winds, feh); };
+        const auto windCts = integrateCts(windStar, 3);
+        mDotWind_ += windCts.at(0);
+        pDotWind_ += windCts.at(1);
+        eDotWind_ += windCts.at(2);
+    }
+}
+
 // Update the field-star feedback quantities from the field stars that
 // died during the most recent advance() call -- see this method's own
 // header comment
 void core::Galaxy::computeFeedback()
 {
     const auto& sc = controls_.get();
+
+    // Supernovae
     fieldStarStochSNe_ += static_cast<unsigned long>(std::ranges::count_if(deadFieldStars_,
         [&sc](const FieldStar& fs) -> bool { return sc.hasSN(fs.mass_, fs.feh_); }));
 
@@ -444,18 +503,14 @@ void core::Galaxy::addContinuousSpec(const extinct::Extinct* ext, const nebular:
     // Add every currently-alive field star's own contribution directly
     // into contSpec, before extinction or nebular emission is applied
     // to it below -- see this method's own header comment for why.
-    if (!fieldStars_.empty())
+    for (std::size_t j = 0; j < fieldStars_.size(); ++j)
     {
-        const auto props = getFieldStarProps();
-        for (std::size_t j = 0; j < fieldStars_.size(); ++j)
-        {
-            // A star outside the tracks' own mass range contributes
-            // nothing, as in Cluster::computeSpec()
-            const auto& starProps = props[j]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- props has size fieldStars_.size() by getFieldStarProps()'s own contract, and j is bounded by fieldStars_.size()
-            if (!starProps.has_value()) { continue; }
-            const auto starSpec = synth->spec(*starProps, fieldStars_[j].feh_); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- as above
-            for (std::size_t i = 0; i < contSpec.size(); ++i) { contSpec[i] += starSpec[i]; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- starSpec has size wl().size() by Specsyn::spec()'s own contract, matching contSpec's size set just above
-        }
+        // A star outside the tracks' own mass range contributes
+        // nothing, as in Cluster::computeSpec()
+        const auto& starProps = fieldStarProps_[j]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- fieldStarProps_ has size fieldStars_.size(), set together by advance(), and j is bounded by fieldStars_.size()
+        if (!starProps.has_value()) { continue; }
+        const auto starSpec = synth->spec(*starProps, fieldStars_[j].feh_); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- as above
+        for (std::size_t i = 0; i < contSpec.size(); ++i) { contSpec[i] += starSpec[i]; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- starSpec has size wl().size() by Specsyn::spec()'s own contract, matching contSpec's size set just above
     }
 
     for (std::size_t i = 0; i < spec_.size(); ++i) { spec_[i] += contSpec[i]; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- contSpec has size wl().size() by construction, matching spec_'s size set in computeSpec()
@@ -594,10 +649,10 @@ void core::Galaxy::computeLbol()
     }
 
     // Add every currently-alive field star's own contribution -- 10^logL,
-    // read directly off getFieldStarProps() -- independent of
+    // read directly off fieldStarProps_ -- independent of
     // lbolCtsCurrent_/lbolCts_ (see this method's own header comment
     // for why).
-    for (const auto& props : getFieldStarProps())
+    for (const auto& props : fieldStarProps_)
     {
         if (!props.has_value()) { continue; } // outside the tracks' own mass range: no luminosity, as in Cluster::computeLbol()
         const double logL = (*props)[static_cast<std::size_t>(tracks::FieldIdx::logL)]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- StarData is a fixed-size std::array, and logL is one of its compile-time-known indices

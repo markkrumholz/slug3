@@ -325,6 +325,31 @@ namespace specsyn
         [[nodiscard]] static auto makeCommonWlGrid(
             const std::vector<std::vector<double>>& wlGrids) -> std::vector<double>;
 
+        /**
+         * @brief Get the log(Teff) range spanned by each chained WNL bucket
+         * @return A const reference to wnlTeffRanges_ -- see its own
+         *   comment; suitable for passing directly to
+         *   SpecsynLibWR::getWRType's own wnlTeffRanges parameter
+         * @details
+         * Exposed so that code outside spectral synthesis (e.g.
+         * feedback::Winds::vWind()) can classify Wolf-Rayet stars
+         * exactly as this library itself does.
+         */
+        [[nodiscard]] auto wnlTeffRanges() const -> const std::array<std::pair<double, double>, 3>&
+        {
+            return wnlTeffRanges_;
+        }
+
+        /**
+         * @brief Get the highest log(Teff) covered by any chained ordinary-star library
+         * @return normalLogTeffMax_ -- see its own comment; suitable for
+         *   passing directly to SpecsynLibWR::getWRType's own
+         *   normalLogTeffMax parameter
+         * @details
+         * Exposed for the same reason as wnlTeffRanges().
+         */
+        [[nodiscard]] auto normalLogTeffMax() const -> double { return normalLogTeffMax_; }
+
     private:
 
         /**

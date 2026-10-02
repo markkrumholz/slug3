@@ -8,8 +8,10 @@
 
 #include "Cluster.hpp"
 #include "../extinct/Extinct.hpp"
+#include "../feedback/Winds.hpp"
 #include "../io/SimControls.hpp"
 #include "../nebular/Nebular.hpp"
+#include "../specsyn/Specsyn.hpp"
 #include "../tracks/TrackCommons.hpp"
 #include "../tracks/Tracks2D.hpp"
 #include "../utils/GKIntegratorData.hpp"
@@ -365,13 +367,16 @@ void core::Cluster::advance(const double t)
     computeFeedback();
     lastFeedbackTime_ = curTime_;
 
-    // Mark spec_/specExtinct_/phot_/photExtinct_/lbol_ as stale; they
-    // are recomputed lazily, on demand, the next time spec()/
-    // specExtinct()/phot()/photExtinct()/lbol() is actually called
-    // (see specCurrent_/photCurrent_/lbolCurrent_'s own comments).
+    // Mark spec_/specExtinct_/phot_/photExtinct_/lbol_ and the wind
+    // fluxes as stale; they are recomputed lazily, on demand, the next
+    // time spec()/specExtinct()/phot()/photExtinct()/lbol()/
+    // mDotWind()/pDotWind()/eDotWind() is actually called (see
+    // specCurrent_/photCurrent_/lbolCurrent_/windsCurrent_'s own
+    // comments).
     specCurrent_ = false;
     photCurrent_ = false;
     lbolCurrent_ = false;
+    windsCurrent_ = false;
 
     // Check for disruption
     if (curTime_ > disruptTime_) { isDisrupted_ = true; }
@@ -680,6 +685,75 @@ auto core::Cluster::nonStochDeadMassRanges(const double lastTime) const
     return result;
 }
 
+// Recompute the stellar wind fluxes from the living stars -- see this
+// method's own header comment
+void core::Cluster::computeWinds()
+{
+    const auto& sc = controls_.get();
+
+    // Stellar wind fluxes: instantaneous rates at curTime_, so
+    // recomputed from scratch, from the living stars
+    mDotWind_ = 0.0;
+    pDotWind_ = 0.0;
+    eDotWind_ = 0.0;
+    const auto windsPtr = sc.winds();
+    const feedback::Winds* const winds = windsPtr.get();
+
+    // Individually-sampled (stochastic) stars, skipping any with no
+    // isochrone segment -- mirrors computeLbol()'s own identical loop
+    for (const double m : m_)
+    {
+        const auto seg = std::ranges::find_if(isochrone_,
+            [m](const auto& segment) -> bool
+            { return m >= segment->xMin() && m <= segment->xMax(); });
+        if (seg == isochrone_.end()) { continue; }
+
+        const auto [mDot, pDot, eDot] = windStar(m, **seg, winds, feH_);
+        mDotWind_ += mDot;
+        pDotWind_ += pDot;
+        eDotWind_ += eDot;
+    }
+
+    // Continuously-sampled (non-stochastic) part of the population:
+    // integrate windStar against the IMF over each isochrone segment,
+    // as computeLbol() integrates lbolStar -- but via
+    // utils::integrateScaled() rather than a bare PDFIntegrator: mDot,
+    // pDot, and eDot differ in units and by tens of orders of
+    // magnitude, and pDot and eDot are exactly 0 if every wind model
+    // is off, so no single absolute tolerance in their own units is
+    // meaningful for all three (with one, mDot alone would meet it on
+    // the first, unrefined estimate) -- see integrateScaled()'s own
+    // comment
+    if (birthNonStochMass_ > 0.0)
+    {
+        const double mMin = sc.imf().getMin();
+        const double mMax = sc.minStochMass();
+        std::array<double, 3> windCts{};
+        for (const auto& seg : isochrone_)
+        {
+            const double a = std::max(mMin, seg->xMin());
+            const double b = std::min(mMax, seg->xMax());
+            if (a >= b) { continue; } // empty intersection with [mMin, mMax]
+
+            const auto windAt = [&seg, winds, this](const double m) -> std::vector<double>
+            {
+                const auto w = windStar(m, *seg, winds, feH_);
+                return { w.begin(), w.end() };
+            };
+            const auto segResult = utils::integrateScaled(sc.imf(), windAt, 3, a, b,
+                { a, std::sqrt(a * b), b }, sc.intMaxIter(), sc.intAbsTol(), sc.intRelTol());
+            for (std::size_t i = 0; i < windCts.size(); ++i) { windCts.at(i) += segResult.at(i); }
+        }
+        // imf() is normalized by number, so windCts is per star;
+        // convert to per unit non-stochastic mass -- see
+        // SimControls::nonStochIMFMass()'s own comment
+        const double scale = birthNonStochMass_ / sc.nonStochIMFMass();
+        mDotWind_ += windCts[0] * scale; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- windCts is a std::array<double, 3>
+        pDotWind_ += windCts[1] * scale; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
+        eDotWind_ += windCts[2] * scale; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- see above
+    }
+}
+
 // Update the cumulative feedback quantities from the stars that died
 // since lastFeedbackTime_ -- see this method's own header comment
 void core::Cluster::computeFeedback()
@@ -733,6 +807,14 @@ auto core::Cluster::lbolStar(const double m, const Segment& segment) -> std::arr
 {
     const auto logL = segment(m, static_cast<size_t>(tracks::FieldIdx::logL));
     return { std::pow(10.0, logL) };
+}
+
+// Per-star wind mass, momentum, and energy fluxes, given a mass and
+// isochrone segment -- see this method's own header comment
+auto core::Cluster::windStar(const double m, const Segment& segment,
+    const feedback::Winds* const winds, const double feH) -> std::array<double, 3>
+{
+    return feedback::windFluxes(segment(m), winds, feH);
 }
 
 // Per-star nucleosynthetic yield, given a mass and [Fe/H] -- see this

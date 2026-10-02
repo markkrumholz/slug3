@@ -7,9 +7,12 @@
  */
 
 #include "../src/core/Cluster.hpp"
+#include "../src/feedback/Winds.hpp"
 #include "../src/interpolation/Interpolator1D.hpp"
 #include "../src/io/SimControls.hpp"
 #include "../src/phot/FilterCollection.hpp"
+#include "../src/tracks/TrackCommons.hpp"
+#include "../src/utils/Constants.hpp"
 #include "../src/utils/HDF5Utils.hpp"
 #include "../src/utils/MiscUtils.hpp"
 #include "../src/utils/PDFIntegrator.hpp"
@@ -18,6 +21,7 @@
 #include "hdf5.h" // NOLINT(misc-include-cleaner) -- see HDF5Utils.hpp's own comment on including hdf5.h wholesale
 #include "testCluster.hpp"
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <exception>
@@ -29,6 +33,7 @@
 #include <string>
 #include <string_view>
 #include <toml.hpp>
+#include <utility>
 #include <vector>
 
 static constexpr std::string_view inputFile = "tests/core/assets/testCluster.in";
@@ -1945,6 +1950,152 @@ static auto testClusterCumSNeYieldGapNonStochastic() -> int
     return 0;
 }
 
+// Independent reference for a single star's wind mass, momentum, and
+// energy fluxes (Msun/yr, g cm s^-2, erg s^-1), from its isochrone
+// properties and controls.winds()->vWind()
+static auto windRef(const double m, const core::Cluster::Segment& seg,
+    const io::SimControls& controls, const double feH) -> std::array<double, 3>
+{
+    const auto props = seg(m);
+    const double mDot = props.at(static_cast<std::size_t>(tracks::FieldIdx::mdot)); // Msun/yr
+    const double v = controls.winds()->vWind(props, feH);                             // cm/s
+    const double mDotCgs = mDot * utils::Msun / utils::yr;                            // g/s
+    return { mDot, mDotCgs * v, 0.5 * mDotCgs * v * v };
+}
+
+// Check a cluster's mDotWind()/pDotWind()/eDotWind() against expected
+// values, to relative tolerance tol
+static auto checkWinds(core::Cluster& cluster, const std::array<double, 3>& expected,
+    const double tol, const std::string_view label) -> int
+{
+    const std::array<std::pair<std::string_view, double>, 3> actual{ {
+        { "mDotWind", cluster.mDotWind() },
+        { "pDotWind", cluster.pDotWind() },
+        { "eDotWind", cluster.eDotWind() },
+    } };
+    int result = 0;
+    for (std::size_t i = 0; i < actual.size(); ++i)
+    {
+        const auto& [name, value] = actual.at(i);
+        if (!(expected.at(i) > 0.0) || std::abs(value / expected.at(i) - 1.0) > tol)
+        {
+            std::cerr << "testCluster: " << label << ": " << name << "() = " << value
+                << ", expected " << expected.at(i) << "\n";
+            result = 1;
+        }
+    }
+    return result;
+}
+
+// Verify mDotWind()/pDotWind()/eDotWind() for a fully stochastic
+// cluster: all three must be 0 before advance() has run, and
+// afterwards must equal the sum of windRef() over every living star
+// (starMasses() after advance()), evaluated on the isochrone at the
+// cluster's own age. Checked at two ages, so that the values are seen
+// to be recomputed (not accumulated) on each advance()
+static auto testClusterWindsStochastic() -> int
+{
+    constexpr double clusterMass = 1e4;
+    constexpr std::array<double, 2> times = { 3e6, 1e7 };
+    constexpr double tol = 1e-10;
+
+    try
+    {
+        const toml::table inputDeck = toml::parse_file(inputFile);
+        const io::SimControls controls(inputDeck);
+        utils::rng().seed(rngSeed);
+        core::Cluster cluster(0, clusterMass, 0.0, controls);
+
+        int result = 0;
+        if (cluster.mDotWind() != 0.0 || cluster.pDotWind() != 0.0 || cluster.eDotWind() != 0.0)
+        {
+            std::cerr << "testCluster: windsStochastic: expected all wind fluxes to be 0 "
+                "before advance() has ever run\n";
+            result = 1;
+        }
+
+        for (const double t : times)
+        {
+            cluster.advance(t);
+            const auto& tr = cluster.tracks();
+            const auto isochrone = tr.getIsochrone(std::max(std::log10(t), tr.logTMin()));
+            std::array<double, 3> expected{};
+            for (const double m : cluster.starMasses())
+            {
+                const auto seg = std::ranges::find_if(isochrone,
+                    [m](const auto& s) -> bool { return m >= s->xMin() && m <= s->xMax(); });
+                if (seg == isochrone.end()) { continue; }
+                const auto w = windRef(m, **seg, controls, cluster.feH());
+                for (std::size_t i = 0; i < w.size(); ++i) { expected.at(i) += w.at(i); }
+            }
+            result |= checkWinds(cluster, expected, tol,
+                "windsStochastic, t = " + std::to_string(t));
+        }
+        return result;
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testCluster: windsStochastic test failed: " << error.what() << "\n";
+        return 1;
+    }
+}
+
+// Verify mDotWind()/pDotWind()/eDotWind() for a fully continuously
+// sampled cluster (min_stoch_mass = 120 Msun): each must equal the
+// IMF-weighted integral of windRef() over the living mass range,
+// scaled by clusterMass / nonStochIMFMass() -- computed here
+// independently of PDFIntegrator, by a fine trapezoidal rule in
+// log(m) over each isochrone segment. The cluster's own integrator
+// tolerance is tightened well below the default 1e-2 so that the
+// comparison is meaningful
+static auto testClusterWindsNonStochastic() -> int
+{
+    constexpr double clusterMass = 1e4;
+    constexpr double ageYr = 3e6;
+    constexpr double intRelTol = 1e-6;
+    constexpr int nGrid = 20000;
+    constexpr double tol = 1e-3;
+
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFile);
+        inputDeck.at_path("stars").as_table()->insert_or_assign("min_stoch_mass", 120.0);
+        io::SimControls controls(inputDeck);
+        controls.setIntRelTol(intRelTol);
+
+        utils::rng().seed(rngSeed);
+        core::Cluster cluster(0, clusterMass, 0.0, controls);
+        cluster.advance(ageYr);
+
+        const auto& tr = cluster.tracks();
+        const auto isochrone = tr.getIsochrone(std::log10(ageYr));
+        const auto& imf = controls.imf();
+        std::array<double, 3> expected{};
+        for (const auto& seg : isochrone)
+        {
+            const double a = std::max(imf.getMin(), seg->xMin());
+            const double b = std::min(controls.minStochMass(), seg->xMax());
+            if (a >= b) { continue; }
+            const double dlnm = std::log(b / a) / nGrid;
+            for (int k = 0; k <= nGrid; ++k)
+            {
+                const double m = std::clamp(a * std::exp(k * dlnm), a, b);
+                const double weight = ((k == 0 || k == nGrid) ? 0.5 : 1.0) * dlnm * imf(m) * m;
+                const auto w = windRef(m, *seg, controls, cluster.feH());
+                for (std::size_t i = 0; i < w.size(); ++i) { expected.at(i) += weight * w.at(i); }
+            }
+        }
+        for (double& e : expected) { e *= clusterMass / controls.nonStochIMFMass(); }
+
+        return checkWinds(cluster, expected, tol, "windsNonStochastic");
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testCluster: windsNonStochastic test failed: " << error.what() << "\n";
+        return 1;
+    }
+}
+
 auto testCluster() -> int
 {
     int result = 0;
@@ -1973,5 +2124,7 @@ auto testCluster() -> int
     result += testClusterCumSNeNonStochastic();
     result += testClusterCumSNeYieldGap();
     result += testClusterCumSNeYieldGapNonStochastic();
+    result += testClusterWindsStochastic();
+    result += testClusterWindsNonStochastic();
     return result;
 }

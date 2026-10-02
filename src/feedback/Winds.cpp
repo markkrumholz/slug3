@@ -9,14 +9,20 @@
 #include "Winds.hpp"
 #include "../io/SimControls.hpp"
 #include "../specsyn/Specsyn.hpp"
+#include "../specsyn/SpecsynCommons.hpp"
+#include "../specsyn/SpecsynLibChained.hpp"
+#include "../specsyn/SpecsynLibWR.hpp"
 #include "../tracks/TrackCommons.hpp"
 #include "../utils/Constants.hpp"
 #include "FeedbackCommons.hpp"
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <numbers>
 #include <stdexcept>
+#include <utility>
 
 namespace feedback
 {
@@ -219,6 +225,68 @@ namespace feedback
             case OtherwindModel::vesc_: return surfaceEscapeSpeed(props);
         }
         throw std::logic_error("Winds::vWindOther: unrecognized other-star wind model"); // unreachable; exhaustive switch above
+    }
+
+    auto Winds::vWind(const specsyn::Specsyn::StarData& props, const double feh) const -> double
+    {
+        using WRLib = specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise>;
+
+        // Wolf-Rayet classification inputs: the spectral library's
+        // own, if it is chained or a standalone WR library, so this
+        // agrees with the spectral synthesis; NaN (unknown) otherwise
+        constexpr double nan = std::numeric_limits<double>::quiet_NaN();
+        std::array<std::pair<double, double>, 3> wnlTeffRanges{ { { nan, nan }, { nan, nan }, { nan, nan } } };
+        double normalLogTeffMax = nan;
+        const auto specsyn = controls_.specsyn();
+        if (const auto* chained = dynamic_cast<const specsyn::SpecsynLibChained*>(specsyn.get());
+            chained != nullptr)
+        {
+            wnlTeffRanges = chained->wnlTeffRanges();
+            normalLogTeffMax = chained->normalLogTeffMax();
+        }
+        else if (const auto* wrLib = dynamic_cast<const WRLib*>(specsyn.get()); wrLib != nullptr)
+        {
+            wnlTeffRanges = wrLib->wnlTeffRanges();
+            normalLogTeffMax = wrLib->normalLogTeffMax();
+        }
+        if (WRLib::getWRType(props, wnlTeffRanges, normalLogTeffMax) != WRLib::WRType::None)
+        {
+            return vWindWR(props);
+        }
+
+        // NOLINTBEGIN(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- StarData is a fixed-size std::array, and every index used here is compile-time-known
+        const double mass = props[static_cast<std::size_t>(tracks::FieldIdx::mass)]; // Msun
+        const double logL = props[static_cast<std::size_t>(tracks::FieldIdx::logL)]; // log10(L/Lsun)
+        const double logTeff = props[static_cast<std::size_t>(tracks::FieldIdx::logTe)];
+        // NOLINTEND(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+
+        // O and B stars
+        constexpr double tOBMin = 1.1e4; // K
+        if (std::pow(10.0, logTeff) > tOBMin) { return vWindOB(props, feh); }
+
+        // AGB stars: log g from the Stefan-Boltzmann radius
+        constexpr double loggAGBMax = 3.5; // log10(g / cm s^-2)
+        const double radius = stellarRadius(logL, logTeff); // cm
+        const double logg = std::log10(utils::G * mass * utils::Msun / (radius * radius));
+        if (logg < loggAGBMax) { return vWindAGB(props, feh); }
+
+        // Everything else
+        return vWindOther(props);
+    }
+
+    auto windFluxes(const specsyn::Specsyn::StarData& props, const Winds* const winds,
+        const double feh) -> std::array<double, 3>
+    {
+        const double mDot = props[static_cast<std::size_t>(tracks::FieldIdx::mdot)]; // Msun/yr // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- StarData is a fixed-size std::array, and this index is compile-time-known
+        // A star with no mass loss has no wind momentum or energy flux,
+        // whatever its nominal wind velocity -- checked before calling
+        // vWind(), since some models (e.g. WRwindModel::lOverc_, v =
+        // L / (mdot c)) diverge at mdot = 0, which would otherwise give
+        // 0 * inf = NaN here
+        if (mDot == 0.0) { return { 0.0, 0.0, 0.0 }; }
+        const double vWind = (winds != nullptr) ? winds->vWind(props, feh) : 0.0;   // cm/s
+        const double mDotCgs = mDot * utils::Msun / utils::yr;                        // g/s
+        return { mDot, mDotCgs * vWind, 0.5 * mDotCgs * vWind * vWind };
     }
 
 } // namespace feedback
