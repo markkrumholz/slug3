@@ -7,9 +7,11 @@ standalone, single-filter copy of the real Generic.Johnson.V filter --
 see make_v_filter_fixture.py) as a real filter, needed for the Vega-
 system conversions, so this needs no data fetched separately and can
 stay a "quick" test alongside test_readers.py -- see the test_Slugpy
-CMakeLists.txt target, which runs this file too. Like test_readers.py,
-run via pytest with WORKING_DIRECTORY set to the repo root, so
-V_FILTER_REGISTRY below resolves without needing SLUG_DIR.
+CMakeLists.txt target, which runs this file too. V_FILTER_REGISTRY
+below is resolved by slug itself, which falls back to the repository
+directory compiled into the module (see utils::getFilePath), so it
+resolves whichever directory pytest is started from, without needing
+SLUG_DIR.
 
 :copyright: Copyright (c) 2026 Mark Krumholz
 """

@@ -8,11 +8,13 @@ tests use (tests/core/assets/testCluster.in, testGalaxy.in), so this
 needs no data fetched separately and can stay a "quick" test. Every
 test below chdir's into tmp_path (via monkeypatch.chdir) before
 calling run_sim, so the output files a simulation run writes don't
-land in the repo itself; the deck paths themselves are captured as
-absolute paths at collection time (while cwd is still the repo root),
-since SimControls's own path argument has no SLUG_DIR/REPO_DIR
-fallback the way paths *inside* a deck do (see test_readers.py's
-identical CLUSTERLIB_DIR/get_cluster comment for the same rule).
+land in the repo itself; the deck paths themselves are absolute,
+built from REPO_ROOT -- the repository root, found from this file's
+own location rather than the working directory, so the tests run
+correctly whichever directory pytest is started from -- since
+SimControls's own path argument has no SLUG_DIR/REPO_DIR fallback the
+way paths *inside* a deck do (see test_readers.py's identical
+CLUSTERLIB_DIR/get_cluster comment for the same rule).
 
 :copyright: Copyright (c) 2026 Mark Krumholz
 """
@@ -34,7 +36,7 @@ from slugpy.slug_reader import slug_reader
 # module directly instead, to monkeypatch run_with_progress on it below.
 run_sim_module = importlib.import_module("slugpy.run_sim")
 
-REPO_ROOT = pathlib.Path.cwd()
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 CLUSTER_DECK = str(REPO_ROOT / "tests" / "core" / "assets" / "testCluster.in")
 GALAXY_DECK = str(REPO_ROOT / "tests" / "core" / "assets" / "testGalaxy.in")
 

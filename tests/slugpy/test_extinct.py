@@ -9,9 +9,12 @@ committed MIST_test-based fixtures tests/core/assets/testCluster.in
 and testClusterExtinct.in (the same ones test_run_sim.py and
 test_readers.py rely on) rather than slug's real bundled physics deck,
 so this needs no data fetched separately and can stay a "quick" test.
-Run via pytest with WORKING_DIRECTORY set to the repo root (see the
-test_Slugpy CMakeLists.txt target), so every path below resolves
-without needing SLUG_DIR.
+Paths below resolve whichever directory pytest is started from:
+deck paths and EXTINCT_H5 (opened directly by h5py) are absolute,
+built from REPO_ROOT (found from this file's own location -- see
+test_run_sim.py's own comment), while EXTINCT_REGISTRY is resolved by
+slug itself, which falls back to the repository directory compiled
+into the module (see utils::getFilePath).
 
 Physics-level correctness (interpolation, V-band normalization,
 degenerate-avDistField handling, ...) is already covered by the C++
@@ -30,11 +33,11 @@ import h5py
 import pytest
 from slugpy._slug import Extinct, SimControls, SpecsynBlackbody
 
-REPO_ROOT = pathlib.Path.cwd()
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 CLUSTER_DECK = str(REPO_ROOT / "tests" / "core" / "assets" / "testCluster.in")
 CLUSTER_EXTINCT_DECK = str(REPO_ROOT / "tests" / "core" / "assets" / "testClusterExtinct.in")
 EXTINCT_REGISTRY = "data/extinct/extinct.toml"
-EXTINCT_H5 = "data/extinct/extinct.h5"
+EXTINCT_H5 = str(REPO_ROOT / "data" / "extinct" / "extinct.h5")
 CURVE_NAME = "Calzetti_starburst"
 
 
