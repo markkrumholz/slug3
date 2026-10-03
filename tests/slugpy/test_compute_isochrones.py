@@ -20,9 +20,9 @@ directory pytest is started from.
 import numpy as np
 import pytest
 from astropy import units as u
+from slugpy._slug import FilterCollection, PhotSystem, SimControls
 
 from slugpy import compute_isochrones
-from slugpy._slug import FilterCollection, PhotSystem, SimControls
 
 # A cluster deck using the small MIST_test tracks and a blackbody
 # spectral synthesizer (fast, no spectral library data needed), with a

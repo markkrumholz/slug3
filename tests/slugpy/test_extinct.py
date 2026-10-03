@@ -31,7 +31,6 @@ import pathlib
 
 import h5py
 import pytest
-
 from slugpy._slug import Extinct, SimControls, SpecsynBlackbody
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
