@@ -943,6 +943,21 @@ in the input deck. Only meaningful for a galaxy-type simulation. See
 writeCluster's own docstring on when assigning this does (and does
 not) take effect.)doc";
 
+static constexpr std::string_view writeClusterFeedbackPropertyDocstring =
+R"doc(Whether the cluster_feedback group/file is written.
+
+True (the default) unless output.write_cluster_feedback was set to
+false in the input deck. See writeCluster's own docstring on when
+assigning this does (and does not) take effect.)doc";
+
+static constexpr std::string_view writeGalaxyFeedbackPropertyDocstring =
+R"doc(Whether the galaxy_feedback group/file is written.
+
+True (the default) unless output.write_galaxy_feedback was set to
+false in the input deck. Only meaningful for a galaxy-type simulation.
+See writeCluster's own docstring on when assigning this does (and does
+not) take effect.)doc";
+
 static constexpr std::string_view yieldChannelsPropertyDocstring =
 R"doc(The nucleosynthetic yield channels requested via yields.channel1, yields.channel2, etc.
 
@@ -1530,6 +1545,10 @@ void bindSimControls(py::module_& m)
                 writeClusterYieldsPropertyDocstring.data(), py::arg("value"))
         .def("setWriteGalaxyYields", &io::SimControls::setWriteGalaxyYields,
                 writeGalaxyYieldsPropertyDocstring.data(), py::arg("value"))
+        .def("setWriteClusterFeedback", &io::SimControls::setWriteClusterFeedback,
+                writeClusterFeedbackPropertyDocstring.data(), py::arg("value"))
+        .def("setWriteGalaxyFeedback", &io::SimControls::setWriteGalaxyFeedback,
+                writeGalaxyFeedbackPropertyDocstring.data(), py::arg("value"))
         .def("setYieldsChannelDecomposed", &io::SimControls::setYieldsChannelDecomposed,
                 yieldsChannelDecomposedPropertyDocstring.data(), py::arg("value"))
         .def("setNoDecay", &io::SimControls::setNoDecay,
@@ -1693,6 +1712,14 @@ void bindSimControls(py::module_& m)
                 &io::SimControls::writeGalaxyYields,
                 &io::SimControls::setWriteGalaxyYields,
                 writeGalaxyYieldsPropertyDocstring.data())
+        .def_property("writeClusterFeedback",
+                &io::SimControls::writeClusterFeedback,
+                &io::SimControls::setWriteClusterFeedback,
+                writeClusterFeedbackPropertyDocstring.data())
+        .def_property("writeGalaxyFeedback",
+                &io::SimControls::writeGalaxyFeedback,
+                &io::SimControls::setWriteGalaxyFeedback,
+                writeGalaxyFeedbackPropertyDocstring.data())
         .def_property("yieldsChannelDecomposed",
                 &io::SimControls::yieldsChannelDecomposed,
                 &io::SimControls::setYieldsChannelDecomposed,

@@ -117,6 +117,7 @@ void core::SimCluster::runTrial(const unsigned long trialNum)
             outputManager_->writeClusterSpec(trialNum, outTime, cluster);
             outputManager_->writeClusterPhot(trialNum, outTime, cluster);
             outputManager_->writeClusterYields(trialNum, outTime, cluster);
+            outputManager_->writeClusterFeedback(trialNum, outTime, cluster);
         }
     }
     catch (const std::exception& error)
@@ -211,8 +212,9 @@ auto core::SimCluster::run() -> int
     // trial, i.e. today's original, unbatched behavior) -- each batch
     // its own "#pragma omp parallel for", so its own implicit barrier
     // guarantees every thread has finished every trial in the batch
-    // (writeCluster/writeClusterSpec/writeClusterPhot/writeClusterYields
-    // for every output time, not just started it) before this reaches
+    // (writeCluster/writeClusterSpec/writeClusterPhot/writeClusterYields/
+    // writeClusterFeedback for every output time, not just started it)
+    // before this reaches
     // the checkpoint() call below, and that this runs on a single
     // thread, from outside any active parallel region, exactly as
     // OutputManagerH5::

@@ -11,6 +11,7 @@
 #include "../src/io/OutputManagerAscii.hpp"
 #include "../src/io/OutputManagerH5.hpp"
 #include "../src/io/SimControls.hpp"
+#include "../src/utils/Constants.hpp"
 #include "../src/utils/HDF5Utils.hpp"
 #include "../src/utils/RngThread.hpp"
 #include "hdf5.h" // NOLINT(misc-include-cleaner)
@@ -31,6 +32,7 @@
 #include <stdexcept>
 #include <string>
 #include <toml.hpp>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -3579,9 +3581,13 @@ static auto testOptOutGalaxyPhotOutput() -> int
 }
 
 // Verify that constructing an OutputManager (via either subclass) from
-// a galaxy-type deck with all six output.write_* keys set to false
+// a galaxy-type deck with all ten output.write_* keys set to false
 // throws std::runtime_error, since nothing at all would ever be
-// written -- sanity check 1 in OutputManager's own constructor.
+// written -- sanity check 1 in OutputManager's own constructor. The
+// error message is checked too: this deck also requests photometry,
+// so if check 1 wrongly let it through, check 2 (photometry with no
+// photometry output) would throw instead, and the test would
+// otherwise still pass.
 static auto testAllOutputsFalseThrows() -> int
 {
     const auto outDir = std::filesystem::temp_directory_path() / "slugTestOutputManagerAllOutputsFalse";
@@ -3591,7 +3597,9 @@ static auto testAllOutputsFalseThrows() -> int
     toml::table inputDeck = makeGalaxyPhysicsInputDeck(modelName, outDir);
     toml::table* outputTbl = inputDeck.at_path("output").as_table();
     for (const std::string& key : { "write_cluster", "write_cluster_spec",
-        "write_cluster_phot", "write_galaxy", "write_galaxy_spec", "write_galaxy_phot" })
+        "write_cluster_phot", "write_cluster_yields", "write_cluster_feedback",
+        "write_galaxy", "write_galaxy_spec", "write_galaxy_phot",
+        "write_galaxy_yields", "write_galaxy_feedback" })
     {
         outputTbl->insert(key, false);
     }
@@ -3604,8 +3612,14 @@ static auto testAllOutputsFalseThrows() -> int
             "construction to throw, but it succeeded\n";
         return 1;
     }
-    catch (const std::runtime_error&)
+    catch (const std::runtime_error& error)
     {
+        if (std::string(error.what()).find("nothing would ever be written") == std::string::npos)
+        {
+            std::cerr << "testOutputManager: all outputs false: threw, but not from "
+                "sanity check 1: " << error.what() << "\n";
+            return 1;
+        }
         return 0;
     }
     catch (const std::exception& error)
@@ -3668,8 +3682,9 @@ static auto testOutputManagerAsciiCheckpointThrows() -> int
 }
 
 // Verify that constructing an OutputManager from a cluster-type deck
-// with write_cluster/write_cluster_spec/write_cluster_phot all set to
-// false also throws -- confirming sanity check 1 correctly excludes
+// with write_cluster/write_cluster_spec/write_cluster_phot/
+// write_cluster_yields/write_cluster_feedback all set to false also
+// throws -- confirming sanity check 1 correctly excludes
 // the (irrelevant, still-defaulted-true) write_galaxy* keys when
 // deciding whether "every output relevant to this simulation" is
 // false, rather than only ever checking the literal six regardless of
@@ -3682,7 +3697,8 @@ static auto testAllClusterOutputsFalseThrows() -> int
     const std::string modelName = "test_model";
     toml::table inputDeck = makeClusterPhysicsInputDeck(modelName, outDir);
     toml::table* outputTbl = inputDeck.at_path("output").as_table();
-    for (const std::string& key : { "write_cluster", "write_cluster_spec", "write_cluster_phot" })
+    for (const std::string& key : { "write_cluster", "write_cluster_spec", "write_cluster_phot",
+             "write_cluster_yields", "write_cluster_feedback" })
     {
         outputTbl->insert(key, false);
     }
@@ -3912,6 +3928,595 @@ static auto testOutputManagerH5() -> int
     }
 }
 
+// ---------------------------------------------------------------------
+// Feedback (supernova and stellar wind) output
+// ---------------------------------------------------------------------
+
+// Output time for the cluster feedback tests: late enough (10 Myr)
+// that a 2e3 Msun cluster has had many supernovae, so n_sn is
+// non-trivially checked, while its massive stars still have winds
+static constexpr double feedbackWriteTime = 1e7;
+
+// Set feedback.sn_mass_range in inputDeck, so that stars in that mass
+// range explode as supernovae even with no yields requested (see
+// SimControls::readFeedback())
+static void addSNMassRange(toml::table& inputDeck)
+{
+    inputDeck.insert_or_assign("feedback",
+        toml::table{ { "sn_mass_range", toml::array{ 8.0, 120.0 } } });
+}
+
+// The { n_sn, mdot_wind, pdot_wind, edot_wind } a cluster or galaxy
+// should be written with, computed independently of
+// OutputManager::feedbackRow() from the cgs values Cluster/Galaxy
+// report: pdot_wind in Msun km/s/yr, edot_wind in Lsun
+template <typename T>
+static auto expectedFeedbackRow(T& obj) -> std::array<double, 4>
+{
+    constexpr double kmToCm = 1e5;
+    return { obj.cumSNe(), obj.mDotWind(),
+        obj.pDotWind() * utils::yr / (utils::Msun * kmToCm), obj.eDotWind() / utils::Lsun };
+}
+
+// Return true if every element of got matches expected to within a
+// relative tolerance rtol
+static auto feedbackRowsMatch(const std::array<double, 4>& got,
+    const std::array<double, 4>& expected, const double rtol) -> bool
+{
+    for (std::size_t i = 0; i < got.size(); ++i)
+    {
+        if (std::abs(got.at(i) - expected.at(i)) > rtol * std::abs(expected.at(i))) { return false; }
+    }
+    return true;
+}
+
+// Names of the feedback datasets/columns, in feedbackRow() order
+static const std::array<std::string, 4> feedbackNames = {
+    "n_sn", "mdot_wind", "pdot_wind", "edot_wind" };
+
+// Read the feedback datasets of an open cluster_feedback/
+// galaxy_feedback group at row i
+static auto readFeedbackRowH5(const hid_t grp, const std::size_t i) -> std::array<double, 4> // NOLINT(misc-include-cleaner)
+{
+    std::array<double, 4> row{};
+    for (std::size_t j = 0; j < row.size(); ++j)
+    {
+        row.at(j) = readColumnDouble(grp, feedbackNames.at(j).c_str()).at(i);
+    }
+    return row;
+}
+
+// Verify that the cluster_feedback group of a cluster-type simulation
+// holds trial/time/uid plus the four feedback datasets, each with the
+// expected units attribute, and that no galaxy_feedback group is
+// created (there is no Galaxy in a cluster-type simulation)
+static auto testClusterFeedbackGroupH5() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() / "slugTestOutputManagerClusterFeedbackGroupH5";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+    const std::string modelName = "test_model";
+    const toml::table inputDeck = makeClusterPhysicsInputDeck(modelName, outDir);
+
+    try
+    {
+        const io::SimControls controls(inputDeck);
+        { const io::OutputManagerH5 manager(controls); }
+
+        const auto h5Path = outDir / (modelName + ".h5");
+        // NOLINTBEGIN(misc-include-cleaner)
+        const hid_t file = H5Fopen(h5Path.string().c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+        if (file < 0) { throw std::runtime_error("unable to reopen " + h5Path.string()); }
+        if (H5Lexists(file, "galaxy_feedback", H5P_DEFAULT) > 0)
+        {
+            H5Fclose(file);
+            throw std::runtime_error("unexpectedly created a galaxy_feedback group");
+        }
+        const hid_t grp = H5Gopen2(file, "cluster_feedback", H5P_DEFAULT);
+        if (grp < 0)
+        {
+            H5Fclose(file);
+            throw std::runtime_error("missing cluster_feedback group");
+        }
+        const std::array<std::pair<std::string, std::string>, 7> expected{ {
+            { "trial", "" }, { "time", "yr" }, { "uid", "" }, { "n_sn", "" },
+            { "mdot_wind", "Msun/yr" }, { "pdot_wind", "Msun km/(s yr)" }, { "edot_wind", "Lsun" } } };
+        std::string error;
+        for (const auto& [name, units] : expected)
+        {
+            const hid_t dset = H5Dopen2(grp, name.c_str(), H5P_DEFAULT);
+            if (dset < 0) { error = "missing dataset " + name; break; }
+            const auto readUnits = readUnitsAttr(dset);
+            H5Dclose(dset);
+            if (readUnits != units)
+            {
+                error = name + " has units '" + readUnits + "', expected '" + units + "'";
+                break;
+            }
+        }
+        H5Gclose(grp);
+        H5Fclose(file);
+        // NOLINTEND(misc-include-cleaner)
+        if (!error.empty()) { throw std::runtime_error(error); }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testOutputManager: cluster feedback group h5: " << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Verify that OutputManagerH5::writeClusterFeedback writes a row
+// matching the cluster's own cumSNe()/mDotWind() and its pDotWind()/
+// eDotWind() converted to Msun km/s/yr and Lsun
+static auto testWriteClusterFeedbackH5() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() / "slugTestOutputManagerWriteClusterFeedbackH5";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+    const std::string modelName = "test_model";
+    const auto expectedPath = outDir / (modelName + ".h5");
+    toml::table inputDeck = makeClusterPhysicsInputDeck(modelName, outDir);
+    addSNMassRange(inputDeck);
+
+    try
+    {
+        const io::SimControls controls(inputDeck);
+        utils::rng().seed(42);
+        core::Cluster cluster(11, 2e3, 0.0, controls);
+        constexpr unsigned long trial = 7;
+        cluster.advance(feedbackWriteTime);
+        const auto expected = expectedFeedbackRow(cluster);
+        if (!(expected[0] > 0.0 && expected[1] > 0.0 && expected[2] > 0.0 && expected[3] > 0.0))
+        {
+            std::cerr << "testOutputManager: write cluster feedback h5: test bug: "
+                "expected every feedback quantity to be positive\n";
+            return 1;
+        }
+
+        {
+            io::OutputManagerH5 manager(controls);
+            manager.writeClusterFeedback(trial, feedbackWriteTime, cluster);
+        }
+
+        // NOLINTBEGIN(misc-include-cleaner)
+        const hid_t file = H5Fopen(expectedPath.string().c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+        if (file < 0) { throw std::runtime_error("unable to reopen " + expectedPath.string()); }
+        const hid_t grp = H5Gopen2(file, "cluster_feedback", H5P_DEFAULT);
+        const auto readTrial = readColumnULong(grp, "trial");
+        const auto readTime = readColumnDouble(grp, "time");
+        const auto readUid = readColumnULong(grp, "uid");
+        const auto readRow = readFeedbackRowH5(grp, 0);
+        H5Gclose(grp);
+        H5Fclose(file);
+        // NOLINTEND(misc-include-cleaner)
+
+        if (readTrial.size() != 1 || readTrial.at(0) != trial ||
+            readTime.at(0) != feedbackWriteTime || readUid.at(0) != cluster.uid())
+        {
+            throw std::runtime_error("trial/time/uid row does not match");
+        }
+        constexpr double rtol = 1e-12;
+        if (!feedbackRowsMatch(readRow, expected, rtol))
+        {
+            throw std::runtime_error("feedback row does not match the cluster's own values");
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testOutputManager: write cluster feedback h5: " << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Verify that OutputManagerH5::writeGalaxyFeedback writes a row
+// matching the galaxy's own feedback quantities into galaxy_feedback
+// (which has no uid dataset), and a matching row into cluster_feedback
+// for every currently-alive cluster in the galaxy
+static auto testWriteGalaxyFeedbackH5() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() / "slugTestOutputManagerWriteGalaxyFeedbackH5";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+    const std::string modelName = "test_model";
+    const auto expectedPath = outDir / (modelName + ".h5");
+    const toml::table inputDeck = makeGalaxyPhysicsInputDeck(modelName, outDir);
+
+    try
+    {
+        const io::SimControls controls(inputDeck);
+        utils::rng().seed(42);
+        core::Galaxy galaxy(controls);
+        galaxy.advance(galaxyWriteTime);
+        if (galaxy.clusters().empty())
+        {
+            std::cerr << "testOutputManager: write galaxy feedback h5: test bug: "
+                "expected at least one cluster to have formed\n";
+            return 1;
+        }
+        constexpr unsigned long trial = 8;
+
+        {
+            io::OutputManagerH5 manager(controls);
+            manager.writeGalaxyFeedback(trial, galaxyWriteTime, galaxy);
+        }
+
+        constexpr double rtol = 1e-12;
+        // NOLINTBEGIN(misc-include-cleaner)
+        const hid_t file = H5Fopen(expectedPath.string().c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+        if (file < 0) { throw std::runtime_error("unable to reopen " + expectedPath.string()); }
+        std::string error;
+        const hid_t galaxyGrp = H5Gopen2(file, "galaxy_feedback", H5P_DEFAULT);
+        if (galaxyGrp < 0) { error = "missing galaxy_feedback group"; }
+        else
+        {
+            if (H5Lexists(galaxyGrp, "uid", H5P_DEFAULT) > 0) { error = "galaxy_feedback has a uid dataset"; }
+            else if (readColumnULong(galaxyGrp, "trial") != std::vector<unsigned long>{ trial })
+            {
+                error = "galaxy_feedback trial column does not match";
+            }
+            else if (!feedbackRowsMatch(readFeedbackRowH5(galaxyGrp, 0), expectedFeedbackRow(galaxy), rtol))
+            {
+                error = "galaxy_feedback row does not match the galaxy's own values";
+            }
+            H5Gclose(galaxyGrp);
+        }
+        const hid_t clusterGrp = error.empty() ? H5Gopen2(file, "cluster_feedback", H5P_DEFAULT) : -1;
+        if (error.empty() && clusterGrp < 0) { error = "missing cluster_feedback group"; }
+        if (clusterGrp >= 0)
+        {
+            const auto uidCol = readColumnULong(clusterGrp, "uid");
+            if (uidCol.size() != galaxy.clusters().size())
+            {
+                error = "cluster_feedback has " + std::to_string(uidCol.size()) +
+                    " rows, expected " + std::to_string(galaxy.clusters().size());
+            }
+            else
+            {
+                for (auto& cluster : galaxy.clusters())
+                {
+                    const auto i = findIndex(uidCol, cluster.uid());
+                    if (!feedbackRowsMatch(readFeedbackRowH5(clusterGrp, i), expectedFeedbackRow(cluster), rtol))
+                    {
+                        error = "cluster_feedback row for uid " + std::to_string(cluster.uid()) +
+                            " does not match the cluster's own values";
+                        break;
+                    }
+                }
+            }
+            H5Gclose(clusterGrp);
+        }
+        H5Fclose(file);
+        // NOLINTEND(misc-include-cleaner)
+        if (!error.empty()) { throw std::runtime_error(error); }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testOutputManager: write galaxy feedback h5: " << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Verify that output.write_galaxy_feedback = false does not suppress
+// writeGalaxyFeedback()'s own writeClusterFeedback() fan-out -- the
+// feedback counterpart of
+// testWriteGalaxyYieldsFalseStillWritesClustersH5()
+static auto testWriteGalaxyFeedbackFalseStillWritesClustersH5() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() /
+        "slugTestOutputManagerGalaxyFeedbackFalseStillWritesClustersH5";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+    const std::string modelName = "test_model";
+    const auto expectedPath = outDir / (modelName + ".h5");
+    toml::table inputDeck = makeGalaxyPhysicsInputDeck(modelName, outDir);
+    inputDeck.at_path("output").as_table()->insert("write_galaxy_feedback", false);
+
+    try
+    {
+        const io::SimControls controls(inputDeck);
+        utils::rng().seed(42);
+        core::Galaxy galaxy(controls);
+        galaxy.advance(galaxyWriteTime);
+        if (galaxy.clusters().empty())
+        {
+            std::cerr << "testOutputManager: galaxy feedback false still writes clusters h5: "
+                "test bug: expected at least one cluster to have formed\n";
+            return 1;
+        }
+
+        {
+            io::OutputManagerH5 manager(controls);
+            manager.writeGalaxyFeedback(10, galaxyWriteTime, galaxy);
+        }
+
+        // NOLINTBEGIN(misc-include-cleaner)
+        const hid_t file = H5Fopen(expectedPath.string().c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+        if (file < 0) { throw std::runtime_error("unable to reopen " + expectedPath.string()); }
+        const bool hasGalaxyGroup = H5Lexists(file, "galaxy_feedback", H5P_DEFAULT) > 0;
+        std::size_t nClusterRows = 0;
+        const hid_t clusterGrp = H5Gopen2(file, "cluster_feedback", H5P_DEFAULT);
+        if (clusterGrp >= 0)
+        {
+            nClusterRows = readColumnULong(clusterGrp, "uid").size();
+            H5Gclose(clusterGrp);
+        }
+        H5Fclose(file);
+        // NOLINTEND(misc-include-cleaner)
+
+        if (hasGalaxyGroup) { throw std::runtime_error("unexpectedly created a galaxy_feedback group"); }
+        if (nClusterRows != galaxy.clusters().size())
+        {
+            throw std::runtime_error("cluster_feedback has " + std::to_string(nClusterRows) +
+                " rows, expected " + std::to_string(galaxy.clusters().size()));
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testOutputManager: galaxy feedback false still writes clusters h5: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Verify that output.write_cluster_feedback = false suppresses the
+// cluster_feedback H5 group and the ascii _cluster_feedback.txt file
+static auto testOptOutClusterFeedbackOutput() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() / "slugTestOutputManagerNoClusterFeedbackOutput";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+    const std::string modelName = "test_model";
+    toml::table inputDeck = makeClusterPhysicsInputDeck(modelName, outDir);
+    inputDeck.at_path("output").as_table()->insert("write_cluster_feedback", false);
+    return checkOptOutSuppressesGroup(inputDeck, outDir, modelName,
+        "cluster_feedback", "_cluster_feedback.txt", "opt-out cluster feedback output");
+}
+
+// Verify that output.write_galaxy_feedback = false suppresses the
+// galaxy_feedback H5 group and the ascii _galaxy_feedback.txt file
+static auto testOptOutGalaxyFeedbackOutput() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() / "slugTestOutputManagerNoGalaxyFeedbackOutput";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+    const std::string modelName = "test_model";
+    toml::table inputDeck = makeGalaxyPhysicsInputDeck(modelName, outDir);
+    inputDeck.at_path("output").as_table()->insert("write_galaxy_feedback", false);
+    return checkOptOutSuppressesGroup(inputDeck, outDir, modelName,
+        "galaxy_feedback", "_galaxy_feedback.txt", "opt-out galaxy feedback output");
+}
+
+// Split line into whitespace-separated tokens
+static auto splitTokens(const std::string& line) -> std::vector<std::string>
+{
+    std::istringstream stream(line);
+    return { std::istream_iterator<std::string>(stream), std::istream_iterator<std::string>() };
+}
+
+// Verify the cluster- and galaxy-feedback ascii headers: the expected
+// column names, and a units row that splits into exactly one token per
+// column (so the space-free "Msun_km/s/yr" unit keeps the file
+// parseable by whitespace splitting)
+static auto testFeedbackHeaderAscii() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() / "slugTestOutputManagerFeedbackHeaderAscii";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+    const std::string modelName = "test_model";
+    const toml::table inputDeck = makeGalaxyPhysicsInputDeck(modelName, outDir);
+
+    try
+    {
+        const io::SimControls controls(inputDeck);
+        { const io::OutputManagerAscii manager(controls); }
+
+        const std::vector<std::string> galaxyNames{ "trial", "time", "n_sn", "mdot_wind", "pdot_wind", "edot_wind" };
+        const std::vector<std::string> galaxyUnits{ "none", "yr", "none", "Msun/yr", "Msun_km/s/yr", "Lsun" };
+        std::vector<std::string> clusterNames = galaxyNames;
+        clusterNames.insert(clusterNames.begin() + 2, "uid");
+        std::vector<std::string> clusterUnits = galaxyUnits;
+        clusterUnits.insert(clusterUnits.begin() + 2, "none");
+
+        for (const auto& [suffix, names, units] : {
+                 std::tuple{ std::string("_cluster_feedback.txt"), clusterNames, clusterUnits },
+                 std::tuple{ std::string("_galaxy_feedback.txt"), galaxyNames, galaxyUnits } })
+        {
+            std::ifstream file(outDir / (modelName + suffix));
+            if (!file) { throw std::runtime_error("missing " + suffix); }
+            std::string headerLine;
+            std::string unitsLine;
+            std::getline(file, headerLine);
+            std::getline(file, unitsLine);
+            if (splitTokens(headerLine) != names) { throw std::runtime_error(suffix + ": unexpected header:\n" + headerLine); }
+            if (splitTokens(unitsLine) != units) { throw std::runtime_error(suffix + ": unexpected units:\n" + unitsLine); }
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testOutputManager: feedback header ascii: " << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Parse the feedback columns of one ascii data line, after its
+// leading trial/time (and uid, if hasUid) columns
+static auto parseFeedbackLineAscii(const std::string& line, const bool hasUid,
+    unsigned long& trial, double& time, unsigned long& uid) -> std::array<double, 4>
+{
+    std::istringstream stream(line);
+    stream >> trial >> time;
+    if (hasUid) { stream >> uid; }
+    std::array<double, 4> row{};
+    for (auto& value : row) { stream >> value; }
+    if (!stream) { throw std::runtime_error("unable to parse feedback line:\n" + line); }
+    return row;
+}
+
+// Verify that OutputManagerAscii::writeClusterFeedback writes one row
+// matching the cluster's own feedback quantities, in output units, to
+// within the precision of the file's 7-significant-figure formatting
+static auto testWriteClusterFeedbackAscii() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() / "slugTestOutputManagerWriteClusterFeedbackAscii";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+    const std::string modelName = "test_model";
+    toml::table inputDeck = makeClusterPhysicsInputDeck(modelName, outDir);
+    addSNMassRange(inputDeck);
+
+    try
+    {
+        const io::SimControls controls(inputDeck);
+        utils::rng().seed(42);
+        core::Cluster cluster(11, 2e3, 0.0, controls);
+        constexpr unsigned long trial = 7;
+        cluster.advance(feedbackWriteTime);
+
+        {
+            io::OutputManagerAscii manager(controls);
+            manager.writeClusterFeedback(trial, feedbackWriteTime, cluster);
+        }
+
+        std::ifstream file(outDir / (modelName + "_cluster_feedback.txt"));
+        skipAsciiHeader(file);
+        std::string dataLine;
+        std::getline(file, dataLine);
+        unsigned long readTrial = 0;
+        double readTime = NAN;
+        unsigned long readUid = 0;
+        const auto readRow = parseFeedbackLineAscii(dataLine, true, readTrial, readTime, readUid);
+
+        constexpr double rtol = 1e-6;
+        if (readTrial != trial || std::abs(readTime - feedbackWriteTime) > rtol * feedbackWriteTime ||
+            readUid != cluster.uid())
+        {
+            throw std::runtime_error("trial/time/uid row does not match");
+        }
+        if (!feedbackRowsMatch(readRow, expectedFeedbackRow(cluster), rtol))
+        {
+            throw std::runtime_error("feedback row does not match the cluster's own values");
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testOutputManager: write cluster feedback ascii: " << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Verify that OutputManagerAscii::writeGalaxyFeedback writes one row
+// (with no uid column) matching the galaxy's own feedback quantities
+// to the galaxy-feedback file, and one row per currently-alive cluster
+// to the cluster-feedback file
+static auto testWriteGalaxyFeedbackAscii() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() / "slugTestOutputManagerWriteGalaxyFeedbackAscii";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+    const std::string modelName = "test_model";
+    const toml::table inputDeck = makeGalaxyPhysicsInputDeck(modelName, outDir);
+
+    try
+    {
+        const io::SimControls controls(inputDeck);
+        utils::rng().seed(42);
+        core::Galaxy galaxy(controls);
+        galaxy.advance(galaxyWriteTime);
+        constexpr unsigned long trial = 8;
+
+        {
+            io::OutputManagerAscii manager(controls);
+            manager.writeGalaxyFeedback(trial, galaxyWriteTime, galaxy);
+        }
+
+        std::ifstream galaxyFile(outDir / (modelName + "_galaxy_feedback.txt"));
+        skipAsciiHeader(galaxyFile);
+        std::string dataLine;
+        std::getline(galaxyFile, dataLine);
+        unsigned long readTrial = 0;
+        double readTime = NAN;
+        unsigned long unusedUid = 0;
+        const auto readRow = parseFeedbackLineAscii(dataLine, false, readTrial, readTime, unusedUid);
+        constexpr double rtol = 1e-6;
+        if (readTrial != trial || !feedbackRowsMatch(readRow, expectedFeedbackRow(galaxy), rtol))
+        {
+            throw std::runtime_error("galaxy feedback row does not match the galaxy's own values");
+        }
+        if (std::getline(galaxyFile, dataLine) && !dataLine.empty())
+        {
+            throw std::runtime_error("galaxy feedback file has more than one data row");
+        }
+
+        std::ifstream clusterFile(outDir / (modelName + "_cluster_feedback.txt"));
+        skipAsciiHeader(clusterFile);
+        std::size_t nClusterRows = 0;
+        while (std::getline(clusterFile, dataLine))
+        {
+            if (!dataLine.empty()) { ++nClusterRows; }
+        }
+        if (nClusterRows != galaxy.clusters().size())
+        {
+            throw std::runtime_error("cluster feedback file has " + std::to_string(nClusterRows) +
+                " rows, expected " + std::to_string(galaxy.clusters().size()));
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testOutputManager: write galaxy feedback ascii: " << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Verify that sanity check 1 in OutputManager's own constructor counts
+// the yields and feedback flags as outputs: a cluster-type simulation
+// with write_cluster/write_cluster_spec/write_cluster_phot all false
+// constructs successfully if write_cluster_feedback is left true, or
+// (with yields requested) if write_cluster_yields is left true
+static auto testFeedbackOrYieldsOnlyOutputAllowed() -> int
+{
+    for (const bool yieldsOnly : { false, true })
+    {
+        const std::string label = yieldsOnly ? "yields-only output" : "feedback-only output";
+        const auto outDir = std::filesystem::temp_directory_path() /
+            (yieldsOnly ? "slugTestOutputManagerYieldsOnly" : "slugTestOutputManagerFeedbackOnly");
+        std::filesystem::remove_all(outDir);
+        std::filesystem::create_directories(outDir);
+        const std::string modelName = "test_model";
+        toml::table inputDeck = makeClusterPhysicsInputDeck(modelName, outDir);
+        toml::table* outputTbl = inputDeck.at_path("output").as_table();
+        for (const std::string& key : { "write_cluster", "write_cluster_spec", "write_cluster_phot" })
+        {
+            outputTbl->insert(key, false);
+        }
+        if (yieldsOnly)
+        {
+            addYieldsFixture(inputDeck);
+            outputTbl->insert("write_cluster_feedback", false);
+        }
+
+        try
+        {
+            const io::SimControls controls(inputDeck);
+            const io::OutputManagerAscii manager(controls);
+        }
+        catch (const std::exception& error)
+        {
+            std::cerr << "testOutputManager: " << label << ": expected construction to "
+                "succeed, but it threw: " << error.what() << "\n";
+            return 1;
+        }
+    }
+    return 0;
+}
+
 auto testOutputManager() -> int
 {
     int result = 0;
@@ -3952,5 +4557,15 @@ auto testOutputManager() -> int
     result += testClusterYieldsHeaderNotDecomposedAscii();
     result += testWriteClusterYieldsAscii();
     result += testWriteGalaxyYieldsAscii();
+    result += testClusterFeedbackGroupH5();
+    result += testWriteClusterFeedbackH5();
+    result += testWriteGalaxyFeedbackH5();
+    result += testWriteGalaxyFeedbackFalseStillWritesClustersH5();
+    result += testOptOutClusterFeedbackOutput();
+    result += testOptOutGalaxyFeedbackOutput();
+    result += testFeedbackHeaderAscii();
+    result += testWriteClusterFeedbackAscii();
+    result += testWriteGalaxyFeedbackAscii();
+    result += testFeedbackOrYieldsOnlyOutputAllowed();
     return result;
 }

@@ -250,6 +250,36 @@ namespace io
             core::Galaxy& galaxy) override;
 
         /**
+         * @brief Write a cluster's feedback as a row of the cluster_feedback datasets
+         * @param trial Trial number to which this cluster belongs
+         * @param time The output time at which this row was recorded, in yr
+         * @param cluster The cluster whose feedback should be written
+         * @details
+         * If the cluster_feedback group does not exist
+         * (output.write_cluster_feedback is false), this is a no-op.
+         * Like writeClusterYields(), a disrupted cluster's own row is
+         * still written (see OutputManager::writeClusterFeedback()'s
+         * own comment for why).
+         */
+        void writeClusterFeedback(unsigned long trial, double time,
+            core::Cluster& cluster) override;
+
+        /**
+         * @brief Write a galaxy's feedback as a row of the galaxy_feedback datasets
+         * @param trial Trial number to which this galaxy belongs
+         * @param time The output time at which this row was recorded, in yr
+         * @param galaxy The galaxy whose feedback should be written
+         * @details
+         * Writing the galaxy_feedback row itself is a no-op if the
+         * galaxy_feedback group does not exist -- writeClusterFeedback()
+         * is still called on every currently-alive (non-disrupted)
+         * cluster in galaxy regardless, exactly as writeGalaxyYields()
+         * does (see its own comment for why).
+         */
+        void writeGalaxyFeedback(unsigned long trial, double time,
+            core::Galaxy& galaxy) override;
+
+        /**
          * @brief Roll over to a new checkpoint
          * @param trialsCompleted Number of trials completed so far in
          *   the run, across every checkpoint including the one just
@@ -795,6 +825,23 @@ namespace io
          */
         void openGalaxyYieldsGroup();
 
+        /**
+         * @brief Create the cluster_feedback group and its datasets
+         * @details
+         * A no-op if output.write_cluster_feedback (optional, defaults
+         * to true) is set to false.
+         */
+        void openClusterFeedbackGroup();
+
+        /**
+         * @brief Create the galaxy_feedback group and its datasets, for a galaxy-type simulation
+         * @details
+         * A no-op unless SimControls::simType() is SimType::galaxy, or
+         * if output.write_galaxy_feedback (optional, defaults to true)
+         * is set to false.
+         */
+        void openGalaxyFeedbackGroup();
+
         // Number of times checkpoint() has rolled over to a new
         // checkpoint; 0 until the first call. Only meaningful if
         // SimControls::checkpointInterval() is non-zero -- see
@@ -884,6 +931,8 @@ namespace io
         utils::ThreadVec<hid_t> galaxySpectraGroup_; /**< Handle to this thread's own open galaxy_spectra group, if any */ // NOLINT(misc-include-cleaner)
         utils::ThreadVec<hid_t> galaxyPhotGroup_; /**< Handle to this thread's own open galaxy_phot group, if any */ // NOLINT(misc-include-cleaner)
         utils::ThreadVec<hid_t> galaxyYieldsGroup_; /**< Handle to this thread's own open galaxy_yields group, if any */ // NOLINT(misc-include-cleaner)
+        utils::ThreadVec<hid_t> clusterFeedbackGroup_; /**< Handle to this thread's own open cluster_feedback group, if any */ // NOLINT(misc-include-cleaner)
+        utils::ThreadVec<hid_t> galaxyFeedbackGroup_; /**< Handle to this thread's own open galaxy_feedback group, if any */ // NOLINT(misc-include-cleaner)
     };
 
 } // namespace io

@@ -605,10 +605,12 @@ void io::SimControls::readOutput(const utils::TrackedDeck& inputDeck)
     writeClusterSpec_ = readWriteFlag(inputDeck, "output.write_cluster_spec");
     writeClusterPhot_ = readWriteFlag(inputDeck, "output.write_cluster_phot");
     writeClusterYields_ = readWriteFlag(inputDeck, "output.write_cluster_yields");
+    writeClusterFeedback_ = readWriteFlag(inputDeck, "output.write_cluster_feedback");
     writeGalaxy_ = readWriteFlag(inputDeck, "output.write_galaxy");
     writeGalaxySpec_ = readWriteFlag(inputDeck, "output.write_galaxy_spec");
     writeGalaxyPhot_ = readWriteFlag(inputDeck, "output.write_galaxy_phot");
     writeGalaxyYields_ = readWriteFlag(inputDeck, "output.write_galaxy_yields");
+    writeGalaxyFeedback_ = readWriteFlag(inputDeck, "output.write_galaxy_feedback");
 }
 
 // Set the [Fe/H] distribution, recomputing tracks2D() (constFeHTracks_)

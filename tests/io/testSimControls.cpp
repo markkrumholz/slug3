@@ -1436,6 +1436,66 @@ static auto testSimControlsYieldsNoDecay() -> int
     return result;
 }
 
+// Verify writeClusterFeedback()/writeGalaxyFeedback() default to true,
+// are parsed independently from output.write_cluster_feedback/
+// output.write_galaxy_feedback like the other output.write_* keys (see
+// readOutput()'s own comment), and can be changed afterward via their
+// setters
+static auto testSimControlsWriteFeedback() -> int
+{
+    constexpr std::string_view galaxyDeck = "tests/core/assets/testGalaxy.in";
+    int result = 0;
+    try
+    {
+        // Defaults
+        {
+            const toml::table inputDeck = toml::parse_file(galaxyDeck);
+            const io::SimControls controls(inputDeck);
+            if (!controls.writeClusterFeedback() || !controls.writeGalaxyFeedback())
+            {
+                std::cerr << "testSimControls: write feedback: expected both "
+                    "writeClusterFeedback() and writeGalaxyFeedback() to default to true\n";
+                result = 1;
+            }
+        }
+
+        // Each key parsed independently of the other
+        for (const bool clusterKey : { true, false })
+        {
+            toml::table inputDeck = toml::parse_file(galaxyDeck);
+            inputDeck.at_path("output").as_table()->insert(
+                clusterKey ? "write_cluster_feedback" : "write_galaxy_feedback", false);
+            const io::SimControls controls(inputDeck);
+            if (controls.writeClusterFeedback() == clusterKey || controls.writeGalaxyFeedback() != clusterKey)
+            {
+                std::cerr << "testSimControls: write feedback: setting only output."
+                    << (clusterKey ? "write_cluster_feedback" : "write_galaxy_feedback")
+                    << " = false did not disable exactly that flag\n";
+                result = 1;
+            }
+        }
+
+        // Setters
+        {
+            const toml::table inputDeck = toml::parse_file(galaxyDeck);
+            io::SimControls controls(inputDeck);
+            controls.setWriteClusterFeedback(false);
+            controls.setWriteGalaxyFeedback(false);
+            if (controls.writeClusterFeedback() || controls.writeGalaxyFeedback())
+            {
+                std::cerr << "testSimControls: write feedback: setters did not take effect\n";
+                result = 1;
+            }
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: write feedback: threw: " << error.what() << "\n";
+        result = 1;
+    }
+    return result;
+}
+
 // Verify writeClusterYields()/writeGalaxyYields() default to true, are
 // parsed from output.write_cluster_yields/output.write_galaxy_yields
 // exactly like the other six output.write_* keys (see readOutput()'s
@@ -4548,6 +4608,7 @@ auto testSimControls() -> int
     result += testSimControlsYields();
     result += testSimControlsYieldsNoDecay();
     result += testSimControlsWriteYields();
+    result += testSimControlsWriteFeedback();
     result += testSimControlsYieldsIsotopes();
     result += testSimControlsYieldsIsotopesKeyword();
     result += testSimControlsYieldsIsotopesDecayClosure();

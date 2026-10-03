@@ -279,6 +279,44 @@ static void createSpecNebExtinctDataset(const io::SimControls& simControls, cons
     H5Dclose(dset);
 }
 
+// Names and units of the feedback datasets shared by the
+// cluster_feedback and galaxy_feedback groups, in the same order as
+// OutputManager::feedbackRow()'s own return value
+static constexpr std::array<const char*, 4> feedbackDsetNames = {
+    "n_sn", "mdot_wind", "pdot_wind", "edot_wind" };
+static constexpr std::array<const char*, 4> feedbackDsetUnits = {
+    "", "Msun/yr", "Msun km/(s yr)", "Lsun" };
+
+// Create the feedback datasets (see feedbackDsetNames) in the given
+// cluster_feedback/galaxy_feedback group. Factored out of
+// openClusterFeedbackGroup()/openGalaxyFeedbackGroup(), which differ
+// only in their leading trial/time/uid datasets.
+static void createFeedbackDatasets(const hid_t group)
+{
+    for (std::size_t i = 0; i < feedbackDsetNames.size(); ++i)
+    {
+        // NOLINTBEGIN(misc-include-cleaner,cppcoreguidelines-pro-bounds-constant-array-index) -- i < feedbackDsetNames.size() == feedbackDsetUnits.size() by construction
+        const hid_t dset = utils::createExtensible1dDataset(group, feedbackDsetNames[i], H5T_NATIVE_DOUBLE);
+        utils::writeStringAttr(dset, "units", feedbackDsetUnits[i]);
+        H5Dclose(dset);
+        // NOLINTEND(misc-include-cleaner,cppcoreguidelines-pro-bounds-constant-array-index)
+    }
+}
+
+// Append one element to each of the feedback datasets (see
+// feedbackDsetNames) in the given group, from row (see
+// OutputManager::feedbackRow()). Must be called from inside the
+// h5ThreadSafety critical section, like every other HDF5 call.
+static void appendFeedbackRow(const hid_t group, const std::array<double, 4>& row)
+{
+    for (std::size_t i = 0; i < feedbackDsetNames.size(); ++i)
+    {
+        // NOLINTBEGIN(misc-include-cleaner,cppcoreguidelines-pro-bounds-constant-array-index) -- i < feedbackDsetNames.size() == row.size() by construction
+        utils::appendToDataset(group, feedbackDsetNames[i], H5T_NATIVE_DOUBLE, &row[i]);
+        // NOLINTEND(misc-include-cleaner,cppcoreguidelines-pro-bounds-constant-array-index)
+    }
+}
+
 // Create the "phot_neb" and (if extinction was also requested)
 // "phot_neb_extinct" 2D datasets (each sized nRealFilters, excluding
 // any appended "Lbol" entry -- see this function's callers' own
@@ -785,6 +823,8 @@ void io::OutputManagerH5::openOutputFile(const std::filesystem::path& path)
     galaxySpectraGroup_() = -1;
     galaxyPhotGroup_() = -1;
     galaxyYieldsGroup_() = -1;
+    clusterFeedbackGroup_() = -1;
+    galaxyFeedbackGroup_() = -1;
 
     // The HDF5 build linked here is not configured with its own
     // (opt-in) thread-safety support (see this class's own header
@@ -835,6 +875,8 @@ void io::OutputManagerH5::openOutputFile(const std::filesystem::path& path)
         openGalaxySpectraGroup();
         openGalaxyPhotGroup();
         openGalaxyYieldsGroup();
+        openClusterFeedbackGroup();
+        openGalaxyFeedbackGroup();
     }
 }
 
@@ -1343,6 +1385,70 @@ void io::OutputManagerH5::openGalaxyYieldsGroup()
     // NOLINTEND(misc-include-cleaner)
 }
 
+// Create the cluster_feedback group and its datasets, if
+// output.write_cluster_feedback (optional, defaults to true) was not
+// set to false
+void io::OutputManagerH5::openClusterFeedbackGroup()
+{
+    if (!simControls_.writeClusterFeedback()) { return; }
+
+    // NOLINTBEGIN(misc-include-cleaner)
+    clusterFeedbackGroup_() = H5Gcreate2(file_(), "cluster_feedback",
+        H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+    if (clusterFeedbackGroup_() < 0)
+    {
+        H5Fclose(file_());
+        throw std::runtime_error(
+            "OutputManagerH5: unable to create cluster_feedback group");
+    }
+
+    const hid_t trialDset = utils::createExtensible1dDataset(
+        clusterFeedbackGroup_(), "trial", H5T_NATIVE_ULONG);
+    utils::writeStringAttr(trialDset, "units", "");
+    H5Dclose(trialDset);
+    const hid_t timeDset = utils::createExtensible1dDataset(
+        clusterFeedbackGroup_(), "time", H5T_NATIVE_DOUBLE);
+    utils::writeStringAttr(timeDset, "units", "yr");
+    H5Dclose(timeDset);
+    const hid_t uidDset = utils::createExtensible1dDataset(
+        clusterFeedbackGroup_(), "uid", H5T_NATIVE_ULONG);
+    utils::writeStringAttr(uidDset, "units", "");
+    H5Dclose(uidDset);
+    createFeedbackDatasets(clusterFeedbackGroup_());
+    // NOLINTEND(misc-include-cleaner)
+}
+
+// Create the galaxy_feedback group and its datasets, for a
+// galaxy-type simulation with output.write_galaxy_feedback not set to
+// false. A no-op for a cluster-type simulation, which has no Galaxy
+// object at all.
+void io::OutputManagerH5::openGalaxyFeedbackGroup()
+{
+    if (simControls_.simType() != SimControls::SimType::galaxy) { return; }
+    if (!simControls_.writeGalaxyFeedback()) { return; }
+
+    // NOLINTBEGIN(misc-include-cleaner)
+    galaxyFeedbackGroup_() = H5Gcreate2(file_(), "galaxy_feedback",
+        H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+    if (galaxyFeedbackGroup_() < 0)
+    {
+        H5Fclose(file_());
+        throw std::runtime_error(
+            "OutputManagerH5: unable to create galaxy_feedback group");
+    }
+
+    const hid_t trialDset = utils::createExtensible1dDataset(
+        galaxyFeedbackGroup_(), "trial", H5T_NATIVE_ULONG);
+    utils::writeStringAttr(trialDset, "units", "");
+    H5Dclose(trialDset);
+    const hid_t timeDset = utils::createExtensible1dDataset(
+        galaxyFeedbackGroup_(), "time", H5T_NATIVE_DOUBLE);
+    utils::writeStringAttr(timeDset, "units", "yr");
+    H5Dclose(timeDset);
+    createFeedbackDatasets(galaxyFeedbackGroup_());
+    // NOLINTEND(misc-include-cleaner)
+}
+
 // Close every thread's own file(s) -- see this class's own header
 // comment -- then, with OpenMP, consolidate them back into a single
 // outDir/modelName.h5 (or, per checkpoint, outDir/modelName_chkNNNNN.h5
@@ -1492,6 +1598,8 @@ void io::OutputManagerH5::closeOutputFile(const unsigned long trialsCompleted)
         if (galaxySpectraGroup_() >= 0) { H5Gclose(galaxySpectraGroup_()); }
         if (galaxyPhotGroup_() >= 0) { H5Gclose(galaxyPhotGroup_()); }
         if (galaxyYieldsGroup_() >= 0) { H5Gclose(galaxyYieldsGroup_()); }
+        if (clusterFeedbackGroup_() >= 0) { H5Gclose(clusterFeedbackGroup_()); }
+        if (galaxyFeedbackGroup_() >= 0) { H5Gclose(galaxyFeedbackGroup_()); }
         utils::writeULongAttr(file_(), "trials_completed", trialsCompleted);
         utils::writeULongAttr(file_(), "restart_uid", utils::uniqueID().read());
         utils::writeULongAttr(file_(), "max_trial", maxTrial_);
@@ -1999,4 +2107,70 @@ void io::OutputManagerH5::writeGalaxyYields(
     }
 
     for (auto& cluster : galaxy.clusters()) { writeClusterYields(trial, time, cluster); }
+}
+
+// Append one element to each of the trial/time/uid/n_sn/mdot_wind/
+// pdot_wind/edot_wind cluster_feedback datasets. A no-op if
+// output.write_cluster_feedback is false (the cluster_feedback group
+// does not exist). Like writeClusterYields(), does not skip a
+// disrupted cluster -- see OutputManager::writeClusterFeedback()'s
+// own comment for why.
+void io::OutputManagerH5::writeClusterFeedback(
+    const unsigned long trial, const double time, core::Cluster& cluster)
+{
+    if (clusterFeedbackGroup_() < 0) { return; }
+
+    // Computed before entering the critical section below, since the
+    // wind fluxes are computed lazily (see core::Cluster::mDotWind()'s
+    // own comment) and need not hold up every other thread's own HDF5
+    // writes while they are
+    const unsigned long uid = cluster.uid();
+    const auto row = feedbackRow(cluster);
+
+#ifdef _OPENMP
+#pragma omp critical(h5ThreadSafety)
+#endif
+    {
+        if (trial > maxTrial_) { maxTrial_ = trial; }
+
+        // NOLINTBEGIN(misc-include-cleaner)
+        utils::appendToDataset(clusterFeedbackGroup_(), "trial", H5T_NATIVE_ULONG, &trial);
+        utils::appendToDataset(clusterFeedbackGroup_(), "time", H5T_NATIVE_DOUBLE, &time);
+        utils::appendToDataset(clusterFeedbackGroup_(), "uid", H5T_NATIVE_ULONG, &uid);
+        appendFeedbackRow(clusterFeedbackGroup_(), row);
+        // NOLINTEND(misc-include-cleaner)
+    }
+}
+
+// Append one element to each of the trial/time/n_sn/mdot_wind/
+// pdot_wind/edot_wind galaxy_feedback datasets, then call
+// writeClusterFeedback() on every currently-alive (non-disrupted)
+// cluster in galaxy -- the latter regardless of whether the
+// galaxy_feedback group exists, for the same reason as
+// writeGalaxyYields() (see its own comment).
+void io::OutputManagerH5::writeGalaxyFeedback(
+    const unsigned long trial, const double time, core::Galaxy& galaxy)
+{
+    if (galaxyFeedbackGroup_() >= 0)
+    {
+        // See writeClusterFeedback's own comment on computing this
+        // outside the critical section
+        const auto row = feedbackRow(galaxy);
+
+        // See writeGalaxy's own comment on this critical section
+#ifdef _OPENMP
+#pragma omp critical(h5ThreadSafety)
+#endif
+        {
+            if (trial > maxTrial_) { maxTrial_ = trial; }
+
+            // NOLINTBEGIN(misc-include-cleaner)
+            utils::appendToDataset(galaxyFeedbackGroup_(), "trial", H5T_NATIVE_ULONG, &trial);
+            utils::appendToDataset(galaxyFeedbackGroup_(), "time", H5T_NATIVE_DOUBLE, &time);
+            appendFeedbackRow(galaxyFeedbackGroup_(), row);
+            // NOLINTEND(misc-include-cleaner)
+        }
+    }
+
+    for (auto& cluster : galaxy.clusters()) { writeClusterFeedback(trial, time, cluster); }
 }

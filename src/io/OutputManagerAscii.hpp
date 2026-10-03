@@ -189,6 +189,38 @@ namespace io
             core::Galaxy& galaxy) override;
 
         /**
+         * @brief Write a cluster's feedback (supernovae and stellar winds)
+         * @param trial Trial number to which this cluster belongs
+         * @param time The output time at which this row was recorded, in yr
+         * @param cluster The cluster whose feedback should be written
+         * @details
+         * If output.write_cluster_feedback is false (the
+         * cluster-feedback file was not opened), this is a no-op. Like
+         * writeClusterYields(), a disrupted cluster's own row is still
+         * written (see OutputManager::writeClusterFeedback()'s own
+         * comment for why). Otherwise writes one line, holding trial,
+         * time, uid, n_sn, mdot_wind, pdot_wind, and edot_wind (see
+         * OutputManager::feedbackRow()), to the cluster-feedback file.
+         */
+        void writeClusterFeedback(unsigned long trial, double time,
+            core::Cluster& cluster) override;
+
+        /**
+         * @brief Write a galaxy's feedback (supernovae and stellar winds)
+         * @param trial Trial number to which this galaxy belongs
+         * @param time The output time at which this row was recorded, in yr
+         * @param galaxy The galaxy whose feedback should be written
+         * @details
+         * Writes one line, laid out as writeClusterFeedback()'s but
+         * with no uid column, to the galaxy-feedback file, if it was
+         * opened; then, regardless, calls writeClusterFeedback() on
+         * every currently-alive (non-disrupted) cluster in galaxy, for
+         * the same reason as writeGalaxyYields().
+         */
+        void writeGalaxyFeedback(unsigned long trial, double time,
+            core::Galaxy& galaxy) override;
+
+        /**
          * @brief Not supported for ascii output
          * @param trialsCompleted Unused; present only to satisfy
          *   OutputManager::checkpoint()'s own signature
@@ -315,6 +347,23 @@ namespace io
         void openGalaxyYieldsFile();
 
         /**
+         * @brief Open the cluster-feedback output file and write its header
+         * @details
+         * A no-op if output.write_cluster_feedback (optional, defaults
+         * to true) is set to false.
+         */
+        void openClusterFeedbackFile();
+
+        /**
+         * @brief Open the galaxy-feedback output file and write its header, for a galaxy-type simulation
+         * @details
+         * A no-op unless SimControls::simType() is SimType::galaxy, or
+         * if output.write_galaxy_feedback (optional, defaults to true)
+         * is set to false.
+         */
+        void openGalaxyFeedbackFile();
+
+        /**
          * @brief Open the cluster-nebular-line-luminosity output file and write its header, if a nebular emission grid was requested
          * @details
          * A no-op if no spectral synthesizer was requested (mirroring
@@ -380,6 +429,8 @@ namespace io
         std::ofstream galaxySpectraFile_; /**< Handle to the open galaxy-spectra output file, if any */
         std::ofstream galaxyPhotFile_; /**< Handle to the open galaxy-photometry output file, if any */
         std::ofstream galaxyYieldsFile_; /**< Handle to the open galaxy-yields output file, if any */
+        std::ofstream clusterFeedbackFile_; /**< Handle to the open cluster-feedback output file, if any */
+        std::ofstream galaxyFeedbackFile_; /**< Handle to the open galaxy-feedback output file, if any (galaxy-type simulations only) */
         std::ofstream galaxyNebLinesFile_; /**< Handle to the open galaxy-nebular-line-luminosity output file, if any */
         std::vector<double> wlObs_; /**< Observed-frame wavelength grid, if spectral synthesis is enabled -- shared by both the cluster- and galaxy-spectra files, since both are drawn from the same SimControls::specsyn() */
         std::vector<int> photColWidths_; /**< Column width used for each filter in the cluster- and galaxy-photometry files -- see computePhotColWidths() */

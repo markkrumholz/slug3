@@ -404,6 +404,14 @@ class slug_reader:
         Lazy reader for the galaxy_yields group's per-isotope
         nucleosynthetic yields, indexed the same way as cluster_yields,
         or None if this file has no galaxy_yields group (read-only).
+    cluster_feedback : slug_group_reader or None
+        Lazy reader for the cluster_feedback group's datasets (trial,
+        time, uid, n_sn, mdot_wind, pdot_wind, edot_wind), or None if
+        this file has no cluster_feedback group (read-only).
+    galaxy_feedback : slug_group_reader or None
+        Lazy reader for the galaxy_feedback group's datasets (as for
+        cluster_feedback, minus uid), or None if this file has no
+        galaxy_feedback group (read-only).
     isotopes : list of str or None
         Alias for cluster_yields.isotopes if this file has a
         cluster_yields group, else for galaxy_yields.isotopes if this
@@ -676,6 +684,46 @@ class slug_reader:
     @galaxy_yields.setter
     def galaxy_yields(self, value: Any) -> None:
         raise AttributeError("galaxy_yields is read-only")
+
+    @property
+    def cluster_feedback(self) -> slug_group_reader | None:
+        """
+        slug_group_reader or None : lazy reader for the
+        cluster_feedback group's datasets -- trial, time, uid, n_sn
+        (cumulative number of supernovae), and the stellar wind mass,
+        momentum, and energy fluxes mdot_wind (Msun/yr), pdot_wind
+        (Msun km/s/yr), and edot_wind (Lsun) -- built the first time
+        this property is accessed and cached thereafter, or None if
+        this file has no cluster_feedback group.
+        """
+        if "cluster_feedback" not in self._groups:
+            return None
+        if self._groups["cluster_feedback"] is None:
+            self._groups["cluster_feedback"] = slug_group_reader(self._file, "cluster_feedback")
+        return self._groups["cluster_feedback"]
+
+    @cluster_feedback.setter
+    def cluster_feedback(self, value: Any) -> None:
+        raise AttributeError("cluster_feedback is read-only")
+
+    @property
+    def galaxy_feedback(self) -> slug_group_reader | None:
+        """
+        slug_group_reader or None : lazy reader for the
+        galaxy_feedback group's datasets (as for cluster_feedback,
+        minus uid), built the first time this property is accessed and
+        cached thereafter, or None if this file has no galaxy_feedback
+        group (only a galaxy-type simulation ever has one).
+        """
+        if "galaxy_feedback" not in self._groups:
+            return None
+        if self._groups["galaxy_feedback"] is None:
+            self._groups["galaxy_feedback"] = slug_group_reader(self._file, "galaxy_feedback")
+        return self._groups["galaxy_feedback"]
+
+    @galaxy_feedback.setter
+    def galaxy_feedback(self, value: Any) -> None:
+        raise AttributeError("galaxy_feedback is read-only")
 
     @property
     def isotopes(self) -> list[str] | None:
