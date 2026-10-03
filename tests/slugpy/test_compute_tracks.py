@@ -9,9 +9,10 @@ assets/tracks.toml + MIST_test.h5) and blackbody spectral synthesizer
 test_run_sim.py/test_compute_isochrones.py themselves use, plus the
 pre-existing testClusterFeHDist.toml PDF fixture for the non-fixed-
 [Fe/H] tests, so this needs no data fetched separately and can stay a
-"quick" test. Run via pytest with WORKING_DIRECTORY set to the repo
-root, matching test_readers.py/test_run_sim.py's own convention, so
-the relative track_registry/FeH paths below resolve correctly.
+"quick" test. The relative track_registry/FeH paths in the decks
+below are resolved by slug itself, which falls back to the repository
+directory compiled into the module (see utils::getFilePath), so they
+resolve whichever directory pytest is started from.
 
 :copyright: Copyright (c) 2026 Mark Krumholz
 """
@@ -19,9 +20,9 @@ the relative track_registry/FeH paths below resolve correctly.
 import numpy as np
 import pytest
 from astropy import units as u
-from slugpy._slug import FilterCollection, PhotSystem, SimControls
 
 from slugpy import compute_tracks
+from slugpy._slug import FilterCollection, PhotSystem, SimControls
 
 # A cluster deck using the small MIST_test tracks and a blackbody
 # spectral synthesizer (fast, no spectral library data needed), with a

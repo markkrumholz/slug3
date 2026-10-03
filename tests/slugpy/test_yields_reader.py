@@ -14,8 +14,8 @@ small, committed yield model files under data/yields/ and the small
 MIST_test track fixture, so this needs no data fetched separately and
 can stay a "quick" test. Every test below chdir's into tmp_path (via
 monkeypatch.chdir) before calling run_sim; the deck paths themselves
-are captured as absolute paths at collection time -- see
-test_run_sim.py's own identical comment for why.
+are absolute, built from REPO_ROOT -- see test_run_sim.py's own
+identical comment for why.
 
 :copyright: Copyright (c) 2026 Mark Krumholz
 """
@@ -31,7 +31,7 @@ from slugpy import run_sim
 from slugpy.slug_reader import slug_reader
 from slugpy.slug_yields_reader import slug_yields_reader
 
-REPO_ROOT = pathlib.Path.cwd()
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 TESTREADERYIELDS_DECK = str(REPO_ROOT / "tests" / "slugpy" / "assets" / "testReaderYields.in")
 TESTREADERYIELDSNOTDECOMPOSED_DECK = str(
     REPO_ROOT / "tests" / "slugpy" / "assets" / "testReaderYieldsNotDecomposed.in")

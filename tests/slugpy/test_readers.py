@@ -9,9 +9,12 @@ more representative check that the classes agree with the actual
 layout OutputManagerH5 writes.
 
 This file is run via pytest, invoked as a CTest test from
-CMakeLists.txt (see the test_Slugpy target), with WORKING_DIRECTORY
-set to the repo root, so CLUSTERLIB_H5 below resolves without needing
-SLUG_DIR or any other environment variable.
+CMakeLists.txt (see the test_Slugpy target). CLUSTERLIB_H5 and every
+other repository path below is built from REPO_ROOT -- the
+repository root, found from this file's own location rather than the
+working directory -- so they resolve whichever directory pytest is
+started from, without needing SLUG_DIR or any other environment
+variable.
 
 :copyright: Copyright (c) 2026 Mark Krumholz
 """
@@ -23,15 +26,15 @@ import h5py
 import numpy as np
 import pytest
 from astropy import units as u
-from slugpy._slug import Filter, FilterCollection
 
+from slugpy._slug import Filter, FilterCollection
 from slugpy.slug_group_reader import slug_group_reader
 from slugpy.slug_phot_reader import slug_phot_reader
 from slugpy.slug_reader import slug_reader
 
-REPO_ROOT = pathlib.Path.cwd()
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 CLUSTERLIB_DIR = REPO_ROOT / "examples" / "clusterlib"
-CLUSTERLIB_H5 = "examples/clusterlib/clusterlib.h5"
+CLUSTERLIB_H5 = str(CLUSTERLIB_DIR / "clusterlib.h5")
 
 # clusterlib.h5's own input_deck requests the real MIST tracks and the
 # full "default" chained spectral library (see clusterlib.toml), so

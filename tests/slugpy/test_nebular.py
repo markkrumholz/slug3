@@ -8,10 +8,12 @@ tests/nebular/assets/testNebular.in, the same fixture the C++ unit
 tests in tests/nebular/testNebular.hpp check against -- see that
 file's own module comment for the exact analytic formulas every
 continuum/line value below is checked against. This needs no data
-fetched separately and can stay a "quick" test. Run via pytest with
-WORKING_DIRECTORY set to the repo root (see the test_Slugpy
-CMakeLists.txt target), so every path below resolves without needing
-SLUG_DIR.
+fetched separately and can stay a "quick" test. Paths below resolve
+whichever directory pytest is started from: deck paths are absolute,
+built from REPO_ROOT (found from this file's own location -- see
+test_run_sim.py's own comment), while NEBULAR_TABLE is resolved by
+slug itself, which falls back to the repository directory compiled
+into the module (see utils::getFilePath).
 
 Physics-level correctness ([Fe/H]/age interpolation, line deposition,
 edge zeroing, ...) is already covered by the C++ unit tests; the tests
@@ -30,9 +32,10 @@ import gc
 import pathlib
 
 import pytest
+
 from slugpy._slug import FilterIdeal, Nebular, SimControls
 
-REPO_ROOT = pathlib.Path.cwd()
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 CLUSTER_DECK = str(REPO_ROOT / "tests" / "core" / "assets" / "testCluster.in")
 NEBULAR_DECK = str(REPO_ROOT / "tests" / "nebular" / "assets" / "testNebular.in")
 NEBULAR_TABLE = "tests/nebular/assets/nebular_test.h5"

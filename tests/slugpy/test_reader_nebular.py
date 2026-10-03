@@ -10,8 +10,8 @@ photometry, extinction, and nebular emission (from the small,
 committed tests/nebular/assets/nebular_test.h5 fixture) all enabled
 together, so this needs no data fetched separately and can stay a
 "quick" test. Every test below chdir's into tmp_path (via
-monkeypatch.chdir) before calling run_sim; NEBULAR_DECK is captured as
-an absolute path at collection time -- see test_run_sim.py's own
+monkeypatch.chdir) before calling run_sim; NEBULAR_DECK is an
+absolute path, built from REPO_ROOT -- see test_run_sim.py's own
 identical comment for why.
 
 :copyright: Copyright (c) 2026 Mark Krumholz
@@ -30,7 +30,7 @@ from slugpy.slug_phot_reader import slug_phot_reader
 from slugpy.slug_reader import slug_reader
 from slugpy.slug_spectra_reader import slug_spectra_reader
 
-REPO_ROOT = pathlib.Path.cwd()
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 NEBULAR_DECK = str(REPO_ROOT / "tests" / "slugpy" / "assets" / "testReaderNebular.in")
 CLUSTER_EXTINCT_DECK = str(REPO_ROOT / "tests" / "core" / "assets" / "testClusterExtinct.in")
 NEBULAR_NO_EXTINCT_DECK = str(REPO_ROOT / "tests" / "nebular" / "assets" / "testNebular.in")
