@@ -63,10 +63,10 @@ void core::SimGalaxy::runTrial(const unsigned long trialNum)
 
     // Loop over output times, advancing the galaxy's internal state
     // and writing it out at each one -- writeGalaxy/writeGalaxySpec/
-    // writeGalaxyPhot/writeGalaxyYields each also write out every
-    // currently-alive cluster in the galaxy, so no separate
-    // writeCluster/writeClusterSpec/writeClusterPhot/writeClusterYields
-    // calls are needed here (unlike SimCluster::runTrial's single
+    // writeGalaxyPhot/writeGalaxyYields/writeGalaxyFeedback each also
+    // write out every currently-alive cluster in the galaxy, so no
+    // separate writeCluster/writeClusterSpec/writeClusterPhot/
+    // writeClusterYields/writeClusterFeedback calls are needed here (unlike SimCluster::runTrial's single
     // writeCluster call, there is no single moment when every cluster
     // this trial will ever form already exists, since new clusters
     // keep forming as the galaxy advances)
@@ -78,6 +78,7 @@ void core::SimGalaxy::runTrial(const unsigned long trialNum)
         outputManager_->writeGalaxySpec(trialNum, outTime, galaxy);
         outputManager_->writeGalaxyPhot(trialNum, outTime, galaxy);
         outputManager_->writeGalaxyYields(trialNum, outTime, galaxy);
+        outputManager_->writeGalaxyFeedback(trialNum, outTime, galaxy);
     }
 
     trialsCompleted_.fetch_add(1, std::memory_order_relaxed);
@@ -114,8 +115,9 @@ auto core::SimGalaxy::run() -> int
     // trial, i.e. today's original, unbatched behavior) -- each batch
     // its own "#pragma omp parallel for", so its own implicit barrier
     // guarantees every thread has finished every trial in the batch
-    // (writeGalaxy/writeGalaxySpec/writeGalaxyPhot/writeGalaxyYields for
-    // every output time, not just started it) before this reaches the
+    // (writeGalaxy/writeGalaxySpec/writeGalaxyPhot/writeGalaxyYields/
+    // writeGalaxyFeedback for every output time, not just started it)
+    // before this reaches the
     // checkpoint()
     // call below, and that this runs on a single thread, from outside
     // any active parallel region, exactly as OutputManagerH5::

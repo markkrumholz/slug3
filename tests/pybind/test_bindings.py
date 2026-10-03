@@ -4246,3 +4246,20 @@ def test_simcontrols_write_yields_properties_settable():
     assert controls.writeGalaxyYields is False
     controls.writeGalaxyYields = True
     assert controls.writeGalaxyYields is True
+
+
+def test_simcontrols_write_feedback_properties():
+    """writeClusterFeedback/writeGalaxyFeedback default to True and are settable via property and setter."""
+    controls = slug.SimControls(GALAXY_DYNAMICS_DECK)
+    assert controls.writeClusterFeedback is True
+    assert controls.writeGalaxyFeedback is True
+
+    controls.writeClusterFeedback = False
+    assert controls.writeClusterFeedback is False
+    controls.setWriteClusterFeedback(True)
+    assert controls.writeClusterFeedback is True
+
+    controls.setWriteGalaxyFeedback(False)
+    assert controls.writeGalaxyFeedback is False
+    controls.writeGalaxyFeedback = True
+    assert controls.writeGalaxyFeedback is True

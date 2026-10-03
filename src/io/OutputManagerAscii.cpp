@@ -92,6 +92,35 @@ static void writeClustersHeader(std::ofstream& file, const bool hasExtinct)
          << std::string(static_cast<std::string::size_type>(rngWidth), '-') << "\n";
 }
 
+// Write the cluster- or galaxy-feedback ascii header (column names, a
+// row of units, and a dashed rule) to file: trial, time, a uid column
+// if hasUid (the cluster file only, since a galaxy has no individual
+// identity), then n_sn, mdot_wind, pdot_wind, and edot_wind, in the
+// units of OutputManager::feedbackRow(). The pdot_wind unit is written
+// without spaces, so that each units row still splits into exactly
+// one token per column.
+static void writeFeedbackHeader(std::ofstream& file, const bool hasUid)
+{
+    file << std::right << std::setw(uidWidth) << "trial"
+         << std::setw(numWidth) << "time";
+    if (hasUid) { file << std::setw(uidWidth) << "uid"; }
+    file << std::setw(numWidth) << "n_sn"
+         << std::setw(numWidth) << "mdot_wind"
+         << std::setw(numWidth) << "pdot_wind"
+         << std::setw(numWidth) << "edot_wind" << "\n";
+    file << std::right << std::setw(uidWidth) << "none"
+         << std::setw(numWidth) << "yr";
+    if (hasUid) { file << std::setw(uidWidth) << "none"; }
+    file << std::setw(numWidth) << "none"
+         << std::setw(numWidth) << "Msun/yr"
+         << std::setw(numWidth) << "Msun_km/s/yr"
+         << std::setw(numWidth) << "Lsun" << "\n";
+    const int numUidColumns = hasUid ? 2 : 1;
+    constexpr int numNumColumns = 5;
+    file << std::string(static_cast<std::string::size_type>(numUidColumns) * uidWidth, '-')
+         << std::string(static_cast<std::string::size_type>(numNumColumns) * numWidth, '-') << "\n";
+}
+
 // Write the "spec_neb" and (if extinction was also requested)
 // "spec_neb_extinct" columns, if a nebular emission grid was
 // requested, for wavelength index i of one spectrum row -- a no-op
@@ -651,6 +680,8 @@ io::OutputManagerAscii::OutputManagerAscii(const SimControls& simControls) :
     openGalaxyNebLinesFile();
     openGalaxyPhotFile();
     openGalaxyYieldsFile();
+    openClusterFeedbackFile();
+    openGalaxyFeedbackFile();
 }
 
 // Open the cluster output file and write its header, if cluster
@@ -808,6 +839,58 @@ void io::OutputManagerAscii::openClusterYieldsFile()
     yieldsColWidths_ = computePhotColWidths(
         columnNames, std::vector<std::string>(columnNames.size(), "Msun"));
     writeClusterYieldsHeader(clusterYieldsFile_, columnNames, yieldsColWidths_);
+}
+
+// Open the cluster-feedback output file and write its header, if
+// output.write_cluster_feedback (optional, defaults to true) was not
+// set to false (see OutputManagerH5::openClusterFeedbackGroup()'s
+// identical gating condition)
+void io::OutputManagerAscii::openClusterFeedbackFile()
+{
+    if (!simControls_.writeClusterFeedback()) { return; }
+
+    const auto clusterFeedbackPath = std::filesystem::path(simControls_.outDir()) /
+        (simControls_.modelName() + "_cluster_feedback.txt");
+    if (std::filesystem::exists(clusterFeedbackPath))
+    {
+        throw std::runtime_error(
+            "OutputManagerAscii: output file " + clusterFeedbackPath.string() + " already exists");
+    }
+
+    clusterFeedbackFile_.open(clusterFeedbackPath);
+    if (!clusterFeedbackFile_)
+    {
+        throw std::runtime_error(
+            "OutputManagerAscii: unable to open output file " + clusterFeedbackPath.string());
+    }
+    writeFeedbackHeader(clusterFeedbackFile_, true);
+}
+
+// Open the galaxy-feedback output file and write its header, for a
+// galaxy-type simulation with output.write_galaxy_feedback (optional,
+// defaults to true) not set to false. A no-op for a cluster-type
+// simulation, since a cluster-type simulation has no Galaxy object at
+// all.
+void io::OutputManagerAscii::openGalaxyFeedbackFile()
+{
+    if (simControls_.simType() != SimControls::SimType::galaxy) { return; }
+    if (!simControls_.writeGalaxyFeedback()) { return; }
+
+    const auto galaxyFeedbackPath = std::filesystem::path(simControls_.outDir()) /
+        (simControls_.modelName() + "_galaxy_feedback.txt");
+    if (std::filesystem::exists(galaxyFeedbackPath))
+    {
+        throw std::runtime_error(
+            "OutputManagerAscii: output file " + galaxyFeedbackPath.string() + " already exists");
+    }
+
+    galaxyFeedbackFile_.open(galaxyFeedbackPath);
+    if (!galaxyFeedbackFile_)
+    {
+        throw std::runtime_error(
+            "OutputManagerAscii: unable to open output file " + galaxyFeedbackPath.string());
+    }
+    writeFeedbackHeader(galaxyFeedbackFile_, false);
 }
 
 // Open the galaxy output file and write its header, for a galaxy-type
@@ -1438,6 +1521,65 @@ void io::OutputManagerAscii::writeGalaxyYields(
     }
 
     for (auto& cluster : galaxy.clusters()) { writeClusterYields(trial, time, cluster); }
+}
+
+// Write one fixed-width row of cluster feedback (trial, time, uid,
+// n_sn, mdot_wind, pdot_wind, edot_wind) to the cluster-feedback
+// output file. A no-op if output.write_cluster_feedback is false (the
+// file was not opened). Like writeClusterYields(), does not skip a
+// disrupted cluster -- see OutputManager::writeClusterFeedback()'s own
+// comment for why.
+void io::OutputManagerAscii::writeClusterFeedback(
+    const unsigned long trial, const double time, core::Cluster& cluster)
+{
+    if (!clusterFeedbackFile_.is_open()) { return; }
+
+    // Computed outside the critical section below, since the wind
+    // fluxes are computed lazily (see core::Cluster::mDotWind()'s own
+    // comment)
+    const unsigned long uid = cluster.uid();
+    const auto row = feedbackRow(cluster);
+
+    // See writeClusterYields's own comment on this critical section
+#ifdef _OPENMP
+#pragma omp critical(clusterFeedbackOutputWrite)
+#endif
+    {
+        clusterFeedbackFile_ << std::right
+                             << std::setw(uidWidth) << formatUid(trial)
+                             << std::setw(numWidth) << formatSci(time)
+                             << std::setw(uidWidth) << formatUid(uid);
+        for (const double value : row) { clusterFeedbackFile_ << std::setw(numWidth) << formatSci(value); }
+        clusterFeedbackFile_ << "\n";
+    }
+}
+
+// Write one fixed-width row of galaxy feedback (trial, time, n_sn,
+// mdot_wind, pdot_wind, edot_wind -- no uid) to the galaxy-feedback
+// output file, if it was opened, then call writeClusterFeedback() on
+// every currently-alive (non-disrupted) cluster in galaxy regardless
+// -- see writeGalaxyYields()'s own comment for why.
+void io::OutputManagerAscii::writeGalaxyFeedback(
+    const unsigned long trial, const double time, core::Galaxy& galaxy)
+{
+    if (galaxyFeedbackFile_.is_open())
+    {
+        // See writeClusterFeedback's own comment
+        const auto row = feedbackRow(galaxy);
+
+#ifdef _OPENMP
+#pragma omp critical(galaxyFeedbackOutputWrite)
+#endif
+        {
+            galaxyFeedbackFile_ << std::right
+                                << std::setw(uidWidth) << formatUid(trial)
+                                << std::setw(numWidth) << formatSci(time);
+            for (const double value : row) { galaxyFeedbackFile_ << std::setw(numWidth) << formatSci(value); }
+            galaxyFeedbackFile_ << "\n";
+        }
+    }
+
+    for (auto& cluster : galaxy.clusters()) { writeClusterFeedback(trial, time, cluster); }
 }
 
 // See this method's own header comment: checkpointing is only ever

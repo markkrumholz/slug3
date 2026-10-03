@@ -10,6 +10,7 @@
 #define OUTPUTMANAGER_HPP
 
 #include "SimControls.hpp"
+#include <array>
 #include <string>
 #include <utility>
 
@@ -47,21 +48,21 @@ namespace io
          * of the format-specific subclasses.
          *
          * Unlike simControls itself, this class no longer needs the
-         * input deck at all: the six output.write_cluster/
-         * write_cluster_spec/write_cluster_phot/write_galaxy/
-         * write_galaxy_spec/write_galaxy_phot flags the subclass
+         * input deck at all: the output.write_* flags the subclass
          * constructors gate their own group/file creation on are
          * simControls's own writeCluster()/writeClusterSpec()/
-         * writeClusterPhot()/writeGalaxy()/writeGalaxySpec()/
-         * writeGalaxyPhot() (parsed by SimControls itself -- see its
+         * writeClusterPhot()/writeClusterYields()/
+         * writeClusterFeedback()/writeGalaxy()/writeGalaxySpec()/
+         * writeGalaxyPhot()/writeGalaxyYields()/writeGalaxyFeedback()
+         * (parsed by SimControls itself -- see its
          * own readOutput()), and the deck text a subclass constructor
          * records for provenance is simControls's own inputDeckStr() --
          * so this constructor only sanity-checks the write_* flags'
          * own resulting combination:
          * @throws std::runtime_error if every output relevant to this
-         *   simulation's own SimType (all six for a galaxy-type
-         *   simulation; just writeCluster()/writeClusterSpec()/
-         *   writeClusterPhot() for a cluster-type simulation, since
+         *   simulation's own SimType (all ten for a galaxy-type
+         *   simulation; just the five writeCluster*() flags for a
+         *   cluster-type simulation, since
          *   write_galaxy* is meaningless when there is no Galaxy object
          *   at all) is false, since nothing would be written
          * @throws std::runtime_error if writeClusterPhot() and
@@ -208,6 +209,42 @@ namespace io
          * rejects both being false at once).
          */
         virtual void writeGalaxyYields(unsigned long trial, double time,
+            core::Galaxy& galaxy) = 0;
+
+        /**
+         * @brief Write a cluster's feedback (supernovae and stellar winds) as a row of the cluster-feedback datasets
+         * @param trial Trial number to which this cluster belongs
+         * @param time The output time at which this row was recorded, in yr
+         * @param cluster The cluster whose feedback should be written;
+         *   not const, since core::Cluster::mDotWind()/pDotWind()/
+         *   eDotWind() are lazily (re)computed (see their own comment)
+         * @details
+         * If cluster feedback output was not enabled for this
+         * simulation, this is a no-op. Like writeClusterYields(), and
+         * for the same reason, does not skip a disrupted cluster: its
+         * cumulative supernova count remains meaningful, and its stars
+         * still lose mass (core::Galaxy::mDotWind() likewise still
+         * counts every disrupted cluster's own wind). The values
+         * written are those of feedbackRow().
+         */
+        virtual void writeClusterFeedback(unsigned long trial, double time,
+            core::Cluster& cluster) = 0;
+
+        /**
+         * @brief Write a galaxy's feedback (supernovae and stellar winds) as a row of the galaxy-feedback datasets
+         * @param trial Trial number to which this galaxy belongs
+         * @param time The output time at which this row was recorded, in yr
+         * @param galaxy The galaxy whose feedback should be written;
+         *   not const -- see writeGalaxy()'s own comment
+         * @details
+         * Writing the galaxy's own row is a no-op if
+         * output.write_galaxy_feedback is false (or this is not a
+         * galaxy-type simulation) -- writeClusterFeedback() is still
+         * called on every currently-alive (non-disrupted) cluster in
+         * galaxy regardless, since output.write_cluster_feedback is
+         * independently togglable, exactly as for writeGalaxyYields().
+         */
+        virtual void writeGalaxyFeedback(unsigned long trial, double time,
             core::Galaxy& galaxy) = 0;
 
         /**
@@ -369,6 +406,31 @@ namespace io
          * so a run can later be reproduced
          */
         static auto currentRngStateString() -> std::string;
+
+        /**
+         * @brief Return a cluster's feedback quantities, in the units they are written to disk in
+         * @param cluster The cluster to read; not const -- see
+         *   writeClusterFeedback()'s own comment
+         * @return { n_sn, mdot_wind, pdot_wind, edot_wind }: the
+         *   cumulative number of supernovae (core::Cluster::cumSNe()),
+         *   and the wind mass flux in Msun/yr, momentum flux in
+         *   Msun km/s/yr, and energy flux in Lsun
+         * @details
+         * core::Cluster reports its wind fluxes in cgs (g cm s^-2 and
+         * erg/s); this converts them to the more conventional units
+         * used in the output files. Shared by both output formats, so
+         * that they cannot disagree on units.
+         */
+        static auto feedbackRow(core::Cluster& cluster) -> std::array<double, 4>;
+
+        /**
+         * @brief Return a galaxy's feedback quantities, in the units they are written to disk in
+         * @param galaxy The galaxy to read; not const -- see
+         *   writeGalaxy()'s own comment
+         * @return As for feedbackRow(core::Cluster&), from
+         *   core::Galaxy::cumSNe()/mDotWind()/pDotWind()/eDotWind()
+         */
+        static auto feedbackRow(core::Galaxy& galaxy) -> std::array<double, 4>;
 
         const SimControls& simControls_; /**< Simulation controls (physics and control-flow settings) */
     };

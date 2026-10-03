@@ -340,6 +340,23 @@ namespace io
         [[nodiscard]] auto writeGalaxyYields() const { return writeGalaxyYields_; }
 
         /**
+         * @brief Whether the cluster_feedback group/file should be written
+         * @return True (the default) unless output.write_cluster_feedback
+         *   was set to false in the input deck; see OutputManager's
+         *   own constructor for how this is enforced
+         */
+        [[nodiscard]] auto writeClusterFeedback() const { return writeClusterFeedback_; }
+
+        /**
+         * @brief Whether the galaxy_feedback group/file should be written
+         * @return True (the default) unless output.write_galaxy_feedback
+         *   was set to false in the input deck; only meaningful for a
+         *   galaxy-type simulation -- see OutputManager's own
+         *   constructor for how this is enforced
+         */
+        [[nodiscard]] auto writeGalaxyFeedback() const { return writeGalaxyFeedback_; }
+
+        /**
          * @brief Set the relative tolerance for PDF integration
          * @param tol New relative tolerance
          * @details
@@ -545,6 +562,25 @@ namespace io
          * not) take effect.
          */
         void setWriteGalaxyYields(bool value) { writeGalaxyYields_ = value; }
+
+        /**
+         * @brief Set whether the cluster_feedback group/file should be written
+         * @param value New value for writeClusterFeedback()
+         * @details
+         * See setWriteCluster()'s own comment on when this does (and
+         * does not) take effect.
+         */
+        void setWriteClusterFeedback(bool value) { writeClusterFeedback_ = value; }
+
+        /**
+         * @brief Set whether the galaxy_feedback group/file should be written
+         * @param value New value for writeGalaxyFeedback()
+         * @details
+         * Only meaningful for a galaxy-type simulation. See
+         * setWriteCluster()'s own comment on when this does (and does
+         * not) take effect.
+         */
+        void setWriteGalaxyFeedback(bool value) { writeGalaxyFeedback_ = value; }
 
         /**
          * @brief Set whether yields should be reported decomposed by channel
@@ -1801,13 +1837,15 @@ namespace io
          * @brief Parse the output content flags from the input deck
          * @param inputDeck A toml table holding the input deck
          * @details
-         * Reads the eight optional output.write_cluster/
+         * Reads the ten optional output.write_cluster/
          * write_cluster_spec/write_cluster_phot/write_cluster_yields/
-         * write_galaxy/write_galaxy_spec/write_galaxy_phot/
-         * write_galaxy_yields keys (each defaulting to true) into
+         * write_cluster_feedback/write_galaxy/write_galaxy_spec/
+         * write_galaxy_phot/write_galaxy_yields/write_galaxy_feedback
+         * keys (each defaulting to true) into
          * writeCluster_/writeClusterSpec_/writeClusterPhot_/
-         * writeClusterYields_/writeGalaxy_/writeGalaxySpec_/
-         * writeGalaxyPhot_/writeGalaxyYields_. Formerly done
+         * writeClusterYields_/writeClusterFeedback_/writeGalaxy_/
+         * writeGalaxySpec_/writeGalaxyPhot_/writeGalaxyYields_/
+         * writeGalaxyFeedback_. Formerly done
          * by OutputManager's own constructor directly from the input
          * deck; moved here so that a SimControls built without an
          * input deck at all (e.g. from Python) still carries these
@@ -2128,6 +2166,15 @@ namespace io
         feedback::OBwindModel obWindModel_ = feedback::OBwindModel::vinkSander21_; /**< O and B star wind velocity model -- see obWindModel()'s own comment; from the optional feedback.ob_winds key, see readFeedback(). Declared beside wrWindModel_ for the same alignment-padding reason */
         feedback::AGBwindModel agbWindModel_ = feedback::AGBwindModel::slug2_; /**< AGB star wind velocity model -- see agbWindModel()'s own comment; from the optional feedback.agb_winds key, see readFeedback(). Declared beside wrWindModel_ for the same alignment-padding reason */
         feedback::OtherwindModel otherWindModel_ = feedback::OtherwindModel::vesc_; /**< Wind velocity model for all other stars -- see otherWindModel()'s own comment; from the optional feedback.other_winds key, see readFeedback(). Declared beside wrWindModel_ for the same alignment-padding reason */
+        // writeClusterFeedback_/writeGalaxyFeedback_ are output content
+        // flags like writeCluster_ etc. above, parsed by readOutput(),
+        // but declared here instead: the eight above exactly fill one
+        // 8-byte word, while these two exactly fill the 2-byte gap left
+        // by the six 1-byte members just above before the next double,
+        // so declaring them alongside the others would add 8 bytes of
+        // padding (and trip clang-analyzer-optin.performance.Padding)
+        bool writeClusterFeedback_ = true; /**< Whether to write the cluster_feedback group/file; see writeClusterFeedback() */
+        bool writeGalaxyFeedback_ = true; /**< Whether to write the galaxy_feedback group/file (galaxy-type simulations only); see writeGalaxyFeedback() */
         double minIsotopeLifetime_ = yields::defaultMinIsotopeLifetime; /**< Minimum isotope lifetime, in yr, below which isotopes are treated as decaying instantly -- see minIsotopeLifetime()'s own comment; from the optional yields.min_isotope_lifetime key, see readYields() */
         std::vector<double> snMassLimits_; /**< Stellar mass limits, in Msun, over which supernovae occur -- see snMassLimits()'s own comment; from the optional feedback.sn_mass_range key, see readFeedback() */
         std::shared_ptr<feedback::Winds> winds_; /**< Stellar wind calculator, built by readFeedback(), or nullptr for a SimControls built without an input deck */

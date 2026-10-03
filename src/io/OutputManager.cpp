@@ -7,8 +7,12 @@
  */
 
 #include "OutputManager.hpp"
+#include "../core/Cluster.hpp"
+#include "../core/Galaxy.hpp"
+#include "../utils/Constants.hpp"
 #include "../utils/RngThread.hpp"
 #include "SimControls.hpp"
+#include <array>
 #include <chrono>
 #include <ctime>
 #include <iomanip>
@@ -24,14 +28,17 @@ io::OutputManager::OutputManager(const SimControls& simControls) :
     // own SimType is disabled, nothing at all would ever be written --
     // almost certainly a mistake. write_galaxy* is only relevant for a
     // galaxy-type simulation (there is no Galaxy object, and so no
-    // galaxy/galaxy_spectra/galaxy_phot group/file, for a cluster-type
-    // simulation), so it is excluded from this check otherwise.
+    // galaxy/galaxy_spectra/galaxy_phot/etc. group/file, for a
+    // cluster-type simulation), so it is excluded from this check
+    // otherwise.
     bool anyOutput = simControls_.writeCluster() || simControls_.writeClusterSpec() ||
-        simControls_.writeClusterPhot();
+        simControls_.writeClusterPhot() || simControls_.writeClusterYields() ||
+        simControls_.writeClusterFeedback();
     if (simControls_.simType() == SimControls::SimType::galaxy)
     {
         anyOutput = anyOutput || simControls_.writeGalaxy() ||
-            simControls_.writeGalaxySpec() || simControls_.writeGalaxyPhot();
+            simControls_.writeGalaxySpec() || simControls_.writeGalaxyPhot() ||
+            simControls_.writeGalaxyYields() || simControls_.writeGalaxyFeedback();
     }
     if (!anyOutput)
     {
@@ -79,4 +86,30 @@ auto io::OutputManager::currentRngStateString() -> std::string
 {
     const auto state = utils::rng().getState();
     return { state.data() };
+}
+
+// Unit conversions from core::Cluster's/core::Galaxy's own cgs wind
+// fluxes to the units written to disk -- see feedbackRow()'s own
+// comment
+namespace
+{
+    constexpr double kmToCm = 1e5;
+    constexpr double pDotUnit = utils::Msun * kmToCm / utils::yr; // (Msun km/s/yr) in g cm s^-2
+    constexpr double eDotUnit = utils::Lsun;                      // Lsun in erg/s
+} // namespace
+
+// Return a cluster's { n_sn, mdot_wind, pdot_wind, edot_wind }, in
+// output units
+auto io::OutputManager::feedbackRow(core::Cluster& cluster) -> std::array<double, 4>
+{
+    return { cluster.cumSNe(), cluster.mDotWind(),
+        cluster.pDotWind() / pDotUnit, cluster.eDotWind() / eDotUnit };
+}
+
+// Return a galaxy's { n_sn, mdot_wind, pdot_wind, edot_wind }, in
+// output units
+auto io::OutputManager::feedbackRow(core::Galaxy& galaxy) -> std::array<double, 4>
+{
+    return { galaxy.cumSNe(), galaxy.mDotWind(),
+        galaxy.pDotWind() / pDotUnit, galaxy.eDotWind() / eDotUnit };
 }
