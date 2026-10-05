@@ -30,6 +30,7 @@ Contents:
    nebular
    extinction
    yields
+   feedback
    slugpy
    cloudy
    examples

@@ -156,6 +156,14 @@ the simulation, how they are formatted, and where they are written.
 * ``write_galaxy_yields`` (optional, default=true; galaxy simulations only): Whether
   to write the nucleosynthetic yields of the whole galaxy; only meaningful if yield
   channels have been requested (see ``yields.channelN`` below).
+* ``write_cluster_feedback`` (optional, default=true): Whether to write the feedback
+  of each individual star cluster, i.e., its cumulative number of supernovae and the
+  instantaneous mass, momentum, and energy fluxes of its stellar winds (see
+  :ref:`sec-feedback` and ``[feedback]`` below).
+* ``write_galaxy_feedback`` (optional, default=true; galaxy simulations only): Whether
+  to write the feedback of the whole galaxy, i.e., the same quantities as
+  ``write_cluster_feedback``, summed over all clusters, field stars, and the
+  non-stochastic part of the population.
 * ``output_mode`` (optional, default="h5"): The output file format. Must be one of
   ``h5`` / ``hdf5`` (a single, consolidated HDF5 file), ``h5divided`` / ``hdf5divided``
   (HDF5 output, but skipping consolidation when SLUG is built with OpenMP, leaving
@@ -493,3 +501,49 @@ yields are included in that of ``Fe56``. Adding ``min_isotope_lifetime = 0`` wou
 instead report seven isotopes per channel, since listing ``Fe56`` would then also
 include ``Ni56`` and ``Co56`` (see ``isotopes`` above), for fourteen columns in all. See :ref:`ssec-troubleshooting-yields` for the
 errors SLUG reports for problems with the ``[yields]`` section.
+
+.. _ssec-parameters-feedback:
+
+Feedback Control Keywords
+-------------------------
+
+These keywords, in the ``[feedback]`` section, control the calculation of feedback
+from the stellar population: the number of core-collapse supernovae and the mass,
+momentum, and energy fluxes of stellar winds. The entire section is optional, and
+every keyword in it has a default. See :ref:`sec-feedback` for the physics of how
+feedback is computed and a full description of each wind model.
+
+* ``sn_mass_range`` (optional, default=none): An array of initial stellar masses, in
+  Msun, specifying the mass range or ranges in which stars end their lives as
+  core-collapse supernovae. The array is read as consecutive (lower, upper) pairs,
+  each giving one mass interval (including its endpoints); giving more than one pair
+  specifies disjoint intervals, which can be used to describe mass gaps due to failed
+  supernovae. For example, ``sn_mass_range = [8.0, 20.0, 25.0, 120.0]`` means that
+  stars with initial masses from 8 to 20 Msun and from 25 to 120 Msun explode as
+  supernovae, and no others do. The array must have an even number of elements, all
+  of which must be finite, positive, and strictly increasing, or SLUG raises an error
+  at startup. If ``sn_mass_range`` is given, it overrides any supernova mass range
+  implied by the yield model. If it is not given, the range of masses that produce
+  supernovae is taken from the ``ccsn`` yield channel (see ``yields.channelN`` above);
+  if there is no such channel either, no supernovae are counted.
+* ``wr_winds`` (optional, default="nugis_lamers_00"): The wind velocity model for
+  Wolf-Rayet stars. Must be one of ``nugis_lamers_00``, ``l_over_c``, or ``none``.
+* ``ob_winds`` (optional, default="vink_sander_21"): The wind velocity model for O and
+  B stars. Must be one of ``vink_sander_21``, ``vink_01``, or ``none``.
+* ``agb_winds`` (optional, default="slug2"): The wind velocity model for RGB and AGB
+  stars. Must be one of ``slug2`` or ``none``.
+* ``other_winds`` (optional, default="vesc"): The wind velocity model for all stars not
+  in one of the above three categories. Must be one of ``vesc`` or ``none``.
+
+An unrecognized name for any of the four wind models causes SLUG to raise an error at
+startup. Setting a wind model to ``none`` sets the wind velocity, and thus the wind
+momentum and energy fluxes, of stars in that category to zero; it does not change their
+wind mass fluxes, which come from the stellar tracks. For example, the following uses a
+fixed supernova mass range of 8 to 40 Msun and turns off winds from Wolf-Rayet stars,
+while leaving the other wind models at their defaults:
+
+.. code-block:: toml
+
+    [feedback]
+    sn_mass_range = [8.0, 40.0]
+    wr_winds = "none"
