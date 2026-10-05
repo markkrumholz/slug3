@@ -28,7 +28,7 @@ spectral and photometric output. This approximation means that, formally, the
 yields for a particular channel are characterized by the yield function
 :math:`y_X(m, Z_\mathrm{Fe})` that describes the mass of isotope
 :math:`X` returned to the ISM by a star of initial mass :math:`m` and iron
-metallicity :math:`Z_\mathrm{Fe}` upon its death.
+metallicity :math:`Z_\mathrm{Fe} = 10^{[{\rm Fe}/{\rm H}]}` upon its death.
 
 Note that the yield as we define it here is the total mass returned, not the net
 increase in mass after subtracting off the mass that went into forming the star, and

@@ -16,15 +16,15 @@ SLUG (Stochastically Lighting Up Galaxies) is a stellar population synthesis
 (SPS) code, meaning that, for a specified stellar initial mass function (IMF),
 star formation history (SFH), cluster mass function (CMF), cluster lifetime
 function (CLF), metallicity distribution [Fe/H], and (optionally) a distribution
-of extinctions (A_V), it predicts the spectra, photometry, and nucleosynthetic
-yields of both individual star clusters (treated as simple stellar populations)
-and galaxies (composite populations). In this regard, SLUG operates much like any
-other SPS code. The main difference is that SLUG regards the functions describing
-the stellar population as probability distributions, and the resulting stellar
-population as being the result of a draw from them. SLUG performs a Monte Carlo
-simulation to determine the PDF of the outputs produced by the stellar populations
-that are drawn from these distributions. The remainder of this section briefly
-describes the major conceptual pieces of a SLUG simulation. Please refer to the
+of extinctions (A_V), it predicts the spectra, photometry, nucleosynthetic
+yields, and feedback of both individual star clusters (treated as simple stellar
+populations) and galaxies (composite populations). In this regard, SLUG operates
+much like any other SPS code. The main difference is that SLUG regards the functions
+describing the stellar population as probability distributions, and the resulting
+stellar population as being the result of a draw from them. SLUG performs a Monte
+Carlo simulation to determine the PDF of the outputs produced by the stellar
+populations that are drawn from these distributions. The remainder of this section
+briefly describes the major conceptual pieces of a SLUG simulation. Please refer to the
 papers references above for a full description of the theoretical underpinning of SLUG.
 
 .. _ssec-cluster-vs-galaxy:
@@ -94,3 +94,6 @@ population synthesis. The main physics modules are:
 * :ref:`sec-yields`: SLUG can calculate the nucleosynthetic yields of stellar populations,
   i.e., the masses of individual isotopes returned to the interstellar medium by
   stars, using a variety of different yield tables.
+* :ref:`sec-feedback`: SLUG can calculate feedback from stellar populations in the form of
+  supernovae and stellar winds, using a variety of models to predict supernovae and wind
+  power.

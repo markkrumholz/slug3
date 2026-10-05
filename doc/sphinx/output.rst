@@ -288,6 +288,28 @@ how to interpret the columns of ``yields``.
   isotope present at ``time`` or the total amounts ever produced depends on
   ``yields.no_decay``.
 
+The ``cluster_feedback`` Group
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Holds the feedback (supernovae and stellar winds) of individually-tracked clusters,
+present only if ``output.write_cluster_feedback`` was not set to false -- see
+:ref:`sec-feedback` for how feedback is computed. There is one row per (cluster,
+output time) pair; call this row count ``n_rows``. Every dataset below has shape
+``(n_rows,)``.
+
+* ``trial`` (unitless integer): The trial number.
+* ``time`` (yr): The output time this feedback was computed at.
+* ``uid`` (unitless integer): The unique identifier of the cluster this feedback
+  belongs to.
+* ``n_sn`` (unitless): The cumulative number of core-collapse supernovae that have
+  occurred in the cluster by ``time``. This includes a contribution from the
+  non-stochastic part of the stellar population, and thus need not be an integer
+  (see :ref:`sec-feedback`).
+* ``mdot_wind`` (Msun/yr): The instantaneous mass flux of stellar winds from every
+  star in the cluster that is alive at ``time``.
+* ``pdot_wind`` (Msun km/(s yr)): The instantaneous momentum flux of those winds.
+* ``edot_wind`` (Lsun): The instantaneous kinetic energy flux of those winds.
+
 The ``galaxy`` Group
 ^^^^^^^^^^^^^^^^^^^^^
 
@@ -346,6 +368,25 @@ Note that in a galaxy-type simulation, the rows of ``cluster_yields`` are
 written only for clusters that have not yet disrupted at the output time in question,
 even though the yields of disrupted clusters are still included in the
 ``galaxy_yields`` totals.
+
+The ``galaxy_feedback`` Group
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Present only for a galaxy-type simulation with ``output.write_galaxy_feedback`` not
+set to false. Identical in structure and meaning to the ``cluster_feedback`` group
+above -- including its ``n_sn``, ``mdot_wind``, ``pdot_wind``, and ``edot_wind``
+datasets -- but with no ``uid`` dataset: each row is one (trial, output time) pair
+(the feedback of the whole galaxy), not one (cluster, output time) pair. The
+supernova count in each row is summed over every star that has exploded in the
+galaxy by that time, and the wind fluxes over every star alive at that time,
+whether it formed in an individually-tracked cluster (including clusters that have
+since disrupted), as a field star, or as part of the continuous (non-stochastic)
+stellar population.
+
+As for yields, in a galaxy-type simulation the rows of ``cluster_feedback`` are
+written only for clusters that have not yet disrupted at the output time in
+question, even though the feedback of disrupted clusters is still included in the
+``galaxy_feedback`` totals.
 
 The ``cluster_cloudy`` Group
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -520,6 +561,17 @@ increasing atomic number and then mass number, matching the ordering of the
 the HDF5 output, the ASCII file has no separate record of which model was used for
 each channel; this is recorded in the input deck copy in the summary file.
 
+The ``<model_name>_cluster_feedback.txt`` File
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Only written if ``output.write_cluster_feedback`` was not set to false. One row per
+(cluster, output time) pair. Columns, in order: ``trial``, ``time`` (yr), ``uid``,
+``n_sn``, ``mdot_wind`` (Msun/yr), ``pdot_wind`` (Msun km/s/yr), ``edot_wind``
+(Lsun). See the ``cluster_feedback`` HDF5 group above for what each column means.
+In the row of units in the header, the units of ``pdot_wind`` are written as
+``Msun_km/s/yr``, without spaces, so that the units row splits into exactly one
+token per column.
+
 The ``<model_name>_galaxy.txt`` File
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -563,3 +615,12 @@ requested and ``output.write_galaxy_yields`` not set to false. Identical to
 ``<model_name>_cluster_yields.txt`` above -- same columns and meanings -- except with no
 ``uid`` column, and one row per (trial, output time) pair describing the yields of
 the whole galaxy rather than one individual cluster's.
+
+The ``<model_name>_galaxy_feedback.txt`` File
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Only written for a galaxy-type simulation with ``output.write_galaxy_feedback`` not
+set to false. Identical to ``<model_name>_cluster_feedback.txt`` above -- same
+columns and meanings -- except with no ``uid`` column, and one row per (trial,
+output time) pair describing the feedback of the whole galaxy rather than of one
+individual cluster.
