@@ -522,10 +522,11 @@ feedback is computed and a full description of each wind model.
   stars with initial masses from 8 to 20 Msun and from 25 to 120 Msun explode as
   supernovae, and no others do. The array must have an even number of elements, all
   of which must be finite, positive, and strictly increasing, or SLUG raises an error
-  at startup. If ``sn_mass_range`` is given, it overrides any supernova mass range
-  implied by the yield model. If it is not given, the range of masses that produce
-  supernovae is taken from the ``ccsn`` yield channel (see ``yields.channelN`` above);
-  if there is no such channel either, no supernovae are counted.
+  at startup. If ``sn_mass_range`` is given and non-empty, it overrides any supernova
+  mass range implied by the yield model. If it is omitted or empty, the range of masses
+  that produce supernovae is taken from the ``ccsn`` yield channel (see
+  ``yields.channelN`` above); if there is no such channel either, no supernovae are
+  counted.
 * ``wr_winds`` (optional, default="nugis_lamers_00"): The wind velocity model for
   Wolf-Rayet stars. Must be one of ``nugis_lamers_00``, ``l_over_c``, or ``none``.
 * ``ob_winds`` (optional, default="vink_sander_21"): The wind velocity model for O and
