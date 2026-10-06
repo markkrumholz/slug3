@@ -247,8 +247,16 @@ auto core::SimCluster::run() -> int
         // (rankBatchStart, rankBatchEnd) == (batchStart, batchEnd) when
         // this build was not compiled with SLUG_MPI, or is running as a
         // single rank.
-        const auto [rankBatchStart, rankBatchEnd] =
-            utils::mpiPartitionRange(batchStart, batchEnd);
+        //
+        // Unpacked into plain variables rather than a structured
+        // binding: rankBatchStart/rankBatchEnd are used inside the
+        // "#pragma omp parallel for" below, and Clang (as of 22) does
+        // not support capturing a structured binding in an OpenMP
+        // region, so a structured binding here fails to compile under
+        // Clang with OpenMP enabled.
+        const auto rankBatch = utils::mpiPartitionRange(batchStart, batchEnd);
+        const unsigned long rankBatchStart = rankBatch.first;
+        const unsigned long rankBatchEnd = rankBatch.second;
 
 #ifdef _OPENMP
         // See runTrial()'s own comment for why each trial is

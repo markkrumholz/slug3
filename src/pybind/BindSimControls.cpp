@@ -260,8 +260,8 @@ Parameters
 imf : str
     A numerical value (interpreted as a delta-function IMF at that
     mass) or the name of an IMF PDF file, resolved relative to
-    SLUG_DIR/REPO_DIR under data/imfs -- the same way stars.IMF is
-    resolved when parsing an input deck.
+    SLUG_DIR, SLUG_DATA_PATH, or REPO_DIR under data/imfs -- the same
+    way stars.IMF is resolved when parsing an input deck.
 
 Throws
 ------
@@ -389,8 +389,8 @@ Unlike setIMF()/setCMF()/setFeH()/setCLF(), a numerical value is not
 interpreted as a delta function, but as the normalization of a
 non-normalized PDF that is constant in time -- mirroring how
 galaxy.sfr itself is handled when parsing an input deck. Also unlike
-those four, a file name is not resolved relative to SLUG_DIR/REPO_DIR;
-it is used as given. Also clears sfrDist back to invalid/empty -- see
+those four, a file name is not resolved relative to SLUG_DIR,
+SLUG_DATA_PATH, or REPO_DIR; it is used as given. Also clears sfrDist back to invalid/empty -- see
 setSFRDist()'s own docstring for why.)doc";
 
 static constexpr std::string_view setSFRDistDocstring = R"doc(Set the distribution from which a single, constant star formation rate is drawn.

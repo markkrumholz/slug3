@@ -134,3 +134,7 @@ doc/sphinx/doxygen/
 doc/sphinx/cpp_api/
 doc/sphinx/_build/
 doc/html/
+
+# Git commit hash recorded for sdists by CMakeLists.txt (see its own
+# SLUG_GIT_HASH comment); a build artifact, not source
+.slug_git_hash

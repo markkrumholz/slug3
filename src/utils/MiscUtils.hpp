@@ -31,14 +31,40 @@ namespace utils
     }
 
     /**
-     * @brief Look for a file in the current working directory, SLUG_DIR, or REPO_DIR
+     * @brief Split a search-path string into its component directories
+     * @param searchPath A list of directories separated by the
+     *   platform's path-list separator (':' on POSIX, ';' on Windows),
+     *   as in the PATH environment variable
+     * @return The non-empty entries of searchPath, in order
+     */
+    inline auto splitSearchPath(const std::string& searchPath) -> std::vector<std::string>
+    {
+#ifdef _WIN32
+        constexpr char sep = ';';
+#else
+        constexpr char sep = ':';
+#endif
+        std::vector<std::string> dirs;
+        std::size_t start = 0;
+        while (start <= searchPath.size())
+        {
+            const auto end = std::min(searchPath.find(sep, start), searchPath.size());
+            if (end > start) { dirs.push_back(searchPath.substr(start, end - start)); }
+            start = end + 1;
+        }
+        return dirs;
+    }
+
+    /**
+     * @brief Look for a file in the current working directory, SLUG_DIR, SLUG_DATA_PATH, or REPO_DIR
      * @param fileName File name
-     * @param prefix Prefix within SLUG_DIR/REPO_DIR to search
+     * @param prefix Prefix within SLUG_DIR/SLUG_DATA_PATH/REPO_DIR to search
      * @returns Path to file
      * @details
      * This routine searches for files with the name fileName in the current
      * working directory, the directory specified by the environment variable
-     * SLUG_DIR, and REPO_DIR (the directory containing the project's
+     * SLUG_DIR, each directory listed in the environment variable
+     * SLUG_DATA_PATH, and REPO_DIR (the directory containing the project's
      * top-level CMakeLists.txt, baked in at compile time -- see
      * CMakeLists.txt), with the following resolution rules:
      * (1) If a file matching fileName exists in the current working directory, return
@@ -48,9 +74,18 @@ namespace utils
      * (3) If fileName is not an absolute path, and the environment variable SLUG_DIR
      *     is set, search for a file named SLUG_DIR/prefix/fileName, and return a path to it
      *     if found.
-     * (4) If still not found, search for a file named REPO_DIR/prefix/fileName, and
-     *     return a path to it if found.
-     * (5) Otherwise, return an empty path.
+     * (4) If still not found, and the environment variable SLUG_DATA_PATH is set,
+     *     treat it as a list of directories separated as in PATH (see
+     *     splitSearchPath), and search each one, in order, for a file named
+     *     dir/prefix/fileName, returning a path to the first one found.
+     *     slugpy sets this (see slugpy/_paths.py) so that a pip-installed copy
+     *     of slug can find both its own bundled data files and any large data
+     *     downloaded into a per-user data directory.
+     * (5) If still not found, and REPO_DIR is not empty, search for a file named
+     *     REPO_DIR/prefix/fileName, and return a path to it if found. REPO_DIR is
+     *     empty for a pip-installed build, whose source tree does not outlive
+     *     installation.
+     * (6) Otherwise, return an empty path.
      */
     inline auto getFilePath(const std::string& fileName,
         const std::string& prefix = "")
@@ -67,9 +102,24 @@ namespace utils
             if (std::filesystem::exists(slugDirPath)) { return slugDirPath; }
         }
 
-        auto repoDirPath = std::filesystem::path(REPO_DIR) /
-            std::filesystem::path(prefix) / filePath;
-        if (std::filesystem::exists(repoDirPath)) { return repoDirPath; }
+        auto *slugDataPath = std::getenv("SLUG_DATA_PATH"); // NOLINT(concurrency-mt-unsafe) -- see SLUG_DIR above
+        if (slugDataPath != nullptr)
+        {
+            for (const auto& dir : splitSearchPath(slugDataPath))
+            {
+                auto dataDirPath = std::filesystem::path(dir) /
+                    std::filesystem::path(prefix) / filePath;
+                if (std::filesystem::exists(dataDirPath)) { return dataDirPath; }
+            }
+        }
+
+        const std::string repoDir = REPO_DIR;
+        if (!repoDir.empty())
+        {
+            auto repoDirPath = std::filesystem::path(repoDir) /
+                std::filesystem::path(prefix) / filePath;
+            if (std::filesystem::exists(repoDirPath)) { return repoDirPath; }
+        }
 
         return std::filesystem::path();
     }
