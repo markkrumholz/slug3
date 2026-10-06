@@ -21,8 +21,10 @@ import argparse
 import base64
 import binascii
 import hashlib
+import os
 import pathlib
 import re
+import tempfile
 from collections.abc import MutableMapping, Sequence
 from typing import Any, cast
 
@@ -321,11 +323,11 @@ def _atomic_write_bytes(dest: pathlib.Path, data: bytes) -> None:
     """
     Write data to dest, replacing dest only once the write has fully succeeded.
 
-    Writes to a "dest.part" sibling first and then renames it into
-    place, as stream_download does, so that an interrupted write never
-    leaves a truncated registry at dest -- which matters most for a
-    merged registry, whose previous content may include entries a user
-    added by hand.
+    Writes to a uniquely named temporary sibling of dest first and then
+    renames it into place, so that an interrupted write never leaves a
+    truncated registry at dest -- which matters most for a merged
+    registry, whose previous content may include entries a user added
+    by hand. The temporary file is removed if either step fails.
 
     Parameters
     ----------
@@ -334,13 +336,15 @@ def _atomic_write_bytes(dest: pathlib.Path, data: bytes) -> None:
     data : bytes
         Content to write.
     """
-    tmp = dest.with_name(dest.name + ".part")
+    fd, tmp_name = tempfile.mkstemp(dir=dest.parent, prefix=dest.name + ".", suffix=".part")
+    tmp = pathlib.Path(tmp_name)
     try:
-        tmp.write_bytes(data)
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        tmp.replace(dest)
     except BaseException:
         tmp.unlink(missing_ok=True)
         raise
-    tmp.replace(dest)
 
 
 def _is_safe_path_component(name: str) -> bool:

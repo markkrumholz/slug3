@@ -113,4 +113,4 @@ def test_install_toml_writes_and_merges_without_leftovers(tmp_path: Path) -> Non
     download_data.install_toml(b'a = 2\n[t]\nx = 3\n', dest, overwrite=False, verbose=False)
     merged = dest.read_text()
     assert "a = 2" in merged and "local = 5" in merged and "x = 3" in merged
-    assert not (tmp_path / "reg.toml.part").exists()
+    assert sorted(f.name for f in tmp_path.iterdir()) == ["reg.toml"]
