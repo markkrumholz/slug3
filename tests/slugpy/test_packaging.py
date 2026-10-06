@@ -103,3 +103,14 @@ def test_deep_merge_toml_keeps_local_entries() -> None:
     remote: dict[str, object] = {"a": {"x": 10}, "lst": [3, 1], "s": "new"}
     download_data.deep_merge_toml(local, remote)  # pyright: ignore[reportArgumentType]
     assert local == {"a": {"x": 10, "local_only": 2}, "lst": [3, 1, 2], "s": "new"}
+
+
+def test_install_toml_writes_and_merges_without_leftovers(tmp_path: Path) -> None:
+    dest = tmp_path / "reg.toml"
+    download_data.install_toml(b'a = 1\n[t]\nx = 1\n', dest, overwrite=False, verbose=False)
+    assert dest.read_text() == 'a = 1\n[t]\nx = 1\n'
+    dest.write_text('a = 1\nlocal = 5\n[t]\nx = 1\n')
+    download_data.install_toml(b'a = 2\n[t]\nx = 3\n', dest, overwrite=False, verbose=False)
+    merged = dest.read_text()
+    assert "a = 2" in merged and "local = 5" in merged and "x = 3" in merged
+    assert not (tmp_path / "reg.toml.part").exists()

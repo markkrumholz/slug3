@@ -304,7 +304,7 @@ def install_toml(remote_bytes: bytes, dest: pathlib.Path, overwrite: bool, verbo
         Print what was done.
     """
     if overwrite or not dest.exists():
-        dest.write_bytes(remote_bytes)
+        _atomic_write_bytes(dest, remote_bytes)
         if verbose:
             print(f"wrote {dest}")
         return
@@ -312,9 +312,35 @@ def install_toml(remote_bytes: bytes, dest: pathlib.Path, overwrite: bool, verbo
     local_doc: MutableMapping[str, Any] = tomlkit.parse(dest.read_text())
     remote_doc: MutableMapping[str, Any] = tomlkit.parse(remote_bytes.decode("utf-8"))
     deep_merge_toml(local_doc, remote_doc)
-    dest.write_text(tomlkit.dumps(local_doc))
+    _atomic_write_bytes(dest, tomlkit.dumps(local_doc).encode("utf-8"))
     if verbose:
         print(f"merged {dest}")
+
+
+def _atomic_write_bytes(dest: pathlib.Path, data: bytes) -> None:
+    """
+    Write data to dest, replacing dest only once the write has fully succeeded.
+
+    Writes to a "dest.part" sibling first and then renames it into
+    place, as stream_download does, so that an interrupted write never
+    leaves a truncated registry at dest -- which matters most for a
+    merged registry, whose previous content may include entries a user
+    added by hand.
+
+    Parameters
+    ----------
+    dest : pathlib.Path
+        File to write.
+    data : bytes
+        Content to write.
+    """
+    tmp = dest.with_name(dest.name + ".part")
+    try:
+        tmp.write_bytes(data)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+    tmp.replace(dest)
 
 
 def _is_safe_path_component(name: str) -> bool:
