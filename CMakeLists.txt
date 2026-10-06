@@ -1,5 +1,90 @@
 cmake_minimum_required(VERSION 3.15)
-project(slug VERSION 0.1 LANGUAGES CXX C)
+
+# The version number lives in exactly one place, pyproject.toml's own
+# [project] version, which is also what pip/scikit-build-core use for
+# an installed package -- read it from there so a plain CMake build and
+# a pip-installed one always agree.
+file(STRINGS ${CMAKE_CURRENT_SOURCE_DIR}/pyproject.toml SLUG_VERSION_LINE
+    REGEX "^version[ \t]*=[ \t]*\"[0-9]+\\.[0-9]+\\.[0-9]+\"")
+string(REGEX REPLACE ".*\"([0-9]+\\.[0-9]+\\.[0-9]+)\".*" "\\1" SLUG_VERSION "${SLUG_VERSION_LINE}")
+if(NOT SLUG_VERSION)
+    message(FATAL_ERROR "Could not read version from pyproject.toml")
+endif()
+project(slug VERSION ${SLUG_VERSION} LANGUAGES CXX C)
+
+# SKBUILD is set by scikit-build-core, i.e. when this project is being
+# built by `pip install .` (see pyproject.toml's [tool.scikit-build])
+# rather than by a plain `cmake -B build`. A plain CMake build keeps
+# the in-tree developer workflow described in AGENTS.md (slugPython
+# built straight into slugpy/, data found via REPO_DIR); an SKBUILD
+# build instead installs slugPython, the slug CLI, and the small,
+# checked-in data files into the slugpy package itself -- see the
+# install() rules at the end of this file.
+if(SKBUILD)
+    message(STATUS "Building slug ${SLUG_VERSION} via scikit-build-core (pip install)")
+endif()
+
+# Determine the current git commit hash, so it can be embedded in output
+# files to record exactly which version of slug produced them. This is
+# captured at configure time, so re-run cmake to refresh the embedded
+# hash after committing. An sdist (see pyproject.toml) is not a git
+# checkout, so when scikit-build-core builds one (SKBUILD_STATE "sdist",
+# with sdist.cmake = true), the hash is recorded in .slug_git_hash at
+# the source root, which the sdist then includes; a later build from
+# that sdist, where git can't supply the hash, reads it back from there.
+# Falls back to "unknown" if neither is available (e.g. a plain source
+# archive of a non-git copy).
+# git is only trusted if this source tree is itself the top level of
+# the repository it finds -- an unpacked sdist that happens to sit
+# somewhere inside some other, unrelated git repository would
+# otherwise pick up that repository's own hash instead.
+set(SLUG_GIT_HASH_FILE ${CMAKE_SOURCE_DIR}/.slug_git_hash)
+set(SLUG_GIT_HASH "")
+execute_process(
+    COMMAND git rev-parse --show-toplevel
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    OUTPUT_VARIABLE SLUG_GIT_TOPLEVEL
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+    RESULT_VARIABLE SLUG_GIT_TOPLEVEL_RESULT
+)
+get_filename_component(SLUG_SOURCE_REALPATH "${CMAKE_SOURCE_DIR}" REALPATH)
+if(SLUG_GIT_TOPLEVEL_RESULT EQUAL 0 AND SLUG_GIT_TOPLEVEL)
+    get_filename_component(SLUG_GIT_TOPLEVEL "${SLUG_GIT_TOPLEVEL}" REALPATH)
+endif()
+if(SLUG_GIT_TOPLEVEL_RESULT EQUAL 0 AND SLUG_GIT_TOPLEVEL STREQUAL SLUG_SOURCE_REALPATH)
+    execute_process(
+        COMMAND git rev-parse HEAD
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        OUTPUT_VARIABLE SLUG_GIT_HASH
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+        RESULT_VARIABLE SLUG_GIT_HASH_RESULT
+    )
+    if(NOT SLUG_GIT_HASH_RESULT EQUAL 0)
+        set(SLUG_GIT_HASH "")
+    endif()
+endif()
+if(SLUG_GIT_HASH)
+    if(SKBUILD_STATE STREQUAL "sdist")
+        file(WRITE ${SLUG_GIT_HASH_FILE} "${SLUG_GIT_HASH}\n")
+    endif()
+elseif(EXISTS ${SLUG_GIT_HASH_FILE})
+    file(STRINGS ${SLUG_GIT_HASH_FILE} SLUG_GIT_HASH LIMIT_COUNT 1)
+else()
+    set(SLUG_GIT_HASH "unknown")
+endif()
+if(NOT SLUG_GIT_HASH)
+    set(SLUG_GIT_HASH "unknown")
+endif()
+
+# Building an sdist only needs the hash recorded above, so stop here
+# rather than going on to require GSL, HDF5, etc. just to package the
+# source tree
+if(SKBUILD_STATE STREQUAL "sdist")
+    message(STATUS "Recorded git hash ${SLUG_GIT_HASH} in ${SLUG_GIT_HASH_FILE} for the sdist")
+    return()
+endif()
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -49,8 +134,18 @@ endif()
 # preprocessor macro for "MPI is available", so code that depends on it
 # must guard itself with #ifdef SLUG_MPI, defined below only for the
 # targets that actually link MPI::MPI_CXX.
-find_package(MPI)
-if(NOT MPI_CXX_FOUND)
+# Off by default for a pip-installed (SKBUILD) build, whose slug CLI is
+# meant to be portable across machines, which an MPI build (tied to one
+# specific MPI implementation's ABI) is not.
+if(SKBUILD)
+    option(SLUG_ENABLE_MPI "Build the slug CLI with MPI support, if MPI is found" OFF)
+else()
+    option(SLUG_ENABLE_MPI "Build the slug CLI with MPI support, if MPI is found" ON)
+endif()
+if(SLUG_ENABLE_MPI)
+    find_package(MPI)
+endif()
+if(SLUG_ENABLE_MPI AND NOT MPI_CXX_FOUND)
     message(WARNING "MPI not found: building without multi-process support")
 endif()
 
@@ -58,22 +153,8 @@ endif()
 # own comment for the native/package/submodule priority this uses.
 include(cmake/Mdspan.cmake)
 
-# Determine the current git commit hash, so it can be embedded in output
-# files to record exactly which version of slug produced them. Falls back
-# to "unknown" if git isn't available or this isn't a git checkout (e.g.
-# a source tarball). This is captured at configure time, so re-run cmake
-# to refresh the embedded hash after committing.
-execute_process(
-    COMMAND git rev-parse HEAD
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-    OUTPUT_VARIABLE SLUG_GIT_HASH
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    ERROR_QUIET
-    RESULT_VARIABLE SLUG_GIT_HASH_RESULT
-)
-if(NOT SLUG_GIT_HASH_RESULT EQUAL 0 OR NOT SLUG_GIT_HASH)
-    set(SLUG_GIT_HASH "unknown")
-endif()
+# SLUG_GIT_HASH (see the top of this file) is embedded in output files
+# via the generated SlugVersion.hpp header
 configure_file(
     ${CMAKE_SOURCE_DIR}/src/io/SlugVersion.hpp.in
     ${CMAKE_BINARY_DIR}/generated/io/SlugVersion.hpp
@@ -86,8 +167,16 @@ configure_file(
 # found even when SLUG_DIR isn't set and the working directory isn't the
 # repo root -- e.g. when slugPython is imported from an arbitrary
 # directory. Applies directory-wide, to every target below, since
-# getFilePath is reachable from most of them.
-add_compile_definitions(REPO_DIR="${CMAKE_SOURCE_DIR}")
+# getFilePath is reachable from most of them. Empty for a pip-installed
+# (SKBUILD) build, whose source tree is typically a temporary directory
+# that no longer exists once installation finishes; getFilePath skips
+# an empty REPO_DIR, and an installed slugpy instead finds its data via
+# SLUG_DATA_PATH (see slugpy/_paths.py).
+if(SKBUILD)
+    add_compile_definitions(REPO_DIR="")
+else()
+    add_compile_definitions(REPO_DIR="${CMAKE_SOURCE_DIR}")
+endif()
 
 # pybind11, for the Python frontend
 add_subdirectory(src/extern/pybind11)
@@ -543,7 +632,9 @@ add_executable(slugTestSpecsyn
 # that wraps it (see slugpy/__init__.py), rather than into the build
 # directory, so that package's compiled and pure-Python halves always
 # live side by side and "import slugpy" works straight out of the
-# source tree with no separate install step.
+# source tree with no separate install step. (A pip-installed, SKBUILD
+# build instead install()s it into the slugpy package -- see the end of
+# this file.)
 pybind11_add_module(slugPython
     src/pybind/Bindings.cpp
     src/pybind/BindInterpolator1D.cpp
@@ -614,9 +705,11 @@ pybind11_add_module(slugPython
     src/yields/YieldChannel.cpp
     src/yields/Yields.cpp
 )
-set_target_properties(slugPython PROPERTIES
-    OUTPUT_NAME _slug
-    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/slugpy)
+set_target_properties(slugPython PROPERTIES OUTPUT_NAME _slug)
+if(NOT SKBUILD)
+    set_target_properties(slugPython PROPERTIES
+        LIBRARY_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/slugpy)
+endif()
 
 # Force optimized flags for slugPython, independent of CMAKE_BUILD_TYPE,
 # for the same reason as slugTestCoreFull above: it drives the same
@@ -826,11 +919,16 @@ endif()
 # slugpy/_slug.pyi is gitignored (see .gitignore): it's a build
 # artifact, one-to-one with the _slug binary that produced it, not
 # source to commit.
+# Skipped for a pip-installed (SKBUILD) build, since it imports
+# slugpy._slug from the source tree, where an SKBUILD build does not
+# put it.
 execute_process(
     COMMAND ${Python_EXECUTABLE} -c "import pybind11_stubgen"
     RESULT_VARIABLE PYBIND11_STUBGEN_MISSING
     OUTPUT_QUIET ERROR_QUIET)
-if(PYBIND11_STUBGEN_MISSING EQUAL 0)
+if(SKBUILD)
+    # Nothing to do; see above
+elseif(PYBIND11_STUBGEN_MISSING EQUAL 0)
     message(STATUS "pybind11-stubgen found: slugPython will regenerate slugpy/_slug.pyi after each build")
     # -o ${CMAKE_SOURCE_DIR}: pybind11-stubgen mirrors the dotted module
     # name ("slugpy._slug") under the output root, so this lands the
@@ -868,12 +966,16 @@ endif()
 # note in that case, the same pattern as pybind11-stubgen above. The
 # built site (doc/html/) is gitignored: it's a build artifact, not
 # source to commit.
+# Never built for a pip-installed (SKBUILD) build, which installs
+# only the slug CLI and the slugpy package.
 find_program(DOXYGEN_EXECUTABLE doxygen)
 execute_process(
     COMMAND ${Python_EXECUTABLE} -c "import sphinx, breathe, exhale"
     RESULT_VARIABLE SLUG_DOCS_PYTHON_MISSING
     OUTPUT_QUIET ERROR_QUIET)
-if(DOXYGEN_EXECUTABLE AND SLUG_DOCS_PYTHON_MISSING EQUAL 0)
+if(SKBUILD)
+    # Nothing to do; see above
+elseif(DOXYGEN_EXECUTABLE AND SLUG_DOCS_PYTHON_MISSING EQUAL 0)
     message(STATUS "sphinx/breathe/exhale/doxygen found: doc/html will be (re)built as part of the default build")
     # PATH: doxygen's own directory is prepended explicitly (rather
     # than relying on it already being on PATH for whatever invokes
@@ -1057,3 +1159,58 @@ add_custom_command(
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/pdfs/assets
         ${CMAKE_CURRENT_BINARY_DIR}/assets   
 )
+
+# Installation, for a pip-installed (SKBUILD) build only -- a plain
+# CMake build is used in place, straight from the source/build trees,
+# and has nothing to install. Everything lands inside the slugpy
+# package directory (scikit-build-core's install prefix is the wheel's
+# own root, so "slugpy/..." here means site-packages/slugpy/...):
+#   - slugpy/_slug*.so: the compiled extension module.
+#   - slugpy/_bin/slug: the CLI executable, launched by the "slug"
+#     console script (slugpy/_cli.py) rather than installed onto PATH
+#     directly, so that it can find the data below.
+#   - slugpy/_share/...: the small data files checked into the
+#     repository, laid out exactly as in the source tree (data/imfs/,
+#     src/pybind/assets/, etc.), so every existing
+#     utils::getFilePath(name, prefix) call resolves unchanged once
+#     slugpy/_share is on SLUG_DATA_PATH (see slugpy/_paths.py). Files
+#     are listed explicitly, or by a pattern matching only checked-in
+#     files, so that large data a developer has downloaded into their
+#     own checkout's data/ is never swept into the package.
+if(SKBUILD)
+    # Keep the link-time search path for shared libraries (e.g. a
+    # Homebrew or system GSL/HDF5) in the installed binaries' RPATH,
+    # so they still find those libraries once installed
+    set_target_properties(slug slugPython PROPERTIES
+        INSTALL_RPATH_USE_LINK_PATH TRUE)
+
+    install(TARGETS slugPython LIBRARY DESTINATION slugpy)
+    # slugpy's pure-Python half: *.py files only, so that build products
+    # an in-tree build may have left in the source slugpy/ directory
+    # (_slug*.so, _slug.pyi, __pycache__) are never picked up -- see
+    # pyproject.toml's own wheel.packages comment
+    install(DIRECTORY slugpy/ DESTINATION slugpy
+        FILES_MATCHING PATTERN "*.py"
+        PATTERN "__pycache__" EXCLUDE)
+    install(TARGETS slug RUNTIME DESTINATION slugpy/_bin)
+
+    set(SLUG_SHARE slugpy/_share)
+    install(FILES data/cloudy/cloudy.in_grid_template
+        DESTINATION ${SLUG_SHARE}/data/cloudy)
+    install(FILES data/elem/isotopes.h5
+        DESTINATION ${SLUG_SHARE}/data/elem)
+    install(FILES data/extinct/extinct.h5 data/extinct/extinct.toml
+        DESTINATION ${SLUG_SHARE}/data/extinct)
+    install(FILES data/filters/V_filter.h5 data/filters/V_filter.toml
+        DESTINATION ${SLUG_SHARE}/data/filters)
+    install(FILES data/spectra/vega.h5
+        DESTINATION ${SLUG_SHARE}/data/spectra)
+    install(DIRECTORY data/imfs/
+        DESTINATION ${SLUG_SHARE}/data/imfs
+        FILES_MATCHING PATTERN "*.toml")
+    install(DIRECTORY data/yields/
+        DESTINATION ${SLUG_SHARE}/data/yields
+        FILES_MATCHING PATTERN "*.h5" PATTERN "yields.toml")
+    install(FILES src/pybind/assets/PyDefaults.toml
+        DESTINATION ${SLUG_SHARE}/src/pybind/assets)
+endif()

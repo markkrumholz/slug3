@@ -207,6 +207,100 @@ jobs:
           fi
           echo "$CHANGED" | xargs -P "$(nproc)" -n1 clang-tidy-18 -p build
 
+  pip-install:
+    # Checks that `pip install .` (scikit-build-core, see pyproject.toml)
+    # builds and installs a working slug: the _slug extension, the slug
+    # CLI (via its console-script launcher, slugpy/_cli.py), and the
+    # small data files bundled into the package (slugpy/_share). The
+    # smoke test runs from a scratch directory, outside the checkout,
+    # with SLUG_DIR unset, so the IMF, yield tables, isotope table, and
+    # SimControls' Python defaults can only be found via the installed
+    # package's own SLUG_DATA_PATH entries -- the only thing it borrows
+    # from the checkout is the small test track fixture, by absolute
+    # path, since real track libraries are not available on CI.
+    # Built with clang-18 + libc++ (for <mdspan>, as in the lint and
+    # pyright jobs) with libomp, so this is also the one job that
+    # compiles slug with Clang and OpenMP together.
+    name: pip install
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-18 libc++-18-dev libc++abi-18-dev libomp-18-dev libgsl-dev libhdf5-dev ninja-build
+
+      - name: pip install .
+        # scikit-build-core passes CMAKE_ARGS through to CMake's own
+        # configure step; see the test job's own CMAKE_CXX_SCAN_FOR_MODULES
+        # comment for why that flag is set
+        env:
+          CC: clang-18
+          CXX: clang++-18
+          CMAKE_GENERATOR: Ninja
+          CMAKE_ARGS: >-
+            -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
+            -DCMAKE_CXX_FLAGS=-stdlib=libc++
+            -DCMAKE_EXE_LINKER_FLAGS=-stdlib=libc++
+            -DCMAKE_MODULE_LINKER_FLAGS=-stdlib=libc++
+        run: python -m pip install -v .
+
+      - name: Smoke test the installed package
+        run: |
+          unset SLUG_DIR PYTHONPATH
+          REPO="$GITHUB_WORKSPACE"
+          cd "$(mktemp -d)"
+          cat > deck.toml <<EOF
+          sim_type = "cluster"
+          n_trial = 3
+
+          [stars]
+          IMF = "chabrier.toml"
+          track_registry = "$REPO/tests/tracks/assets/tracks.toml"
+          tracks = "MIST_test"
+          FeH = 0.0
+          alphaFe = -0.2
+
+          [spectra]
+          model = "blackbody"
+
+          [clusters]
+          CMF = 1e3
+
+          [output]
+          model_name = "smoke_cli"
+          output_times = [1.0e6, 1.0e7]
+
+          [yields.channel1]
+          channel = "ccsn"
+          model = "sukhbold16"
+
+          [nebular]
+          compute_neb = false
+          EOF
+          sed 's/smoke_cli/smoke_py/' deck.toml > deck_py.toml
+          slug deck.toml
+          python - <<'EOF'
+          import slugpy
+
+          for name in ("smoke_cli", "smoke_py"):
+              if name == "smoke_py":
+                  slugpy.run_sim(slugpy.SimControls("deck_py.toml"), progress=False)
+              r = slugpy.read(name)
+              assert len(r.clusters["uid"]) == 3, name
+              assert len(r.cluster_yields.isotopes) > 0, name
+              print(name, "n_sn:", r.cluster_feedback["n_sn"][:])
+          EOF
+
   pyright:
     name: pyright
     runs-on: ubuntu-latest

@@ -1,34 +1,50 @@
 # pyproject.toml
 #
-# Documents slugpy's own Python dependencies -- there is deliberately
-# no [build-system] table here, so this file does not make `pip
-# install .` work. slugpy's compiled half (the _slug extension module,
-# wrapping src/pybind) is built by CMake directly into the slugpy/
-# directory alongside its pure-Python half, with no separate
-# packaging/install step (see AGENTS.md's own Building section); a
-# setuptools-style build here would only see the pure-Python files and
-# produce a package missing _slug entirely. This file exists purely so
-# tooling (dependabot, IDEs, `pip install -r <(python -c
-# "import tomllib,sys; ...")`-style scripts, etc.) has one place to
-# read slugpy's actual runtime requirements from.
+# Python packaging metadata for slug. `pip install .` (from a checkout
+# or an sdist) builds and installs the slugpy package via
+# scikit-build-core, which drives the top-level CMakeLists.txt with
+# SKBUILD set: that builds the _slug extension module and the slug CLI
+# executable and installs both, together with the small data files
+# checked into this repository, into the slugpy package itself (see
+# the install() rules at the end of CMakeLists.txt). Large data
+# (stellar tracks, spectral libraries, nebular tables) is not bundled;
+# fetch it with `python -m slugpy.download_data`.
+#
+# A plain CMake build (`cmake -S . -B build`) is unaffected by any of
+# this and remains the developer workflow: it builds _slug straight
+# into slugpy/ in the source tree, with no install step (see
+# AGENTS.md's own Building section).
+#
+# The [project] version below is the single source of truth for slug's
+# version number; CMakeLists.txt reads it from here.
 #
 # :copyright: Copyright (c) 2026 Mark Krumholz
+
+[build-system]
+requires = ["scikit-build-core>=0.10"]
+build-backend = "scikit_build_core.build"
 
 [project]
 name = "slugpy"
 description = "Python frontend for slug3 -- stellar population synthesis, and slug cluster/galaxy simulation output analysis."
 license = { file = "LICENSE" }
 requires-python = ">=3.12"
-version = "0.1"
+version = "3.0.1"
 dependencies = [
     "astropy",
     "h5py",
     "numpy",
+    "platformdirs",
     "scipy",
     "tomlkit",
     "tqdm",
     "urllib3",
 ]
+
+[project.scripts]
+# The slug CLI; see slugpy/_cli.py for why this is a Python launcher
+# around the compiled executable rather than the executable itself
+slug = "slugpy._cli:main"
 
 [project.optional-dependencies]
 # Only needed to run slugpy inside a marimo notebook (see
@@ -45,3 +61,30 @@ dev = ["pyright"]
 # (which Exhale drives to produce the XML Breathe reads) is a separate,
 # non-Python dependency, not pip-installable here.
 docs = ["sphinx", "breathe", "exhale", "sphinx_rtd_theme"]
+
+[tool.scikit-build]
+minimum-version = "0.10"
+cmake.build-type = "Release"
+# Build only what gets installed -- not the C++ test executables or the
+# docs, which a plain CMake build still builds by default
+build.targets = ["slug", "slugPython"]
+# slugpy's pure-Python files are installed by CMake itself (see the
+# install() rules at the end of CMakeLists.txt), not copied by
+# scikit-build-core: a plain, in-tree CMake build leaves its own
+# _slug*.so (possibly for several Python versions) in the source
+# slugpy/ directory, and copying that directory wholesale would ship
+# those too, while scikit-build-core's wheel.exclude cannot tell them
+# apart from the freshly built module that CMake installs
+wheel.packages = []
+# Local build directories and test output, plus examples/, whose
+# checked-in simulation outputs (tens of MB) are not needed to build or
+# install slug; large data files under data/ are already excluded,
+# since scikit-build-core honors .gitignore
+# Run CMake's configure step while building an sdist, solely so that
+# CMakeLists.txt can record the current git commit hash in
+# .slug_git_hash, which the sdist then includes -- builds from the
+# sdist (which is not a git checkout) read the hash from there to embed
+# in output files (see CMakeLists.txt's own SLUG_GIT_HASH comment)
+sdist.cmake = true
+sdist.include = [".slug_git_hash"]
+sdist.exclude = ["build/", "build-*/", "Testing/", ".pytest_cache/", ".ruff_cache/", "doc/html/", "examples/"]

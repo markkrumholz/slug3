@@ -142,8 +142,10 @@ auto core::SimGalaxy::run() -> int
             std::min(batchStart + batchSize, numberingEnd);
 
         // See SimCluster::run()'s own identical comment
-        const auto [rankBatchStart, rankBatchEnd] =
-            utils::mpiPartitionRange(batchStart, batchEnd);
+        // (including why this is not a structured binding)
+        const auto rankBatch = utils::mpiPartitionRange(batchStart, batchEnd);
+        const unsigned long rankBatchStart = rankBatch.first;
+        const unsigned long rankBatchEnd = rankBatch.second;
 
 #ifdef _OPENMP
         // See runTrial()'s own comment for why each trial is

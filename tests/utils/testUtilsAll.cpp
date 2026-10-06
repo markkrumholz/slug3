@@ -8,6 +8,7 @@
  * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
+#include "testGetFilePath.hpp"
 #include "testGridBracket.hpp"
 #include "testMPIUtils.hpp"
 #include "testPDFIntegrator.hpp"
@@ -31,6 +32,8 @@ auto main() -> int {
         result += testGridBracketCache();
         result += testTrackedDeck();
         result += testMPIUtilsSingleProcess();
+        result += testSplitSearchPath();
+        result += testGetFilePathDataPath();
         return result;
     }
     catch (const std::exception& error)

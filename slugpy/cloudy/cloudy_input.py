@@ -14,15 +14,37 @@ import numpy as np
 from astropy import constants as const
 from astropy import units as u
 
+from .._paths import package_share_dir
 from .hiiregparam import hiiregparam
 
+
+def _default_template() -> Path:
+    """
+    Locate the bundled default cloudy input template.
+
+    Returns
+    -------
+    pathlib.Path
+        The template bundled into the package (under
+        ``slugpy/_share/data/cloudy``) if slugpy is pip-installed, and
+        otherwise the copy in the source tree's own data/cloudy
+        directory (slugpy/cloudy/cloudy_input.py is three directories
+        below the repo root: slugpy/cloudy -> slugpy -> repo root).
+        Either way it is resolved relative to this package's own
+        location, so this works regardless of the caller's own working
+        directory.
+    """
+    rel = Path("data") / "cloudy" / "cloudy.in_grid_template"
+    installed = package_share_dir() / rel
+    if installed.is_file():
+        return installed
+    return Path(__file__).resolve().parents[2] / rel
+
+
 # The bundled default template, alongside data/{imfs,filters,spectra,
-# tracks,extinct}/'s own default-resource files -- resolved relative
-# to this package's own location (slugpy/cloudy/cloudy_input.py is
-# three directories below the repo root: slugpy/cloudy -> slugpy ->
-# repo root), so this works regardless of the caller's own working
-# directory, unlike the C++ side's SLUG_DIR/REPO_DIR-based resolution.
-DEFAULT_TEMPLATE: Path = Path(__file__).resolve().parents[2] / "data" / "cloudy" / "cloudy.in_grid_template"
+# tracks,extinct}/'s own default-resource files -- see
+# _default_template()
+DEFAULT_TEMPLATE: Path = _default_template()
 
 _c: float = const.c.cgs.value  # Speed of light, cm/s
 
