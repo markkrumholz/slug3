@@ -2,7 +2,9 @@
 #
 # Build slug's native dependencies (zlib, GSL, HDF5 with its C++ API) from
 # source as static, position-independent libraries, installed into a single
-# prefix, for building binary wheels (see .github/workflows/wheels.yml).
+# prefix, for building binary wheels (see .github/workflows/wheels.yml). On
+# macOS, also build LLVM's OpenMP runtime (libomp), which Apple's compiler
+# lacks, as a shared library that delocate then bundles into each wheel.
 #
 # Static libraries are linked straight into the _slug extension module and
 # the slug executable, so a wheel carries no separate copies of these
@@ -14,8 +16,11 @@
 #
 # Run by cibuildwheel's before-all step: inside the manylinux container on
 # Linux, and directly on the runner on macOS, where MACOSX_DEPLOYMENT_TARGET
-# (set by the workflow) controls the minimum macOS version the libraries
-# are built for.
+# (set in pyproject.toml) controls the minimum macOS version the libraries
+# are built for. libomp is built from source rather than taken from
+# Homebrew for exactly this reason: Homebrew's libomp targets whatever
+# macOS version the runner itself runs, and delocate would then retag the
+# wheel to require that version.
 #
 # :copyright: Copyright (c) 2026 Mark Krumholz
 
@@ -25,6 +30,7 @@ PREFIX="${1:-/tmp/slug-deps}"
 ZLIB_VERSION=1.3.1
 GSL_VERSION=2.8
 HDF5_VERSION=1.14.6
+LLVM_VERSION=19.1.7   # libomp, macOS only
 
 if [ -f "${PREFIX}/.complete" ]; then
     echo "build_deps.sh: ${PREFIX} already complete, nothing to do"
@@ -44,14 +50,21 @@ cd "${WORK}"
 export CFLAGS="${CFLAGS:-} -O2 -fPIC"
 export CXXFLAGS="${CXXFLAGS:-} -O2 -fPIC"
 
+# curl's --retry-all-errors (which also retries connection failures) is
+# only in curl >= 7.71, newer than the curl in the manylinux_2_28 image
+CURL_RETRY=(--retry 5 --retry-delay 5)
+if curl --help all 2> /dev/null | grep -q -- --retry-all-errors; then
+    CURL_RETRY+=(--retry-all-errors)
+fi
+
 fetch() {
     # fetch OUTPUT URL [URL...] -- tries each URL in turn, each with
-    # retries (including on connection errors), since a transient download
-    # failure would otherwise fail a whole wheel build
+    # retries, since a transient download failure would otherwise fail a
+    # whole wheel build
     local out="$1"
     shift
     for url in "$@"; do
-        if curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors -o "${out}" "${url}"; then
+        if curl -fsSL "${CURL_RETRY[@]}" -o "${out}" "${url}"; then
             return 0
         fi
         echo "build_deps.sh: download from ${url} failed" >&2
@@ -102,6 +115,28 @@ cmake -S "hdf5-${HDF5_VERSION}" -B hdf5-build \
     -DHDF5_ALLOW_EXTERNAL_SUPPORT=NO
 cmake --build hdf5-build --parallel "${JOBS}"
 cmake --install hdf5-build
+
+if [ "$(uname)" = "Darwin" ]; then
+    echo "=== libomp (LLVM ${LLVM_VERSION})"
+    # A standalone OpenMP runtime build needs LLVM's shared CMake modules
+    # alongside it, in a sibling directory named "cmake"
+    LLVM_URL="https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_VERSION}"
+    fetch openmp.tar.xz "${LLVM_URL}/openmp-${LLVM_VERSION}.src.tar.xz"
+    fetch llvm-cmake.tar.xz "${LLVM_URL}/cmake-${LLVM_VERSION}.src.tar.xz"
+    tar xf openmp.tar.xz
+    tar xf llvm-cmake.tar.xz
+    mv "cmake-${LLVM_VERSION}.src" cmake
+    cmake -S "openmp-${LLVM_VERSION}.src" -B openmp-build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX="${PREFIX}" \
+        -DLIBOMP_INSTALL_ALIASES=OFF \
+        -DLIBOMP_OMPD_SUPPORT=OFF \
+        -DLIBOMP_USE_HWLOC=OFF \
+        -DOPENMP_ENABLE_LIBOMPTARGET=OFF \
+        -DOPENMP_ENABLE_OMPT_TOOLS=OFF
+    cmake --build openmp-build --parallel "${JOBS}"
+    cmake --install openmp-build
+fi
 
 touch "${PREFIX}/.complete"
 echo "build_deps.sh: installed into ${PREFIX}"

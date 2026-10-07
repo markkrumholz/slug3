@@ -92,8 +92,9 @@ sdist.exclude = ["build/", "build-*/", "Testing/", ".pytest_cache/", ".ruff_cach
 # Binary wheels, built by .github/workflows/wheels.yml. GSL, HDF5, and zlib
 # are built from source as static libraries (.github/wheels/build_deps.sh)
 # and linked straight into _slug and the slug executable, so a wheel needs
-# nothing but the system libraries (plus libomp, which delocate bundles, on
-# macOS). See that script's own comment for why static.
+# nothing but the system libraries (plus libomp on macOS, also built by that
+# script, which delocate bundles). See that script's own comment for why
+# static.
 [tool.cibuildwheel]
 build = "cp312-* cp313-* cp314-*"
 # musllinux (Alpine) and free-threaded builds are not supported yet
@@ -119,20 +120,16 @@ CMAKE_ARGS = "-DHDF5_USE_STATIC_LIBRARIES=ON"
 
 [tool.cibuildwheel.macos]
 archs = ["arm64"]
-# Apple's compiler has no OpenMP runtime, so use LLVM's libomp from
-# Homebrew, which delocate then bundles into the wheel. 14.0 is the
-# oldest macOS whose libc++ provides the floating-point std::to_chars
-# that slug uses (13.3 strictly, but wheel tags for macOS 11+ only use
-# major versions), and matches the macOS 14 runner Homebrew's libomp is
-# built for.
-before-all = [
-    "brew install libomp",
-    "bash {project}/.github/wheels/build_deps.sh /tmp/slug-deps",
-]
 
 [tool.cibuildwheel.macos.environment]
+# 14.0 is the oldest macOS whose libc++ provides the floating-point
+# std::to_chars that slug uses (13.3 strictly, but wheel tags for macOS
+# 11+ only use major versions). build_deps.sh builds every dependency,
+# including the OpenMP runtime (libomp, which Apple's compiler lacks and
+# delocate bundles into the wheel), for this same target, independent of
+# which macOS version the runner itself runs.
 MACOSX_DEPLOYMENT_TARGET = "14.0"
 CMAKE_PREFIX_PATH = "/tmp/slug-deps"
 HDF5_ROOT = "/tmp/slug-deps"
 GSL_ROOT_DIR = "/tmp/slug-deps"
-CMAKE_ARGS = "-DHDF5_USE_STATIC_LIBRARIES=ON -DOpenMP_ROOT=$(brew --prefix libomp)"
+CMAKE_ARGS = "-DHDF5_USE_STATIC_LIBRARIES=ON -DOpenMP_ROOT=/tmp/slug-deps"

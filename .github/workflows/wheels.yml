@@ -19,6 +19,9 @@ name: Wheels
 # stored anywhere: it requires a one-time setup on test.pypi.org, naming
 # this repository, this workflow file, and the "testpypi" environment.
 
+permissions:
+  contents: read
+
 on:
   pull_request:
     paths:
@@ -48,10 +51,12 @@ jobs:
       fail-fast: false
       matrix:
         # Native runners for every architecture, so nothing is built under
-        # emulation (see archs in pyproject.toml). macos-14 is Apple
-        # Silicon; Intel macOS is not built (users there can install from
-        # the sdist).
-        os: [ubuntu-latest, ubuntu-24.04-arm, macos-14]
+        # emulation (see archs in pyproject.toml). macos-15 is Apple
+        # Silicon; the macOS 14.0 minimum the wheels target is set by
+        # MACOSX_DEPLOYMENT_TARGET (pyproject.toml), not by the runner's
+        # own macOS version. Intel macOS is not built (users there can
+        # install from the sdist).
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-15]
 
     steps:
       - uses: actions/checkout@v7
@@ -71,7 +76,8 @@ jobs:
         # delocate silently retags a wheel to the newest minimum macOS of
         # anything it bundles (e.g. a libomp built for a newer macOS than
         # MACOSX_DEPLOYMENT_TARGET), which would make the wheel
-        # uninstallable on the macOS versions it is meant for
+        # uninstallable on the macOS versions it is meant for -- guard
+        # against any dependency regressing on that
         if: runner.os == 'macOS'
         run: |
           ls wheelhouse
