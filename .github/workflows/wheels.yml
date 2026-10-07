@@ -1,0 +1,144 @@
+name: Wheels
+
+# Builds and tests binary wheels (Linux x86_64/aarch64, macOS arm64) and
+# an sdist for slugpy, via cibuildwheel -- see pyproject.toml's own
+# [tool.cibuildwheel] section and .github/wheels/ for how. Optionally
+# publishes them to TestPyPI.
+#
+# - On pull requests that touch the packaging machinery: build and test
+#   only, so packaging changes can't silently break the wheels.
+# - On workflow_dispatch: build and test; with publish = testpypi, also
+#   upload to TestPyPI as a dry run. The version gets a ".devN" suffix
+#   (N = this workflow's run number) first, since TestPyPI, like PyPI,
+#   never accepts the same version twice.
+# - On a v* tag: build, test, check that the tag matches pyproject.toml's
+#   version, and upload that exact version to TestPyPI. (Publishing to the
+#   real PyPI is a separate, later step.)
+#
+# Publishing uses PyPI's "trusted publishing" (OIDC), so no API token is
+# stored anywhere: it requires a one-time setup on test.pypi.org, naming
+# this repository, this workflow file, and the "testpypi" environment.
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+    paths:
+      - pyproject.toml
+      - CMakeLists.txt
+      - cmake/**
+      - .github/wheels/**
+      - .github/workflows/wheels.yml
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Where to publish the built distributions"
+        type: choice
+        options:
+          - none
+          - testpypi
+        default: none
+
+jobs:
+  build_wheels:
+    name: wheels / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Native runners for every architecture, so nothing is built under
+        # emulation (see archs in pyproject.toml). macos-15 is Apple
+        # Silicon; the macOS 14.0 minimum the wheels target is set by
+        # MACOSX_DEPLOYMENT_TARGET (pyproject.toml), not by the runner's
+        # own macOS version. Intel macOS is not built (users there can
+        # install from the sdist).
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-15]
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Use a dev version for a TestPyPI dry run
+        if: github.event_name == 'workflow_dispatch' && inputs.publish == 'testpypi'
+        run: sed -i.bak -E 's/^version = "([0-9]+\.[0-9]+\.[0-9]+)"/version = "\1.dev${{ github.run_number }}"/' pyproject.toml && rm pyproject.toml.bak && grep "^version" pyproject.toml
+
+      - name: Build and test wheels
+        uses: pypa/cibuildwheel@v4.3.0
+        with:
+          output-dir: wheelhouse
+
+      - name: Check macOS wheel deployment target
+        # delocate silently retags a wheel to the newest minimum macOS of
+        # anything it bundles (e.g. a libomp built for a newer macOS than
+        # MACOSX_DEPLOYMENT_TARGET), which would make the wheel
+        # uninstallable on the macOS versions it is meant for -- guard
+        # against any dependency regressing on that
+        if: runner.os == 'macOS'
+        run: |
+          ls wheelhouse
+          if ls wheelhouse/*.whl | grep -v 'macosx_14_0_arm64'; then
+            echo "::error::macOS wheel is not tagged macosx_14_0_arm64"
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wheels-${{ matrix.os }}
+          path: wheelhouse/*.whl
+
+  build_sdist:
+    name: sdist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Use a dev version for a TestPyPI dry run
+        if: github.event_name == 'workflow_dispatch' && inputs.publish == 'testpypi'
+        run: sed -i.bak -E 's/^version = "([0-9]+\.[0-9]+\.[0-9]+)"/version = "\1.dev${{ github.run_number }}"/' pyproject.toml && rm pyproject.toml.bak && grep "^version" pyproject.toml
+
+      - name: Check that the tag matches the package version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          VERSION=$(sed -nE 's/^version = "(.*)"/\1/p' pyproject.toml)
+          if [ "v${VERSION}" != "${GITHUB_REF_NAME}" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match pyproject.toml version ${VERSION}"
+            exit 1
+          fi
+
+      - name: Build sdist
+        run: pipx run build --sdist
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+
+  publish_testpypi:
+    name: publish to TestPyPI
+    needs: [build_wheels, build_sdist]
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.publish == 'testpypi') ||
+      startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/slugpy
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish
+        uses: pypa/gh-action-pypi-publish@v1.14.2
+        with:
+          repository-url: https://test.pypi.org/legacy/
