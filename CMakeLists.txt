@@ -3,10 +3,13 @@ cmake_minimum_required(VERSION 3.15)
 # The version number lives in exactly one place, pyproject.toml's own
 # [project] version, which is also what pip/scikit-build-core use for
 # an installed package -- read it from there so a plain CMake build and
-# a pip-installed one always agree.
+# a pip-installed one always agree. Only its leading X.Y.Z is used here
+# (CMake's project() accepts nothing else), so a PEP 440 suffix such as
+# the ".devN" the wheel-building workflow adds for TestPyPI dry runs
+# (see .github/workflows/wheels.yml) is ignored.
 file(STRINGS ${CMAKE_CURRENT_SOURCE_DIR}/pyproject.toml SLUG_VERSION_LINE
-    REGEX "^version[ \t]*=[ \t]*\"[0-9]+\\.[0-9]+\\.[0-9]+\"")
-string(REGEX REPLACE ".*\"([0-9]+\\.[0-9]+\\.[0-9]+)\".*" "\\1" SLUG_VERSION "${SLUG_VERSION_LINE}")
+    REGEX "^version[ \t]*=[ \t]*\"[0-9]+\\.[0-9]+\\.[0-9]+")
+string(REGEX REPLACE "^[^\"]*\"([0-9]+\\.[0-9]+\\.[0-9]+).*" "\\1" SLUG_VERSION "${SLUG_VERSION_LINE}")
 if(NOT SLUG_VERSION)
     message(FATAL_ERROR "Could not read version from pyproject.toml")
 endif()
@@ -116,7 +119,14 @@ endif()
 # Find GSL
 find_package(GSL REQUIRED)
 
-# Find HDF5
+# Find HDF5. A static HDF5 (HDF5_USE_STATIC_LIBRARIES, as used to build
+# binary wheels -- see .github/wheels/build_deps.sh) built with zlib
+# support lists ZLIB::ZLIB in its own exported link interface without
+# finding it itself, so find it first in that case.
+if(HDF5_USE_STATIC_LIBRARIES)
+    set(ZLIB_USE_STATIC_LIBS ON)
+    find_package(ZLIB REQUIRED)
+endif()
 find_package(HDF5 REQUIRED COMPONENTS CXX)
 
 # Find OpenMP; threading is optional, so fall back to a single-threaded
@@ -1183,6 +1193,18 @@ if(SKBUILD)
     # so they still find those libraries once installed
     set_target_properties(slug slugPython PROPERTIES
         INSTALL_RPATH_USE_LINK_PATH TRUE)
+
+    # On Linux, keep the symbols of any static libraries linked into
+    # _slug (as binary wheels do for GSL, HDF5, and zlib -- see
+    # .github/wheels/build_deps.sh) out of its dynamic symbol table, so
+    # they can never interpose with another copy of the same library
+    # loaded into the same Python process (e.g. the libhdf5 bundled in
+    # h5py's own wheel). A no-op for shared-library dependencies. macOS's
+    # two-level namespace already keeps each image's symbol bindings
+    # separate, so it needs no equivalent.
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        target_link_options(slugPython PRIVATE "LINKER:--exclude-libs,ALL")
+    endif()
 
     install(TARGETS slugPython LIBRARY DESTINATION slugpy)
     # slugpy's pure-Python half: *.py files only, so that build products
