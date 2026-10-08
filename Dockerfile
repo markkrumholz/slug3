@@ -64,6 +64,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=build /opt/slug /opt/slug
 
+# Put /opt/slug's own site-packages ahead of anything on PYTHONPATH.
+# Apptainer/Singularity pass the host environment into the container by
+# default, so a host PYTHONPATH that includes some other copy of slugpy
+# (e.g. slug version 2's) would otherwise shadow this one -- breaking the
+# slug launcher, `python -m slugpy.download_data`, etc. A .pth file is
+# processed at Python startup, after PYTHONPATH has been added to
+# sys.path, so this works however the container runtime treats
+# environment variables, and leaves every other PYTHONPATH entry
+# importable.
+RUN SITE=$(/opt/slug/bin/python -c "import sysconfig; print(sysconfig.get_paths()['purelib'])") \
+    && echo 'import sys, sysconfig; _p = sysconfig.get_paths()["purelib"]; _p in sys.path and sys.path.remove(_p); sys.path.insert(0, _p)' \
+        > "${SITE}/000-slug-site-first.pth"
+
 # Fail the image build, rather than the first user's run, if any shared
 # library the compiled pieces need is missing from the runtime stage
 RUN for f in /opt/slug/lib/python3*/site-packages/slugpy/_bin/slug \
