@@ -1149,14 +1149,20 @@ static auto buildDelta(const double x) -> pdfs::PDF
 }
 
 // Throw unless avNebFac (a candidate for SimControls::avNebFac_) is
-// non-negative everywhere -- see setAVNebFac()'s own header comment
+// finite and non-negative everywhere -- see setAVNebFac()'s own header
+// comment. Written as !(min >= 0) so that a NaN, for which every
+// comparison is false, is rejected too; a numeric input of "nan" or
+// "inf" would otherwise become a delta PDF that contaminates (NaN) or
+// zeroes (inf) every nebular spectrum it is applied to.
 static void checkAVNebFac(const pdfs::PDF& avNebFac, const std::string& source)
 {
-    if (avNebFac.getMin() < 0.0)
+    const double lo = avNebFac.getMin();
+    const double hi = avNebFac.getMax();
+    if (!(lo >= 0.0) || !std::isfinite(lo) || !std::isfinite(hi)) // NOLINT(readability-simplify-boolean-expr) -- the De Morgan form would accept a NaN minimum
     {
-        throw std::runtime_error("SimControls: " + source + " must not extend below 0 "
-            "(it is the ratio of nebular to stellar V-band extinction), but its minimum is " +
-            std::to_string(avNebFac.getMin()));
+        throw std::runtime_error("SimControls: " + source + " must be finite and not extend "
+            "below 0 (it is the ratio of nebular to stellar V-band extinction), but it spans [" +
+            std::to_string(lo) + ", " + std::to_string(hi) + "]");
     }
 }
 

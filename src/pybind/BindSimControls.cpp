@@ -382,8 +382,9 @@ Throws
 ------
 RuntimeError
     If av_neb_fac is not numeric and does not name a file that can be
-    found, or if the resulting distribution extends below 0; avNebFac
-    is left unchanged in either case.
+    found, or if the resulting distribution extends below 0 or is not
+    finite (e.g. "nan" or "inf"); avNebFac is left unchanged in either
+    case.
 
 Details
 -------
@@ -400,7 +401,7 @@ exceeds that applied to the stellar light it accompanies (A_V,neb =
 f A_V), set by the input deck's optional extinct.neb_factor key. It is
 a delta function at 1 (equal nebular and stellar extinction) if that
 key was not given, including when no extinction is applied at all, and
-never extends below 0.
+is always finite and non-negative.
 
 Reading returns a PDF; assigning a str sets a new one via
 setAVNebFac() -- see its own docstring for the exact rules.)doc";

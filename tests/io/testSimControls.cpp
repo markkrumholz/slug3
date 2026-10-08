@@ -1073,14 +1073,17 @@ static auto testSimControlsExtinctNebFac() -> int
                     "to make avNebFac() always draw 1.5\n";
                 return 1;
             }
-            bool threw = false;
-            try { controls.setAVNebFac("-0.5"); }
-            catch (const std::runtime_error&) { threw = true; }
-            if (!threw || !drawsExactly(controls.avNebFac(), 1.5))
+            for (const std::string bad : { "-0.5", "nan", "inf" })
             {
-                std::cerr << "testSimControls: extinctNebFac: expected setAVNebFac(\"-0.5\") "
-                    "to throw and leave avNebFac() unchanged\n";
-                return 1;
+                bool threw = false;
+                try { controls.setAVNebFac(bad); }
+                catch (const std::runtime_error&) { threw = true; }
+                if (!threw || !drawsExactly(controls.avNebFac(), 1.5))
+                {
+                    std::cerr << "testSimControls: extinctNebFac: expected setAVNebFac(\""
+                        << bad << "\") to throw and leave avNebFac() unchanged\n";
+                    return 1;
+                }
             }
         }
     }

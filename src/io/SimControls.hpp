@@ -842,7 +842,8 @@ namespace io
          *   starlight. Always valid: a delta function at 1 (nebular
          *   and stellar extinction equal) if extinct.neb_factor was
          *   not given, including when no extinction is applied at
-         *   all. Never extends below 0 -- see setAVNebFac().
+         *   all. Always finite and never extends below 0 -- see
+         *   setAVNebFac().
          */
         [[nodiscard]] auto avNebFac() const -> const auto& { return avNebFac_; }
 
@@ -1229,8 +1230,9 @@ namespace io
          * @throws std::runtime_error if avNebFac is not numeric and
          *   does not name a file that can be found, or if the
          *   resulting distribution extends below 0 (a negative
-         *   extinction factor is unphysical); avNebFac() is left
-         *   unchanged in either case
+         *   extinction factor is unphysical) or is not finite (e.g.
+         *   "nan" or "inf"); avNebFac() is left unchanged in either
+         *   case
          * @details
          * If this SimControls already has an extinction curve
          * (extinct() is not null), also calls its own
