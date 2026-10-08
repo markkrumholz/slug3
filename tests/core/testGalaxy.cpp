@@ -38,6 +38,7 @@
 #include <toml.hpp>
 #include <tuple>
 #include <utility>
+#include <variant>
 #include <vector>
 
 // Note: distinct from tests/core/assets/testGalaxy.in, which
@@ -1701,6 +1702,225 @@ static auto testExtinctApplyExtinctionCtsUniform() -> int
     {
         std::cerr << "testExtinctApplyExtinctionCtsUniform test failed: "
             << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Ein(z) = int_0^z (1 - exp(-t)) / t dt, the entire exponential
+// integral, via its power series sum_{n>=1} (-1)^(n+1) z^n / (n n!) --
+// adequate (no catastrophic cancellation) for the z <~ 20 the tests
+// below use
+static auto entireExpIntegral(const double z) -> double
+{
+    double term = z; // z^n / n!, at n = 1
+    double sum = 0.0;
+    for (int n = 1; n < 200; ++n)
+    {
+        const double contrib = term / static_cast<double>(n);
+        sum += (n % 2 == 1) ? contrib : -contrib;
+        if (std::abs(contrib) < 1e-17 * std::abs(sum)) { break; }
+        term *= z / static_cast<double>(n + 1);
+    }
+    return sum;
+}
+
+// Verify Extinct's nebular continuous-population extinction factors --
+// applyExtinctionCts(spec, true) (extinctionFacCtsNeb_) and
+// applyExtinctionCtsLines() (extinctionFacCtsLines_), both integrated
+// over A_V ~ avDistField() and f ~ avNebFac() -- against the closed
+// forms each case admits, with k the normalized extinction curve:
+//   - both deltas (A_V = 0.5, f = 2): exp(-A_V f k), for the spectrum
+//     and the lines alike, while applyExtinctionCts(spec) (stellar)
+//     still gives exp(-A_V k);
+//   - A_V uniform on [0, X], f = 2: (1 - exp(-k f X)) / (k f X);
+//   - A_V = 0.5, f uniform on [0, X] (set via setAVNebFac(), which must
+//     rebuild extinct()'s cache): (1 - exp(-k A_V X)) / (k A_V X);
+//   - both uniform on [0, X]: Ein(k X^2) / (k X^2) (the double
+//     integral of exp(-k A_V f) / X^2) -- see entireExpIntegral().
+// X = 2, from tests/extinct/assets/testExtinctAVFieldUniform.toml.
+// Line extinction coefficients are recovered from
+// applyExtinctionLines(1, 1) = exp(-k_line).
+static auto testExtinctApplyExtinctionCtsNeb() -> int
+{
+    constexpr double relTol = 1e-5;
+    constexpr double avDelta = 0.5; // NOLINT(readability-identifier-naming) -- see Extinct::applyExtinction()'s own identical NOLINT
+    constexpr double facDelta = 2.0;
+    constexpr double uniformMax = 2.0;
+    const std::string uniformFile = "tests/extinct/assets/testExtinctAVFieldUniform.toml";
+
+    const auto check = [relTol](const std::vector<double>& got, const std::vector<double>& k,
+        const auto& expectedOf, const std::string& what) -> bool
+    {
+        for (std::size_t i = 0; i < got.size(); ++i)
+        {
+            const double expected = expectedOf(k.at(i));
+            if (std::abs(got.at(i) - expected) > relTol * std::abs(expected))
+            {
+                std::cerr << "testExtinctApplyExtinctionCtsNeb: " << what << ": at index "
+                    << i << " got " << got.at(i) << ", expected " << expected << "\n";
+                return false;
+            }
+        }
+        return true;
+    };
+    // Mean of exp(-c k t) for t uniform on [0, X]
+    const auto uniformMean = [uniformMax](const double ck) -> double
+    {
+        return (ck == 0.0) ? 1.0 : (1.0 - std::exp(-ck * uniformMax)) / (ck * uniformMax);
+    };
+
+    try
+    {
+        const auto makeControls = [&](const std::variant<double, std::string>& avField,
+            const double nebFactor) -> io::SimControls
+        {
+            toml::table inputDeck = toml::parse_file(inputFile);
+            auto* ext = inputDeck.at_path("extinct").as_table();
+            if (std::holds_alternative<double>(avField)) { ext->insert_or_assign("AV_field", std::get<double>(avField)); }
+            else { ext->insert_or_assign("AV_field", std::get<std::string>(avField)); }
+            ext->insert_or_assign("neb_factor", nebFactor);
+            inputDeck.at_path("nebular").as_table()->insert_or_assign("compute_neb", true);
+            inputDeck.at_path("nebular").as_table()->insert_or_assign(
+                "table", std::string("tests/nebular/assets/nebular_test.h5"));
+            return io::SimControls(inputDeck);
+        };
+
+        // Both deltas
+        {
+            const auto controls = makeControls(avDelta, facDelta);
+            const auto ext = controls.extinct();
+            const std::vector<double> spec(controls.specsyn()->wl().size(), 1.0);
+            const auto& k = ext->extinct();
+            if (!check(ext->applyExtinctionCts(spec), k,
+                    [](const double kk) -> double { return std::exp(-avDelta * kk); }, "both deltas, stellar") ||
+                !check(ext->applyExtinctionCts(spec, true), k,
+                    [](const double kk) -> double { return std::exp(-avDelta * facDelta * kk); }, "both deltas, nebular"))
+            {
+                return 1;
+            }
+            const std::vector<double> ones(controls.nebular()->lineWl().size(), 1.0);
+            std::vector<double> kLine;
+            for (const double v : ext->applyExtinctionLines(1.0, ones)) { kLine.push_back(-std::log(v)); }
+            if (!check(ext->applyExtinctionCtsLines(ones), kLine,
+                    [](const double kk) -> double { return std::exp(-avDelta * facDelta * kk); }, "both deltas, lines"))
+            {
+                return 1;
+            }
+        }
+
+        // A_V uniform, f a delta
+        {
+            const auto controls = makeControls(uniformFile, facDelta);
+            const auto ext = controls.extinct();
+            const std::vector<double> spec(controls.specsyn()->wl().size(), 1.0);
+            if (!check(ext->applyExtinctionCts(spec, true), ext->extinct(),
+                    [&](const double kk) -> double { return uniformMean(facDelta * kk); }, "uniform A_V, delta f"))
+            {
+                return 1;
+            }
+        }
+
+        // A_V a delta, f uniform -- set after construction, so this also
+        // checks that setAVNebFac() rebuilds extinct()'s cache
+        {
+            auto controls = makeControls(avDelta, 1.0);
+            controls.setAVNebFac(uniformFile);
+            const auto ext = controls.extinct();
+            const std::vector<double> spec(controls.specsyn()->wl().size(), 1.0);
+            if (!check(ext->applyExtinctionCts(spec, true), ext->extinct(),
+                    [&](const double kk) -> double { return uniformMean(avDelta * kk); }, "delta A_V, uniform f"))
+            {
+                return 1;
+            }
+        }
+
+        // Both uniform
+        {
+            auto controls = makeControls(uniformFile, 1.0);
+            controls.setAVNebFac(uniformFile);
+            const auto ext = controls.extinct();
+            const std::vector<double> spec(controls.specsyn()->wl().size(), 1.0);
+            const auto bothUniform = [](const double kk) -> double
+            {
+                const double z = kk * uniformMax * uniformMax;
+                return (z == 0.0) ? 1.0 : entireExpIntegral(z) / z;
+            };
+            if (!check(ext->applyExtinctionCts(spec, true), ext->extinct(), bothUniform, "both uniform"))
+            {
+                return 1;
+            }
+            const std::vector<double> ones(controls.nebular()->lineWl().size(), 1.0);
+            std::vector<double> kLine;
+            for (const double v : ext->applyExtinctionLines(1.0, ones)) { kLine.push_back(-std::log(v)); }
+            if (!check(ext->applyExtinctionCtsLines(ones), kLine, bothUniform, "both uniform, lines"))
+            {
+                return 1;
+            }
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testExtinctApplyExtinctionCtsNeb test failed: " << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
+// Verify that Galaxy's purely continuous population's nebular emission
+// is extincted with the nebular factor: with f_cluster = 0 and
+// min_stoch_mass at the IMF's own maximum (no clusters, no field
+// stars), specNeb()/lineLum() are exactly the continuous population's,
+// so specNebExtinct() must equal applyExtinctionCts(specNeb(), true)
+// -- and, with extinct.neb_factor = 2, differ from the stellar
+// applyExtinctionCts(specNeb()) -- and lineLumExtinct() must equal
+// applyExtinctionCtsLines(lineLum()).
+static auto testGalaxyNebularExtinctFactor() -> int
+{
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFile);
+        inputDeck.at_path("clusters").as_table()->insert("f_cluster", 0.0);
+        inputDeck.at_path("stars").as_table()->insert_or_assign("min_stoch_mass", 120.0);
+        inputDeck.at_path("extinct").as_table()->insert_or_assign("AV_field", 0.5);
+        inputDeck.at_path("extinct").as_table()->insert_or_assign("neb_factor", 2.0);
+        inputDeck.at_path("nebular").as_table()->insert_or_assign("compute_neb", true);
+        inputDeck.at_path("nebular").as_table()->insert_or_assign(
+            "table", std::string("tests/nebular/assets/nebular_test.h5"));
+        const io::SimControls controls(inputDeck);
+        utils::rng().seed(rngSeed);
+        core::Galaxy galaxy(controls);
+        galaxy.advance(t1);
+
+        const auto ext = controls.extinct();
+        const auto& specNeb = galaxy.specNeb();
+        if (std::reduce(specNeb.begin(), specNeb.end(), 0.0) <= 0.0)
+        {
+            std::cerr << "testGalaxy: nebularExtinctFactor: test bug: expected a non-zero specNeb()\n";
+            return 1;
+        }
+        if (galaxy.specNebExtinct() != ext->applyExtinctionCts(specNeb, true))
+        {
+            std::cerr << "testGalaxy: nebularExtinctFactor: specNebExtinct() does not equal "
+                "applyExtinctionCts(specNeb(), true)\n";
+            return 1;
+        }
+        if (galaxy.specNebExtinct() == ext->applyExtinctionCts(specNeb))
+        {
+            std::cerr << "testGalaxy: nebularExtinctFactor: specNebExtinct() equals the "
+                "stellar applyExtinctionCts(specNeb()) despite neb_factor = 2\n";
+            return 1;
+        }
+        if (galaxy.lineLumExtinct() != ext->applyExtinctionCtsLines(galaxy.lineLum()))
+        {
+            std::cerr << "testGalaxy: nebularExtinctFactor: lineLumExtinct() does not equal "
+                "applyExtinctionCtsLines(lineLum())\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testGalaxy: nebularExtinctFactor test failed: " << error.what() << "\n";
         return 1;
     }
     return 0;
@@ -3450,6 +3670,8 @@ auto testGalaxy() -> int
     result += testFieldStarsExtinct();
     result += testExtinctApplyExtinctionCtsDegenerate();
     result += testExtinctApplyExtinctionCtsUniform();
+    result += testExtinctApplyExtinctionCtsNeb();
+    result += testGalaxyNebularExtinctFactor();
     result += testGalaxyNebular();
     result += testGalaxyNebularMultiFeh();
     result += testContinuousPopNebularExtinct();

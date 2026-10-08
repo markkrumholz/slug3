@@ -60,6 +60,7 @@ void extinct::Extinct::rebuildCacheImpl()
         wlOffset_ = 0;
         extinctLines_.clear();
         extinctionFacCts_.clear();
+        extinctionFacCtsNeb_.clear();
         extinctionFacCtsLines_.clear();
         return;
     }
@@ -98,8 +99,8 @@ void extinct::Extinct::rebuildCacheImpl()
     // above) to a V-band extinction of 1 mag
     normalize(wl_, extinct_, extinctLines_);
 
-    // Recompute extinctionFacCts_/extinctionFacCtsLines_ -- see their
-    // own comments
+    // Recompute extinctionFacCts_/extinctionFacCtsNeb_/
+    // extinctionFacCtsLines_ -- see their own comments
     computeExtinctionFacCts();
     computeExtinctionFacCtsLines();
 }
@@ -127,46 +128,88 @@ void extinct::Extinct::initExtinctLines(const interp::Interpolator1D<1>& interp)
     }
 }
 
-void extinct::Extinct::computeExtinctionFacCts()
+auto extinct::Extinct::expectedExtinctFac(const ExtinctFacFn fac, const std::size_t nInt,
+    const bool nebular) const -> std::vector<double>
 {
     const auto& avDistField = controls_.avDistField();
 
-    // A degenerate (single-point) or invalid (no explicit distribution
-    // at all -- see this class's own comment for when that happens,
-    // e.g. constructed directly against a bare default-constructed
-    // SimControls, as tests/extinct/testExtinct.hpp's own tests do)
-    // avDistField() has no meaningful density for utils::PDFIntegrator
-    // to evaluate pointwise: PDFSegmentDelta::operator() would throw if
-    // pdfs::PDF::operator() ever actually called it, but in practice
-    // PDF::operator()'s own boundary check (a strict getMin() < x)
-    // excludes the delta's own point exactly, so it would instead
-    // silently return a density of 0 everywhere, integrating to a
-    // wrong, all-zero extinctionFacCts_ -- and an invalid avDistField()
-    // has NaN getMin()/getMax(), which would never satisfy any of
-    // GKIntegrator::integrate()'s own convergence checks (all strict
-    // less-than comparisons against NaN), risking an infinite loop.
-    // Handled directly here instead, with any invalid avDistField()
-    // treated as a delta at A_V = 0 -- mirroring Cluster's own
-    // identical avDist().valid() ? draw() : 0.0 convention -- rather
-    // than ever handing PDFIntegrator a degenerate or NaN-bounded
-    // domain to integrate over.
-    if (!avDistField.valid() || avDistField.getMin() == avDistField.getMax())
+    // An invalid avDistField() (no explicit distribution at all -- see
+    // this class's own comment for when that happens, e.g. constructed
+    // directly against a bare default-constructed SimControls, as
+    // tests/extinct/testExtinct.hpp's own tests do) is treated as a
+    // delta at A_V = 0, mirroring Cluster's own avDist().valid() ?
+    // draw() : 0.0 convention, so the result is all 1s whatever the
+    // nebular factor is.
+    if (!avDistField.valid()) { return (this->*fac)(0.0); }
+
+    // The nebular-to-stellar extinction ratio f: exactly 1 for stellar
+    // (non-nebular) light, and likewise if avNebFac() is invalid
+    // (SimControls always sets it when reading an input deck, but a
+    // bare default-constructed SimControls leaves it unset)
+    const auto& avNebFac = controls_.avNebFac();
+    const bool useNebFac = nebular && avNebFac.valid();
+
+    // A degenerate (single-point) distribution has no meaningful density
+    // for utils::PDFIntegrator to evaluate pointwise: PDFSegmentDelta::
+    // operator() would throw if pdfs::PDF::operator() ever actually
+    // called it, but in practice PDF::operator()'s own boundary check (a
+    // strict getMin() < x) excludes the delta's own point exactly, so it
+    // would instead silently return a density of 0 everywhere,
+    // integrating to a wrong, all-zero result. Delta distributions are
+    // therefore handled directly, by evaluating at their one point,
+    // rather than ever handed to PDFIntegrator as a domain to integrate
+    // over.
+    const bool avIsDelta = avDistField.getMin() == avDistField.getMax();
+    const bool facIsDelta = !useNebFac || avNebFac.getMin() == avNebFac.getMax();
+    const double avValue = avDistField.getMin(); // only meaningful if avIsDelta
+    const double facValue = useNebFac ? avNebFac.getMin() : 1.0; // only meaningful if facIsDelta
+    const auto maxIter = controls_.intMaxIter();
+    const auto absTol = controls_.intAbsTol();
+    const auto relTol = controls_.intRelTol();
+
+    // Both deltas: a single evaluation
+    if (avIsDelta && facIsDelta) { return (this->*fac)(avValue * facValue); }
+
+    // A_V distributed, f a delta: integrate fac(A_V f) over avDistField()
+    if (facIsDelta)
     {
-        const double A_V = avDistField.valid() ? avDistField.getMin() : 0.0; // NOLINT(readability-identifier-naming) -- see applyExtinction()'s own identical NOLINT
-        extinctionFacCts_ = extinctFac(A_V);
-        return;
+        const auto integrand = [this, fac, facValue](const double aV) -> std::vector<double>
+        { return (this->*fac)(aV * facValue); };
+        const utils::PDFIntegrator<decltype(integrand), utils::GKOrder::GK15> integrator(
+            avDistField, integrand, nInt, false, maxIter, absTol, relTol);
+        return integrator.integrate(avDistField.getMin(), avDistField.getMax());
     }
 
-    // General case: a genuine, non-degenerate distribution -- integrate
-    // extinctFac(A_V) against avDistField() itself via PDFIntegrator,
-    // exactly the \int exp[-A_V * extinct(lambda)] p(A_V) dA_V this
-    // class's own comment describes, over avDistField()'s own full
-    // support.
-    using ExtinctFacFn = std::vector<double> (Extinct::*)(double) const;
-    const utils::PDFIntegrator<ExtinctFacFn, utils::GKOrder::GK15> integrator(
-        avDistField, static_cast<ExtinctFacFn>(&Extinct::extinctFac),
-        wl_.size(), false, controls_.intMaxIter(), controls_.intAbsTol(), controls_.intRelTol());
-    extinctionFacCts_ = integrator.integrate(avDistField.getMin(), avDistField.getMax(), this);
+    // The integral of fac(A_V f) over f ~ avNebFac(), at fixed A_V -- the
+    // whole answer if A_V is a delta, and otherwise the inner integral
+    // of the double integral below
+    const auto integrateOverNebFac = [this, fac, nInt, &avNebFac, maxIter, absTol, relTol](
+        const double aV) -> std::vector<double>
+    {
+        const auto integrand = [this, fac, aV](const double f) -> std::vector<double>
+        { return (this->*fac)(aV * f); };
+        const utils::PDFIntegrator<decltype(integrand), utils::GKOrder::GK15> integrator(
+            avNebFac, integrand, nInt, false, maxIter, absTol, relTol);
+        return integrator.integrate(avNebFac.getMin(), avNebFac.getMax());
+    };
+
+    // A_V a delta, f distributed: a single integral over avNebFac()
+    if (avIsDelta) { return integrateOverNebFac(avValue); }
+
+    // Both distributed: the double integral, as two nested
+    // PDFIntegrators -- the outer one over A_V ~ avDistField(), whose
+    // integrand is itself the inner integral over f ~ avNebFac()
+    const utils::PDFIntegrator<decltype(integrateOverNebFac), utils::GKOrder::GK15> integrator(
+        avDistField, integrateOverNebFac, nInt, false, maxIter, absTol, relTol);
+    return integrator.integrate(avDistField.getMin(), avDistField.getMax());
+}
+
+void extinct::Extinct::computeExtinctionFacCts()
+{
+    // Stellar light (A_V only), then nebular emission (A_V times the
+    // nebular-to-stellar ratio) -- see expectedExtinctFac()
+    extinctionFacCts_ = expectedExtinctFac(&Extinct::extinctFac, wl_.size(), false);
+    extinctionFacCtsNeb_ = expectedExtinctFac(&Extinct::extinctFac, wl_.size(), true);
 }
 
 void extinct::Extinct::computeExtinctionFacCtsLines()
@@ -182,23 +225,8 @@ void extinct::Extinct::computeExtinctionFacCtsLines()
         return;
     }
 
-    const auto& avDistField = controls_.avDistField();
-
-    // See computeExtinctionFacCts()'s own comment on this degenerate/
-    // invalid avDistField() handling -- identical here, just for
-    // extinctFacLines()/extinctionFacCtsLines_ rather than
-    // extinctFac()/extinctionFacCts_
-    if (!avDistField.valid() || avDistField.getMin() == avDistField.getMax())
-    {
-        const double A_V = avDistField.valid() ? avDistField.getMin() : 0.0; // NOLINT(readability-identifier-naming) -- see applyExtinction()'s own identical NOLINT
-        extinctionFacCtsLines_ = extinctFacLines(A_V);
-        return;
-    }
-
-    // General case -- see computeExtinctionFacCts()'s own comment
-    using ExtinctFacLinesFn = std::vector<double> (Extinct::*)(double) const;
-    const utils::PDFIntegrator<ExtinctFacLinesFn, utils::GKOrder::GK15> integrator(
-        avDistField, static_cast<ExtinctFacLinesFn>(&Extinct::extinctFacLines),
-        extinctLines_.size(), false, controls_.intMaxIter(), controls_.intAbsTol(), controls_.intRelTol());
-    extinctionFacCtsLines_ = integrator.integrate(avDistField.getMin(), avDistField.getMax(), this);
+    // Lines are always nebular emission, so integrate over the
+    // nebular-to-stellar extinction ratio too -- see
+    // expectedExtinctFac()
+    extinctionFacCtsLines_ = expectedExtinctFac(&Extinct::extinctFacLines, extinctLines_.size(), true);
 }

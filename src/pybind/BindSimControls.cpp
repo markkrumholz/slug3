@@ -369,6 +369,43 @@ quantities (Extinct.rebuildCache()), so its cached expectation values
 (used by Extinct.applyExtinctionCts()/applyExtinctionCtsLines()) stay
 in sync with the new distribution.)doc";
 
+static constexpr std::string_view setAVNebFacDocstring = R"doc(Set the distribution of the ratio of nebular to stellar V-band extinction.
+
+Parameters
+----------
+av_neb_fac : str
+    A numerical value (interpreted as a delta-function factor at that
+    value) or the name of a PDF file. See the avNebFac property for
+    what this factor is.
+
+Throws
+------
+RuntimeError
+    If av_neb_fac is not numeric and does not name a file that can be
+    found, or if the resulting distribution extends below 0 or is not
+    finite (e.g. "nan" or "inf"); avNebFac is left unchanged in either
+    case.
+
+Details
+-------
+If this SimControls already has an extinction curve (its extinct
+property is not None), also rebuilds that Extinct's own cached
+quantities (Extinct.rebuildCache()), so its cached nebular expectation
+values (used by Extinct.applyExtinctionCts() with nebular=True, and
+applyExtinctionCtsLines()) stay in sync with the new distribution.)doc";
+
+static constexpr std::string_view avNebFacPropertyDocstring = R"doc(The distribution of the ratio of nebular to stellar V-band extinction.
+
+The factor f by which the V-band extinction applied to nebular emission
+exceeds that applied to the stellar light it accompanies (A_V,neb =
+f A_V), set by the input deck's optional extinct.neb_factor key. It is
+a delta function at 1 (equal nebular and stellar extinction) if that
+key was not given, including when no extinction is applied at all, and
+is always finite and non-negative.
+
+Reading returns a PDF; assigning a str sets a new one via
+setAVNebFac() -- see its own docstring for the exact rules.)doc";
+
 static constexpr std::string_view setSFRDocstring = R"doc(Set the star formation rate.
 
 Parameters
@@ -1501,6 +1538,8 @@ void bindSimControls(py::module_& m)
                 setAVDistDocstring.data(), py::arg("av_dist"))
         .def("setAVDistField", &io::SimControls::setAVDistField,
                 setAVDistFieldDocstring.data(), py::arg("av_dist_field"))
+        .def("setAVNebFac", &io::SimControls::setAVNebFac,
+                setAVNebFacDocstring.data(), py::arg("av_neb_fac"))
         .def("setSFR", &io::SimControls::setSFR,
                 setSFRDocstring.data(), py::arg("sfr"))
         .def("setSFRDist", &io::SimControls::setSFRDist,
@@ -1596,6 +1635,10 @@ void bindSimControls(py::module_& m)
                 &io::SimControls::clf,
                 [](io::SimControls& self, const std::string& clf) { self.setCLF(clf); },
                 clfPropertyDocstring.data())
+        .def_property("avNebFac",
+                &io::SimControls::avNebFac,
+                [](io::SimControls& self, const std::string& avNebFac) { self.setAVNebFac(avNebFac); },
+                avNebFacPropertyDocstring.data())
         .def_property("sfr",
                 &io::SimControls::sfr,
                 [](io::SimControls& self, const std::string& sfr) { self.setSFR(sfr); },

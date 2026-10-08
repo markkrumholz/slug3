@@ -1137,26 +1137,78 @@ void io::SimControls::readFilters(const utils::TrackedDeck& inputDeck)
         filterNames, photSystem, registryName);
 }
 
-// Build a valid PDF that always draws exactly 0 -- used by readExtinct()
+// Build a valid PDF that always draws exactly x -- used by readExtinct()
 // below to fill in whichever of avDist_/avDistField_ was not given an
-// explicit distribution of its own, so the two are always either both
-// valid or both invalid, never just one
-static auto buildDeltaAV0() -> pdfs::PDF
+// explicit distribution of its own (x = 0), so the two are always either
+// both valid or both invalid, never just one, and avNebFac_'s default
+// (x = 1)
+static auto buildDelta(const double x) -> pdfs::PDF
 {
-    auto delta = std::make_unique<pdfs::PDFSegmentDelta>(0.0);
+    auto delta = std::make_unique<pdfs::PDFSegmentDelta>(x);
     return pdfs::PDF(std::move(delta));
+}
+
+// Throw unless avNebFac (a candidate for SimControls::avNebFac_) is
+// finite and non-negative everywhere -- see setAVNebFac()'s own header
+// comment. Written as !(min >= 0) so that a NaN, for which every
+// comparison is false, is rejected too; a numeric input of "nan" or
+// "inf" would otherwise become a delta PDF that contaminates (NaN) or
+// zeroes (inf) every nebular spectrum it is applied to.
+static void checkAVNebFac(const pdfs::PDF& avNebFac, const std::string& source)
+{
+    const double lo = avNebFac.getMin();
+    const double hi = avNebFac.getMax();
+    if (!(lo >= 0.0) || !std::isfinite(lo) || !std::isfinite(hi)) // NOLINT(readability-simplify-boolean-expr) -- the De Morgan form would accept a NaN minimum
+    {
+        throw std::runtime_error("SimControls: " + source + " must be finite and not extend "
+            "below 0 (it is the ratio of nebular to stellar V-band extinction), but it spans [" +
+            std::to_string(lo) + ", " + std::to_string(hi) + "]");
+    }
+}
+
+// Set the nebular-to-stellar A_V ratio distribution, validating it
+// before replacing the old one, then rebuilding extinct_'s own cached
+// quantities -- see setAVNebFac()'s own header comment, and
+// setAVDistField()'s for why the old value is restored if that rebuild
+// throws
+void io::SimControls::setAVNebFac(const std::string& avNebFac)
+{
+    auto newAVNebFac = utils::initPDFFromString(avNebFac);
+    checkAVNebFac(newAVNebFac, "the nebular extinction factor");
+    if (!extinct_)
+    {
+        avNebFac_ = std::move(newAVNebFac);
+        return;
+    }
+    auto oldAVNebFac = std::move(avNebFac_);
+    avNebFac_ = std::move(newAVNebFac);
+    try
+    {
+        extinct_->rebuildCache();
+    }
+    catch (...)
+    {
+        avNebFac_ = std::move(oldAVNebFac);
+        throw;
+    }
 }
 
 // Extinction curve reader
 void io::SimControls::readExtinct(const utils::TrackedDeck& inputDeck)
 {
+    // Nebular-to-stellar extinction ratio: equal unless
+    // extinct.neb_factor (read below) says otherwise -- set before the
+    // early return below, so avNebFac_ is valid even when no
+    // extinction is applied at all
+    avNebFac_ = buildDelta(1.0);
+
     // extinct.AV / extinct.AV_field: both optional; if neither is
     // given, this simulation applies no extinction at all, and
     // avDist_/avDistField_/extinct_ are left at their default/null
     // state. If either is given, extinct.model becomes mandatory
     // (below), and whichever of the two was not given is set to a
     // delta function PDF at 0 instead of being left invalid -- see
-    // buildDeltaAV0()'s own comment for why.
+    // buildDelta()'s own comment for why.
     const auto avNode = inputDeck.atPath("extinct.AV");
     const auto avFieldNode = inputDeck.atPath("extinct.AV_field");
     if (!avNode && !avFieldNode)
@@ -1166,8 +1218,17 @@ void io::SimControls::readExtinct(const utils::TrackedDeck& inputDeck)
         return;
     }
 
-    avDist_ = avNode ? inputDeck.initPDF("extinct.AV") : buildDeltaAV0();
-    avDistField_ = avFieldNode ? inputDeck.initPDF("extinct.AV_field") : buildDeltaAV0();
+    avDist_ = avNode ? inputDeck.initPDF("extinct.AV") : buildDelta(0.0);
+    avDistField_ = avFieldNode ? inputDeck.initPDF("extinct.AV_field") : buildDelta(0.0);
+
+    // extinct.neb_factor: optional ratio of nebular to stellar V-band
+    // extinction -- see avNebFac()'s own comment
+    if (inputDeck.atPath("extinct.neb_factor"))
+    {
+        auto avNebFac = inputDeck.initPDF("extinct.neb_factor");
+        checkAVNebFac(avNebFac, "extinct.neb_factor");
+        avNebFac_ = std::move(avNebFac);
+    }
 
     // extinct.model: required now that extinct.AV or extinct.AV_field
     // was given, names the extinction curve to use

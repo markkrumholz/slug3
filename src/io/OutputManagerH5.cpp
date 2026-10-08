@@ -933,6 +933,11 @@ void io::OutputManagerH5::openClustersGroup()
             clustersGroup_(), "A_V", H5T_NATIVE_DOUBLE);
         utils::writeStringAttr(aVDset, "units", "magnitudes");
         H5Dclose(aVDset);
+        // Nebular V-band extinction -- see core::Cluster::avNeb()
+        const hid_t aVNebDset = utils::createExtensible1dDataset(
+            clustersGroup_(), "A_V_neb", H5T_NATIVE_DOUBLE);
+        utils::writeStringAttr(aVNebDset, "units", "magnitudes");
+        H5Dclose(aVNebDset);
     }
     // NOLINTEND(misc-include-cleaner)
 }
@@ -1797,6 +1802,8 @@ void io::OutputManagerH5::writeCluster(
         {
             const double aV = cluster.aV();
             utils::appendToDataset(clustersGroup_(), "A_V", H5T_NATIVE_DOUBLE, &aV);
+            const double aVNeb = cluster.avNeb();
+            utils::appendToDataset(clustersGroup_(), "A_V_neb", H5T_NATIVE_DOUBLE, &aVNeb);
         }
 
         // Flush this thread's own file now, rather than waiting for

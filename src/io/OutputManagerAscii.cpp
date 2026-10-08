@@ -66,8 +66,10 @@ static auto formatSci(const double value) -> std::string
 
 // Write the cluster-output ascii header (column names, a row of
 // units -- "none" for a dimensionless column -- and a dashed rule) to
-// file. hasExtinct adds an "a_v" (mag) column, right before "rng",
-// when SimControls::extinct() is set.
+// file. hasExtinct adds "a_v" and "a_v_neb" (mag) columns -- the
+// cluster's stellar and nebular V-band extinctions (see
+// core::Cluster::aV()/avNeb()) -- right before "rng", when
+// SimControls::extinct() is set.
 static void writeClustersHeader(std::ofstream& file, const bool hasExtinct)
 {
     file << std::right << std::setw(uidWidth) << "trial"
@@ -76,7 +78,7 @@ static void writeClustersHeader(std::ofstream& file, const bool hasExtinct)
          << std::setw(numWidth) << "birth_mass"
          << std::setw(numWidth) << "form_time"
          << std::setw(numWidth) << "feh";
-    if (hasExtinct) { file << std::setw(numWidth) << "a_v"; }
+    if (hasExtinct) { file << std::setw(numWidth) << "a_v" << std::setw(numWidth) << "a_v_neb"; }
     file << std::setw(rngWidth) << "rng" << "\n";
     file << std::right << std::setw(uidWidth) << "none"
          << std::setw(uidWidth) << "none"
@@ -84,9 +86,9 @@ static void writeClustersHeader(std::ofstream& file, const bool hasExtinct)
          << std::setw(numWidth) << "Msun"
          << std::setw(numWidth) << "yr"
          << std::setw(numWidth) << "none";
-    if (hasExtinct) { file << std::setw(numWidth) << "mag"; }
+    if (hasExtinct) { file << std::setw(numWidth) << "mag" << std::setw(numWidth) << "mag"; }
     file << std::setw(rngWidth) << "none" << "\n";
-    const int numColumns = hasExtinct ? 5 : 4;
+    const int numColumns = hasExtinct ? 6 : 4;
     file << std::string(static_cast<std::string::size_type>(2) * uidWidth, '-')
          << std::string(static_cast<std::string::size_type>(numColumns) * numWidth, '-')
          << std::string(static_cast<std::string::size_type>(rngWidth), '-') << "\n";
@@ -1094,7 +1096,8 @@ void io::OutputManagerAscii::writeCluster(
                       << std::setw(numWidth) << formatSci(cluster.feH());
         if (simControls_.extinct() != nullptr)
         {
-            clustersFile_ << std::setw(numWidth) << formatSci(cluster.aV());
+            clustersFile_ << std::setw(numWidth) << formatSci(cluster.aV())
+                          << std::setw(numWidth) << formatSci(cluster.avNeb());
         }
         clustersFile_ << std::setw(rngWidth) << std::string(cluster.rngState().data()) << "\n";
     }

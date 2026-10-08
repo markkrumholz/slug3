@@ -96,7 +96,7 @@ nebular emission line's own wavelength too, if a nebular emission grid
 was requested (SimControls.nebular is not None); normalizes both to a
 V-band extinction of 1 mag; and recomputes the field-star expectation
 values applyExtinctionCts()/applyExtinctionCtsLines() use from
-SimControls.avDistField. Call this (rather than loadCurve()) after
+SimControls.avDistField and SimControls.avNebFac. Call this (rather than loadCurve()) after
 this Extinct's own SimControls has its spectral synthesizer, nebular
 emission grid, or field-star A_V distribution change, to bring these
 cached quantities back in sync with them, without re-reading the
@@ -180,7 +180,9 @@ with one known A_V, this is for a population whose members are not
 individually tracked, so there is no single A_V to apply -- instead,
 each element of spec is multiplied by the expectation value of
 exp(-A_V * extinct()) over the field-star A_V distribution
-(SimControls.avDistField).
+(SimControls.avDistField). If nebular is True, the expectation value
+is instead of exp(-A_V f * extinct()), over both that distribution
+and the nebular-to-stellar extinction ratio f (SimControls.avNebFac).
 
 Parameters
 ----------
@@ -188,6 +190,10 @@ spec : list of float
     Spectrum to extinguish, tabulated on exactly this Extinct's own
     SimControls.specsyn.wl -- see applyExtinction()'s own spec
     parameter.
+nebular : bool, optional
+    Whether spec is nebular emission, to be extinguished by the
+    nebular extinction (see above) rather than the stellar one.
+    Defaults to False.
 
 Returns
 -------
@@ -221,8 +227,10 @@ static constexpr std::string_view applyExtinctionCtsLinesDocstring =
 
 Line-luminosity analog of applyExtinctionCts() -- see its own
 docstring; each element of line_lum is multiplied by the expectation
-value of exp(-A_V * extinctLines) over the field-star A_V
-distribution (SimControls.avDistField).
+value of exp(-A_V f * extinctLines) over the field-star A_V
+distribution (SimControls.avDistField) and the nebular-to-stellar
+extinction ratio f (SimControls.avNebFac), since lines are always
+nebular emission.
 
 Parameters
 ----------
@@ -297,7 +305,7 @@ void bindExtinct(py::module_& m)
                 py::arg("A_V"), py::arg("spec"))
         .def("applyExtinctionCts", &extinct::Extinct::applyExtinctionCts,
                 applyExtinctionCtsDocstring.data(),
-                py::arg("spec"))
+                py::arg("spec"), py::arg("nebular") = false)
         .def("applyExtinctionLines", &extinct::Extinct::applyExtinctionLines,
                 applyExtinctionLinesDocstring.data(),
                 py::arg("A_V"), py::arg("line_lum"))

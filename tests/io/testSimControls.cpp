@@ -1013,6 +1013,103 @@ static auto testSimControlsSpectraChained() -> int
     return 0;
 }
 
+// Verify SimControls::avNebFac(): a valid delta at 1 by default (with
+// or without extinction), extinct.neb_factor read when given, negative
+// factors rejected (from the deck or setAVNebFac(), the latter leaving
+// the old value unchanged), and setAVNebFac() replacing the value
+static auto testSimControlsExtinctNebFac() -> int
+{
+    constexpr double tightTol = 1e-9;
+    constexpr std::string_view baseDeck = "tests/core/assets/testGalaxy.in";
+    const auto drawsExactly = [](const pdfs::PDF& pdf, const double x) -> bool
+    { return pdf.valid() && std::abs(pdf.draw() - x) <= tightTol; };
+
+    try
+    {
+        // No extinction at all: still a valid delta at 1
+        {
+            const toml::table inputDeck = toml::parse_file(baseDeck);
+            const io::SimControls controls(inputDeck);
+            if (!drawsExactly(controls.avNebFac(), 1.0))
+            {
+                std::cerr << "testSimControls: extinctNebFac: expected avNebFac() "
+                    "to be a delta at 1 with no extinction\n";
+                return 1;
+            }
+        }
+
+        // Extinction, but no extinct.neb_factor: delta at 1
+        {
+            toml::table inputDeck = toml::parse_file(baseDeck);
+            inputDeck.insert("extinct", toml::table{
+                { "AV", 1.0 }, { "model", "Calzetti_starburst" } });
+            const io::SimControls controls(inputDeck);
+            if (!drawsExactly(controls.avNebFac(), 1.0))
+            {
+                std::cerr << "testSimControls: extinctNebFac: expected avNebFac() "
+                    "to default to a delta at 1 when extinct.neb_factor is absent\n";
+                return 1;
+            }
+        }
+
+        // extinct.neb_factor given: read as given; then setAVNebFac()
+        // replaces it, and rejects a negative value without changing it
+        {
+            toml::table inputDeck = toml::parse_file(baseDeck);
+            inputDeck.insert("extinct", toml::table{
+                { "AV", 1.0 }, { "neb_factor", 2.0 }, { "model", "Calzetti_starburst" } });
+            io::SimControls controls(inputDeck);
+            if (!drawsExactly(controls.avNebFac(), 2.0))
+            {
+                std::cerr << "testSimControls: extinctNebFac: expected avNebFac() "
+                    "to always draw 2.0 from extinct.neb_factor = 2.0, got "
+                    << controls.avNebFac().draw() << "\n";
+                return 1;
+            }
+            controls.setAVNebFac("1.5");
+            if (!drawsExactly(controls.avNebFac(), 1.5))
+            {
+                std::cerr << "testSimControls: extinctNebFac: expected setAVNebFac(\"1.5\") "
+                    "to make avNebFac() always draw 1.5\n";
+                return 1;
+            }
+            for (const std::string bad : { "-0.5", "nan", "inf" })
+            {
+                bool threw = false;
+                try { controls.setAVNebFac(bad); }
+                catch (const std::runtime_error&) { threw = true; }
+                if (!threw || !drawsExactly(controls.avNebFac(), 1.5))
+                {
+                    std::cerr << "testSimControls: extinctNebFac: expected setAVNebFac(\""
+                        << bad << "\") to throw and leave avNebFac() unchanged\n";
+                    return 1;
+                }
+            }
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testSimControls: extinctNebFac: unexpected exception: "
+            << error.what() << "\n";
+        return 1;
+    }
+
+    // A negative extinct.neb_factor in the deck should throw
+    try
+    {
+        toml::table inputDeck = toml::parse_file(baseDeck);
+        inputDeck.insert("extinct", toml::table{
+            { "AV", 1.0 }, { "neb_factor", -1.0 }, { "model", "Calzetti_starburst" } });
+        const io::SimControls controls(inputDeck);
+        std::cerr << "testSimControls: extinctNebFac: expected an exception "
+            "for a negative extinct.neb_factor\n";
+        return 1;
+    }
+    catch (const std::runtime_error&) { /* expected */ }
+
+    return 0;
+}
+
 // Verify that SimControls::readExtinct() symmetrically defaults
 // whichever of avDist()/avDistField() was not given an explicit
 // distribution to a valid delta function PDF at 0, so the two are
@@ -4605,6 +4702,7 @@ auto testSimControls() -> int
     result += testSimControlsSpectraSkipTrackPadding();
     result += testSimControlsSpectraChained();
     result += testSimControlsExtinctField();
+    result += testSimControlsExtinctNebFac();
     result += testSimControlsYields();
     result += testSimControlsYieldsNoDecay();
     result += testSimControlsWriteYields();

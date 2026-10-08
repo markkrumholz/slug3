@@ -889,6 +889,31 @@ def test_simcontrols_set_av_dist_invalid_raises(setter):
         getattr(controls, setter)("not_numeric_or_a_real_file")
 
 
+def test_simcontrols_av_neb_fac_default_and_setters():
+    """avNebFac defaults to a delta at 1 (here with no extinction at
+    all); assigning the property and calling setAVNebFac() both replace
+    it; a negative factor raises and leaves the old value in place."""
+    controls = slug.SimControls(CLUSTER_DECK)
+    assert controls.avNebFac.draw() == pytest.approx(1.0)
+    controls.avNebFac = "2.0"
+    assert controls.avNebFac.draw() == pytest.approx(2.0)
+    controls.setAVNebFac("1.5")
+    assert controls.avNebFac.draw() == pytest.approx(1.5)
+    with pytest.raises(RuntimeError):
+        controls.setAVNebFac("-1.0")
+    assert controls.avNebFac.draw() == pytest.approx(1.5)
+    with pytest.raises(RuntimeError):
+        controls.setAVNebFac("not_numeric_or_a_real_file")
+
+
+def test_simcontrols_av_neb_fac_from_deck():
+    """extinct.neb_factor in the input deck sets avNebFac."""
+    deck = tomllib.loads(pathlib.Path(CLUSTER_DECK).read_text())
+    deck["extinct"] = {"AV": 1.0, "neb_factor": 2.5, "model": "Calzetti_starburst"}
+    controls = slug.SimControls(tomlkit.dumps(deck))
+    assert controls.avNebFac.draw() == pytest.approx(2.5)
+
+
 def _controls_with_extinct(av_field):
     """A SimControls built from CLUSTER_DECK with extinction enabled
     (extinct.AV/extinct.AV_field/extinct.model added), so extinct is

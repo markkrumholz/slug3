@@ -727,6 +727,88 @@ static auto testClusterLbol() -> int
     return 0;
 }
 
+// Verify Cluster's nebular extinction factor (SimControls::avNebFac(),
+// from extinct.neb_factor): with neb_factor = 2, avNeb() is twice aV(),
+// specNebExtinct()/lineLumExtinct() are extincted by avNeb() rather than
+// aV(), and specExtinct() (the stellar spectrum) still by aV(). Also
+// checks that the rng-state constructor replays avNeb() exactly when the
+// factor is a genuine (non-delta) distribution, i.e. that both
+// constructors draw it in the same position of the rng sequence.
+static auto testClusterNebularExtinctFactor() -> int
+{
+    constexpr double ageYr = 1e7; // an exact hit on the nebular fixture's own tabulated cluster ages
+    constexpr double nebFactor = 2.0;
+
+    try
+    {
+        toml::table inputDeck = toml::parse_file(inputFileExtinct);
+        inputDeck.at_path("nebular").as_table()->insert_or_assign("compute_neb", true);
+        inputDeck.at_path("nebular").as_table()->insert_or_assign(
+            "table", std::string("tests/nebular/assets/nebular_test.h5"));
+        inputDeck.at_path("extinct").as_table()->insert_or_assign("neb_factor", nebFactor);
+        io::SimControls controls(inputDeck);
+        const auto ext = controls.extinct();
+        if (ext == nullptr || controls.nebular() == nullptr)
+        {
+            std::cerr << "testCluster: nebularExtinctFactor: test bug: expected "
+                "extinct() and nebular() non-null\n";
+            return 1;
+        }
+
+        utils::rng().seed(rngSeed);
+        core::Cluster cluster(0, 1e4, 0.0, controls);
+        cluster.advance(ageYr);
+
+        if (!utils::approxEqual(cluster.avNeb(), nebFactor * cluster.aV()) || cluster.aV() <= 0.0)
+        {
+            std::cerr << "testCluster: nebularExtinctFactor: expected avNeb() == "
+                << nebFactor << " * aV() with aV() > 0, got aV() = " << cluster.aV()
+                << ", avNeb() = " << cluster.avNeb() << "\n";
+            return 1;
+        }
+        if (cluster.specExtinct() != ext->applyExtinction(cluster.aV(), cluster.spec()))
+        {
+            std::cerr << "testCluster: nebularExtinctFactor: expected specExtinct() "
+                "to still be extincted by aV()\n";
+            return 1;
+        }
+        if (cluster.specNebExtinct() != ext->applyExtinction(cluster.avNeb(), cluster.specNeb()) ||
+            cluster.lineLumExtinct() != ext->applyExtinctionLines(cluster.avNeb(), cluster.lineLum()))
+        {
+            std::cerr << "testCluster: nebularExtinctFactor: expected specNebExtinct()/"
+                "lineLumExtinct() to be extincted by avNeb()\n";
+            return 1;
+        }
+        if (cluster.specNebExtinct() == ext->applyExtinction(cluster.aV(), cluster.specNeb()))
+        {
+            std::cerr << "testCluster: nebularExtinctFactor: expected specNebExtinct() "
+                "to differ from extinction by aV() alone when neb_factor != 1\n";
+            return 1;
+        }
+
+        // Rng-state replay with a non-delta factor distribution
+        controls.setAVNebFac("tests/pdfs/assets/chabrier_imf.toml");
+        utils::rng().seed(rngSeed);
+        const core::Cluster original(1, 1e4, 0.0, controls);
+        const core::Cluster replayed(1, 1e4, 0.0, controls, original.rngState());
+        if (original.avNeb() != replayed.avNeb() ||
+            original.starMasses() != replayed.starMasses())
+        {
+            std::cerr << "testCluster: nebularExtinctFactor: expected the rng-state "
+                "constructor to replay avNeb() (" << original.avNeb() << " vs "
+                << replayed.avNeb() << ") and the stellar masses exactly\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testCluster: nebularExtinctFactor test failed: "
+            << error.what() << "\n";
+        return 1;
+    }
+    return 0;
+}
+
 // Verify that Cluster's own specNeb()/specNebExtinct()/lineLum()/
 // lineLumExtinct()/photNeb()/photNebExtinct() agree, bit-for-bit, with an independent
 // recomputation via SimControls::nebular()'s own public getCluster(),
@@ -794,18 +876,18 @@ static auto testClusterNebular() -> int
                 "extinct() non-null\n";
             return 1;
         }
-        const auto expectedSpecNebExtinct = ext->applyExtinction(cluster.aV(), cluster.specNeb());
+        const auto expectedSpecNebExtinct = ext->applyExtinction(cluster.avNeb(), cluster.specNeb());
         if (cluster.specNebExtinct() != expectedSpecNebExtinct)
         {
             std::cerr << "testCluster: nebular: specNebExtinct() does not match "
-                "ext->applyExtinction(aV(), specNeb())\n";
+                "ext->applyExtinction(avNeb(), specNeb())\n";
             return 1;
         }
-        const auto expectedLineLumExtinct = ext->applyExtinctionLines(cluster.aV(), cluster.lineLum());
+        const auto expectedLineLumExtinct = ext->applyExtinctionLines(cluster.avNeb(), cluster.lineLum());
         if (cluster.lineLumExtinct() != expectedLineLumExtinct)
         {
             std::cerr << "testCluster: nebular: lineLumExtinct() does not match "
-                "ext->applyExtinctionLines(aV(), lineLum())\n";
+                "ext->applyExtinctionLines(avNeb(), lineLum())\n";
             return 1;
         }
 
@@ -2109,6 +2191,7 @@ auto testCluster() -> int
     result += testClusterPhot();
     result += testClusterPhotAbsent();
     result += testClusterExtinct();
+    result += testClusterNebularExtinctFactor();
     result += testClusterLbol();
     result += testClusterLbolContinuousMatchesStochastic();
     result += testClusterNebular();
