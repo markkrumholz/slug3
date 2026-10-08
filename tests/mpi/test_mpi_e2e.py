@@ -11,7 +11,7 @@ CMakeLists.txt's own comment on why MPI is linked only there, not
 slugPython or the test suite), and depends on genuinely separate
 processes (MPI_Comm_rank/size) to exercise. See CMakeLists.txt's
 test_MPI, which only registers this module as a CTest test when the
-build actually found and linked MPI (MPI_CXX_FOUND) -- everywhere
+build actually found and linked MPI (MPI_C_FOUND) -- everywhere
 else, the skipif below makes it a no-op.
 """
 
@@ -36,7 +36,7 @@ pytestmark = pytest.mark.skipif(
     or not shutil.which(MPIEXEC_EXECUTABLE),
     reason="slug was not built with MPI support, or mpiexec is "
     "unavailable (see CMakeLists.txt's test_MPI, which only registers "
-    "this test when MPI_CXX_FOUND)",
+    "this test when MPI_C_FOUND)",
 )
 
 
