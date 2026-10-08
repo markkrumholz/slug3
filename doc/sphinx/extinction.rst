@@ -46,6 +46,19 @@ gives the extinction (or distribution of extinctions) for stars that are part of
 clusters, while in galaxy simulations ``AV_field`` provides a separate distribution
 of extinctions that is applied only to "field" stars that are not part of clusters.
 
+Finally, SLUG allows nebular emission to be subjected to a different amount of
+extinction than stellar emission, consistent with observations showing that the
+nebular emission lines are usually more heavily extincted than the stellar continuum 
+(e.g., `Calzetti et al. 2000 <https://ui.adsabs.harvard.edu/abs/2000ApJ...533..682C/abstract>`__).
+The keyword ``extinct.neb_factor`` (see :ref:`ssec-parameters-extinct`) specifies the
+distribution of the ratio of nebular extinction to stellar extinction, 
+:math:`A_{V,\mathrm{neb}}/A_{V,\mathrm{star}}`. This factor is applied to both clusters
+whose extinction is set by ``AV`` and field stars whose extinction is set by ``AV_field``.
+For example, if ``extinct.neb_factor`` is set to 2, then nebular emission will be
+extincted by twice the :math:`A_V` that is applied to stellar emission. Note that
+``neb_factor`` can be a PDF, so that the ratio can be drawn from a distribution rather
+than being a fixed number.
+
 Extinction Curves
 -----------------
 

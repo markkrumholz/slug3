@@ -1161,12 +1161,30 @@ static void checkAVNebFac(const pdfs::PDF& avNebFac, const std::string& source)
 }
 
 // Set the nebular-to-stellar A_V ratio distribution, validating it
-// before replacing the old one -- see setAVNebFac()'s own header comment
+// before replacing the old one, then rebuilding extinct_'s own cached
+// quantities -- see setAVNebFac()'s own header comment, and
+// setAVDistField()'s for why the old value is restored if that rebuild
+// throws
 void io::SimControls::setAVNebFac(const std::string& avNebFac)
 {
     auto newAVNebFac = utils::initPDFFromString(avNebFac);
     checkAVNebFac(newAVNebFac, "the nebular extinction factor");
+    if (!extinct_)
+    {
+        avNebFac_ = std::move(newAVNebFac);
+        return;
+    }
+    auto oldAVNebFac = std::move(avNebFac_);
     avNebFac_ = std::move(newAVNebFac);
+    try
+    {
+        extinct_->rebuildCache();
+    }
+    catch (...)
+    {
+        avNebFac_ = std::move(oldAVNebFac);
+        throw;
+    }
 }
 
 // Extinction curve reader

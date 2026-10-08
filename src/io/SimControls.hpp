@@ -1231,6 +1231,14 @@ namespace io
          *   resulting distribution extends below 0 (a negative
          *   extinction factor is unphysical); avNebFac() is left
          *   unchanged in either case
+         * @details
+         * If this SimControls already has an extinction curve
+         * (extinct() is not null), also calls its own
+         * Extinct::rebuildCache(), since its cached nebular extinction
+         * factors (used by applyExtinctionCts() with nebular = true,
+         * and applyExtinctionCtsLines()) depend on avNebFac() -- with
+         * avNebFac() restored to its previous value if that call
+         * throws, exactly as setAVDistField() does for avDistField().
          */
         void setAVNebFac(const std::string& avNebFac);
 

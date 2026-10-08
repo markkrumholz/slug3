@@ -383,7 +383,15 @@ Throws
 RuntimeError
     If av_neb_fac is not numeric and does not name a file that can be
     found, or if the resulting distribution extends below 0; avNebFac
-    is left unchanged in either case.)doc";
+    is left unchanged in either case.
+
+Details
+-------
+If this SimControls already has an extinction curve (its extinct
+property is not None), also rebuilds that Extinct's own cached
+quantities (Extinct.rebuildCache()), so its cached nebular expectation
+values (used by Extinct.applyExtinctionCts() with nebular=True, and
+applyExtinctionCtsLines()) stay in sync with the new distribution.)doc";
 
 static constexpr std::string_view avNebFacPropertyDocstring = R"doc(The distribution of the ratio of nebular to stellar V-band extinction.
 

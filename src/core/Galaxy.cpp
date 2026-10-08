@@ -581,7 +581,7 @@ void core::Galaxy::addContinuousNebSpec(const extinct::Extinct* ext, const nebul
     for (std::size_t i = 0; i < lineLum_.size(); ++i) { lineLum_[i] += nebContLineLum[i]; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- nebContLineLum has size neb->lineWl().size() by Nebular::getGalaxy()'s own contract, matching lineLum_'s size set in computeSpec()
     if (ext == nullptr) { return; }
 
-    const auto nebContSpecExtinct = ext->applyExtinctionCts(nebContSpec);
+    const auto nebContSpecExtinct = ext->applyExtinctionCts(nebContSpec, true); // nebular: also integrates over SimControls::avNebFac()
     for (std::size_t i = 0; i < specNebExtinct_.size(); ++i) { specNebExtinct_[i] += nebContSpecExtinct[i]; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- nebContSpecExtinct has size specNebExtinct_.size() (wl_.size()) by Extinct::applyExtinctionCts()'s own contract, matching specNebExtinct_'s size set in computeSpec()
     const auto nebContLineLumExtinct = ext->applyExtinctionCtsLines(nebContLineLum);
     for (std::size_t i = 0; i < lineLumExtinct_.size(); ++i) { lineLumExtinct_[i] += nebContLineLumExtinct[i]; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- nebContLineLumExtinct has size lineLumExtinct_.size() (neb->lineWl().size()) by Extinct::applyExtinctionCtsLines()'s own contract, matching lineLumExtinct_'s size set in addClusterSpecNeb()

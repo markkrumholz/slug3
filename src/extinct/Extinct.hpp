@@ -160,7 +160,8 @@ namespace extinct
          * @details
          * If controls_.specsyn() is null, clears every cached quantity
          * (wl_/extinct_/wlOffset_/extinctLines_/extinctionFacCts_/
-         * extinctionFacCtsLines_) instead of computing anything -- see
+         * extinctionFacCtsNeb_/extinctionFacCtsLines_) instead of
+         * computing anything -- see
          * rebuildCacheImpl()'s own comment for why every one of them,
          * not just wl_/extinct_, ends up equally unusable in that
          * state. Every method that reads these quantities (wlObs(),
@@ -180,7 +181,7 @@ namespace extinct
          *     (see initExtinctLines());
          *   - normalizes both of the above to a V-band extinction of
          *     1 mag (see normalize());
-         *   - precomputes extinctionFacCts_/extinctionFacCtsLines_
+         *   - precomputes extinctionFacCts_/extinctionFacCtsNeb_/extinctionFacCtsLines_
          *     (see their own comments).
          * The actual computation is rebuildCacheImpl()'s -- this
          * method itself only performs it on a disposable copy of
@@ -320,6 +321,10 @@ namespace extinct
          * @param spec Spectrum to extinguish, tabulated on exactly
          *   controls_.specsyn()->wl() -- see applyExtinction()'s own
          *   spec parameter
+         * @param nebular If true, spec is nebular emission, and is
+         *   attenuated by extinctionFacCtsNeb_ (which also integrates
+         *   over the nebular-to-stellar extinction ratio,
+         *   io::SimControls::avNebFac()) instead of extinctionFacCts_
          * @returns The expected extinguished spectrum, on the
          *   wavelength grid returned by wl()
          * @throws std::runtime_error if wl() is empty (controls_.specsyn()
@@ -334,9 +339,12 @@ namespace extinct
          * corresponding wavelength: the expectation value of
          * exp(-A_V * extinct()) over the field-star A_V distribution
          * (io::SimControls::avDistField()), precomputed by
-         * rebuildCache() -- see extinctionFacCts_'s own comment.
+         * rebuildCache() -- see extinctionFacCts_'s own comment; or,
+         * if nebular is true, by extinctionFacCtsNeb_ instead -- see
+         * its own comment.
          */
-        [[nodiscard]] auto applyExtinctionCts(const std::vector<double>& spec) const -> std::vector<double>
+        [[nodiscard]] auto applyExtinctionCts(const std::vector<double>& spec,
+            const bool nebular = false) const -> std::vector<double>
         {
             if (wl_.empty())
             {
@@ -346,10 +354,11 @@ namespace extinct
                     "last time rebuildCache() ran, so there is nothing to "
                     "extinguish spec against");
             }
+            const auto& fac = nebular ? extinctionFacCtsNeb_ : extinctionFacCts_;
             std::vector<double> result(wl_.size());
             for (std::size_t i = 0; i < wl_.size(); i++)
             {
-                result[i] = spec[wlOffset_ + i] * extinctionFacCts_[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- result and extinctionFacCts_ both have size wl_.size() (extinctionFacCts_ by computeExtinctionFacCts()'s own contract), and i is bounded by wl_.size(); spec has the same size as the wl originally passed to the constructor, so wlOffset_ + i stays in bounds -- see applyExtinction()'s own identical indexing
+                result[i] = spec[wlOffset_ + i] * fac[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access) -- result and fac (extinctionFacCts_ or extinctionFacCtsNeb_) all have size wl_.size() (by computeExtinctionFacCts()'s own contract), and i is bounded by wl_.size(); spec has the same size as the wl originally passed to the constructor, so wlOffset_ + i stays in bounds -- see applyExtinction()'s own identical indexing
             }
             return result;
         }
@@ -411,8 +420,11 @@ namespace extinct
          * Line-luminosity analog of applyExtinctionCts(): each element
          * of lineLum is multiplied by extinctionFacCtsLines_ at the
          * corresponding line -- the expectation value of
-         * exp(-A_V * extinctLines_) over the field-star A_V
-         * distribution (io::SimControls::avDistField()), precomputed
+         * exp(-A_V f * extinctLines_) over the field-star A_V
+         * distribution (io::SimControls::avDistField()) and the
+         * nebular-to-stellar extinction ratio f
+         * (io::SimControls::avNebFac()), since lines are always
+         * nebular emission, precomputed
          * by rebuildCache() -- see extinctionFacCtsLines_'s own
          * comment. See applyExtinctionLines()'s own comment for why
          * there is no analog of wlOffset_ here.
@@ -446,7 +458,8 @@ namespace extinct
          * @details
          * Moves every cached member (wlDat_/extinctDat_/wl_/extinct_/
          * wlOffset_/extinctLines_/extinctionFacCts_/
-         * extinctionFacCtsLines_) from tmp into *this. Unlike the
+         * extinctionFacCtsNeb_/extinctionFacCtsLines_) from tmp into
+         * *this. Unlike the
          * loadCurveImpl()/rebuildCacheImpl() work that produced tmp's
          * state in the first place (see their own comments), these
          * moves cannot fail for any reason loadCurve()/rebuildCache()
@@ -462,6 +475,7 @@ namespace extinct
             wlOffset_ = tmp.wlOffset_;
             extinctLines_ = std::move(tmp.extinctLines_);
             extinctionFacCts_ = std::move(tmp.extinctionFacCts_);
+            extinctionFacCtsNeb_ = std::move(tmp.extinctionFacCtsNeb_);
             extinctionFacCtsLines_ = std::move(tmp.extinctionFacCtsLines_);
         }
 
@@ -678,7 +692,40 @@ namespace extinct
         void initExtinctLines(const interp::Interpolator1D<1>& interp);
 
         /**
-         * @brief Compute extinctionFacCts_
+         * @brief Pointer to extinctFac() or extinctFacLines(), the per-A_V extinction factors expectedExtinctFac() integrates
+         */
+        using ExtinctFacFn = std::vector<double> (Extinct::*)(double) const;
+
+        /**
+         * @brief The expectation value of an extinction factor over the field-star A_V distribution and, optionally, the nebular-to-stellar extinction ratio
+         * @param fac extinctFac() or extinctFacLines(), the factor to
+         *   integrate
+         * @param nInt The number of values fac returns (wl_.size() or
+         *   extinctLines_.size())
+         * @param nebular If false, the expectation value of
+         *   fac(A_V) over A_V ~ controls_.avDistField(); if true, of
+         *   fac(A_V f) over both A_V ~ controls_.avDistField() and f ~
+         *   controls_.avNebFac(), independently
+         * @return The expectation value, one entry per value fac
+         *   returns
+         * @details
+         * Defined out-of-line, in Extinct.cpp, for the same reason as
+         * computeExtinctionFacCts(). An invalid avDistField() is
+         * treated as a delta at A_V = 0 (so the result is all 1s), and
+         * an invalid avNebFac() as a delta at f = 1. Delta-function
+         * distributions are never handed to utils::PDFIntegrator (see
+         * the .cpp file's own comment for why): if both are deltas,
+         * fac is evaluated once, at the product of their values; if
+         * exactly one is, fac(A_V f) is integrated over the other with
+         * one PDFIntegrator; and if neither is, the double integral is
+         * evaluated with two nested PDFIntegrators, the inner one (over
+         * f) evaluated at every A_V the outer one visits.
+         */
+        [[nodiscard]] auto expectedExtinctFac(ExtinctFacFn fac, std::size_t nInt,
+            bool nebular) const -> std::vector<double>;
+
+        /**
+         * @brief Compute extinctionFacCts_ and extinctionFacCtsNeb_
          * @details
          * Defined out-of-line, in Extinct.cpp -- see that file's own
          * comment for why (needs io::SimControls's complete type, to
@@ -686,8 +733,10 @@ namespace extinct
          * intRelTol(); mirrors wlObs()'s identical situation). Called
          * by rebuildCache(), immediately after normalize() -- every
          * time rebuildCache() runs, not just once; always fully
-         * overwrites extinctionFacCts_, so repeated calls never leave
-         * it stale.
+         * overwrites both, so repeated calls never leave them stale.
+         * Both are computed by expectedExtinctFac(): extinctionFacCts_
+         * with nebular = false, extinctionFacCtsNeb_ with nebular =
+         * true.
          */
         void computeExtinctionFacCts();
 
@@ -695,10 +744,11 @@ namespace extinct
          * @brief Compute extinctionFacCtsLines_
          * @details
          * Line-luminosity analog of computeExtinctionFacCts() -- see
-         * its own comment; identical in every respect except that it
-         * integrates extinctFacLines() (over extinctLines_.size()
-         * quantities) rather than extinctFac(), storing the result
-         * into extinctionFacCtsLines_ rather than extinctionFacCts_.
+         * its own comment; integrates extinctFacLines() (over
+         * extinctLines_.size() quantities) rather than extinctFac(),
+         * and always with nebular = true (see expectedExtinctFac()),
+         * since lines are always nebular emission, storing the result
+         * into extinctionFacCtsLines_.
          * Clears extinctionFacCtsLines_ (a no-op if it's already
          * empty) if extinctLines_ is itself empty, i.e. no nebular
          * emission grid was requested -- mirrors initExtinctLines()'s
@@ -719,7 +769,7 @@ namespace extinct
          * If controls_.specsyn() is null, there is no wavelength grid
          * to interpolate the native curve onto -- rather than throw,
          * this clears wl_/extinct_/wlOffset_/extinctLines_/
-         * extinctionFacCts_/extinctionFacCtsLines_ and returns. Every
+         * extinctionFacCts_/extinctionFacCtsNeb_/extinctionFacCtsLines_ and returns. Every
          * one of those, not just wl_/extinct_, has to go: even though
          * initExtinctLines() itself only needs wlDat_/extinctDat_/
          * controls_.nebular() to interpolate the curve onto each
@@ -748,7 +798,7 @@ namespace extinct
          *     (see initExtinctLines());
          *   - normalizes both of the above to a V-band extinction of
          *     1 mag (see normalize());
-         *   - precomputes extinctionFacCts_/extinctionFacCtsLines_
+         *   - precomputes extinctionFacCts_/extinctionFacCtsNeb_/extinctionFacCtsLines_
          *     (see their own comments).
          * Safe to call more than once: every quantity it touches is
          * fully overwritten (not appended to) on each call, so calling
@@ -757,7 +807,7 @@ namespace extinct
          * extinctionFacCtsLines_) empty rather than stale.
          *
          * Mutates wl_/extinct_/wlOffset_/extinctLines_/
-         * extinctionFacCts_/extinctionFacCtsLines_ directly and
+         * extinctionFacCts_/extinctionFacCtsNeb_/extinctionFacCtsLines_ directly and
          * unconditionally, so a failure partway through (e.g. a
          * degenerate avDistField -- see computeExtinctionFacCts()) can
          * leave the object it is called on in an inconsistent state --
@@ -784,7 +834,7 @@ namespace extinct
          * or controls_.avDistField() only takes effect once
          * rebuildCache() is called again (the cached quantities those
          * three feed into -- wl_/extinct_/extinctLines_/
-         * extinctionFacCts_/extinctionFacCtsLines_ -- are not
+         * extinctionFacCts_/extinctionFacCtsNeb_/extinctionFacCtsLines_ -- are not
          * recomputed on every access). Bound once, at construction,
          * from whichever SimControls actually built this Extinct (see
          * SimControls::readExtinct()); never reseated afterward, so
@@ -831,9 +881,24 @@ namespace extinct
         std::vector<double> extinctionFacCts_;
 
         /**
-         * @brief The expected value of exp(-A_V * extinctLines_) over controls_.avDistField(), at each line in controls_.nebular()->lineWl()
+         * @brief The expected value of exp(-A_V f * extinct()) over controls_.avDistField() and controls_.avNebFac(), at each wavelength in wl()
          * @details
-         * Line-luminosity analog of extinctionFacCts_ -- the
+         * Nebular analog of extinctionFacCts_:
+         * \f$\int\int \exp[-A_V f \cdot \mathrm{extinct}(\lambda)]\, p(A_V)\, q(f)\, dA_V\, df\f$,
+         * where \f$p\f$ is controls_.avDistField() and \f$q\f$ is
+         * controls_.avNebFac(), the nebular-to-stellar extinction ratio
+         * -- the factor applyExtinctionCts() applies when its nebular
+         * argument is true. Recomputed by computeExtinctionFacCts()
+         * every time rebuildCache() runs, right after
+         * extinctionFacCts_.
+         */
+        std::vector<double> extinctionFacCtsNeb_;
+
+        /**
+         * @brief The expected value of exp(-A_V f * extinctLines_) over controls_.avDistField() and controls_.avNebFac(), at each line in controls_.nebular()->lineWl()
+         * @details
+         * Line-luminosity analog of extinctionFacCtsNeb_ (lines being
+         * nebular emission, f is integrated over here too) -- the
          * multiplicative factor applyExtinctionCtsLines() itself
          * applies to a continuously-distributed population's line
          * luminosities. Recomputed by computeExtinctionFacCtsLines()
