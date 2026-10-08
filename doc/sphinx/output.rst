@@ -159,7 +159,7 @@ history and the cluster mass function. Every dataset below has shape
   extinction applied to this cluster's starlight.
 * ``A_V_neb`` (mag; only present if ``extinct.model`` was set): The V-band
   extinction applied to this cluster's nebular emission: ``A_V`` times a factor
-  drawn from ``extinct.neb_factor`` (see :ref:`sec-parameters`), or equal to
+  drawn from ``extinct.neb_factor`` (see :ref:`ssec-parameters-extinct`), or equal to
   ``A_V`` if that keyword was not given.
 
 The ``cluster_spectra`` Group

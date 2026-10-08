@@ -334,6 +334,13 @@ requires spectral synthesis to also be enabled (see ``spectra.model`` above).
   to the continuous ("field") stellar population, as a number or PDF. If ``AV`` is
   given but ``AV_field`` is not (or vice versa), the missing one defaults to a
   fixed extinction of zero, rather than being left unset.
+* ``neb_factor`` (optional, default=1.0): A multiplicative factor applied to the
+  extinction of nebular emission relative to the extinction of stellar light; this
+  can be a number or a PDF (see above). The default value of 1.0 means that nebular
+  emission is extincted by the same amount as stellar light, while a value of
+  2.1 means the nebular emission is 2.1 times more extincted than the stellar light,
+  the ratio inferred by
+  `Calzetti et al. 1994 <https://ui.adsabs.harvard.edu/abs/1994ApJ...429..582C/abstract>`__.
 * ``model`` (required if ``AV`` or ``AV_field`` is given): The name of the
   extinction curve to apply, as listed in the extinction registry (see ``registry`` below).
 * ``registry`` (optional, default="data/extinct/extinct.toml"): Overrides the
