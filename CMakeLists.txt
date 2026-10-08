@@ -143,7 +143,11 @@ endif()
 # _OPENMP, which the compiler defines automatically, there is no standard
 # preprocessor macro for "MPI is available", so code that depends on it
 # must guard itself with #ifdef SLUG_MPI, defined below only for the
-# targets that actually link MPI::MPI_CXX.
+# targets that actually link MPI. Only MPI's C API is used (see
+# src/utils/MPIUtils.hpp), so only its C component is required -- not
+# the deprecated C++ bindings (libmpi_cxx), which e.g. Open MPI 4.x
+# doesn't build by default, and which a host MPI bound into the
+# container image (see Dockerfile) therefore may not provide.
 # Off by default for a pip-installed (SKBUILD) build, whose slug CLI is
 # meant to be portable across machines, which an MPI build (tied to one
 # specific MPI implementation's ABI) is not.
@@ -153,9 +157,9 @@ else()
     option(SLUG_ENABLE_MPI "Build the slug CLI with MPI support, if MPI is found" ON)
 endif()
 if(SLUG_ENABLE_MPI)
-    find_package(MPI)
+    find_package(MPI COMPONENTS C)
 endif()
-if(SLUG_ENABLE_MPI AND NOT MPI_CXX_FOUND)
+if(SLUG_ENABLE_MPI AND NOT MPI_C_FOUND)
     message(WARNING "MPI not found: building without multi-process support")
 endif()
 
@@ -913,9 +917,12 @@ endif()
 # shared sources those other targets also compile simply take the
 # existing, unchanged single-rank code path when SLUG_MPI is not defined
 # for them.
-if(MPI_CXX_FOUND)
-    target_compile_definitions(slug PRIVATE SLUG_MPI)
-    target_link_libraries(slug PRIVATE MPI::MPI_CXX)
+# OMPI_SKIP_MPICXX/MPICH_SKIP_MPICXX keep mpi.h, compiled as C++, from
+# pulling in the C++ bindings' own headers (and with them a dependency on
+# libmpi_cxx) -- see the find_package(MPI) comment above.
+if(MPI_C_FOUND)
+    target_compile_definitions(slug PRIVATE SLUG_MPI OMPI_SKIP_MPICXX MPICH_SKIP_MPICXX)
+    target_link_libraries(slug PRIVATE MPI::MPI_C)
 endif()
 
 # Optional: auto-regenerate a .pyi type stub for the compiled _slug
@@ -1133,7 +1140,7 @@ set_tests_properties(test_Slugpy PROPERTIES
 # so it needs the slug executable's own path and FindMPI's own
 # mpiexec/flag variables passed through as environment variables --
 # see tests/mpi/test_mpi_e2e.py's own skipif for how it uses them.
-if(MPI_CXX_FOUND)
+if(MPI_C_FOUND)
     add_test(NAME test_MPI
         COMMAND ${Python_EXECUTABLE} -m pytest ${CMAKE_SOURCE_DIR}/tests/mpi -v
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})

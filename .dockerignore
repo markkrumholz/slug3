@@ -1,0 +1,27 @@
+# Keep the Docker build context (see Dockerfile) to what `pip install .`
+# actually needs. In particular, keep out large downloaded data under
+# data/ (gigabytes, gitignored, and never installed -- the image expects
+# it bind-mounted at run time), local build directories, and checked-in
+# example outputs.
+.git
+build/
+build-*/
+Testing/
+examples/
+doc/html/
+doc/sphinx/_build/
+.pytest_cache/
+.ruff_cache/
+.ccache/
+**/__pycache__/
+slugpy/_slug*.so
+slugpy/_slug.pyi
+.slug_git_hash
+data/tracks/
+data/spectra/*
+!data/spectra/vega.h5
+data/nebular/
+data/tools/
+data/filters/*
+!data/filters/V_filter.h5
+!data/filters/V_filter.toml

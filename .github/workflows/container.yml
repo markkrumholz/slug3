@@ -1,0 +1,137 @@
+name: Container
+
+# Builds the slug container image (see Dockerfile), tests it, and
+# optionally pushes it to the GitHub Container Registry as
+# ghcr.io/markkrumholz/slug3, from where it can be run with Docker or
+# pulled by Apptainer/Singularity on HPC systems.
+#
+# - On pull requests that touch the image's own files: build and test
+#   only.
+# - On workflow_dispatch: build and test; with push = true, also push,
+#   tagged with the commit (sha-<short sha>).
+# - On a v* tag: build, test, and push, tagged with the version (e.g.
+#   3.0.1) and "latest".
+#
+# The image is built for linux/amd64 only for now (e.g. NCI Gadi).
+#
+# The image that is pushed is exactly the one that was tested: it is
+# built once, loaded into the runner's Docker daemon under all of its
+# output tags, tested, and then pushed from there, rather than rebuilt.
+# Third-party actions are pinned to full commit SHAs, since this job
+# holds packages: write.
+#
+# Note that GHCR creates a newly pushed package as private; make it
+# public once, in the package's own settings on GitHub, so that it can be
+# pulled without authenticating.
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - .github/workflows/container.yml
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      push:
+        description: "Push the image to ghcr.io after a successful build and test"
+        type: boolean
+        default: false
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/slug3
+
+jobs:
+  build:
+    name: build, test, and push
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Image tags
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=sha
+
+      - name: Build image
+        # Tagged slug3:test for the test steps below, plus every tag it
+        # will be pushed under, with its final labels, so that the push
+        # step needs no rebuild
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: |
+            slug3:test
+            ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: SLUG_GIT_HASH=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test
+        # The same installed-package smoke test the wheels and CI's pip
+        # install job run (see the script's own comment), from inside the
+        # image, with the checkout bind-mounted read-only for its test
+        # track fixture
+        run: docker run --rm -v "$PWD":/src:ro slug3:test bash /src/.github/wheels/smoke_test.sh /src
+
+      - name: MPI end-to-end test
+        # tests/mpi, run against the image's own MPI-enabled slug
+        # executable under its own mpiexec. Open MPI refuses to run as
+        # root (the container's default user) without the two
+        # ALLOW_RUN_AS_ROOT variables, and its shared-memory transport
+        # needs single-copy disabled under Docker's default seccomp
+        # profile. Fails if the tests are skipped (e.g. if the
+        # executable or mpiexec weren't found), not just if they fail.
+        run: |
+          docker run --rm -v "$PWD":/src -w /src \
+            -e OMPI_ALLOW_RUN_AS_ROOT=1 -e OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1 \
+            -e OMPI_MCA_btl_vader_single_copy_mechanism=none \
+            -e SLUG_DIR=/src \
+            slug3:test bash -c '
+              set -euo pipefail
+              /opt/slug/bin/pip install --quiet pytest
+              export SLUG_EXECUTABLE=$(ls /opt/slug/lib/python3*/site-packages/slugpy/_bin/slug)
+              export MPIEXEC_EXECUTABLE=mpiexec
+              python -m pytest -v -rs -p no:cacheprovider /src/tests/mpi | tee /tmp/mpi.log
+              grep -q " passed" /tmp/mpi.log
+              if grep -q "skipped" /tmp/mpi.log; then echo "MPI tests were skipped"; exit 1; fi
+            '
+
+      - name: Log in to ghcr.io
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.push)
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push image
+        # Push the very image tested above, under each of its tags
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.push)
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          for tag in $TAGS; do
+            docker push "$tag"
+          done
