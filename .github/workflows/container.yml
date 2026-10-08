@@ -95,6 +95,19 @@ jobs:
         # track fixture
         run: docker run --rm -v "$PWD":/src:ro slug3:test bash /src/.github/wheels/smoke_test.sh /src
 
+      - name: Host PYTHONPATH cannot shadow slugpy
+        # Apptainer passes the host environment into the container, so
+        # check that a PYTHONPATH holding some other slugpy (here a fake
+        # stand-in for slug version 2's) doesn't shadow the image's own --
+        # see the Dockerfile's .pth comment -- while leaving PYTHONPATH's
+        # other modules importable
+        run: |
+          mkdir -p /tmp/fakepath/slugpy /tmp/fakepath/othermod
+          echo 'raise ImportError("wrong slugpy imported")' > /tmp/fakepath/slugpy/__init__.py
+          touch /tmp/fakepath/othermod/__init__.py
+          docker run --rm -v /tmp/fakepath:/fakepath:ro -e PYTHONPATH=/fakepath slug3:test \
+            python -c 'import slugpy, slugpy.download_data, othermod; assert slugpy.__file__.startswith("/opt/slug/"), slugpy.__file__; print("slugpy from", slugpy.__file__)'
+
       - name: MPI end-to-end test
         # tests/mpi, run against the image's own MPI-enabled slug
         # executable under its own mpiexec. Open MPI refuses to run as
