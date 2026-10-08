@@ -340,7 +340,7 @@ requires spectral synthesis to also be enabled (see ``spectra.model`` above).
   emission is extincted by the same amount as stellar light, while a value of
   2.1 means the nebular emission is 2.1 times more extincted than the stellar light,
   the ratio inferred by
-  `Calzetti et al. 1994 <https://ui.adsabs.harvard.edu/abs/1994ApJ...429..582C/abstract>`__.
+  `Calzetti et al. 1994 <https://ui.adsabs.harvard.edu/abs/1994ApJ...429..582C/abstract>`_.
 * ``model`` (required if ``AV`` or ``AV_field`` is given): The name of the
   extinction curve to apply, as listed in the extinction registry (see ``registry`` below).
 * ``registry`` (optional, default="data/extinct/extinct.toml"): Overrides the

@@ -49,7 +49,7 @@ of extinctions that is applied only to "field" stars that are not part of cluste
 Finally, SLUG allows nebular emission to be subjected to a different amount of
 extinction than stellar emission, consistent with observations showing that the
 nebular emission lines are usually more heavily extincted than the stellar continuum 
-(e.g., `Calzetti et al. 1994 <https://ui.adsabs.harvard.edu/abs/1994ApJ...429..582C/abstract>`__).
+(e.g., `Calzetti et al. 1994 <https://ui.adsabs.harvard.edu/abs/1994ApJ...429..582C/abstract>`_).
 The keyword ``extinct.neb_factor`` (see :ref:`ssec-parameters-extinct`) specifies the
 distribution of the ratio of nebular extinction to stellar extinction, 
 :math:`A_{V,\mathrm{neb}}/A_{V,\mathrm{star}}`. This factor is applied to both clusters
