@@ -145,8 +145,10 @@ static auto testWriteClusterAsciiExtinct() -> int
     std::filesystem::remove_all(outDir);
     std::filesystem::create_directories(outDir);
     const std::string modelName = "test_model";
-    const toml::table inputDeck = makeClusterPhysicsInputDeck(
+    toml::table inputDeck = makeClusterPhysicsInputDeck(
         modelName, outDir, "tests/core/assets/testClusterExtinct.in");
+    // A nebular extinction factor != 1, so A_V_neb differs from A_V
+    inputDeck.at_path("extinct").as_table()->insert_or_assign("neb_factor", 2.0);
 
     try
     {
@@ -189,10 +191,11 @@ static auto testWriteClusterAsciiExtinct() -> int
             std::getline(file, ruleLine);
             std::getline(file, dataLine);
 
-            if (!headerLine.contains("a_v") || !unitsLine.contains("mag"))
+            if (!headerLine.contains("a_v") || !headerLine.contains("a_v_neb") ||
+                !unitsLine.contains("mag"))
             {
                 std::cerr << "testOutputManager: ascii extinct: clusters.txt "
-                    "header is missing the expected a_v (mag) column\n";
+                    "header is missing the expected a_v/a_v_neb (mag) columns\n";
                 return 1;
             }
 
@@ -204,13 +207,21 @@ static auto testWriteClusterAsciiExtinct() -> int
             double readFormTime = 0.0;
             double readFeH = 0.0;
             double readAV = 0.0;
+            double readAVNeb = 0.0;
             lineStream >> readTrial >> readUid >> readTargetMass >> readBirthMass
-                >> readFormTime >> readFeH >> readAV;
+                >> readFormTime >> readFeH >> readAV >> readAVNeb;
             if (std::abs(readAV - cluster.aV()) > tol)
             {
                 std::cerr << "testOutputManager: ascii extinct: clusters.txt "
                     "a_v = " << readAV << " does not match cluster.aV() = "
                     << cluster.aV() << "\n";
+                return 1;
+            }
+            if (std::abs(readAVNeb - cluster.avNeb()) > tol || cluster.avNeb() == cluster.aV())
+            {
+                std::cerr << "testOutputManager: ascii extinct: clusters.txt "
+                    "a_v_neb = " << readAVNeb << " does not match cluster.avNeb() = "
+                    << cluster.avNeb() << " (which should also differ from aV())\n";
                 return 1;
             }
         }
@@ -862,8 +873,10 @@ static auto testWriteClusterSpecPhotH5Extinct() -> int
     std::filesystem::create_directories(outDir);
     const std::string modelName = "test_model";
     const auto expectedPath = outDir / (modelName + ".h5");
-    const toml::table inputDeck = makeClusterPhysicsInputDeck(
+    toml::table inputDeck = makeClusterPhysicsInputDeck(
         modelName, outDir, "tests/core/assets/testClusterExtinct.in");
+    // A nebular extinction factor != 1, so A_V_neb differs from A_V
+    inputDeck.at_path("extinct").as_table()->insert_or_assign("neb_factor", 2.0);
 
     try
     {
@@ -932,6 +945,7 @@ static auto testWriteClusterSpecPhotH5Extinct() -> int
         std::vector<double> readWlExtinct;
         std::vector<double> readPhotExtinct;
         double readAV = 0.0;
+        double readAVNeb = 0.0;
         try
         {
             const hid_t specGrp = H5Gopen2(file, "cluster_spectra", H5P_DEFAULT);
@@ -969,6 +983,14 @@ static auto testWriteClusterSpecPhotH5Extinct() -> int
             }
             H5Dread(aVDset, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, &readAV);
             H5Dclose(aVDset);
+            const hid_t aVNebDset = H5Dopen2(clustersGrp, "A_V_neb", H5P_DEFAULT);
+            if (aVNebDset < 0)
+            {
+                H5Gclose(clustersGrp);
+                throw std::runtime_error("missing expected dataset A_V_neb");
+            }
+            H5Dread(aVNebDset, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, &readAVNeb);
+            H5Dclose(aVNebDset);
             H5Gclose(clustersGrp);
         }
         catch (const std::runtime_error& error)
@@ -1002,6 +1024,13 @@ static auto testWriteClusterSpecPhotH5Extinct() -> int
         {
             std::cerr << "testOutputManager: h5 spec/phot extinct: A_V = " << readAV
                 << " does not match cluster.aV() = " << cluster.aV() << "\n";
+            return 1;
+        }
+        if (readAVNeb != cluster.avNeb() || cluster.avNeb() == cluster.aV())
+        {
+            std::cerr << "testOutputManager: h5 spec/phot extinct: A_V_neb = " << readAVNeb
+                << " does not match cluster.avNeb() = " << cluster.avNeb()
+                << " (which should also differ from aV())\n";
             return 1;
         }
     }

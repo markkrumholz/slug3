@@ -156,7 +156,11 @@ history and the cluster mass function. Every dataset below has shape
   moment this cluster was drawn, so that its own stochastic realization can be
   reproduced independently of the rest of the run.
 * ``A_V`` (mag; only present if ``extinct.model`` was set): The V-band
-  extinction applied to this cluster.
+  extinction applied to this cluster's starlight.
+* ``A_V_neb`` (mag; only present if ``extinct.model`` was set): The V-band
+  extinction applied to this cluster's nebular emission: ``A_V`` times a factor
+  drawn from ``extinct.neb_factor`` (see :ref:`sec-parameters`), or equal to
+  ``A_V`` if that keyword was not given.
 
 The ``cluster_spectra`` Group
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -497,8 +501,8 @@ The ``<model_name>_clusters.txt`` File
 One row per individually-tracked cluster -- see the ``clusters`` HDF5 group
 above for exactly which clusters that means and what each column means.
 Columns, in order: ``trial``, ``uid``, ``target_mass`` (Msun), ``birth_mass``
-(Msun), ``form_time`` (yr), ``feh``, ``A_V`` (mag; only if ``extinct.model``
-was set), ``rng``.
+(Msun), ``form_time`` (yr), ``feh``, ``a_v`` and ``a_v_neb`` (mag; only if
+``extinct.model`` was set; the HDF5 group's ``A_V`` and ``A_V_neb``), ``rng``.
 
 The ``<model_name>_cluster_spectra.txt`` File
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
