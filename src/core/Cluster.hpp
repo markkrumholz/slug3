@@ -78,10 +78,10 @@ namespace core
          *   original cluster's
          * @details
          * Sets every member the same way the primary constructor does,
-         * except for feH_, aV_, m_, and birthMass_: rngState_ is set to
+         * except for feH_, aV_, avNeb_, m_, and birthMass_: rngState_ is set to
          * rngState directly, since that is this cluster's own birth
          * state by construction, rather than one captured live.
-         * feH_, aV_ (if SimControls::avDist() is valid), and m_ are
+         * feH_, aV_ and avNeb_ (if SimControls::avDist() is valid), and m_ are
          * then all drawn together, in the same order the primary
          * constructor draws them, from rngState rather than the live
          * rng stream -- saving the live state first and restoring it
@@ -160,6 +160,15 @@ namespace core
          *   given in the input deck)
          */
         [[nodiscard]] auto aV() const { return aV_; }
+
+        /**
+         * @brief Return the V-band extinction applied to the cluster's nebular emission
+         * @return A_V,neb, in magnitudes: aV() times a factor drawn
+         *   from SimControls::avNebFac() at construction (see that
+         *   method's own comment), or 0 if SimControls::avDist() is
+         *   not valid (no extinction requested)
+         */
+        [[nodiscard]] auto avNeb() const { return avNeb_; }
 
         /**
          * @brief Return the current list of living stellar masses
@@ -544,6 +553,7 @@ namespace core
         double formTime_;           /**< Formation time */
         double feH_;                /**< [Fe/H] of cluster */
         double aV_;                 /**< V-band extinction, in magnitudes, drawn from SimControls::avDist() (0 if that PDF is not valid) */
+        double avNeb_;              /**< V-band extinction applied to nebular emission, in magnitudes -- see avNeb()'s own comment. Declared immediately after aV_, so that the primary constructor's initializer list draws it right after aV_ and before m_, the same order the rng-state constructor replays them in */
 
         /**
          * @brief Simulation controls (physics and control-flow settings) this cluster was built from
@@ -601,9 +611,9 @@ namespace core
         std::vector<double> spec_;  /**< Spectrum of the continuously-sampled part of the population at the current time */
         std::vector<double> specExtinct_; /**< spec_ attenuated by aV_ through SimControls::extinct(), at the current time */
         std::vector<double> specNeb_; /**< spec_ plus nebular continuum and line emission, via SimControls::nebular()'s own getCluster(), at the current time */
-        std::vector<double> specNebExtinct_; /**< specNeb_ attenuated by aV_ through SimControls::extinct(), at the current time */
+        std::vector<double> specNebExtinct_; /**< specNeb_ attenuated by avNeb_ through SimControls::extinct(), at the current time */
         std::vector<double> lineLum_; /**< Luminosity of each of SimControls::nebular()'s own lineWl() lines, in erg/s, at the current time */
-        std::vector<double> lineLumExtinct_; /**< lineLum_ attenuated by aV_ through SimControls::extinct(), at the current time */
+        std::vector<double> lineLumExtinct_; /**< lineLum_ attenuated by avNeb_ through SimControls::extinct(), at the current time */
         std::vector<double> phot_;  /**< Photometry of spec_ through each filter in SimControls::filters(), at the current time */
         std::vector<double> photExtinct_; /**< Photometry of specExtinct_ through each filter in SimControls::filters(), at the current time */
         std::vector<double> photNeb_; /**< Photometry of specNeb_ through each filter in SimControls::filters(), at the current time */

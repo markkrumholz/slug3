@@ -143,6 +143,7 @@ core::Cluster::Cluster(const unsigned long uid,
     formTime_(time),
     feH_(controls.fehDist().draw()),
     aV_(controls.avDist().valid() ? controls.avDist().draw() : 0.0),
+    avNeb_(controls.avDist().valid() ? aV_ * controls.avNebFac().draw() : 0.0),
     controls_(std::cref(controls)),
     m_(controls.imf().drawTarget(
         controls.fracStochMass() * mass,
@@ -224,13 +225,14 @@ core::Cluster::Cluster(const unsigned long uid,
     formTime_(time),
     feH_(0.0), // placeholder; set in the constructor body below
     aV_(0.0), // placeholder; set in the constructor body below
+    avNeb_(0.0), // placeholder; set in the constructor body below
     controls_(std::cref(controls)),
     birthNonStochMass_((1.0 - controls.fracStochMass()) * mass),
     birthMass_(0.0), // placeholder; overwritten once m_ is drawn
     disruptTime_(std::numeric_limits<double>::quiet_NaN()),
     curTime_(time)
 {
-    // Draw feH_, aV_ (if valid), and m_ from the given rng state
+    // Draw feH_, aV_ and avNeb_ (if valid), and m_ from the given rng state
     // rather than the live one: save the live state, temporarily
     // switch to rngState, draw each in the same order the primary
     // constructor does, then restore, so this constructor has no
@@ -239,6 +241,7 @@ core::Cluster::Cluster(const unsigned long uid,
     utils::rng().setState(rngState);
     feH_ = controls.fehDist().draw(); //NOLINT(cppcoreguidelines-prefer-member-initializer) -- must happen after setState(rngState) above, not in the initializer list
     aV_ = controls.avDist().valid() ? controls.avDist().draw() : 0.0; //NOLINT(cppcoreguidelines-prefer-member-initializer) -- must happen after setState(rngState) above, not in the initializer list
+    avNeb_ = controls.avDist().valid() ? aV_ * controls.avNebFac().draw() : 0.0; //NOLINT(cppcoreguidelines-prefer-member-initializer) -- must happen after aV_ above, in the same order as the primary constructor
     m_ = controls.imf().drawTarget(
         controls.fracStochMass() * mass,
         controls.minStochMass(),
@@ -462,8 +465,8 @@ void core::Cluster::computeSpec()
         specExtinct_ = ext->applyExtinction(aV_, spec_);
         if (neb != nullptr)
         {
-            specNebExtinct_ = ext->applyExtinction(aV_, specNeb_);
-            lineLumExtinct_ = ext->applyExtinctionLines(aV_, lineLum_);
+            specNebExtinct_ = ext->applyExtinction(avNeb_, specNeb_);
+            lineLumExtinct_ = ext->applyExtinctionLines(avNeb_, lineLum_);
         }
     }
 }
