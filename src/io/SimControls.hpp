@@ -832,6 +832,21 @@ namespace io
         [[nodiscard]] auto avDistField() const -> const auto& { return avDistField_; }
 
         /**
+         * @brief Get the distribution of the ratio of nebular to stellar V-band extinction
+         * @return A const reference to the distribution requested via
+         *   the optional extinct.neb_factor key: the factor by which
+         *   the V-band extinction applied to nebular emission exceeds
+         *   that applied to the stellar light it accompanies (A_V,neb
+         *   = f A_V), reflecting the observation that nebular
+         *   emission is often more heavily extinguished than the
+         *   starlight. Always valid: a delta function at 1 (nebular
+         *   and stellar extinction equal) if extinct.neb_factor was
+         *   not given, including when no extinction is applied at
+         *   all. Never extends below 0 -- see setAVNebFac().
+         */
+        [[nodiscard]] auto avNebFac() const -> const auto& { return avNebFac_; }
+
+        /**
          * @brief Get the extinction curve, if any
          * @return A shared_ptr to the extinction curve requested via
          *   extinct.model, or nullptr if neither extinct.AV nor
@@ -1205,6 +1220,19 @@ namespace io
          * distribution extinct()'s own cache doesn't actually reflect.
          */
         void setAVDistField(const std::string& avDistField);
+
+        /**
+         * @brief Set the distribution of the ratio of nebular to stellar V-band extinction
+         * @param avNebFac A numerical value (interpreted as a delta-
+         *   function factor at that value) or the name of a PDF file
+         *   -- see avNebFac()'s own comment for what this factor is
+         * @throws std::runtime_error if avNebFac is not numeric and
+         *   does not name a file that can be found, or if the
+         *   resulting distribution extends below 0 (a negative
+         *   extinction factor is unphysical); avNebFac() is left
+         *   unchanged in either case
+         */
+        void setAVNebFac(const std::string& avNebFac);
 
         /**
          * @brief Set the cluster lifetime function
@@ -1895,9 +1923,13 @@ namespace io
          * @brief Load the extinction curve specified by input deck
          * @param inputDeck A toml table holding the input deck
          * @details
-         * Reads extinct.AV, extinct.AV_field, extinct.model, and
-         * extinct.registry, and sets avDist_/avDistField_/extinct_
-         * accordingly; see the .cpp file for the exact rules. Both
+         * Reads extinct.AV, extinct.AV_field, extinct.neb_factor,
+         * extinct.model, and extinct.registry, and sets avDist_/
+         * avDistField_/avNebFac_/extinct_ accordingly; see the .cpp
+         * file for the exact rules. avNebFac_ is a delta function at 1
+         * unless extinct.neb_factor is given (see avNebFac()), and
+         * keeps that default even when no extinction is applied at
+         * all. Both
          * extinct.AV and extinct.AV_field are optional, and
          * avDist_/avDistField_/extinct_ are all left at their default/
          * null state if neither is given. If either is given,
@@ -2155,6 +2187,7 @@ namespace io
         bool computeLbol_ = false; /**< True if "Lbol" was included in phot.filters; see Cluster::computeLbol() for where it is actually computed */
         pdfs::PDF avDist_; /**< Distribution of V-band extinction (A_V) for clustered stars -- see avDist()'s own comment for exactly when this is valid/a delta at 0/invalid */
         pdfs::PDF avDistField_; /**< Distribution of V-band extinction (A_V) for field stars -- see avDistField()'s own comment */
+        pdfs::PDF avNebFac_; /**< Distribution of the ratio of nebular to stellar V-band extinction -- see avNebFac()'s own comment; set by readExtinct() */
         std::shared_ptr<extinct::Extinct> extinct_; /**< Extinction curve requested via extinct.model, or nullptr if neither extinct.AV nor extinct.AV_field was given */
         nebular::NebularControls nebControls_; /**< Nebular emission control parameters, see nebControls() */
         std::shared_ptr<nebular::Nebular> nebular_; /**< Nebular emission grid requested via the [nebular] stanza */
