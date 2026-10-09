@@ -30,6 +30,14 @@ from docutils import nodes
 # slugpy itself, for autodoc -- doc/sphinx/../.. is the repo root.
 sys.path.insert(0, os.path.abspath(os.path.join("..", "..")))
 
+# Import slugpy here, explicitly, so that a build environment that can't
+# import it (e.g. one missing its compiled _slug extension or one of its
+# runtime dependencies) fails the whole documentation build, instead of
+# autodoc reporting the failure as a mere warning and silently producing
+# an empty Python API page -- exactly what the GitHub Pages build did
+# until the Docs workflow installed slugpy's dependencies.
+import slugpy  # noqa: E402,F401
+
 # -- Project information -------------------------------------------------
 project = "slug"
 copyright = "2026, Mark Krumholz"

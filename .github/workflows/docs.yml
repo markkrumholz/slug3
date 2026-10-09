@@ -50,8 +50,16 @@ jobs:
         with:
           python-version: '3.12'
 
+      # Sphinx itself, plus slugpy's own runtime dependencies (read from
+      # pyproject.toml, so this list can never drift from it): autodoc
+      # must actually import slugpy to document it -- see conf.py's own
+      # import of it, which fails this build outright if it can't be
+      # imported, rather than letting Sphinx publish an empty Python API
+      # page with only a warning
       - name: Install Python doc dependencies
-        run: python -m pip install sphinx breathe exhale sphinx_rtd_theme
+        run: |
+          python -m pip install sphinx breathe exhale sphinx_rtd_theme \
+            $(python -c "import tomllib; print(' '.join(tomllib.load(open('pyproject.toml', 'rb'))['project']['dependencies']))")
 
       # doxygen builds the C++ API's XML that breathe/exhale read;
       # libgsl-dev/libhdf5-dev are needed to configure and build
