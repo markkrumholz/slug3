@@ -57,7 +57,7 @@ LABEL org.opencontainers.image.description="slug: stochastic stellar population 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates libgomp1 \
-        libgsl27 libhdf5-103-1t64 libhdf5-cpp-103-1t64 \
+        libgsl27 libhdf5-103-1t64 \
         libopenmpi3t64 openmpi-bin \
         python3 \
     && rm -rf /var/lib/apt/lists/*

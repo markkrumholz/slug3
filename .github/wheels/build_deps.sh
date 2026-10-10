@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Build slug's native dependencies (zlib, GSL, HDF5 with its C++ API) from
+# Build slug's native dependencies (zlib, GSL, and HDF5's C library) from
 # source as static, position-independent libraries, installed into a single
 # prefix, for building binary wheels (see .github/workflows/wheels.yml). On
 # macOS, also build LLVM's OpenMP runtime (libomp), which Apple's compiler
@@ -100,7 +100,7 @@ cmake -S "hdf5-${HDF5_VERSION}" -B hdf5-build \
     -DBUILD_SHARED_LIBS=OFF \
     -DBUILD_STATIC_LIBS=ON \
     -DBUILD_TESTING=OFF \
-    -DHDF5_BUILD_CPP_LIB=ON \
+    -DHDF5_BUILD_CPP_LIB=OFF \
     -DHDF5_BUILD_HL_LIB=OFF \
     -DHDF5_BUILD_FORTRAN=OFF \
     -DHDF5_BUILD_JAVA=OFF \
