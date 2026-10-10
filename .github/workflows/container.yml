@@ -108,6 +108,20 @@ jobs:
           docker run --rm -v /tmp/fakepath:/fakepath:ro -e PYTHONPATH=/fakepath slug3:test \
             python -c 'import slugpy, slugpy.download_data, othermod; assert slugpy.__file__.startswith("/opt/slug/"), slugpy.__file__; print("slugpy from", slugpy.__file__)'
 
+      - name: OpenMP affinity survives the slug launcher
+        # The slug console script is a Python launcher that imports slugpy
+        # (and with it the OpenMP runtime) before exec'ing the real slug
+        # executable; with thread binding requested, the runtime pins the
+        # launcher to one CPU, which the executable used to inherit,
+        # running every OpenMP thread on that one CPU (see
+        # slugpy/_affinity.py). Both the launcher's and the executable's
+        # own OMP_DISPLAY_ENV dumps must show the same, full place list.
+        run: |
+          docker run --rm -e OMP_PROC_BIND=close -e OMP_PLACES=cores -e OMP_DISPLAY_ENV=VERBOSE \
+            slug3:test bash -c 'slug 2>&1 | grep "OMP_PLACES" > /tmp/places || true
+              cat /tmp/places
+              [ "$(wc -l < /tmp/places)" -ge 2 ] && [ "$(sort -u /tmp/places | wc -l)" -eq 1 ]'
+
       - name: MPI end-to-end test
         # tests/mpi, run against the image's own MPI-enabled slug
         # executable under its own mpiexec. Open MPI refuses to run as

@@ -17,6 +17,11 @@ slugpy: the Python frontend for slug.
 # -- live in their own modules under this package and are imported
 # below explicitly.
 
+# _affinity must be imported before _slug, so that it records the CPU
+# affinity the process started with before the OpenMP runtime _slug
+# links can change it -- see _affinity.py, and the call to
+# _restore_initial_affinity() below
+from ._affinity import restore_initial_affinity as _restore_initial_affinity
 from ._paths import ensure_search_path as _ensure_search_path
 from ._slug import *
 from .compute_isochrones import compute_isochrones as compute_isochrones
@@ -31,3 +36,11 @@ from .run_sim import run_sim as run_sim
 # side reads SLUG_DATA_PATH only when it actually looks for a file, not
 # when _slug is imported, so this need not precede the imports above.
 _ensure_search_path()
+
+# Undo the OpenMP runtime's pinning of this thread to a single CPU (which
+# happens when _slug is imported with OMP_PROC_BIND/OMP_PLACES/
+# GOMP_CPU_AFFINITY set), so that processes started from here -- the
+# real slug executable the slug console script execs, cloudy
+# subprocesses -- do not inherit it and run every OpenMP thread on one
+# CPU. See _affinity.py.
+_restore_initial_affinity()
