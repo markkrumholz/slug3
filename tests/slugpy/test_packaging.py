@@ -8,12 +8,14 @@ launcher (slugpy._cli), and the data downloader's defaults
 """
 
 import os
+import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
-from slugpy import _cli, _paths, download_data
+from slugpy import _affinity, _cli, _paths, download_data
 
 
 @pytest.fixture
@@ -114,3 +116,49 @@ def test_install_toml_writes_and_merges_without_leftovers(tmp_path: Path) -> Non
     merged = dest.read_text()
     assert "a = 2" in merged and "local = 5" in merged and "x = 3" in merged
     assert sorted(f.name for f in tmp_path.iterdir()) == ["reg.toml"]
+
+
+def test_restore_initial_affinity_restores_changed_mask(monkeypatch: pytest.MonkeyPatch) -> None:
+    current: set[int] = {0}
+    calls: list[set[int]] = []
+
+    def fake_get(pid: int) -> set[int]:
+        return set(current)
+
+    def fake_set(pid: int, cpus: object) -> None:
+        calls.append(set(cpus))  # pyright: ignore[reportArgumentType]
+
+    monkeypatch.setattr(_affinity, "_initial_affinity", frozenset({0, 1, 2, 3}))
+    monkeypatch.setattr(_affinity, "_getaffinity", fake_get)
+    monkeypatch.setattr(_affinity, "_setaffinity", fake_set)
+    _affinity.restore_initial_affinity()
+    assert calls == [{0, 1, 2, 3}]
+
+    # Unchanged mask: nothing to do
+    calls.clear()
+    current = {0, 1, 2, 3}
+    _affinity.restore_initial_affinity()
+    assert calls == []
+
+    # No affinity support on this platform: nothing to do
+    monkeypatch.setattr(_affinity, "_initial_affinity", None)
+    _affinity.restore_initial_affinity()
+    assert calls == []
+
+
+_getaffinity: Callable[[int], set[int]] | None = getattr(os, "sched_getaffinity", None)
+
+
+@pytest.mark.skipif(_getaffinity is None or len(_getaffinity(0)) < 2,
+                    reason="needs CPU affinity support and at least two CPUs")
+def test_import_keeps_affinity_under_omp_binding() -> None:
+    """Importing slugpy with OpenMP thread binding requested must not leave
+    the importing thread pinned to one CPU -- otherwise the slug executable
+    the slug console script execs, and any other subprocess, inherits that
+    pin and runs every OpenMP thread on one CPU (see slugpy/_affinity.py)."""
+    code = ("import os; before = sorted(os.sched_getaffinity(0)); import slugpy; "
+            "after = sorted(os.sched_getaffinity(0)); print(before == after, before, after)")
+    env = dict(os.environ, OMP_PROC_BIND="close", OMP_PLACES="cores")
+    result = subprocess.run([sys.executable, "-c", code], env=env,
+                            capture_output=True, text=True, check=True)
+    assert result.stdout.startswith("True"), result.stdout
