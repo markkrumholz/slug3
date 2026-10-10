@@ -1,4 +1,4 @@
-<img src="doc/logos/slug-logo-banner.png" alt="slug" width="300">
+<img src="https://raw.githubusercontent.com/markkrumholz/slug3/main/doc/logos/slug-logo-banner.png" alt="slug" width="300">
 
 ### Overview of SLUG ###
 

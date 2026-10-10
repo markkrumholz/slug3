@@ -3,7 +3,7 @@ name: Wheels
 # Builds and tests binary wheels (Linux x86_64/aarch64, macOS arm64) and
 # an sdist for slugpy, via cibuildwheel -- see pyproject.toml's own
 # [tool.cibuildwheel] section and .github/wheels/ for how. Optionally
-# publishes them to TestPyPI.
+# publishes them to TestPyPI and, for a release, to PyPI.
 #
 # - On pull requests that touch the packaging machinery: build and test
 #   only, so packaging changes can't silently break the wheels.
@@ -11,13 +11,18 @@ name: Wheels
 #   upload to TestPyPI as a dry run. The version gets a ".devN" suffix
 #   (N = this workflow's run number) first, since TestPyPI, like PyPI,
 #   never accepts the same version twice.
-# - On a v* tag: build, test, check that the tag matches pyproject.toml's
-#   version, and upload that exact version to TestPyPI. (Publishing to the
-#   real PyPI is a separate, later step.)
+# - On a v* tag (a release): build, test, check that the tag matches
+#   pyproject.toml's version, upload that exact version to TestPyPI, and
+#   then -- only once that upload has succeeded -- upload the identical,
+#   already-tested files to PyPI. The "pypi" environment can be
+#   configured (repository Settings > Environments) to require manual
+#   approval before that last step runs; PyPI never accepts the same
+#   version twice, so a release cannot be redone once published.
 #
 # Publishing uses PyPI's "trusted publishing" (OIDC), so no API token is
-# stored anywhere: it requires a one-time setup on test.pypi.org, naming
-# this repository, this workflow file, and the "testpypi" environment.
+# stored anywhere: it requires a one-time setup on test.pypi.org and on
+# pypi.org, each naming this repository, this workflow file, and the
+# "testpypi" or "pypi" environment respectively.
 
 permissions:
   contents: read
@@ -142,3 +147,24 @@ jobs:
         uses: pypa/gh-action-pypi-publish@v1.14.2
         with:
           repository-url: https://test.pypi.org/legacy/
+
+  publish_pypi:
+    # Releases only (v* tags, never workflow_dispatch), and only after the
+    # same files have been accepted by TestPyPI
+    name: publish to PyPI
+    needs: [publish_testpypi]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/slugpy
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish
+        uses: pypa/gh-action-pypi-publish@v1.14.2
