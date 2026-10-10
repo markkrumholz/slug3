@@ -119,15 +119,19 @@ endif()
 # Find GSL
 find_package(GSL REQUIRED)
 
-# Find HDF5. A static HDF5 (HDF5_USE_STATIC_LIBRARIES, as used to build
-# binary wheels -- see .github/wheels/build_deps.sh) built with zlib
-# support lists ZLIB::ZLIB in its own exported link interface without
-# finding it itself, so find it first in that case.
+# Find HDF5. slug uses only HDF5's C API (hdf5.h), never its C++ API
+# (H5Cpp.h), so only the C component is required -- many HDF5
+# installations, e.g. parallel (MPI-IO) builds common on HPC systems,
+# don't provide the C++ library at all. A static HDF5
+# (HDF5_USE_STATIC_LIBRARIES, as used to build binary wheels -- see
+# .github/wheels/build_deps.sh) built with zlib support lists ZLIB::ZLIB
+# in its own exported link interface without finding it itself, so find
+# it first in that case.
 if(HDF5_USE_STATIC_LIBRARIES)
     set(ZLIB_USE_STATIC_LIBS ON)
     find_package(ZLIB REQUIRED)
 endif()
-find_package(HDF5 REQUIRED COMPONENTS CXX)
+find_package(HDF5 REQUIRED COMPONENTS C)
 
 # Find OpenMP; threading is optional, so fall back to a single-threaded
 # build with a warning if no OpenMP implementation is available. Code that
@@ -872,23 +876,23 @@ target_link_libraries(slugTestSpecsyn PRIVATE slug_mdspan)
 target_link_libraries(slugPython PRIVATE slug_mdspan)
 
 # Link to HDF5
-target_link_libraries(slug PRIVATE ${HDF5_CXX_LIBRARIES})
-target_link_libraries(slugTestInterpolation PRIVATE ${HDF5_CXX_LIBRARIES})
-target_link_libraries(slugTestElem PRIVATE ${HDF5_CXX_LIBRARIES})
-target_link_libraries(slugTestExtinct PRIVATE ${HDF5_CXX_LIBRARIES})
-target_link_libraries(slugTestPhot PRIVATE ${HDF5_CXX_LIBRARIES})
-target_link_libraries(slugTestPDFs PRIVATE ${HDF5_CXX_LIBRARIES})
-target_link_libraries(slugTestUtils PRIVATE ${HDF5_CXX_LIBRARIES})
-target_link_libraries(slugTestTracks PRIVATE ${HDF5_CXX_LIBRARIES})
-target_link_libraries(slugTestTracksFull PRIVATE ${HDF5_CXX_LIBRARIES})
-target_link_libraries(slugTestYields PRIVATE ${HDF5_CXX_LIBRARIES})
-target_link_libraries(slugTestCore PRIVATE ${HDF5_CXX_LIBRARIES})
-target_link_libraries(slugTestCoreFull PRIVATE ${HDF5_CXX_LIBRARIES})
-target_link_libraries(slugTestIo PRIVATE ${HDF5_CXX_LIBRARIES})
-target_link_libraries(slugTestNebular PRIVATE ${HDF5_CXX_LIBRARIES})
-target_link_libraries(slugTestFeedback PRIVATE ${HDF5_CXX_LIBRARIES})
-target_link_libraries(slugTestSpecsyn PRIVATE ${HDF5_CXX_LIBRARIES})
-target_link_libraries(slugPython PRIVATE ${HDF5_CXX_LIBRARIES})
+target_link_libraries(slug PRIVATE ${HDF5_C_LIBRARIES})
+target_link_libraries(slugTestInterpolation PRIVATE ${HDF5_C_LIBRARIES})
+target_link_libraries(slugTestElem PRIVATE ${HDF5_C_LIBRARIES})
+target_link_libraries(slugTestExtinct PRIVATE ${HDF5_C_LIBRARIES})
+target_link_libraries(slugTestPhot PRIVATE ${HDF5_C_LIBRARIES})
+target_link_libraries(slugTestPDFs PRIVATE ${HDF5_C_LIBRARIES})
+target_link_libraries(slugTestUtils PRIVATE ${HDF5_C_LIBRARIES})
+target_link_libraries(slugTestTracks PRIVATE ${HDF5_C_LIBRARIES})
+target_link_libraries(slugTestTracksFull PRIVATE ${HDF5_C_LIBRARIES})
+target_link_libraries(slugTestYields PRIVATE ${HDF5_C_LIBRARIES})
+target_link_libraries(slugTestCore PRIVATE ${HDF5_C_LIBRARIES})
+target_link_libraries(slugTestCoreFull PRIVATE ${HDF5_C_LIBRARIES})
+target_link_libraries(slugTestIo PRIVATE ${HDF5_C_LIBRARIES})
+target_link_libraries(slugTestNebular PRIVATE ${HDF5_C_LIBRARIES})
+target_link_libraries(slugTestFeedback PRIVATE ${HDF5_C_LIBRARIES})
+target_link_libraries(slugTestSpecsyn PRIVATE ${HDF5_C_LIBRARIES})
+target_link_libraries(slugPython PRIVATE ${HDF5_C_LIBRARIES})
 
 # Link to OpenMP, if available
 if(OpenMP_CXX_FOUND)

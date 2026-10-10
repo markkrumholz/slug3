@@ -28,8 +28,8 @@ Required
   * Other C++23-capable compilers have not been tested.
 
 * The `GNU Scientific Library <https://www.gnu.org/software/gsl/>`_ (GSL).
-* `HDF5 <https://www.hdfgroup.org/solutions/hdf5/>`_, built with its C++
-  component enabled.
+* `HDF5 <https://www.hdfgroup.org/solutions/hdf5/>`_ (only its C library
+  is needed; HDF5's optional C++ component is not required).
 
 Bundled (no action needed)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
