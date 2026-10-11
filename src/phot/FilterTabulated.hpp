@@ -50,7 +50,7 @@ namespace phot
         : Filter(std::move(name)), wl_(wl), lnWl_(lnGrid(wl_)), responseData_(response),
           response_(lnWl_, responseData_),
           norm_(response_.integ(response_.xMin(), response_.xMax())),
-          wlPivot_(wlPivot)
+          wlPivot_(wlPivot), wlSupport_(supportRange(wl_, responseData_))
         { }
 
         /**
@@ -94,6 +94,22 @@ namespace phot
          *   registry entry's wl_ref field (the registry constructor)
          */
         [[nodiscard]] auto wlPivot() const -> double override { return wlPivot_; }
+
+        /**
+         * @brief Get the wavelength range over which this filter's response is nonzero
+         * @return {minimum, maximum} wavelength, in Angstrom: the
+         *   tabulated points bracketing the first and last nonzero
+         *   entries of responseData() (since the response is
+         *   interpolated linearly between tabulated points, it is
+         *   nonzero right up to those bracketing points), or the full
+         *   tabulated range if the response has no zero padding at
+         *   either end
+         * @details
+         * Zero-response padding at either end of a filter's table is
+         * excluded, so that it does not make the filter look wider
+         * than its real passband.
+         */
+        [[nodiscard]] auto wlSupport() const -> std::pair<double, double> override { return wlSupport_; }
 
         /**
          * @brief Compute the photometric response in this filter to a given spectrum
@@ -166,12 +182,22 @@ namespace phot
         FilterTabulated(std::string name, const RegistryData& data)
         : FilterTabulated(std::move(name), data.wl_, data.response_, data.wlPivot_) {}
 
+        /**
+         * @brief Find the wavelength range over which a tabulated response is nonzero
+         * @param wl Wavelengths at which the response is tabulated, in Angstrom
+         * @param response Filter response at each wavelength in wl
+         * @return The range wlSupport() returns -- see its own comment
+         */
+        static auto supportRange(const std::vector<double>& wl,
+            const std::vector<double>& response) -> std::pair<double, double>;
+
         std::vector<double> wl_;             /**< Wavelengths at which the response is tabulated, in Angstrom */
         std::vector<double> lnWl_;           /**< ln(wl_) */
         std::vector<double> responseData_;   /**< Filter response at each wavelength in wl_ */
         interp::Interpolator1D<1> response_; /**< Interpolator for responseData_ as a function of lnWl_ */
         double norm_;                        /**< Integral of the filter response with respect to ln(wavelength) */
         double wlPivot_;                     /**< Pivot wavelength, in Angstrom */
+        std::pair<double, double> wlSupport_; /**< Wavelength range over which the response is nonzero, in Angstrom; see wlSupport() */
     };
 
 } // namespace phot

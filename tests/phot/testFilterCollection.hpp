@@ -32,6 +32,7 @@
 #include <cstddef>
 #include <exception>
 #include <iostream>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -465,6 +466,122 @@ inline auto testFilterCollectionVega() -> int
 }
 
 /**
+ * @brief Test that FilterCollection::phot() reports NaN for filters truncated by a chopped wavelength grid
+ * @return 0 on pass, 1 on failure
+ * @details
+ * Uses a constant spectrum on a full grid [500, 9000] Angstrom, and
+ * the same spectrum chopped to [1000, 8000] Angstrom (as an
+ * extinction curve's coverage would chop it), and checks the
+ * three-argument phot() against the expected verdict for each kind
+ * of filter:
+ * - ideal_energy_2000_3000, entirely inside the chopped grid: finite,
+ *   and equal to the two-argument phot() on the chopped grid
+ * - ideal_energy_700_1500 and ideal_energy_7500_8500, each running
+ *   past one edge of the chopped grid: NaN
+ * - ideal_energy_100_400, entirely outside the full grid: not NaN
+ *   (left as the two-argument phot() would compute it)
+ * - Q(HI), with no lower bound and wlMax = 911.6 Angstrom: NaN
+ * - a tabulated filter whose response is nonzero only in
+ *   (1100, 5000) Angstrom, padded with zeros out to [500, 8500]:
+ *   finite, since only its padding extends past the chopped grid
+ *
+ * It also checks that passing the full grid as both wl and wlFull
+ * (no truncation) gives exactly the two-argument result, with
+ * Q(HI) finite; that an empty wl gives NaN for every filter that
+ * overlaps the full grid; and the tabulated filter's wlSupport().
+ */
+inline auto testFilterCollectionTruncation() -> int
+{
+    constexpr double f0 = 3.5;
+    const auto [wlFull, specFull] = makeConstSpec(500.0, 9000.0, 5000, f0);
+    std::vector<double> wl;
+    std::vector<double> spec;
+    for (std::size_t i = 0; i < wlFull.size(); ++i)
+    {
+        if (wlFull.at(i) >= 1000.0 && wlFull.at(i) <= 8000.0)
+        {
+            wl.push_back(wlFull.at(i));
+            spec.push_back(specFull.at(i));
+        }
+    }
+
+    try
+    {
+        phot::FilterCollection fc({"ideal_energy_2000_3000", "ideal_energy_700_1500",
+            "ideal_energy_7500_8500", "ideal_energy_100_400", "Q(HI)"},
+            phot::PhotSystem::Flambda, registryName);
+        const std::vector<double> padWl = {500.0, 900.0, 1100.0, 2000.0, 3000.0, 5000.0, 8500.0};
+        const std::vector<double> padResp = {0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0};
+        auto padded = std::make_unique<phot::FilterTabulated>("PADDED", padWl, padResp, 2500.0);
+        const auto [supMin, supMax] = padded->wlSupport();
+        if (supMin != 1100.0 || supMax != 5000.0)
+        {
+            std::cerr << "testFilterCollectionTruncation: padded filter wlSupport() = ["
+                << supMin << ", " << supMax << "], expected [1100, 5000]\n";
+            return 1;
+        }
+        fc.addFilter(std::move(padded));
+
+        // Expected NaN verdicts, in filter order
+        const std::vector<bool> expectNaN = {false, true, true, false, true, false};
+        const auto got = fc.phot(wl, spec, wlFull);
+        const auto ref = fc.phot(wl, spec);
+        for (std::size_t i = 0; i < expectNaN.size(); ++i)
+        {
+            if (std::isnan(got.at(i)) != expectNaN.at(i))
+            {
+                std::cerr << "testFilterCollectionTruncation: filter " << i << " ("
+                    << fc.filterNames().at(i) << ") gave " << got.at(i)
+                    << ", expected " << (expectNaN.at(i) ? "NaN" : "a non-NaN value") << "\n";
+                return 1;
+            }
+            if (!expectNaN.at(i) && got.at(i) != ref.at(i))
+            {
+                std::cerr << "testFilterCollectionTruncation: filter " << i << " ("
+                    << fc.filterNames().at(i) << ") gave " << got.at(i)
+                    << ", expected the two-argument phot() value " << ref.at(i) << "\n";
+                return 1;
+            }
+        }
+
+        // No truncation: identical to the two-argument overload, with
+        // Q(HI) (index 4) finite
+        const auto gotFull = fc.phot(wlFull, specFull, wlFull);
+        const auto refFull = fc.phot(wlFull, specFull);
+        for (std::size_t i = 0; i < refFull.size(); ++i)
+        {
+            if (std::isnan(gotFull.at(i)) || gotFull.at(i) != refFull.at(i))
+            {
+                std::cerr << "testFilterCollectionTruncation: untruncated filter " << i << " ("
+                    << fc.filterNames().at(i) << ") gave " << gotFull.at(i)
+                    << ", expected " << refFull.at(i) << "\n";
+                return 1;
+            }
+        }
+
+        // Empty wl: NaN for everything overlapping the full grid,
+        // i.e. everything but ideal_energy_100_400 (index 3)
+        const auto gotEmpty = fc.phot({}, {}, wlFull);
+        for (std::size_t i = 0; i < gotEmpty.size(); ++i)
+        {
+            if (i != 3 && !std::isnan(gotEmpty.at(i)))
+            {
+                std::cerr << "testFilterCollectionTruncation: empty wl, filter " << i << " ("
+                    << fc.filterNames().at(i) << ") gave " << gotEmpty.at(i) << ", expected NaN\n";
+                return 1;
+            }
+        }
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "testFilterCollectionTruncation: unexpected exception: " << e.what() << "\n";
+        return 1;
+    }
+
+    return 0;
+}
+
+/**
  * @brief Run all FilterCollection unit tests
  * @return 0 if all tests pass, positive count of failures otherwise
  */
@@ -476,6 +593,7 @@ inline auto testFilterCollection() -> int
     result += testFilterCollectionInstrumentOmitted();
     result += testFilterCollectionErrors();
     result += testFilterCollectionVega();
+    result += testFilterCollectionTruncation();
     return result;
 }
 

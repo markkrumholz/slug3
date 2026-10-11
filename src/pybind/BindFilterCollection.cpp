@@ -12,6 +12,7 @@
 #include "../phot/PhotCommons.hpp"
 #include <cstddef>
 #include <memory>
+#include <optional>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h> // NOLINT(misc-include-cleaner); this is needed for correct Python binding, even if clang-tidy can't recognize it
 #include <string>
@@ -75,6 +76,12 @@ wl : list of float
     The wavelength grid, in Angstrom, on which spec is computed.
 spec : list of float
     The spectrum to which to compute the photometric response.
+wl_full : list of float or None, optional
+    The full wavelength grid, in Angstrom, of which wl is a
+    contiguous, ascending sub-range (e.g. the stellar spectral grid,
+    when wl is that grid chopped to an extinction curve's own
+    coverage); only its first and last elements are used. Default
+    None, meaning wl itself is the full grid.
 
 Returns
 -------
@@ -83,7 +90,11 @@ values : list of float
     filterNames()/filterUnits(): for a photCount() filter, the raw
     photon-count value (PhotSystem conversions apply only to energy
     fluxes); for an energy-flux filter, the value converted to this
-    collection's phot_system.)doc";
+    collection's phot_system. If wl_full is given, a filter whose
+    response (see Filter.wlSupport()) overlaps any part of wl_full's
+    range that lies outside wl's is NaN, since the spectrum there is
+    unknown rather than zero; a filter lying entirely outside wl_full
+    is computed as usual.)doc";
 
 static constexpr std::string_view filterNamesDocstring = R"doc(Get the names of every filter in this collection.
 
@@ -210,9 +221,15 @@ void bindFilterCollection(py::module_& m)
                 constructorDocstring.data(),
                 py::arg("filter_names"), py::arg("phot_system"),
                 py::arg("registry") = phot::defaultRegistry)
-        .def("phot", &phot::FilterCollection::phot,
+        .def("phot",
+                [](const phot::FilterCollection& fc, const std::vector<double>& wl,
+                    const std::vector<double>& spec,
+                    const std::optional<std::vector<double>>& wlFull) -> std::vector<double>
+                {
+                    return wlFull ? fc.phot(wl, spec, *wlFull) : fc.phot(wl, spec);
+                },
                 photDocstring.data(),
-                py::arg("wl"), py::arg("spec"))
+                py::arg("wl"), py::arg("spec"), py::arg("wl_full") = py::none())
         .def("filterNames", &phot::FilterCollection::filterNames,
                 filterNamesDocstring.data())
         .def("filterUnits", &phot::FilterCollection::filterUnits,

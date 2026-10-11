@@ -246,6 +246,18 @@ actually written; call this row count ``n_rows``.
   emission grid, ``extinct.model``, and at least one real filter were all
   requested): The nebular-inclusive photometry after applying dust extinction.
 
+Extinction curves cover only a limited range of wavelengths (for example, the
+Calzetti curves do not extend below 912 Angstrom), and the extincted spectrum is
+undefined outside that range. A value in ``phot_extinct`` or
+``phot_neb_extinct`` is therefore NaN for any filter whose passband extends,
+even partly, past the edge of the extinction curve's wavelength coverage, since
+the extincted photometry cannot be computed for that filter. For example, the
+ionizing-photon filter ``Q(HI)`` is always NaN in ``phot_extinct`` when using a
+Calzetti curve. If the passband also extends beyond the stellar spectral
+library's wavelength range, only the part within the library's range counts:
+a filter lying entirely outside the library's range gets zero flux (an infinite
+magnitude) in every photometry dataset, extincted or not, rather than NaN.
+
 The ``cluster_yields`` Group
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
