@@ -252,11 +252,15 @@ undefined outside that range. A value in ``phot_extinct`` or
 ``phot_neb_extinct`` is therefore NaN for any filter whose passband extends,
 even partly, past the edge of the extinction curve's wavelength coverage, since
 the extincted photometry cannot be computed for that filter. For example, the
-ionizing-photon filter ``Q(HI)`` is always NaN in ``phot_extinct`` when using a
-Calzetti curve. If the passband also extends beyond the stellar spectral
-library's wavelength range, only the part within the library's range counts:
-a filter lying entirely outside the library's range gets zero flux (an infinite
-magnitude) in every photometry dataset, extincted or not, rather than NaN.
+ionizing-photon filter ``Q(HI)`` is NaN in ``phot_extinct`` when using a
+Calzetti curve, provided the stellar spectral library extends below 912
+Angstrom, as libraries that include ionizing radiation do. If the passband also
+extends beyond the stellar spectral library's wavelength range, only the part
+within the library's range counts. A filter lying entirely outside the
+library's range is never NaN, whether or not extinction is enabled: instead, a
+photon-count filter (e.g. ``Q(HI)``) reports zero photons/s, and an energy-flux
+filter reports zero flux, which appears as an infinite magnitude if the
+photometric system is a magnitude system (AB, ST, or Vega).
 
 The ``cluster_yields`` Group
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
