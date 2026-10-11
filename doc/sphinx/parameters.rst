@@ -21,7 +21,7 @@ example input decks can be found in the ``examples`` directory of the repository
 (see :ref:`sec-examples`).
 
 Below is a full section-by-section listing of the input deck keywords and their meanings,
-organized by section. 
+organized by section.
 
 Numerical Values vs. Distributions vs. Files
 ---------------------------------------------
@@ -41,14 +41,28 @@ given in either of two forms:
 Unless noted otherwise, a file name given for one of these keywords (or for
 ``stars.tracks``, ``spectra.model``, ``phot.filters``, ``extinct.model``, and the
 various ``*_registry``/``registry`` overrides below) is resolved by first checking
-for a file of that name in the current working directory; if none is found and the
-name is not an absolute path, SLUG next checks for the file under the directory
-named by the ``SLUG_DIR`` environment variable (if set), and finally under the
-repository's own top-level directory. Most of these keywords resolve directly
-under that search root, but a few (``stars.IMF``, and the internal defaults for
-track/spectral/filter/extinction registries) are resolved under a fixed
-subdirectory of ``data/`` instead -- this is noted individually below where it
-applies.
+for a file of that name in the current working directory. If none is found and the
+name is not an absolute path, SLUG then searches the following directories, in order,
+using the first match it finds:
+
+#. The directory named by the ``SLUG_DIR`` environment variable, if it is set.
+#. Each directory listed in the ``SLUG_DATA_PATH`` environment variable, if it is
+   set, in order. ``SLUG_DATA_PATH`` is a list of directories separated by colons, in
+   the same format as ``PATH``. When slugpy is imported, or SLUG is run through the
+   ``slug`` command installed by ``pip`` (see :ref:`sec-getting`), it automatically
+   adds two directories to the start of this list: the per-user directory into which
+   ``python -m slugpy.download_data`` downloads data files by default, and the
+   directory inside the installed slugpy package that holds the small data files
+   bundled with it. This is how a PyPI or container installation finds its data files
+   without ``SLUG_DIR`` being set.
+#. The top-level directory of the source repository SLUG was compiled from, if it was
+   compiled in place from a source checkout (see :ref:`sec-compiling`). This last
+   step does not apply to installations made with ``pip``.
+
+Most of these keywords resolve directly under each of these search directories, but a
+few (``stars.IMF``, and the internal defaults for track/spectral/filter/extinction
+registries) are resolved under a fixed subdirectory of ``data/`` instead -- this is
+noted individually below where it applies.
 
 .. _ssec-parameters-toplevel:
 
@@ -207,8 +221,9 @@ These keywords, in the ``[stars]`` section, describe the stellar population itse
 composition/rotation settings.
 
 * ``IMF`` (required): The stellar initial mass function, as a number or PDF (see
-  above). A file name is resolved under ``data/imfs`` (in addition to the usual
-  current-working-directory/``SLUG_DIR``/repository search). The following IMF
+  above). A file name is resolved under ``data/imfs`` within each of the search
+  directories described above, after first checking the current working directory.
+  The following IMF
   models are included in the SLUG repo: ``chabrier.toml`` (a Chabrier 2005 IMF),
   ``chabrier03.toml`` (a Chabrier 2003 IMF), ``kroupa.toml`` (a Kroupa 2002 IMF),
   ``salpeter.toml`` (a Salpeter IMF), and ``weidner_kroupa06.toml`` (one version
@@ -262,7 +277,7 @@ a galaxy simulation, and are only used (and only permitted) when ``sim_type`` =
   constant rate, in Msun/yr, shared by every trial; a string names a PDF descriptor
   file giving the (possibly time-varying) rate directly -- unlike every other
   file-valued keyword described above, this file name is resolved relative to the
-  current working directory only, not via the ``SLUG_DIR``/repository search.
+  current working directory only, not via the search directories described above.
 * ``sfr_dist``: A distribution (number or PDF, as above) from which each trial
   independently draws its own single, constant star formation rate, in Msun/yr.
   Unlike ``sfr``, a bare number here is treated as an ordinary delta function, as
