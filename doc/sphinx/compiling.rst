@@ -5,11 +5,19 @@
 Compiling and Installing SLUG
 ==============================
 
-SLUG has no separate installation step: building it with CMake produces the
-``slug`` command-line executable directly in the build directory, and the
-compiled Python extension module lands directly inside the ``slugpy``
-package in the source tree, alongside its pure-Python code. There is
-nothing to run afterwards to "install" it -- see :ref:`sec-building` below.
+Compilation is only necessary if you are installing SLUG from source, as
+described in :ref:`sec-getting`. If you are installing from PyPI or a container,
+you can skip this section.
+
+There are two ways to build a source checkout. The first, described in
+:ref:`sec-building` below, is to build it in place with CMake. This has no
+separate installation step: it produces the ``slug`` command-line executable
+directly in the build directory, and the compiled Python extension module lands
+directly inside the ``slugpy`` package in the source tree, alongside its
+pure-Python code. This is the most flexible option, and the one to use if you
+plan to modify SLUG. The second, described in :ref:`sec-pip-install-source`
+below, is to build and install it into a Python environment with ``pip``, exactly
+as a PyPI installation would, but compiled on your own system.
 
 .. _sec-dependencies:
 
@@ -111,25 +119,23 @@ Python
 
 SLUG's Python frontend, ``slugpy`` (see :ref:`sec-slugpy`), requires Python
 3.12 or later, plus `astropy <https://www.astropy.org/>`_, `h5py
-<https://www.h5py.org/>`_, `NumPy <https://numpy.org/>`_, `SciPy
-<https://scipy.org/>`_, `tomlkit <https://tomlkit.readthedocs.io/>`_, and
-`tqdm <https://tqdm.github.io/>`_:
+<https://www.h5py.org/>`_, `NumPy <https://numpy.org/>`_, `platformdirs
+<https://platformdirs.readthedocs.io/>`_, `SciPy <https://scipy.org/>`_,
+`tomlkit <https://tomlkit.readthedocs.io/>`_, `tqdm
+<https://tqdm.github.io/>`_, and `urllib3 <https://urllib3.readthedocs.io/>`_:
 
     .. code-block:: bash
 
-      pip install astropy h5py numpy scipy tomlkit tqdm
+      pip install astropy h5py numpy platformdirs scipy tomlkit tqdm urllib3
 
 CMake builds the compiled ``_slug`` extension module against whichever
 Python interpreter it finds (or the one given explicitly via
 ``-DPython_EXECUTABLE``, see below), and that same interpreter needs the
 packages above installed for ``import slugpy`` to work afterwards.
 ``pyproject.toml`` lists these same packages (and the optional ones just
-below) under ``[project.dependencies]``/``[project.optional-dependencies]``
-for tooling to read, but that file cannot itself be installed with ``pip
-install .`` -- there is deliberately no ``[build-system]`` table, since
-``_slug`` is built by CMake directly into the ``slugpy`` package rather
-than through a separate Python packaging step (see the file's own header
-comment).
+below) under ``[project.dependencies]``/``[project.optional-dependencies]``.
+If you instead install a source checkout with ``pip`` (see
+:ref:`sec-pip-install-source`), ``pip`` installs them automatically.
 
 A further three tools are needed only for specific development tasks, not
 for using ``slugpy`` itself: `pytest <https://pytest.org/>`_ to run the
@@ -174,11 +180,31 @@ A few configure-time options worth knowing about:
     isn't available, rather than a silent fallback. Defaults to ``AUTO``.
 
 ``-DCMAKE_BUILD_TYPE=Debug|Release|RelWithDebInfo``
-    The usual CMake build-type switch. Some of SLUG's own performance-
+    The usual CMake build-type switch. If it is not given, SLUG defaults
+    to ``Release``, an optimized build with assertions disabled; use
+    ``Debug`` to turn on SLUG's internal assertion checks, e.g. when
+    developing or debugging the code. Some of SLUG's own performance-
     sensitive targets (e.g. the Python extension module) are always built
     with optimizations enabled regardless of this setting, since they drive
     the same interpolation-heavy code any analysis using ``slugpy``
     depends on.
+
+Setting the Data Path
+---------------------
+
+Once SLUG is built, it is recommended but not required to set the environment
+variable ``SLUG_DIR`` to the repository root directory. This simplifies finding
+the data files that SLUG needs to run by providing an automatic search path that
+will be used when parsing the inputs -- see :ref:`sec-parameters` for details. For
+example, if you cloned the repository into ``/home/user/slug3``, you can do:
+
+    .. code-block:: bash
+
+        export SLUG_DIR=/home/user/slug3
+
+This step is not necessary if you installed SLUG from PyPI or a container, or if
+you have :ref:`built and installed with pip <sec-pip-install-source>`, since those
+installation methods automatically set up the data path for you.
 
 Verifying the Build
 ---------------------
@@ -193,6 +219,40 @@ The ``quick`` label selects tests that run in a few seconds each and need
 no large data files beyond what's already committed to the repository;
 some further, slower end-to-end tests exist but require data files too
 large to distribute this way (see :ref:`sec-tests` for the full detail).
+
+.. _sec-pip-install-source:
+
+Installing a Source Checkout with pip
+--------------------------------------
+
+Instead of building in place, you can build and install a source checkout into
+the active Python environment by running, from the repository root:
+
+    .. code-block:: bash
+
+      pip install .
+
+This uses the same CMake build, driven by
+`scikit-build-core <https://scikit-build-core.readthedocs.io/>`_, to compile
+SLUG, and then installs the slugpy package, the ``slug`` command-line
+executable, and the small data files distributed with the source code into the
+environment, exactly as installing from PyPI does (see :ref:`sec-getting`); the
+Python dependencies listed above are installed automatically. You still need a
+C++ compiler, CMake, GSL, and HDF5, as described in :ref:`sec-dependencies`. As
+with a PyPI installation, the large data files are not installed this way;
+download them with ``python -m slugpy.download_data``, or point the
+``SLUG_DIR`` environment variable at an existing copy of them (e.g., the
+repository root of a checkout into which you have already downloaded them).
+
+The installed ``slug`` executable is built without MPI support by default, so
+that it does not depend on any particular MPI library. To build it with MPI
+support, pass the corresponding CMake option through ``pip``:
+
+    .. code-block:: bash
+
+      CMAKE_ARGS="-DSLUG_ENABLE_MPI=ON" pip install .
+
+Other CMake options described above can be passed the same way.
 
 .. _sec-building-docs:
 

@@ -15,6 +15,19 @@ if(NOT SLUG_VERSION)
 endif()
 project(slug VERSION ${SLUG_VERSION} LANGUAGES CXX C)
 
+# Default to an optimized Release build when no build type is given,
+# since that is what anyone building slug to run simulations wants.
+# Developers who want assertions enabled (they are compiled out by
+# Release's NDEBUG) should configure with -DCMAKE_BUILD_TYPE=Debug, as
+# CI's test and clang-tidy jobs do. Multi-config generators (Xcode,
+# Visual Studio, Ninja Multi-Config) choose the configuration at build
+# time instead, so this does not apply to them.
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    message(STATUS "No build type specified; defaulting to Release")
+    set(CMAKE_BUILD_TYPE Release CACHE STRING
+        "Build type (Debug, Release, RelWithDebInfo, MinSizeRel)" FORCE)
+endif()
+
 # SKBUILD is set by scikit-build-core, i.e. when this project is being
 # built by `pip install .` (see pyproject.toml's [tool.scikit-build])
 # rather than by a plain `cmake -B build`. A plain CMake build keeps

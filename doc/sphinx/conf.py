@@ -24,6 +24,7 @@ written assuming it.
 import os
 import sys
 import textwrap
+import tomllib
 
 from docutils import nodes
 
@@ -42,8 +43,13 @@ import slugpy  # noqa: E402,F401
 project = "slug"
 copyright = "2026, Mark Krumholz"
 author = "Mark Krumholz"
-version = "3.0"
-release = "3.0"
+# Read from pyproject.toml's [project] version, slug's single source of
+# truth for it (see CMakeLists.txt), so the documentation can't drift
+# from the code: release is the full version (e.g. "3.0.1"), version
+# the short X.Y form Sphinx shows in places like the page title.
+with open(os.path.join("..", "..", "pyproject.toml"), "rb") as _pyproject:
+    release = tomllib.load(_pyproject)["project"]["version"]
+version = ".".join(release.split(".")[:2])
 
 # -- General configuration ------------------------------------------------
 extensions = [
