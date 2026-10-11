@@ -180,7 +180,10 @@ A few configure-time options worth knowing about:
     isn't available, rather than a silent fallback. Defaults to ``AUTO``.
 
 ``-DCMAKE_BUILD_TYPE=Debug|Release|RelWithDebInfo``
-    The usual CMake build-type switch. Some of SLUG's own performance-
+    The usual CMake build-type switch. If it is not given, SLUG defaults
+    to ``Release``, an optimized build with assertions disabled; use
+    ``Debug`` to turn on SLUG's internal assertion checks, e.g. when
+    developing or debugging the code. Some of SLUG's own performance-
     sensitive targets (e.g. the Python extension module) are always built
     with optimizations enabled regardless of this setting, since they drive
     the same interpolation-heavy code any analysis using ``slugpy``
