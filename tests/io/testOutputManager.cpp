@@ -36,6 +36,28 @@
 #include <utility>
 #include <vector>
 
+// Read one whitespace-delimited numeric column from an ascii output
+// row. Extincted photometry can be NaN (a filter running past the
+// extinction curve's edge -- see FilterCollection::phot()'s
+// three-argument overload), which the ascii writer prints as "nan";
+// operator>>(double&) can't parse that and would fail the stream for
+// every later column, whereas std::stod() can.
+static auto readAsciiValue(std::istream& stream) -> double
+{
+    std::string token;
+    stream >> token;
+    return std::stod(token);
+}
+
+// Element-wise equality of two photometry vectors, treating NaN as
+// equal to NaN (see readAsciiValue()'s own comment on why extincted
+// photometry can be NaN; NaN != NaN)
+static auto samePhot(const std::vector<double>& a, const std::vector<double>& b) -> bool
+{
+    return std::ranges::equal(a, b, [](const double x, const double y) -> bool
+        { return x == y || (std::isnan(x) && std::isnan(y)); });
+}
+
 // Build a valid input deck for a cluster-type simulation that also
 // has usable stellar physics (IMF, tracks, CMF, etc.), by reusing an
 // existing deck (testCluster.in by default, but any deck of the same
@@ -319,14 +341,15 @@ static auto testWriteClusterAsciiExtinct() -> int
             const std::size_t nPhotCols = realFilterNames.size() +
                 (controls.computeLbol() ? 1 : 0);
             std::vector<double> readPhot(nPhotCols);
-            for (double& v : readPhot) { lineStream >> v; }
+            for (double& v : readPhot) { v = readAsciiValue(lineStream); }
             std::vector<double> readPhotExtinct(cluster.photExtinct().size());
-            for (double& v : readPhotExtinct) { lineStream >> v; }
+            for (double& v : readPhotExtinct) { v = readAsciiValue(lineStream); }
 
             for (std::size_t i = 0; i < readPhotExtinct.size(); ++i)
             {
                 const double expected = cluster.photExtinct().at(i);
-                if (std::abs(readPhotExtinct.at(i) - expected) > tol * std::abs(expected))
+                if (std::isnan(readPhotExtinct.at(i)) != std::isnan(expected) ||
+                    std::abs(readPhotExtinct.at(i) - expected) > tol * std::abs(expected))
                 {
                     std::cerr << "testOutputManager: ascii extinct: cluster_phot.txt "
                         "extinct column " << i << " = " << readPhotExtinct.at(i)
@@ -467,13 +490,13 @@ static auto checkClusterPhotNebularAscii(const std::filesystem::path& outDir,
     const std::size_t nPhotCols = realFilterNames.size() +
         (controls.computeLbol() ? 1 : 0);
     std::vector<double> readPhot(nPhotCols);
-    for (double& v : readPhot) { lineStream >> v; }
+    for (double& v : readPhot) { v = readAsciiValue(lineStream); }
     std::vector<double> readPhotExtinct(cluster.photExtinct().size());
-    for (double& v : readPhotExtinct) { lineStream >> v; }
+    for (double& v : readPhotExtinct) { v = readAsciiValue(lineStream); }
     std::vector<double> readPhotNeb(cluster.photNeb().size());
-    for (double& v : readPhotNeb) { lineStream >> v; }
+    for (double& v : readPhotNeb) { v = readAsciiValue(lineStream); }
     std::vector<double> readPhotNebExtinct(cluster.photNebExtinct().size());
-    for (double& v : readPhotNebExtinct) { lineStream >> v; }
+    for (double& v : readPhotNebExtinct) { v = readAsciiValue(lineStream); }
 
     for (std::size_t i = 0; i < readPhotNeb.size(); ++i)
     {
@@ -491,7 +514,8 @@ static auto checkClusterPhotNebularAscii(const std::filesystem::path& outDir,
     {
         const double expected = cluster.photNebExtinct().at(i);
         const double denom = std::max(std::abs(expected), 1.0);
-        if (std::abs(readPhotNebExtinct.at(i) - expected) > tol * denom)
+        if (std::isnan(readPhotNebExtinct.at(i)) != std::isnan(expected) ||
+            std::abs(readPhotNebExtinct.at(i) - expected) > tol * denom)
         {
             std::cerr << "testOutputManager: ascii nebular: cluster_phot.txt "
                 "neb_ex column " << i << " = " << readPhotNebExtinct.at(i)
@@ -1014,7 +1038,7 @@ static auto testWriteClusterSpecPhotH5Extinct() -> int
                 "does not match extinct()->wlObs()\n";
             return 1;
         }
-        if (!std::ranges::equal(readPhotExtinct, cluster.photExtinct()))
+        if (!samePhot(readPhotExtinct, cluster.photExtinct()))
         {
             std::cerr << "testOutputManager: h5 spec/phot extinct: phot_extinct "
                 "row does not match cluster.photExtinct()\n";
@@ -1173,7 +1197,7 @@ static auto testWriteClusterSpecPhotH5Nebular() -> int
                 "row does not match cluster.photNeb()\n";
             return 1;
         }
-        if (!std::ranges::equal(readPhotNebExtinct, cluster.photNebExtinct()))
+        if (!samePhot(readPhotNebExtinct, cluster.photNebExtinct()))
         {
             std::cerr << "testOutputManager: h5 spec/phot nebular: phot_neb_extinct "
                 "row does not match cluster.photNebExtinct()\n";
@@ -2162,7 +2186,7 @@ static void checkGalaxyPhotRowH5(const hid_t file, const io::SimControls& contro
     {
         throw std::runtime_error("galaxy_phot phot row does not match galaxy.phot()/lbol()");
     }
-    if (!std::ranges::equal(readPhotExtinct, galaxy.photExtinct()))
+    if (!samePhot(readPhotExtinct, galaxy.photExtinct()))
     {
         throw std::runtime_error("galaxy_phot phot_extinct row does not match "
             "galaxy.photExtinct()");

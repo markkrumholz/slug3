@@ -600,20 +600,25 @@ void core::Galaxy::computePhot()
     const auto filters = sc.filters();
     if (filters == nullptr) { return; }
 
-    phot_ = filters->phot(sc.specsyn()->wlObs(), spec());
+    const auto wlFull = sc.specsyn()->wlObs();
+    phot_ = filters->phot(wlFull, spec());
 
+    // The extincted spectra live on wlFull chopped to the extinction
+    // curve's own coverage (ext->wlObs()); passing wlFull too lets
+    // phot() report NaN for any filter whose passband reaches past
+    // the curve's edge, where the extincted spectrum is unknown
     const auto ext = sc.extinct();
     if (ext != nullptr)
     {
-        photExtinct_ = filters->phot(ext->wlObs(), specExtinct());
+        photExtinct_ = filters->phot(ext->wlObs(), specExtinct(), wlFull);
     }
 
     if (sc.nebular() != nullptr)
     {
-        photNeb_ = filters->phot(sc.specsyn()->wlObs(), specNeb());
+        photNeb_ = filters->phot(wlFull, specNeb());
         if (ext != nullptr)
         {
-            photNebExtinct_ = filters->phot(ext->wlObs(), specNebExtinct());
+            photNebExtinct_ = filters->phot(ext->wlObs(), specNebExtinct(), wlFull);
         }
     }
 }

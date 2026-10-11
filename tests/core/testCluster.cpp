@@ -46,6 +46,16 @@ static constexpr std::string_view yieldsRegistry = "tests/yields/assets/yields.t
 static constexpr unsigned int rngSeed = 42;
 
 // Verify that Cluster::starMasses() sums to within 5% of the target mass.
+// Element-wise equality of two photometry vectors, treating NaN as
+// equal to NaN -- extincted photometry is NaN for any filter whose
+// passband runs past the extinction curve's edge (see
+// FilterCollection::phot()'s three-argument overload), and NaN != NaN
+static auto samePhot(const std::vector<double>& a, const std::vector<double>& b) -> bool
+{
+    return std::ranges::equal(a, b, [](const double x, const double y) -> bool
+        { return x == y || (std::isnan(x) && std::isnan(y)); });
+}
+
 static auto testClusterConstruction() -> int
 {
     try
@@ -649,8 +659,25 @@ static auto testClusterExtinct() -> int
                 << phot.size() << "\n";
             return 1;
         }
+        // ideal_phot_700_1500's passband runs past the 912 Angstrom
+        // blue edge of testClusterExtinct.in's Calzetti_starburst
+        // curve, so its extincted photometry is NaN; every other
+        // filter is fully covered, and extinction can only dim it
+        const auto filterNames = controls.filters()->filterNames();
         for (std::size_t i = 0; i < phot.size(); ++i)
         {
+            if (filterNames.at(i) == "ideal_phot_700_1500")
+            {
+                if (!std::isnan(photExtinct.at(i)))
+                {
+                    std::cerr << "testCluster: extinct: photExtinct()[" << i
+                        << "] (ideal_phot_700_1500) = " << photExtinct.at(i)
+                        << ", expected NaN since its passband runs past the "
+                        "extinction curve's edge\n";
+                    return 1;
+                }
+                continue;
+            }
             if (!(photExtinct.at(i) <= phot.at(i)))
             {
                 std::cerr << "testCluster: extinct: photExtinct()[" << i
@@ -905,12 +932,12 @@ static auto testClusterNebular() -> int
                 "filters->phot(wlObs(), specNeb())\n";
             return 1;
         }
-        const auto expectedPhotNebExtinct =
-            controls.filters()->phot(ext->wlObs(), cluster.specNebExtinct());
-        if (cluster.photNebExtinct() != expectedPhotNebExtinct)
+        const auto expectedPhotNebExtinct = controls.filters()->phot(
+            ext->wlObs(), cluster.specNebExtinct(), controls.specsyn()->wlObs());
+        if (!samePhot(cluster.photNebExtinct(), expectedPhotNebExtinct))
         {
             std::cerr << "testCluster: nebular: photNebExtinct() does not match "
-                "filters->phot(ext->wlObs(), specNebExtinct())\n";
+                "filters->phot(ext->wlObs(), specNebExtinct(), specsyn()->wlObs())\n";
             return 1;
         }
     }

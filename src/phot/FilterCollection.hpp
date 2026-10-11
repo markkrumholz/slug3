@@ -131,9 +131,39 @@ namespace phot
          *   using this filter's own fluxVega() -- lazily computed the
          *   first time it is needed, see Filter::fluxVega() -- as the
          *   zero point)
+         * @details
+         * Equivalent to phot(wl, spec, wl): wl is taken to be the
+         * full wavelength grid, so no filter is treated as truncated.
          */
         [[nodiscard]] auto phot(const std::vector<double>& wl,
-            const std::vector<double>& spec) const -> std::vector<double>;
+            const std::vector<double>& spec) const -> std::vector<double>
+        { return phot(wl, spec, wl); }
+
+        /**
+         * @brief Compute the photometric response of every filter in this collection to a spectrum on a truncated wavelength grid
+         * @param wl The wavelength grid, in Angstrom, on which spec is
+         *   computed -- a contiguous, ascending sub-range of wlFull
+         *   (e.g. wlFull chopped to an extinction curve's own coverage)
+         * @param spec The spectrum to which to compute the photometric response
+         * @param wlFull The full wavelength grid, in Angstrom, of
+         *   which wl is a sub-range; only its first and last elements
+         *   are used
+         * @return As for the two-argument phot(), except that a
+         *   filter is NaN if its response (see Filter::wlSupport())
+         *   overlaps any part of [wlFull.front(), wlFull.back()] that
+         *   lies outside [wl.front(), wl.back()] -- i.e. if part of
+         *   its passband falls where the spectrum is unknown, rather
+         *   than zero, because the grid was truncated there
+         * @details
+         * A filter whose response lies entirely outside wlFull is not
+         * set to NaN: there the spectrum is genuinely absent from the
+         * full grid as well, and is handled the same way as by the
+         * two-argument phot(). If wl is empty, every filter that
+         * overlaps wlFull is NaN.
+         */
+        [[nodiscard]] auto phot(const std::vector<double>& wl,
+            const std::vector<double>& spec,
+            const std::vector<double>& wlFull) const -> std::vector<double>;
 
         /**
          * @brief Get the names of every filter in this collection

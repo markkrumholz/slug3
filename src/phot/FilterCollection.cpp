@@ -13,7 +13,9 @@
 #include "FilterIdeal.hpp"
 #include "FilterTabulated.hpp"
 #include "PhotCommons.hpp"
+#include <algorithm>
 #include <cstddef>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -148,13 +150,35 @@ void phot::FilterCollection::addFilter(const std::string& name, const std::strin
 }
 
 auto phot::FilterCollection::phot(const std::vector<double>& wl,
-    const std::vector<double>& spec) const -> std::vector<double>
+    const std::vector<double>& spec,
+    const std::vector<double>& wlFull) const -> std::vector<double>
 {
     std::vector<double> result(filters_.size());
     for (std::size_t i = 0; i < filters_.size(); ++i)
     {
         const auto& filt = filters_.at(i);
-        const double value = filt->phot(wl, spec);
+
+        // A filter is truncated if the part of its passband that the
+        // full grid covers extends past either end of wl: there the
+        // spectrum is unknown, not zero, so report NaN rather than a
+        // value missing part of its flux. A filter that doesn't
+        // overlap the full grid at all is left alone (lo >= hi).
+        if (!wlFull.empty())
+        {
+            const auto [sMin, sMax] = filt->wlSupport();
+            const double lo = std::max(sMin, wlFull.front());
+            const double hi = std::min(sMax, wlFull.back());
+            if (lo < hi && (wl.empty() || lo < wl.front() || hi > wl.back()))
+            {
+                result.at(i) = std::numeric_limits<double>::quiet_NaN();
+                continue;
+            }
+        }
+
+        // An empty wl (e.g. an extinction curve that doesn't overlap
+        // the spectral grid at all) can only get here for a filter
+        // outside wlFull, which has no flux on any grid
+        const double value = wl.empty() ? 0.0 : filt->phot(wl, spec);
         // fluxVega() lazily loads the (potentially large) global Vega
         // reference spectrum on its first call (see Filter::fluxVega()),
         // so only pay that cost when photSystem_ actually needs it;

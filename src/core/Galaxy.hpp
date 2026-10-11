@@ -264,6 +264,9 @@ namespace core
          * Computed lazily -- see phot()'s own comment; all share the
          * same photCurrent_ flag, since a single computePhot() call
          * computes them together.
+         * A filter whose passband extends past the edge of the
+         * extinction curve's wavelength coverage is NaN -- see
+         * FilterCollection::phot()'s three-argument overload.
          */
         [[nodiscard]] auto photExtinct() -> const auto&
         {
@@ -375,6 +378,9 @@ namespace core
          *   null)
          * @details
          * Computed lazily -- see photNeb()'s own comment.
+         * A filter whose passband extends past the edge of the
+         * extinction curve's wavelength coverage is NaN -- see
+         * FilterCollection::phot()'s three-argument overload.
          */
         [[nodiscard]] auto photNebExtinct() -> const auto&
         {

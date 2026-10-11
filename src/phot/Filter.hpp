@@ -73,6 +73,22 @@ namespace phot
         [[nodiscard]] virtual auto wlPivot() const -> double = 0;
 
         /**
+         * @brief Get the wavelength range over which this filter's response is nonzero
+         * @return {minimum, maximum} wavelength, in Angstrom, outside
+         *   of which this filter's response is exactly zero; the
+         *   minimum may be 0 and the maximum infinite, for a filter
+         *   whose passband has no finite lower or upper end (e.g. a
+         *   Q(*) ionization-threshold filter)
+         * @details
+         * Used by FilterCollection::phot() to recognize a filter
+         * whose passband extends past the edge of a truncated
+         * wavelength grid (e.g. one chopped to an extinction curve's
+         * own coverage), where the spectrum is unknown rather than
+         * zero.
+         */
+        [[nodiscard]] virtual auto wlSupport() const -> std::pair<double, double> = 0;
+
+        /**
          * @brief Compute the photometric response in this filter to a given spectrum
          * @param wl The wavelength grid, in Angstrom, on which spec is computed
          * @param spec The spectrum to which to compute the photometric response

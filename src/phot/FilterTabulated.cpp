@@ -25,9 +25,11 @@
 #include "../utils/TOMLUtils.hpp"
 #include "hdf5.h" // NOLINT(misc-include-cleaner)
 #include <algorithm>
+#include <cstddef>
 #include <stdexcept>
 #include <string>
 #include <toml.hpp>
+#include <utility>
 #include <vector>
 
 namespace phot
@@ -37,6 +39,24 @@ namespace phot
     {
         const interp::Interpolator1D<1> specInterp(lnGrid(wl), spec);
         return response_.integ(specInterp, specInterp.xMin(), specInterp.xMax()) / norm_;
+    }
+
+    auto FilterTabulated::supportRange(const std::vector<double>& wl,
+        const std::vector<double>& response) -> std::pair<double, double>
+    {
+        // Index of the first and last nonzero response entries; if
+        // there are none, fall back to the full tabulated range
+        std::size_t lo = 0;
+        while (lo < response.size() && response.at(lo) == 0.0) { ++lo; }
+        if (lo == response.size()) { return {wl.front(), wl.back()}; }
+        std::size_t hi = response.size() - 1;
+        while (response.at(hi) == 0.0) { --hi; }
+
+        // Widen to the bracketing zero entries, if any, since linear
+        // interpolation makes the response nonzero right up to them
+        if (lo > 0) { --lo; }
+        if (hi + 1 < response.size()) { ++hi; }
+        return {wl.at(lo), wl.at(hi)};
     }
 
     auto FilterTabulated::loadFromRegistry(

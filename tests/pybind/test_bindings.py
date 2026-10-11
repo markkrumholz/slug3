@@ -2302,7 +2302,9 @@ def test_galaxy_advance_populates_phot_and_extinct(galaxy_dynamics_controls):
     "Lbol", which is tracked separately via lbol() -- see
     Galaxy.phot()'s own docstring), each extincted value no brighter
     than its unextincted counterpart, once at least one cluster has
-    formed."""
+    formed -- except ideal_phot_700_1500, whose passband runs past the
+    912 Angstrom blue edge of the deck's Calzetti_starburst curve, and
+    so is NaN (see FilterCollection.phot()'s wl_full argument)."""
     galaxy = slug.Galaxy(galaxy_dynamics_controls)
     assert len(galaxy.phot()) == 0
 
@@ -2313,8 +2315,13 @@ def test_galaxy_advance_populates_phot_and_extinct(galaxy_dynamics_controls):
     assert len(galaxy.phot()) == n_filters
     assert all(value > 0.0 for value in galaxy.phot())
     assert len(galaxy.photExtinct()) == n_filters
-    for extinct_value, value in zip(galaxy.photExtinct(), galaxy.phot()):
-        assert extinct_value <= value
+    for name, extinct_value, value in zip(
+            galaxy_dynamics_controls.filters.filterNames(),
+            galaxy.photExtinct(), galaxy.phot()):
+        if name == "ideal_phot_700_1500":
+            assert math.isnan(extinct_value)
+        else:
+            assert extinct_value <= value
 
 
 def test_galaxy_advance_populates_lbol(galaxy_dynamics_controls):

@@ -5,7 +5,7 @@
  * @date 2026-08-02
  * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  * @details
- * Filter is abstract (wlPivot() and phot() are pure virtual), so no
+ * Filter is abstract (wlPivot(), wlSupport(), and phot() are pure virtual), so no
  * constructor is exposed here -- Python code only ever encounters a
  * Filter through a FilterIdeal or FilterTabulated, either constructed
  * directly or handed back by FilterCollection.getFilter()/filters().
@@ -57,6 +57,18 @@ wl_pivot : float
     depends on the concrete filter type -- see
     FilterIdeal.wlPivot()/FilterTabulated.wlPivot() for specifics.)doc";
 
+static constexpr std::string_view wlSupportDocstring = R"doc(Get the wavelength range over which this filter's response is nonzero.
+
+Returns
+-------
+wl_support : tuple of (float, float)
+    The (minimum, maximum) wavelength, in Angstrom, outside of which
+    this filter's response is exactly zero. The minimum may be 0 and
+    the maximum infinite, for a filter whose passband has no finite
+    lower or upper end (e.g. a Q(*) ionization-threshold filter). For
+    a FilterTabulated, zero-response padding at either end of the
+    table is excluded.)doc";
+
 static constexpr std::string_view photDocstring = R"doc(Compute the photometric response of this filter to a spectrum.
 
 Parameters
@@ -96,6 +108,8 @@ void bindFilter(py::module_& m)
                 photCountDocstring.data())
         .def("wlPivot", &phot::Filter::wlPivot,
                 wlPivotDocstring.data())
+        .def("wlSupport", &phot::Filter::wlSupport,
+                wlSupportDocstring.data())
         .def("phot", &phot::Filter::phot,
                 photDocstring.data(),
                 py::arg("wl"), py::arg("spec"))
