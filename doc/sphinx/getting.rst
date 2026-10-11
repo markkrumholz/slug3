@@ -57,8 +57,8 @@ listed in :ref:`sec-dependencies`.
 
 .. _ssec-getting-container:
 
-Installing from container
--------------------------
+Using a container
+-----------------
 
 SLUG v3 is also distributed as a container image, hosted on the GitHub Container
 Registry as ``ghcr.io/markkrumholz/slug3``. Each release is tagged with its version
