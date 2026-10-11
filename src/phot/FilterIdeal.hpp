@@ -111,6 +111,15 @@ namespace phot
         [[nodiscard]] auto wlMax() const -> double { return wlMax_; }
 
         /**
+         * @brief Get the wavelength range over which this filter's response is nonzero
+         * @return {wlMin(), wlMax()}
+         */
+        [[nodiscard]] auto wlSupport() const -> std::pair<double, double> override
+        {
+            return {wlMin_, wlMax_};
+        }
+
+        /**
          * @brief Get this filter's pivot wavelength
          * @return The midpoint of [wlMin, wlMax]; wlMax if wlMin is 0
          *   (as for a Q(*) ionization-threshold filter, whose passband

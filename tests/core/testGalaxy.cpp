@@ -67,6 +67,16 @@ static constexpr double massTolerance = 0.3;
 
 // Verify that a freshly-constructed Galaxy starts with curTime() == 0,
 // every list/vector empty, and lbol() == 0, before advance() has ever run.
+// Element-wise equality of two photometry vectors, treating NaN as
+// equal to NaN -- extincted photometry is NaN for any filter whose
+// passband runs past the extinction curve's edge (see
+// FilterCollection::phot()'s three-argument overload), and NaN != NaN
+static auto samePhot(const std::vector<double>& a, const std::vector<double>& b) -> bool
+{
+    return std::ranges::equal(a, b, [](const double x, const double y) -> bool
+        { return x == y || (std::isnan(x) && std::isnan(y)); });
+}
+
 static auto checkConstruction(const io::SimControls& controls) -> int
 {
     core::Galaxy galaxy(controls);
@@ -239,7 +249,12 @@ static auto checkPhotSum(core::Galaxy& galaxy, const io::SimControls& controls) 
                 "phot() gives " << expectedPhot.at(i) << "\n";
             return 1;
         }
-        if (std::abs(photExtinct.at(i) - expectedPhotExtinct.at(i)) >
+        // A NaN (a filter running past the extinction curve's edge)
+        // in any cluster's photExtinct() makes the expected sum NaN
+        // too, and Galaxy's own must then be NaN as well -- written
+        // out explicitly since a NaN comparison below is always false
+        if (std::isnan(photExtinct.at(i)) != std::isnan(expectedPhotExtinct.at(i)) ||
+            std::abs(photExtinct.at(i) - expectedPhotExtinct.at(i)) >
             photTolerance * std::abs(expectedPhotExtinct.at(i)))
         {
             std::cerr << "testGalaxy: photSum: photExtinct()[" << i << "] = "
@@ -2150,12 +2165,12 @@ static auto testGalaxyNebular() -> int
                 "filters->phot(wlObs(), specNeb())\n";
             return 1;
         }
-        const auto expectedPhotNebExtinct =
-            controls.filters()->phot(controls.extinct()->wlObs(), galaxy.specNebExtinct());
-        if (galaxy.photNebExtinct() != expectedPhotNebExtinct)
+        const auto expectedPhotNebExtinct = controls.filters()->phot(
+            controls.extinct()->wlObs(), galaxy.specNebExtinct(), controls.specsyn()->wlObs());
+        if (!samePhot(galaxy.photNebExtinct(), expectedPhotNebExtinct))
         {
             std::cerr << "testGalaxy: nebular: photNebExtinct() does not match "
-                "filters->phot(ext->wlObs(), specNebExtinct())\n";
+                "filters->phot(ext->wlObs(), specNebExtinct(), specsyn()->wlObs())\n";
             return 1;
         }
     }
