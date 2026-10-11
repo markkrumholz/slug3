@@ -7,6 +7,28 @@ This is version 3 of the Stochastically Lighting Up Galaxies (SLUG) code.
 SLUG is a stellar population synthesis (SPS) code, meaning that for an input star formation history, stellar initial mass function, and a set of evolutionary tracks and stellar atmospheres, it can predict the light output of the stellar population. The main difference between SLUG and conventional SPS codes is that, instead of the usual approach of assuming that all stellar masses and ages are fully populated, SLUG is capable of stochastically sampling from the stellar initial mass function and age distribution, and thereby predicting not just the mean light output,
 nucleosynthetic yields, and feedback power, but also the full distribution that results from stochastic sampling. This capability is critical in the regime of low star formation rates and total stellar masses, where finite sampling can lead to a distribution of properties that is extremely broad, and the mean values produced by other SPS codes are therefore of limited predictive power.
 
+### Installation ###
+
+The easiest way to install SLUG is from [PyPI](https://pypi.org/project/slugpy/), which provides both the `slugpy` Python package and the `slug` command-line executable:
+
+```bash
+pip install slugpy
+python -m slugpy.download_data
+```
+
+The second command downloads the stellar tracks, spectral libraries, and other data files SLUG needs, which are too large to include in the package (several GB). Prebuilt wheels are available for Linux (x86_64 and aarch64) and macOS 14+ on Apple Silicon, for Python 3.12–3.14; on other platforms pip builds SLUG from source.
+
+SLUG is also available as a container image, with MPI support, for use with Docker or Apptainer/Singularity:
+
+```bash
+docker pull ghcr.io/markkrumholz/slug3:latest
+apptainer pull slug3.sif docker://ghcr.io/markkrumholz/slug3:latest
+```
+
+Finally, you can clone this repository and build SLUG from source with CMake, which requires a C++23 compiler, [GSL](https://www.gnu.org/software/gsl/), and [HDF5](https://www.hdfgroup.org/solutions/hdf5/).
+
+See the [installation instructions](https://markkrumholz.github.io/slug3/getting.html) and the [quickstart guide](https://markkrumholz.github.io/slug3/quickstart.html) in the documentation for full details on all three options.
+
 ### Version history ###
 
 This is version 3 of SLUG. It is a complete rewrite of version 2, taking advantage of modern C++ and Python capabilities to significantly improve its usability. It also greatly expands the range of stellar tracks, atmospheres, nucleosynthetic yield tables, and feedback models available, incorporating advances that have occurred since the last release. Additional major improvements in this version include:
