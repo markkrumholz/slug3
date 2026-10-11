@@ -186,6 +186,23 @@ A few configure-time options worth knowing about:
     the same interpolation-heavy code any analysis using ``slugpy``
     depends on.
 
+Setting the Data Path
+---------------------
+
+Once SLUG is built, it is recommended but not required to set the environment
+variable ``SLUG_DIR`` to the repository root directory. This simplifies finding
+the data files that SLUG needs to run by providing an automatic search path that
+will be used when parsing the inputs -- see :ref:`sec-parameters` for details. For
+example, if you cloned the repository into ``/home/user/slug3``, you can do:
+
+    .. code-block:: bash
+
+        export SLUG_DIR=/home/user/slug3
+
+This step is not necessary if you installed SLUG from PyPI or a container, or if
+you have :ref:`built and installed with pip <sec-pip-install-source>`, since those
+installation methods automatically set up the data path for you.
+
 Verifying the Build
 ---------------------
 
