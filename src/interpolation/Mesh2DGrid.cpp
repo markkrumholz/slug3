@@ -881,59 +881,63 @@ namespace interp
                 if (jDown == 0 && y_[0] == y_[1]) { continueDown = false; }
                 if (jUp == ny()-2 && y_[ny()-2] == y_[ny()-1]) { continueUp = false; }
 
-                // Handle special case where starting search point is on a
-                // corner; if this happens, we may need to change the i
-                // search indices
-                while (x == x_[iUp,jSaveLoc] && m_[iUp,jSaveLoc] > 0)
+                // Handle the special case where the starting point is
+                // exactly on a cell corner, i.e. also on a spine. Each
+                // direction must then decide which column's cell the
+                // line x = const actually enters, from the slope of the
+                // spine segment on that side of the rib (above it for
+                // up, below it for down), and must suppress the
+                // recheck of whichever spine of that cell passes through
+                // the starting point, which would otherwise be
+                // rediscovered at zero distance. In findNextIntersect's
+                // convention, lastIntersectRight suppresses a cell's
+                // left spine and lastIntersectLeft its right spine (see
+                // findIntersectDistance()), as in
+                // xIntersectSegStartInterior's identical corner case.
+                //
+                // Up: if the spine segment above leans right (m > 0),
+                // the line is to its left, in the cell one column to the
+                // left, whose right spine is the one we are on; at the
+                // mesh's left edge (column 0) there is no such cell, so
+                // the line leaves the mesh. Otherwise the line stays in
+                // this column's cell, whose left spine we are on.
+                while (continueUp && x == x_[iUp,jUp] && m_[iUp,jUp] > 0)
                 {
+                    if (iUp == 0)
+                    {
+                        continueUp = false;
+                        break;
+                    }
                     iUp--;
+                    lastIntersectLeftUp = true;
+                    lastIntersectRightUp = false;
+                }
+                if (continueUp && x == x_[iUp,jUp] && !(m_[iUp,jUp] > 0))
+                {
                     lastIntersectLeftUp = false;
                     lastIntersectRightUp = true;
-                    if (iUp == 0) { break; }
                 }
-                if (x == x_[iUp,jSaveLoc])
+
+                // Down: the mirror image, using the spine segment below
+                // the rib, i.e. the one ending at the starting point:
+                // if it leans left (m < 0), the line below the starting
+                // point is to its left, in the cell one column to the
+                // left; otherwise it stays in this column's cell
+                while (continueDown && x == x_[iDown,jDown+1] && m_[iDown,jDown] < 0)
                 {
-                    if (m_[iUp,jSaveLoc] > 0)
-                    {
-                        // The while loop above stopped only because it
-                        // reached the mesh's left edge (iUp == 0), not
-                        // because the slope condition failed: there is
-                        // no column further left to move into
-                        continueUp = false;
-                    }
-                    else
-                    {
-                        // Slope <= 0 at this corner: unlike the
-                        // positive-slope case, we stay in this same
-                        // column, but must still suppress its own
-                        // left-spine recheck, which trivially starts
-                        // at our exact position (the same self-
-                        // detection this guards against for m > 0,
-                        // just on the other side). Mirrors
-                        // xIntersectSegStartInterior's identical
-                        // corner-case handling.
-                        lastIntersectRightUp = true;
-                    }
-                }
-                while (x == x_[iDown,jSaveLoc] && m_[iDown,jSaveLoc] < 0)
-                {
-                    iDown--;
-                    lastIntersectLeftDown = false;
-                    lastIntersectRightDown = true;
-                    if (iDown == 0) { break; }
-                }
-                if (x == x_[iDown,jSaveLoc])
-                {
-                    if (m_[iDown,jSaveLoc] < 0)
+                    if (iDown == 0)
                     {
                         continueDown = false;
+                        break;
                     }
-                    else
-                    {
-                        // Mirrors the m > 0 case above, for the down
-                        // direction
-                        lastIntersectLeftDown = true;
-                    }
+                    iDown--;
+                    lastIntersectLeftDown = true;
+                    lastIntersectRightDown = false;
+                }
+                if (continueDown && x == x_[iDown,jDown+1] && !(m_[iDown,jDown] < 0))
+                {
+                    lastIntersectLeftDown = false;
+                    lastIntersectRightDown = true;
                 }
 
             }

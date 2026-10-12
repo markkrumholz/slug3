@@ -474,11 +474,17 @@ testYEdgeSlope(const interp::Mesh2DGrid& m2d, const interp::Mesh2DGrid& m2dNC)
 // downward search terminates there) without either being wrong.
 // meshExit correctness is instead covered by the hand-verified
 // testXIntersectNDownwardSpine regression test below.
+//
+// If yOnly is true, only each point's y is compared, not its xs/t/idx
+// descriptor: a point exactly on a cell corner lies on both a rib and a
+// spine, and xIntersect and xIntersectN can legitimately describe it as
+// either, so yOnly is needed for an x passing exactly through a corner.
 static auto
 checkXIntersectNAgainstFull(
     const interp::Mesh2DGrid& m,
     const double x,
-    const std::string& label) -> int
+    const std::string& label,
+    const bool yOnly = false) -> int
 {
     const auto full = m.xIntersect(x);
     if (full.size() < 2)
@@ -534,9 +540,8 @@ checkXIntersectNAgainstFull(
             {
                 const auto& e = full[windowStart + idx];
                 const auto& r = got[idx];
-                if (!utils::approxEqual(r.y, e.y) ||
-                    !utils::approxEqual(r.xs, e.xs) ||
-                    r.t != e.t || r.idx != e.idx)
+                if (!utils::approxEqual(r.y, e.y) || (!yOnly &&
+                    (!utils::approxEqual(r.xs, e.xs) || r.t != e.t || r.idx != e.idx)))
                 {
                     std::cerr << "checkXIntersectNAgainstFull: " << label
                         << ": x = " << x << ", y = " << y << ", n = " << n
@@ -979,6 +984,81 @@ testXIntersectNRibCornerNegativeSlope()
     return 0; // Success
 }
 
+// Regression test for xIntersectN starting exactly on a cell corner,
+// i.e. on a rib at the same point as a spine. From such a start, each
+// search direction must decide which column's cell the line x = const
+// enters from the slope of the spine segment on that side of the rib
+// (above it going up, below it going down), and must suppress the
+// recheck of the spine passing through the starting point. This used
+// to go wrong in three ways: at a corner on the mesh's left edge
+// (column 0) the column index was decremented before checking it was
+// already 0, wrapping a size_t around and reading far out of bounds
+// (caught by libstdc++'s debug assertions, and seen in practice for a
+// Tracks2D/Tracks3D getStar() query exactly at a track's own first,
+// sentinel, time point); the down direction suppressed the wrong
+// spine, so it rediscovered the starting point at zero distance and
+// stopped; and stepping into the column to the left suppressed that
+// cell's left spine rather than its right one (the one through the
+// starting point), and the down direction used the slope of the spine
+// segment above the rib rather than below it. Each mesh below is
+// checked, at x values passing exactly through a left-edge corner and
+// an interior corner, against the already-tested full xIntersect list,
+// from every starting point and for every n; y values only, since a
+// corner can legitimately be described as either a rib or a spine
+// intersection.
+static auto
+testXIntersectNCorners() -> int
+{
+    constexpr size_t nx = 4;
+    constexpr size_t ny = 3;
+    struct MeshCase
+    {
+        const char* label_;
+        double (*x_)(size_t i, size_t j);
+        std::array<double, 2> xQuery_;
+    };
+    const std::array<MeshCase, 3> cases = {{
+        // Spines lean right: going up from a corner steps left (or
+        // leaves the mesh at column 0); going down stays
+        { "spines leaning right",
+            [](const size_t i, const size_t j) { return static_cast<double>(i) + (0.1 * static_cast<double>(j)); },
+            { 0.1, 1.1 } },
+        // Spines lean left: going down from a corner steps left (or
+        // leaves the mesh at column 0); going up stays
+        { "spines leaning left",
+            [](const size_t i, const size_t j) { return static_cast<double>(i) - (0.1 * static_cast<double>(j)); },
+            { -0.1, 0.9 } },
+        // Spines bend at the middle rib, leaning right below it and
+        // left above it, so both directions stay in the corner's own
+        // column -- distinguishing the slope below the rib from the
+        // slope above it
+        { "spines bending at middle rib",
+            [](const size_t i, const size_t j) { return static_cast<double>(i) + (j == 1 ? 0.1 : 0.0); },
+            { 0.1, 1.1 } },
+    }};
+
+    int result = 0;
+    for (const auto& c : cases)
+    {
+        std::array<double, nx*ny> xData = { 0 };
+        std::array<double, ny> yData = { 0 };
+        const std::mdspan<double, std::extents<size_t, nx, ny>> x(xData.data());
+        const std::mdspan<double, std::extents<size_t, ny>> y(yData.data());
+        for (size_t j = 0; j < ny; ++j)
+        {
+            y[j] = static_cast<double>(j);
+            for (size_t i = 0; i < nx; ++i) { x[i,j] = c.x_(i, j); }
+        }
+        const interp::Mesh2DGrid m2d(x, y);
+        for (const double xQuery : c.xQuery_)
+        {
+            result += checkXIntersectNAgainstFull(m2d, xQuery,
+                std::string(c.label_) + ", corner start", true);
+        }
+    }
+    return result;
+}
+
 // Regression test for yIntersect at the exact yMin_/yMax_ boundary.
 // yIdx's cell-index clamp (needed so it always returns a valid
 // cell-start index) forces a nonzero mass offset from the boundary
@@ -1194,6 +1274,7 @@ auto testMesh2DGrid() -> int
     // findIntersectDistance, found while implementing xIntersectN
     test += testXIntersectNDownwardSpine();
     test += testXIntersectNRibCornerNegativeSlope();
+    test += testXIntersectNCorners();
 
     // Regression tests for yIntersect/xIntersect at the exact
     // yMin_/yMax_ and xMin_/xMax_ boundaries
