@@ -512,20 +512,16 @@ void io::SimControls::setOutputTimes(const utils::TrackedDeck& inputDeck)
 {
     // This routine computes the output times. A user can specify the
     // times of outputs in one of two ways:
-    // (1) The user can set output.output_times. This is tried first as
-    //     a PDF, via utils::initPDFFromKey: a single number is
-    //     interpreted as a delta function, giving one output per
-    //     simulation at that time, and a string is interpreted as the
-    //     name of a PDF file, giving one output per simulation drawn
-    //     from that PDF. If that interpretation fails -- most commonly
-    //     because the value is an array -- output.output_times is
-    //     instead read as an explicit array of output times, via
+    // (1) The user can set output.output_times. If the value is an
+    //     array, it is read as an explicit array of output times, via
     //     readOutputTimesArray, giving one output per trial at each of
-    //     the specified times. This mirrors the try-then-fall-back
-    //     convention used elsewhere for a key that can be given in more
-    //     than one form (e.g. SimControls's own constructor, which
-    //     tries its input deck argument as literal toml text before
-    //     falling back to a file path).
+    //     the specified times. Otherwise it is read as a PDF, via
+    //     utils::initPDFFromKey: a single number is interpreted as a
+    //     delta function, giving one output per simulation at that
+    //     time, and a string is interpreted as the name of a PDF file,
+    //     giving one output per simulation drawn from that PDF; any
+    //     error from that (e.g. a PDF file that cannot be found) is
+    //     passed on to the caller as-is.
     // (2) The user can specify all three of output.start_time,
     //     output.end_time, and output.ntime, with the first two interpreted
     //     as doubles (required to be >= 0) and the third as an unsigned int (which must be > 0). In
@@ -567,17 +563,21 @@ void io::SimControls::setOutputTimes(const utils::TrackedDeck& inputDeck)
             "may be specified");
     }
 
-    // Option 1: output.output_times, tried first as a PDF, falling
-    // back to an explicit array of output times if that fails
+    // Option 1: output.output_times, read as an explicit array of
+    // output times if it is an array, and as a PDF otherwise. This
+    // dispatches on the value's type rather than trying the PDF first
+    // and falling back to the array on any error, because the latter
+    // hides the PDF's own error (e.g. a PDF file that cannot be found)
+    // behind a misleading complaint that the value is not an array.
     if (hasTimes)
     {
-        try
-        {
-            outTimeDist_ = inputDeck.initPDF("output.output_times");
-        }
-        catch (const std::runtime_error&)
+        if (inputDeck.atPath("output.output_times").is_array())
         {
             outTimes_ = readOutputTimesArray(inputDeck);
+        }
+        else
+        {
+            outTimeDist_ = inputDeck.initPDF("output.output_times");
         }
         return;
     }
