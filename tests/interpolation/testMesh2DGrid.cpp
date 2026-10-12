@@ -1135,7 +1135,21 @@ testXIntersectBounded() -> int
                     if (p.y < yLo || p.y > yHi) { inRange = false; }
                     if (p.y > yLo && p.y < yHi) { gotInterior.push_back(p.y); }
                 }
-                bool match = inRange && gotInterior.size() == want.size();
+                // Hits exactly at yLo or yHi (e.g. a query starting on a
+                // corner) are excluded from the interior comparison above,
+                // so check them separately: the same number of points at
+                // each endpoint height (descriptors aside -- a corner can
+                // be described as either a rib or a spine)
+                bool endpointsMatch = true;
+                for (const double endpoint : { yLo, yHi })
+                {
+                    size_t wantCount = 0;
+                    size_t gotCount = 0;
+                    for (const auto& p : full) { if (utils::approxEqual(p.y, endpoint)) { ++wantCount; } }
+                    for (const auto& p : got) { if (utils::approxEqual(p.y, endpoint)) { ++gotCount; } }
+                    endpointsMatch = endpointsMatch && wantCount == gotCount;
+                }
+                bool match = inRange && endpointsMatch && gotInterior.size() == want.size();
                 for (size_t k = 0; match && k < want.size(); ++k)
                 {
                     match = utils::approxEqual(gotInterior[k], want[k]);

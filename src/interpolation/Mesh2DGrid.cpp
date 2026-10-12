@@ -774,8 +774,22 @@ namespace interp
             const double yLoSeg = std::max(yMin, yLo);
             const double yHiSeg = std::min(yMax, yHi);
 
-            // Skip segment if applying limits makes it zero length
-            if (yLoSeg >= yHiSeg) { continue; }
+            // Skip segment if applying limits leaves nothing of it. The
+            // bounds are a closed interval, so if they leave exactly one
+            // point of it -- the line touches [yLo, yHi] only at one end
+            // of this segment -- keep whatever intersection(s) lie at
+            // that point, taken from a traversal of the whole segment so
+            // that they are described exactly as an unbounded query
+            // would describe them
+            if (yLoSeg > yHiSeg) { continue; }
+            if (yLoSeg == yHiSeg)
+            {
+                for (const auto& p : xIntersectSeg(x, yMin, yMax, false, false))
+                {
+                    if (p.y == yLoSeg) { intList.push_back(p); }
+                }
+                continue;
+            }
 
             // Mark whether the starting and ending points for this segment
             // are on the edge of the mesh
@@ -1248,8 +1262,13 @@ namespace interp
                 x, y, yMax, endInterior, 
                 lastIntersectLeft, lastIntersectRight);
 
-            // Record intersection point if valid one found
-            if (nextInt.t != IntersectionType::none)
+            // Record intersection point if valid one found, unless it is
+            // the same point as the one just recorded -- e.g. when yMax
+            // falls exactly on a rib, the traversal reaches that rib
+            // both as the next intersection and as its stopping point
+            // (mirrors xIntersectN's own guard against the same thing)
+            if (nextInt.t != IntersectionType::none &&
+                (intList.empty() || nextInt.y != intList.back().y))
             {
                 intList.push_back(nextInt);
             }

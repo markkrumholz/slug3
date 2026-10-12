@@ -756,7 +756,9 @@ namespace interp
          * This routine returns the set of points at which a
          * line of constant x starting at yLo and ending at yHi
          * intersects the mesh. The returned points are of type
-         * xIntersectionDescriptor.
+         * xIntersectionDescriptor. [yLo, yHi] is a closed interval: an
+         * intersection exactly at yLo or yHi is included, including
+         * where the line touches the interval only at that point.
          */
         auto xIntersect(
             double x,
