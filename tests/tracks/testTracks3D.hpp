@@ -552,11 +552,18 @@ inline auto testTracks3DSurfaceAbundancesBounded() -> int
         for (const double m : { 1.0, 5.0, 20.0, 60.0, 100.0 })
         {
             const auto track = tracks3d.getTrack(m, feh);
+            // A track's own xMin() is the synthetic sentinel point
+            // Tracks2D/Tracks3D prepend at the lowest representable log
+            // time, not a real stellar age, and getStar() is only
+            // defined for live stars, so start sampling at log t = 0
+            // (1 yr) instead -- before any real track's own first point,
+            // but well clear of the sentinel itself
+            const double logTLo = std::max(track->xMin(), 0.0);
             constexpr int nSample = 2000;
             for (int i = 0; i <= nSample; ++i)
             {
                 const double logT = std::min(track->xMax(),
-                    track->xMin() + ((track->xMax() - track->xMin()) * i / nSample));
+                    logTLo + ((track->xMax() - logTLo) * i / nSample));
                 ++nChecked;
                 if (surfSum((*track)(logT)) > 1.0 + tol)
                 {
