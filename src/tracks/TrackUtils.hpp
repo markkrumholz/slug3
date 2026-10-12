@@ -125,8 +125,8 @@ namespace tracks
      *   quantity k)
      * @param context Description of the track being checked (e.g. its
      *   file, group, and dataset), for the error message
-     * @throws std::runtime_error if any row's X + Y + C + N + O exceeds
-     *   1 + surfaceAbundanceTol
+     * @throws std::runtime_error if any row's X, Y, C, N, or O is not
+     *   finite, or their sum exceeds 1 + surfaceAbundanceTol
      * @details
      * Tracks2D and Tracks3D call this on every track they read, so that
      * corrupt track data is reported where it is loaded, rather than

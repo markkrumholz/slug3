@@ -503,7 +503,8 @@ inline auto testTracks3DLazyMatchesEager() -> int
  * whole MIST_test age range, plus tracks and getStar(), at an off-grid
  * [Fe/H] = -0.37 -- through both Tracks3D directly and the lazy
  * Tracks2D slice Cluster uses -- and checks that every sampled star's
- * surface mass fractions sum to at most 1.
+ * surface mass fractions sum to at most 1 (written as !(sum <= 1 + tol),
+ * so that a NaN sum also fails).
  */
 inline auto testTracks3DSurfaceAbundancesBounded() -> int
 {
@@ -538,11 +539,11 @@ inline auto testTracks3DSurfaceAbundancesBounded() -> int
                             ((segment->xMax() - segment->xMin()) * i / nSample));
                         const auto props = (*segment)(m);
                         ++nChecked;
-                        if (surfSum(props) > 1.0 + tol)
+                        if (!(surfSum(props) <= 1.0 + tol))
                         {
                             std::cerr << "testTracks3DSurfaceAbundancesBounded: isochrone "
                                 "at log t = " << logT << ", m = " << m << " has X + Y + C + N + O = "
-                                << surfSum(props) << " > 1\n";
+                                << surfSum(props) << ", not <= 1\n";
                             return 1;
                         }
                     }
@@ -565,19 +566,19 @@ inline auto testTracks3DSurfaceAbundancesBounded() -> int
                 const double logT = std::min(track->xMax(),
                     logTLo + ((track->xMax() - logTLo) * i / nSample));
                 ++nChecked;
-                if (surfSum((*track)(logT)) > 1.0 + tol)
+                if (!(surfSum((*track)(logT)) <= 1.0 + tol))
                 {
                     std::cerr << "testTracks3DSurfaceAbundancesBounded: track for m = " << m
                         << " at log t = " << logT << " has X + Y + C + N + O = "
-                        << surfSum((*track)(logT)) << " > 1\n";
+                        << surfSum((*track)(logT)) << ", not <= 1\n";
                     return 1;
                 }
                 const auto star = tracks3d.getStar(m, logT, feh);
-                if (surfSum(star) > 1.0 + tol)
+                if (!(surfSum(star) <= 1.0 + tol))
                 {
                     std::cerr << "testTracks3DSurfaceAbundancesBounded: getStar for m = " << m
                         << " at log t = " << logT << " has X + Y + C + N + O = "
-                        << surfSum(star) << " > 1\n";
+                        << surfSum(star) << ", not <= 1\n";
                     return 1;
                 }
             }

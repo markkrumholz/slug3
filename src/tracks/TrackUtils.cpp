@@ -13,6 +13,7 @@
 #include "TrackCommons.hpp"
 #include "hdf5.h"   // NOLINT(misc-include-cleaner)
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <filesystem>
 #include <format>
@@ -347,7 +348,15 @@ namespace tracks
             double sum = 0.0;
             for (const auto f : surfaceAbundanceIdx)
             {
-                sum += data.at((row * ncol) + qtyIdx.at(static_cast<std::size_t>(f)));
+                const double value = data.at((row * ncol) + qtyIdx.at(static_cast<std::size_t>(f)));
+                if (!std::isfinite(value))
+                {
+                    throw std::runtime_error(std::format(
+                        "checkSurfaceAbundances: {}, row {}: surface mass fraction {} "
+                        "is {}; the track data are corrupt", context, row,
+                        fieldStr.at(static_cast<std::size_t>(f)), value));
+                }
+                sum += value;
             }
             if (sum > 1.0 + surfaceAbundanceTol)
             {

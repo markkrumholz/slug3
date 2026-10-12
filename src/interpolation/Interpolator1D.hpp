@@ -179,7 +179,7 @@ namespace interp
                 if constexpr(NF > 1) { return (*this)(x)[idx]; } // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- idx is asserted < NF just above
                 else { return (*this)(x); }
             }
-            return gsl_interp_eval(interp_[idx], x_.data(), f_[idx].data(), x, acc_()); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- idx is asserted < NF just above
+            return evalRaw(x, idx);
         }
 
         /**
@@ -266,7 +266,7 @@ namespace interp
             std::vector<double> fgGrid(xGrid.size());
             for (size_t j = 0; j < xGrid.size(); ++j)
             {
-                fgGrid[j] = (*this)(xGrid[j], idx) * g(xGrid[j], idx);
+                fgGrid[j] = evalRaw(xGrid[j], idx) * g.evalRaw(xGrid[j], idx);
             }
 
             // Integrate the product interpolant
@@ -322,7 +322,7 @@ namespace interp
             {
                 for (size_t i = 0; i < NF; ++i)
                 {
-                    fgGrid[i][j] = (*this)(xGrid[j], i) * g(xGrid[j], i); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i is bounded by compile-time constant NF
+                    fgGrid[i][j] = evalRaw(xGrid[j], i) * g.evalRaw(xGrid[j], i); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i is bounded by compile-time constant NF
                 }
             }
 
@@ -394,6 +394,21 @@ namespace interp
             const size_t newSize = w + 1;
             x_.resize(newSize);
             for (auto &fi : f_) { fi.resize(newSize); }
+        }
+
+        /**
+         * @brief Interpolate a single quantity to a given point, without post-processing
+         * @param x The point to which to interpolate
+         * @param idx Quantity to interpolate; must be < NF
+         * @return The raw interpolated value, ignoring any function set
+         *   by setPostProcess() -- used by the product-integration
+         *   integ() overloads, which (like every integ() method) are
+         *   documented as unaffected by post-processing
+         */
+        [[nodiscard]] auto evalRaw(const double x, const size_t idx) const -> double
+        {
+            assert(idx < NF);
+            return gsl_interp_eval(interp_[idx], x_.data(), f_[idx].data(), x, acc_()); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- idx is asserted < NF just above
         }
 
         /**

@@ -449,7 +449,8 @@ inline auto testRenormalizeSurfaceAbundances() -> int
  * FieldIdx order (so qtyIdx is exercised), and checks that rows summing
  * to at most 1 + surfaceAbundanceTol -- including a roundoff-level
  * excess of 6e-5, the largest in any shipped track set -- pass, while a
- * row summing to 1.01 throws, naming that row.
+ * row summing to 1.01, or with a NaN surface mass fraction, throws,
+ * naming that row (and, for the NaN, that field).
  */
 inline auto testCheckSurfaceAbundances() -> int
 {
@@ -500,6 +501,25 @@ inline auto testCheckSurfaceAbundances() -> int
         {
             std::cerr << "testCheckSurfaceAbundances: error does not identify the "
                 "offending row: " << msg << "\n";
+            return 1;
+        }
+    }
+    auto withNaN = makeTable({ { 0.7, 0.28, 0.003, 0.001, 0.008 },
+        { 0.7, 0.28, 0.003, 0.001, 0.008 }, { 0.7, std::numeric_limits<double>::quiet_NaN(), 0.003, 0.001, 0.008 } });
+    try
+    {
+        tracks::checkSurfaceAbundances(withNaN, 3, ncol, qtyIdx, "NaN table");
+        std::cerr << "testCheckSurfaceAbundances: expected a row with a NaN surface "
+            "mass fraction to throw\n";
+        return 1;
+    }
+    catch (const std::runtime_error& e)
+    {
+        const std::string msg = e.what();
+        if (msg.find("NaN table, row 2") == std::string::npos || msg.find("he_surf") == std::string::npos)
+        {
+            std::cerr << "testCheckSurfaceAbundances: error does not identify the "
+                "offending row and field: " << msg << "\n";
             return 1;
         }
     }

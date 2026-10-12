@@ -358,8 +358,9 @@ auto testInterpolator1DProductInteg() -> int
  * Linearly interpolates f0(x) = x and f1(x) = 10 x on x = {0, 1, 2},
  * with a post-processing function that doubles f0 only. Checks that
  * operator()(x) and operator()(x, idx) both apply it (and agree with
- * each other), that integ() does not, and that clearing it with
- * nullptr restores the raw values.
+ * each other), that integ() -- including both product-integration
+ * overloads -- does not, and that clearing it with nullptr restores the
+ * raw values.
  */
 auto testInterpolator1DPostProcess() -> int
 {
@@ -387,6 +388,19 @@ auto testInterpolator1DPostProcess() -> int
     {
         std::cerr << "testInterpolator1DPostProcess: integ() gave "
             << interp.integ(0.0, 2.0)[0] << ", expected 2 (unprocessed)\n";
+        return 1;
+    }
+    // Product integration is unaffected too: with both factors this same
+    // (post-processed) interpolator, the result must equal that of an
+    // identical interpolator with no post-processing, not 4x it as
+    // doubling both factors would give
+    const interp::Interpolator1D<2> plain(x, f, gsl_interp_linear);
+    if (!utils::approxEqual(interp.integ(interp, 0.0, 2.0, 0), plain.integ(plain, 0.0, 2.0, 0)) ||
+        !utils::approxEqual(interp.integ(interp, 0.0, 2.0)[0], plain.integ(plain, 0.0, 2.0)[0]))
+    {
+        std::cerr << "testInterpolator1DPostProcess: product integ() gave "
+            << interp.integ(interp, 0.0, 2.0, 0) << " / " << interp.integ(interp, 0.0, 2.0)[0]
+            << ", expected the unprocessed value " << plain.integ(plain, 0.0, 2.0, 0) << "\n";
         return 1;
     }
     interp.setPostProcess(nullptr);
