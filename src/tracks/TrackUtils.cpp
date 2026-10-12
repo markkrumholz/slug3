@@ -356,6 +356,13 @@ namespace tracks
                         "is {}; the track data are corrupt", context, row,
                         fieldStr.at(static_cast<std::size_t>(f)), value));
                 }
+                if (value < 0.0)
+                {
+                    throw std::runtime_error(std::format(
+                        "checkSurfaceAbundances: {}, row {}: surface mass fraction {} "
+                        "is negative ({}); the track data are corrupt", context, row,
+                        fieldStr.at(static_cast<std::size_t>(f)), value));
+                }
                 sum += value;
             }
             if (sum > 1.0 + surfaceAbundanceTol)
