@@ -193,8 +193,17 @@ namespace tracks
          * @brief Return the track for a star of a given mass
          * @param m Mass of the star whose track should be computed
          * @return An unique_ptr to an Interpolator1D describing the track for a given mass
+         * @details
+         * Every point evaluation of the result has its surface mass
+         * fractions passed through renormalizeSurfaceAbundances() (see
+         * Interpolator1D::setPostProcess()).
          */
-        [[nodiscard]] auto getTrack(const double m) const { return interp_->interpConstY(m); }
+        [[nodiscard]] auto getTrack(const double m) const
+        {
+            auto track = interp_->interpConstY(m);
+            track->setPostProcess(&renormalizeSurfaceAbundances);
+            return track;
+        }
 
         /**
          * @brief Return the isochrone at a given log time
@@ -204,8 +213,17 @@ namespace tracks
          * Note that this method returns a vector of Interpolator1D objects
          * rather than a single one because for non-monotonic tracks there
          * may be multiple disjoint segments to the isochrone.
+         *
+         * Every point evaluation of the result has its surface mass
+         * fractions passed through renormalizeSurfaceAbundances() (see
+         * Interpolator1D::setPostProcess()).
          */
-        [[nodiscard]] auto getIsochrone(const double logT) const { return interp_->interpConstX(logT); }
+        [[nodiscard]] auto getIsochrone(const double logT) const
+        {
+            auto isochrone = interp_->interpConstX(logT);
+            for (auto& segment : isochrone) { segment->setPostProcess(&renormalizeSurfaceAbundances); }
+            return isochrone;
+        }
 
         /**
          * @brief Return the properties of a star of a given mass and age
@@ -219,10 +237,17 @@ namespace tracks
          * with an (m, logT) pair that does not correspond to a live
          * star at that time. If it is uncertain whether the star is
          * alive, check first by calling liveMassRange().
+         *
+         * The result's surface mass fractions are passed through
+         * renormalizeSurfaceAbundances().
          */
         [[nodiscard]] auto getStar(const double m, const double logT,
             const bool linear = false) const
-        { return (*interp_)(logT, m, linear); }
+        {
+            auto props = (*interp_)(logT, m, linear);
+            renormalizeSurfaceAbundances(props);
+            return props;
+        }
 
     private:
 

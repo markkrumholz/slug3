@@ -205,9 +205,17 @@ namespace tracks
          * @param m Mass of the star whose track should be computed
          * @param feh [Fe/H] value of the tracks to use
          * @return An unique_ptr to an Interpolator1D describing the track for a given mass
+         * @details
+         * Every point evaluation of the result has its surface mass
+         * fractions passed through renormalizeSurfaceAbundances() (see
+         * Interpolator1D::setPostProcess()).
          */
         [[nodiscard]] auto getTrack(const double m, const double feh) const
-        { return interp_->lazySliceConstZ(feh).interpConstY(m); }
+        {
+            auto track = interp_->lazySliceConstZ(feh).interpConstY(m);
+            track->setPostProcess(&renormalizeSurfaceAbundances);
+            return track;
+        }
 
         /**
          * @brief Return the isochrone at a given log time and [Fe/H]
@@ -218,9 +226,17 @@ namespace tracks
          * Note that this method returns a vector of Interpolator1D objects
          * rather than a single one because for non-monotonic tracks there
          * may be multiple disjoint segments to the isochrone.
+         *
+         * Every point evaluation of the result has its surface mass
+         * fractions passed through renormalizeSurfaceAbundances() (see
+         * Interpolator1D::setPostProcess()).
          */
         [[nodiscard]] auto getIsochrone(const double logT, const double feh) const
-        { return interp_->lazySliceConstZ(feh).interpConstX(logT); }
+        {
+            auto isochrone = interp_->lazySliceConstZ(feh).interpConstX(logT);
+            for (auto& segment : isochrone) { segment->setPostProcess(&renormalizeSurfaceAbundances); }
+            return isochrone;
+        }
 
         /**
          * @brief Return the properties of a star of a given mass, age, and [Fe/H]
@@ -235,10 +251,17 @@ namespace tracks
          * with an (m, logT) pair that does not correspond to a live
          * star at that time and [Fe/H]. If it is uncertain whether the
          * star is alive, check first by calling liveMassRange().
+         *
+         * The result's surface mass fractions are passed through
+         * renormalizeSurfaceAbundances().
          */
         [[nodiscard]] auto getStar(const double m, const double logT,
             const double feh, const bool linear = false) const
-        { return interp_->lazySliceConstZ(feh)(logT, m, linear); }
+        {
+            auto props = interp_->lazySliceConstZ(feh)(logT, m, linear);
+            renormalizeSurfaceAbundances(props);
+            return props;
+        }
 
         /**
          * @brief Construct a Tracks2D object for a slice at fixed [Fe/H]

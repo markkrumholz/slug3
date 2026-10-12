@@ -10,8 +10,10 @@
 #include "../utils/HDF5Utils.hpp"
 #include "../utils/MiscUtils.hpp"
 #include "../utils/TOMLUtils.hpp"
+#include "TrackCommons.hpp"
 #include "hdf5.h"   // NOLINT(misc-include-cleaner)
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <filesystem>
 #include <format>
@@ -335,6 +337,42 @@ namespace tracks
         // NOLINTEND(misc-include-cleaner)
 
         return { nmass, ntime };
+    }
+
+    // See this function's own header comment
+    void checkSurfaceAbundances(const std::vector<double>& data, const std::size_t nrow,
+        const std::size_t ncol, const std::vector<std::size_t>& qtyIdx, const std::string& context)
+    {
+        for (std::size_t row = 0; row < nrow; ++row)
+        {
+            double sum = 0.0;
+            for (const auto f : surfaceAbundanceIdx)
+            {
+                const double value = data.at((row * ncol) + qtyIdx.at(static_cast<std::size_t>(f)));
+                if (!std::isfinite(value))
+                {
+                    throw std::runtime_error(std::format(
+                        "checkSurfaceAbundances: {}, row {}: surface mass fraction {} "
+                        "is {}; the track data are corrupt", context, row,
+                        fieldStr.at(static_cast<std::size_t>(f)), value));
+                }
+                if (value < 0.0)
+                {
+                    throw std::runtime_error(std::format(
+                        "checkSurfaceAbundances: {}, row {}: surface mass fraction {} "
+                        "is negative ({}); the track data are corrupt", context, row,
+                        fieldStr.at(static_cast<std::size_t>(f)), value));
+                }
+                sum += value;
+            }
+            if (sum > 1.0 + surfaceAbundanceTol)
+            {
+                throw std::runtime_error(std::format(
+                    "checkSurfaceAbundances: {}, row {}: surface mass fractions "
+                    "X + Y + C + N + O = {} exceed 1 by more than {}; the track "
+                    "data are corrupt", context, row, sum, surfaceAbundanceTol));
+            }
+        }
     }
 
 } // namespace tracks

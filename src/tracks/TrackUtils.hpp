@@ -104,6 +104,43 @@ namespace tracks
         const std::string& groupName)
     -> std::pair<size_t, size_t>;
 
+    /**
+     * @brief Largest amount by which a tabulated star's surface mass fractions may sum above 1
+     * @details
+     * See checkSurfaceAbundances(): roundoff in published track tables
+     * can push X + Y + C + N + O fractionally above 1 (the largest such
+     * excess in any track set slug ships is ~6e-5, in PARSEC), but a
+     * larger excess at a tabulated point indicates corrupt data.
+     */
+    inline constexpr double surfaceAbundanceTol = 1e-3;
+
+    /**
+     * @brief Check that every tabulated point of a track has physical surface mass fractions
+     * @param data A track's data, as read by utils::readDataset2D:
+     *   nrow rows (one per time point) of ncol fields, row-major
+     * @param nrow Number of rows in data
+     * @param ncol Number of fields per row in data
+     * @param qtyIdx Column of data holding each FieldIdx quantity, as
+     *   built by Tracks2D/Tracks3D (qtyIdx[k] is the column holding
+     *   quantity k)
+     * @param context Description of the track being checked (e.g. its
+     *   file, group, and dataset), for the error message
+     * @throws std::runtime_error if any row's X, Y, C, N, or O is not
+     *   finite or is negative (no tabulated value in any track set slug
+     *   ships is), or their sum exceeds 1 + surfaceAbundanceTol
+     * @details
+     * Tracks2D and Tracks3D call this on every track they read, so that
+     * corrupt track data is reported where it is loaded, rather than
+     * silently absorbed by renormalizeSurfaceAbundances() -- which, by
+     * design, corrects any excess above 1 in an interpolated value,
+     * since interpolating each surface mass fraction independently
+     * legitimately overshoots by up to several percent even when every
+     * tabulated point is valid.
+     */
+    void checkSurfaceAbundances(const std::vector<double>& data, std::size_t nrow,
+        std::size_t ncol, const std::vector<std::size_t>& qtyIdx, const std::string& context);
+
+
 } // namespace tracks
 
 #endif // TRACKUTILS_HPP

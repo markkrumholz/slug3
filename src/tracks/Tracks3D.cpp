@@ -114,6 +114,17 @@ namespace tracks
                             "Tracks3D: dataset " + name +
                             " has an unexpected number of fields");
                     }
+                    try
+                    {
+                        checkSurfaceAbundances(data, nrow, ncol, qtyIdx,
+                            "group " + groupNames[f] + ", dataset " + name);
+                    }
+                    catch (...)
+                    {
+                        H5Gclose(grp);
+                        H5Fclose(file);
+                        throw;
+                    }
                     const Array2D track(data.data(), nrow, ncol);
 
                     // Prepend a synthetic sentinel point at the

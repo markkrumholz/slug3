@@ -113,9 +113,38 @@ namespace interp
         [[nodiscard]] auto xRange() const { return std::make_pair(xMin(), xMax()); }
 
         /**
+         * @brief Type of a function that post-processes the interpolated values at a point
+         * @details
+         * Takes the full array of NF interpolated values at a single
+         * point and modifies it in place -- see setPostProcess().
+         */
+        using PostProcess = void (*)(std::array<double, NF>&);
+
+        /**
+         * @brief Set a function to apply to the interpolated values at every point
+         * @param postProcess The function to apply, or nullptr (the
+         *   default) for none
+         * @details
+         * When set, every point evaluation -- operator()(x), and
+         * operator()(x, idx), which then evaluates every quantity so
+         * that postProcess sees all of them together -- passes its
+         * full array of interpolated values through postProcess before
+         * returning. This exists for constraints that tie quantities
+         * together, which interpolating each quantity independently
+         * cannot respect on its own: e.g. stellar surface mass
+         * fractions, whose sum independent (even monotonicity-
+         * preserving) interpolation can push above 1 between sample
+         * points (see tracks::renormalizeSurfaceAbundances()). The
+         * integ() methods are unaffected, since a constraint on point
+         * values does not in general translate into one on integrals.
+         */
+        void setPostProcess(const PostProcess postProcess) { postProcess_ = postProcess; }
+
+        /**
          * @brief Interpolate to a given point
          * @param x The point to which to interpolate
-         * @return The interpolated value(s)
+         * @return The interpolated value(s), passed through the
+         *   function set by setPostProcess(), if any
          * @details
          * Return type is a double if NF = 1, and a std::array otherwise.
          */
@@ -128,6 +157,7 @@ namespace interp
                 result[i] = gsl_interp_eval(interp_[i], x_.data(), // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i is a loop index bounded by compile-time constant NF
                     f_[i].data(), x, acc_()); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i is a loop index bounded by compile-time constant NF
             }
+            if (postProcess_ != nullptr) { postProcess_(result); }
             if constexpr(NF > 1) { return result; }
             else { return result[0]; }
         }
@@ -136,13 +166,20 @@ namespace interp
          * @brief Interpolate a single quantity to a given point
          * @param x The point to which to interpolate
          * @param idx Quantity to interpolate; must be <= NF
-         * @return The interpolated value
+         * @return The interpolated value, consistent with
+         *   operator()(x)[idx] -- including any post-processing set by
+         *   setPostProcess()
         */
         [[nodiscard]] auto operator()(double x, size_t idx) const
         {
             assert(x >= x_.front() && x <= x_.back());
             assert(idx < NF);
-            return gsl_interp_eval(interp_[idx], x_.data(), f_[idx].data(), x, acc_()); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- idx is asserted < NF just above
+            if (postProcess_ != nullptr)
+            {
+                if constexpr(NF > 1) { return (*this)(x)[idx]; } // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- idx is asserted < NF just above
+                else { return (*this)(x); }
+            }
+            return evalRaw(x, idx);
         }
 
         /**
@@ -229,7 +266,7 @@ namespace interp
             std::vector<double> fgGrid(xGrid.size());
             for (size_t j = 0; j < xGrid.size(); ++j)
             {
-                fgGrid[j] = (*this)(xGrid[j], idx) * g(xGrid[j], idx);
+                fgGrid[j] = evalRaw(xGrid[j], idx) * g.evalRaw(xGrid[j], idx);
             }
 
             // Integrate the product interpolant
@@ -285,7 +322,7 @@ namespace interp
             {
                 for (size_t i = 0; i < NF; ++i)
                 {
-                    fgGrid[i][j] = (*this)(xGrid[j], i) * g(xGrid[j], i); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i is bounded by compile-time constant NF
+                    fgGrid[i][j] = evalRaw(xGrid[j], i) * g.evalRaw(xGrid[j], i); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- i is bounded by compile-time constant NF
                 }
             }
 
@@ -360,6 +397,21 @@ namespace interp
         }
 
         /**
+         * @brief Interpolate a single quantity to a given point, without post-processing
+         * @param x The point to which to interpolate
+         * @param idx Quantity to interpolate; must be < NF
+         * @return The raw interpolated value, ignoring any function set
+         *   by setPostProcess() -- used by the product-integration
+         *   integ() overloads, which (like every integ() method) are
+         *   documented as unaffected by post-processing
+         */
+        [[nodiscard]] auto evalRaw(const double x, const size_t idx) const -> double
+        {
+            assert(idx < NF);
+            return gsl_interp_eval(interp_[idx], x_.data(), f_[idx].data(), x, acc_()); // NOLINT(cppcoreguidelines-pro-bounds-constant-array-index) -- idx is asserted < NF just above
+        }
+
+        /**
          * @brief Initialize the gsl interpolation machinery
          */
         void interpInit(const gsl_interp_type *interpType)
@@ -388,6 +440,7 @@ namespace interp
         std::array<std::vector<double>, NF> f_; /**< Dependent variables */
         std::array<gsl_interp *, NF> interp_;   /**< GSL interpolator */
         utils::ThreadVec<gsl_interp_accel *> acc_; /**< Interpolation accelerator, one per thread */
+        PostProcess postProcess_ = nullptr; /**< Applied to every point evaluation, if non-null -- see setPostProcess() */
     };
 
 } // namespace interp
