@@ -782,8 +782,9 @@ namespace interp
             const bool startInterior = (yLo > yMin);
             const bool endInterior = (yHi < yMax);
 
-            // Find all the intersection points for this segment
-            auto intListSeg = xIntersectSeg(x, yMin, yMax,
+            // Find all the intersection points for this segment,
+            // traversing only the part of it within [yLo, yHi]
+            auto intListSeg = xIntersectSeg(x, yLoSeg, yHiSeg,
                 startInterior, endInterior);
 
             // Append to list
@@ -1221,8 +1222,10 @@ namespace interp
         bool lastIntersectLeft = false;
         bool lastIntersectRight = false;
         if (startInterior) {
-            xIntersectSegStartInterior(x, y, intList,
-                lastIntersectLeft, lastIntersectRight);
+            const bool tangent =
+                xIntersectSegStartInterior(x, y, intList,
+                    lastIntersectLeft, lastIntersectRight);
+            if (tangent) { return intList; }
         }
         else
         {
@@ -1261,13 +1264,13 @@ namespace interp
 
 
     // Helper to start segment traversal on mesh interior
-    void Mesh2DGrid::xIntersectSegStartInterior(
+    auto Mesh2DGrid::xIntersectSegStartInterior( //NOLINT(readability-function-cognitive-complexity) -- like xIntersectSegStartEdge, a short sequence of rib/spine/corner cases, each needing its own left-edge guard; splitting them out would only add indirection
         const double x,
         double& y,
         std::vector<xIntersectionDescriptor>& intList,
         bool& lastIntersectLeft,
         bool& lastIntersectRight
-    ) const
+    ) const -> bool
     {
         auto& iSaveLoc = iSave_();
         auto& jSaveLoc = jSave_();
@@ -1295,12 +1298,22 @@ namespace interp
                     if (jSaveLoc == ny()-2) { break; }
                 }
 
-                // Handle the case where the intersection point is a cell corner
+                // Handle the case where the intersection point is a cell
+                // corner, exactly as xIntersectSegStartEdge's own bottom-
+                // rib corner case does: the slope of the spine segment
+                // above this rib (row jSaveLoc) decides whether the line
+                // continues up in this column's cell (m <= 0; suppress
+                // its left spine, which passes through this point) or in
+                // the cell one column to the left (m > 0; suppress that
+                // cell's right spine instead), and at the mesh's left
+                // edge (column 0) there is no cell to the left, so the
+                // line only touches the mesh here
                 if (x == x_[iSaveLoc,jSaveLoc])
                 {
-                    if (m_[iSaveLoc,0] > 0)
+                    if (m_[iSaveLoc,jSaveLoc] > 0)
                     {
                         lastIntersectLeft = true;
+                        if (iSaveLoc == 0) { return true; }
                         iSaveLoc--;
                     }
                     else
@@ -1324,8 +1337,12 @@ namespace interp
                 }
                 else
                 {
+                    // The line continues up in the cell to the left of
+                    // this spine; at the mesh's left edge there is none,
+                    // so the line only touches the mesh here
                     lastIntersectLeft = true;
                     lastIntersectRight = false;
+                    if (iSaveLoc == 0) { return true; }
                     iSaveLoc--;
                 }
 
@@ -1341,6 +1358,7 @@ namespace interp
 
         }
 
+        return false;
     }
 
     // Helper to start segment traversal on mesh edge

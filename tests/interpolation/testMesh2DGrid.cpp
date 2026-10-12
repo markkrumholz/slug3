@@ -1059,6 +1059,104 @@ testXIntersectNCorners() -> int
     return result;
 }
 
+// Regression test for xIntersect with explicit yLo/yHi bounds, which
+// used to be ignored for the traversal itself: xIntersect passed each
+// segment's own full extent to xIntersectSeg rather than its clipped
+// [yLo, yHi] portion, so a bounded query returned every intersection of
+// any segment overlapping the bounds. That also meant
+// xIntersectSegStartInterior -- which handles a traversal starting
+// strictly inside the mesh, as a bounded query does -- was never handed
+// an actual interior starting point; its own corner case read the
+// slope of the spine segment in row 0 rather than the starting row,
+// and decremented the column index with no guard at the mesh's left
+// edge. Each mesh below (as in testXIntersectNCorners) is queried at
+// corner and non-corner x values, with bounds that include ones
+// starting exactly on a rib at a corner -- e.g. x = 1.1 with yLo = 1 on
+// the bending mesh, where row 0's spine slope has the opposite sign to
+// row 1's, and x = 0.1 with yLo = 1 there, a left-edge corner -- and
+// checked against the unbounded xIntersect list restricted to the same
+// open interval (yLo, yHi), plus a check that every returned point lies
+// within [yLo, yHi].
+static auto
+testXIntersectBounded() -> int
+{
+    constexpr size_t nx = 4;
+    constexpr size_t ny = 3;
+    struct MeshCase
+    {
+        const char* label_;
+        double (*x_)(size_t i, size_t j);
+        std::array<double, 4> xQuery_;
+    };
+    const std::array<MeshCase, 3> cases = {{
+        { "spines leaning right",
+            [](const size_t i, const size_t j) { return static_cast<double>(i) + (0.1 * static_cast<double>(j)); },
+            { 0.1, 1.1, 0.55, 2.23 } },
+        { "spines leaning left",
+            [](const size_t i, const size_t j) { return static_cast<double>(i) - (0.1 * static_cast<double>(j)); },
+            { -0.1, 0.9, 0.55, 2.23 } },
+        { "spines bending at middle rib",
+            [](const size_t i, const size_t j) { return static_cast<double>(i) + (j == 1 ? 0.1 : 0.0); },
+            { 0.1, 1.1, 0.55, 2.23 } },
+    }};
+    // Includes bounds starting exactly on the middle rib and extending
+    // past the mesh's top (yHi = 2.5 > yMax = 2), so that whether the
+    // traversal correctly continues up from a corner start to the top
+    // rib is actually observable inside the open interval
+    const std::array<std::pair<double, double>, 7> bounds = {{
+        { 1.0, 2.0 }, { 1.0, 2.5 }, { 1.0, 1.5 }, { 0.0, 1.0 }, { 0.25, 1.75 }, { 0.5, 2.5 }, { 1.2, 1.3 },
+    }};
+
+    int result = 0;
+    for (const auto& c : cases)
+    {
+        std::array<double, nx*ny> xData = { 0 };
+        std::array<double, ny> yData = { 0 };
+        const std::mdspan<double, std::extents<size_t, nx, ny>> x(xData.data());
+        const std::mdspan<double, std::extents<size_t, ny>> y(yData.data());
+        for (size_t j = 0; j < ny; ++j)
+        {
+            y[j] = static_cast<double>(j);
+            for (size_t i = 0; i < nx; ++i) { x[i,j] = c.x_(i, j); }
+        }
+        const interp::Mesh2DGrid m2d(x, y);
+        for (const double xQuery : c.xQuery_)
+        {
+            const auto full = m2d.xIntersect(xQuery);
+            for (const auto& [yLo, yHi] : bounds)
+            {
+                const auto got = m2d.xIntersect(xQuery, yLo, yHi);
+                std::vector<double> want;
+                for (const auto& p : full) { if (p.y > yLo && p.y < yHi) { want.push_back(p.y); } }
+                std::vector<double> gotInterior;
+                bool inRange = true;
+                for (const auto& p : got)
+                {
+                    if (p.y < yLo || p.y > yHi) { inRange = false; }
+                    if (p.y > yLo && p.y < yHi) { gotInterior.push_back(p.y); }
+                }
+                bool match = inRange && gotInterior.size() == want.size();
+                for (size_t k = 0; match && k < want.size(); ++k)
+                {
+                    match = utils::approxEqual(gotInterior[k], want[k]);
+                }
+                if (!match)
+                {
+                    std::cerr << "testMesh2DGrid: testXIntersectBounded (" << c.label_
+                        << "): xIntersect(" << xQuery << ", " << yLo << ", " << yHi
+                        << ") returned y =";
+                    for (const auto& p : got) { std::cerr << " " << p.y; }
+                    std::cerr << "; expected, strictly inside the bounds, y =";
+                    for (const double w : want) { std::cerr << " " << w; }
+                    std::cerr << "\n";
+                    result += 1;
+                }
+            }
+        }
+    }
+    return result;
+}
+
 // Regression test for yIntersect at the exact yMin_/yMax_ boundary.
 // yIdx's cell-index clamp (needed so it always returns a valid
 // cell-start index) forces a nonzero mass offset from the boundary
@@ -1275,6 +1373,7 @@ auto testMesh2DGrid() -> int
     test += testXIntersectNDownwardSpine();
     test += testXIntersectNRibCornerNegativeSlope();
     test += testXIntersectNCorners();
+    test += testXIntersectBounded();
 
     // Regression tests for yIntersect/xIntersect at the exact
     // yMin_/yMax_ and xMin_/xMax_ boundaries

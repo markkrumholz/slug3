@@ -1024,14 +1024,18 @@ namespace interp
          * @param intList List of mesh intersections to populate
          * @param lastIntersectLeft True if the last intersection point was on the left edge of a cell
          * @param lastIntersectRight True if the last intersection point was on the right edge of a cell
+         * @returns True if the line only touches the mesh at the starting
+         *   point (it starts on the mesh's left edge, where the line
+         *   continues up outside the mesh), and thus search should end
+         *   immediately -- mirroring xIntersectSegStartEdge()
          */
-        void xIntersectSegStartInterior(
+        auto xIntersectSegStartInterior(
             double x,
             double& y,
             std::vector<xIntersectionDescriptor>& intList,
             bool& lastIntersectLeft,
             bool& lastIntersectRight
-        ) const;
+        ) const -> bool;
 
         /**
          * @brief Helper to xIntersectSeg to start traversals on mesh edge
