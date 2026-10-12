@@ -72,6 +72,7 @@
  * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
 
+#include "../../src/feedback/Winds.hpp"
 #include "../../src/io/SimControls.hpp"
 #include "../../src/specsyn/SpecsynLibNoWind.hpp"
 #include "../../src/specsyn/SpecsynLibChained.hpp"
@@ -80,12 +81,17 @@
 #include "../../src/utils/MiscUtils.hpp"
 #include "testSpecsynLibChained.hpp"
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <functional>
 #include <iostream>
+#include <limits>
+#include <memory>
 #include <stdexcept>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 namespace
@@ -1018,6 +1024,100 @@ static auto testMakeCommonWlGridErrors() -> int
     return result;
 }
 
+// End to end through the chain: a WC star whose surface X + Y exceeds 1
+// (see testSpecsynLibWR.cpp's testSpecNegativeZThrows) used to fall
+// through every WR library (its NaN log(R_t) matched no populated grid
+// point) to the final specForce() fallback, which returned an all-NaN
+// spectrum that silently poisoned the whole population's spectrum and
+// photometry. spec() must now throw instead, with tClamp both true and
+// false.
+static auto testChainNegativeZThrows() -> int
+{
+    // A SimControls using the nugis_lamers_00 WR wind model; built in
+    // place, since SimControls is neither copyable nor movable and a
+    // Winds holds a live reference back to it
+    static io::SimControls nlControls;
+    if (nlControls.winds() == nullptr)
+    {
+        nlControls.setWRWindModel(feedback::WRwindModel::nugisLamers00_);
+        nlControls.setWinds(std::make_unique<feedback::Winds>(nlControls));
+    }
+    // He = 0.92, C = 0.02 > N = 0.001, X = 0.1: X + Y = 1.02
+    auto props = makeWRStarData(20.0, 5.7, 4.75, 3e-5);
+    props.at(static_cast<std::size_t>(tracks::FieldIdx::hSurf)) = 0.1;
+    props.at(static_cast<std::size_t>(tracks::FieldIdx::heSurf)) = 0.92;
+    props.at(static_cast<std::size_t>(tracks::FieldIdx::cSurf)) = 0.02;
+    props.at(static_cast<std::size_t>(tracks::FieldIdx::nSurf)) = 0.001;
+
+    int result = 0;
+    for (const bool tClamp : { true, false })
+    {
+        const specsyn::SpecsynLibChained chain(
+            { "POWR_WC_test", "POWR_WNE_test", "TLUSTY_test" }, -3.0, 1.0, 0.0, 0.0,
+            {}, specsyn::defaultR, registryName, 0.0, 0.0, 0, tClamp, nlControls);
+        try
+        {
+            const auto spec = chain.spec(props, -0.5);
+            std::cerr << "testSpecsynLibChained: testChainNegativeZThrows (tClamp = "
+                << tClamp << "): expected spec() to throw for a star with X + Y > 1, "
+                "but it returned a spectrum of size " << spec.size() << "\n";
+            result += 1;
+        }
+        catch (const std::runtime_error& e)
+        {
+            if (!std::string_view(e.what()).contains("not finite"))
+            {
+                std::cerr << "testSpecsynLibChained: testChainNegativeZThrows (tClamp = "
+                    << tClamp << "): unexpected error message: " << e.what() << "\n";
+                result += 1;
+            }
+        }
+    }
+    return result;
+}
+
+// Defense in depth, independent of any particular library's own
+// checks: whatever path spec() takes, a spectrum containing a
+// non-finite value must never be returned. An ordinary OB star (handled
+// by TLUSTY_test) with a NaN mass or log(L), or a log(L) so large its
+// luminosity overflows, yields such a spectrum, which spec() must
+// reject with its own error rather than return.
+static auto testChainNonFiniteSpectrumThrows() -> int
+{
+    const specsyn::SpecsynLibChained chain(
+        { "TLUSTY_test", "BOSZ_test" }, -3.0, 1.0, 0.0, 0.0,
+        {}, specsyn::defaultR, registryName, 0.0, 0.0, 0, true, testControls);
+    constexpr double nan = std::numeric_limits<double>::quiet_NaN();
+    const std::array<std::pair<const char*, specsyn::Specsyn::StarData>, 3> cases{ {
+        { "NaN log(L)", makeStarData(20.0, nan, 4.45) },
+        { "NaN mass", makeStarData(nan, 5.278, 4.45) },
+        { "overflowing log(L)", makeStarData(20.0, 400.0, 4.45) },
+    } };
+
+    int result = 0;
+    for (const auto& [label, props] : cases)
+    {
+        try
+        {
+            const auto spec = chain.spec(props, -0.5);
+            std::cerr << "testSpecsynLibChained: testChainNonFiniteSpectrumThrows ("
+                << label << "): expected spec() to throw, but it returned a "
+                "spectrum of size " << spec.size() << "\n";
+            result += 1;
+        }
+        catch (const std::runtime_error& e)
+        {
+            if (!std::string_view(e.what()).contains("non-finite"))
+            {
+                std::cerr << "testSpecsynLibChained: testChainNonFiniteSpectrumThrows ("
+                    << label << "): unexpected error message: " << e.what() << "\n";
+                result += 1;
+            }
+        }
+    }
+    return result;
+}
+
 auto testSpecsynLibChained() -> int
 {
     int result = 0;
@@ -1039,5 +1139,7 @@ auto testSpecsynLibChained() -> int
     result += testMakeCommonWlGridWindows();
     result += testMakeCommonWlGridGap();
     result += testMakeCommonWlGridErrors();
+    result += testChainNegativeZThrows();
+    result += testChainNonFiniteSpectrumThrows();
     return result;
 }

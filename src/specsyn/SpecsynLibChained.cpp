@@ -805,6 +805,22 @@ namespace specsyn
         const auto type = classifyGridType(props, rawLogg, logTeffMin_, logTeffMax_, loggMin_, loggMax_, wnlTeffRanges_, normalLogTeffMax_);
         const auto& chain = chainFor(type);
 
+        // Every spectrum returned below goes through this check: a
+        // non-finite value means something upstream (the star's own
+        // properties, or a library) is broken, and returning it would
+        // silently poison the spectrum of the whole population this star
+        // belongs to, so it is an error instead
+        const auto checkedFinite = [&props, feh](std::vector<double> result) -> std::vector<double>
+        {
+            if (!std::ranges::all_of(result, [](const double v) -> bool { return std::isfinite(v); }))
+            {
+                throw std::runtime_error(
+                    "SpecsynLibChained: computed spectrum contains non-finite "
+                    "values for star with " + describeStar(props, feh));
+            }
+            return result;
+        };
+
         if (chain.empty())
         {
             throw std::runtime_error(
@@ -829,7 +845,7 @@ namespace specsyn
         for (const auto& lib : chain)
         {
             auto result = lib->spec(queryProps, feh);
-            if (!result.empty()) { return result; }
+            if (!result.empty()) { return checkedFinite(std::move(result)); }
         }
 
         // Second pass, only reached if no library in the chain covers
@@ -861,11 +877,11 @@ namespace specsyn
             const auto [clampedFeh, clampedLogg] = clampFehForLibrary(feh, queryLogg, type, i);
             const StarData libProps = propsWithClampedLogg(queryProps, queryLogg, clampedLogg);
             auto result = chain[i]->spec(libProps, clampedFeh);
-            if (!result.empty()) { return result; }
+            if (!result.empty()) { return checkedFinite(std::move(result)); }
         }
         const auto [finalFeh, finalLogg] = clampFehForLibrary(feh, queryLogg, type, chain.size() - 1);
         const StarData finalProps = propsWithClampedLogg(queryProps, queryLogg, finalLogg);
-        return chain.back()->specForce(finalProps, finalFeh);
+        return checkedFinite(chain.back()->specForce(finalProps, finalFeh));
     }
 
     auto SpecsynLibChained::specForIntegration(const StarData& props, const double feh) const -> std::vector<double>

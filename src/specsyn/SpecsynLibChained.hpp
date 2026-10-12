@@ -186,6 +186,11 @@ namespace specsyn
          *   a size-0 vector
          * @throws std::runtime_error if this star's own GridType has
          *   no chained library at all
+         * @throws std::runtime_error if the spectrum about to be
+         *   returned contains any non-finite value, rather than
+         *   returning it -- a NaN for even one star would otherwise
+         *   silently contaminate the spectrum (and every photometric
+         *   value derived from it) of whatever population it belongs to
          * @details
          * First decides which GridType this star belongs to -- see
          * classifyGridType's own comment for the exact rule (in short:
