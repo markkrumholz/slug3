@@ -14,8 +14,9 @@ The Pure Python Layer
 ..
    The pure-Python layer -- reading/post-processing slug output files,
    plus a handful of top-level convenience functions
-   (``compute_isochrones``, ``compute_tracks``, ``phot_convert``,
-   ``read``, ``run_sim``). ``slugpy/__init__.py`` also wildcard-re-exports
+   (``compute_isochrones``, ``compute_tracks``,
+   ``consolidate_checkpoints``, ``phot_convert``, ``read``,
+   ``run_sim``). ``slugpy/__init__.py`` also wildcard-re-exports
    every class and function from ``_slug`` (so e.g. ``slugpy.Cluster``
    works directly, not just ``slugpy._slug.Cluster``), but those are
    documented separately below, under their own ``slugpy._slug`` module
@@ -24,12 +25,12 @@ The Pure Python Layer
    ``:members:`` is given this section's own explicit name list, rather
    than a bare flag plus ``:imported-members:``, specifically to keep
    that ``_slug`` wildcard re-export out of this listing --
-   ``:imported-members:`` can't tell an explicit, named import (the five
+   ``:imported-members:`` can't tell an explicit, named import (the six
    functions above) apart from a wildcard one, so it would otherwise
    pull every ``_slug`` class in here too, duplicating the listing below:
 
 .. automodule:: slugpy
-   :members: compute_isochrones, compute_tracks, phot_convert, read, run_sim
+   :members: compute_isochrones, compute_tracks, consolidate_checkpoints, phot_convert, read, run_sim
 
 The Compiled Core (``slugpy._slug``)
 ---------------------------------------

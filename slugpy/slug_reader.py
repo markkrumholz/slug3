@@ -193,6 +193,47 @@ def _checkpoint_files(prefix: Path, checkpoint_num: int) -> list[str]:
         f"{h5_path} nor {dir_path} exists")
 
 
+def _find_checkpoints(prefix: Path) -> dict[int, list[str]]:
+    """
+    Find every checkpoint a checkpointed run left behind.
+
+    Parameters
+    ----------
+    prefix : pathlib.Path
+        outDir / model_name for the run, with no extension.
+
+    Returns
+    -------
+    dict of int to list of str
+        Maps each checkpoint number NNNNN for which prefix.parent holds
+        model_name_chkNNNNN.h5 or model_name_chkNNNNN/ to that
+        checkpoint's own file(s), as returned by _checkpoint_files().
+        Empty if there are no checkpoints (or prefix.parent does not
+        exist). Mirrors OutputManagerH5::restartSetup()'s own
+        checkpoint discovery (findMaxCheckpointNumber() in
+        OutputManagerH5.cpp): a name matches only if the suffix after
+        "_chk" is exactly five ASCII digits.
+    """
+    # [0-9], not \d, for the same reason as _rank_thread_files_in_dir()
+    chk_re = re.compile(re.escape(prefix.name) + r"_chk([0-9]{5})")
+    checkpoints: dict[int, list[str]] = {}
+    if not prefix.parent.is_dir():
+        return checkpoints
+    for entry in prefix.parent.iterdir():
+        if entry.is_file() and entry.suffix == ".h5":
+            candidate = entry.stem
+        elif entry.is_dir():
+            candidate = entry.name
+        else:
+            continue
+        match = chk_re.fullmatch(candidate)
+        if match is None:
+            continue
+        checkpoint_num = int(match.group(1))
+        checkpoints[checkpoint_num] = _checkpoint_files(prefix, checkpoint_num)
+    return checkpoints
+
+
 def _find_output_files(filename: str) -> tuple[list[str], list[str]]:
     """
     Resolve filename to the underlying HDF5 file(s) making up one
@@ -255,23 +296,7 @@ def _find_output_files(filename: str) -> tuple[list[str], list[str]]:
         return [str(path)], [str(path)]
 
     prefix = Path(filename).resolve()
-    chk_re = re.compile(re.escape(prefix.name) + r"_chk(\d{5})$")
-
-    checkpoints: dict[int, list[str]] = {}
-    if prefix.parent.is_dir():
-        for entry in prefix.parent.iterdir():
-            if entry.is_file() and entry.suffix == ".h5":
-                candidate = entry.stem
-            elif entry.is_dir():
-                candidate = entry.name
-            else:
-                continue
-            match = chk_re.fullmatch(candidate)
-            if match is None:
-                continue
-            checkpoint_num = int(match.group(1))
-            checkpoints[checkpoint_num] = _checkpoint_files(prefix, checkpoint_num)
-
+    checkpoints = _find_checkpoints(prefix)
     if checkpoints:
         all_files: list[str] = []
         for checkpoint_num in sorted(checkpoints):
