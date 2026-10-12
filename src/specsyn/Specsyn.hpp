@@ -20,6 +20,7 @@
 #include <memory>
 #include <numbers>
 #include <stdexcept>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -600,6 +601,17 @@ namespace specsyn
         [[nodiscard]] auto intMaxIter() const -> std::size_t;
 
     protected:
+
+        /**
+         * @brief Describe a star's properties, for use in an error message
+         * @param props Stellar properties, as produced by evaluating
+         *   the Interpolator1D returned by Tracks2D::getIsochrone at
+         *   this star's mass
+         * @param feh [Fe/H] value of the star
+         * @return A one-line, human-readable listing of feh and every
+         *   field of props, by name, at full precision
+         */
+        [[nodiscard]] static auto describeStar(const StarData& props, double feh) -> std::string;
 
         /**
          * @brief Compute a star's surface area and log(g) from its stellar properties

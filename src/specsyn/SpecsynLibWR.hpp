@@ -516,6 +516,13 @@ namespace specsyn
          *   own range) log(R_t), by Todt et al. 2015, eq. 2 -- or
          *   logRt_.front(), the grid's own lowest log(R_t), if the
          *   wind velocity is zero (see @details)
+         * @throws std::runtime_error, regardless of Policy, if the wind
+         *   velocity is not finite or the resulting log(R_t) is NaN --
+         *   e.g. a star whose surface X + Y exceeds 1, giving the
+         *   nugis_lamers_00 WC formula a negative Z to take the log
+         *   of. Such a star's properties are invalid rather than out of
+         *   bounds, and returning a NaN log(R_t) would otherwise yield
+         *   an all-NaN spectrum.
          * @details
          * Factored out of spec() (which calls this, then moves the
          * result to the nearest populated logRt_ value) so specForce()

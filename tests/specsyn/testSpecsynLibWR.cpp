@@ -45,6 +45,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -758,6 +759,72 @@ static auto testSpecZeroWindSucceeds() -> int
     return result;
 }
 
+// A WC star (He > 0.9, C > N, hotter than 50000 K) whose surface X + Y
+// exceeds 1 -- the case that produced all-NaN spectra in the 3.0.1
+// validation run, from MIST tracks whose interpolated surface
+// abundances overshoot 1 -- makes Z = 1 - X - Y negative, so the
+// nugis_lamers_00 WC wind velocity (which takes log10(Z)) is NaN.
+// spec() must throw rather than return a NaN spectrum, and must do so
+// even under OOBPolicy::silent, since this is an invalid star rather
+// than an out-of-bounds one. The same star with X + Y < 1 is a
+// positive control: it must get a full, finite spectrum.
+static auto testSpecNegativeZThrows() -> int
+{
+    const auto& nlControls = controlsWithWinds<feedback::WRwindModel::nugisLamers00_>();
+    // He = 0.92, C = 0.02 > N = 0.001, X = 0.1: X + Y = 1.02
+    const auto badProps = makeWRStarData(20.0, 5.7, 4.75, 3e-5, 0.92, 0.02, 0.001, 0.1);
+    // Same star with X = 0, so Z = 0.08 > 0
+    const auto goodProps = makeWRStarData(20.0, 5.7, 4.75, 3e-5, 0.92, 0.02, 0.001, 0.0);
+    int result = 0;
+
+    const specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise> lib(
+        "POWR_WC_test", -3.0, 1.0, registryName, 0.0, 0.0, 0, nlControls);
+    try
+    {
+        const auto spectrum = lib.spec(goodProps, -0.5);
+        if (spectrum.size() != lib.wl().size() ||
+            !std::ranges::all_of(spectrum, [](const double v) -> bool { return std::isfinite(v); }))
+        {
+            std::cerr << "testSpecsynLibWR: testSpecNegativeZThrows: positive control "
+                "(X + Y < 1) expected a full-size, all-finite spectrum\n";
+            result = 1;
+        }
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "testSpecsynLibWR: testSpecNegativeZThrows: positive control "
+            "(X + Y < 1) threw unexpectedly: " << e.what() << "\n";
+        result = 1;
+    }
+
+    const auto expectThrow = [&badProps](const auto& testLib, const char* label) -> int
+    {
+        try
+        {
+            const auto spectrum = testLib.spec(badProps, -0.5);
+            std::cerr << "testSpecsynLibWR: testSpecNegativeZThrows (" << label
+                << "): expected spec() to throw for a star with X + Y > 1, but it "
+                "returned a spectrum of size " << spectrum.size() << "\n";
+            return 1;
+        }
+        catch (const std::runtime_error& e)
+        {
+            if (!std::string_view(e.what()).contains("not finite"))
+            {
+                std::cerr << "testSpecsynLibWR: testSpecNegativeZThrows (" << label
+                    << "): unexpected error message: " << e.what() << "\n";
+                return 1;
+            }
+            return 0;
+        }
+    };
+    result += expectThrow(lib, "raise");
+    const specsyn::SpecsynLibWR<specsyn::OOBPolicy::silent> silentLib(
+        "POWR_WC_test", -3.0, 1.0, registryName, 0.0, 0.0, 0, nlControls);
+    result += expectThrow(silentLib, "silent");
+    return result;
+}
+
 auto testSpecsynLibWR() -> int
 {
     int result = 0;
@@ -777,5 +844,6 @@ auto testSpecsynLibWR() -> int
     result += testNWlOnly();
     result += testRawLogRtWindModels();
     result += testSpecZeroWindSucceeds();
+    result += testSpecNegativeZThrows();
     return result;
 }
