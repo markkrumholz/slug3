@@ -192,7 +192,8 @@ def consolidate_checkpoints(model_name: str, out_dir: str | os.PathLike[str] | N
     FileNotFoundError
         If out_dir holds no checkpoints of model_name.
     FileExistsError
-        If out_dir/model_name.h5 already exists.
+        If out_dir/model_name.h5 already exists, or is created by
+        something else while this function is running.
     ValueError
         If the checkpoint files do not all have the same HDF5 group
         and dataset structure, or if any of them lacks the
@@ -326,7 +327,18 @@ def consolidate_checkpoints(model_name: str, out_dir: str | os.PathLike[str] | N
                                 raise RuntimeError(
                                     f"consolidated {name} does not match {path} "
                                     f"in rows {start}-{stop - 1}")
-        tmp.replace(dest)
+        # Link rather than rename, since os.link fails instead of
+        # overwriting if dest was created while this was running; fall
+        # back to a (racy) check-then-rename only on filesystems that
+        # do not support hard links
+        try:
+            os.link(tmp, dest)
+        except FileExistsError:
+            raise FileExistsError(f"{dest} was created while consolidating") from None
+        except OSError:
+            if dest.exists():
+                raise FileExistsError(f"{dest} was created while consolidating") from None
+            tmp.replace(dest)
     finally:
         tmp.unlink(missing_ok=True)
 

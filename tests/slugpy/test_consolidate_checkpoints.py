@@ -260,6 +260,24 @@ def test_refuses_existing_destination(tmp_path: Path) -> None:
     assert (tmp_path / "model_chk00000.h5").is_file()
 
 
+def test_refuses_destination_created_during_consolidation(tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch) -> None:
+    """A model.h5 that appears while consolidation is running is never
+    overwritten, and the checkpoints are not cleaned up."""
+    _write_output_file(tmp_path / "model_chk00000.h5", trials=[0], trials_completed=1)
+    real_same_rows = cc._same_rows
+
+    def same_rows_creating_dest(a: np.ndarray, b: np.ndarray) -> bool:
+        (tmp_path / "model.h5").write_text("precious")
+        return real_same_rows(a, b)
+
+    monkeypatch.setattr(cc, "_same_rows", same_rows_creating_dest)
+    with pytest.raises(FileExistsError, match="while consolidating"):
+        consolidate_checkpoints("model", tmp_path, cleanup=True)
+    assert (tmp_path / "model.h5").read_text() == "precious"
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["model.h5", "model_chk00000.h5"]
+
+
 def test_raises_without_checkpoints(tmp_path: Path) -> None:
     """A model with no checkpoints at all raises FileNotFoundError."""
     _write_output_file(tmp_path / "model.h5", trials=[0], trials_completed=1)
