@@ -33,6 +33,29 @@ namespace tracks
     // FieldIdx::nTrackQty as a size_t
     constexpr size_t nQty = static_cast<size_t>(FieldIdx::nTrackQty);
 
+    namespace
+    {
+        // Run checkSurfaceAbundances() on one track, closing the open
+        // HDF5 group and file before letting its exception propagate;
+        // factored out of the constructor to keep its own cognitive
+        // complexity within bounds
+        void checkSurfaceAbundancesOrClose(const std::vector<double>& data, // NOLINT(llvm-prefer-static-over-anonymous-namespace)
+            const size_t nrow, const size_t ncol, const std::vector<size_t>& qtyIdx,
+            const std::string& context, const hid_t grp, const hid_t file) // NOLINT(misc-include-cleaner)
+        {
+            try
+            {
+                checkSurfaceAbundances(data, nrow, ncol, qtyIdx, context);
+            }
+            catch (...)
+            {
+                H5Gclose(grp); // NOLINT(misc-include-cleaner)
+                H5Fclose(file); // NOLINT(misc-include-cleaner)
+                throw;
+            }
+        }
+    } // namespace
+
     Tracks2D::Tracks2D(
         const std::string& trackName,
         const double feh,
@@ -171,6 +194,9 @@ namespace tracks
             const auto name = std::format("track_m{:.3f}", massData[i]);
             auto [data, shape] = utils::readDataset2D(grp, name, "Tracks2D");
             const auto [nrow, ncol] = shape;
+            checkSurfaceAbundancesOrClose(data, nrow, ncol, qtyIdx,
+                std::format("{}, group {}, dataset {}", h5path.string(), groupName, name),
+                grp, file);
             const Array2D track(data.data(), nrow, ncol);
 
             // Prepend a synthetic sentinel point at the earliest

@@ -21,6 +21,7 @@
 #include "trackFieldFixture.hpp"
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <exception>
 #include <iostream>
 #include <memory>
@@ -489,6 +490,104 @@ inline auto testTracks3DLazyMatchesEager() -> int
         fail(std::string("unexpected exception: ") + e.what());
     }
     return nBad > 0 ? 1 : 0;
+}
+
+/**
+ * @brief Unit test that every interpolated surface composition is physical
+ * @return 0 if the test passes, 1 if it fails.
+ * @details
+ * Interpolating each surface mass fraction independently can push
+ * X + Y + C + N + O above 1 (see tracks::renormalizeSurfaceAbundances()),
+ * which in the 3.0.1 validation run gave a handful of massive stars a
+ * negative Z = 1 - X - Y at off-grid [Fe/H]. Scans isochrones over the
+ * whole MIST_test age range, plus tracks and getStar(), at an off-grid
+ * [Fe/H] = -0.37 -- through both Tracks3D directly and the lazy
+ * Tracks2D slice Cluster uses -- and checks that every sampled star's
+ * surface mass fractions sum to at most 1.
+ */
+inline auto testTracks3DSurfaceAbundancesBounded() -> int
+{
+    using tracks::FieldIdx;
+    const std::string registryName = "tests/tracks/assets/tracks.toml";
+    constexpr double feh = -0.37;
+    const auto surfSum = [](const auto& p)
+    {
+        return p.at(static_cast<std::size_t>(FieldIdx::hSurf)) +
+            p.at(static_cast<std::size_t>(FieldIdx::heSurf)) +
+            p.at(static_cast<std::size_t>(FieldIdx::cSurf)) +
+            p.at(static_cast<std::size_t>(FieldIdx::nSurf)) +
+            p.at(static_cast<std::size_t>(FieldIdx::oSurf));
+    };
+    constexpr double tol = 1e-12;
+
+    try
+    {
+        const tracks::Tracks3D tracks3d("MIST_test", -1.0, 0.5, 0.0, -0.2, registryName);
+        const auto slice = tracks3d.lazySliceConstFeH(feh);
+        std::size_t nChecked = 0;
+        for (double logT = 5.5; logT <= 10.2; logT += 0.01)
+        {
+            for (const auto& isochrone : { tracks3d.getIsochrone(logT, feh), slice.getIsochrone(logT) })
+            {
+                for (const auto& segment : isochrone)
+                {
+                    constexpr int nSample = 50;
+                    for (int i = 0; i <= nSample; ++i)
+                    {
+                        const double m = std::min(segment->xMax(), segment->xMin() +
+                            ((segment->xMax() - segment->xMin()) * i / nSample));
+                        const auto props = (*segment)(m);
+                        ++nChecked;
+                        if (surfSum(props) > 1.0 + tol)
+                        {
+                            std::cerr << "testTracks3DSurfaceAbundancesBounded: isochrone "
+                                "at log t = " << logT << ", m = " << m << " has X + Y + C + N + O = "
+                                << surfSum(props) << " > 1\n";
+                            return 1;
+                        }
+                    }
+                }
+            }
+        }
+        for (const double m : { 1.0, 5.0, 20.0, 60.0, 100.0 })
+        {
+            const auto track = tracks3d.getTrack(m, feh);
+            constexpr int nSample = 2000;
+            for (int i = 0; i <= nSample; ++i)
+            {
+                const double logT = std::min(track->xMax(),
+                    track->xMin() + ((track->xMax() - track->xMin()) * i / nSample));
+                ++nChecked;
+                if (surfSum((*track)(logT)) > 1.0 + tol)
+                {
+                    std::cerr << "testTracks3DSurfaceAbundancesBounded: track for m = " << m
+                        << " at log t = " << logT << " has X + Y + C + N + O = "
+                        << surfSum((*track)(logT)) << " > 1\n";
+                    return 1;
+                }
+                const auto star = tracks3d.getStar(m, logT, feh);
+                if (surfSum(star) > 1.0 + tol)
+                {
+                    std::cerr << "testTracks3DSurfaceAbundancesBounded: getStar for m = " << m
+                        << " at log t = " << logT << " has X + Y + C + N + O = "
+                        << surfSum(star) << " > 1\n";
+                    return 1;
+                }
+            }
+        }
+        if (nChecked == 0)
+        {
+            std::cerr << "testTracks3DSurfaceAbundancesBounded: no stars were sampled\n";
+            return 1;
+        }
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "testTracks3DSurfaceAbundancesBounded: unexpected exception: "
+            << e.what() << "\n";
+        return 1;
+    }
+    return 0;
 }
 
 // NOLINTEND(misc-include-cleaner)

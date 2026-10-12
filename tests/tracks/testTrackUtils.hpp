@@ -16,10 +16,16 @@
 #ifndef TESTTRACKUTILS_HPP
 #define TESTTRACKUTILS_HPP
 
+#include "../../src/tracks/TrackCommons.hpp"
 #include "../../src/tracks/TrackUtils.hpp"
 #include <algorithm>
+#include <array>
+#include <cmath>
+#include <cstddef>
 #include <exception>
 #include <iostream>
+#include <limits>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -342,6 +348,165 @@ inline auto testGetTrackSize() -> int
 }
 
 /**
+ * @brief Unit test for the renormalizeSurfaceAbundances function.
+ * @return 0 if the test passes, 1 if it fails.
+ * @details
+ * Checks that surface mass fractions summing to at most 1 are left
+ * untouched; that a sum above 1 -- both the composition of the star
+ * that produced NaN photometry in the 3.0.1 validation run,
+ * X + Y + C + N + O = 1.0135, and an 8.5% overshoot, the largest any
+ * shipped track set's interpolated isochrones produce -- is rescaled to
+ * sum to exactly 1, with ratios preserved, Z = 1 - X - Y non-negative,
+ * and every non-abundance field untouched; and that a NaN sum is left
+ * alone.
+ */
+inline auto testRenormalizeSurfaceAbundances() -> int
+{
+    using tracks::FieldIdx;
+    constexpr auto nQty = static_cast<std::size_t>(FieldIdx::nTrackQty);
+    const auto idx = [](const FieldIdx f) { return static_cast<std::size_t>(f); };
+    const auto makeProps = [&idx](const double x, const double y, const double c,
+        const double n, const double o) -> std::array<double, nQty>
+    {
+        std::array<double, nQty> props{};
+        props.at(idx(FieldIdx::mass)) = 66.5;
+        props.at(idx(FieldIdx::mdot)) = 1.4e-4;
+        props.at(idx(FieldIdx::logL)) = 6.45;
+        props.at(idx(FieldIdx::logTe)) = 4.9;
+        props.at(idx(FieldIdx::hSurf)) = x;
+        props.at(idx(FieldIdx::heSurf)) = y;
+        props.at(idx(FieldIdx::cSurf)) = c;
+        props.at(idx(FieldIdx::nSurf)) = n;
+        props.at(idx(FieldIdx::oSurf)) = o;
+        return props;
+    };
+    const auto surfSum = [&idx](const std::array<double, nQty>& p)
+    {
+        return p.at(idx(FieldIdx::hSurf)) + p.at(idx(FieldIdx::heSurf)) +
+            p.at(idx(FieldIdx::cSurf)) + p.at(idx(FieldIdx::nSurf)) + p.at(idx(FieldIdx::oSurf));
+    };
+
+    // Sum <= 1: untouched
+    const auto valid = makeProps(0.7, 0.28, 0.003, 0.001, 0.008);
+    auto validCopy = valid;
+    tracks::renormalizeSurfaceAbundances(validCopy);
+    if (validCopy != valid)
+    {
+        std::cerr << "testRenormalizeSurfaceAbundances: a composition summing to "
+            "less than 1 was modified\n";
+        return 1;
+    }
+
+    // Overshoots: rescaled to sum to 1, ratios and other fields kept
+    const std::array<std::array<double, nQty>, 2> overshoots = {
+        makeProps(0.1538509684580525, 0.847424251704682, 0.0058013157108631344,
+            0.005026218138719116, 0.0014471129569203775), // sum = 1.0135
+        makeProps(0.4833, 0.5896, 0.003, 0.0061, 0.003), // sum = 1.085
+    };
+    for (const auto& bad : overshoots)
+    {
+        auto fixed = bad;
+        tracks::renormalizeSurfaceAbundances(fixed);
+        const double badSum = surfSum(bad);
+        if (std::abs(surfSum(fixed) - 1.0) > 1e-14 ||
+            1.0 - fixed.at(idx(FieldIdx::hSurf)) - fixed.at(idx(FieldIdx::heSurf)) < 0.0)
+        {
+            std::cerr << "testRenormalizeSurfaceAbundances: renormalized sum is "
+                << surfSum(fixed) << ", expected 1 with Z = 1 - X - Y >= 0\n";
+            return 1;
+        }
+        for (std::size_t k = 0; k < nQty; ++k)
+        {
+            const bool isSurf = k >= idx(FieldIdx::hSurf) && k <= idx(FieldIdx::oSurf);
+            const double expected = isSurf ? bad.at(k) / badSum : bad.at(k);
+            if (std::abs(fixed.at(k) - expected) > 1e-15 * std::abs(expected))
+            {
+                std::cerr << "testRenormalizeSurfaceAbundances: field " << tracks::fieldStr.at(k)
+                    << " is " << fixed.at(k) << " after renormalization, expected "
+                    << expected << "\n";
+                return 1;
+            }
+        }
+    }
+
+    // NaN sum: left alone, for downstream checks to catch
+    auto withNaN = makeProps(std::numeric_limits<double>::quiet_NaN(), 0.9, 0.003, 0.001, 0.008);
+    tracks::renormalizeSurfaceAbundances(withNaN);
+    if (!std::isnan(withNaN.at(idx(FieldIdx::hSurf))) || withNaN.at(idx(FieldIdx::heSurf)) != 0.9)
+    {
+        std::cerr << "testRenormalizeSurfaceAbundances: a NaN composition was modified\n";
+        return 1;
+    }
+
+    return 0;
+}
+
+/**
+ * @brief Unit test for the checkSurfaceAbundances function.
+ * @return 0 if the test passes, 1 if it fails.
+ * @details
+ * Builds a three-row table whose columns are deliberately not in
+ * FieldIdx order (so qtyIdx is exercised), and checks that rows summing
+ * to at most 1 + surfaceAbundanceTol -- including a roundoff-level
+ * excess of 6e-5, the largest in any shipped track set -- pass, while a
+ * row summing to 1.01 throws, naming that row.
+ */
+inline auto testCheckSurfaceAbundances() -> int
+{
+    using tracks::FieldIdx;
+    constexpr auto nQty = static_cast<std::size_t>(FieldIdx::nTrackQty);
+    // On-disk column order: an age column, then the quantities in reverse
+    constexpr std::size_t ncol = nQty + 1;
+    std::vector<std::size_t> qtyIdx(nQty);
+    for (std::size_t k = 0; k < nQty; ++k) { qtyIdx.at(k) = ncol - 1 - k; }
+    const auto makeTable = [&qtyIdx](const std::vector<std::array<double, 5>>& rows)
+    {
+        std::vector<double> data(rows.size() * ncol, 0.0);
+        for (std::size_t r = 0; r < rows.size(); ++r)
+        {
+            for (std::size_t j = 0; j < 5; ++j)
+            {
+                const auto k = static_cast<std::size_t>(FieldIdx::hSurf) + j;
+                data.at((r * ncol) + qtyIdx.at(k)) = rows.at(r).at(j);
+            }
+        }
+        return data;
+    };
+
+    const auto good = makeTable({ { 0.7, 0.28, 0.003, 0.001, 0.008 },
+        { 0.0, 0.98, 0.01, 0.0, 0.01 }, { 0.5, 0.48006, 0.01, 0.005, 0.005 } });
+    try
+    {
+        tracks::checkSurfaceAbundances(good, 3, ncol, qtyIdx, "good table");
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "testCheckSurfaceAbundances: valid table rejected: " << e.what() << "\n";
+        return 1;
+    }
+
+    const auto bad = makeTable({ { 0.7, 0.28, 0.003, 0.001, 0.008 },
+        { 0.7, 0.28, 0.003, 0.001, 0.008 }, { 0.5, 0.49, 0.01, 0.005, 0.005 } });
+    try
+    {
+        tracks::checkSurfaceAbundances(bad, 3, ncol, qtyIdx, "bad table");
+        std::cerr << "testCheckSurfaceAbundances: expected a row summing to 1.01 to throw\n";
+        return 1;
+    }
+    catch (const std::runtime_error& e)
+    {
+        const std::string msg = e.what();
+        if (msg.find("bad table, row 2") == std::string::npos)
+        {
+            std::cerr << "testCheckSurfaceAbundances: error does not identify the "
+                "offending row: " << msg << "\n";
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/**
  * @brief Unit test for the TrackUtils functions.
  * @return 0 if the test passes, 1 if it fails.
  */
@@ -352,6 +517,8 @@ inline auto testTrackUtils() -> int
     result += testFindMatchingTracks();
     result += testFindTrack();
     result += testGetTrackSize();
+    result += testRenormalizeSurfaceAbundances();
+    result += testCheckSurfaceAbundances();
     return result;
 }
 

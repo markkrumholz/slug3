@@ -351,4 +351,52 @@ auto testInterpolator1DProductInteg() -> int
     return 0; // Success
 }
 
+/**
+ * @brief Unit test for Interpolator1D::setPostProcess()
+ * @return 0 if the test passes, 1 if it fails
+ * @details
+ * Linearly interpolates f0(x) = x and f1(x) = 10 x on x = {0, 1, 2},
+ * with a post-processing function that doubles f0 only. Checks that
+ * operator()(x) and operator()(x, idx) both apply it (and agree with
+ * each other), that integ() does not, and that clearing it with
+ * nullptr restores the raw values.
+ */
+auto testInterpolator1DPostProcess() -> int
+{
+    const std::vector<double> x = { 0.0, 1.0, 2.0 };
+    const std::array<std::vector<double>, 2> f = {{ { 0.0, 1.0, 2.0 }, { 0.0, 10.0, 20.0 } }};
+    interp::Interpolator1D<2> interp(x, f, gsl_interp_linear);
+    interp.setPostProcess([](std::array<double, 2>& v) { v[0] *= 2.0; });
+
+    const double xT = 1.5;
+    const auto full = interp(xT);
+    if (!utils::approxEqual(full[0], 3.0) || !utils::approxEqual(full[1], 15.0))
+    {
+        std::cerr << "testInterpolator1DPostProcess: operator()(x) gave {" << full[0]
+            << ", " << full[1] << "}, expected {3, 15}\n";
+        return 1;
+    }
+    if (!utils::approxEqual(interp(xT, 0), 3.0) || !utils::approxEqual(interp(xT, 1), 15.0))
+    {
+        std::cerr << "testInterpolator1DPostProcess: operator()(x, idx) gave {"
+            << interp(xT, 0) << ", " << interp(xT, 1) << "}, expected {3, 15}\n";
+        return 1;
+    }
+    // integ() is unaffected: the integral of x over [0, 2] is 2
+    if (!utils::approxEqual(interp.integ(0.0, 2.0)[0], 2.0))
+    {
+        std::cerr << "testInterpolator1DPostProcess: integ() gave "
+            << interp.integ(0.0, 2.0)[0] << ", expected 2 (unprocessed)\n";
+        return 1;
+    }
+    interp.setPostProcess(nullptr);
+    if (!utils::approxEqual(interp(xT)[0], 1.5) || !utils::approxEqual(interp(xT, 0), 1.5))
+    {
+        std::cerr << "testInterpolator1DPostProcess: clearing the post-processing "
+            "function did not restore the raw interpolated value 1.5\n";
+        return 1;
+    }
+    return 0;
+}
+
 #endif // TESTINTERPOLATION1D_HPP
