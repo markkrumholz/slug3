@@ -474,11 +474,17 @@ testYEdgeSlope(const interp::Mesh2DGrid& m2d, const interp::Mesh2DGrid& m2dNC)
 // downward search terminates there) without either being wrong.
 // meshExit correctness is instead covered by the hand-verified
 // testXIntersectNDownwardSpine regression test below.
+//
+// If yOnly is true, only each point's y is compared, not its xs/t/idx
+// descriptor: a point exactly on a cell corner lies on both a rib and a
+// spine, and xIntersect and xIntersectN can legitimately describe it as
+// either, so yOnly is needed for an x passing exactly through a corner.
 static auto
 checkXIntersectNAgainstFull(
     const interp::Mesh2DGrid& m,
     const double x,
-    const std::string& label) -> int
+    const std::string& label,
+    const bool yOnly = false) -> int
 {
     const auto full = m.xIntersect(x);
     if (full.size() < 2)
@@ -534,9 +540,8 @@ checkXIntersectNAgainstFull(
             {
                 const auto& e = full[windowStart + idx];
                 const auto& r = got[idx];
-                if (!utils::approxEqual(r.y, e.y) ||
-                    !utils::approxEqual(r.xs, e.xs) ||
-                    r.t != e.t || r.idx != e.idx)
+                if (!utils::approxEqual(r.y, e.y) || (!yOnly &&
+                    (!utils::approxEqual(r.xs, e.xs) || r.t != e.t || r.idx != e.idx)))
                 {
                     std::cerr << "checkXIntersectNAgainstFull: " << label
                         << ": x = " << x << ", y = " << y << ", n = " << n
@@ -979,6 +984,284 @@ testXIntersectNRibCornerNegativeSlope()
     return 0; // Success
 }
 
+// Regression test for xIntersectN starting exactly on a cell corner,
+// i.e. on a rib at the same point as a spine. From such a start, each
+// search direction must decide which column's cell the line x = const
+// enters from the slope of the spine segment on that side of the rib
+// (above it going up, below it going down), and must suppress the
+// recheck of the spine passing through the starting point. This used
+// to go wrong in three ways: at a corner on the mesh's left edge
+// (column 0) the column index was decremented before checking it was
+// already 0, wrapping a size_t around and reading far out of bounds
+// (caught by libstdc++'s debug assertions, and seen in practice for a
+// Tracks2D/Tracks3D getStar() query exactly at a track's own first,
+// sentinel, time point); the down direction suppressed the wrong
+// spine, so it rediscovered the starting point at zero distance and
+// stopped; and stepping into the column to the left suppressed that
+// cell's left spine rather than its right one (the one through the
+// starting point), and the down direction used the slope of the spine
+// segment above the rib rather than below it. Each mesh below is
+// checked, at x values passing exactly through a left-edge corner and
+// an interior corner, against the already-tested full xIntersect list,
+// from every starting point and for every n; y values only, since a
+// corner can legitimately be described as either a rib or a spine
+// intersection.
+static auto
+testXIntersectNCorners() -> int
+{
+    constexpr size_t nx = 4;
+    constexpr size_t ny = 3;
+    struct MeshCase
+    {
+        const char* label_;
+        double (*x_)(size_t i, size_t j);
+        std::array<double, 2> xQuery_;
+    };
+    const std::array<MeshCase, 3> cases = {{
+        // Spines lean right: going up from a corner steps left (or
+        // leaves the mesh at column 0); going down stays
+        { "spines leaning right",
+            [](const size_t i, const size_t j) { return static_cast<double>(i) + (0.1 * static_cast<double>(j)); },
+            { 0.1, 1.1 } },
+        // Spines lean left: going down from a corner steps left (or
+        // leaves the mesh at column 0); going up stays
+        { "spines leaning left",
+            [](const size_t i, const size_t j) { return static_cast<double>(i) - (0.1 * static_cast<double>(j)); },
+            { -0.1, 0.9 } },
+        // Spines bend at the middle rib, leaning right below it and
+        // left above it, so both directions stay in the corner's own
+        // column -- distinguishing the slope below the rib from the
+        // slope above it
+        { "spines bending at middle rib",
+            [](const size_t i, const size_t j) { return static_cast<double>(i) + (j == 1 ? 0.1 : 0.0); },
+            { 0.1, 1.1 } },
+    }};
+
+    int result = 0;
+    for (const auto& c : cases)
+    {
+        std::array<double, nx*ny> xData = { 0 };
+        std::array<double, ny> yData = { 0 };
+        const std::mdspan<double, std::extents<size_t, nx, ny>> x(xData.data());
+        const std::mdspan<double, std::extents<size_t, ny>> y(yData.data());
+        for (size_t j = 0; j < ny; ++j)
+        {
+            y[j] = static_cast<double>(j);
+            for (size_t i = 0; i < nx; ++i) { x[i,j] = c.x_(i, j); }
+        }
+        const interp::Mesh2DGrid m2d(x, y);
+        for (const double xQuery : c.xQuery_)
+        {
+            result += checkXIntersectNAgainstFull(m2d, xQuery,
+                std::string(c.label_) + ", corner start", true);
+        }
+    }
+    return result;
+}
+
+// Regression test for vertical spines (slope bigNum) at a corner: the
+// corner handling in xIntersectN, xIntersectSegStartEdge, and
+// xIntersectSegStartInterior treated bigNum as a right-leaning spine, so
+// at column 0 it ended the upward search (or reported a tangent) even
+// though the line runs along the vertical spine, inside the mesh. Checked
+// against hand-computed y values, not just against each other, since
+// xIntersect and xIntersectN both got the second mesh below wrong. In
+// both meshes the line runs inside the mesh from y = 0 to y = 2. (These
+// meshes are deliberately not run through checkXIntersectNAgainstFull:
+// where the line runs along a vertical spine, every point of it is on
+// the mesh, so that helper's model of discrete intersections with
+// interior starting points between them does not apply.)
+static auto
+testXIntersectVerticalSpine() -> int
+{
+    constexpr size_t nx = 4;
+    constexpr size_t ny = 3;
+    struct MeshCase
+    {
+        const char* label_;
+        double (*x_)(size_t i, size_t j);
+        double xQuery_;
+    };
+    const std::array<MeshCase, 2> cases = {{
+        { "vertical left edge",
+            [](const size_t i, const size_t j) { return i == 0 ? 0.0 : static_cast<double>(i) + (0.1 * static_cast<double>(j)); },
+            0.0 },
+        { "left edge vertical below middle rib",
+            [](const size_t i, const size_t j) { return i == 0 ? (j < 2 ? 0.3 : 0.0) : static_cast<double>(i) + 0.5; },
+            0.3 },
+    }};
+    const std::vector<double> expected = { 0.0, 1.0, 2.0 };
+
+    int result = 0;
+    for (const auto& c : cases)
+    {
+        std::array<double, nx*ny> xData = { 0 };
+        std::array<double, ny> yData = { 0 };
+        const std::mdspan<double, std::extents<size_t, nx, ny>> x(xData.data());
+        const std::mdspan<double, std::extents<size_t, ny>> y(yData.data());
+        for (size_t j = 0; j < ny; ++j)
+        {
+            y[j] = static_cast<double>(j);
+            for (size_t i = 0; i < nx; ++i) { x[i,j] = c.x_(i, j); }
+        }
+        const interp::Mesh2DGrid m2d(x, y);
+        const auto check = [&](const std::vector<interp::Mesh2DGrid::xIntersectionDescriptor>& got,
+            const std::string& what) -> int
+        {
+            bool ok = got.size() == expected.size();
+            for (size_t k = 0; ok && k < got.size(); ++k) { ok = utils::approxEqual(got[k].y, expected[k]); }
+            if (ok) { return 0; }
+            std::cerr << "testMesh2DGrid: testXIntersectVerticalSpine (" << c.label_ << "): "
+                << what << " returned y =";
+            for (const auto& p : got) { std::cerr << " " << p.y; }
+            std::cerr << ", expected 0 1 2\n";
+            return 1;
+        };
+        result += check(m2d.xIntersect(c.xQuery_), "xIntersect");
+        // A zero-width bounded query at a point partway along the
+        // vertical spine (y = 0.5) must return the same point(s) there
+        // as a query of nonzero width starting at that point -- the
+        // spine point itself in the interior, though none at the mesh's
+        // exact left edge, where xIntersectBoundaryRow reports only the
+        // boundary's rib points
+        const auto pointQuery = m2d.xIntersect(c.xQuery_, 0.5, 0.5);
+        std::vector<double> wantPoint;
+        for (const auto& p : m2d.xIntersect(c.xQuery_, 0.5, 0.6))
+        {
+            if (p.y == 0.5) { wantPoint.push_back(p.y); }
+        }
+        bool pointOk = pointQuery.size() == wantPoint.size();
+        for (size_t k = 0; pointOk && k < wantPoint.size(); ++k) { pointOk = pointQuery[k].y == wantPoint[k]; }
+        if (!pointOk || (c.xQuery_ == 0.3 && wantPoint.size() != 1))
+        {
+            std::cerr << "testMesh2DGrid: testXIntersectVerticalSpine (" << c.label_
+                << "): xIntersect(" << c.xQuery_ << ", 0.5, 0.5) returned y =";
+            for (const auto& p : pointQuery) { std::cerr << " " << p.y; }
+            std::cerr << ", but xIntersect(" << c.xQuery_ << ", 0.5, 0.6) has "
+                << wantPoint.size() << " point(s) at y = 0.5\n";
+            result += 1;
+        }
+        for (const double yStart : expected)
+        {
+            result += check(m2d.xIntersectN(c.xQuery_, yStart, expected.size()),
+                "xIntersectN from y = " + std::to_string(yStart));
+        }
+    }
+    return result;
+}
+
+// Regression test for xIntersect with explicit yLo/yHi bounds, which
+// used to be ignored for the traversal itself: xIntersect passed each
+// segment's own full extent to xIntersectSeg rather than its clipped
+// [yLo, yHi] portion, so a bounded query returned every intersection of
+// any segment overlapping the bounds. That also meant
+// xIntersectSegStartInterior -- which handles a traversal starting
+// strictly inside the mesh, as a bounded query does -- was never handed
+// an actual interior starting point; its own corner case read the
+// slope of the spine segment in row 0 rather than the starting row,
+// and decremented the column index with no guard at the mesh's left
+// edge. Each mesh below (as in testXIntersectNCorners) is queried at
+// corner and non-corner x values, with bounds that include ones
+// starting exactly on a rib at a corner -- e.g. x = 1.1 with yLo = 1 on
+// the bending mesh, where row 0's spine slope has the opposite sign to
+// row 1's, and x = 0.1 with yLo = 1 there, a left-edge corner -- and
+// checked against the unbounded xIntersect list restricted to the same
+// open interval (yLo, yHi), plus a check that every returned point lies
+// within [yLo, yHi].
+static auto
+testXIntersectBounded() -> int
+{
+    constexpr size_t nx = 4;
+    constexpr size_t ny = 3;
+    struct MeshCase
+    {
+        const char* label_;
+        double (*x_)(size_t i, size_t j);
+        std::array<double, 4> xQuery_;
+    };
+    const std::array<MeshCase, 3> cases = {{
+        { "spines leaning right",
+            [](const size_t i, const size_t j) { return static_cast<double>(i) + (0.1 * static_cast<double>(j)); },
+            { 0.1, 1.1, 0.55, 2.23 } },
+        { "spines leaning left",
+            [](const size_t i, const size_t j) { return static_cast<double>(i) - (0.1 * static_cast<double>(j)); },
+            { -0.1, 0.9, 0.55, 2.23 } },
+        { "spines bending at middle rib",
+            [](const size_t i, const size_t j) { return static_cast<double>(i) + (j == 1 ? 0.1 : 0.0); },
+            { 0.1, 1.1, 0.55, 2.23 } },
+    }};
+    // Includes bounds starting exactly on the middle rib and extending
+    // past the mesh's top (yHi = 2.5 > yMax = 2), so that whether the
+    // traversal correctly continues up from a corner start to the top
+    // rib is actually observable inside the open interval
+    const std::array<std::pair<double, double>, 7> bounds = {{
+        { 1.0, 2.0 }, { 1.0, 2.5 }, { 1.0, 1.5 }, { 0.0, 1.0 }, { 0.25, 1.75 }, { 0.5, 2.5 }, { 1.2, 1.3 },
+    }};
+
+    int result = 0;
+    for (const auto& c : cases)
+    {
+        std::array<double, nx*ny> xData = { 0 };
+        std::array<double, ny> yData = { 0 };
+        const std::mdspan<double, std::extents<size_t, nx, ny>> x(xData.data());
+        const std::mdspan<double, std::extents<size_t, ny>> y(yData.data());
+        for (size_t j = 0; j < ny; ++j)
+        {
+            y[j] = static_cast<double>(j);
+            for (size_t i = 0; i < nx; ++i) { x[i,j] = c.x_(i, j); }
+        }
+        const interp::Mesh2DGrid m2d(x, y);
+        for (const double xQuery : c.xQuery_)
+        {
+            const auto full = m2d.xIntersect(xQuery);
+            for (const auto& [yLo, yHi] : bounds)
+            {
+                const auto got = m2d.xIntersect(xQuery, yLo, yHi);
+                std::vector<double> want;
+                for (const auto& p : full) { if (p.y > yLo && p.y < yHi) { want.push_back(p.y); } }
+                std::vector<double> gotInterior;
+                bool inRange = true;
+                for (const auto& p : got)
+                {
+                    if (p.y < yLo || p.y > yHi) { inRange = false; }
+                    if (p.y > yLo && p.y < yHi) { gotInterior.push_back(p.y); }
+                }
+                // Hits exactly at yLo or yHi (e.g. a query starting on a
+                // corner) are excluded from the interior comparison above,
+                // so check them separately: the same number of points at
+                // each endpoint height (descriptors aside -- a corner can
+                // be described as either a rib or a spine)
+                bool endpointsMatch = true;
+                for (const double endpoint : { yLo, yHi })
+                {
+                    size_t wantCount = 0;
+                    size_t gotCount = 0;
+                    for (const auto& p : full) { if (utils::approxEqual(p.y, endpoint)) { ++wantCount; } }
+                    for (const auto& p : got) { if (utils::approxEqual(p.y, endpoint)) { ++gotCount; } }
+                    endpointsMatch = endpointsMatch && wantCount == gotCount;
+                }
+                bool match = inRange && endpointsMatch && gotInterior.size() == want.size();
+                for (size_t k = 0; match && k < want.size(); ++k)
+                {
+                    match = utils::approxEqual(gotInterior[k], want[k]);
+                }
+                if (!match)
+                {
+                    std::cerr << "testMesh2DGrid: testXIntersectBounded (" << c.label_
+                        << "): xIntersect(" << xQuery << ", " << yLo << ", " << yHi
+                        << ") returned y =";
+                    for (const auto& p : got) { std::cerr << " " << p.y; }
+                    std::cerr << "; expected, strictly inside the bounds, y =";
+                    for (const double w : want) { std::cerr << " " << w; }
+                    std::cerr << "\n";
+                    result += 1;
+                }
+            }
+        }
+    }
+    return result;
+}
+
 // Regression test for yIntersect at the exact yMin_/yMax_ boundary.
 // yIdx's cell-index clamp (needed so it always returns a valid
 // cell-start index) forces a nonzero mass offset from the boundary
@@ -1194,6 +1477,9 @@ auto testMesh2DGrid() -> int
     // findIntersectDistance, found while implementing xIntersectN
     test += testXIntersectNDownwardSpine();
     test += testXIntersectNRibCornerNegativeSlope();
+    test += testXIntersectNCorners();
+    test += testXIntersectBounded();
+    test += testXIntersectVerticalSpine();
 
     // Regression tests for yIntersect/xIntersect at the exact
     // yMin_/yMax_ and xMin_/xMax_ boundaries

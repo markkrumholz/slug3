@@ -774,16 +774,41 @@ namespace interp
             const double yLoSeg = std::max(yMin, yLo);
             const double yHiSeg = std::min(yMax, yHi);
 
-            // Skip segment if applying limits makes it zero length
-            if (yLoSeg >= yHiSeg) { continue; }
+            // Skip segment if applying limits leaves nothing of it. The
+            // bounds are a closed interval, so if they leave exactly one
+            // point of it -- the line touches [yLo, yHi] only at one end
+            // of this segment -- keep whatever intersection(s) lie at
+            // that point, taken from a traversal of the whole segment so
+            // that they are described exactly as an unbounded query
+            // would describe them
+            if (yLoSeg > yHiSeg) { continue; }
+            if (yLoSeg == yHiSeg)
+            {
+                bool found = false;
+                for (const auto& p : xIntersectSeg(x, yMin, yMax, false, false))
+                {
+                    if (p.y == yLoSeg) { intList.push_back(p); found = true; }
+                }
+                // Where the line runs along a vertical spine, the
+                // traversal only records the rib crossings at the ends
+                // of that run, not the continuum of spine points between
+                // them, so fall back to checking the point itself
+                if (!found)
+                {
+                    const auto [pointOnMesh, d] = onMesh(x, yLoSeg);
+                    if (pointOnMesh) { intList.push_back(d); }
+                }
+                continue;
+            }
 
             // Mark whether the starting and ending points for this segment
             // are on the edge of the mesh
             const bool startInterior = (yLo > yMin);
             const bool endInterior = (yHi < yMax);
 
-            // Find all the intersection points for this segment
-            auto intListSeg = xIntersectSeg(x, yMin, yMax,
+            // Find all the intersection points for this segment,
+            // traversing only the part of it within [yLo, yHi]
+            auto intListSeg = xIntersectSeg(x, yLoSeg, yHiSeg,
                 startInterior, endInterior);
 
             // Append to list
@@ -881,59 +906,68 @@ namespace interp
                 if (jDown == 0 && y_[0] == y_[1]) { continueDown = false; }
                 if (jUp == ny()-2 && y_[ny()-2] == y_[ny()-1]) { continueUp = false; }
 
-                // Handle special case where starting search point is on a
-                // corner; if this happens, we may need to change the i
-                // search indices
-                while (x == x_[iUp,jSaveLoc] && m_[iUp,jSaveLoc] > 0)
+                // Handle the special case where the starting point is
+                // exactly on a cell corner, i.e. also on a spine. Each
+                // direction must then decide which column's cell the
+                // line x = const actually enters, from the slope of the
+                // spine segment on that side of the rib (above it for
+                // up, below it for down), and must suppress the
+                // recheck of whichever spine of that cell passes through
+                // the starting point, which would otherwise be
+                // rediscovered at zero distance. In findNextIntersect's
+                // convention, lastIntersectRight suppresses a cell's
+                // left spine and lastIntersectLeft its right spine (see
+                // findIntersectDistance()), as in
+                // xIntersectSegStartInterior's identical corner case.
+                //
+                // Up: if the spine segment above leans right (m > 0),
+                // the line is to its left, in the cell one column to the
+                // left, whose right spine is the one we are on; at the
+                // mesh's left edge (column 0) there is no such cell, so
+                // the line leaves the mesh. Otherwise -- including a
+                // vertical spine (m == bigNum), along which the line
+                // runs, and which belongs to the cell to its right --
+                // the line stays in this column's cell, whose left spine
+                // we are on.
+                while (continueUp && x == x_[iUp,jUp] && m_[iUp,jUp] > 0 &&
+                    m_[iUp,jUp] != bigNum)
                 {
+                    if (iUp == 0)
+                    {
+                        continueUp = false;
+                        break;
+                    }
                     iUp--;
+                    lastIntersectLeftUp = true;
+                    lastIntersectRightUp = false;
+                }
+                if (continueUp && x == x_[iUp,jUp] &&
+                    (!(m_[iUp,jUp] > 0) || m_[iUp,jUp] == bigNum))
+                {
                     lastIntersectLeftUp = false;
                     lastIntersectRightUp = true;
-                    if (iUp == 0) { break; }
                 }
-                if (x == x_[iUp,jSaveLoc])
+
+                // Down: the mirror image, using the spine segment below
+                // the rib, i.e. the one ending at the starting point:
+                // if it leans left (m < 0), the line below the starting
+                // point is to its left, in the cell one column to the
+                // left; otherwise it stays in this column's cell
+                while (continueDown && x == x_[iDown,jDown+1] && m_[iDown,jDown] < 0)
                 {
-                    if (m_[iUp,jSaveLoc] > 0)
-                    {
-                        // The while loop above stopped only because it
-                        // reached the mesh's left edge (iUp == 0), not
-                        // because the slope condition failed: there is
-                        // no column further left to move into
-                        continueUp = false;
-                    }
-                    else
-                    {
-                        // Slope <= 0 at this corner: unlike the
-                        // positive-slope case, we stay in this same
-                        // column, but must still suppress its own
-                        // left-spine recheck, which trivially starts
-                        // at our exact position (the same self-
-                        // detection this guards against for m > 0,
-                        // just on the other side). Mirrors
-                        // xIntersectSegStartInterior's identical
-                        // corner-case handling.
-                        lastIntersectRightUp = true;
-                    }
-                }
-                while (x == x_[iDown,jSaveLoc] && m_[iDown,jSaveLoc] < 0)
-                {
-                    iDown--;
-                    lastIntersectLeftDown = false;
-                    lastIntersectRightDown = true;
-                    if (iDown == 0) { break; }
-                }
-                if (x == x_[iDown,jSaveLoc])
-                {
-                    if (m_[iDown,jSaveLoc] < 0)
+                    if (iDown == 0)
                     {
                         continueDown = false;
+                        break;
                     }
-                    else
-                    {
-                        // Mirrors the m > 0 case above, for the down
-                        // direction
-                        lastIntersectLeftDown = true;
-                    }
+                    iDown--;
+                    lastIntersectLeftDown = true;
+                    lastIntersectRightDown = false;
+                }
+                if (continueDown && x == x_[iDown,jDown+1] && !(m_[iDown,jDown] < 0))
+                {
+                    lastIntersectLeftDown = false;
+                    lastIntersectRightDown = true;
                 }
 
             }
@@ -1217,8 +1251,10 @@ namespace interp
         bool lastIntersectLeft = false;
         bool lastIntersectRight = false;
         if (startInterior) {
-            xIntersectSegStartInterior(x, y, intList,
-                lastIntersectLeft, lastIntersectRight);
+            const bool tangent =
+                xIntersectSegStartInterior(x, y, intList,
+                    lastIntersectLeft, lastIntersectRight);
+            if (tangent) { return intList; }
         }
         else
         {
@@ -1241,8 +1277,13 @@ namespace interp
                 x, y, yMax, endInterior, 
                 lastIntersectLeft, lastIntersectRight);
 
-            // Record intersection point if valid one found
-            if (nextInt.t != IntersectionType::none)
+            // Record intersection point if valid one found, unless it is
+            // the same point as the one just recorded -- e.g. when yMax
+            // falls exactly on a rib, the traversal reaches that rib
+            // both as the next intersection and as its stopping point
+            // (mirrors xIntersectN's own guard against the same thing)
+            if (nextInt.t != IntersectionType::none &&
+                (intList.empty() || nextInt.y != intList.back().y))
             {
                 intList.push_back(nextInt);
             }
@@ -1257,13 +1298,13 @@ namespace interp
 
 
     // Helper to start segment traversal on mesh interior
-    void Mesh2DGrid::xIntersectSegStartInterior(
+    auto Mesh2DGrid::xIntersectSegStartInterior( //NOLINT(readability-function-cognitive-complexity) -- like xIntersectSegStartEdge, a short sequence of rib/spine/corner cases, each needing its own left-edge guard; splitting them out would only add indirection
         const double x,
         double& y,
         std::vector<xIntersectionDescriptor>& intList,
         bool& lastIntersectLeft,
         bool& lastIntersectRight
-    ) const
+    ) const -> bool
     {
         auto& iSaveLoc = iSave_();
         auto& jSaveLoc = jSave_();
@@ -1291,12 +1332,24 @@ namespace interp
                     if (jSaveLoc == ny()-2) { break; }
                 }
 
-                // Handle the case where the intersection point is a cell corner
+                // Handle the case where the intersection point is a cell
+                // corner, exactly as xIntersectSegStartEdge's own bottom-
+                // rib corner case does: the slope of the spine segment
+                // above this rib (row jSaveLoc) decides whether the line
+                // continues up in this column's cell (m <= 0; suppress
+                // its left spine, which passes through this point) or in
+                // the cell one column to the left (m > 0, but not a
+                // vertical spine, m == bigNum, which also keeps the line
+                // in this column; suppress that cell's right spine
+                // instead), and at the mesh's left edge (column 0) there
+                // is no cell to the left, so the line only touches the
+                // mesh here
                 if (x == x_[iSaveLoc,jSaveLoc])
                 {
-                    if (m_[iSaveLoc,0] > 0)
+                    if (m_[iSaveLoc,jSaveLoc] > 0 && m_[iSaveLoc,jSaveLoc] != bigNum)
                     {
                         lastIntersectLeft = true;
+                        if (iSaveLoc == 0) { return true; }
                         iSaveLoc--;
                     }
                     else
@@ -1320,8 +1373,12 @@ namespace interp
                 }
                 else
                 {
+                    // The line continues up in the cell to the left of
+                    // this spine; at the mesh's left edge there is none,
+                    // so the line only touches the mesh here
                     lastIntersectLeft = true;
                     lastIntersectRight = false;
+                    if (iSaveLoc == 0) { return true; }
                     iSaveLoc--;
                 }
 
@@ -1337,6 +1394,7 @@ namespace interp
 
         }
 
+        return false;
     }
 
     // Helper to start segment traversal on mesh edge
@@ -1375,10 +1433,12 @@ namespace interp
             // Handle degenerate tracks
             while (y_[jSaveLoc] == y_[jSaveLoc+1]) { ++jSaveLoc; }
 
-            // Handle the case where the starting point is a cell corner
+            // Handle the case where the starting point is a cell corner;
+            // a vertical spine (m == bigNum) keeps the line in this
+            // column's cell, as in xIntersectSegStartInterior's spine case
             if (x == x_[iSaveLoc,jSaveLoc])
             {
-                if (m_[iSaveLoc,jSaveLoc] > 0)
+                if (m_[iSaveLoc,jSaveLoc] > 0 && m_[iSaveLoc,jSaveLoc] != bigNum)
                 {
                     lastIntersectLeft = true;
                     if (iSaveLoc == 0) { return true; }
