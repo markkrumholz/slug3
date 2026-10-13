@@ -165,7 +165,10 @@ inside the container). To restart from a checkpoint when running in Python, do
 For either the command line or Python interface, when the restart flag is present SLUG
 will automatically find the most recent checkpoint file, determine the number of trials
 already completed, and resume to reach the target number. The :ref:`sec-slugpy` output
-reader also automatically handles runs whose outputs are divided across checkpoints.
+reader also automatically handles runs whose outputs are divided across checkpoints. The
+:ref:`slugpy <sec-slugpy>` module also contains a function ``consolidate_checkpoints``
+that can be used to combine multiple checkpoints into a single output file after a run
+is complete.
 
 When checkpointing is enabled, SLUG will also safely complete the current trial and
 finalize its output files if it receives ``SIGTERM``. This capability can be used to

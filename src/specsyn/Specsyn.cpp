@@ -23,7 +23,11 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <iomanip>
+#include <limits>
 #include <memory>
+#include <sstream>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -56,6 +60,17 @@ namespace
         return imf.expectationValue(a, b) * imf.integral(a, b);
     }
 } // namespace
+
+auto specsyn::Specsyn::describeStar(const StarData& props, const double feh) -> std::string
+{
+    std::ostringstream desc;
+    desc << std::setprecision(std::numeric_limits<double>::max_digits10) << "feh = " << feh;
+    for (std::size_t i = 0; i < props.size(); ++i)
+    {
+        desc << ", " << tracks::fieldStr.at(i) << " = " << props.at(i);
+    }
+    return desc.str();
+}
 
 auto specsyn::Specsyn::intRelTol() const -> double { return controls_.intRelTol(); }
 

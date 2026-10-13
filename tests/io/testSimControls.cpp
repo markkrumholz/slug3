@@ -201,10 +201,9 @@ static auto testSimControlsExplicit() -> int
 }
 
 // Verify option 1's PDF interpretation: output.output_times, given a
-// single scalar value, is tried first as a PDF (via
-// utils::initPDFFromKey) and succeeds without ever falling back to
-// readOutputTimesArray -- here the distribution is a delta function at
-// 5.0, so the draw is deterministic.
+// single scalar value, is read as a PDF (via utils::initPDFFromKey) --
+// here the distribution is a delta function at 5.0, so the draw is
+// deterministic.
 static auto testSimControlsOutputTimeDist() -> int
 {
     const std::string fileName = "tests/io/assets/testControlsOutputTimeDist.in";
@@ -222,10 +221,9 @@ static auto testSimControlsOutputTimeDist() -> int
     }
 }
 
-// Verify option 1's array-fallback interpretation: output.output_times,
-// given an array, fails utils::initPDFFromKey (an array is neither a
-// number nor a string) and falls back to readOutputTimesArray, which
-// reads it back exactly as an explicit array of output times.
+// Verify option 1's array interpretation: output.output_times, given an
+// array, is read by readOutputTimesArray exactly as an explicit array of
+// output times.
 static auto testSimControlsOutputTimesArray() -> int
 {
     const std::string fileName = "tests/io/assets/testControlsOutputTimesArray.in";
@@ -240,6 +238,34 @@ static auto testSimControlsOutputTimesArray() -> int
         std::cerr << "testSimControls: failed to parse valid input deck "
             << fileName << ": " << error.what() << "\n";
         return 1;
+    }
+}
+
+// Verify that when output.output_times names a PDF file that cannot be
+// found, the error reported is the PDF reader's own (naming the missing
+// file), not a misleading complaint that output_times is not an array
+static auto testSimControlsOutputTimesMissingFile() -> int
+{
+    const std::string fileName = "tests/io/assets/testControlsOutputTimesMissingFile.in";
+    const toml::table inputDeck = toml::parse_file(fileName);
+    try
+    {
+        const io::SimControls controls(inputDeck);
+        std::cerr << "testSimControls: " << fileName
+            << ": expected construction to throw, but it succeeded\n";
+        return 1;
+    }
+    catch (const std::runtime_error& error)
+    {
+        const std::string_view msg = error.what();
+        if (!msg.contains("no_such_dir/times.toml") || msg.contains("array"))
+        {
+            std::cerr << "testSimControls: " << fileName
+                << ": expected an error naming the missing PDF file, got: "
+                << msg << "\n";
+            return 1;
+        }
+        return 0;
     }
 }
 
@@ -4681,6 +4707,7 @@ auto testSimControls() -> int
     result += testSimControlsExplicit();
     result += testSimControlsOutputTimeDist();
     result += testSimControlsOutputTimesArray();
+    result += testSimControlsOutputTimesMissingFile();
     result += testSimControlsOutputTimesLog();
     result += testSimControlsNoOutputs();
     result += testSimControlsOutputTimesConflict();

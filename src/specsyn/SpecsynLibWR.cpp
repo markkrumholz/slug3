@@ -554,6 +554,22 @@ namespace specsyn
         const auto winds = this->controls().winds();
         const double vWind = winds ? winds->vWindWR(props) : 0.0; // cm/s
 
+        // A non-finite wind velocity means the star's own properties are
+        // invalid for the selected wind model (e.g. a surface composition
+        // with X + Y > 1, which makes Z = 1 - X - Y negative and the
+        // nugis_lamers_00 WC formula's log10(Z) NaN). This is not an
+        // out-of-bounds star that a different library might handle, so
+        // it is always an error, regardless of Policy: letting it
+        // through would silently turn the whole spectrum into NaN.
+        if (!std::isfinite(vWind))
+        {
+            throw std::runtime_error(
+                "SpecsynLibWR: wind velocity for Wolf-Rayet star is not finite "
+                "(vWind = " + std::to_string(vWind) + " cm/s), so its spectrum "
+                "cannot be computed; check the star's properties (e.g. surface "
+                "X + Y > 1 gives negative Z): " + Specsyn::describeStar(props, feh));
+        }
+
         // No wind: Rt ~ vWind^(2/3) -> 0, so log10(Rt) would be -inf (or
         // NaN, via 0/0, if mdot is also 0); floor at this grid's own
         // lowest log(R_t) instead. The caller then moves that to the
@@ -574,7 +590,21 @@ namespace specsyn
         constexpr double vWindNorm = 2500.0e5; // 2500 km/s, in cm/s
         constexpr double mdotNorm = 1.0e-4;    // Msun/yr
         const double ratio = (vWind / vWindNorm) / (mdot * std::sqrt(dInf) / mdotNorm);
-        return std::log10(rStarRsun * std::pow(ratio, 2.0 / 3.0));
+        const double logRt = std::log10(rStarRsun * std::pow(ratio, 2.0 / 3.0));
+
+        // +infinity (mdot == 0 with a nonzero wind) is fine -- the caller
+        // moves it to the nearest populated grid value like any other
+        // raw log(R_t) -- but NaN has no nearest grid value, and would
+        // otherwise end up as an all-NaN spectrum; see the vWind check
+        // above for why this is always an error
+        if (std::isnan(logRt))
+        {
+            throw std::runtime_error(
+                "SpecsynLibWR: transformed radius of Wolf-Rayet star is NaN, "
+                "so its spectrum cannot be computed: " +
+                Specsyn::describeStar(props, feh));
+        }
+        return logRt;
     }
 
     template <OOBPolicy Policy>

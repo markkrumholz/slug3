@@ -89,9 +89,9 @@ namespace core
          * effect on the ambient rng stream. All of these draws, not
          * just m_'s, must be replayed from rngState for the result
          * to come out bitwise identical to the original cluster's:
-         * PDF::draw() consumes rng state (via a
-         * std::discrete_distribution used to pick a segment) even for
-         * a single-segment/delta [Fe/H] distribution, so drawing feH_
+         * PDF::draw() generally consumes rng state (to pick a segment,
+         * via a utils::DiscreteDist, if there is more than one, and
+         * within most segment types' own draw), so drawing feH_
          * (and aV_) live first would already have advanced the stream
          * before m_'s draw ever saw rngState, decoupling the draws
          * from the sequence that originally produced them. birthMass_

@@ -12,6 +12,7 @@
 #include "testGridBracket.hpp"
 #include "testMPIUtils.hpp"
 #include "testPDFIntegrator.hpp"
+#include "testRandomDist.hpp"
 #include "testRngThread.hpp"
 #include "testTrackedDeck.hpp"
 #include "testUniqueIDManager.hpp"
@@ -23,6 +24,10 @@ auto main() -> int {
     {
         int result = 0;
         result += testRngThread();
+        result += testRandomDistContinuous();
+        result += testRandomDistDiscrete();
+        result += testRandomDistPoisson();
+        result += testRandomDistLibstdcxx();
         result += testUniqueIDManager();
         result += testUniqueIDManagerSetRead();
         result += testPDFIntegrator();

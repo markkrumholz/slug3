@@ -58,6 +58,43 @@ namespace tracks
     inline constexpr double defaultVVcrit = 0.0; /**< Default v/vcrit value */
     inline constexpr double defaultAFe = 0.0;    /**< Default [alpha/Fe] value */
 
+    /** FieldIdx positions of the five tracked surface mass fractions, X, Y, C, N, and O */
+    inline constexpr std::array<FieldIdx, 5> surfaceAbundanceIdx = {
+        FieldIdx::hSurf, FieldIdx::heSurf, FieldIdx::cSurf, FieldIdx::nSurf, FieldIdx::oSurf };
+
+    /**
+     * @brief Rescale a star's surface mass fractions so that they sum to at most 1
+     * @param props A star's properties, as produced by evaluating a
+     *   track or isochrone; its hSurf/heSurf/cSurf/nSurf/oSurf entries
+     *   are modified in place, and every other entry is untouched
+     * @details
+     * Interpolating each surface mass fraction independently -- which
+     * is how tracks and isochrones are evaluated, with a monotonicity-
+     * preserving but nonlinear scheme -- does not preserve their sum:
+     * between two sample points across which X falls and Y rises (as
+     * when a massive star's surface becomes hydrogen-poor), X + Y can
+     * exceed 1 even though every tabulated point is valid. Scanning the
+     * isochrones of every track set slug ships finds interpolated sums
+     * X + Y + C + N + O up to ~1.085 (MIST), although no tabulated MIST
+     * point exceeds 1. A sum above 1 makes the implied metallicity
+     * Z = 1 - X - Y negative (or smaller than the C + N + O it must
+     * contain), which quantities that take log(Z) -- e.g. the
+     * nugis_lamers_00 WC wind velocity -- cannot handle. If
+     * X + Y + C + N + O exceeds 1, this scales all five down by the
+     * same factor so that they sum to exactly 1 (so that
+     * Z = 1 - X - Y = C + N + O >= 0), preserving their ratios. A sum at
+     * or below 1, or a NaN sum, is left untouched. Corrupt track data,
+     * as opposed to interpolation artifacts, is caught when the tracks
+     * are loaded instead -- see checkSurfaceAbundances() in TrackUtils.hpp.
+     */
+    inline void renormalizeSurfaceAbundances(std::array<double, static_cast<std::size_t>(FieldIdx::nTrackQty)>& props)
+    {
+        double sum = 0.0;
+        for (const auto f : surfaceAbundanceIdx) { sum += props.at(static_cast<std::size_t>(f)); }
+        if (!(sum > 1.0)) { return; } // also leaves a NaN sum alone, for downstream checks to catch
+        for (const auto f : surfaceAbundanceIdx) { props.at(static_cast<std::size_t>(f)) /= sum; }
+    }
+
 } // namespace tracks
 
 #endif // TRACKCOMMONS_HPP

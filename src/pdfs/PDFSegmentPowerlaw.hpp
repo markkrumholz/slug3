@@ -15,13 +15,13 @@
 #ifndef PDFSEGMENTPOWERLAW_HPP
 #define PDFSEGMENTPOWERLAW_HPP
 
+#include "../utils/RandomDist.hpp"
 #include "../utils/RngThread.hpp"
 #include "PDFCommons.hpp"
 #include "PDFSegment.hpp"
 #include <algorithm>
 #include <cmath>
 #include <fstream>
-#include <random>
 #include <toml.hpp>
 
 namespace pdfs {
@@ -156,8 +156,7 @@ namespace pdfs {
             if (aClamped >= bClamped) {
                 return 0.0; // Invalid range for drawing
             }
-            std::uniform_real_distribution<double> dist(0.0, 1.0);
-            const double u = dist(utils::rng()()); // Uniform random number in [0, 1)
+            const double u = utils::canonical(utils::rng()()); // Uniform random number in [0, 1)
             if (alpha_ != -1)
             {
                 // Special case

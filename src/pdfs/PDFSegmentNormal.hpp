@@ -14,6 +14,7 @@
 #ifndef PDFSEGMENTNORMAL_HPP
 #define PDFSEGMENTNORMAL_HPP
 
+#include "../utils/RandomDist.hpp"
 #include "../utils/RngThread.hpp"
 #include "PDFCommons.hpp"
 #include "PDFSegment.hpp"
@@ -21,7 +22,6 @@
 #include <cmath>
 #include <fstream>
 #include <numbers>
-#include <random>
 #include <toml.hpp>
 
 namespace pdfs {
@@ -156,7 +156,7 @@ namespace pdfs {
             if (aClamped >= bClamped) {
                 return 0.0; // Invalid range for drawing
             }
-            std::normal_distribution<double> dist(mean_, stddev_);
+            utils::NormalDist dist(mean_, stddev_);
             double sample = NAN;
             while (true) {
                 sample = dist(utils::rng()());

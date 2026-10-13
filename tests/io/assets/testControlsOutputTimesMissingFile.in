@@ -1,0 +1,22 @@
+# Test input deck for SimControls: output.output_times names a PDF file
+# that does not exist, so constructing SimControls must fail with the
+# PDF reader's own "not found" error rather than a complaint that
+# output_times is not an array
+
+sim_type = "cluster"
+
+[stars]
+IMF = "chabrier.toml"
+track_registry = "tests/tracks/assets/tracks.toml"
+tracks = "MIST_test"
+FeH = 0.0
+alphaFe = -0.2
+
+[clusters]
+CMF = 1e3
+
+[output]
+output_times = "no_such_dir/times.toml"
+
+[nebular]
+compute_neb = false
