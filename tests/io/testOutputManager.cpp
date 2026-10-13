@@ -11,6 +11,7 @@
 #include "../src/io/OutputManagerAscii.hpp"
 #include "../src/io/OutputManagerH5.hpp"
 #include "../src/io/SimControls.hpp"
+#include "../src/pdfs/PDFFileParser.hpp"
 #include "../src/utils/Constants.hpp"
 #include "../src/utils/HDF5Utils.hpp"
 #include "../src/utils/RngThread.hpp"
@@ -1494,6 +1495,117 @@ static auto readUnitsAttr(const hid_t dset) -> std::string // NOLINT(misc-includ
     H5Aclose(attr);
     return result;
     // NOLINTEND(misc-include-cleaner)
+}
+
+// Read a scalar string attribute called name on the HDF5 object loc
+static auto readScalarStringAttr(const hid_t loc, const std::string& name) -> std::string // NOLINT(misc-include-cleaner)
+{
+    // NOLINTBEGIN(misc-include-cleaner)
+    const hid_t attr = H5Aopen(loc, name.c_str(), H5P_DEFAULT);
+    if (attr < 0) { throw std::runtime_error("missing expected attribute " + name); }
+    const hid_t strType = H5Aget_type(attr);
+    char* cstr = nullptr;
+    H5Aread(attr, strType, &cstr); // NOLINT(bugprone-multi-level-implicit-pointer-conversion)
+    std::string result(cstr != nullptr ? cstr : "");
+    if (cstr != nullptr)
+    {
+        const hid_t space = H5Aget_space(attr);
+        H5Dvlen_reclaim(strType, space, H5P_DEFAULT, &cstr); // NOLINT(bugprone-multi-level-implicit-pointer-conversion)
+        H5Sclose(space);
+    }
+    H5Tclose(strType);
+    H5Aclose(attr);
+    return result;
+    // NOLINTEND(misc-include-cleaner)
+}
+
+// Verify that the PDFs group holds one string attribute per valid PDF
+// in SimControls::allPDFs() -- and none for invalid ones -- each of
+// which parses back (via parsePDFTomlString) to a PDF identical to the
+// SimControls one: same toml text when re-serialized, and the same
+// weights and limits
+static auto testWritePDFsH5() -> int
+{
+    const auto outDir = std::filesystem::temp_directory_path() / "slugTestOutputManagerWritePDFsH5";
+    std::filesystem::remove_all(outDir);
+    std::filesystem::create_directories(outDir);
+    const std::string modelName = "test_model";
+    const auto expectedPath = outDir / (modelName + ".h5");
+    const toml::table inputDeck = makeClusterPhysicsInputDeck(modelName, outDir);
+
+    try
+    {
+        const io::SimControls controls(inputDeck);
+        {
+            const io::OutputManagerH5 manager(controls);
+        }
+
+        // NOLINTBEGIN(misc-include-cleaner)
+        const hid_t file = H5Fopen(expectedPath.string().c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+        if (file < 0)
+        {
+            std::cerr << "testOutputManager: PDFs: unable to reopen " << expectedPath.string() << "\n";
+            return 1;
+        }
+        const hid_t grp = H5Gopen2(file, "PDFs", H5P_DEFAULT);
+        if (grp < 0)
+        {
+            H5Fclose(file);
+            std::cerr << "testOutputManager: PDFs: no PDFs group in output file\n";
+            return 1;
+        }
+        int failures = 0;
+        int nValid = 0;
+        for (const auto& [name, pdf] : controls.allPDFs())
+        {
+            const bool present = H5Aexists(grp, name.c_str()) > 0;
+            if (!pdf->valid())
+            {
+                if (present)
+                {
+                    std::cerr << "testOutputManager: PDFs: unexpected attribute for invalid PDF " << name << "\n";
+                    ++failures;
+                }
+                continue;
+            }
+            ++nValid;
+            if (!present)
+            {
+                std::cerr << "testOutputManager: PDFs: missing attribute for valid PDF " << name << "\n";
+                ++failures;
+                continue;
+            }
+            const std::string descriptor = readScalarStringAttr(grp, name);
+            const pdfs::PDF copy = pdfs::parsePDFTomlString(descriptor);
+            const auto& w = pdf->getWeights();
+            const auto& wCopy = copy.getWeights();
+            const bool sameWeights = w.size() == wCopy.size() &&
+                std::equal(std::begin(w), std::end(w), std::begin(wCopy));
+            if (descriptor != pdf->toToml() || copy.toToml() != descriptor || !sameWeights ||
+                copy.getMin() != pdf->getMin() || copy.getMax() != pdf->getMax() ||
+                copy.normalized() != pdf->normalized())
+            {
+                std::cerr << "testOutputManager: PDFs: " << name << " does not round-trip exactly\n";
+                ++failures;
+            }
+        }
+        H5Gclose(grp);
+        H5Fclose(file);
+        // NOLINTEND(misc-include-cleaner)
+
+        // The test deck uses at least an IMF, a CMF, and avNebFac
+        if (nValid < 3)
+        {
+            std::cerr << "testOutputManager: PDFs: expected at least 3 valid PDFs, found " << nValid << "\n";
+            ++failures;
+        }
+        return failures > 0 ? 1 : 0;
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "testOutputManager: PDFs test failed: " << error.what() << "\n";
+        return 1;
+    }
 }
 
 // Read a 1d array-of-strings attribute called name on the HDF5 object loc
@@ -4580,6 +4692,7 @@ auto testOutputManager() -> int
     result += testWriteClusterAsciiNebular();
     result += testWriteClusterAsciiNebLines();
     result += testWriteClusterH5();
+    result += testWritePDFsH5();
     result += testWriteReadClusterRngRoundTrip();
     result += testWriteClusterSpecPhotH5Extinct();
     result += testWriteClusterSpecPhotH5Nebular();

@@ -16,6 +16,7 @@
 #include "testPDFSegmentNormal.hpp"
 #include "testPDFSegmentPowerlaw.hpp"
 #include "testPDFSegmentSchechter.hpp"
+#include "testPDFSerialize.hpp"
 #include <exception>
 #include <iostream>
 
@@ -31,6 +32,8 @@ auto main() -> int {
         result += testPDFSegmentSchechter();
         result += testPDF();
         result += testPDFReflect();
+        result += testPDFSerializeRoundTrip();
+        result += testPDFSerializeErrors();
         return result;
     }
     catch (const std::exception& error)

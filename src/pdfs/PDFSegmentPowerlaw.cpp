@@ -115,3 +115,13 @@ pdfs::PDFSegmentPowerlaw::PDFSegmentPowerlaw(
         norm_ = 1.0 / std::log(sMax_ / sMin_);
     }
 }
+
+// Write this segment's parameters into a toml table -- the inverse of
+// the toml-based constructor above, in advanced format
+void pdfs::PDFSegmentPowerlaw::toToml(toml::table& tbl) const
+{
+    tbl.insert_or_assign("type", "powerlaw");
+    tbl.insert_or_assign("slope", alpha_);
+    tbl.insert_or_assign("min", sMin_);
+    tbl.insert_or_assign("max", sMax_);
+}

@@ -72,3 +72,12 @@ pdfs::PDFSegmentDelta::PDFSegmentDelta(
         }
     }
 }
+
+// Write this segment's parameters into a toml table -- the inverse of
+// the toml-based constructor above, in advanced format
+void pdfs::PDFSegmentDelta::toToml(toml::table& tbl) const
+{
+    tbl.insert_or_assign("type", "delta");
+    tbl.insert_or_assign("min", sMin_);
+    tbl.insert_or_assign("max", sMax_);
+}

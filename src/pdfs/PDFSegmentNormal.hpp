@@ -167,6 +167,14 @@ namespace pdfs {
         [[nodiscard]] auto draw() const -> double override {
             return draw(sMin_, sMax_);
         }
+        // Serialization
+        /**
+         * @brief Write this segment's parameters into a toml table
+         * @param tbl The table to write into
+         * @details See PDFSegment::toToml()
+         */
+        void toToml(toml::table& tbl) const override;
+
     private:
         double mean_;   /**< Mean of the normal distribution */
         double stddev_; /**< Standard deviation of the normal distribution */

@@ -63,6 +63,12 @@ namespace pdfs
      *   - "method" (optional string, one of the same sampling method
      *     names parsePDFLegacy() itself recognizes; defaults to
      *     stop-nearest sampling if omitted)
+     *   - "normalized" (optional boolean, allowed only if format is
+     *     "advanced"; defaults to false): if true, the PDF reports
+     *     itself as normalized (PDF::normalized()), without its
+     *     weights being rescaled -- i.e. it asserts the weights given
+     *     already are. PDF::toToml() writes this key so a PDF read
+     *     back reports the same normalization as the original.
      * Every other top-level key must be a table named segmentN (N =
      * 1, 2, ...), numbered sequentially with no gaps, one per PDF
      * segment, each analogous to one "segment"/"type TYPE"/... block
@@ -78,6 +84,20 @@ namespace pdfs
      * no such continuity is enforced.
      */
     auto parsePDFToml(const toml::table& deck) -> PDF;
+
+    /**
+     * @brief Construct a PDF object from a toml-format PDF descriptor held in a string
+     * @param descriptor The text of a toml PDF descriptor, e.g. as
+     *   returned by PDF::toToml()
+     * @returns A PDF object constructed from descriptor
+     * @throws std::runtime_error if descriptor is not valid toml, or
+     *   not a valid PDF descriptor
+     * @details
+     * Parses descriptor as toml, then hands the result to
+     * parsePDFToml(); see that function's own doc comment for the
+     * descriptor format.
+     */
+    auto parsePDFTomlString(const std::string& descriptor) -> PDF;
 } // namespace pdfs
 
 #endif // PDFFILEPARSER_HPP

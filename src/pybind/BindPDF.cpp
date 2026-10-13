@@ -47,25 +47,6 @@ namespace
             "(expected stop_nearest, stop_before, stop_after, stop_50, "
             "number, poisson, or sorted_sampling)");
     }
-
-    // The inverse of samplingMethodFromString(), including "none" (see
-    // its own comment above) so the sampling property can still report
-    // it for a PDF that has never had its sampling method set
-    auto samplingMethodToString(const pdfs::SamplingMethods method) -> std::string
-    {
-        switch (method)
-        {
-            case pdfs::SamplingMethods::stopNearest: return "stop_nearest";
-            case pdfs::SamplingMethods::stopBefore:  return "stop_before";
-            case pdfs::SamplingMethods::stopAfter:   return "stop_after";
-            case pdfs::SamplingMethods::stop50:      return "stop_50";
-            case pdfs::SamplingMethods::number:      return "number";
-            case pdfs::SamplingMethods::poisson:     return "poisson";
-            case pdfs::SamplingMethods::sorted:      return "sorted_sampling";
-            case pdfs::SamplingMethods::none:        return "none";
-        }
-        throw std::runtime_error("PDF: unrecognized sampling method"); // unreachable; exhaustive switch above
-    }
 } // namespace
 
 // Numpy-style docstrings for the Python bindings below
@@ -243,6 +224,44 @@ Throws
 RuntimeError
     If the file cannot be found or parsed.)doc";
 
+static constexpr std::string_view toTomlDocstring = R"doc(Serialize the PDF as an advanced-format toml PDF descriptor.
+
+Always written in advanced format, whatever format (if any) the PDF was
+read from, with each value in its shortest exact form, so that
+parsePDFTomlString() turns the result back into an identical PDF:
+same segments, weights, sampling method, and normalized() flag, and
+hence identical draws.
+
+Returns
+-------
+descriptor : str
+    The PDF as the text of a toml PDF descriptor.
+
+Throws
+------
+RuntimeError
+    If the PDF is not valid().)doc";
+
+static constexpr std::string_view parsePDFTomlStringDocstring = R"doc(Construct a PDF from a toml PDF descriptor held in a string.
+
+Accepts the same toml descriptor format as parsePDFDescriptor() does
+for files -- including the output of PDF.toToml(), which this inverts
+exactly.
+
+Parameters
+----------
+descriptor : str
+    The text of a toml PDF descriptor.
+
+Returns
+-------
+pdf : PDF
+
+Throws
+------
+RuntimeError
+    If descriptor is not valid toml, or not a valid PDF descriptor.)doc";
+
 // Disable linting for includes -- the pybind macro magic seems to confuse
 // the linter
 // NOLINTBEGIN(misc-include-cleaner)
@@ -265,7 +284,7 @@ void bindPDF(py::module_& m)
         .def_property("sampling",
                 [](const pdfs::PDF& self) -> std::string
                 {
-                    return samplingMethodToString(self.getSampling());
+                    return std::string(pdfs::samplingMethodName(self.getSampling()));
                 },
                 [](pdfs::PDF& self, const std::string& method)
                 {
@@ -276,6 +295,8 @@ void bindPDF(py::module_& m)
                 normalizePDFDocstring.data())
         .def("normalized", &pdfs::PDF::normalized,
                 normalizedDocstring.data())
+        .def("toToml", &pdfs::PDF::toToml,
+                toTomlDocstring.data())
         .def("__call__",
                 py::vectorize(
                     [](const pdfs::PDF* self, const double x) -> double
@@ -334,5 +355,13 @@ void bindPDF(py::module_& m)
             },
             parsePDFDescriptorDocstring.data(),
             py::arg("file_name"));
+
+    m.def("parsePDFTomlString",
+            [](const std::string& descriptor) -> std::unique_ptr<pdfs::PDF>
+            {
+                return std::make_unique<pdfs::PDF>(pdfs::parsePDFTomlString(descriptor));
+            },
+            parsePDFTomlStringDocstring.data(),
+            py::arg("descriptor"));
 }
 // NOLINTEND(misc-include-cleaner)

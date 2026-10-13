@@ -579,7 +579,9 @@ namespace io
          * @details
          * Resets the calling thread's own handles to -1, then creates
          * the file, writes its top-level slug-hash/date/time/rng_state
-         * attributes and input_deck group, then calls
+         * attributes, input_deck group, and PDFs group (one string
+         * attribute per valid PDF in SimControls::allPDFs(), holding
+         * that PDF's PDF::toToml() descriptor), then calls
          * openClustersGroup()/openClusterSpectraGroup()/
          * openClusterPhotGroup()/openClusterYieldsGroup()/
          * openGalaxyGroup()/openGalaxySpectraGroup()/

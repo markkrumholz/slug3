@@ -173,6 +173,14 @@ namespace pdfs {
             return draw(sMin_, sMax_);
         }
 
+        // Serialization
+        /**
+         * @brief Write this segment's parameters into a toml table
+         * @param tbl The table to write into
+         * @details See PDFSegment::toToml()
+         */
+        void toToml(toml::table& tbl) const override;
+
     private:
         double alpha_;  /**< Power-law index */
         double norm_;   /**< Normalization constant for the PDF segment */

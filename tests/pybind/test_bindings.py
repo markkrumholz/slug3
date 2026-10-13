@@ -2855,6 +2855,36 @@ def test_parse_pdf_descriptor():
     assert pdf.integral() == pytest.approx(1.0)
 
 
+def test_pdf_to_toml_round_trip():
+    """toToml() should produce an advanced-format descriptor that
+    parsePDFTomlString() turns back into an identical PDF: same text
+    when re-serialized, same weights, limits, normalization, and
+    sampling method."""
+    pdf = slug.parsePDFDescriptor(CHABRIER_IMF_DESCRIPTOR)
+    text = pdf.toToml()
+    descriptor = tomllib.loads(text)
+    assert descriptor["format"] == "advanced"
+    assert descriptor["segment1"]["type"] == "lognormal"
+    assert descriptor["segment1"]["disp"] == 0.55
+
+    copy = slug.parsePDFTomlString(text)
+    assert copy.toToml() == text
+    assert copy.getWeights() == pdf.getWeights()
+    assert (copy.getMin(), copy.getMax()) == (pdf.getMin(), pdf.getMax())
+    assert copy.normalized() == pdf.normalized()
+    assert copy.sampling == pdf.sampling
+    assert copy.expectationValue() == pdf.expectationValue()
+
+
+def test_parse_pdf_toml_string_invalid_raises():
+    """parsePDFTomlString() should raise, not crash, for text that is
+    not valid toml or not a valid PDF descriptor."""
+    with pytest.raises(RuntimeError):
+        slug.parsePDFTomlString("this is [ not toml")
+    with pytest.raises(RuntimeError):
+        slug.parsePDFTomlString('format = "advanced"\n')
+
+
 def test_parse_pdf_descriptor_missing_file_raises():
     """parsePDFDescriptor() should raise, not crash, for a file that
     cannot be found."""

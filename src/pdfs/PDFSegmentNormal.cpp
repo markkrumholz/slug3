@@ -116,3 +116,14 @@ pdfs::PDFSegmentNormal::PDFSegmentNormal(
         (std::erf((sMax_ - mean_) / (stddev_ * std::numbers::sqrt2)) -
          std::erf((sMin_ - mean_) / (stddev_ * std::numbers::sqrt2)));
 }
+
+// Write this segment's parameters into a toml table -- the inverse of
+// the toml-based constructor above, in advanced format
+void pdfs::PDFSegmentNormal::toToml(toml::table& tbl) const
+{
+    tbl.insert_or_assign("type", "normal");
+    tbl.insert_or_assign("mean", mean_);
+    tbl.insert_or_assign("disp", stddev_);
+    tbl.insert_or_assign("min", sMin_);
+    tbl.insert_or_assign("max", sMax_);
+}

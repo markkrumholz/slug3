@@ -35,7 +35,8 @@ pdfs::PDFSegmentLognormal::PDFSegmentLognormal(
 
         // Use the parsed results to set parameters
         mean_ = contents["mean"];
-        stddev_ = std::numbers::ln10 * contents["disp"]; // Convert to base e
+        dispDex_ = contents["disp"];
+        stddev_ = std::numbers::ln10 * dispDex_; // Convert to base e
     }
     else
     {
@@ -48,7 +49,8 @@ pdfs::PDFSegmentLognormal::PDFSegmentLognormal(
 
         // Use the parsed results to set parameters
         mean_ = contents["mean"];
-        stddev_ = std::numbers::ln10 * contents["disp"]; // Convert to base e
+        dispDex_ = contents["disp"];
+        stddev_ = std::numbers::ln10 * dispDex_; // Convert to base e
         sMin_ = contents["min"];
         sMax_ = contents["max"];
         wgt = contents["weight" ];
@@ -89,7 +91,8 @@ pdfs::PDFSegmentLognormal::PDFSegmentLognormal(
 
         // Use the parsed results to set parameters
         mean_ = contents["mean"];
-        stddev_ = std::numbers::ln10 * contents["disp"]; // Convert to base e
+        dispDex_ = contents["disp"];
+        stddev_ = std::numbers::ln10 * dispDex_; // Convert to base e
     }
     else
     {
@@ -102,7 +105,8 @@ pdfs::PDFSegmentLognormal::PDFSegmentLognormal(
 
         // Use the parsed results to set parameters
         mean_ = contents["mean"];
-        stddev_ = std::numbers::ln10 * contents["disp"]; // Convert to base e
+        dispDex_ = contents["disp"];
+        stddev_ = std::numbers::ln10 * dispDex_; // Convert to base e
         sMin_ = contents["min"];
         sMax_ = contents["max"];
         wgt = contents["weight" ];
@@ -123,4 +127,15 @@ pdfs::PDFSegmentLognormal::PDFSegmentLognormal(
         std::erf( -std::log(sMin_/mean_) / root2dev_ ) -
         std::erf( -std::log(sMax_/mean_) / root2dev_ )
         );
+}
+
+// Write this segment's parameters into a toml table -- the inverse of
+// the toml-based constructor above, in advanced format
+void pdfs::PDFSegmentLognormal::toToml(toml::table& tbl) const
+{
+    tbl.insert_or_assign("type", "lognormal");
+    tbl.insert_or_assign("mean", mean_);
+    tbl.insert_or_assign("disp", dispDex_);
+    tbl.insert_or_assign("min", sMin_);
+    tbl.insert_or_assign("max", sMax_);
 }
