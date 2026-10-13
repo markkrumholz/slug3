@@ -31,7 +31,7 @@ concurrency:
 jobs:
   build:
     name: Build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     env:
       CMAKE_GENERATOR: Ninja
@@ -111,7 +111,7 @@ jobs:
     name: Deploy
     needs: build
     if: github.event_name == 'push'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     permissions:
       pages: write
