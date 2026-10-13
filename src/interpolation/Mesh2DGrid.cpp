@@ -784,9 +784,19 @@ namespace interp
             if (yLoSeg > yHiSeg) { continue; }
             if (yLoSeg == yHiSeg)
             {
+                bool found = false;
                 for (const auto& p : xIntersectSeg(x, yMin, yMax, false, false))
                 {
-                    if (p.y == yLoSeg) { intList.push_back(p); }
+                    if (p.y == yLoSeg) { intList.push_back(p); found = true; }
+                }
+                // Where the line runs along a vertical spine, the
+                // traversal only records the rib crossings at the ends
+                // of that run, not the continuum of spine points between
+                // them, so fall back to checking the point itself
+                if (!found)
+                {
+                    const auto [pointOnMesh, d] = onMesh(x, yLoSeg);
+                    if (pointOnMesh) { intList.push_back(d); }
                 }
                 continue;
             }

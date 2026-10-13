@@ -1118,6 +1118,29 @@ testXIntersectVerticalSpine() -> int
             return 1;
         };
         result += check(m2d.xIntersect(c.xQuery_), "xIntersect");
+        // A zero-width bounded query at a point partway along the
+        // vertical spine (y = 0.5) must return the same point(s) there
+        // as a query of nonzero width starting at that point -- the
+        // spine point itself in the interior, though none at the mesh's
+        // exact left edge, where xIntersectBoundaryRow reports only the
+        // boundary's rib points
+        const auto pointQuery = m2d.xIntersect(c.xQuery_, 0.5, 0.5);
+        std::vector<double> wantPoint;
+        for (const auto& p : m2d.xIntersect(c.xQuery_, 0.5, 0.6))
+        {
+            if (p.y == 0.5) { wantPoint.push_back(p.y); }
+        }
+        bool pointOk = pointQuery.size() == wantPoint.size();
+        for (size_t k = 0; pointOk && k < wantPoint.size(); ++k) { pointOk = pointQuery[k].y == wantPoint[k]; }
+        if (!pointOk || (c.xQuery_ == 0.3 && wantPoint.size() != 1))
+        {
+            std::cerr << "testMesh2DGrid: testXIntersectVerticalSpine (" << c.label_
+                << "): xIntersect(" << c.xQuery_ << ", 0.5, 0.5) returned y =";
+            for (const auto& p : pointQuery) { std::cerr << " " << p.y; }
+            std::cerr << ", but xIntersect(" << c.xQuery_ << ", 0.5, 0.6) has "
+                << wantPoint.size() << " point(s) at y = 0.5\n";
+            result += 1;
+        }
         for (const double yStart : expected)
         {
             result += check(m2d.xIntersectN(c.xQuery_, yStart, expected.size()),
