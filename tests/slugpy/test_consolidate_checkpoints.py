@@ -156,6 +156,21 @@ def test_pdfs_group_copied(tmp_path: Path) -> None:
     assert pdfs["fehDist"].getMin() == 0.5
 
 
+def test_pdfs_read_from_latest_checkpoint(tmp_path: Path) -> None:
+    """On an unconsolidated, checkpointed run whose PDFs group exists
+    only in its final checkpoint (e.g. one restarted after the group was
+    introduced), slug_reader.pdfs still finds it, rather than reading
+    only the oldest checkpoint."""
+    _make_mixed_run(tmp_path)
+    descriptor = ('format = "advanced"\nmethod = "stop_nearest"\nnormalized = true\n'
+        '\n[segment1]\nmax = 0.5\nmin = 0.5\ntype = "delta"\nweight = 1.0\n')
+    for path in sorted((tmp_path / "model_chk00002").glob("*.h5")):
+        with h5py.File(path, "a") as f:
+            f.create_group("PDFs").attrs["fehDist"] = descriptor
+    pdfs = slug_reader(str(tmp_path / "model")).pdfs
+    assert list(pdfs) == ["fehDist"]
+
+
 def test_result_readable_by_slug_reader(tmp_path: Path) -> None:
     """slug_reader reads the consolidated file back as one file."""
     _make_mixed_run(tmp_path)

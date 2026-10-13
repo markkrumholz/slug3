@@ -97,6 +97,10 @@ def test_pdfs_cached_and_readonly(run: slug_reader) -> None:
     assert run.pdfs is run.pdfs
     with pytest.raises(AttributeError):
         run.pdfs = {}
+    # The returned mapping is a read-only view of the cache, so it
+    # cannot be modified in place either
+    with pytest.raises(TypeError):
+        run.pdfs["imf"] = run.pdfs["cmf"]  # pyright: ignore[reportIndexIssue]
 
 
 def test_pdfs_group_is_self_contained(run: slug_reader) -> None:

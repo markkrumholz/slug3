@@ -191,6 +191,9 @@ inline auto testPDFSerializeErrors() -> int
     expectThrow("toToml() on an empty PDF", [] { (void)pdfs::PDF().toToml(); });
     const pdfs::PDF base(std::make_unique<pdfs::PDFSegmentPowerlaw>(1.0, 2.0, 0.0));
     expectThrow("toToml() on a PDFReflect", [&base] { (void)pdfs::PDFReflect(base).toToml(); });
+    pdfs::PDF noMethod(std::make_unique<pdfs::PDFSegmentPowerlaw>(1.0, 2.0, 0.0));
+    noMethod.setSampling(pdfs::SamplingMethods::none);
+    expectThrow("toToml() with sampling method none", [&noMethod] { (void)noMethod.toToml(); });
 
     // "normalized" is only allowed in advanced format, and must be a boolean
     expectThrow("normalized in basic format", [] {

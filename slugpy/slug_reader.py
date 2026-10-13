@@ -9,7 +9,9 @@ Implements slug_reader, a lazy reader for slug HDF5 output files.
 import concurrent.futures
 import re
 import shutil
+from collections.abc import Mapping
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Literal, cast
 
 import h5py
@@ -384,7 +386,7 @@ class slug_reader:
         The input deck used to produce this file, read from the
         input_deck group's toml dataset and parsed on first access
         (read-only).
-    pdfs : dict of str to PDF
+    pdfs : Mapping of str to PDF
         Every PDF the run used, rebuilt from the PDFs group -- see the
         pdfs property's own docstring (read-only).
     clusters : slug_group_reader or None
@@ -505,7 +507,11 @@ class slug_reader:
                 None if raw_restart_uid is None else int(raw_restart_uid))
 
         self._input_deck: tomlkit.TOMLDocument | None = None
-        self._pdfs: dict[str, PDF] | None = None
+        self._pdfs: MappingProxyType[str, PDF] | None = None
+        # Read pdfs from the latest checkpoint, like trials_completed
+        # above: a run restarted after the PDFs group was introduced
+        # may have it only in its later checkpoints
+        self._last_checkpoint_file: str = last_checkpoint_files[0]
         self._controls: SimControls | None = None
 
     @property
@@ -528,29 +534,30 @@ class slug_reader:
         raise AttributeError("input_deck is read-only")
 
     @property
-    def pdfs(self) -> dict[str, PDF]:
+    def pdfs(self) -> Mapping[str, PDF]:
         """
-        dict of str to PDF : every PDF the run used, keyed by the name
+        Mapping of str to PDF : every PDF the run used, keyed by the name
         of the SimControls accessor that holds it -- "imf", "cmf",
         "fehDist", "sfr", "sfrDist", "clf", "avDist", "avDistField",
         "avNebFac", "outTimeDist" -- for those that were valid for the
-        run. Rebuilt from the first file's own PDFs group, which holds
+        run. Rebuilt from the latest checkpoint's PDFs group, which holds
         each one as a toml descriptor (see PDF.toToml()), so this needs
         none of the PDF files the input deck names; each PDF is
         identical to the one the run used, down to its draws. Built the
-        first time this property is accessed and cached thereafter;
-        empty for files written before the PDFs group existed.
+        first time this property is accessed and cached thereafter, and
+        returned as a read-only view of that cache; empty for files
+        written before the PDFs group existed.
         """
         if self._pdfs is not None:
             return self._pdfs
         pdfs: dict[str, PDF] = {}
-        with h5py.File(self._file[0], "r") as f:
+        with h5py.File(self._last_checkpoint_file, "r") as f:
             if "PDFs" in f:
                 group = cast(h5py.Group, f["PDFs"])
                 for name, value in group.attrs.items():
                     descriptor = value.decode() if isinstance(value, bytes) else str(value)
                     pdfs[name] = parsePDFTomlString(descriptor)
-        self._pdfs = pdfs
+        self._pdfs = MappingProxyType(pdfs)
         return self._pdfs
 
     @pdfs.setter

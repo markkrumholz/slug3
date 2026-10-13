@@ -213,7 +213,8 @@ namespace pdfs {
          * @brief Serialize the PDF as an advanced-format toml PDF descriptor
          * @return A toml document that parsePDFToml() (or
          *   parsePDFTomlString()) turns back into an identical PDF
-         * @throws std::logic_error if the PDF is not valid()
+         * @throws std::logic_error if the PDF is not valid(), or its
+         *   sampling method is SamplingMethods::none
          * @details
          * Always written in advanced format, whatever format (if any)
          * the PDF was originally read from, since that format can
@@ -229,6 +230,11 @@ namespace pdfs {
             if (!valid())
             {
                 throw std::logic_error("PDF::toToml: cannot serialize an invalid (empty) PDF");
+            }
+            if (method_ == SamplingMethods::none)
+            {
+                throw std::logic_error("PDF::toToml: cannot serialize a PDF whose sampling "
+                    "method is 'none', which no PDF descriptor can specify");
             }
             std::string out;
             out += "format = \"advanced\"\n";
