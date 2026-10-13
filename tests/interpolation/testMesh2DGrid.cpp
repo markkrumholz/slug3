@@ -1059,6 +1059,74 @@ testXIntersectNCorners() -> int
     return result;
 }
 
+// Regression test for vertical spines (slope bigNum) at a corner: the
+// corner handling in xIntersectN, xIntersectSegStartEdge, and
+// xIntersectSegStartInterior treated bigNum as a right-leaning spine, so
+// at column 0 it ended the upward search (or reported a tangent) even
+// though the line runs along the vertical spine, inside the mesh. Checked
+// against hand-computed y values, not just against each other, since
+// xIntersect and xIntersectN both got the second mesh below wrong. In
+// both meshes the line runs inside the mesh from y = 0 to y = 2. (These
+// meshes are deliberately not run through checkXIntersectNAgainstFull:
+// where the line runs along a vertical spine, every point of it is on
+// the mesh, so that helper's model of discrete intersections with
+// interior starting points between them does not apply.)
+static auto
+testXIntersectVerticalSpine() -> int
+{
+    constexpr size_t nx = 4;
+    constexpr size_t ny = 3;
+    struct MeshCase
+    {
+        const char* label_;
+        double (*x_)(size_t i, size_t j);
+        double xQuery_;
+    };
+    const std::array<MeshCase, 2> cases = {{
+        { "vertical left edge",
+            [](const size_t i, const size_t j) { return i == 0 ? 0.0 : static_cast<double>(i) + (0.1 * static_cast<double>(j)); },
+            0.0 },
+        { "left edge vertical below middle rib",
+            [](const size_t i, const size_t j) { return i == 0 ? (j < 2 ? 0.3 : 0.0) : static_cast<double>(i) + 0.5; },
+            0.3 },
+    }};
+    const std::vector<double> expected = { 0.0, 1.0, 2.0 };
+
+    int result = 0;
+    for (const auto& c : cases)
+    {
+        std::array<double, nx*ny> xData = { 0 };
+        std::array<double, ny> yData = { 0 };
+        const std::mdspan<double, std::extents<size_t, nx, ny>> x(xData.data());
+        const std::mdspan<double, std::extents<size_t, ny>> y(yData.data());
+        for (size_t j = 0; j < ny; ++j)
+        {
+            y[j] = static_cast<double>(j);
+            for (size_t i = 0; i < nx; ++i) { x[i,j] = c.x_(i, j); }
+        }
+        const interp::Mesh2DGrid m2d(x, y);
+        const auto check = [&](const std::vector<interp::Mesh2DGrid::xIntersectionDescriptor>& got,
+            const std::string& what) -> int
+        {
+            bool ok = got.size() == expected.size();
+            for (size_t k = 0; ok && k < got.size(); ++k) { ok = utils::approxEqual(got[k].y, expected[k]); }
+            if (ok) { return 0; }
+            std::cerr << "testMesh2DGrid: testXIntersectVerticalSpine (" << c.label_ << "): "
+                << what << " returned y =";
+            for (const auto& p : got) { std::cerr << " " << p.y; }
+            std::cerr << ", expected 0 1 2\n";
+            return 1;
+        };
+        result += check(m2d.xIntersect(c.xQuery_), "xIntersect");
+        for (const double yStart : expected)
+        {
+            result += check(m2d.xIntersectN(c.xQuery_, yStart, expected.size()),
+                "xIntersectN from y = " + std::to_string(yStart));
+        }
+    }
+    return result;
+}
+
 // Regression test for xIntersect with explicit yLo/yHi bounds, which
 // used to be ignored for the traversal itself: xIntersect passed each
 // segment's own full extent to xIntersectSeg rather than its clipped
@@ -1388,6 +1456,7 @@ auto testMesh2DGrid() -> int
     test += testXIntersectNRibCornerNegativeSlope();
     test += testXIntersectNCorners();
     test += testXIntersectBounded();
+    test += testXIntersectVerticalSpine();
 
     // Regression tests for yIntersect/xIntersect at the exact
     // yMin_/yMax_ and xMin_/xMax_ boundaries

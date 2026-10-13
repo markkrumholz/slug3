@@ -914,9 +914,13 @@ namespace interp
                 // the line is to its left, in the cell one column to the
                 // left, whose right spine is the one we are on; at the
                 // mesh's left edge (column 0) there is no such cell, so
-                // the line leaves the mesh. Otherwise the line stays in
-                // this column's cell, whose left spine we are on.
-                while (continueUp && x == x_[iUp,jUp] && m_[iUp,jUp] > 0)
+                // the line leaves the mesh. Otherwise -- including a
+                // vertical spine (m == bigNum), along which the line
+                // runs, and which belongs to the cell to its right --
+                // the line stays in this column's cell, whose left spine
+                // we are on.
+                while (continueUp && x == x_[iUp,jUp] && m_[iUp,jUp] > 0 &&
+                    m_[iUp,jUp] != bigNum)
                 {
                     if (iUp == 0)
                     {
@@ -927,7 +931,8 @@ namespace interp
                     lastIntersectLeftUp = true;
                     lastIntersectRightUp = false;
                 }
-                if (continueUp && x == x_[iUp,jUp] && !(m_[iUp,jUp] > 0))
+                if (continueUp && x == x_[iUp,jUp] &&
+                    (!(m_[iUp,jUp] > 0) || m_[iUp,jUp] == bigNum))
                 {
                     lastIntersectLeftUp = false;
                     lastIntersectRightUp = true;
@@ -1323,13 +1328,15 @@ namespace interp
                 // above this rib (row jSaveLoc) decides whether the line
                 // continues up in this column's cell (m <= 0; suppress
                 // its left spine, which passes through this point) or in
-                // the cell one column to the left (m > 0; suppress that
-                // cell's right spine instead), and at the mesh's left
-                // edge (column 0) there is no cell to the left, so the
-                // line only touches the mesh here
+                // the cell one column to the left (m > 0, but not a
+                // vertical spine, m == bigNum, which also keeps the line
+                // in this column; suppress that cell's right spine
+                // instead), and at the mesh's left edge (column 0) there
+                // is no cell to the left, so the line only touches the
+                // mesh here
                 if (x == x_[iSaveLoc,jSaveLoc])
                 {
-                    if (m_[iSaveLoc,jSaveLoc] > 0)
+                    if (m_[iSaveLoc,jSaveLoc] > 0 && m_[iSaveLoc,jSaveLoc] != bigNum)
                     {
                         lastIntersectLeft = true;
                         if (iSaveLoc == 0) { return true; }
@@ -1416,10 +1423,12 @@ namespace interp
             // Handle degenerate tracks
             while (y_[jSaveLoc] == y_[jSaveLoc+1]) { ++jSaveLoc; }
 
-            // Handle the case where the starting point is a cell corner
+            // Handle the case where the starting point is a cell corner;
+            // a vertical spine (m == bigNum) keeps the line in this
+            // column's cell, as in xIntersectSegStartInterior's spine case
             if (x == x_[iSaveLoc,jSaveLoc])
             {
-                if (m_[iSaveLoc,jSaveLoc] > 0)
+                if (m_[iSaveLoc,jSaveLoc] > 0 && m_[iSaveLoc,jSaveLoc] != bigNum)
                 {
                     lastIntersectLeft = true;
                     if (iSaveLoc == 0) { return true; }
