@@ -80,6 +80,16 @@ pygments_style = "sphinx"
 # and make docutils reject the page outright.
 napoleon_custom_sections = [("Throws", "Raises"), ("Details", "notes")]
 
+# Render a numpy-style "Attributes" docstring section (used by slugpy's
+# reader classes, e.g. slug_reader) as :ivar: fields inside the class's
+# own description, rather than Napoleon's default of separate
+# ``.. attribute::`` directives. Those directives are unqualified, so
+# they fail to resolve under primary_domain = "cpp" below; and most of
+# those attributes are properties that autodoc's :members: already
+# documents individually from their own docstrings, which separate
+# attribute directives would duplicate.
+napoleon_use_ivar = True
+
 # -- Options for HTML output -----------------------------------------------
 html_theme = "sphinx_rtd_theme"
 html_static_path = ["_static"]
