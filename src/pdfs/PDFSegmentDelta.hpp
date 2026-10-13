@@ -112,6 +112,14 @@ namespace pdfs {
         [[nodiscard]] auto draw() const -> double override {
             return sMin_;  // Sampling from a delta function always returns the same value
         }
+
+        // Serialization
+        /**
+         * @brief Write this segment's parameters into a toml table
+         * @param tbl The table to write into
+         * @details See PDFSegment::toToml()
+         */
+        void toToml(toml::table& tbl) const override;
     };
 
 } // namespace pdfs

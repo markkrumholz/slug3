@@ -23,10 +23,13 @@
 #include <array>
 #include <cmath>
 #include <concepts>
+#include <format>
 #include <limits>
 #include <memory>
 #include <ranges>
 #include <stdexcept>
+#include <string>
+#include <toml.hpp>
 #include <utility>
 #include <valarray>
 #include <vector>
@@ -193,6 +196,58 @@ namespace pdfs {
          * @brief Return whether the PDF is normalized
          */
         [[nodiscard]] auto normalized() const -> bool { return normalized_; }
+        /**
+         * @brief Mark the PDF as normalized without rescaling its weights
+         * @details
+         * For a PDF whose weights are already known to be normalized --
+         * e.g., one read back from the output of toToml(), whose
+         * "normalized" key records that the original was. Unlike
+         * normalizePDF(), this leaves the weights untouched, since
+         * dividing them by their sum again could change their last
+         * bits.
+         */
+        auto markNormalized() -> void { normalized_ = true; }
+
+        // Serialization
+        /**
+         * @brief Serialize the PDF as an advanced-format toml PDF descriptor
+         * @return A toml document that parsePDFToml() (or
+         *   parsePDFTomlString()) turns back into an identical PDF
+         * @throws std::logic_error if the PDF is not valid()
+         * @details
+         * Always written in advanced format, whatever format (if any)
+         * the PDF was originally read from, since that format can
+         * represent every PDF: a "format", "method", and "normalized"
+         * header, then one segmentN table per segment holding that
+         * segment's weight plus whatever PDFSegment::toToml() writes.
+         * Floating-point values are written in their shortest exact
+         * form, so the PDF read back has bitwise-identical segment
+         * parameters and weights, and hence draws identically.
+         */
+        [[nodiscard]] virtual auto toToml() const -> std::string
+        {
+            if (!valid())
+            {
+                throw std::logic_error("PDF::toToml: cannot serialize an invalid (empty) PDF");
+            }
+            std::string out;
+            out += "format = \"advanced\"\n";
+            out += "method = \"" + std::string(samplingMethodName(method_)) + "\"\n";
+            out += std::string("normalized = ") + (normalized_ ? "true" : "false") + "\n";
+            int n = 1;
+            for (auto const& [s,w] : std::views::zip(seg_,wgt_)) {
+                toml::table segTbl;
+                s->toToml(segTbl);
+                out += "\n[segment" + std::to_string(n++) + "]\n";
+                out += "type = " + tomlValueString(*segTbl.get("type")) + "\n";
+                out += "weight = " + tomlValueString(toml::value<double>(w)) + "\n";
+                for (auto const& [key, val] : segTbl) {
+                    if (key.str() == "type") { continue; }
+                    out += std::string(key.str()) + " = " + tomlValueString(val) + "\n";
+                }
+            }
+            return out;
+        }
 
         // Evaluation functions
         /**
@@ -421,6 +476,36 @@ namespace pdfs {
         }
 
     protected:
+
+        /**
+         * @brief Format one toml value the way toToml() writes it
+         * @param val A string, boolean, integer, or floating-point toml value
+         * @return val as it appears on the right-hand side of a toml
+         *   key = value line
+         * @details
+         * Written by hand rather than with toml++'s own printer because
+         * toml++ disables std::to_chars for floating-point values on
+         * GCC and Clang, and so writes every double with 17
+         * significant digits (e.g. 0.55000000000000004 for 0.55).
+         * std::format() instead gives the shortest representation that
+         * reads back exactly; ".0" is appended to a whole number so it
+         * stays a toml float. Strings are only ever fixed identifiers
+         * (segment types, sampling methods), so need no escaping.
+         */
+        [[nodiscard]] static auto tomlValueString(const toml::node& val) -> std::string
+        {
+            if (const auto* str = val.as_string()) { return "\"" + str->get() + "\""; }
+            if (const auto* b = val.as_boolean()) { return b->get() ? "true" : "false"; }
+            if (const auto* i = val.as_integer()) { return std::to_string(i->get()); }
+            if (const auto* d = val.as_floating_point())
+            {
+                std::string s = std::format("{}", d->get());
+                if (s.find_first_of(".eni") == std::string::npos) { s += ".0"; }
+                return s;
+            }
+            throw std::logic_error("PDF::toToml: unsupported toml value type");
+        }
+
 
         std::vector<std::unique_ptr<PDFSegment> > seg_; /**< Segments in the PDF */
         std::valarray<double> wgt_;     /**< Weights of segments */

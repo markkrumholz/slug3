@@ -51,13 +51,18 @@ namespace pdfs {
          * This class represents a distribution that is normal in log(x), but note
          * that, for convenience, the value given by mean is the mean of *x*, not
          * the mean of *log(x)*. On the other hand, stddev is the standard deviation
-         * of *log(x)*.
+         * of *log(x)*. Unlike the descriptor-based constructors below, which
+         * take the dispersion in dex and keep that value for toToml() to
+         * write back, this one derives it as stddev / ln(10), so a segment
+         * built here may round-trip through toToml() with stddev off by
+         * one ulp.
          */
         PDFSegmentLognormal(double sMin, double sMax, double mean, double stddev) :
             PDFSegment(sMin, sMax), 
             mean_(mean), 
             stddev_(stddev),
             logMean_(std::log(mean_)),
+            dispDex_(stddev / std::numbers::ln10),
             root2dev_(std::numbers::sqrt2 * stddev_)
             {
                 norm_ = std::numbers::sqrt2 * std::numbers::inv_sqrtpi / 
@@ -184,11 +189,20 @@ namespace pdfs {
             return draw(sMin_, sMax_);
         }
 
+        // Serialization
+        /**
+         * @brief Write this segment's parameters into a toml table
+         * @param tbl The table to write into
+         * @details See PDFSegment::toToml()
+         */
+        void toToml(toml::table& tbl) const override;
+
     private:
         double mean_;    /**< Mean of the underlying normal distribution */
         double stddev_;  /**< Standard deviation of the underlying normal distribution */
         double norm_;    /**< Normalization constant for the PDF segment */
         double logMean_; /**< Log of the mean; cached for convenience */
+        double dispDex_; /**< Dispersion in dex, as given in a PDF descriptor; kept so toToml() can write it back exactly */
         double root2dev_; /**< sqrt(2) * stddev_; cached for convenience */
     };
 

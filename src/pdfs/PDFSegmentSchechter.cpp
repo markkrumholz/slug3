@@ -122,3 +122,14 @@ pdfs::PDFSegmentSchechter::PDFSegmentSchechter(
         )
     );
 }
+
+// Write this segment's parameters into a toml table -- the inverse of
+// the toml-based constructor above, in advanced format
+void pdfs::PDFSegmentSchechter::toToml(toml::table& tbl) const
+{
+    tbl.insert_or_assign("type", "schechter");
+    tbl.insert_or_assign("slope", alpha_);
+    tbl.insert_or_assign("x_star", sStar_);
+    tbl.insert_or_assign("min", sMin_);
+    tbl.insert_or_assign("max", sMax_);
+}

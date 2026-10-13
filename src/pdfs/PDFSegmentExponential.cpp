@@ -111,3 +111,13 @@ pdfs::PDFSegmentExponential::PDFSegmentExponential(
     const double exMax = std::exp(-sMax_ / scale_);
     norm_ = 1.0 / (scale_ * (exMin - exMax));
 }
+
+// Write this segment's parameters into a toml table -- the inverse of
+// the toml-based constructor above, in advanced format
+void pdfs::PDFSegmentExponential::toToml(toml::table& tbl) const
+{
+    tbl.insert_or_assign("type", "exponential");
+    tbl.insert_or_assign("scale", scale_);
+    tbl.insert_or_assign("min", sMin_);
+    tbl.insert_or_assign("max", sMax_);
+}

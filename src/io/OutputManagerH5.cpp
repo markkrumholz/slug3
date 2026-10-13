@@ -799,7 +799,8 @@ void io::OutputManagerH5::openNewOutputFiles()
 
 // Create one HDF5 file at path, write its header (slug-hash, date,
 // time, rng_state) as top-level attributes, then dump the toml input
-// deck into an input_deck group, and finally create whichever of the
+// deck into an input_deck group and every valid PDF into a PDFs group,
+// and finally create whichever of the
 // clusters/cluster_spectra/cluster_phot/galaxy/galaxy_spectra/
 // galaxy_phot groups are enabled -- see this method's own header
 // comment
@@ -865,6 +866,23 @@ void io::OutputManagerH5::openOutputFile(const std::filesystem::path& path)
         }
         utils::writeStringDataset(inputDeckGrp, "toml", simControls_.inputDeckStr());
         H5Gclose(inputDeckGrp);
+
+        // Record every PDF the run used, as a toml descriptor per PDF
+        // (see PDF::toToml()), so the file alone -- without the PDF
+        // files the input deck names -- is enough to rebuild them
+        const hid_t pdfsGrp = H5Gcreate2(file_(), "PDFs",
+            H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+        if (pdfsGrp < 0)
+        {
+            H5Fclose(file_());
+            throw std::runtime_error(
+                "OutputManagerH5: unable to create PDFs group");
+        }
+        for (const auto& [name, pdf] : simControls_.allPDFs())
+        {
+            if (pdf->valid()) { utils::writeStringAttr(pdfsGrp, name, pdf->toToml()); }
+        }
+        H5Gclose(pdfsGrp);
         // NOLINTEND(misc-include-cleaner)
 
         openClustersGroup();

@@ -13,6 +13,8 @@
 #define PDFCOMMONS_HPP
 
 #include <cstdint>
+#include <stdexcept>
+#include <string_view>
 
 /**
  * @brief A namespace to hold PDFs and quantities related to them.
@@ -40,6 +42,29 @@ namespace pdfs {
         basic,       /**< Basic format */
         advanced     /**< Advanced format */
     };
+
+    /**
+     * @brief Name of a sampling method, as used in PDF descriptors
+     * @param method The sampling method
+     * @return The name a PDF descriptor's "method" key (or a legacy
+     *   descriptor's "method" line) uses for method -- e.g.
+     *   "stop_nearest" -- or "none" for the invalid dummy method
+     */
+    inline auto samplingMethodName(const SamplingMethods method) -> std::string_view
+    {
+        switch (method)
+        {
+            case SamplingMethods::stopNearest: return "stop_nearest";
+            case SamplingMethods::stopBefore:  return "stop_before";
+            case SamplingMethods::stopAfter:   return "stop_after";
+            case SamplingMethods::stop50:      return "stop_50";
+            case SamplingMethods::number:      return "number";
+            case SamplingMethods::poisson:     return "poisson";
+            case SamplingMethods::sorted:      return "sorted_sampling";
+            case SamplingMethods::none:        return "none";
+        }
+        throw std::logic_error("samplingMethodName: unrecognized sampling method"); // unreachable; exhaustive switch above
+    }
 
 } // namespace pdfs
 

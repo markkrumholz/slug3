@@ -12,6 +12,8 @@
 #include "PDF.hpp"
 #include <functional>
 #include <limits>
+#include <stdexcept>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -64,6 +66,21 @@ namespace pdfs {
         // ordinary C++ name-hiding rules, even though the no-argument
         // form needs no change (see integral(a,b)'s own comment).
         using PDF::integral;
+
+        /**
+         * @brief Not supported: a PDFReflect cannot be serialized
+         * @throws std::logic_error always
+         * @details
+         * A PDFReflect is a non-owning, transformed view of another
+         * PDF, built internally rather than read from a PDF
+         * descriptor, and has no segments of its own to write out;
+         * serialize the PDF it wraps instead.
+         */
+        [[nodiscard]] auto toToml() const -> std::string override
+        {
+            throw std::logic_error("PDFReflect::toToml: a reflected view of a PDF "
+                "cannot be serialized; serialize the PDF it wraps instead");
+        }
 
         /**
          * @brief Construct a reflected view of an existing PDF, about the midpoint of its own support

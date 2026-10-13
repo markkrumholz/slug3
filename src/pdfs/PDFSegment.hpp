@@ -100,6 +100,21 @@ namespace pdfs {
          */
         [[nodiscard]] virtual auto draw() const -> double = 0;
 
+        // Serialization
+        /**
+         * @brief Write this segment's parameters into a toml table
+         * @param tbl The table to write into, i.e., this segment's own
+         *   segmentN table in an advanced-format toml PDF descriptor
+         * @details
+         * The inverse of this segment type's toml-based constructor in
+         * advanced format (see parsePDFToml): inserts a "type" key
+         * naming this segment type, plus every key that constructor
+         * reads except "weight", which belongs to the PDF rather than
+         * the segment and is written by PDF::toToml(). Reading the
+         * result back reproduces this segment exactly.
+         */
+        virtual void toToml(toml::table& tbl) const = 0;
+
     protected:
 
         /**

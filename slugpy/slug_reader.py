@@ -17,7 +17,15 @@ import numpy as np
 import tomlkit
 from astropy import units as u
 
-from ._slug import Cluster, Filter, FilterIdeal, SimControls, parsePDFDescriptor
+from ._slug import (
+    PDF,
+    Cluster,
+    Filter,
+    FilterIdeal,
+    SimControls,
+    parsePDFDescriptor,
+    parsePDFTomlString,
+)
 from .cloudy.cloudy_continuum import read_cloudy_continuum
 from .cloudy.cloudy_input import write_cloudy_input
 from .cloudy.cloudy_lines import read_cloudy_linearr
@@ -376,6 +384,9 @@ class slug_reader:
         The input deck used to produce this file, read from the
         input_deck group's toml dataset and parsed on first access
         (read-only).
+    pdfs : dict of str to PDF
+        Every PDF the run used, rebuilt from the PDFs group -- see the
+        pdfs property's own docstring (read-only).
     clusters : slug_group_reader or None
         Lazy reader for the clusters group's datasets (target_mass,
         birth_mass, ...), or None if this file has no clusters group
@@ -494,6 +505,7 @@ class slug_reader:
                 None if raw_restart_uid is None else int(raw_restart_uid))
 
         self._input_deck: tomlkit.TOMLDocument | None = None
+        self._pdfs: dict[str, PDF] | None = None
         self._controls: SimControls | None = None
 
     @property
@@ -514,6 +526,36 @@ class slug_reader:
     @input_deck.setter
     def input_deck(self, value: Any) -> None:
         raise AttributeError("input_deck is read-only")
+
+    @property
+    def pdfs(self) -> dict[str, PDF]:
+        """
+        dict of str to PDF : every PDF the run used, keyed by the name
+        of the SimControls accessor that holds it -- "imf", "cmf",
+        "fehDist", "sfr", "sfrDist", "clf", "avDist", "avDistField",
+        "avNebFac", "outTimeDist" -- for those that were valid for the
+        run. Rebuilt from the first file's own PDFs group, which holds
+        each one as a toml descriptor (see PDF.toToml()), so this needs
+        none of the PDF files the input deck names; each PDF is
+        identical to the one the run used, down to its draws. Built the
+        first time this property is accessed and cached thereafter;
+        empty for files written before the PDFs group existed.
+        """
+        if self._pdfs is not None:
+            return self._pdfs
+        pdfs: dict[str, PDF] = {}
+        with h5py.File(self._file[0], "r") as f:
+            if "PDFs" in f:
+                group = cast(h5py.Group, f["PDFs"])
+                for name, value in group.attrs.items():
+                    descriptor = value.decode() if isinstance(value, bytes) else str(value)
+                    pdfs[name] = parsePDFTomlString(descriptor)
+        self._pdfs = pdfs
+        return self._pdfs
+
+    @pdfs.setter
+    def pdfs(self, value: Any) -> None:
+        raise AttributeError("pdfs is read-only")
 
     @property
     def clusters(self) -> slug_group_reader | None:

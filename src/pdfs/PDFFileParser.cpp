@@ -331,6 +331,7 @@ namespace
         pdfs::FileFormats fmt_ = pdfs::FileFormats::basic; /**< Basic or advanced format */
         std::vector<double> breakpoints_; /**< Segment breakpoints, only set (and only meaningful) if fmt_ is basic */
         pdfs::SamplingMethods method_ = pdfs::SamplingMethods::stopNearest; /**< Sampling method to use */
+        bool normalized_ = false; /**< Whether an advanced-format PDF's weights are already normalized (the "normalized" key) */
     };
 } // namespace
 
@@ -388,6 +389,20 @@ static auto parseTomlHeader(const toml::table& deck) -> PDFTomlHeader
     if (const auto methodNode = deck.at_path("method"))
     {
         header.method_ = parseMethodToml(methodNode.value<std::string>());
+    }
+
+    // "normalized": optional, advanced format only, defaults to false
+    if (const auto normalizedNode = deck.at_path("normalized"))
+    {
+        // Checked with is_boolean() rather than value<bool>().has_value(),
+        // since value<bool>() also accepts (and converts) an integer
+        if (!normalizedNode.is_boolean()) { parseTomlError("'normalized' must be a boolean"); }
+        const auto normalized = normalizedNode.value<bool>();
+        if (header.fmt_ != pdfs::FileFormats::advanced)
+        {
+            parseTomlError("'normalized' may only be given when format is 'advanced'");
+        }
+        header.normalized_ = normalized.value();
     }
 
     return header;
@@ -667,9 +682,28 @@ namespace pdfs {
             return { std::move(seg), wgt, header.method_, normalize };
         }
 
-        // Advanced mode, so don't do any normalization, just return
+        // Advanced mode, so don't do any normalization, just mark the
+        // PDF normalized if the descriptor says its weights already are
         const bool normalize = false;
-        return { std::move(seg), wgt, header.method_, normalize };
+        PDF pdf(std::move(seg), wgt, header.method_, normalize);
+        if (header.normalized_) { pdf.markNormalized(); }
+        return pdf;
+    }
+
+    // Parse a toml PDF descriptor held in a string -- see
+    // PDFFileParser.hpp
+    auto parsePDFTomlString(const std::string& descriptor) -> PDF
+    {
+        toml::table deck;
+        try
+        {
+            deck = toml::parse(descriptor);
+        }
+        catch (const std::exception& error)
+        {
+            parseTomlError(std::string("descriptor is not valid toml: ") + error.what());
+        }
+        return parsePDFToml(deck);
     }
 
     // Drop-in replacement for the old parsePDFDescriptor(): tries to

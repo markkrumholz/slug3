@@ -848,6 +848,45 @@ namespace io
         [[nodiscard]] auto avNebFac() const -> const auto& { return avNebFac_; }
 
         /**
+         * @brief Get the distribution output times are drawn from
+         * @return A const reference to the distribution requested via
+         *   output.output_times, when that names a PDF; invalid/empty
+         *   if output times were instead given as an explicit array
+         *   (see outTimes())
+         */
+        [[nodiscard]] auto outTimeDist() const -> const auto& { return outTimeDist_; }
+
+        /**
+         * @brief List every PDF this SimControls holds, by name
+         * @return One (name, PDF) pair per PDF-valued setting, named by
+         *   its own accessor -- imf, cmf, fehDist, sfr, sfrDist, clf,
+         *   avDist, avDistField, avNebFac, outTimeDist -- including
+         *   ones that are invalid/unused for this simulation (check
+         *   PDF::valid() before using them)
+         * @details
+         * The single list of this class's PDF members, for code that
+         * needs to handle all of them uniformly, e.g. writing them to
+         * an output file (see OutputManagerH5). The pointers are
+         * non-owning and valid for as long as this SimControls is,
+         * until the corresponding setting is changed.
+         */
+        [[nodiscard]] auto allPDFs() const -> std::vector<std::pair<std::string, const pdfs::PDF*>>
+        {
+            return {
+                {"imf", &imf_},
+                {"cmf", &cmf_},
+                {"fehDist", &fehDist_},
+                {"sfr", &sfr_},
+                {"sfrDist", &sfrDist_},
+                {"clf", &clf_},
+                {"avDist", &avDist_},
+                {"avDistField", &avDistField_},
+                {"avNebFac", &avNebFac_},
+                {"outTimeDist", &outTimeDist_},
+            };
+        }
+
+        /**
          * @brief Get the extinction curve, if any
          * @return A shared_ptr to the extinction curve requested via
          *   extinct.model, or nullptr if neither extinct.AV nor
