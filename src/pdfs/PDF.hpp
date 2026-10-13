@@ -320,14 +320,17 @@ namespace pdfs {
             double b = std::numeric_limits<double>::max()) const
             -> std::vector<double>
         {
-            // A degenerate (empty) range has no samples to draw,
-            // regardless of target: falling through to draw(a, b)
-            // below would build a utils::DiscreteDist from all-zero
-            // per-segment weights (every segment's integral(a, b) is 0
-            // when a >= b, matching integral()'s own a >= b convention
-            // above), which throws rather than returning an empty
-            // sample.
-            if (a >= b) { return {}; }
+            // A range containing no probability -- either degenerate
+            // (a >= b) or lying entirely outside every segment's
+            // support -- has no samples to draw, regardless of target.
+            // Falling through would build a utils::DiscreteDist from
+            // all-zero per-segment weights (which throws), or divide
+            // by a zero integral in expectationValue(a, b), giving a
+            // NaN sample count or Poisson mean (or, for the stop
+            // methods, an endless loop of zero-valued draws).
+            // integral() consumes no rng state, so this check does not
+            // perturb the draw sequence.
+            if (a >= b || !(integral(a, b) > 0.0)) { return {}; }
 
             std::vector<double> sample;
             switch (method_)

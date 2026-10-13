@@ -225,6 +225,35 @@ static auto testPDFTomlParsing() -> int
     return 0; // Passed
 }
 
+/**
+ * @brief Check that drawTarget() over a range with no probability returns an empty sample
+ * @param pdf The PDF to test; its sampling method is changed by this test
+ * @param a Lower limit of a range lying entirely outside pdf's support
+ * @param b Upper limit of that range
+ * @return 0 if the test passes, 1 if it fails
+ */
+static auto testPDFDrawTargetZeroMass(pdfs::PDF& pdf, const double a, const double b) -> int
+{
+    for (const auto method : {pdfs::SamplingMethods::stopNearest,
+                              pdfs::SamplingMethods::stopBefore,
+                              pdfs::SamplingMethods::stopAfter,
+                              pdfs::SamplingMethods::stop50,
+                              pdfs::SamplingMethods::number,
+                              pdfs::SamplingMethods::poisson,
+                              pdfs::SamplingMethods::sorted})
+    {
+        pdf.setSampling(method);
+        if (!pdf.drawTarget(100.0, a, b).empty())
+        {
+            std::cerr << "testPDF: drawTarget over zero-probability range ["
+                << a << ", " << b << "] returned a non-empty sample for sampling method "
+                << static_cast<int>(method) << "\n";
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static auto testPDFSampling(
     const double a, 
     const double b, 
@@ -478,6 +507,9 @@ auto testPDF() -> int
 
     // Test sampling from the distribution
     if (testPDFSampling(a, b, expectationValueExpected, pdf) == 1) { return 1; }
+
+    // Test drawTarget() over a range lying entirely above the PDF's support
+    if (testPDFDrawTargetZeroMass(pdf, 2.0 * plMax, 3.0 * plMax) == 1) { return 1; }
 
     // Test parsing
     if (testPDFParsing() == 1) { return 1; }
