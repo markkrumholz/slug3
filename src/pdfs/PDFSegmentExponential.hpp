@@ -14,13 +14,13 @@
 #ifndef PDFSEGMENTEXPONENTIAL_HPP
 #define PDFSEGMENTEXPONENTIAL_HPP
 
+#include "../utils/RandomDist.hpp"
 #include "../utils/RngThread.hpp"
 #include "PDFCommons.hpp"
 #include "PDFSegment.hpp"
 #include <algorithm>
 #include <cmath>
 #include <fstream>
-#include <random>
 #include <toml.hpp>
 namespace pdfs {
 
@@ -141,7 +141,7 @@ namespace pdfs {
         [[nodiscard]] auto draw(const double a, const double b) const -> double override {
             const double aClamped = std::max(a, sMin_);
             const double bClamped = std::min(b, sMax_);
-            const double u = std::uniform_real_distribution<double>(0.0, 1.0)(utils::rng()());
+            const double u = utils::canonical(utils::rng()());
             const double expA = std::exp(-aClamped / scale_);
             const double expB= std::exp(-bClamped / scale_);
             return -scale_ * std::log(expA - (u * (expA - expB))); // Inverse transform sampling for exponential distribution

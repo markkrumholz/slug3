@@ -15,6 +15,7 @@
 #ifndef PDFSEGMENTLOGNORMAL_HPP
 #define PDFSEGMENTLOGNORMAL_HPP
 
+#include "../utils/RandomDist.hpp"
 #include "../utils/RngThread.hpp"
 #include "PDFCommons.hpp"
 #include "PDFSegment.hpp"
@@ -22,7 +23,6 @@
 #include <cmath>
 #include <fstream>
 #include <numbers>
-#include <random>
 #include <toml.hpp>
 
 namespace pdfs {
@@ -172,7 +172,7 @@ namespace pdfs {
             if (aClamped >= bClamped) {
                 return 0.0; // Invalid range for drawing
             }
-            std::lognormal_distribution<double> dist(logMean_, stddev_);
+            utils::LognormalDist dist(logMean_, stddev_);
             double sample = NAN;
             while (true) {
                 sample = dist(utils::rng()());
