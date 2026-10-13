@@ -61,7 +61,7 @@ jobs:
         # MACOSX_DEPLOYMENT_TARGET (pyproject.toml), not by the runner's
         # own macOS version. Intel macOS is not built (users there can
         # install from the sdist).
-        os: [ubuntu-latest, ubuntu-24.04-arm, macos-15]
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15]
 
     steps:
       - uses: actions/checkout@v7
@@ -98,7 +98,7 @@ jobs:
 
   build_sdist:
     name: sdist
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
         with:
@@ -131,7 +131,7 @@ jobs:
     if: >-
       (github.event_name == 'workflow_dispatch' && inputs.publish == 'testpypi') ||
       startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment:
       name: testpypi
       url: https://test.pypi.org/p/slugpy
