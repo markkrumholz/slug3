@@ -21,13 +21,42 @@
 # :copyright: Copyright (c) 2026 Mark Krumholz
 
 [build-system]
-requires = ["scikit-build-core>=0.10"]
+requires = ["scikit-build-core>=0.11"]
 build-backend = "scikit_build_core.build"
 
 [project]
 name = "slugpy"
 description = "Python frontend for slug3 -- stellar population synthesis, and slug cluster/galaxy simulation output analysis."
-license = { file = "LICENSE" }
+readme = "README.md"
+# SPDX license expression and license file (PEP 639), which needs
+# scikit-build-core >= 0.11 -- see [build-system] above
+license = "BSD-3-Clause"
+license-files = ["LICENSE"]
+authors = [{ name = "Mark Krumholz", email = "mark.krumholz@anu.edu.au" }]
+keywords = [
+    "astronomy",
+    "astrophysics",
+    "stellar population synthesis",
+    "star clusters",
+    "galaxies",
+    "stochastic sampling",
+    "nucleosynthesis",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Natural Language :: English",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: C++",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering :: Astronomy",
+    "Topic :: Scientific/Engineering :: Physics",
+]
 requires-python = ">=3.12"
 version = "3.0.1"
 dependencies = [
@@ -40,6 +69,12 @@ dependencies = [
     "tqdm",
     "urllib3",
 ]
+
+[project.urls]
+Homepage = "https://github.com/markkrumholz/slug3"
+Documentation = "https://markkrumholz.github.io/slug3/"
+Source = "https://github.com/markkrumholz/slug3"
+Issues = "https://github.com/markkrumholz/slug3/issues"
 
 [project.scripts]
 # The slug CLI; see slugpy/_cli.py for why this is a Python launcher
@@ -63,7 +98,7 @@ dev = ["pyright"]
 docs = ["sphinx", "breathe", "exhale", "sphinx_rtd_theme"]
 
 [tool.scikit-build]
-minimum-version = "0.10"
+minimum-version = "0.11"
 cmake.build-type = "Release"
 # Build only what gets installed -- not the C++ test executables or the
 # docs, which a plain CMake build still builds by default
