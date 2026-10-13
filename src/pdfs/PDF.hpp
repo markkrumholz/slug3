@@ -15,6 +15,7 @@
 #ifndef PDF_HPP
 #define PDF_HPP
 
+#include "../utils/RandomDist.hpp"
 #include "../utils/RngThread.hpp"
 #include "PDFCommons.hpp"
 #include "PDFSegment.hpp"
@@ -24,7 +25,6 @@
 #include <concepts>
 #include <limits>
 #include <memory>
-#include <random>
 #include <ranges>
 #include <stdexcept>
 #include <utility>
@@ -290,7 +290,7 @@ namespace pdfs {
             for (auto const& [wL,s,w] : std::views::zip(wLim,seg_,wgt_)) {
                 wL = w * s->integral(a,b);
             }
-            std::discrete_distribution<int> dist(wLim.begin(), wLim.end());
+            const utils::DiscreteDist dist(wLim);
             return seg_.at(dist(utils::rng()()))->draw(a,b);
         }
         /**
@@ -322,11 +322,11 @@ namespace pdfs {
         {
             // A degenerate (empty) range has no samples to draw,
             // regardless of target: falling through to draw(a, b)
-            // below would build a std::discrete_distribution from
-            // all-zero per-segment weights (every segment's
-            // integral(a, b) is 0 when a >= b, matching integral()'s
-            // own a >= b convention above), which normalizes to NaN
-            // internally and hangs rather than erroring.
+            // below would build a utils::DiscreteDist from all-zero
+            // per-segment weights (every segment's integral(a, b) is 0
+            // when a >= b, matching integral()'s own a >= b convention
+            // above), which throws rather than returning an empty
+            // sample.
             if (a >= b) { return {}; }
 
             std::vector<double> sample;
@@ -349,7 +349,6 @@ namespace pdfs {
                             sum += s;
                         } else {
                             // Target reached; decide whether to keep last number based on policy
-                            std::uniform_real_distribution<double> dist(0.0, 1.0);
                             const bool keep =
                                 (
                                     method_ == SamplingMethods::stopNearest &&
@@ -358,7 +357,7 @@ namespace pdfs {
                                     method_ == SamplingMethods::stopAfter
                                 ) || (
                                     method_ == SamplingMethods::stop50 &&
-                                    dist(utils::rng()()) > 0.5
+                                    utils::canonical(utils::rng()()) > 0.5
                                 );
                             if (keep) { sample.push_back(s); }
                             break;
@@ -378,7 +377,7 @@ namespace pdfs {
                 case SamplingMethods::poisson:
                 {
                     // Poisson method: draw number of samples, then draw
-                    std::poisson_distribution<unsigned int> dist(target / expectationValue(a,b));
+                    utils::PoissonDist dist(target / expectationValue(a,b));
                     const auto nSamp = dist(utils::rng()());
                     return draw(nSamp, a, b);
                 }

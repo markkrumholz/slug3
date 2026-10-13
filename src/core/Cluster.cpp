@@ -210,10 +210,10 @@ core::Cluster::Cluster(const unsigned long uid,
 // rather than drawing feH_ live and m_ from that state independently,
 // so the result is bitwise identical to the original cluster's -- see
 // this constructor's own header comment for why both draws, not just
-// the mass one, need to be replayed: PDF::draw() consumes rng state
-// (via a std::discrete_distribution used to pick a segment) even for
-// a single-segment/delta [Fe/H] distribution, so feH_'s own draw
-// already advances the stream before m_'s draw would otherwise see it.
+// the mass one, need to be replayed: PDF::draw() generally consumes
+// rng state (to pick a segment, if there is more than one, and within
+// most segment types' own draw), so feH_'s own draw already advances
+// the stream before m_'s draw would otherwise see it.
 core::Cluster::Cluster(const unsigned long uid,
     const double mass,
     const double time,

@@ -14,6 +14,7 @@
 #ifndef PDFSEGMENTSCHECHTER_HPP
 #define PDFSEGMENTSCHECHTER_HPP
 
+#include "../utils/RandomDist.hpp"
 #include "../utils/RngThread.hpp"
 #include "PDFCommons.hpp"
 #include "PDFSegment.hpp"
@@ -21,7 +22,6 @@
 #include <cmath>
 #include <fstream>
 #include <gsl/gsl_sf_gamma.h>
-#include <random>
 #include <toml.hpp>
 
 namespace pdfs {
@@ -152,8 +152,7 @@ namespace pdfs {
             if (aClamped >= bClamped) {
                 return 0.0; // Invalid range for drawing
             }
-            std::uniform_real_distribution<double> dist(0.0, 1.0);
-            const double u = dist(utils::rng()()); // Uniform random number in [0, 1)
+            const double u = utils::canonical(utils::rng()()); // Uniform random number in [0, 1)
             // Find the value of the deviate y by numerically solving
             // u = \int_a^y x^alpha exp(-x / sStar) dx /
             //     \int_a^b x^alpha exp(-x / sStar) dx
