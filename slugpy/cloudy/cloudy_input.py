@@ -41,9 +41,10 @@ def _default_template() -> Path:
     return Path(__file__).resolve().parents[2] / rel
 
 
-# The bundled default template, alongside data/{imfs,filters,spectra,
-# tracks,extinct}/'s own default-resource files -- see
-# _default_template()
+#: Path to the default cloudy input template bundled with slug
+#: (data/cloudy/cloudy.in_grid_template), which write_cloudy_input()
+#: uses when no template is given. Its location in a source checkout
+#: vs. a pip-installed copy is resolved by _default_template().
 DEFAULT_TEMPLATE: Path = _default_template()
 
 _c: float = const.c.cgs.value  # Speed of light, cm/s
