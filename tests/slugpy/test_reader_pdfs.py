@@ -20,9 +20,9 @@ import tomllib
 
 import h5py
 import pytest
+from slugpy._slug import PDF, SimControls
 
 from slugpy import run_sim
-from slugpy._slug import PDF, SimControls
 from slugpy.slug_reader import slug_reader
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
