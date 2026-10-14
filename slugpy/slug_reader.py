@@ -1150,9 +1150,10 @@ class slug_reader:
             If spec_type is "cluster" and trial is given, or spec_type
             is "galaxy" and uid is given; if no spectrum matches
             uid/trial/time; if spec_type is "cluster" and no matching
-            cluster is found in the clusters group; or if this file's
-            own stars.FeH entry (for spec_type "galaxy") is neither a
-            number nor a PDF file path.
+            cluster is found in the clusters group; or if spec_type is
+            "galaxy", this file stores no [Fe/H] distribution (see
+            pdfs), and its own stars.FeH entry is neither a number nor
+            a PDF file path.
         RuntimeError
             If the cloudy executable cannot be located (see
             find_cloudy_executable), or if this reader spans more than
@@ -1171,8 +1172,10 @@ class slug_reader:
         spec_type "cluster", [Fe/H] is taken from the matching
         cluster's own entry in the clusters group. For spec_type
         "galaxy", [Fe/H] is instead the expectation value of this
-        file's own stars.FeH distribution (or its fixed value, if
-        stars.FeH is not a distribution) -- a single population-level
+        file's own [Fe/H] distribution: its stored copy (pdfs["fehDist"])
+        if the file has one, which takes precedence over the input
+        deck, and otherwise the stars.FeH entry's own value or the PDF
+        file it names -- a single population-level
         value used for every matching galaxy spectrum, since there
         is no single [Fe/H] value for a galaxy the way there is for
         a cluster. Cloudy input decks for every matching spectrum are
