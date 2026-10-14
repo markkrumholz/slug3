@@ -189,10 +189,11 @@ namespace kden {
          *   the same number of elements as x1
          * @param h2Inv Inverse squared bandwidth matrix defining the
          *   metric, of size n x n where n is the number of elements of
-         *   x1; if not given, the metric is Euclidean
-         * @return With d_i = x1[i] - x2[i], or 0 if either is NaN:
-         *   d^T h2Inv d if h2Inv is given, or the ordinary Euclidean
-         *   squared distance d^T d if it is not
+         *   x1; if not given, the metric is Euclidean. If any coordinate
+         *   is unspecified and the metric is not diagonal, this must be
+         *   the reduced matrix returned by reduceMetric() (see below).
+         * @return d^T h2Inv d, or d^T d if h2Inv is not given, with
+         *   d_i = x1[i] - x2[i], or 0 if either of them is NaN
          * @details
          * h2Inv acts as the metric tensor (an inverse covariance
          * matrix): for a diagonal bandwidth h_i in each dimension, its
@@ -204,19 +205,18 @@ namespace kden {
          * use different metrics at the same time.
          *
          * A NaN coordinate in either point means "unspecified": that
-         * dimension contributes zero separation, so the result is a
+         * dimension contributes no separation, so the result is a
          * distance between a point and a line, a plane, etc., or
-         * between two such objects. With s the specified dimensions,
-         * the result is d_s^T M_ss d_s, using only the s-s block of
-         * h2Inv. For a diagonal metric that is exactly the minimum
-         * distance (equivalently, the metric of the Gaussian
-         * marginalized over the unspecified dimensions). For a
-         * non-diagonal metric it is not: both of those are given by the
-         * Schur complement M_ss - M_sf M_ff^-1 M_fs, i.e. by the inverse
-         * of the s-s block of the covariance, not by M_ss. Callers
-         * that leave dimensions unspecified with a non-diagonal metric
-         * should therefore pass that reduced matrix as the s-s block
-         * of h2Inv; its other entries are then irrelevant.
+         * between two such objects. For a Euclidean or diagonal metric
+         * that is exact as is. For a non-diagonal metric, the distance
+         * minimized over the unspecified coordinates (equivalently, the
+         * metric of the Gaussian marginalized over them) is given not
+         * by the specified block of h2Inv but by its Schur complement,
+         * which reduceMetric() computes; this function does not, so
+         * that its cost stays O(n^2) with no allocation. Since the
+         * unspecified dimensions are usually the same for every point
+         * in a query, callers should call reduceMetric() once per
+         * query and pass its result here.
          */
         [[nodiscard]] static constexpr auto dist2(const std::vector<double>& x1,
             const std::vector<double>& x2,
@@ -253,6 +253,110 @@ namespace kden {
                 }
             }
             return r2;
+        }
+
+        /**
+         * @brief Reduce a metric for use with some coordinates unspecified
+         * @param h2Inv The full inverse squared bandwidth matrix, n x n
+         * @param unspecified Which dimensions will be unspecified (NaN)
+         *   in the points passed to dist2(); must have n elements
+         * @return A row-major n x n matrix (wrap it in a MatrixView to
+         *   pass it to dist2()) whose block over the specified
+         *   dimensions s is the Schur complement
+         *   M_ss - M_sf M_ff^-1 M_fs of the block over the unspecified
+         *   dimensions f, and whose other elements are zero
+         * @throws std::domain_error if the block of h2Inv over the
+         *   unspecified dimensions is not positive definite (which
+         *   cannot happen for a valid, positive-definite h2Inv)
+         * @details
+         * With this matrix, dist2() between points whose unspecified
+         * coordinates are NaN returns d^T M d minimized over every value
+         * of the unspecified separations -- i.e. the distance between
+         * a point and a line, plane, etc. in the full metric -- which
+         * is also the metric of the Gaussian marginalized over the
+         * unspecified dimensions (the Schur complement is the inverse of
+         * the s-s block of the covariance). Computed with a Cholesky
+         * factorization M_ff = L L^T: with W = L^-1 M_fs, the result is
+         * M_ss - W^T W. Costs O(n^3), so call it once for a given
+         * metric and set of unspecified dimensions and reuse the
+         * result. If no dimension is unspecified, the result is just a
+         * copy of h2Inv.
+         */
+        [[nodiscard]] static auto reduceMetric(const MatrixView h2Inv,
+            const std::vector<bool>& unspecified) -> std::vector<double>
+        {
+            const std::size_t n = h2Inv.extent(0);
+            assert(h2Inv.extent(1) == n && unspecified.size() == n);
+            std::vector<std::size_t> spec;
+            std::vector<std::size_t> free;
+            for (std::size_t i = 0; i < n; ++i)
+            {
+                (unspecified[i] ? free : spec).push_back(i);
+            }
+            const std::size_t nf = free.size();
+            const std::size_t ns = spec.size();
+
+            // Start from M_ss, with every other element zero
+            std::vector<double> result(n * n, 0.0);
+            for (const std::size_t i : spec)
+            {
+                for (const std::size_t j : spec)
+                {
+                    result[(i * n) + j] = h2Inv[i, j]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                }
+            }
+            if (nf == 0 || ns == 0) { return result; }
+
+            // Cholesky-factor M_ff = L L^T (L stored row-major, nf x nf)
+            std::vector<double> chol(nf * nf, 0.0);
+            auto el = [&chol, nf](const std::size_t r, const std::size_t c) -> double&
+            {
+                return chol[(r * nf) + c]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            };
+            for (std::size_t r = 0; r < nf; ++r)
+            {
+                for (std::size_t c = 0; c <= r; ++c)
+                {
+                    double sum = h2Inv[free[r], free[c]]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                    for (std::size_t k = 0; k < c; ++k) { sum -= el(r, k) * el(c, k); }
+                    if (c == r)
+                    {
+                        if (!(sum > 0.0))
+                        {
+                            throw std::domain_error("KDTree::reduceMetric: the block of h2Inv "
+                                "over the unspecified dimensions is not positive definite");
+                        }
+                        el(r, r) = std::sqrt(sum);
+                    }
+                    else { el(r, c) = sum / el(c, c); }
+                }
+            }
+
+            // W = L^-1 M_fs by forward substitution, one column (one
+            // specified dimension) at a time; then subtract W^T W
+            std::vector<double> w(nf * ns);
+            for (std::size_t c = 0; c < ns; ++c)
+            {
+                for (std::size_t r = 0; r < nf; ++r)
+                {
+                    double sum = h2Inv[free[r], spec[c]]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                    for (std::size_t k = 0; k < r; ++k) { sum -= el(r, k) * w[(k * ns) + c]; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                    w[(r * ns) + c] = sum / el(r, r); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                }
+            }
+            for (std::size_t a = 0; a < ns; ++a)
+            {
+                for (std::size_t b = 0; b < ns; ++b)
+                {
+                    double wtw = 0.0;
+                    for (std::size_t k = 0; k < nf; ++k)
+                    {
+                        wtw += w[(k * ns) + a] * w[(k * ns) + b]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                    }
+                    result[(spec[a] * n) + spec[b]] -= wtw; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                }
+            }
+            return result;
         }
 
         /**
