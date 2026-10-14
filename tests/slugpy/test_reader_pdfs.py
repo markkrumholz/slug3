@@ -16,6 +16,7 @@ rather than in the repository.
 """
 
 import pathlib
+import shutil
 import tomllib
 
 import h5py
@@ -27,7 +28,22 @@ from slugpy.slug_reader import slug_reader
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 CLUSTER_DECK = str(REPO_ROOT / "tests" / "core" / "assets" / "testCluster.in")
-OLD_OUTPUT_H5 = str(REPO_ROOT / "examples" / "clusterlib" / "clusterlib.h5")
+EXAMPLE_H5 = REPO_ROOT / "examples" / "clusterlib" / "clusterlib.h5"
+
+# Every committed example output, with the exact set of PDFs its run
+# used (and so stores) -- which depends on that example's own deck
+COMMITTED_EXAMPLES: dict[str, tuple[pathlib.Path, set[str]]] = {
+    "clusterlib": (EXAMPLE_H5,
+        {"imf", "cmf", "fehDist", "avDist", "avDistField", "avNebFac", "outTimeDist"}),
+    "QHIstats": (REPO_ROOT / "examples" / "QHIstats" / "QHIstats.h5",
+        {"imf", "cmf", "fehDist", "avNebFac", "outTimeDist"}),
+    "cloudy": (REPO_ROOT / "examples" / "cloudy" / "cloudy_example.h5",
+        {"imf", "cmf", "fehDist", "avNebFac", "outTimeDist"}),
+    "QHIFUVstats": (REPO_ROOT / "examples" / "QHIFUVstats" / "QHIFUVstats.h5",
+        {"imf", "cmf", "clf", "sfrDist", "fehDist", "avNebFac", "outTimeDist"}),
+    "yieldslib": (REPO_ROOT / "examples" / "yieldslib" / "yieldslib.h5",
+        {"imf", "cmf", "clf", "sfr", "fehDist", "avNebFac"}),
+}
 
 
 @pytest.fixture(scope="module")
@@ -116,11 +132,24 @@ def test_pdfs_group_is_self_contained(run: slug_reader) -> None:
             assert "breakpoints" not in descriptor
 
 
-def test_pdfs_empty_for_older_files() -> None:
-    """A file written before the PDFs group existed gives an empty dict."""
-    with h5py.File(OLD_OUTPUT_H5, "r") as f:
-        assert "PDFs" not in f
-    assert slug_reader(OLD_OUTPUT_H5).pdfs == {}
+def test_pdfs_empty_for_older_files(tmp_path: pathlib.Path) -> None:
+    """A file written before the PDFs group existed gives an empty dict.
+    Simulated by deleting the group from a copy of a committed example
+    output (which itself has one)."""
+    old = tmp_path / "old.h5"
+    shutil.copy(EXAMPLE_H5, old)
+    with h5py.File(old, "a") as f:
+        assert "PDFs" in f
+        del f["PDFs"]
+    assert slug_reader(str(old)).pdfs == {}
+
+
+@pytest.mark.parametrize("example", sorted(COMMITTED_EXAMPLES))
+def test_committed_example_has_pdfs(example: str) -> None:
+    """Each committed example output carries exactly its run's PDFs, so
+    its controls and get_cluster need no PDF files from dists/."""
+    path, expected = COMMITTED_EXAMPLES[example]
+    assert set(slug_reader(str(path)).pdfs) == expected
 
 
 # ---------------------------------------------------------------------
