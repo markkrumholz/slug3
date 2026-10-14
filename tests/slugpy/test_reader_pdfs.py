@@ -30,6 +30,21 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 CLUSTER_DECK = str(REPO_ROOT / "tests" / "core" / "assets" / "testCluster.in")
 EXAMPLE_H5 = REPO_ROOT / "examples" / "clusterlib" / "clusterlib.h5"
 
+# Every committed example output, with the exact set of PDFs its run
+# used (and so stores) -- which depends on that example's own deck
+COMMITTED_EXAMPLES: dict[str, tuple[pathlib.Path, set[str]]] = {
+    "clusterlib": (EXAMPLE_H5,
+        {"imf", "cmf", "fehDist", "avDist", "avDistField", "avNebFac", "outTimeDist"}),
+    "QHIstats": (REPO_ROOT / "examples" / "QHIstats" / "QHIstats.h5",
+        {"imf", "cmf", "fehDist", "avNebFac", "outTimeDist"}),
+    "cloudy": (REPO_ROOT / "examples" / "cloudy" / "cloudy_example.h5",
+        {"imf", "cmf", "fehDist", "avNebFac", "outTimeDist"}),
+    "QHIFUVstats": (REPO_ROOT / "examples" / "QHIFUVstats" / "QHIFUVstats.h5",
+        {"imf", "cmf", "clf", "sfrDist", "fehDist", "avNebFac", "outTimeDist"}),
+    "yieldslib": (REPO_ROOT / "examples" / "yieldslib" / "yieldslib.h5",
+        {"imf", "cmf", "clf", "sfr", "fehDist", "avNebFac"}),
+}
+
 
 @pytest.fixture(scope="module")
 def run(tmp_path_factory: pytest.TempPathFactory) -> slug_reader:
@@ -129,11 +144,12 @@ def test_pdfs_empty_for_older_files(tmp_path: pathlib.Path) -> None:
     assert slug_reader(str(old)).pdfs == {}
 
 
-def test_committed_example_has_pdfs() -> None:
-    """The committed example output carries its run's PDFs, so its
-    controls and get_cluster need no PDF files from dists/."""
-    pdfs = slug_reader(str(EXAMPLE_H5)).pdfs
-    assert {"imf", "cmf", "fehDist", "avDist", "outTimeDist"} <= set(pdfs)
+@pytest.mark.parametrize("example", sorted(COMMITTED_EXAMPLES))
+def test_committed_example_has_pdfs(example: str) -> None:
+    """Each committed example output carries exactly its run's PDFs, so
+    its controls and get_cluster need no PDF files from dists/."""
+    path, expected = COMMITTED_EXAMPLES[example]
+    assert set(slug_reader(str(path)).pdfs) == expected
 
 
 # ---------------------------------------------------------------------
