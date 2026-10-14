@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cmath>
 #include <concepts>
 #include <cstddef>
 #include <functional>
@@ -100,7 +101,10 @@ namespace kden {
      * every point's position x_ must have exactly nDim elements.
      * Distances may be measured using an inverse squared bandwidth
      * matrix h2Inv; if none is given, the metric is the usual
-     * Euclidean one.
+     * Euclidean one. The metric used to build the tree (which only
+     * affects which dimension each node is split along) is not
+     * stored: every query takes its own, so different threads can
+     * query the same tree with different metrics at once.
      */
     template <typename PtType>
         requires KDTreePoint<PtType>
@@ -179,24 +183,40 @@ namespace kden {
 
         /**
          * @brief Squared distance between two points in a given metric
-         * @param x1 Position of the first point
-         * @param x2 Position of the second point; must have the same
-         *   number of elements as x1
-         * @param h2Inv Inverse squared bandwidth matrix defining the metric, of
-         *   size n x n where n is the number of elements of x1; if not
-         *   given, the metric is Euclidean
-         * @return With d = x1 - x2: d^T h2Inv d if h2Inv is given, or the
-         *   ordinary Euclidean squared distance d^T d if it is not
+         * @param x1 Position of the first point; elements may be NaN
+         *   to leave that coordinate unspecified (see below)
+         * @param x2 Position of the second point, likewise; must have
+         *   the same number of elements as x1
+         * @param h2Inv Inverse squared bandwidth matrix defining the
+         *   metric, of size n x n where n is the number of elements of
+         *   x1; if not given, the metric is Euclidean
+         * @return With d_i = x1[i] - x2[i], or 0 if either is NaN:
+         *   d^T h2Inv d if h2Inv is given, or the ordinary Euclidean
+         *   squared distance d^T d if it is not
          * @details
          * h2Inv acts as the metric tensor (an inverse covariance
          * matrix): for a diagonal bandwidth h_i in each dimension, its
-         * diagonal entries are 1 / h_i^2. The metric is an argument,
-         * rather than the tree's own h2Inv_, because inference typically
+         * diagonal entries are 1 / h_i^2. The metric is an argument
+         * rather than part of the tree because inference typically
          * uses a locally computed one (e.g. the tree's bandwidth
          * convolved with a particular observation's uncertainties),
          * and keeping it out of the tree's state lets different threads
-         * use different metrics at the same time. Pass h2Inv_ to use the
-         * metric the tree was built with.
+         * use different metrics at the same time.
+         *
+         * A NaN coordinate in either point means "unspecified": that
+         * dimension contributes zero separation, so the result is a
+         * distance between a point and a line, a plane, etc., or
+         * between two such objects. With s the specified dimensions,
+         * the result is d_s^T M_ss d_s, using only the s-s block of
+         * h2Inv. For a diagonal metric that is exactly the minimum
+         * distance (equivalently, the metric of the Gaussian
+         * marginalized over the unspecified dimensions). For a
+         * non-diagonal metric it is not: both of those are given by the
+         * Schur complement M_ss - M_sf M_ff^-1 M_fs, i.e. by the inverse
+         * of the s-s block of the covariance, not by M_ss. Callers
+         * that leave dimensions unspecified with a non-diagonal metric
+         * should therefore pass that reduced matrix as the s-s block
+         * of h2Inv; its other entries are then irrelevant.
          */
         [[nodiscard]] static constexpr auto dist2(const std::vector<double>& x1,
             const std::vector<double>& x2,
@@ -204,12 +224,19 @@ namespace kden {
         {
             const std::size_t n = x1.size();
             assert(x2.size() == n);
+            // Separation in dimension i, or 0 if either coordinate is unspecified
+            auto sep = [&x1, &x2](const std::size_t i) -> double
+            {
+                const double a = x1[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                const double b = x2[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                return (std::isnan(a) || std::isnan(b)) ? 0.0 : a - b;
+            };
             double r2 = 0.0;
             if (!h2Inv.has_value())
             {
                 for (std::size_t i = 0; i < n; ++i)
                 {
-                    const double d = x1[i] - x2[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                    const double d = sep(i);
                     r2 += d * d;
                 }
                 return r2;
@@ -218,10 +245,11 @@ namespace kden {
             assert(m.extent(0) == n && m.extent(1) == n);
             for (std::size_t i = 0; i < n; ++i)
             {
-                const double di = x1[i] - x2[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                const double di = sep(i);
+                if (di == 0.0) { continue; }
                 for (std::size_t j = 0; j < n; ++j)
                 {
-                    r2 += di * (x1[j] - x2[j]) * m[i, j]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                    r2 += di * sep(j) * m[i, j];
                 }
             }
             return r2;
@@ -236,9 +264,10 @@ namespace kden {
          * @param leafSize Maximum number of points in a leaf; must be
          *   at least 1
          * @param h2Inv Inverse squared bandwidth matrix defining the
-         *   distance metric, of size nDim x nDim; if not given, the
-         *   metric is Euclidean. Not copied, so its data must outlive
-         *   the tree.
+         *   metric used to choose split dimensions while building the
+         *   tree (see chooseSplitDim()), of size nDim x nDim; if not
+         *   given, the metric is Euclidean. Used only during
+         *   construction and not stored; queries take their own metric.
          * @throws std::invalid_argument if nDim, leafSize, or the shape
          *   of h2Inv is invalid, or if any point's x_ does not have
          *   exactly nDim elements
@@ -257,8 +286,7 @@ namespace kden {
             const std::optional<MatrixView> h2Inv = std::nullopt) :
             nDim_(nDim),
             data_(std::ref(data)),
-            leafSize_(leafSize),
-            h2Inv_(h2Inv)
+            leafSize_(leafSize)
         {
             if (nDim_ < 1)
             {
@@ -268,8 +296,8 @@ namespace kden {
             {
                 throw std::invalid_argument("KDTree: leafSize must be at least 1");
             }
-            if (h2Inv_.has_value() &&
-                (h2Inv_->extent(0) != nDim_ || h2Inv_->extent(1) != nDim_))
+            if (h2Inv.has_value() &&
+                (h2Inv->extent(0) != nDim_ || h2Inv->extent(1) != nDim_))
             {
                 throw std::invalid_argument("KDTree: h2Inv must be of size nDim x nDim");
             }
@@ -323,7 +351,7 @@ namespace kden {
 #endif
                 for (std::size_t i = first; i < first + width; ++i)
                 {
-                    splitNode(i);
+                    splitNode(i, h2Inv);
                 }
                 first += width;
                 width <<= 1;
@@ -335,17 +363,20 @@ namespace kden {
         /**
          * @brief Choose the dimension along which to split a node
          * @param idx Index of the node; its lo_ and hi_ must already be set
+         * @param h2Inv Inverse squared bandwidth matrix defining the
+         *   metric, or none for Euclidean
          * @return The dimension to split along, in [0, nDim)
          * @details
          * Splits along the dimension in which the node is widest,
          * measured in the tree's metric: the one maximizing
-         * (hi_[i] - lo_[i])^2 h2Inv_[i,i], the squared metric length of
+         * (hi_[i] - lo_[i])^2 h2Inv[i,i], the squared metric length of
          * the node's extent along axis i (for a diagonal bandwidth h_i,
          * its extent in units of the bandwidth, squared), or just
-         * (hi_[i] - lo_[i])^2 if the tree has no h2Inv_. Ties go to the
+         * (hi_[i] - lo_[i])^2 if h2Inv is not given. Ties go to the
          * lowest dimension.
          */
-        [[nodiscard]] auto chooseSplitDim(const std::size_t idx) const -> int
+        [[nodiscard]] auto chooseSplitDim(const std::size_t idx,
+            const std::optional<MatrixView> h2Inv) const -> int
         {
             const auto& node = nodes_[idx];
             std::size_t best = 0;
@@ -354,7 +385,7 @@ namespace kden {
             {
                 const double width = node.hi_[i] - node.lo_[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
                 double size = width * width;
-                if (h2Inv_.has_value()) { size *= (*h2Inv_)[i, i]; }
+                if (h2Inv.has_value()) { size *= (*h2Inv)[i, i]; }
                 if (size > bestSize)
                 {
                     best = i;
@@ -467,16 +498,19 @@ namespace kden {
          * @brief Split a node into two children, or mark it as a leaf
          * @param idx Index of the node; its start_, count_, and
          *   statistics (see setNodeStats()) must already be set
+         * @param h2Inv Inverse squared bandwidth matrix defining the
+         *   metric used to choose the split dimension, or none for
+         *   Euclidean
          * @details
          * A node with at most leafSize_ points becomes a leaf
          * (splitDim_ = -1, no children). Otherwise it is split along
-         * chooseSplitDim(idx): its points are partitioned about their
+         * chooseSplitDim(idx, h2Inv): its points are partitioned about their
          * median along that dimension (see partitionNode()), the left
          * child gets the first (count_ + 1) / 2 of them and the right
          * child the rest, and each child's statistics are computed
          * from its own points.
          */
-        void splitNode(const std::size_t idx)
+        void splitNode(const std::size_t idx, const std::optional<MatrixView> h2Inv)
         {
             auto& node = nodes_[idx];
             if (node.count_ <= leafSize_)
@@ -488,7 +522,7 @@ namespace kden {
             }
 
             // Partition the points along the split dimension
-            node.splitDim_ = chooseSplitDim(idx);
+            node.splitDim_ = chooseSplitDim(idx, h2Inv);
             assert(node.splitDim_ >= 0 && static_cast<std::size_t>(node.splitDim_) < nDim_);
             partitionNode(idx);
 
@@ -518,7 +552,6 @@ namespace kden {
         std::size_t nLevels_ = 1;                               /**< Number of levels in the tree */
         std::size_t nLeaves_ = 1;                               /**< Number of leaves in the tree */
         std::size_t leafSize_;                                  /**< Maximum number of points in a leaf */
-        std::optional<MatrixView> h2Inv_;                       /**< Inverse squared bandwidth matrix defining the metric, if any */
     };
 
 } // namespace kden
