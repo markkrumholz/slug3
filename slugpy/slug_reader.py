@@ -9,6 +9,7 @@ Implements slug_reader, a lazy reader for slug HDF5 output files.
 import concurrent.futures
 import re
 import shutil
+import tempfile
 from collections.abc import Mapping
 from pathlib import Path
 from types import MappingProxyType
@@ -325,6 +326,22 @@ def _find_output_files(filename: str) -> tuple[list[str], list[str]]:
         f"for {plain_h5}, {prefix} as a thread/rank directory, and "
         f"{prefix.name}_chkNNNNN.h5/{prefix.name}_chkNNNNN/ checkpoints in "
         f"{prefix.parent}")
+
+
+# The input-deck key each stored PDF (see slug_reader.pdfs) comes from,
+# by the name it is stored under -- see slug_reader.controls
+_PDF_DECK_KEYS: dict[str, tuple[str, str]] = {
+    "imf": ("stars", "IMF"),
+    "cmf": ("clusters", "CMF"),
+    "fehDist": ("stars", "FeH"),
+    "clf": ("clusters", "CLF"),
+    "sfr": ("galaxy", "sfr"),
+    "sfrDist": ("galaxy", "sfr_dist"),
+    "avDist": ("extinct", "AV"),
+    "avDistField": ("extinct", "AV_field"),
+    "avNebFac": ("extinct", "neb_factor"),
+    "outTimeDist": ("output", "output_times"),
+}
 
 
 class slug_reader:
@@ -855,10 +872,59 @@ class slug_reader:
         SimControls : simulation controls parsed from this file's own
         input_deck, built the first time this property is accessed
         and cached thereafter.
+
+        If the file stores the run's PDFs (see pdfs), every input-deck
+        key that named a PDF file is first pointed at a temporary copy
+        of the stored PDF instead, so controls can be built without the
+        PDF files the deck names -- e.g. after they have been moved or
+        edited -- and its PDFs are exactly the ones the run used. Keys
+        whose value is not a file name (a number, an array of output
+        times, or absent) are left as they are, since those need no
+        file. The input_deck property itself is never modified. For a
+        file with no stored PDFs, controls is built from input_deck
+        unchanged.
         """
         if self._controls is None:
-            self._controls = SimControls(tomlkit.dumps(self.input_deck))
+            if not self.pdfs:
+                self._controls = SimControls(tomlkit.dumps(self.input_deck))
+            else:
+                # SimControls reads every PDF in its constructor, so
+                # the temporary files are only needed until it returns
+                with tempfile.TemporaryDirectory() as tmp_dir:
+                    deck = self._deck_with_stored_pdfs(Path(tmp_dir))
+                    self._controls = SimControls(tomlkit.dumps(deck))
         return self._controls
+
+    def _deck_with_stored_pdfs(self, pdf_dir: Path) -> tomlkit.TOMLDocument:
+        """
+        Copy input_deck, pointing PDF-file keys at stored PDFs.
+
+        Parameters
+        ----------
+        pdf_dir : pathlib.Path
+            Existing directory to write the stored PDFs' descriptors
+            into, one file per PDF replaced.
+
+        Returns
+        -------
+        tomlkit.TOMLDocument
+            A copy of input_deck in which every key listed in
+            _PDF_DECK_KEYS whose value is a string (i.e. names a PDF
+            file), and whose PDF is in pdfs, names the absolute path
+            of that PDF's descriptor written to pdf_dir instead.
+        """
+        deck = tomlkit.parse(tomlkit.dumps(self.input_deck))
+        for name, pdf in self.pdfs.items():
+            if name not in _PDF_DECK_KEYS:
+                continue
+            section_name, key = _PDF_DECK_KEYS[name]
+            section = deck.get(section_name)
+            if not isinstance(section, dict) or not isinstance(section.get(key), str):
+                continue
+            path = (pdf_dir / f"{name}.toml").resolve()
+            path.write_text(pdf.toToml())
+            cast(dict[str, Any], section)[key] = str(path)
+        return deck
 
     @controls.setter
     def controls(self, value: Any) -> None:
@@ -1084,9 +1150,10 @@ class slug_reader:
             If spec_type is "cluster" and trial is given, or spec_type
             is "galaxy" and uid is given; if no spectrum matches
             uid/trial/time; if spec_type is "cluster" and no matching
-            cluster is found in the clusters group; or if this file's
-            own stars.FeH entry (for spec_type "galaxy") is neither a
-            number nor a PDF file path.
+            cluster is found in the clusters group; or if spec_type is
+            "galaxy", this file stores no [Fe/H] distribution (see
+            pdfs), and its own stars.FeH entry is neither a number nor
+            a PDF file path.
         RuntimeError
             If the cloudy executable cannot be located (see
             find_cloudy_executable), or if this reader spans more than
@@ -1105,8 +1172,10 @@ class slug_reader:
         spec_type "cluster", [Fe/H] is taken from the matching
         cluster's own entry in the clusters group. For spec_type
         "galaxy", [Fe/H] is instead the expectation value of this
-        file's own stars.FeH distribution (or its fixed value, if
-        stars.FeH is not a distribution) -- a single population-level
+        file's own [Fe/H] distribution: its stored copy (pdfs["fehDist"])
+        if the file has one, which takes precedence over the input
+        deck, and otherwise the stars.FeH entry's own value or the PDF
+        file it names -- a single population-level
         value used for every matching galaxy spectrum, since there
         is no single [Fe/H] value for a galaxy the way there is for
         a cluster. Cloudy input decks for every matching spectrum are
@@ -1198,11 +1267,15 @@ class slug_reader:
         # [Fe/H] for a galaxy spectrum is a single population-level
         # value (the expectation value of stars.FeH's own
         # distribution, or its fixed value), computed once here rather
-        # than per matching spectrum
+        # than per matching spectrum -- from the stored copy of that
+        # distribution if this file has one (see pdfs), so the PDF
+        # file the deck names is not needed
         galaxy_feh: float | None = None
         if spec_type == "galaxy":
             feh_entry = self.input_deck.get("stars", {}).get("FeH")
-            if isinstance(feh_entry, (int, float)):
+            if "fehDist" in self.pdfs:
+                galaxy_feh = self.pdfs["fehDist"].expectationValue()
+            elif isinstance(feh_entry, (int, float)):
                 galaxy_feh = float(feh_entry)
             elif isinstance(feh_entry, str):
                 galaxy_feh = parsePDFDescriptor(feh_entry).expectationValue()

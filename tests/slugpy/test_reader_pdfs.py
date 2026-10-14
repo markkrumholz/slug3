@@ -121,3 +121,80 @@ def test_pdfs_empty_for_older_files() -> None:
     with h5py.File(OLD_OUTPUT_H5, "r") as f:
         assert "PDFs" not in f
     assert slug_reader(OLD_OUTPUT_H5).pdfs == {}
+
+
+# ---------------------------------------------------------------------
+# slug_reader.controls built from the stored PDFs
+# ---------------------------------------------------------------------
+
+FEH_DESCRIPTOR = """\
+breakpoints = [-0.5, 0.2]
+[segment1]
+type = "powerlaw"
+slope = 0.0
+"""
+
+
+def _run_with_feh_file(run_dir: pathlib.Path) -> slug_reader:
+    """
+    Run CLUSTER_DECK in run_dir with stars.FeH read from a PDF file.
+
+    Parameters
+    ----------
+    run_dir : pathlib.Path
+        Directory to run in; feh.toml is written there, and the deck
+        names it by that relative path.
+
+    Returns
+    -------
+    slug_reader
+        Reader on the run's own output file.
+    """
+    (run_dir / "feh.toml").write_text(FEH_DESCRIPTOR)
+    deck = pathlib.Path(CLUSTER_DECK).read_text().replace("FeH = 0.0", 'FeH = "feh.toml"')
+    assert 'FeH = "feh.toml"' in deck
+    with pytest.MonkeyPatch.context() as mp:
+        mp.chdir(run_dir)
+        data = run_sim(deck, progress=False)
+    assert isinstance(data, slug_reader)
+    return data
+
+
+def test_controls_without_pdf_files(tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch) -> None:
+    """controls builds from the stored PDFs once the PDF file the deck
+    names is gone, matches them exactly, leaves input_deck untouched,
+    and lets get_cluster reproduce the recorded [Fe/H]."""
+    data = _run_with_feh_file(tmp_path)
+    (tmp_path / "feh.toml").rename(tmp_path / "feh_moved.toml")
+    monkeypatch.chdir(tmp_path)
+
+    reader = slug_reader(data._file[0])
+    assert _same_pdf(reader.controls.feH, reader.pdfs["fehDist"])
+    assert reader.controls.feH.getMin() == -0.5
+    assert reader.input_deck["stars"]["FeH"] == "feh.toml"
+
+    clusters = reader.clusters
+    assert clusters is not None
+    uid = int(clusters["uid"][0])
+    assert reader.get_cluster(uid).feH() == float(clusters["feh"][0])
+
+
+def test_controls_unchanged_without_stored_pdfs(tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch) -> None:
+    """For a file with no PDFs group, controls is built from the input
+    deck as-is: it needs the PDF file the deck names, and fails without
+    it, exactly as before stored PDFs existed."""
+    data = _run_with_feh_file(tmp_path)
+    with h5py.File(data._file[0], "a") as f:
+        del f["PDFs"]
+    monkeypatch.chdir(tmp_path)
+
+    (tmp_path / "feh.toml").rename(tmp_path / "feh_moved.toml")
+    with pytest.raises(RuntimeError):
+        _ = slug_reader(data._file[0]).controls
+
+    (tmp_path / "feh_moved.toml").rename(tmp_path / "feh.toml")
+    reader = slug_reader(data._file[0])
+    assert reader.pdfs == {}
+    assert reader.controls.feH.getMin() == -0.5
