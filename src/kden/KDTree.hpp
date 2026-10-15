@@ -651,7 +651,7 @@ namespace kden {
             std::vector<std::pair<std::size_t, double>> stack;
             stack.reserve((2 * nLevels_) + 2);
             const auto& root = nodes_[rootNode];
-            stack.emplace_back(rootNode, bound(nodeLo(rootNode), nodeHi(rootNode)));
+            stack.emplace_back(rootNode, bound.lower(nodeLo(rootNode), nodeHi(rootNode)));
             while (!stack.empty())
             {
                 const auto [idx, nodeBound] = stack.back();
@@ -677,8 +677,8 @@ namespace kden {
 
                 // An interior node: push both children, nearer one last
                 // so that it is searched first
-                const double lBound = bound(nodeLo(node.lchild_), nodeHi(node.lchild_));
-                const double rBound = bound(nodeLo(node.rchild_), nodeHi(node.rchild_));
+                const double lBound = bound.lower(nodeLo(node.lchild_), nodeHi(node.lchild_));
+                const double rBound = bound.lower(nodeLo(node.rchild_), nodeHi(node.rchild_));
                 if (lBound <= rBound)
                 {
                     stack.emplace_back(node.rchild_, rBound);

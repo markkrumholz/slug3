@@ -6,8 +6,9 @@
  * Covers distances (with and without unspecified coordinates, for
  * diagonal and full metrics), reduction (against an independent
  * inverse-covariance calculation, and composed reductions), and the box
- * bound (never above the true minimum distance to a box, and exact for
- * diagonal metrics), plus argument checking.
+ * bounds (the lower bound never above the true minimum distance to a box
+ * and the upper never below the true maximum, both exact for diagonal
+ * metrics), plus argument checking.
  * @date 2026-10-15
  * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
@@ -20,6 +21,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <iostream>
 #include <limits>
 #include <random>
@@ -176,7 +178,7 @@ inline auto testBandwidthReduce() -> int
 }
 
 /**
- * @brief Check the box bound: never above the true distance, exact for diagonal metrics
+ * @brief Check the box bounds: they bracket the true distances, and are exact for diagonal metrics
  * @return Number of failures
  */
 inline auto testBandwidthBoxBound() -> int
@@ -206,11 +208,40 @@ inline auto testBandwidthBoxBound() -> int
         }
         if (trial % 4 == 1) { x[0] = nan; bw = bw.reduce(kden::Bandwidth::nanPattern(x)); }
         const auto bound = bw.boxBounder(x);
-        const double b = bound(lo, hi);
+        const double b = bound.lower(lo, hi);
+        const double u = bound.upper(lo, hi);
 
-        // The bound must not exceed the distance to any point in the box
-        double minSampled = std::numeric_limits<double>::infinity();
+        // bounds() agrees with lower() and upper()
+        const auto [bLo, bHi] = bound.bounds(lo, hi);
+        if (bLo != b || bHi != u)
+        {
+            std::cerr << "testBandwidthBoxBound: bounds() gives (" << bLo << ", " << bHi
+                << "), lower()/upper() give (" << b << ", " << u << ")\n";
+            ++failures;
+            break;
+        }
+
+        // The squared distance is a convex quadratic, so its maximum
+        // over the box is at one of the 2^n corners
+        double maxCorner = 0.0;
         std::vector<double> y(n);
+        for (std::uint32_t corner = 0; corner < (1U << n); ++corner)
+        {
+            for (std::size_t i = 0; i < n; ++i) { y[i] = ((corner >> i) & 1U) != 0U ? hi[i] : lo[i]; }
+            maxCorner = std::max(maxCorner, bw.dist2(x, y));
+        }
+        if (u < maxCorner * (1.0 - 1e-12))
+        {
+            std::cerr << "testBandwidthBoxBound: upper bound " << u << " is below the maximum "
+                "distance to a corner " << maxCorner << " (n = " << n << ")\n";
+            ++failures;
+            break;
+        }
+
+        // The lower bound must not exceed the distance to any point in
+        // the box, nor the upper bound fall below it
+        double minSampled = std::numeric_limits<double>::infinity();
+        double maxSampled = 0.0;
         for (int sample = 0; sample < 2000; ++sample)
         {
             for (std::size_t i = 0; i < n; ++i)
@@ -219,7 +250,9 @@ inline auto testBandwidthBoxBound() -> int
                 const double r = unif(gen);
                 y[i] = r < 0.25 ? lo[i] : (r < 0.5 ? hi[i] : lo[i] + ((hi[i] - lo[i]) * unif(gen)));
             }
-            minSampled = std::min(minSampled, bw.dist2(x, y));
+            const double d2 = bw.dist2(x, y);
+            minSampled = std::min(minSampled, d2);
+            maxSampled = std::max(maxSampled, d2);
         }
         if (b > minSampled * (1.0 + 1e-12))
         {
@@ -228,8 +261,16 @@ inline auto testBandwidthBoxBound() -> int
             ++failures;
             break;
         }
+        if (u < maxSampled * (1.0 - 1e-12))
+        {
+            std::cerr << "testBandwidthBoxBound: upper bound " << u << " is below a sampled distance "
+                << maxSampled << " (n = " << n << ")\n";
+            ++failures;
+            break;
+        }
 
-        // For a diagonal metric, the bound is the exact distance to the box
+        // For a diagonal metric, the bounds are the exact distances to
+        // the nearest point of the box and to its farthest corner
         if (diagonal && trial % 4 != 1)
         {
             std::vector<double> nearest(n);
@@ -239,6 +280,13 @@ inline auto testBandwidthBoxBound() -> int
             {
                 std::cerr << "testBandwidthBoxBound: diagonal bound " << b << " is not the exact "
                     "box distance " << exact << "\n";
+                ++failures;
+                break;
+            }
+            if (std::abs(u - maxCorner) > 1e-12 * (1.0 + maxCorner))
+            {
+                std::cerr << "testBandwidthBoxBound: diagonal upper bound " << u << " is not the "
+                    "exact farthest-corner distance " << maxCorner << "\n";
                 ++failures;
                 break;
             }
