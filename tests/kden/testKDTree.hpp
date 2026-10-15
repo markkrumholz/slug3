@@ -127,13 +127,18 @@ inline auto testKDTreeTraversal() -> int
 
 /**
  * @brief Check one node's statistics against brute force
- * @param data The tree's data
- * @param node The node
+ * @param tree The tree
+ * @param idx Index of the node
  * @return Number of discrepancies
  */
 template <typename AuxType>
-inline auto checkNodeStats(const kden::KDTreeData<AuxType>& data, const kden::KDTreeNode& node) -> int
+inline auto checkNodeStats(const kden::KDTree<AuxType>& tree, const std::size_t idx) -> int
 {
+    const auto& data = tree.data();
+    const auto& node = tree.nodes()[idx];
+    const auto nodeLo = tree.nodeLo(idx);
+    const auto nodeHi = tree.nodeHi(idx);
+    const auto nodeCm = tree.nodeCm(idx);
     const std::size_t nd = data.nDim_;
     double w = 0.0;
     double w2 = 0.0;
@@ -155,8 +160,8 @@ inline auto checkNodeStats(const kden::KDTreeData<AuxType>& data, const kden::KD
     int bad = 0;
     for (std::size_t k = 0; k < nd; ++k)
     {
-        if (lo[k] != node.lo_[k] || hi[k] != node.hi_[k] ||
-            std::abs((cm[k] / w) - node.cm_[k]) > 1e-10 * (1.0 + std::abs(node.cm_[k]))) { ++bad; }
+        if (lo[k] != nodeLo[k] || hi[k] != nodeHi[k] ||
+            std::abs((cm[k] / w) - nodeCm[k]) > 1e-10 * (1.0 + std::abs(nodeCm[k]))) { ++bad; }
     }
     if (std::abs(w - node.w_) > 1e-10 * w || std::abs(w2 - node.w2_) > 1e-10 * w2) { ++bad; }
     return bad;
@@ -180,7 +185,7 @@ inline auto checkKDTreeInvariants(const kden::KDTree<AuxType>& tree, const std::
     while (idx != kden::nullNode)
     {
         const auto& node = nodes[idx];
-        bad += checkNodeStats(data, node);
+        bad += checkNodeStats(tree, idx);
         if (node.splitDim_ < 0)
         {
             // Leaf: no children, at most leafSize points, contiguous with the previous leaf

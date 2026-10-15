@@ -46,15 +46,15 @@ namespace kden {
      * @brief A single node of a kd tree
      * @details
      * A node covers the contiguous block of count_ points that starts
-     * at index start_ of the tree's point array, and the axis-aligned
-     * box with corners lo_ and hi_. An interior node is split along
-     * dimension splitDim_ into children lchild_ and rchild_; a leaf
-     * has splitDim_ = -1 and both children equal to nullNode. The node
-     * also caches the sum of its points' weights (w_), of their squared
-     * weights (w2_), and their weighted center of mass (cm_). The
-     * tree's dimensionality is a runtime quantity, so lo_, hi_, and
-     * cm_ are vectors; they start empty and are sized (one element per
-     * dimension) by the tree that owns the node.
+     * at index start_ of the tree's point array. An interior node is
+     * split along dimension splitDim_ into children lchild_ and
+     * rchild_; a leaf has splitDim_ = -1 and both children equal to
+     * nullNode. The node also caches the sum of its points' weights
+     * (w_) and of their squared weights (w2_). Its per-dimension data
+     * -- bounding box and center of mass -- are not stored here but in
+     * flat arrays owned by the tree (see KDTree::nodeLo(), nodeHi(),
+     * and nodeCm()), so that a node is a small fixed-size record with
+     * no allocations of its own.
      */
     struct KDTreeNode
     {
@@ -64,11 +64,8 @@ namespace kden {
         std::size_t rchild_ = nullNode;               /**< Index of the right child, or nullNode if this is a leaf */
         std::size_t parent_ = nullNode;               /**< Index of the parent node (nullNode for the root) */
         int splitDim_ = -1;                           /**< Dimension along which the node is split, or -1 if this is a leaf */
-        std::vector<double> lo_;                      /**< Lower corner of the node's bounding box */
-        std::vector<double> hi_;                      /**< Upper corner of the node's bounding box */
         double w_ = 0.0;                              /**< Sum of the weights of the node's points */
         double w2_ = 0.0;                             /**< Sum of the squared weights of the node's points */
-        std::vector<double> cm_;                      /**< Weighted center of mass of the node's points */
     };
 
     /**
@@ -343,12 +340,9 @@ namespace kden {
                 nNodes += nLeaves_;
             }
             nodes_.resize(nNodes);
-            for (auto& node : nodes_)
-            {
-                node.lo_.resize(nDim_);
-                node.hi_.resize(nDim_);
-                node.cm_.resize(nDim_);
-            }
+            nodeLo_.assign(nNodes * nDim_, 0.0);
+            nodeHi_.assign(nNodes * nDim_, 0.0);
+            nodeCm_.assign(nNodes * nDim_, 0.0);
 
             // Root node: covers every point
             nodes_[rootNode].start_ = 0;
@@ -408,6 +402,39 @@ namespace kden {
          *  @return The nodes; slots below a leaf are unused, and hold
          *    default (empty) nodes */
         [[nodiscard]] auto nodes() const -> const std::vector<KDTreeNode>& { return nodes_; }
+        /**
+         * @brief Lower corner of a node's bounding box
+         * @param idx Index of the node
+         * @return Its nDim coordinates: the minimum of the node's points'
+         *   positions in each dimension (the actual extent of its
+         *   points, not the plane that split it from its sibling)
+         */
+        [[nodiscard]] auto nodeLo(const std::size_t idx) const -> std::span<const double>
+        {
+            return std::span<const double>(nodeLo_).subspan(idx * nDim_, nDim_);
+        }
+        /**
+         * @brief Upper corner of a node's bounding box
+         * @param idx Index of the node
+         * @return Its nDim coordinates (see nodeLo())
+         */
+        [[nodiscard]] auto nodeHi(const std::size_t idx) const -> std::span<const double>
+        {
+            return std::span<const double>(nodeHi_).subspan(idx * nDim_, nDim_);
+        }
+        /**
+         * @brief Weighted center of mass of a node's points
+         * @param idx Index of the node
+         * @return Its nDim coordinates; zero if the node's total weight is zero
+         * @details
+         * Kept for the kernel density evaluation still to be built on
+         * this tree; if the algorithm settled on does not need it, it
+         * (and its nNodes x nDim storage) may be dropped.
+         */
+        [[nodiscard]] auto nodeCm(const std::size_t idx) const -> std::span<const double>
+        {
+            return std::span<const double>(nodeCm_).subspan(idx * nDim_, nDim_);
+        }
         /** @brief The points the tree indexes, in tree order
          *  @return The (non-owned) points, reordered so that each node's
          *    points are contiguous; Neighbor::idx_ indexes into these */
@@ -604,7 +631,7 @@ namespace kden {
             std::vector<std::pair<std::size_t, double>> stack;
             stack.reserve((2 * nLevels_) + 2);
             const auto& root = nodes_[rootNode];
-            stack.emplace_back(rootNode, bound(root.lo_, root.hi_));
+            stack.emplace_back(rootNode, bound(nodeLo(rootNode), nodeHi(rootNode)));
             while (!stack.empty())
             {
                 const auto [idx, nodeBound] = stack.back();
@@ -630,10 +657,8 @@ namespace kden {
 
                 // An interior node: push both children, nearer one last
                 // so that it is searched first
-                const auto& l = nodes_[node.lchild_];
-                const auto& r = nodes_[node.rchild_];
-                const double lBound = bound(l.lo_, l.hi_);
-                const double rBound = bound(r.lo_, r.hi_);
+                const double lBound = bound(nodeLo(node.lchild_), nodeHi(node.lchild_));
+                const double rBound = bound(nodeLo(node.rchild_), nodeHi(node.rchild_));
                 if (lBound <= rBound)
                 {
                     stack.emplace_back(node.rchild_, rBound);
@@ -704,27 +729,28 @@ namespace kden {
 
         /**
          * @brief Choose the dimension along which to split a node
-         * @param idx Index of the node; its lo_ and hi_ must already be set
+         * @param idx Index of the node; its bounding box must already be set
          * @param bandwidth The metric
          * @return The dimension to split along, in [0, nDim)
          * @details
          * Splits along the dimension in which the node is widest,
          * measured in the tree's metric: the one maximizing
-         * (hi_[i] - lo_[i])^2 M_ii, the squared metric length of
+         * (hi[i] - lo[i])^2 M_ii, the squared metric length of
          * the node's extent along axis i (for a diagonal bandwidth h_i,
          * its extent in units of the bandwidth, squared), or just
-         * (hi_[i] - lo_[i])^2 for the Euclidean metric. Ties go to the
+         * (hi[i] - lo[i])^2 for the Euclidean metric. Ties go to the
          * lowest dimension.
          */
         [[nodiscard]] auto chooseSplitDim(const std::size_t idx,
             const Bandwidth& bandwidth) const -> int
         {
-            const auto& node = nodes_[idx];
+            const auto lo = nodeLo(idx);
+            const auto hi = nodeHi(idx);
             std::size_t best = 0;
             double bestSize = -1.0;
             for (std::size_t i = 0; i < nDim_; ++i)
             {
-                const double width = node.hi_[i] - node.lo_[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                const double width = hi[i] - lo[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
                 double size = width * width;
                 size *= bandwidth.h2Inv()(static_cast<Eigen::Index>(i), static_cast<Eigen::Index>(i));
                 if (size > bestSize)
@@ -740,19 +766,26 @@ namespace kden {
          * @brief Set a node's bounding box, weight sums, and center of mass from its points
          * @param idx Index of the node; its start_ and count_ must already be set
          * @details
-         * lo_ and hi_ are the actual extent of the node's points (not
-         * the planes that split them off from their siblings); cm_ is
-         * their weighted center of mass, left at zero if their total
-         * weight is zero. A node with no points gets lo_ = +inf and
-         * hi_ = -inf in every dimension.
+         * The bounding box (nodeLo()/nodeHi()) is the actual extent of
+         * the node's points, not the planes that split them off from
+         * their siblings; the center of mass (nodeCm()) is their
+         * weighted mean position, left at zero if their total weight is
+         * zero. A node with no points gets lo = +inf and hi = -inf in
+         * every dimension. Writes only this node's own slices of the
+         * flat arrays, so nodes may be processed in parallel.
          */
         void setNodeStats(const std::size_t idx)
         {
             auto& node = nodes_[idx];
             const auto& pts = data_.get();
-            node.lo_.assign(nDim_, std::numeric_limits<double>::infinity());
-            node.hi_.assign(nDim_, -std::numeric_limits<double>::infinity());
-            node.cm_.assign(nDim_, 0.0);
+            const auto offset = static_cast<std::ptrdiff_t>(idx * nDim_);
+            const auto len = static_cast<std::ptrdiff_t>(nDim_);
+            const std::span<double> lo(nodeLo_.begin() + offset, nodeLo_.begin() + offset + len);
+            const std::span<double> hi(nodeHi_.begin() + offset, nodeHi_.begin() + offset + len);
+            const std::span<double> cm(nodeCm_.begin() + offset, nodeCm_.begin() + offset + len);
+            std::ranges::fill(lo, std::numeric_limits<double>::infinity());
+            std::ranges::fill(hi, -std::numeric_limits<double>::infinity());
+            std::ranges::fill(cm, 0.0);
             node.w_ = 0.0;
             node.w2_ = 0.0;
             for (std::size_t i = node.start_; i < node.start_ + node.count_; ++i)
@@ -762,20 +795,20 @@ namespace kden {
                 for (std::size_t d = 0; d < nDim_; ++d)
                 {
                     const double x = pos[d]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-                    node.lo_[d] = std::min(node.lo_[d], x); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-                    node.hi_[d] = std::max(node.hi_[d], x); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-                    node.cm_[d] += w * x; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                    lo[d] = std::min(lo[d], x); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                    hi[d] = std::max(hi[d], x); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                    cm[d] += w * x; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
                 }
                 node.w_ += w;
                 node.w2_ += w * w;
             }
             if (node.w_ != 0.0)
             {
-                for (auto& c : node.cm_) { c /= node.w_; }
+                for (auto& c : cm) { c /= node.w_; }
             }
             else
             {
-                node.cm_.assign(nDim_, 0.0);
+                std::ranges::fill(cm, 0.0);
             }
         }
 
@@ -889,6 +922,9 @@ namespace kden {
         std::size_t nDim_;                                      /**< Number of dimensions the tree is built over */
         std::reference_wrapper<KDTreeData<AuxType>> data_;      /**< The (non-owned) points the tree indexes */
         std::vector<KDTreeNode> nodes_;                         /**< The tree's nodes, root first */
+        std::vector<double> nodeLo_;                            /**< Lower corners of the nodes' bounding boxes, nodes x nDim, node-major */
+        std::vector<double> nodeHi_;                            /**< Upper corners of the nodes' bounding boxes, likewise */
+        std::vector<double> nodeCm_;                            /**< Weighted centers of mass of the nodes' points, likewise; may be dropped if the kernel density evaluation does not need it (see nodeCm()) */
         std::size_t nLevels_ = 1;                               /**< Number of levels in the tree */
         std::size_t nLeaves_ = 1;                               /**< Number of leaves in the tree */
         std::size_t leafSize_;                                  /**< Maximum number of points in a leaf */

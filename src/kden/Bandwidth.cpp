@@ -242,8 +242,8 @@ kden::Bandwidth::BoxBounder::BoxBounder(const Bandwidth& bandwidth, std::span<co
     }
 }
 
-auto kden::Bandwidth::BoxBounder::operator()(const std::vector<double>& lo,
-    const std::vector<double>& hi) const -> double
+auto kden::Bandwidth::BoxBounder::operator()(std::span<const double> lo,
+    std::span<const double> hi) const -> double
 {
     const Bandwidth& bw = bandwidth_.get();
     const auto& spec = bw.spec_;

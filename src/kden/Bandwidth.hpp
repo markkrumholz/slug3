@@ -183,8 +183,8 @@ namespace kden {
              * @return A value no larger than the squared distance (as
              *   computed by dist2()) from the point to any point in the box
              */
-            auto operator()(const std::vector<double>& lo,
-                const std::vector<double>& hi) const -> double;
+            auto operator()(std::span<const double> lo,
+                std::span<const double> hi) const -> double;
 
         private:
 
