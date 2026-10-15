@@ -278,9 +278,21 @@ inline auto testKDTreeConstruction() -> int
     auto badAux = data;
     badAux.aux_.pop_back();
     try { const KDTestTree t(badAux); } catch (const std::invalid_argument&) { ++thrown; }
-    if (thrown != 5)
+    // Non-finite stored positions and weights are rejected: NaN is
+    // allowed only in search points, and infinities would give nodes
+    // non-finite bounds
+    auto nanX = data;
+    nanX.x_[7] = std::numeric_limits<double>::quiet_NaN();
+    try { const KDTestTree t(nanX); } catch (const std::invalid_argument&) { ++thrown; }
+    auto infX = data;
+    infX.x_[4] = std::numeric_limits<double>::infinity();
+    try { const KDTestTree t(infX); } catch (const std::invalid_argument&) { ++thrown; }
+    auto nanW = data;
+    nanW.w_[2] = std::numeric_limits<double>::quiet_NaN();
+    try { const KDTestTree t(nanW); } catch (const std::invalid_argument&) { ++thrown; }
+    if (thrown != 8)
     {
-        std::cerr << "testKDTreeConstruction: only " << thrown << " of 5 invalid constructions threw\n";
+        std::cerr << "testKDTreeConstruction: only " << thrown << " of 8 invalid constructions threw\n";
         ++failures;
     }
     return failures;

@@ -13,6 +13,7 @@
 #include <Eigen/Dense> // NOLINT(misc-include-cleaner) -- provides Eigen::Index; clang-tidy's IWYU mapping doesn't know this header
 #include <algorithm>
 #include <cassert>
+#include <cmath>
 #include <cstddef>
 #include <exception>
 #include <functional>
@@ -144,9 +145,18 @@ namespace kden {
         }
 
         /**
-         * @brief Check that the arrays are consistent with one another
-         * @throws std::invalid_argument if nDim_ is 0, or x_ (or aux_)
-         *   does not have nDim_ (or 1) elements per weight
+         * @brief Check that the arrays are consistent with one another, and finite
+         * @throws std::invalid_argument if nDim_ is 0, x_ (or aux_) does
+         *   not have nDim_ (or 1) elements per weight, or any position
+         *   coordinate or weight is not finite
+         * @details
+         * Stored positions must be finite: NaN marks unspecified
+         * dimensions only in search points, and a non-finite stored
+         * coordinate would give a node non-finite bounds, which the
+         * search's pruning bound cannot handle (and would break the
+         * ordering the build relies on). Data with non-finite values
+         * -- e.g. infinite magnitudes for clusters with no luminous
+         * stars -- must be filtered before building a tree.
          */
         void validate() const
         {
@@ -157,6 +167,15 @@ namespace kden {
             if (x_.size() != size() * nDim_)
             {
                 throw std::invalid_argument("KDTreeData: x_ must hold nDim_ coordinates per weight");
+            }
+            if (!std::ranges::all_of(x_, [](const double v) -> bool { return std::isfinite(v); }))
+            {
+                throw std::invalid_argument("KDTreeData: positions must be finite (NaN is "
+                    "supported only in search points)");
+            }
+            if (!std::ranges::all_of(w_, [](const double v) -> bool { return std::isfinite(v); }))
+            {
+                throw std::invalid_argument("KDTreeData: weights must be finite");
             }
             if constexpr (hasAux)
             {
@@ -292,7 +311,8 @@ namespace kden {
          * @brief Construct a KDTree over a set of points
          * @param data The points to index; not copied, so must outlive
          *   the tree, and reordered in place as the tree is built. Its
-         *   dimensionality sets the tree's.
+         *   dimensionality sets the tree's. Every position coordinate
+         *   and weight must be finite (see KDTreeData::validate()).
          * @param leafSize Maximum number of points in a leaf; must be
          *   at least 1
          * @param splitBandwidth Metric used to choose split dimensions
