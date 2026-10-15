@@ -9,15 +9,15 @@
 #ifndef KDTREE_HPP
 #define KDTREE_HPP
 
+#include "Bandwidth.hpp"
+#include <Eigen/Dense> // NOLINT(misc-include-cleaner) -- provides Eigen::Index; clang-tidy's IWYU mapping doesn't know this header
 #include <algorithm>
 #include <cassert>
-#include <cmath>
 #include <concepts>
 #include <cstddef>
+#include <exception>
 #include <functional>
 #include <limits>
-#include <mdspan> // NOLINT(misc-include-cleaner)
-#include <optional>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -99,12 +99,12 @@ namespace kden {
      *
      * The number of dimensions, nDim, is a runtime parameter, and
      * every point's position x_ must have exactly nDim elements.
-     * Distances may be measured using an inverse squared bandwidth
-     * matrix h2Inv; if none is given, the metric is the usual
-     * Euclidean one. The metric used to build the tree (which only
+     * Distances are measured in a metric defined by an inverse
+     * squared bandwidth matrix (see Bandwidth), or the Euclidean one
+     * if none is given. The metric used to build the tree (which only
      * affects which dimension each node is split along) is not
-     * stored: every query takes its own, so different threads can
-     * query the same tree with different metrics at once.
+     * stored: every search takes its own, so different threads can
+     * search the same tree with different metrics at once.
      */
     template <typename PtType>
         requires KDTreePoint<PtType>
@@ -178,187 +178,6 @@ namespace kden {
             return idx == nullNode ? nullNode : idx + 1;
         }
 
-        /** Type of a non-owning view of an nDim x nDim inverse squared bandwidth matrix */
-        using MatrixView = std::mdspan<const double, std::dextents<std::size_t, 2>>; // NOLINT(misc-include-cleaner) -- see the identical NOLINT on SpecsynLib.hpp's SpectraGrid alias
-
-        /**
-         * @brief Squared distance between two points in a given metric
-         * @param x1 Position of the first point; elements may be NaN
-         *   to leave that coordinate unspecified (see below)
-         * @param x2 Position of the second point, likewise; must have
-         *   the same number of elements as x1
-         * @param h2Inv Inverse squared bandwidth matrix defining the
-         *   metric, of size n x n where n is the number of elements of
-         *   x1; if not given, the metric is Euclidean. If any coordinate
-         *   is unspecified and the metric is not diagonal, this must be
-         *   the reduced matrix returned by reduceMetric() (see below).
-         * @return d^T h2Inv d, or d^T d if h2Inv is not given, with
-         *   d_i = x1[i] - x2[i], or 0 if either of them is NaN
-         * @details
-         * h2Inv acts as the metric tensor (an inverse covariance
-         * matrix): for a diagonal bandwidth h_i in each dimension, its
-         * diagonal entries are 1 / h_i^2. The metric is an argument
-         * rather than part of the tree because inference typically
-         * uses a locally computed one (e.g. the tree's bandwidth
-         * convolved with a particular observation's uncertainties),
-         * and keeping it out of the tree's state lets different threads
-         * use different metrics at the same time.
-         *
-         * A NaN coordinate in either point means "unspecified": that
-         * dimension contributes no separation, so the result is a
-         * distance between a point and a line, a plane, etc., or
-         * between two such objects. For a Euclidean or diagonal metric
-         * that is exact as is. For a non-diagonal metric, the distance
-         * minimized over the unspecified coordinates (equivalently, the
-         * metric of the Gaussian marginalized over them) is given not
-         * by the specified block of h2Inv but by its Schur complement,
-         * which reduceMetric() computes; this function does not, so
-         * that its cost stays O(n^2) with no allocation. Since the
-         * unspecified dimensions are usually the same for every point
-         * in a query, callers should call reduceMetric() once per
-         * query and pass its result here.
-         */
-        [[nodiscard]] static constexpr auto dist2(const std::vector<double>& x1,
-            const std::vector<double>& x2,
-            const std::optional<MatrixView> h2Inv = std::nullopt) -> double
-        {
-            const std::size_t n = x1.size();
-            assert(x2.size() == n);
-            // Separation in dimension i, or 0 if either coordinate is unspecified
-            auto sep = [&x1, &x2](const std::size_t i) -> double
-            {
-                const double a = x1[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-                const double b = x2[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-                return (std::isnan(a) || std::isnan(b)) ? 0.0 : a - b;
-            };
-            double r2 = 0.0;
-            if (!h2Inv.has_value())
-            {
-                for (std::size_t i = 0; i < n; ++i)
-                {
-                    const double d = sep(i);
-                    r2 += d * d;
-                }
-                return r2;
-            }
-            const MatrixView& m = *h2Inv;
-            assert(m.extent(0) == n && m.extent(1) == n);
-            for (std::size_t i = 0; i < n; ++i)
-            {
-                const double di = sep(i);
-                if (di == 0.0) { continue; }
-                for (std::size_t j = 0; j < n; ++j)
-                {
-                    r2 += di * sep(j) * m[i, j];
-                }
-            }
-            return r2;
-        }
-
-        /**
-         * @brief Reduce a metric for use with some coordinates unspecified
-         * @param h2Inv The full inverse squared bandwidth matrix, n x n
-         * @param unspecified Which dimensions will be unspecified (NaN)
-         *   in the points passed to dist2(); must have n elements
-         * @return A row-major n x n matrix (wrap it in a MatrixView to
-         *   pass it to dist2()) whose block over the specified
-         *   dimensions s is the Schur complement
-         *   M_ss - M_sf M_ff^-1 M_fs of the block over the unspecified
-         *   dimensions f, and whose other elements are zero
-         * @throws std::domain_error if the block of h2Inv over the
-         *   unspecified dimensions is not positive definite (which
-         *   cannot happen for a valid, positive-definite h2Inv)
-         * @details
-         * With this matrix, dist2() between points whose unspecified
-         * coordinates are NaN returns d^T M d minimized over every value
-         * of the unspecified separations -- i.e. the distance between
-         * a point and a line, plane, etc. in the full metric -- which
-         * is also the metric of the Gaussian marginalized over the
-         * unspecified dimensions (the Schur complement is the inverse of
-         * the s-s block of the covariance). Computed with a Cholesky
-         * factorization M_ff = L L^T: with W = L^-1 M_fs, the result is
-         * M_ss - W^T W. Costs O(n^3), so call it once for a given
-         * metric and set of unspecified dimensions and reuse the
-         * result. If no dimension is unspecified, the result is just a
-         * copy of h2Inv.
-         */
-        [[nodiscard]] static auto reduceMetric(const MatrixView h2Inv,
-            const std::vector<bool>& unspecified) -> std::vector<double>
-        {
-            const std::size_t n = h2Inv.extent(0);
-            assert(h2Inv.extent(1) == n && unspecified.size() == n);
-            std::vector<std::size_t> spec;
-            std::vector<std::size_t> free;
-            for (std::size_t i = 0; i < n; ++i)
-            {
-                (unspecified[i] ? free : spec).push_back(i);
-            }
-            const std::size_t nf = free.size();
-            const std::size_t ns = spec.size();
-
-            // Start from M_ss, with every other element zero
-            std::vector<double> result(n * n, 0.0);
-            for (const std::size_t i : spec)
-            {
-                for (const std::size_t j : spec)
-                {
-                    result[(i * n) + j] = h2Inv[i, j]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-                }
-            }
-            if (nf == 0 || ns == 0) { return result; }
-
-            // Cholesky-factor M_ff = L L^T (L stored row-major, nf x nf)
-            std::vector<double> chol(nf * nf, 0.0);
-            auto el = [&chol, nf](const std::size_t r, const std::size_t c) -> double&
-            {
-                return chol[(r * nf) + c]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-            };
-            for (std::size_t r = 0; r < nf; ++r)
-            {
-                for (std::size_t c = 0; c <= r; ++c)
-                {
-                    double sum = h2Inv[free[r], free[c]]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-                    for (std::size_t k = 0; k < c; ++k) { sum -= el(r, k) * el(c, k); }
-                    if (c == r)
-                    {
-                        if (!(sum > 0.0))
-                        {
-                            throw std::domain_error("KDTree::reduceMetric: the block of h2Inv "
-                                "over the unspecified dimensions is not positive definite");
-                        }
-                        el(r, r) = std::sqrt(sum);
-                    }
-                    else { el(r, c) = sum / el(c, c); }
-                }
-            }
-
-            // W = L^-1 M_fs by forward substitution, one column (one
-            // specified dimension) at a time; then subtract W^T W
-            std::vector<double> w(nf * ns);
-            for (std::size_t c = 0; c < ns; ++c)
-            {
-                for (std::size_t r = 0; r < nf; ++r)
-                {
-                    double sum = h2Inv[free[r], spec[c]]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-                    for (std::size_t k = 0; k < r; ++k) { sum -= el(r, k) * w[(k * ns) + c]; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-                    w[(r * ns) + c] = sum / el(r, r); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-                }
-            }
-            for (std::size_t a = 0; a < ns; ++a)
-            {
-                for (std::size_t b = 0; b < ns; ++b)
-                {
-                    double wtw = 0.0;
-                    for (std::size_t k = 0; k < nf; ++k)
-                    {
-                        wtw += w[(k * ns) + a] * w[(k * ns) + b]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-                    }
-                    result[(spec[a] * n) + spec[b]] -= wtw; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-                }
-            }
-            return result;
-        }
-
         /**
          * @brief Construct a KDTree over a set of points
          * @param data The points to index; not copied, so must outlive
@@ -367,14 +186,13 @@ namespace kden {
          *   least 1, and equal to the size of every point's x_
          * @param leafSize Maximum number of points in a leaf; must be
          *   at least 1
-         * @param h2Inv Inverse squared bandwidth matrix defining the
-         *   metric used to choose split dimensions while building the
-         *   tree (see chooseSplitDim()), of size nDim x nDim; if not
-         *   given, the metric is Euclidean. Used only during
-         *   construction and not stored; queries take their own metric.
-         * @throws std::invalid_argument if nDim, leafSize, or the shape
-         *   of h2Inv is invalid, or if any point's x_ does not have
-         *   exactly nDim elements
+         * @param splitBandwidth Metric used to choose split dimensions
+         *   while building the tree (see chooseSplitDim()), for nDim
+         *   dimensions. Used only during construction and not stored;
+         *   searches take their own metric.
+         * @throws std::invalid_argument if nDim or leafSize is invalid,
+         *   splitBandwidth is not for nDim dimensions, or any point's
+         *   x_ does not have exactly nDim elements
          * @details
          * Sizes the tree, then initializes its root node to cover
          * every point: its bounding box, the sum of its points'
@@ -386,11 +204,12 @@ namespace kden {
          */
         KDTree(std::vector<PtType>& data,
             const std::size_t nDim,
-            const std::size_t leafSize = 16,
-            const std::optional<MatrixView> h2Inv = std::nullopt) :
+            const std::size_t leafSize,
+            const Bandwidth& splitBandwidth) :
             nDim_(nDim),
             data_(std::ref(data)),
-            leafSize_(leafSize)
+            leafSize_(leafSize),
+            euclidean_(Bandwidth::identity(std::max<std::size_t>(nDim, 1)))
         {
             if (nDim_ < 1)
             {
@@ -400,10 +219,9 @@ namespace kden {
             {
                 throw std::invalid_argument("KDTree: leafSize must be at least 1");
             }
-            if (h2Inv.has_value() &&
-                (h2Inv->extent(0) != nDim_ || h2Inv->extent(1) != nDim_))
+            if (splitBandwidth.nDim() != nDim_)
             {
-                throw std::invalid_argument("KDTree: h2Inv must be of size nDim x nDim");
+                throw std::invalid_argument("KDTree: splitBandwidth must be for nDim dimensions");
             }
 
             // Number of leaves, levels, and nodes: keep halving the
@@ -455,32 +273,353 @@ namespace kden {
 #endif
                 for (std::size_t i = first; i < first + width; ++i)
                 {
-                    splitNode(i, h2Inv);
+                    splitNode(i, splitBandwidth);
                 }
                 first += width;
                 width <<= 1;
             }
         }
 
+        /**
+         * @brief Construct a KDTree, choosing split dimensions with the Euclidean metric
+         * @param data As for the other constructor
+         * @param nDim As for the other constructor
+         * @param leafSize As for the other constructor
+         * @throws std::invalid_argument as for the other constructor
+         */
+        KDTree(std::vector<PtType>& data, const std::size_t nDim, const std::size_t leafSize = 16) :
+            KDTree(data, nDim, leafSize, Bandwidth::identity(std::max<std::size_t>(nDim, 1)))
+        {}
+
+        // Read-only access to the tree's structure
+        /** @brief Number of dimensions of the tree
+         *  @return The number of dimensions */
+        [[nodiscard]] auto nDim() const -> std::size_t { return nDim_; }
+        /** @brief Maximum number of points in a leaf
+         *  @return The leaf size */
+        [[nodiscard]] auto leafSize() const -> std::size_t { return leafSize_; }
+        /** @brief Number of levels allocated for the tree
+         *  @return The number of levels (an upper bound on the depth;
+         *    see splitNode()) */
+        [[nodiscard]] auto nLevels() const -> std::size_t { return nLevels_; }
+        /** @brief Number of leaves allocated for the tree
+         *  @return The number of leaf slots on the last level (an upper
+         *    bound on the number of actual leaves) */
+        [[nodiscard]] auto nLeaves() const -> std::size_t { return nLeaves_; }
+        /** @brief The tree's nodes, in index order (root first)
+         *  @return The nodes; slots below a leaf are unused, and hold
+         *    default (empty) nodes */
+        [[nodiscard]] auto nodes() const -> const std::vector<KDTreeNode>& { return nodes_; }
+        /** @brief The points the tree indexes, in tree order
+         *  @return The (non-owned) points, reordered so that each node's
+         *    points are contiguous */
+        [[nodiscard]] auto data() const -> const std::vector<PtType>& { return data_.get(); }
+
+        /**
+         * @brief Find the nearest neighbors of a point
+         * @param x Position to search around; must have nDim elements.
+         *   Elements may be NaN, to judge nearness only in the other
+         *   dimensions.
+         * @param nNeighbor Number of neighbors to find
+         * @param bandwidth The metric, for nDim dimensions. If x has NaN
+         *   elements and bandwidth has not been reduced for exactly that
+         *   pattern (see Bandwidth::reduce()), it is reduced here, at
+         *   O(nDim^3) cost; for many searches with the same metric and
+         *   pattern, reduce once and pass the result.
+         * @return The min(nNeighbor, number of points) points nearest
+         *   to x, each paired with its squared distance from x (as
+         *   computed by Bandwidth::dist2(), with the reduced bandwidth
+         *   if x has NaN elements), in order of increasing distance. The
+         *   points are copies, carrying whatever other data PtType
+         *   holds (e.g. an index into the original data set).
+         * @throws std::invalid_argument if x or bandwidth is not for
+         *   nDim dimensions, or bandwidth has been reduced for a
+         *   different pattern of NaNs than x's
+         * @throws std::domain_error if reducing bandwidth fails (see
+         *   Bandwidth::reduce())
+         * @details
+         * Exact k-nearest-neighbor search. The tree is walked depth
+         * first, visiting the nearer child of each node first, so that
+         * close neighbors are found early; a node is skipped, with its
+         * whole subtree, if a rigorous lower bound on the distance from
+         * x to any point in its bounding box (see
+         * Bandwidth::BoxBounder) exceeds the distance to the current
+         * k'th nearest neighbor. Thread-safe: neither the tree nor the
+         * bandwidth is modified, so different threads may search at
+         * once, sharing a bandwidth or each with its own.
+         */
+        [[nodiscard]] auto neighbors(const std::vector<double>& x,
+            const std::size_t nNeighbor,
+            const Bandwidth& bandwidth) const
+            -> std::vector<std::pair<PtType, double>>
+        {
+            if (x.size() != nDim_ || bandwidth.nDim() != nDim_)
+            {
+                throw std::invalid_argument("KDTree::neighbors: x and bandwidth must be "
+                    "for nDim dimensions");
+            }
+            if (bandwidth.matches(x)) { return search(x, nNeighbor, bandwidth); }
+            if (bandwidth.isReduced())
+            {
+                throw std::invalid_argument("KDTree::neighbors: bandwidth was reduced for "
+                    "a different pattern of NaNs than x's");
+            }
+            return search(x, nNeighbor, bandwidth.reduce(Bandwidth::nanPattern(x)));
+        }
+
+        /**
+         * @brief Find the nearest neighbors of a point, in the Euclidean metric
+         * @param x As for the other overload
+         * @param nNeighbor As for the other overload
+         * @return As for the other overload
+         * @throws std::invalid_argument if x does not have nDim elements
+         */
+        [[nodiscard]] auto neighbors(const std::vector<double>& x,
+            const std::size_t nNeighbor) const
+            -> std::vector<std::pair<PtType, double>>
+        {
+            return neighbors(x, nNeighbor, euclidean_);
+        }
+
+        /**
+         * @brief Find the nearest neighbors of each of several points, in parallel
+         * @param x Positions to search around, one per search
+         * @param nNeighbor Number of neighbors to find, one per search
+         * @param bandwidth Metric to use, one per search
+         * @return One result per search, each exactly as returned by the
+         *   single-point version for the corresponding arguments
+         * @throws std::invalid_argument if x, nNeighbor, and bandwidth do
+         *   not all have the same number of elements; otherwise, any
+         *   exception the single-point version throws for any one of
+         *   the searches (the first one caught, if several do)
+         * @details
+         * Runs the single-point search for each element, in parallel
+         * (dynamically scheduled, since searches can differ widely in
+         * cost) if built with OpenMP.
+         */
+        [[nodiscard]] auto neighbors(const std::vector<std::vector<double>>& x,
+            const std::vector<std::size_t>& nNeighbor,
+            const std::vector<Bandwidth>& bandwidth) const
+            -> std::vector<std::vector<std::pair<PtType, double>>>
+        {
+            if (bandwidth.size() != x.size())
+            {
+                throw std::invalid_argument("KDTree::neighbors: x, nNeighbor, and bandwidth "
+                    "must all have the same number of elements");
+            }
+            return batchNeighbors(x, nNeighbor, [this, &bandwidth](const std::vector<double>& xi,
+                const std::size_t ki, const std::size_t i) -> std::vector<std::pair<PtType, double>>
+            {
+                return neighbors(xi, ki, bandwidth[i]); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            });
+        }
+
+        /**
+         * @brief Find the nearest neighbors of each of several points, in parallel, sharing one metric
+         * @param x Positions to search around, one per search
+         * @param nNeighbor Number of neighbors to find, one per search
+         * @param bandwidth The metric, shared by every search
+         * @return One result per search, each exactly as returned by the
+         *   single-point version
+         * @throws As for the version taking one bandwidth per search
+         * @details
+         * If bandwidth has not been reduced and every search point has
+         * the same pattern of NaNs, it is reduced once for all of them
+         * rather than once per search.
+         */
+        [[nodiscard]] auto neighbors(const std::vector<std::vector<double>>& x,
+            const std::vector<std::size_t>& nNeighbor,
+            const Bandwidth& bandwidth) const
+            -> std::vector<std::vector<std::pair<PtType, double>>>
+        {
+            // Reduce once up front if every point needs the same reduction
+            if (!x.empty() && !bandwidth.isReduced() && x.front().size() == nDim_ &&
+                !bandwidth.matches(x.front()))
+            {
+                const std::vector<bool> pattern = Bandwidth::nanPattern(x.front());
+                const bool shared = std::ranges::all_of(x, [&pattern](const std::vector<double>& xi) -> bool
+                    { return Bandwidth::nanPattern(xi) == pattern; });
+                if (shared)
+                {
+                    const Bandwidth reduced = bandwidth.reduce(pattern);
+                    return batchNeighbors(x, nNeighbor, [this, &reduced](const std::vector<double>& xi,
+                        const std::size_t ki, const std::size_t) -> std::vector<std::pair<PtType, double>>
+                    {
+                        return neighbors(xi, ki, reduced);
+                    });
+                }
+            }
+            return batchNeighbors(x, nNeighbor, [this, &bandwidth](const std::vector<double>& xi,
+                const std::size_t ki, const std::size_t) -> std::vector<std::pair<PtType, double>>
+            {
+                return neighbors(xi, ki, bandwidth);
+            });
+        }
+
+        /**
+         * @brief Find the nearest neighbors of each of several points, in parallel, in the Euclidean metric
+         * @param x Positions to search around, one per search
+         * @param nNeighbor Number of neighbors to find, one per search
+         * @return One result per search
+         * @throws As for the shared-bandwidth version
+         */
+        [[nodiscard]] auto neighbors(const std::vector<std::vector<double>>& x,
+            const std::vector<std::size_t>& nNeighbor) const
+            -> std::vector<std::vector<std::pair<PtType, double>>>
+        {
+            return neighbors(x, nNeighbor, euclidean_);
+        }
+
     private:
+
+        /**
+         * @brief The nearest-neighbor search itself
+         * @param x The search point; must match bandwidth (see Bandwidth::matches())
+         * @param nNeighbor Number of neighbors to find
+         * @param bandwidth The metric
+         * @return As for neighbors()
+         * @details
+         * Depth-first, nearer child first, with an explicit stack of
+         * (node, lower bound) pairs: a node popped whose bound now
+         * exceeds the current k'th distance is skipped. Candidates are
+         * kept as (squared distance, point index) pairs, sorted by
+         * distance, and copied into the result only at the end.
+         */
+        [[nodiscard]] auto search(const std::vector<double>& x,
+            const std::size_t nNeighbor,
+            const Bandwidth& bandwidth) const
+            -> std::vector<std::pair<PtType, double>>
+        {
+            const auto& pts = data_.get();
+            const std::size_t k = std::min(nNeighbor, pts.size());
+            if (k == 0) { return {}; }
+
+            const auto bound = bandwidth.boxBounder(x);
+            std::vector<double> scratch;
+            std::vector<std::pair<double, std::size_t>> best;
+            best.reserve(k + 1);
+            auto kth = [&best, k]() -> double
+            {
+                return best.size() < k ? std::numeric_limits<double>::infinity() : best.back().first;
+            };
+
+            std::vector<std::pair<std::size_t, double>> stack;
+            stack.reserve((2 * nLevels_) + 2);
+            const auto& root = nodes_[rootNode];
+            stack.emplace_back(rootNode, bound(root.lo_, root.hi_));
+            while (!stack.empty())
+            {
+                const auto [idx, nodeBound] = stack.back();
+                stack.pop_back();
+                if (nodeBound > kth()) { continue; }
+                const auto& node = nodes_[idx];
+
+                // A leaf: check each of its points, inserting any closer
+                // than the current k'th neighbor into the sorted list
+                if (node.splitDim_ < 0)
+                {
+                    for (std::size_t i = node.start_; i < node.start_ + node.count_; ++i)
+                    {
+                        const double r2 = bandwidth.dist2(x, pts[i].x_, scratch); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                        if (r2 > kth()) { continue; }
+                        const auto pos = std::ranges::lower_bound(best, r2, {},
+                            [](const std::pair<double, std::size_t>& entry) -> double { return entry.first; });
+                        best.insert(pos, {r2, i});
+                        if (best.size() > k) { best.pop_back(); }
+                    }
+                    continue;
+                }
+
+                // An interior node: push both children, nearer one last
+                // so that it is searched first
+                const auto& l = nodes_[node.lchild_];
+                const auto& r = nodes_[node.rchild_];
+                const double lBound = bound(l.lo_, l.hi_);
+                const double rBound = bound(r.lo_, r.hi_);
+                if (lBound <= rBound)
+                {
+                    stack.emplace_back(node.rchild_, rBound);
+                    stack.emplace_back(node.lchild_, lBound);
+                }
+                else
+                {
+                    stack.emplace_back(node.lchild_, lBound);
+                    stack.emplace_back(node.rchild_, rBound);
+                }
+            }
+
+            std::vector<std::pair<PtType, double>> result;
+            result.reserve(best.size());
+            for (const auto& [r2, i] : best) { result.emplace_back(pts[i], r2); } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            return result;
+        }
+
+        /**
+         * @brief Run a batch of neighbor searches in parallel
+         * @tparam Search Callable taking (x[i], nNeighbor[i], i) and
+         *   returning one search's result
+         * @param x Positions to search around, one per search
+         * @param nNeighbor Number of neighbors to find, one per search
+         * @param search The search to run for each element
+         * @return One result per search
+         * @throws std::invalid_argument if x and nNeighbor differ in
+         *   length; otherwise, the first exception any search throws
+         * @details
+         * Dynamically scheduled OpenMP loop, if built with OpenMP. An
+         * exception must not escape an OpenMP parallel region, so each
+         * is caught in the loop and the first one rethrown afterwards.
+         */
+        template <typename Search>
+        [[nodiscard]] auto batchNeighbors(const std::vector<std::vector<double>>& x,
+            const std::vector<std::size_t>& nNeighbor, const Search& search) const
+            -> std::vector<std::vector<std::pair<PtType, double>>>
+        {
+            if (nNeighbor.size() != x.size())
+            {
+                throw std::invalid_argument("KDTree::neighbors: x and nNeighbor "
+                    "must have the same number of elements");
+            }
+            std::vector<std::vector<std::pair<PtType, double>>> result(x.size());
+            std::exception_ptr error = nullptr;
+#ifdef _OPENMP
+#           pragma omp parallel for schedule(dynamic)
+#endif
+            for (std::size_t i = 0; i < x.size(); ++i)
+            {
+                try
+                {
+                    result[i] = search(x[i], nNeighbor[i], i); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                }
+                catch (...)
+                {
+#ifdef _OPENMP
+#                   pragma omp critical(kdtreeNeighborsError)
+#endif
+                    {
+                        if (!error) { error = std::current_exception(); }
+                    }
+                }
+            }
+            if (error) { std::rethrow_exception(error); }
+            return result;
+        }
 
         /**
          * @brief Choose the dimension along which to split a node
          * @param idx Index of the node; its lo_ and hi_ must already be set
-         * @param h2Inv Inverse squared bandwidth matrix defining the
-         *   metric, or none for Euclidean
+         * @param bandwidth The metric
          * @return The dimension to split along, in [0, nDim)
          * @details
          * Splits along the dimension in which the node is widest,
          * measured in the tree's metric: the one maximizing
-         * (hi_[i] - lo_[i])^2 h2Inv[i,i], the squared metric length of
+         * (hi_[i] - lo_[i])^2 M_ii, the squared metric length of
          * the node's extent along axis i (for a diagonal bandwidth h_i,
          * its extent in units of the bandwidth, squared), or just
-         * (hi_[i] - lo_[i])^2 if h2Inv is not given. Ties go to the
+         * (hi_[i] - lo_[i])^2 for the Euclidean metric. Ties go to the
          * lowest dimension.
          */
         [[nodiscard]] auto chooseSplitDim(const std::size_t idx,
-            const std::optional<MatrixView> h2Inv) const -> int
+            const Bandwidth& bandwidth) const -> int
         {
             const auto& node = nodes_[idx];
             std::size_t best = 0;
@@ -489,7 +628,7 @@ namespace kden {
             {
                 const double width = node.hi_[i] - node.lo_[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
                 double size = width * width;
-                if (h2Inv.has_value()) { size *= (*h2Inv)[i, i]; }
+                size *= bandwidth.h2Inv()(static_cast<Eigen::Index>(i), static_cast<Eigen::Index>(i));
                 if (size > bestSize)
                 {
                     best = i;
@@ -602,19 +741,17 @@ namespace kden {
          * @brief Split a node into two children, or mark it as a leaf
          * @param idx Index of the node; its start_, count_, and
          *   statistics (see setNodeStats()) must already be set
-         * @param h2Inv Inverse squared bandwidth matrix defining the
-         *   metric used to choose the split dimension, or none for
-         *   Euclidean
+         * @param bandwidth The metric used to choose the split dimension
          * @details
          * A node with at most leafSize_ points becomes a leaf
          * (splitDim_ = -1, no children). Otherwise it is split along
-         * chooseSplitDim(idx, h2Inv): its points are partitioned about their
+         * chooseSplitDim(idx, bandwidth): its points are partitioned about their
          * median along that dimension (see partitionNode()), the left
          * child gets the first (count_ + 1) / 2 of them and the right
          * child the rest, and each child's statistics are computed
          * from its own points.
          */
-        void splitNode(const std::size_t idx, const std::optional<MatrixView> h2Inv)
+        void splitNode(const std::size_t idx, const Bandwidth& bandwidth)
         {
             auto& node = nodes_[idx];
             if (node.count_ <= leafSize_)
@@ -626,7 +763,7 @@ namespace kden {
             }
 
             // Partition the points along the split dimension
-            node.splitDim_ = chooseSplitDim(idx, h2Inv);
+            node.splitDim_ = chooseSplitDim(idx, bandwidth);
             assert(node.splitDim_ >= 0 && static_cast<std::size_t>(node.splitDim_) < nDim_);
             partitionNode(idx);
 
@@ -656,6 +793,7 @@ namespace kden {
         std::size_t nLevels_ = 1;                               /**< Number of levels in the tree */
         std::size_t nLeaves_ = 1;                               /**< Number of leaves in the tree */
         std::size_t leafSize_;                                  /**< Maximum number of points in a leaf */
+        Bandwidth euclidean_;                                   /**< The Euclidean metric, for searches given none */
     };
 
 } // namespace kden
