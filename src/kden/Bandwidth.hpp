@@ -58,7 +58,7 @@ namespace kden {
          *   or is not symmetric
          * @throws std::domain_error if h2Inv is not positive semi-definite
          */
-        explicit Bandwidth(Eigen::MatrixXd h2Inv);
+        explicit Bandwidth(Eigen::MatrixXd h2Inv); // NOLINT(misc-include-cleaner) -- Eigen::MatrixXd is provided by <Eigen/Dense> (included above); clang-tidy's IWYU mapping doesn't know that
 
         /**
          * @brief The Euclidean metric
@@ -198,7 +198,7 @@ namespace kden {
             BoxBounder(const Bandwidth& bandwidth, std::span<const double> x);
 
             std::reference_wrapper<const Bandwidth> bandwidth_;  /**< The metric */
-            Eigen::VectorXd xs_;              /**< The point, specified dimensions only */
+            Eigen::VectorXd xs_;              /**< The point, specified dimensions only */ // NOLINT(misc-include-cleaner) -- Eigen::VectorXd is provided by <Eigen/Dense> (included above); clang-tidy's IWYU mapping doesn't know that
             Eigen::VectorXd wx_;              /**< W times xs_ (non-diagonal metrics only) */
             mutable Eigen::VectorXd center_;  /**< Scratch: a box's center */
             mutable Eigen::VectorXd half_;    /**< Scratch: a box's half-widths */

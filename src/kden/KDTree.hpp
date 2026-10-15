@@ -76,13 +76,13 @@ namespace kden {
     template <typename AuxType>
     struct KDTreeAuxStorage
     {
-        using type = std::vector<AuxType>; /**< One element per point */
+        using Type = std::vector<AuxType>; /**< One element per point */
     };
     /** @brief No auxiliary data: an empty placeholder */
     template <>
     struct KDTreeAuxStorage<void>
     {
-        using type = std::monostate; /**< Empty */
+        using Type = std::monostate; /**< Empty */
     };
 
     /**
@@ -109,7 +109,7 @@ namespace kden {
         std::size_t nDim_ = 0;   /**< Number of dimensions of each position */
         std::vector<double> x_;  /**< Positions, N x nDim_, point-major */
         std::vector<double> w_;  /**< Weights, one per point */
-        [[no_unique_address]] typename KDTreeAuxStorage<AuxType>::type aux_; /**< Auxiliary data, one per point (if AuxType is not void) */
+        [[no_unique_address]] typename KDTreeAuxStorage<AuxType>::Type aux_; /**< Auxiliary data, one per point (if AuxType is not void) */
 
         /** @brief Number of points
          *  @return N, the number of weights */
@@ -647,8 +647,8 @@ namespace kden {
                     {
                         const double r2 = bandwidth.dist2(x, pts.position(i), scratch);
                         if (r2 > kth()) { continue; }
-                        const auto pos = std::ranges::lower_bound(best, r2, {},
-                            [](const std::pair<double, std::size_t>& entry) -> double { return entry.first; });
+                        const auto pos = std::lower_bound(best.begin(), best.end(), r2,
+                            [](const std::pair<double, std::size_t>& entry, const double value) -> bool { return entry.first < value; });
                         best.insert(pos, {r2, i});
                         if (best.size() > k) { best.pop_back(); }
                     }
@@ -752,7 +752,7 @@ namespace kden {
             {
                 const double width = hi[i] - lo[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
                 double size = width * width;
-                size *= bandwidth.h2Inv()(static_cast<Eigen::Index>(i), static_cast<Eigen::Index>(i));
+                size *= bandwidth.h2Inv()(static_cast<Eigen::Index>(i), static_cast<Eigen::Index>(i)); // NOLINT(misc-include-cleaner) -- Eigen::Index is provided by <Eigen/Dense> (included above); clang-tidy's IWYU mapping doesn't know that
                 if (size > bestSize)
                 {
                     best = i;

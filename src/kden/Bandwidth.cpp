@@ -12,13 +12,14 @@
 #include <cassert>
 #include <cmath>
 #include <cstddef>
+#include <functional>
 #include <span>
 #include <stdexcept>
 #include <utility>
 #include <vector>
 
 // Public constructor: a full (unreduced) metric
-kden::Bandwidth::Bandwidth(Eigen::MatrixXd h2Inv) :
+kden::Bandwidth::Bandwidth(Eigen::MatrixXd h2Inv) : // NOLINT(misc-include-cleaner) -- Eigen::MatrixXd is provided by <Eigen/Dense> (included above); clang-tidy's IWYU mapping doesn't know that
     h2Inv_(std::move(h2Inv))
 {
     if (h2Inv_.rows() == 0 || h2Inv_.rows() != h2Inv_.cols())
@@ -44,7 +45,7 @@ kden::Bandwidth::Bandwidth(Eigen::MatrixXd h2Inv, std::vector<bool> unspecified)
 
 auto kden::Bandwidth::identity(const std::size_t nDim) -> Bandwidth
 {
-    const auto n = static_cast<Eigen::Index>(nDim);
+    const auto n = static_cast<Eigen::Index>(nDim); // NOLINT(misc-include-cleaner) -- Eigen::Index is provided by <Eigen/Dense> (included above); clang-tidy's IWYU mapping doesn't know that
     return Bandwidth(Eigen::MatrixXd::Identity(n, n));
 }
 
@@ -82,9 +83,9 @@ void kden::Bandwidth::prepare()
     }
 
     // Box-bound factor: M_s = P^T L D L^T P, W = D^1/2 L^T P
-    const Eigen::LDLT<Eigen::MatrixXd> ldlt(ms_);
+    const Eigen::LDLT<Eigen::MatrixXd> ldlt(ms_); // NOLINT(misc-include-cleaner) -- Eigen::LDLT is provided by <Eigen/Dense> (included above); clang-tidy's IWYU mapping doesn't know that
     const Eigen::VectorXd& d = ldlt.vectorD();
-    if (ldlt.info() != Eigen::Success || d.minCoeff() < -1e-12 * std::max(d.maxCoeff(), 0.0))
+    if (ldlt.info() != Eigen::Success || d.minCoeff() < -1e-12 * std::max(d.maxCoeff(), 0.0)) // NOLINT(misc-include-cleaner) -- Eigen::Success is provided by <Eigen/Dense> (included above); clang-tidy's IWYU mapping doesn't know that
     {
         throw std::domain_error("Bandwidth: h2Inv is not positive semi-definite");
     }
@@ -129,7 +130,7 @@ auto kden::Bandwidth::reduce(const std::vector<bool>& unspecified) const -> Band
         }
         return b;
     };
-    const Eigen::LLT<Eigen::MatrixXd> llt(block(drop, drop));
+    const Eigen::LLT<Eigen::MatrixXd> llt(block(drop, drop)); // NOLINT(misc-include-cleaner) -- Eigen::LLT is provided by <Eigen/Dense> (included above); clang-tidy's IWYU mapping doesn't know that
     if (llt.info() != Eigen::Success)
     {
         throw std::domain_error("Bandwidth::reduce: the block of h2Inv over the newly "
