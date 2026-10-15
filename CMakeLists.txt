@@ -347,6 +347,10 @@ add_executable(slugTestTracksFull
     tests/tracks/testTracksFullAll.cpp
     src/utils/HDF5Utils.cpp
 )
+add_executable(slugTestKden
+    tests/kden/testKdenAll.cpp
+    src/kden/Bandwidth.cpp
+)
 add_executable(slugTestYields
     src/elem/IsotopeTable.cpp
     src/yields/YieldChannel.cpp
@@ -790,6 +794,7 @@ target_include_directories(slugTestTracks SYSTEM PRIVATE src/extern/pcg-cpp/incl
 target_include_directories(slugTestTracksFull SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
 
 target_include_directories(slugTestYields PRIVATE src)
+target_include_directories(slugTestKden PRIVATE src)
 target_include_directories(slugTestYields SYSTEM PRIVATE src/extern/pcg-cpp/include src/extern/tomlplusplus)
 
 target_include_directories(slugTestCore PRIVATE src ${CMAKE_BINARY_DIR}/generated)
@@ -849,6 +854,7 @@ target_include_directories(slugTestNebular SYSTEM PRIVATE src/extern/eigen)
 target_include_directories(slugTestFeedback SYSTEM PRIVATE src/extern/eigen)
 target_include_directories(slugTestSpecsyn SYSTEM PRIVATE src/extern/eigen)
 target_include_directories(slugPython SYSTEM PRIVATE src/extern/eigen)
+target_include_directories(slugTestKden SYSTEM PRIVATE src/extern/eigen)
 
 # Link to GSL
 target_link_libraries(slug PRIVATE GSL::gsl)
@@ -880,6 +886,7 @@ target_link_libraries(slugTestUtils PRIVATE slug_mdspan)
 target_link_libraries(slugTestTracks PRIVATE slug_mdspan)
 target_link_libraries(slugTestTracksFull PRIVATE slug_mdspan)
 target_link_libraries(slugTestYields PRIVATE slug_mdspan)
+target_link_libraries(slugTestKden PRIVATE slug_mdspan)
 target_link_libraries(slugTestCore PRIVATE slug_mdspan)
 target_link_libraries(slugTestCoreFull PRIVATE slug_mdspan)
 target_link_libraries(slugTestIo PRIVATE slug_mdspan)
@@ -919,6 +926,7 @@ if(OpenMP_CXX_FOUND)
     target_link_libraries(slugTestTracks PRIVATE OpenMP::OpenMP_CXX)
     target_link_libraries(slugTestTracksFull PRIVATE OpenMP::OpenMP_CXX)
     target_link_libraries(slugTestYields PRIVATE OpenMP::OpenMP_CXX)
+    target_link_libraries(slugTestKden PRIVATE OpenMP::OpenMP_CXX)
     target_link_libraries(slugTestCore PRIVATE OpenMP::OpenMP_CXX)
     target_link_libraries(slugTestCoreFull PRIVATE OpenMP::OpenMP_CXX)
     target_link_libraries(slugTestIo PRIVATE OpenMP::OpenMP_CXX)
@@ -1074,6 +1082,8 @@ add_test(NAME test_TracksFull COMMAND slugTestTracksFull
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 add_test(NAME test_Yields COMMAND slugTestYields
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+add_test(NAME test_Kden COMMAND slugTestKden
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 # test_Core exercises SimPhysics's file resolution via getFilePath's
 # SLUG_DIR + prefix rule (e.g. for stars.IMF = "chabrier.toml", which
@@ -1182,7 +1192,7 @@ endif()
 # executable would make it impossible to skip on its own.
 set_tests_properties(
     test_Interpolation test_Elem test_Extinct test_Phot test_PDFs test_Utils test_Specsyn test_Tracks
-    test_Yields test_Core test_Io test_Nebular test_Feedback test_PythonBindings test_Slugpy
+    test_Yields test_Kden test_Core test_Io test_Nebular test_Feedback test_PythonBindings test_Slugpy
     PROPERTIES LABELS "quick")
 set_tests_properties(test_CoreFull test_TracksFull PROPERTIES LABELS "slow")
 
