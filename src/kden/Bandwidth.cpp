@@ -12,6 +12,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstddef>
+#include <span>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -150,14 +151,14 @@ auto kden::Bandwidth::reduce(const std::vector<bool>& unspecified) const -> Band
     return {std::move(reduced), unspecified};
 }
 
-auto kden::Bandwidth::nanPattern(const std::vector<double>& x) -> std::vector<bool>
+auto kden::Bandwidth::nanPattern(std::span<const double> x) -> std::vector<bool>
 {
     std::vector<bool> pattern(x.size());
     for (std::size_t i = 0; i < x.size(); ++i) { pattern[i] = std::isnan(x[i]); } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
     return pattern;
 }
 
-auto kden::Bandwidth::matches(const std::vector<double>& x) const -> bool
+auto kden::Bandwidth::matches(std::span<const double> x) const -> bool
 {
     if (x.size() != unspecified_.size()) { return false; }
     for (std::size_t i = 0; i < x.size(); ++i)
@@ -167,13 +168,13 @@ auto kden::Bandwidth::matches(const std::vector<double>& x) const -> bool
     return true;
 }
 
-auto kden::Bandwidth::dist2(const std::vector<double>& x1, const std::vector<double>& x2) const -> double
+auto kden::Bandwidth::dist2(std::span<const double> x1, std::span<const double> x2) const -> double
 {
     std::vector<double> scratch;
     return dist2(x1, x2, scratch);
 }
 
-auto kden::Bandwidth::dist2(const std::vector<double>& x1, const std::vector<double>& x2,
+auto kden::Bandwidth::dist2(std::span<const double> x1, std::span<const double> x2,
     std::vector<double>& scratch) const -> double
 {
     assert(x1.size() == nDim() && x2.size() == nDim());
@@ -218,12 +219,12 @@ auto kden::Bandwidth::dist2(const std::vector<double>& x1, const std::vector<dou
     return r2;
 }
 
-auto kden::Bandwidth::boxBounder(const std::vector<double>& x) const -> BoxBounder
+auto kden::Bandwidth::boxBounder(std::span<const double> x) const -> BoxBounder
 {
     return {*this, x};
 }
 
-kden::Bandwidth::BoxBounder::BoxBounder(const Bandwidth& bandwidth, const std::vector<double>& x) :
+kden::Bandwidth::BoxBounder::BoxBounder(const Bandwidth& bandwidth, std::span<const double> x) :
     bandwidth_(std::cref(bandwidth))
 {
     const auto& spec = bandwidth.spec_;

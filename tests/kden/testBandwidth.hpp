@@ -76,12 +76,12 @@ inline auto testBandwidthDist2() -> int
     check("diagonal", diagBw.dist2(a, b), 34.0);
     check("full", fullBw.dist2(a, b), 46.0);
     check("self", fullBw.dist2(a, a), 0.0);
-    check("Euclidean, x1[1] unspecified", euclid.dist2({1.0, nan}, b), 9.0);
-    check("diagonal, x2[0] unspecified", diagBw.dist2(a, {nan, 6.0}), 16.0);
-    check("disjoint unspecified", fullBw.dist2({1.0, nan}, {nan, 6.0}), 0.0);
+    check("Euclidean, x1[1] unspecified", euclid.dist2(std::vector<double>{1.0, nan}, b), 9.0);
+    check("diagonal, x2[0] unspecified", diagBw.dist2(a, std::vector<double>{nan, 6.0}), 16.0);
+    check("disjoint unspecified", fullBw.dist2(std::vector<double>{1.0, nan}, std::vector<double>{nan, 6.0}), 0.0);
     const kden::Bandwidth reduced = fullBw.reduce({false, true});
-    check("full, reduced: 9 * (2 - 0.5^2)", reduced.dist2({1.0, nan}, b), 15.75);
-    if (!reduced.isReduced() || !reduced.isDiagonal() || !reduced.matches({1.0, nan}) || reduced.matches(a))
+    check("full, reduced: 9 * (2 - 0.5^2)", reduced.dist2(std::vector<double>{1.0, nan}, b), 15.75);
+    if (!reduced.isReduced() || !reduced.isDiagonal() || !reduced.matches(std::vector<double>{1.0, nan}) || reduced.matches(a))
     {
         std::cerr << "testBandwidthDist2: reduced bandwidth reports the wrong state\n";
         ++failures;

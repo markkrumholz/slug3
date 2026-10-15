@@ -13,13 +13,15 @@
 #include <Eigen/Dense> // NOLINT(misc-include-cleaner) -- provides Eigen::Index; clang-tidy's IWYU mapping doesn't know this header
 #include <algorithm>
 #include <cassert>
-#include <concepts>
 #include <cstddef>
 #include <exception>
 #include <functional>
 #include <limits>
+#include <span>
 #include <stdexcept>
+#include <type_traits>
 #include <utility>
+#include <variant>
 #include <vector>
 
 /**
@@ -70,44 +72,155 @@ namespace kden {
     };
 
     /**
-     * @brief Requirements on the type of a point stored in a KDTree
-     * @tparam PtType The point type
-     * @details
-     * A point must be copyable and assignable (the tree reorders its
-     * points in place), and must have public members x_, of type
-     * std::vector<double>, holding its position (one element per
-     * dimension of the tree), and w_, of type double, holding its
-     * weight. It may carry any other information as well.
+     * @brief Storage type for a KDTreeData's auxiliary data
+     * @tparam AuxType Type of one point's auxiliary data, or void for none
+     * @details std::vector<AuxType>, or an empty placeholder if AuxType is void
      */
-    template <typename PtType>
-    concept KDTreePoint = std::copyable<PtType> &&
-        std::same_as<decltype(PtType::x_), std::vector<double>> &&
-        std::same_as<decltype(PtType::w_), double>;
+    template <typename AuxType>
+    struct KDTreeAuxStorage
+    {
+        using type = std::vector<AuxType>; /**< One element per point */
+    };
+    /** @brief No auxiliary data: an empty placeholder */
+    template <>
+    struct KDTreeAuxStorage<void>
+    {
+        using type = std::monostate; /**< Empty */
+    };
+
+    /**
+     * @struct KDTreeData
+     * @brief The points a KDTree indexes, stored as a struct of arrays
+     * @tparam AuxType Type of the auxiliary data carried by each point
+     *   (e.g. an index into an original data set), or void (the
+     *   default) for none
+     * @details
+     * Holds N points of nDim_ dimensions each, as one flat array of
+     * positions (x_, N x nDim_ doubles, point-major: point i occupies
+     * x_[i * nDim_] through x_[i * nDim_ + nDim_ - 1]), one of weights
+     * (w_, N doubles), and, unless AuxType is void, one of auxiliary
+     * data (aux_, N elements of AuxType). Building a KDTree over it
+     * reorders all of them together, in place. With AuxType void, aux_
+     * is an empty placeholder that occupies no storage.
+     */
+    template <typename AuxType = void>
+    struct KDTreeData
+    {
+        /** Whether points carry auxiliary data */
+        static constexpr bool hasAux = !std::is_void_v<AuxType>;
+
+        std::size_t nDim_ = 0;   /**< Number of dimensions of each position */
+        std::vector<double> x_;  /**< Positions, N x nDim_, point-major */
+        std::vector<double> w_;  /**< Weights, one per point */
+        [[no_unique_address]] typename KDTreeAuxStorage<AuxType>::type aux_; /**< Auxiliary data, one per point (if AuxType is not void) */
+
+        /** @brief Number of points
+         *  @return N, the number of weights */
+        [[nodiscard]] auto size() const -> std::size_t { return w_.size(); }
+
+        /**
+         * @brief Position of a point
+         * @param i Index of the point
+         * @return A view of its nDim_ coordinates
+         */
+        [[nodiscard]] auto position(const std::size_t i) const -> std::span<const double>
+        {
+            return std::span<const double>(x_).subspan(i * nDim_, nDim_);
+        }
+
+        /**
+         * @brief Weight of a point
+         * @param i Index of the point
+         * @return Its weight
+         */
+        [[nodiscard]] auto weight(const std::size_t i) const -> double { return w_[i]; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+
+        /**
+         * @brief Auxiliary data of a point
+         * @param i Index of the point
+         * @return Its auxiliary data
+         */
+        [[nodiscard]] auto aux(const std::size_t i) const -> const auto&
+            requires hasAux
+        {
+            return aux_[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        }
+
+        /**
+         * @brief Check that the arrays are consistent with one another
+         * @throws std::invalid_argument if nDim_ is 0, or x_ (or aux_)
+         *   does not have nDim_ (or 1) elements per weight
+         */
+        void validate() const
+        {
+            if (nDim_ < 1)
+            {
+                throw std::invalid_argument("KDTreeData: nDim_ must be at least 1");
+            }
+            if (x_.size() != size() * nDim_)
+            {
+                throw std::invalid_argument("KDTreeData: x_ must hold nDim_ coordinates per weight");
+            }
+            if constexpr (hasAux)
+            {
+                if (aux_.size() != size())
+                {
+                    throw std::invalid_argument("KDTreeData: aux_ must hold one element per weight");
+                }
+            }
+        }
+
+        /**
+         * @brief Exchange two points: their positions, weights, and auxiliary data
+         * @param i Index of one point
+         * @param j Index of the other
+         */
+        void swap(const std::size_t i, const std::size_t j)
+        {
+            std::swap_ranges(x_.begin() + static_cast<std::ptrdiff_t>(i * nDim_),
+                x_.begin() + static_cast<std::ptrdiff_t>((i + 1) * nDim_),
+                x_.begin() + static_cast<std::ptrdiff_t>(j * nDim_));
+            std::swap(w_[i], w_[j]); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            if constexpr (hasAux)
+            {
+                std::swap(aux_[i], aux_[j]); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            }
+        }
+    };
+
+    /**
+     * @struct Neighbor
+     * @brief One result of a nearest-neighbor search
+     */
+    struct Neighbor
+    {
+        std::size_t idx_ = 0;  /**< Index of the point in the tree's (reordered) KDTreeData */
+        double dist2_ = 0.0;   /**< Squared distance from the search point */
+    };
 
     /**
      * @class KDTree
      * @brief A balanced kd tree indexing a set of weighted points
-     * @tparam PtType Type of a point; see KDTreePoint
+     * @tparam AuxType Type of the auxiliary data each point carries, or
+     *   void (the default) for none; see KDTreeData
      * @details
-     * A non-owning wrapper around a vector of points that provides
-     * tree-based access to them. The tree is balanced, and its nodes
+     * A non-owning wrapper around a set of points (a KDTreeData) that
+     * provides tree-based access to them. The tree is balanced, and its nodes
      * are stored in a single contiguous array: node 0 is the root, and
      * the children of node i are nodes 2i + 1 and 2i + 2, so the tree
      * can be traversed with bit-shifting arithmetic. Building the tree
      * reorders the underlying points in place, so that every node's
      * points occupy a contiguous range of them.
      *
-     * The number of dimensions, nDim, is a runtime parameter, and
-     * every point's position x_ must have exactly nDim elements.
-     * Distances are measured in a metric defined by an inverse
+     * The number of dimensions, nDim, is a runtime parameter, taken
+     * from the data. Distances are measured in a metric defined by an inverse
      * squared bandwidth matrix (see Bandwidth), or the Euclidean one
      * if none is given. The metric used to build the tree (which only
      * affects which dimension each node is split along) is not
      * stored: every search takes its own, so different threads can
      * search the same tree with different metrics at once.
      */
-    template <typename PtType>
-        requires KDTreePoint<PtType>
+    template <typename AuxType = void>
     class KDTree
     {
     public:
@@ -181,18 +294,17 @@ namespace kden {
         /**
          * @brief Construct a KDTree over a set of points
          * @param data The points to index; not copied, so must outlive
-         *   the tree, and reordered in place as the tree is built
-         * @param nDim Number of dimensions of the tree; must be at
-         *   least 1, and equal to the size of every point's x_
+         *   the tree, and reordered in place as the tree is built. Its
+         *   dimensionality sets the tree's.
          * @param leafSize Maximum number of points in a leaf; must be
          *   at least 1
          * @param splitBandwidth Metric used to choose split dimensions
          *   while building the tree (see chooseSplitDim()), for nDim
          *   dimensions. Used only during construction and not stored;
          *   searches take their own metric.
-         * @throws std::invalid_argument if nDim or leafSize is invalid,
-         *   splitBandwidth is not for nDim dimensions, or any point's
-         *   x_ does not have exactly nDim elements
+         * @throws std::invalid_argument if data is inconsistent (see
+         *   KDTreeData::validate()), leafSize is 0, or splitBandwidth is
+         *   not for data's number of dimensions
          * @details
          * Sizes the tree, then initializes its root node to cover
          * every point: its bounding box, the sum of its points'
@@ -202,19 +314,15 @@ namespace kden {
          * by level (see splitNode()), in parallel within each level if
          * built with OpenMP. This reorders data in place.
          */
-        KDTree(std::vector<PtType>& data,
-            const std::size_t nDim,
+        KDTree(KDTreeData<AuxType>& data,
             const std::size_t leafSize,
             const Bandwidth& splitBandwidth) :
-            nDim_(nDim),
+            nDim_(data.nDim_),
             data_(std::ref(data)),
             leafSize_(leafSize),
-            euclidean_(Bandwidth::identity(std::max<std::size_t>(nDim, 1)))
+            euclidean_(Bandwidth::identity(std::max<std::size_t>(data.nDim_, 1)))
         {
-            if (nDim_ < 1)
-            {
-                throw std::invalid_argument("KDTree: nDim must be at least 1");
-            }
+            data.validate();
             if (leafSize_ < 1)
             {
                 throw std::invalid_argument("KDTree: leafSize must be at least 1");
@@ -242,16 +350,7 @@ namespace kden {
                 node.cm_.resize(nDim_);
             }
 
-            // Root node: covers every point. Check every point's
-            // dimensionality once here, so nothing downstream has to.
-            for (const auto& pt : data_.get())
-            {
-                if (pt.x_.size() != nDim_)
-                {
-                    throw std::invalid_argument(
-                        "KDTree: every point's x_ must have exactly nDim elements");
-                }
-            }
+            // Root node: covers every point
             nodes_[rootNode].start_ = 0;
             nodes_[rootNode].count_ = data_.get().size();
             setNodeStats(rootNode);
@@ -283,12 +382,11 @@ namespace kden {
         /**
          * @brief Construct a KDTree, choosing split dimensions with the Euclidean metric
          * @param data As for the other constructor
-         * @param nDim As for the other constructor
          * @param leafSize As for the other constructor
          * @throws std::invalid_argument as for the other constructor
          */
-        KDTree(std::vector<PtType>& data, const std::size_t nDim, const std::size_t leafSize = 16) :
-            KDTree(data, nDim, leafSize, Bandwidth::identity(std::max<std::size_t>(nDim, 1)))
+        explicit KDTree(KDTreeData<AuxType>& data, const std::size_t leafSize = 16) :
+            KDTree(data, leafSize, Bandwidth::identity(std::max<std::size_t>(data.nDim_, 1)))
         {}
 
         // Read-only access to the tree's structure
@@ -312,8 +410,8 @@ namespace kden {
         [[nodiscard]] auto nodes() const -> const std::vector<KDTreeNode>& { return nodes_; }
         /** @brief The points the tree indexes, in tree order
          *  @return The (non-owned) points, reordered so that each node's
-         *    points are contiguous */
-        [[nodiscard]] auto data() const -> const std::vector<PtType>& { return data_.get(); }
+         *    points are contiguous; Neighbor::idx_ indexes into these */
+        [[nodiscard]] auto data() const -> const KDTreeData<AuxType>& { return data_.get(); }
 
         /**
          * @brief Find the nearest neighbors of a point
@@ -327,11 +425,11 @@ namespace kden {
          *   O(nDim^3) cost; for many searches with the same metric and
          *   pattern, reduce once and pass the result.
          * @return The min(nNeighbor, number of points) points nearest
-         *   to x, each paired with its squared distance from x (as
+         *   to x, in order of increasing distance, each as the index of
+         *   the point in data() and its squared distance from x (as
          *   computed by Bandwidth::dist2(), with the reduced bandwidth
-         *   if x has NaN elements), in order of increasing distance. The
-         *   points are copies, carrying whatever other data PtType
-         *   holds (e.g. an index into the original data set).
+         *   if x has NaN elements). Use data().position(), weight(),
+         *   and aux() to get at the point itself.
          * @throws std::invalid_argument if x or bandwidth is not for
          *   nDim dimensions, or bandwidth has been reduced for a
          *   different pattern of NaNs than x's
@@ -351,7 +449,7 @@ namespace kden {
         [[nodiscard]] auto neighbors(const std::vector<double>& x,
             const std::size_t nNeighbor,
             const Bandwidth& bandwidth) const
-            -> std::vector<std::pair<PtType, double>>
+            -> std::vector<Neighbor>
         {
             if (x.size() != nDim_ || bandwidth.nDim() != nDim_)
             {
@@ -376,7 +474,7 @@ namespace kden {
          */
         [[nodiscard]] auto neighbors(const std::vector<double>& x,
             const std::size_t nNeighbor) const
-            -> std::vector<std::pair<PtType, double>>
+            -> std::vector<Neighbor>
         {
             return neighbors(x, nNeighbor, euclidean_);
         }
@@ -400,7 +498,7 @@ namespace kden {
         [[nodiscard]] auto neighbors(const std::vector<std::vector<double>>& x,
             const std::vector<std::size_t>& nNeighbor,
             const std::vector<Bandwidth>& bandwidth) const
-            -> std::vector<std::vector<std::pair<PtType, double>>>
+            -> std::vector<std::vector<Neighbor>>
         {
             if (bandwidth.size() != x.size())
             {
@@ -408,7 +506,7 @@ namespace kden {
                     "must all have the same number of elements");
             }
             return batchNeighbors(x, nNeighbor, [this, &bandwidth](const std::vector<double>& xi,
-                const std::size_t ki, const std::size_t i) -> std::vector<std::pair<PtType, double>>
+                const std::size_t ki, const std::size_t i) -> std::vector<Neighbor>
             {
                 return neighbors(xi, ki, bandwidth[i]); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
             });
@@ -430,7 +528,7 @@ namespace kden {
         [[nodiscard]] auto neighbors(const std::vector<std::vector<double>>& x,
             const std::vector<std::size_t>& nNeighbor,
             const Bandwidth& bandwidth) const
-            -> std::vector<std::vector<std::pair<PtType, double>>>
+            -> std::vector<std::vector<Neighbor>>
         {
             // Reduce once up front if every point needs the same reduction
             if (!x.empty() && !bandwidth.isReduced() && x.front().size() == nDim_ &&
@@ -443,14 +541,14 @@ namespace kden {
                 {
                     const Bandwidth reduced = bandwidth.reduce(pattern);
                     return batchNeighbors(x, nNeighbor, [this, &reduced](const std::vector<double>& xi,
-                        const std::size_t ki, const std::size_t) -> std::vector<std::pair<PtType, double>>
+                        const std::size_t ki, const std::size_t) -> std::vector<Neighbor>
                     {
                         return neighbors(xi, ki, reduced);
                     });
                 }
             }
             return batchNeighbors(x, nNeighbor, [this, &bandwidth](const std::vector<double>& xi,
-                const std::size_t ki, const std::size_t) -> std::vector<std::pair<PtType, double>>
+                const std::size_t ki, const std::size_t) -> std::vector<Neighbor>
             {
                 return neighbors(xi, ki, bandwidth);
             });
@@ -465,7 +563,7 @@ namespace kden {
          */
         [[nodiscard]] auto neighbors(const std::vector<std::vector<double>>& x,
             const std::vector<std::size_t>& nNeighbor) const
-            -> std::vector<std::vector<std::pair<PtType, double>>>
+            -> std::vector<std::vector<Neighbor>>
         {
             return neighbors(x, nNeighbor, euclidean_);
         }
@@ -483,12 +581,12 @@ namespace kden {
          * (node, lower bound) pairs: a node popped whose bound now
          * exceeds the current k'th distance is skipped. Candidates are
          * kept as (squared distance, point index) pairs, sorted by
-         * distance, and copied into the result only at the end.
+         * distance.
          */
         [[nodiscard]] auto search(const std::vector<double>& x,
             const std::size_t nNeighbor,
             const Bandwidth& bandwidth) const
-            -> std::vector<std::pair<PtType, double>>
+            -> std::vector<Neighbor>
         {
             const auto& pts = data_.get();
             const std::size_t k = std::min(nNeighbor, pts.size());
@@ -520,7 +618,7 @@ namespace kden {
                 {
                     for (std::size_t i = node.start_; i < node.start_ + node.count_; ++i)
                     {
-                        const double r2 = bandwidth.dist2(x, pts[i].x_, scratch); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                        const double r2 = bandwidth.dist2(x, pts.position(i), scratch);
                         if (r2 > kth()) { continue; }
                         const auto pos = std::ranges::lower_bound(best, r2, {},
                             [](const std::pair<double, std::size_t>& entry) -> double { return entry.first; });
@@ -548,9 +646,9 @@ namespace kden {
                 }
             }
 
-            std::vector<std::pair<PtType, double>> result;
+            std::vector<Neighbor> result;
             result.reserve(best.size());
-            for (const auto& [r2, i] : best) { result.emplace_back(pts[i], r2); } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            for (const auto& [r2, i] : best) { result.push_back({.idx_ = i, .dist2_ = r2}); }
             return result;
         }
 
@@ -572,14 +670,14 @@ namespace kden {
         template <typename Search>
         [[nodiscard]] auto batchNeighbors(const std::vector<std::vector<double>>& x,
             const std::vector<std::size_t>& nNeighbor, const Search& search) const
-            -> std::vector<std::vector<std::pair<PtType, double>>>
+            -> std::vector<std::vector<Neighbor>>
         {
             if (nNeighbor.size() != x.size())
             {
                 throw std::invalid_argument("KDTree::neighbors: x and nNeighbor "
                     "must have the same number of elements");
             }
-            std::vector<std::vector<std::pair<PtType, double>>> result(x.size());
+            std::vector<std::vector<Neighbor>> result(x.size());
             std::exception_ptr error = nullptr;
 #ifdef _OPENMP
 #           pragma omp parallel for schedule(dynamic)
@@ -659,16 +757,17 @@ namespace kden {
             node.w2_ = 0.0;
             for (std::size_t i = node.start_; i < node.start_ + node.count_; ++i)
             {
-                const auto& pt = pts[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                const auto pos = pts.position(i);
+                const double w = pts.weight(i);
                 for (std::size_t d = 0; d < nDim_; ++d)
                 {
-                    const double x = pt.x_[d]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                    const double x = pos[d]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
                     node.lo_[d] = std::min(node.lo_[d], x); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
                     node.hi_[d] = std::max(node.hi_[d], x); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-                    node.cm_[d] += pt.w_ * x; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                    node.cm_[d] += w * x; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
                 }
-                node.w_ += pt.w_;
-                node.w2_ += pt.w_ * pt.w_;
+                node.w_ += w;
+                node.w2_ += w * w;
             }
             if (node.w_ != 0.0)
             {
@@ -690,17 +789,17 @@ namespace kden {
          * be there if the node's points were fully sorted by their
          * coordinate along splitDim_, every point before it has a
          * coordinate no larger, and every point after it one no
-         * smaller. Points are swapped whole, so any other data they
-         * carry (e.g. their original index) moves with them.
+         * smaller. Points are swapped whole -- position, weight, and
+         * auxiliary data together (see KDTreeData::swap()).
          */
         void partitionNode(const std::size_t idx)
         {
             const auto& node = nodes_[idx];
             auto& pts = data_.get();
             const auto dim = static_cast<std::size_t>(node.splitDim_);
-            auto key = [&pts, dim](const std::size_t i) -> double
+            auto key = [&pts, dim, nDim = nDim_](const std::size_t i) -> double
             {
-                return pts[i].x_[dim]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                return pts.x_[(i * nDim) + dim]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
             };
 
             std::size_t l = node.start_;
@@ -722,7 +821,7 @@ namespace kden {
                     while (key(lptr) < splitVal && lptr < rptr) { lptr++; }
                     while (key(rptr) > splitVal && lptr <= rptr) { rptr--; }
                     if (lptr >= rptr) { break; }
-                    std::swap(pts[lptr], pts[rptr]); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                    pts.swap(lptr, rptr);
                     lptr++;
                     rptr--;
                 }
@@ -788,7 +887,7 @@ namespace kden {
         }
 
         std::size_t nDim_;                                      /**< Number of dimensions the tree is built over */
-        std::reference_wrapper<std::vector<PtType>> data_;      /**< The (non-owned) points the tree indexes */
+        std::reference_wrapper<KDTreeData<AuxType>> data_;      /**< The (non-owned) points the tree indexes */
         std::vector<KDTreeNode> nodes_;                         /**< The tree's nodes, root first */
         std::size_t nLevels_ = 1;                               /**< Number of levels in the tree */
         std::size_t nLeaves_ = 1;                               /**< Number of leaves in the tree */

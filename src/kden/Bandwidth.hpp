@@ -12,6 +12,7 @@
 #include <Eigen/Dense> // NOLINT(misc-include-cleaner) -- provides Eigen::MatrixXd/VectorXd/LLT/LDLT; clang-tidy's IWYU mapping doesn't know this header
 #include <cstddef>
 #include <functional>
+#include <span>
 #include <vector>
 
 namespace kden {
@@ -109,7 +110,7 @@ namespace kden {
          * @param x The point
          * @return One flag per element, true if it is NaN
          */
-        [[nodiscard]] static auto nanPattern(const std::vector<double>& x) -> std::vector<bool>;
+        [[nodiscard]] static auto nanPattern(std::span<const double> x) -> std::vector<bool>;
 
         /**
          * @brief Check whether a point's unspecified coordinates match this Bandwidth's
@@ -117,7 +118,7 @@ namespace kden {
          * @return True if x has n elements, NaN in exactly the dimensions
          *   this Bandwidth treats as unspecified
          */
-        [[nodiscard]] auto matches(const std::vector<double>& x) const -> bool;
+        [[nodiscard]] auto matches(std::span<const double> x) const -> bool;
 
         /**
          * @brief Squared distance between two points
@@ -132,8 +133,8 @@ namespace kden {
          * Allocates a scratch vector; the overload taking one avoids
          * that, for use in loops.
          */
-        [[nodiscard]] auto dist2(const std::vector<double>& x1,
-            const std::vector<double>& x2) const -> double;
+        [[nodiscard]] auto dist2(std::span<const double> x1,
+            std::span<const double> x2) const -> double;
 
         /**
          * @brief Squared distance between two points, using caller-provided scratch space
@@ -143,8 +144,8 @@ namespace kden {
          *   reused across calls without further allocation
          * @return As for the other overload
          */
-        [[nodiscard]] auto dist2(const std::vector<double>& x1,
-            const std::vector<double>& x2, std::vector<double>& scratch) const -> double;
+        [[nodiscard]] auto dist2(std::span<const double> x1,
+            std::span<const double> x2, std::vector<double>& scratch) const -> double;
 
         /**
          * @class BoxBounder
@@ -194,7 +195,7 @@ namespace kden {
              * @param bandwidth The Bandwidth; must outlive this
              * @param x The point; NaN in the bandwidth's unspecified dimensions
              */
-            BoxBounder(const Bandwidth& bandwidth, const std::vector<double>& x);
+            BoxBounder(const Bandwidth& bandwidth, std::span<const double> x);
 
             std::reference_wrapper<const Bandwidth> bandwidth_;  /**< The metric */
             Eigen::VectorXd xs_;              /**< The point, specified dimensions only */
@@ -208,7 +209,7 @@ namespace kden {
          * @param x The search point; must match this Bandwidth (see matches())
          * @return A BoxBounder for x, which must not outlive this Bandwidth
          */
-        [[nodiscard]] auto boxBounder(const std::vector<double>& x) const -> BoxBounder;
+        [[nodiscard]] auto boxBounder(std::span<const double> x) const -> BoxBounder;
 
     private:
 
