@@ -4,7 +4,7 @@
  * @brief Unit tests for kden::KDTree and kden::KDTreeData
  * @details
  * Covers the traversal helpers, tree construction (every node's
- * statistics and the split invariants, with and without auxiliary
+ * bounding box and the split invariants, with and without auxiliary
  * data), and the nearest-neighbor search, single-point and batched,
  * against brute force for Euclidean, diagonal, strongly correlated,
  * and partially-unspecified metrics. (Bandwidth itself is tested in
@@ -36,7 +36,7 @@
 /** Test data: each point's auxiliary data is its original index */
 using KDTestData = kden::KDTreeData<std::size_t>;
 /** A tree over KDTestData */
-using KDTestTree = kden::KDTree<std::size_t>;
+using KDTestTree = kden::KDTree<KDTestData>;
 
 /**
  * @brief Make a data set with strongly correlated dimensions
@@ -47,19 +47,17 @@ using KDTestTree = kden::KDTree<std::size_t>;
  * @param seed Random seed
  * @param coarse If true, round coordinates to integers, to create many
  *   duplicate coordinate values
- * @return The points, with weights in [0.5, 2) and each point's
- *   original index as its auxiliary data
+ * @return The points, with each point's original index as its
+ *   auxiliary data
  */
 inline auto makeKDTestData(const std::size_t nPt, const std::size_t nDim,
     const std::size_t nCorr, const unsigned seed, const bool coarse = false) -> KDTestData
 {
     std::mt19937 gen(seed);
     std::normal_distribution<double> gauss(0.0, 1.0);
-    std::uniform_real_distribution<double> unif(0.5, 2.0);
     KDTestData data;
     data.nDim_ = nDim;
     data.x_.resize(nPt * nDim);
-    data.w_.resize(nPt);
     data.aux_.resize(nPt);
     for (std::size_t i = 0; i < nPt; ++i)
     {
@@ -70,7 +68,6 @@ inline auto makeKDTestData(const std::size_t nPt, const std::size_t nDim,
             if (coarse) { x = std::round(x); }
             data.x_[(i * nDim) + d] = x;
         }
-        data.w_[i] = unif(gen);
         data.aux_[i] = i;
     }
     return data;
@@ -126,44 +123,35 @@ inline auto testKDTreeTraversal() -> int
 }
 
 /**
- * @brief Check one node's statistics against brute force
+ * @brief Check one node's bounding box against brute force
  * @param tree The tree
  * @param idx Index of the node
  * @return Number of discrepancies
  */
-template <typename AuxType>
-inline auto checkNodeStats(const kden::KDTree<AuxType>& tree, const std::size_t idx) -> int
+template <typename Data>
+inline auto checkNodeBounds(const kden::KDTree<Data>& tree, const std::size_t idx) -> int
 {
     const auto& data = tree.data();
     const auto& node = tree.nodes()[idx];
     const auto nodeLo = tree.nodeLo(idx);
     const auto nodeHi = tree.nodeHi(idx);
-    const auto nodeCm = tree.nodeCm(idx);
     const std::size_t nd = data.nDim_;
-    double w = 0.0;
-    double w2 = 0.0;
     std::vector<double> lo(nd, std::numeric_limits<double>::infinity());
     std::vector<double> hi(nd, -std::numeric_limits<double>::infinity());
-    std::vector<double> cm(nd, 0.0);
     for (std::size_t i = node.start_; i < node.start_ + node.count_; ++i)
     {
         const auto pos = data.position(i);
-        w += data.weight(i);
-        w2 += data.weight(i) * data.weight(i);
         for (std::size_t k = 0; k < nd; ++k)
         {
             lo[k] = std::min(lo[k], pos[k]);
             hi[k] = std::max(hi[k], pos[k]);
-            cm[k] += data.weight(i) * pos[k];
         }
     }
     int bad = 0;
     for (std::size_t k = 0; k < nd; ++k)
     {
-        if (lo[k] != nodeLo[k] || hi[k] != nodeHi[k] ||
-            std::abs((cm[k] / w) - nodeCm[k]) > 1e-10 * (1.0 + std::abs(nodeCm[k]))) { ++bad; }
+        if (lo[k] != nodeLo[k] || hi[k] != nodeHi[k]) { ++bad; }
     }
-    if (std::abs(w - node.w_) > 1e-10 * w || std::abs(w2 - node.w2_) > 1e-10 * w2) { ++bad; }
     return bad;
 }
 
@@ -173,10 +161,10 @@ inline auto checkNodeStats(const kden::KDTree<AuxType>& tree, const std::size_t 
  * @param nPt Number of points it was built from
  * @return Number of violations
  */
-template <typename AuxType>
-inline auto checkKDTreeInvariants(const kden::KDTree<AuxType>& tree, const std::size_t nPt) -> int
+template <typename Data>
+inline auto checkKDTreeInvariants(const kden::KDTree<Data>& tree, const std::size_t nPt) -> int
 {
-    using Tree = kden::KDTree<AuxType>;
+    using Tree = kden::KDTree<Data>;
     int bad = 0;
     const auto& data = tree.data();
     const auto& nodes = tree.nodes();
@@ -185,7 +173,7 @@ inline auto checkKDTreeInvariants(const kden::KDTree<AuxType>& tree, const std::
     while (idx != kden::nullNode)
     {
         const auto& node = nodes[idx];
-        bad += checkNodeStats(tree, idx);
+        bad += checkNodeBounds(tree, idx);
         if (node.splitDim_ < 0)
         {
             // Leaf: no children, at most leafSize points, contiguous with the previous leaf
@@ -215,7 +203,7 @@ inline auto checkKDTreeInvariants(const kden::KDTree<AuxType>& tree, const std::
 
     // With auxiliary data (each point's original index), the points are
     // still a permutation of the original data
-    if constexpr (kden::KDTreeData<AuxType>::hasAux)
+    if constexpr (Data::hasAux)
     {
         std::vector<int> seen(nPt, 0);
         for (std::size_t i = 0; i < data.size(); ++i) { seen[data.aux(i)]++; }
@@ -253,12 +241,12 @@ inline auto testKDTreeConstruction() -> int
         }
     }
 
-    // Without auxiliary data: the same positions and weights build the same tree
+    // Without auxiliary data: the same positions build the same tree
     auto withAux = makeKDTestData(5000, 4, 2, 7, true);
-    kden::KDTreeData<> noAux{.nDim_ = withAux.nDim_, .x_ = withAux.x_, .w_ = withAux.w_, .aux_ = {}};
+    kden::KDTreeData<> noAux{.nDim_ = withAux.nDim_, .x_ = withAux.x_, .aux_ = {}};
     const KDTestTree auxTree(withAux, 16);
     const kden::KDTree<> plainTree(noAux, 16);
-    if (checkKDTreeInvariants(plainTree, 5000) != 0 || noAux.x_ != withAux.x_ || noAux.w_ != withAux.w_)
+    if (checkKDTreeInvariants(plainTree, 5000) != 0 || noAux.x_ != withAux.x_)
     {
         std::cerr << "testKDTreeConstruction: tree without auxiliary data differs from one with it\n";
         ++failures;
@@ -278,7 +266,7 @@ inline auto testKDTreeConstruction() -> int
     auto badAux = data;
     badAux.aux_.pop_back();
     try { const KDTestTree t(badAux); } catch (const std::invalid_argument&) { ++thrown; }
-    // Non-finite stored positions and weights are rejected: NaN is
+    // Non-finite stored positions are rejected: NaN is
     // allowed only in search points, and infinities would give nodes
     // non-finite bounds
     auto nanX = data;
@@ -287,12 +275,9 @@ inline auto testKDTreeConstruction() -> int
     auto infX = data;
     infX.x_[4] = std::numeric_limits<double>::infinity();
     try { const KDTestTree t(infX); } catch (const std::invalid_argument&) { ++thrown; }
-    auto nanW = data;
-    nanW.w_[2] = std::numeric_limits<double>::quiet_NaN();
-    try { const KDTestTree t(nanW); } catch (const std::invalid_argument&) { ++thrown; }
-    if (thrown != 8)
+    if (thrown != 7)
     {
-        std::cerr << "testKDTreeConstruction: only " << thrown << " of 8 invalid constructions threw\n";
+        std::cerr << "testKDTreeConstruction: only " << thrown << " of 7 invalid constructions threw\n";
         ++failures;
     }
     return failures;
@@ -429,7 +414,7 @@ inline auto testKDTreeNeighbors() -> int
     }
 
     // A tree without auxiliary data gives the same distances
-    kden::KDTreeData<> plain{.nDim_ = 3, .x_ = dups.x_, .w_ = dups.w_, .aux_ = {}};
+    kden::KDTreeData<> plain{.nDim_ = 3, .x_ = dups.x_, .aux_ = {}};
     const kden::KDTree<> plainTree(plain, 4);
     const auto a = plainTree.neighbors(std::vector<double>{0.0, 0.0, 1.0}, 40);
     const auto b = dupTree.neighbors(std::vector<double>{0.0, 0.0, 1.0}, 40);
