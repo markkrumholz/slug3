@@ -10,7 +10,9 @@
  * sums and largest entry against brute force; and the density
  * estimate pdf() against brute force, its normalization and
  * marginalization against numerical integration, and its argument
- * checks.
+ * checks; and conditional estimates (ConditionalDensity) against the
+ * full estimate, exactly and within massTol's L1 bound, with and
+ * without marginalized dimensions.
  * @date 2026-10-16
  * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
@@ -474,6 +476,124 @@ inline auto testKernelDensityNormalization() -> int
     {
         std::cerr << "testKernelDensityNormalization: marginal " << margPdf
             << " differs from the integral over the NaN dimension " << marginal << "\n";
+        ++failures;
+    }
+    return failures;
+}
+
+/**
+ * @brief Check conditional estimates against the full estimate they come from
+ * @return Number of failures
+ * @details
+ * With massTol = 0, marginal() times the conditional pdf must equal
+ * the full estimate at (x0_F, y) (marginalized over G, if any), and
+ * marginal() the full estimate's marginal over F. With massTol > 0,
+ * the conditional density must be within L1 distance 2 massTol of the
+ * exact one, while keeping far fewer points.
+ */
+inline auto testConditionalDensity() -> int
+{
+    int failures = 0;
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    std::mt19937 gen(61); // NOLINT(cert-msc32-c,cert-msc51-cpp) -- fixed seed for a reproducible test
+    std::normal_distribution<double> gauss(0.0, 1.0);
+    KDETestData data = makeKDETestData(3000, 4, 2, 62);
+    const KDETest kde(data, 8);
+    const Eigen::MatrixXd corr = (0.2 * Eigen::MatrixXd::Identity(4, 4)) +
+        (0.8 * Eigen::MatrixXd::Ones(4, 4));
+    const kden::Bandwidth bw(4.0 * Eigen::MatrixXd(corr.inverse()));
+
+    // Exact (massTol = 0): fix 0 and 2, keep 1, and keep or marginalize 3
+    for (const bool marginalize : {false, true})
+    {
+        const std::string what = marginalize ? "marginalizing dimension 3" : "no marginalization";
+        const std::vector<std::size_t> marginalDims = marginalize ? std::vector<std::size_t>{3} : std::vector<std::size_t>{};
+        for (int trial = 0; trial < 5; ++trial)
+        {
+            const double x0v = 1.5 * gauss(gen);
+            const double x2v = 1.5 * gauss(gen);
+            const std::vector<double> x0{x0v, nan, x2v, marginalize ? 0.3 : nan};
+            const auto cd = kde.conditional(x0, marginalDims, 0.0, bw);
+            const std::vector<std::size_t> wantDims = marginalize ? std::vector<std::size_t>{1} : std::vector<std::size_t>{1, 3};
+            const double marg = kde.pdf(std::vector<double>{x0v, nan, x2v, nan}, 0.0, 0.0, bw);
+            bool ok = cd.dims() == wantDims && std::abs(cd.marginal() - marg) <= 1e-10 * marg;
+            for (int j = 0; ok && j < 5; ++j)
+            {
+                const double y1 = 2.0 * gauss(gen);
+                const double y3 = 2.0 * gauss(gen);
+                const std::vector<double> y = marginalize ? std::vector<double>{y1} : std::vector<double>{y1, y3};
+                const double full = kde.pdf(std::vector<double>{x0v, y1, x2v, marginalize ? nan : y3}, 0.0, 0.0, bw);
+                const double got = cd.marginal() * cd.pdf(y, 0.0, 0.0);
+                ok = std::abs(got - full) <= 1e-10 * full + 1e-300;
+                if (!ok)
+                {
+                    std::cerr << "testConditionalDensity: " << what << ", trial " << trial << ": "
+                        << got << " vs full estimate " << full << "\n";
+                }
+            }
+            if (!ok)
+            {
+                std::cerr << "testConditionalDensity: " << what << ", trial " << trial
+                    << ": wrong dimensions or marginal " << cd.marginal() << " vs " << marg << "\n";
+                ++failures;
+                break;
+            }
+        }
+    }
+
+    // Pruned (massTol > 0), keeping one dimension: L1 distance from the
+    // exact conditional density, by the midpoint rule
+    for (const double massTol : {1e-1, 1e-2, 1e-3})
+    {
+        const std::vector<double> x0{0.4, nan, 0.9, -0.2};
+        const auto exact = kde.conditional(x0, {}, 0.0, bw);
+        const auto pruned = kde.conditional(x0, {}, massTol, bw);
+        const double lim = 15.0;
+        const int nGrid = 3000;
+        const double dy = 2.0 * lim / nGrid;
+        double l1 = 0.0;
+        for (int j = 0; j < nGrid; ++j)
+        {
+            const std::vector<double> y{-lim + ((j + 0.5) * dy)};
+            l1 += std::abs(pruned.pdf(y, 0.0, 0.0) - exact.pdf(y, 0.0, 0.0)) * dy;
+        }
+        if (l1 > 2.0 * massTol || pruned.data().size() >= exact.data().size() ||
+            pruned.marginal() > exact.marginal() || pruned.marginal() < (1.0 - massTol) * exact.marginal())
+        {
+            std::cerr << "testConditionalDensity: massTol = " << massTol << ": L1 distance " << l1
+                << ", " << pruned.data().size() << " of " << exact.data().size() << " points kept, marginal "
+                << pruned.marginal() << " vs " << exact.marginal() << "\n";
+            ++failures;
+        }
+    }
+
+    // Auxiliary data comes along, and a moved-from result's estimate
+    // still works from its new home
+    auto cd = kde.conditional(std::vector<double>{0.0, nan, 0.0, nan}, {}, 1e-2, bw);
+    const double before = cd.pdf(std::vector<double>{0.1, -0.2}, 0.0, 0.0);
+    const auto moved = std::move(cd);
+    bool auxOk = moved.pdf(std::vector<double>{0.1, -0.2}, 0.0, 0.0) == before;
+    std::vector<int> seen(data.size(), 0);
+    for (std::size_t i = 0; i < moved.data().size(); ++i) { auxOk = auxOk && ++seen[moved.data().aux(i)] == 1; }
+    if (!auxOk)
+    {
+        std::cerr << "testConditionalDensity: moved result or auxiliary data is wrong\n";
+        ++failures;
+    }
+
+    // Errors: nothing fixed, nothing kept, bad marginalDims, bad
+    // massTol, a reduced bandwidth, and x0 far from every point
+    int thrown = 0;
+    try { (void)kde.conditional(std::vector<double>{nan, nan, nan, nan}, {}, 0.0, bw); } catch (const std::invalid_argument&) { ++thrown; }
+    try { (void)kde.conditional(std::vector<double>{0.0, 0.0, 0.0, 0.0}, {}, 0.0, bw); } catch (const std::invalid_argument&) { ++thrown; }
+    try { (void)kde.conditional(std::vector<double>{0.0, nan, 0.0, 0.0}, {4}, 0.0, bw); } catch (const std::invalid_argument&) { ++thrown; }
+    try { (void)kde.conditional(std::vector<double>{0.0, nan, 0.0, 0.0}, {3, 3}, 0.0, bw); } catch (const std::invalid_argument&) { ++thrown; }
+    try { (void)kde.conditional(std::vector<double>{0.0, nan, 0.0, 0.0}, {}, 1.0, bw); } catch (const std::invalid_argument&) { ++thrown; }
+    try { (void)kde.conditional(std::vector<double>{0.0, nan, 0.0, 0.0}, {}, 0.0, bw.reduce({false, false, false, true})); } catch (const std::invalid_argument&) { ++thrown; }
+    try { (void)kde.conditional(std::vector<double>{1e3, nan, 1e3, 1e3}, {}, 0.0, bw); } catch (const std::domain_error&) { ++thrown; }
+    if (thrown != 7)
+    {
+        std::cerr << "testConditionalDensity: only " << thrown << " of 7 invalid conditionals threw\n";
         ++failures;
     }
     return failures;

@@ -27,6 +27,7 @@ auto main() -> int {
         result += testRefinementList();
         result += testKernelDensityPdf();
         result += testKernelDensityNormalization();
+        result += testConditionalDensity();
         return result;
     }
     catch (const std::exception& error)
