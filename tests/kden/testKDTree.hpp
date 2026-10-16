@@ -33,10 +33,12 @@
 #include <utility>
 #include <vector>
 
-/** Test data: each point's auxiliary data is its original index */
-using KDTestData = kden::KDTreeData<std::size_t>;
-/** A tree over KDTestData */
-using KDTestTree = kden::KDTree<KDTestData>;
+/** Test data, owned: each point's auxiliary data is its original index */
+using KDTestData = kden::OwnedKDTreeData<std::size_t>;
+/** A view of KDTestData, which trees are built over */
+using KDTestView = kden::KDTreeData<std::size_t>;
+/** A tree over KDTestView */
+using KDTestTree = kden::KDTree<KDTestView>;
 
 /**
  * @brief Make a data set with strongly correlated dimensions
@@ -91,7 +93,7 @@ inline auto positionOf(const kden::KDTreeData<AuxType>& data, const std::size_t 
  * @param data The data
  * @return A Bandwidth holding (s^2 Cov)^-1, with s^2 = N^(-2 / (nDim + 4))
  */
-inline auto silvermanBandwidth(const KDTestData& data) -> kden::Bandwidth
+inline auto silvermanBandwidth(const KDTestView& data) -> kden::Bandwidth
 {
     const auto n = static_cast<Eigen::Index>(data.nDim_);
     const auto nPt = static_cast<Eigen::Index>(data.size());
@@ -229,8 +231,9 @@ inline auto testKDTreeConstruction() -> int
         for (const bool withMetric : {false, true})
         {
             auto data = makeKDTestData(nPt, 4, 2, 7, true);
-            const auto tree = withMetric ? std::make_unique<KDTestTree>(data, 16, metric) :
-                std::make_unique<KDTestTree>(data, 16);
+            auto view = data.view();
+            const auto tree = withMetric ? std::make_unique<KDTestTree>(view, 16, metric) :
+                std::make_unique<KDTestTree>(view, 16);
             const int bad = checkKDTreeInvariants(*tree, nPt);
             if (bad != 0)
             {
@@ -243,9 +246,11 @@ inline auto testKDTreeConstruction() -> int
 
     // Without auxiliary data: the same positions build the same tree
     auto withAux = makeKDTestData(5000, 4, 2, 7, true);
-    kden::KDTreeData<> noAux{.nDim_ = withAux.nDim_, .x_ = withAux.x_, .aux_ = {}};
-    const KDTestTree auxTree(withAux, 16);
-    const kden::KDTree<> plainTree(noAux, 16);
+    kden::OwnedKDTreeData<> noAux{.nDim_ = withAux.nDim_, .x_ = withAux.x_, .aux_ = {}};
+    auto withAuxView = withAux.view();
+    auto noAuxView = noAux.view();
+    const KDTestTree auxTree(withAuxView, 16);
+    const kden::KDTree<> plainTree(noAuxView, 16);
     if (checkKDTreeInvariants(plainTree, 5000) != 0 || noAux.x_ != withAux.x_)
     {
         std::cerr << "testKDTreeConstruction: tree without auxiliary data differs from one with it\n";
@@ -257,9 +262,10 @@ inline auto testKDTreeConstruction() -> int
     for (const bool withMetric : {false, true})
     {
         auto restricted = makeKDTestData(5000, 4, 2, 8);
+        auto view = restricted.view();
         const std::vector<std::size_t> noSplit{0, 2};
-        const auto tree = withMetric ? std::make_unique<KDTestTree>(restricted, 16, metric, noSplit) :
-            std::make_unique<KDTestTree>(restricted, 16, noSplit);
+        const auto tree = withMetric ? std::make_unique<KDTestTree>(view, 16, metric, noSplit) :
+            std::make_unique<KDTestTree>(view, 16, noSplit);
         bool splitsOk = true;
         bool splitsBoth = false;
         for (const auto& node : tree->nodes())
@@ -278,29 +284,35 @@ inline auto testKDTreeConstruction() -> int
     // Invalid data and arguments
     int thrown = 0;
     auto data = makeKDTestData(10, 3, 2, 1);
-    try { const KDTestTree t(data, 0); } catch (const std::invalid_argument&) { ++thrown; }
-    try { const KDTestTree t(data, 16, kden::Bandwidth::identity(2)); } catch (const std::invalid_argument&) { ++thrown; }
+    // Each case builds a tree over a view of its own copy of data
+    auto tryBuild = [&thrown](KDTestData d, auto&&... args) -> void
+    {
+        auto v = d.view();
+        try { const KDTestTree t(v, args...); } catch (const std::invalid_argument&) { ++thrown; }
+    };
+    tryBuild(data, 0);
+    tryBuild(data, 16, kden::Bandwidth::identity(2));
     auto badDim = data;
     badDim.nDim_ = 0;
-    try { const KDTestTree t(badDim); } catch (const std::invalid_argument&) { ++thrown; }
+    tryBuild(badDim);
     auto badX = data;
     badX.x_.pop_back();
-    try { const KDTestTree t(badX); } catch (const std::invalid_argument&) { ++thrown; }
+    tryBuild(badX);
     auto badAux = data;
     badAux.aux_.pop_back();
-    try { const KDTestTree t(badAux); } catch (const std::invalid_argument&) { ++thrown; }
+    tryBuild(badAux);
     // Non-finite stored positions are rejected: NaN is
     // allowed only in search points, and infinities would give nodes
     // non-finite bounds
     auto nanX = data;
     nanX.x_[7] = std::numeric_limits<double>::quiet_NaN();
-    try { const KDTestTree t(nanX); } catch (const std::invalid_argument&) { ++thrown; }
+    tryBuild(nanX);
     auto infX = data;
     infX.x_[4] = std::numeric_limits<double>::infinity();
-    try { const KDTestTree t(infX); } catch (const std::invalid_argument&) { ++thrown; }
+    tryBuild(infX);
     // noSplitDims out of range, or excluding every dimension
-    try { const KDTestTree t(data, 16, std::vector<std::size_t>{3}); } catch (const std::invalid_argument&) { ++thrown; }
-    try { const KDTestTree t(data, 16, std::vector<std::size_t>{2, 0, 1}); } catch (const std::invalid_argument&) { ++thrown; }
+    tryBuild(data, 16, std::vector<std::size_t>{3});
+    tryBuild(data, 16, std::vector<std::size_t>{2, 0, 1});
     if (thrown != 9)
     {
         std::cerr << "testKDTreeConstruction: only " << thrown << " of 9 invalid constructions threw\n";
@@ -367,7 +379,8 @@ inline auto testKDTreeNeighbors() -> int
 {
     int failures = 0;
     const std::size_t nDim = 6;
-    auto data = makeKDTestData(4000, nDim, 4, 3);
+    auto owned = makeKDTestData(4000, nDim, 4, 3);
+    auto data = owned.view();
     const kden::Bandwidth full = silvermanBandwidth(data);
     const kden::Bandwidth diag(Eigen::MatrixXd(full.h2Inv().diagonal().asDiagonal()));
     const kden::Bandwidth euclid = kden::Bandwidth::identity(nDim);
@@ -401,7 +414,8 @@ inline auto testKDTreeNeighbors() -> int
     // A tree that never splits along the dimensions searches leave
     // unspecified still finds the exact neighbors, for both partially
     // and fully specified searches
-    auto restricted = makeKDTestData(4000, nDim, 4, 3);
+    auto restrictedOwned = makeKDTestData(4000, nDim, 4, 3);
+    auto restricted = restrictedOwned.view();
     const KDTestTree rTree(restricted, 8, full, std::vector<std::size_t>{1, 4});
     for (std::size_t q = 0; q < 10; ++q)
     {
@@ -427,7 +441,8 @@ inline auto testKDTreeNeighbors() -> int
     }
 
     // Edge cases: more neighbors than points, none, and duplicate points
-    auto few = makeKDTestData(5, 3, 2, 4);
+    auto fewOwned = makeKDTestData(5, 3, 2, 4);
+    auto few = fewOwned.view();
     const KDTestTree small(few, 2);
     const std::vector<double> origin{0.0, 0.0, 0.0};
     failures += checkNeighbors(small, origin, 10, kden::Bandwidth::identity(3), "nNeighbor > number of points");
@@ -436,7 +451,8 @@ inline auto testKDTreeNeighbors() -> int
         std::cerr << "testKDTreeNeighbors: nNeighbor = 0 returned neighbors\n";
         ++failures;
     }
-    auto dups = makeKDTestData(300, 3, 2, 6, true);
+    auto dupsOwned = makeKDTestData(300, 3, 2, 6, true);
+    auto dups = dupsOwned.view();
     const KDTestTree dupTree(dups, 4);
     failures += checkNeighbors(dupTree, std::vector<double>{0.0, 0.0, 1.0}, 40, kden::Bandwidth::identity(3), "duplicate points");
 
@@ -453,7 +469,8 @@ inline auto testKDTreeNeighbors() -> int
     }
 
     // A tree without auxiliary data gives the same distances
-    kden::KDTreeData<> plain{.nDim_ = 3, .x_ = dups.x_, .aux_ = {}};
+    kden::OwnedKDTreeData<> plainOwned{.nDim_ = 3, .x_ = std::vector<double>(dups.x_.begin(), dups.x_.end()), .aux_ = {}};
+    auto plain = plainOwned.view();
     const kden::KDTree<> plainTree(plain, 4);
     const auto a = plainTree.neighbors(std::vector<double>{0.0, 0.0, 1.0}, 40);
     const auto b = dupTree.neighbors(std::vector<double>{0.0, 0.0, 1.0}, 40);
@@ -475,7 +492,8 @@ inline auto testKDTreeNeighborsBatch() -> int
 {
     int failures = 0;
     const std::size_t nDim = 5;
-    auto data = makeKDTestData(3000, nDim, 3, 12);
+    auto owned = makeKDTestData(3000, nDim, 3, 12);
+    auto data = owned.view();
     const kden::Bandwidth full = silvermanBandwidth(data);
     const KDTestTree tree(data, 16);
 
