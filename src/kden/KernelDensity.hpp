@@ -526,11 +526,20 @@ namespace kden {
         static auto normalizeWeights(KernelDensityData<AuxType>& data) -> KernelDensityData<AuxType>&
         {
             data.validate();
-            double wTot = 0.0;
-            for (const double w : data.w_) { wTot += w; }
-            if (!(wTot > 0.0))
+
+            // Scale by the largest weight first, so that summing finite
+            // weights cannot overflow
+            double wMax = 0.0;
+            for (const double w : data.w_) { wMax = std::max(wMax, w); }
+            if (!(wMax > 0.0))
             {
                 throw std::invalid_argument("KernelDensity: weights must not all be zero");
+            }
+            double wTot = 0.0;
+            for (double& w : data.w_)
+            {
+                w /= wMax;
+                wTot += w;
             }
             for (double& w : data.w_) { w /= wTot; }
             return data;

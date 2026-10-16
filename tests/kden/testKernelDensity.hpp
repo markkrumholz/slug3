@@ -127,7 +127,7 @@ inline auto testKernelDensityConstruction() -> int
             for (std::size_t i = 0; i < nPt; ++i)
             {
                 const double want = kdeTestWeight(kdeData.aux_[i]) / wTot;
-                moved = moved && std::abs(kdeData.w_[i] - want) <= 1e-15 * want;
+                moved = moved && std::abs(kdeData.w_[i] - want) <= 1e-12 * want;
                 wSum += kdeData.w_[i];
             }
             if (!moved || std::abs(wSum - 1.0) > 1e-12 || std::abs(kde.nodeW(kden::rootNode) - 1.0) > 1e-12)
@@ -145,6 +145,16 @@ inline auto testKernelDensityConstruction() -> int
                 ++failures;
             }
         }
+    }
+
+    // Huge weights, whose sum overflows a double, still normalize
+    KDETestData huge = makeKDETestData(100, 3, 2, 2);
+    std::ranges::fill(huge.w_, 0.5 * std::numeric_limits<double>::max());
+    const KDETest hugeKde(huge, 8);
+    if (std::abs(hugeKde.nodeW(kden::rootNode) - 1.0) > 1e-12 || std::abs(huge.w_[0] - 0.01) > 1e-15)
+    {
+        std::cerr << "testKernelDensityConstruction: weights whose sum overflows did not normalize\n";
+        ++failures;
     }
 
     // Invalid weights: wrong number, and non-finite
