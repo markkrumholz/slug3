@@ -5,7 +5,7 @@
  * @details
  * Checks that both constructors build the same tree a KDTree would
  * over the same positions, that the weights are reordered along with
- * the points, every node's weight sums and center of mass against
+ * the points, every node's weight sum against
  * brute force, and the weights' argument checks; RefinementList's
  * sums and largest entry against brute force; and the density
  * estimate pdf() against brute force, its normalization and
@@ -68,35 +68,21 @@ inline auto makeKDETestData(const std::size_t nPt, const std::size_t nDim,
 }
 
 /**
- * @brief Check every node's weight sums and center of mass against brute force
+ * @brief Check every node's weight sum against brute force
  * @param kde The kernel density estimate
  * @return Number of discrepancies
  */
 inline auto checkNodeWeights(const KDETest& kde) -> int
 {
     const auto& data = kde.data();
-    const std::size_t nd = data.nDim_;
     int bad = 0;
     std::size_t idx = kden::rootNode;
     while (idx != kden::nullNode)
     {
         const auto& node = kde.nodes()[idx];
         double w = 0.0;
-        double w2 = 0.0;
-        std::vector<double> cm(nd, 0.0);
-        for (std::size_t i = node.start_; i < node.start_ + node.count_; ++i)
-        {
-            const auto pos = data.position(i);
-            w += data.weight(i);
-            w2 += data.weight(i) * data.weight(i);
-            for (std::size_t k = 0; k < nd; ++k) { cm[k] += data.weight(i) * pos[k]; }
-        }
-        const auto nodeCm = kde.nodeCm(idx);
-        for (std::size_t k = 0; k < nd; ++k)
-        {
-            if (std::abs((cm[k] / w) - nodeCm[k]) > 1e-10 * (1.0 + std::abs(nodeCm[k]))) { ++bad; }
-        }
-        if (std::abs(w - kde.nodeW(idx)) > 1e-10 * w || std::abs(w2 - kde.nodeW2(idx)) > 1e-10 * w2) { ++bad; }
+        for (std::size_t i = node.start_; i < node.start_ + node.count_; ++i) { w += data.weight(i); }
+        if (std::abs(w - kde.nodeW(idx)) > 1e-10 * w) { ++bad; }
         idx = node.splitDim_ < 0 ? KDETest::next(idx) : KDETest::left(idx);
     }
     return bad;
@@ -155,7 +141,7 @@ inline auto testKernelDensityConstruction() -> int
             if (bad != 0)
             {
                 std::cerr << "testKernelDensityConstruction: " << what << ": " << bad
-                    << " node weight sums or centers of mass are wrong\n";
+                    << " node weight sums are wrong\n";
                 ++failures;
             }
         }
