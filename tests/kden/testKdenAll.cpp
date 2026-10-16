@@ -24,6 +24,9 @@ auto main() -> int {
         result += testKDTreeNeighbors();
         result += testKDTreeNeighborsBatch();
         result += testKernelDensityConstruction();
+        result += testRefinementList();
+        result += testKernelDensityPdf();
+        result += testKernelDensityNormalization();
         return result;
     }
     catch (const std::exception& error)

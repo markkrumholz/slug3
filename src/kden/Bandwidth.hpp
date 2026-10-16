@@ -86,6 +86,17 @@ namespace kden {
         /** @brief Whether the matrix is diagonal (over the specified dimensions)
          *  @return True if distances and bounds use the O(n) diagonal path */
         [[nodiscard]] auto isDiagonal() const -> bool { return diagonal_; }
+        /** @brief Number of specified dimensions
+         *  @return The number of dimensions not flagged in unspecified() */
+        [[nodiscard]] auto nSpecified() const -> std::size_t { return spec_.size(); }
+        /** @brief Determinant of the matrix over the specified dimensions
+         *  @return det M_s, with M_s the matrix's block over the specified
+         *    dimensions (for a reduced Bandwidth, the Schur complement;
+         *    see reduce()); 1 if no dimension is specified, and 0 (to
+         *    rounding) if M_s is singular. The integral of
+         *    exp(-d^T M_s d) over the specified dimensions is
+         *    pi^(nSpecified / 2) / sqrt(det()). */
+        [[nodiscard]] auto det() const -> double { return det_; }
 
         /**
          * @brief Reduce the metric for points with some coordinates unspecified
@@ -275,6 +286,7 @@ namespace kden {
         Eigen::MatrixXd ms_;              /**< h2Inv_'s block over the specified dimensions, contiguous */
         Eigen::VectorXd diag_;            /**< Diagonal of ms_ */
         bool diagonal_ = false;           /**< Whether ms_ is diagonal */
+        double det_ = 1.0;                /**< Determinant of ms_ */
         Eigen::MatrixXd w_;               /**< Box-bound factor W (M_s = W^T W), over the specified dimensions; empty if diagonal */
         Eigen::MatrixXd absW_;            /**< Element-wise absolute value of W */
     };

@@ -77,6 +77,7 @@ void kden::Bandwidth::prepare()
         {
             throw std::domain_error("Bandwidth: h2Inv is not positive semi-definite");
         }
+        det_ = diag_.prod();
         w_.resize(0, 0);
         absW_.resize(0, 0);
         return;
@@ -89,6 +90,7 @@ void kden::Bandwidth::prepare()
     {
         throw std::domain_error("Bandwidth: h2Inv is not positive semi-definite");
     }
+    det_ = d.cwiseMax(0.0).prod();   // L is unit triangular and P a permutation
     Eigen::MatrixXd perm = Eigen::MatrixXd::Identity(ns, ns);
     perm = ldlt.transpositionsP() * perm;
     w_ = d.cwiseMax(0.0).cwiseSqrt().asDiagonal() * Eigen::MatrixXd(ldlt.matrixU()) * perm;
