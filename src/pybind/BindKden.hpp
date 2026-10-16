@@ -335,10 +335,15 @@ namespace kdenbind {
     inline auto pdf(const KDE& kde, const QueryArray& x, const double relTol, const double absTol,
         const py::object& bandwidth, const kden::Bandwidth& euclidean) -> py::object
     {
-        auto [pts, single] = queryPoints(x, kde.nDim());
-        auto [bws, shared] = batchBandwidths(bandwidth, pts.size(), euclidean);
+        // Not structured bindings: the lambdas below, which run inside
+        // an OpenMP region, capture these, and clang does not support
+        // capturing a structured binding there
+        const auto query = queryPoints(x, kde.nDim());
+        const auto& pts = query.first;
+        const auto batch = batchBandwidths(bandwidth, pts.size(), euclidean);
+        const auto& bws = batch.first;
         std::vector<double> out;
-        if (shared)
+        if (batch.second)
         {
             const kden::Bandwidth bw = reduceShared(bws.front(), pts);
             out = evalPoints(pts, [&](const std::vector<double>& p, const std::size_t) -> double
@@ -349,7 +354,7 @@ namespace kdenbind {
             out = evalPoints(pts, [&](const std::vector<double>& p, const std::size_t i) -> double
                 { return kde.pdf(p, relTol, absTol, bws[i]); }); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         }
-        if (single) { return py::float_(out.front()); }
+        if (query.second) { return py::float_(out.front()); }
         return toArray(out);
     }
 
