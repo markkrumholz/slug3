@@ -252,6 +252,29 @@ inline auto testKDTreeConstruction() -> int
         ++failures;
     }
 
+    // Splitting restricted to some dimensions: a valid tree that never
+    // splits along the others, with or without a metric
+    for (const bool withMetric : {false, true})
+    {
+        auto restricted = makeKDTestData(5000, 4, 2, 8);
+        const std::vector<std::size_t> noSplit{0, 2};
+        const auto tree = withMetric ? std::make_unique<KDTestTree>(restricted, 16, metric, noSplit) :
+            std::make_unique<KDTestTree>(restricted, 16, noSplit);
+        bool splitsOk = true;
+        bool splitsBoth = false;
+        for (const auto& node : tree->nodes())
+        {
+            splitsOk = splitsOk && node.splitDim_ != 0 && node.splitDim_ != 2;
+            splitsBoth = splitsBoth || node.splitDim_ == 3;
+        }
+        if (checkKDTreeInvariants(*tree, 5000) != 0 || !splitsOk || !splitsBoth)
+        {
+            std::cerr << "testKDTreeConstruction: tree with noSplitDims = {0, 2}"
+                << (withMetric ? " and a metric" : "") << " is invalid or splits along an excluded dimension\n";
+            ++failures;
+        }
+    }
+
     // Invalid data and arguments
     int thrown = 0;
     auto data = makeKDTestData(10, 3, 2, 1);
@@ -275,9 +298,12 @@ inline auto testKDTreeConstruction() -> int
     auto infX = data;
     infX.x_[4] = std::numeric_limits<double>::infinity();
     try { const KDTestTree t(infX); } catch (const std::invalid_argument&) { ++thrown; }
-    if (thrown != 7)
+    // noSplitDims out of range, or excluding every dimension
+    try { const KDTestTree t(data, 16, std::vector<std::size_t>{3}); } catch (const std::invalid_argument&) { ++thrown; }
+    try { const KDTestTree t(data, 16, std::vector<std::size_t>{2, 0, 1}); } catch (const std::invalid_argument&) { ++thrown; }
+    if (thrown != 9)
     {
-        std::cerr << "testKDTreeConstruction: only " << thrown << " of 7 invalid constructions threw\n";
+        std::cerr << "testKDTreeConstruction: only " << thrown << " of 9 invalid constructions threw\n";
         ++failures;
     }
     return failures;
@@ -370,6 +396,19 @@ inline auto testKDTreeNeighbors() -> int
             failures += checkNeighbors(tree, xPart, k, reduced, "partially specified, pre-reduced");
             failures += checkNeighbors(tree, xPart, k, full, "partially specified, reduced automatically");
         }
+    }
+
+    // A tree that never splits along the dimensions searches leave
+    // unspecified still finds the exact neighbors, for both partially
+    // and fully specified searches
+    auto restricted = makeKDTestData(4000, nDim, 4, 3);
+    const KDTestTree rTree(restricted, 8, full, std::vector<std::size_t>{1, 4});
+    for (std::size_t q = 0; q < 10; ++q)
+    {
+        std::vector<double> x = positionOf(rTree.data(), (q * 157) % restricted.size());
+        for (auto& v : x) { v += 0.05 * gauss(gen); }
+        failures += checkNeighbors(rTree, withNanAt(withNanAt(x, 1), 4), 7, full, "restricted splits, partially specified");
+        failures += checkNeighbors(rTree, x, 7, full, "restricted splits, fully specified");
     }
 
     // The Euclidean overload matches an explicit identity bandwidth

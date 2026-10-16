@@ -373,6 +373,30 @@ inline auto testKernelDensityPdf() -> int
         }
     }
 
+    // A tree that never splits along dimension 1 gives the same
+    // answers, to within the tolerance, including for marginal
+    // densities over dimension 1
+    KDETestData rData = makeKDETestData(4000, 4, 2, 32);
+    const KDETest rKde(rData, 8, std::vector<std::size_t>{1});
+    for (int trial = 0; trial < 10; ++trial)
+    {
+        std::vector<double> x(4);
+        for (auto& xi : x) { xi = 2.0 * gauss(gen); }
+        if (trial % 2 == 0) { x[1] = nan; }
+        const auto& bw = bandwidths[2].second;
+        const kden::Bandwidth red = bw.matches(x) ? bw : bw.reduce(kden::Bandwidth::nanPattern(x));
+        const double want = brutePdf(rData, x, red);
+        const double got = rKde.pdf(x, 1e-3, 0.0, bw);
+        const double exact = rKde.pdf(x, 0.0, 0.0, bw);
+        if (!(std::abs(got - want) <= 1e-3 * got * (1.0 + 1e-9)) || std::abs(exact - want) > 1e-12 * want)
+        {
+            std::cerr << "testKernelDensityPdf: restricted splits, trial " << trial << ": " << got
+                << " (exact " << exact << ") vs brute force " << want << "\n";
+            ++failures;
+            break;
+        }
+    }
+
     // The default bandwidth is the Euclidean one
     const std::vector<double> x0{0.5, 0.5, -0.3, 0.1};
     if (kde.pdf(x0, 1e-4, 0.0) != kde.pdf(x0, 1e-4, 0.0, kden::Bandwidth::identity(4)))

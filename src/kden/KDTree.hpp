@@ -327,9 +327,16 @@ namespace kden {
          *   while building the tree (see chooseSplitDim()), for nDim
          *   dimensions. Used only during construction and not stored;
          *   searches take their own metric.
+         * @param noSplitDims Dimensions along which no node is split
+         *   (see chooseSplitDim()); empty (the default) to allow every
+         *   dimension. A tree for searches in which some dimensions
+         *   will always be unspecified (NaN) can be built this way, so
+         *   that its nodes are split only along the dimensions those
+         *   searches use.
          * @throws std::invalid_argument if data is inconsistent (see
-         *   Data::validate()), leafSize is 0, or splitBandwidth is
-         *   not for data's number of dimensions
+         *   Data::validate()), leafSize is 0, splitBandwidth is not
+         *   for data's number of dimensions, or noSplitDims contains a
+         *   dimension not below nDim or contains every dimension
          * @details
          * Sizes the tree, then initializes its root node to cover
          * every point, with their bounding box. Finally
@@ -339,7 +346,8 @@ namespace kden {
          */
         KDTree(Data& data,
             const std::size_t leafSize,
-            const Bandwidth& splitBandwidth) :
+            const Bandwidth& splitBandwidth,
+            const std::vector<std::size_t>& noSplitDims = {}) :
             nDim_(data.nDim_),
             data_(std::ref(data)),
             leafSize_(leafSize),
@@ -353,6 +361,16 @@ namespace kden {
             if (splitBandwidth.nDim() != nDim_)
             {
                 throw std::invalid_argument("KDTree: splitBandwidth must be for nDim dimensions");
+            }
+            if (std::ranges::any_of(noSplitDims, [this](const std::size_t d) -> bool { return d >= nDim_; }))
+            {
+                throw std::invalid_argument("KDTree: noSplitDims must contain only dimensions below nDim");
+            }
+            std::vector<bool> noSplit(nDim_, false);
+            for (const std::size_t d : noSplitDims) { noSplit[d] = true; }
+            if (std::ranges::all_of(noSplit, [](const bool b) -> bool { return b; }))
+            {
+                throw std::invalid_argument("KDTree: noSplitDims must leave at least one dimension to split along");
             }
 
             // Number of leaves, levels, and nodes: keep halving the
@@ -391,7 +409,7 @@ namespace kden {
 #endif
                 for (std::size_t i = first; i < first + width; ++i)
                 {
-                    splitNode(i, splitBandwidth);
+                    splitNode(i, splitBandwidth, noSplitDims);
                 }
                 first += width;
                 width <<= 1;
@@ -402,10 +420,12 @@ namespace kden {
          * @brief Construct a KDTree, choosing split dimensions with the Euclidean metric
          * @param data As for the other constructor
          * @param leafSize As for the other constructor
+         * @param noSplitDims As for the other constructor
          * @throws std::invalid_argument as for the other constructor
          */
-        explicit KDTree(Data& data, const std::size_t leafSize = 16) :
-            KDTree(data, leafSize, Bandwidth::identity(std::max<std::size_t>(data.nDim_, 1)))
+        explicit KDTree(Data& data, const std::size_t leafSize = 16,
+            const std::vector<std::size_t>& noSplitDims = {}) :
+            KDTree(data, leafSize, Bandwidth::identity(std::max<std::size_t>(data.nDim_, 1)), noSplitDims)
         {}
 
         // Read-only access to the tree's structure
@@ -743,25 +763,31 @@ namespace kden {
          * @brief Choose the dimension along which to split a node
          * @param idx Index of the node; its bounding box must already be set
          * @param bandwidth The metric
-         * @return The dimension to split along, in [0, nDim)
+         * @param noSplitDims Dimensions not to split along; must leave
+         *   at least one
+         * @return The dimension to split along, in [0, nDim) and not in
+         *   noSplitDims
          * @details
          * Splits along the dimension in which the node is widest,
          * measured in the tree's metric: the one maximizing
          * (hi[i] - lo[i])^2 M_ii, the squared metric length of
          * the node's extent along axis i (for a diagonal bandwidth h_i,
          * its extent in units of the bandwidth, squared), or just
-         * (hi[i] - lo[i])^2 for the Euclidean metric. Ties go to the
-         * lowest dimension.
+         * (hi[i] - lo[i])^2 for the Euclidean metric, among the
+         * dimensions not in noSplitDims. Ties go to the lowest
+         * dimension.
          */
         [[nodiscard]] auto chooseSplitDim(const std::size_t idx,
-            const Bandwidth& bandwidth) const -> int
+            const Bandwidth& bandwidth,
+            const std::vector<std::size_t>& noSplitDims) const -> int
         {
             const auto lo = nodeLo(idx);
             const auto hi = nodeHi(idx);
-            std::size_t best = 0;
+            std::size_t best = nDim_;
             double bestSize = -1.0;
             for (std::size_t i = 0; i < nDim_; ++i)
             {
+                if (std::ranges::find(noSplitDims, i) != noSplitDims.end()) { continue; }
                 const double width = hi[i] - lo[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
                 double size = width * width;
                 size *= bandwidth.h2Inv()(static_cast<Eigen::Index>(i), static_cast<Eigen::Index>(i)); // NOLINT(misc-include-cleaner) -- Eigen::Index is provided by <Eigen/Dense> (included above); clang-tidy's IWYU mapping doesn't know that
@@ -771,6 +797,7 @@ namespace kden {
                     bestSize = size;
                 }
             }
+            assert(best < nDim_);
             return static_cast<int>(best);
         }
 
@@ -870,16 +897,18 @@ namespace kden {
          * @param idx Index of the node; its start_, count_, and
          *   bounding box (see setNodeBounds()) must already be set
          * @param bandwidth The metric used to choose the split dimension
+         * @param noSplitDims Dimensions not to split along
          * @details
          * A node with at most leafSize_ points becomes a leaf
          * (splitDim_ = -1, no children). Otherwise it is split along
-         * chooseSplitDim(idx, bandwidth): its points are partitioned about their
+         * chooseSplitDim(idx, bandwidth, noSplitDims): its points are partitioned about their
          * median along that dimension (see partitionNode()), the left
          * child gets the first (count_ + 1) / 2 of them and the right
          * child the rest, and each child's bounding box is computed
          * from its own points.
          */
-        void splitNode(const std::size_t idx, const Bandwidth& bandwidth)
+        void splitNode(const std::size_t idx, const Bandwidth& bandwidth,
+            const std::vector<std::size_t>& noSplitDims)
         {
             auto& node = nodes_[idx];
             if (node.count_ <= leafSize_)
@@ -891,7 +920,7 @@ namespace kden {
             }
 
             // Partition the points along the split dimension
-            node.splitDim_ = chooseSplitDim(idx, bandwidth);
+            node.splitDim_ = chooseSplitDim(idx, bandwidth, noSplitDims);
             assert(node.splitDim_ >= 0 && static_cast<std::size_t>(node.splitDim_) < nDim_);
             partitionNode(idx);
 

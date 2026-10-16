@@ -301,13 +301,17 @@ namespace kden {
          *   are rescaled in place to sum to one.
          * @param leafSize As for the corresponding KDTree constructor
          * @param splitBandwidth As for the corresponding KDTree constructor
+         * @param noSplitDims As for the corresponding KDTree constructor;
+         *   e.g., the dimensions that evaluations of a marginal density
+         *   will leave unspecified
          * @throws std::invalid_argument as for the corresponding KDTree
          *   constructor, or if the weights sum to zero
          */
         KernelDensity(KernelDensityData<AuxType>& data,
             const std::size_t leafSize,
-            const Bandwidth& splitBandwidth) :
-            Tree(normalizeWeights(data), leafSize, splitBandwidth)
+            const Bandwidth& splitBandwidth,
+            const std::vector<std::size_t>& noSplitDims = {}) :
+            Tree(normalizeWeights(data), leafSize, splitBandwidth, noSplitDims)
         {
             setNodeWeights();
         }
@@ -316,10 +320,12 @@ namespace kden {
          * @brief Construct a KernelDensity, choosing split dimensions with the Euclidean metric
          * @param data As for the other constructor
          * @param leafSize As for the other constructor
+         * @param noSplitDims As for the other constructor
          * @throws std::invalid_argument as for the other constructor
          */
-        explicit KernelDensity(KernelDensityData<AuxType>& data, const std::size_t leafSize = 16) :
-            Tree(normalizeWeights(data), leafSize)
+        explicit KernelDensity(KernelDensityData<AuxType>& data, const std::size_t leafSize = 16,
+            const std::vector<std::size_t>& noSplitDims = {}) :
+            Tree(normalizeWeights(data), leafSize, noSplitDims)
         {
             setNodeWeights();
         }
