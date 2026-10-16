@@ -77,6 +77,7 @@ void kden::Bandwidth::prepare()
         {
             throw std::domain_error("Bandwidth: h2Inv is not positive semi-definite");
         }
+        det_ = diag_.prod();
         w_.resize(0, 0);
         absW_.resize(0, 0);
         return;
@@ -89,6 +90,7 @@ void kden::Bandwidth::prepare()
     {
         throw std::domain_error("Bandwidth: h2Inv is not positive semi-definite");
     }
+    det_ = d.cwiseMax(0.0).prod();   // L is unit triangular and P a permutation
     Eigen::MatrixXd perm = Eigen::MatrixXd::Identity(ns, ns);
     perm = ldlt.transpositionsP() * perm;
     w_ = d.cwiseMax(0.0).cwiseSqrt().asDiagonal() * Eigen::MatrixXd(ldlt.matrixU()) * perm;
@@ -243,27 +245,41 @@ kden::Bandwidth::BoxBounder::BoxBounder(const Bandwidth& bandwidth, std::span<co
     }
 }
 
-auto kden::Bandwidth::BoxBounder::operator()(std::span<const double> lo,
-    std::span<const double> hi) const -> double
+template <bool WantLower, bool WantUpper>
+auto kden::Bandwidth::BoxBounder::compute(std::span<const double> lo,
+    std::span<const double> hi) const -> std::pair<double, double>
 {
     const Bandwidth& bw = bandwidth_.get();
     const auto& spec = bw.spec_;
     const auto ns = static_cast<Eigen::Index>(spec.size());
-    double r2 = 0.0;
+    double lowerBound = 0.0; // NOLINT(misc-const-correctness) -- unmodified only in instantiations where if constexpr drops the lower bound
+    double upperBound = 0.0; // NOLINT(misc-const-correctness) -- likewise for the upper bound
 
-    // Diagonal metric: the exact distance to the box, dimension by dimension
+    // Diagonal metric: the exact distances to the nearest point of the
+    // box and to its farthest corner, dimension by dimension
     if (bw.diagonal_)
     {
         for (Eigen::Index a = 0; a < ns; ++a)
         {
             const std::size_t i = spec[static_cast<std::size_t>(a)]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-            const double gap = std::max({lo[i] - xs_(a), xs_(a) - hi[i], 0.0}); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-            r2 += bw.diag_(a) * gap * gap;
+            const double dlo = xs_(a) - lo[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            const double dhi = hi[i] - xs_(a); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            if constexpr (WantLower)
+            {
+                const double gap = std::max({-dlo, -dhi, 0.0});
+                lowerBound += bw.diag_(a) * gap * gap;
+            }
+            if constexpr (WantUpper)
+            {
+                const double far = std::max(std::abs(dlo), std::abs(dhi));
+                upperBound += bw.diag_(a) * far * far;
+            }
         }
-        return r2;
+        return {lowerBound, upperBound};
     }
 
-    // General metric: separating-axis bound along the rows of W
+    // General metric: separating-axis bounds along the rows of W; along
+    // row k the box projects onto the interval w_k . c +- |w_k| . h
     for (Eigen::Index a = 0; a < ns; ++a)
     {
         const std::size_t i = spec[static_cast<std::size_t>(a)]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
@@ -272,9 +288,36 @@ auto kden::Bandwidth::BoxBounder::operator()(std::span<const double> lo,
     }
     for (Eigen::Index k = 0; k < ns; ++k)
     {
-        const double gap = std::max(
-            std::abs(wx_(k) - bw.w_.row(k).dot(center_)) - bw.absW_.row(k).dot(half_), 0.0);
-        r2 += gap * gap;
+        const double offset = std::abs(wx_(k) - bw.w_.row(k).dot(center_));
+        const double halfWidth = bw.absW_.row(k).dot(half_);
+        if constexpr (WantLower)
+        {
+            const double gap = std::max(offset - halfWidth, 0.0);
+            lowerBound += gap * gap;
+        }
+        if constexpr (WantUpper)
+        {
+            const double far = offset + halfWidth;
+            upperBound += far * far;
+        }
     }
-    return r2 * (1.0 - 1e-10);
+    return {lowerBound * (1.0 - 1e-10), upperBound * (1.0 + 1e-10)};
+}
+
+auto kden::Bandwidth::BoxBounder::lower(std::span<const double> lo,
+    std::span<const double> hi) const -> double
+{
+    return compute<true, false>(lo, hi).first;
+}
+
+auto kden::Bandwidth::BoxBounder::upper(std::span<const double> lo,
+    std::span<const double> hi) const -> double
+{
+    return compute<false, true>(lo, hi).second;
+}
+
+auto kden::Bandwidth::BoxBounder::bounds(std::span<const double> lo,
+    std::span<const double> hi) const -> std::pair<double, double>
+{
+    return compute<true, true>(lo, hi);
 }

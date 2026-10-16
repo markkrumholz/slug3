@@ -8,6 +8,7 @@
 
 #include "testBandwidth.hpp"
 #include "testKDTree.hpp"
+#include "testKernelDensity.hpp"
 #include <exception>
 #include <iostream>
 
@@ -22,6 +23,10 @@ auto main() -> int {
         result += testKDTreeConstruction();
         result += testKDTreeNeighbors();
         result += testKDTreeNeighborsBatch();
+        result += testKernelDensityConstruction();
+        result += testRefinementList();
+        result += testKernelDensityPdf();
+        result += testKernelDensityNormalization();
         return result;
     }
     catch (const std::exception& error)

@@ -13,6 +13,7 @@
 #include <cstddef>
 #include <functional>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace kden {
@@ -85,6 +86,17 @@ namespace kden {
         /** @brief Whether the matrix is diagonal (over the specified dimensions)
          *  @return True if distances and bounds use the O(n) diagonal path */
         [[nodiscard]] auto isDiagonal() const -> bool { return diagonal_; }
+        /** @brief Number of specified dimensions
+         *  @return The number of dimensions not flagged in unspecified() */
+        [[nodiscard]] auto nSpecified() const -> std::size_t { return spec_.size(); }
+        /** @brief Determinant of the matrix over the specified dimensions
+         *  @return det M_s, with M_s the matrix's block over the specified
+         *    dimensions (for a reduced Bandwidth, the Schur complement;
+         *    see reduce()); 1 if no dimension is specified, and 0 (to
+         *    rounding) if M_s is singular. The integral of
+         *    exp(-d^T M_s d) over the specified dimensions is
+         *    pi^(nSpecified / 2) / sqrt(det()). */
+        [[nodiscard]] auto det() const -> double { return det_; }
 
         /**
          * @brief Reduce the metric for points with some coordinates unspecified
@@ -149,7 +161,7 @@ namespace kden {
 
         /**
          * @class BoxBounder
-         * @brief Rigorous lower bound on the distance from one point to axis-aligned boxes
+         * @brief Rigorous lower and upper bounds on the distance from one point to axis-aligned boxes
          * @details
          * Built once per search point (see Bandwidth::boxBounder()).
          * With s the specified dimensions, the bound uses a factor W of
@@ -162,14 +174,21 @@ namespace kden {
          * is the squared gap between w_k . x and that interval (zero if
          * it lies inside); their sum is a rigorous lower bound on the
          * minimum of the sum, and exact for a diagonal metric (which
-         * uses a direct O(n) path instead). A triangular, Cholesky-type
+         * uses a direct O(n) path instead). Likewise the maximum of each
+         * term is the squared distance from w_k . x to the far end of
+         * the interval, (|w_k . x - w_k . c| + |w_k| . h)^2, and their
+         * sum is a rigorous upper bound on the maximum of the sum (the
+         * per-term maxima generally occur at different points of the
+         * box), again exact for a diagonal metric, where it is the
+         * distance to the box's farthest corner. A triangular, Cholesky-type
          * factor is used rather than the metric's principal axes
          * because it stays close to the coordinate axes as the metric
          * approaches diagonal, keeping the bound tight; the principal
          * axes can rotate arbitrarily when eigenvalues are nearly
-         * equal. The bound is shrunk by a relative 1e-10, so that
-         * rounding in the factorization can never make it exceed a true
-         * distance. Holds scratch space, so must not be shared between
+         * equal. For non-diagonal metrics the lower bound is shrunk,
+         * and the upper bound inflated, by a relative 1e-10, so that
+         * rounding in the factorization can never carry either past a
+         * true distance. Holds scratch space, so must not be shared between
          * threads; must not outlive the Bandwidth it came from.
          */
         class BoxBounder
@@ -183,8 +202,29 @@ namespace kden {
              * @return A value no larger than the squared distance (as
              *   computed by dist2()) from the point to any point in the box
              */
-            auto operator()(std::span<const double> lo,
+            [[nodiscard]] auto lower(std::span<const double> lo,
                 std::span<const double> hi) const -> double;
+
+            /**
+             * @brief Upper bound on the squared distance from the point to a box
+             * @param lo Lower corner of the box (n elements)
+             * @param hi Upper corner of the box (n elements)
+             * @return A value no smaller than the squared distance (as
+             *   computed by dist2()) from the point to any point in the box
+             */
+            [[nodiscard]] auto upper(std::span<const double> lo,
+                std::span<const double> hi) const -> double;
+
+            /**
+             * @brief Lower and upper bounds together
+             * @param lo Lower corner of the box (n elements)
+             * @param hi Upper corner of the box (n elements)
+             * @return The pair (lower(lo, hi), upper(lo, hi)), computed
+             *   with a single pass over the box, so cheaper than calling
+             *   both separately
+             */
+            [[nodiscard]] auto bounds(std::span<const double> lo,
+                std::span<const double> hi) const -> std::pair<double, double>;
 
         private:
 
@@ -196,6 +236,19 @@ namespace kden {
              * @param x The point; NaN in the bandwidth's unspecified dimensions
              */
             BoxBounder(const Bandwidth& bandwidth, std::span<const double> x);
+
+            /**
+             * @brief Shared implementation of lower(), upper(), and bounds()
+             * @tparam WantLower Whether to compute the lower bound
+             * @tparam WantUpper Whether to compute the upper bound
+             * @param lo Lower corner of the box (n elements)
+             * @param hi Upper corner of the box (n elements)
+             * @return (lower bound, upper bound); an element that was not
+             *   requested is zero
+             */
+            template <bool WantLower, bool WantUpper>
+            auto compute(std::span<const double> lo,
+                std::span<const double> hi) const -> std::pair<double, double>;
 
             std::reference_wrapper<const Bandwidth> bandwidth_;  /**< The metric */
             Eigen::VectorXd xs_;              /**< The point, specified dimensions only */ // NOLINT(misc-include-cleaner) -- Eigen::VectorXd is provided by <Eigen/Dense> (included above); clang-tidy's IWYU mapping doesn't know that
@@ -233,6 +286,7 @@ namespace kden {
         Eigen::MatrixXd ms_;              /**< h2Inv_'s block over the specified dimensions, contiguous */
         Eigen::VectorXd diag_;            /**< Diagonal of ms_ */
         bool diagonal_ = false;           /**< Whether ms_ is diagonal */
+        double det_ = 1.0;                /**< Determinant of ms_ */
         Eigen::MatrixXd w_;               /**< Box-bound factor W (M_s = W^T W), over the specified dimensions; empty if diagonal */
         Eigen::MatrixXd absW_;            /**< Element-wise absolute value of W */
     };
