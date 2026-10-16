@@ -200,6 +200,27 @@ void bindSimCluster(py::module_& m);
 void bindSimGalaxy(py::module_& m);
 
 /**
+ * @brief Bind kden::Bandwidth as Bandwidth, and kden::Bandwidth::BoxBounder as BoxBounder
+ * @details
+ * Must run before bindKDTree()/bindKernelDensity(), whose methods
+ * take and return Bandwidth objects.
+ */
+void bindBandwidth(py::module_& m);
+
+/**
+ * @brief Bind kden::KDTreeNode as KDTreeNode, and a kden::KDTree over numpy arrays as KDTree
+ */
+void bindKDTree(py::module_& m);
+
+/**
+ * @brief Bind kden::KernelDensity as KernelDensityView, a KernelDensity over numpy arrays as KernelDensity, and kden::ConditionalDensity as ConditionalDensity
+ * @details
+ * Must run after bindKDTree(), since KernelDensity's tree methods
+ * return KDTreeNode objects.
+ */
+void bindKernelDensity(py::module_& m);
+
+/**
  * @brief Resolve an optional py::object SimControls argument to a real SimControls
  * @param controls The Python-facing controls argument; if py::none(),
  *   fallback is used instead

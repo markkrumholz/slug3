@@ -99,6 +99,15 @@ Sections, in file order, and the fixtures each is built around:
   directly, in more detail, by tests/elem/testDecayChain.hpp's own C++
   tests.
 
+- Bandwidth / BoxBounder / KDTree / KDTreeNode / KernelDensity /
+  KernelDensityView / ConditionalDensity: small random point sets made
+  here (make_kde_points()), checked against brute-force numpy
+  evaluations. KDTree and KernelDensity view the numpy arrays they are
+  given and reorder them in place (no copies), so these tests also
+  check that the caller's own arrays are what get reordered, that the
+  aux index array maps them back to the original order, and that the
+  arrays stay alive with the tree.
+
 This file is run via pytest, invoked as a CTest test from CMakeLists.txt
 (see the test_PythonBindings target), so `ctest` alone runs both the
 C++ and Python sides of the test suite. It requires the SLUG_DIR
@@ -4325,3 +4334,262 @@ def test_simcontrols_write_feedback_properties():
     assert controls.writeGalaxyFeedback is False
     controls.writeGalaxyFeedback = True
     assert controls.writeGalaxyFeedback is True
+
+
+# ---------------------------------------------------------------------------
+# Bandwidth / KDTree / KernelDensity / ConditionalDensity
+# ---------------------------------------------------------------------------
+
+def make_kde_points(n, ndim, seed):
+    """Random points with correlated first two dimensions, plus weights in [0.5, 2)."""
+    rng = np.random.default_rng(seed)
+    common = 3.0 * rng.standard_normal(n)
+    x = rng.standard_normal((n, ndim))
+    x[:, :2] = common[:, None] + 0.2 * rng.standard_normal((n, 2))
+    w = rng.uniform(0.5, 2.0, n)
+    return np.ascontiguousarray(x), w
+
+
+def kde_test_metric(ndim):
+    """A full, strongly correlated inverse squared bandwidth matrix."""
+    corr = 0.2 * np.eye(ndim) + 0.8 * np.ones((ndim, ndim))
+    m = 4.0 * np.linalg.inv(corr)
+    return 0.5 * (m + m.T)
+
+
+def brute_pdf(x, w, m, q):
+    """Normalized Gaussian KDE exp(-d^T M d) at q, by brute force (no NaNs)."""
+    d = x - q
+    r2 = np.einsum("ij,jk,ik->i", d, m, d)
+    norm = np.sqrt(np.linalg.det(m)) / np.pi ** (0.5 * x.shape[1])
+    return norm * np.sum(w * np.exp(-r2)) / np.sum(w)
+
+
+def test_bandwidth_basics():
+    """Bandwidth exposes its matrix, reduction, convolution, distances, and bounds."""
+    m = kde_test_metric(3)
+    bw = slug.Bandwidth(m)
+    assert bw.nDim() == 3 and not bw.isDiagonal() and not bw.isReduced()
+    assert np.allclose(bw.h2Inv(), m)
+    assert bw.det() == pytest.approx(np.linalg.det(m))
+    assert slug.Bandwidth.identity(2).isDiagonal()
+    assert slug.Bandwidth.nanPattern([1.0, np.nan, 2.0]) == [False, True, False]
+
+    # reduce(): the inverse of the specified block of the covariance
+    red = bw.reduce([False, True, False])
+    cov = np.linalg.inv(m)[np.ix_([0, 2], [0, 2])]
+    assert np.allclose(red.h2Inv()[np.ix_([0, 2], [0, 2])], np.linalg.inv(cov))
+    assert red.isReduced() and red.nSpecified() == 2
+    assert red.unspecified() == [False, True, False]
+    assert red.matches([0.0, np.nan, 0.0]) and not red.matches([0.0, 0.0, 0.0])
+
+    # convolve(): (M1^-1 + M2^-1)^-1
+    other = slug.Bandwidth(np.diag([1.0, 2.0, 3.0]))
+    want = np.linalg.inv(np.linalg.inv(m) + np.diag([1.0, 0.5, 1.0 / 3.0]))
+    assert np.allclose(bw.convolve(other).h2Inv(), want)
+
+    # dist2(): scalar for two points, vectorized otherwise
+    a = np.array([0.1, -0.4, 0.7])
+    b = np.array([[1.0, 0.0, 0.0], [0.5, 0.5, -0.5]])
+    assert bw.dist2(a, b[0]) == pytest.approx((a - b[0]) @ m @ (a - b[0]))
+    assert np.allclose(bw.dist2(a, b), [(a - bi) @ m @ (a - bi) for bi in b])
+
+    # BoxBounder brackets the distance to points in a box
+    rng = np.random.default_rng(3)
+    lo, hi = np.array([-1.0, 0.0, 0.5]), np.array([0.0, 1.0, 1.5])
+    pts = lo + (hi - lo) * rng.uniform(size=(2000, 3))
+    d2 = bw.dist2(a, pts)
+    bounder = bw.boxBounder(a)
+    lower, upper = bounder.bounds(lo, hi)
+    assert lower == bounder.lower(lo, hi) and upper == bounder.upper(lo, hi)
+    assert lower <= d2.min() and upper >= d2.max()
+
+
+def test_bandwidth_errors():
+    """Invalid matrices and mis-sized arguments raise."""
+    with pytest.raises(ValueError):
+        slug.Bandwidth(np.array([[1.0, 0.5], [0.0, 1.0]]))
+    bw = slug.Bandwidth.identity(2)
+    with pytest.raises(ValueError):
+        bw.dist2([0.0, 0.0, 0.0], [0.0, 0.0, 0.0])
+    with pytest.raises(ValueError):
+        bw.boxBounder([0.0, 0.0]).lower([0.0], [1.0])
+    with pytest.raises(ValueError):
+        bw.convolve(slug.Bandwidth.identity(3))
+
+
+def test_kdtree_reorders_callers_arrays_in_place():
+    """KDTree reorders the caller's own arrays, and aux maps them back to the original order."""
+    x, _ = make_kde_points(500, 3, 1)
+    x_orig = x.copy()
+    aux = np.arange(1000, 1500, dtype=np.int64)
+    tree = slug.KDTree(x, aux, leafSize=8)
+    assert np.shares_memory(tree.x, x) and np.shares_memory(tree.aux, aux)
+    assert not np.array_equal(x, x_orig)
+    assert np.array_equal(x, x_orig[aux - 1000])
+    with pytest.raises(ValueError):
+        tree.x[0, 0] = 0.0  # the views are read-only
+
+    # A default aux is the original index
+    y, _ = make_kde_points(200, 3, 2)
+    y_orig = y.copy()
+    tree2 = slug.KDTree(y)
+    assert np.array_equal(y, y_orig[tree2.aux])
+
+    # The tree keeps its arrays alive
+    del x, aux
+    gc.collect()
+    assert tree.x.shape == (500, 3)
+    idx, _ = tree.neighbors(np.zeros(3), 3)
+    assert idx.shape == (3,)
+
+
+def test_kdtree_structure():
+    """Tree accessors and traversal helpers are consistent."""
+    x, _ = make_kde_points(300, 2, 3)
+    tree = slug.KDTree(x, leafSize=10)
+    nodes = tree.nodes()
+    root = nodes[slug.KDTree.rootNode]
+    assert root.start == 0 and root.count == 300 and root.parent == slug.KDTree.nullNode
+    assert tree.nDim() == 2 and tree.leafSize() == 10 and tree.nLeaves() >= 1
+    assert slug.KDTree.left(0) == 1 and slug.KDTree.right(0) == 2
+    assert slug.KDTree.parent(4) == 1 and slug.KDTree.sibling(3) == 4
+    assert slug.KDTree.next(0) == slug.KDTree.nullNode
+    assert np.allclose(tree.nodeLo(0), x.min(axis=0)) and np.allclose(tree.nodeHi(0), x.max(axis=0))
+    with pytest.raises(IndexError):
+        tree.nodeLo(len(nodes))
+    # Restricted splits
+    tree3 = slug.KDTree(make_kde_points(300, 3, 4)[0], leafSize=10, noSplitDims=[1])
+    assert all(n.splitDim != 1 for n in tree3.nodes())
+
+
+def test_kdtree_neighbors_match_brute_force():
+    """neighbors() matches brute force, singly and in batches, with shared and per-point metrics."""
+    x, _ = make_kde_points(1000, 3, 5)
+    tree = slug.KDTree(x)
+    m = kde_test_metric(3)
+    bw = slug.Bandwidth(m)
+    rng = np.random.default_rng(6)
+    q = rng.standard_normal((20, 3))
+
+    def brute(qi, mm):
+        d = x - qi
+        r2 = np.einsum("ij,jk,ik->i", d, mm, d)
+        return np.sort(r2)[:7]
+
+    idx, d2 = tree.neighbors(q[0], 7, bw)
+    assert np.allclose(d2, brute(q[0], m))
+    assert np.allclose(bw.dist2(q[0], x[idx]), d2)
+    idx, d2 = tree.neighbors(q, 7, bw)
+    assert idx.shape == (20, 7)
+    for i in range(20):
+        assert np.allclose(d2[i], brute(q[i], m))
+    _, d2e = tree.neighbors(q, 7)
+    for i in range(20):
+        assert np.allclose(d2e[i], brute(q[i], np.eye(3)))
+    bws = [bw if i % 2 else slug.Bandwidth.identity(3) for i in range(20)]
+    _, d2m = tree.neighbors(q, 7, bws)
+    for i in range(20):
+        assert np.allclose(d2m[i], brute(q[i], m if i % 2 else np.eye(3)))
+    # More neighbors than points
+    idx, _ = slug.KDTree(make_kde_points(5, 3, 7)[0]).neighbors(q[0], 10)
+    assert idx.shape == (5,)
+
+
+def test_kdtree_array_checks():
+    """Arrays that cannot be reordered in place without a copy are rejected."""
+    x, _ = make_kde_points(50, 2, 8)
+    with pytest.raises(TypeError):
+        slug.KDTree(x.astype(np.float32))
+    with pytest.raises(TypeError):
+        slug.KDTree(x.tolist())
+    with pytest.raises(ValueError):
+        slug.KDTree(np.asfortranarray(x))
+    ro = x.copy()
+    ro.setflags(write=False)
+    with pytest.raises(ValueError):
+        slug.KDTree(ro)
+    with pytest.raises(TypeError):
+        slug.KDTree(x.copy(), np.arange(50, dtype=np.int32))
+    with pytest.raises(ValueError):
+        slug.KDTree(x.copy(), np.arange(49, dtype=np.int64))
+    bad = x.copy()
+    bad[3, 1] = np.nan
+    with pytest.raises(ValueError):
+        slug.KDTree(bad)
+
+
+def test_kernel_density_pdf_matches_brute_force():
+    """KernelDensity normalizes weights in place, and pdf() matches brute force."""
+    x, w = make_kde_points(2000, 3, 9)
+    x0, w0 = x.copy(), w.copy()
+    kde = slug.KernelDensity(x, w, leafSize=8)
+    assert np.shares_memory(kde.w, w)
+    assert w.sum() == pytest.approx(1.0) and kde.nodeW(0) == pytest.approx(1.0)
+    assert np.allclose(w, (w0 / w0.sum())[kde.aux])
+    m = kde_test_metric(3)
+    bw = slug.Bandwidth(m)
+    rng = np.random.default_rng(10)
+    q = 1.5 * rng.standard_normal((10, 3))
+    want = np.array([brute_pdf(x0, w0, m, qi) for qi in q])
+    got = kde.pdf(q, 1e-3, 0.0, bw)
+    assert np.all(np.abs(got - want) <= 1e-3 * got * (1 + 1e-9))
+    assert kde.pdf(q[0], 0.0, 0.0, bw) == pytest.approx(want[0], rel=1e-12)
+    assert isinstance(kde.pdf(q[0], 1e-3, 0.0), float)
+
+    # NaN coordinates give the marginal: the 2D estimate with the reduced metric
+    qn = q.copy()
+    qn[:, 2] = np.nan
+    red = np.linalg.inv(np.linalg.inv(m)[:2, :2])
+    want_n = np.array([brute_pdf(x0[:, :2], w0, red, qi[:2]) for qi in qn])
+    assert np.allclose(kde.pdf(qn, 0.0, 0.0, bw), want_n, rtol=1e-10)
+
+    # Per-point bandwidths
+    bws = [bw if i % 2 else slug.Bandwidth.identity(3) for i in range(10)]
+    want_m = np.array([brute_pdf(x0, w0, m if i % 2 else np.eye(3), qi) for i, qi in enumerate(q)])
+    assert np.allclose(kde.pdf(q, 0.0, 0.0, bws), want_m, rtol=1e-10)
+
+    # Default weights are equal
+    kde_eq = slug.KernelDensity(make_kde_points(100, 2, 11)[0])
+    assert np.allclose(kde_eq.w, 0.01)
+    with pytest.raises(ValueError):
+        slug.KernelDensity(x0.copy(), -w0)
+
+
+def test_conditional_density():
+    """conditional() reproduces the full estimate, owns its points, and keeps them alive."""
+    x, w = make_kde_points(1500, 4, 12)
+    kde = slug.KernelDensity(x, w, leafSize=8)
+    bw = slug.Bandwidth(kde_test_metric(4))
+    x0 = np.array([0.4, np.nan, 0.9, np.nan])
+    cd = kde.conditional(x0, 0.0, bandwidth=bw)
+    assert cd.dims() == [1, 3]
+    marg = kde.pdf(x0, 0.0, 0.0, bw)
+    assert cd.marginal() == pytest.approx(marg, rel=1e-10)
+    rng = np.random.default_rng(13)
+    y = rng.standard_normal((5, 2))
+    full = kde.pdf(np.column_stack([np.full(5, 0.4), y[:, 0], np.full(5, 0.9), y[:, 1]]), 0.0, 0.0, bw)
+    assert np.allclose(cd.marginal() * cd.pdf(y, 0.0, 0.0), full, rtol=1e-10)
+
+    # Marginalizing dimension 3
+    cdm = kde.conditional(np.array([0.4, np.nan, 0.9, 0.0]), 0.0, marginalDims=[3], bandwidth=bw)
+    fullm = kde.pdf(np.column_stack([np.full(5, 0.4), y[:, 0], np.full(5, 0.9), np.full(5, np.nan)]),
+                    0.0, 0.0, bw)
+    assert np.allclose(cdm.marginal() * cdm.pdf(y[:, :1], 0.0, 0.0), fullm, rtol=1e-10)
+
+    # Pruning keeps fewer points; aux is carried over; kde() is a usable view
+    pruned = kde.conditional(x0, 1e-2, bandwidth=bw)
+    assert 0 < pruned.w.size < cd.w.size
+    assert pruned.w.sum() == pytest.approx(1.0)
+    assert set(pruned.aux.tolist()) <= set(kde.aux.tolist())
+    view = pruned.kde()
+    assert isinstance(view, slug.KernelDensityView) and not isinstance(view, slug.KernelDensity)
+    assert view.pdf(y[0], 0.0, 0.0, pruned.bandwidth()) == pytest.approx(pruned.pdf(y[0], 0.0, 0.0))
+    del pruned
+    gc.collect()
+    assert view.nDim() == 2 and view.x.shape[1] == 2
+
+    with pytest.raises(ValueError):
+        kde.conditional(np.full(4, np.nan), 0.0, bandwidth=bw)
+    with pytest.raises(ValueError):
+        kde.conditional(x0, 1.0, bandwidth=bw)

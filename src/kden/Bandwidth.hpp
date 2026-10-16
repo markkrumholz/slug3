@@ -231,6 +231,10 @@ namespace kden {
             [[nodiscard]] auto lower(std::span<const double> lo,
                 std::span<const double> hi) const -> double;
 
+            /** @brief Number of dimensions of the boxes
+             *  @return The Bandwidth's number of dimensions, n */
+            [[nodiscard]] auto nDim() const -> std::size_t { return bandwidth_.get().nDim(); }
+
             /**
              * @brief Upper bound on the squared distance from the point to a box
              * @param lo Lower corner of the box (n elements)
