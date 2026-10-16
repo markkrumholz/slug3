@@ -45,5 +45,8 @@ PYBIND11_MODULE(_slug, m, py::mod_gil_not_used()) {
     bindOutputManagerAscii(m);
     bindSimCluster(m);
     bindSimGalaxy(m);
+    bindBandwidth(m);
+    bindKDTree(m);
+    bindKernelDensity(m);
 }
 // NOLINTEND(misc-include-cleaner)

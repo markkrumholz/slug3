@@ -69,36 +69,43 @@ namespace kden {
     };
 
     /**
-     * @brief Storage type for a KDTreeData's auxiliary data
+     * @brief Types for a KDTreeData's auxiliary data
      * @tparam AuxType Type of one point's auxiliary data, or void for none
-     * @details std::vector<AuxType>, or an empty placeholder if AuxType is void
+     * @details View is a std::span<AuxType> over the caller's storage,
+     *   and Owned a std::vector<AuxType> (see OwnedKDTreeData); both
+     *   are an empty placeholder if AuxType is void
      */
     template <typename AuxType>
     struct KDTreeAuxStorage
     {
-        using Type = std::vector<AuxType>; /**< One element per point */
+        using View = std::span<AuxType>;     /**< One element per point, not owned */
+        using Owned = std::vector<AuxType>;  /**< One element per point, owned */
     };
     /** @brief No auxiliary data: an empty placeholder */
     template <>
     struct KDTreeAuxStorage<void>
     {
-        using Type = std::monostate; /**< Empty */
+        using View = std::monostate;   /**< Empty */
+        using Owned = std::monostate;  /**< Empty */
     };
 
     /**
      * @struct KDTreeData
-     * @brief The points a KDTree indexes, stored as a struct of arrays
+     * @brief The points a KDTree indexes: a non-owning view of a struct of arrays
      * @tparam AuxType Type of the auxiliary data carried by each point
      *   (e.g. an index into an original data set), or void (the
      *   default) for none
      * @details
-     * Holds N points of nDim_ dimensions each, as one flat array of
+     * Views N points of nDim_ dimensions each, as one flat array of
      * positions (x_, N x nDim_ doubles, point-major: point i occupies
      * x_[i * nDim_] through x_[i * nDim_ + nDim_ - 1]) and, unless
      * AuxType is void, one of auxiliary data (aux_, N elements of
      * AuxType). Building a KDTree over it reorders both together, in
-     * place. With AuxType void, aux_ is an empty placeholder that
-     * occupies no storage.
+     * place, in the caller's own storage: the arrays are spans, so
+     * they can view any contiguous storage (e.g. an OwnedKDTreeData's
+     * vectors, or arrays owned by Python) without copying it. The
+     * storage must outlive any tree built over it. With AuxType void,
+     * aux_ is an empty placeholder that occupies no storage.
      *
      * A type derived from this may add further per-point arrays (as
      * KernelDensityData adds weights) and have the tree reorder them
@@ -117,8 +124,8 @@ namespace kden {
         static constexpr bool hasAux = !std::is_void_v<AuxType>;
 
         std::size_t nDim_ = 0;   /**< Number of dimensions of each position */
-        std::vector<double> x_;  /**< Positions, N x nDim_, point-major */
-        [[no_unique_address]] typename KDTreeAuxStorage<AuxType>::Type aux_; /**< Auxiliary data, one per point (if AuxType is not void) */
+        std::span<double> x_;    /**< Positions, N x nDim_, point-major (not owned) */
+        [[no_unique_address]] typename KDTreeAuxStorage<AuxType>::View aux_; /**< Auxiliary data, one per point (if AuxType is not void; not owned) */
 
         /** @brief Number of points
          *  @return N, the number of positions (zero if nDim_ is zero) */
@@ -197,6 +204,37 @@ namespace kden {
             {
                 std::swap(aux_[i], aux_[j]); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
             }
+        }
+    };
+
+    /**
+     * @struct OwnedKDTreeData
+     * @brief Storage for a set of KDTree points: owning vectors, viewed by a KDTreeData
+     * @tparam AuxType As for KDTreeData
+     * @details
+     * For C++ callers that want the tree's points to own their
+     * storage. view() returns a KDTreeData over the vectors; it stays
+     * valid until a vector is resized or reallocated (moving this
+     * object keeps it valid, since moving a vector keeps its buffer).
+     */
+    template <typename AuxType = void>
+    struct OwnedKDTreeData
+    {
+        std::size_t nDim_ = 0;   /**< Number of dimensions of each position */
+        std::vector<double> x_;  /**< Positions, N x nDim_, point-major */
+        [[no_unique_address]] typename KDTreeAuxStorage<AuxType>::Owned aux_; /**< Auxiliary data, one per point (if AuxType is not void) */
+
+        /**
+         * @brief A view of these points
+         * @return A KDTreeData viewing x_ and aux_
+         */
+        [[nodiscard]] auto view() -> KDTreeData<AuxType>
+        {
+            KDTreeData<AuxType> v;
+            v.nDim_ = nDim_;
+            v.x_ = std::span<double>(x_);
+            if constexpr (KDTreeData<AuxType>::hasAux) { v.aux_ = std::span<AuxType>(aux_); }
+            return v;
         }
     };
 
@@ -316,8 +354,9 @@ namespace kden {
 
         /**
          * @brief Construct a KDTree over a set of points
-         * @param data The points to index; not copied, so must outlive
-         *   the tree, and reordered in place as the tree is built. Its
+         * @param data The points to index; not copied, so both it and
+         *   the storage it views must outlive the tree, and the storage
+         *   is reordered in place as the tree is built. Its
          *   dimensionality sets the tree's. It must pass its own
          *   validate(): for KDTreeData, every position coordinate must
          *   be finite.

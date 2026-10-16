@@ -696,6 +696,9 @@ pybind11_add_module(slugPython
     src/pybind/BindYieldChannel.cpp
     src/pybind/BindYields.cpp
     src/pybind/BindWinds.cpp
+    src/pybind/BindBandwidth.cpp
+    src/pybind/BindKDTree.cpp
+    src/pybind/BindKernelDensity.cpp
     src/core/Cluster.cpp
     src/core/Galaxy.cpp
     src/core/SimCluster.cpp
@@ -739,6 +742,7 @@ pybind11_add_module(slugPython
     src/elem/IsotopeTable.cpp
     src/yields/YieldChannel.cpp
     src/yields/Yields.cpp
+    src/kden/Bandwidth.cpp
 )
 set_target_properties(slugPython PROPERTIES OUTPUT_NAME _slug)
 if(NOT SKBUILD)

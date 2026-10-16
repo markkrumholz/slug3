@@ -37,8 +37,10 @@
 #include <vector>
 
 /** Weighted test data: each point's auxiliary data is its original index */
-using KDETestData = kden::KernelDensityData<std::size_t>;
-/** A kernel density estimate over KDETestData */
+using KDETestData = kden::OwnedKernelDensityData<std::size_t>;
+/** A view of KDETestData, which estimates are built over */
+using KDETestView = kden::KernelDensityData<std::size_t>;
+/** A kernel density estimate over KDETestView */
 using KDETest = kden::KernelDensity<std::size_t>;
 
 /**
@@ -109,8 +111,10 @@ inline auto testKernelDensityConstruction() -> int
                 (withMetric ? " with" : " without") + " a metric";
             KDETestData kdeData = makeKDETestData(nPt, 4, 2, 21);
             KDTestData treeData = makeKDTestData(nPt, 4, 2, 21);
-            const KDETest kde = withMetric ? KDETest(kdeData, 8, splitBw) : KDETest(kdeData, 8);
-            const KDTestTree tree = withMetric ? KDTestTree(treeData, 8, splitBw) : KDTestTree(treeData, 8);
+            auto kdeView = kdeData.view();
+            auto treeView = treeData.view();
+            const KDETest kde = withMetric ? KDETest(kdeView, 8, splitBw) : KDETest(kdeView, 8);
+            const KDTestTree tree = withMetric ? KDTestTree(treeView, 8, splitBw) : KDTestTree(treeView, 8);
 
             // The same tree as a KDTree builds over the same positions
             if (kdeData.aux_ != treeData.aux_ || kdeData.x_ != treeData.x_ ||
@@ -152,7 +156,8 @@ inline auto testKernelDensityConstruction() -> int
     // Huge weights, whose sum overflows a double, still normalize
     KDETestData huge = makeKDETestData(100, 3, 2, 2);
     std::ranges::fill(huge.w_, 0.5 * std::numeric_limits<double>::max());
-    const KDETest hugeKde(huge, 8);
+    auto hugeView = huge.view();
+    const KDETest hugeKde(hugeView, 8);
     if (std::abs(hugeKde.nodeW(kden::rootNode) - 1.0) > 1e-12 || std::abs(huge.w_[0] - 0.01) > 1e-15)
     {
         std::cerr << "testKernelDensityConstruction: weights whose sum overflows did not normalize\n";
@@ -162,21 +167,27 @@ inline auto testKernelDensityConstruction() -> int
     // Invalid weights: wrong number, and non-finite
     int thrown = 0;
     const KDETestData data = makeKDETestData(10, 3, 2, 1);
+    // Each case builds an estimate over a view of its own copy of data
+    auto tryBuild = [&thrown](KDETestData d) -> void
+    {
+        auto v = d.view();
+        try { const KDETest t(v); } catch (const std::invalid_argument&) { ++thrown; }
+    };
     auto badW = data;
     badW.w_.pop_back();
-    try { const KDETest t(badW); } catch (const std::invalid_argument&) { ++thrown; }
+    tryBuild(badW);
     auto nanW = data;
     nanW.w_[2] = std::numeric_limits<double>::quiet_NaN();
-    try { const KDETest t(nanW); } catch (const std::invalid_argument&) { ++thrown; }
+    tryBuild(nanW);
     auto infW = data;
     infW.w_[5] = -std::numeric_limits<double>::infinity();
-    try { const KDETest t(infW); } catch (const std::invalid_argument&) { ++thrown; }
+    tryBuild(infW);
     auto negW = data;
     negW.w_[7] = -0.1;
-    try { const KDETest t(negW); } catch (const std::invalid_argument&) { ++thrown; }
+    tryBuild(negW);
     auto zeroW = data;
     std::ranges::fill(zeroW.w_, 0.0);
-    try { const KDETest t(zeroW); } catch (const std::invalid_argument&) { ++thrown; }
+    tryBuild(zeroW);
     if (thrown != 5)
     {
         std::cerr << "testKernelDensityConstruction: only " << thrown << " of 5 invalid constructions threw\n";
@@ -289,7 +300,7 @@ inline auto testRefinementList() -> int
  * @return sqrt(det M) / (pi^(n / 2) sum_i w_i) sum_i w_i exp(-d_i^T M d_i),
  *   over the n specified dimensions
  */
-inline auto brutePdf(const KDETestData& data, const std::vector<double>& x,
+inline auto brutePdf(const KDETestView& data, const std::vector<double>& x,
     const kden::Bandwidth& bandwidth) -> double
 {
     double sum = 0.0;
@@ -313,7 +324,8 @@ inline auto testKernelDensityPdf() -> int
     std::mt19937 gen(31); // NOLINT(cert-msc32-c,cert-msc51-cpp) -- fixed seed for a reproducible test
     std::normal_distribution<double> gauss(0.0, 1.0);
     const double nan = std::numeric_limits<double>::quiet_NaN();
-    KDETestData data = makeKDETestData(4000, 4, 2, 32);
+    KDETestData owned = makeKDETestData(4000, 4, 2, 32);
+    auto data = owned.view();
     const KDETest kde(data, 8);
 
     // Bandwidths: Euclidean, diagonal, and full and correlated, all
@@ -374,7 +386,8 @@ inline auto testKernelDensityPdf() -> int
     // A tree that never splits along dimension 1 gives the same
     // answers, to within the tolerance, including for marginal
     // densities over dimension 1
-    KDETestData rData = makeKDETestData(4000, 4, 2, 32);
+    KDETestData rOwned = makeKDETestData(4000, 4, 2, 32);
+    auto rData = rOwned.view();
     const KDETest rKde(rData, 8, std::vector<std::size_t>{1});
     for (int trial = 0; trial < 10; ++trial)
     {
@@ -440,7 +453,8 @@ inline auto testKernelDensityPdf() -> int
 inline auto testKernelDensityNormalization() -> int
 {
     int failures = 0;
-    KDETestData data = makeKDETestData(40, 2, 2, 41);
+    KDETestData owned = makeKDETestData(40, 2, 2, 41);
+    auto data = owned.view();
     const KDETest kde(data, 4);
     Eigen::MatrixXd m(2, 2);
     m << 3.0, 1.2, 1.2, 1.0;
@@ -497,7 +511,8 @@ inline auto testConditionalDensity() -> int
     const double nan = std::numeric_limits<double>::quiet_NaN();
     std::mt19937 gen(61); // NOLINT(cert-msc32-c,cert-msc51-cpp) -- fixed seed for a reproducible test
     std::normal_distribution<double> gauss(0.0, 1.0);
-    KDETestData data = makeKDETestData(3000, 4, 2, 62);
+    KDETestData owned = makeKDETestData(3000, 4, 2, 62);
+    auto data = owned.view();
     const KDETest kde(data, 8);
     const Eigen::MatrixXd corr = (0.2 * Eigen::MatrixXd::Identity(4, 4)) +
         (0.8 * Eigen::MatrixXd::Ones(4, 4));

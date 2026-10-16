@@ -18,6 +18,7 @@
 #include <limits>
 #include <memory>
 #include <numbers>
+#include <span>
 #include <stdexcept>
 #include <tuple>
 #include <utility>
@@ -34,12 +35,13 @@ namespace kden {
      * Adds a flat array of weights (w_, N doubles) to KDTreeData's
      * positions and auxiliary data, and extends swap() and validate()
      * to cover it, so that building a tree over the points reorders
-     * the weights along with them.
+     * the weights along with them. Like KDTreeData, a non-owning view
+     * of the caller's storage (see OwnedKernelDensityData).
      */
     template <typename AuxType = void>
     struct KernelDensityData : public KDTreeData<AuxType>
     {
-        std::vector<double> w_;  /**< Weights, one per point */
+        std::span<double> w_;  /**< Weights, one per point (not owned) */
 
         /**
          * @brief Weight of a point
@@ -82,6 +84,32 @@ namespace kden {
         {
             KDTreeData<AuxType>::swap(i, j);
             std::swap(w_[i], w_[j]); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        }
+    };
+
+    /**
+     * @struct OwnedKernelDensityData
+     * @brief Storage for a set of weighted points: owning vectors, viewed by a KernelDensityData
+     * @tparam AuxType As for KDTreeData
+     * @details
+     * Adds owned weights to OwnedKDTreeData; view() returns a
+     * KernelDensityData over the vectors, valid on the same terms.
+     */
+    template <typename AuxType = void>
+    struct OwnedKernelDensityData : public OwnedKDTreeData<AuxType>
+    {
+        std::vector<double> w_;  /**< Weights, one per point */
+
+        /**
+         * @brief A view of these points
+         * @return A KernelDensityData viewing x_, aux_, and w_
+         */
+        [[nodiscard]] auto view() -> KernelDensityData<AuxType>
+        {
+            KernelDensityData<AuxType> v;
+            static_cast<KDTreeData<AuxType>&>(v) = OwnedKDTreeData<AuxType>::view();
+            v.w_ = std::span<double>(w_);
+            return v;
         }
     };
 
@@ -510,11 +538,11 @@ namespace kden {
             const auto& pts = this->data_.get();
             const std::size_t nF = dimsF.size();
             const std::size_t nR = dimsR.size();
-            auto data = std::make_unique<KernelDensityData<AuxType>>();
-            data->nDim_ = nR;
-            data->x_.resize(kept.size() * nR);
-            data->w_.resize(kept.size());
-            if constexpr (KernelDensityData<AuxType>::hasAux) { data->aux_.reserve(kept.size()); }
+            OwnedKernelDensityData<AuxType> data;
+            data.nDim_ = nR;
+            data.x_.resize(kept.size() * nR);
+            data.w_.resize(kept.size());
+            if constexpr (KernelDensityData<AuxType>::hasAux) { data.aux_.reserve(kept.size()); }
             Eigen::VectorXd a(static_cast<Eigen::Index>(nF)); // NOLINT(misc-include-cleaner) -- Eigen::VectorXd is provided by <Eigen/Dense> (included via Bandwidth.hpp); clang-tidy's IWYU mapping doesn't know that
             for (std::size_t k = 0; k < kept.size(); ++k)
             {
@@ -524,10 +552,10 @@ namespace kden {
                 const Eigen::VectorXd ka = shift * a;
                 for (std::size_t r = 0; r < nR; ++r)
                 {
-                    data->x_[(k * nR) + r] = pos[dimsR[r]] + ka(static_cast<Eigen::Index>(r)); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                    data.x_[(k * nR) + r] = pos[dimsR[r]] + ka(static_cast<Eigen::Index>(r)); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
                 }
-                data->w_[k] = w; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-                if constexpr (KernelDensityData<AuxType>::hasAux) { data->aux_.push_back(pts.aux(i)); }
+                data.w_[k] = w; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                if constexpr (KernelDensityData<AuxType>::hasAux) { data.aux_.push_back(pts.aux(i)); }
             }
 
             // Density of the marginal over F at x0_F: the original
@@ -906,9 +934,10 @@ namespace kden {
      * Made by KernelDensity::conditional(). Holds the conditional
      * estimate's points (shifted, reweighted, and pruned copies of the
      * original ones, with their auxiliary data), a KernelDensity over
-     * them, and the kernel metric to evaluate it with. The points are
-     * held through a pointer, so their address, which the
-     * KernelDensity refers to, survives moving the ConditionalDensity.
+     * them, and the kernel metric to evaluate it with. The points and
+     * the view of them the KernelDensity refers to are held through a
+     * pointer, so their addresses survive moving the
+     * ConditionalDensity.
      */
     template <typename AuxType = void>
     class ConditionalDensity
@@ -946,11 +975,34 @@ namespace kden {
         [[nodiscard]] auto kde() const -> const KernelDensity<AuxType>& { return kde_; }
         /** @brief The conditional estimate's points
          *  @return Its points, in tree order, with weights normalized to sum to one */
-        [[nodiscard]] auto data() const -> const KernelDensityData<AuxType>& { return *data_; }
+        [[nodiscard]] auto data() const -> const KernelDensityData<AuxType>& { return points_->view_; }
 
     private:
 
         friend class KernelDensity<AuxType>;
+
+        /**
+         * @struct Points
+         * @brief The owned points and the view of them the KernelDensity is built over
+         */
+        struct Points
+        {
+            OwnedKernelDensityData<AuxType> owned_;  /**< The points */
+            KernelDensityData<AuxType> view_;        /**< A view of owned_ */
+        };
+
+        /**
+         * @brief Move a set of points onto the heap, with a view of them
+         * @param data The points
+         * @return The heap-allocated points and view
+         */
+        static auto makePoints(OwnedKernelDensityData<AuxType>&& data) -> std::unique_ptr<Points>
+        {
+            auto p = std::make_unique<Points>();
+            p->owned_ = std::move(data);
+            p->view_ = p->owned_.view();
+            return p;
+        }
 
         /**
          * @brief Construct from the conditional estimate's points
@@ -960,17 +1012,17 @@ namespace kden {
          * @param marginal p(x0_F)
          * @param leafSize Leaf size of the tree
          */
-        ConditionalDensity(std::unique_ptr<KernelDensityData<AuxType>> data, Bandwidth bandwidth,
+        ConditionalDensity(OwnedKernelDensityData<AuxType>&& data, Bandwidth bandwidth,
             std::vector<std::size_t> dims, const double marginal, const std::size_t leafSize) :
-            data_(std::move(data)),
-            kde_(*data_, leafSize, bandwidth),
+            points_(makePoints(std::move(data))),
+            kde_(points_->view_, leafSize, bandwidth),
             bandwidth_(std::move(bandwidth)),
             dims_(std::move(dims)),
             marginal_(marginal)
         {}
 
-        std::unique_ptr<KernelDensityData<AuxType>> data_;  /**< The points, owned */
-        KernelDensity<AuxType> kde_;                        /**< The estimate over data_ */
+        std::unique_ptr<Points> points_;                    /**< The points, owned */
+        KernelDensity<AuxType> kde_;                        /**< The estimate over points_->view_ */
         Bandwidth bandwidth_;                               /**< Its kernel metric */
         std::vector<std::size_t> dims_;                     /**< The kept dimensions */
         double marginal_;                                   /**< p(x0_F) */
