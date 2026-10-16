@@ -118,6 +118,32 @@ namespace kden {
         [[nodiscard]] auto reduce(const std::vector<bool>& unspecified) const -> Bandwidth;
 
         /**
+         * @brief Convolve with another bandwidth
+         * @param other The other Bandwidth; must have the same number of
+         *   dimensions, and the same unspecified dimensions (see
+         *   unspecified())
+         * @return The Bandwidth of the convolution of the two kernels,
+         *   whose matrix, over the specified dimensions, is
+         *   (M1^-1 + M2^-1)^-1, with M1 and M2 the two matrices there
+         * @throws std::invalid_argument if other has a different number
+         *   of dimensions or different unspecified dimensions
+         * @throws std::domain_error if M1 + M2 is not positive definite
+         *   (the two kernels are both infinitely broad along some
+         *   direction)
+         * @details
+         * Convolving two Gaussians adds their covariances, and the
+         * covariance is proportional to the inverse of the matrix, so
+         * this is, e.g., the bandwidth of a kernel density estimate
+         * smoothed by Gaussian measurement errors. It is computed as
+         * M1 (M1 + M2)^-1 M2, by Cholesky factorization of M1 + M2,
+         * which equals (M1^-1 + M2^-1)^-1 when both are invertible, but
+         * needs neither to be: a singular matrix (a kernel infinitely
+         * broad along some direction) gives a singular result. Costs
+         * O(n^3).
+         */
+        [[nodiscard]] auto convolve(const Bandwidth& other) const -> Bandwidth;
+
+        /**
          * @brief Which elements of a point are NaN
          * @param x The point
          * @return One flag per element, true if it is NaN

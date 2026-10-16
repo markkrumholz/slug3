@@ -19,6 +19,7 @@ auto main() -> int {
         result += testBandwidthDist2();
         result += testBandwidthReduce();
         result += testBandwidthBoxBound();
+        result += testBandwidthConvolve();
         result += testKDTreeTraversal();
         result += testKDTreeConstruction();
         result += testKDTreeNeighbors();

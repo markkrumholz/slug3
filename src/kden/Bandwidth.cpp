@@ -97,6 +97,38 @@ void kden::Bandwidth::prepare()
     absW_ = w_.cwiseAbs();
 }
 
+auto kden::Bandwidth::convolve(const Bandwidth& other) const -> Bandwidth
+{
+    if (other.nDim() != nDim() || other.unspecified_ != unspecified_)
+    {
+        throw std::invalid_argument("Bandwidth::convolve: the bandwidths must have the same "
+            "number of dimensions and the same unspecified dimensions");
+    }
+
+    // M1 (M1 + M2)^-1 M2 over the specified dimensions
+    const Eigen::LLT<Eigen::MatrixXd> llt(ms_ + other.ms_); // NOLINT(misc-include-cleaner) -- Eigen::LLT is provided by <Eigen/Dense> (included above); clang-tidy's IWYU mapping doesn't know that
+    if (llt.info() != Eigen::Success)
+    {
+        throw std::domain_error("Bandwidth::convolve: the sum of the two matrices is not "
+            "positive definite");
+    }
+    Eigen::MatrixXd conv = ms_ * llt.solve(other.ms_);
+    conv = 0.5 * (conv + conv.transpose());
+
+    // Back to n x n, zero in the unspecified dimensions
+    const auto ni = static_cast<Eigen::Index>(nDim());
+    Eigen::MatrixXd full = Eigen::MatrixXd::Zero(ni, ni);
+    for (std::size_t r = 0; r < spec_.size(); ++r)
+    {
+        for (std::size_t c = 0; c < spec_.size(); ++c)
+        {
+            full(static_cast<Eigen::Index>(spec_[r]), static_cast<Eigen::Index>(spec_[c])) = // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                conv(static_cast<Eigen::Index>(r), static_cast<Eigen::Index>(c));
+        }
+    }
+    return {std::move(full), unspecified_};
+}
+
 auto kden::Bandwidth::reduce(const std::vector<bool>& unspecified) const -> Bandwidth
 {
     const std::size_t n = nDim();

@@ -8,7 +8,8 @@
  * inverse-covariance calculation, and composed reductions), and the box
  * bounds (the lower bound never above the true minimum distance to a box
  * and the upper never below the true maximum, both exact for diagonal
- * metrics), plus argument checking.
+ * metrics), convolution (against the formula, reduction, and numerical
+ * convolution), plus argument checking.
  * @date 2026-10-15
  * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
@@ -24,9 +25,11 @@
 #include <cstdint>
 #include <iostream>
 #include <limits>
+#include <numbers>
 #include <random>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 /**
@@ -291,6 +294,116 @@ inline auto testBandwidthBoxBound() -> int
                 break;
             }
         }
+    }
+    return failures;
+}
+
+/**
+ * @brief Check convolve() against the formula, reduction, and numerical convolution
+ * @return Number of failures
+ */
+inline auto testBandwidthConvolve() -> int
+{
+    int failures = 0;
+    std::mt19937 gen(12); // NOLINT(cert-msc32-c,cert-msc51-cpp) -- fixed seed for a reproducible test
+    auto fail = [&failures](const std::string& what) -> void
+    {
+        std::cerr << "testBandwidthConvolve: " << what << "\n";
+        ++failures;
+    };
+
+    // (M1^-1 + M2^-1)^-1, symmetric in its arguments, and commuting
+    // with reduction (marginalizing commutes with adding covariances)
+    for (int trial = 0; trial < 200; ++trial)
+    {
+        const std::size_t n = 2 + static_cast<std::size_t>(trial % 6);
+        const Eigen::MatrixXd m1 = randomSPD(n, gen);
+        const Eigen::MatrixXd m2 = randomSPD(n, gen);
+        const kden::Bandwidth b1(m1);
+        const kden::Bandwidth b2(m2);
+        const kden::Bandwidth c = b1.convolve(b2);
+        const Eigen::MatrixXd want = (m1.inverse() + m2.inverse()).inverse();
+        if (!c.h2Inv().isApprox(want, 1e-9) || !b2.convolve(b1).h2Inv().isApprox(want, 1e-9))
+        {
+            fail("disagrees with (M1^-1 + M2^-1)^-1 for n = " + std::to_string(n));
+            break;
+        }
+        std::vector<bool> unspec(n, false);
+        unspec[0] = true;
+        const Eigen::MatrixXd viaReduced = b1.reduce(unspec).convolve(b2.reduce(unspec)).h2Inv();
+        const Eigen::MatrixXd reducedAfter = c.reduce(unspec).h2Inv();
+        if (!viaReduced.isApprox(reducedAfter, 1e-9))
+        {
+            fail("convolving reduced bandwidths differs from reducing the convolution");
+            break;
+        }
+    }
+
+    // Diagonal: h^2 add, so 1 / M adds; and a singular matrix (an
+    // infinitely broad kernel) gives a singular result
+    Eigen::MatrixXd d1 = Eigen::MatrixXd::Zero(2, 2);
+    d1.diagonal() << 4.0, 1.0;
+    Eigen::MatrixXd d2 = Eigen::MatrixXd::Zero(2, 2);
+    d2.diagonal() << 4.0, 3.0;
+    const kden::Bandwidth dc = kden::Bandwidth(d1).convolve(kden::Bandwidth(d2));
+    if (!dc.isDiagonal() || std::abs(dc.h2Inv()(0, 0) - 2.0) > 1e-14 || std::abs(dc.h2Inv()(1, 1) - 0.75) > 1e-14)
+    {
+        fail("diagonal convolution is wrong");
+    }
+    Eigen::MatrixXd sing = Eigen::MatrixXd::Zero(2, 2);
+    sing(0, 0) = 1.0;
+    const kden::Bandwidth sc = kden::Bandwidth(sing).convolve(kden::Bandwidth::identity(2));
+    if (std::abs(sc.h2Inv()(0, 0) - 0.5) > 1e-14 || sc.h2Inv().cwiseAbs().sum() - 0.5 > 1e-14)
+    {
+        fail("convolution with a singular bandwidth is wrong");
+    }
+
+    // The normalized kernels sqrt(det M) / pi exp(-d^T M d) convolve
+    // to the normalized kernel of the result, in two dimensions
+    Eigen::MatrixXd f1(2, 2);
+    f1 << 2.0, 0.8, 0.8, 1.0;
+    Eigen::MatrixXd f2(2, 2);
+    f2 << 0.7, -0.3, -0.3, 1.5;
+    const kden::Bandwidth k1(f1);
+    const kden::Bandwidth k2(f2);
+    const kden::Bandwidth k12 = k1.convolve(k2);
+    auto kernel = [](const kden::Bandwidth& b, const double x, const double y) -> double
+    {
+        return std::sqrt(b.det()) / std::numbers::pi * std::exp(-b.dist2(std::vector<double>{x, y}, std::vector<double>{0.0, 0.0}));
+    };
+    const double lim = 8.0;
+    const int nGrid = 400;
+    const double dx = 2.0 * lim / nGrid;
+    for (const auto& [x, y] : std::vector<std::pair<double, double>>{{0.0, 0.0}, {0.7, -0.4}, {-1.2, 1.5}})
+    {
+        double conv = 0.0;
+        for (int i = 0; i < nGrid; ++i)
+        {
+            const double tx = -lim + ((i + 0.5) * dx);
+            for (int j = 0; j < nGrid; ++j)
+            {
+                const double ty = -lim + ((j + 0.5) * dx);
+                conv += kernel(k1, x - tx, y - ty) * kernel(k2, tx, ty) * dx * dx;
+            }
+        }
+        const double want = kernel(k12, x, y);
+        if (std::abs(conv - want) > 1e-8 * want)
+        {
+            fail("numerical convolution " + std::to_string(conv) + " differs from the convolved kernel " +
+                std::to_string(want));
+            break;
+        }
+    }
+
+    // Errors: different sizes, different unspecified dimensions, and
+    // two kernels both infinitely broad along the same direction
+    int thrown = 0;
+    try { (void)k1.convolve(kden::Bandwidth::identity(3)); } catch (const std::invalid_argument&) { ++thrown; }
+    try { (void)k1.convolve(k2.reduce({true, false})); } catch (const std::invalid_argument&) { ++thrown; }
+    try { (void)kden::Bandwidth(sing).convolve(kden::Bandwidth(sing)); } catch (const std::domain_error&) { ++thrown; }
+    if (thrown != 3)
+    {
+        fail("only " + std::to_string(thrown) + " of 3 invalid convolutions threw");
     }
     return failures;
 }
