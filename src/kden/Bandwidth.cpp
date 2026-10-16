@@ -112,8 +112,10 @@ auto kden::Bandwidth::convolve(const Bandwidth& other) const -> Bandwidth
         throw std::domain_error("Bandwidth::convolve: the sum of the two matrices is not "
             "positive definite");
     }
-    Eigen::MatrixXd conv = ms_ * llt.solve(other.ms_);
-    conv = 0.5 * (conv + conv.transpose());
+    // Symmetrized into a separate matrix: assigning back to the one
+    // being transposed would alias, since Eigen evaluates lazily
+    const Eigen::MatrixXd prod = ms_ * llt.solve(other.ms_);
+    const Eigen::MatrixXd conv = 0.5 * (prod + prod.transpose());
 
     // Back to n x n, zero in the unspecified dimensions
     const auto ni = static_cast<Eigen::Index>(nDim());
@@ -170,8 +172,8 @@ auto kden::Bandwidth::reduce(const std::vector<bool>& unspecified) const -> Band
         throw std::domain_error("Bandwidth::reduce: the block of h2Inv over the newly "
             "unspecified dimensions is not positive definite");
     }
-    Eigen::MatrixXd schur = block(keep, keep) - (block(keep, drop) * llt.solve(block(drop, keep)));
-    schur = 0.5 * (schur + schur.transpose());
+    const Eigen::MatrixXd raw = block(keep, keep) - (block(keep, drop) * llt.solve(block(drop, keep)));
+    const Eigen::MatrixXd schur = 0.5 * (raw + raw.transpose());   // not in place: see convolve()
 
     const auto ni = static_cast<Eigen::Index>(n);
     Eigen::MatrixXd reduced = Eigen::MatrixXd::Zero(ni, ni);

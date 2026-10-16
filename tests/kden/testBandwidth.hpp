@@ -126,6 +126,14 @@ inline auto testBandwidthReduce() -> int
             else { s.push_back(static_cast<Eigen::Index>(i)); }
         }
         const kden::Bandwidth red = bw.reduce(unspec);
+        // (Exactly symmetric when computed; with nothing to reduce, reduce()
+        // returns bw itself, whose randomSPD matrix need not be)
+        if (red.isReduced() && red.h2Inv() != red.h2Inv().transpose())
+        {
+            std::cerr << "testBandwidthReduce: reduced matrix is not exactly symmetric\n";
+            ++failures;
+            break;
+        }
         const double got = red.dist2(x1, x2);
         double want = 0.0;
         if (!s.empty())
@@ -326,6 +334,11 @@ inline auto testBandwidthConvolve() -> int
         if (!c.h2Inv().isApprox(want, 1e-9) || !b2.convolve(b1).h2Inv().isApprox(want, 1e-9))
         {
             fail("disagrees with (M1^-1 + M2^-1)^-1 for n = " + std::to_string(n));
+            break;
+        }
+        if (c.h2Inv() != c.h2Inv().transpose())
+        {
+            fail("result is not exactly symmetric for n = " + std::to_string(n));
             break;
         }
         std::vector<bool> unspec(n, false);
