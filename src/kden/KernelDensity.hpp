@@ -15,8 +15,11 @@
 #include <bit>
 #include <cmath>
 #include <cstddef>
+#include <limits>
+#include <memory>
 #include <numbers>
 #include <stdexcept>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -262,6 +265,9 @@ namespace kden {
         std::vector<std::size_t> free_;     /**< Freed slots, for reuse */
     };
 
+    template <typename AuxType>
+    class ConditionalDensity;
+
     /**
      * @class KernelDensity
      * @brief A kernel density estimate built on a kd tree of weighted points
@@ -408,7 +414,303 @@ namespace kden {
             return pdf(x, relTol, absTol, this->euclidean_);
         }
 
+        /**
+         * @brief Condition the estimate on values of some dimensions, optionally marginalizing over others
+         * @param x0 One element per dimension: a finite value fixes that
+         *   dimension (the set F); NaN keeps it as a dimension of the
+         *   result (the set R). Elements for dimensions in marginalDims
+         *   are ignored.
+         * @param marginalDims Dimensions to marginalize over (the set G);
+         *   may be empty
+         * @param massTol Largest fraction of the conditional estimate's
+         *   total weight that may be dropped, in [0, 1); 0 keeps every
+         *   point with non-zero weight
+         * @param bandwidth The kernel's inverse squared bandwidth
+         *   matrix, for nDim dimensions; must not be reduced
+         * @param leafSize Leaf size of the result's tree
+         * @return The conditional estimate p(y | x0_F) over the
+         *   dimensions in R, as a ConditionalDensity
+         * @throws std::invalid_argument if x0 or bandwidth is not for
+         *   nDim dimensions, bandwidth is reduced, marginalDims has a
+         *   dimension not below nDim or a repeated one, F or R is empty,
+         *   or massTol is not in [0, 1)
+         * @throws std::domain_error if the bandwidth's blocks needed
+         *   are not positive definite, or every point's conditional
+         *   weight underflows to zero (x0_F is too far from every point)
+         * @details
+         * Marginalizing a Gaussian over G replaces M by its Schur
+         * complement M' = bandwidth.reduce(G). Then, writing a = x0_F -
+         * x_F and b = y - x_R for a point x, completing the square in b
+         * gives
+         *
+         *   d^T M' d = (b + K a)^T M'_RR (b + K a) + a^T S a,
+         *
+         * with K = M'_RR^-1 M'_RF and S = M'_FF - M'_FR M'_RR^-1 M'_RF,
+         * the reduction of M over G and R together. So the estimate at
+         * (x0_F, y) is itself a kernel density estimate in y, with kernel
+         * metric M'_RR, points y'_i = x_i,R + K (x_i,F - x0_F), and
+         * weights w'_i = w_i exp(-a_i^T S a_i).
+         *
+         * Most points' weights w'_i are negligible, so only those that
+         * matter are kept. The tree is walked as in pdf(), with each
+         * node's total conditional weight bounded by its weight times
+         * exp(-a^T S a) at the bounds of a^T S a over its box (see
+         * Bandwidth::BoxBounder; dimensions in G and R are ignored, so
+         * a tree built with them in noSplitDims suits these queries).
+         * The node with the largest upper bound is opened until the
+         * upper bounds of the unopened interior nodes sum to at most
+         * massTol / 2 of the total weight, and those nodes are dropped;
+         * the points of the leaves reached are then sorted by weight,
+         * and the lightest dropped, up to another massTol / 2. The
+         * weight dropped is thus at most massTol of the total, so the
+         * result's L1 distance from the exact conditional density is at
+         * most 2 massTol. Its cost depends on the number of points kept,
+         * not the size of the tree. Thread-safe, as for pdf().
+         */
+        [[nodiscard]] auto conditional(const std::vector<double>& x0,
+            const std::vector<std::size_t>& marginalDims,
+            const double massTol,
+            const Bandwidth& bandwidth,
+            const std::size_t leafSize = 16) const -> ConditionalDensity<AuxType>
+        {
+            // Sort the dimensions into fixed (F), kept (R), and
+            // marginalized (G)
+            const std::size_t nDim = this->nDim_;
+            if (x0.size() != nDim || bandwidth.nDim() != nDim)
+            {
+                throw std::invalid_argument("KernelDensity::conditional: x0 and bandwidth must be "
+                    "for nDim dimensions");
+            }
+            if (bandwidth.isReduced())
+            {
+                throw std::invalid_argument("KernelDensity::conditional: bandwidth must not be reduced");
+            }
+            if (!(massTol >= 0.0) || !(massTol < 1.0))   // written to reject NaN too
+            {
+                throw std::invalid_argument("KernelDensity::conditional: massTol must be in [0, 1)");
+            }
+            auto [dimsF, dimsR, inG, inGR] = classifyDims(x0, marginalDims);
+
+            // The metrics: M' over F and R, S over F, and the shift K
+            const Bandwidth mPrime = bandwidth.reduce(inG);
+            const Bandwidth weightMetric = bandwidth.reduce(inGR);
+            const auto [kernelMetric, shift] = conditionalMetric(mPrime.h2Inv(), dimsF, dimsR);
+
+            // Walk the tree, collecting the points of the leaves reached
+            std::vector<double> xF(nDim, std::numeric_limits<double>::quiet_NaN());
+            for (const std::size_t d : dimsF) { xF[d] = x0[d]; }
+            const auto [kept, keptMass] = selectConditional(xF, weightMetric, massTol);
+            if (!(keptMass > 0.0))
+            {
+                throw std::domain_error("KernelDensity::conditional: every point's conditional "
+                    "weight underflows to zero");
+            }
+
+            // The new points, in the kept dimensions
+            const auto& pts = this->data_.get();
+            const std::size_t nF = dimsF.size();
+            const std::size_t nR = dimsR.size();
+            auto data = std::make_unique<KernelDensityData<AuxType>>();
+            data->nDim_ = nR;
+            data->x_.resize(kept.size() * nR);
+            data->w_.resize(kept.size());
+            if constexpr (KernelDensityData<AuxType>::hasAux) { data->aux_.reserve(kept.size()); }
+            Eigen::VectorXd a(static_cast<Eigen::Index>(nF)); // NOLINT(misc-include-cleaner) -- Eigen::VectorXd is provided by <Eigen/Dense> (included via Bandwidth.hpp); clang-tidy's IWYU mapping doesn't know that
+            for (std::size_t k = 0; k < kept.size(); ++k)
+            {
+                const auto [w, i] = kept[k]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                const auto pos = pts.position(i);
+                for (std::size_t f = 0; f < nF; ++f) { a(static_cast<Eigen::Index>(f)) = pos[dimsF[f]] - x0[dimsF[f]]; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                const Eigen::VectorXd ka = shift * a;
+                for (std::size_t r = 0; r < nR; ++r)
+                {
+                    data->x_[(k * nR) + r] = pos[dimsR[r]] + ka(static_cast<Eigen::Index>(r)); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                }
+                data->w_[k] = w; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                if constexpr (KernelDensityData<AuxType>::hasAux) { data->aux_.push_back(pts.aux(i)); }
+            }
+
+            // Density of the marginal over F at x0_F: the original
+            // weights sum to one, so the conditional weights sum to it,
+            // up to the normalization of S's kernel
+            const double marginal = keptMass * std::sqrt(weightMetric.det()) /
+                std::pow(std::numbers::pi, 0.5 * static_cast<double>(nF));
+            return ConditionalDensity<AuxType>(std::move(data), Bandwidth(kernelMetric),
+                std::move(dimsR), marginal, leafSize);
+        }
+
+        /**
+         * @brief Condition the estimate on values of some dimensions, with the Euclidean bandwidth
+         * @param x0 As for the other overload
+         * @param marginalDims As for the other overload
+         * @param massTol As for the other overload
+         * @param leafSize As for the other overload
+         * @return As for the other overload, with M the identity
+         * @throws As for the other overload
+         */
+        [[nodiscard]] auto conditional(const std::vector<double>& x0,
+            const std::vector<std::size_t>& marginalDims,
+            const double massTol,
+            const std::size_t leafSize = 16) const -> ConditionalDensity<AuxType>
+        {
+            return conditional(x0, marginalDims, massTol, this->euclidean_, leafSize);
+        }
+
     protected:
+
+        /**
+         * @brief Sort dimensions into fixed, kept, and marginalized, for conditional()
+         * @param x0 As for conditional(); must have nDim elements
+         * @param marginalDims As for conditional()
+         * @return The fixed dimensions F and the kept dimensions R, in
+         *   order, and flags marking the dimensions in G and in G or R
+         * @throws std::invalid_argument if marginalDims has a dimension
+         *   not below nDim or a repeated one, or F or R is empty
+         */
+        [[nodiscard]] auto classifyDims(const std::vector<double>& x0,
+            const std::vector<std::size_t>& marginalDims) const
+            -> std::tuple<std::vector<std::size_t>, std::vector<std::size_t>, std::vector<bool>, std::vector<bool>>
+        {
+            const std::size_t nDim = this->nDim_;
+            std::vector<bool> inG(nDim, false);
+            for (const std::size_t d : marginalDims)
+            {
+                if (d >= nDim || inG[d])
+                {
+                    throw std::invalid_argument("KernelDensity::conditional: marginalDims must hold "
+                        "distinct dimensions below nDim");
+                }
+                inG[d] = true;
+            }
+            std::vector<std::size_t> dimsF;
+            std::vector<std::size_t> dimsR;
+            std::vector<bool> inGR = inG;
+            for (std::size_t d = 0; d < nDim; ++d)
+            {
+                if (inG[d]) { continue; }
+                if (std::isnan(x0[d])) // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                {
+                    dimsR.push_back(d);
+                    inGR[d] = true;
+                }
+                else { dimsF.push_back(d); }
+            }
+            if (dimsF.empty() || dimsR.empty())
+            {
+                throw std::invalid_argument("KernelDensity::conditional: x0 must fix at least one "
+                    "dimension and leave at least one unfixed");
+            }
+            return {std::move(dimsF), std::move(dimsR), std::move(inG), std::move(inGR)};
+        }
+
+        /**
+         * @brief The kernel metric and point shift of a conditional estimate
+         * @param m The (possibly reduced) inverse squared bandwidth matrix, nDim x nDim
+         * @param dimsF The fixed dimensions
+         * @param dimsR The kept dimensions
+         * @return (M_RR, K = M_RR^-1 M_RF), |R| x |R| and |R| x |F|
+         * @throws std::domain_error if M_RR is not positive definite
+         */
+        [[nodiscard]] static auto conditionalMetric(const Eigen::MatrixXd& m,
+            const std::vector<std::size_t>& dimsF,
+            const std::vector<std::size_t>& dimsR) -> std::pair<Eigen::MatrixXd, Eigen::MatrixXd> // NOLINT(misc-include-cleaner) -- Eigen::MatrixXd is provided by <Eigen/Dense> (included via Bandwidth.hpp); clang-tidy's IWYU mapping doesn't know that
+        {
+            const auto nF = static_cast<Eigen::Index>(dimsF.size());
+            const auto nR = static_cast<Eigen::Index>(dimsR.size());
+            Eigen::MatrixXd mRR(nR, nR);
+            Eigen::MatrixXd mRF(nR, nF);
+            for (Eigen::Index r = 0; r < nR; ++r)
+            {
+                const auto ri = static_cast<Eigen::Index>(dimsR[static_cast<std::size_t>(r)]); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                for (Eigen::Index c = 0; c < nR; ++c) { mRR(r, c) = m(ri, static_cast<Eigen::Index>(dimsR[static_cast<std::size_t>(c)])); } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                for (Eigen::Index c = 0; c < nF; ++c) { mRF(r, c) = m(ri, static_cast<Eigen::Index>(dimsF[static_cast<std::size_t>(c)])); } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            }
+            const Eigen::LLT<Eigen::MatrixXd> llt(mRR); // NOLINT(misc-include-cleaner) -- Eigen::LLT is provided by <Eigen/Dense> (included via Bandwidth.hpp); clang-tidy's IWYU mapping doesn't know that
+            if (llt.info() != Eigen::Success) // NOLINT(misc-include-cleaner) -- Eigen::Success is provided by <Eigen/Dense> (included via Bandwidth.hpp); clang-tidy's IWYU mapping doesn't know that
+            {
+                throw std::domain_error("KernelDensity::conditional: the bandwidth's block over the "
+                    "kept dimensions is not positive definite");
+            }
+            Eigen::MatrixXd k = llt.solve(mRF);
+            return {std::move(mRR), std::move(k)};
+        }
+
+        /**
+         * @brief Select the points carrying all but massTol of the conditional weight
+         * @param xF The point; NaN except in the fixed dimensions
+         * @param weightMetric The metric S of the conditional weights;
+         *   must match xF
+         * @param massTol As for conditional()
+         * @return The kept points, as (conditional weight, index into
+         *   data()) pairs, and the sum of their weights
+         * @details
+         * See conditional(). Here each RefinementList entry's
+         * "estimate" is a lower bound on the node's conditional weight
+         * and its "uncertainty" an upper bound, so the list opens the
+         * node with the largest upper bound.
+         */
+        [[nodiscard]] auto selectConditional(const std::vector<double>& xF,
+            const Bandwidth& weightMetric,
+            const double massTol) const
+            -> std::pair<std::vector<std::pair<double, std::size_t>>, double>
+        {
+            const auto& pts = this->data_.get();
+            const auto bound = weightMetric.boxBounder(xF);
+            std::vector<double> scratch;
+            RefinementList list;
+            std::vector<std::pair<double, std::size_t>> candidates;
+            double leafMass = 0.0;
+            auto add = [&](const std::size_t idx, const std::size_t slot) -> void
+            {
+                const auto& node = this->nodes_[idx];
+                if (node.splitDim_ < 0)
+                {
+                    for (std::size_t i = node.start_; i < node.start_ + node.count_; ++i)
+                    {
+                        const double w = pts.weight(i) * std::exp(-weightMetric.dist2(xF, pts.position(i), scratch));
+                        if (w > 0.0)
+                        {
+                            candidates.emplace_back(w, i);
+                            leafMass += w;
+                        }
+                    }
+                    if (slot != nullNode) { list.erase(slot); }
+                    return;
+                }
+                const auto [r2min, r2max] = bound.bounds(this->nodeLo(idx), this->nodeHi(idx));
+                const double w = nodeW_[idx]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                const double lo = w * std::exp(-r2max);
+                const double hi = w * std::exp(-r2min);
+                if (slot != nullNode) { list.replace(slot, idx, lo, hi); }
+                else { list.insert(idx, lo, hi); }
+            };
+
+            // Open nodes until the unopened ones can carry at most
+            // massTol / 2 of the total
+            add(rootNode, nullNode);
+            while (list.uncertainty() > 0.5 * massTol * (leafMass + list.estimate()))
+            {
+                const std::size_t worst = list.worst();
+                const auto& node = this->nodes_[list.node(worst)];
+                add(node.lchild_, worst);
+                add(node.rchild_, nullNode);
+            }
+
+            // Drop the lightest points, up to another massTol / 2
+            const double budget = 0.5 * massTol * (leafMass + list.estimate());
+            std::ranges::sort(candidates);
+            double dropped = 0.0;
+            std::size_t first = 0;
+            while (first < candidates.size() && dropped + candidates[first].first <= budget) // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            {
+                dropped += candidates[first].first; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                ++first;
+            }
+            candidates.erase(candidates.begin(), candidates.begin() + static_cast<std::ptrdiff_t>(first));
+            double keptMass = 0.0;
+            for (const auto& c : candidates) { keptMass += c.first; }
+            return {std::move(candidates), keptMass};
+        }
 
         /**
          * @brief The evaluation itself, for pdf()
@@ -594,6 +896,84 @@ namespace kden {
         }
 
         std::vector<double> nodeW_;   /**< Sum of the weights of each node's points */
+    };
+
+    /**
+     * @class ConditionalDensity
+     * @brief A kernel density estimate conditioned on some dimensions' values, owning its points
+     * @tparam AuxType As for KernelDensity
+     * @details
+     * Made by KernelDensity::conditional(). Holds the conditional
+     * estimate's points (shifted, reweighted, and pruned copies of the
+     * original ones, with their auxiliary data), a KernelDensity over
+     * them, and the kernel metric to evaluate it with. The points are
+     * held through a pointer, so their address, which the
+     * KernelDensity refers to, survives moving the ConditionalDensity.
+     */
+    template <typename AuxType = void>
+    class ConditionalDensity
+    {
+    public:
+
+        /**
+         * @brief Evaluate the conditional density
+         * @param y Position in the kept dimensions (see dims()); elements
+         *   may be NaN, to marginalize over them too
+         * @param relTol As for KernelDensity::pdf()
+         * @param absTol As for KernelDensity::pdf()
+         * @return p(y | x0_F), normalized to unit integral over the kept
+         *   dimensions
+         * @throws As for KernelDensity::pdf()
+         */
+        [[nodiscard]] auto pdf(const std::vector<double>& y, const double relTol, const double absTol) const -> double
+        {
+            return kde_.pdf(y, relTol, absTol, bandwidth_);
+        }
+
+        /** @brief The kept dimensions
+         *  @return Their indices in the original estimate, in order;
+         *    dimension i of this estimate is dims()[i] there */
+        [[nodiscard]] auto dims() const -> const std::vector<std::size_t>& { return dims_; }
+        /** @brief Density of the original estimate's marginal over the fixed dimensions, at x0_F
+         *  @return p(x0_F), estimated from the points kept, so low by at
+         *    most a fraction massTol; p(x0_F, y) = marginal() pdf(y) */
+        [[nodiscard]] auto marginal() const -> double { return marginal_; }
+        /** @brief The kernel metric of the conditional estimate
+         *  @return M'_RR (see KernelDensity::conditional()) */
+        [[nodiscard]] auto bandwidth() const -> const Bandwidth& { return bandwidth_; }
+        /** @brief The conditional estimate itself
+         *  @return Its KernelDensity, to be evaluated with bandwidth() */
+        [[nodiscard]] auto kde() const -> const KernelDensity<AuxType>& { return kde_; }
+        /** @brief The conditional estimate's points
+         *  @return Its points, in tree order, with weights normalized to sum to one */
+        [[nodiscard]] auto data() const -> const KernelDensityData<AuxType>& { return *data_; }
+
+    private:
+
+        friend class KernelDensity<AuxType>;
+
+        /**
+         * @brief Construct from the conditional estimate's points
+         * @param data The points (not yet normalized)
+         * @param bandwidth The kernel metric
+         * @param dims The kept dimensions
+         * @param marginal p(x0_F)
+         * @param leafSize Leaf size of the tree
+         */
+        ConditionalDensity(std::unique_ptr<KernelDensityData<AuxType>> data, Bandwidth bandwidth,
+            std::vector<std::size_t> dims, const double marginal, const std::size_t leafSize) :
+            data_(std::move(data)),
+            kde_(*data_, leafSize, bandwidth),
+            bandwidth_(std::move(bandwidth)),
+            dims_(std::move(dims)),
+            marginal_(marginal)
+        {}
+
+        std::unique_ptr<KernelDensityData<AuxType>> data_;  /**< The points, owned */
+        KernelDensity<AuxType> kde_;                        /**< The estimate over data_ */
+        Bandwidth bandwidth_;                               /**< Its kernel metric */
+        std::vector<std::size_t> dims_;                     /**< The kept dimensions */
+        double marginal_;                                   /**< p(x0_F) */
     };
 
 } // namespace kden
