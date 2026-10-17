@@ -98,6 +98,37 @@ namespace kdenbind {
     }
 
     /**
+     * @brief Check that arrays a tree will reorder in place do not share memory
+     * @param arrays The arrays (C-contiguous, so each occupies
+     *   [data(), data() + nbytes()))
+     * @param names Their names, for the error message
+     * @throws py::value_error if any two overlap
+     * @details
+     * Points' positions, weights, and auxiliary data are reordered (and
+     * the weights normalized) in place, so overlapping arrays would
+     * corrupt one another -- e.g. weights given as a column of the
+     * positions.
+     */
+    inline void checkNoOverlap(const std::vector<py::array>& arrays, const std::vector<std::string>& names)
+    {
+        for (std::size_t i = 0; i < arrays.size(); ++i)
+        {
+            const auto* pi = static_cast<const char*>(arrays[i].data());
+            const auto ni = static_cast<std::size_t>(arrays[i].nbytes());
+            for (std::size_t j = i + 1; j < arrays.size(); ++j)
+            {
+                const auto* pj = static_cast<const char*>(arrays[j].data());
+                const auto nj = static_cast<std::size_t>(arrays[j].nbytes());
+                if (ni > 0 && nj > 0 && pi < pj + nj && pj < pi + ni) // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+                {
+                    throw py::value_error(names[i] + " and " + names[j] + " must not share memory "
+                        "(they are reordered in place)");
+                }
+            }
+        }
+    }
+
+    /**
      * @brief A span over a numpy array's memory
      * @tparam T Element type
      * @param arr The array
@@ -216,6 +247,24 @@ namespace kdenbind {
     }
 
     /**
+     * @brief A numpy view of a span, kept alive by an owner
+     * @tparam T Element type
+     * @param s The span
+     * @param shape Shape of the view
+     * @param owner Python object whose lifetime the memory shares
+     * @param writeable Whether the view may be written through
+     * @return The view
+     */
+    template <typename T>
+    inline auto spanView(const std::span<T> s, const std::vector<py::ssize_t>& shape, const py::handle owner,
+        const bool writeable) -> py::array_t<T>
+    {
+        py::array_t<T> arr(shape, s.data(), owner);
+        if (!writeable) { arr.attr("setflags")(py::arg("write") = false); }
+        return arr;
+    }
+
+    /**
      * @brief A read-only numpy view of a span, kept alive by an owner
      * @tparam T Element type
      * @param s The span
@@ -227,9 +276,7 @@ namespace kdenbind {
     inline auto readOnlyView(const std::span<T> s, const std::vector<py::ssize_t>& shape, const py::handle owner)
         -> py::array_t<T>
     {
-        py::array_t<T> arr(shape, s.data(), owner);
-        arr.attr("setflags")(py::arg("write") = false);
-        return arr;
+        return spanView(s, shape, owner, false);
     }
 
     /**

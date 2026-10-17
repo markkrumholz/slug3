@@ -27,6 +27,7 @@ from ._slug import *
 from .compute_isochrones import compute_isochrones as compute_isochrones
 from .compute_tracks import compute_tracks as compute_tracks
 from .consolidate_checkpoints import consolidate_checkpoints as consolidate_checkpoints
+from .kde import KDE as KDE
 from .phot_convert import phot_convert as phot_convert
 from .read import read as read
 from .run_sim import run_sim as run_sim
