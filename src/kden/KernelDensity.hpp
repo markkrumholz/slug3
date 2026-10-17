@@ -370,6 +370,24 @@ namespace kden {
         [[nodiscard]] auto nodeW(const std::size_t idx) const -> double { return nodeW_[idx]; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
 
         /**
+         * @brief Bring the estimate up to date after its weights are changed in place
+         * @throws std::invalid_argument if the weights are invalid (see
+         *   KernelDensityData::validate()) or all zero
+         * @details
+         * The weights may be changed in place (but the positions may
+         * not: the tree is built around them). Afterwards, call this to
+         * renormalize the weights to sum to one, in place, and
+         * recompute every node's weight sum. Costs O(N), in parallel if
+         * built with OpenMP; unlike construction, it checks only the
+         * weights, not the (unchanged) positions.
+         */
+        void reweight()
+        {
+            normalizeWeightArray(this->data_.get().w_);
+            setNodeWeights();
+        }
+
+        /**
          * @brief Evaluate the kernel density estimate at a point, to within a tolerance
          * @param x Position at which to evaluate it; must have nDim
          *   elements. Elements may be NaN, to evaluate the marginal
@@ -856,23 +874,60 @@ namespace kden {
         static auto normalizeWeights(KernelDensityData<AuxType>& data) -> KernelDensityData<AuxType>&
         {
             data.validate();
+            normalizeWeightArray(data.w_);
+            return data;
+        }
 
-            // Scale by the largest weight first, so that summing finite
-            // weights cannot overflow
+        /**
+         * @brief Check a set of weights and rescale them to sum to one, in place
+         * @param w The weights
+         * @throws std::invalid_argument if any weight is negative or not
+         *   finite, or all are zero
+         * @details
+         * The weights are scaled by the largest first, so that summing
+         * finite weights cannot overflow. Each pass over the weights
+         * runs in parallel if built with OpenMP, since reweight() calls
+         * this whenever the weights are changed, e.g. on every step of
+         * an optimization over them.
+         */
+        static void normalizeWeightArray(const std::span<double> w)
+        {
+            const std::size_t n = w.size();
             double wMax = 0.0;
-            for (const double w : data.w_) { wMax = std::max(wMax, w); }
+            bool valid = true;
+#ifdef _OPENMP
+#           pragma omp parallel for reduction(max:wMax) reduction(&&:valid)
+#endif
+            for (std::size_t i = 0; i < n; ++i)
+            {
+                const double v = w[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                valid = valid && std::isfinite(v) && v >= 0.0;
+                wMax = std::max(wMax, v);
+            }
+            if (!valid)
+            {
+                throw std::invalid_argument("KernelDensity: weights must be finite and non-negative");
+            }
             if (!(wMax > 0.0))
             {
                 throw std::invalid_argument("KernelDensity: weights must not all be zero");
             }
             double wTot = 0.0;
-            for (double& w : data.w_)
+#ifdef _OPENMP
+#           pragma omp parallel for reduction(+:wTot)
+#endif
+            for (std::size_t i = 0; i < n; ++i)
             {
-                w /= wMax;
-                wTot += w;
+                w[i] /= wMax; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                wTot += w[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
             }
-            for (double& w : data.w_) { w /= wTot; }
-            return data;
+#ifdef _OPENMP
+#           pragma omp parallel for
+#endif
+            for (std::size_t i = 0; i < n; ++i)
+            {
+                w[i] /= wTot; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            }
         }
 
         /**

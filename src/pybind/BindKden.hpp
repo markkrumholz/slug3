@@ -216,6 +216,24 @@ namespace kdenbind {
     }
 
     /**
+     * @brief A numpy view of a span, kept alive by an owner
+     * @tparam T Element type
+     * @param s The span
+     * @param shape Shape of the view
+     * @param owner Python object whose lifetime the memory shares
+     * @param writeable Whether the view may be written through
+     * @return The view
+     */
+    template <typename T>
+    inline auto spanView(const std::span<T> s, const std::vector<py::ssize_t>& shape, const py::handle owner,
+        const bool writeable) -> py::array_t<T>
+    {
+        py::array_t<T> arr(shape, s.data(), owner);
+        if (!writeable) { arr.attr("setflags")(py::arg("write") = false); }
+        return arr;
+    }
+
+    /**
      * @brief A read-only numpy view of a span, kept alive by an owner
      * @tparam T Element type
      * @param s The span
@@ -227,9 +245,7 @@ namespace kdenbind {
     inline auto readOnlyView(const std::span<T> s, const std::vector<py::ssize_t>& shape, const py::handle owner)
         -> py::array_t<T>
     {
-        py::array_t<T> arr(shape, s.data(), owner);
-        arr.attr("setflags")(py::arg("write") = false);
-        return arr;
+        return spanView(s, shape, owner, false);
     }
 
     /**

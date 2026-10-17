@@ -153,6 +153,35 @@ inline auto testKernelDensityConstruction() -> int
         }
     }
 
+    // Reweighting in place: renormalized, with node sums recomputed
+    {
+        KDETestData owned = makeKDETestData(500, 3, 2, 3);
+        auto view = owned.view();
+        KDETest kde(view, 8);
+        for (std::size_t i = 0; i < view.size(); ++i) { view.w_[i] = (i % 2 == 0) ? 3.0 : 0.0; }
+        kde.reweight();
+        double wSum = 0.0;
+        for (std::size_t i = 0; i < view.size(); ++i) { wSum += view.w_[i]; }
+        if (std::abs(wSum - 1.0) > 1e-12 || checkNodeWeights(kde) != 0)
+        {
+            std::cerr << "testKernelDensityConstruction: reweight() did not renormalize or update node sums\n";
+            ++failures;
+        }
+        int threw = 0;
+        std::ranges::fill(view.w_, 0.0);
+        try { kde.reweight(); } catch (const std::invalid_argument&) { ++threw; }
+        std::ranges::fill(view.w_, 1.0);
+        view.w_[17] = -1.0;
+        try { kde.reweight(); } catch (const std::invalid_argument&) { ++threw; }
+        view.w_[17] = std::numeric_limits<double>::quiet_NaN();
+        try { kde.reweight(); } catch (const std::invalid_argument&) { ++threw; }
+        if (threw != 3)
+        {
+            std::cerr << "testKernelDensityConstruction: reweight() accepted invalid weights\n";
+            ++failures;
+        }
+    }
+
     // Huge weights, whose sum overflows a double, still normalize
     KDETestData huge = makeKDETestData(100, 3, 2, 2);
     std::ranges::fill(huge.w_, 0.5 * std::numeric_limits<double>::max());

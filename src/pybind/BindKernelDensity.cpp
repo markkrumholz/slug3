@@ -141,7 +141,20 @@ static constexpr std::string_view wDocstring = R"doc(The weights, in tree order.
 Returns
 -------
 w : numpy.ndarray of float, shape (N,)
-    A read-only view of the (reordered, normalized) weight array.)doc";
+    A writeable view of the (reordered, normalized) weight array. The
+    weights may be changed in place; call reweight() afterwards.)doc";
+
+static constexpr std::string_view reweightDocstring = R"doc(Bring the estimate up to date after its weights are changed in place.
+
+The weights (w) may be changed in place, but the positions may not:
+the tree is built around them. After changing the weights, call this
+to renormalize them to sum to one, in place, and recompute every
+node's weight sum. Costs O(N), in parallel (without the GIL).
+
+Raises
+------
+ValueError
+    If the weights are not finite and non-negative, or are all zero.)doc";
 
 static constexpr std::string_view pdfDocstring = R"doc(Evaluate the kernel density estimate at one or more points, to within a tolerance.
 
@@ -150,12 +163,12 @@ Parameters
 x : array_like of float, shape (nDim,) or (M, nDim)
     One point, or M of them. Coordinates may be NaN, to evaluate the
     marginal density over the other dimensions.
-relTol : float
+relTol : float, optional
     Relative tolerance: stop once the uncertainty is less than relTol
-    times the estimate.
-absTol : float
+    times the estimate (default 1e-2).
+absTol : float, optional
     Absolute tolerance: stop once the estimate plus its uncertainty is
-    less than absTol.
+    less than absTol (default 1e-8).
 bandwidth : Bandwidth or sequence of Bandwidth, optional
     The kernel's inverse squared bandwidth matrix: None (the default)
     for the identity, one Bandwidth for every point, or (for M points)
@@ -187,11 +200,11 @@ Parameters
 x0 : array_like of float, shape (nDim,)
     A finite value fixes that dimension; NaN keeps it as a dimension
     of the result. Values for dimensions in marginalDims are ignored.
-massTol : float
+massTol : float, optional
     Largest fraction of the conditional estimate's total weight that
-    may be dropped, in [0, 1); 0 keeps every point with non-zero
-    weight. The result is within L1 distance 2 massTol of the exact
-    conditional density.
+    may be dropped, in [0, 1) (default 1e-2); 0 keeps every point with
+    non-zero weight. The result is within L1 distance 2 massTol of the
+    exact conditional density.
 marginalDims : list of int, optional
     Dimensions to marginalize over (default: none).
 bandwidth : Bandwidth, optional
@@ -230,10 +243,10 @@ Parameters
 y : array_like of float, shape (nKept,) or (M, nKept)
     One point in the kept dimensions (see dims()), or M of them;
     coordinates may be NaN, to marginalize over them too.
-relTol : float
-    Relative tolerance, as for KernelDensity.pdf().
-absTol : float
-    Absolute tolerance, as for KernelDensity.pdf().
+relTol : float, optional
+    Relative tolerance, as for KernelDensity.pdf() (default 1e-2).
+absTol : float, optional
+    Absolute tolerance, as for KernelDensity.pdf() (default 1e-8).
 
 Returns
 -------
@@ -288,7 +301,8 @@ static constexpr std::string_view condWDocstring = R"doc(The conditional estimat
 Returns
 -------
 w : numpy.ndarray of float, shape (K,)
-    A read-only view of the weights, normalized to sum to one.)doc";
+    A writeable view of the weights, normalized to sum to one. They may
+    be changed in place; call kde().reweight() afterwards.)doc";
 
 static constexpr std::string_view condAuxDocstring = R"doc(The conditional estimate's auxiliary data, in tree order.
 
@@ -317,13 +331,15 @@ void bindKernelDensity(py::module_& m)
         .def_property_readonly("w", [](const py::object& self) -> py::array_t<double>
             {
                 const auto& kde = py::cast<const KDE&>(self);
-                return kdenbind::readOnlyView(kde.data().w_, {static_cast<py::ssize_t>(kde.data().size())}, self);
+                return kdenbind::spanView(kde.data().w_, {static_cast<py::ssize_t>(kde.data().size())}, self, true);
             }, wDocstring.data())
+        .def("reweight", &KDE::reweight, reweightDocstring.data(),
+            py::call_guard<py::gil_scoped_release>())
         .def("pdf", [](const KDE& kde, const kdenbind::QueryArray& x, const double relTol,
                 const double absTol, const py::object& bandwidth) -> py::object
             {
                 return kdenbind::pdf(kde, x, relTol, absTol, bandwidth, kden::Bandwidth::identity(kde.nDim()));
-            }, pdfDocstring.data(), py::arg("x"), py::arg("relTol"), py::arg("absTol"),
+            }, pdfDocstring.data(), py::arg("x"), py::arg("relTol") = 1e-2, py::arg("absTol") = 1e-8,
             py::arg("bandwidth") = py::none())
         .def("conditional", [](const KDE& kde, const std::vector<double>& x0, const double massTol,
                 const std::vector<std::size_t>& marginalDims, const py::object& bandwidth,
@@ -334,7 +350,7 @@ void bindKernelDensity(py::module_& m)
                     : py::cast<kden::Bandwidth>(bandwidth);
                 const py::gil_scoped_release release;
                 return kde.conditional(x0, marginalDims, massTol, bw, leafSize);
-            }, conditionalDocstring.data(), py::arg("x0"), py::arg("massTol"),
+            }, conditionalDocstring.data(), py::arg("x0"), py::arg("massTol") = 1e-2,
             py::arg("marginalDims") = std::vector<std::size_t>{}, py::arg("bandwidth") = py::none(),
             py::arg("leafSize") = 16);
     view.attr("nullNode") = kden::nullNode;
@@ -393,7 +409,7 @@ void bindKernelDensity(py::module_& m)
                     const std::size_t) -> double { return cd.pdf(p, relTol, absTol); });
                 if (single) { return py::float_(out.front()); }
                 return kdenbind::toArray(out);
-            }, condPdfDocstring.data(), py::arg("y"), py::arg("relTol"), py::arg("absTol"))
+            }, condPdfDocstring.data(), py::arg("y"), py::arg("relTol") = 1e-2, py::arg("absTol") = 1e-8)
         .def("dims", &Conditional::dims, condDimsDocstring.data())
         .def("marginal", &Conditional::marginal, condMarginalDocstring.data())
         .def("bandwidth", &Conditional::bandwidth, condBandwidthDocstring.data(),
@@ -409,7 +425,7 @@ void bindKernelDensity(py::module_& m)
         .def_property_readonly("w", [](const py::object& self) -> py::array_t<double>
             {
                 const auto& cd = py::cast<const Conditional&>(self);
-                return kdenbind::readOnlyView(cd.data().w_, {static_cast<py::ssize_t>(cd.data().size())}, self);
+                return kdenbind::spanView(cd.data().w_, {static_cast<py::ssize_t>(cd.data().size())}, self, true);
             }, condWDocstring.data())
         .def_property_readonly("aux", [](const py::object& self) -> py::array_t<kdenbind::Aux>
             {
