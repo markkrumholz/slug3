@@ -24,6 +24,7 @@ slugpy: the Python frontend for slug.
 from ._affinity import restore_initial_affinity as _restore_initial_affinity
 from ._paths import ensure_search_path as _ensure_search_path
 from ._slug import *
+from .cluster_slug import cluster_slug as cluster_slug
 from .compute_isochrones import compute_isochrones as compute_isochrones
 from .compute_tracks import compute_tracks as compute_tracks
 from .consolidate_checkpoints import consolidate_checkpoints as consolidate_checkpoints
