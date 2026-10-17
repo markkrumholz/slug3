@@ -379,7 +379,10 @@ namespace kden {
          * renormalize the weights to sum to one, in place, and
          * recompute every node's weight sum. Costs O(N), in parallel if
          * built with OpenMP; unlike construction, it checks only the
-         * weights, not the (unchanged) positions.
+         * weights, not the (unchanged) positions. Not thread-safe with
+         * respect to evaluation: like any non-const member, it must not
+         * run concurrently with pdf() or conditional() on the same
+         * estimate (nor may the weights be changed while they run).
          */
         void reweight()
         {

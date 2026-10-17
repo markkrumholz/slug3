@@ -74,12 +74,19 @@ def _silverman_h2inv(dataset: np.ndarray, w: np.ndarray) -> np.ndarray:
     Raises
     ------
     ValueError
-        If the kernel covariance is singular (e.g. too few points, or a
+        If the weights are not finite and non-negative, or are all zero,
+        or the kernel covariance is singular (e.g. too few points, or a
         dimension with no spread).
     """
     d = dataset.shape[1]
-    cov = np.atleast_2d(np.cov(dataset, rowvar=False, aweights=w))
-    neff = float(np.sum(w)) ** 2 / float(np.sum(w ** 2))
+    # Scale the weights by the largest first, so that squaring tiny (but
+    # valid) weights cannot underflow
+    w_max = float(np.max(w)) if w.size > 0 else 0.0
+    if not (np.all(np.isfinite(w)) and np.all(w >= 0.0) and w_max > 0.0):
+        raise ValueError("weights must be finite and non-negative, and not all zero")
+    ws = w / w_max
+    cov = np.atleast_2d(np.cov(dataset, rowvar=False, aweights=ws))
+    neff = float(np.sum(ws)) ** 2 / float(np.sum(ws ** 2))
     factor = (neff * (d + 2) / 4.0) ** (-1.0 / (d + 4))
     kernel_cov = cov * factor ** 2
     try:
@@ -357,7 +364,10 @@ class KDE:
         Bring the estimate up to date after the weights are changed in place.
 
         Renormalizes w in place to sum to one, and recomputes the kd
-        tree's node weight sums. Costs O(N), in parallel.
+        tree's node weight sums. Costs O(N), in parallel. Like changing
+        the weights in place, this must not happen while the estimate is
+        being evaluated (pdf() or conditional(), e.g. from another
+        thread): reweighting is not synchronized with evaluations.
 
         Raises
         ------

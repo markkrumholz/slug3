@@ -326,6 +326,7 @@ void bindKDTree(py::module_& m)
                 const auto n = static_cast<std::size_t>(arrays.x_.shape(0));
                 const auto nDim = static_cast<std::size_t>(arrays.x_.shape(1));
                 arrays.aux_ = kdenbind::auxArray(aux, n);
+                kdenbind::checkNoOverlap({arrays.x_, arrays.aux_}, {"x", "aux"});
                 arrays.view_.nDim_ = nDim;
                 arrays.view_.x_ = kdenbind::spanOf(arrays.x_);
                 arrays.view_.aux_ = kdenbind::spanOf(arrays.aux_);

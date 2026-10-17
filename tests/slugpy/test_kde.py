@@ -91,6 +91,13 @@ def test_silverman_bandwidth() -> None:
     factor = (neff * 5.0 / 4.0) ** (-1.0 / 7.0)
     cov = np.cov(x0, rowvar=False, aweights=w0) * factor ** 2
     assert np.allclose(kde.h2Inv, np.linalg.inv(cov) / 2.0)
+    # Tiny (but valid) weights, whose squares underflow, give the same bandwidth
+    z = x0.copy()
+    tiny = KDE(z, w=1e-200 * w0 / w0.max())
+    assert np.allclose(tiny.h2Inv, np.linalg.inv(cov) / 2.0)
+    with pytest.raises(ValueError):
+        KDE(x0.copy(), w=np.zeros(500))
+
     # Unweighted: neff = N
     y, _ = make_points(300, 2, 3)
     y0 = y.copy()
@@ -126,6 +133,11 @@ def test_data_handling() -> None:
         KDE(make_points(50, 3, 5)[0].astype(np.float32), h2Inv=1.0)
     with pytest.raises(ValueError):
         KDE(make_points(50, 3, 5)[0], h2Inv=1.0, w=np.ones(49))
+
+    # Weights sharing memory with the data set (here, its only column)
+    one_d = np.random.default_rng(5).uniform(1.0, 2.0, (50, 1))
+    with pytest.raises(ValueError, match="share memory"):
+        KDE(one_d, h2Inv=1.0, w=one_d[:, 0])
 
 
 def test_pdf_matches_brute_force() -> None:

@@ -4518,6 +4518,14 @@ def test_kdtree_array_checks():
     with pytest.raises(ValueError):
         slug.KDTree(bad)
 
+    # Arrays that would be reordered in place must not share memory
+    buf = np.zeros(150)
+    xs = buf.reshape(50, 3)
+    with pytest.raises(ValueError, match="share memory"):
+        slug.KDTree(xs, buf.view(np.int64)[:50])
+    with pytest.raises(ValueError, match="share memory"):
+        slug.KernelDensity(xs, buf[100:])
+
 
 def test_kernel_density_pdf_matches_brute_force():
     """KernelDensity normalizes weights in place, and pdf() matches brute force."""

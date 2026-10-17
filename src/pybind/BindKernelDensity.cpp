@@ -151,6 +151,10 @@ the tree is built around them. After changing the weights, call this
 to renormalize them to sum to one, in place, and recompute every
 node's weight sum. Costs O(N), in parallel (without the GIL).
 
+Reweighting is not synchronized with evaluation: like changing the
+weights in place, it must not happen while the estimate is being
+evaluated (pdf() or conditional(), e.g. from another thread).
+
 Raises
 ------
 ValueError
@@ -385,6 +389,7 @@ void bindKernelDensity(py::module_& m)
                     }
                 }
                 arrays.aux_ = kdenbind::auxArray(aux, n);
+                kdenbind::checkNoOverlap({arrays.x_, arrays.w_, arrays.aux_}, {"x", "w", "aux"});
                 arrays.view_.nDim_ = nDim;
                 arrays.view_.x_ = kdenbind::spanOf(arrays.x_);
                 arrays.view_.w_ = kdenbind::spanOf(arrays.w_);
