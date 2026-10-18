@@ -620,6 +620,55 @@ def test_conditional_errors() -> None:
         lib.conditional(x0, cov=-np.eye(2))
 
 
+def test_pdf() -> None:
+    """pdf() passes through to KDE.pdf(), filling in the inference quantities and convolving errors."""
+    filters = ["HST.WFC3_UVIS1.F555W", "HST.WFC3_UVIS1.F814W"]
+    lib = cluster_slug(str(LIBRARY), filtersets=filters, abstol=0.0, reltol=0.0)
+    kde = lib.kdes[tuple(filters)]
+    full = kde.dataset[[3, 17, 40]] + 0.02
+    phot = full[:, :2]
+    padded = np.concatenate([phot, np.full((3, 4), np.nan)], axis=1)
+
+    # Full points and photometry alone, one point or several; the
+    # tolerances default to reltol and abstol (zero here, so exact)
+    assert np.array_equal(lib.pdf(full), kde.pdf(full, 0.0, 0.0))
+    assert lib.pdf(full[0]) == kde.pdf(full[0], 0.0, 0.0)
+    marginal = kde.pdf(padded, 0.0, 0.0)
+    assert np.array_equal(lib.pdf(phot), marginal)
+    single = lib.pdf(phot[1])
+    assert isinstance(single, float) and single == float(np.asarray(marginal)[1])
+    assert np.shape(lib.pdf(phot, relTol=0.5, absTol=1e-3)) == (3,)
+
+    # Errors convolve the bandwidth, as for conditional(), whose
+    # marginal is this density of the photometry
+    c = np.zeros((6, 6))
+    c[:2, :2] = np.diag([0.01, 0.04])
+    mtot = np.linalg.inv(np.linalg.inv(kde.h2Inv) + 2.0 * c)
+    want = kde.pdf(padded, 0.0, 0.0, bandwidth=Bandwidth(0.5 * (mtot + mtot.T)))
+    with_errors = lib.pdf(phot, errors=np.array([0.1, 0.2]))
+    assert np.allclose(with_errors, want, rtol=1e-10)
+    assert np.allclose(lib.pdf(phot, cov=np.diag([0.01, 0.04]) * u.mag ** 2), want, rtol=1e-10)
+    cond = lib.conditional(phot[0], massTol=0.0, errors=np.array([0.1, 0.2]))
+    assert cond.marginal == pytest.approx(float(np.asarray(with_errors)[0]), rel=1e-10)
+    with pytest.raises(ValueError, match="not both"):
+        lib.pdf(phot, errors=0.1, cov=np.eye(2))
+    with pytest.raises(ValueError, match="does not match"):
+        lib.pdf(phot, errors=0.1 * u.dex)
+
+    # Shapes
+    for bad in [np.zeros(3), np.zeros(7), np.zeros((2, 5)), np.zeros((2, 2, 6)), 0.0]:
+        with pytest.raises(ValueError, match="one element per band"):
+            lib.pdf(bad)
+
+    # Filter set selection, as for conditional()
+    lib.add_filterset(["Lbol"])
+    with pytest.raises(ValueError, match="filterset must be given"):
+        lib.pdf(phot)
+    assert np.array_equal(lib.pdf(phot, filterset=filters), marginal)
+    lbol = lib.kdes[("Lbol",)].dataset[:2, :1]
+    lib.pdf(lbol, filterset=["Lbol"])
+
+
 def test_conditional_error_units_for_linear_bands() -> None:
     """Errors for bands not in magnitudes are in dex, of the log10 photometry the KDE stores."""
     lib = cluster_slug(str(LIBRARY), filtersets=[["Lbol"], ["HST.WFC3_UVIS1.F555W", "Lbol"]])

@@ -989,16 +989,110 @@ class cluster_slug(slug_reader):
         elif point.shape != (kde.nDim,):
             raise ValueError(f"x0 must have one element per band ({len(filters)}) or per dimension "
                              f"of the estimate ({kde.nDim})")
+        bandwidth = self._error_bandwidth(filters, kde, errors, cov)
+        return kde.conditional(point, massTol, marginalDims, leafSize, bandwidth=bandwidth)
+
+    def pdf(self, x: Any, relTol: float | None = None, absTol: float | None = None,
+            filterset: list[str] | None = None, errors: Any = None,
+            cov: Any = None) -> float | np.ndarray:
+        """
+        Evaluate a filter set's kernel density estimate at one or more points.
+
+        Parameters
+        ----------
+        x : array_like of float, shape (nband,), (nDim,), (M, nband), or (M, nDim)
+            One point or M of them, each either the photometry in the
+            filter set's nband bands, in which case the inference
+            quantities are marginalized over (giving the density of the
+            photometry alone), or a full point in the estimate's space
+            (see kdes[...].names), its filters then the inference
+            quantities, in which, as for KDE.pdf(), NaN marginalizes
+            over that dimension. Photometry is in the units the estimate
+            stores, as for conditional().
+        relTol : float, optional
+            As for KDE.pdf(); if None (the default), reltol.
+        absTol : float, optional
+            As for KDE.pdf(); if None (the default), abstol.
+        filterset : list of str, optional
+            As for conditional().
+        errors : float, array_like, or astropy.units.Quantity, optional
+            As for conditional(): the photometric errors, the same for
+            every point.
+        cov : array_like or astropy.units.Quantity, optional
+            As for conditional().
+
+        Returns
+        -------
+        float or numpy.ndarray of float
+            The estimate at each point (see KDE.pdf()); a float for one
+            point. If errors or cov is given, the estimate's kernel is
+            first convolved with the errors (see
+            Bandwidth.convolveCov()), so that the result is the density
+            of photometry measured with those errors.
+
+        Raises
+        ------
+        TypeError
+            As for conditional().
+        ValueError
+            If filterset is None and kdes does not hold exactly one filter
+            set; if x is not 1D or 2D with nband or nDim elements per
+            point; or as for conditional()'s errors and cov, and for
+            add_filterset().
+        """
+        filters = self._select_filterset(filterset)
+        kde = self._kdes[tuple(filters)]
+        points = np.asarray(x, dtype=np.float64)
+        nband = len(filters)
+        if points.ndim not in (1, 2) or points.shape[-1] not in (nband, kde.nDim):
+            raise ValueError(f"x must have one element per band ({nband}) or per dimension of the "
+                             f"estimate ({kde.nDim}) for each point")
+        if points.shape[-1] == nband:
+            # Just the photometry: marginalize over every inference quantity
+            pad = np.full(points.shape[:-1] + (kde.nDim - nband,), np.nan)
+            points = np.concatenate([points, pad], axis=-1)
+        bandwidth = self._error_bandwidth(filters, kde, errors, cov)
+        return kde.pdf(points, self._reltol if relTol is None else relTol,
+                       self._abstol if absTol is None else absTol, bandwidth=bandwidth)
+
+    def _error_bandwidth(self, filters: list[str], kde: KDE, errors: Any, cov: Any) -> Bandwidth | None:
+        """
+        A filter set's kernel bandwidth convolved with photometric errors.
+
+        Parameters
+        ----------
+        filters : list of str
+            The filter set.
+        kde : KDE
+            Its kernel density estimate.
+        errors : Any
+            The errors, as for conditional(), or None.
+        cov : Any
+            Their covariance, as for conditional(), or None.
+
+        Returns
+        -------
+        Bandwidth or None
+            kde's bandwidth convolved with the errors, or None if both
+            errors and cov are None.
+
+        Raises
+        ------
+        TypeError
+            If errors or cov has the wrong type.
+        ValueError
+            If both errors and cov are given, or either is invalid (see
+            conditional()).
+        """
         if errors is not None and cov is not None:
             raise ValueError("give the photometric errors as errors or cov, not both")
-        bandwidth = None
-        if errors is not None or cov is not None:
-            phot_cov = (self._errors_cov(filters, errors) if errors is not None
-                        else self._check_cov(filters, cov))
-            full = np.zeros((kde.nDim, kde.nDim))
-            full[:len(filters), :len(filters)] = phot_cov
-            bandwidth = Bandwidth(kde.h2Inv).convolveCov(full)
-        return kde.conditional(point, massTol, marginalDims, leafSize, bandwidth=bandwidth)
+        if errors is None and cov is None:
+            return None
+        phot_cov = (self._errors_cov(filters, errors) if errors is not None
+                    else self._check_cov(filters, cov))
+        full = np.zeros((kde.nDim, kde.nDim))
+        full[:len(filters), :len(filters)] = phot_cov
+        return Bandwidth(kde.h2Inv).convolveCov(full)
 
     def _select_filterset(self, filterset: Any) -> list[str]:
         """
