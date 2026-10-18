@@ -4388,6 +4388,12 @@ def test_bandwidth_basics():
     want = np.linalg.inv(np.linalg.inv(m) + np.diag([1.0, 0.5, 1.0 / 3.0]))
     assert np.allclose(bw.convolve(other).h2Inv(), want)
 
+    # convolveCov(): (M^-1 + 2 C)^-1, with C singular (errors in one dimension only)
+    c = np.diag([0.3, 0.0, 0.0])
+    assert np.allclose(bw.convolveCov(c).h2Inv(), np.linalg.inv(np.linalg.inv(m) + 2.0 * c))
+    with pytest.raises(ValueError):
+        bw.convolveCov(-np.eye(3))
+
     # dist2(): scalar for two points, vectorized otherwise
     a = np.array([0.1, -0.4, 0.7])
     b = np.array([[1.0, 0.0, 0.0], [0.5, 0.5, -0.5]])

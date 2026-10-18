@@ -166,6 +166,32 @@ ValueError
     If other has a different number of dimensions or different
     unspecified dimensions, or M1 + M2 is not positive definite.)doc";
 
+static constexpr std::string_view convolveCovDocstring = R"doc(Convolve with a Gaussian given by its covariance matrix.
+
+Parameters
+----------
+cov : numpy.ndarray of float, shape (n, n)
+    The Gaussian's covariance matrix C: symmetric and positive
+    semi-definite (e.g. measurement errors, zero in dimensions without
+    them). Only its block over this Bandwidth's specified dimensions is
+    used.
+
+Returns
+-------
+convolved : Bandwidth
+    The Bandwidth of the convolution of this kernel with that Gaussian,
+    whose matrix over the specified dimensions is (M^-1 + 2 C)^-1: as
+    for convolve(), with the other kernel given by its covariance
+    rather than its inverse squared bandwidth matrix, the two being
+    related by M = (2 C)^-1. Computed as (I + 2 M C)^-1 M, so neither M
+    nor C need be invertible.
+
+Raises
+------
+ValueError
+    If cov is not n x n, is not finite and symmetric, or is not positive
+    semi-definite.)doc";
+
 static constexpr std::string_view matchesDocstring = R"doc(Whether a point's pattern of NaNs matches this Bandwidth's unspecified dimensions.
 
 Parameters
@@ -339,6 +365,7 @@ void bindBandwidth(py::module_& m)
         .def("det", &Bandwidth::det, detDocstring.data())
         .def("reduce", &Bandwidth::reduce, reduceDocstring.data(), py::arg("unspecified"))
         .def("convolve", &Bandwidth::convolve, convolveDocstring.data(), py::arg("other"))
+        .def("convolveCov", &Bandwidth::convolveCov, convolveCovDocstring.data(), py::arg("cov"))
         .def("matches", [](const Bandwidth& bw, const std::vector<double>& x) -> bool
                 {
                     checkSize(bw, x, "x");

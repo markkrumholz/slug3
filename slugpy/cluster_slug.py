@@ -17,6 +17,7 @@ import numexpr  # pyright: ignore[reportMissingTypeStubs]
 import numpy as np
 from astropy import units as u
 
+from ._slug import Bandwidth
 from .kde import KDE
 from .slug_reader import slug_reader
 
@@ -116,6 +117,68 @@ def _check_tolerance(value: Any, name: str) -> float:
     if not math.isfinite(tol) or tol < 0.0:
         raise ValueError(f"{name} must be finite and non-negative")
     return tol
+
+
+def _is_mag_unit(unit: u.UnitBase) -> bool:
+    """
+    Whether a photometric unit is a magnitude.
+
+    Parameters
+    ----------
+    unit : astropy.units.UnitBase
+        The unit.
+
+    Returns
+    -------
+    bool
+        True for mag and the magnitude units of photometric systems
+        (e.g. mag(AB), mag(ST)).
+    """
+    return unit == u.mag or isinstance(unit, u.MagUnit)
+
+
+def _error_unit_matches(unit: u.UnitBase, band: u.UnitBase) -> bool:
+    """
+    Whether a photometric error's unit suits a band.
+
+    Parameters
+    ----------
+    unit : astropy.units.UnitBase
+        The error's unit.
+    band : astropy.units.UnitBase
+        The band's photometric unit.
+
+    Returns
+    -------
+    bool
+        For a band in magnitudes, whether unit is mag or the band's own
+        unit; otherwise, whether unit is dex or dex of a unit equivalent
+        to the band's.
+    """
+    if _is_mag_unit(band):
+        return unit == u.mag or unit == band
+    if unit == u.dex:
+        return True
+    return isinstance(unit, u.DexUnit) and cast(u.DexUnit, unit).physical_unit.is_equivalent(band)
+
+
+def _error_unit_rule(band: u.UnitBase) -> str:
+    """
+    The rule for a photometric error's unit, for error messages.
+
+    Parameters
+    ----------
+    band : astropy.units.UnitBase
+        The band's photometric unit.
+
+    Returns
+    -------
+    str
+        A description of the units an error in that band may have.
+    """
+    if _is_mag_unit(band):
+        return f"errors in magnitudes must be in mag or {band}"
+    return f"errors in a non-magnitude unit are in dex (of the log10 photometry), so must be in dex or dex({band})"
 
 
 def _filterset_list(value: Any) -> list[list[str]]:
@@ -697,6 +760,229 @@ class cluster_slug(slug_reader):
         self._kdes[tuple(names)] = KDE(
             kept, h2Inv=h2Inv, w=kept_weights, names=columns, aux=rows,
             noSplitDims=list(range(len(names), len(columns))))
+
+    def conditional(self, x0: Any, massTol: float = 1e-2, marginalDims: list[int] | None = None,
+                    leafSize: int = 16, filterset: list[str] | None = None,
+                    errors: Any = None, cov: Any = None) -> KDE:
+        """
+        Condition a filter set's kernel density estimate on observed photometry.
+
+        Parameters
+        ----------
+        x0 : array_like of float, shape (nband,) or (nDim,)
+            The photometry in the filter set's nband bands, in which case
+            the inference quantities are kept as the dimensions of the
+            result (the usual case); or a full point in the estimate's
+            space (see kdes[...].names), its filters then the inference
+            quantities, in which, as for KDE.conditional(), a finite
+            value fixes that dimension and NaN keeps it as a dimension
+            of the result. Photometry is in the units the estimate
+            stores: magnitudes as they are, and log10 of any other unit
+            (see add_filterset()).
+        massTol : float, optional
+            As for KDE.conditional() (default 1e-2).
+        marginalDims : list of int, optional
+            As for KDE.conditional() (default: none).
+        leafSize : int, optional
+            As for KDE.conditional() (default 16).
+        filterset : list of str, optional
+            The filter set whose estimate to use; added with
+            add_filterset() first if it is not already in kdes. May be
+            None (the default) only if kdes holds a single filter set,
+            which is then used.
+        errors : float, array_like, or astropy.units.Quantity, optional
+            The photometric errors: one value for every band, or one per
+            band of the filter set. For a band in magnitudes, a plain
+            number is in mag, and a Quantity must be in mag or the band's
+            own magnitude unit (e.g. mag(AB)); for a band in any other
+            unit (e.g. erg/(s Hz)), which the estimate stores as log10, a
+            plain number is in dex, and a Quantity must be in dex or dex
+            of a unit equivalent to the band's. Errors are taken to be
+            independent; see cov for correlated ones.
+        cov : array_like or astropy.units.Quantity, optional
+            The covariance matrix of the photometric errors, nband x
+            nband, in the same units as errors, squared: a Quantity must
+            be in mag^2 if every band is in magnitudes, or dex^2 if none
+            is (a filter set with both needs a plain array, since no
+            single astropy unit describes it). May not be given with
+            errors.
+
+        Returns
+        -------
+        KDE
+            The conditional estimate over the kept dimensions (see
+            KDE.conditional()), with its marginal property the filter
+            set's estimate's marginal density at the fixed values. If
+            errors or cov is given, the estimate's kernel is first
+            convolved with the errors (see Bandwidth.convolveCov()), so
+            that the result is the posterior given photometry with those
+            errors.
+
+        Raises
+        ------
+        TypeError
+            If filterset, errors, or cov has the wrong type.
+        ValueError
+            If filterset is None and kdes does not hold exactly one filter
+            set; if x0 has neither nband nor nDim elements; if both errors
+            and cov are given; if errors or cov has
+            the wrong shape, invalid values, or units that do not match
+            the bands' photometric systems; or as for add_filterset() and
+            KDE.conditional().
+        """
+        filters = self._select_filterset(filterset)
+        kde = self._kdes[tuple(filters)]
+        point = np.asarray(x0, dtype=np.float64)
+        if point.shape == (len(filters),):
+            # Just the photometry: keep every inference quantity
+            point = np.concatenate([point, np.full(kde.nDim - len(filters), np.nan)])
+        elif point.shape != (kde.nDim,):
+            raise ValueError(f"x0 must have one element per band ({len(filters)}) or per dimension "
+                             f"of the estimate ({kde.nDim})")
+        if errors is not None and cov is not None:
+            raise ValueError("give the photometric errors as errors or cov, not both")
+        bandwidth = None
+        if errors is not None or cov is not None:
+            phot_cov = (self._errors_cov(filters, errors) if errors is not None
+                        else self._check_cov(filters, cov))
+            full = np.zeros((kde.nDim, kde.nDim))
+            full[:len(filters), :len(filters)] = phot_cov
+            bandwidth = Bandwidth(kde.h2Inv).convolveCov(full)
+        return kde.conditional(point, massTol, marginalDims, leafSize, bandwidth=bandwidth)
+
+    def _select_filterset(self, filterset: Any) -> list[str]:
+        """
+        The filter set conditional() uses, added if need be.
+
+        Parameters
+        ----------
+        filterset : list of str or None
+            The filter set, or None for the only one in kdes.
+
+        Returns
+        -------
+        list of str
+            The filter set, now in kdes.
+
+        Raises
+        ------
+        ValueError
+            If filterset is None and kdes does not hold exactly one.
+        """
+        if filterset is None:
+            if len(self._kdes) != 1:
+                raise ValueError(f"filterset must be given, since there are {len(self._kdes)} "
+                                 "filter sets (not exactly one)")
+            return list(next(iter(self._kdes)))
+        if not isinstance(filterset, list):
+            raise TypeError("filterset must be a list of filter names")
+        filters = cast(list[str], filterset)
+        if tuple(filters) not in self._kdes:
+            self.add_filterset(filters)
+        return list(filters)
+
+    def _band_units(self, filters: list[str]) -> list[u.UnitBase]:
+        """
+        Each filter's photometric unit.
+
+        Parameters
+        ----------
+        filters : list of str
+            The filters.
+
+        Returns
+        -------
+        list of astropy.units.UnitBase
+            Their units (e.g. mag, mag(AB), erg/(s Hz)).
+        """
+        phot = self.cluster_phot
+        assert phot is not None
+        return [u.Unit(phot.filter_units[phot.filters.index(f)]) for f in filters]
+
+    def _errors_cov(self, filters: list[str], errors: Any) -> np.ndarray:
+        """
+        The covariance matrix of independent photometric errors.
+
+        Parameters
+        ----------
+        filters : list of str
+            The filter set.
+        errors : float, array_like, or astropy.units.Quantity
+            The errors (see conditional()).
+
+        Returns
+        -------
+        numpy.ndarray of float
+            diag(errors^2), nband x nband, in mag^2 or dex^2 by band.
+
+        Raises
+        ------
+        ValueError
+            If errors has the wrong shape, negative or non-finite
+            values, or units that do not match a band's.
+        """
+        nband = len(filters)
+        if isinstance(errors, u.Quantity):
+            quantity = cast(u.Quantity, errors)
+            for f, band in zip(filters, self._band_units(filters), strict=True):
+                if not _error_unit_matches(quantity.unit, band):
+                    raise ValueError(f"errors are in {quantity.unit}, which does not match filter {f}'s "
+                                     f"photometric unit {band}: " + _error_unit_rule(band))
+            values = np.asarray(quantity.value, dtype=np.float64)
+        else:
+            values = np.asarray(errors, dtype=np.float64)
+        if values.ndim == 0:
+            values = np.full(nband, float(values))
+        if values.shape != (nband,):
+            raise ValueError(f"errors must be a single value or have one per band ({nband})")
+        if not np.all(np.isfinite(values)) or np.any(values < 0.0):
+            raise ValueError("errors must be finite and non-negative")
+        return np.diag(values ** 2)
+
+    def _check_cov(self, filters: list[str], cov: Any) -> np.ndarray:
+        """
+        Check a covariance matrix of photometric errors.
+
+        Parameters
+        ----------
+        filters : list of str
+            The filter set.
+        cov : array_like or astropy.units.Quantity
+            The covariance matrix (see conditional()).
+
+        Returns
+        -------
+        numpy.ndarray of float
+            cov, nband x nband, in mag^2 or dex^2 by band.
+
+        Raises
+        ------
+        ValueError
+            If cov has the wrong shape, non-finite values, or units that
+            do not match the bands' (or a Quantity is given for a filter
+            set mixing magnitudes with other units).
+        """
+        nband = len(filters)
+        if isinstance(cov, u.Quantity):
+            quantity = cast(u.Quantity, cov)
+            is_mag = [_is_mag_unit(band) for band in self._band_units(filters)]
+            if all(is_mag):
+                want = u.mag ** 2
+            elif not any(is_mag):
+                want = u.dex ** 2
+            else:
+                raise ValueError("cov cannot be a Quantity for a filter set that mixes magnitudes "
+                                 "with other units: give it as a plain array, in mag^2 and dex^2")
+            if quantity.unit != want:
+                raise ValueError(f"cov is in {quantity.unit}, but must be in {want} for filters {filters}")
+            values = np.asarray(quantity.value, dtype=np.float64)
+        else:
+            values = np.asarray(cov, dtype=np.float64)
+        if values.shape != (nband, nband):
+            raise ValueError(f"cov must be {nband} x {nband}, one row and column per band")
+        if not np.all(np.isfinite(values)):
+            raise ValueError("cov must be finite")
+        return values
 
     def remove_filterset(self, filters: list[str]) -> None:
         """

@@ -116,8 +116,56 @@ auto kden::Bandwidth::convolve(const Bandwidth& other) const -> Bandwidth
     // being transposed would alias, since Eigen evaluates lazily
     const Eigen::MatrixXd prod = ms_ * llt.solve(other.ms_);
     const Eigen::MatrixXd conv = 0.5 * (prod + prod.transpose());
+    return {embed(conv), unspecified_};
+}
 
-    // Back to n x n, zero in the unspecified dimensions
+auto kden::Bandwidth::convolveCov(const Eigen::MatrixXd& cov) const -> Bandwidth
+{
+    const auto ni = static_cast<Eigen::Index>(nDim());
+    if (cov.rows() != ni || cov.cols() != ni || !cov.allFinite())
+    {
+        throw std::invalid_argument("Bandwidth::convolveCov: cov must be a finite nDim x nDim matrix");
+    }
+    const double scale = std::max(cov.cwiseAbs().maxCoeff(), 1.0e-300);
+    if ((cov - cov.transpose()).cwiseAbs().maxCoeff() > 1e-12 * scale)
+    {
+        throw std::invalid_argument("Bandwidth::convolveCov: cov must be symmetric");
+    }
+
+    // C's block over the specified dimensions, which must be positive
+    // semi-definite
+    const auto ns = static_cast<Eigen::Index>(spec_.size());
+    Eigen::MatrixXd cs(ns, ns);
+    for (Eigen::Index a = 0; a < ns; ++a)
+    {
+        for (Eigen::Index b = 0; b < ns; ++b)
+        {
+            cs(a, b) = cov(static_cast<Eigen::Index>(spec_[static_cast<std::size_t>(a)]), // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                           static_cast<Eigen::Index>(spec_[static_cast<std::size_t>(b)])); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        }
+    }
+    if (ns > 0)
+    {
+        const Eigen::LDLT<Eigen::MatrixXd> ldlt(cs);
+        const Eigen::VectorXd& d = ldlt.vectorD();
+        if (ldlt.info() != Eigen::Success || d.minCoeff() < -1e-12 * std::max(d.maxCoeff(), 0.0))
+        {
+            throw std::domain_error("Bandwidth::convolveCov: cov is not positive semi-definite");
+        }
+    }
+
+    // (M^-1 + 2 C)^-1 = (I + 2 M C)^-1 M; I + 2 M C is invertible for
+    // positive semi-definite M and C, since M C's eigenvalues are real
+    // and non-negative. Symmetrized into a separate matrix, as in
+    // convolve().
+    const Eigen::MatrixXd lhs = Eigen::MatrixXd::Identity(ns, ns) + (2.0 * ms_ * cs);
+    const Eigen::MatrixXd prod = lhs.partialPivLu().solve(ms_);
+    const Eigen::MatrixXd conv = 0.5 * (prod + prod.transpose());
+    return {embed(conv), unspecified_};
+}
+
+auto kden::Bandwidth::embed(const Eigen::MatrixXd& block) const -> Eigen::MatrixXd
+{
     const auto ni = static_cast<Eigen::Index>(nDim());
     Eigen::MatrixXd full = Eigen::MatrixXd::Zero(ni, ni);
     for (std::size_t r = 0; r < spec_.size(); ++r)
@@ -125,10 +173,10 @@ auto kden::Bandwidth::convolve(const Bandwidth& other) const -> Bandwidth
         for (std::size_t c = 0; c < spec_.size(); ++c)
         {
             full(static_cast<Eigen::Index>(spec_[r]), static_cast<Eigen::Index>(spec_[c])) = // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-                conv(static_cast<Eigen::Index>(r), static_cast<Eigen::Index>(c));
+                block(static_cast<Eigen::Index>(r), static_cast<Eigen::Index>(c));
         }
     }
-    return {std::move(full), unspecified_};
+    return full;
 }
 
 auto kden::Bandwidth::reduce(const std::vector<bool>& unspecified) const -> Bandwidth

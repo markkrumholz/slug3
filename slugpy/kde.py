@@ -384,7 +384,8 @@ class KDE:
         """
         self._kde.reweight()
 
-    def pdf(self, x: Any, relTol: float = 1e-2, absTol: float = 1e-8) -> float | np.ndarray:
+    def pdf(self, x: Any, relTol: float = 1e-2, absTol: float = 1e-8,
+            bandwidth: Bandwidth | None = None) -> float | np.ndarray:
         """
         Evaluate the kernel density estimate at one or more points.
 
@@ -399,6 +400,10 @@ class KDE:
         absTol : float, optional
             Absolute tolerance: stop once the estimate plus its
             uncertainty is less than absTol (default 1e-8).
+        bandwidth : Bandwidth, optional
+            The kernel's bandwidth, in place of h2Inv (e.g. h2Inv
+            convolved with measurement errors; see
+            Bandwidth.convolveCov()); if None (the default), h2Inv.
 
         Returns
         -------
@@ -407,10 +412,11 @@ class KDE:
             specified dimensions, for a point with NaNs); a float for
             one point.
         """
-        return self._kde.pdf(x, relTol, absTol, self._current_bandwidth())
+        bw = self._current_bandwidth() if bandwidth is None else bandwidth
+        return self._kde.pdf(x, relTol, absTol, bw)
 
     def conditional(self, x0: Any, massTol: float = 1e-2, marginalDims: list[int] | None = None,
-                    leafSize: int = 16) -> "KDE":
+                    leafSize: int = 16, bandwidth: Bandwidth | None = None) -> "KDE":
         """
         Condition the estimate on values of some dimensions, optionally marginalizing over others.
 
@@ -429,6 +435,10 @@ class KDE:
             Dimensions to marginalize over (default: none).
         leafSize : int, optional
             Leaf size of the result's kd tree (default 16).
+        bandwidth : Bandwidth, optional
+            The kernel's bandwidth, in place of h2Inv (e.g. h2Inv
+            convolved with measurement errors; see
+            Bandwidth.convolveCov()); if None (the default), h2Inv.
 
         Returns
         -------
@@ -443,8 +453,9 @@ class KDE:
         ValueError
             As for KernelDensity.conditional().
         """
+        bw = self._current_bandwidth() if bandwidth is None else bandwidth
         cd = self._kde.conditional(x0, massTol, [] if marginalDims is None else marginalDims,
-                                   self._current_bandwidth(), leafSize)
+                                   bw, leafSize)
         dims = cd.dims()
         names = [self._names[d] for d in dims] if self._names else []
         return KDE._from_kernel_density(cd.kde(), cd.bandwidth().h2Inv(), names, cd.marginal(), cd)
