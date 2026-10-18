@@ -95,7 +95,7 @@ try:
         wl_ds = h5file.create_dataset("wl", data=wavelength, compression="gzip")
         wl_ds.attrs["units"] = "Angstrom"
         flux_ds = h5file.create_dataset("flux", data=flux, compression="gzip")
-        flux_ds.attrs["units"] = "erg/s/cm^2/Angstrom"
+        flux_ds.attrs["units"] = "erg/(s cm2 Angstrom)"
 
     print(f"Wrote {args.output}.")
 finally:

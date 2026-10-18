@@ -882,6 +882,8 @@ static auto testWriteReadClusterRngRoundTrip() -> int
     return 0;
 }
 
+static auto readUnitsAttr(hid_t dset) -> std::string; // NOLINT(misc-include-cleaner)
+
 // Verify that OutputManager::writeClusterSpec/writeClusterPhot append
 // spec_extinct/phot_extinct rows, alongside spec/phot, to the HDF5
 // cluster_spectra/cluster_phot groups whenever SimControls::extinct()
@@ -971,6 +973,8 @@ static auto testWriteClusterSpecPhotH5Extinct() -> int
         std::vector<double> readPhotExtinct;
         double readAV = 0.0;
         double readAVNeb = 0.0;
+        std::string readAVUnits;
+        std::string readAVNebUnits;
         try
         {
             const hid_t specGrp = H5Gopen2(file, "cluster_spectra", H5P_DEFAULT);
@@ -1007,6 +1011,7 @@ static auto testWriteClusterSpecPhotH5Extinct() -> int
                 throw std::runtime_error("missing expected dataset A_V");
             }
             H5Dread(aVDset, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, &readAV);
+            readAVUnits = readUnitsAttr(aVDset);
             H5Dclose(aVDset);
             const hid_t aVNebDset = H5Dopen2(clustersGrp, "A_V_neb", H5P_DEFAULT);
             if (aVNebDset < 0)
@@ -1015,6 +1020,7 @@ static auto testWriteClusterSpecPhotH5Extinct() -> int
                 throw std::runtime_error("missing expected dataset A_V_neb");
             }
             H5Dread(aVNebDset, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, &readAVNeb);
+            readAVNebUnits = readUnitsAttr(aVNebDset);
             H5Dclose(aVNebDset);
             H5Gclose(clustersGrp);
         }
@@ -1056,6 +1062,14 @@ static auto testWriteClusterSpecPhotH5Extinct() -> int
             std::cerr << "testOutputManager: h5 spec/phot extinct: A_V_neb = " << readAVNeb
                 << " does not match cluster.avNeb() = " << cluster.avNeb()
                 << " (which should also differ from aV())\n";
+            return 1;
+        }
+        // "mag", which astropy parses, unlike the "magnitudes" written
+        // through 3.0.1
+        if (readAVUnits != "mag" || readAVNebUnits != "mag")
+        {
+            std::cerr << "testOutputManager: h5 spec/phot extinct: A_V/A_V_neb units are \""
+                << readAVUnits << "\"/\"" << readAVNebUnits << "\", not \"mag\"\n";
             return 1;
         }
     }
