@@ -498,6 +498,65 @@ class KDE:
             return [self._wrap_conditional(cd) for cd in cast(list[Any], result)]
         return self._wrap_conditional(result)
 
+    def conditional_sample(self, x0: Any, massTol: float = 1e-2, marginalDims: list[int] | None = None,
+                           bandwidth: Bandwidth | None = None, errDims: list[int] | None = None,
+                           errCov: Any = None) -> "tuple[np.ndarray, np.ndarray, np.ndarray] | list[tuple[np.ndarray, np.ndarray, np.ndarray]]":
+        """
+        Find the sample points, weights, and aux labels of a conditional estimate, without building it.
+
+        The same points, weights, and aux labels conditional() keeps,
+        e.g. for storing a conditional estimate and rebuilding it later:
+        a KDE
+        over them, with dataset the points, w the weights, and h2Inv the
+        conditional kernel metric -- the block over the kept dimensions
+        of the bandwidth reduced over marginalDims (or of the bandwidth
+        convolved with the errors, if errCov is given) -- is the
+        conditional estimate.
+
+        Parameters
+        ----------
+        x0 : array_like of float, shape (nDim,) or (M, nDim)
+            As for conditional().
+        massTol : float, optional
+            As for conditional() (default 1e-2).
+        marginalDims : list of int, optional
+            As for conditional() (default: none).
+        bandwidth : Bandwidth, optional
+            As for conditional(); if None (the default), h2Inv.
+        errDims : list of int, optional
+            As for conditional() (default: none).
+        errCov : array_like of float, shape (nErr, nErr) or (M, nErr, nErr), optional
+            As for conditional().
+
+        Returns
+        -------
+        tuple of (numpy.ndarray, numpy.ndarray, numpy.ndarray), or list of such tuples
+            The points kept, shape (K, nR), in the kept dimensions (those
+            NaN in x0 and not in marginalDims, in increasing order); their
+            weights, shape (K,); and their aux labels, shape (K,), each
+            that of the point in this KDE it came from (see aux); all in
+            increasing order of weight. A list of one such tuple per
+            point for M points. The weights are not normalized (see
+            KernelDensity.conditionalSample()).
+
+        Raises
+        ------
+        ValueError
+            As for conditional().
+
+        Notes
+        -----
+        Several points are handled in parallel, one per thread at a
+        time, without the GIL.
+        """
+        bw = self._current_bandwidth() if bandwidth is None else bandwidth
+        result = self._kde.conditionalSample(x0, massTol, [] if marginalDims is None else marginalDims, bw,
+                                             [] if errDims is None else errDims, errCov)
+        if isinstance(result, list):
+            return [(x, w, aux) for x, w, aux in cast(list[tuple[np.ndarray, np.ndarray, np.ndarray]], result)]
+        x, w, aux = cast(tuple[np.ndarray, np.ndarray, np.ndarray], result)
+        return x, w, aux
+
     def _wrap_conditional(self, cd: Any) -> "KDE":
         """
         Wrap a ConditionalDensity as a KDE.

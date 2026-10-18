@@ -35,6 +35,7 @@
 #include <pybind11/stl.h> // NOLINT(misc-include-cleaner); needed for list/vector conversions
 #include <span>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -440,6 +441,63 @@ namespace kdenbind {
         if (single) { return py::cast(std::move(cds.front())); }
         py::list out;
         for (auto& cd : cds) { out.append(py::cast(std::move(cd))); }
+        return out;
+    }
+
+    /**
+     * @brief Find the sample points, weights, and auxiliary data of conditional estimates at one point or a batch, for Python
+     * @param kde The estimate
+     * @param x0 One point or an M x nDim array
+     * @param massTol As for KernelDensity::conditionalSample()
+     * @param marginalDims As for KernelDensity::conditionalSample()
+     * @param bandwidth None or a Bandwidth
+     * @param errDims Dimensions with measurement errors (empty for none)
+     * @param errCov None, or their covariances (see batchErrors())
+     * @param euclidean The Euclidean metric
+     * @return For one point, a tuple of the points (K x nR array),
+     *   their weights (K array), and their auxiliary data (K array);
+     *   for a batch, a list of one such tuple per point
+     * @throws py::value_error if errDims is given without errCov, or
+     *   errCov or bandwidth is invalid
+     * @details
+     * Calls KernelDensity's batch conditionalSample(), which runs in
+     * parallel, without the GIL.
+     */
+    inline auto conditionalSample(const KDE& kde, const QueryArray& x0, const double massTol,
+        const std::vector<std::size_t>& marginalDims, const py::object& bandwidth,
+        const std::vector<std::size_t>& errDims, const py::object& errCov,
+        const kden::Bandwidth& euclidean) -> py::object
+    {
+        const auto query = queryPoints(x0, kde.nDim());
+        const auto& pts = query.first;
+        if (errCov.is_none() && !errDims.empty()) { throw py::value_error("errDims was given without errCov"); }
+        const kden::Bandwidth bw = errorsBandwidth(bandwidth, euclidean);
+        std::vector<KDE::Sample> samples;
+        if (!errCov.is_none())
+        {
+            const auto errs = batchErrors(errCov, pts.size(), errDims.size());
+            const py::gil_scoped_release release;
+            samples = kde.conditionalSample(pts, errDims, errs, marginalDims, massTol, bw);
+        }
+        else
+        {
+            const py::gil_scoped_release release;
+            samples = kde.conditionalSample(pts, marginalDims, massTol, bw);
+        }
+        // A sample as (points, weights, aux); it always has at least one point
+        auto toPython = [](const KDE::Sample& sample) -> py::tuple
+        {
+            const auto& x = std::get<0>(sample);
+            const auto& w = std::get<1>(sample);
+            const auto nKept = static_cast<py::ssize_t>(w.size());
+            const auto nR = static_cast<py::ssize_t>(x.size() / w.size());
+            py::array_t<double> xArr({nKept, nR});
+            std::ranges::copy(x, xArr.mutable_data());
+            return py::make_tuple(xArr, toArray(w), toArray(std::get<2>(sample)));
+        };
+        if (query.second) { return toPython(samples.front()); }
+        py::list out;
+        for (const auto& sample : samples) { out.append(toPython(sample)); }
         return out;
     }
 

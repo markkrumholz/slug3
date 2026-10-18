@@ -259,3 +259,24 @@ def test_batches_with_errors() -> None:
     assert densities[2] == pytest.approx(float(np.asarray(one)), rel=1e-10)
     with pytest.raises(ValueError, match="without errCov"):
         kde.pdf(x0, errDims=err_dims)
+
+
+def test_conditional_sample() -> None:
+    """conditional_sample() gives conditional()'s points and weights, from which it can be rebuilt."""
+    x, w = make_points(1500, 4, 31)
+    m = np.linalg.inv(0.2 * np.eye(4) + 0.8 * np.ones((4, 4)))
+    kde = KDE(x, h2Inv=m, w=w, names=["mass", "age", "A_V", "Z"])
+    x0 = np.array([0.4, np.nan, 0.9, np.nan])
+    cond = _one(kde.conditional(x0))
+    sample = kde.conditional_sample(x0)
+    assert isinstance(sample, tuple)
+    pts, wts, aux = sample
+    assert pts.shape == (cond.dataset.shape[0], 2) and wts.shape == (pts.shape[0],)
+    assert np.array_equal(np.sort(aux), np.sort(cond.aux))
+    rebuilt = KDE(pts.copy(), h2Inv=cond.h2Inv, w=wts.copy(), aux=aux.copy())
+    y = np.random.default_rng(32).standard_normal((5, 2))
+    assert np.allclose(np.asarray(rebuilt.pdf(y, 0.0, 0.0)), np.asarray(cond.pdf(y, 0.0, 0.0)), rtol=1e-12)
+
+    batch = kde.conditional_sample(np.stack([x0, x0 + np.array([0.2, 0.0, -0.1, 0.0])]))
+    assert isinstance(batch, list) and len(batch) == 2
+    assert all(np.array_equal(a, b) for a, b in zip(batch[0], sample, strict=True))

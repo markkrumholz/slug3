@@ -328,6 +328,15 @@ namespace kden {
         using Tree = KDTree<KernelDensityData<AuxType>>;
 
         /**
+         * What conditionalSample() returns: a conditional estimate's
+         * points (K x nR, point-major), their weights (K), and their
+         * auxiliary data (K elements, carried over from this estimate's
+         * points; an empty placeholder if AuxType is void)
+         */
+        using Sample = std::tuple<std::vector<double>, std::vector<double>,
+            typename KDTreeAuxStorage<AuxType>::Owned>;
+
+        /**
          * @brief Construct a KernelDensity over a set of weighted points
          * @param data The kernel centers; as for the corresponding KDTree
          *   constructor. Every weight must also be finite and
@@ -517,13 +526,101 @@ namespace kden {
          * weight dropped is thus at most massTol of the total, so the
          * result's L1 distance from the exact conditional density is at
          * most 2 massTol. Its cost depends on the number of points kept,
-         * not the size of the tree. Thread-safe, as for pdf().
+         * not the size of the tree. conditionalSample() finds the same
+         * points and weights without building the result. Thread-safe,
+         * as for pdf().
          */
         [[nodiscard]] auto conditional(const std::vector<double>& x0,
             const std::vector<std::size_t>& marginalDims,
             const double massTol,
             const Bandwidth& bandwidth,
             const std::size_t leafSize = 16) const -> ConditionalDensity<AuxType>
+        {
+            auto pts = conditionalPoints(x0, marginalDims, massTol, bandwidth);
+            return ConditionalDensity<AuxType>(std::move(pts.data_), Bandwidth(pts.metric_),
+                std::move(pts.dims_), pts.marginal_, leafSize);
+        }
+
+        /**
+         * @brief Find the sample points, weights, and auxiliary data of a conditional estimate, without building it
+         * @param x0 As for conditional()
+         * @param marginalDims As for conditional()
+         * @param massTol As for conditional()
+         * @param bandwidth As for conditional()
+         * @return The points the conditional estimate p(y | x0_F) keeps,
+         *   in the dimensions R (in increasing order), K x |R|,
+         *   point-major; and their weights, K of them, w'_i = w_i
+         *   exp(-a_i^T S a_i) (see conditional()), with w_i this
+         *   estimate's normalized weights: not themselves normalized, so
+         *   that their sum times sqrt(det S) / pi^(|F|/2) is the marginal
+         *   density over F at x0_F (conditional()'s marginal()); and,
+         *   unless AuxType is void, their auxiliary data, carried over
+         *   from the points they came from (see Sample)
+         * @throws As for conditional()
+         * @details
+         * The same points, weights, and auxiliary data as
+         * conditional() keeps, in increasing order of weight, without
+         * building the conditional estimate's tree: a
+         * KernelDensity over them, with the kernel metric M'_RR -- the
+         * block of bandwidth.reduce(G) over R, a function of the
+         * bandwidth alone -- is the conditional estimate. Suited to
+         * storing conditional estimates, to be rebuilt as needed.
+         * Thread-safe, as for conditional().
+         */
+        [[nodiscard]] auto conditionalSample(const std::vector<double>& x0,
+            const std::vector<std::size_t>& marginalDims,
+            const double massTol,
+            const Bandwidth& bandwidth) const -> Sample
+        {
+            auto pts = conditionalPoints(x0, marginalDims, massTol, bandwidth);
+            return {std::move(pts.data_.x_), std::move(pts.data_.w_), std::move(pts.data_.aux_)};
+        }
+
+        /**
+         * @brief Find the sample points and weights of a conditional estimate, with the Euclidean bandwidth
+         * @param x0 As for the other overload
+         * @param marginalDims As for the other overload
+         * @param massTol As for the other overload
+         * @return As for the other overload, with M the identity
+         * @throws As for the other overload
+         */
+        [[nodiscard]] auto conditionalSample(const std::vector<double>& x0,
+            const std::vector<std::size_t>& marginalDims,
+            const double massTol) const -> Sample
+        {
+            return conditionalSample(x0, marginalDims, massTol, this->euclidean_);
+        }
+
+    protected:
+
+        /**
+         * @struct ConditionalPoints
+         * @brief What conditional() and conditionalSample() find: a conditional estimate's points, before its tree is built
+         */
+        struct ConditionalPoints
+        {
+            OwnedKernelDensityData<AuxType> data_;  /**< The kept points, in the dimensions R; their unnormalized weights; and their auxiliary data */
+            std::vector<std::size_t> dims_;         /**< The kept dimensions R, in increasing order */
+            Eigen::MatrixXd metric_;                /**< The conditional kernel metric M'_RR */ // NOLINT(misc-include-cleaner) -- Eigen::MatrixXd is provided by <Eigen/Dense> (included via Bandwidth.hpp); clang-tidy's IWYU mapping doesn't know that
+            double marginal_ = 0.0;                 /**< The marginal density over F at x0_F */
+        };
+
+        /**
+         * @brief Find a conditional estimate's points, weights, metric, and marginal
+         * @param x0 As for conditional()
+         * @param marginalDims As for conditional()
+         * @param massTol As for conditional()
+         * @param bandwidth As for conditional()
+         * @return The points and the rest (see ConditionalPoints)
+         * @throws As for conditional()
+         * @details
+         * The work of conditional() and conditionalSample(); see
+         * conditional() for the method.
+         */
+        [[nodiscard]] auto conditionalPoints(const std::vector<double>& x0,
+            const std::vector<std::size_t>& marginalDims,
+            const double massTol,
+            const Bandwidth& bandwidth) const -> ConditionalPoints
         {
             // Sort the dimensions into fixed (F), kept (R), and
             // marginalized (G)
@@ -587,9 +684,11 @@ namespace kden {
             // up to the normalization of S's kernel
             const double marginal = keptMass * std::sqrt(weightMetric.det()) /
                 std::pow(std::numbers::pi, 0.5 * static_cast<double>(nF));
-            return ConditionalDensity<AuxType>(std::move(data), Bandwidth(kernelMetric),
-                std::move(dimsR), marginal, leafSize);
+            return {.data_ = std::move(data), .dims_ = std::move(dimsR), .metric_ = kernelMetric,
+                .marginal_ = marginal};
         }
+
+    public:
 
         /**
          * @brief Condition the estimate on values of some dimensions, with the Euclidean bandwidth
@@ -807,6 +906,88 @@ namespace kden {
             {
                 return conditional(x0[i], marginalDims, massTol, // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
                     bandwidth.convolveCov(embedErrors(errDims, errCov[i])), leafSize); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            });
+        }
+
+        /**
+         * @brief Find the sample points, weights, and auxiliary data of conditional estimates for each of several points, in parallel
+         * @param x0 The points to condition on, each as for the
+         *   single-point conditionalSample()
+         * @param marginalDims As for the single-point
+         *   conditionalSample(), shared by every point
+         * @param massTol As for the single-point conditionalSample()
+         * @param bandwidth As for the single-point conditionalSample(),
+         *   shared by every point
+         * @return One result per point, each exactly as the single-point
+         *   conditionalSample() returns it
+         * @throws Any exception the single-point conditionalSample()
+         *   throws for any one of the points (the first one caught, if
+         *   several do)
+         * @details
+         * Runs the single-point conditionalSample() for each point, in
+         * parallel (dynamically scheduled) if built with OpenMP.
+         */
+        [[nodiscard]] auto conditionalSample(const std::vector<std::vector<double>>& x0,
+            const std::vector<std::size_t>& marginalDims,
+            const double massTol,
+            const Bandwidth& bandwidth) const
+            -> std::vector<Sample>
+        {
+            return parallelEval<Sample>(x0.size(),
+                [&](const std::size_t i) -> Sample
+                { return conditionalSample(x0[i], marginalDims, massTol, bandwidth); }); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        }
+
+        /**
+         * @brief Find the sample points, weights, and auxiliary data of conditional estimates for each of several points, in parallel, with the Euclidean bandwidth
+         * @param x0 As for the other overload
+         * @param marginalDims As for the other overload
+         * @param massTol As for the other overload
+         * @return As for the other overload, with M the identity
+         * @throws As for the other overload
+         */
+        [[nodiscard]] auto conditionalSample(const std::vector<std::vector<double>>& x0,
+            const std::vector<std::size_t>& marginalDims,
+            const double massTol) const
+            -> std::vector<Sample>
+        {
+            return conditionalSample(x0, marginalDims, massTol, this->euclidean_);
+        }
+
+        /**
+         * @brief Find, in parallel, the sample points, weights, and auxiliary data of conditional estimates for each of several points measured with errors
+         * @param x0 The points to condition on, each as for the
+         *   single-point conditionalSample()
+         * @param errDims As for the errors version of the batch
+         *   conditional()
+         * @param errCov As for the errors version of the batch
+         *   conditional()
+         * @param marginalDims As for the single-point
+         *   conditionalSample(), shared by every point
+         * @param massTol As for the single-point conditionalSample()
+         * @param bandwidth As for the single-point conditionalSample(),
+         *   shared by every point
+         * @return For each point x0[i], the sample points, weights, and
+         *   auxiliary data of the conditional estimate given x0[i] with the kernel first
+         *   convolved with its errors, as the errors version of the
+         *   batch conditional() would keep them; its kernel metric is
+         *   that of the convolved bandwidth
+         * @throws As for the errors version of the batch conditional()
+         */
+        [[nodiscard]] auto conditionalSample(const std::vector<std::vector<double>>& x0,
+            const std::vector<std::size_t>& errDims,
+            const std::vector<Eigen::MatrixXd>& errCov,
+            const std::vector<std::size_t>& marginalDims,
+            const double massTol,
+            const Bandwidth& bandwidth) const
+            -> std::vector<Sample>
+        {
+            checkErrors(x0, errDims, errCov, marginalDims, "KernelDensity::conditionalSample");
+            return parallelEval<Sample>(x0.size(),
+                [&](const std::size_t i) -> Sample
+            {
+                return conditionalSample(x0[i], marginalDims, massTol, // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                    bandwidth.convolveCov(embedErrors(errDims, errCov[i]))); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
             });
         }
 

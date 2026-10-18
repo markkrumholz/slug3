@@ -4671,3 +4671,41 @@ def test_kernel_density_batches_with_errors():
         kde.pdf(q, 0.0, 0.0, [bw] * 8, errDims=err_dims, errCov=cov)
     with pytest.raises(ValueError, match="marginalized"):
         kde.conditional(q, 0.0, marginalDims=[0], bandwidth=bw, errDims=err_dims, errCov=cov)
+
+
+def test_conditional_sample():
+    """conditionalSample() returns conditional()'s points and weights, from which it can be rebuilt."""
+    x, w = make_kde_points(2000, 3, 16)
+    kde = slug.KernelDensity(x, w, leafSize=8)
+    m = kde_test_metric(3)
+    bw = slug.Bandwidth(m)
+    x0 = np.array([0.3, np.nan, -0.5])
+    pts, wts, aux = kde.conditionalSample(x0, 1e-2, bandwidth=bw)
+    cd = kde.conditional(x0, 1e-2, bandwidth=bw)
+    assert pts.shape == (cd.w.size, 1) and wts.shape == (cd.w.size,) and aux.shape == (cd.w.size,)
+    assert aux.dtype == np.int64
+    assert np.array_equal(np.sort(pts[:, 0]), np.sort(cd.x[:, 0]))
+    # Each point's aux label is the conditional estimate's for the same point
+    assert dict(zip(aux.tolist(), pts[:, 0].tolist(), strict=True)) == \
+        dict(zip(cd.aux.tolist(), cd.x[:, 0].tolist(), strict=True))
+    assert np.all(np.diff(wts) >= 0.0)
+    # Rebuilt with the conditional metric, it is the conditional estimate
+    rebuilt = slug.KernelDensity(pts.copy(), wts.copy(), aux.copy())
+    y = np.array([[-1.0], [0.0], [0.7]])
+    assert np.allclose(rebuilt.pdf(y, 0.0, 0.0, cd.bandwidth()), cd.pdf(y, 0.0, 0.0), rtol=1e-12)
+    # The weights' sum times the fixed dimensions' normalization is the marginal
+    s = np.linalg.inv(np.linalg.inv(m)[np.ix_([0, 2], [0, 2])])
+    assert wts.sum() * np.sqrt(np.linalg.det(s)) / np.pi == pytest.approx(cd.marginal(), rel=1e-10)
+
+    # A batch, with per-point errors: a list of tuples, each as for its point alone
+    q = np.array([[0.3, np.nan, -0.5], [-0.6, np.nan, 0.2], [1.0, np.nan, 0.8]])
+    cov = np.stack([0.01 * (i + 1) * np.eye(2) for i in range(3)])
+    batch = kde.conditionalSample(q, 1e-2, bandwidth=bw, errDims=[0, 2], errCov=cov)
+    assert isinstance(batch, list) and len(batch) == 3
+    for i, (bp, bw_i, ba) in enumerate(batch):
+        full = np.zeros((3, 3))
+        full[np.ix_([0, 2], [0, 2])] = cov[i]
+        alone_p, alone_w, alone_a = kde.conditionalSample(q[i], 1e-2, bandwidth=bw.convolveCov(full))
+        assert np.array_equal(bp, alone_p) and np.array_equal(bw_i, alone_w) and np.array_equal(ba, alone_a)
+    with pytest.raises(ValueError):
+        kde.conditionalSample(np.full(3, np.nan), bandwidth=bw)

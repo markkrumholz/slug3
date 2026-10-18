@@ -266,6 +266,53 @@ Notes
 A batch runs in parallel, one point per thread at a time, without the
 GIL.)doc";
 
+static constexpr std::string_view conditionalSampleDocstring = R"doc(Find the sample points, weights, and auxiliary data of a conditional estimate, without building it.
+
+The same points, weights, and auxiliary data conditional() keeps, for
+storing a conditional estimate (e.g. on disk) and rebuilding it later: a
+KernelDensity over them, with the conditional kernel metric -- the block
+over the kept dimensions of the bandwidth reduced over marginalDims (with
+errors, of that bandwidth convolved with them) -- is the conditional
+estimate.
+
+Parameters
+----------
+x0 : array_like of float, shape (nDim,) or (M, nDim)
+    As for conditional().
+massTol : float, optional
+    As for conditional() (default 1e-2).
+marginalDims : list of int, optional
+    As for conditional() (default: none).
+bandwidth : Bandwidth, optional
+    As for conditional() (default: identity).
+errDims : list of int, optional
+    As for conditional() (default: none).
+errCov : array_like of float, shape (nErr, nErr) or (M, nErr, nErr), optional
+    As for conditional().
+
+Returns
+-------
+sample : tuple of (numpy.ndarray, numpy.ndarray, numpy.ndarray), or list of such tuples
+    The points kept, shape (K, nR), in the kept dimensions (those NaN in
+    x0 and not in marginalDims, in increasing order); their weights,
+    shape (K,); and their auxiliary data (int64), shape (K,), each that
+    of the point it came from (see aux); all in increasing order of
+    weight. The weights are not
+    normalized: their sum times sqrt(det S) / pi^(nF / 2), with S the
+    bandwidth reduced to the nF fixed dimensions, is the marginal
+    density at x0 (conditional()'s marginal()). A list of one tuple per
+    point for M points.
+
+Raises
+------
+ValueError
+    As for conditional().
+
+Notes
+-----
+A batch runs in parallel, one point per thread at a time, without the
+GIL.)doc";
+
 static constexpr std::string_view condClassDocstring = R"doc(A kernel density estimate conditioned on some dimensions' values.
 
 Made by KernelDensity.conditional(). Owns its points: shifted,
@@ -393,7 +440,16 @@ void bindKernelDensity(py::module_& m)
             }, conditionalDocstring.data(), py::arg("x0"), py::arg("massTol") = 1e-2,
             py::arg("marginalDims") = std::vector<std::size_t>{}, py::arg("bandwidth") = py::none(),
             py::arg("leafSize") = 16, py::arg("errDims") = std::vector<std::size_t>{},
-            py::arg("errCov") = py::none());
+            py::arg("errCov") = py::none())
+        .def("conditionalSample", [](const KDE& kde, const kdenbind::QueryArray& x0, const double massTol,
+                const std::vector<std::size_t>& marginalDims, const py::object& bandwidth,
+                const std::vector<std::size_t>& errDims, const py::object& errCov) -> py::object
+            {
+                return kdenbind::conditionalSample(kde, x0, massTol, marginalDims, bandwidth, errDims, errCov,
+                    kden::Bandwidth::identity(kde.nDim()));
+            }, conditionalSampleDocstring.data(), py::arg("x0"), py::arg("massTol") = 1e-2,
+            py::arg("marginalDims") = std::vector<std::size_t>{}, py::arg("bandwidth") = py::none(),
+            py::arg("errDims") = std::vector<std::size_t>{}, py::arg("errCov") = py::none());
     view.attr("nullNode") = kden::nullNode;
     view.attr("rootNode") = kden::rootNode;
 

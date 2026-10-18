@@ -1000,6 +1000,71 @@ class cluster_slug(slug_reader):
                                    errCov=per_point[0] if points.ndim == 1 else per_point)
         return kde.conditional(points, massTol, marginalDims, leafSize, bandwidth=bandwidth)
 
+    def conditional_sample(self, x0: Any, massTol: float = 1e-2, marginalDims: list[int] | None = None,
+                           filterset: list[str] | None = None, errors: Any = None,
+                           cov: Any = None) -> "tuple[np.ndarray, np.ndarray, np.ndarray] | list[tuple[np.ndarray, np.ndarray, np.ndarray]]":
+        """
+        Find the sample points, weights, and library rows of the posterior given photometry, without building it.
+
+        The same points, weights, and aux labels conditional() keeps,
+        e.g. for storing posteriors and rebuilding them later: a KDE over
+        them (dataset the points, w the weights, aux the labels), with
+        h2Inv the conditional
+        kernel metric, is the posterior that conditional() returns. With
+        the default bandwidth (see add_filterset()), which is diagonal,
+        and no photometric errors, that metric is just the bandwidth's
+        block over the kept dimensions; with errors, it is that block of
+        the bandwidth convolved with them (see Bandwidth.convolveCov()),
+        reduced over marginalDims if any.
+
+        Parameters
+        ----------
+        x0 : array_like of float, shape (nband,), (nDim,), (M, nband), or (M, nDim)
+            As for conditional().
+        massTol : float, optional
+            As for conditional() (default 1e-2).
+        marginalDims : list of int, optional
+            As for conditional() (default: none).
+        filterset : list of str, optional
+            As for conditional().
+        errors : float, array_like, or astropy.units.Quantity, optional
+            As for conditional().
+        cov : array_like or astropy.units.Quantity, optional
+            As for conditional().
+
+        Returns
+        -------
+        tuple of (numpy.ndarray, numpy.ndarray, numpy.ndarray), or list of such tuples
+            The points kept, shape (K, nR), in the kept dimensions (see
+            conditional(); for photometry alone, the inference
+            quantities); their weights, shape (K,); and their aux labels,
+            shape (K,): the library row of the cluster each point came
+            from. A list of one such tuple per point for M points (see
+            KDE.conditional_sample()).
+
+        Raises
+        ------
+        TypeError
+            As for conditional().
+        ValueError
+            As for conditional().
+
+        Notes
+        -----
+        Several points are handled in parallel, one per thread at a
+        time, each with its own errors.
+        """
+        filters = self._select_filterset(filterset)
+        kde = self._kdes[tuple(filters)]
+        points = self._full_points(x0, "x0", filters, kde)
+        bandwidth, per_point = self._phot_errors(filters, kde, errors, cov,
+                                                 1 if points.ndim == 1 else points.shape[0])
+        if per_point is not None:
+            return kde.conditional_sample(points, massTol, marginalDims,
+                                          errDims=list(range(len(filters))),
+                                          errCov=per_point[0] if points.ndim == 1 else per_point)
+        return kde.conditional_sample(points, massTol, marginalDims, bandwidth=bandwidth)
+
     def pdf(self, x: Any, relTol: float | None = None, absTol: float | None = None,
             filterset: list[str] | None = None, errors: Any = None,
             cov: Any = None) -> float | np.ndarray:

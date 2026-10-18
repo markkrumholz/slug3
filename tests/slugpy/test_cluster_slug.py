@@ -727,6 +727,29 @@ def test_per_point_errors_and_batches() -> None:
         lib.conditional(phot, cov=cov[:2])
 
 
+def test_conditional_sample() -> None:
+    """conditional_sample() gives the posterior's points and weights, from which it can be rebuilt."""
+    filters = ["HST.WFC3_UVIS1.F555W", "HST.WFC3_UVIS1.F814W"]
+    lib = cluster_slug(str(LIBRARY), filtersets=filters)
+    kde = lib.kdes[tuple(filters)]
+    phot = kde.dataset[[5, 50, 500], :2] + 0.03
+    errors = np.array([[0.05, 0.1], [0.2, 0.1], [0.1, 0.3]])
+    posts = lib.conditional(phot, errors=errors)
+    samples = lib.conditional_sample(phot, errors=errors)
+    assert isinstance(posts, list) and isinstance(samples, list) and len(samples) == 3
+    y = np.column_stack([np.linspace(2.0, 4.0, 4), np.linspace(6.5, 9.5, 4), np.full(4, 0.5), np.zeros(4)])
+    for post, (pts, wts, rows) in zip(posts, samples, strict=True):
+        assert pts.shape == (post.dataset.shape[0], 4)
+        # The aux labels are library rows, as the posterior's are
+        assert np.array_equal(np.sort(rows), np.sort(post.aux)) and np.all(rows < LIBRARY_SIZE)
+        rebuilt = KDE(pts.copy(), h2Inv=post.h2Inv, w=wts.copy(), aux=rows.copy())
+        assert np.allclose(np.asarray(rebuilt.pdf(y, 0.0, 0.0)), np.asarray(post.pdf(y, 0.0, 0.0)),
+                           rtol=1e-12, atol=1e-300)
+    # One point, with errors shared by the bands
+    single = lib.conditional_sample(phot[0], errors=0.1)
+    assert isinstance(single, tuple) and len(single) == 3 and single[0].shape[1] == 4
+
+
 def test_conditional_error_units_for_linear_bands() -> None:
     """Errors for bands not in magnitudes are in dex, of the log10 photometry the KDE stores."""
     lib = cluster_slug(str(LIBRARY), filtersets=[["Lbol"], ["HST.WFC3_UVIS1.F555W", "Lbol"]])
