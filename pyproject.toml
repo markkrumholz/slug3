@@ -155,6 +155,16 @@ CMAKE_ARGS = "-DHDF5_USE_STATIC_LIBRARIES=ON"
 
 [tool.cibuildwheel.macos]
 archs = ["arm64"]
+# delocate bundles libomp and points the wheel's binaries at it by path;
+# share_libomp.py then has them load it as @rpath/libomp.dylib instead, so
+# that a process with another libomp already loaded (e.g. conda-forge's
+# numpy, via OpenBLAS) shares that one rather than loading a second
+# OpenMP runtime, which aborts or crashes (see that script, and the
+# conda-forge test in wheels.yml)
+repair-wheel-command = [
+    "delocate-wheel --require-archs {delocate_archs} -w {dest_dir} -v {wheel}",
+    "python {project}/.github/wheels/share_libomp.py {dest_dir}",
+]
 
 [tool.cibuildwheel.macos.environment]
 # 14.0 is the oldest macOS whose libc++ provides the floating-point
