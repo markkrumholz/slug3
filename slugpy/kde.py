@@ -131,6 +131,11 @@ class KDE:
         default), equal weights.
     names : list of str, optional
         Names of the nDim quantities in the data set (default: none).
+    aux : numpy.ndarray of int64, shape (N,), optional
+        An integer label for each point (e.g. its row in a library on
+        disk), C-contiguous and writeable; reordered in place along with
+        dataset. If None (the default), each point's index in dataset as
+        given.
     noSplitDims : list of int, optional
         Dimensions along which the kd tree is never split (default:
         none), as for KernelDensity.
@@ -159,9 +164,9 @@ class KDE:
     names : list of str
         Names of the quantities in the data set (empty if not given).
     aux : numpy.ndarray of int64, shape (N,)
-        Each point's index in the data set as originally given (or, for
-        a KDE from conditional(), in its parent's), in tree order
-        (read-only array).
+        Each point's label, in tree order (read-only array): by default
+        its index in the data set as originally given; for a KDE from
+        conditional(), its parent's label.
     nDim : int
         Number of dimensions.
     marginal : float or None
@@ -182,7 +187,8 @@ class KDE:
 
     def __init__(self, dataset: np.ndarray, h2Inv: float | np.ndarray | None = None,
                  w: np.ndarray | None = None, names: list[str] | None = None,
-                 noSplitDims: list[int] | None = None, leafSize: int = 16) -> None:
+                 aux: np.ndarray | None = None, noSplitDims: list[int] | None = None,
+                 leafSize: int = 16) -> None:
         if not isinstance(dataset, np.ndarray) or dataset.ndim != 2:
             raise TypeError("dataset must be a 2D numpy array")
         n, ndim = dataset.shape
@@ -196,7 +202,7 @@ class KDE:
                                    else _parse_h2inv(h2Inv, ndim))
         bandwidth = Bandwidth(self._h2Inv)
         self._kde: KernelDensityView = KernelDensity(
-            dataset, weights, None, leafSize, bandwidth, [] if noSplitDims is None else noSplitDims)
+            dataset, weights, aux, leafSize, bandwidth, [] if noSplitDims is None else noSplitDims)
         self._bandwidth: Bandwidth = bandwidth
         self._bandwidth_h2Inv: np.ndarray = self._h2Inv.copy()
         dataset.setflags(write=False)
@@ -328,9 +334,10 @@ class KDE:
     @property
     def aux(self) -> np.ndarray:
         """
-        numpy.ndarray of int64, shape (N,) : each point's index in the
-        data set as originally given (or, for a KDE from conditional(),
-        in its parent's), in tree order (a read-only array).
+        numpy.ndarray of int64, shape (N,) : each point's label, in tree
+        order (a read-only array): by default its index in the data set
+        as originally given; for a KDE from conditional(), its parent's
+        label.
         """
         return self._aux
 
@@ -428,8 +435,8 @@ class KDE:
         KDE
             The conditional estimate p(y | x0) over the kept dimensions,
             with its names taken from this KDE's, its marginal set to
-            this KDE's marginal density at x0, and its aux giving each
-            point's index in this KDE's original data set.
+            this KDE's marginal density at x0, and each point's aux label
+            carried over from this KDE.
 
         Raises
         ------

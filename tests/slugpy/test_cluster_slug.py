@@ -14,10 +14,12 @@ something, or with nebular photometry, edit a copy of it in tmp_path.
 import pathlib
 import shutil
 from collections.abc import Callable
+from typing import cast
 
 import h5py
 import numpy as np
 import pytest
+from astropy import units as u
 
 from slugpy import cluster_slug
 
@@ -37,6 +39,23 @@ def lib() -> cluster_slug:
         The cluster_slug.
     """
     return cluster_slug(str(LIBRARY))
+
+
+def _values(data: object) -> np.ndarray:
+    """
+    The numerical values of a reader's dataset.
+
+    Parameters
+    ----------
+    data : astropy.units.Quantity or numpy.ndarray
+        The dataset.
+
+    Returns
+    -------
+    numpy.ndarray
+        Its values, without units.
+    """
+    return np.asarray(cast(u.Quantity, data).value if isinstance(data, u.Quantity) else data)
 
 
 def _edited_copy(tmp_path: pathlib.Path, edit: Callable[[h5py.File], None]) -> str:
@@ -66,7 +85,7 @@ def test_construction_defaults(lib: cluster_slug) -> None:
     """The example library is accepted, with the documented defaults."""
     assert lib.size == LIBRARY_SIZE
     assert lib.pobs is None and lib.priors is None
-    assert lib.filtersets == []
+    assert len(lib.filtersets) == 0 and len(lib.kdes) == 0
     assert lib.inference_quantities == ["mass", "age", "A_V", "metallicity"]
     assert lib.abstol == 1e-8 and lib.reltol == 1e-2
     # The example has extincted, but not nebular, photometry
@@ -97,17 +116,25 @@ def test_rejects_unsuitable_libraries(tmp_path: pathlib.Path) -> None:
 
 
 def test_constructor_keywords() -> None:
-    """Every setting can be set on construction."""
+    """Every setting can be set on construction; filtersets may be one list or a list of lists."""
     pobs = np.full(LIBRARY_SIZE, 0.5)
-    lib = cluster_slug(str(LIBRARY), pobs=pobs, priors=len, filtersets=[["Lbol"]],
+    priors = np.full(LIBRARY_SIZE, 2.0)
+    lib = cluster_slug(str(LIBRARY), pobs=pobs, priors=priors, filtersets=["Lbol"],
                        inference_quantities=["mass", "Q(HI)"],
                        abstol=0.0, reltol=1e-3, use_nebular=False, use_extinct=False)
     assert isinstance(lib.pobs, np.ndarray) and np.array_equal(lib.pobs, pobs)
-    assert lib.priors is len
-    assert lib.filtersets == [["Lbol"]]
+    assert isinstance(lib.priors, np.ndarray) and np.array_equal(lib.priors, priors)
+    assert list(lib.filtersets) == [("Lbol",)]
     assert lib.inference_quantities == ["mass", "Q(HI)"]
     assert lib.abstol == 0.0 and lib.reltol == 1e-3
     assert lib.use_nebular is False and lib.use_extinct is False
+
+    two = cluster_slug(str(LIBRARY), filtersets=[["Lbol"], ["HST.WFC3_UVIS1.F555W", "HST.WFC3_UVIS1.F814W"]])
+    assert list(two.filtersets) == [("Lbol",), ("HST.WFC3_UVIS1.F555W", "HST.WFC3_UVIS1.F814W")]
+    assert cluster_slug(str(LIBRARY), filtersets=[]).kdes == {}
+    for bad in ["Lbol", [("Lbol",)], [[1]], [["Lbol"], "Lbol"]]:
+        with pytest.raises(TypeError):
+            cluster_slug(str(LIBRARY), filtersets=bad)  # pyright: ignore[reportArgumentType]
 
 
 def test_pobs_and_priors_validation(lib: cluster_slug) -> None:
@@ -134,19 +161,8 @@ def test_pobs_and_priors_validation(lib: cluster_slug) -> None:
         assert getattr(lib, name) is None
 
 
-def test_filtersets_and_tolerances_validation(lib: cluster_slug) -> None:
-    """filtersets must be a list of non-empty lists of str; tolerances non-negative reals."""
-    lib.filtersets = [["Lbol"], ["HST.WFC3_UVIS1.F555W", "HST.WFC3_UVIS1.F814W"]]
-    sets = lib.filtersets
-    sets[0].append("x")  # the property returns a copy
-    assert lib.filtersets[0] == ["Lbol"]
-    for bad in ["Lbol", ["Lbol"], [("Lbol",)], [[1]]]:
-        with pytest.raises(TypeError):
-            lib.filtersets = bad
-    with pytest.raises(ValueError):
-        lib.filtersets = [[]]
-    lib.filtersets = []
-
+def test_tolerances_validation(lib: cluster_slug) -> None:
+    """Tolerances must be non-negative reals."""
     lib.abstol = 1
     assert lib.abstol == 1.0 and isinstance(lib.abstol, float)
     for bad, err in [(-1.0, ValueError), (np.inf, ValueError), ("1e-3", TypeError), (True, TypeError)]:
@@ -181,7 +197,7 @@ def test_nebular_and_extinct_availability(tmp_path: pathlib.Path, lib: cluster_s
 
 
 def test_inference_quantities(lib: cluster_slug) -> None:
-    """inference_quantities takes physical quantities and library filters, disjoint from filtersets."""
+    """inference_quantities takes physical quantities and library filters, disjoint from filter sets."""
     lib.inference_quantities = ["age", "Q(HI)", "HST.WFC3_UVIS1.F275W"]
     q = lib.inference_quantities
     q.append("mass")  # the property returns a copy
@@ -194,11 +210,172 @@ def test_inference_quantities(lib: cluster_slug) -> None:
 
     # A filter cannot be both inferred and used for inference, whichever is set second
     with pytest.raises(ValueError, match="Q\\(HI\\)"):
-        lib.filtersets = [["Lbol"], ["Q(HI)", "Lbol"]]
-    lib.filtersets = [["Lbol"]]
+        lib.add_filterset(["Q(HI)", "Lbol"])
+    lib.inference_quantities = ["mass", "age"]
+    lib.add_filterset(["Lbol"])
     with pytest.raises(ValueError, match="Lbol"):
         lib.inference_quantities = ["mass", "Lbol"]
     with pytest.raises(ValueError, match="Lbol"):
         cluster_slug(str(LIBRARY), filtersets=[["Lbol"]], inference_quantities=["Lbol"])
-    lib.filtersets = []
+    lib.remove_filterset(["Lbol"])
     lib.inference_quantities = ["mass", "age", "A_V", "metallicity"]
+
+
+def test_singular_quantities(tmp_path: pathlib.Path) -> None:
+    """Quantities drawn from an absent or delta PDF are left out by default, and cannot be requested."""
+    def singular(f: h5py.File) -> None:
+        pdfs = f["PDFs"]
+        assert isinstance(pdfs, h5py.Group)
+        pdfs.attrs["fehDist"] = pdfs.attrs["avNebFac"]  # a delta distribution
+        del pdfs.attrs["outTimeDist"]                   # absent
+
+    path = _edited_copy(tmp_path, singular)
+    lib = cluster_slug(path)
+    assert lib.pdfs["fehDist"].getMin() == lib.pdfs["fehDist"].getMax()
+    assert lib.inference_quantities == ["mass", "A_V"]
+    for bad in [["mass", "metallicity"], ["age"]]:
+        with pytest.raises(ValueError, match="cannot infer"):
+            lib.inference_quantities = bad
+        with pytest.raises(ValueError, match="cannot infer"):
+            cluster_slug(path, inference_quantities=bad)
+    # Filters may still be inferred
+    lib.inference_quantities = ["mass", "Q(HI)"]
+
+    # Priors are divided only by the non-singular PDFs
+    lib.inference_quantities = ["mass", "A_V"]
+    lib.priors = np.ones(LIBRARY_SIZE)
+    lib.add_filterset(["HST.WFC3_UVIS1.F555W"])
+    kde = lib.kdes[("HST.WFC3_UVIS1.F555W",)]
+    clusters = lib.clusters
+    assert clusters is not None
+    mass = _values(clusters["target_mass"])
+    av = _values(clusters["A_V"])
+    want = 1.0 / (lib.pdfs["cmf"](mass) * lib.pdfs["avDist"](av))
+    want = want[kde.aux] / want[kde.aux].sum()
+    assert np.allclose(kde.w, want)
+
+
+def test_add_filterset_dataset() -> None:
+    """add_filterset() builds the dataset as specified: transforms, fallback, row filtering, layout."""
+    lib = cluster_slug(str(LIBRARY))
+    filters = ["HST.WFC3_UVIS1.F555W", "Q(HI)", "Lbol"]
+    lib.add_filterset(filters)
+    kde = lib.kdes[tuple(filters)]
+    assert kde.names == filters + ["mass", "age", "A_V", "metallicity"]
+    phot, clusters = lib.cluster_phot, lib.clusters
+    assert phot is not None and clusters is not None
+
+    # Expected columns, in library order: extincted F555W (mag, unlogged);
+    # Q(HI), whose extincted values are all zero, so plain, logged; Lbol,
+    # which has no extincted variant, so plain, logged
+    with np.errstate(divide="ignore"):
+        expected = np.column_stack([
+            _values(phot["HST.WFC3_UVIS1.F555W_ex"]),
+            np.log10(_values(phot["Q(HI)"])),
+            np.log10(_values(phot["Lbol"])),
+            np.log10(_values(clusters["target_mass"])),
+            np.log10(_values(phot["time"])),
+            _values(clusters["A_V"]),
+            np.asarray(clusters["feh"]),
+        ])
+    assert np.all(_values(phot["Q(HI)_ex"]) == 0.0)
+
+    # Clusters with a non-finite value (here, the one with Q(HI) = 0) are left out
+    valid = np.all(np.isfinite(expected), axis=1)
+    assert np.sum(~valid) == 1
+    assert kde.dataset.shape == (np.sum(valid), 7)
+    assert sorted(kde.aux.tolist()) == np.nonzero(valid)[0].tolist()
+    assert np.array_equal(kde.dataset, expected[kde.aux])
+    assert kde.w.sum() == pytest.approx(1.0) and np.allclose(kde.w, kde.w[0])
+
+    # The tree is never split along the inference quantities
+    split_dims = {n.splitDim for n in kde.kernel_density.nodes()}
+    assert split_dims <= {-1, 0, 1, 2}
+
+    # Without extinction, the plain photometry
+    lib.use_extinct = False
+    lib.add_filterset(["HST.WFC3_UVIS1.F555W"])
+    plain = lib.kdes[("HST.WFC3_UVIS1.F555W",)]
+    assert np.array_equal(plain.dataset[:, 0], _values(phot["HST.WFC3_UVIS1.F555W"])[plain.aux])
+
+
+def test_add_filterset_fallback(tmp_path: pathlib.Path) -> None:
+    """Where the chosen variant is NaN, photometry falls back to the next variant, cluster by cluster."""
+    nan_rows = np.arange(0, LIBRARY_SIZE, 7)
+
+    def nan_extinct(f: h5py.File) -> None:
+        dset = f["cluster_phot"]["phot_extinct"]
+        assert isinstance(dset, h5py.Dataset)
+        data = dset[()]
+        data[nan_rows, 3] = np.nan  # HST.WFC3_UVIS1.F555W
+        dset[...] = data
+
+    lib = cluster_slug(_edited_copy(tmp_path, nan_extinct), filtersets=["HST.WFC3_UVIS1.F555W"])
+    kde = lib.kdes[("HST.WFC3_UVIS1.F555W",)]
+    phot = lib.cluster_phot
+    assert phot is not None
+    ext = _values(phot["HST.WFC3_UVIS1.F555W_ex"])
+    plain = _values(phot["HST.WFC3_UVIS1.F555W"])
+    want = np.where(np.isnan(ext), plain, ext)
+    assert kde.dataset.shape[0] == LIBRARY_SIZE
+    assert np.array_equal(kde.dataset[:, 0], want[kde.aux])
+    assert np.any(np.isin(kde.aux, nan_rows))
+
+
+def test_add_filterset_weights() -> None:
+    """Weights combine pobs and priors over the sampling density; callables get astropy Quantities."""
+    rng = np.random.default_rng(1)
+    pobs = rng.uniform(0.0, 1.0, LIBRARY_SIZE)
+    pobs[:100] = 0.0  # never observed: left out
+    lib = cluster_slug(str(LIBRARY), pobs=pobs, filtersets=["HST.WFC3_UVIS1.F555W"])
+    kde = lib.kdes[("HST.WFC3_UVIS1.F555W",)]
+    assert kde.dataset.shape[0] == LIBRARY_SIZE - 100 and np.all(kde.aux >= 100)
+    assert np.allclose(kde.w, pobs[kde.aux] / pobs[kde.aux].sum())
+
+    # Callable pobs and priors, with the expected argument types
+    seen: list[tuple[type, ...]] = []
+
+    def prior(mass: u.Quantity, age: u.Quantity, av: u.Quantity, feh: np.ndarray) -> np.ndarray:
+        seen.append((type(mass), type(age), type(av), type(feh)))
+        assert mass.unit == u.Msun and age.unit == u.yr and av.unit == u.mag
+        return np.asarray(mass.value) ** -1.0
+
+    lib.pobs = None
+    lib.priors = prior
+    lib.add_filterset(["HST.WFC3_UVIS1.F814W"])
+    assert seen == [(u.Quantity, u.Quantity, u.Quantity, np.ndarray)]
+    clusters, phot = lib.clusters, lib.cluster_phot
+    assert clusters is not None and phot is not None
+    mass = _values(clusters["target_mass"])
+    sampling = (lib.pdfs["cmf"](mass) * lib.pdfs["outTimeDist"](_values(phot["time"]))
+                * lib.pdfs["avDist"](_values(clusters["A_V"]))
+                * lib.pdfs["fehDist"](np.asarray(clusters["feh"])))
+    want = mass ** -1.0 / sampling
+    kde = lib.kdes[("HST.WFC3_UVIS1.F814W",)]
+    assert np.allclose(kde.w, want[kde.aux] / want[kde.aux].sum())
+
+
+def test_kdes_and_removal() -> None:
+    """kdes and filtersets are read-only; add_filterset() validates; remove_filterset() removes."""
+    lib = cluster_slug(str(LIBRARY), filtersets=[["Lbol"], ["HST.WFC3_UVIS1.F555W"]])
+    assert set(lib.kdes) == {("Lbol",), ("HST.WFC3_UVIS1.F555W",)}
+    with pytest.raises(TypeError):
+        lib.kdes[("x",)] = lib.kdes[("Lbol",)]  # pyright: ignore[reportIndexIssue]
+    with pytest.raises(AttributeError):
+        lib.filtersets = []  # pyright: ignore[reportAttributeAccessIssue]
+    with pytest.raises(AttributeError):
+        lib.kdes = {}  # pyright: ignore[reportAttributeAccessIssue]
+    for bad, err in [("Lbol", TypeError), ([1], TypeError), ([], ValueError),
+                     (["Lbol", "Lbol"], ValueError), (["NOT.A.FILTER"], ValueError),
+                     (["mass"], ValueError)]:
+        with pytest.raises(err):
+            lib.add_filterset(bad)  # pyright: ignore[reportArgumentType]
+
+    # An explicit bandwidth is used as given
+    lib.add_filterset(["Lbol"], h2Inv=2.0)
+    assert np.array_equal(lib.kdes[("Lbol",)].h2Inv, 2.0 * np.eye(5))
+
+    lib.remove_filterset(["Lbol"])
+    assert list(lib.filtersets) == [("HST.WFC3_UVIS1.F555W",)]
+    with pytest.raises(KeyError):
+        lib.remove_filterset(["Lbol"])

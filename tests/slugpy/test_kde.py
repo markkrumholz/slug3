@@ -126,6 +126,13 @@ def test_data_handling() -> None:
         with pytest.raises(AttributeError):
             setattr(kde, attr, None)
 
+    # Explicit aux labels are reordered with the points
+    y, _ = make_points(100, 2, 10)
+    y0 = y.copy()
+    labels = np.arange(1000, 1100, dtype=np.int64)
+    labeled = KDE(y, h2Inv=1.0, aux=labels)
+    assert np.array_equal(labeled.aux, labels) and np.array_equal(y, y0[labels - 1000])
+
     # Argument checks
     with pytest.raises(ValueError):
         KDE(make_points(50, 3, 5)[0], h2Inv=1.0, names=["a"])

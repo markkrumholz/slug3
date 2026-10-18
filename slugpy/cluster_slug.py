@@ -8,12 +8,15 @@ from photometry, using a library of slug cluster simulations.
 """
 
 import math
-from collections.abc import Callable
-from typing import Any
+from collections.abc import Callable, KeysView, Mapping
+from types import MappingProxyType
+from typing import Any, cast
 
 import h5py
 import numpy as np
+from astropy import units as u
 
+from .kde import KDE
 from .slug_reader import slug_reader
 
 # A probability specification (pobs or priors): None, one value per
@@ -22,6 +25,20 @@ ProbSpec = np.ndarray | Callable[..., Any] | None
 
 # Physical quantities that can be inferred, besides photometry
 PHYSICAL_QUANTITIES = ("mass", "age", "A_V", "metallicity")
+
+# The PDF (a key of slug_reader.pdfs) from which a library draws each
+# physical quantity
+QUANTITY_PDFS = {"mass": "cmf", "age": "outTimeDist", "A_V": "avDist", "metallicity": "fehDist"}
+
+# Photometric variant suffixes (see slug_phot_reader) to try in turn, by
+# (use_nebular, use_extinct): the requested variant first, then those
+# without nebular emission and/or extinction
+_PHOT_CHAINS = {
+    (True, True): ("_neb_ex", "_neb", "_ex", ""),
+    (True, False): ("_neb", ""),
+    (False, True): ("_ex", ""),
+    (False, False): ("",),
+}
 
 
 def _check_prob_spec(value: Any, name: str, size: int, at_most_one: bool) -> ProbSpec:
@@ -100,6 +117,39 @@ def _check_tolerance(value: Any, name: str) -> float:
     return tol
 
 
+def _filterset_list(value: Any) -> list[list[str]]:
+    """
+    Interpret the constructor's filtersets argument.
+
+    Parameters
+    ----------
+    value : Any
+        None, a list of filter names (one filter set), or a list of such
+        lists.
+
+    Returns
+    -------
+    list of list of str
+        The filter sets (none, if value is None or empty).
+
+    Raises
+    ------
+    TypeError
+        If value has any other form.
+    """
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise TypeError("filtersets must be a list of filter names, or a list of such lists")
+    entries = cast(list[Any], value)
+    if all(isinstance(name, str) for name in entries):
+        return [cast(list[str], entries)] if entries else []
+    if all(isinstance(fs, list) and all(isinstance(name, str) for name in cast(list[Any], fs))
+           for fs in entries):
+        return [list(cast(list[str], fs)) for fs in entries]
+    raise TypeError("filtersets must be a list of filter names, or a list of such lists")
+
+
 class cluster_slug(slug_reader):
     """
     Bayesian inference of star cluster properties from photometry,
@@ -121,11 +171,15 @@ class cluster_slug(slug_reader):
         Initial value of the pobs property (default None).
     priors : None, numpy.ndarray, or callable, optional
         Initial value of the priors property (default None).
-    filtersets : list of list of str, optional
-        Initial value of the filtersets property (default: none).
+    filtersets : list of str or list of list of str, optional
+        Filter sets to build kernel density estimates for, each passed
+        to add_filterset() (with the default bandwidth) once the other
+        settings are made: a list of filter names for one filter set,
+        or a list of such lists (default: none).
     inference_quantities : list of str, optional
-        Initial value of the inference_quantities property (default
-        ["mass", "age", "A_V", "metallicity"]).
+        Initial value of the inference_quantities property. If None (the
+        default), those of "mass", "age", "A_V", and "metallicity" that
+        are not singular in the library (see inference_quantities).
     abstol : float, optional
         Initial value of the abstol property (default 1e-8).
     reltol : float, optional
@@ -162,16 +216,20 @@ class cluster_slug(slug_reader):
         properties: None (the prior equals the sampling density from
         which the library was drawn), an array of one non-negative
         value per library cluster, or a callable.
-    filtersets : list of list of str
-        Combinations of filters to do inference with; each must name
-        filters the library has photometry for, which is checked when
-        the data for a filter set are loaded. No filter may also be in
-        inference_quantities.
+    kdes : Mapping of tuple of str to KDE
+        The kernel density estimate for each filter set, keyed by the
+        filter set's names, as a tuple (read-only view; see
+        add_filterset() and remove_filterset()).
+    filtersets : KeysView of tuple of str
+        The filter sets with kernel density estimates: kdes.keys()
+        (read-only).
     inference_quantities : list of str
         Quantities to infer: any of "mass", "age", "A_V", and
-        "metallicity", and the names of any of the library's filters
-        (e.g. to infer Q(HI) from photometry in other filters). No
-        filter named here may also be in any of filtersets.
+        "metallicity" that are not singular in the library (drawn from a
+        PDF that is absent or a delta distribution, so constant), and
+        the names of any of the library's filters (e.g. to infer Q(HI)
+        from photometry in other filters). No filter named here may also
+        be in any filter set.
     abstol : float
         Absolute tolerance for evaluating PDFs (non-negative).
     reltol : float
@@ -186,10 +244,17 @@ class cluster_slug(slug_reader):
         library has extincted photometry; filters for which it is
         unavailable (NaN, e.g. because the extinction curve does not
         cover the filter) fall back to unextincted photometry.
+
+    Notes
+    -----
+    The settings are read when a filter set is added: changing pobs,
+    priors, inference_quantities, use_nebular, or use_extinct afterwards
+    does not change kernel density estimates already built; remove and
+    re-add a filter set to rebuild its estimate.
     """
 
     def __init__(self, filename: str, pobs: ProbSpec = None, priors: ProbSpec = None,
-                 filtersets: list[list[str]] | None = None,
+                 filtersets: list[str] | list[list[str]] | None = None,
                  inference_quantities: list[str] | None = None, abstol: float = 1e-8,
                  reltol: float = 1e-2, use_nebular: bool | None = None,
                  use_extinct: bool | None = None) -> None:
@@ -216,10 +281,17 @@ class cluster_slug(slug_reader):
         self._has_nebular: bool = "phot_neb" in phot_datasets
         self._has_extinct: bool = "phot_extinct" in phot_datasets
 
+        # Physical quantities drawn from an absent or delta PDF are
+        # constant across the library, so cannot be inferred: their
+        # dimension of a kernel density estimate would have zero spread
+        self._singular: frozenset[str] = frozenset(
+            q for q, name in QUANTITY_PDFS.items()
+            if name not in self.pdfs or self.pdfs[name].getMin() == self.pdfs[name].getMax())
+
         # Settings, each checked by its own setter
+        self._kdes: dict[tuple[str, ...], KDE] = {}
         self._pobs: ProbSpec = None
         self._priors: ProbSpec = None
-        self._filtersets: list[list[str]] = []
         self._inference_quantities: list[str] = []
         self._abstol: float = 1e-8
         self._reltol: float = 1e-2
@@ -227,13 +299,18 @@ class cluster_slug(slug_reader):
         self._use_extinct: bool = False
         self.pobs = pobs
         self.priors = priors
-        self.filtersets = [] if filtersets is None else filtersets
-        self.inference_quantities = (list(PHYSICAL_QUANTITIES) if inference_quantities is None
-                                     else inference_quantities)
+        self.inference_quantities = (
+            [q for q in PHYSICAL_QUANTITIES if q not in self._singular]
+            if inference_quantities is None else inference_quantities)
         self.abstol = abstol
         self.reltol = reltol
         self.use_nebular = self._has_nebular if use_nebular is None else use_nebular
         self.use_extinct = self._has_extinct if use_extinct is None else use_extinct
+
+        # Filter sets last, since building their estimates uses every
+        # other setting
+        for filters in _filterset_list(filtersets):
+            self.add_filterset(filters)
 
     @property
     def size(self) -> int:
@@ -294,34 +371,22 @@ class cluster_slug(slug_reader):
         self._priors = _check_prob_spec(value, "priors", self._size, at_most_one=False)
 
     @property
-    def filtersets(self) -> list[list[str]]:
+    def kdes(self) -> Mapping[tuple[str, ...], KDE]:
         """
-        list of list of str : combinations of filters to do inference
-        with (a copy; assign to change it). Each filter must be one the
-        library has photometry for, which is checked when the data for
-        a filter set are loaded.
-
-        Raises
-        ------
-        TypeError
-            On setting, if the value is not a list of lists of str.
-        ValueError
-            On setting, if any filter set is empty, or names a filter
-            that is also in inference_quantities.
+        Mapping of tuple of str to KDE : the kernel density estimate for
+        each filter set, keyed by the filter set's names as a tuple
+        (read-only view: use add_filterset() and remove_filterset()).
         """
-        return [list(fs) for fs in self._filtersets]
+        return MappingProxyType(self._kdes)
 
-    @filtersets.setter
-    def filtersets(self, value: Any) -> None:
-        if not isinstance(value, list) or not all(
-                isinstance(fs, list) and all(isinstance(name, str) for name in fs)
-                for fs in value):
-            raise TypeError("filtersets must be a list of lists of filter names")
-        sets = [list(fs) for fs in value]
-        if any(len(fs) == 0 for fs in sets):
-            raise ValueError("filter sets must not be empty")
-        self._check_disjoint(sets, self._inference_quantities)
-        self._filtersets = sets
+    @property
+    def filtersets(self) -> KeysView[tuple[str, ...]]:
+        """
+        KeysView of tuple of str : the filter sets with kernel density
+        estimates, i.e. kdes.keys() (read-only: use add_filterset() and
+        remove_filterset()).
+        """
+        return self._kdes.keys()
 
     @property
     def inference_quantities(self) -> list[str]:
@@ -329,8 +394,11 @@ class cluster_slug(slug_reader):
         list of str : quantities to infer (a copy; assign to change it):
         any of "mass", "age", "A_V", and "metallicity", and the names
         of any of the library's filters, so that, e.g., Q(HI) can be
-        inferred from photometry in other filters. No filter named
-        here may also be in any of filtersets.
+        inferred from photometry in other filters. A physical quantity
+        must not be singular in the library: drawn from a PDF that is
+        absent (e.g. A_V without extinction) or a delta distribution
+        (e.g. a single [Fe/H]), since it is then the same for every
+        cluster. No filter named here may also be in any filter set.
 
         Raises
         ------
@@ -339,8 +407,8 @@ class cluster_slug(slug_reader):
         ValueError
             On setting, if the value is empty, has repeated entries, has
             an entry that is neither a physical quantity nor one of the
-            library's filters, or names a filter that is also in one of
-            filtersets.
+            library's filters, names a singular physical quantity, or
+            names a filter that is also in a filter set.
         """
         return list(self._inference_quantities)
 
@@ -358,7 +426,11 @@ class cluster_slug(slug_reader):
         if unknown:
             raise ValueError(f"unknown inference quantities {unknown}: each must be one of "
                              f"{list(PHYSICAL_QUANTITIES)} or one of the library's filters")
-        self._check_disjoint(self._filtersets, quantities)
+        singular = [q for q in quantities if q in self._singular]
+        if singular:
+            raise ValueError(f"cannot infer {singular}: the library draws them from a PDF that is "
+                             "absent or a delta distribution, so they are the same for every cluster")
+        self._check_disjoint([list(fs) for fs in self._kdes], quantities)
         self._inference_quantities = quantities
 
     @staticmethod
@@ -466,3 +538,239 @@ class cluster_slug(slug_reader):
         if value and not self._has_extinct:
             raise ValueError("use_extinct cannot be True: the library has no extincted photometry")
         self._use_extinct = bool(value)
+
+    def add_filterset(self, filters: list[str], h2Inv: float | np.ndarray | None = None) -> None:
+        """
+        Build the kernel density estimate for a filter set.
+
+        Builds a KDE over the library in the space of the filters'
+        photometry and the inference quantities, and stores it in kdes
+        under tuple(filters), replacing any estimate already there.
+
+        Parameters
+        ----------
+        filters : list of str
+            Names of the filters; each must be one of the library's
+            filters, and none may be in inference_quantities.
+        h2Inv : float or numpy.ndarray, optional
+            The KDE's inverse squared bandwidth matrix, in any form KDE
+            accepts; if None (the default), chosen by Silverman's rule.
+
+        Raises
+        ------
+        TypeError
+            If filters is not a list of str.
+        ValueError
+            If filters is empty, repeats a filter, names a filter the
+            library does not have, or names an inference quantity; if no
+            library cluster has valid values for every quantity with a
+            non-zero weight; or if the KDE cannot be built (see KDE).
+
+        Notes
+        -----
+        The estimate's dimensions are the filters, in order, then the
+        inference quantities, in order (see kdes[...].names); its tree is
+        never split along the inference quantities. Each dimension holds:
+
+        - for a filter (as a filter or an inference quantity): the
+          photometry chosen by use_nebular and use_extinct, falling back,
+          cluster by cluster, to photometry without nebular emission
+          and/or extinction where it is NaN, zero (for a flux or photon
+          rate, e.g. an extincted ionizing photon rate when the
+          extinction curve does not extend past 13.6 eV), or absent for
+          that filter. Magnitudes are used as they are; any other unit
+          (e.g. photon/s, Lsun) is converted to its log10.
+        - for "mass" and "age": log10 of the target mass (Msun) and of
+          the cluster's age (yr);
+        - for "A_V" and "metallicity": A_V (mag) and [Fe/H], unlogged.
+
+        If pobs or priors is set, each cluster is weighted by pobs, and
+        by priors divided by the density from which the library drew
+        the cluster's physical properties (the product of the library's
+        PDFs for those physical quantities that are not singular). A
+        callable pobs or priors is called as f(mass, age, A_V, feh),
+        with mass (Msun), age (yr), and A_V (mag) astropy Quantities (A_V
+        None if the library has no extinction) and feh a numpy array.
+
+        Clusters with a non-finite value in any dimension (e.g. the log
+        of a photon rate that is zero in every variant) or with a zero or
+        non-finite weight are left out of the estimate. Each point's aux
+        label is its cluster's row in the library.
+        """
+        if not isinstance(filters, list) or not all(isinstance(f, str) for f in cast(list[Any], filters)):
+            raise TypeError("filters must be a list of filter names")
+        names = list(filters)
+        if not names:
+            raise ValueError("a filter set must not be empty")
+        if len(set(names)) != len(names):
+            raise ValueError("a filter set must not repeat a filter")
+        available = self.filters or []
+        unknown = [f for f in names if f not in available]
+        if unknown:
+            raise ValueError(f"the library has no photometry for filters {unknown}")
+        self._check_disjoint([names], self._inference_quantities)
+
+        # The data set: the filters, then the inference quantities
+        columns = names + self._inference_quantities
+        dataset = np.empty((self._size, len(columns)))
+        for i, name in enumerate(columns):
+            dataset[:, i] = (self._physical_column(name) if name in PHYSICAL_QUANTITIES
+                             else self._phot_column(name))
+
+        # Weights, from pobs and priors
+        weights = self._weights()
+
+        # Leave out clusters with invalid values or no weight
+        keep = np.all(np.isfinite(dataset), axis=1)
+        if weights is not None:
+            keep &= np.isfinite(weights) & (weights > 0.0)
+        if not np.any(keep):
+            raise ValueError(f"no library cluster has valid values for every quantity in "
+                             f"{columns} with a non-zero weight")
+        rows = np.nonzero(keep)[0].astype(np.int64)
+        kept = np.ascontiguousarray(dataset[keep])
+        kept_weights = None if weights is None else np.ascontiguousarray(weights[keep])
+
+        self._kdes[tuple(names)] = KDE(
+            kept, h2Inv=h2Inv, w=kept_weights, names=columns, aux=rows,
+            noSplitDims=list(range(len(names), len(columns))))
+
+    def remove_filterset(self, filters: list[str]) -> None:
+        """
+        Remove a filter set and its kernel density estimate.
+
+        Parameters
+        ----------
+        filters : list of str
+            The filter set, as given to add_filterset().
+
+        Raises
+        ------
+        KeyError
+            If there is no such filter set.
+        """
+        key = tuple(filters)
+        if key not in self._kdes:
+            raise KeyError(f"no filter set {list(key)}")
+        del self._kdes[key]
+
+    def _phot_column(self, name: str) -> np.ndarray:
+        """
+        One filter's photometry for every library cluster, as stored in a kernel density estimate.
+
+        Parameters
+        ----------
+        name : str
+            The filter.
+
+        Returns
+        -------
+        numpy.ndarray of float
+            The photometry, chosen by use_nebular and use_extinct with
+            fallback (see add_filterset()), as magnitudes or log10 of
+            any other unit; -inf where a flux is zero in every variant,
+            NaN where no variant has a value.
+        """
+        phot = self.cluster_phot
+        assert phot is not None
+        is_mag = phot.filter_units[phot.filters.index(name)].startswith("mag")
+        result = np.full(self._size, np.nan)
+        for suffix in _PHOT_CHAINS[(self._use_nebular, self._use_extinct)]:
+            try:
+                data = phot[name + suffix]
+            except (KeyError, IndexError):
+                continue  # no such variant for this filter
+            values = np.asarray(cast(u.Quantity, data).value if isinstance(data, u.Quantity) else data,
+                                dtype=np.float64)
+            missing = np.isnan(result) if is_mag else (np.isnan(result) | (result == 0.0))
+            result[missing] = values[missing]
+        if is_mag:
+            return result
+        with np.errstate(divide="ignore", invalid="ignore"):
+            return np.log10(result)
+
+    def _physical_column(self, name: str) -> np.ndarray:
+        """
+        One physical quantity for every library cluster, as stored in a kernel density estimate.
+
+        Parameters
+        ----------
+        name : str
+            "mass", "age", "A_V", or "metallicity".
+
+        Returns
+        -------
+        numpy.ndarray of float
+            log10 of the target mass (Msun) or age (yr), or A_V (mag) or
+            [Fe/H] as they are.
+        """
+        mass, age, av, feh = self._physical_args()
+        with np.errstate(divide="ignore", invalid="ignore"):
+            if name == "mass":
+                return np.log10(cast(u.Quantity, mass).to_value(u.Msun))
+            if name == "age":
+                return np.log10(cast(u.Quantity, age).to_value(u.yr))
+        if name == "A_V":
+            assert av is not None  # A_V is singular, so never inferred, without extinction
+            return np.asarray(cast(u.Quantity, av).to_value(u.mag), dtype=np.float64)
+        return np.asarray(feh, dtype=np.float64)
+
+    def _physical_args(self) -> tuple[u.Quantity, u.Quantity, u.Quantity | None, np.ndarray]:
+        """
+        Every library cluster's physical properties, as passed to a callable pobs or priors.
+
+        Returns
+        -------
+        mass : astropy.units.Quantity
+            Target masses (Msun).
+        age : astropy.units.Quantity
+            Ages (yr): the output times, since every cluster in a library
+            forms at time zero.
+        A_V : astropy.units.Quantity or None
+            V-band extinctions (mag), or None if the library has no
+            extinction.
+        feh : numpy.ndarray
+            [Fe/H].
+        """
+        clusters = self.clusters
+        phot = self.cluster_phot
+        assert clusters is not None and phot is not None
+        mass = cast(u.Quantity, clusters["target_mass"])
+        age = cast(u.Quantity, phot["time"])
+        datasets = clusters.keys()
+        av = cast(u.Quantity, clusters["A_V"]) if "A_V" in datasets else None
+        feh = np.asarray(clusters["feh"], dtype=np.float64)
+        return mass, age, av, feh
+
+    def _weights(self) -> np.ndarray | None:
+        """
+        Each library cluster's weight, from pobs and priors.
+
+        Returns
+        -------
+        numpy.ndarray of float or None
+            pobs times priors divided by the library's sampling density
+            (see add_filterset()), or None if both are None.
+        """
+        if self._pobs is None and self._priors is None:
+            return None
+        weights = np.ones(self._size)
+        args = self._physical_args()
+        if self._pobs is not None:
+            pobs = self._pobs(*args) if callable(self._pobs) else self._pobs
+            weights *= np.asarray(pobs, dtype=np.float64)
+        if self._priors is not None:
+            priors = self._priors(*args) if callable(self._priors) else self._priors
+            sampling = np.ones(self._size)
+            mass, age, av, feh = args
+            values = {"mass": cast(u.Quantity, mass).to_value(u.Msun),
+                      "age": cast(u.Quantity, age).to_value(u.yr),
+                      "A_V": None if av is None else cast(u.Quantity, av).to_value(u.mag),
+                      "metallicity": feh}
+            for q, pdf_name in QUANTITY_PDFS.items():
+                if q in self._singular:
+                    continue  # a constant factor, which normalization removes
+                sampling *= np.asarray(self.pdfs[pdf_name](values[q]), dtype=np.float64)
+            with np.errstate(divide="ignore", invalid="ignore"):
+                weights *= np.asarray(priors, dtype=np.float64) / sampling
+        return weights
