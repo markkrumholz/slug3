@@ -1174,16 +1174,26 @@ class cluster_slug(slug_reader):
         phot = self.cluster_phot
         assert phot is not None
         is_mag = phot.filter_units[phot.filters.index(name)].startswith("mag")
-        result = np.full(self._size, np.nan)
+        result: np.ndarray | None = None
         for suffix in _PHOT_CHAINS[(self._use_nebular, self._use_extinct)]:
+            # Read a fallback variant only if values are still missing
+            missing = (None if result is None
+                       else np.isnan(result) if is_mag else (np.isnan(result) | (result == 0.0)))
+            if missing is not None and not np.any(missing):
+                break
             try:
                 data = phot[name + suffix]
             except (KeyError, IndexError):
                 continue  # no such variant for this filter
             values = np.asarray(cast(u.Quantity, data).value if isinstance(data, u.Quantity) else data,
                                 dtype=np.float64)
-            missing = np.isnan(result) if is_mag else (np.isnan(result) | (result == 0.0))
-            result[missing] = values[missing]
+            if missing is None:
+                result = values.copy()  # a copy, since phot caches values
+            else:
+                assert result is not None
+                result[missing] = values[missing]
+        if result is None:
+            return np.full(self._size, np.nan)
         if is_mag:
             return result
         with np.errstate(divide="ignore", invalid="ignore"):

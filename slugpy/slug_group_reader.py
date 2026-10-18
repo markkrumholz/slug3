@@ -128,7 +128,7 @@ class slug_group_reader:
         has_unit = isinstance(unit, str) and unit != ""
         if isinstance(unit, str):
             unit = _LEGACY_UNITS.get(unit, unit)
-        result: Dataset = arr * u.Unit(unit) if has_unit else arr
+        result: Dataset = arr << u.Unit(unit) if has_unit else arr  # << wraps arr without copying it
         self._datasets[key] = result
         return result
 

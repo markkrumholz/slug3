@@ -191,7 +191,7 @@ class slug_phot_reader(slug_group_reader):
                 arrs.append(f[self._group_name][dataset_name][:, index])
         arr = arrs[0] if len(arrs) == 1 else np.concatenate(arrs, axis=0)
         unit = self._filter_units[index]
-        result: Dataset = arr if unit == "" else arr * u.Unit(unit)
+        result: Dataset = arr if unit == "" else arr << u.Unit(unit)  # << wraps arr without copying it
         phot[name] = result
         return result
 

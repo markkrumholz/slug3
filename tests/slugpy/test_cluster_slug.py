@@ -324,6 +324,18 @@ def test_add_filterset_fallback(tmp_path: pathlib.Path) -> None:
     assert np.any(np.isin(kde.aux, nan_rows))
 
 
+def test_add_filterset_reads_fallback_only_when_needed() -> None:
+    """A fallback variant is not read (or cached) when the chosen variant has no missing values."""
+    lib = cluster_slug(str(LIBRARY), filtersets=["HST.WFC3_UVIS1.F555W"])
+    phot = lib.cluster_phot
+    assert phot is not None
+    assert phot._phot["HST.WFC3_UVIS1.F555W"] is None  # pyright: ignore[reportPrivateUsage]
+    ext = _values(phot["HST.WFC3_UVIS1.F555W_ex"])
+    assert not np.any(np.isnan(ext))
+    kde = lib.kdes[("HST.WFC3_UVIS1.F555W",)]
+    assert np.array_equal(kde.dataset[:, 0], ext[kde.aux])
+
+
 def test_add_filterset_weights() -> None:
     """Weights combine pobs and priors over the sampling density; callables get astropy Quantities."""
     rng = np.random.default_rng(1)
