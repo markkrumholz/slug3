@@ -949,12 +949,12 @@ void io::OutputManagerH5::openClustersGroup()
     {
         const hid_t aVDset = utils::createExtensible1dDataset(
             clustersGroup_(), "A_V", H5T_NATIVE_DOUBLE);
-        utils::writeStringAttr(aVDset, "units", "magnitudes");
+        utils::writeStringAttr(aVDset, "units", "mag");
         H5Dclose(aVDset);
         // Nebular V-band extinction -- see core::Cluster::avNeb()
         const hid_t aVNebDset = utils::createExtensible1dDataset(
             clustersGroup_(), "A_V_neb", H5T_NATIVE_DOUBLE);
-        utils::writeStringAttr(aVNebDset, "units", "magnitudes");
+        utils::writeStringAttr(aVNebDset, "units", "mag");
         H5Dclose(aVNebDset);
     }
     // NOLINTEND(misc-include-cleaner)

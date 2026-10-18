@@ -15,6 +15,12 @@ from astropy import units as u
 
 Dataset = np.ndarray | u.Quantity
 
+# Unit strings written by older versions of slug that astropy cannot
+# parse, mapped to their astropy equivalents: through 3.0.1, the
+# clusters group's A_V/A_V_neb datasets were written with units
+# "magnitudes"
+_LEGACY_UNITS = {"magnitudes": "mag"}
+
 
 class slug_group_reader:
     """
@@ -120,6 +126,8 @@ class slug_group_reader:
         arr = arrs[0] if len(arrs) == 1 else np.concatenate(arrs, axis=0)
 
         has_unit = isinstance(unit, str) and unit != ""
+        if isinstance(unit, str):
+            unit = _LEGACY_UNITS.get(unit, unit)
         result: Dataset = arr * u.Unit(unit) if has_unit else arr
         self._datasets[key] = result
         return result
