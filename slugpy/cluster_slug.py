@@ -13,6 +13,7 @@ from types import MappingProxyType
 from typing import Any, cast
 
 import h5py
+import numexpr  # pyright: ignore[reportMissingTypeStubs]
 import numpy as np
 from astropy import units as u
 
@@ -207,15 +208,20 @@ class cluster_slug(slug_reader):
     ----------
     size : int
         Number of clusters in the library (read-only).
+    sampling_density : numpy.ndarray of float
+        The density from which the library drew each cluster's physical
+        properties (read-only array; see add_filterset()).
     pobs : None, numpy.ndarray, or callable
         Probability that each library cluster would be observed: None
         (every cluster is observed), an array of one value in [0, 1]
-        per library cluster, or a callable.
+        per library cluster, or a callable. Setting it reweights every
+        kernel density estimate.
     priors : None, numpy.ndarray, or callable
         Prior probability of each library cluster's physical
         properties: None (the prior equals the sampling density from
         which the library was drawn), an array of one non-negative
-        value per library cluster, or a callable.
+        value per library cluster, or a callable. Setting it reweights
+        every kernel density estimate.
     kdes : Mapping of tuple of str to KDE
         The kernel density estimate for each filter set, keyed by the
         filter set's names, as a tuple (read-only view; see
@@ -247,10 +253,11 @@ class cluster_slug(slug_reader):
 
     Notes
     -----
-    The settings are read when a filter set is added: changing pobs,
-    priors, inference_quantities, use_nebular, or use_extinct afterwards
-    does not change kernel density estimates already built; remove and
-    re-add a filter set to rebuild its estimate.
+    Changing pobs or priors reweights every kernel density estimate in
+    place (see the pobs property). The other settings are read when a
+    filter set is added: changing inference_quantities, use_nebular, or
+    use_extinct afterwards does not change estimates already built;
+    remove and re-add a filter set to rebuild its estimate.
     """
 
     def __init__(self, filename: str, pobs: ProbSpec = None, priors: ProbSpec = None,
@@ -288,10 +295,25 @@ class cluster_slug(slug_reader):
             q for q, name in QUANTITY_PDFS.items()
             if name not in self.pdfs or self.pdfs[name].getMin() == self.pdfs[name].getMax())
 
+        # Cached library quantities, which never change: every cluster's
+        # physical properties, and the density the library drew them from
+        mass, age, av, feh = self._read_physical()
+        self._mass: u.Quantity = mass
+        self._age: u.Quantity = age
+        self._av: u.Quantity | None = av
+        self._feh: np.ndarray = feh
+        self._sampling_density: np.ndarray = self._compute_sampling_density()
+
         # Settings, each checked by its own setter
         self._kdes: dict[tuple[str, ...], KDE] = {}
         self._pobs: ProbSpec = None
         self._priors: ProbSpec = None
+        # pobs and priors as arrays (a callable's result, cached so that
+        # changing one need not recompute the other), and the weights
+        # they give each library cluster; None where there are none
+        self._pobs_values: np.ndarray | None = None
+        self._priors_values: np.ndarray | None = None
+        self._weights: np.ndarray | None = None
         self._inference_quantities: list[str] = []
         self._abstol: float = 1e-8
         self._reltol: float = 1e-2
@@ -324,6 +346,18 @@ class cluster_slug(slug_reader):
         raise AttributeError("size is read-only")
 
     @property
+    def sampling_density(self) -> np.ndarray:
+        """
+        numpy.ndarray of float : the density from which the library drew
+        each cluster's physical properties (a read-only array): the
+        product, over the physical quantities that are not singular, of
+        the library's PDF for that quantity evaluated at the cluster's
+        value of it (mass in Msun, age in yr, A_V in mag, [Fe/H]).
+        Computed on construction.
+        """
+        return self._sampling_density
+
+    @property
     def pobs(self) -> ProbSpec:
         """
         None, numpy.ndarray, or callable : probability that each library
@@ -337,14 +371,27 @@ class cluster_slug(slug_reader):
             On setting, if the value is not None, a numpy array, or a
             callable.
         ValueError
-            On setting, if an array is not 1D with size elements, or has
-            values outside [0, 1].
+            On setting, if an array (or a callable's result, which must
+            be one) is not 1D with size elements, or has values outside
+            [0, 1]; or if the new weights would leave a kernel density
+            estimate with no weight at all.
+
+        Notes
+        -----
+        A callable is called once, on setting, as for add_filterset(),
+        and its result cached. Setting pobs reweights every kernel
+        density estimate in place: each cluster's weight becomes
+        pobs * priors / sampling_density (see add_filterset()). If that
+        fails, nothing is changed.
         """
         return self._pobs
 
     @pobs.setter
     def pobs(self, value: Any) -> None:
-        self._pobs = _check_prob_spec(value, "pobs", self._size, at_most_one=True)
+        spec = _check_prob_spec(value, "pobs", self._size, at_most_one=True)
+        values = self._evaluate_prob_spec(spec, "pobs", at_most_one=True)
+        self._update_weights(values, self._priors_values)
+        self._pobs, self._pobs_values = spec, values
 
     @property
     def priors(self) -> ProbSpec:
@@ -361,14 +408,25 @@ class cluster_slug(slug_reader):
             On setting, if the value is not None, a numpy array, or a
             callable.
         ValueError
-            On setting, if an array is not 1D with size elements, or has
-            negative or non-finite values.
+            On setting, if an array (or a callable's result, which must
+            be one) is not 1D with size elements, or has negative or
+            non-finite values; or if the new weights would leave a
+            kernel density estimate with no weight at all.
+
+        Notes
+        -----
+        As for pobs: a callable is called once, on setting, and its
+        result cached, and setting priors reweights every kernel density
+        estimate in place.
         """
         return self._priors
 
     @priors.setter
     def priors(self, value: Any) -> None:
-        self._priors = _check_prob_spec(value, "priors", self._size, at_most_one=False)
+        spec = _check_prob_spec(value, "priors", self._size, at_most_one=False)
+        values = self._evaluate_prob_spec(spec, "priors", at_most_one=False)
+        self._update_weights(self._pobs_values, values)
+        self._priors, self._priors_values = spec, values
 
     @property
     def kdes(self) -> Mapping[tuple[str, ...], KDE]:
@@ -563,8 +621,9 @@ class cluster_slug(slug_reader):
         ValueError
             If filters is empty, repeats a filter, names a filter the
             library does not have, or names an inference quantity; if no
-            library cluster has valid values for every quantity with a
-            non-zero weight; or if the KDE cannot be built (see KDE).
+            library cluster has valid values for every quantity, or
+            those that do all have zero weight; or if the KDE cannot be
+            built (see KDE).
 
         Notes
         -----
@@ -593,9 +652,11 @@ class cluster_slug(slug_reader):
         None if the library has no extinction) and feh a numpy array.
 
         Clusters with a non-finite value in any dimension (e.g. the log
-        of a photon rate that is zero in every variant) or with a zero or
-        non-finite weight are left out of the estimate. Each point's aux
-        label is its cluster's row in the library.
+        of a photon rate that is zero in every variant), or with zero or
+        non-finite sampling_density, are left out of the estimate.
+        Clusters whose weight is zero are kept, contributing nothing, so
+        that a later change to pobs or priors can give them weight. Each
+        point's aux label is its cluster's row in the library.
         """
         if not isinstance(filters, list) or not all(isinstance(f, str) for f in cast(list[Any], filters)):
             raise TypeError("filters must be a list of filter names")
@@ -617,19 +678,21 @@ class cluster_slug(slug_reader):
             dataset[:, i] = (self._physical_column(name) if name in PHYSICAL_QUANTITIES
                              else self._phot_column(name))
 
-        # Weights, from pobs and priors
-        weights = self._weights()
-
-        # Leave out clusters with invalid values or no weight
+        # Leave out clusters that can never be used: those with an
+        # invalid value, or drawn with zero or non-finite density (so
+        # their prior weight would be infinite). Those whose weight is
+        # zero now are kept, since reweighting may give them weight.
         keep = np.all(np.isfinite(dataset), axis=1)
-        if weights is not None:
-            keep &= np.isfinite(weights) & (weights > 0.0)
+        keep &= np.isfinite(self._sampling_density) & (self._sampling_density > 0.0)
         if not np.any(keep):
-            raise ValueError(f"no library cluster has valid values for every quantity in "
-                             f"{columns} with a non-zero weight")
+            raise ValueError(f"no library cluster has valid values for every quantity in {columns}")
         rows = np.nonzero(keep)[0].astype(np.int64)
         kept = np.ascontiguousarray(dataset[keep])
-        kept_weights = None if weights is None else np.ascontiguousarray(weights[keep])
+        kept_weights = None
+        if self._weights is not None:
+            kept_weights = np.ascontiguousarray(self._weights[keep])
+            if not np.any(kept_weights > 0.0):
+                raise ValueError(f"the library clusters valid for {columns} all have zero weight")
 
         self._kdes[tuple(names)] = KDE(
             kept, h2Inv=h2Inv, w=kept_weights, names=columns, aux=rows,
@@ -702,22 +765,21 @@ class cluster_slug(slug_reader):
         -------
         numpy.ndarray of float
             log10 of the target mass (Msun) or age (yr), or A_V (mag) or
-            [Fe/H] as they are.
+            [Fe/H] as they are, from the cached library values.
         """
-        mass, age, av, feh = self._physical_args()
         with np.errstate(divide="ignore", invalid="ignore"):
             if name == "mass":
-                return np.log10(cast(u.Quantity, mass).to_value(u.Msun))
+                return np.log10(self._mass.to_value(u.Msun))
             if name == "age":
-                return np.log10(cast(u.Quantity, age).to_value(u.yr))
+                return np.log10(self._age.to_value(u.yr))
         if name == "A_V":
-            assert av is not None  # A_V is singular, so never inferred, without extinction
-            return np.asarray(cast(u.Quantity, av).to_value(u.mag), dtype=np.float64)
-        return np.asarray(feh, dtype=np.float64)
+            assert self._av is not None  # A_V is singular, so never inferred, without extinction
+            return np.asarray(self._av.to_value(u.mag), dtype=np.float64)
+        return self._feh
 
-    def _physical_args(self) -> tuple[u.Quantity, u.Quantity, u.Quantity | None, np.ndarray]:
+    def _read_physical(self) -> tuple[u.Quantity, u.Quantity, u.Quantity | None, np.ndarray]:
         """
-        Every library cluster's physical properties, as passed to a callable pobs or priors.
+        Read every library cluster's physical properties from disk.
 
         Returns
         -------
@@ -742,35 +804,120 @@ class cluster_slug(slug_reader):
         feh = np.asarray(clusters["feh"], dtype=np.float64)
         return mass, age, av, feh
 
-    def _weights(self) -> np.ndarray | None:
+    def _compute_sampling_density(self) -> np.ndarray:
         """
-        Each library cluster's weight, from pobs and priors.
+        The density from which the library drew each cluster's physical properties.
+
+        Returns
+        -------
+        numpy.ndarray of float
+            The product, over the non-singular physical quantities, of
+            the library's PDF for each at the cluster's value of it (a
+            read-only array; all ones if every quantity is singular).
+        """
+        values = {"mass": self._mass.to_value(u.Msun), "age": self._age.to_value(u.yr),
+                  "A_V": None if self._av is None else self._av.to_value(u.mag),
+                  "metallicity": self._feh}
+        density = np.ones(self._size)
+        for q, pdf_name in QUANTITY_PDFS.items():
+            if q in self._singular:
+                continue  # a constant factor, which normalization removes
+            density *= np.asarray(self.pdfs[pdf_name](values[q]), dtype=np.float64)
+        density.setflags(write=False)
+        return density
+
+    def _evaluate_prob_spec(self, spec: ProbSpec, name: str, at_most_one: bool) -> np.ndarray | None:
+        """
+        A pobs or priors specification as an array of one value per library cluster.
+
+        Parameters
+        ----------
+        spec : ProbSpec
+            The (already checked) specification.
+        name : str
+            "pobs" or "priors", for error messages.
+        at_most_one : bool
+            Whether values must be at most one (pobs).
 
         Returns
         -------
         numpy.ndarray of float or None
-            pobs times priors divided by the library's sampling density
-            (see add_filterset()), or None if both are None.
+            spec itself if it is an array, a callable's result (called
+            with the cached mass, age, A_V, and [Fe/H]; see
+            add_filterset()), or None if spec is None.
+
+        Raises
+        ------
+        ValueError
+            If a callable's result is not a valid array (see
+            _check_prob_spec()).
         """
-        if self._pobs is None and self._priors is None:
+        if spec is None:
             return None
-        weights = np.ones(self._size)
-        args = self._physical_args()
-        if self._pobs is not None:
-            pobs = self._pobs(*args) if callable(self._pobs) else self._pobs
-            weights *= np.asarray(pobs, dtype=np.float64)
-        if self._priors is not None:
-            priors = self._priors(*args) if callable(self._priors) else self._priors
-            sampling = np.ones(self._size)
-            mass, age, av, feh = args
-            values = {"mass": cast(u.Quantity, mass).to_value(u.Msun),
-                      "age": cast(u.Quantity, age).to_value(u.yr),
-                      "A_V": None if av is None else cast(u.Quantity, av).to_value(u.mag),
-                      "metallicity": feh}
-            for q, pdf_name in QUANTITY_PDFS.items():
-                if q in self._singular:
-                    continue  # a constant factor, which normalization removes
-                sampling *= np.asarray(self.pdfs[pdf_name](values[q]), dtype=np.float64)
-            with np.errstate(divide="ignore", invalid="ignore"):
-                weights *= np.asarray(priors, dtype=np.float64) / sampling
+        if callable(spec):
+            result = np.asarray(spec(self._mass, self._age, self._av, self._feh), dtype=np.float64)
+            return cast(np.ndarray, _check_prob_spec(result, f"{name} (the callable's result)",
+                                                     self._size, at_most_one))
+        return spec
+
+    def _library_weights(self, pobs: np.ndarray | None, priors: np.ndarray | None) -> np.ndarray | None:
+        """
+        Every library cluster's weight, from pobs and priors.
+
+        Parameters
+        ----------
+        pobs : numpy.ndarray of float or None
+            pobs, as an array (None for every cluster observed).
+        priors : numpy.ndarray of float or None
+            priors, as an array (None for the library's own sampling
+            density).
+
+        Returns
+        -------
+        numpy.ndarray of float or None
+            pobs * priors / sampling_density, evaluated in parallel by
+            numexpr (pobs, or priors / sampling_density, if the other is
+            None), or None if both are None; zero where sampling_density
+            is zero or non-finite (such clusters are never in an
+            estimate).
+        """
+        if pobs is None and priors is None:
+            return None
+        if priors is None:
+            return np.array(pobs, dtype=np.float64)
+        operands = {"priors": priors, "sampling": self._sampling_density}
+        expr = "priors / sampling"
+        if pobs is not None:
+            operands["pobs"] = pobs
+            expr = "pobs * priors / sampling"
+        with np.errstate(divide="ignore", invalid="ignore"):
+            weights = cast(np.ndarray, numexpr.evaluate(expr, local_dict=operands))  # pyright: ignore[reportUnknownMemberType]
+        weights[~np.isfinite(weights)] = 0.0
         return weights
+
+    def _update_weights(self, pobs: np.ndarray | None, priors: np.ndarray | None) -> None:
+        """
+        Recompute the library weights, and reweight every kernel density estimate in place.
+
+        Parameters
+        ----------
+        pobs : numpy.ndarray of float or None
+            The new pobs, as an array.
+        priors : numpy.ndarray of float or None
+            The new priors, as an array.
+
+        Raises
+        ------
+        ValueError
+            If the new weights would leave an estimate with no weight at
+            all; nothing is changed in that case.
+        """
+        weights = self._library_weights(pobs, priors)
+        if weights is not None:
+            empty = [list(key) for key, kde in self._kdes.items() if not np.any(weights[kde.aux] > 0.0)]
+            if empty:
+                raise ValueError(f"the new weights leave filter sets {empty} with no weight at all")
+        for kde in self._kdes.values():
+            kde.w[:] = 1.0 if weights is None else weights[kde.aux]
+            kde.reweight()
+        self._weights = weights

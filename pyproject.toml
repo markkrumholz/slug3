@@ -62,6 +62,7 @@ version = "3.0.3"
 dependencies = [
     "astropy",
     "h5py",
+    "numexpr",
     "numpy",
     "platformdirs",
     "scipy",

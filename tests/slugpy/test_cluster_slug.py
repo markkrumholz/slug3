@@ -140,7 +140,7 @@ def test_constructor_keywords() -> None:
 def test_pobs_and_priors_validation(lib: cluster_slug) -> None:
     """pobs and priors accept None, arrays of the right size and range, and callables."""
     lib.pobs = np.linspace(0.0, 1.0, LIBRARY_SIZE)
-    lib.pobs = lambda x: x  # pyright: ignore[reportUnknownLambdaType]
+    lib.pobs = lambda m, a, av, feh: np.full(LIBRARY_SIZE, 0.5)  # pyright: ignore[reportUnknownLambdaType]
     lib.pobs = None
     lib.priors = np.linspace(0.0, 5.0, LIBRARY_SIZE)
     lib.priors = None
@@ -326,11 +326,12 @@ def test_add_filterset_weights() -> None:
     """Weights combine pobs and priors over the sampling density; callables get astropy Quantities."""
     rng = np.random.default_rng(1)
     pobs = rng.uniform(0.0, 1.0, LIBRARY_SIZE)
-    pobs[:100] = 0.0  # never observed: left out
+    pobs[:100] = 0.0  # never observed: kept, with no weight, so that reweighting can restore them
     lib = cluster_slug(str(LIBRARY), pobs=pobs, filtersets=["HST.WFC3_UVIS1.F555W"])
     kde = lib.kdes[("HST.WFC3_UVIS1.F555W",)]
-    assert kde.dataset.shape[0] == LIBRARY_SIZE - 100 and np.all(kde.aux >= 100)
+    assert kde.dataset.shape[0] == LIBRARY_SIZE
     assert np.allclose(kde.w, pobs[kde.aux] / pobs[kde.aux].sum())
+    assert np.all(kde.w[kde.aux < 100] == 0.0)
 
     # Callable pobs and priors, with the expected argument types
     seen: list[tuple[type, ...]] = []
@@ -379,3 +380,85 @@ def test_kdes_and_removal() -> None:
     assert list(lib.filtersets) == [("HST.WFC3_UVIS1.F555W",)]
     with pytest.raises(KeyError):
         lib.remove_filterset(["Lbol"])
+
+
+def test_sampling_density() -> None:
+    """sampling_density is the product of the library's PDFs, cached and read-only."""
+    lib = cluster_slug(str(LIBRARY))
+    clusters, phot = lib.clusters, lib.cluster_phot
+    assert clusters is not None and phot is not None
+    want = (lib.pdfs["cmf"](_values(clusters["target_mass"]))
+            * lib.pdfs["outTimeDist"](_values(phot["time"]))
+            * lib.pdfs["avDist"](_values(clusters["A_V"]))
+            * lib.pdfs["fehDist"](_values(clusters["feh"])))
+    assert np.allclose(lib.sampling_density, want)
+    with pytest.raises(ValueError):
+        lib.sampling_density[0] = 1.0
+    with pytest.raises(AttributeError):
+        lib.sampling_density = want  # pyright: ignore[reportAttributeAccessIssue]
+
+
+def test_reweighting() -> None:
+    """Setting pobs or priors reweights every KDE in place, matching a KDE built with those weights."""
+    filters = ["HST.WFC3_UVIS1.F555W", "HST.WFC3_UVIS1.F814W"]
+    other = ["Lbol"]
+    h2inv = 4.0 * np.eye(6)
+    lib = cluster_slug(str(LIBRARY))
+    lib.add_filterset(filters, h2Inv=h2inv)
+    lib.add_filterset(other)
+    kde = lib.kdes[tuple(filters)]
+    rng = np.random.default_rng(2)
+    q = kde.dataset[rng.choice(kde.dataset.shape[0], 5, replace=False)] + 0.05
+
+    def fresh(**settings: object) -> np.ndarray:
+        # The same KDE, built from scratch with the given pobs/priors
+        ref = cluster_slug(str(LIBRARY), **settings)  # pyright: ignore[reportArgumentType]
+        ref.add_filterset(filters, h2Inv=h2inv)
+        return np.asarray(ref.kdes[tuple(filters)].pdf(q, 0.0, 0.0))
+
+    # pobs as an array; zero for some clusters
+    pobs = rng.uniform(0.0, 1.0, LIBRARY_SIZE)
+    pobs[::3] = 0.0
+    lib.pobs = pobs
+    assert np.allclose(kde.w, pobs[kde.aux] / pobs[kde.aux].sum())
+    assert np.allclose(np.asarray(kde.pdf(q, 0.0, 0.0)), fresh(pobs=pobs), rtol=1e-10)
+    other_kde = lib.kdes[tuple(other)]
+    assert np.allclose(other_kde.w, pobs[other_kde.aux] / pobs[other_kde.aux].sum())
+
+    # Callable priors: called once on setting, and not again when pobs changes
+    calls: list[int] = []
+
+    def prior(mass: u.Quantity, age: u.Quantity, av: u.Quantity, feh: np.ndarray) -> np.ndarray:
+        calls.append(1)
+        return np.asarray(mass.value) ** -0.5
+
+    lib.priors = prior
+    assert len(calls) == 1
+    mass = _values(lib.clusters["target_mass"]) if lib.clusters is not None else None
+    assert mass is not None
+    want = pobs * mass ** -0.5 / lib.sampling_density
+    assert np.allclose(kde.w, want[kde.aux] / want[kde.aux].sum())
+    assert np.allclose(np.asarray(kde.pdf(q, 0.0, 0.0)), fresh(pobs=pobs, priors=prior), rtol=1e-10)
+    n_calls = len(calls)  # fresh() calls prior too, for its own cluster_slug
+    lib.pobs = np.ones(LIBRARY_SIZE)  # restores the clusters pobs had zeroed
+    assert len(calls) == n_calls
+    want = mass ** -0.5 / lib.sampling_density
+    assert np.allclose(kde.w, want[kde.aux] / want[kde.aux].sum())
+    assert np.all(kde.w > 0.0)
+
+    # Back to no weights: every cluster equal
+    lib.pobs = None
+    lib.priors = None
+    assert np.allclose(kde.w, 1.0 / kde.w.size)
+    assert np.allclose(np.asarray(kde.pdf(q, 0.0, 0.0)), fresh(), rtol=1e-10)
+
+    # A change that would leave an estimate with no weight is refused, changing nothing
+    before = kde.w.copy()
+    with pytest.raises(ValueError, match="no weight"):
+        lib.pobs = np.zeros(LIBRARY_SIZE)
+    assert lib.pobs is None and np.array_equal(kde.w, before)
+
+    # A callable's result is checked like an array
+    with pytest.raises(ValueError, match="callable"):
+        lib.pobs = lambda m, a, av, feh: np.full(LIBRARY_SIZE, 2.0)  # pyright: ignore[reportUnknownLambdaType]
+    assert lib.pobs is None
