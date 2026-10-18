@@ -4607,3 +4607,67 @@ def test_conditional_density():
         kde.conditional(np.full(4, np.nan), 0.0, bandwidth=bw)
     with pytest.raises(ValueError):
         kde.conditional(x0, 1.0, bandwidth=bw)
+
+
+def test_kernel_density_batches_with_errors():
+    """pdf() and conditional() take per-point measurement errors, and conditional() a batch of points."""
+    x, w = make_kde_points(2000, 3, 14)
+    x0, w0 = x.copy(), w.copy()
+    kde = slug.KernelDensity(x, w, leafSize=8)
+    m = kde_test_metric(3)
+    bw = slug.Bandwidth(m)
+    rng = np.random.default_rng(15)
+    q = 1.5 * rng.standard_normal((8, 3))
+    err_dims = [2, 0]
+    cov = np.stack([np.array([[0.02 * (i + 1), 0.005], [0.005, 0.03]]) for i in range(8)])
+
+    def convolved(c):
+        # The errors, in the order errDims gives, embedded in all three dimensions
+        full = np.zeros((3, 3))
+        full[np.ix_(err_dims, err_dims)] = c
+        return np.linalg.inv(np.linalg.inv(m) + 2.0 * full)
+
+    # pdf: per-point errors, against brute force with each point's convolved kernel
+    want = np.array([brute_pdf(x0, w0, convolved(c), qi) for qi, c in zip(q, cov, strict=True)])
+    assert np.allclose(kde.pdf(q, 0.0, 0.0, bw, errDims=err_dims, errCov=cov), want, rtol=1e-10)
+    # One matrix shared by every point, and a single point
+    want_shared = np.array([brute_pdf(x0, w0, convolved(cov[0]), qi) for qi in q])
+    assert np.allclose(kde.pdf(q, 0.0, 0.0, bw, errDims=err_dims, errCov=cov[0]), want_shared, rtol=1e-10)
+    one = kde.pdf(q[3], 0.0, 0.0, bw, errDims=err_dims, errCov=cov[3])
+    assert isinstance(one, float) and one == pytest.approx(want[3], rel=1e-10)
+
+    # conditional: a batch gives a list, each as conditioning on its point alone
+    q_cond = q.copy()
+    q_cond[:, 1] = np.nan
+    cds = kde.conditional(q_cond, 0.0, bandwidth=bw)
+    assert isinstance(cds, list) and len(cds) == 8
+    for qi, cd in zip(q_cond, cds, strict=True):
+        single = kde.conditional(qi, 0.0, bandwidth=bw)
+        assert cd.dims() == single.dims() == [1]
+        assert cd.marginal() == single.marginal()
+    # With errors: each is the posterior with that point's convolved kernel,
+    # and its marginal the density pdf() gives for the same point and errors
+    cds_err = kde.conditional(q_cond, 0.0, bandwidth=bw, errDims=err_dims, errCov=cov)
+    marginals = kde.pdf(q_cond, 0.0, 0.0, bw, errDims=err_dims, errCov=cov)
+    for i, cd in enumerate(cds_err):
+        single = kde.conditional(q_cond[i], 0.0, bandwidth=slug.Bandwidth(convolved(cov[i])))
+        assert cd.marginal() == pytest.approx(single.marginal(), rel=1e-10)
+        assert cd.marginal() == pytest.approx(marginals[i], rel=1e-10)
+    y = rng.standard_normal((5, 1))
+    assert np.allclose(cds_err[0].pdf(y, 0.0, 0.0), [cds_err[0].pdf(yi, 0.0, 0.0) for yi in y], rtol=1e-12)
+
+    # Invalid errors
+    with pytest.raises(ValueError, match="without errCov"):
+        kde.pdf(q, 0.0, 0.0, bw, errDims=err_dims)
+    with pytest.raises(ValueError, match="without errCov"):
+        kde.conditional(q_cond, 0.0, bandwidth=bw, errDims=err_dims)
+    with pytest.raises(ValueError, match="errCov must have shape"):
+        kde.pdf(q, 0.0, 0.0, bw, errDims=err_dims, errCov=cov[:5])
+    with pytest.raises(ValueError, match="specified"):
+        kde.pdf(q_cond, 0.0, 0.0, bw, errDims=[1], errCov=np.eye(1))
+    with pytest.raises(ValueError, match="positive semi-definite"):
+        kde.pdf(q, 0.0, 0.0, bw, errDims=err_dims, errCov=-cov)
+    with pytest.raises(ValueError, match="single Bandwidth"):
+        kde.pdf(q, 0.0, 0.0, [bw] * 8, errDims=err_dims, errCov=cov)
+    with pytest.raises(ValueError, match="marginalized"):
+        kde.conditional(q, 0.0, marginalDims=[0], bandwidth=bw, errDims=err_dims, errCov=cov)

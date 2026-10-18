@@ -13,7 +13,25 @@ Uses small random data sets made here, so needs no data fetched.
 import numpy as np
 import pytest
 
-from slugpy import KDE
+from slugpy import KDE, Bandwidth
+
+
+def _one(result: KDE | list[KDE]) -> KDE:
+    """
+    A single-point conditional estimate, narrowed from the batch type.
+
+    Parameters
+    ----------
+    result : KDE or list of KDE
+        What conditional() returned for one point.
+
+    Returns
+    -------
+    KDE
+        result, checked to be a single KDE.
+    """
+    assert isinstance(result, KDE)
+    return result
 
 
 def make_points(n: int, ndim: int, seed: int) -> tuple[np.ndarray, np.ndarray]:
@@ -185,7 +203,7 @@ def test_conditional() -> None:
     m = np.linalg.inv(0.2 * np.eye(4) + 0.8 * np.ones((4, 4)))
     kde = KDE(x, h2Inv=m, w=w, names=["mass", "age", "A_V", "Z"])
     x0 = np.array([0.4, np.nan, 0.9, np.nan])
-    cond = kde.conditional(x0, 0.0)
+    cond = _one(kde.conditional(x0, 0.0))
     assert isinstance(cond, KDE)
     assert cond.names == ["age", "Z"] and cond.nDim == 2
     assert cond.dataset.shape[1] == 2 and cond.w.sum() == pytest.approx(1.0)
@@ -200,12 +218,44 @@ def test_conditional() -> None:
         cond.dataset[0, 0] = 0.0
 
     # Marginalizing, pruning, and conditioning again
-    pruned = kde.conditional(np.array([0.4, np.nan, 0.9, 0.0]), marginalDims=[3])  # massTol = 1e-2
+    pruned = _one(kde.conditional(np.array([0.4, np.nan, 0.9, 0.0]), marginalDims=[3]))  # massTol = 1e-2
     assert pruned.names == ["age"] and 0 < pruned.dataset.shape[0] < cond.dataset.shape[0]
-    again = cond.conditional(np.array([np.nan, 0.2]), 0.0)
+    again = _one(cond.conditional(np.array([np.nan, 0.2]), 0.0))
     assert again.names == ["age"] and again.nDim == 1
 
     # The conditional's weights can be changed in place too
     cond.w[:] = 1.0
     cond.reweight()
     assert cond.w.sum() == pytest.approx(1.0)
+
+
+def test_batches_with_errors() -> None:
+    """pdf() and conditional() pass per-point errors through; conditional() takes a batch of points."""
+    x, w = make_points(1500, 4, 21)
+    m = np.linalg.inv(0.2 * np.eye(4) + 0.8 * np.ones((4, 4)))
+    kde = KDE(x, h2Inv=m, w=w, names=["mass", "age", "A_V", "Z"])
+    rng = np.random.default_rng(22)
+    x0 = np.column_stack([rng.normal(0.0, 1.0, 6), np.full(6, np.nan),
+                          rng.normal(0.0, 1.0, 6), np.full(6, np.nan)])
+    cov = np.stack([np.diag([0.01 * (i + 1), 0.02]) for i in range(6)])
+    err_dims = [0, 2]
+
+    # A batch of conditionals: a list of KDEs, each named and as for its point alone
+    batch = kde.conditional(x0, 0.0)
+    assert isinstance(batch, list) and len(batch) == 6
+    for xi, cond in zip(x0, batch, strict=True):
+        assert cond.names == ["age", "Z"]
+        assert cond.marginal == pytest.approx(_one(kde.conditional(xi, 0.0)).marginal, rel=1e-12)
+
+    # Errors: each point's marginal is pdf() at it with the same errors
+    with_errors = kde.conditional(x0, 0.0, errDims=err_dims, errCov=cov)
+    densities = np.asarray(kde.pdf(x0, 0.0, 0.0, errDims=err_dims, errCov=cov))
+    assert isinstance(with_errors, list)
+    for i, cond in enumerate(with_errors):
+        assert cond.marginal == pytest.approx(densities[i], rel=1e-10)
+    full = np.zeros((4, 4))
+    full[np.ix_(err_dims, err_dims)] = cov[2]
+    one = kde.pdf(x0[2], 0.0, 0.0, bandwidth=Bandwidth(kde.h2Inv).convolveCov(full))
+    assert densities[2] == pytest.approx(float(np.asarray(one)), rel=1e-10)
+    with pytest.raises(ValueError, match="without errCov"):
+        kde.pdf(x0, errDims=err_dims)

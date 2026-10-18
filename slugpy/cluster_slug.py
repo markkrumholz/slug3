@@ -913,22 +913,22 @@ class cluster_slug(slug_reader):
 
     def conditional(self, x0: Any, massTol: float = 1e-2, marginalDims: list[int] | None = None,
                     leafSize: int = 16, filterset: list[str] | None = None,
-                    errors: Any = None, cov: Any = None) -> KDE:
+                    errors: Any = None, cov: Any = None) -> KDE | list[KDE]:
         """
         Condition a filter set's kernel density estimate on observed photometry.
 
         Parameters
         ----------
-        x0 : array_like of float, shape (nband,) or (nDim,)
-            The photometry in the filter set's nband bands, in which case
-            the inference quantities are kept as the dimensions of the
-            result (the usual case); or a full point in the estimate's
-            space (see kdes[...].names), its filters then the inference
-            quantities, in which, as for KDE.conditional(), a finite
-            value fixes that dimension and NaN keeps it as a dimension
-            of the result. Photometry is in the units the estimate
-            stores: magnitudes as they are, and log10 of any other unit
-            (see add_filterset()).
+        x0 : array_like of float, shape (nband,), (nDim,), (M, nband), or (M, nDim)
+            One point or M of them, each either the photometry in the
+            filter set's nband bands, in which case the inference
+            quantities are kept as the dimensions of the result (the
+            usual case), or a full point in the estimate's space (see
+            kdes[...].names), its filters then the inference quantities,
+            in which, as for KDE.conditional(), a finite value fixes that
+            dimension and NaN keeps it as a dimension of the result.
+            Photometry is in the units the estimate stores: magnitudes as
+            they are, and log10 of any other unit (see add_filterset()).
         massTol : float, optional
             As for KDE.conditional() (default 1e-2).
         marginalDims : list of int, optional
@@ -941,8 +941,10 @@ class cluster_slug(slug_reader):
             None (the default) only if kdes holds a single filter set,
             which is then used.
         errors : float, array_like, or astropy.units.Quantity, optional
-            The photometric errors: one value for every band, or one per
-            band of the filter set. For a band in magnitudes, a plain
+            The photometric errors: one value for every band, one per
+            band of the filter set (shape (nband,)), or, for M points,
+            one per band for each point (shape (M, nband)); the first two
+            apply to every point. For a band in magnitudes, a plain
             number is in mag, and a Quantity must be in mag or the band's
             own magnitude unit (e.g. mag(AB)); for a band in any other
             unit (e.g. erg/(s Hz)), which the estimate stores as log10, a
@@ -951,7 +953,8 @@ class cluster_slug(slug_reader):
             independent; see cov for correlated ones.
         cov : array_like or astropy.units.Quantity, optional
             The covariance matrix of the photometric errors, nband x
-            nband, in the same units as errors, squared: a Quantity must
+            nband for every point, or M x nband x nband for each of M
+            points, in the same units as errors, squared: a Quantity must
             be in mag^2 if every band is in magnitudes, or dex^2 if none
             is (a filter set with both needs a plain array, since no
             single astropy unit describes it). May not be given with
@@ -959,14 +962,14 @@ class cluster_slug(slug_reader):
 
         Returns
         -------
-        KDE
+        KDE or list of KDE
             The conditional estimate over the kept dimensions (see
             KDE.conditional()), with its marginal property the filter
-            set's estimate's marginal density at the fixed values. If
-            errors or cov is given, the estimate's kernel is first
-            convolved with the errors (see Bandwidth.convolveCov()), so
-            that the result is the posterior given photometry with those
-            errors.
+            set's estimate's marginal density at the fixed values; a list
+            of one per point for M points. If errors or cov is given, the
+            estimate's kernel is first convolved with each point's errors
+            (see Bandwidth.convolveCov()), so that the result is the
+            posterior given photometry with those errors.
 
         Raises
         ------
@@ -974,23 +977,28 @@ class cluster_slug(slug_reader):
             If filterset, errors, or cov has the wrong type.
         ValueError
             If filterset is None and kdes does not hold exactly one filter
-            set; if x0 has neither nband nor nDim elements; if both errors
-            and cov are given; if errors or cov has
-            the wrong shape, invalid values, or units that do not match
+            set; if x0 is not 1D or 2D with nband or nDim elements per
+            point; if both errors and cov are given; if errors or cov has
+            the wrong shape (including per-point errors for a different
+            number of points), invalid values, or units that do not match
             the bands' photometric systems; or as for add_filterset() and
             KDE.conditional().
+
+        Notes
+        -----
+        Several points are conditioned on in parallel, one per thread at
+        a time (see KDE.conditional()), each with its own errors.
         """
         filters = self._select_filterset(filterset)
         kde = self._kdes[tuple(filters)]
-        point = np.asarray(x0, dtype=np.float64)
-        if point.shape == (len(filters),):
-            # Just the photometry: keep every inference quantity
-            point = np.concatenate([point, np.full(kde.nDim - len(filters), np.nan)])
-        elif point.shape != (kde.nDim,):
-            raise ValueError(f"x0 must have one element per band ({len(filters)}) or per dimension "
-                             f"of the estimate ({kde.nDim})")
-        bandwidth = self._error_bandwidth(filters, kde, errors, cov)
-        return kde.conditional(point, massTol, marginalDims, leafSize, bandwidth=bandwidth)
+        points = self._full_points(x0, "x0", filters, kde)
+        bandwidth, per_point = self._phot_errors(filters, kde, errors, cov,
+                                                 1 if points.ndim == 1 else points.shape[0])
+        if per_point is not None:
+            return kde.conditional(points, massTol, marginalDims, leafSize,
+                                   errDims=list(range(len(filters))),
+                                   errCov=per_point[0] if points.ndim == 1 else per_point)
+        return kde.conditional(points, massTol, marginalDims, leafSize, bandwidth=bandwidth)
 
     def pdf(self, x: Any, relTol: float | None = None, absTol: float | None = None,
             filterset: list[str] | None = None, errors: Any = None,
@@ -1017,16 +1025,17 @@ class cluster_slug(slug_reader):
             As for conditional().
         errors : float, array_like, or astropy.units.Quantity, optional
             As for conditional(): the photometric errors, the same for
-            every point.
+            every point or (shape (M, nband)) one set per point.
         cov : array_like or astropy.units.Quantity, optional
-            As for conditional().
+            As for conditional(): one matrix for every point, or one per
+            point.
 
         Returns
         -------
         float or numpy.ndarray of float
             The estimate at each point (see KDE.pdf()); a float for one
             point. If errors or cov is given, the estimate's kernel is
-            first convolved with the errors (see
+            first convolved with each point's errors (see
             Bandwidth.convolveCov()), so that the result is the density
             of photometry measured with those errors.
 
@@ -1039,25 +1048,66 @@ class cluster_slug(slug_reader):
             set; if x is not 1D or 2D with nband or nDim elements per
             point; or as for conditional()'s errors and cov, and for
             add_filterset().
+
+        Notes
+        -----
+        Several points are evaluated in parallel, one per thread at a
+        time (see KDE.pdf()), each with its own errors.
         """
         filters = self._select_filterset(filterset)
         kde = self._kdes[tuple(filters)]
+        points = self._full_points(x, "x", filters, kde)
+        bandwidth, per_point = self._phot_errors(filters, kde, errors, cov,
+                                                 1 if points.ndim == 1 else points.shape[0])
+        rel = self._reltol if relTol is None else relTol
+        abs_ = self._abstol if absTol is None else absTol
+        if per_point is not None:
+            return kde.pdf(points, rel, abs_, errDims=list(range(len(filters))),
+                           errCov=per_point[0] if points.ndim == 1 else per_point)
+        return kde.pdf(points, rel, abs_, bandwidth=bandwidth)
+
+    @staticmethod
+    def _full_points(x: Any, name: str, filters: list[str], kde: KDE) -> np.ndarray:
+        """
+        Points in a filter set's estimate's space, from photometry alone or full points.
+
+        Parameters
+        ----------
+        x : array_like of float
+            One point or M of them, each with one element per band or
+            per dimension of the estimate.
+        name : str
+            The argument's name, for error messages.
+        filters : list of str
+            The filter set.
+        kde : KDE
+            Its kernel density estimate.
+
+        Returns
+        -------
+        numpy.ndarray of float, shape (nDim,) or (M, nDim)
+            The points, with NaN for every inference quantity of a point
+            given as photometry alone.
+
+        Raises
+        ------
+        ValueError
+            If x is not 1D or 2D, with nband or nDim elements per point.
+        """
         points = np.asarray(x, dtype=np.float64)
         nband = len(filters)
         if points.ndim not in (1, 2) or points.shape[-1] not in (nband, kde.nDim):
-            raise ValueError(f"x must have one element per band ({nband}) or per dimension of the "
+            raise ValueError(f"{name} must have one element per band ({nband}) or per dimension of the "
                              f"estimate ({kde.nDim}) for each point")
         if points.shape[-1] == nband:
-            # Just the photometry: marginalize over every inference quantity
             pad = np.full(points.shape[:-1] + (kde.nDim - nband,), np.nan)
             points = np.concatenate([points, pad], axis=-1)
-        bandwidth = self._error_bandwidth(filters, kde, errors, cov)
-        return kde.pdf(points, self._reltol if relTol is None else relTol,
-                       self._abstol if absTol is None else absTol, bandwidth=bandwidth)
+        return points
 
-    def _error_bandwidth(self, filters: list[str], kde: KDE, errors: Any, cov: Any) -> Bandwidth | None:
+    def _phot_errors(self, filters: list[str], kde: KDE, errors: Any, cov: Any,
+                     n_points: int) -> tuple[Bandwidth | None, np.ndarray | None]:
         """
-        A filter set's kernel bandwidth convolved with photometric errors.
+        Photometric errors, as a convolved bandwidth or per-point covariances.
 
         Parameters
         ----------
@@ -1069,30 +1119,42 @@ class cluster_slug(slug_reader):
             The errors, as for conditional(), or None.
         cov : Any
             Their covariance, as for conditional(), or None.
+        n_points : int
+            The number of points they are for.
 
         Returns
         -------
-        Bandwidth or None
-            kde's bandwidth convolved with the errors, or None if both
-            errors and cov are None.
+        bandwidth : Bandwidth or None
+            For errors the same for every point, kde's bandwidth
+            convolved with them; otherwise None.
+        per_point : numpy.ndarray of float or None
+            For errors given per point, their covariance matrices,
+            n_points x nband x nband, for KDE's errCov (with errDims the
+            filter set's bands); otherwise None.
 
         Raises
         ------
         TypeError
             If errors or cov has the wrong type.
         ValueError
-            If both errors and cov are given, or either is invalid (see
-            conditional()).
+            If both errors and cov are given, either is invalid (see
+            conditional()), or per-point errors are not for n_points
+            points.
         """
         if errors is not None and cov is not None:
             raise ValueError("give the photometric errors as errors or cov, not both")
         if errors is None and cov is None:
-            return None
+            return None, None
         phot_cov = (self._errors_cov(filters, errors) if errors is not None
                     else self._check_cov(filters, cov))
+        if phot_cov.ndim == 3:
+            if phot_cov.shape[0] != n_points:
+                raise ValueError(f"per-point photometric errors are for {phot_cov.shape[0]} points, "
+                                 f"but {n_points} were given")
+            return None, np.ascontiguousarray(phot_cov)
         full = np.zeros((kde.nDim, kde.nDim))
         full[:len(filters), :len(filters)] = phot_cov
-        return Bandwidth(kde.h2Inv).convolveCov(full)
+        return Bandwidth(kde.h2Inv).convolveCov(full), None
 
     def _select_filterset(self, filterset: Any) -> list[str]:
         """
@@ -1157,7 +1219,9 @@ class cluster_slug(slug_reader):
         Returns
         -------
         numpy.ndarray of float
-            diag(errors^2), nband x nband, in mag^2 or dex^2 by band.
+            diag(errors^2), nband x nband, in mag^2 or dex^2 by band; or,
+            for an M x nband errors array, one such matrix per point,
+            M x nband x nband.
 
         Raises
         ------
@@ -1177,11 +1241,12 @@ class cluster_slug(slug_reader):
             values = np.asarray(errors, dtype=np.float64)
         if values.ndim == 0:
             values = np.full(nband, float(values))
-        if values.shape != (nband,):
-            raise ValueError(f"errors must be a single value or have one per band ({nband})")
+        if values.shape[-1:] != (nband,) or values.ndim > 2:
+            raise ValueError(f"errors must be a single value, or have one per band ({nband}), for "
+                             "every point or (as an M x nband array) for each of M points")
         if not np.all(np.isfinite(values)) or np.any(values < 0.0):
             raise ValueError("errors must be finite and non-negative")
-        return np.diag(values ** 2)
+        return (values ** 2)[..., :, np.newaxis] * np.eye(nband)
 
     def _check_cov(self, filters: list[str], cov: Any) -> np.ndarray:
         """
@@ -1197,7 +1262,8 @@ class cluster_slug(slug_reader):
         Returns
         -------
         numpy.ndarray of float
-            cov, nband x nband, in mag^2 or dex^2 by band.
+            cov, nband x nband (or M x nband x nband, one per point), in
+            mag^2 or dex^2 by band.
 
         Raises
         ------
@@ -1222,8 +1288,9 @@ class cluster_slug(slug_reader):
             values = np.asarray(quantity.value, dtype=np.float64)
         else:
             values = np.asarray(cov, dtype=np.float64)
-        if values.shape != (nband, nband):
-            raise ValueError(f"cov must be {nband} x {nband}, one row and column per band")
+        if values.shape[-2:] != (nband, nband) or values.ndim > 3:
+            raise ValueError(f"cov must be {nband} x {nband}, one row and column per band, for every "
+                             f"point, or M x {nband} x {nband}, for each of M points")
         if not np.all(np.isfinite(values)):
             raise ValueError("cov must be finite")
         return values

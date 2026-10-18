@@ -21,11 +21,29 @@ import numpy as np
 import pytest
 from astropy import units as u
 
-from slugpy import Bandwidth, cluster_slug
+from slugpy import KDE, Bandwidth, cluster_slug
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 LIBRARY = REPO_ROOT / "examples" / "clusterlib" / "clusterlib.h5"
 LIBRARY_SIZE = 2000
+
+
+def _one(result: KDE | list[KDE]) -> KDE:
+    """
+    A single-point conditional estimate, narrowed from the batch type.
+
+    Parameters
+    ----------
+    result : KDE or list of KDE
+        What conditional() returned for one point.
+
+    Returns
+    -------
+    KDE
+        result, checked to be a single KDE.
+    """
+    assert isinstance(result, KDE)
+    return result
 
 
 @pytest.fixture(scope="module")
@@ -532,12 +550,12 @@ def test_conditional_filterset_selection() -> None:
     lib = cluster_slug(str(LIBRARY))
     x0 = np.full(5, np.nan)
     with pytest.raises(ValueError, match="filterset must be given"):
-        lib.conditional(x0)
+        _one(lib.conditional(x0))
     lib.add_filterset(["Lbol"])
     kde = lib.kdes[("Lbol",)]
     x0[0] = float(np.median(kde.dataset[:, 0]))
-    cond = lib.conditional(x0, massTol=0.0)
-    direct = kde.conditional(x0, massTol=0.0)
+    cond = _one(lib.conditional(x0, massTol=0.0))
+    direct = _one(kde.conditional(x0, massTol=0.0))
     assert cond.names == direct.names == ["mass", "age", "A_V", "metallicity"]
     assert cond.marginal == pytest.approx(direct.marginal, rel=1e-12)
     assert np.array_equal(cond.h2Inv, direct.h2Inv)
@@ -545,17 +563,17 @@ def test_conditional_filterset_selection() -> None:
     # A second filter set: now one must be named; naming a new one adds it
     lib.add_filterset(["HST.WFC3_UVIS1.F555W"])
     with pytest.raises(ValueError, match="filterset must be given"):
-        lib.conditional(x0)
-    assert lib.conditional(x0, massTol=0.0, filterset=["Lbol"]).marginal == pytest.approx(cond.marginal)
+        _one(lib.conditional(x0))
+    assert _one(lib.conditional(x0, massTol=0.0, filterset=["Lbol"])).marginal == pytest.approx(cond.marginal)
     phot = lib.cluster_phot
     assert phot is not None
     y0 = np.full(6, np.nan)
     y0[0] = float(np.median(_values(phot["HST.WFC3_UVIS1.F814W_ex"])))
     y0[1] = float(np.median(_values(phot["HST.WFC3_UVIS1.F555W_ex"])))
-    lib.conditional(y0, filterset=["HST.WFC3_UVIS1.F814W", "HST.WFC3_UVIS1.F555W"])
+    _one(lib.conditional(y0, filterset=["HST.WFC3_UVIS1.F814W", "HST.WFC3_UVIS1.F555W"]))
     assert ("HST.WFC3_UVIS1.F814W", "HST.WFC3_UVIS1.F555W") in lib.filtersets
     with pytest.raises(TypeError):
-        lib.conditional(x0, filterset="Lbol")  # pyright: ignore[reportArgumentType]
+        _one(lib.conditional(x0, filterset="Lbol"))  # pyright: ignore[reportArgumentType]
 
 
 def test_conditional_errors() -> None:
@@ -575,49 +593,49 @@ def test_conditional_errors() -> None:
         return mtot[2:, 2:], float(np.asarray(marginal))
 
     # Same error in every band, one per band, and the equivalent covariance
-    cond = lib.conditional(x0, massTol=0.0, errors=0.1)
+    cond = _one(lib.conditional(x0, massTol=0.0, errors=0.1))
     m_rr, marginal = expected(np.diag([0.01, 0.01]))
     assert np.allclose(cond.h2Inv, m_rr) and cond.marginal == pytest.approx(marginal, rel=1e-10)
-    per_band = lib.conditional(x0, massTol=0.0, errors=np.array([0.1, 0.2]))
+    per_band = _one(lib.conditional(x0, massTol=0.0, errors=np.array([0.1, 0.2])))
     m_rr, marginal = expected(np.diag([0.01, 0.04]))
     assert np.allclose(per_band.h2Inv, m_rr) and per_band.marginal == pytest.approx(marginal, rel=1e-10)
-    via_cov = lib.conditional(x0, massTol=0.0, cov=np.diag([0.01, 0.04]))
+    via_cov = _one(lib.conditional(x0, massTol=0.0, cov=np.diag([0.01, 0.04])))
     assert np.allclose(via_cov.h2Inv, per_band.h2Inv) and via_cov.marginal == pytest.approx(per_band.marginal)
 
     # Just the photometry: the inference quantities are kept automatically
-    short = lib.conditional(x0[:2], massTol=0.0, errors=0.1)
+    short = _one(lib.conditional(x0[:2], massTol=0.0, errors=0.1))
     assert short.names == ["mass", "age", "A_V", "metallicity"]
     assert np.array_equal(short.h2Inv, cond.h2Inv) and short.marginal == pytest.approx(cond.marginal, rel=1e-12)
     for bad_x0 in [x0[:1], x0[:3], np.zeros(7)]:
         with pytest.raises(ValueError, match="one element per band"):
-            lib.conditional(bad_x0)
+            _one(lib.conditional(bad_x0))
 
     # Correlated errors
     c_corr = np.array([[0.04, 0.03], [0.03, 0.04]])
-    corr = lib.conditional(x0, massTol=0.0, cov=c_corr)
+    corr = _one(lib.conditional(x0, massTol=0.0, cov=c_corr))
     m_rr, marginal = expected(c_corr)
     assert np.allclose(corr.h2Inv, m_rr) and corr.marginal == pytest.approx(marginal, rel=1e-10)
 
     # Units: magnitudes for these bands
-    as_quantity = lib.conditional(x0, massTol=0.0, errors=0.1 * u.mag)
+    as_quantity = _one(lib.conditional(x0, massTol=0.0, errors=0.1 * u.mag))
     assert as_quantity.marginal == pytest.approx(cond.marginal)
-    lib.conditional(x0, massTol=0.0, cov=np.diag([0.01, 0.04]) * u.mag ** 2)
+    _one(lib.conditional(x0, massTol=0.0, cov=np.diag([0.01, 0.04]) * u.mag ** 2))
     for bad in [0.1 * u.dex, 0.1 * u.Lsun, 0.1 * u.ABmag]:
         with pytest.raises(ValueError, match="does not match"):
-            lib.conditional(x0, errors=bad)
+            _one(lib.conditional(x0, errors=bad))
     with pytest.raises(ValueError, match="must be in"):
-        lib.conditional(x0, cov=np.diag([0.01, 0.04]) * u.dex ** 2)
+        _one(lib.conditional(x0, cov=np.diag([0.01, 0.04]) * u.dex ** 2))
 
     # Shapes and values
-    for bad in [np.array([0.1, 0.2, 0.3]), np.array([[0.1, 0.2]]), -0.1, np.nan]:
+    for bad in [np.array([0.1, 0.2, 0.3]), np.full((1, 1, 2), 0.1), np.full((2, 2), 0.1), -0.1, np.nan]:
         with pytest.raises(ValueError):
-            lib.conditional(x0, errors=bad)
+            _one(lib.conditional(x0, errors=bad))
     with pytest.raises(ValueError):
-        lib.conditional(x0, cov=np.eye(3))
+        _one(lib.conditional(x0, cov=np.eye(3)))
     with pytest.raises(ValueError, match="not both"):
-        lib.conditional(x0, errors=0.1, cov=np.eye(2))
+        _one(lib.conditional(x0, errors=0.1, cov=np.eye(2)))
     with pytest.raises(ValueError):
-        lib.conditional(x0, cov=-np.eye(2))
+        _one(lib.conditional(x0, cov=-np.eye(2)))
 
 
 def test_pdf() -> None:
@@ -648,7 +666,7 @@ def test_pdf() -> None:
     with_errors = lib.pdf(phot, errors=np.array([0.1, 0.2]))
     assert np.allclose(with_errors, want, rtol=1e-10)
     assert np.allclose(lib.pdf(phot, cov=np.diag([0.01, 0.04]) * u.mag ** 2), want, rtol=1e-10)
-    cond = lib.conditional(phot[0], massTol=0.0, errors=np.array([0.1, 0.2]))
+    cond = _one(lib.conditional(phot[0], massTol=0.0, errors=np.array([0.1, 0.2])))
     assert cond.marginal == pytest.approx(float(np.asarray(with_errors)[0]), rel=1e-10)
     with pytest.raises(ValueError, match="not both"):
         lib.pdf(phot, errors=0.1, cov=np.eye(2))
@@ -669,27 +687,67 @@ def test_pdf() -> None:
     lib.pdf(lbol, filterset=["Lbol"])
 
 
+def test_per_point_errors_and_batches() -> None:
+    """pdf() and conditional() take a batch of photometry with one set of errors per point."""
+    filters = ["HST.WFC3_UVIS1.F555W", "HST.WFC3_UVIS1.F814W"]
+    lib = cluster_slug(str(LIBRARY), filtersets=filters, abstol=0.0, reltol=0.0)
+    kde = lib.kdes[tuple(filters)]
+    phot = kde.dataset[[5, 50, 500, 900], :2] + 0.03
+    errors = np.array([[0.05, 0.1], [0.2, 0.1], [0.1, 0.3], [0.15, 0.15]])
+
+    # pdf: each point with its own errors, as if evaluated alone
+    dens = np.asarray(lib.pdf(phot, errors=errors))
+    for i in range(4):
+        assert dens[i] == pytest.approx(lib.pdf(phot[i], errors=errors[i]), rel=1e-10)
+    assert np.allclose(np.asarray(lib.pdf(phot, errors=errors * u.mag)), dens, rtol=1e-12)
+    cov = (errors ** 2)[:, :, np.newaxis] * np.eye(2)
+    assert np.allclose(np.asarray(lib.pdf(phot, cov=cov)), dens, rtol=1e-12)
+
+    # conditional: a batch of posteriors, each with its own errors, its
+    # marginal the density pdf() gives for that point
+    posts = lib.conditional(phot, massTol=0.0, errors=errors)
+    assert isinstance(posts, list) and len(posts) == 4
+    for i, post in enumerate(posts):
+        assert post.names == ["mass", "age", "A_V", "metallicity"]
+        assert post.marginal == pytest.approx(dens[i], rel=1e-10)
+        alone = _one(lib.conditional(phot[i], massTol=0.0, errors=errors[i]))
+        assert post.marginal == pytest.approx(alone.marginal, rel=1e-10)
+    # Shared errors for a batch, and per-point errors for one point
+    shared = lib.conditional(phot, massTol=0.0, errors=0.1)
+    assert isinstance(shared, list) and len(shared) == 4
+    assert _one(lib.conditional(phot[1], massTol=0.0, errors=errors[1:2])).marginal == \
+        pytest.approx(posts[1].marginal, rel=1e-10)
+
+    # Per-point errors for the wrong number of points
+    with pytest.raises(ValueError, match="for 3 points"):
+        lib.pdf(phot, errors=errors[:3])
+    with pytest.raises(ValueError, match="for 4 points"):
+        lib.conditional(phot[0], errors=errors)
+    with pytest.raises(ValueError, match="for 2 points"):
+        lib.conditional(phot, cov=cov[:2])
+
+
 def test_conditional_error_units_for_linear_bands() -> None:
     """Errors for bands not in magnitudes are in dex, of the log10 photometry the KDE stores."""
     lib = cluster_slug(str(LIBRARY), filtersets=[["Lbol"], ["HST.WFC3_UVIS1.F555W", "Lbol"]])
     kde = lib.kdes[("Lbol",)]
     x0 = np.full(5, np.nan)
     x0[0] = float(np.median(kde.dataset[:, 0]))
-    plain = lib.conditional(x0, massTol=0.0, filterset=["Lbol"], errors=0.1)
+    plain = _one(lib.conditional(x0, massTol=0.0, filterset=["Lbol"], errors=0.1))
     for ok in [0.1 * u.dex, 0.1 * u.dex(u.Lsun), 0.1 * u.dex(u.erg / u.s)]:
-        assert lib.conditional(x0, massTol=0.0, filterset=["Lbol"], errors=ok).marginal == pytest.approx(plain.marginal)
-    lib.conditional(x0, filterset=["Lbol"], cov=np.array([[0.01]]) * u.dex ** 2)
+        assert _one(lib.conditional(x0, massTol=0.0, filterset=["Lbol"], errors=ok)).marginal == pytest.approx(plain.marginal)
+    _one(lib.conditional(x0, filterset=["Lbol"], cov=np.array([[0.01]]) * u.dex ** 2))
     for bad in [0.1 * u.mag, 0.1 * u.Lsun, 0.1 * u.dex(u.erg / u.s / u.Hz)]:
         with pytest.raises(ValueError, match="does not match"):
-            lib.conditional(x0, filterset=["Lbol"], errors=bad)
+            _one(lib.conditional(x0, filterset=["Lbol"], errors=bad))
 
     # A filter set mixing magnitudes and other units: a Quantity cov is ambiguous
     mixed = lib.kdes[("HST.WFC3_UVIS1.F555W", "Lbol")]
     y0 = np.full(6, np.nan)
     y0[:2] = mixed.dataset[5, :2]
     filterset = ["HST.WFC3_UVIS1.F555W", "Lbol"]
-    lib.conditional(y0, filterset=filterset, cov=np.diag([0.01, 0.01]))
+    _one(lib.conditional(y0, filterset=filterset, cov=np.diag([0.01, 0.01])))
     with pytest.raises(ValueError, match="mixes"):
-        lib.conditional(y0, filterset=filterset, cov=np.diag([0.01, 0.01]) * u.mag ** 2)
+        _one(lib.conditional(y0, filterset=filterset, cov=np.diag([0.01, 0.01]) * u.mag ** 2))
     with pytest.raises(ValueError, match="does not match"):
-        lib.conditional(y0, filterset=filterset, errors=0.1 * u.mag)
+        _one(lib.conditional(y0, filterset=filterset, errors=0.1 * u.mag))

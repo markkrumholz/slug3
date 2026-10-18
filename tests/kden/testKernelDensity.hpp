@@ -647,4 +647,152 @@ inline auto testConditionalDensity() -> int
     return failures;
 }
 
+/**
+ * @brief Check the batch versions of pdf() and conditional(), with and without measurement errors
+ * @return Number of failures
+ * @details
+ * Each batch result is compared with the single-point call it stands
+ * for: exactly, where the batch does the same arithmetic, and to a
+ * tight tolerance where it reduces the bandwidth before convolving with
+ * the errors rather than after. Also checks that invalid errors are
+ * rejected, including an exception thrown inside the parallel loop.
+ */
+inline auto testKernelDensityBatch() -> int
+{
+    int failures = 0;
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    std::mt19937 gen(71); // NOLINT(cert-msc32-c,cert-msc51-cpp) -- fixed seed for a reproducible test
+    std::normal_distribution<double> gauss(0.0, 1.0);
+    KDETestData owned = makeKDETestData(3000, 4, 2, 72);
+    auto data = owned.view();
+    const KDETest kde(data, 8);
+    const Eigen::MatrixXd corr = (0.2 * Eigen::MatrixXd::Identity(4, 4)) +
+        (0.8 * Eigen::MatrixXd::Ones(4, 4));
+    const kden::Bandwidth bw(4.0 * Eigen::MatrixXd(corr.inverse()));
+    auto fail = [&failures](const std::string& what) -> void
+    {
+        std::cerr << "testKernelDensityBatch: " << what << "\n";
+        ++failures;
+    };
+
+    // Points sharing a pattern of NaNs (dimensions 0 and 2 specified),
+    // and points with mixed patterns; each with its own errors in 0 and 2
+    constexpr std::size_t nPt = 40;
+    std::vector<std::vector<double>> shared;
+    std::vector<std::vector<double>> mixed;
+    std::vector<Eigen::MatrixXd> errCov;
+    std::vector<kden::Bandwidth> perPoint;
+    const std::vector<std::size_t> errDims{2, 0};
+    for (std::size_t i = 0; i < nPt; ++i)
+    {
+        const double a = 1.5 * gauss(gen);
+        const double b = 1.5 * gauss(gen);
+        shared.push_back({a, nan, b, nan});
+        mixed.push_back(i % 2 == 0 ? std::vector<double>{a, nan, b, nan} :
+            std::vector<double>{a, gauss(gen), b, nan});
+        const double s0 = 0.05 + (0.3 * std::abs(gauss(gen)));
+        const double s2 = 0.05 + (0.3 * std::abs(gauss(gen)));
+        Eigen::MatrixXd c(2, 2);
+        c << s2 * s2, 0.5 * s0 * s2, 0.5 * s0 * s2, s0 * s0;
+        errCov.push_back(c);
+        perPoint.push_back(kden::Bandwidth((1.0 + (0.1 * static_cast<double>(i))) * Eigen::MatrixXd(corr.inverse())));
+    }
+    auto embedded = [](const Eigen::MatrixXd& c) -> Eigen::MatrixXd
+    {
+        Eigen::MatrixXd full = Eigen::MatrixXd::Zero(4, 4);
+        full(2, 2) = c(0, 0);
+        full(2, 0) = c(0, 1);
+        full(0, 2) = c(1, 0);
+        full(0, 0) = c(1, 1);
+        return full;
+    };
+
+    // pdf: shared and per-point bandwidths, the Euclidean metric
+    for (const auto* pts : {&shared, &mixed})
+    {
+        const auto got = kde.pdf(*pts, 1e-3, 0.0, bw);
+        const auto gotEuclid = kde.pdf(*pts, 1e-3, 0.0);
+        const auto gotEach = kde.pdf(*pts, 1e-3, 0.0, perPoint);
+        bool ok = got.size() == nPt && gotEuclid.size() == nPt && gotEach.size() == nPt;
+        for (std::size_t i = 0; ok && i < nPt; ++i)
+        {
+            ok = got[i] == kde.pdf((*pts)[i], 1e-3, 0.0, bw) &&
+                gotEuclid[i] == kde.pdf((*pts)[i], 1e-3, 0.0) &&
+                gotEach[i] == kde.pdf((*pts)[i], 1e-3, 0.0, perPoint[i]);
+        }
+        if (!ok) { fail(std::string("batch pdf differs from single-point pdf for ") + (pts == &shared ? "shared" : "mixed") + " NaN patterns"); }
+    }
+
+    // pdf with errors: each point's kernel convolved with its own errors
+    for (const auto* pts : {&shared, &mixed})
+    {
+        const auto got = kde.pdf(*pts, errDims, errCov, 0.0, 0.0, bw);
+        bool ok = got.size() == nPt;
+        for (std::size_t i = 0; ok && i < nPt; ++i)
+        {
+            const double want = kde.pdf((*pts)[i], 0.0, 0.0, bw.convolveCov(embedded(errCov[i])));
+            ok = std::abs(got[i] - want) <= 1e-10 * want;
+        }
+        if (!ok) { fail(std::string("pdf with errors differs from pdf with the convolved bandwidth for ") + (pts == &shared ? "shared" : "mixed") + " NaN patterns"); }
+    }
+
+    // conditional, with and without errors, and the result's batch pdf
+    {
+        const auto cds = kde.conditional(shared, {3}, 0.0, bw);
+        const auto cdsErr = kde.conditional(shared, errDims, errCov, {3}, 0.0, bw);
+        const auto cdsEuclid = kde.conditional(shared, {3}, 0.0);
+        bool ok = cds.size() == nPt && cdsErr.size() == nPt && cdsEuclid.size() == nPt;
+        const std::vector<std::vector<double>> ys{{0.1}, {-0.7}, {1.2}};
+        for (std::size_t i = 0; ok && i < nPt; ++i)
+        {
+            const auto one = kde.conditional(shared[i], {3}, 0.0, bw);
+            const auto oneErr = kde.conditional(shared[i], {3}, 0.0, bw.convolveCov(embedded(errCov[i])));
+            const auto oneEuclid = kde.conditional(shared[i], {3}, 0.0);
+            ok = cds[i].marginal() == one.marginal() && cds[i].dims() == one.dims() &&
+                cds[i].data().x_.size() == one.data().x_.size() &&
+                std::ranges::equal(cds[i].data().x_, one.data().x_) &&
+                cdsEuclid[i].marginal() == oneEuclid.marginal() &&
+                cdsErr[i].marginal() == oneErr.marginal() &&
+                std::ranges::equal(cdsErr[i].data().x_, oneErr.data().x_);
+            // Each result's weights are normalized by a sum that runs
+            // serially inside the batch's parallel loop, but may run in
+            // parallel, in a different order, for a single call: equal
+            // to rounding
+            const auto py = cds[i].pdf(ys, 0.0, 0.0);
+            for (std::size_t j = 0; ok && j < ys.size(); ++j)
+            {
+                const double want = one.pdf(ys[j], 0.0, 0.0);
+                ok = std::abs(py[j] - want) <= 1e-12 * want;
+            }
+        }
+        if (!ok) { fail("batch conditional differs from single-point conditional"); }
+    }
+
+    // Invalid errors
+    int thrown = 0;
+    auto expectThrow = [&thrown](auto&& f) -> void
+    {
+        try { f(); } catch (const std::invalid_argument&) { ++thrown; } catch (const std::domain_error&) { ++thrown; }
+    };
+    const std::vector<Eigen::MatrixXd> tooFew(errCov.begin(), errCov.end() - 1);
+    std::vector<Eigen::MatrixXd> wrongSize = errCov;
+    wrongSize[3] = Eigen::MatrixXd::Identity(3, 3);
+    std::vector<Eigen::MatrixXd> notPsd = errCov;
+    notPsd[nPt - 1] = -Eigen::MatrixXd::Identity(2, 2);
+    expectThrow([&] { (void)kde.pdf(shared, errDims, tooFew, 0.0, 0.0, bw); });
+    expectThrow([&] { (void)kde.pdf(shared, errDims, wrongSize, 0.0, 0.0, bw); });
+    expectThrow([&] { (void)kde.pdf(shared, {0, 1}, errCov, 0.0, 0.0, bw); });   // 1 is NaN
+    expectThrow([&] { (void)kde.pdf(shared, {0, 0}, errCov, 0.0, 0.0, bw); });   // repeated
+    expectThrow([&] { (void)kde.pdf(shared, {0, 4}, errCov, 0.0, 0.0, bw); });   // out of range
+    expectThrow([&] { (void)kde.pdf(shared, errDims, notPsd, 0.0, 0.0, bw); });  // thrown in the loop
+    expectThrow([&] { (void)kde.pdf(shared, 0.0, 0.0, std::vector<kden::Bandwidth>(perPoint.begin(), perPoint.end() - 1)); });
+    expectThrow([&] { (void)kde.conditional(shared, {0, 3}, std::vector<Eigen::MatrixXd>(nPt, Eigen::MatrixXd::Identity(2, 2)), {3}, 0.0, bw); }); // marginalized
+    expectThrow([&] { (void)kde.conditional(shared, errDims, notPsd, {3}, 0.0, bw); });
+    if (thrown != 9)
+    {
+        fail("only " + std::to_string(thrown) + " of 9 invalid batch calls threw");
+    }
+    return failures;
+}
+
 #endif // TESTKERNELDENSITY_HPP

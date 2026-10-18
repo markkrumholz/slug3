@@ -30,6 +30,7 @@ auto main() -> int {
         result += testKernelDensityPdf();
         result += testKernelDensityNormalization();
         result += testConditionalDensity();
+        result += testKernelDensityBatch();
         return result;
     }
     catch (const std::exception& error)
