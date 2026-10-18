@@ -25,6 +25,9 @@
 #include <utility>
 #include <variant>
 #include <vector>
+#ifdef _OPENMP
+#   include <omp.h>
+#endif
 
 /**
  * @brief A namespace for kd trees and kernel density estimation
@@ -381,7 +384,11 @@ namespace kden {
          * every point, with their bounding box. Finally
          * builds the rest of the tree by splitting every node, level
          * by level (see splitNode()), in parallel within each level if
-         * built with OpenMP. This reorders data in place.
+         * built with OpenMP -- across a level's nodes, or, for the top
+         * few levels, within each large node (see partitionNode() and
+         * setNodeBounds()). This reorders data in place; the order
+         * produced depends only on the data, not on the number of
+         * threads.
          */
         KDTree(Data& data,
             const std::size_t leafSize,
@@ -438,17 +445,31 @@ namespace kden {
             // level can be split in parallel. Level k holds nodes
             // 2^k - 1 through 2^(k+1) - 2; nodes on the last level have
             // at most leafSize_ points, so splitNode() just marks them
-            // as leaves.
+            // as leaves. A level with fewer nodes than threads (the top
+            // few) is instead split one node at a time, so that each
+            // split can use every thread (see partitionNode() and
+            // setNodeBounds()); which way a level is split does not
+            // change the tree built.
             std::size_t first = rootNode;
             std::size_t width = 1;
             for (std::size_t level = 0; level < nLevels_; ++level)
             {
 #ifdef _OPENMP
-#               pragma omp parallel for
-#endif
-                for (std::size_t i = first; i < first + width; ++i)
+                if (width >= static_cast<std::size_t>(omp_get_max_threads()))
                 {
-                    splitNode(i, splitBandwidth, noSplitDims);
+#                   pragma omp parallel for
+                    for (std::size_t i = first; i < first + width; ++i)
+                    {
+                        splitNode(i, splitBandwidth, noSplitDims);
+                    }
+                }
+                else
+#endif
+                {
+                    for (std::size_t i = first; i < first + width; ++i)
+                    {
+                        splitNode(i, splitBandwidth, noSplitDims);
+                    }
                 }
                 first += width;
                 width <<= 1;
@@ -669,6 +690,20 @@ namespace kden {
     protected:
 
         /**
+         * Nodes with at least this many points are partitioned
+         * (selectBlocked()) and have their bounding boxes found
+         * (setNodeBounds()) in blocks that can be processed in
+         * parallel; smaller ones serially
+         */
+        static constexpr std::size_t blockedMinCount = std::size_t{1} << 16;
+
+        /** Number of points per block, and per chunk of swaps, in the blocked algorithms */
+        static constexpr std::size_t blockSize = std::size_t{1} << 14;
+
+        /** Number of coordinates sampled to choose each round's pivots in selectBlocked() */
+        static constexpr std::size_t pivotSampleSize = 1024;
+
+        /**
          * @brief The nearest-neighbor search itself
          * @param x The search point; must match bandwidth (see Bandwidth::matches())
          * @param nNeighbor Number of neighbors to find
@@ -849,19 +884,65 @@ namespace kden {
          * their siblings. A node with no points gets lo = +inf and
          * hi = -inf in every dimension. Writes only this node's own
          * slices of the flat arrays, so nodes may be processed in
-         * parallel.
+         * parallel. A node with at least blockedMinCount points is
+         * scanned in blocks of blockSize, in parallel if built with
+         * OpenMP (and not already inside a parallel region), and the
+         * blocks' extents then combined; the result is the same either
+         * way.
          */
         void setNodeBounds(const std::size_t idx)
         {
             const auto& node = nodes_[idx];
-            const auto& pts = data_.get();
             const auto offset = static_cast<std::ptrdiff_t>(idx * nDim_);
             const auto len = static_cast<std::ptrdiff_t>(nDim_);
             const std::span<double> lo(nodeLo_.begin() + offset, nodeLo_.begin() + offset + len);
             const std::span<double> hi(nodeHi_.begin() + offset, nodeHi_.begin() + offset + len);
+            if (node.count_ < blockedMinCount)
+            {
+                rangeBounds(node.start_, node.start_ + node.count_, lo, hi);
+                return;
+            }
+
+            // Each block's extent, then their combination
+            const std::size_t nBlocks = (node.count_ + blockSize - 1) / blockSize;
+            std::vector<double> blockLo(nBlocks * nDim_);
+            std::vector<double> blockHi(nBlocks * nDim_);
+#ifdef _OPENMP
+#           pragma omp parallel for if(!omp_in_parallel())
+#endif
+            for (std::size_t b = 0; b < nBlocks; ++b)
+            {
+                const std::size_t start = node.start_ + (b * blockSize);
+                const std::size_t end = std::min(start + blockSize, node.start_ + node.count_);
+                rangeBounds(start, end, std::span<double>(blockLo).subspan(b * nDim_, nDim_),
+                    std::span<double>(blockHi).subspan(b * nDim_, nDim_));
+            }
             std::ranges::fill(lo, std::numeric_limits<double>::infinity());
             std::ranges::fill(hi, -std::numeric_limits<double>::infinity());
-            for (std::size_t i = node.start_; i < node.start_ + node.count_; ++i)
+            for (std::size_t b = 0; b < nBlocks; ++b)
+            {
+                for (std::size_t d = 0; d < nDim_; ++d)
+                {
+                    lo[d] = std::min(lo[d], blockLo[(b * nDim_) + d]); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                    hi[d] = std::max(hi[d], blockHi[(b * nDim_) + d]); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                }
+            }
+        }
+
+        /**
+         * @brief Find the extent of a contiguous range of points
+         * @param start Index of the first point
+         * @param end One past the index of the last point
+         * @param lo Set to the minimum of each coordinate (+inf if the range is empty)
+         * @param hi Set to the maximum of each coordinate (-inf if the range is empty)
+         */
+        void rangeBounds(const std::size_t start, const std::size_t end,
+            const std::span<double> lo, const std::span<double> hi) const
+        {
+            const auto& pts = data_.get();
+            std::ranges::fill(lo, std::numeric_limits<double>::infinity());
+            std::ranges::fill(hi, -std::numeric_limits<double>::infinity());
+            for (std::size_t i = start; i < end; ++i)
             {
                 const auto pos = pts.position(i);
                 for (std::size_t d = 0; d < nDim_; ++d)
@@ -874,32 +955,66 @@ namespace kden {
         }
 
         /**
+         * @brief A point's coordinate along one dimension
+         * @param i Index of the point
+         * @param dim The dimension
+         * @return The coordinate
+         */
+        [[nodiscard]] auto coord(const std::size_t i, const std::size_t dim) const -> double
+        {
+            return data_.get().x_[(i * nDim_) + dim]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        }
+
+        /**
          * @brief Partially sort a node's points about their median along its split dimension
          * @param idx Index of the node; its splitDim_ must already be set
          * @details
-         * Reorders the node's points (an in-place selection, following
-         * slug2's partition_node) so that, with m = start_ +
-         * (count_ - 1) / 2, the point at index m is the one that would
-         * be there if the node's points were fully sorted by their
-         * coordinate along splitDim_, every point before it has a
-         * coordinate no larger, and every point after it one no
-         * smaller. Points are swapped whole, with Data::swap(), so
-         * auxiliary data and any per-point arrays a derived Data adds
-         * move with their positions.
+         * Reorders the node's points (an in-place selection) so that,
+         * with m = start_ + (count_ - 1) / 2, the point at index m is
+         * the one that would be there if the node's points were fully
+         * sorted by their coordinate along splitDim_, every point
+         * before it has a coordinate no larger, and every point after
+         * it one no smaller. Points are swapped whole, with
+         * Data::swap(), so auxiliary data and any per-point arrays a
+         * derived Data adds move with their positions. A node with at
+         * least blockedMinCount points is narrowed down with
+         * selectBlocked(), which can run in parallel; the rest of the
+         * work is done by selectSerial().
          */
         void partitionNode(const std::size_t idx)
         {
             const auto& node = nodes_[idx];
-            auto& pts = data_.get();
             const auto dim = static_cast<std::size_t>(node.splitDim_);
-            auto key = [&pts, dim, nDim = nDim_](const std::size_t i) -> double
-            {
-                return pts.x_[(i * nDim) + dim]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-            };
-
-            std::size_t l = node.start_;
-            std::size_t r = node.start_ + node.count_ - 1;
             const std::size_t m = node.start_ + ((node.count_ - 1) >> 1);
+            if (node.count_ >= blockedMinCount)
+            {
+                selectBlocked(node.start_, node.start_ + node.count_, m, dim);
+            }
+            else
+            {
+                selectSerial(node.start_, node.start_ + node.count_ - 1, m, dim);
+            }
+        }
+
+        /**
+         * @brief Select, serially, the point of a given rank in a range
+         * @param first Index of the first point of the range
+         * @param last Index of the last point of the range (inclusive)
+         * @param m Index, in [first, last], at which to put the point of
+         *   rank m - first along dim
+         * @param dim The dimension to order by
+         * @details
+         * An in-place quickselect (following slug2's partition_node):
+         * afterwards, the points in [first, m) have coordinates no
+         * larger than point m's, and those in (m, last] no smaller.
+         */
+        void selectSerial(const std::size_t first, const std::size_t last, const std::size_t m,
+            const std::size_t dim)
+        {
+            auto& pts = data_.get();
+            auto key = [this, dim](const std::size_t i) -> double { return coord(i, dim); };
+            std::size_t l = first;
+            std::size_t r = last;
 
             // Iterate until the part of the list containing the middle
             // index has been narrowed down to that index alone
@@ -929,6 +1044,218 @@ namespace kden {
                 if (rptr > m) { r = rptr - 1; }
                 else { l = rptr; }
             }
+        }
+
+        /**
+         * @brief Select the point of a given rank in a large range, with passes that can run in parallel
+         * @param first Index of the first point of the range
+         * @param end One past the index of the last point of the range
+         * @param m Index, in [first, end), at which to put the point of
+         *   rank m - first along dim
+         * @param dim The dimension to order by
+         * @details
+         * The same result as selectSerial() (though possibly a
+         * different order of the points on either side of m). Each
+         * round sorts an evenly spaced sample of the range's
+         * coordinates and takes two of them, a little below and a
+         * little above m's relative rank, as pivots; two
+         * partitionBlocked() passes then narrow the range to the
+         * points between the pivots, which contain m unless the
+         * sample misjudged its rank (in which case the round still
+         * narrows the range, to one side of a pivot). Rounds continue
+         * until the range has fewer than blockedMinCount points, or
+         * consists of equal coordinates, or a round fails to narrow
+         * it; selectSerial() finishes the job. The order of points
+         * this produces depends only on the data, not on the number
+         * of threads.
+         */
+        void selectBlocked(const std::size_t first, const std::size_t end, const std::size_t m,
+            const std::size_t dim)
+        {
+            std::size_t l = first;
+            std::size_t r = end;
+            std::vector<double> sample;
+            while (r - l >= blockedMinCount)
+            {
+                // Pivots bracketing m's rank, from a sorted sample; the
+                // sample's ranks scatter by about sqrt(nSample) / 2, so
+                // a gap of twice sqrt(nSample) brackets m's rank with
+                // high probability
+                const std::size_t n = r - l;
+                const std::size_t nSample = std::min(pivotSampleSize, n);
+                sample.resize(nSample);
+                for (std::size_t k = 0; k < nSample; ++k)
+                {
+                    sample[k] = coord(l + ((k * n) / nSample), dim); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                }
+                std::ranges::sort(sample);
+                const auto gap = static_cast<std::size_t>(2.0 * std::sqrt(static_cast<double>(nSample)));
+                const std::size_t rank = ((m - l) * nSample) / n;
+                const double pivotLo = sample[rank >= gap ? rank - gap : 0]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                const double pivotHi = sample[std::min(rank + gap, nSample - 1)]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+
+                // Points below pivotLo first, then those up to pivotHi;
+                // keep whichever part holds m
+                const std::size_t oldL = l;
+                const std::size_t oldR = r;
+                const std::size_t below = partitionBlocked(l, r,
+                    [this, dim, pivotLo](const std::size_t i) -> bool { return coord(i, dim) < pivotLo; });
+                if (m < below)
+                {
+                    r = below;
+                }
+                else
+                {
+                    l = below;
+                    const std::size_t upTo = partitionBlocked(l, r,
+                        [this, dim, pivotHi](const std::size_t i) -> bool { return coord(i, dim) <= pivotHi; });
+                    if (m >= upTo)
+                    {
+                        l = upTo;
+                    }
+                    else
+                    {
+                        r = upTo;
+                        // Every point left has coordinate pivotLo, so
+                        // any order is sorted
+                        if (pivotLo == pivotHi) { return; }
+                    }
+                }
+                if (l == oldL && r == oldR) { break; }
+            }
+            selectSerial(l, r - 1, m, dim);
+        }
+
+        /**
+         * @brief Partition, serially, a range of points by a predicate
+         * @tparam Pred Callable taking a point index and returning bool
+         * @param first Index of the first point of the range
+         * @param end One past the index of the last point of the range
+         * @param pred The predicate
+         * @return The index of the first point for which pred is
+         *   false, after reordering the range so that pred holds for
+         *   the points before it and not for those from it on
+         */
+        template <typename Pred>
+        auto partitionSerial(const std::size_t first, const std::size_t end, const Pred& pred) -> std::size_t
+        {
+            auto& pts = data_.get();
+            std::size_t i = first;
+            std::size_t j = end;
+            while (true)
+            {
+                while (i < j && pred(i)) { ++i; }
+                while (i < j && !pred(j - 1)) { --j; }
+                if (i >= j) { return i; }
+                pts.swap(i, j - 1);
+                ++i;
+                --j;
+            }
+        }
+
+        /**
+         * @brief Partition a range of points by a predicate, in blocks that can be processed in parallel
+         * @tparam Pred Callable taking a point index and returning bool;
+         *   called concurrently, so must be safe to call from several
+         *   threads at once
+         * @param first Index of the first point of the range
+         * @param end One past the index of the last point of the range
+         * @param pred The predicate
+         * @return As for partitionSerial()
+         * @details
+         * Each block of blockSize points is partitioned on its own
+         * (partitionSerial()). With mid the returned index, the points
+         * then out of place -- those failing pred before mid, and those
+         * passing it from mid on -- are equal in number, and lie in at
+         * most one interval per block on each side; pairing the k'th
+         * of one side with the k'th of the other, the swaps that put
+         * them in place touch distinct points, so are made in parallel,
+         * in chunks of blockSize. Both stages run in parallel if built
+         * with OpenMP (and not already inside a parallel region); the
+         * blocks, and so the order of points produced, depend only on
+         * the range's size, not on the number of threads.
+         */
+        template <typename Pred>
+        auto partitionBlocked(const std::size_t first, const std::size_t end, const Pred& pred) -> std::size_t
+        {
+            const std::size_t nBlocks = (end - first + blockSize - 1) / blockSize;
+            std::vector<std::size_t> split(nBlocks);
+#ifdef _OPENMP
+#           pragma omp parallel for if(!omp_in_parallel())
+#endif
+            for (std::size_t b = 0; b < nBlocks; ++b)
+            {
+                const std::size_t start = first + (b * blockSize);
+                split[b] = partitionSerial(start, std::min(start + blockSize, end), pred); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            }
+            std::size_t mid = first;
+            for (std::size_t b = 0; b < nBlocks; ++b)
+            {
+                mid += split[b] - (first + (b * blockSize)); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            }
+
+            // The out-of-place points, as runs [start, start + length)
+            // in increasing order, with the number in earlier runs
+            struct Run
+            {
+                std::size_t start_;   /**< First point of the run */
+                std::size_t length_;  /**< Number of points in it */
+                std::size_t before_;  /**< Number of out-of-place points in earlier runs */
+            };
+            std::vector<Run> low;   // failing pred, before mid
+            std::vector<Run> high;  // passing pred, from mid on
+            std::size_t nLow = 0;
+            std::size_t nHigh = 0;
+            for (std::size_t b = 0; b < nBlocks; ++b)
+            {
+                const std::size_t start = first + (b * blockSize);
+                const std::size_t stop = std::min(start + blockSize, end);
+                const std::size_t s = split[b]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                if (s < mid && stop > s)
+                {
+                    const std::size_t length = std::min(stop, mid) - s;
+                    low.push_back({.start_ = s, .length_ = length, .before_ = nLow});
+                    nLow += length;
+                }
+                if (s > mid && s > start)
+                {
+                    const std::size_t runStart = std::max(start, mid);
+                    high.push_back({.start_ = runStart, .length_ = s - runStart, .before_ = nHigh});
+                    nHigh += s - runStart;
+                }
+            }
+            assert(nLow == nHigh);
+
+            // Swap the k'th out-of-place point on each side, for every k
+            auto& pts = data_.get();
+            const std::size_t nChunks = (nLow + blockSize - 1) / blockSize;
+#ifdef _OPENMP
+#           pragma omp parallel for if(!omp_in_parallel())
+#endif
+            for (std::size_t c = 0; c < nChunks; ++c)
+            {
+                const std::size_t k0 = c * blockSize;
+                const std::size_t k1 = std::min(k0 + blockSize, nLow);
+                auto runOf = [k0](const std::vector<Run>& runs) -> std::size_t
+                {
+                    const auto it = std::upper_bound(runs.begin(), runs.end(), k0,
+                        [](const std::size_t k, const Run& run) -> bool { return k < run.before_; });
+                    return static_cast<std::size_t>(it - runs.begin()) - 1;
+                };
+                std::size_t a = runOf(low);
+                std::size_t h = runOf(high);
+                std::size_t offA = k0 - low[a].before_; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                std::size_t offH = k0 - high[h].before_; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                for (std::size_t k = k0; k < k1; ++k)
+                {
+                    while (offA == low[a].length_) { ++a; offA = 0; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                    while (offH == high[h].length_) { ++h; offH = 0; } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                    pts.swap(low[a].start_ + offA, high[h].start_ + offH); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                    ++offA;
+                    ++offH;
+                }
+            }
+            return mid;
         }
 
         /**

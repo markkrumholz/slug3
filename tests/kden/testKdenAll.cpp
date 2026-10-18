@@ -22,6 +22,7 @@ auto main() -> int {
         result += testBandwidthConvolve();
         result += testKDTreeTraversal();
         result += testKDTreeConstruction();
+        result += testKDTreeBlockedBuild();
         result += testKDTreeNeighbors();
         result += testKDTreeNeighborsBatch();
         result += testKernelDensityConstruction();

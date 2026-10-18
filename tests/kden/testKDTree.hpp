@@ -7,7 +7,8 @@
  * bounding box and the split invariants, with and without auxiliary
  * data), and the nearest-neighbor search, single-point and batched,
  * against brute force for Euclidean, diagonal, strongly correlated,
- * and partially-unspecified metrics. (Bandwidth itself is tested in
+ * and partially-unspecified metrics, and the blocked build used for
+ * large nodes. (Bandwidth itself is tested in
  * testBandwidth.hpp.) Test data carry their original index as
  * auxiliary data, so results can be matched to brute force point by
  * point even though building the tree reorders them.
@@ -32,6 +33,9 @@
 #include <string>
 #include <utility>
 #include <vector>
+#ifdef _OPENMP
+#   include <omp.h>
+#endif
 
 /** Test data, owned: each point's auxiliary data is its original index */
 using KDTestData = kden::OwnedKDTreeData<std::size_t>;
@@ -226,7 +230,7 @@ inline auto testKDTreeConstruction() -> int
     const Eigen::MatrixXd corr = (0.2 * Eigen::MatrixXd::Identity(4, 4)) +
         (0.8 * Eigen::MatrixXd::Ones(4, 4));
     const kden::Bandwidth metric(corr.inverse());
-    for (const std::size_t nPt : {1UL, 16UL, 17UL, 100UL, 5000UL})
+    for (const std::size_t nPt : {1UL, 16UL, 17UL, 100UL, 5000UL, 300000UL})
     {
         for (const bool withMetric : {false, true})
         {
@@ -317,6 +321,73 @@ inline auto testKDTreeConstruction() -> int
     {
         std::cerr << "testKDTreeConstruction: only " << thrown << " of 9 invalid constructions threw\n";
         ++failures;
+    }
+    return failures;
+}
+
+/**
+ * @brief Check the blocked build used for large nodes: valid trees, on hard data, independent of the thread count
+ * @return Number of failures
+ * @details
+ * Nodes of at least KDTree::blockedMinCount (65536) points are
+ * partitioned by sampling pivots and partitioning in blocks. Covers
+ * data with many tied coordinates; adversarial data, in which every
+ * position the first round samples holds an extreme value, so that
+ * the pivots misjudge the median's rank (both too high and too low);
+ * and, if built with OpenMP, that one thread builds exactly the same
+ * order of points as many.
+ */
+inline auto testKDTreeBlockedBuild() -> int
+{
+    int failures = 0;
+    constexpr std::size_t nPt = 300000;
+    constexpr std::size_t nSample = 1024;  // KDTree's pivotSampleSize
+
+    // Plain, tied, and adversarial data sets
+    std::vector<std::pair<std::string, KDTestData>> cases;
+    cases.emplace_back("plain", makeKDTestData(nPt, 3, 2, 11));
+    cases.emplace_back("tied", makeKDTestData(nPt, 3, 2, 12, true));
+    for (const double sign : {1.0, -1.0})
+    {
+        KDTestData adversarial = makeKDTestData(nPt, 1, 0, 13);
+        for (std::size_t k = 0; k < nSample; ++k)
+        {
+            adversarial.x_[(k * nPt) / nSample] = sign * (1.0e6 + static_cast<double>(k));
+        }
+        cases.emplace_back(sign > 0.0 ? "sampled high" : "sampled low", std::move(adversarial));
+    }
+
+    for (auto& [what, data] : cases)
+    {
+#ifdef _OPENMP
+        // Build on at least two threads, even if fewer are available
+        // by default, so that the comparison below is with a parallel
+        // build
+        auto serialData = data;
+        const int nThreads = omp_get_max_threads();
+        const int nParallel = std::max(nThreads, 2);
+        omp_set_num_threads(nParallel);
+#endif
+        auto view = data.view();
+        const KDTestTree tree(view, 16);
+        const int bad = checkKDTreeInvariants(tree, nPt);
+        if (bad != 0)
+        {
+            std::cerr << "testKDTreeBlockedBuild: " << bad << " violations for " << what << " data\n";
+            ++failures;
+        }
+#ifdef _OPENMP
+        omp_set_num_threads(1);
+        auto serialView = serialData.view();
+        const KDTestTree serialTree(serialView, 16);
+        omp_set_num_threads(nThreads);
+        if (serialData.x_ != data.x_ || serialData.aux_ != data.aux_)
+        {
+            std::cerr << "testKDTreeBlockedBuild: " << what << " data: one thread ordered the points "
+                << "differently from " << nParallel << "\n";
+            ++failures;
+        }
+#endif
     }
     return failures;
 }
