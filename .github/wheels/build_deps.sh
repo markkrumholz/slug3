@@ -4,7 +4,9 @@
 # source as static, position-independent libraries, installed into a single
 # prefix, for building binary wheels (see .github/workflows/wheels.yml). On
 # macOS, also build LLVM's OpenMP runtime (libomp), which Apple's compiler
-# lacks, as a shared library that delocate then bundles into each wheel.
+# lacks, as a shared library that delocate then bundles into each wheel
+# (and share_libomp.py then makes shareable with another libomp already
+# loaded in the process).
 #
 # Static libraries are linked straight into the _slug extension module and
 # the slug executable, so a wheel carries no separate copies of these
