@@ -88,6 +88,7 @@ def test_construction_defaults(lib: cluster_slug) -> None:
     assert len(lib.filtersets) == 0 and len(lib.kdes) == 0
     assert lib.inference_quantities == ["mass", "age", "A_V", "metallicity"]
     assert lib.abstol == 1e-8 and lib.reltol == 1e-2
+    assert lib.bw_phot == 0.1 and lib.bw_phys == 0.1
     # The example has extincted, but not nebular, photometry
     assert lib.use_extinct is True and lib.use_nebular is False
     with pytest.raises(AttributeError):
@@ -120,13 +121,14 @@ def test_constructor_keywords() -> None:
     pobs = np.full(LIBRARY_SIZE, 0.5)
     priors = np.full(LIBRARY_SIZE, 2.0)
     lib = cluster_slug(str(LIBRARY), pobs=pobs, priors=priors, filtersets=["Lbol"],
-                       inference_quantities=["mass", "Q(HI)"],
+                       inference_quantities=["mass", "Q(HI)"], bw_phot=0.2, bw_phys=0.05,
                        abstol=0.0, reltol=1e-3, use_nebular=False, use_extinct=False)
     assert isinstance(lib.pobs, np.ndarray) and np.array_equal(lib.pobs, pobs)
     assert isinstance(lib.priors, np.ndarray) and np.array_equal(lib.priors, priors)
     assert list(lib.filtersets) == [("Lbol",)]
     assert lib.inference_quantities == ["mass", "Q(HI)"]
     assert lib.abstol == 0.0 and lib.reltol == 1e-3
+    assert lib.bw_phot == 0.2 and lib.bw_phys == 0.05
     assert lib.use_nebular is False and lib.use_extinct is False
 
     two = cluster_slug(str(LIBRARY), filtersets=[["Lbol"], ["HST.WFC3_UVIS1.F555W", "HST.WFC3_UVIS1.F814W"]])
@@ -380,6 +382,55 @@ def test_kdes_and_removal() -> None:
     assert list(lib.filtersets) == [("HST.WFC3_UVIS1.F555W",)]
     with pytest.raises(KeyError):
         lib.remove_filterset(["Lbol"])
+
+
+def test_default_bandwidth() -> None:
+    """The default h2Inv is diagonal from bw_phot/bw_phys, and follows changes to them."""
+    lib = cluster_slug(str(LIBRARY), inference_quantities=["mass", "age", "Q(HI)"],
+                       bw_phot=0.2, bw_phys=0.05)
+    filters = ["HST.WFC3_UVIS1.F555W", "Lbol"]
+    lib.add_filterset(filters)
+    lib.add_filterset(["HST.WFC3_UVIS1.F814W"], h2Inv=3.0)
+    kde = lib.kdes[tuple(filters)]
+    assert kde.names == filters + ["mass", "age", "Q(HI)"]
+
+    def expected(bw_phot: float, bw_phys: float) -> np.ndarray:
+        # F555W in mag; Lbol and Q(HI) stored as log10, so 0.4 bw_phot dex
+        return np.diag(1.0 / np.square([bw_phot, 0.4 * bw_phot, bw_phys, bw_phys, 0.4 * bw_phot]))
+
+    assert np.allclose(kde.h2Inv, expected(0.2, 0.05), rtol=1e-14)
+
+    # Changing either bandwidth updates default-bandwidth estimates in
+    # place, and their evaluation uses the new bandwidth; estimates with
+    # an explicit h2Inv are left alone
+    x = kde.dataset[7].copy()
+    before = kde.pdf(x, relTol=0.0, absTol=0.0)
+    lib.bw_phot = 0.1
+    lib.bw_phys = 0.2
+    assert np.allclose(kde.h2Inv, expected(0.1, 0.2), rtol=1e-14)
+    assert np.array_equal(lib.kdes[("HST.WFC3_UVIS1.F814W",)].h2Inv, 3.0 * np.eye(4))
+    after = kde.pdf(x, relTol=0.0, absTol=0.0)
+    ref = cluster_slug(str(LIBRARY), inference_quantities=["mass", "age", "Q(HI)"],
+                       bw_phot=0.1, bw_phys=0.2, filtersets=[filters])
+    assert after == pytest.approx(ref.kdes[tuple(filters)].pdf(x, relTol=0.0, absTol=0.0), rel=1e-12)
+    assert after != pytest.approx(before)
+
+    # Re-adding with an explicit h2Inv stops it following the
+    # bandwidths; re-adding with the default starts again
+    lib.add_filterset(filters, h2Inv=5.0)
+    lib.bw_phot = 0.3
+    assert np.array_equal(lib.kdes[tuple(filters)].h2Inv, 5.0 * np.eye(5))
+    lib.add_filterset(filters)
+    assert np.allclose(lib.kdes[tuple(filters)].h2Inv, expected(0.3, 0.2), rtol=1e-14)
+    lib.remove_filterset(filters)
+    lib.bw_phys = 0.1
+
+    for bad, err in [(0.0, ValueError), (-0.1, ValueError), (np.inf, ValueError),
+                     (np.nan, ValueError), ("0.1", TypeError), (True, TypeError)]:
+        for name in ["bw_phot", "bw_phys"]:
+            with pytest.raises(err):
+                setattr(lib, name, bad)
+    assert lib.bw_phot == 0.3 and lib.bw_phys == 0.1
 
 
 def test_sampling_density() -> None:

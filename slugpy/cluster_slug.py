@@ -119,6 +119,37 @@ def _check_tolerance(value: Any, name: str) -> float:
     return tol
 
 
+def _check_bandwidth(value: Any, name: str) -> float:
+    """
+    Check that a value is a valid bandwidth.
+
+    Parameters
+    ----------
+    value : Any
+        The value to check.
+    name : str
+        Its name ("bw_phot" or "bw_phys"), for error messages.
+
+    Returns
+    -------
+    float
+        value, as a float.
+
+    Raises
+    ------
+    TypeError
+        If value is not a real number.
+    ValueError
+        If value is not finite and positive.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float, np.integer, np.floating)):
+        raise TypeError(f"{name} must be a real number")
+    bw = float(value)
+    if not math.isfinite(bw) or bw <= 0.0:
+        raise ValueError(f"{name} must be finite and positive")
+    return bw
+
+
 def _is_mag_unit(unit: u.UnitBase) -> bool:
     """
     Whether a photometric unit is a magnitude.
@@ -244,6 +275,10 @@ class cluster_slug(slug_reader):
         Initial value of the inference_quantities property. If None (the
         default), those of "mass", "age", "A_V", and "metallicity" that
         are not singular in the library (see inference_quantities).
+    bw_phot : float, optional
+        Initial value of the bw_phot property (default 0.1).
+    bw_phys : float, optional
+        Initial value of the bw_phys property (default 0.1).
     abstol : float, optional
         Initial value of the abstol property (default 1e-8).
     reltol : float, optional
@@ -299,6 +334,15 @@ class cluster_slug(slug_reader):
         the names of any of the library's filters (e.g. to infer Q(HI)
         from photometry in other filters). No filter named here may also
         be in any filter set.
+    bw_phot : float
+        Photometric bandwidth of the default kernel, in mag (positive);
+        see add_filterset(). Setting it updates every kernel density
+        estimate built with the default bandwidth.
+    bw_phys : float
+        Bandwidth of the default kernel in the physical quantities, in
+        dex for mass and age, mag for A_V, and dex for [Fe/H]
+        (positive); see add_filterset(). Setting it updates every kernel
+        density estimate built with the default bandwidth.
     abstol : float
         Absolute tolerance for evaluating PDFs (non-negative).
     reltol : float
@@ -317,17 +361,19 @@ class cluster_slug(slug_reader):
     Notes
     -----
     Changing pobs or priors reweights every kernel density estimate in
-    place (see the pobs property). The other settings are read when a
-    filter set is added: changing inference_quantities, use_nebular, or
-    use_extinct afterwards does not change estimates already built;
-    remove and re-add a filter set to rebuild its estimate.
+    place (see the pobs property), and changing bw_phot or bw_phys
+    updates the bandwidth of every estimate built with the default
+    bandwidth. The other settings are read when a filter set is added:
+    changing inference_quantities, use_nebular, or use_extinct
+    afterwards does not change estimates already built; remove and
+    re-add a filter set to rebuild its estimate.
     """
 
     def __init__(self, filename: str, pobs: ProbSpec = None, priors: ProbSpec = None,
                  filtersets: list[str] | list[list[str]] | None = None,
-                 inference_quantities: list[str] | None = None, abstol: float = 1e-8,
-                 reltol: float = 1e-2, use_nebular: bool | None = None,
-                 use_extinct: bool | None = None) -> None:
+                 inference_quantities: list[str] | None = None, bw_phot: float = 0.1,
+                 bw_phys: float = 0.1, abstol: float = 1e-8, reltol: float = 1e-2,
+                 use_nebular: bool | None = None, use_extinct: bool | None = None) -> None:
         super().__init__(filename)
 
         # The library must have one photometry entry per cluster, and
@@ -369,6 +415,11 @@ class cluster_slug(slug_reader):
 
         # Settings, each checked by its own setter
         self._kdes: dict[tuple[str, ...], KDE] = {}
+        # The filter sets whose estimates use the default bandwidth, which
+        # follows bw_phot and bw_phys
+        self._default_bw: set[tuple[str, ...]] = set()
+        self._bw_phot: float = 0.1
+        self._bw_phys: float = 0.1
         self._pobs: ProbSpec = None
         self._priors: ProbSpec = None
         # pobs and priors as arrays (a callable's result, cached so that
@@ -387,6 +438,8 @@ class cluster_slug(slug_reader):
         self.inference_quantities = (
             [q for q in PHYSICAL_QUANTITIES if q not in self._singular]
             if inference_quantities is None else inference_quantities)
+        self.bw_phot = bw_phot
+        self.bw_phys = bw_phys
         self.abstol = abstol
         self.reltol = reltol
         self.use_nebular = self._has_nebular if use_nebular is None else use_nebular
@@ -577,6 +630,59 @@ class cluster_slug(slug_reader):
                              "sets; a filter cannot be inferred from itself")
 
     @property
+    def bw_phot(self) -> float:
+        """
+        float : photometric bandwidth of the default kernel, in mag
+        (positive; see add_filterset()).
+
+        Raises
+        ------
+        TypeError
+            On setting, if the value is not a real number.
+        ValueError
+            On setting, if the value is not finite and positive.
+
+        Notes
+        -----
+        Setting bw_phot updates the bandwidth of every kernel density
+        estimate built with the default bandwidth (no rebuild is
+        needed); estimates built with an explicit h2Inv are unchanged.
+        """
+        return self._bw_phot
+
+    @bw_phot.setter
+    def bw_phot(self, value: Any) -> None:
+        self._bw_phot = _check_bandwidth(value, "bw_phot")
+        self._update_default_bandwidths()
+
+    @property
+    def bw_phys(self) -> float:
+        """
+        float : bandwidth of the default kernel in the physical
+        quantities (positive; see add_filterset()): in dex for mass and
+        age, which the estimates store as log10, in mag for A_V, and in
+        dex for [Fe/H].
+
+        Raises
+        ------
+        TypeError
+            On setting, if the value is not a real number.
+        ValueError
+            On setting, if the value is not finite and positive.
+
+        Notes
+        -----
+        As for bw_phot, setting bw_phys updates the bandwidth of every
+        kernel density estimate built with the default bandwidth.
+        """
+        return self._bw_phys
+
+    @bw_phys.setter
+    def bw_phys(self, value: Any) -> None:
+        self._bw_phys = _check_bandwidth(value, "bw_phys")
+        self._update_default_bandwidths()
+
+    @property
     def abstol(self) -> float:
         """
         float : absolute tolerance for evaluating PDFs (non-negative).
@@ -675,7 +781,9 @@ class cluster_slug(slug_reader):
             filters, and none may be in inference_quantities.
         h2Inv : float or numpy.ndarray, optional
             The KDE's inverse squared bandwidth matrix, in any form KDE
-            accepts; if None (the default), chosen by Silverman's rule.
+            accepts. If None (the default), the default bandwidth, set
+            by bw_phot and bw_phys (see Notes), which then follows any
+            later change to them.
 
         Raises
         ------
@@ -705,6 +813,12 @@ class cluster_slug(slug_reader):
         - for "mass" and "age": log10 of the target mass (Msun) and of
           the cluster's age (yr);
         - for "A_V" and "metallicity": A_V (mag) and [Fe/H], unlogged.
+
+        The default bandwidth is diagonal: the kernel is exp(-d^T h2Inv
+        d), with h2Inv's diagonal entry 1 / bw_phys^2 for a physical
+        quantity, and, for a filter, 1 / bw_phot^2 if it is in
+        magnitudes or 1 / (0.4 bw_phot)^2 if it is stored as log10, so
+        that bw_phot is the same width in either unit.
 
         If pobs or priors is set, each cluster is weighted by pobs, and
         by priors divided by the density from which the library drew
@@ -757,9 +871,45 @@ class cluster_slug(slug_reader):
             if not np.any(kept_weights > 0.0):
                 raise ValueError(f"the library clusters valid for {columns} all have zero weight")
 
-        self._kdes[tuple(names)] = KDE(
-            kept, h2Inv=h2Inv, w=kept_weights, names=columns, aux=rows,
+        key = tuple(names)
+        self._kdes[key] = KDE(
+            kept, h2Inv=self._default_h2inv(columns) if h2Inv is None else h2Inv,
+            w=kept_weights, names=columns, aux=rows,
             noSplitDims=list(range(len(names), len(columns))))
+        if h2Inv is None:
+            self._default_bw.add(key)
+        else:
+            self._default_bw.discard(key)
+
+    def _default_h2inv(self, columns: list[str]) -> np.ndarray:
+        """
+        The default inverse squared bandwidth matrix for an estimate.
+
+        Parameters
+        ----------
+        columns : list of str
+            The estimate's dimensions: filters and physical quantities.
+
+        Returns
+        -------
+        numpy.ndarray of float, shape (len(columns), len(columns))
+            The diagonal matrix described in add_filterset().
+        """
+        filters = [c for c in columns if c not in PHYSICAL_QUANTITIES]
+        units = dict(zip(filters, self._band_units(filters), strict=True))
+        widths = [self._bw_phys if c in PHYSICAL_QUANTITIES
+                  else self._bw_phot if _is_mag_unit(units[c])
+                  else 0.4 * self._bw_phot
+                  for c in columns]
+        return np.diag(1.0 / np.square(widths))
+
+    def _update_default_bandwidths(self) -> None:
+        """
+        Set every default-bandwidth estimate's h2Inv from bw_phot and bw_phys.
+        """
+        for key in self._default_bw:
+            kde = self._kdes[key]
+            kde.h2Inv[...] = self._default_h2inv(kde.names)
 
     def conditional(self, x0: Any, massTol: float = 1e-2, marginalDims: list[int] | None = None,
                     leafSize: int = 16, filterset: list[str] | None = None,
@@ -1002,6 +1152,7 @@ class cluster_slug(slug_reader):
         if key not in self._kdes:
             raise KeyError(f"no filter set {list(key)}")
         del self._kdes[key]
+        self._default_bw.discard(key)
 
     def _phot_column(self, name: str) -> np.ndarray:
         """
