@@ -203,10 +203,9 @@ ValueError
     was reduced for a different pattern of NaNs, or a bandwidth is
     singular over the specified dimensions; if errDims is given without
     errCov, has a dimension out of range, repeated, or NaN in a point,
-    errCov has the wrong shape or is not finite and symmetric, or a
-    sequence of bandwidths is given with errCov.
-ArithmeticError
-    If an errCov matrix is not positive semi-definite.
+    errCov has the wrong shape, or is not finite, symmetric, and
+    positive semi-definite, or a sequence of bandwidths is given with
+    errCov.
 
 Notes
 -----
@@ -258,8 +257,6 @@ ValueError
     are not positive definite, or every point's conditional weight
     underflows to zero; or if errDims or errCov is invalid, as for
     pdf().
-ArithmeticError
-    If an errCov matrix is not positive semi-definite.
 
 Notes
 -----

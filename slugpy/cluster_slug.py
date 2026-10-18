@@ -62,8 +62,10 @@ def _check_prob_spec(value: Any, name: str, size: int, at_most_one: bool) -> Pro
     Returns
     -------
     ProbSpec
-        value, unchanged if it is None or a callable, or as a float64
-        array if it is an array.
+        value, unchanged if it is None or a callable, or, if it is an
+        array, a read-only float64 copy of it (so that changing the
+        caller's array later cannot desynchronize it from the weights
+        computed from it).
 
     Raises
     ------
@@ -78,7 +80,8 @@ def _check_prob_spec(value: Any, name: str, size: int, at_most_one: bool) -> Pro
         return value
     if not isinstance(value, np.ndarray):
         raise TypeError(f"{name} must be None, a 1D numpy array, or a callable")
-    arr = np.asarray(value, dtype=np.float64)
+    arr = np.array(value, dtype=np.float64)
+    arr.setflags(write=False)
     if arr.ndim != 1 or arr.size != size:
         raise ValueError(f"{name} must be a 1D array with one element per library cluster ({size})")
     if not np.all(np.isfinite(arr)) or np.any(arr < 0.0):
@@ -1399,7 +1402,7 @@ class cluster_slug(slug_reader):
         """
         phot = self.cluster_phot
         assert phot is not None
-        is_mag = phot.filter_units[phot.filters.index(name)].startswith("mag")
+        is_mag = _is_mag_unit(self._band_units([name])[0])
         result: np.ndarray | None = None
         for suffix in _PHOT_CHAINS[(self._use_nebular, self._use_extinct)]:
             # Read a fallback variant only if values are still missing

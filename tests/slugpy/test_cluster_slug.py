@@ -157,6 +157,21 @@ def test_constructor_keywords() -> None:
             cluster_slug(str(LIBRARY), filtersets=bad)  # pyright: ignore[reportArgumentType]
 
 
+def test_pobs_and_priors_arrays_are_copied() -> None:
+    """An array pobs or priors is a read-only copy, so the caller's array can change freely."""
+    lib = cluster_slug(str(LIBRARY), filtersets=["Lbol"])
+    kde = lib.kdes[("Lbol",)]
+    priors = np.ones(LIBRARY_SIZE)
+    lib.priors = priors
+    w = kde.w.copy()
+    priors[:] = 2.0 * np.arange(LIBRARY_SIZE)
+    held = lib.priors
+    assert isinstance(held, np.ndarray) and np.all(held == 1.0) and not held.flags.writeable
+    assert np.array_equal(kde.w, w)
+    with pytest.raises(ValueError):
+        held[0] = 5.0
+
+
 def test_pobs_and_priors_validation(lib: cluster_slug) -> None:
     """pobs and priors accept None, arrays of the right size and range, and callables."""
     lib.pobs = np.linspace(0.0, 1.0, LIBRARY_SIZE)

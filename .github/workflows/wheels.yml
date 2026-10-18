@@ -101,12 +101,16 @@ jobs:
         uses: mamba-org/setup-micromamba@v2
         with:
           environment-name: libomp-test
+          # slugpy's runtime dependencies (pyproject.toml's [project]
+          # dependencies -- keep the two lists in step), from conda-forge,
+          # since the wheel is installed below with --no-deps
           create-args: >-
             python=3.12
             numpy
             libopenblas=*=openmp*
             astropy
             h5py
+            numexpr
             platformdirs
             scipy
             tomlkit
