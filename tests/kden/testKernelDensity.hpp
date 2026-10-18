@@ -103,7 +103,7 @@ inline auto testKernelDensityConstruction() -> int
     m(0, 1) = m(1, 0) = 0.5;
     const kden::Bandwidth splitBw(m);
 
-    for (const std::size_t nPt : {1UL, 16UL, 17UL, 100UL, 5000UL})
+    for (const std::size_t nPt : {1UL, 16UL, 17UL, 100UL, 5000UL, 300000UL})
     {
         for (const bool withMetric : {false, true})
         {
@@ -125,7 +125,11 @@ inline auto testKernelDensityConstruction() -> int
                 ++failures;
             }
 
-            // Each weight moved with its point, and was normalized
+            // Each weight moved with its point, and was normalized (to
+            // within the rounding of summing nPt weights, which differs
+            // between this sum and the constructor's; a weight on the
+            // wrong point would be off by order unity)
+            const double tol = 1e-15 * static_cast<double>(std::max<std::size_t>(nPt, 1000));
             double wTot = 0.0;
             for (std::size_t i = 0; i < nPt; ++i) { wTot += kdeTestWeight(i); }
             bool moved = true;
@@ -133,10 +137,10 @@ inline auto testKernelDensityConstruction() -> int
             for (std::size_t i = 0; i < nPt; ++i)
             {
                 const double want = kdeTestWeight(kdeData.aux_[i]) / wTot;
-                moved = moved && std::abs(kdeData.w_[i] - want) <= 1e-12 * want;
+                moved = moved && std::abs(kdeData.w_[i] - want) <= tol * want;
                 wSum += kdeData.w_[i];
             }
-            if (!moved || std::abs(wSum - 1.0) > 1e-12 || std::abs(kde.nodeW(kden::rootNode) - 1.0) > 1e-12)
+            if (!moved || std::abs(wSum - 1.0) > tol || std::abs(kde.nodeW(kden::rootNode) - 1.0) > tol)
             {
                 std::cerr << "testKernelDensityConstruction: " << what
                     << ": weights were not reordered with their points and normalized\n";
