@@ -15,11 +15,14 @@
 #include <bit>
 #include <cmath>
 #include <cstddef>
+#include <exception>
 #include <limits>
 #include <memory>
 #include <numbers>
+#include <optional>
 #include <span>
 #include <stdexcept>
+#include <string>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -325,6 +328,15 @@ namespace kden {
         using Tree = KDTree<KernelDensityData<AuxType>>;
 
         /**
+         * What conditionalSample() returns: a conditional estimate's
+         * points (K x nR, point-major), their weights (K), and their
+         * auxiliary data (K elements, carried over from this estimate's
+         * points; an empty placeholder if AuxType is void)
+         */
+        using Sample = std::tuple<std::vector<double>, std::vector<double>,
+            typename KDTreeAuxStorage<AuxType>::Owned>;
+
+        /**
          * @brief Construct a KernelDensity over a set of weighted points
          * @param data The kernel centers; as for the corresponding KDTree
          *   constructor. Every weight must also be finite and
@@ -514,13 +526,101 @@ namespace kden {
          * weight dropped is thus at most massTol of the total, so the
          * result's L1 distance from the exact conditional density is at
          * most 2 massTol. Its cost depends on the number of points kept,
-         * not the size of the tree. Thread-safe, as for pdf().
+         * not the size of the tree. conditionalSample() finds the same
+         * points and weights without building the result. Thread-safe,
+         * as for pdf().
          */
         [[nodiscard]] auto conditional(const std::vector<double>& x0,
             const std::vector<std::size_t>& marginalDims,
             const double massTol,
             const Bandwidth& bandwidth,
             const std::size_t leafSize = 16) const -> ConditionalDensity<AuxType>
+        {
+            auto pts = conditionalPoints(x0, marginalDims, massTol, bandwidth);
+            return ConditionalDensity<AuxType>(std::move(pts.data_), Bandwidth(pts.metric_),
+                std::move(pts.dims_), pts.marginal_, leafSize);
+        }
+
+        /**
+         * @brief Find the sample points, weights, and auxiliary data of a conditional estimate, without building it
+         * @param x0 As for conditional()
+         * @param marginalDims As for conditional()
+         * @param massTol As for conditional()
+         * @param bandwidth As for conditional()
+         * @return The points the conditional estimate p(y | x0_F) keeps,
+         *   in the dimensions R (in increasing order), K x |R|,
+         *   point-major; and their weights, K of them, w'_i = w_i
+         *   exp(-a_i^T S a_i) (see conditional()), with w_i this
+         *   estimate's normalized weights: not themselves normalized, so
+         *   that their sum times sqrt(det S) / pi^(|F|/2) is the marginal
+         *   density over F at x0_F (conditional()'s marginal()); and,
+         *   unless AuxType is void, their auxiliary data, carried over
+         *   from the points they came from (see Sample)
+         * @throws As for conditional()
+         * @details
+         * The same points, weights, and auxiliary data as
+         * conditional() keeps, in increasing order of weight, without
+         * building the conditional estimate's tree: a
+         * KernelDensity over them, with the kernel metric M'_RR -- the
+         * block of bandwidth.reduce(G) over R, a function of the
+         * bandwidth alone -- is the conditional estimate. Suited to
+         * storing conditional estimates, to be rebuilt as needed.
+         * Thread-safe, as for conditional().
+         */
+        [[nodiscard]] auto conditionalSample(const std::vector<double>& x0,
+            const std::vector<std::size_t>& marginalDims,
+            const double massTol,
+            const Bandwidth& bandwidth) const -> Sample
+        {
+            auto pts = conditionalPoints(x0, marginalDims, massTol, bandwidth);
+            return {std::move(pts.data_.x_), std::move(pts.data_.w_), std::move(pts.data_.aux_)};
+        }
+
+        /**
+         * @brief Find the sample points and weights of a conditional estimate, with the Euclidean bandwidth
+         * @param x0 As for the other overload
+         * @param marginalDims As for the other overload
+         * @param massTol As for the other overload
+         * @return As for the other overload, with M the identity
+         * @throws As for the other overload
+         */
+        [[nodiscard]] auto conditionalSample(const std::vector<double>& x0,
+            const std::vector<std::size_t>& marginalDims,
+            const double massTol) const -> Sample
+        {
+            return conditionalSample(x0, marginalDims, massTol, this->euclidean_);
+        }
+
+    protected:
+
+        /**
+         * @struct ConditionalPoints
+         * @brief What conditional() and conditionalSample() find: a conditional estimate's points, before its tree is built
+         */
+        struct ConditionalPoints
+        {
+            OwnedKernelDensityData<AuxType> data_;  /**< The kept points, in the dimensions R; their unnormalized weights; and their auxiliary data */
+            std::vector<std::size_t> dims_;         /**< The kept dimensions R, in increasing order */
+            Eigen::MatrixXd metric_;                /**< The conditional kernel metric M'_RR */ // NOLINT(misc-include-cleaner) -- Eigen::MatrixXd is provided by <Eigen/Dense> (included via Bandwidth.hpp); clang-tidy's IWYU mapping doesn't know that
+            double marginal_ = 0.0;                 /**< The marginal density over F at x0_F */
+        };
+
+        /**
+         * @brief Find a conditional estimate's points, weights, metric, and marginal
+         * @param x0 As for conditional()
+         * @param marginalDims As for conditional()
+         * @param massTol As for conditional()
+         * @param bandwidth As for conditional()
+         * @return The points and the rest (see ConditionalPoints)
+         * @throws As for conditional()
+         * @details
+         * The work of conditional() and conditionalSample(); see
+         * conditional() for the method.
+         */
+        [[nodiscard]] auto conditionalPoints(const std::vector<double>& x0,
+            const std::vector<std::size_t>& marginalDims,
+            const double massTol,
+            const Bandwidth& bandwidth) const -> ConditionalPoints
         {
             // Sort the dimensions into fixed (F), kept (R), and
             // marginalized (G)
@@ -584,9 +684,11 @@ namespace kden {
             // up to the normalization of S's kernel
             const double marginal = keptMass * std::sqrt(weightMetric.det()) /
                 std::pow(std::numbers::pi, 0.5 * static_cast<double>(nF));
-            return ConditionalDensity<AuxType>(std::move(data), Bandwidth(kernelMetric),
-                std::move(dimsR), marginal, leafSize);
+            return {.data_ = std::move(data), .dims_ = std::move(dimsR), .metric_ = kernelMetric,
+                .marginal_ = marginal};
         }
+
+    public:
 
         /**
          * @brief Condition the estimate on values of some dimensions, with the Euclidean bandwidth
@@ -605,7 +707,438 @@ namespace kden {
             return conditional(x0, marginalDims, massTol, this->euclidean_, leafSize);
         }
 
+        /**
+         * @brief Evaluate the kernel density estimate at each of several points, in parallel
+         * @param x The points, each as for the single-point pdf()
+         * @param relTol As for the single-point pdf()
+         * @param absTol As for the single-point pdf()
+         * @param bandwidth The bandwidth, one per point
+         * @return The estimate at each point, each exactly as the
+         *   single-point pdf() returns it
+         * @throws std::invalid_argument if x and bandwidth differ in
+         *   length; otherwise, any exception the single-point pdf()
+         *   throws for any one of the points (the first one caught, if
+         *   several do)
+         * @details
+         * Runs the single-point pdf() for each point, in parallel
+         * (dynamically scheduled, since queries can differ widely in
+         * cost) if built with OpenMP.
+         */
+        [[nodiscard]] auto pdf(const std::vector<std::vector<double>>& x,
+            const double relTol,
+            const double absTol,
+            const std::vector<Bandwidth>& bandwidth) const -> std::vector<double>
+        {
+            if (bandwidth.size() != x.size())
+            {
+                throw std::invalid_argument("KernelDensity::pdf: x and bandwidth must have the same "
+                    "number of elements");
+            }
+            return parallelEval<double>(x.size(), [&](const std::size_t i) -> double
+                { return pdf(x[i], relTol, absTol, bandwidth[i]); }); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        }
+
+        /**
+         * @brief Evaluate the kernel density estimate at each of several points, in parallel, sharing one bandwidth
+         * @param x The points, each as for the single-point pdf()
+         * @param relTol As for the single-point pdf()
+         * @param absTol As for the single-point pdf()
+         * @param bandwidth The bandwidth, shared by every point
+         * @return As for the version taking one bandwidth per point
+         * @throws As for the version taking one bandwidth per point
+         * @details
+         * If bandwidth has not been reduced and every point has the
+         * same pattern of NaNs, it is reduced once for all of them,
+         * rather than once per point.
+         */
+        [[nodiscard]] auto pdf(const std::vector<std::vector<double>>& x,
+            const double relTol,
+            const double absTol,
+            const Bandwidth& bandwidth) const -> std::vector<double>
+        {
+            const Bandwidth bw = sharedReduction(x, bandwidth);
+            return parallelEval<double>(x.size(), [&](const std::size_t i) -> double
+                { return pdf(x[i], relTol, absTol, bw); }); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        }
+
+        /**
+         * @brief Evaluate the kernel density estimate at each of several points, in parallel, with the Euclidean bandwidth
+         * @param x As for the other overloads
+         * @param relTol As for the other overloads
+         * @param absTol As for the other overloads
+         * @return As for the other overloads, with M the identity
+         * @throws As for the other overloads
+         */
+        [[nodiscard]] auto pdf(const std::vector<std::vector<double>>& x,
+            const double relTol,
+            const double absTol) const -> std::vector<double>
+        {
+            return pdf(x, relTol, absTol, this->euclidean_);
+        }
+
+        /**
+         * @brief Evaluate, in parallel, the density of each of several points measured with errors
+         * @param x The points, each as for the single-point pdf()
+         * @param errDims The dimensions with measurement errors; each
+         *   must be finite (specified) in every point
+         * @param errCov The covariance matrix of each point's errors, in
+         *   the dimensions errDims (in that order): one per point, each
+         *   errDims.size() square, symmetric, and positive semi-definite
+         * @param relTol As for the single-point pdf()
+         * @param absTol As for the single-point pdf()
+         * @param bandwidth The bandwidth, shared by every point
+         * @return For each point x[i], the estimate at x[i] with the
+         *   kernel convolved with its errors (see
+         *   Bandwidth::convolveCov()), i.e. the density of measuring
+         *   x[i] given errors with covariance errCov[i]
+         * @throws std::invalid_argument if errCov does not have one
+         *   matrix per point, or one has the wrong size, or errDims has
+         *   a dimension not below nDim, a repeated one, or one that is
+         *   NaN in a point; otherwise, as for the other overloads, and
+         *   as for Bandwidth::convolveCov()
+         * @details
+         * Each point's bandwidth is convolved with its own errors in the
+         * thread that evaluates it. If every point has the same pattern
+         * of NaNs, bandwidth is reduced for it once, beforehand, and each
+         * convolution done in the reduced space (reduction and
+         * convolution with errors in specified dimensions commute).
+         */
+        [[nodiscard]] auto pdf(const std::vector<std::vector<double>>& x,
+            const std::vector<std::size_t>& errDims,
+            const std::vector<Eigen::MatrixXd>& errCov, // NOLINT(misc-include-cleaner) -- Eigen::MatrixXd is provided by <Eigen/Dense> (included via Bandwidth.hpp); clang-tidy's IWYU mapping doesn't know that
+            const double relTol,
+            const double absTol,
+            const Bandwidth& bandwidth) const -> std::vector<double>
+        {
+            checkErrors(x, errDims, errCov, {}, "KernelDensity::pdf");
+            const Bandwidth bw = sharedReduction(x, bandwidth);
+            return parallelEval<double>(x.size(), [&](const std::size_t i) -> double
+            {
+                return pdf(x[i], relTol, absTol, bw.convolveCov(embedErrors(errDims, errCov[i]))); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            });
+        }
+
+        /**
+         * @brief Condition the estimate on each of several points, in parallel
+         * @param x0 The points to condition on, each as for the
+         *   single-point conditional()
+         * @param marginalDims As for the single-point conditional(),
+         *   shared by every point
+         * @param massTol As for the single-point conditional()
+         * @param bandwidth As for the single-point conditional(),
+         *   shared by every point
+         * @param leafSize As for the single-point conditional()
+         * @return One conditional density per point, each exactly as the
+         *   single-point conditional() returns it
+         * @throws Any exception the single-point conditional() throws
+         *   for any one of the points (the first one caught, if several
+         *   do)
+         * @details
+         * Runs the single-point conditional() for each point, in
+         * parallel (dynamically scheduled) if built with OpenMP. Each
+         * result's own tree is then built on the thread that conditions
+         * it: the parallel loops of that build are nested inside this
+         * one, so (unless nested parallelism is enabled) run on that
+         * thread alone.
+         */
+        [[nodiscard]] auto conditional(const std::vector<std::vector<double>>& x0,
+            const std::vector<std::size_t>& marginalDims,
+            const double massTol,
+            const Bandwidth& bandwidth,
+            const std::size_t leafSize = 16) const -> std::vector<ConditionalDensity<AuxType>>
+        {
+            return parallelEval<ConditionalDensity<AuxType>>(x0.size(),
+                [&](const std::size_t i) -> ConditionalDensity<AuxType>
+                { return conditional(x0[i], marginalDims, massTol, bandwidth, leafSize); }); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        }
+
+        /**
+         * @brief Condition the estimate on each of several points, in parallel, with the Euclidean bandwidth
+         * @param x0 As for the other overload
+         * @param marginalDims As for the other overload
+         * @param massTol As for the other overload
+         * @param leafSize As for the other overload
+         * @return As for the other overload, with M the identity
+         * @throws As for the other overload
+         */
+        [[nodiscard]] auto conditional(const std::vector<std::vector<double>>& x0,
+            const std::vector<std::size_t>& marginalDims,
+            const double massTol,
+            const std::size_t leafSize = 16) const -> std::vector<ConditionalDensity<AuxType>>
+        {
+            return conditional(x0, marginalDims, massTol, this->euclidean_, leafSize);
+        }
+
+        /**
+         * @brief Condition the estimate, in parallel, on each of several points measured with errors
+         * @param x0 The points to condition on, each as for the
+         *   single-point conditional()
+         * @param errDims The dimensions with measurement errors; each
+         *   must be fixed (finite, and not in marginalDims) in every point
+         * @param errCov The covariance matrix of each point's errors, in
+         *   the dimensions errDims, as for the errors version of pdf()
+         * @param marginalDims As for the single-point conditional(),
+         *   shared by every point
+         * @param massTol As for the single-point conditional()
+         * @param bandwidth As for the single-point conditional(),
+         *   shared by every point
+         * @param leafSize As for the single-point conditional()
+         * @return For each point x0[i], the conditional density given
+         *   x0[i] with the kernel first convolved with its errors (see
+         *   Bandwidth::convolveCov()): the posterior given a measurement
+         *   x0[i] with errors of covariance errCov[i]
+         * @throws std::invalid_argument as for the errors version of
+         *   pdf(), with errDims required to be fixed rather than merely
+         *   specified; otherwise, as for the other overloads, and as for
+         *   Bandwidth::convolveCov()
+         */
+        [[nodiscard]] auto conditional(const std::vector<std::vector<double>>& x0,
+            const std::vector<std::size_t>& errDims,
+            const std::vector<Eigen::MatrixXd>& errCov,
+            const std::vector<std::size_t>& marginalDims,
+            const double massTol,
+            const Bandwidth& bandwidth,
+            const std::size_t leafSize = 16) const -> std::vector<ConditionalDensity<AuxType>>
+        {
+            checkErrors(x0, errDims, errCov, marginalDims, "KernelDensity::conditional");
+            return parallelEval<ConditionalDensity<AuxType>>(x0.size(),
+                [&](const std::size_t i) -> ConditionalDensity<AuxType>
+            {
+                return conditional(x0[i], marginalDims, massTol, // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                    bandwidth.convolveCov(embedErrors(errDims, errCov[i])), leafSize); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            });
+        }
+
+        /**
+         * @brief Find the sample points, weights, and auxiliary data of conditional estimates for each of several points, in parallel
+         * @param x0 The points to condition on, each as for the
+         *   single-point conditionalSample()
+         * @param marginalDims As for the single-point
+         *   conditionalSample(), shared by every point
+         * @param massTol As for the single-point conditionalSample()
+         * @param bandwidth As for the single-point conditionalSample(),
+         *   shared by every point
+         * @return One result per point, each exactly as the single-point
+         *   conditionalSample() returns it
+         * @throws Any exception the single-point conditionalSample()
+         *   throws for any one of the points (the first one caught, if
+         *   several do)
+         * @details
+         * Runs the single-point conditionalSample() for each point, in
+         * parallel (dynamically scheduled) if built with OpenMP.
+         */
+        [[nodiscard]] auto conditionalSample(const std::vector<std::vector<double>>& x0,
+            const std::vector<std::size_t>& marginalDims,
+            const double massTol,
+            const Bandwidth& bandwidth) const
+            -> std::vector<Sample>
+        {
+            return parallelEval<Sample>(x0.size(),
+                [&](const std::size_t i) -> Sample
+                { return conditionalSample(x0[i], marginalDims, massTol, bandwidth); }); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        }
+
+        /**
+         * @brief Find the sample points, weights, and auxiliary data of conditional estimates for each of several points, in parallel, with the Euclidean bandwidth
+         * @param x0 As for the other overload
+         * @param marginalDims As for the other overload
+         * @param massTol As for the other overload
+         * @return As for the other overload, with M the identity
+         * @throws As for the other overload
+         */
+        [[nodiscard]] auto conditionalSample(const std::vector<std::vector<double>>& x0,
+            const std::vector<std::size_t>& marginalDims,
+            const double massTol) const
+            -> std::vector<Sample>
+        {
+            return conditionalSample(x0, marginalDims, massTol, this->euclidean_);
+        }
+
+        /**
+         * @brief Find, in parallel, the sample points, weights, and auxiliary data of conditional estimates for each of several points measured with errors
+         * @param x0 The points to condition on, each as for the
+         *   single-point conditionalSample()
+         * @param errDims As for the errors version of the batch
+         *   conditional()
+         * @param errCov As for the errors version of the batch
+         *   conditional()
+         * @param marginalDims As for the single-point
+         *   conditionalSample(), shared by every point
+         * @param massTol As for the single-point conditionalSample()
+         * @param bandwidth As for the single-point conditionalSample(),
+         *   shared by every point
+         * @return For each point x0[i], the sample points, weights, and
+         *   auxiliary data of the conditional estimate given x0[i] with the kernel first
+         *   convolved with its errors, as the errors version of the
+         *   batch conditional() would keep them; its kernel metric is
+         *   that of the convolved bandwidth
+         * @throws As for the errors version of the batch conditional()
+         */
+        [[nodiscard]] auto conditionalSample(const std::vector<std::vector<double>>& x0,
+            const std::vector<std::size_t>& errDims,
+            const std::vector<Eigen::MatrixXd>& errCov,
+            const std::vector<std::size_t>& marginalDims,
+            const double massTol,
+            const Bandwidth& bandwidth) const
+            -> std::vector<Sample>
+        {
+            checkErrors(x0, errDims, errCov, marginalDims, "KernelDensity::conditionalSample");
+            return parallelEval<Sample>(x0.size(),
+                [&](const std::size_t i) -> Sample
+            {
+                return conditionalSample(x0[i], marginalDims, massTol, // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                    bandwidth.convolveCov(embedErrors(errDims, errCov[i]))); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            });
+        }
+
     protected:
+
+        /**
+         * @brief Evaluate a function for each of a set of indices, in parallel
+         * @tparam T The function's result type; need only be movable
+         * @tparam Eval Callable taking an index and returning a T
+         * @param n Number of indices
+         * @param eval The function
+         * @return eval(i) for i = 0, ..., n - 1, in order
+         * @throws The first exception any call throws (one must not
+         *   escape an OpenMP region, so each is caught in the loop and
+         *   the first rethrown afterwards)
+         * @details
+         * Dynamically scheduled OpenMP loop, if built with OpenMP.
+         */
+        template <typename T, typename Eval>
+        [[nodiscard]] static auto parallelEval(const std::size_t n, const Eval& eval) -> std::vector<T>
+        {
+            std::vector<std::optional<T>> results(n);
+            std::exception_ptr error = nullptr;
+#ifdef _OPENMP
+#           pragma omp parallel for schedule(dynamic)
+#endif
+            for (std::size_t i = 0; i < n; ++i)
+            {
+                try
+                {
+                    results[i].emplace(eval(i)); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                }
+                catch (...)
+                {
+#ifdef _OPENMP
+#                   pragma omp critical(kernelDensityBatchError)
+#endif
+                    {
+                        if (!error) { error = std::current_exception(); }
+                    }
+                }
+            }
+            if (error) { std::rethrow_exception(error); }
+            std::vector<T> out;
+            out.reserve(n);
+            for (auto& r : results) { out.push_back(std::move(*r)); } // NOLINT(bugprone-unchecked-optional-access) -- every element was set, or an exception rethrown above
+            return out;
+        }
+
+        /**
+         * @brief A shared bandwidth, reduced once for a batch of points if they all share a pattern of NaNs
+         * @param x The points
+         * @param bandwidth The bandwidth
+         * @return bandwidth reduced for the points' common pattern of
+         *   NaNs, if it is not reduced already, is for nDim dimensions,
+         *   every point has nDim elements and the same pattern, and that
+         *   pattern has a NaN; otherwise bandwidth itself (each query
+         *   then reduces it as needed, or reports what is wrong)
+         */
+        [[nodiscard]] auto sharedReduction(const std::vector<std::vector<double>>& x,
+            const Bandwidth& bandwidth) const -> Bandwidth
+        {
+            if (x.empty() || bandwidth.isReduced() || bandwidth.nDim() != this->nDim_ ||
+                x.front().size() != this->nDim_ || bandwidth.matches(x.front()))
+            {
+                return bandwidth;
+            }
+            const std::vector<bool> pattern = Bandwidth::nanPattern(x.front());
+            const bool shared = std::ranges::all_of(x, [this, &pattern](const std::vector<double>& xi) -> bool
+                { return xi.size() == this->nDim_ && Bandwidth::nanPattern(xi) == pattern; });
+            return shared ? bandwidth.reduce(pattern) : bandwidth;
+        }
+
+        /**
+         * @brief Check a batch's measurement errors
+         * @param x The points
+         * @param errDims The dimensions with errors
+         * @param errCov One covariance matrix per point
+         * @param marginalDims Dimensions that must not be in errDims
+         * @param caller The caller's name, for messages
+         * @throws std::invalid_argument if errCov does not have one
+         *   matrix per point, or one is not errDims.size() square;
+         *   errDims has a dimension not below nDim, a repeated one, or
+         *   one in marginalDims; or a dimension in errDims is NaN in a
+         *   point (points that do not have nDim elements are left to
+         *   the single-point call to report)
+         */
+        void checkErrors(const std::vector<std::vector<double>>& x,
+            const std::vector<std::size_t>& errDims,
+            const std::vector<Eigen::MatrixXd>& errCov,
+            const std::vector<std::size_t>& marginalDims,
+            const char* caller) const
+        {
+            const std::string name(caller);
+            if (errCov.size() != x.size())
+            {
+                throw std::invalid_argument(name + ": errCov must have one matrix per point");
+            }
+            const auto k = static_cast<Eigen::Index>(errDims.size());
+            if (std::ranges::any_of(errCov, [k](const Eigen::MatrixXd& c) -> bool
+                { return c.rows() != k || c.cols() != k; }))
+            {
+                throw std::invalid_argument(name + ": each errCov matrix must be errDims.size() square");
+            }
+            std::vector<bool> seen(this->nDim_, false);
+            for (const std::size_t d : errDims)
+            {
+                if (d >= this->nDim_ || seen[d]) // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                {
+                    throw std::invalid_argument(name + ": errDims must hold distinct dimensions below nDim");
+                }
+                if (std::ranges::find(marginalDims, d) != marginalDims.end())
+                {
+                    throw std::invalid_argument(name + ": errDims must not include a marginalized dimension");
+                }
+                seen[d] = true; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            }
+            for (const auto& xi : x)
+            {
+                if (xi.size() != this->nDim_) { continue; }
+                if (std::ranges::any_of(errDims, [&xi](const std::size_t d) -> bool
+                    { return std::isnan(xi[d]); })) // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                {
+                    throw std::invalid_argument(name + ": every dimension in errDims must be "
+                        "specified (not NaN) in every point");
+                }
+            }
+        }
+
+        /**
+         * @brief A covariance matrix over some dimensions, embedded in all nDim
+         * @param errDims The dimensions it covers
+         * @param cov The matrix, errDims.size() square
+         * @return The nDim x nDim matrix with cov in the rows and columns
+         *   errDims, and zero elsewhere
+         */
+        [[nodiscard]] auto embedErrors(const std::vector<std::size_t>& errDims,
+            const Eigen::MatrixXd& cov) const -> Eigen::MatrixXd
+        {
+            const auto n = static_cast<Eigen::Index>(this->nDim_);
+            Eigen::MatrixXd full = Eigen::MatrixXd::Zero(n, n);
+            for (std::size_t a = 0; a < errDims.size(); ++a)
+            {
+                for (std::size_t b = 0; b < errDims.size(); ++b)
+                {
+                    full(static_cast<Eigen::Index>(errDims[a]), static_cast<Eigen::Index>(errDims[b])) = // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                        cov(static_cast<Eigen::Index>(a), static_cast<Eigen::Index>(b));
+                }
+            }
+            return full;
+        }
 
         /**
          * @brief Sort dimensions into fixed, kept, and marginalized, for conditional()
@@ -1013,6 +1546,21 @@ namespace kden {
          * @throws As for KernelDensity::pdf()
          */
         [[nodiscard]] auto pdf(const std::vector<double>& y, const double relTol, const double absTol) const -> double
+        {
+            return kde_.pdf(y, relTol, absTol, bandwidth_);
+        }
+
+        /**
+         * @brief Evaluate the conditional density at each of several points, in parallel
+         * @param y The points, each with one element per kept dimension
+         *   (see dims())
+         * @param relTol As for KernelDensity::pdf()
+         * @param absTol As for KernelDensity::pdf()
+         * @return The density at each point
+         * @throws As for KernelDensity's batch pdf()
+         */
+        [[nodiscard]] auto pdf(const std::vector<std::vector<double>>& y, const double relTol,
+            const double absTol) const -> std::vector<double>
         {
             return kde_.pdf(y, relTol, absTol, bandwidth_);
         }

@@ -30,12 +30,12 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <exception>
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h> // NOLINT(misc-include-cleaner); used throughout, via the py alias
 #include <pybind11/stl.h> // NOLINT(misc-include-cleaner); needed for list/vector conversions
 #include <span>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -191,48 +191,6 @@ namespace kdenbind {
     }
 
     /**
-     * @brief Evaluate a function at each of a set of points, in parallel
-     * @tparam Eval Callable taking (point, index) and returning a double
-     * @param pts The points
-     * @param eval The function
-     * @return Its value at each point
-     * @details
-     * Runs without the GIL, and in parallel (dynamically scheduled) if
-     * built with OpenMP; the first exception thrown, if any, is
-     * rethrown afterwards, since one must not escape an OpenMP region.
-     */
-    template <typename Eval>
-    inline auto evalPoints(const std::vector<std::vector<double>>& pts, const Eval& eval) -> std::vector<double>
-    {
-        std::vector<double> out(pts.size());
-        std::exception_ptr error = nullptr;
-        {
-            const py::gil_scoped_release release;
-#ifdef _OPENMP
-#           pragma omp parallel for schedule(dynamic)
-#endif
-            for (std::size_t i = 0; i < pts.size(); ++i)
-            {
-                try
-                {
-                    out[i] = eval(pts[i], i);
-                }
-                catch (...)
-                {
-#ifdef _OPENMP
-#                   pragma omp critical(kdenbindEvalError)
-#endif
-                    {
-                        if (!error) { error = std::current_exception(); }
-                    }
-                }
-            }
-        }
-        if (error) { std::rethrow_exception(error); }
-        return out;
-    }
-
-    /**
      * @brief A 1D numpy array copied from a vector
      * @tparam T Element type
      * @param v The values
@@ -303,31 +261,6 @@ namespace kdenbind {
     }
 
     /**
-     * @brief A shared bandwidth, reduced once for a batch of queries if they all share a pattern of NaNs
-     * @param bandwidth The shared bandwidth
-     * @param pts The query points
-     * @return bandwidth reduced for the points' common pattern of NaNs,
-     *   if it is not reduced already, they all share one, and it has a
-     *   NaN; otherwise bandwidth itself (each query then reduces it as
-     *   needed)
-     */
-    inline auto reduceShared(const kden::Bandwidth& bandwidth, const std::vector<std::vector<double>>& pts)
-        -> kden::Bandwidth
-    {
-        if (pts.empty() || bandwidth.isReduced() || pts.front().size() != bandwidth.nDim() ||
-            bandwidth.matches(pts.front()))
-        {
-            return bandwidth;
-        }
-        const std::vector<bool> pattern = kden::Bandwidth::nanPattern(pts.front());
-        for (const auto& p : pts)
-        {
-            if (kden::Bandwidth::nanPattern(p) != pattern) { return bandwidth; }
-        }
-        return bandwidth.reduce(pattern);
-    }
-
-    /**
      * @brief Find nearest neighbors for one point or a batch, for Python
      * @tparam TreeT The tree type
      * @param tree The tree
@@ -370,39 +303,202 @@ namespace kdenbind {
     }
 
     /**
+     * @brief Per-point measurement error covariances, from Python
+     * @param errCov An (nErr, nErr) array, shared by every point, or an
+     *   (M, nErr, nErr) array of one per point
+     * @param m Number of points, M
+     * @param nErr Number of dimensions with errors
+     * @return One nErr x nErr matrix per point
+     * @throws py::value_error if errCov has neither shape
+     */
+    inline auto batchErrors(const py::object& errCov, const std::size_t m, const std::size_t nErr)
+        -> std::vector<Eigen::MatrixXd>
+    {
+        const auto arr = py::cast<QueryArray>(errCov);
+        const auto k = static_cast<py::ssize_t>(nErr);
+        const bool shared = arr.ndim() == 2 && arr.shape(0) == k && arr.shape(1) == k;
+        const bool each = arr.ndim() == 3 && static_cast<std::size_t>(arr.shape(0)) == m &&
+            arr.shape(1) == k && arr.shape(2) == k;
+        if (!shared && !each)
+        {
+            throw py::value_error("errCov must have shape (nErr, nErr), shared by every point, or (M, nErr, "
+                "nErr), one per point, with nErr = len(errDims) = " + std::to_string(nErr));
+        }
+        std::vector<Eigen::MatrixXd> out(m, Eigen::MatrixXd(k, k));
+        const double* p = arr.data();
+        const std::size_t kk = nErr * nErr;
+        for (std::size_t i = 0; i < m; ++i)
+        {
+            const double* src = shared ? p : p + (i * kk); // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+            for (std::size_t a = 0; a < nErr; ++a)
+            {
+                for (std::size_t b = 0; b < nErr; ++b)
+                {
+                    out[i](static_cast<Eigen::Index>(a), static_cast<Eigen::Index>(b)) = src[(a * nErr) + b]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,cppcoreguidelines-pro-bounds-pointer-arithmetic)
+                }
+            }
+        }
+        return out;
+    }
+
+    /**
+     * @brief The single bandwidth a query with measurement errors uses
+     * @param bandwidth None (the Euclidean metric) or one Bandwidth
+     * @param euclidean The Euclidean metric
+     * @return The bandwidth
+     * @throws py::value_error if bandwidth is a sequence
+     */
+    inline auto errorsBandwidth(const py::object& bandwidth, const kden::Bandwidth& euclidean) -> kden::Bandwidth
+    {
+        if (bandwidth.is_none()) { return euclidean; }
+        if (!py::isinstance<kden::Bandwidth>(bandwidth))
+        {
+            throw py::value_error("with errCov, bandwidth must be None or a single Bandwidth");
+        }
+        return py::cast<kden::Bandwidth>(bandwidth);
+    }
+
+    /**
      * @brief Evaluate a kernel density estimate at one point or a batch, for Python
      * @param kde The estimate
      * @param x One point or an M x nDim array
      * @param relTol Relative tolerance
      * @param absTol Absolute tolerance
-     * @param bandwidth None, a Bandwidth, or (for a batch) a sequence of one per point
+     * @param bandwidth None, a Bandwidth, or (without errCov, for a
+     *   batch) a sequence of one per point
+     * @param errDims Dimensions with measurement errors (empty for none)
+     * @param errCov None, or their covariances (see batchErrors())
      * @param euclidean The Euclidean metric
      * @return A float for one point, or an array of M for a batch
+     * @throws py::value_error if errDims is given without errCov, or
+     *   errCov or bandwidth is invalid
+     * @details
+     * Calls KernelDensity's batch pdf(), which runs in parallel, without
+     * the GIL.
      */
     inline auto pdf(const KDE& kde, const QueryArray& x, const double relTol, const double absTol,
-        const py::object& bandwidth, const kden::Bandwidth& euclidean) -> py::object
+        const py::object& bandwidth, const std::vector<std::size_t>& errDims, const py::object& errCov,
+        const kden::Bandwidth& euclidean) -> py::object
     {
-        // Not structured bindings: the lambdas below, which run inside
-        // an OpenMP region, capture these, and clang does not support
-        // capturing a structured binding there
-        const auto query = queryPoints(x, kde.nDim());
-        const auto& pts = query.first;
-        const auto batch = batchBandwidths(bandwidth, pts.size(), euclidean);
-        const auto& bws = batch.first;
+        const auto [pts, single] = queryPoints(x, kde.nDim());
         std::vector<double> out;
-        if (batch.second)
+        if (!errCov.is_none())
         {
-            const kden::Bandwidth bw = reduceShared(bws.front(), pts);
-            out = evalPoints(pts, [&](const std::vector<double>& p, const std::size_t) -> double
-                { return kde.pdf(p, relTol, absTol, bw); });
+            const kden::Bandwidth bw = errorsBandwidth(bandwidth, euclidean);
+            const auto errs = batchErrors(errCov, pts.size(), errDims.size());
+            const py::gil_scoped_release release;
+            out = kde.pdf(pts, errDims, errs, relTol, absTol, bw);
         }
         else
         {
-            out = evalPoints(pts, [&](const std::vector<double>& p, const std::size_t i) -> double
-                { return kde.pdf(p, relTol, absTol, bws[i]); }); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            if (!errDims.empty()) { throw py::value_error("errDims was given without errCov"); }
+            const auto [bws, shared] = batchBandwidths(bandwidth, pts.size(), euclidean);
+            const py::gil_scoped_release release;
+            out = shared ? kde.pdf(pts, relTol, absTol, bws.front()) : kde.pdf(pts, relTol, absTol, bws);
         }
-        if (query.second) { return py::float_(out.front()); }
+        if (single) { return py::float_(out.front()); }
         return toArray(out);
+    }
+
+    /**
+     * @brief Condition a kernel density estimate on one point or a batch, for Python
+     * @param kde The estimate
+     * @param x0 One point or an M x nDim array
+     * @param massTol As for KernelDensity::conditional()
+     * @param marginalDims As for KernelDensity::conditional()
+     * @param bandwidth None or a Bandwidth
+     * @param leafSize As for KernelDensity::conditional()
+     * @param errDims Dimensions with measurement errors (empty for none)
+     * @param errCov None, or their covariances (see batchErrors())
+     * @param euclidean The Euclidean metric
+     * @return A ConditionalDensity for one point, or a list of M for a batch
+     * @throws py::value_error if errDims is given without errCov, or
+     *   errCov or bandwidth is invalid
+     * @details
+     * Calls KernelDensity's batch conditional(), which runs in
+     * parallel, without the GIL.
+     */
+    inline auto conditional(const KDE& kde, const QueryArray& x0, const double massTol,
+        const std::vector<std::size_t>& marginalDims, const py::object& bandwidth, const std::size_t leafSize,
+        const std::vector<std::size_t>& errDims, const py::object& errCov,
+        const kden::Bandwidth& euclidean) -> py::object
+    {
+        const auto [pts, single] = queryPoints(x0, kde.nDim());
+        if (errCov.is_none() && !errDims.empty()) { throw py::value_error("errDims was given without errCov"); }
+        const kden::Bandwidth bw = errorsBandwidth(bandwidth, euclidean);
+        std::vector<Conditional> cds;
+        if (!errCov.is_none())
+        {
+            const auto errs = batchErrors(errCov, pts.size(), errDims.size());
+            const py::gil_scoped_release release;
+            cds = kde.conditional(pts, errDims, errs, marginalDims, massTol, bw, leafSize);
+        }
+        else
+        {
+            const py::gil_scoped_release release;
+            cds = kde.conditional(pts, marginalDims, massTol, bw, leafSize);
+        }
+        if (single) { return py::cast(std::move(cds.front())); }
+        py::list out;
+        for (auto& cd : cds) { out.append(py::cast(std::move(cd))); }
+        return out;
+    }
+
+    /**
+     * @brief Find the sample points, weights, and auxiliary data of conditional estimates at one point or a batch, for Python
+     * @param kde The estimate
+     * @param x0 One point or an M x nDim array
+     * @param massTol As for KernelDensity::conditionalSample()
+     * @param marginalDims As for KernelDensity::conditionalSample()
+     * @param bandwidth None or a Bandwidth
+     * @param errDims Dimensions with measurement errors (empty for none)
+     * @param errCov None, or their covariances (see batchErrors())
+     * @param euclidean The Euclidean metric
+     * @return For one point, a tuple of the points (K x nR array),
+     *   their weights (K array), and their auxiliary data (K array);
+     *   for a batch, a list of one such tuple per point
+     * @throws py::value_error if errDims is given without errCov, or
+     *   errCov or bandwidth is invalid
+     * @details
+     * Calls KernelDensity's batch conditionalSample(), which runs in
+     * parallel, without the GIL.
+     */
+    inline auto conditionalSample(const KDE& kde, const QueryArray& x0, const double massTol,
+        const std::vector<std::size_t>& marginalDims, const py::object& bandwidth,
+        const std::vector<std::size_t>& errDims, const py::object& errCov,
+        const kden::Bandwidth& euclidean) -> py::object
+    {
+        const auto query = queryPoints(x0, kde.nDim());
+        const auto& pts = query.first;
+        if (errCov.is_none() && !errDims.empty()) { throw py::value_error("errDims was given without errCov"); }
+        const kden::Bandwidth bw = errorsBandwidth(bandwidth, euclidean);
+        std::vector<KDE::Sample> samples;
+        if (!errCov.is_none())
+        {
+            const auto errs = batchErrors(errCov, pts.size(), errDims.size());
+            const py::gil_scoped_release release;
+            samples = kde.conditionalSample(pts, errDims, errs, marginalDims, massTol, bw);
+        }
+        else
+        {
+            const py::gil_scoped_release release;
+            samples = kde.conditionalSample(pts, marginalDims, massTol, bw);
+        }
+        // A sample as (points, weights, aux); it always has at least one point
+        auto toPython = [](const KDE::Sample& sample) -> py::tuple
+        {
+            const auto& x = std::get<0>(sample);
+            const auto& w = std::get<1>(sample);
+            const auto nKept = static_cast<py::ssize_t>(w.size());
+            const auto nR = static_cast<py::ssize_t>(x.size() / w.size());
+            py::array_t<double> xArr({nKept, nR});
+            std::ranges::copy(x, xArr.mutable_data());
+            return py::make_tuple(xArr, toArray(w), toArray(std::get<2>(sample)));
+        };
+        if (query.second) { return toPython(samples.front()); }
+        py::list out;
+        for (const auto& sample : samples) { out.append(toPython(sample)); }
+        return out;
     }
 
     /**

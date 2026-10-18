@@ -131,6 +131,11 @@ class KDE:
         default), equal weights.
     names : list of str, optional
         Names of the nDim quantities in the data set (default: none).
+    aux : numpy.ndarray of int64, shape (N,), optional
+        An integer label for each point (e.g. its row in a library on
+        disk), C-contiguous and writeable; reordered in place along with
+        dataset. If None (the default), each point's index in dataset as
+        given.
     noSplitDims : list of int, optional
         Dimensions along which the kd tree is never split (default:
         none), as for KernelDensity.
@@ -159,9 +164,9 @@ class KDE:
     names : list of str
         Names of the quantities in the data set (empty if not given).
     aux : numpy.ndarray of int64, shape (N,)
-        Each point's index in the data set as originally given (or, for
-        a KDE from conditional(), in its parent's), in tree order
-        (read-only array).
+        Each point's label, in tree order (read-only array): by default
+        its index in the data set as originally given; for a KDE from
+        conditional(), its parent's label.
     nDim : int
         Number of dimensions.
     marginal : float or None
@@ -182,7 +187,8 @@ class KDE:
 
     def __init__(self, dataset: np.ndarray, h2Inv: float | np.ndarray | None = None,
                  w: np.ndarray | None = None, names: list[str] | None = None,
-                 noSplitDims: list[int] | None = None, leafSize: int = 16) -> None:
+                 aux: np.ndarray | None = None, noSplitDims: list[int] | None = None,
+                 leafSize: int = 16) -> None:
         if not isinstance(dataset, np.ndarray) or dataset.ndim != 2:
             raise TypeError("dataset must be a 2D numpy array")
         n, ndim = dataset.shape
@@ -196,7 +202,7 @@ class KDE:
                                    else _parse_h2inv(h2Inv, ndim))
         bandwidth = Bandwidth(self._h2Inv)
         self._kde: KernelDensityView = KernelDensity(
-            dataset, weights, None, leafSize, bandwidth, [] if noSplitDims is None else noSplitDims)
+            dataset, weights, aux, leafSize, bandwidth, [] if noSplitDims is None else noSplitDims)
         self._bandwidth: Bandwidth = bandwidth
         self._bandwidth_h2Inv: np.ndarray = self._h2Inv.copy()
         dataset.setflags(write=False)
@@ -328,9 +334,10 @@ class KDE:
     @property
     def aux(self) -> np.ndarray:
         """
-        numpy.ndarray of int64, shape (N,) : each point's index in the
-        data set as originally given (or, for a KDE from conditional(),
-        in its parent's), in tree order (a read-only array).
+        numpy.ndarray of int64, shape (N,) : each point's label, in tree
+        order (a read-only array): by default its index in the data set
+        as originally given; for a KDE from conditional(), its parent's
+        label.
         """
         return self._aux
 
@@ -377,7 +384,9 @@ class KDE:
         """
         self._kde.reweight()
 
-    def pdf(self, x: Any, relTol: float = 1e-2, absTol: float = 1e-8) -> float | np.ndarray:
+    def pdf(self, x: Any, relTol: float = 1e-2, absTol: float = 1e-8,
+            bandwidth: Bandwidth | None = None, errDims: list[int] | None = None,
+            errCov: Any = None) -> float | np.ndarray:
         """
         Evaluate the kernel density estimate at one or more points.
 
@@ -392,6 +401,19 @@ class KDE:
         absTol : float, optional
             Absolute tolerance: stop once the estimate plus its
             uncertainty is less than absTol (default 1e-8).
+        bandwidth : Bandwidth, optional
+            The kernel's bandwidth, in place of h2Inv (e.g. h2Inv
+            convolved with measurement errors; see
+            Bandwidth.convolveCov()); if None (the default), h2Inv.
+        errDims : list of int, optional
+            Dimensions with measurement errors (default: none); each must
+            be specified (not NaN) in every point. Requires errCov.
+        errCov : array_like of float, shape (nErr, nErr) or (M, nErr, nErr), optional
+            Covariance matrices of the measurement errors in errDims, in
+            that order (nErr = len(errDims)): one shared by every point,
+            or one per point. Each point's kernel is convolved with its
+            own errors (see Bandwidth.convolveCov()), so that the result
+            is the density of measuring that point with those errors.
 
         Returns
         -------
@@ -399,20 +421,33 @@ class KDE:
             The estimate, normalized to unit integral (over the
             specified dimensions, for a point with NaNs); a float for
             one point.
+
+        Raises
+        ------
+        ValueError
+            As for KernelDensity.pdf().
+
+        Notes
+        -----
+        Several points are evaluated in parallel, one per thread at a
+        time, without the GIL, each convolving its own errors in the
+        thread that evaluates it.
         """
-        return self._kde.pdf(x, relTol, absTol, self._current_bandwidth())
+        bw = self._current_bandwidth() if bandwidth is None else bandwidth
+        return self._kde.pdf(x, relTol, absTol, bw, [] if errDims is None else errDims, errCov)
 
     def conditional(self, x0: Any, massTol: float = 1e-2, marginalDims: list[int] | None = None,
-                    leafSize: int = 16) -> "KDE":
+                    leafSize: int = 16, bandwidth: Bandwidth | None = None,
+                    errDims: list[int] | None = None, errCov: Any = None) -> "KDE | list[KDE]":
         """
         Condition the estimate on values of some dimensions, optionally marginalizing over others.
 
         Parameters
         ----------
-        x0 : array_like of float, shape (nDim,)
-            A finite value fixes that dimension; NaN keeps it as a
-            dimension of the result. Values for dimensions in
-            marginalDims are ignored.
+        x0 : array_like of float, shape (nDim,) or (M, nDim)
+            One point, or M of them. A finite value fixes that
+            dimension; NaN keeps it as a dimension of the result. Values
+            for dimensions in marginalDims are ignored.
         massTol : float, optional
             Largest fraction of the conditional estimate's total weight
             that may be dropped, in [0, 1) (default 1e-2); the result is
@@ -422,22 +457,120 @@ class KDE:
             Dimensions to marginalize over (default: none).
         leafSize : int, optional
             Leaf size of the result's kd tree (default 16).
+        bandwidth : Bandwidth, optional
+            The kernel's bandwidth, in place of h2Inv (e.g. h2Inv
+            convolved with measurement errors; see
+            Bandwidth.convolveCov()); if None (the default), h2Inv.
+        errDims : list of int, optional
+            Dimensions with measurement errors (default: none); each must
+            be fixed (finite, and not in marginalDims) in every point.
+            Requires errCov.
+        errCov : array_like of float, shape (nErr, nErr) or (M, nErr, nErr), optional
+            Covariance matrices of the measurement errors in errDims, as
+            for pdf(). Each point's kernel is convolved with its own
+            errors before conditioning, so that the result is the
+            posterior given a measurement of that point with those
+            errors.
 
         Returns
         -------
-        KDE
+        KDE or list of KDE
             The conditional estimate p(y | x0) over the kept dimensions,
             with its names taken from this KDE's, its marginal set to
-            this KDE's marginal density at x0, and its aux giving each
-            point's index in this KDE's original data set.
+            this KDE's marginal density at x0, and each point's aux label
+            carried over from this KDE; a list of one per point for M
+            points.
 
         Raises
         ------
         ValueError
             As for KernelDensity.conditional().
+
+        Notes
+        -----
+        Several points are conditioned on in parallel, one per thread at
+        a time, without the GIL.
         """
-        cd = self._kde.conditional(x0, massTol, [] if marginalDims is None else marginalDims,
-                                   self._current_bandwidth(), leafSize)
+        bw = self._current_bandwidth() if bandwidth is None else bandwidth
+        result = self._kde.conditional(x0, massTol, [] if marginalDims is None else marginalDims,
+                                       bw, leafSize, [] if errDims is None else errDims, errCov)
+        if isinstance(result, list):
+            return [self._wrap_conditional(cd) for cd in cast(list[Any], result)]
+        return self._wrap_conditional(result)
+
+    def conditional_sample(self, x0: Any, massTol: float = 1e-2, marginalDims: list[int] | None = None,
+                           bandwidth: Bandwidth | None = None, errDims: list[int] | None = None,
+                           errCov: Any = None) -> "tuple[np.ndarray, np.ndarray, np.ndarray] | list[tuple[np.ndarray, np.ndarray, np.ndarray]]":
+        """
+        Find the sample points, weights, and aux labels of a conditional estimate, without building it.
+
+        The same points, weights, and aux labels conditional() keeps,
+        e.g. for storing a conditional estimate and rebuilding it later:
+        a KDE
+        over them, with dataset the points, w the weights, and h2Inv the
+        conditional kernel metric -- the block over the kept dimensions
+        of the bandwidth reduced over marginalDims (or of the bandwidth
+        convolved with the errors, if errCov is given) -- is the
+        conditional estimate.
+
+        Parameters
+        ----------
+        x0 : array_like of float, shape (nDim,) or (M, nDim)
+            As for conditional().
+        massTol : float, optional
+            As for conditional() (default 1e-2).
+        marginalDims : list of int, optional
+            As for conditional() (default: none).
+        bandwidth : Bandwidth, optional
+            As for conditional(); if None (the default), h2Inv.
+        errDims : list of int, optional
+            As for conditional() (default: none).
+        errCov : array_like of float, shape (nErr, nErr) or (M, nErr, nErr), optional
+            As for conditional().
+
+        Returns
+        -------
+        tuple of (numpy.ndarray, numpy.ndarray, numpy.ndarray), or list of such tuples
+            The points kept, shape (K, nR), in the kept dimensions (those
+            NaN in x0 and not in marginalDims, in increasing order); their
+            weights, shape (K,); and their aux labels, shape (K,), each
+            that of the point in this KDE it came from (see aux); all in
+            increasing order of weight. A list of one such tuple per
+            point for M points. The weights are not normalized (see
+            KernelDensity.conditionalSample()).
+
+        Raises
+        ------
+        ValueError
+            As for conditional().
+
+        Notes
+        -----
+        Several points are handled in parallel, one per thread at a
+        time, without the GIL.
+        """
+        bw = self._current_bandwidth() if bandwidth is None else bandwidth
+        result = self._kde.conditionalSample(x0, massTol, [] if marginalDims is None else marginalDims, bw,
+                                             [] if errDims is None else errDims, errCov)
+        if isinstance(result, list):
+            return [(x, w, aux) for x, w, aux in cast(list[tuple[np.ndarray, np.ndarray, np.ndarray]], result)]
+        x, w, aux = cast(tuple[np.ndarray, np.ndarray, np.ndarray], result)
+        return x, w, aux
+
+    def _wrap_conditional(self, cd: Any) -> "KDE":
+        """
+        Wrap a ConditionalDensity as a KDE.
+
+        Parameters
+        ----------
+        cd : ConditionalDensity
+            The conditional density, from this KDE's kernel density.
+
+        Returns
+        -------
+        KDE
+            A KDE over cd's points (see conditional()), keeping cd alive.
+        """
         dims = cd.dims()
         names = [self._names[d] for d in dims] if self._names else []
         return KDE._from_kernel_density(cd.kde(), cd.bandwidth().h2Inv(), names, cd.marginal(), cd)

@@ -144,6 +144,28 @@ namespace kden {
         [[nodiscard]] auto convolve(const Bandwidth& other) const -> Bandwidth;
 
         /**
+         * @brief Convolve with a Gaussian given by its covariance matrix
+         * @param cov The Gaussian's covariance matrix C, n x n: symmetric
+         *   and positive semi-definite (e.g. measurement errors, zero in
+         *   dimensions without them); only its block over this
+         *   Bandwidth's specified dimensions is used
+         * @return The Bandwidth of the convolution of this kernel with
+         *   that Gaussian, whose matrix, over the specified dimensions,
+         *   is (M^-1 + 2 C)^-1
+         * @throws std::invalid_argument if cov is not n x n, or is not
+         *   finite and symmetric
+         * @throws std::domain_error if cov is not positive semi-definite
+         * @details
+         * Like convolve(), with the other kernel given by its covariance
+         * C rather than its inverse squared bandwidth matrix, the two
+         * being related by M = (2 C)^-1 for the kernel exp(-d^T M d).
+         * Computed as (I + 2 M C)^-1 M, by LU factorization, so neither
+         * M nor C need be invertible -- C typically is not, being zero in
+         * dimensions without measurement errors. Costs O(n^3).
+         */
+        [[nodiscard]] auto convolveCov(const Eigen::MatrixXd& cov) const -> Bandwidth; // NOLINT(misc-include-cleaner) -- Eigen::MatrixXd is provided by <Eigen/Dense> (included above); clang-tidy's IWYU mapping doesn't know that
+
+        /**
          * @brief Which elements of a point are NaN
          * @param x The point
          * @return One flag per element, true if it is NaN
@@ -309,6 +331,14 @@ namespace kden {
          *   positive semi-definite
          */
         void prepare();
+
+        /**
+         * @brief Embed a matrix over the specified dimensions in an n x n matrix
+         * @param block The matrix, over the specified dimensions
+         * @return The n x n matrix equal to block over the specified
+         *   dimensions, and zero elsewhere
+         */
+        [[nodiscard]] auto embed(const Eigen::MatrixXd& block) const -> Eigen::MatrixXd;
 
         Eigen::MatrixXd h2Inv_;           /**< The inverse squared bandwidth matrix */
         std::vector<bool> unspecified_;   /**< Which dimensions are unspecified */

@@ -9,7 +9,8 @@
  * bounds (the lower bound never above the true minimum distance to a box
  * and the upper never below the true maximum, both exact for diagonal
  * metrics), convolution (against the formula, reduction, and numerical
- * convolution), plus argument checking.
+ * convolution) by another bandwidth or by a covariance matrix, plus
+ * argument checking.
  * @date 2026-10-15
  * @copyright Copyright (c) 2026 Mark Krumholz. All rights reserved.
  */
@@ -405,6 +406,63 @@ inline auto testBandwidthConvolve() -> int
             fail("numerical convolution " + std::to_string(conv) + " differs from the convolved kernel " +
                 std::to_string(want));
             break;
+        }
+    }
+
+    // convolveCov(C): (M^-1 + 2 C)^-1; the same as convolving with
+    // (2 C)^-1 when C is invertible; exact in the dimensions C leaves
+    // alone when C is singular; and commuting with reduction
+    for (int trial = 0; trial < 100; ++trial)
+    {
+        const std::size_t n = 2 + static_cast<std::size_t>(trial % 5);
+        const auto ni = static_cast<Eigen::Index>(n);
+        const Eigen::MatrixXd m = randomSPD(n, gen);
+        const kden::Bandwidth b(m);
+        Eigen::MatrixXd cov = randomSPD(n, gen);
+        const Eigen::MatrixXd want = (m.inverse() + (2.0 * cov)).inverse();
+        const kden::Bandwidth c = b.convolveCov(cov);
+        const Eigen::MatrixXd viaConvolve = b.convolve(kden::Bandwidth(Eigen::MatrixXd(0.5 * cov.inverse()))).h2Inv();
+        if (!c.h2Inv().isApprox(want, 1e-9) || !c.h2Inv().isApprox(viaConvolve, 1e-9) ||
+            c.h2Inv() != c.h2Inv().transpose())
+        {
+            fail("convolveCov disagrees with (M^-1 + 2 C)^-1 for n = " + std::to_string(n));
+            break;
+        }
+
+        // Errors in only the first dimension: a singular C
+        Eigen::MatrixXd single = Eigen::MatrixXd::Zero(ni, ni);
+        single(0, 0) = 0.3;
+        const Eigen::MatrixXd wantSingle = (m.inverse() + (2.0 * single)).inverse();
+        if (!b.convolveCov(single).h2Inv().isApprox(wantSingle, 1e-9) ||
+            !b.convolveCov(Eigen::MatrixXd::Zero(ni, ni)).h2Inv().isApprox(m, 1e-12))
+        {
+            fail("convolveCov is wrong for a singular covariance, n = " + std::to_string(n));
+            break;
+        }
+
+        std::vector<bool> unspec(n, false);
+        unspec[n - 1] = true;
+        if (!b.reduce(unspec).convolveCov(cov).h2Inv().isApprox(c.reduce(unspec).h2Inv(), 1e-9))
+        {
+            fail("convolveCov does not commute with reduce, n = " + std::to_string(n));
+            break;
+        }
+    }
+    {
+        int covThrown = 0;
+        Eigen::MatrixXd asymCov(2, 2);
+        asymCov << 1.0, 0.5, 0.0, 1.0;
+        Eigen::MatrixXd negCov = -Eigen::MatrixXd::Identity(2, 2);
+        Eigen::MatrixXd nanCov = Eigen::MatrixXd::Identity(2, 2);
+        nanCov(0, 1) = nanCov(1, 0) = std::numeric_limits<double>::quiet_NaN();
+        const kden::Bandwidth id2 = kden::Bandwidth::identity(2);
+        try { (void)id2.convolveCov(Eigen::MatrixXd::Identity(3, 3)); } catch (const std::invalid_argument&) { ++covThrown; }
+        try { (void)id2.convolveCov(asymCov); } catch (const std::invalid_argument&) { ++covThrown; }
+        try { (void)id2.convolveCov(nanCov); } catch (const std::invalid_argument&) { ++covThrown; }
+        try { (void)id2.convolveCov(negCov); } catch (const std::domain_error&) { ++covThrown; }
+        if (covThrown != 4)
+        {
+            fail("only " + std::to_string(covThrown) + " of 4 invalid convolveCov calls threw");
         }
     }
 

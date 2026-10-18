@@ -128,9 +128,31 @@ class slug_group_reader:
         has_unit = isinstance(unit, str) and unit != ""
         if isinstance(unit, str):
             unit = _LEGACY_UNITS.get(unit, unit)
-        result: Dataset = arr * u.Unit(unit) if has_unit else arr
+        result: Dataset = arr << u.Unit(unit) if has_unit else arr  # << wraps arr without copying it
         self._datasets[key] = result
         return result
+
+    def __len__(self) -> int:
+        """
+        Return the number of rows (entries) in this group.
+
+        Returns
+        -------
+        int
+            The length of the first axis of this group's extensible
+            datasets (one row per trial/time), summed over every one of
+            this reader's own files -- read from the datasets' shapes
+            alone, without reading any data; 0 if the group has no
+            extensible dataset.
+        """
+        name = next((n for n, ext in self._extensible.items() if ext), None)
+        if name is None:
+            return 0
+        n = 0
+        for path in self._file_paths:
+            with h5py.File(path, "r") as f:
+                n += f[self._group_name][name].shape[0]
+        return n
 
     def keys(self) -> KeysView[str]:
         """

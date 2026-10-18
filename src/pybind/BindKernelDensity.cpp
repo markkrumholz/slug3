@@ -175,10 +175,20 @@ absTol : float, optional
     less than absTol (default 1e-8).
 bandwidth : Bandwidth or sequence of Bandwidth, optional
     The kernel's inverse squared bandwidth matrix: None (the default)
-    for the identity, one Bandwidth for every point, or (for M points)
-    a sequence of M. A bandwidth not reduced for a point's NaNs is
-    reduced automatically (once for the whole batch, if every point
-    shares one pattern).
+    for the identity, one Bandwidth for every point, or (for M points,
+    without errCov) a sequence of M. A bandwidth not reduced for a
+    point's NaNs is reduced automatically (once for the whole batch, if
+    every point shares one pattern).
+errDims : list of int, optional
+    Dimensions with measurement errors (default: none); each must be
+    specified (not NaN) in every point. Requires errCov.
+errCov : array_like of float, shape (nErr, nErr) or (M, nErr, nErr), optional
+    Covariance matrices of the measurement errors in errDims (in that
+    order, nErr = len(errDims)): one shared by every point, or one per
+    point; each symmetric and positive semi-definite. Each point's
+    kernel is convolved with its errors (see Bandwidth.convolveCov()),
+    so that the result is the density of measuring that point with
+    those errors.
 
 Returns
 -------
@@ -191,19 +201,25 @@ Raises
 ValueError
     If x or a bandwidth has the wrong number of dimensions, a bandwidth
     was reduced for a different pattern of NaNs, or a bandwidth is
-    singular over the specified dimensions.
+    singular over the specified dimensions; if errDims is given without
+    errCov, has a dimension out of range, repeated, or NaN in a point,
+    errCov has the wrong shape, or is not finite, symmetric, and
+    positive semi-definite, or a sequence of bandwidths is given with
+    errCov.
 
 Notes
 -----
-A batch runs in parallel, without the GIL.)doc";
+A batch runs in parallel, one point per thread at a time, without the
+GIL.)doc";
 
 static constexpr std::string_view conditionalDocstring = R"doc(Condition the estimate on values of some dimensions, optionally marginalizing over others.
 
 Parameters
 ----------
-x0 : array_like of float, shape (nDim,)
-    A finite value fixes that dimension; NaN keeps it as a dimension
-    of the result. Values for dimensions in marginalDims are ignored.
+x0 : array_like of float, shape (nDim,) or (M, nDim)
+    One point or M of them. A finite value fixes that dimension; NaN
+    keeps it as a dimension of the result. Values for dimensions in
+    marginalDims are ignored.
 massTol : float, optional
     Largest fraction of the conditional estimate's total weight that
     may be dropped, in [0, 1) (default 1e-2); 0 keeps every point with
@@ -216,11 +232,21 @@ bandwidth : Bandwidth, optional
     must not be reduced.
 leafSize : int, optional
     Leaf size of the result's tree (default 16).
+errDims : list of int, optional
+    Dimensions with measurement errors (default: none); each must be
+    fixed (finite, and not in marginalDims) in every point. Requires
+    errCov.
+errCov : array_like of float, shape (nErr, nErr) or (M, nErr, nErr), optional
+    Covariance matrices of the measurement errors in errDims, as for
+    pdf(). Each point's kernel is convolved with its errors before
+    conditioning, so that the result is the posterior given a
+    measurement of that point with those errors.
 
 Returns
 -------
-conditional : ConditionalDensity
-    The conditional estimate p(y | x0) over the kept dimensions.
+conditional : ConditionalDensity or list of ConditionalDensity
+    The conditional estimate p(y | x0) over the kept dimensions; a
+    list of one per point for M points.
 
 Raises
 ------
@@ -229,7 +255,60 @@ ValueError
     is reduced, marginalDims is invalid, x0 fixes no dimension or
     every dimension, massTol is not in [0, 1), the bandwidth's blocks
     are not positive definite, or every point's conditional weight
-    underflows to zero.)doc";
+    underflows to zero; or if errDims or errCov is invalid, as for
+    pdf().
+
+Notes
+-----
+A batch runs in parallel, one point per thread at a time, without the
+GIL.)doc";
+
+static constexpr std::string_view conditionalSampleDocstring = R"doc(Find the sample points, weights, and auxiliary data of a conditional estimate, without building it.
+
+The same points, weights, and auxiliary data conditional() keeps, for
+storing a conditional estimate (e.g. on disk) and rebuilding it later: a
+KernelDensity over them, with the conditional kernel metric -- the block
+over the kept dimensions of the bandwidth reduced over marginalDims (with
+errors, of that bandwidth convolved with them) -- is the conditional
+estimate.
+
+Parameters
+----------
+x0 : array_like of float, shape (nDim,) or (M, nDim)
+    As for conditional().
+massTol : float, optional
+    As for conditional() (default 1e-2).
+marginalDims : list of int, optional
+    As for conditional() (default: none).
+bandwidth : Bandwidth, optional
+    As for conditional() (default: identity).
+errDims : list of int, optional
+    As for conditional() (default: none).
+errCov : array_like of float, shape (nErr, nErr) or (M, nErr, nErr), optional
+    As for conditional().
+
+Returns
+-------
+sample : tuple of (numpy.ndarray, numpy.ndarray, numpy.ndarray), or list of such tuples
+    The points kept, shape (K, nR), in the kept dimensions (those NaN in
+    x0 and not in marginalDims, in increasing order); their weights,
+    shape (K,); and their auxiliary data (int64), shape (K,), each that
+    of the point it came from (see aux); all in increasing order of
+    weight. The weights are not
+    normalized: their sum times sqrt(det S) / pi^(nF / 2), with S the
+    bandwidth reduced to the nF fixed dimensions, is the marginal
+    density at x0 (conditional()'s marginal()). A list of one tuple per
+    point for M points.
+
+Raises
+------
+ValueError
+    As for conditional().
+
+Notes
+-----
+A batch runs in parallel, one point per thread at a time, without the
+GIL.)doc";
 
 static constexpr std::string_view condClassDocstring = R"doc(A kernel density estimate conditioned on some dimensions' values.
 
@@ -340,23 +419,34 @@ void bindKernelDensity(py::module_& m)
         .def("reweight", &KDE::reweight, reweightDocstring.data(),
             py::call_guard<py::gil_scoped_release>())
         .def("pdf", [](const KDE& kde, const kdenbind::QueryArray& x, const double relTol,
-                const double absTol, const py::object& bandwidth) -> py::object
+                const double absTol, const py::object& bandwidth, const std::vector<std::size_t>& errDims,
+                const py::object& errCov) -> py::object
             {
-                return kdenbind::pdf(kde, x, relTol, absTol, bandwidth, kden::Bandwidth::identity(kde.nDim()));
+                return kdenbind::pdf(kde, x, relTol, absTol, bandwidth, errDims, errCov,
+                    kden::Bandwidth::identity(kde.nDim()));
             }, pdfDocstring.data(), py::arg("x"), py::arg("relTol") = 1e-2, py::arg("absTol") = 1e-8,
-            py::arg("bandwidth") = py::none())
-        .def("conditional", [](const KDE& kde, const std::vector<double>& x0, const double massTol,
+            py::arg("bandwidth") = py::none(), py::arg("errDims") = std::vector<std::size_t>{},
+            py::arg("errCov") = py::none())
+        .def("conditional", [](const KDE& kde, const kdenbind::QueryArray& x0, const double massTol,
                 const std::vector<std::size_t>& marginalDims, const py::object& bandwidth,
-                const std::size_t leafSize) -> Conditional
+                const std::size_t leafSize, const std::vector<std::size_t>& errDims,
+                const py::object& errCov) -> py::object
             {
-                const kden::Bandwidth bw = bandwidth.is_none()
-                    ? kden::Bandwidth::identity(kde.nDim())
-                    : py::cast<kden::Bandwidth>(bandwidth);
-                const py::gil_scoped_release release;
-                return kde.conditional(x0, marginalDims, massTol, bw, leafSize);
+                return kdenbind::conditional(kde, x0, massTol, marginalDims, bandwidth, leafSize, errDims,
+                    errCov, kden::Bandwidth::identity(kde.nDim()));
             }, conditionalDocstring.data(), py::arg("x0"), py::arg("massTol") = 1e-2,
             py::arg("marginalDims") = std::vector<std::size_t>{}, py::arg("bandwidth") = py::none(),
-            py::arg("leafSize") = 16);
+            py::arg("leafSize") = 16, py::arg("errDims") = std::vector<std::size_t>{},
+            py::arg("errCov") = py::none())
+        .def("conditionalSample", [](const KDE& kde, const kdenbind::QueryArray& x0, const double massTol,
+                const std::vector<std::size_t>& marginalDims, const py::object& bandwidth,
+                const std::vector<std::size_t>& errDims, const py::object& errCov) -> py::object
+            {
+                return kdenbind::conditionalSample(kde, x0, massTol, marginalDims, bandwidth, errDims, errCov,
+                    kden::Bandwidth::identity(kde.nDim()));
+            }, conditionalSampleDocstring.data(), py::arg("x0"), py::arg("massTol") = 1e-2,
+            py::arg("marginalDims") = std::vector<std::size_t>{}, py::arg("bandwidth") = py::none(),
+            py::arg("errDims") = std::vector<std::size_t>{}, py::arg("errCov") = py::none());
     view.attr("nullNode") = kden::nullNode;
     view.attr("rootNode") = kden::rootNode;
 
@@ -409,9 +499,12 @@ void bindKernelDensity(py::module_& m)
         .def("pdf", [](const Conditional& cd, const kdenbind::QueryArray& y, const double relTol,
                 const double absTol) -> py::object
             {
-                auto [pts, single] = kdenbind::queryPoints(y, cd.dims().size());
-                const auto out = kdenbind::evalPoints(pts, [&](const std::vector<double>& p,
-                    const std::size_t) -> double { return cd.pdf(p, relTol, absTol); });
+                const auto [pts, single] = kdenbind::queryPoints(y, cd.dims().size());
+                std::vector<double> out;
+                {
+                    const py::gil_scoped_release release;
+                    out = cd.pdf(pts, relTol, absTol);
+                }
                 if (single) { return py::float_(out.front()); }
                 return kdenbind::toArray(out);
             }, condPdfDocstring.data(), py::arg("y"), py::arg("relTol") = 1e-2, py::arg("absTol") = 1e-8)
