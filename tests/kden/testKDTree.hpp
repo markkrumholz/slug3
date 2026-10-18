@@ -360,7 +360,13 @@ inline auto testKDTreeBlockedBuild() -> int
     for (auto& [what, data] : cases)
     {
 #ifdef _OPENMP
+        // Build on at least two threads, even if fewer are available
+        // by default, so that the comparison below is with a parallel
+        // build
         auto serialData = data;
+        const int nThreads = omp_get_max_threads();
+        const int nParallel = std::max(nThreads, 2);
+        omp_set_num_threads(nParallel);
 #endif
         auto view = data.view();
         const KDTestTree tree(view, 16);
@@ -371,7 +377,6 @@ inline auto testKDTreeBlockedBuild() -> int
             ++failures;
         }
 #ifdef _OPENMP
-        const int nThreads = omp_get_max_threads();
         omp_set_num_threads(1);
         auto serialView = serialData.view();
         const KDTestTree serialTree(serialView, 16);
@@ -379,7 +384,7 @@ inline auto testKDTreeBlockedBuild() -> int
         if (serialData.x_ != data.x_ || serialData.aux_ != data.aux_)
         {
             std::cerr << "testKDTreeBlockedBuild: " << what << " data: one thread ordered the points "
-                << "differently from " << nThreads << "\n";
+                << "differently from " << nParallel << "\n";
             ++failures;
         }
 #endif
