@@ -927,4 +927,112 @@ inline auto testConditionalSample() -> int
     return failures;
 }
 
+/**
+ * @brief Check marginalize(): the marginal estimate over the remaining dimensions
+ * @return Number of failures
+ * @details
+ * The marginal's pdf() equals the original's pdf() with NaN in the
+ * marginalized dimensions; it keeps every point, weight, and
+ * auxiliary datum; marginalizing over nothing reproduces the original;
+ * and invalid dimensions are rejected.
+ */
+inline auto testKernelDensityMarginalize() -> int
+{
+    int failures = 0;
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    KDETestData owned = makeKDETestData(3000, 4, 2, 91);
+    auto data = owned.view();
+    const KDETest kde(data, 8);
+    const Eigen::MatrixXd corr = (0.2 * Eigen::MatrixXd::Identity(4, 4)) +
+        (0.8 * Eigen::MatrixXd::Ones(4, 4));
+    const kden::Bandwidth bw(4.0 * Eigen::MatrixXd(corr.inverse()));
+    std::mt19937 gen(92); // NOLINT(cert-msc32-c,cert-msc51-cpp) -- fixed seed for a reproducible test
+    std::normal_distribution<double> gauss(0.0, 1.5);
+
+    for (const std::vector<std::size_t>& g : {std::vector<std::size_t>{3}, std::vector<std::size_t>{0, 2},
+        std::vector<std::size_t>{}})
+    {
+        std::string what = "marginalDims = {";
+        for (const std::size_t d : g) { what += std::to_string(d) + " "; }
+        what += "}";
+        const auto marg = kde.marginalize(g, bw);
+        std::vector<std::size_t> wantDims;
+        for (std::size_t d = 0; d < 4; ++d)
+        {
+            if (std::ranges::find(g, d) == g.end()) { wantDims.push_back(d); }
+        }
+        bool ok = marg.dims() == wantDims && marg.marginal() == 1.0 && marg.data().size() == data.size();
+
+        // Every point, weight, and auxiliary datum is kept: match them by
+        // aux (each point's original index, so unique). The weights are
+        // renormalized building the result, so equal to rounding.
+        std::vector<std::tuple<std::size_t, std::vector<double>, double>> fromMarg;
+        std::vector<std::tuple<std::size_t, std::vector<double>, double>> fromOrig;
+        for (std::size_t i = 0; ok && i < data.size(); ++i)
+        {
+            std::vector<double> xm(marg.data().position(i).begin(), marg.data().position(i).end());
+            fromMarg.emplace_back(marg.data().aux(i), xm, marg.data().w_[i]);
+            std::vector<double> xo;
+            for (const std::size_t d : wantDims) { xo.push_back(data.position(i)[d]); }
+            fromOrig.emplace_back(data.aux(i), xo, data.w_[i]);
+        }
+        std::ranges::sort(fromMarg);
+        std::ranges::sort(fromOrig);
+        for (std::size_t q = 0; ok && q < fromMarg.size(); ++q)
+        {
+            const auto& [am, xm, wm] = fromMarg[q];
+            const auto& [ao, xo, wo] = fromOrig[q];
+            ok = am == ao && xm == xo && std::abs(wm - wo) <= 1e-12 * wo;
+        }
+
+        // Its density is the original's with NaN in the marginalized dimensions
+        for (int t = 0; ok && t < 5; ++t)
+        {
+            std::vector<double> y;
+            std::vector<double> full(4, nan);
+            for (const std::size_t d : wantDims)
+            {
+                y.push_back(gauss(gen));
+                full[d] = y.back();
+            }
+            const double want = kde.pdf(full, 0.0, 0.0, bw);
+            const double got = marg.pdf(y, 0.0, 0.0);
+            ok = std::abs(got - want) <= 1e-10 * want;
+        }
+        if (!ok)
+        {
+            std::cerr << "testKernelDensityMarginalize: " << what << ": the marginal estimate is wrong\n";
+            ++failures;
+        }
+    }
+
+    // The Euclidean overload
+    const auto margE = kde.marginalize({1});
+    const std::vector<double> y{0.3, -0.2, 0.5};
+    const double wantE = kde.pdf(std::vector<double>{0.3, nan, -0.2, 0.5}, 0.0, 0.0);
+    if (std::abs(margE.pdf(y, 0.0, 0.0) - wantE) > 1e-10 * wantE)
+    {
+        std::cerr << "testKernelDensityMarginalize: the Euclidean marginal estimate is wrong\n";
+        ++failures;
+    }
+
+    // Invalid dimensions or bandwidth
+    int thrown = 0;
+    auto expectThrow = [&thrown](auto&& f) -> void
+    {
+        try { f(); } catch (const std::invalid_argument&) { ++thrown; }
+    };
+    expectThrow([&] { (void)kde.marginalize({4}, bw); });
+    expectThrow([&] { (void)kde.marginalize({1, 1}, bw); });
+    expectThrow([&] { (void)kde.marginalize({0, 1, 2, 3}, bw); });
+    expectThrow([&] { (void)kde.marginalize({1}, kden::Bandwidth::identity(3)); });
+    expectThrow([&] { (void)kde.marginalize({1}, bw.reduce({true, false, false, false})); });
+    if (thrown != 5)
+    {
+        std::cerr << "testKernelDensityMarginalize: only " << thrown << " of 5 invalid calls threw\n";
+        ++failures;
+    }
+    return failures;
+}
+
 #endif // TESTKERNELDENSITY_HPP

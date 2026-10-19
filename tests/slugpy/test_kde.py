@@ -298,3 +298,25 @@ def test_neighbors() -> None:
         assert np.allclose(np.einsum("ij,jk,ik->i", dd, m, dd), dist2[i], rtol=1e-12)
     idx_r, dist2_r = kde.neighbors(q, np.array([1, 3]), bandwidth=Bandwidth.identity(3))
     assert idx_r.shape == (2, 3) and np.all(idx_r[0, 1:] == -1) and np.all(np.isnan(dist2_r[0, 1:]))
+
+
+def test_marginalize() -> None:
+    """marginalize() returns a KDE over the remaining dimensions that reproduces the marginal density."""
+    x, w = make_points(1500, 4, 51)
+    m = np.linalg.inv(0.2 * np.eye(4) + 0.8 * np.ones((4, 4)))
+    kde = KDE(x, h2Inv=m, w=w, names=["mass", "age", "A_V", "Z"])
+    marg = kde.marginalize([2])
+    assert marg.names == ["mass", "age", "Z"] and marg.nDim == 3 and marg.marginal is None
+    assert marg.dataset.shape == (1500, 3) and marg.w.sum() == pytest.approx(1.0)
+    want_metric = np.linalg.inv(np.linalg.inv(m)[np.ix_([0, 1, 3], [0, 1, 3])])
+    assert np.allclose(marg.h2Inv, want_metric, rtol=1e-12)
+    y = np.random.default_rng(52).standard_normal((4, 3))
+    full = np.column_stack([y[:, 0], y[:, 1], np.full(4, np.nan), y[:, 2]])
+    assert np.allclose(np.asarray(marg.pdf(y, 0.0, 0.0)), np.asarray(kde.pdf(full, 0.0, 0.0)), rtol=1e-10)
+    # Marginalizing again, and over nothing
+    again = marg.marginalize([0, 1])
+    assert again.names == ["Z"]
+    same = kde.marginalize([])
+    assert np.allclose(np.asarray(same.pdf(x[:3], 0.0, 0.0)), np.asarray(kde.pdf(x[:3], 0.0, 0.0)), rtol=1e-12)
+    with pytest.raises(ValueError):
+        kde.marginalize([0, 1, 2, 3])

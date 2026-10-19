@@ -4702,6 +4702,29 @@ def test_neighbors_counts_and_errors():
         kde.neighbors(q, 2, bw, errDims=[0])
 
 
+def test_marginalize():
+    """marginalize() keeps every point and weight in the remaining dimensions, with the reduced metric."""
+    x, w = make_kde_points(1500, 4, 20)
+    kde = slug.KernelDensity(x, w, leafSize=8)
+    bw = slug.Bandwidth(kde_test_metric(4))
+    marg = kde.marginalize([1, 3], bandwidth=bw)
+    assert isinstance(marg, slug.ConditionalDensity)
+    assert marg.dims() == [0, 2] and marg.marginal() == 1.0 and marg.w.size == kde.w.size
+    assert np.array_equal(np.sort(marg.aux), np.sort(kde.aux))
+    # Coordinates and weights, matched through aux
+    order_m = np.argsort(marg.aux)
+    order_k = np.argsort(kde.aux)
+    assert np.array_equal(marg.x[order_m], kde.x[order_k][:, [0, 2]])
+    assert np.allclose(marg.w[order_m], kde.w[order_k], rtol=1e-12)
+    rng = np.random.default_rng(21)
+    y = rng.standard_normal((5, 2))
+    full = np.column_stack([y[:, 0], np.full(5, np.nan), y[:, 1], np.full(5, np.nan)])
+    assert np.allclose(marg.pdf(y, 0.0, 0.0), kde.pdf(full, 0.0, 0.0, bw), rtol=1e-10)
+    for bad in [[4], [1, 1], [0, 1, 2, 3]]:
+        with pytest.raises(ValueError):
+            kde.marginalize(bad, bandwidth=bw)
+
+
 def test_conditional_sample():
     """conditionalSample() returns conditional()'s points and weights, from which it can be rebuilt."""
     x, w = make_kde_points(2000, 3, 16)
