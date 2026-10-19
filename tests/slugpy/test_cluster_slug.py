@@ -841,11 +841,14 @@ def test_neighbors() -> None:
         assert np.array_equal(rows_err[i], kde.aux[want_i])
         alone_d, alone_rows = lib.neighbors(phot[i], 3, errors=errors[i])
         assert np.allclose(alone_d, dist_err[i], rtol=1e-12) and np.array_equal(alone_rows, rows_err[i])
-    # The Euclidean metric convolved with errors
-    dist_en, _ = lib.neighbors(phot[0], 3, errors=0.1, norm="Euclidean")
-    want_d, _ = _brute_neighbors(kde.dataset[:, :2], phot[0], np.linalg.inv(np.eye(2) + 2.0 * 0.01 * np.eye(2)), 3)
-    assert isinstance(dist_en, u.Quantity)
-    assert np.allclose(cast(u.Quantity, dist_en).to_value(u.mag), want_d / root2, rtol=1e-10)
+    # The Euclidean metric ignores errors and cov entirely
+    plain_d, plain_rows = lib.neighbors(phot, 3, norm="Euclidean")
+    for kwargs in [{"errors": 0.1}, {"errors": errors}, {"cov": np.eye(2)}]:
+        dist_en, rows_en = lib.neighbors(phot, 3, norm="Euclidean", **kwargs)
+        assert isinstance(dist_en, u.Quantity) and isinstance(plain_d, u.Quantity)
+        assert np.array_equal(cast(u.Quantity, dist_en).to_value(u.mag),
+                              cast(u.Quantity, plain_d).to_value(u.mag))
+        assert np.array_equal(rows_en, plain_rows)
 
     # The errors alone: each band's difference divided by its error
     dist_x, rows_x = lib.neighbors(phot, 3, errors=errors, norm="errors")

@@ -1161,10 +1161,10 @@ class cluster_slug(slug_reader):
         errors : float, array_like, or astropy.units.Quantity, optional
             As for conditional(): photometric errors, the same for every
             point or one set per point, with covariance C. For norm
-            "bandwidth" or "Euclidean", the metric M is convolved with
-            them, M -> (M^-1 + 2 C)^-1, so that differences the errors
-            could explain count for less; for norm "errors", they define
-            the metric.
+            "bandwidth", the metric M is convolved with them, M ->
+            (M^-1 + 2 C)^-1, so that differences the errors could explain
+            count for less; for norm "errors", they define the metric;
+            for norm "Euclidean", they are ignored.
         cov : array_like or astropy.units.Quantity, optional
             As for conditional().
         norm : str, optional
@@ -1185,9 +1185,10 @@ class cluster_slug(slug_reader):
               errors or cov, positive definite, and points that specify
               only the photometry (inference quantities NaN).
             - "Euclidean": the identity (as if h2Inv were the identity),
-              convolved with any errors. Distance is in the units the
-              estimate stores each dimension in (mag or dex for the
-              bands), and shows the absolute level of disagreement.
+              ignoring errors and cov: the true Euclidean distance, in
+              the units the estimate stores each dimension in (mag or dex
+              for the bands), which shows the absolute level of
+              disagreement.
 
         Returns
         -------
@@ -1234,8 +1235,11 @@ class cluster_slug(slug_reader):
         if metric == "errors":
             idx, dist2 = kde.neighbors(points, counts, bandwidth=self._error_metric(
                 filters, kde, points, self._phot_cov(filters, errors, cov)))
+        elif metric == "euclidean":
+            # The true Euclidean distance: errors and cov are ignored
+            idx, dist2 = kde.neighbors(points, counts, bandwidth=Bandwidth.identity(kde.nDim))
         else:
-            base = Bandwidth(kde.h2Inv) if metric == "bandwidth" else Bandwidth.identity(kde.nDim)
+            base = Bandwidth(kde.h2Inv)
             bandwidth, per_point = self._phot_errors(filters, kde, errors, cov, n_points, base)
             if per_point is not None:
                 idx, dist2 = kde.neighbors(points, counts, bandwidth=base, errDims=list(range(len(filters))),
