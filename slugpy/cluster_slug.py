@@ -1642,9 +1642,10 @@ class cluster_slug(slug_reader):
         Raises
         ------
         ValueError
-            If cov has the wrong shape, non-finite values, or units that
-            do not match the bands' (or a Quantity is given for a filter
-            set mixing magnitudes with other units).
+            If cov has the wrong shape, non-finite values, a matrix that
+            is not symmetric, or units that do not match the bands' (or a
+            Quantity is given for a filter set mixing magnitudes with
+            other units).
         """
         nband = len(filters)
         if isinstance(cov, u.Quantity):
@@ -1667,6 +1668,12 @@ class cluster_slug(slug_reader):
                              f"point, or M x {nband} x {nband}, for each of M points")
         if not np.all(np.isfinite(values)):
             raise ValueError("cov must be finite")
+        # Symmetric to the same tolerance as Bandwidth.convolveCov(), checked
+        # here so that every use rejects an asymmetric cov alike (the
+        # "errors" metric of neighbors() never reaches convolveCov())
+        scale = np.maximum(np.max(np.abs(values), axis=(-2, -1)), 1e-300)
+        if np.any(np.max(np.abs(values - np.swapaxes(values, -1, -2)), axis=(-2, -1)) > 1e-12 * scale):
+            raise ValueError("cov must be symmetric")
         return values
 
     def remove_filterset(self, filters: list[str]) -> None:
