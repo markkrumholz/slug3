@@ -33,6 +33,7 @@ auto main() -> int {
         result += testConditionalDensity();
         result += testKernelDensityBatch();
         result += testConditionalSample();
+        result += testKernelDensityPercentile();
         result += testKernelDensityMarginalize();
         return result;
     }

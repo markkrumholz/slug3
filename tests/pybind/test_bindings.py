@@ -4702,6 +4702,40 @@ def test_neighbors_counts_and_errors():
         kde.neighbors(q, 2, bw, errDims=[0])
 
 
+def test_percentile():
+    """percentile() is within its tolerance in probability of the brute-force marginal distribution."""
+    from scipy.special import erfc
+
+    x, w = make_kde_points(2000, 3, 22)
+    x0, w0 = x.copy(), w / w.sum()
+    kde = slug.KernelDensity(x, w, leafSize=8)
+    m = kde_test_metric(3) * 9.0
+    bw = slug.Bandwidth(m)
+    pcts = np.array([0.5, 16.0, 50.0, 84.0, 99.5])
+    for dim in range(3):
+        s = np.sqrt(1.0 / np.linalg.inv(m)[dim, dim])
+        t = kde.percentile(dim, pcts, 1e-3, 1e-10, bw)
+        assert t.shape == (5,) and np.all(np.diff(t) > 0)
+        for ti, pct in zip(t, pcts, strict=True):
+            p = pct / 100.0
+            f = np.sum(w0 * 0.5 * erfc(-s * (ti - x0[:, dim])))
+            assert abs(f - p) <= max(1e-10, 1e-3 * min(p, 1.0 - p))
+    one = kde.percentile(2, 50.0, bandwidth=bw)
+    assert isinstance(one, float)
+    assert kde.percentile(2, np.array([[50.0]]), bandwidth=bw).shape == (1, 1)
+    # A conditional density's percentiles
+    cd = kde.conditional(np.array([0.3, np.nan, np.nan]), 0.0, bandwidth=bw)
+    med = cd.percentile(0, 50.0, 0.0, 1e-9)
+    s_cd = np.sqrt(1.0 / np.linalg.inv(cd.bandwidth().h2Inv())[0, 0])
+    w_cd = cd.w / cd.w.sum()
+    assert abs(np.sum(w_cd * 0.5 * erfc(-s_cd * (med - cd.x[:, 0]))) - 0.5) <= 1e-9
+    for bad in [0.0, 100.0, -5.0, np.nan]:
+        with pytest.raises(ValueError):
+            kde.percentile(0, bad, bandwidth=bw)
+    with pytest.raises(ValueError):
+        kde.percentile(3, 50.0, bandwidth=bw)
+
+
 def test_marginalize():
     """marginalize() keeps every point and weight in the remaining dimensions, with the reduced metric."""
     x, w = make_kde_points(1500, 4, 20)

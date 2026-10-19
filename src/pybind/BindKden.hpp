@@ -557,6 +557,33 @@ namespace kdenbind {
     }
 
     /**
+     * @brief Evaluate one or several percentiles, for Python
+     * @tparam Eval Callable taking a vector of percentiles and returning
+     *   one value per percentile (a batch percentile())
+     * @param pct A float, or an array_like of floats (any shape)
+     * @param eval The batch evaluation
+     * @return A float for a float pct, or an array of pct's shape
+     * @details
+     * Runs eval without the GIL.
+     */
+    template <typename Eval>
+    inline auto percentiles(const py::object& pct, const Eval& eval) -> py::object
+    {
+        const auto arr = py::cast<QueryArray>(pct);
+        const std::vector<double> ps(arr.data(), arr.data() + arr.size()); // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+        std::vector<double> out;
+        {
+            const py::gil_scoped_release release;
+            out = eval(ps);
+        }
+        if (arr.ndim() == 0) { return py::float_(out.front()); }
+        const std::vector<py::ssize_t> shape(arr.shape(), arr.shape() + arr.ndim()); // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+        py::array_t<double> result(shape);
+        std::ranges::copy(out, result.mutable_data());
+        return result;
+    }
+
+    /**
      * @brief Add the methods every bound tree type shares
      * @tparam PyClass The py::class_ type
      * @tparam TreeT The C++ tree type (or a base of the bound class)

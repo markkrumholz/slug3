@@ -348,6 +348,74 @@ Notes
 Copies every point (in parallel), then builds the result's tree,
 without the GIL.)doc";
 
+static constexpr std::string_view percentileDocstring = R"doc(Compute one-dimensional percentiles of the estimate.
+
+Parameters
+----------
+dim : int
+    The dimension.
+pct : float or array_like of float
+    The percentile(s), each in (0, 100).
+relTol : float, optional
+    Relative tolerance, in probability (default 1e-2); see Returns.
+absTol : float, optional
+    Absolute tolerance, in probability (default 1e-8); see Returns.
+bandwidth : Bandwidth, optional
+    The kernel's inverse squared bandwidth matrix (default: identity);
+    must not be reduced.
+
+Returns
+-------
+t : float or numpy.ndarray of float
+    For each percentile, a value t of dimension dim at which the
+    estimate's marginal cumulative distribution in dim, F, satisfies
+    |F(t) - p| <= max(absTol, relTol * min(p, 1 - p)), with p = pct / 100
+    -- guaranteed, with the same relative standard in both tails; a
+    float for a float pct, otherwise an array of pct's shape.
+
+Raises
+------
+ValueError
+    If dim is not below nDim, a pct is not in (0, 100), a tolerance is
+    negative, bandwidth has the wrong number of dimensions or is reduced,
+    the estimate has no points, or the bandwidth's marginal in dim is
+    not positive.
+
+Notes
+-----
+A tree walk: a cut through the tree bounds F above and below, and so
+brackets the percentile; the cut is refined where it matters, near the
+percentile, until the bounds meet the tolerance. This is fast in a
+dimension the tree splits along; in one in noSplitDims (e.g. an
+inference quantity of a cluster_slug library), every node spans the
+whole range, so the walk reaches nearly every point, which is still
+correct but much slower. Several percentiles are computed in parallel,
+without the GIL.)doc";
+
+static constexpr std::string_view condPercentileDocstring = R"doc(Compute one-dimensional percentiles of the conditional density.
+
+Parameters
+----------
+dim : int
+    Index of the dimension among the kept ones (see dims()).
+pct : float or array_like of float
+    The percentile(s), each in (0, 100).
+relTol : float, optional
+    As for KernelDensity.percentile() (default 1e-2).
+absTol : float, optional
+    As for KernelDensity.percentile() (default 1e-8).
+
+Returns
+-------
+t : float or numpy.ndarray of float
+    As for KernelDensity.percentile(), with the conditional kernel
+    metric.
+
+Raises
+------
+ValueError
+    As for KernelDensity.percentile().)doc";
+
 static constexpr std::string_view condClassDocstring = R"doc(A kernel density estimate conditioned on some dimensions' values.
 
 Made by KernelDensity.conditional(). Owns its points: shifted,
@@ -490,6 +558,16 @@ void bindKernelDensity(py::module_& m)
             }, conditionalSampleDocstring.data(), py::arg("x0"), py::arg("massTol") = 1e-2,
             py::arg("marginalDims") = std::vector<std::size_t>{}, py::arg("bandwidth") = py::none(),
             py::arg("errDims") = std::vector<std::size_t>{}, py::arg("errCov") = py::none())
+        .def("percentile", [](const KDE& kde, const std::size_t dim, const py::object& pct, const double relTol,
+                const double absTol, const py::object& bandwidth) -> py::object
+            {
+                const kden::Bandwidth bw = bandwidth.is_none()
+                    ? kden::Bandwidth::identity(kde.nDim())
+                    : py::cast<kden::Bandwidth>(bandwidth);
+                return kdenbind::percentiles(pct, [&](const std::vector<double>& ps) -> std::vector<double>
+                    { return kde.percentile(dim, ps, relTol, absTol, bw); });
+            }, percentileDocstring.data(), py::arg("dim"), py::arg("pct"), py::arg("relTol") = 1e-2,
+            py::arg("absTol") = 1e-8, py::arg("bandwidth") = py::none())
         .def("marginalize", [](const KDE& kde, const std::vector<std::size_t>& marginalDims,
                 const py::object& bandwidth, const std::size_t leafSize) -> Conditional
             {
@@ -561,6 +639,13 @@ void bindKernelDensity(py::module_& m)
                 if (single) { return py::float_(out.front()); }
                 return kdenbind::toArray(out);
             }, condPdfDocstring.data(), py::arg("y"), py::arg("relTol") = 1e-2, py::arg("absTol") = 1e-8)
+        .def("percentile", [](const Conditional& cd, const std::size_t dim, const py::object& pct,
+                const double relTol, const double absTol) -> py::object
+            {
+                return kdenbind::percentiles(pct, [&](const std::vector<double>& ps) -> std::vector<double>
+                    { return cd.percentile(dim, ps, relTol, absTol); });
+            }, condPercentileDocstring.data(), py::arg("dim"), py::arg("pct"), py::arg("relTol") = 1e-2,
+            py::arg("absTol") = 1e-8)
         .def("dims", &Conditional::dims, condDimsDocstring.data())
         .def("marginal", &Conditional::marginal, condMarginalDocstring.data())
         .def("bandwidth", &Conditional::bandwidth, condBandwidthDocstring.data(),

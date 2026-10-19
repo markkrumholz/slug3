@@ -486,6 +486,65 @@ class KDE:
         idx, dist2 = self._kde.neighbors(x, nn, bw, [] if errDims is None else errDims, errCov)
         return np.asarray(idx), np.asarray(dist2)
 
+    def percentile(self, dim: int | str, pct: Any, relTol: float = 1e-2, absTol: float = 1e-8,
+                   bandwidth: Bandwidth | None = None) -> float | np.ndarray:
+        """
+        Compute one-dimensional percentiles of the estimate.
+
+        Parameters
+        ----------
+        dim : int or str
+            The dimension: its index, or its name (see names).
+        pct : float or array_like of float
+            The percentile(s), each in (0, 100).
+        relTol : float, optional
+            Relative tolerance, in probability (default 1e-2); see
+            Returns.
+        absTol : float, optional
+            Absolute tolerance, in probability (default 1e-8); see
+            Returns.
+        bandwidth : Bandwidth, optional
+            The kernel's bandwidth, in place of h2Inv; if None (the
+            default), h2Inv.
+
+        Returns
+        -------
+        float or numpy.ndarray of float
+            For each percentile, a value t of dimension dim at which the
+            estimate's marginal cumulative distribution in dim, F,
+            satisfies |F(t) - p| <= max(absTol, relTol * min(p, 1 - p)),
+            with p = pct / 100 (guaranteed); a float for a float pct,
+            otherwise an array of pct's shape. For a conditional estimate
+            (from conditional()), these are percentiles of the posterior.
+
+        Raises
+        ------
+        ValueError
+            If dim is a name not in names, or a negative index; or as for
+            KernelDensity.percentile() (e.g. an index not below nDim).
+        TypeError
+            If dim is neither an int nor a str.
+
+        Notes
+        -----
+        A tree walk that brackets the percentile between bounds on F from
+        a cut through the tree, refined near the percentile (see
+        KernelDensity.percentile()); several percentiles are computed in
+        parallel, without the GIL.
+        """
+        if isinstance(dim, str):
+            if dim not in self._names:
+                raise ValueError(f"no dimension named {dim!r}; the names are {self._names}")
+            index = self._names.index(dim)
+        elif isinstance(dim, (int, np.integer)) and not isinstance(dim, bool):
+            index = int(dim)
+            if index < 0:
+                raise ValueError(f"dim must be non-negative, not {index}")
+        else:
+            raise TypeError("dim must be an int or a str")
+        bw = self._current_bandwidth() if bandwidth is None else bandwidth
+        return self._kde.percentile(index, pct, relTol, absTol, bw)
+
     def conditional(self, x0: Any, massTol: float = 1e-2, marginalDims: list[int] | None = None,
                     leafSize: int = 16, bandwidth: Bandwidth | None = None,
                     errDims: list[int] | None = None, errCov: Any = None) -> "KDE | list[KDE]":

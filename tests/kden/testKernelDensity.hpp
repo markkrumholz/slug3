@@ -1035,4 +1035,121 @@ inline auto testKernelDensityMarginalize() -> int
     return failures;
 }
 
+/**
+ * @brief The marginal cumulative distribution of a kernel density estimate in one dimension, by brute force
+ * @param data The estimate's points (weights normalized)
+ * @param dim The dimension
+ * @param m The marginal kernel's metric in dim
+ * @param t Where to evaluate it
+ * @return sum_i w_i erfc(-sqrt(m) (t - x_i)) / 2
+ */
+inline auto bruteCdf(const KDETestView& data, const std::size_t dim, const double m, const double t) -> double
+{
+    double f = 0.0;
+    for (std::size_t i = 0; i < data.size(); ++i)
+    {
+        f += data.w_[i] * 0.5 * std::erfc(-std::sqrt(m) * (t - data.position(i)[dim]));
+    }
+    return f;
+}
+
+/**
+ * @brief Check percentile(): the guaranteed tolerance in probability, against a brute-force cumulative distribution
+ * @return Number of failures
+ * @details
+ * For several dimensions and percentiles (including both tails) and
+ * tolerances (loose, tight, and zero), the brute-force cumulative
+ * distribution at the result must be within the tolerance of the
+ * requested fraction. Also checks a ConditionalDensity's percentiles,
+ * the batch version, and argument checks.
+ */
+inline auto testKernelDensityPercentile() -> int
+{
+    int failures = 0;
+    KDETestData owned = makeKDETestData(4000, 4, 2, 101);
+    auto data = owned.view();
+    const KDETest kde(data, 8);
+    const Eigen::MatrixXd corr = (0.2 * Eigen::MatrixXd::Identity(4, 4)) +
+        (0.8 * Eigen::MatrixXd::Ones(4, 4));
+    const kden::Bandwidth bw(16.0 * Eigen::MatrixXd(corr.inverse()));
+    const Eigen::MatrixXd cov = bw.h2Inv().inverse();
+    const std::vector<double> pcts{0.1, 2.5, 16.0, 50.0, 84.0, 97.5, 99.9};
+
+    for (const auto& [relTol, absTol] : {std::pair{1e-2, 1e-8}, std::pair{0.0, 1e-10}, std::pair{0.0, 0.0}})
+    {
+        for (std::size_t dim = 0; dim < 4; ++dim)
+        {
+            const double m = 1.0 / cov(static_cast<Eigen::Index>(dim), static_cast<Eigen::Index>(dim));
+            for (const double pct : pcts)
+            {
+                const double p = pct / 100.0;
+                const double tol = std::max({absTol, relTol * std::min(p, 1.0 - p), 1e-13});
+                const double t = kde.percentile(dim, pct, relTol, absTol, bw);
+                const double f = bruteCdf(data, dim, m, t);
+                if (!(std::abs(f - p) <= tol))
+                {
+                    std::cerr << "testKernelDensityPercentile: dim " << dim << ", pct " << pct << ", relTol "
+                        << relTol << ", absTol " << absTol << ": F(" << t << ") = " << f << ", off by "
+                        << f - p << " > " << tol << "\n";
+                    ++failures;
+                }
+            }
+        }
+    }
+
+    // The batch version gives what single calls do
+    const auto batch = kde.percentile(1, pcts, 1e-3, 1e-10, bw);
+    bool same = batch.size() == pcts.size();
+    for (std::size_t i = 0; same && i < pcts.size(); ++i) { same = batch[i] == kde.percentile(1, pcts[i], 1e-3, 1e-10, bw); }
+    if (!same)
+    {
+        std::cerr << "testKernelDensityPercentile: batch percentiles differ from single ones\n";
+        ++failures;
+    }
+
+    // A conditional density's percentiles, in its own metric
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const auto cd = kde.conditional(std::vector<double>{0.5, nan, -0.4, nan}, {}, 1e-3, bw);
+    const Eigen::MatrixXd cdCov = cd.bandwidth().h2Inv().inverse();
+    KDETestView cdView;
+    cdView.nDim_ = cd.data().nDim_;
+    cdView.x_ = std::span<double>(const_cast<double*>(cd.data().x_.data()), cd.data().x_.size()); // NOLINT(cppcoreguidelines-pro-type-const-cast) -- read only, for bruteCdf
+    cdView.w_ = std::span<double>(const_cast<double*>(cd.data().w_.data()), cd.data().w_.size()); // NOLINT(cppcoreguidelines-pro-type-const-cast)
+    for (std::size_t dim = 0; dim < 2; ++dim)
+    {
+        const double m = 1.0 / cdCov(static_cast<Eigen::Index>(dim), static_cast<Eigen::Index>(dim));
+        for (const double pct : {5.0, 50.0, 95.0})
+        {
+            const double t = cd.percentile(dim, pct, 0.0, 1e-9);
+            const double f = bruteCdf(cdView, dim, m, t);
+            if (!(std::abs(f - (pct / 100.0)) <= 1e-9))
+            {
+                std::cerr << "testKernelDensityPercentile: conditional density, dim " << dim << ", pct " << pct
+                    << ": F = " << f << "\n";
+                ++failures;
+            }
+        }
+    }
+
+    // Argument checks
+    int thrown = 0;
+    auto expectThrow = [&thrown](auto&& f) -> void
+    {
+        try { f(); } catch (const std::invalid_argument&) { ++thrown; }
+    };
+    expectThrow([&] { (void)kde.percentile(4, 50.0, 1e-2, 1e-8, bw); });
+    expectThrow([&] { (void)kde.percentile(0, 0.0, 1e-2, 1e-8, bw); });
+    expectThrow([&] { (void)kde.percentile(0, 100.0, 1e-2, 1e-8, bw); });
+    expectThrow([&] { (void)kde.percentile(0, nan, 1e-2, 1e-8, bw); });
+    expectThrow([&] { (void)kde.percentile(0, 50.0, -1e-2, 1e-8, bw); });
+    expectThrow([&] { (void)kde.percentile(0, 50.0, 1e-2, 1e-8, kden::Bandwidth::identity(3)); });
+    expectThrow([&] { (void)kde.percentile(0, 50.0, 1e-2, 1e-8, bw.reduce({false, true, false, false})); });
+    if (thrown != 7)
+    {
+        std::cerr << "testKernelDensityPercentile: only " << thrown << " of 7 invalid calls threw\n";
+        ++failures;
+    }
+    return failures;
+}
+
 #endif // TESTKERNELDENSITY_HPP

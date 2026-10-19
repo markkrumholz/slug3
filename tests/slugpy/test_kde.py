@@ -10,6 +10,8 @@ Uses small random data sets made here, so needs no data fetched.
 :copyright: Copyright (c) 2026 Mark Krumholz
 """
 
+from typing import cast
+
 import numpy as np
 import pytest
 
@@ -298,6 +300,31 @@ def test_neighbors() -> None:
         assert np.allclose(np.einsum("ij,jk,ik->i", dd, m, dd), dist2[i], rtol=1e-12)
     idx_r, dist2_r = kde.neighbors(q, np.array([1, 3]), bandwidth=Bandwidth.identity(3))
     assert idx_r.shape == (2, 3) and np.all(idx_r[0, 1:] == -1) and np.all(np.isnan(dist2_r[0, 1:]))
+
+
+def test_percentile() -> None:
+    """percentile() takes a dimension's index or name, and meets its tolerance in probability."""
+    from scipy.special import erfc  # pyright: ignore[reportMissingTypeStubs]
+
+    x, w = make_points(1500, 3, 61)
+    m = np.diag([25.0, 4.0, 100.0])
+    kde = KDE(x, h2Inv=m, w=w, names=["mass", "age", "Z"])
+    pcts = [16.0, 50.0, 84.0]
+    by_name = np.asarray(kde.percentile("age", pcts))
+    by_index = np.asarray(kde.percentile(1, pcts))
+    assert np.array_equal(by_name, by_index) and np.all(np.diff(by_name) > 0)
+    tight = np.asarray(kde.percentile("Z", pcts, relTol=0.0, absTol=1e-10))
+    wn = kde.w / kde.w.sum()
+    for t, pct in zip(tight, pcts, strict=True):
+        f = float(np.sum(wn * 0.5 * cast(np.ndarray, erfc(-10.0 * (t - kde.dataset[:, 2])))))
+        assert abs(f - pct / 100.0) <= 1e-10
+    with pytest.raises(ValueError, match="no dimension named"):
+        kde.percentile("A_V", 50.0)
+    for bad_dim in [-1, 3]:
+        with pytest.raises(ValueError):
+            kde.percentile(bad_dim, 50.0)
+    with pytest.raises(TypeError):
+        kde.percentile(1.0, 50.0)  # pyright: ignore[reportArgumentType]
 
 
 def test_marginalize() -> None:

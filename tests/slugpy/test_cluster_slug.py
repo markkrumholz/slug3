@@ -908,6 +908,20 @@ def test_neighbors_distance_units() -> None:
         lib.neighbors(lbol.dataset[0, :1], 1)
 
 
+def test_posterior_percentiles() -> None:
+    """Percentiles of a posterior from conditional(), by name, ordered and within the posterior's support."""
+    filters = ["HST.WFC3_UVIS1.F555W", "HST.WFC3_UVIS1.F814W"]
+    lib = cluster_slug(str(LIBRARY), filtersets=filters)
+    phot = lib.kdes[tuple(filters)].dataset[[5, 50], :2]
+    posts = lib.conditional(phot, errors=0.1)
+    assert isinstance(posts, list)
+    for post in posts:
+        q = np.asarray(post.percentile("mass", [2.5, 16.0, 50.0, 84.0, 97.5]))
+        assert np.all(np.diff(q) > 0)
+        assert post.dataset[:, 0].min() - 1.0 < q[0] and q[-1] < post.dataset[:, 0].max() + 1.0
+        assert float(np.asarray(post.percentile(0, 50.0))) == pytest.approx(q[2])
+
+
 def test_asymmetric_cov_rejected() -> None:
     """Every method rejects an asymmetric cov, including neighbors() with norm "errors"."""
     filters = ["HST.WFC3_UVIS1.F555W", "HST.WFC3_UVIS1.F814W"]
