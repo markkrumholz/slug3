@@ -34,6 +34,7 @@ auto main() -> int {
         result += testKernelDensityBatch();
         result += testConditionalSample();
         result += testKernelDensityPercentile();
+        result += testKernelDensityMarginalize();
         return result;
     }
     catch (const std::exception& error)

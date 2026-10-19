@@ -729,6 +729,114 @@ namespace kden {
                 { return percentile(dim, pct[i], relTol, absTol, bandwidth); }); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         }
 
+        /**
+         * @brief Marginalize the estimate over some dimensions
+         * @param marginalDims Dimensions to marginalize over (the set G):
+         *   distinct, below nDim, and leaving at least one; may be empty
+         * @param bandwidth The kernel's inverse squared bandwidth
+         *   matrix, for nDim dimensions; must not be reduced
+         * @param leafSize Leaf size of the result's tree
+         * @return The marginal estimate over the remaining dimensions R
+         *   (in increasing order), as a ConditionalDensity -- with no
+         *   dimensions fixed, its marginal() is 1
+         * @throws std::invalid_argument if bandwidth is not for nDim
+         *   dimensions or is reduced, or marginalDims has a dimension
+         *   not below nDim or a repeated one, or leaves no dimension
+         * @throws std::domain_error if the bandwidth's block over G is
+         *   not positive definite
+         * @details
+         * Marginalizing a Gaussian kernel over G replaces its metric M
+         * by the Schur complement M' = bandwidth.reduce(G), so the
+         * marginal estimate is the kernel density estimate over the
+         * points' coordinates in R, with the same weights, and kernel
+         * metric M' over R: conditional() with no dimension fixed, so
+         * that every point keeps its full weight, unshifted. Its pdf()
+         * at y equals this estimate's pdf() at the point with y in R
+         * and NaN in G. Copies every point's coordinates in R, weight,
+         * and auxiliary data (in parallel, if built with OpenMP), then
+         * builds the result's tree. Thread-safe, as for pdf().
+         */
+        [[nodiscard]] auto marginalize(const std::vector<std::size_t>& marginalDims,
+            const Bandwidth& bandwidth,
+            const std::size_t leafSize = 16) const -> ConditionalDensity<AuxType>
+        {
+            const std::size_t nDim = this->nDim_;
+            if (bandwidth.nDim() != nDim)
+            {
+                throw std::invalid_argument("KernelDensity::marginalize: bandwidth must be for nDim dimensions");
+            }
+            if (bandwidth.isReduced())
+            {
+                throw std::invalid_argument("KernelDensity::marginalize: bandwidth must not be reduced");
+            }
+            std::vector<bool> inG(nDim, false);
+            for (const std::size_t d : marginalDims)
+            {
+                if (d >= nDim || inG[d]) // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                {
+                    throw std::invalid_argument("KernelDensity::marginalize: marginalDims must hold "
+                        "distinct dimensions below nDim");
+                }
+                inG[d] = true; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            }
+            std::vector<std::size_t> dimsR;
+            for (std::size_t d = 0; d < nDim; ++d)
+            {
+                if (!inG[d]) { dimsR.push_back(d); } // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            }
+            if (dimsR.empty())
+            {
+                throw std::invalid_argument("KernelDensity::marginalize: marginalDims must leave at least one dimension");
+            }
+
+            // The kernel metric: the Schur complement over R
+            const Eigen::MatrixXd mPrime = bandwidth.reduce(inG).h2Inv(); // NOLINT(misc-include-cleaner) -- Eigen::MatrixXd is provided by <Eigen/Dense> (included via Bandwidth.hpp); clang-tidy's IWYU mapping doesn't know that
+            const auto nR = static_cast<Eigen::Index>(dimsR.size()); // NOLINT(misc-include-cleaner) -- Eigen::Index is provided by <Eigen/Dense> (included via Bandwidth.hpp); clang-tidy's IWYU mapping doesn't know that
+            Eigen::MatrixXd metric(nR, nR);
+            for (Eigen::Index r = 0; r < nR; ++r)
+            {
+                for (Eigen::Index c = 0; c < nR; ++c)
+                {
+                    metric(r, c) = mPrime(static_cast<Eigen::Index>(dimsR[static_cast<std::size_t>(r)]), // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                        static_cast<Eigen::Index>(dimsR[static_cast<std::size_t>(c)])); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                }
+            }
+
+            // Every point's coordinates in R, weight, and auxiliary data
+            const auto& pts = this->data_.get();
+            const std::size_t n = pts.size();
+            const std::size_t nKept = dimsR.size();
+            OwnedKernelDensityData<AuxType> data;
+            data.nDim_ = nKept;
+            data.x_.resize(n * nKept);
+            data.w_.assign(pts.w_.begin(), pts.w_.end());
+            if constexpr (KernelDensityData<AuxType>::hasAux) { data.aux_.assign(pts.aux_.begin(), pts.aux_.end()); }
+#ifdef _OPENMP
+#           pragma omp parallel for
+#endif
+            for (std::size_t i = 0; i < n; ++i)
+            {
+                for (std::size_t r = 0; r < nKept; ++r)
+                {
+                    data.x_[(i * nKept) + r] = pts.x_[(i * nDim) + dimsR[r]]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                }
+            }
+            return ConditionalDensity<AuxType>(std::move(data), Bandwidth(metric), std::move(dimsR), 1.0, leafSize);
+        }
+
+        /**
+         * @brief Marginalize the estimate over some dimensions, with the Euclidean bandwidth
+         * @param marginalDims As for the other overload
+         * @param leafSize As for the other overload
+         * @return As for the other overload, with M the identity
+         * @throws As for the other overload
+         */
+        [[nodiscard]] auto marginalize(const std::vector<std::size_t>& marginalDims,
+            const std::size_t leafSize = 16) const -> ConditionalDensity<AuxType>
+        {
+            return marginalize(marginalDims, this->euclidean_, leafSize);
+        }
+
     protected:
 
         /**
@@ -1861,10 +1969,13 @@ namespace kden {
      * @brief A kernel density estimate conditioned on some dimensions' values, owning its points
      * @tparam AuxType As for KernelDensity
      * @details
-     * Made by KernelDensity::conditional(). Holds the conditional
-     * estimate's points (shifted, reweighted, and pruned copies of the
-     * original ones, with their auxiliary data), a KernelDensity over
-     * them, and the kernel metric to evaluate it with. The points and
+     * Made by KernelDensity::conditional(), or by
+     * KernelDensity::marginalize() (a conditional on no dimensions,
+     * whose marginal() is 1). Holds the estimate's points (shifted,
+     * reweighted, and pruned copies of the original ones, or for a
+     * marginal, copies of them in the kept dimensions, with their
+     * auxiliary data), a KernelDensity over them, and the kernel metric
+     * to evaluate it with. The points and
      * the view of them the KernelDensity refers to are held through a
      * pointer, so their addresses survive moving the
      * ConditionalDensity.

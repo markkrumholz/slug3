@@ -666,6 +666,48 @@ class KDE:
         x, w, aux = cast(tuple[np.ndarray, np.ndarray, np.ndarray], result)
         return x, w, aux
 
+    def marginalize(self, marginalDims: list[int], leafSize: int = 16,
+                    bandwidth: Bandwidth | None = None) -> "KDE":
+        """
+        Marginalize the estimate over some dimensions.
+
+        Parameters
+        ----------
+        marginalDims : list of int
+            Dimensions to marginalize over: distinct, below nDim, and
+            leaving at least one; may be empty, for a copy.
+        leafSize : int, optional
+            Leaf size of the result's kd tree (default 16).
+        bandwidth : Bandwidth, optional
+            The kernel's bandwidth, in place of h2Inv; if None (the
+            default), h2Inv.
+
+        Returns
+        -------
+        KDE
+            The marginal estimate over the remaining dimensions: the
+            same points, in those dimensions, with the same weights and
+            aux labels, and h2Inv the bandwidth reduced over
+            marginalDims (its Schur complement). Its names are this
+            KDE's for the remaining dimensions, and its marginal None.
+            Its pdf(y) equals this KDE's pdf() at the point with y in
+            the remaining dimensions and NaN in marginalDims.
+
+        Raises
+        ------
+        ValueError
+            As for KernelDensity.marginalize().
+
+        Notes
+        -----
+        Copies every point (in parallel), then builds the result's
+        tree, without the GIL.
+        """
+        bw = self._current_bandwidth() if bandwidth is None else bandwidth
+        cd = self._kde.marginalize(marginalDims, bw, leafSize)
+        names = [self._names[d] for d in cd.dims()] if self._names else []
+        return KDE._from_kernel_density(cd.kde(), cd.bandwidth().h2Inv(), names, None, cd)
+
     def _wrap_conditional(self, cd: Any) -> "KDE":
         """
         Wrap a ConditionalDensity as a KDE.

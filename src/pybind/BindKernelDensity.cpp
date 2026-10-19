@@ -310,6 +310,44 @@ Notes
 A batch runs in parallel, one point per thread at a time, without the
 GIL.)doc";
 
+static constexpr std::string_view marginalizeDocstring = R"doc(Marginalize the estimate over some dimensions.
+
+The marginal estimate over the remaining dimensions: the same points,
+in those dimensions, with the same weights and auxiliary data, and the
+kernel metric the bandwidth reduced over marginalDims (its Schur
+complement). Its pdf(y) equals this estimate's pdf() at the point with
+y in the remaining dimensions and NaN in marginalDims.
+
+Parameters
+----------
+marginalDims : list of int
+    Dimensions to marginalize over: distinct, below nDim, and leaving at
+    least one; may be empty, for a copy.
+bandwidth : Bandwidth, optional
+    The kernel's inverse squared bandwidth matrix (default: identity);
+    must not be reduced.
+leafSize : int, optional
+    Leaf size of the result's tree (default 16).
+
+Returns
+-------
+marginal : ConditionalDensity
+    The marginal estimate over the remaining dimensions (see dims()),
+    with marginal() 1, since no dimension is fixed.
+
+Raises
+------
+ValueError
+    If marginalDims has a dimension not below nDim or a repeated one,
+    or leaves no dimension; if bandwidth has the wrong number of
+    dimensions or is reduced; or if its block over marginalDims is not
+    positive definite.
+
+Notes
+-----
+Copies every point (in parallel), then builds the result's tree,
+without the GIL.)doc";
+
 static constexpr std::string_view percentileDocstring = R"doc(Compute one-dimensional percentiles of the estimate.
 
 Parameters
@@ -385,7 +423,12 @@ reweighted, and pruned copies of the original estimate's points, with
 their auxiliary data. Its pdf() is the conditional density p(y | x0)
 over the kept dimensions (see dims()), and marginal() the original
 estimate's marginal density at the fixed values, so that the original
-estimate at (x0, y) is marginal() * pdf(y).)doc";
+estimate at (x0, y) is marginal() * pdf(y).
+
+Also made by KernelDensity.marginalize(), as the marginal estimate over
+the kept dimensions: a conditional on no dimensions, whose points are
+copies of the original's in the kept dimensions, and whose marginal()
+is 1.)doc";
 
 static constexpr std::string_view condPdfDocstring = R"doc(Evaluate the conditional density at one or more points.
 
@@ -524,7 +567,17 @@ void bindKernelDensity(py::module_& m)
                 return kdenbind::percentiles(pct, [&](const std::vector<double>& ps) -> std::vector<double>
                     { return kde.percentile(dim, ps, relTol, absTol, bw); });
             }, percentileDocstring.data(), py::arg("dim"), py::arg("pct"), py::arg("relTol") = 1e-2,
-            py::arg("absTol") = 1e-8, py::arg("bandwidth") = py::none());
+            py::arg("absTol") = 1e-8, py::arg("bandwidth") = py::none())
+        .def("marginalize", [](const KDE& kde, const std::vector<std::size_t>& marginalDims,
+                const py::object& bandwidth, const std::size_t leafSize) -> Conditional
+            {
+                const kden::Bandwidth bw = bandwidth.is_none()
+                    ? kden::Bandwidth::identity(kde.nDim())
+                    : py::cast<kden::Bandwidth>(bandwidth);
+                const py::gil_scoped_release release;
+                return kde.marginalize(marginalDims, bw, leafSize);
+            }, marginalizeDocstring.data(), py::arg("marginalDims"), py::arg("bandwidth") = py::none(),
+            py::arg("leafSize") = 16);
     view.attr("nullNode") = kden::nullNode;
     view.attr("rootNode") = kden::rootNode;
 
