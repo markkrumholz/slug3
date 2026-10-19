@@ -153,6 +153,47 @@ def _check_bandwidth(value: Any, name: str) -> float:
     return bw
 
 
+def _check_neighbor_counts(value: Any, n_points: int) -> int | list[int]:
+    """
+    Check the number of neighbors to find for each of a set of points.
+
+    Parameters
+    ----------
+    value : Any
+        The value to check: a positive int, or an array of n_points of
+        them.
+    n_points : int
+        The number of points.
+
+    Returns
+    -------
+    int or list of int
+        value, as an int or a list of ints.
+
+    Raises
+    ------
+    TypeError
+        If value is not an int or an array of ints.
+    ValueError
+        If value is not positive, or is an array not of n_points
+        elements.
+    """
+    if isinstance(value, (bool, np.bool_)):
+        raise TypeError("nNeighbor must be an int or an array of ints")
+    if isinstance(value, (int, np.integer)):
+        if value < 1:
+            raise ValueError("nNeighbor must be positive")
+        return int(value)
+    arr = np.asarray(value)
+    if arr.dtype == np.bool_ or not np.issubdtype(arr.dtype, np.integer):
+        raise TypeError("nNeighbor must be an int or an array of ints")
+    if arr.shape != (n_points,):
+        raise ValueError(f"nNeighbor must be an int, or have one element per point ({n_points})")
+    if np.any(arr < 1):
+        raise ValueError("nNeighbor must be positive")
+    return [int(k) for k in arr]
+
+
 def _is_mag_unit(unit: u.UnitBase) -> bool:
     """
     Whether a photometric unit is a magnitude.
@@ -1068,6 +1109,118 @@ class cluster_slug(slug_reader):
                                           errCov=per_point[0] if points.ndim == 1 else per_point)
         return kde.conditional_sample(points, massTol, marginalDims, bandwidth=bandwidth)
 
+    def neighbors(self, x0: Any, nNeighbor: Any, filterset: list[str] | None = None,
+                  errors: Any = None, cov: Any = None,
+                  norm: bool = True) -> tuple[np.ndarray | u.Quantity, np.ndarray]:
+        """
+        Find the library clusters nearest to one or more points.
+
+        Parameters
+        ----------
+        x0 : array_like of float, shape (nband,), (nDim,), (M, nband), or (M, nDim)
+            One point or M of them, each either the photometry in the
+            filter set's nband bands, in which case nearness is judged
+            in the photometry alone, or a full point in the filter set's
+            estimate's space (see kdes[...].names), in which NaN leaves a
+            dimension out of the judgement. Photometry is in the units
+            the estimate stores, as for conditional().
+        nNeighbor : int or array_like of int
+            Number of neighbors to find (positive): one for every point,
+            or, for M points, one per point.
+        filterset : list of str, optional
+            As for conditional().
+        errors : float, array_like, or astropy.units.Quantity, optional
+            As for conditional(): photometric errors, the same for every
+            point or one set per point, with which the metric is
+            convolved (M -> (M^-1 + 2 C)^-1), so that differences the
+            errors could explain count for less.
+        cov : array_like or astropy.units.Quantity, optional
+            As for conditional().
+        norm : bool, optional
+            If True (the default), measure distance in the metric of the
+            filter set's estimate's bandwidth (h2Inv, M): the distance
+            between points separated by d is sqrt(d^T M d), in units of
+            the kernel's bandwidth. If False, use the Euclidean metric,
+            as if h2Inv were the identity, so that distances are in the
+            units the estimate stores each dimension in.
+
+        Returns
+        -------
+        dist : numpy.ndarray of float or astropy.units.Quantity, shape (k,) or (M, k)
+            The distances to the neighbors, nearest first, with k the
+            largest number of neighbors found for any point; a point
+            for which fewer were requested (or exist) is padded with
+            NaN. Dimensionless if norm is True. If norm is False and
+            every point is judged in filters only, all in magnitudes or
+            all stored as log10, a Quantity in mag or dex; otherwise
+            (dimensions in different units) a plain array.
+        idx : numpy.ndarray of int64, shape (k,) or (M, k)
+            The neighbors' rows in the library (as for kdes[...].aux),
+            padded with -1.
+
+        Raises
+        ------
+        TypeError
+            If nNeighbor is not an int or an array of ints; or as for
+            conditional().
+        ValueError
+            If nNeighbor is not positive, or an array of the wrong size;
+            or as for conditional().
+
+        Notes
+        -----
+        An exact search; several points are searched around in parallel,
+        one per thread at a time (see KDE.neighbors()), each with its
+        own errors.
+        """
+        filters = self._select_filterset(filterset)
+        kde = self._kdes[tuple(filters)]
+        points = self._full_points(x0, "x0", filters, kde)
+        n_points = 1 if points.ndim == 1 else points.shape[0]
+        counts = _check_neighbor_counts(nNeighbor, n_points)
+        base = Bandwidth(kde.h2Inv) if norm else Bandwidth.identity(kde.nDim)
+        bandwidth, per_point = self._phot_errors(filters, kde, errors, cov, n_points, base)
+        if per_point is not None:
+            idx, dist2 = kde.neighbors(points, counts, bandwidth=base, errDims=list(range(len(filters))),
+                                       errCov=per_point[0] if points.ndim == 1 else per_point)
+        else:
+            idx, dist2 = kde.neighbors(points, counts, bandwidth=base if bandwidth is None else bandwidth)
+        rows = np.where(idx >= 0, kde.aux[np.maximum(idx, 0)], -1)
+        dist = np.sqrt(dist2)
+        if not norm:
+            unit = self._distance_unit(kde, points)
+            if unit is not None:
+                return dist * unit, rows
+        return dist, rows
+
+    def _distance_unit(self, kde: KDE, points: np.ndarray) -> u.UnitBase | None:
+        """
+        The unit of Euclidean distances between points in a filter set's estimate's space.
+
+        Parameters
+        ----------
+        kde : KDE
+            The filter set's estimate.
+        points : numpy.ndarray of float, shape (nDim,) or (M, nDim)
+            The search points; distances are judged in the dimensions
+            they specify (are not NaN in).
+
+        Returns
+        -------
+        astropy.units.UnitBase or None
+            mag if every point specifies only filters, all in
+            magnitudes; dex if only filters, all stored as log10; None
+            otherwise (a physical quantity, or a mix of units).
+        """
+        units: set[u.UnitBase | None] = set()
+        for specified in np.unique(~np.isnan(np.atleast_2d(points)), axis=0):
+            names = [n for n, s in zip(kde.names, specified, strict=True) if s]
+            if any(n in PHYSICAL_QUANTITIES for n in names):
+                return None
+            is_mag = [_is_mag_unit(b) for b in self._band_units(names)]
+            units.add(u.mag if all(is_mag) else u.dex if not any(is_mag) else None)
+        return units.pop() if len(units) == 1 else None
+
     def pdf(self, x: Any, relTol: float | None = None, absTol: float | None = None,
             filterset: list[str] | None = None, errors: Any = None,
             cov: Any = None) -> float | np.ndarray:
@@ -1173,7 +1326,7 @@ class cluster_slug(slug_reader):
         return points
 
     def _phot_errors(self, filters: list[str], kde: KDE, errors: Any, cov: Any,
-                     n_points: int) -> tuple[Bandwidth | None, np.ndarray | None]:
+                     n_points: int, base: Bandwidth | None = None) -> tuple[Bandwidth | None, np.ndarray | None]:
         """
         Photometric errors, as a convolved bandwidth or per-point covariances.
 
@@ -1189,12 +1342,15 @@ class cluster_slug(slug_reader):
             Their covariance, as for conditional(), or None.
         n_points : int
             The number of points they are for.
+        base : Bandwidth, optional
+            The bandwidth to convolve with errors shared by every point;
+            if None (the default), kde's own (h2Inv).
 
         Returns
         -------
         bandwidth : Bandwidth or None
-            For errors the same for every point, kde's bandwidth
-            convolved with them; otherwise None.
+            For errors the same for every point, base convolved with
+            them; otherwise None.
         per_point : numpy.ndarray of float or None
             For errors given per point, their covariance matrices,
             n_points x nband x nband, for KDE's errCov (with errDims the
@@ -1222,7 +1378,7 @@ class cluster_slug(slug_reader):
             return None, np.ascontiguousarray(phot_cov)
         full = np.zeros((kde.nDim, kde.nDim))
         full[:len(filters), :len(filters)] = phot_cov
-        return Bandwidth(kde.h2Inv).convolveCov(full), None
+        return (Bandwidth(kde.h2Inv) if base is None else base).convolveCov(full), None
 
     def _select_filterset(self, filterset: Any) -> list[str]:
         """

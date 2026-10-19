@@ -765,6 +765,115 @@ def test_conditional_sample() -> None:
     assert isinstance(single, tuple) and len(single) == 3 and single[0].shape[1] == 4
 
 
+def _brute_neighbors(points: np.ndarray, x: np.ndarray, m: np.ndarray, k: int) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Nearest neighbors by brute force.
+
+    Parameters
+    ----------
+    points : numpy.ndarray, shape (N, n)
+        The points.
+    x : numpy.ndarray, shape (n,)
+        The search point.
+    m : numpy.ndarray, shape (n, n)
+        The metric: squared distance d^T m d.
+    k : int
+        Number of neighbors.
+
+    Returns
+    -------
+    dist : numpy.ndarray, shape (k,)
+        Distances to the k nearest points, nearest first.
+    idx : numpy.ndarray, shape (k,)
+        Their indices in points.
+    """
+    d = points - x
+    dist2 = np.einsum("ij,jk,ik->i", d, m, d)
+    order = np.argsort(dist2, kind="stable")[:k]
+    return np.sqrt(dist2[order]), order
+
+
+def test_neighbors() -> None:
+    """neighbors() finds the nearest library clusters, in the bandwidth's metric or the Euclidean one."""
+    filters = ["HST.WFC3_UVIS1.F555W", "HST.WFC3_UVIS1.F814W"]
+    lib = cluster_slug(str(LIBRARY), filtersets=filters)
+    kde = lib.kdes[tuple(filters)]
+    phot = kde.dataset[[3, 40, 700], :2] + np.array([0.02, -0.03])
+    m_phot = np.linalg.inv(np.linalg.inv(kde.h2Inv)[:2, :2])  # the metric reduced to the photometry
+
+    # Photometry alone, in the bandwidth's metric: brute force over the
+    # estimate's points, mapped to library rows through aux
+    dist, rows = lib.neighbors(phot, 5)
+    assert isinstance(dist, np.ndarray) and not isinstance(dist, u.Quantity)
+    assert dist.shape == rows.shape == (3, 5) and rows.dtype == np.int64
+    for i in range(3):
+        want_d, want_i = _brute_neighbors(kde.dataset[:, :2], phot[i], m_phot, 5)
+        assert np.allclose(dist[i], want_d, rtol=1e-10)
+        assert np.array_equal(rows[i], kde.aux[want_i])
+    one_d, one_rows = lib.neighbors(phot[1], 5)
+    assert one_d.shape == (5,) and np.array_equal(one_rows, rows[1])
+
+    # The Euclidean metric: distances in mag
+    dist_e, rows_e = lib.neighbors(phot, 4, norm=False)
+    assert isinstance(dist_e, u.Quantity)
+    dist_eq = cast(u.Quantity, dist_e)
+    assert dist_eq.unit == u.mag
+    want_d, want_i = _brute_neighbors(kde.dataset[:, :2], phot[0], np.eye(2), 4)
+    assert np.allclose(dist_eq[0].to_value(u.mag), want_d, rtol=1e-10)
+    assert np.array_equal(rows_e[0], kde.aux[want_i])
+
+    # Different numbers of neighbors per point: padded with -1 and NaN
+    dist_r, rows_r = lib.neighbors(phot, np.array([2, 6, 4]))
+    assert rows_r.shape == (3, 6)
+    assert np.all(rows_r[0, 2:] == -1) and np.all(np.isnan(dist_r[0, 2:])) and np.all(rows_r[0, :2] >= 0)
+    assert np.all(rows_r[1] >= 0) and np.array_equal(rows_r[1], np.asarray(lib.neighbors(phot[1], 6)[1]))
+
+    # Errors: the metric convolved with them, shared or per point
+    errors = np.array([[0.1, 0.2], [0.3, 0.1], [0.05, 0.05]])
+    dist_err, rows_err = lib.neighbors(phot, 3, errors=errors)
+    for i in range(3):
+        m_conv = np.linalg.inv(np.linalg.inv(m_phot) + 2.0 * np.diag(errors[i] ** 2))
+        want_d, want_i = _brute_neighbors(kde.dataset[:, :2], phot[i], m_conv, 3)
+        assert np.allclose(dist_err[i], want_d, rtol=1e-10)
+        assert np.array_equal(rows_err[i], kde.aux[want_i])
+        alone_d, alone_rows = lib.neighbors(phot[i], 3, errors=errors[i])
+        assert np.allclose(alone_d, dist_err[i], rtol=1e-12) and np.array_equal(alone_rows, rows_err[i])
+    # Without norm, errors convolve the identity metric
+    dist_en, _ = lib.neighbors(phot[0], 3, errors=0.1, norm=False)
+    want_d, _ = _brute_neighbors(kde.dataset[:, :2], phot[0], np.linalg.inv(np.eye(2) + 2.0 * 0.01 * np.eye(2)), 3)
+    assert isinstance(dist_en, u.Quantity)
+    assert np.allclose(cast(u.Quantity, dist_en).to_value(u.mag), want_d, rtol=1e-10)
+
+    # Full points: nearness judged in every specified dimension; with a
+    # physical quantity, Euclidean distances mix units, so are plain numbers
+    full = kde.dataset[12].copy()
+    dist_f, rows_f = lib.neighbors(full, 1)
+    assert dist_f[0] == pytest.approx(0.0, abs=1e-12) and rows_f[0] == kde.aux[12]
+    dist_fe, _ = lib.neighbors(full, 2, norm=False)
+    assert not isinstance(dist_fe, u.Quantity)
+
+    # Invalid numbers of neighbors
+    for bad, err in [(0, ValueError), (-2, ValueError), (np.array([1, 2]), ValueError),
+                     (np.array([1, 0, 2]), ValueError), (1.5, TypeError), (True, TypeError),
+                     (np.array([1.0, 2.0, 3.0]), TypeError)]:
+        with pytest.raises(err):
+            lib.neighbors(phot, bad)
+
+
+def test_neighbors_distance_units() -> None:
+    """With norm False, distances are in dex for bands stored as log10, and unitless for a mix."""
+    lib = cluster_slug(str(LIBRARY), filtersets=[["Lbol"], ["HST.WFC3_UVIS1.F555W", "Lbol"]])
+    lbol = lib.kdes[("Lbol",)]
+    dist, rows = lib.neighbors(lbol.dataset[:2, :1], 3, filterset=["Lbol"], norm=False)
+    assert isinstance(dist, u.Quantity) and cast(u.Quantity, dist).unit == u.dex and rows.shape == (2, 3)
+    mixed = lib.kdes[("HST.WFC3_UVIS1.F555W", "Lbol")]
+    dist_m, _ = lib.neighbors(mixed.dataset[:2, :2], 3, filterset=["HST.WFC3_UVIS1.F555W", "Lbol"],
+                              norm=False)
+    assert not isinstance(dist_m, u.Quantity)
+    with pytest.raises(ValueError, match="filterset must be given"):
+        lib.neighbors(lbol.dataset[0, :1], 1)
+
+
 def test_conditional_error_units_for_linear_bands() -> None:
     """Errors for bands not in magnitudes are in dex, of the log10 photometry the KDE stores."""
     lib = cluster_slug(str(LIBRARY), filtersets=[["Lbol"], ["HST.WFC3_UVIS1.F555W", "Lbol"]])

@@ -25,6 +25,7 @@ auto main() -> int {
         result += testKDTreeBlockedBuild();
         result += testKDTreeNeighbors();
         result += testKDTreeNeighborsBatch();
+        result += testKDTreeNeighborsErrors();
         result += testKernelDensityConstruction();
         result += testRefinementList();
         result += testKernelDensityPdf();

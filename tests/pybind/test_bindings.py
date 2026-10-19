@@ -4673,6 +4673,35 @@ def test_kernel_density_batches_with_errors():
         kde.conditional(q, 0.0, marginalDims=[0], bandwidth=bw, errDims=err_dims, errCov=cov)
 
 
+def test_neighbors_counts_and_errors():
+    """neighbors() takes one count per point (padding with -1 and NaN) and per-point errors."""
+    x, w = make_kde_points(1500, 3, 18)
+    kde = slug.KernelDensity(x, w, leafSize=8)
+    bw = slug.Bandwidth(kde_test_metric(3))
+    rng = np.random.default_rng(19)
+    q = rng.standard_normal((5, 3))
+    idx, dist2 = kde.neighbors(q, [1, 4, 2, 4, 3], bw)
+    assert idx.shape == dist2.shape == (5, 4)
+    for i, k in enumerate([1, 4, 2, 4, 3]):
+        single_idx, single_d2 = kde.neighbors(q[i], k, bw)
+        assert np.array_equal(idx[i, :k], single_idx) and np.array_equal(dist2[i, :k], single_d2)
+        assert np.all(idx[i, k:] == -1) and np.all(np.isnan(dist2[i, k:]))
+    # Per-point errors: each point's metric convolved with its own
+    cov = np.stack([0.02 * (i + 1) * np.eye(2) for i in range(5)])
+    idx_e, d2_e = kde.neighbors(q, 3, bw, errDims=[0, 2], errCov=cov)
+    for i in range(5):
+        full = np.zeros((3, 3))
+        full[np.ix_([0, 2], [0, 2])] = cov[i]
+        single_idx, single_d2 = kde.neighbors(q[i], 3, bw.convolveCov(full))
+        assert np.array_equal(idx_e[i], single_idx) and np.allclose(d2_e[i], single_d2, rtol=1e-12)
+    with pytest.raises(ValueError):
+        kde.neighbors(q, [1, 2], bw)
+    with pytest.raises(ValueError):
+        kde.neighbors(q, -1, bw)
+    with pytest.raises(ValueError, match="without errCov"):
+        kde.neighbors(q, 2, bw, errDims=[0])
+
+
 def test_conditional_sample():
     """conditionalSample() returns conditional()'s points and weights, from which it can be rebuilt."""
     x, w = make_kde_points(2000, 3, 16)

@@ -192,26 +192,47 @@ Parameters
 x : array_like of float, shape (nDim,) or (M, nDim)
     One point, or M of them. Coordinates may be NaN, to judge nearness
     only in the other dimensions.
-nNeighbor : int
-    Number of neighbors to find for each point.
+nNeighbor : int or sequence of int
+    Number of neighbors to find for each point (non-negative): one for
+    every point, or (for M points) a sequence of M.
 bandwidth : Bandwidth or sequence of Bandwidth, optional
     The metric: None (the default) for the Euclidean one, one
-    Bandwidth for every point, or (for M points) a sequence of M. A
-    bandwidth not reduced for a point's NaNs is reduced automatically
-    (once for the whole batch, if every point shares one pattern).
+    Bandwidth for every point, or (for M points, without errCov) a
+    sequence of M. A bandwidth not reduced for a point's NaNs is
+    reduced automatically (once for the whole batch, if every point
+    shares one pattern).
+errDims : list of int, optional
+    Dimensions with measurement errors (default: none); each must be
+    specified (not NaN) in every point. Requires errCov.
+errCov : array_like of float, shape (nErr, nErr) or (M, nErr, nErr), optional
+    Covariance matrices of the measurement errors in errDims (in that
+    order, nErr = len(errDims)): one shared by every point, or one per
+    point. Each point's metric M is replaced by (M^-1 + 2 C)^-1, its
+    convolution with its errors (see Bandwidth.convolveCov()), in
+    which differences the errors could explain count for less.
 
 Returns
 -------
 idx : numpy.ndarray of int64, shape (k,) or (M, k)
     Indices of the neighbors in the tree's (reordered) points, nearest
-    first, with k = min(nNeighbor, N); aux[idx] gives their auxiliary
-    data.
+    first, with k the most neighbors found for any point (min(nNeighbor,
+    N) for each); aux[idx] gives their auxiliary data. A point for
+    which fewer were found is padded with -1.
 dist2 : numpy.ndarray of float, shape (k,) or (M, k)
-    Their squared distances.
+    Their squared distances in the metric, padded with NaN.
+
+Raises
+------
+ValueError
+    If x or a bandwidth has the wrong number of dimensions, or a
+    bandwidth was reduced for a different pattern of NaNs; if nNeighbor
+    is negative or a sequence of the wrong length; or if errDims or
+    errCov is invalid (as for KernelDensity.pdf()).
 
 Notes
 -----
-An exact search; a batch runs in parallel, without the GIL.)doc";
+An exact search; a batch runs in parallel, one point per thread at a
+time, without the GIL.)doc";
 
 static constexpr std::string_view leftDocstring = R"doc(Index of a node's left child.
 
