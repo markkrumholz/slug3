@@ -15,7 +15,9 @@
 #include <bit>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <exception>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <numbers>
@@ -590,7 +592,448 @@ namespace kden {
             return conditionalSample(x0, marginalDims, massTol, this->euclidean_);
         }
 
+        /**
+         * @brief A one-dimensional percentile of the estimate
+         * @param dim The dimension
+         * @param pct The percentile, in (0, 100)
+         * @param relTol Relative tolerance, in probability (see the
+         *   return value); non-negative
+         * @param absTol Absolute tolerance, in probability; non-negative
+         * @param bandwidth The kernel's inverse squared bandwidth matrix,
+         *   for nDim dimensions; must not be reduced
+         * @return A value t of dimension dim at which the estimate's
+         *   marginal cumulative distribution in dim, F(t), satisfies
+         *   |F(t) - p| <= max(absTol, relTol min(p, 1 - p)), with p =
+         *   pct / 100 -- a tolerance in probability, the same relative
+         *   standard in both tails
+         * @throws std::invalid_argument if dim is not below nDim, pct is
+         *   not in (0, 100), a tolerance is negative or NaN, or
+         *   bandwidth is not for nDim dimensions or is reduced
+         * @throws std::domain_error if the estimate has no points, or the
+         *   bandwidth's block over the other dimensions is not positive
+         *   definite
+         * @details
+         * Marginalizing the kernel over every other dimension leaves a
+         * one-dimensional Gaussian exp(-m u^2), with m the bandwidth
+         * reduced to dim alone, so F(t) = sum_i w_i Phi(t - x_i), with
+         * Phi(u) = erfc(-sqrt(m) u) / 2. Each term is monotone in x_i, so
+         * a node of weight W whose points lie in [lo, hi] in dim adds
+         * between W Phi(t - hi) and W Phi(t - lo) to F, for every t.
+         *
+         * A cut through the tree -- unopened nodes, plus points evaluated
+         * exactly -- thus bounds F between two functions F_L <= F <= F_U,
+         * and the percentile t* between the roots of F_U = p and F_L = p.
+         * Starting from the root alone, each round finds that bracket and
+         * a candidate t_c, the root of (F_L + F_U) / 2 = p, within it
+         * (safeguarded Newton iterations, every root-find confined to the
+         * current bracket, so that it only ever shrinks). It stops once
+         * F_U(t_c) - p and p - F_L(t_c) are both within the tolerance,
+         * which guarantees the result; otherwise it opens the nodes that
+         * contribute most to F_U - F_L at t_c (every one within a factor
+         * of two of the largest), a leaf's points becoming exact terms.
+         * Terms lying wholly to the left or right of the bracket, whose
+         * contribution is 1 or 0 there to within a small fraction of the
+         * tolerance, are folded into constant bounds (rigorous, since the
+         * bracket only shrinks), so the work stays with the points within
+         * a few kernel widths of t*: it costs far less than evaluating
+         * F over every point at each step of a root-find. That relies on
+         * the tree splitting along dim: in a dimension in noSplitDims,
+         * every node spans its whole range, so the walk must reach
+         * nearly every point (still correct, but much slower).
+         * Thread-safe, as for pdf().
+         */
+        [[nodiscard]] auto percentile(const std::size_t dim,
+            const double pct,
+            const double relTol,
+            const double absTol,
+            const Bandwidth& bandwidth) const -> double
+        {
+            const std::size_t nDim = this->nDim_;
+            if (dim >= nDim)
+            {
+                throw std::invalid_argument("KernelDensity::percentile: dim must be below nDim");
+            }
+            if (!(pct > 0.0) || !(pct < 100.0))   // written to reject NaN too
+            {
+                throw std::invalid_argument("KernelDensity::percentile: pct must be in (0, 100)");
+            }
+            if (!(relTol >= 0.0) || !(absTol >= 0.0))
+            {
+                throw std::invalid_argument("KernelDensity::percentile: relTol and absTol must be non-negative");
+            }
+            if (bandwidth.nDim() != nDim)
+            {
+                throw std::invalid_argument("KernelDensity::percentile: bandwidth must be for nDim dimensions");
+            }
+            if (bandwidth.isReduced())
+            {
+                throw std::invalid_argument("KernelDensity::percentile: bandwidth must not be reduced");
+            }
+            if (this->data_.get().size() == 0)
+            {
+                throw std::domain_error("KernelDensity::percentile: the estimate has no points");
+            }
+
+            // The marginal kernel in dim: the bandwidth reduced to dim alone
+            std::vector<bool> others(nDim, true);
+            others[dim] = false; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            const auto di = static_cast<Eigen::Index>(dim); // NOLINT(misc-include-cleaner) -- Eigen::Index is provided by <Eigen/Dense> (included via Bandwidth.hpp); clang-tidy's IWYU mapping doesn't know that
+            const double m = bandwidth.reduce(others).h2Inv()(di, di);
+            if (!(m > 0.0) || !std::isfinite(m))
+            {
+                throw std::domain_error("KernelDensity::percentile: the bandwidth's marginal in dim is not positive");
+            }
+            const double p = pct / 100.0;
+            return evalPercentile(dim, p, std::max(absTol, relTol * std::min(p, 1.0 - p)), std::sqrt(m));
+        }
+
+        /**
+         * @brief A one-dimensional percentile of the estimate, with the Euclidean bandwidth
+         * @param dim As for the other overload
+         * @param pct As for the other overload
+         * @param relTol As for the other overload
+         * @param absTol As for the other overload
+         * @return As for the other overload, with M the identity
+         * @throws As for the other overload
+         */
+        [[nodiscard]] auto percentile(const std::size_t dim,
+            const double pct,
+            const double relTol,
+            const double absTol) const -> double
+        {
+            return percentile(dim, pct, relTol, absTol, this->euclidean_);
+        }
+
+        /**
+         * @brief Several one-dimensional percentiles of the estimate, in parallel
+         * @param dim As for the single-percentile version
+         * @param pct The percentiles, each in (0, 100)
+         * @param relTol As for the single-percentile version
+         * @param absTol As for the single-percentile version
+         * @param bandwidth As for the single-percentile version
+         * @return One value per percentile, each as the single-percentile
+         *   version returns it
+         * @throws As for the single-percentile version (the first
+         *   exception caught, if several are)
+         * @details
+         * Runs the single-percentile version for each, in parallel
+         * (dynamically scheduled) if built with OpenMP.
+         */
+        [[nodiscard]] auto percentile(const std::size_t dim,
+            const std::vector<double>& pct,
+            const double relTol,
+            const double absTol,
+            const Bandwidth& bandwidth) const -> std::vector<double>
+        {
+            return parallelEval<double>(pct.size(), [&](const std::size_t i) -> double
+                { return percentile(dim, pct[i], relTol, absTol, bandwidth); }); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+        }
+
     protected:
+
+        /**
+         * @class PercentileCut
+         * @brief A cut through the tree, bounding a marginal cumulative distribution, for percentile()
+         * @details
+         * Holds the active terms -- unopened nodes, each with its weight
+         * and extent in the dimension, and points evaluated exactly --
+         * and constant bounds on the terms retired from them, with the
+         * slack those add to the gap between the bounds. With s the
+         * square root of the marginal kernel's metric, each term's
+         * kernel cumulative distribution is Phi(u) = erfc(-s u) / 2.
+         */
+        class PercentileCut
+        {
+        public:
+
+            /** Which bound on the cumulative distribution to evaluate */
+            enum class Bound : std::uint8_t
+            {
+                lower,   /**< F_L */
+                upper,   /**< F_U */
+                mean     /**< (F_L + F_U) / 2 */
+            };
+
+            /**
+             * @brief Start the cut at the root
+             * @param kde The estimate
+             * @param dim The dimension
+             * @param s The square root of the marginal kernel's metric
+             * @param tolP The tolerance in probability
+             */
+            PercentileCut(const KernelDensity& kde, const std::size_t dim, const double s, const double tolP) :
+                kde_(std::cref(kde)), dim_(dim), s_(s), dnorm_(s / std::sqrt(std::numbers::pi)),
+                slackBudget_(0.5 * tolP), retireTol_(1e-6 * tolP), tolP_(tolP)
+            {
+                addNode(rootNode, active_);
+            }
+
+            /**
+             * @brief Evaluate a bound and its derivative
+             * @param t Where to evaluate it
+             * @param which The bound
+             * @return The bound and its derivative at t
+             */
+            [[nodiscard]] auto eval(const double t, const Bound which) const -> std::pair<double, double>
+            {
+                double f = which == Bound::upper ? cU_ : cL_;
+                if (which == Bound::mean) { f = 0.5 * (cL_ + cU_); }
+                double df = 0.0;
+                for (const auto& term : active_)
+                {
+                    if (which == Bound::mean && term.node_ != nullNode)
+                    {
+                        f += 0.5 * term.w_ * (cdf(t - term.lo_) + cdf(t - term.hi_));
+                        df += 0.5 * term.w_ * (dens(t - term.lo_) + dens(t - term.hi_));
+                        continue;
+                    }
+                    const double u = t - (which == Bound::upper ? term.lo_ : term.hi_);   // lo_ == hi_ for a point
+                    f += term.w_ * cdf(u);
+                    df += term.w_ * dens(u);
+                }
+                return {f, df};
+            }
+
+            /**
+             * @brief Narrow a bracket on where a bound reaches a target
+             * @param which The bound (non-decreasing)
+             * @param target The target
+             * @param a Left end of the bracket
+             * @param b Right end of the bracket
+             * @param ftol Stop once the bound at an end is within ftol of target
+             * @return [l, r] within [a, b], with the bound at l at most,
+             *   and at r at least, the target (l = r = a if the bound at a
+             *   is at least the target, b if the bound at b is at most it),
+             *   narrowed by safeguarded Newton iterations until the bound
+             *   at an end is within ftol of the target, or [l, r] is at
+             *   rounding
+             */
+            [[nodiscard]] auto solve(const Bound which, const double target, double a, double b,
+                const double ftol) const -> std::pair<double, double>
+            {
+                if (eval(a, which).first >= target) { return {a, a}; }
+                if (eval(b, which).first <= target) { return {b, b}; }
+                double x = 0.5 * (a + b);
+                for (int it = 0; it < 200; ++it)
+                {
+                    const auto [g, dg] = eval(x, which);
+                    if (g < target) { a = x; }
+                    else if (g > target) { b = x; }
+                    else { return {x, x}; }
+                    if (std::abs(g - target) <= ftol || atRounding(a, b)) { break; }
+                    double next = dg > 0.0 ? x + ((target - g) / dg) : a;
+                    if (!(next > a) || !(next < b)) { next = 0.5 * (a + b); }
+                    x = next;
+                }
+                return {a, b};
+            }
+
+            /**
+             * @brief Whether any active term is a node
+             * @return True if some node is still unopened
+             */
+            [[nodiscard]] auto hasNodes() const -> bool
+            {
+                return std::ranges::any_of(active_, [](const Term& t) -> bool { return t.node_ != nullNode; });
+            }
+
+            /**
+             * @brief Refine the cut for a bracket and candidate
+             * @param tLo Left end of the bracket on the percentile
+             * @param tHi Right end of the bracket
+             * @param tC The candidate
+             * @details
+             * Retires the terms wholly left or right of [tLo, tHi] whose
+             * slack fits the budget, then opens the nodes contributing
+             * most to F_U - F_L at tC, largest first, until those left
+             * unopened sum to at most a quarter of the tolerance (all of
+             * them, for a zero tolerance), a leaf's points becoming exact
+             * terms.
+             */
+            void refine(const double tLo, const double tHi, const double tC)
+            {
+                std::vector<Term> kept;
+                kept.reserve(active_.size());
+                std::vector<std::pair<double, std::size_t>> gaps;   // (gap at tC, index in kept)
+                for (const auto& term : active_)
+                {
+                    if (retire(term, tLo, tHi)) { continue; }
+                    if (term.node_ != nullNode)
+                    {
+                        gaps.emplace_back(term.w_ * (cdf(tC - term.lo_) - cdf(tC - term.hi_)), kept.size());
+                    }
+                    kept.push_back(term);
+                }
+                const std::vector<bool> open = toOpen(gaps, kept.size());
+                active_.clear();
+                for (std::size_t k = 0; k < kept.size(); ++k)
+                {
+                    const auto& term = kept[k]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                    if (!open[k]) // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                    {
+                        active_.push_back(term);
+                        continue;
+                    }
+                    const auto& node = kde_.get().nodes()[term.node_]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                    addNode(node.lchild_, active_);
+                    addNode(node.rchild_, active_);
+                }
+            }
+
+        private:
+
+            /** @brief One term of the cut */
+            struct Term
+            {
+                double w_;           /**< Weight */
+                double lo_;          /**< Least position in the dimension (that of the point, for a point) */
+                double hi_;          /**< Greatest position in the dimension */
+                std::size_t node_;   /**< The tree node, or nullNode for a single point */
+            };
+
+            /** @brief The kernel's cumulative distribution @param u Offset @return Phi(u) */
+            [[nodiscard]] auto cdf(const double u) const -> double { return 0.5 * std::erfc(-s_ * u); }
+            /** @brief Its complement @param u Offset @return 1 - Phi(u), accurately */
+            [[nodiscard]] auto ccdf(const double u) const -> double { return 0.5 * std::erfc(s_ * u); }
+            /** @brief Its density @param u Offset @return Phi'(u) */
+            [[nodiscard]] auto dens(const double u) const -> double { return dnorm_ * std::exp(-s_ * s_ * u * u); }
+
+            /**
+             * @brief Whether a bracket is at rounding
+             * @param a Left end
+             * @param b Right end
+             * @return True if [a, b] is within a few ulps
+             */
+            [[nodiscard]] static auto atRounding(const double a, const double b) -> bool
+            {
+                return b - a <= 4.0 * std::numeric_limits<double>::epsilon() * std::max(std::abs(a), std::abs(b));
+            }
+
+            /**
+             * @brief Add a node to a list of terms: as one term, or as its points if a leaf
+             * @param idx The node
+             * @param terms The list
+             */
+            void addNode(const std::size_t idx, std::vector<Term>& terms) const
+            {
+                if (!(kde_.get().nodeW(idx) > 0.0)) { return; }
+                const auto& node = kde_.get().nodes()[idx]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                if (node.splitDim_ >= 0)
+                {
+                    terms.push_back({.w_ = kde_.get().nodeW(idx), .lo_ = kde_.get().nodeLo(idx)[dim_], // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                        .hi_ = kde_.get().nodeHi(idx)[dim_], .node_ = idx}); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                    return;
+                }
+                const auto& pts = kde_.get().data();
+                for (std::size_t i = node.start_; i < node.start_ + node.count_; ++i)
+                {
+                    const double wi = pts.w_[i]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                    const double xi = pts.position(i)[dim_]; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                    if (wi > 0.0) { terms.push_back({.w_ = wi, .lo_ = xi, .hi_ = xi, .node_ = nullNode}); }
+                }
+            }
+
+            /**
+             * @brief Retire a term wholly left or right of a bracket, if its slack fits
+             * @param term The term
+             * @param tLo Left end of the bracket
+             * @param tHi Right end of the bracket
+             * @return True if retired: folded into the constant bounds,
+             *   which stay valid for every t in [tLo, tHi], since the
+             *   bracket only shrinks
+             */
+            auto retire(const Term& term, const double tLo, const double tHi) -> bool
+            {
+                const double leftSlack = term.w_ * ccdf(tLo - term.hi_);
+                if (leftSlack <= retireTol_ && slack_ + leftSlack <= slackBudget_)
+                {
+                    cL_ += term.w_ - leftSlack;
+                    cU_ += term.w_;
+                    slack_ += leftSlack;
+                    return true;
+                }
+                const double rightSlack = term.w_ * cdf(tHi - term.lo_);
+                if (rightSlack <= retireTol_ && slack_ + rightSlack <= slackBudget_)
+                {
+                    cU_ += rightSlack;
+                    slack_ += rightSlack;
+                    return true;
+                }
+                return false;
+            }
+
+            /**
+             * @brief Which nodes to open: those with the largest gaps, until the rest fit a quarter of the tolerance
+             * @param gaps (gap, index) of each active node
+             * @param n Number of active terms
+             * @return Whether to open each active term
+             */
+            [[nodiscard]] auto toOpen(std::vector<std::pair<double, std::size_t>>& gaps, const std::size_t n) const
+                -> std::vector<bool>
+            {
+                std::vector<bool> open(n, false);
+                std::ranges::sort(gaps, std::greater<>());
+                double rest = 0.0;
+                for (const auto& gap : gaps) { rest += gap.first; }
+                for (const auto& [gap, k] : gaps)
+                {
+                    if (rest <= 0.25 * tolP_ && rest < gaps.front().first) { break; }
+                    open[k] = true; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                    rest -= gap;
+                }
+                return open;
+            }
+
+            std::reference_wrapper<const KernelDensity> kde_;   /**< The estimate */
+            std::size_t dim_;             /**< The dimension */
+            double s_;                    /**< Square root of the marginal kernel's metric */
+            double dnorm_;                /**< s_ / sqrt(pi), the kernel density's peak */
+            double slackBudget_;          /**< Most slack the retired terms may add to the gap */
+            double retireTol_;            /**< Most slack one term may have to be retired */
+            double tolP_;                 /**< The tolerance in probability */
+            std::vector<Term> active_;    /**< The active terms */
+            double cL_ = 0.0;             /**< Retired terms' lower bound */
+            double cU_ = 0.0;             /**< Retired terms' upper bound */
+            double slack_ = 0.0;          /**< Retired terms' total slack */
+        };
+
+        /**
+         * @brief The work of percentile(), with its arguments checked
+         * @param dim The dimension
+         * @param p The fraction, in (0, 1)
+         * @param tolP The tolerance in probability
+         * @param s The square root of the marginal kernel's metric
+         * @return The percentile (see percentile())
+         */
+        [[nodiscard]] auto evalPercentile(const std::size_t dim, const double p, const double tolP,
+            const double s) const -> double
+        {
+            using Bound = typename PercentileCut::Bound;
+            PercentileCut cut(*this, dim, s, tolP);
+
+            // An initial bracket, wide enough that every term's kernel
+            // cumulative distribution is 0 at its left end, 1 at its right
+            const double reach = 40.0 / s;
+            double tLo = this->nodeLo(rootNode)[dim] - reach; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            double tHi = this->nodeHi(rootNode)[dim] + reach; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            while (true)
+            {
+                // The bracket: t* is no less than where F_U reaches p, no
+                // more than where F_L does; then the candidate, the end of
+                // its own bracket where (F_L + F_U) / 2 is nearer p
+                tLo = cut.solve(Bound::upper, p, tLo, tHi, tolP).first;
+                tHi = cut.solve(Bound::lower, p, tLo, tHi, tolP).second;
+                const auto [cl, cr] = cut.solve(Bound::mean, p, tLo, tHi, 0.1 * tolP);
+                const double tC = std::abs(cut.eval(cl, Bound::mean).first - p) <=
+                    std::abs(cut.eval(cr, Bound::mean).first - p) ? cl : cr;
+                if (cut.eval(tC, Bound::upper).first - p <= tolP && p - cut.eval(tC, Bound::lower).first <= tolP)
+                {
+                    return tC;
+                }
+                if (!cut.hasNodes()) { return tC; }   // every term exact: tC is the root, to rounding
+                cut.refine(tLo, tHi, tC);
+            }
+        }
 
         /**
          * @struct ConditionalPoints
@@ -1459,6 +1902,37 @@ namespace kden {
             const double absTol) const -> std::vector<double>
         {
             return kde_.pdf(y, relTol, absTol, bandwidth_);
+        }
+
+        /**
+         * @brief A one-dimensional percentile of the conditional density
+         * @param dim Index of the dimension among the kept ones (see dims())
+         * @param pct The percentile, in (0, 100)
+         * @param relTol As for KernelDensity::percentile()
+         * @param absTol As for KernelDensity::percentile()
+         * @return As for KernelDensity::percentile(), evaluated with the
+         *   conditional kernel metric
+         * @throws As for KernelDensity::percentile()
+         */
+        [[nodiscard]] auto percentile(const std::size_t dim, const double pct, const double relTol,
+            const double absTol) const -> double
+        {
+            return kde_.percentile(dim, pct, relTol, absTol, bandwidth_);
+        }
+
+        /**
+         * @brief Several one-dimensional percentiles of the conditional density, in parallel
+         * @param dim As for the single-percentile version
+         * @param pct The percentiles, each in (0, 100)
+         * @param relTol As for KernelDensity::percentile()
+         * @param absTol As for KernelDensity::percentile()
+         * @return One value per percentile
+         * @throws As for KernelDensity's batch percentile()
+         */
+        [[nodiscard]] auto percentile(const std::size_t dim, const std::vector<double>& pct, const double relTol,
+            const double absTol) const -> std::vector<double>
+        {
+            return kde_.percentile(dim, pct, relTol, absTol, bandwidth_);
         }
 
         /** @brief The kept dimensions
