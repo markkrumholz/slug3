@@ -194,6 +194,35 @@ def _check_neighbor_counts(value: Any, n_points: int) -> int | list[int]:
     return [int(k) for k in arr]
 
 
+def _check_norm(value: Any) -> str:
+    """
+    Check the metric named by neighbors()'s norm.
+
+    Parameters
+    ----------
+    value : Any
+        The value to check.
+
+    Returns
+    -------
+    str
+        value, lower-cased: "bandwidth", "errors", or "euclidean".
+
+    Raises
+    ------
+    TypeError
+        If value is not a str.
+    ValueError
+        If value is not one of those, ignoring case.
+    """
+    if not isinstance(value, str):
+        raise TypeError('norm must be "bandwidth", "errors", or "Euclidean"')
+    metric = value.lower()
+    if metric not in ("bandwidth", "errors", "euclidean"):
+        raise ValueError(f'norm must be "bandwidth", "errors", or "Euclidean", not {value!r}')
+    return metric
+
+
 def _is_mag_unit(unit: u.UnitBase) -> bool:
     """
     Whether a photometric unit is a magnitude.
@@ -1111,7 +1140,7 @@ class cluster_slug(slug_reader):
 
     def neighbors(self, x0: Any, nNeighbor: Any, filterset: list[str] | None = None,
                   errors: Any = None, cov: Any = None,
-                  norm: bool = True) -> tuple[np.ndarray | u.Quantity, np.ndarray]:
+                  norm: str = "bandwidth") -> tuple[np.ndarray | u.Quantity, np.ndarray]:
         """
         Find the library clusters nearest to one or more points.
 
@@ -1131,29 +1160,49 @@ class cluster_slug(slug_reader):
             As for conditional().
         errors : float, array_like, or astropy.units.Quantity, optional
             As for conditional(): photometric errors, the same for every
-            point or one set per point, with which the metric is
-            convolved (M -> (M^-1 + 2 C)^-1), so that differences the
-            errors could explain count for less.
+            point or one set per point, with covariance C. For norm
+            "bandwidth" or "Euclidean", the metric M is convolved with
+            them, M -> (M^-1 + 2 C)^-1, so that differences the errors
+            could explain count for less; for norm "errors", they define
+            the metric.
         cov : array_like or astropy.units.Quantity, optional
             As for conditional().
-        norm : bool, optional
-            If True (the default), measure distance in the metric of the
-            filter set's estimate's bandwidth (h2Inv, M): the distance
-            between points separated by d is sqrt(d^T M d), in units of
-            the kernel's bandwidth. If False, use the Euclidean metric,
-            as if h2Inv were the identity, so that distances are in the
-            units the estimate stores each dimension in.
+        norm : str, optional
+            The metric in which to measure distance (case-insensitive):
+
+            - "bandwidth" (the default): the filter set's estimate's
+              bandwidth, h2Inv (M), convolved with any errors. Distance
+              is in units of the kernel's bandwidth, and shows which
+              library clusters contribute most to the kernel density
+              estimate (e.g. to judge whether the bandwidth is a
+              reasonable size).
+            - "errors": the errors alone, C^-1 (M -> infinity before
+              convolving, scaled so that, for independent errors in each
+              band, distance is the Euclidean one with each band's
+              difference divided by its error). Distance is in units of
+              the errors, and shows whether the library is dense enough
+              to hold clusters that match within the errors. Requires
+              errors or cov, positive definite, and points that specify
+              only the photometry (inference quantities NaN).
+            - "Euclidean": the identity (as if h2Inv were the identity),
+              convolved with any errors. Distance is in the units the
+              estimate stores each dimension in (mag or dex for the
+              bands), and shows the absolute level of disagreement.
 
         Returns
         -------
         dist : numpy.ndarray of float or astropy.units.Quantity, shape (k,) or (M, k)
-            The distances to the neighbors, nearest first, with k the
-            largest number of neighbors found for any point; a point
-            for which fewer were requested (or exist) is padded with
-            NaN. Dimensionless if norm is True. If norm is False and
-            every point is judged in filters only, all in magnitudes or
-            all stored as log10, a Quantity in mag or dex; otherwise
-            (dimensions in different units) a plain array.
+            The distances to the neighbors, nearest first, per dimension:
+            the distance in the metric divided by sqrt(n), with n the
+            number of dimensions the point specifies (not NaN), so that
+            results for filter sets with different numbers of bands are
+            comparable. k is the largest number of neighbors found for
+            any point; a point for which fewer were requested (or exist)
+            is padded with NaN. Dimensionless for norm "bandwidth" or
+            "errors". For "Euclidean", a Quantity in mag or dex if every
+            point is judged in filters only, all in magnitudes or all
+            stored as log10; otherwise (dimensions in different units) a
+            plain array.
         idx : numpy.ndarray of int64, shape (k,) or (M, k)
             The neighbors' rows in the library (as for kdes[...].aux),
             padded with -1.
@@ -1161,11 +1210,14 @@ class cluster_slug(slug_reader):
         Raises
         ------
         TypeError
-            If nNeighbor is not an int or an array of ints; or as for
-            conditional().
+            If nNeighbor is not an int or an array of ints, or norm is
+            not a str; or as for conditional().
         ValueError
             If nNeighbor is not positive, or an array of the wrong size;
-            or as for conditional().
+            if norm is not one of the values above; if norm is "errors"
+            and neither errors nor cov is given, the error covariance is
+            not positive definite, or a point specifies an inference
+            quantity; or as for conditional().
 
         Notes
         -----
@@ -1178,20 +1230,82 @@ class cluster_slug(slug_reader):
         points = self._full_points(x0, "x0", filters, kde)
         n_points = 1 if points.ndim == 1 else points.shape[0]
         counts = _check_neighbor_counts(nNeighbor, n_points)
-        base = Bandwidth(kde.h2Inv) if norm else Bandwidth.identity(kde.nDim)
-        bandwidth, per_point = self._phot_errors(filters, kde, errors, cov, n_points, base)
-        if per_point is not None:
-            idx, dist2 = kde.neighbors(points, counts, bandwidth=base, errDims=list(range(len(filters))),
-                                       errCov=per_point[0] if points.ndim == 1 else per_point)
+        metric = _check_norm(norm)
+        if metric == "errors":
+            idx, dist2 = kde.neighbors(points, counts, bandwidth=self._error_metric(
+                filters, kde, points, self._phot_cov(filters, errors, cov)))
         else:
-            idx, dist2 = kde.neighbors(points, counts, bandwidth=base if bandwidth is None else bandwidth)
+            base = Bandwidth(kde.h2Inv) if metric == "bandwidth" else Bandwidth.identity(kde.nDim)
+            bandwidth, per_point = self._phot_errors(filters, kde, errors, cov, n_points, base)
+            if per_point is not None:
+                idx, dist2 = kde.neighbors(points, counts, bandwidth=base, errDims=list(range(len(filters))),
+                                           errCov=per_point[0] if points.ndim == 1 else per_point)
+            else:
+                idx, dist2 = kde.neighbors(points, counts, bandwidth=base if bandwidth is None else bandwidth)
         rows = np.where(idx >= 0, kde.aux[np.maximum(idx, 0)], -1)
-        dist = np.sqrt(dist2)
-        if not norm:
+        # Distance per dimension the point specifies
+        n_specified = np.sum(~np.isnan(points), axis=-1, keepdims=points.ndim > 1)
+        dist = np.sqrt(dist2 / n_specified)
+        if metric == "euclidean":
             unit = self._distance_unit(kde, points)
             if unit is not None:
                 return dist * unit, rows
         return dist, rows
+
+    @staticmethod
+    def _error_metric(filters: list[str], kde: KDE, points: np.ndarray,
+                      phot_cov: np.ndarray | None) -> Bandwidth | list[Bandwidth]:
+        """
+        The metric of neighbors()'s norm "errors": the inverse of the error covariance.
+
+        Parameters
+        ----------
+        filters : list of str
+            The filter set.
+        kde : KDE
+            Its kernel density estimate.
+        points : numpy.ndarray of float, shape (nDim,) or (M, nDim)
+            The search points.
+        phot_cov : numpy.ndarray of float or None
+            The error covariance, nband x nband or M x nband x nband (see
+            _phot_cov()).
+
+        Returns
+        -------
+        Bandwidth or list of Bandwidth
+            For errors shared by every point, one metric; otherwise one
+            per point. Each is C^-1 over the bands, and the identity
+            (never used, since every point leaves those dimensions NaN)
+            over the inference quantities.
+
+        Raises
+        ------
+        ValueError
+            If phot_cov is None, a covariance is not positive definite,
+            per-point covariances are not for every point, or a point
+            specifies an inference quantity.
+        """
+        if phot_cov is None:
+            raise ValueError('norm "errors" requires the photometric errors, as errors or cov')
+        nband = len(filters)
+        if not np.all(np.isnan(np.atleast_2d(points)[:, nband:])):
+            raise ValueError('norm "errors" judges nearness in the photometry alone, so the points must '
+                             "not specify any inference quantity")
+        covs = phot_cov if phot_cov.ndim == 3 else phot_cov[np.newaxis]
+        n_points = 1 if points.ndim == 1 else points.shape[0]
+        if phot_cov.ndim == 3 and covs.shape[0] != n_points:
+            raise ValueError(f"per-point photometric errors are for {covs.shape[0]} points, "
+                             f"but {n_points} were given")
+        try:
+            np.linalg.cholesky(covs)
+        except np.linalg.LinAlgError as err:
+            raise ValueError('norm "errors" requires an error covariance that is positive definite '
+                             "(every error positive)") from err
+        inv = np.linalg.inv(covs)
+        full = np.tile(np.eye(kde.nDim), (covs.shape[0], 1, 1))
+        full[:, :nband, :nband] = 0.5 * (inv + np.swapaxes(inv, 1, 2))
+        metrics = [Bandwidth(m) for m in full]
+        return metrics[0] if len(metrics) == 1 else metrics
 
     def _distance_unit(self, kde: KDE, points: np.ndarray) -> u.UnitBase | None:
         """
@@ -1325,6 +1439,41 @@ class cluster_slug(slug_reader):
             points = np.concatenate([points, pad], axis=-1)
         return points
 
+    def _phot_cov(self, filters: list[str], errors: Any, cov: Any) -> np.ndarray | None:
+        """
+        The covariance of photometric errors given as errors or cov.
+
+        Parameters
+        ----------
+        filters : list of str
+            The filter set.
+        errors : Any
+            The errors, as for conditional(), or None.
+        cov : Any
+            Their covariance, as for conditional(), or None.
+
+        Returns
+        -------
+        numpy.ndarray of float or None
+            The covariance, nband x nband (shared by every point) or
+            M x nband x nband (one per point), in mag^2 or dex^2 by band;
+            None if both errors and cov are None.
+
+        Raises
+        ------
+        TypeError
+            If errors or cov has the wrong type.
+        ValueError
+            If both errors and cov are given, or either is invalid (see
+            conditional()).
+        """
+        if errors is not None and cov is not None:
+            raise ValueError("give the photometric errors as errors or cov, not both")
+        if errors is None and cov is None:
+            return None
+        return (self._errors_cov(filters, errors) if errors is not None
+                else self._check_cov(filters, cov))
+
     def _phot_errors(self, filters: list[str], kde: KDE, errors: Any, cov: Any,
                      n_points: int, base: Bandwidth | None = None) -> tuple[Bandwidth | None, np.ndarray | None]:
         """
@@ -1365,12 +1514,9 @@ class cluster_slug(slug_reader):
             conditional()), or per-point errors are not for n_points
             points.
         """
-        if errors is not None and cov is not None:
-            raise ValueError("give the photometric errors as errors or cov, not both")
-        if errors is None and cov is None:
+        phot_cov = self._phot_cov(filters, errors, cov)
+        if phot_cov is None:
             return None, None
-        phot_cov = (self._errors_cov(filters, errors) if errors is not None
-                    else self._check_cov(filters, cov))
         if phot_cov.ndim == 3:
             if phot_cov.shape[0] != n_points:
                 raise ValueError(f"per-point photometric errors are for {phot_cov.shape[0]} points, "

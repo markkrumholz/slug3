@@ -436,7 +436,7 @@ class KDE:
         bw = self._current_bandwidth() if bandwidth is None else bandwidth
         return self._kde.pdf(x, relTol, absTol, bw, [] if errDims is None else errDims, errCov)
 
-    def neighbors(self, x: Any, nNeighbor: Any, bandwidth: Bandwidth | None = None,
+    def neighbors(self, x: Any, nNeighbor: Any, bandwidth: Bandwidth | list[Bandwidth] | None = None,
                   errDims: list[int] | None = None, errCov: Any = None) -> tuple[np.ndarray, np.ndarray]:
         """
         Find the nearest neighbors of one or more points among the estimate's points.
@@ -449,10 +449,12 @@ class KDE:
         nNeighbor : int or array_like of int
             Number of neighbors to find for each point: one for every
             point, or (for M points) one per point.
-        bandwidth : Bandwidth, optional
+        bandwidth : Bandwidth or list of Bandwidth, optional
             The metric, in which the squared distance between points
-            separated by d is d^T M d; if None (the default), h2Inv, so
-            that distances are in units of the kernel's bandwidth.
+            separated by d is d^T M d: one for every point, or (for M
+            points, without errCov) a list of one per point; if None
+            (the default), h2Inv, so that distances are in units of the
+            kernel's bandwidth.
         errDims : list of int, optional
             Dimensions with measurement errors (default: none); each must
             be specified (not NaN) in every point. Requires errCov.
