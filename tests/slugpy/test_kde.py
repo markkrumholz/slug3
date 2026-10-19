@@ -320,5 +320,8 @@ def test_percentile() -> None:
         assert abs(f - pct / 100.0) <= 1e-10
     with pytest.raises(ValueError, match="no dimension named"):
         kde.percentile("A_V", 50.0)
+    for bad_dim in [-1, 3]:
+        with pytest.raises(ValueError):
+            kde.percentile(bad_dim, 50.0)
     with pytest.raises(TypeError):
         kde.percentile(1.0, 50.0)  # pyright: ignore[reportArgumentType]

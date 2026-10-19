@@ -520,8 +520,8 @@ class KDE:
         Raises
         ------
         ValueError
-            If dim is a name not in names; or as for
-            KernelDensity.percentile().
+            If dim is a name not in names, or a negative index; or as for
+            KernelDensity.percentile() (e.g. an index not below nDim).
         TypeError
             If dim is neither an int nor a str.
 
@@ -538,6 +538,8 @@ class KDE:
             index = self._names.index(dim)
         elif isinstance(dim, (int, np.integer)) and not isinstance(dim, bool):
             index = int(dim)
+            if index < 0:
+                raise ValueError(f"dim must be non-negative, not {index}")
         else:
             raise TypeError("dim must be an int or a str")
         bw = self._current_bandwidth() if bandwidth is None else bandwidth
