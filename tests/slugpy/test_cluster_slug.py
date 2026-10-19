@@ -908,6 +908,30 @@ def test_neighbors_distance_units() -> None:
         lib.neighbors(lbol.dataset[0, :1], 1)
 
 
+def test_asymmetric_cov_rejected() -> None:
+    """Every method rejects an asymmetric cov, including neighbors() with norm "errors"."""
+    filters = ["HST.WFC3_UVIS1.F555W", "HST.WFC3_UVIS1.F814W"]
+    lib = cluster_slug(str(LIBRARY), filtersets=filters)
+    phot = lib.kdes[tuple(filters)].dataset[[3, 40], :2]
+    asym = np.array([[1.0, 0.2], [0.1, 1.0]])  # passes a Cholesky test of its lower triangle
+    per_point = np.stack([np.eye(2), asym])
+    calls: list[Callable[[], object]] = [
+        lambda: lib.pdf(phot, cov=asym),
+        lambda: lib.conditional(phot[0], cov=asym),
+        lambda: lib.conditional_sample(phot, cov=per_point),
+        lambda: lib.neighbors(phot, 2, cov=asym),
+        lambda: lib.neighbors(phot, 2, cov=asym, norm="errors"),
+        lambda: lib.neighbors(phot, 2, cov=per_point, norm="errors"),
+    ]
+    for call in calls:
+        with pytest.raises(ValueError, match="symmetric"):
+            call()
+    # Symmetric to rounding is fine
+    nearly = np.array([[0.04, 0.01], [0.01 * (1.0 + 1e-15), 0.02]])
+    lib.neighbors(phot, 2, cov=nearly, norm="errors")
+    lib.pdf(phot, cov=nearly)
+
+
 def test_conditional_error_units_for_linear_bands() -> None:
     """Errors for bands not in magnitudes are in dex, of the log10 photometry the KDE stores."""
     lib = cluster_slug(str(LIBRARY), filtersets=[["Lbol"], ["HST.WFC3_UVIS1.F555W", "Lbol"]])
