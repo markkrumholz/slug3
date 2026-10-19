@@ -30,6 +30,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h> // NOLINT(misc-include-cleaner); used throughout, via the py alias
 #include <pybind11/stl.h> // NOLINT(misc-include-cleaner); needed for list/vector conversions
@@ -261,48 +262,6 @@ namespace kdenbind {
     }
 
     /**
-     * @brief Find nearest neighbors for one point or a batch, for Python
-     * @tparam TreeT The tree type
-     * @param tree The tree
-     * @param x One point or an M x nDim array
-     * @param nNeighbor Number of neighbors per point
-     * @param bandwidth None, a Bandwidth, or (for a batch) a sequence of one per point
-     * @param euclidean The Euclidean metric
-     * @return (idx, dist2): int64 and float64 arrays of shape (k,) for
-     *   one point, or (M, k) for a batch, k = min(nNeighbor, number of points)
-     */
-    template <typename TreeT>
-    inline auto neighbors(const TreeT& tree, const QueryArray& x, const std::size_t nNeighbor,
-        const py::object& bandwidth, const kden::Bandwidth& euclidean) -> py::tuple
-    {
-        auto [pts, single] = queryPoints(x, tree.nDim());
-        auto [bws, shared] = batchBandwidths(bandwidth, pts.size(), euclidean);
-        std::vector<std::vector<kden::Neighbor>> res;
-        {
-            const py::gil_scoped_release release;
-            const std::vector<std::size_t> ks(pts.size(), nNeighbor);
-            if (shared) { res = tree.neighbors(pts, ks, bws.front()); }
-            else { res = tree.neighbors(pts, ks, bws); }
-        }
-        const std::size_t k = res.empty() ? 0 : res.front().size();
-        std::vector<py::ssize_t> shape{static_cast<py::ssize_t>(k)};
-        if (!single) { shape.insert(shape.begin(), static_cast<py::ssize_t>(res.size())); }
-        py::array_t<Aux> idx(shape);
-        py::array_t<double> dist2(shape);
-        Aux* pi = idx.mutable_data();
-        double* pd = dist2.mutable_data();
-        for (std::size_t q = 0; q < res.size(); ++q)
-        {
-            for (std::size_t j = 0; j < k; ++j)
-            {
-                pi[(q * k) + j] = static_cast<Aux>(res[q][j].idx_); // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
-                pd[(q * k) + j] = res[q][j].dist2_; // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
-            }
-        }
-        return py::make_tuple(idx, dist2);
-    }
-
-    /**
      * @brief Per-point measurement error covariances, from Python
      * @param errCov An (nErr, nErr) array, shared by every point, or an
      *   (M, nErr, nErr) array of one per point
@@ -356,6 +315,102 @@ namespace kdenbind {
             throw py::value_error("with errCov, bandwidth must be None or a single Bandwidth");
         }
         return py::cast<kden::Bandwidth>(bandwidth);
+    }
+
+    /**
+     * @brief The number of neighbors to find for each of a batch of searches, from Python
+     * @param nNeighbor An int, the same for every search, or a sequence
+     *   of one non-negative int per search
+     * @param m Number of searches
+     * @return One count per search
+     * @throws py::value_error if a sequence has the wrong length or a
+     *   negative element
+     */
+    inline auto batchCounts(const py::object& nNeighbor, const std::size_t m) -> std::vector<std::size_t>
+    {
+        if (py::isinstance<py::int_>(nNeighbor) || py::isinstance(nNeighbor, py::module_::import("numpy").attr("integer")))
+        {
+            const auto k = py::cast<py::ssize_t>(nNeighbor);
+            if (k < 0) { throw py::value_error("nNeighbor must be non-negative"); }
+            std::vector<std::size_t> counts(m, static_cast<std::size_t>(k));
+            return counts;
+        }
+        const auto ks = py::cast<std::vector<py::ssize_t>>(nNeighbor);
+        if (ks.size() != m)
+        {
+            throw py::value_error("nNeighbor must be an int, or a sequence of one int per point");
+        }
+        std::vector<std::size_t> out;
+        out.reserve(m);
+        for (const auto k : ks)
+        {
+            if (k < 0) { throw py::value_error("nNeighbor must be non-negative"); }
+            out.push_back(static_cast<std::size_t>(k));
+        }
+        return out;
+    }
+
+    /**
+     * @brief Find nearest neighbors for one point or a batch, for Python
+     * @tparam TreeT The bound tree type
+     * @param tree The tree
+     * @param x One point or an M x nDim array
+     * @param nNeighbor Number of neighbors per point: an int, or (for a
+     *   batch) a sequence of one per point (see batchCounts())
+     * @param bandwidth None, a Bandwidth, or (without errCov, for a
+     *   batch) a sequence of one per point
+     * @param errDims Dimensions with measurement errors (empty for none)
+     * @param errCov None, or their covariances (see batchErrors())
+     * @param euclidean The Euclidean metric
+     * @return (idx, dist2): arrays of shape (k,) for one point, or
+     *   (M, k) for a batch, with k the most neighbors any search found;
+     *   searches that found fewer are padded with idx -1 and dist2 NaN
+     * @throws py::value_error if nNeighbor, errDims, errCov, or
+     *   bandwidth is invalid
+     * @details
+     * Calls the tree's batch neighbors(), which runs in parallel,
+     * without the GIL.
+     */
+    template <typename TreeT>
+    inline auto neighbors(const TreeT& tree, const QueryArray& x, const py::object& nNeighbor,
+        const py::object& bandwidth, const std::vector<std::size_t>& errDims, const py::object& errCov,
+        const kden::Bandwidth& euclidean) -> py::tuple
+    {
+        const auto [pts, single] = queryPoints(x, tree.nDim());
+        const std::vector<std::size_t> ks = batchCounts(nNeighbor, pts.size());
+        std::vector<std::vector<kden::Neighbor>> res;
+        if (!errCov.is_none())
+        {
+            const kden::Bandwidth bw = errorsBandwidth(bandwidth, euclidean);
+            const auto errs = batchErrors(errCov, pts.size(), errDims.size());
+            const py::gil_scoped_release release;
+            res = tree.neighbors(pts, ks, errDims, errs, bw);
+        }
+        else
+        {
+            if (!errDims.empty()) { throw py::value_error("errDims was given without errCov"); }
+            const auto [bws, shared] = batchBandwidths(bandwidth, pts.size(), euclidean);
+            const py::gil_scoped_release release;
+            res = shared ? tree.neighbors(pts, ks, bws.front()) : tree.neighbors(pts, ks, bws);
+        }
+        std::size_t k = 0;
+        for (const auto& r : res) { k = std::max(k, r.size()); }
+        std::vector<py::ssize_t> shape{static_cast<py::ssize_t>(k)};
+        if (!single) { shape.insert(shape.begin(), static_cast<py::ssize_t>(res.size())); }
+        py::array_t<Aux> idx(shape);
+        py::array_t<double> dist2(shape);
+        Aux* pi = idx.mutable_data();
+        double* pd = dist2.mutable_data();
+        for (std::size_t q = 0; q < res.size(); ++q)
+        {
+            for (std::size_t j = 0; j < k; ++j)
+            {
+                const bool found = j < res[q].size(); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                pi[(q * k) + j] = found ? static_cast<Aux>(res[q][j].idx_) : Aux{-1}; // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic,cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                pd[(q * k) + j] = found ? res[q][j].dist2_ : std::numeric_limits<double>::quiet_NaN(); // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic,cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            }
+        }
+        return py::make_tuple(idx, dist2);
     }
 
     /**
@@ -535,12 +590,14 @@ namespace kdenbind {
                     const auto hi = t.nodeHi(idx);
                     return toArray(std::vector<double>(hi.begin(), hi.end()));
                 }, docs.at(6), py::arg("idx"))
-            .def("neighbors", [](const Bound& t, const QueryArray& x, const std::size_t nNeighbor,
-                    const py::object& bandwidth) -> py::tuple
+            .def("neighbors", [](const Bound& t, const QueryArray& x, const py::object& nNeighbor,
+                    const py::object& bandwidth, const std::vector<std::size_t>& errDims,
+                    const py::object& errCov) -> py::tuple
                 {
-                    return neighbors(t, x, nNeighbor, bandwidth,
+                    return neighbors(t, x, nNeighbor, bandwidth, errDims, errCov,
                         kden::Bandwidth::identity(t.nDim()));
-                }, docs.at(7), py::arg("x"), py::arg("nNeighbor"), py::arg("bandwidth") = py::none())
+                }, docs.at(7), py::arg("x"), py::arg("nNeighbor"), py::arg("bandwidth") = py::none(),
+                py::arg("errDims") = std::vector<std::size_t>{}, py::arg("errCov") = py::none())
             .def_static("left", &TreeT::left, docs.at(8), py::arg("idx"))
             .def_static("right", &TreeT::right, docs.at(9), py::arg("idx"))
             .def_static("parent", &TreeT::parent, docs.at(10), py::arg("idx"))

@@ -21,6 +21,7 @@
 #include <limits>
 #include <span>
 #include <stdexcept>
+#include <string>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -650,26 +651,11 @@ namespace kden {
             -> std::vector<std::vector<Neighbor>>
         {
             // Reduce once up front if every point needs the same reduction
-            if (!x.empty() && !bandwidth.isReduced() && x.front().size() == nDim_ &&
-                !bandwidth.matches(x.front()))
-            {
-                const std::vector<bool> pattern = Bandwidth::nanPattern(x.front());
-                const bool shared = std::ranges::all_of(x, [&pattern](const std::vector<double>& xi) -> bool
-                    { return Bandwidth::nanPattern(xi) == pattern; });
-                if (shared)
-                {
-                    const Bandwidth reduced = bandwidth.reduce(pattern);
-                    return batchNeighbors(x, nNeighbor, [this, &reduced](const std::vector<double>& xi,
-                        const std::size_t ki, const std::size_t) -> std::vector<Neighbor>
-                    {
-                        return neighbors(xi, ki, reduced);
-                    });
-                }
-            }
-            return batchNeighbors(x, nNeighbor, [this, &bandwidth](const std::vector<double>& xi,
+            const Bandwidth bw = sharedReduction(x, bandwidth);
+            return batchNeighbors(x, nNeighbor, [this, &bw](const std::vector<double>& xi,
                 const std::size_t ki, const std::size_t) -> std::vector<Neighbor>
             {
-                return neighbors(xi, ki, bandwidth);
+                return neighbors(xi, ki, bw);
             });
         }
 
@@ -687,6 +673,47 @@ namespace kden {
             return neighbors(x, nNeighbor, euclidean_);
         }
 
+        /**
+         * @brief Find, in parallel, the nearest neighbors of each of several points measured with errors
+         * @param x Positions to search around, one per search
+         * @param nNeighbor Number of neighbors to find, one per search
+         * @param errDims The dimensions with measurement errors; each
+         *   must be specified (not NaN) in every point
+         * @param errCov The covariance matrix of each point's errors, in
+         *   the dimensions errDims (in that order): one per point, each
+         *   errDims.size() square, symmetric, and positive semi-definite
+         * @param bandwidth The metric, shared by every search
+         * @return One result per search: the neighbors of x[i] in the
+         *   metric bandwidth convolved with its errors (see
+         *   Bandwidth::convolveCov()), (M^-1 + 2 C_i)^-1, in which a
+         *   difference the errors could explain counts for less
+         * @throws std::invalid_argument if errCov does not have one
+         *   matrix per point, or one has the wrong size, or errDims has
+         *   a dimension not below nDim, a repeated one, or one that is
+         *   NaN in a point; otherwise, as for the shared-bandwidth
+         *   version, and as for Bandwidth::convolveCov()
+         * @details
+         * Each point's metric is convolved with its own errors in the
+         * thread that searches around it. If every point has the same
+         * pattern of NaNs, bandwidth is reduced for it once, beforehand,
+         * and each convolution done in the reduced space.
+         */
+        [[nodiscard]] auto neighbors(const std::vector<std::vector<double>>& x,
+            const std::vector<std::size_t>& nNeighbor,
+            const std::vector<std::size_t>& errDims,
+            const std::vector<Eigen::MatrixXd>& errCov, // NOLINT(misc-include-cleaner) -- Eigen::MatrixXd is provided by <Eigen/Dense> (included above); clang-tidy's IWYU mapping doesn't know that
+            const Bandwidth& bandwidth) const
+            -> std::vector<std::vector<Neighbor>>
+        {
+            checkErrors(x, errDims, errCov, {}, "KDTree::neighbors");
+            const Bandwidth bw = sharedReduction(x, bandwidth);
+            return batchNeighbors(x, nNeighbor, [this, &bw, &errDims, &errCov](const std::vector<double>& xi,
+                const std::size_t ki, const std::size_t i) -> std::vector<Neighbor>
+            {
+                return neighbors(xi, ki, bw.convolveCov(embedErrors(errDims, errCov[i]))); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            });
+        }
+
     protected:
 
         /**
@@ -702,6 +729,109 @@ namespace kden {
 
         /** Number of coordinates sampled to choose each round's pivots in selectBlocked() */
         static constexpr std::size_t pivotSampleSize = 1024;
+
+        /**
+         * @brief A shared bandwidth, reduced once for a batch of points if they all share a pattern of NaNs
+         * @param x The points
+         * @param bandwidth The bandwidth
+         * @return bandwidth reduced for the points' common pattern of
+         *   NaNs, if it is not reduced already, is for nDim dimensions,
+         *   every point has nDim elements and the same pattern, and that
+         *   pattern has a NaN; otherwise bandwidth itself (each query
+         *   then reduces it as needed, or reports what is wrong)
+         */
+        [[nodiscard]] auto sharedReduction(const std::vector<std::vector<double>>& x,
+            const Bandwidth& bandwidth) const -> Bandwidth
+        {
+            if (x.empty() || bandwidth.isReduced() || bandwidth.nDim() != this->nDim_ ||
+                x.front().size() != this->nDim_ || bandwidth.matches(x.front()))
+            {
+                return bandwidth;
+            }
+            const std::vector<bool> pattern = Bandwidth::nanPattern(x.front());
+            const bool shared = std::ranges::all_of(x, [this, &pattern](const std::vector<double>& xi) -> bool
+                { return xi.size() == this->nDim_ && Bandwidth::nanPattern(xi) == pattern; });
+            return shared ? bandwidth.reduce(pattern) : bandwidth;
+        }
+
+        /**
+         * @brief Check a batch's measurement errors
+         * @param x The points
+         * @param errDims The dimensions with errors
+         * @param errCov One covariance matrix per point
+         * @param marginalDims Dimensions that must not be in errDims
+         * @param caller The caller's name, for messages
+         * @throws std::invalid_argument if errCov does not have one
+         *   matrix per point, or one is not errDims.size() square;
+         *   errDims has a dimension not below nDim, a repeated one, or
+         *   one in marginalDims; or a dimension in errDims is NaN in a
+         *   point (points that do not have nDim elements are left to
+         *   the single-point call to report)
+         */
+        void checkErrors(const std::vector<std::vector<double>>& x,
+            const std::vector<std::size_t>& errDims,
+            const std::vector<Eigen::MatrixXd>& errCov,
+            const std::vector<std::size_t>& marginalDims,
+            const char* caller) const
+        {
+            const std::string name(caller);
+            if (errCov.size() != x.size())
+            {
+                throw std::invalid_argument(name + ": errCov must have one matrix per point");
+            }
+            const auto k = static_cast<Eigen::Index>(errDims.size()); // NOLINT(misc-include-cleaner) -- Eigen::Index is provided by <Eigen/Dense> (included above); clang-tidy's IWYU mapping doesn't know that
+            if (std::ranges::any_of(errCov, [k](const Eigen::MatrixXd& c) -> bool
+                { return c.rows() != k || c.cols() != k; }))
+            {
+                throw std::invalid_argument(name + ": each errCov matrix must be errDims.size() square");
+            }
+            std::vector<bool> seen(this->nDim_, false);
+            for (const std::size_t d : errDims)
+            {
+                if (d >= this->nDim_ || seen[d]) // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                {
+                    throw std::invalid_argument(name + ": errDims must hold distinct dimensions below nDim");
+                }
+                if (std::ranges::find(marginalDims, d) != marginalDims.end())
+                {
+                    throw std::invalid_argument(name + ": errDims must not include a marginalized dimension");
+                }
+                seen[d] = true; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+            }
+            for (const auto& xi : x)
+            {
+                if (xi.size() != this->nDim_) { continue; }
+                if (std::ranges::any_of(errDims, [&xi](const std::size_t d) -> bool
+                    { return std::isnan(xi[d]); })) // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                {
+                    throw std::invalid_argument(name + ": every dimension in errDims must be "
+                        "specified (not NaN) in every point");
+                }
+            }
+        }
+
+        /**
+         * @brief A covariance matrix over some dimensions, embedded in all nDim
+         * @param errDims The dimensions it covers
+         * @param cov The matrix, errDims.size() square
+         * @return The nDim x nDim matrix with cov in the rows and columns
+         *   errDims, and zero elsewhere
+         */
+        [[nodiscard]] auto embedErrors(const std::vector<std::size_t>& errDims,
+            const Eigen::MatrixXd& cov) const -> Eigen::MatrixXd
+        {
+            const auto n = static_cast<Eigen::Index>(this->nDim_);
+            Eigen::MatrixXd full = Eigen::MatrixXd::Zero(n, n);
+            for (std::size_t a = 0; a < errDims.size(); ++a)
+            {
+                for (std::size_t b = 0; b < errDims.size(); ++b)
+                {
+                    full(static_cast<Eigen::Index>(errDims[a]), static_cast<Eigen::Index>(errDims[b])) = // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                        cov(static_cast<Eigen::Index>(a), static_cast<Eigen::Index>(b));
+                }
+            }
+            return full;
+        }
 
         /**
          * @brief The nearest-neighbor search itself

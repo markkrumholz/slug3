@@ -436,6 +436,56 @@ class KDE:
         bw = self._current_bandwidth() if bandwidth is None else bandwidth
         return self._kde.pdf(x, relTol, absTol, bw, [] if errDims is None else errDims, errCov)
 
+    def neighbors(self, x: Any, nNeighbor: Any, bandwidth: Bandwidth | list[Bandwidth] | None = None,
+                  errDims: list[int] | None = None, errCov: Any = None) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Find the nearest neighbors of one or more points among the estimate's points.
+
+        Parameters
+        ----------
+        x : array_like of float, shape (nDim,) or (M, nDim)
+            One point, or M of them. Coordinates may be NaN, to judge
+            nearness only in the other dimensions.
+        nNeighbor : int or array_like of int
+            Number of neighbors to find for each point: one for every
+            point, or (for M points) one per point.
+        bandwidth : Bandwidth or list of Bandwidth, optional
+            The metric, in which the squared distance between points
+            separated by d is d^T M d: one for every point, or (for M
+            points, without errCov) a list of one per point; if None
+            (the default), h2Inv, so that distances are in units of the
+            kernel's bandwidth.
+        errDims : list of int, optional
+            Dimensions with measurement errors (default: none); each must
+            be specified (not NaN) in every point. Requires errCov.
+        errCov : array_like of float, shape (nErr, nErr) or (M, nErr, nErr), optional
+            Covariance matrices of the measurement errors in errDims, as
+            for pdf(): each point's metric is convolved with its errors.
+
+        Returns
+        -------
+        idx : numpy.ndarray of int64, shape (k,) or (M, k)
+            Indices of the neighbors in dataset (and w and aux), nearest
+            first, with k the most neighbors found for any point; a
+            point for which fewer were found is padded with -1.
+        dist2 : numpy.ndarray of float, shape (k,) or (M, k)
+            Their squared distances in the metric, padded with NaN.
+
+        Raises
+        ------
+        ValueError
+            As for KernelDensity.neighbors().
+
+        Notes
+        -----
+        An exact search; several points are searched around in parallel,
+        one per thread at a time, without the GIL.
+        """
+        bw = self._current_bandwidth() if bandwidth is None else bandwidth
+        nn = nNeighbor.tolist() if isinstance(nNeighbor, np.ndarray) else nNeighbor
+        idx, dist2 = self._kde.neighbors(x, nn, bw, [] if errDims is None else errDims, errCov)
+        return np.asarray(idx), np.asarray(dist2)
+
     def conditional(self, x0: Any, massTol: float = 1e-2, marginalDims: list[int] | None = None,
                     leafSize: int = 16, bandwidth: Bandwidth | None = None,
                     errDims: list[int] | None = None, errCov: Any = None) -> "KDE | list[KDE]":

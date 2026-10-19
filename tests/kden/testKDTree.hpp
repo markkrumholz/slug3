@@ -638,4 +638,100 @@ inline auto testKDTreeNeighborsBatch() -> int
     return failures;
 }
 
+/**
+ * @brief Check batch neighbor searches with per-point measurement errors
+ * @return Number of failures
+ * @details
+ * Each search's metric is the shared bandwidth convolved with that
+ * point's errors: compared with single searches in that convolved
+ * metric, exactly for points with mixed NaN patterns (each convolved,
+ * then reduced, as a single search does), and to rounding for points
+ * sharing one pattern (reduced once, then convolved). Also checks that
+ * invalid errors are rejected.
+ */
+inline auto testKDTreeNeighborsErrors() -> int
+{
+    int failures = 0;
+    const std::size_t nDim = 4;
+    auto owned = makeKDTestData(3000, nDim, 2, 17);
+    auto data = owned.view();
+    const kden::Bandwidth bw = silvermanBandwidth(data);
+    const KDTestTree tree(data, 16);
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const std::vector<std::size_t> errDims{2, 0};
+
+    std::vector<std::vector<double>> shared;
+    std::vector<std::vector<double>> mixed;
+    std::vector<std::size_t> ks;
+    std::vector<Eigen::MatrixXd> errCov;
+    for (std::size_t q = 0; q < 30; ++q)
+    {
+        auto x = positionOf(tree.data(), (q * 97) % data.size());
+        x[0] += 0.1;
+        mixed.push_back(q % 2 == 0 ? withNanAt(x, 3) : x);
+        shared.push_back(withNanAt(withNanAt(x, 1), 3));
+        ks.push_back(1 + (q % 12));
+        const double s = 0.05 * static_cast<double>(1 + (q % 5));
+        Eigen::MatrixXd c(2, 2);
+        c << s * s, 0.3 * s * s, 0.3 * s * s, 2.0 * s * s;
+        errCov.push_back(c);
+    }
+    auto convolved = [&bw, &errDims](const Eigen::MatrixXd& c) -> kden::Bandwidth
+    {
+        Eigen::MatrixXd full = Eigen::MatrixXd::Zero(4, 4);
+        for (std::size_t a = 0; a < 2; ++a)
+        {
+            for (std::size_t b = 0; b < 2; ++b)
+            {
+                full(static_cast<Eigen::Index>(errDims[a]), static_cast<Eigen::Index>(errDims[b])) =
+                    c(static_cast<Eigen::Index>(a), static_cast<Eigen::Index>(b));
+            }
+        }
+        return bw.convolveCov(full);
+    };
+
+    for (const bool isShared : {false, true})
+    {
+        const auto& xs = isShared ? shared : mixed;
+        const auto batch = tree.neighbors(xs, ks, errDims, errCov, bw);
+        bool ok = batch.size() == xs.size();
+        for (std::size_t q = 0; ok && q < xs.size(); ++q)
+        {
+            const auto single = tree.neighbors(xs[q], ks[q], convolved(errCov[q]));
+            ok = single.size() == batch[q].size();
+            for (std::size_t j = 0; ok && j < single.size(); ++j)
+            {
+                ok = isShared ? (single[j].idx_ == batch[q][j].idx_ &&
+                        std::abs(single[j].dist2_ - batch[q][j].dist2_) <= 1e-10 * single[j].dist2_) :
+                    (single[j].idx_ == batch[q][j].idx_ && single[j].dist2_ == batch[q][j].dist2_);
+            }
+        }
+        if (!ok)
+        {
+            std::cerr << "testKDTreeNeighborsErrors: batch with errors differs from single searches in the "
+                << "convolved metric, for " << (isShared ? "shared" : "mixed") << " NaN patterns\n";
+            ++failures;
+        }
+    }
+
+    // Invalid errors
+    int thrown = 0;
+    auto expectThrow = [&thrown](auto&& f) -> void
+    {
+        try { f(); } catch (const std::invalid_argument&) { ++thrown; } catch (const std::domain_error&) { ++thrown; }
+    };
+    std::vector<Eigen::MatrixXd> notPsd = errCov;
+    notPsd.back() = -Eigen::MatrixXd::Identity(2, 2);
+    expectThrow([&] { (void)tree.neighbors(shared, ks, errDims, std::vector<Eigen::MatrixXd>(errCov.begin(), errCov.end() - 1), bw); });
+    expectThrow([&] { (void)tree.neighbors(shared, ks, {0, 1}, errCov, bw); });   // 1 is NaN
+    expectThrow([&] { (void)tree.neighbors(shared, ks, {0, 4}, errCov, bw); });   // out of range
+    expectThrow([&] { (void)tree.neighbors(shared, ks, errDims, notPsd, bw); });  // thrown in the loop
+    if (thrown != 4)
+    {
+        std::cerr << "testKDTreeNeighborsErrors: only " << thrown << " of 4 invalid searches threw\n";
+        ++failures;
+    }
+    return failures;
+}
+
 #endif // TESTKDTREE_HPP

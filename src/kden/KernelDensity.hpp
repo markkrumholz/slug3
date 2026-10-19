@@ -22,7 +22,6 @@
 #include <optional>
 #include <span>
 #include <stdexcept>
-#include <string>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -756,7 +755,7 @@ namespace kden {
             const double absTol,
             const Bandwidth& bandwidth) const -> std::vector<double>
         {
-            const Bandwidth bw = sharedReduction(x, bandwidth);
+            const Bandwidth bw = this->sharedReduction(x, bandwidth);
             return parallelEval<double>(x.size(), [&](const std::size_t i) -> double
                 { return pdf(x[i], relTol, absTol, bw); }); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         }
@@ -810,11 +809,11 @@ namespace kden {
             const double absTol,
             const Bandwidth& bandwidth) const -> std::vector<double>
         {
-            checkErrors(x, errDims, errCov, {}, "KernelDensity::pdf");
-            const Bandwidth bw = sharedReduction(x, bandwidth);
+            this->checkErrors(x, errDims, errCov, {}, "KernelDensity::pdf");
+            const Bandwidth bw = this->sharedReduction(x, bandwidth);
             return parallelEval<double>(x.size(), [&](const std::size_t i) -> double
             {
-                return pdf(x[i], relTol, absTol, bw.convolveCov(embedErrors(errDims, errCov[i]))); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                return pdf(x[i], relTol, absTol, bw.convolveCov(this->embedErrors(errDims, errCov[i]))); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
             });
         }
 
@@ -900,12 +899,12 @@ namespace kden {
             const Bandwidth& bandwidth,
             const std::size_t leafSize = 16) const -> std::vector<ConditionalDensity<AuxType>>
         {
-            checkErrors(x0, errDims, errCov, marginalDims, "KernelDensity::conditional");
+            this->checkErrors(x0, errDims, errCov, marginalDims, "KernelDensity::conditional");
             return parallelEval<ConditionalDensity<AuxType>>(x0.size(),
                 [&](const std::size_t i) -> ConditionalDensity<AuxType>
             {
                 return conditional(x0[i], marginalDims, massTol, // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-                    bandwidth.convolveCov(embedErrors(errDims, errCov[i])), leafSize); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                    bandwidth.convolveCov(this->embedErrors(errDims, errCov[i])), leafSize); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
             });
         }
 
@@ -982,12 +981,12 @@ namespace kden {
             const Bandwidth& bandwidth) const
             -> std::vector<Sample>
         {
-            checkErrors(x0, errDims, errCov, marginalDims, "KernelDensity::conditionalSample");
+            this->checkErrors(x0, errDims, errCov, marginalDims, "KernelDensity::conditionalSample");
             return parallelEval<Sample>(x0.size(),
                 [&](const std::size_t i) -> Sample
             {
                 return conditionalSample(x0[i], marginalDims, massTol, // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-                    bandwidth.convolveCov(embedErrors(errDims, errCov[i]))); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
+                    bandwidth.convolveCov(this->embedErrors(errDims, errCov[i]))); // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
             });
         }
 
@@ -1035,109 +1034,6 @@ namespace kden {
             out.reserve(n);
             for (auto& r : results) { out.push_back(std::move(*r)); } // NOLINT(bugprone-unchecked-optional-access) -- every element was set, or an exception rethrown above
             return out;
-        }
-
-        /**
-         * @brief A shared bandwidth, reduced once for a batch of points if they all share a pattern of NaNs
-         * @param x The points
-         * @param bandwidth The bandwidth
-         * @return bandwidth reduced for the points' common pattern of
-         *   NaNs, if it is not reduced already, is for nDim dimensions,
-         *   every point has nDim elements and the same pattern, and that
-         *   pattern has a NaN; otherwise bandwidth itself (each query
-         *   then reduces it as needed, or reports what is wrong)
-         */
-        [[nodiscard]] auto sharedReduction(const std::vector<std::vector<double>>& x,
-            const Bandwidth& bandwidth) const -> Bandwidth
-        {
-            if (x.empty() || bandwidth.isReduced() || bandwidth.nDim() != this->nDim_ ||
-                x.front().size() != this->nDim_ || bandwidth.matches(x.front()))
-            {
-                return bandwidth;
-            }
-            const std::vector<bool> pattern = Bandwidth::nanPattern(x.front());
-            const bool shared = std::ranges::all_of(x, [this, &pattern](const std::vector<double>& xi) -> bool
-                { return xi.size() == this->nDim_ && Bandwidth::nanPattern(xi) == pattern; });
-            return shared ? bandwidth.reduce(pattern) : bandwidth;
-        }
-
-        /**
-         * @brief Check a batch's measurement errors
-         * @param x The points
-         * @param errDims The dimensions with errors
-         * @param errCov One covariance matrix per point
-         * @param marginalDims Dimensions that must not be in errDims
-         * @param caller The caller's name, for messages
-         * @throws std::invalid_argument if errCov does not have one
-         *   matrix per point, or one is not errDims.size() square;
-         *   errDims has a dimension not below nDim, a repeated one, or
-         *   one in marginalDims; or a dimension in errDims is NaN in a
-         *   point (points that do not have nDim elements are left to
-         *   the single-point call to report)
-         */
-        void checkErrors(const std::vector<std::vector<double>>& x,
-            const std::vector<std::size_t>& errDims,
-            const std::vector<Eigen::MatrixXd>& errCov,
-            const std::vector<std::size_t>& marginalDims,
-            const char* caller) const
-        {
-            const std::string name(caller);
-            if (errCov.size() != x.size())
-            {
-                throw std::invalid_argument(name + ": errCov must have one matrix per point");
-            }
-            const auto k = static_cast<Eigen::Index>(errDims.size());
-            if (std::ranges::any_of(errCov, [k](const Eigen::MatrixXd& c) -> bool
-                { return c.rows() != k || c.cols() != k; }))
-            {
-                throw std::invalid_argument(name + ": each errCov matrix must be errDims.size() square");
-            }
-            std::vector<bool> seen(this->nDim_, false);
-            for (const std::size_t d : errDims)
-            {
-                if (d >= this->nDim_ || seen[d]) // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-                {
-                    throw std::invalid_argument(name + ": errDims must hold distinct dimensions below nDim");
-                }
-                if (std::ranges::find(marginalDims, d) != marginalDims.end())
-                {
-                    throw std::invalid_argument(name + ": errDims must not include a marginalized dimension");
-                }
-                seen[d] = true; // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-            }
-            for (const auto& xi : x)
-            {
-                if (xi.size() != this->nDim_) { continue; }
-                if (std::ranges::any_of(errDims, [&xi](const std::size_t d) -> bool
-                    { return std::isnan(xi[d]); })) // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-                {
-                    throw std::invalid_argument(name + ": every dimension in errDims must be "
-                        "specified (not NaN) in every point");
-                }
-            }
-        }
-
-        /**
-         * @brief A covariance matrix over some dimensions, embedded in all nDim
-         * @param errDims The dimensions it covers
-         * @param cov The matrix, errDims.size() square
-         * @return The nDim x nDim matrix with cov in the rows and columns
-         *   errDims, and zero elsewhere
-         */
-        [[nodiscard]] auto embedErrors(const std::vector<std::size_t>& errDims,
-            const Eigen::MatrixXd& cov) const -> Eigen::MatrixXd
-        {
-            const auto n = static_cast<Eigen::Index>(this->nDim_);
-            Eigen::MatrixXd full = Eigen::MatrixXd::Zero(n, n);
-            for (std::size_t a = 0; a < errDims.size(); ++a)
-            {
-                for (std::size_t b = 0; b < errDims.size(); ++b)
-                {
-                    full(static_cast<Eigen::Index>(errDims[a]), static_cast<Eigen::Index>(errDims[b])) = // NOLINT(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-                        cov(static_cast<Eigen::Index>(a), static_cast<Eigen::Index>(b));
-                }
-            }
-            return full;
         }
 
         /**

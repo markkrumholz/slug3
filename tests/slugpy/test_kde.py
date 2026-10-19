@@ -280,3 +280,21 @@ def test_conditional_sample() -> None:
     batch = kde.conditional_sample(np.stack([x0, x0 + np.array([0.2, 0.0, -0.1, 0.0])]))
     assert isinstance(batch, list) and len(batch) == 2
     assert all(np.array_equal(a, b) for a, b in zip(batch[0], sample, strict=True))
+
+
+def test_neighbors() -> None:
+    """neighbors() finds the nearest points in the bandwidth's metric, indexing dataset."""
+    x, w = make_points(1000, 3, 41)
+    m = np.diag([4.0, 1.0, 9.0])
+    kde = KDE(x, h2Inv=m, w=w)
+    q = np.array([[0.1, -0.2, 0.3], [1.0, 0.5, -0.5]])
+    idx, dist2 = kde.neighbors(q, 4)
+    assert idx.shape == dist2.shape == (2, 4)
+    for i in range(2):
+        d = kde.dataset - q[i]
+        want = np.sort(np.einsum("ij,jk,ik->i", d, m, d))[:4]
+        assert np.allclose(dist2[i], want, rtol=1e-12)
+        dd = kde.dataset[idx[i]] - q[i]
+        assert np.allclose(np.einsum("ij,jk,ik->i", dd, m, dd), dist2[i], rtol=1e-12)
+    idx_r, dist2_r = kde.neighbors(q, np.array([1, 3]), bandwidth=Bandwidth.identity(3))
+    assert idx_r.shape == (2, 3) and np.all(idx_r[0, 1:] == -1) and np.all(np.isnan(dist2_r[0, 1:]))
