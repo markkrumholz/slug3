@@ -512,7 +512,7 @@ class KDE:
         float or numpy.ndarray of float
             For each percentile, a value t of dimension dim at which the
             estimate's marginal cumulative distribution in dim, F,
-            satisfies |F(t) - p| <= max(absTol, relTol * min(p, 1 - p)),
+            satisfies abs(F(t) - p) <= max(absTol, relTol * min(p, 1 - p)),
             with p = pct / 100 (guaranteed); a float for a float pct,
             otherwise an array of pct's shape. For a conditional estimate
             (from conditional()), these are percentiles of the posterior.

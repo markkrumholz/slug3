@@ -33,6 +33,8 @@ Contents:
    feedback
    slugpy
    cloudy
+   bayesian
+   clusterslug
    examples
    troubleshooting
    tests

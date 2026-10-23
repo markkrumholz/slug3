@@ -112,3 +112,10 @@ The ``compute_tracks`` function operates similarly, except that it takes as inpu
 a list of stellar masses (and other optional arguments) and returns an array of
 times and a dict containing the properties of a star born with each stellar mass
 at each time. The properties available are the same as for ``compute_isochrones``.
+
+Bayesian Inference for Star clusters
+------------------------------------
+
+The slugpy module provides the ``cluster_slug`` class to perform Bayesian inference
+of star cluster properties. See :ref:`sec-cluster-slug` for details on how to use
+this tool.

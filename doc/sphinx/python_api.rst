@@ -68,6 +68,29 @@ Output Readers
    :members:
    :special-members: __init__, __getitem__
 
+Bayesian Inference
+^^^^^^^^^^^^^^^^^^
+
+..
+   cluster_slug and KDE are re-exported from ``slugpy`` itself (so
+   ``from slugpy import cluster_slug`` works), but the automodule above
+   lists only its own explicit names, so each is documented here with
+   its own ``autoclass``, under the module that defines it, as for the
+   readers. ``:show-inheritance:`` on cluster_slug shows that it is a
+   slug_reader, whose own members (e.g. ``clusters``,
+   ``cluster_phot``) it inherits but ``:members:`` does not repeat.
+   ``:special-members: __init__`` is added for the same reason as for
+   the reader classes above.
+
+.. autoclass:: slugpy.cluster_slug.cluster_slug
+   :members:
+   :show-inheritance:
+   :special-members: __init__
+
+.. autoclass:: slugpy.kde.KDE
+   :members:
+   :special-members: __init__
+
 Running Cloudy (``slugpy.cloudy``)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 

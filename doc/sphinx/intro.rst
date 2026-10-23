@@ -1,5 +1,7 @@
 .. highlight:: rest
 
+.. _sec-intro:
+
 Introduction to SLUG
 ====================
 

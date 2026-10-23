@@ -369,7 +369,7 @@ Returns
 t : float or numpy.ndarray of float
     For each percentile, a value t of dimension dim at which the
     estimate's marginal cumulative distribution in dim, F, satisfies
-    |F(t) - p| <= max(absTol, relTol * min(p, 1 - p)), with p = pct / 100
+    abs(F(t) - p) <= max(absTol, relTol * min(p, 1 - p)), with p = pct / 100
     -- guaranteed, with the same relative standard in both tails; a
     float for a float pct, otherwise an array of pct's shape.
 
