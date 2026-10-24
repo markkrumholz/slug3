@@ -752,6 +752,23 @@ def test_phot_convert_roundtrip(tmp_path):
     assert np.allclose(back.value, orig, atol=1e-9)
 
 
+
+def test_phot_convert_updates_filter_units(tmp_path):
+    """phot_convert() updates filter_units for every filter it converts, and only those."""
+    reader = slug_reader(str(_make_phot_convert_test_file(tmp_path)))
+    cp = reader.cluster_phot
+    assert cp is not None
+
+    reader.phot_convert("AB")
+    assert cp.filter_units == ["mag(AB)", "photon/s"]
+    assert reader.filter_units == cp.filter_units
+    assert u.Unit(cp.filter_units[0]) == cast(u.Quantity, cp["Generic.Johnson.V"]).unit
+    reader.phot_convert("Fnu")
+    assert u.Unit(cp.filter_units[0]) == u.erg / u.s / u.Hz
+    assert cp.filter_units[1] == "photon/s"
+    reader.phot_convert("Vega")
+    assert cp.filter_units == ["mag", "photon/s"]
+
 def test_phot_convert_via_reader_delegates(tmp_path):
     """slug_reader.phot_convert() delegates to cluster_phot.phot_convert()."""
     reader = slug_reader(str(_make_phot_convert_test_file(tmp_path)))
