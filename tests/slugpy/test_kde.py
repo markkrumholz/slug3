@@ -366,7 +366,7 @@ def test_dimensions_by_name() -> None:
     # marginalize(): by name, and mixed with indices
     y = rng.standard_normal((5, 2))
     marg = kde.marginalize([1, 3])
-    for other in [kde.marginalize(["age", "Z"]), kde.marginalize([1, "Z"])]:
+    for other in [kde.marginalize(["age", "Z"]), kde.marginalize([1, "Z"]), kde.marginalize(range(1, 4, 2))]:
         assert other.names == marg.names == ["mass", "A_V"]
         assert np.array_equal(np.asarray(other.pdf(y, 0.0, 0.0)), np.asarray(marg.pdf(y, 0.0, 0.0)))
 

@@ -327,7 +327,7 @@ class KDE:
 
         Parameters
         ----------
-        dims : list, tuple, or numpy.ndarray of int or str, or None
+        dims : sequence (e.g. list, tuple, or range) or numpy.ndarray of int or str, or None
             The dimensions, each as for _dim_index(); None means none.
         arg : str
             Name of the argument dims came from, for error messages.
@@ -343,12 +343,13 @@ class KDE:
         ValueError
             If an entry is a name not in names, or a negative index.
         TypeError
-            If dims is not a list, tuple, or array, or an entry is
-            neither an int nor a str.
+            If dims is a str (a single name, not a sequence of them), or
+            not a sequence or array, or an entry is neither an int nor a
+            str.
         """
         if dims is None:
             return []
-        if not isinstance(dims, (list, tuple, np.ndarray)):
+        if isinstance(dims, (str, bytes)) or not isinstance(dims, (Sequence, np.ndarray)):
             raise TypeError(f"{arg} must be a list of int or str, not {type(dims).__name__}")
         return [self._dim_index(d, arg) for d in dims]
 
