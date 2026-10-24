@@ -78,6 +78,28 @@ def _limits(x: np.ndarray, i: int, lolim: np.ndarray | None,
     return lo, hi
 
 
+def _bin_centers(lim: tuple[float, float], n: int) -> np.ndarray:
+    """
+    The centers of equal-width bins spanning a range.
+
+    Parameters
+    ----------
+    lim : tuple of float
+        Lower and upper limits of the range.
+    n : int
+        Number of bins.
+
+    Returns
+    -------
+    numpy.ndarray, shape (n,)
+        The bin centers, matching the bins numpy.histogram and
+        scipy.stats.binned_statistic_2d use for the same range and
+        number of bins.
+    """
+    edges = np.linspace(lim[0], lim[1], n + 1)
+    return 0.5 * (edges[:-1] + edges[1:])
+
+
 def npdfplot(pts: ArrayLike, fignum: int | None = None, lolim: ArrayLike | None = None,
              hilim: ArrayLike | None = None, nbin: int | Sequence[int] = 50,
              thresh: float | None = None, threshfrac: float = 0.99, log: bool = True,
@@ -225,11 +247,11 @@ def npdfplot(pts: ArrayLike, fignum: int | None = None, lolim: ArrayLike | None 
             elif zscaling == "count":
                 z = count
             elif zscaling == "frac":
-                z = count / len(points)
+                z = count / wsum
             elif zscaling == "density":
                 z = count / ((xe2[1] - xe2[0]) * (ye2[1] - ye2[0]))
             else:  # normed
-                z = count / (len(points) * (xe2[1] - xe2[0]) * (ye2[1] - ye2[0]))
+                z = count / (wsum * (xe2[1] - xe2[0]) * (ye2[1] - ye2[0]))
 
             # Save
             zarr.append(z)
@@ -281,15 +303,15 @@ def npdfplot(pts: ArrayLike, fignum: int | None = None, lolim: ArrayLike | None 
     ctr = 0
     for i in range(ndim):
 
-        # Make grid in x direction
+        # Make grid of bin centers in x direction
         x = points[:, i]
         nxbin = _nbins(nbin, i)
         xlim = _limits(x, i, lo, hi)
-        xgrd = np.linspace(xlim[0], xlim[1], nxbin)
+        xgrd = _bin_centers(xlim, nxbin)
 
         # Make 1D histogram on the diagonal
         ax = plt.subplot(gs[i, i])
-        ax.bar(xgrd, histarr[i], xgrd[1] - xgrd[0], align="center",
+        ax.bar(xgrd, histarr[i], (xlim[1] - xlim[0]) / nxbin, align="center",
                facecolor="C0", edgecolor="black")
         ax.set_xlim(xlim)
         if log:
@@ -325,11 +347,11 @@ def npdfplot(pts: ArrayLike, fignum: int | None = None, lolim: ArrayLike | None 
             # Grab axes for this pair
             ax = plt.subplot(gs[j, i])
 
-            # Define y grid and 2D grid
+            # Define y grid and 2D grid, of bin centers
             y = points[:, j]
             nybin = _nbins(nbin, j)
             ylim = _limits(y, j, lo, hi)
-            ygrd = np.linspace(ylim[0], ylim[1], nybin)
+            ygrd = _bin_centers(ylim, nybin)
             xx, yy = np.meshgrid(xgrd, ygrd)
 
             # If using logarithmic scaling, apply it
