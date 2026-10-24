@@ -1018,7 +1018,9 @@ class slug_reader:
         Details
         -------
         Thin wrapper around cluster_phot.phot_convert() -- see its own
-        docstring for exactly which entries get converted and how.
+        docstring for exactly which entries get converted and how. It
+        also updates cluster_phot.filter_units (and so filter_units) to
+        match every filter it converts.
         """
         cluster_phot = self.cluster_phot
         if cluster_phot is not None:
