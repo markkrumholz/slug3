@@ -776,13 +776,18 @@ class KDE:
             If marginalDims names a dimension not in names, or holds a
             negative index; or as for KernelDensity.marginalize().
         TypeError
-            If marginalDims is not a list of int or str.
+            If marginalDims is not a list of int or str (including if it
+            is None).
 
         Notes
         -----
         Copies every point (in parallel), then builds the result's
         tree, without the GIL.
         """
+        # Unlike the optional dimension arguments elsewhere, marginalDims
+        # is required here: None must not quietly mean [] (a copy)
+        if marginalDims is None:
+            raise TypeError("marginalDims must be a list of int or str, not None")
         bw = self._current_bandwidth() if bandwidth is None else bandwidth
         cd = self._kde.marginalize(self._dim_list(marginalDims, "marginalDims"), bw, leafSize)
         names = [self._names[d] for d in cd.dims()] if self._names else []

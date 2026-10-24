@@ -404,6 +404,8 @@ def test_dimensions_by_name() -> None:
         kde.pdf(q, errDims=[-1], errCov=np.eye(1))
     with pytest.raises(TypeError, match="marginalDims must be a list of int or str"):
         kde.marginalize("Z")  # a bare name, not a list of them
+    with pytest.raises(TypeError, match="marginalDims must be a list of int or str, not None"):
+        kde.marginalize(None)  # pyright: ignore[reportArgumentType]
     for bad in [1.0, True]:
         with pytest.raises(TypeError, match="marginalDims must be an int or a str"):
             kde.conditional(x0, marginalDims=[bad])  # pyright: ignore[reportArgumentType]
