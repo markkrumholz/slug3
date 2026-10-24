@@ -753,7 +753,7 @@ def test_phot_convert_roundtrip(tmp_path):
 
 
 
-def test_phot_convert_updates_filter_units(tmp_path):
+def test_phot_convert_updates_filter_units(tmp_path: pathlib.Path) -> None:
     """phot_convert() updates filter_units for every filter it converts, and only those."""
     reader = slug_reader(str(_make_phot_convert_test_file(tmp_path)))
     cp = reader.cluster_phot
