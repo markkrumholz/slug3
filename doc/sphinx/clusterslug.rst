@@ -31,7 +31,7 @@ The basic steps required to perform inference are as follows:
 
    * ``bw_phot`` and ``bw_phys``: these control the bandwidths used for physical and photometric quantities in the kernel; see :ref:`ssec-cluster-slug-bandwidth` for details. Default bandwidths are 0.1 dex for physical quantities (0.1 mag for ``A_V``), and 0.1 mag for photometric quantities, with no correlation.
    * ``inference_quantities``: the list of quantities to infer from photometry; defaults to whichever of ``["mass", "age", "A_V", "metallicity"]`` vary in the library, but users can choose to infer only a subset of these, and can also choose to infer photometric quantities that have not been observed (e.g., inferring the distribution of ionizing luminosity ``Q(HI)`` from longer-wavelength bands). Mass and age are automatically logged, so for example ``mass`` gives :math:`\log_{10} M` in units of :math:`M_\odot` as the inferred quantity, while ``A_V`` (in mag) and ``metallicity`` (:math:`[\mathrm{Fe/H}]`, already logarithmic) are used as-is.
-   * ``priors`` and ``pobs``: the prior probability to assign to each combination of physical properties, and the probability that a cluster with a given set of physical or photometric properties will be observed; these can be either callable functions or arrays with as many elements as the number of samples in the library giving a prior and observation probability for each library cluster.
+   * ``priors`` and ``pobs``: the prior probability and the probability of observational detection for each cluster in the library; see :ref:`ssec-cluster-slug-priors-pobs` for details.
 
 #. Add a set of photometric filters on which to perform inference, by doing
 
@@ -40,15 +40,34 @@ The basic steps required to perform inference are as follows:
        cs.add_filterset(['filter1', 'filter2', ...])
 
    where ``'filter1'``, ``'filter2'``, ... are the names of :ref:`photometric filters <sec-phot>`
-   available in the library.
+   available in the library. A ``cluster_slug`` object can have multiple filter sets loaded at
+   once; just call ``add_filterset`` as many times as needed.
 
-#. Supply a set of observed photometry in that filter set, along with an optional set of photometric uncertainties, by doing
+#. Supply a set of observed photometry, along with an optional set of photometric uncertainties, by doing
 
    .. code-block:: python
 
        results = cs.conditional(phot, errors=photerr)
 
-   where ``phot`` is an array of magnitudes and ``photerr`` is an array (or ``astropy.units.Quantity``) of errors, both of length ``nfilter``, where ``nfilter`` is the number of filters in the filterset added in the previous step. The returned value ``results`` will be a ``KDE`` object giving the PDF of cluster physical properties conditional on the input photometry and photometric errors. Alternatively, ``phot`` and ``photerr`` can be arrays of shape ``(M,nfilter)``, in which case the function will return a list of ``KDE`` objects of length ``M``, one per row of ``phot``; these will be computed in parallel.
+   or, if more than one filter set was loaded at the previous step,
+
+   .. code-block:: python
+
+       results = cs.conditional(phot, errors=photerr, filterset=fs)
+
+   Here ``fs`` is a list of filters specifying which filter set the photometry is for (not
+   needed if only a single filter set is loaded, but otherwise required), ``phot`` is an array of
+   magnitudes or log luminosities (depending on the photometric system) and ``photerr`` is an array
+   (or ``astropy.units.Quantity``) of errors, both of length ``nfilter``, where ``nfilter`` is the
+   number of filters in the filterset added in the previous step. The returned value ``results``
+   will be a ``KDE`` object giving the PDF of cluster physical properties conditional on the input
+   photometry and photometric errors. Alternatively, ``phot`` and ``photerr`` can be arrays of
+   shape ``(M,nfilter)``, in which case the function will return a list of ``KDE`` objects of
+   length ``M``, one per row of ``phot``; these will be computed in parallel. The input ``phot``
+   and ``photerr`` must be in the same photometric system as used in the library; use 
+   ``phot_convert`` (:ref:`sec-slugpy`) if necessary to convert observations into the photometric
+   system used in the library. For photometric systems using magnitudes, the input ``phot``
+   must be absolute magnitudes, not apparent ones.
 
 #. The ``KDE`` objects in results can be used to compute the full PDF of physical properties at any given set of physical parameters by doing
 
@@ -56,13 +75,59 @@ The basic steps required to perform inference are as follows:
 
        results.pdf(x)
 
-   where ``x`` is an array with as many elements as the number of quantities in ``inference_quantities``. Alternatively, the KDEs can be further reduced to produce marginal 1D KDEs for each physical property by doing
+   where ``x`` is an array with as many elements as the number of quantities in
+   ``inference_quantities``. Alternatively, the KDEs can be further reduced to produce marginal
+   1D KDEs for each physical property by doing
 
    .. code-block:: python
 
        marginal_kde = results.marginalize(dims)
 
-   where ``dims`` is a list of integers specifying which dimensions are to be marginalized out. Thus for example to get the marginal posterior PDF of log cluster mass for the default list of ``inference_quantities``, one would use ``dims = [1,2,3]``.
+   where ``dims`` is a list of integers or strings specifying which dimensions or quantities
+   in ``inference_quantities`` are to be marginalized out. Thus for example to get the marginal
+   posterior PDF of log cluster mass for the default list of ``inference_quantities``, one would
+   use ``dims = ["age", "A_V", "metallicity"]``. Alternatively, the KDEs can also be used to
+   directly compute confidence intervals on each of the ``inference_quantities`` by doing
+
+   .. code-block:: python
+
+       results.percentile(qty, pct)
+
+   where ``qty`` is a string specifying the quantity whose confidence intervals are to be computed
+   (e.g., ``"mass"``) and ``pct`` gives the percentile values to be computed
+   (e.g., ``[16, 50, 84]`` to get the 16th, 50th, and 84th percentiles). This function behaves
+   analogously to ``np.percentile``.
+
+#. Instead of producing ``KDE`` objects directly, users can also use the ``conditional_sample`` function, by doing
+
+   .. code-block:: python
+
+       pts, wgts, idx = cs.conditional_sample(phot, errors=photerr, filterset=fs)
+
+   This returns the sample points, weights, and indices from which the ``KDE`` is constructed;
+   here ``pts`` is an array of shape ``(npts, nqty)``, where ``npts`` is the number of points
+   and ``nqty`` is the number of quantities in ``inference_quantities``, ``wgts`` is an array
+   of shape ``npts`` containing the weights of each of those points, and ``idx`` is an array
+   of integers of shape ``npts`` containing the indices of these points in the library. This
+   form is more convenient for writing outputs to file, and the corresponding ``KDE`` objects
+   can then be constructed from the points whenever needed by passing ``pts`` and ``wgts``
+   to the ``KDE`` class's constructor, along with the desired bandwidth for inference of
+   physical quantities (see :ref:`sec-slugpy-full`).
+
+#. A quick way of checking whether a given set of input photometry is reproduced well by the library is to use the ``neighbors`` function to find the nearest neighbors to a given cluster's photometry in the library, by doing
+
+   .. code-block:: python
+
+       dist, idx = cs.neighbors(phot, n, errors=photerr)
+
+   where ``n`` is the number of neighbors to find. As with ``conditional``, if more than one filter
+   set is loaded, then the ``filterset`` keyword is also required to specify which filter set
+   to use. The return values ``dist`` and ``idx`` are the distances and indices in the library
+   of the ``n`` nearest neighbors of the input cluster. Clusters that have at least a few neighbors
+   with distances :math:`<2` can be regarded as well-fit by the library, while clusters for which
+   the nearest neighbor has a distance :math:`\gtrsim 4` are probably not well-fit by the library. However,
+   there is no strict goodness of fit test for a single cluster with a probabilistic model, so
+   this is only a rule of thumb.
 
 This is only a partial list of the capabilities of ``cluster_slug``; see :ref:`sec-slugpy-full` for
 full documentation of all its methods and properties.
@@ -83,12 +148,72 @@ rules and recommendations apply when generating a library.
 * If the library includes outputs with either :ref:`sec-extinction` or :ref:`sec-nebular`, these will be used by default when performing inference (though this can be overridden by the ``use_extinct`` and ``use_nebular`` keywords when constructing the ``cluster_slug`` object).
 * The size of the library, together with the typical photometric errors, will determine the bandwidth it is safe to use and the accuracy of the resulting inference (see :ref:`ssec-cluster-slug-bandwidth`). For photometric uncertainties at the :math:`\approx 0.1` mag level, libraries of :math:`>10^6`, and preferably :math:`\gtrsim 10^7`, clusters are recommended.
 
+.. _ssec-cluster-slug-priors-pobs:
+
+Priors and Observation Probabilities
+------------------------------------
+
+The :ref:`Bayesian inference method <sec-bayesian>` used by ``cluster_slug`` starts from a joint
+PDF of physical and photometric properties of star clusters, which is formed using a weighted
+kernel density estimate from the SLUG library. By default, if the ``priors`` and ``pobs``
+properties of ``cluster_slug`` are left as ``None`` (their default), all clusters in the
+library are weighted equally; this is equivalent to assuming that all clusters are equally
+likely to have been observed, and to adopting a prior probability for Bayesian inference that
+is equal to the probability distribution from which the clusters were sampled when the library
+was created, e.g., if the library was created with a ``CMF`` keyword describing a mass
+distribution :math:`p(M) \propto M^{-2}`, then leaving ``priors`` as ``None`` is equivalent
+to performing Bayesian inference assuming this prior probability for cluster masses.
+
+Users, however, may wish to modify ``priors`` to specify a different choice of prior probability,
+and to modify ``pobs`` to take into account selection bias in the observations (e.g., that
+clusters with lower luminosities are less likely to be detected). The effect of each of these
+parameters is to change the weights in the kernel density estimate; the weight used is
+
+.. math::
+
+    w_i \propto P_{\mathrm{obs},i} \frac{p_{\mathrm{prior},i}}{p_{\mathrm{lib},i}}
+
+where :math:`w_i` is the weight assigned to cluster :math:`i` in the library,
+:math:`P_{\mathrm{obs},i}` is the probability that this cluster would be detected
+(assumed to be unity if ``pobs`` is ``None``), :math:`p_{\mathrm{prior},i}` is the
+prior probability density for the properties of cluster :math:`i`, and
+:math:`p_{\mathrm{lib},i}` is the probability density for the properties of cluster
+:math:`i` evaluated using the PDFs from which the library was constructed, e.g., if
+the ``CMF`` and ``output_times`` keywords in :ref:`sec-parameters` specify PDFs
+:math:`p_M(M)` and :math:`p_T(T)`, then we will have 
+:math:`p_{\mathrm{lib},i} \propto p_M(M_i) p_T(T_i)`, where :math:`M_i` and
+:math:`T_i` are the mass and age of cluster :math:`i` in the library. Note that,
+even though inference is performed on log mass and log time, the prior (and library
+sampling density) are expressed in linear variables, i.e., :math:`p_{\mathrm{prior},i}`
+must be the probability per unit mass and per unit age, not per unit log mass and log age.
+Setting ``priors = None`` is equivalent to setting
+:math:`p_{\mathrm{prior},i} = p_{\mathrm{lib},i}`.
+Note that the absolute values of the weights are not meaningful because their sum
+is always normalized to unity. See
+`Krumholz et al. (2019) <https://ui.adsabs.harvard.edu/#abs/2019MNRAS.482.3550K/abstract>`_
+for a derivation of the theoretical underpinnings of this functional form for the
+weights.
+
+In ``cluster_slug``, ``priors`` and ``pobs`` are properties of the class (which can also be
+set by providing keywords to the constructor), and can be set to either numpy arrays or callables.
+If they are set to arrays, these arrays must have the same length as the number of
+clusters in the library (available as the ``size`` property of the ``cluster_slug`` object),
+and each array element must be a non-negative real number; for ``pobs`` the number must be
+in :math:`[0,1]`. If these are set to callables, the callable must accept four arguments, which will contain the
+mass, age, visual extinction, and metallicity of every cluster in the library: the first three as
+``astropy.units.Quantity`` arrays of length ``size`` (the extinction argument is ``None`` if the
+library has no extinction), and the metallicity :math:`[\mathrm{Fe/H}]` as a plain numpy array of
+length ``size``. The callable must return as output
+an array of shape ``size`` containing the prior or observation probability for each cluster
+(which must again be a non-negative real number, with ``pobs`` restricted to :math:`[0,1]`).
+
+
 .. _ssec-cluster-slug-bandwidth:
 
 Choosing a Bandwidth
 --------------------
 
-Bandwidth is a fundamental choice in :ref:`ssec-kernel-density`. The bandwidth determines how much
+Bandwidth is a fundamental choice in :ref:`ssec-bayesian-kernel-density`. The bandwidth determines how much
 "blurring" is applied to the library clusters when performing inference, and it represents a
 tradeoff between noisiness and accuracy -- a bandwidth that is too large will produce inferences
 that are blurred out and under-specific, while one that is too small will produce results

@@ -34,7 +34,7 @@ SLUG draws are then distributed in photometry as
 
 .. math:: p_\mathrm{phot}(\boldsymbol{\Theta}_\mathrm{phot}) = \int p(\boldsymbol{\Theta}) \, \mathrm{d}\Theta_\mathrm{phys,1} \ldots \, \mathrm{d}\Theta_\mathrm{phys,N}
 
-where the physical dimensions of :math:` p(\boldsymbol{\Theta})` are distributed following
+where the physical dimensions of :math:`p(\boldsymbol{\Theta})` are distributed following
 the PDFs :math:`p_1(\Theta_\mathrm{phys,1}), p_2(\Theta_\mathrm{phys,2}),\ldots` specified
 by the input deck (e.g., the PDF of cluster masses, the PDF of metallicities, etc.).
 
@@ -43,17 +43,17 @@ marginalized over the physical PDFs, we can equivalently use Bayes' Theorem to w
 the PDF of physical variables given a set of measured photometry. Formally, if we
 fixed the photometric properties for some observed object to be
 :math:`\boldsymbol{\Theta}_\mathrm{phot,obs}`, then we can write the corresponding
-PDF of physical properties as
+PDF of physical properties conditional on the observed photometric properties as
 
 .. math:: p_\mathrm{phys}(\boldsymbol{\Theta}_\mathrm{phys} \mid \boldsymbol{\Theta}_\mathrm{phot,obs}) = \mathcal{N} \int p(\boldsymbol{\Theta}) \delta(\boldsymbol{\Theta}_\mathrm{phot} - \boldsymbol{\Theta}_\mathrm{phot,obs}) \, \mathrm{d}\boldsymbol{\Theta}_\mathrm{phot}
 
-where :math:`\mathcal{N}` is a normalization factor chosen to enforce that the marginalized
+where :math:`\mathcal{N}` is a normalization factor chosen to enforce that the conditional
 PDF over physical properties has unit integral. This gives us a way to infer physical
 properties from a set of photometric properties.
 
-The principle challenge then becomes how to construct the continuous joint physical-photometric
+The principal challenge then becomes how to construct the continuous joint physical-photometric
 PDF :math:`p(\boldsymbol{\Theta})` from the samples provided by a SLUG simulation, and how to
-use that estimate to compute the integrals required to return the marginal posterior PDF 
+use that estimate to compute the integrals required to return the conditional PDF 
 :math:`p_\mathrm{phys}(\boldsymbol{\Theta}_\mathrm{phys} \mid \boldsymbol{\Theta}_\mathrm{phot,obs})`,
 in a computationally tractable manner.
 
@@ -74,36 +74,53 @@ the physical-photometric parameters :math:`\boldsymbol{\Theta}_i` of the trial :
 :math:`w_i` is the weight assigned to trial :math:`i` (with :math:`\sum_{i=1}^N w_i = 1`),
 :math:`\mathbb{G}` is a real symmetric positive-definite matrix that defines the kernel
 (which is related to the usual bandwidth matrix :math:`\mathbb{H}` by
-:math:`\mathbb{G} = (\mathbb{H}^2)^{-1}`), and :math:`\mathcal{N}_G` is a normalization
+:math:`\mathbb{G} = (\mathbb{H}^2)^{-1}`), and :math:`\mathcal{N}_\mathbb{G}` is a normalization
 constant satisfying
 :math:`\mathcal{N}_\mathbb{G} \int \exp(-\mathbf{x}^\mathrm{T} \mathbb{G} \mathbf{x}) \, \mathrm{d}\mathbf{x} = 1`.
 
-This functional form has three main advantages. First, it allows :math:`p(\boldsymbol{\Theta})`
+The weights :math:`w_i` effectively specify the prior probabilities assigned to the physical
+parameters. Weights that are equal for every trial correspond to adopting a prior probability
+that is the same as the probability distribution from which the SLUG library was sampled, but one can
+change the priors by resetting the weights to
+
+.. math:: w_i \propto \frac{p_{\mathrm{prior},i}}{p_{\mathrm{lib},i}}
+
+where :math:`p_{\mathrm{prior},i}` is the prior probability density for a set of cluster
+properties matching those of cluster :math:`i` in the library, and :math:`p_{\mathrm{lib},i}`
+is the probability density for that set of properties evaluated using the PDFs provided
+when SLUG was run to create the library of simulation outputs.
+
+This functional form has four main advantages. First, it allows :math:`p(\boldsymbol{\Theta})`
 to be evaluated to high accuracy in order :math:`\ln N` time using a tree-based divide-and-conquer
 strategy (after an initial, one-time order :math:`N\ln N` operation to construct a tree).
 
 Second, for this functional form, integrals of the form
 :math:`\int p(\boldsymbol{\Theta}) \delta(\boldsymbol{\Theta}_\mathrm{phot} - \boldsymbol{\Theta}_\mathrm{phot,obs}) \, \mathrm{d}\boldsymbol{\Theta}_\mathrm{phot}`,
-as required to compute the marginal PDF of physical properties given photometric observations,
-can also be evaluated in order :\math:`\ln N` time using the same tree-based techniques. The
+as required to compute the conditional PDF of physical properties given photometric observations,
+can also be evaluated in order :math:`\ln N` time using the same tree-based techniques. The
 outcome of such an integral is another kernel density estimate of the same form given by the
 equation above, simply over the physical dimensions only.
 
 Third, if the observed photometry :math:`\boldsymbol{\Theta}_\mathrm{phot,obs}` has Gaussian
-uncertainties described by a covariance matrix :math:`\bbSigma`, the conditional probability
+uncertainties described by a covariance matrix :math:`\boldsymbol{\Sigma}`, the conditional probability
 may be obtained by convolving the expression 
 :math:`p_\mathrm{phys}(\boldsymbol{\Theta}_\mathrm{phys} \mid \boldsymbol{\Theta}_\mathrm{phot,obs})`
 given above with the uncertainty distribution around :math:`\boldsymbol{\Theta}_\mathrm{phot,obs}`
 -- and this convolution can be computed analytically simply by replacing :math:`\mathbb{G}`
 with a new bandwidth :math:`\mathbb{G}'` generated by the standard rule for convolution
 of Gaussians; consequently, marginalization over an uncertainty distribution is only
-marginally more expensive that calculation of the case where the observations are exact.
+marginally more expensive than calculation of the case where the observations are exact.
+
+Fourth, the weights can be altered in-place, allowing the set of adopted prior probabilities
+to be changed without needing to rebuild the full tree or (even worse) run a new simulation.
+Thus the cost of changing the priors is simply one order :math:`N` step to replace the
+priors and then another :math:`\ln N` step per evaluation of the full or conditional PDF.
 
 SLUG's Implementation
 ---------------------
 
-SLUG provides a class called ``KernelDensity`` -- accessible via :ref:`sec-cpp`, and via
-a wrapper class called ``KDE`` via :ref:`sec-slugpy-full` -- to perform kernel density
+SLUG provides a class called ``KernelDensity`` -- accessible via the :doc:`C++ API <cpp_api/cpp_api_root>`, and via
+a wrapper class called ``KDE`` via the :ref:`Python API <sec-slugpy-full>` -- to perform kernel density
 estimation and computation of conditional and marginal PDFs from it. Convolution of
 bandwidths is provided by the ``Bandwidth`` class, also accessible via both APIs. These
 classes provide the ability to carry out the mathematical operations described above with
