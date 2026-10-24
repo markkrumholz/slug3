@@ -13,6 +13,7 @@ something, or with nebular photometry, edit a copy of it in tmp_path.
 
 import pathlib
 import shutil
+import sys
 from collections.abc import Callable
 from typing import cast
 
@@ -990,3 +991,19 @@ def test_conditional_error_units_for_linear_bands() -> None:
         _one(lib.conditional(y0, filterset=filterset, cov=np.diag([0.01, 0.01]) * u.mag ** 2))
     with pytest.raises(ValueError, match="does not match"):
         _one(lib.conditional(y0, filterset=filterset, errors=0.1 * u.mag))
+
+
+def test_default_library(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """With no filename, cluster_slug reads data/cluster_slug/default.h5 from slug's data search path."""
+    (tmp_path / "data" / "cluster_slug").mkdir(parents=True)
+    (tmp_path / "data" / "cluster_slug" / "default.h5").symlink_to(LIBRARY)
+    monkeypatch.chdir(tmp_path)
+    lib = cluster_slug()
+    assert lib.size == LIBRARY_SIZE
+
+    # Not found anywhere: an error that says how to download it
+    # (slugpy.cluster_slug is the class, re-exported over the module's own name)
+    module = sys.modules[cluster_slug.__module__]
+    monkeypatch.setattr(module, "getFilePath", lambda fileName, prefix="": None)
+    with pytest.raises(FileNotFoundError, match="--subdir cluster_slug"):
+        cluster_slug()

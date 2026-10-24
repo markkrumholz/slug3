@@ -118,6 +118,30 @@ def test_install_toml_writes_and_merges_without_leftovers(tmp_path: Path) -> Non
     assert sorted(f.name for f in tmp_path.iterdir()) == ["reg.toml"]
 
 
+def test_download_skips_opt_in_subdirs_unless_requested(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """The default download skips cluster_slug (too large); --subdir cluster_slug fetches it."""
+    synced: list[str] = []
+
+    def fake_list(url: str, http: object) -> list[str]:
+        return ["filters/", "cluster_slug/", "tracks/", "README.txt"]
+
+    def fake_sync(remote_url: str, dest_dir: Path, http: object, overwrite: bool, verbose: bool) -> None:
+        synced.append(dest_dir.name)
+
+    monkeypatch.setattr(download_data, "list_remote_entries", fake_list)
+    monkeypatch.setattr(download_data, "sync_directory", fake_sync)
+    assert "cluster_slug" in download_data.OPT_IN_SUBDIRS
+
+    download_data.main(["--dest", str(tmp_path)])
+    assert synced == ["filters", "tracks"]
+    assert "--subdir cluster_slug" in capsys.readouterr().out
+
+    synced.clear()
+    download_data.main(["--dest", str(tmp_path), "--subdir", "cluster_slug"])
+    assert synced == ["cluster_slug"]
+
+
 def test_restore_initial_affinity_restores_changed_mask(monkeypatch: pytest.MonkeyPatch) -> None:
     current: set[int] = {0}
     calls: list[set[int]] = []

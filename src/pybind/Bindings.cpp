@@ -48,5 +48,6 @@ PYBIND11_MODULE(_slug, m, py::mod_gil_not_used()) {
     bindBandwidth(m);
     bindKDTree(m);
     bindKernelDensity(m);
+    bindUtils(m);
 }
 // NOLINTEND(misc-include-cleaner)

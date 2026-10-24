@@ -699,6 +699,7 @@ pybind11_add_module(slugPython
     src/pybind/BindBandwidth.cpp
     src/pybind/BindKDTree.cpp
     src/pybind/BindKernelDensity.cpp
+    src/pybind/BindUtils.cpp
     src/core/Cluster.cpp
     src/core/Galaxy.cpp
     src/core/SimCluster.cpp

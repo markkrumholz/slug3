@@ -17,13 +17,16 @@ import numexpr  # pyright: ignore[reportMissingTypeStubs]
 import numpy as np
 from astropy import units as u
 
-from ._slug import Bandwidth
+from ._slug import Bandwidth, getFilePath
 from .kde import KDE
 from .slug_reader import slug_reader
 
 # A probability specification (pobs or priors): None, one value per
 # library cluster, or a callable
 ProbSpec = np.ndarray | Callable[..., Any] | None
+
+DEFAULT_LIBRARY: str = "data/cluster_slug/default.h5"
+"""The library cluster_slug reads if given no filename, searched for as slug searches for its data files (see getFilePath)."""
 
 # Physical quantities that can be inferred, besides photometry
 PHYSICAL_QUANTITIES = ("mass", "age", "A_V", "metallicity")
@@ -333,8 +336,15 @@ class cluster_slug(slug_reader):
 
     Parameters
     ----------
-    filename : str
-        The library to read: as for slug_reader.
+    filename : str, optional
+        The library to read: as for slug_reader. If None (the default),
+        the default library, DEFAULT_LIBRARY (data/cluster_slug/
+        default.h5), found where slug looks for its data files (see
+        getFilePath()): relative to the working directory, $SLUG_DIR,
+        each directory in $SLUG_DATA_PATH (including slug's per-user
+        data directory), or the slug source tree. The default library
+        is not downloaded with slug's other data, because of its size;
+        see data/cluster_slug/README.md for how to download it.
     pobs : None, numpy.ndarray, or callable, optional
         Initial value of the pobs property (default None).
     priors : None, numpy.ndarray, or callable, optional
@@ -367,6 +377,8 @@ class cluster_slug(slug_reader):
 
     Raises
     ------
+    FileNotFoundError
+        If filename is None and the default library is not found.
     ValueError
         If the library has no clusters or cluster_phot group, they have
         different numbers of entries, or it has no PDFs group; or any
@@ -442,11 +454,21 @@ class cluster_slug(slug_reader):
     re-add a filter set to rebuild its estimate.
     """
 
-    def __init__(self, filename: str, pobs: ProbSpec = None, priors: ProbSpec = None,
+    def __init__(self, filename: str | None = None, pobs: ProbSpec = None, priors: ProbSpec = None,
                  filtersets: list[str] | list[list[str]] | None = None,
                  inference_quantities: list[str] | None = None, bw_phot: float = 0.1,
                  bw_phys: float = 0.1, abstol: float = 1e-8, reltol: float = 1e-2,
                  use_nebular: bool | None = None, use_extinct: bool | None = None) -> None:
+        if filename is None:
+            path = getFilePath(DEFAULT_LIBRARY)
+            if path is None:
+                raise FileNotFoundError(
+                    f"the default cluster_slug library ({DEFAULT_LIBRARY}) was not found; it is "
+                    "not downloaded with slug's other data, because of its size (about 33 GB). "
+                    "Download it with 'python -m slugpy.download_data --subdir cluster_slug' "
+                    "(or, from a slug checkout, 'python3 data/tools/download_data.py --subdir "
+                    "cluster_slug'), or pass the filename of another library.")
+            filename = str(path)
         super().__init__(filename)
 
         # The library must have one photometry entry per cluster, and

@@ -5,7 +5,8 @@ Download slug's large data files (stellar tracks, spectral libraries,
 filters, etc.) from the public mirror on the ANU Data Commons, and
 install them into the matching subdirectories of a data/ directory.
 Run as ``python -m slugpy.download_data``; see --help for the full
-detail (merge rules, etc.).
+detail (merge rules, etc.). A few very large subdirectories (see
+OPT_IN_SUBDIRS) are skipped unless requested explicitly with --subdir.
 
 By default, data is installed into the data/ subdirectory of the
 directory named by the SLUG_DIR environment variable if it is set, and
@@ -34,6 +35,13 @@ import urllib3
 DEFAULT_BASE_URL: str = "https://datacommons.anu.edu.au/DataCommons/rest/records/anudc:6518/data/"
 """Base URL of the public data mirror."""
 
+OPT_IN_SUBDIRS: frozenset[str] = frozenset({"cluster_slug"})
+"""Mirror subdirectories downloaded only when named explicitly with --subdir.
+
+These are too large to fetch as part of the default, download-everything
+run: cluster_slug holds the default cluster_slug library, which is about
+33 GB on its own (see data/cluster_slug/README.md)."""
+
 # The mirror's directory listing embeds each entry (file or
 # subdirectory) as a checkbox value, e.g.
 #     <input type="checkbox" name="i" value="filters.h5" />
@@ -49,8 +57,11 @@ The mirror's own directory structure is a direct copy of data/'s own:
 top-level entries are data subdirectories (e.g. filters, spectra,
 tracks), each containing that subdirectory's *.h5 library files plus
 a *.toml registry indexing them. By default, every subdirectory the
-mirror actually has is downloaded; --subdir restricts this to just
-one, e.g. for a smaller test download or to refresh a single library.
+mirror actually has is downloaded, except cluster_slug (the default
+cluster_slug library, about 33 GB on its own), which is downloaded only
+on request, with --subdir cluster_slug. --subdir restricts the download
+to just one subdirectory, e.g. for a smaller test download or to
+refresh a single library.
 
 Existing files are left alone by default -- pass --overwrite to
 redownload them anyway. This applies differently to *.toml registry
@@ -69,6 +80,7 @@ Examples:
     python -m slugpy.download_data
     python -m slugpy.download_data --subdir filters
     python -m slugpy.download_data --overwrite --subdir tracks
+    python -m slugpy.download_data --subdir cluster_slug
 """
 
 
@@ -118,7 +130,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
              "per-user data directory)")
     p.add_argument("--subdir",
         help="Only download this one subdirectory (e.g. filters, spectra, "
-             "tracks) instead of everything the mirror has")
+             "tracks) instead of everything the mirror has; the only way to "
+             "download " + ", ".join(sorted(OPT_IN_SUBDIRS)) + ", which the "
+             "default download skips because of its size")
     p.add_argument("--overwrite", action="store_true",
         help="Redownload files that already exist locally, instead of "
              "skipping them; also makes *.toml registries a wholesale "
@@ -438,10 +452,15 @@ def main(argv: Sequence[str] | None = None) -> None:
             raise SystemExit(f"--subdir must be a single directory name, not {args.subdir!r}")
         subdirs = [args.subdir]
     else:
-        subdirs = [name.rstrip("/") for name in list_remote_entries(base_url, http)
-                   if name.endswith("/")]
+        listed = [name.rstrip("/") for name in list_remote_entries(base_url, http)
+                  if name.endswith("/")]
         if args.verbose:
-            print(f"found subdirectories: {', '.join(subdirs)}")
+            print(f"found subdirectories: {', '.join(listed)}")
+        subdirs = [subdir for subdir in listed if subdir not in OPT_IN_SUBDIRS]
+        for subdir in listed:
+            if subdir in OPT_IN_SUBDIRS:
+                print(f"Skipping {subdir}, which is downloaded only on request "
+                      f"(pass --subdir {subdir} to download it)")
 
     for subdir in subdirs:
         print(f"Syncing {subdir}...")
