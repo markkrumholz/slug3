@@ -1161,6 +1161,16 @@ add_test(NAME test_Slugpy
 set_tests_properties(test_Slugpy PROPERTIES
     ENVIRONMENT "PYTHONPATH=${CMAKE_SOURCE_DIR}")
 
+# The slug executable's own command-line handling (--help, --version,
+# and rejecting unknown options; see src/main.cpp). Like test_MPI below,
+# this drives the slug executable itself, so it needs its path passed
+# through as an environment variable.
+add_test(NAME test_CLI
+    COMMAND ${Python_EXECUTABLE} -m pytest ${CMAKE_SOURCE_DIR}/tests/cli -v
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+set_tests_properties(test_CLI PROPERTIES
+    ENVIRONMENT "SLUG_EXECUTABLE=$<TARGET_FILE:slug>")
+
 # MPI end-to-end test: only registered when this build actually links
 # MPI (see the find_package(MPI) block above), since the SLUG_MPI-
 # guarded code under test (per-rank UID striping, checkpoint sync,
@@ -1197,6 +1207,7 @@ endif()
 set_tests_properties(
     test_Interpolation test_Elem test_Extinct test_Phot test_PDFs test_Utils test_Specsyn test_Tracks
     test_Yields test_Kden test_Core test_Io test_Nebular test_Feedback test_PythonBindings test_Slugpy
+    test_CLI
     PROPERTIES LABELS "quick")
 set_tests_properties(test_CoreFull test_TracksFull PROPERTIES LABELS "slow")
 
