@@ -65,6 +65,13 @@ slug --help > help.txt
 grep -q "^Usage: slug" help.txt
 slug --version > version.txt
 grep -q "^slug [0-9]" version.txt
+# ...and rejects an unknown option, with the usage and a nonzero status
+# that the console script passes through
+if slug --unknown-option > invalid.txt 2>&1; then
+  echo "slug accepted an unknown option" >&2
+  exit 1
+fi
+grep -q "^Usage: slug" invalid.txt
 
 slug deck.toml
 python - <<'EOF'
