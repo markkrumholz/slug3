@@ -139,6 +139,10 @@ The basic steps required to perform inference are as follows:
 This is only a partial list of the capabilities of ``cluster_slug``; see :ref:`sec-slugpy-full` for
 full documentation of all its methods and properties.
 
+For a worked example that puts these steps together, inferring the masses and ages of 50 star
+clusters in NGC 628 from their photometry using the default library, see the marimo notebook
+``examples/cluster_slug/cluster_slug_legus.py`` (see :ref:`sec-examples`).
+
 .. _ssec-cluster-slug-default-library:
 
 The Default cluster_slug Library
