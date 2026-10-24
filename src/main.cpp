@@ -12,16 +12,125 @@
 #include "io/OutputManagerAscii.hpp"
 #include "io/OutputManagerH5.hpp"
 #include "io/SimControls.hpp"
+#include "io/SlugVersion.hpp"
 #include "utils/MPIUtils.hpp"
 #include "utils/UniqueIDManager.hpp"
 #include <cstdlib>
 #include <exception>
 #include <iostream>
 #include <memory>
+#include <optional>
+#include <ostream>
 #include <span>
-#include <string>
+#include <string_view>
 #include <toml.hpp>
 #include <utility>
+
+namespace
+{
+    /**
+     * @brief Print the one-line usage summary
+     * @param os The stream to print to
+     */
+    void printUsage(std::ostream& os)
+    {
+        os << "Usage: slug [--restart|-R] slug.in\n"
+              "       slug --help|-h\n"
+              "       slug --version|-V\n";
+    }
+
+    /**
+     * @brief Print the usage summary, followed by a description of the
+     *   arguments and where the input deck format is documented
+     */
+    void printHelp()
+    {
+        printUsage(std::cout);
+        std::cout << "\n"
+            "Run the slug simulation described by the TOML input deck slug.in.\n"
+            "\n"
+            "Options:\n"
+            "  -R, --restart   resume an interrupted run from its most recent checkpoint\n"
+            "                  (HDF5 output only), rather than starting over\n"
+            "  -h, --help      print this help and exit\n"
+            "  -V, --version   print slug's version and the git commit it was built from,\n"
+            "                  and exit\n"
+            "\n"
+            "The input deck's parameters are documented at\n"
+            "https://markkrumholz.github.io/slug3/parameters.html\n";
+    }
+
+    /**
+     * @brief Print slug's version number and the git commit it was built from
+     */
+    void printVersion()
+    {
+        std::cout << "slug " << io::slugVersion << " (git " << io::slugGitHash << ")\n";
+    }
+
+    /**
+     * @brief Handle the command line
+     * @param args The arguments, starting with the program name
+     * @param restart Set to true if --restart/-R was given ahead of the
+     *   input deck, and left unchanged otherwise
+     * @return An exit status if slug should exit without running a
+     *   simulation -- 0 after printing help (--help/-h) or the version
+     *   (--version/-V), or 1 after printing a usage error -- or
+     *   std::nullopt if it should go on to run the input deck,
+     *   args.back()
+     * @details
+     * The accepted forms are slug.in alone, --restart/-R followed by
+     * slug.in, or --help/-h or --version/-V alone. Any other argument
+     * starting with "-" is an error rather than the name of an input
+     * deck; a deck whose name starts with "-" can be given as ./-name.
+     * Help and version output is the same on every MPI rank, so only
+     * the I/O rank prints it.
+     */
+    auto parseArgs(std::span<char*> args, bool& restart) -> std::optional<int>
+    {
+        if (args.size() != 2 && args.size() != 3)
+        {
+            printUsage(std::cerr);
+            return 1;
+        }
+        const std::string_view first = args[1];
+        const bool isRestart = first == "--restart" || first == "-R";
+        if (args.size() == 3)
+        {
+            if (isRestart)
+            {
+                restart = true;
+                return std::nullopt;
+            }
+            std::cerr << "slug: unrecognized option '" << first << "'\n";
+            printUsage(std::cerr);
+            return 1;
+        }
+        if (first == "--help" || first == "-h")
+        {
+            if (utils::isIORank()) { printHelp(); }
+            return 0;
+        }
+        if (first == "--version" || first == "-V")
+        {
+            if (utils::isIORank()) { printVersion(); }
+            return 0;
+        }
+        if (isRestart)
+        {
+            std::cerr << "slug: " << first << " needs an input deck\n";
+            printUsage(std::cerr);
+            return 1;
+        }
+        if (first.starts_with('-'))
+        {
+            std::cerr << "slug: unrecognized option '" << first << "'\n";
+            printUsage(std::cerr);
+            return 1;
+        }
+        return std::nullopt;
+    }
+} // namespace
 
 auto main(int argc, char *argv[]) -> int // NOLINT(bugprone-exception-escape) -- every throwing call below (SimControls, OutputManagerH5/OutputManagerAscii construction, SimCluster::run()/SimGalaxy::run()) is inside the try block below, catching std::exception by reference; verified at runtime that a genuine constructor throw (e.g. an invalid deck) is caught cleanly rather than escaping. This check's own known limitation is that it cannot see through calls into other translation units (OpenMP-parallel code among them) well enough to confirm every thrown type derives from std::exception, so it stays conservative here regardless.
 {
@@ -53,24 +162,11 @@ auto main(int argc, char *argv[]) -> int // NOLINT(bugprone-exception-escape) --
     // --restart/-R flag ahead of it, requesting that this run resume
     // a previous, interrupted run from its most recent checkpoint
     // (see io::OutputManagerH5::restartSetup()'s own comment) rather
-    // than starting over from trial 0
-    if (argc != 2 && argc != 3)
-    {
-        std::cerr << "Usage: slug [--restart|-R] slug.in\n";
-        return 1;
-    }
+    // than starting over from trial 0; or, alone, --help/-h or
+    // --version/-V (see parseArgs())
     auto args = std::span(argv, static_cast<size_t>(argc));
     bool restart = false;
-    if (argc == 3)
-    {
-        const std::string flag = args[1];
-        if (flag == "--restart" || flag == "-R") { restart = true; }
-        else
-        {
-            std::cerr << "Usage: slug [--restart|-R] slug.in\n";
-            return 1;
-        }
-    }
+    if (const auto status = parseArgs(args, restart)) { return *status; }
 
     // Parse input file
     toml::table inputDeck;

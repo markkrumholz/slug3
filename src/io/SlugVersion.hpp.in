@@ -1,7 +1,7 @@
 /**
  * @file SlugVersion.hpp.in
  * @author Mark Krumholz
- * @brief Generated at configure time; records the git commit slug was built from
+ * @brief Generated at configure time; records the version and git commit slug was built from
  */
 
 #ifndef SLUGVERSION_HPP
@@ -14,6 +14,12 @@ namespace io
      *   from, or "unknown" if it could not be determined
      */
     constexpr auto slugGitHash = "@SLUG_GIT_HASH@";
+
+    /**
+     * @brief The slug version number, as given in pyproject.toml (see
+     *   CMakeLists.txt, which reads it from there into SLUG_VERSION)
+     */
+    constexpr auto slugVersion = "@SLUG_VERSION@";
 
 } // namespace io
 

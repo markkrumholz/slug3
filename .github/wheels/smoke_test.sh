@@ -59,6 +59,13 @@ compute_neb = false
 EOF
 sed 's/smoke_cli/smoke_py/' deck.toml > deck_py.toml
 
+# The console script's own --help/--version (see src/main.cpp), written to
+# files rather than piped, so grep -q exiting early can't SIGPIPE slug
+slug --help > help.txt
+grep -q "^Usage: slug" help.txt
+slug --version > version.txt
+grep -q "^slug [0-9]" version.txt
+
 slug deck.toml
 python - <<'EOF'
 import slugpy
