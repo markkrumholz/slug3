@@ -7,6 +7,11 @@ This is version 3 of the Stochastically Lighting Up Galaxies (SLUG) code.
 SLUG is a stellar population synthesis (SPS) code, meaning that for an input star formation history, stellar initial mass function, and a set of evolutionary tracks and stellar atmospheres, it can predict the light output of the stellar population. The main difference between SLUG and conventional SPS codes is that, instead of the usual approach of assuming that all stellar masses and ages are fully populated, SLUG is capable of stochastically sampling from the stellar initial mass function and age distribution, and thereby predicting not just the mean light output,
 nucleosynthetic yields, and feedback power, but also the full distribution that results from stochastic sampling. This capability is critical in the regime of low star formation rates and total stellar masses, where finite sampling can lead to a distribution of properties that is extremely broad, and the mean values produced by other SPS codes are therefore of limited predictive power.
 
+SLUG also provides tools to use the outputs of its simulations to perform Bayesian inference
+on the light emitted by stellar populations, using measurements of this output to derive
+probability distributions for the physical properties of the stellar population responsible
+for producing the light.
+
 ### Installation ###
 
 The easiest way to install SLUG is from [PyPI](https://pypi.org/project/slugpy/), which provides both the `slugpy` Python package and the `slug` command-line executable:
@@ -16,7 +21,14 @@ pip install slugpy
 python -m slugpy.download_data
 ```
 
-The second command downloads the stellar tracks, spectral libraries, and other data files SLUG needs, which are too large to include in the package (several GB). Prebuilt wheels are available for Linux (x86_64 and aarch64) and macOS 14+ on Apple Silicon, for Python 3.12–3.14; on other platforms pip builds SLUG from source.
+The second command downloads the stellar tracks, spectral libraries, and other data files SLUG needs, which are too large to include in the package (several GB). Optionally also do
+
+```bash
+python -m slugpy.download_data --subdir cluster_slug
+```
+
+to download the large (33 GB) default library for Bayesian inference. Prebuilt wheels are
+available for Linux (x86_64 and aarch64) and macOS 14+ on Apple Silicon, for Python 3.12–3.14; on other platforms pip builds SLUG from source.
 
 SLUG is also available as a container image, with MPI support, for use with Docker or Apptainer/Singularity:
 
@@ -41,8 +53,11 @@ by a distribution.
 * Output has been migrated from the FITS format used in version 2 to [HDF5](https://www.hdfgroup.org/solutions/hdf5/) format, allowing significantly faster and more flexible IO.
 * The input format has been simplified and converted to the [TOML](https://toml.io/en/) standard, providing a more intuitive way of controlling the code.
 * A larger, modernized set of stellar tracks, atmospheres, and photometric filters, and standardization of the formats for describing these and other data inputs so that users can easily add additional data without needing to alter the source code.
+* Bayesian inference has been significantly sped up compared to version 2, and the outputs are
+more flexible.
 
-Version 2 of SLUG remains available at <https://bitbucket.org/krumholz/slug2/>. As of this writing there are some capabilities in SLUG version 2 that have not yet been re-implemented in this version, and while this remains true SLUG version 2 will continue to be maintained. However, version 2 is no longer being developed, and eventually all capabilities it provides will be migrated to this version, at which point maintenance on SLUG version 2 will be discontinued. Users are therefore encouraged to migrate to this version.
+Version 2 of SLUG remains available at <https://bitbucket.org/krumholz/slug2/>, but is no longer being developed. From this point forward, version 2 will receive only critical bug fixes, and
+eventually all support for it will cease. Users are therefore encouraged to migrate to this version.
 
 ### Documentation ###
 
@@ -57,6 +72,7 @@ This repository is structured as follows:
 * *cmake*: helper CMake build files
 * *data*: data files, divided by type of data
     - *data/cloudy*: template files for the SLUG-Cloudy interface
+    - *data/cluster_slug*: library of clusters for the `cluster_slug` Bayesian inference tool
     - *data/elem*: elemental and atomic data
     - *data/extinct*: extinction curves
     - *data/filters*: filter response curves and similar data
@@ -66,7 +82,7 @@ This repository is structured as follows:
     - *data/tools*: scripts for fetching and manipulating data
     - *data/tracks*: libraries of stellar evolutionary tracks
     - *data/yields*: libraries of nucleosynthetic yields
-* *doc/sphinx*: documentation
+* *doc*: documentation
 * *examples*: example applications of SLUG, each in a separate subdirectory
 * *slugpy*: the Python frontend for SLUG
     - *slugpy/cloudy*: the interface between SLUG and [Cloudy](http://nublado.org/)
@@ -78,6 +94,7 @@ This repository is structured as follows:
     - *src/feedback*: stellar feedback physics
     - *src/interpolation*: low-level interpolation machinery
     - *src/io*: input/output management
+    - *src/kden*: kernel density estimation routines
     - *src/nebular*: nebular emission physics
     - *src/pdfs*: low-level mathematical description of probability distribution functions
     - *src/phot*: photometry and filter calculations
@@ -86,7 +103,7 @@ This repository is structured as follows:
     - *src/tracks*: stellar evolutionary track routines
     - *src/utils*: miscellaneous utilities
     - *src/yields*: calculation of nucleosynthetic yields
-* *tests*: unit tests; the subdirectory structure mirrors that of *src* (except for the vendored *src/extern*), plus *tests/slugpy* for the Python frontend and *tests/mpi* for end-to-end MPI tests
+* *tests*: unit tests; the subdirectory structure mirrors that of *src* (except for the vendored *src/extern*), plus *tests/cli* for the command line interface, *tests/slugpy* for the Python frontend, and *tests/mpi* for end-to-end MPI tests
 
 ### Contact ###
 
