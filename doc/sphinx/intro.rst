@@ -10,6 +10,7 @@ in any published work, please cite the following papers:
 
 * `da Silva, R. L., Fumagalli, M., & Krumholz, M. R., 2012, The Astrophysical Journal, 745, 145 <http://adsabs.harvard.edu/abs/2012ApJ...745..145D>`_
 * `Krumholz, M. R., Fumagalli, M., da Silva, R. L., Rendahl, T., & Parra, J. 2015, Monthly Notices of the Royal Astronomical Society, 452, 1447 <http://adsabs.harvard.edu/abs/2015MNRAS.452.1447K>`_
+* `Krumholz, M. R., Adamo, A., Fumagalli, M., & Calzetti, D. 2019, Monthly Notices of the Royal Astronomical Society, 482, 3550 <https://ui.adsabs.harvard.edu/#abs/2019MNRAS.482.3550K/abstract>`_ (only for the Bayesian inference capabilities)
 
 What Does SLUG Do?
 ------------------
@@ -25,9 +26,14 @@ much like any other SPS code. The main difference is that SLUG regards the funct
 describing the stellar population as probability distributions, and the resulting
 stellar population as being the result of a draw from them. SLUG performs a Monte
 Carlo simulation to determine the PDF of the outputs produced by the stellar
-populations that are drawn from these distributions. The remainder of this section
-briefly describes the major conceptual pieces of a SLUG simulation. Please refer to the
-papers references above for a full description of the theoretical underpinning of SLUG.
+populations that are drawn from these distributions. It can then use the outputs
+of those Monte Carlo simulations to perform Bayesian inference on observations,
+turning measurements of light output from stellar populations into probability
+distributions for the physical properties of the underlying population.
+
+The remainder of this section briefly describes the major conceptual pieces of a
+SLUG simulation. Please refer to the papers referenced above for a full description
+of the theoretical underpinning of SLUG.
 
 .. _ssec-cluster-vs-galaxy:
 
@@ -99,3 +105,16 @@ population synthesis. The main physics modules are:
 * :ref:`sec-feedback`: SLUG can calculate feedback from stellar populations in the form of
   supernovae and stellar winds, using a variety of models to predict supernovae and wind
   power.
+
+Bayesian Inference
+------------------
+
+A set of SLUG simulations represents samples drawn from the probabilistic mapping between
+the physical properties of a stellar population (mass, age, metallicity, etc.) and its
+light output. Consequently, they can be used to perform Bayesian inference from observed
+light output to the underlying physical properties.
+
+* :ref:`sec-bayesian` describes the general theory behind such inferences, and how they
+  can be implemented using SLUG.
+* :ref:`sec-cluster-slug` describes how to use the ``cluster_slug`` tool that is built
+  into SLUG to perform such inferences for the properties of star clusters.
