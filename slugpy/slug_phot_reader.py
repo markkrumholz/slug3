@@ -60,7 +60,8 @@ class slug_phot_reader(slug_group_reader):
         (read-only).
     filter_units : list of str
         Units of each filter's photometry, in the same order as
-        filters (read-only).
+        filters (read-only); updated by phot_convert() for every filter
+        it converts.
     filter_collection : FilterCollection
         A PhotSystem.Vega FilterCollection, initially empty, that
         get_filter() lazily adds filters to on request (read-only).
@@ -104,7 +105,8 @@ class slug_phot_reader(slug_group_reader):
     def filter_units(self) -> list[str]:
         """
         list of str : units of each filter's photometry, in the same
-        order as filters (read-only).
+        order as filters (read-only); updated by phot_convert() for
+        every filter it converts.
         """
         return self._filter_units
 
@@ -239,8 +241,18 @@ class slug_phot_reader(slug_group_reader):
         return self._filter_collection.getFilter(index)
 
     def _convert_phot_dict(self, phot_dict: dict[str, Dataset | None],
-        suffix: str, phot_to: str) -> None:
-        """Convert every convertible entry of phot_dict to phot_to, in place."""
+        suffix: str, phot_to: str) -> dict[str, str]:
+        """
+        Convert every convertible entry of phot_dict to phot_to, in place.
+
+        Returns
+        -------
+        dict of str to str
+            The new unit of each filter whose entry was converted, keyed
+            by filter name (as a string, in the same form as
+            filter_units).
+        """
+        converted: dict[str, str] = {}
         for filter_name in list(phot_dict.keys()):
             try:
                 value = self[filter_name + suffix]
@@ -272,8 +284,10 @@ class slug_phot_reader(slug_group_reader):
             if "Vega" in (phot_from, phot_to):
                 filt = self.get_filter(filter_name)
 
-            phot_dict[filter_name] = _phot_convert_value(
-                quantity, phot_to, wl=wl, filt=filt)
+            result = _phot_convert_value(quantity, phot_to, wl=wl, filt=filt)
+            phot_dict[filter_name] = result
+            converted[filter_name] = result.unit.to_string()
+        return converted
 
     def phot_convert(self, phot_to: str) -> None:
         """
@@ -300,12 +314,16 @@ class slug_phot_reader(slug_group_reader):
         phot_to's own system. A conversion that needs a wavelength or
         a Vega zero point gets it from get_filter(filter_name) -- see
         its own docstring on how (and from where) that filter gets
-        built.
+        built. filter_units is updated to match for every filter
+        converted, so that it describes the photometry __getitem__ now
+        returns.
         """
-        self._convert_phot_dict(self._phot, "", phot_to)
+        converted = self._convert_phot_dict(self._phot, "", phot_to)
         if self._phot_extinct is not None:
-            self._convert_phot_dict(self._phot_extinct, "_ex", phot_to)
+            converted |= self._convert_phot_dict(self._phot_extinct, "_ex", phot_to)
         if self._phot_neb is not None:
-            self._convert_phot_dict(self._phot_neb, "_neb", phot_to)
+            converted |= self._convert_phot_dict(self._phot_neb, "_neb", phot_to)
         if self._phot_neb_extinct is not None:
-            self._convert_phot_dict(self._phot_neb_extinct, "_neb_ex", phot_to)
+            converted |= self._convert_phot_dict(self._phot_neb_extinct, "_neb_ex", phot_to)
+        for filter_name, unit in converted.items():
+            self._filter_units[self._filters.index(filter_name)] = unit

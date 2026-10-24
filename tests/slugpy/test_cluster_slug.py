@@ -993,6 +993,37 @@ def test_conditional_error_units_for_linear_bands() -> None:
         _one(lib.conditional(y0, filterset=filterset, errors=0.1 * u.mag))
 
 
+def test_phot_convert_library() -> None:
+    """A library converted to another photometric system is stored, and checked, in that system's units."""
+    filters = ["HST.WFC3_UVIS1.F555W", "HST.WFC3_UVIS1.F814W"]
+    lib = cluster_slug(str(LIBRARY))
+    phot = lib.cluster_phot
+    assert phot is not None
+    try:
+        for f in filters:
+            phot.get_filter(f)
+    except RuntimeError:
+        pytest.skip("requires the filter registry (fetched data, not committed to the repo)")
+
+    # To Fnu: no longer magnitudes, so stored as log10, with the log bandwidth
+    lib.phot_convert("Fnu")
+    lib.add_filterset(filters)
+    kde = lib.kdes[tuple(filters)]
+    for i, f in enumerate(filters):
+        fnu = cast(u.Quantity, phot[f + "_ex"])
+        assert fnu.unit == u.erg / u.s / u.Hz
+        assert np.allclose(kde.dataset[:, i], np.log10(fnu.value[kde.aux]), rtol=1e-12)
+    assert kde.h2Inv[0, 0] == pytest.approx(1.0 / (0.4 * 0.1)**2)
+
+    # To AB: errors in mag(AB), the bands' own magnitude unit, are accepted
+    ab = cluster_slug(str(LIBRARY))
+    ab.phot_convert("AB")
+    ab.add_filterset(filters)
+    x0 = ab.kdes[tuple(filters)].dataset[5, :2]
+    post = _one(ab.conditional(x0, errors=[0.1, 0.1] * u.ABmag))
+    assert post.names == ["mass", "age", "A_V", "metallicity"]
+
+
 def test_default_library(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """With no filename, cluster_slug reads data/cluster_slug/default.h5 from slug's data search path."""
     (tmp_path / "data" / "cluster_slug").mkdir(parents=True)
