@@ -3,7 +3,8 @@ Unit tests for KDE, the Python wrapper around the compiled
 KernelDensity class: bandwidth specification (explicit and by
 Silverman's rule), the zero-copy handling of the data set and weights,
 evaluation against brute force, in-place changes to the weights and
-bandwidth, and conditional estimates.
+bandwidth, conditional estimates, and dimensions given by index or by
+name.
 
 Uses small random data sets made here, so needs no data fetched.
 
@@ -347,3 +348,62 @@ def test_marginalize() -> None:
     assert np.allclose(np.asarray(same.pdf(x[:3], 0.0, 0.0)), np.asarray(kde.pdf(x[:3], 0.0, 0.0)), rtol=1e-12)
     with pytest.raises(ValueError):
         kde.marginalize([0, 1, 2, 3])
+
+
+def test_dimensions_by_name() -> None:
+    """Every dimension-list argument takes names as well as indices, mixed freely, with the same results."""
+    x, w = make_points(1500, 4, 71)
+    m = np.linalg.inv(0.2 * np.eye(4) + 0.8 * np.ones((4, 4)))
+    names = ["mass", "age", "A_V", "Z"]
+    kde = KDE(x.copy(), h2Inv=m, w=w.copy(), names=names)
+    rng = np.random.default_rng(72)
+
+    # noSplitDims: the same tree, so the points end up in the same order
+    by_index = KDE(x.copy(), h2Inv=m, w=w.copy(), names=names, noSplitDims=[2, 3])
+    by_name = KDE(x.copy(), h2Inv=m, w=w.copy(), names=names, noSplitDims=["A_V", "Z"])
+    assert np.array_equal(by_index.aux, by_name.aux) and np.array_equal(by_index.dataset, by_name.dataset)
+
+    # marginalize(): by name, and mixed with indices
+    y = rng.standard_normal((5, 2))
+    marg = kde.marginalize([1, 3])
+    for other in [kde.marginalize(["age", "Z"]), kde.marginalize([1, "Z"])]:
+        assert other.names == marg.names == ["mass", "A_V"]
+        assert np.array_equal(np.asarray(other.pdf(y, 0.0, 0.0)), np.asarray(marg.pdf(y, 0.0, 0.0)))
+
+    # conditional() and conditional_sample(): marginalDims and errDims, as a tuple or array too
+    x0 = np.array([0.4, np.nan, 0.9, 0.0])
+    cov = np.diag([0.01, 0.02])
+    cond = _one(kde.conditional(x0, 0.0, marginalDims=[3], errDims=[0, 2], errCov=cov))
+    cond_named = _one(kde.conditional(x0, 0.0, marginalDims=["Z"], errDims=["mass", "A_V"], errCov=cov))
+    assert cond_named.names == cond.names == ["age"] and cond_named.marginal == cond.marginal
+    t = rng.standard_normal((5, 1))
+    assert np.array_equal(np.asarray(cond_named.pdf(t, 0.0, 0.0)), np.asarray(cond.pdf(t, 0.0, 0.0)))
+    sample = kde.conditional_sample(x0, 0.0, marginalDims=[3], errDims=[0, 2], errCov=cov)
+    sample_named = kde.conditional_sample(x0, 0.0, marginalDims=("Z",),
+                                          errDims=np.array(["mass", "A_V"]), errCov=cov)  # pyright: ignore[reportArgumentType]
+    assert isinstance(sample, tuple) and isinstance(sample_named, tuple)
+    assert all(np.array_equal(a, b) for a, b in zip(sample, sample_named, strict=True))
+
+    # pdf() and neighbors(): errDims
+    q = rng.standard_normal((3, 4))
+    assert np.array_equal(np.asarray(kde.pdf(q, 0.0, 0.0, errDims=["mass", "A_V"], errCov=cov)),
+                          np.asarray(kde.pdf(q, 0.0, 0.0, errDims=[0, 2], errCov=cov)))
+    idx, dist2 = kde.neighbors(q, 3, errDims=[0, 2], errCov=cov)
+    idx_named, dist2_named = kde.neighbors(q, 3, errDims=["mass", 2], errCov=cov)
+    assert np.array_equal(idx, idx_named) and np.array_equal(dist2, dist2_named)
+
+    # Bad dimensions: an unknown name (also on a KDE without names), a negative index, a bare
+    # name rather than a list of them, and an entry that is neither an int nor a str
+    with pytest.raises(ValueError, match="marginalDims: no dimension named 'metallicity'"):
+        kde.marginalize(["metallicity"])
+    with pytest.raises(ValueError, match="no dimension named 'Z'"):
+        KDE(x.copy(), h2Inv=m, w=w.copy()).marginalize(["Z"])
+    with pytest.raises(ValueError, match="noSplitDims: no dimension named"):
+        KDE(x.copy(), h2Inv=m, names=names, noSplitDims=["metallicity"])
+    with pytest.raises(ValueError, match="errDims must be non-negative"):
+        kde.pdf(q, errDims=[-1], errCov=np.eye(1))
+    with pytest.raises(TypeError, match="marginalDims must be a list of int or str"):
+        kde.marginalize("Z")  # a bare name, not a list of them
+    for bad in [1.0, True]:
+        with pytest.raises(TypeError, match="marginalDims must be an int or a str"):
+            kde.conditional(x0, marginalDims=[bad])  # pyright: ignore[reportArgumentType]

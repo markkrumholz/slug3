@@ -8,7 +8,7 @@ from photometry, using a library of slug cluster simulations.
 """
 
 import math
-from collections.abc import Callable, KeysView, Mapping
+from collections.abc import Callable, KeysView, Mapping, Sequence
 from types import MappingProxyType
 from typing import Any, cast
 
@@ -984,7 +984,7 @@ class cluster_slug(slug_reader):
             kde = self._kdes[key]
             kde.h2Inv[...] = self._default_h2inv(kde.names)
 
-    def conditional(self, x0: Any, massTol: float = 1e-2, marginalDims: list[int] | None = None,
+    def conditional(self, x0: Any, massTol: float = 1e-2, marginalDims: Sequence[int | str] | None = None,
                     leafSize: int = 16, filterset: list[str] | None = None,
                     errors: Any = None, cov: Any = None) -> KDE | list[KDE]:
         """
@@ -1004,8 +1004,10 @@ class cluster_slug(slug_reader):
             they are, and log10 of any other unit (see add_filterset()).
         massTol : float, optional
             As for KDE.conditional() (default 1e-2).
-        marginalDims : list of int, optional
-            As for KDE.conditional() (default: none).
+        marginalDims : list of int or str, optional
+            As for KDE.conditional() (default: none): dimensions of the
+            estimate, each given by its index or by its name (see
+            kdes[...].names, e.g. "metallicity"), to marginalize over.
         leafSize : int, optional
             As for KDE.conditional() (default 16).
         filterset : list of str, optional
@@ -1047,7 +1049,9 @@ class cluster_slug(slug_reader):
         Raises
         ------
         TypeError
-            If filterset, errors, or cov has the wrong type.
+            If filterset, errors, or cov has the wrong type; or as for
+            KDE.conditional() (e.g. marginalDims is not a list of int or
+            str).
         ValueError
             If filterset is None and kdes does not hold exactly one filter
             set; if x0 is not 1D or 2D with nband or nDim elements per
@@ -1073,7 +1077,7 @@ class cluster_slug(slug_reader):
                                    errCov=per_point[0] if points.ndim == 1 else per_point)
         return kde.conditional(points, massTol, marginalDims, leafSize, bandwidth=bandwidth)
 
-    def conditional_sample(self, x0: Any, massTol: float = 1e-2, marginalDims: list[int] | None = None,
+    def conditional_sample(self, x0: Any, massTol: float = 1e-2, marginalDims: Sequence[int | str] | None = None,
                            filterset: list[str] | None = None, errors: Any = None,
                            cov: Any = None) -> "tuple[np.ndarray, np.ndarray, np.ndarray] | list[tuple[np.ndarray, np.ndarray, np.ndarray]]":
         """
@@ -1096,7 +1100,7 @@ class cluster_slug(slug_reader):
             As for conditional().
         massTol : float, optional
             As for conditional() (default 1e-2).
-        marginalDims : list of int, optional
+        marginalDims : list of int or str, optional
             As for conditional() (default: none).
         filterset : list of str, optional
             As for conditional().

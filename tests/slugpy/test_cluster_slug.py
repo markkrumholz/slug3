@@ -922,6 +922,26 @@ def test_posterior_percentiles() -> None:
         assert float(np.asarray(post.percentile(0, 50.0))) == pytest.approx(q[2])
 
 
+def test_marginal_dims_by_name() -> None:
+    """conditional() and conditional_sample() take marginalDims by name, from the estimate's names."""
+    filters = ["HST.WFC3_UVIS1.F555W", "HST.WFC3_UVIS1.F814W"]
+    lib = cluster_slug(str(LIBRARY), filtersets=filters)
+    kde = lib.kdes[tuple(filters)]
+    phot = kde.dataset[5, :2] + 0.03
+    indices = [kde.names.index("A_V"), kde.names.index("metallicity")]
+    post = _one(lib.conditional(phot, marginalDims=indices, errors=0.1))
+    post_named = _one(lib.conditional(phot, marginalDims=["A_V", "metallicity"], errors=0.1))
+    assert post_named.names == post.names == ["mass", "age"]
+    y = np.column_stack([np.linspace(2.0, 4.0, 4), np.linspace(6.5, 9.5, 4)])
+    assert np.array_equal(np.asarray(post_named.pdf(y, 0.0, 0.0)), np.asarray(post.pdf(y, 0.0, 0.0)))
+    sample = lib.conditional_sample(phot, marginalDims=indices, errors=0.1)
+    sample_named = lib.conditional_sample(phot, marginalDims=["A_V", indices[1]], errors=0.1)
+    assert isinstance(sample, tuple) and isinstance(sample_named, tuple)
+    assert all(np.array_equal(a, b) for a, b in zip(sample, sample_named, strict=True))
+    with pytest.raises(ValueError, match="no dimension named 'Z'"):
+        lib.conditional(phot, marginalDims=["Z"])
+
+
 def test_asymmetric_cov_rejected() -> None:
     """Every method rejects an asymmetric cov, including neighbors() with norm "errors"."""
     filters = ["HST.WFC3_UVIS1.F555W", "HST.WFC3_UVIS1.F814W"]
