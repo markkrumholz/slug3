@@ -7,6 +7,7 @@ wrapping the compiled KernelDensity class.
 :copyright: Copyright (c) 2026 Mark Krumholz
 """
 
+from collections.abc import Sequence
 from typing import Any, cast
 
 import numpy as np
@@ -136,9 +137,10 @@ class KDE:
         disk), C-contiguous and writeable; reordered in place along with
         dataset. If None (the default), each point's index in dataset as
         given.
-    noSplitDims : list of int, optional
+    noSplitDims : list of int or str, optional
         Dimensions along which the kd tree is never split (default:
-        none), as for KernelDensity.
+        none), as for KernelDensity; each given by its index or by its
+        name (see names).
     leafSize : int, optional
         Maximum number of points in a leaf of the kd tree (default 16).
 
@@ -187,7 +189,7 @@ class KDE:
 
     def __init__(self, dataset: np.ndarray, h2Inv: float | np.ndarray | None = None,
                  w: np.ndarray | None = None, names: list[str] | None = None,
-                 aux: np.ndarray | None = None, noSplitDims: list[int] | None = None,
+                 aux: np.ndarray | None = None, noSplitDims: Sequence[int | str] | None = None,
                  leafSize: int = 16) -> None:
         if not isinstance(dataset, np.ndarray) or dataset.ndim != 2:
             raise TypeError("dataset must be a 2D numpy array")
@@ -202,7 +204,7 @@ class KDE:
                                    else _parse_h2inv(h2Inv, ndim))
         bandwidth = Bandwidth(self._h2Inv)
         self._kde: KernelDensityView = KernelDensity(
-            dataset, weights, aux, leafSize, bandwidth, [] if noSplitDims is None else noSplitDims)
+            dataset, weights, aux, leafSize, bandwidth, self._dim_list(noSplitDims, "noSplitDims"))
         self._bandwidth: Bandwidth = bandwidth
         self._bandwidth_h2Inv: np.ndarray = self._h2Inv.copy()
         dataset.setflags(write=False)
@@ -282,6 +284,74 @@ class KDE:
         if len(checked) not in (0, ndim):
             raise ValueError(f"names must be empty or have one entry per dimension ({ndim})")
         return checked
+
+    def _dim_index(self, dim: Any, arg: str) -> int:
+        """
+        Resolve one dimension, given by index or by name, to its index.
+
+        Parameters
+        ----------
+        dim : int or str
+            The dimension: its index, or its name (see names).
+        arg : str
+            Name of the argument dim came from, for error messages.
+
+        Returns
+        -------
+        int
+            The dimension's index. An index is returned as it is (other
+            than being checked to be non-negative), so an index not below
+            nDim is left for the compiled code to reject.
+
+        Raises
+        ------
+        ValueError
+            If dim is a name not in names, or a negative index.
+        TypeError
+            If dim is neither an int nor a str.
+        """
+        if isinstance(dim, str):
+            if dim not in self._names:
+                raise ValueError(f"{arg}: no dimension named {dim!r}; the names are {self._names}")
+            return self._names.index(dim)
+        if isinstance(dim, (int, np.integer)) and not isinstance(dim, bool):
+            index = int(dim)
+            if index < 0:
+                raise ValueError(f"{arg} must be non-negative, not {index}")
+            return index
+        raise TypeError(f"{arg} must be an int or a str, not {type(dim).__name__}")
+
+    def _dim_list(self, dims: Any, arg: str) -> list[int]:
+        """
+        Resolve a list of dimensions, each given by index or by name, to their indices.
+
+        Parameters
+        ----------
+        dims : sequence (e.g. list, tuple, or range) or numpy.ndarray of int or str, or None
+            The dimensions, each as for _dim_index(); None means none.
+        arg : str
+            Name of the argument dims came from, for error messages.
+
+        Returns
+        -------
+        list of int
+            The dimensions' indices, in the order given (empty if dims is
+            None).
+
+        Raises
+        ------
+        ValueError
+            If an entry is a name not in names, or a negative index.
+        TypeError
+            If dims is a str (a single name, not a sequence of them), or
+            not a sequence or array, or an entry is neither an int nor a
+            str.
+        """
+        if dims is None:
+            return []
+        if isinstance(dims, (str, bytes)) or not isinstance(dims, (Sequence, np.ndarray)):
+            raise TypeError(f"{arg} must be a list of int or str, not {type(dims).__name__}")
+        return [self._dim_index(d, arg) for d in dims]
 
     def _current_bandwidth(self) -> Bandwidth:
         """
@@ -385,7 +455,7 @@ class KDE:
         self._kde.reweight()
 
     def pdf(self, x: Any, relTol: float = 1e-2, absTol: float = 1e-8,
-            bandwidth: Bandwidth | None = None, errDims: list[int] | None = None,
+            bandwidth: Bandwidth | None = None, errDims: Sequence[int | str] | None = None,
             errCov: Any = None) -> float | np.ndarray:
         """
         Evaluate the kernel density estimate at one or more points.
@@ -405,9 +475,10 @@ class KDE:
             The kernel's bandwidth, in place of h2Inv (e.g. h2Inv
             convolved with measurement errors; see
             Bandwidth.convolveCov()); if None (the default), h2Inv.
-        errDims : list of int, optional
-            Dimensions with measurement errors (default: none); each must
-            be specified (not NaN) in every point. Requires errCov.
+        errDims : list of int or str, optional
+            Dimensions with measurement errors (default: none), each
+            given by its index or by its name (see names); each must be
+            specified (not NaN) in every point. Requires errCov.
         errCov : array_like of float, shape (nErr, nErr) or (M, nErr, nErr), optional
             Covariance matrices of the measurement errors in errDims, in
             that order (nErr = len(errDims)): one shared by every point,
@@ -425,7 +496,10 @@ class KDE:
         Raises
         ------
         ValueError
-            As for KernelDensity.pdf().
+            If errDims names a dimension not in names, or holds a
+            negative index; or as for KernelDensity.pdf().
+        TypeError
+            If errDims is not a list of int or str.
 
         Notes
         -----
@@ -434,10 +508,10 @@ class KDE:
         thread that evaluates it.
         """
         bw = self._current_bandwidth() if bandwidth is None else bandwidth
-        return self._kde.pdf(x, relTol, absTol, bw, [] if errDims is None else errDims, errCov)
+        return self._kde.pdf(x, relTol, absTol, bw, self._dim_list(errDims, "errDims"), errCov)
 
     def neighbors(self, x: Any, nNeighbor: Any, bandwidth: Bandwidth | list[Bandwidth] | None = None,
-                  errDims: list[int] | None = None, errCov: Any = None) -> tuple[np.ndarray, np.ndarray]:
+                  errDims: Sequence[int | str] | None = None, errCov: Any = None) -> tuple[np.ndarray, np.ndarray]:
         """
         Find the nearest neighbors of one or more points among the estimate's points.
 
@@ -455,9 +529,10 @@ class KDE:
             points, without errCov) a list of one per point; if None
             (the default), h2Inv, so that distances are in units of the
             kernel's bandwidth.
-        errDims : list of int, optional
-            Dimensions with measurement errors (default: none); each must
-            be specified (not NaN) in every point. Requires errCov.
+        errDims : list of int or str, optional
+            Dimensions with measurement errors (default: none), each
+            given by its index or by its name (see names); each must be
+            specified (not NaN) in every point. Requires errCov.
         errCov : array_like of float, shape (nErr, nErr) or (M, nErr, nErr), optional
             Covariance matrices of the measurement errors in errDims, as
             for pdf(): each point's metric is convolved with its errors.
@@ -474,7 +549,10 @@ class KDE:
         Raises
         ------
         ValueError
-            As for KernelDensity.neighbors().
+            If errDims names a dimension not in names, or holds a
+            negative index; or as for KernelDensity.neighbors().
+        TypeError
+            If errDims is not a list of int or str.
 
         Notes
         -----
@@ -483,7 +561,7 @@ class KDE:
         """
         bw = self._current_bandwidth() if bandwidth is None else bandwidth
         nn = nNeighbor.tolist() if isinstance(nNeighbor, np.ndarray) else nNeighbor
-        idx, dist2 = self._kde.neighbors(x, nn, bw, [] if errDims is None else errDims, errCov)
+        idx, dist2 = self._kde.neighbors(x, nn, bw, self._dim_list(errDims, "errDims"), errCov)
         return np.asarray(idx), np.asarray(dist2)
 
     def percentile(self, dim: int | str, pct: Any, relTol: float = 1e-2, absTol: float = 1e-8,
@@ -532,22 +610,13 @@ class KDE:
         KernelDensity.percentile()); several percentiles are computed in
         parallel, without the GIL.
         """
-        if isinstance(dim, str):
-            if dim not in self._names:
-                raise ValueError(f"no dimension named {dim!r}; the names are {self._names}")
-            index = self._names.index(dim)
-        elif isinstance(dim, (int, np.integer)) and not isinstance(dim, bool):
-            index = int(dim)
-            if index < 0:
-                raise ValueError(f"dim must be non-negative, not {index}")
-        else:
-            raise TypeError("dim must be an int or a str")
+        index = self._dim_index(dim, "dim")
         bw = self._current_bandwidth() if bandwidth is None else bandwidth
         return self._kde.percentile(index, pct, relTol, absTol, bw)
 
-    def conditional(self, x0: Any, massTol: float = 1e-2, marginalDims: list[int] | None = None,
+    def conditional(self, x0: Any, massTol: float = 1e-2, marginalDims: Sequence[int | str] | None = None,
                     leafSize: int = 16, bandwidth: Bandwidth | None = None,
-                    errDims: list[int] | None = None, errCov: Any = None) -> "KDE | list[KDE]":
+                    errDims: Sequence[int | str] | None = None, errCov: Any = None) -> "KDE | list[KDE]":
         """
         Condition the estimate on values of some dimensions, optionally marginalizing over others.
 
@@ -562,17 +631,19 @@ class KDE:
             that may be dropped, in [0, 1) (default 1e-2); the result is
             within L1 distance 2 massTol of the exact conditional
             density.
-        marginalDims : list of int, optional
-            Dimensions to marginalize over (default: none).
+        marginalDims : list of int or str, optional
+            Dimensions to marginalize over (default: none), each given by
+            its index or by its name (see names).
         leafSize : int, optional
             Leaf size of the result's kd tree (default 16).
         bandwidth : Bandwidth, optional
             The kernel's bandwidth, in place of h2Inv (e.g. h2Inv
             convolved with measurement errors; see
             Bandwidth.convolveCov()); if None (the default), h2Inv.
-        errDims : list of int, optional
-            Dimensions with measurement errors (default: none); each must
-            be fixed (finite, and not in marginalDims) in every point.
+        errDims : list of int or str, optional
+            Dimensions with measurement errors (default: none), each
+            given by its index or by its name (see names); each must be
+            fixed (finite, and not in marginalDims) in every point.
             Requires errCov.
         errCov : array_like of float, shape (nErr, nErr) or (M, nErr, nErr), optional
             Covariance matrices of the measurement errors in errDims, as
@@ -593,7 +664,10 @@ class KDE:
         Raises
         ------
         ValueError
-            As for KernelDensity.conditional().
+            If marginalDims or errDims names a dimension not in names, or
+            holds a negative index; or as for KernelDensity.conditional().
+        TypeError
+            If marginalDims or errDims is not a list of int or str.
 
         Notes
         -----
@@ -601,14 +675,14 @@ class KDE:
         a time, without the GIL.
         """
         bw = self._current_bandwidth() if bandwidth is None else bandwidth
-        result = self._kde.conditional(x0, massTol, [] if marginalDims is None else marginalDims,
-                                       bw, leafSize, [] if errDims is None else errDims, errCov)
+        result = self._kde.conditional(x0, massTol, self._dim_list(marginalDims, "marginalDims"),
+                                       bw, leafSize, self._dim_list(errDims, "errDims"), errCov)
         if isinstance(result, list):
             return [self._wrap_conditional(cd) for cd in cast(list[Any], result)]
         return self._wrap_conditional(result)
 
-    def conditional_sample(self, x0: Any, massTol: float = 1e-2, marginalDims: list[int] | None = None,
-                           bandwidth: Bandwidth | None = None, errDims: list[int] | None = None,
+    def conditional_sample(self, x0: Any, massTol: float = 1e-2, marginalDims: Sequence[int | str] | None = None,
+                           bandwidth: Bandwidth | None = None, errDims: Sequence[int | str] | None = None,
                            errCov: Any = None) -> "tuple[np.ndarray, np.ndarray, np.ndarray] | list[tuple[np.ndarray, np.ndarray, np.ndarray]]":
         """
         Find the sample points, weights, and aux labels of a conditional estimate, without building it.
@@ -628,11 +702,11 @@ class KDE:
             As for conditional().
         massTol : float, optional
             As for conditional() (default 1e-2).
-        marginalDims : list of int, optional
+        marginalDims : list of int or str, optional
             As for conditional() (default: none).
         bandwidth : Bandwidth, optional
             As for conditional(); if None (the default), h2Inv.
-        errDims : list of int, optional
+        errDims : list of int or str, optional
             As for conditional() (default: none).
         errCov : array_like of float, shape (nErr, nErr) or (M, nErr, nErr), optional
             As for conditional().
@@ -652,6 +726,8 @@ class KDE:
         ------
         ValueError
             As for conditional().
+        TypeError
+            As for conditional().
 
         Notes
         -----
@@ -659,23 +735,24 @@ class KDE:
         time, without the GIL.
         """
         bw = self._current_bandwidth() if bandwidth is None else bandwidth
-        result = self._kde.conditionalSample(x0, massTol, [] if marginalDims is None else marginalDims, bw,
-                                             [] if errDims is None else errDims, errCov)
+        result = self._kde.conditionalSample(x0, massTol, self._dim_list(marginalDims, "marginalDims"), bw,
+                                             self._dim_list(errDims, "errDims"), errCov)
         if isinstance(result, list):
             return [(x, w, aux) for x, w, aux in cast(list[tuple[np.ndarray, np.ndarray, np.ndarray]], result)]
         x, w, aux = cast(tuple[np.ndarray, np.ndarray, np.ndarray], result)
         return x, w, aux
 
-    def marginalize(self, marginalDims: list[int], leafSize: int = 16,
+    def marginalize(self, marginalDims: Sequence[int | str], leafSize: int = 16,
                     bandwidth: Bandwidth | None = None) -> "KDE":
         """
         Marginalize the estimate over some dimensions.
 
         Parameters
         ----------
-        marginalDims : list of int
-            Dimensions to marginalize over: distinct, below nDim, and
-            leaving at least one; may be empty, for a copy.
+        marginalDims : list of int or str
+            Dimensions to marginalize over, each given by its index or by
+            its name (see names): distinct, below nDim, and leaving at
+            least one; may be empty, for a copy.
         leafSize : int, optional
             Leaf size of the result's kd tree (default 16).
         bandwidth : Bandwidth, optional
@@ -696,15 +773,23 @@ class KDE:
         Raises
         ------
         ValueError
-            As for KernelDensity.marginalize().
+            If marginalDims names a dimension not in names, or holds a
+            negative index; or as for KernelDensity.marginalize().
+        TypeError
+            If marginalDims is not a list of int or str (including if it
+            is None).
 
         Notes
         -----
         Copies every point (in parallel), then builds the result's
         tree, without the GIL.
         """
+        # Unlike the optional dimension arguments elsewhere, marginalDims
+        # is required here: None must not quietly mean [] (a copy)
+        if marginalDims is None:
+            raise TypeError("marginalDims must be a list of int or str, not None")
         bw = self._current_bandwidth() if bandwidth is None else bandwidth
-        cd = self._kde.marginalize(marginalDims, bw, leafSize)
+        cd = self._kde.marginalize(self._dim_list(marginalDims, "marginalDims"), bw, leafSize)
         names = [self._names[d] for d in cd.dims()] if self._names else []
         return KDE._from_kernel_density(cd.kde(), cd.bandwidth().h2Inv(), names, None, cd)
 
