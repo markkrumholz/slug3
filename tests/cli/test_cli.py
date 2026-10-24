@@ -5,7 +5,7 @@ error rather than the name of an input deck.
 
 Like tests/mpi, these launch the slug executable itself, whose path
 CMakeLists.txt's test_CLI passes in as SLUG_EXECUTABLE; without it, they
-are skipped.
+are skipped, and with a path that is not the executable, they fail.
 
 :copyright: Copyright (c) 2026 Mark Krumholz
 """
@@ -22,8 +22,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 SLUG_EXECUTABLE = os.environ.get("SLUG_EXECUTABLE")
 
+# Skipped only when SLUG_EXECUTABLE is unset (e.g. a direct pytest run);
+# if it is set but wrong, the tests fail rather than quietly skip
 pytestmark = pytest.mark.skipif(
-    not SLUG_EXECUTABLE or not Path(SLUG_EXECUTABLE).is_file(),
+    not SLUG_EXECUTABLE,
     reason="SLUG_EXECUTABLE is not set to the slug executable (see CMakeLists.txt's test_CLI)",
 )
 
@@ -60,8 +62,13 @@ def test_help(flag: str) -> None:
 @pytest.mark.parametrize("flag", ["--version", "-V"])
 def test_version(flag: str) -> None:
     """--version/-V prints pyproject.toml's version and a git hash, and exits 0."""
+    # CMakeLists.txt embeds only the version's leading X.Y.Z (e.g. 3.1.0
+    # for 3.1.0.dev1), so compare with that
     with open(REPO_ROOT / "pyproject.toml", "rb") as f:
-        version = tomllib.load(f)["project"]["version"]
+        full_version = tomllib.load(f)["project"]["version"]
+    match = re.match(r"\d+\.\d+\.\d+", full_version)
+    assert match is not None
+    version = match.group(0)
     result = _run(flag)
     assert result.returncode == 0
     assert re.fullmatch(rf"slug {re.escape(version)} \(git \S+\)\n", result.stdout)
@@ -72,6 +79,8 @@ def test_version(flag: str) -> None:
     (("-x", "deck.toml"), "unrecognized option '-x'"),
     (("--restart",), "--restart needs an input deck"),
     (("-R",), "-R needs an input deck"),
+    (("-R", "--help"), "-R needs an input deck, not '--help'"),
+    (("--restart", "-x"), "--restart needs an input deck, not '-x'"),
     ((), ""),
 ])
 def test_bad_arguments(args: tuple[str, ...], message: str) -> None:

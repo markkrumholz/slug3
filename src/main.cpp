@@ -81,7 +81,8 @@ namespace
      * @details
      * The accepted forms are slug.in alone, --restart/-R followed by
      * slug.in, or --help/-h or --version/-V alone. Any other argument
-     * starting with "-" is an error rather than the name of an input
+     * starting with "-", whether alone or in the input deck's place
+     * after --restart/-R, is an error rather than the name of an input
      * deck; a deck whose name starts with "-" can be given as ./-name.
      * Help and version output is the same on every MPI rank, so only
      * the I/O rank prints it.
@@ -99,6 +100,13 @@ namespace
         {
             if (isRestart)
             {
+                const std::string_view deck = args[2];
+                if (deck.starts_with('-'))
+                {
+                    std::cerr << "slug: " << first << " needs an input deck, not '" << deck << "'\n";
+                    printUsage(std::cerr);
+                    return 1;
+                }
                 restart = true;
                 return std::nullopt;
             }
