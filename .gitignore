@@ -106,6 +106,9 @@ data/filters/*.toml
 data/filters/*.h5
 data/nebular/*.toml
 data/nebular/*.h5
+# cluster_slug libraries (data/cluster_slug/README.md describes them);
+# opt-in only in download_data.py, since the default one is ~33 GB
+data/cluster_slug/*.h5
 # vega.h5 is a single small reference spectrum (not an interpolatable
 # library grid like the rest of data/spectra/*.h5), so it's committed
 # rather than fetched on demand

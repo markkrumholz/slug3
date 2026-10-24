@@ -11,12 +11,15 @@ to this repository's own data/. That module is loaded directly from
 its source file rather than via `import slugpy`, so that this works in
 a fresh checkout before the compiled _slug extension has been built.
 See --help for the full detail (merge rules, etc.); see also AGENTS.md's
-own Data files section.
+own Data files section. As there, the default download skips
+data/cluster_slug (the default cluster_slug library, about 33 GB), which
+is downloaded only with --subdir cluster_slug.
 
 Run from anywhere, e.g. from the repository root:
     python3 data/tools/download_data.py
     python3 data/tools/download_data.py --subdir filters
     python3 data/tools/download_data.py --overwrite --subdir tracks
+    python3 data/tools/download_data.py --subdir cluster_slug
 
 :copyright: Copyright (c) 2026 Mark Krumholz
 """
