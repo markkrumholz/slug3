@@ -18,7 +18,7 @@ Using ``cluster_slug``
 following the general :ref:`Bayesian inference <sec-bayesian>` method implemented in SLUG.
 The basic steps required to perform inference are as follows:
 
-#. Decide on a library of SLUG simulation outputs to use to perform the inference. This library defines the choice of IMF, stellar tracks, stellar atmospheres, etc., and is produced by :ref:`sec-running`. See :ref:`ssec-cluster-slug-libraries` for details on the requirements for a valid library.
+#. Decide on a library of SLUG simulation outputs to use to perform the inference. This library defines the choice of IMF, stellar tracks, stellar atmospheres, etc., and is produced by :ref:`sec-running`. A :ref:`default library <ssec-cluster-slug-default-library>` is provided for users who do not want to produce their own; see :ref:`ssec-cluster-slug-libraries` for requirements for a valid library if you want to make your own.
 
 #. Create a ``cluster_slug`` object by loading the library, by doing
 
@@ -26,6 +26,13 @@ The basic steps required to perform inference are as follows:
 
        from slugpy import cluster_slug
        cs = cluster_slug('libname')
+
+   where ``'libname'`` is the name of the library to load. To use the default library, instead do
+   
+   .. code-block:: python
+
+       from slugpy import cluster_slug
+       cs = cluster_slug()
 
    Users can optionally also specify the following keywords in the constructor:
 
@@ -132,14 +139,96 @@ The basic steps required to perform inference are as follows:
 This is only a partial list of the capabilities of ``cluster_slug``; see :ref:`sec-slugpy-full` for
 full documentation of all its methods and properties.
 
-.. _ssec-cluster-slug-libraries:
+For a worked example that puts these steps together, inferring the masses and ages of 50 star
+clusters in NGC 628 from their photometry using the default library, see the marimo notebook
+``examples/cluster_slug/cluster_slug_legus.py`` (see :ref:`sec-examples`).
 
-Libraries for cluster_slug
---------------------------
+.. _ssec-cluster-slug-default-library:
+
+The Default cluster_slug Library
+--------------------------------
 
 Inference requires a library, which is the output of a SLUG cluster-type simulation (see
-:ref:`ssec-cluster-vs-galaxy`). While most cluster simulations can be used, the following
-rules and recommendations apply when generating a library.
+:ref:`ssec-cluster-vs-galaxy`). A default library is available, which can be obtained by
+the following methods depending on how you installed SLUG:
+
+For installs from ``pip`` / PyPI:
+
+.. code-block:: bash
+
+    python -m slugpy.download_data --subdir cluster_slug
+
+For installs using a Docker container:
+
+.. code-block:: bash
+
+    docker run --rm -v /path/to/slug-data:/data ghcr.io/markkrumholz/slug3:latest \
+        python -m slugpy.download_data --subdir cluster_slug
+
+For installs using an Apptainer/Singularity container:
+
+.. code-block:: bash
+
+    apptainer exec --bind /path/to/slug-data:/data slug3.sif python -m slugpy.download_data \
+        --subdir cluster_slug
+
+If you have cloned the repository and are building from scratch, execute the following from the repository root:
+
+.. code-block:: bash
+
+    python3 data/tools/download_data.py --subdir cluster_slug
+
+**WARNING:** the default library is 33 GB in size because it contains a large sample of clusters
+for a wide range of filters. The large size is why it is not included as part of the default
+SLUG data download.
+
+The default library uses the following settings:
+
+.. list-table::
+   :widths: 20 80
+
+   * - IMF
+     - Chabrier (2005): lognormal below :math:`1\,\mathrm{M}_\odot` (centered on :math:`0.2\,\mathrm{M}_\odot`, dispersion 0.55 dex), power law of slope -2.35 from :math:`1-120\,\mathrm{M}_\odot`; full mass range :math:`0.08-120\,\mathrm{M}_\odot`
+   * - Stellar tracks
+     - MIST, rotating at :math:`v/v_\mathrm{crit} = 0.4`, :math:`[\alpha/\mathrm{Fe}] = 0`
+   * - Metallicity
+     - [Fe/H] drawn uniformly from -1.0 to +0.3
+   * - Cluster mass (CMF)
+     - :math:`dN/dM \propto M^{-1}` from :math:`10^2` to :math:`10^5\,\mathrm{M}_\odot`, and :math:`\propto M^{-2}` from :math:`10^5` to :math:`10^7\,\mathrm{M}_\odot`
+   * - Cluster age
+     - :math:`dN/dt \propto t^{-1}` (uniform in :math:`\log t`) from :math:`10^5 - 1.5 \times 10^{10}` yr
+   * - Extinction
+     - :math:`A_V` drawn uniformly from 0 to 3 mag, Calzetti starburst extinction curve
+   * - Nebular emission
+     - Included. The nebular emission's :math:`A_V` is the stellar :math:`A_V` times a factor drawn from a normal distribution of mean 2.1 and dispersion 0.5, truncated to the range 1 - 100.
+   * - Spectral synthesis
+     - Default spectral model, 1024-point wavelength grid from 200 Å to 20 μm
+   * - Photometric system
+     - Vega magnitudes
+
+It includes the following filters:
+
+- **HST WFC3/UVIS:** F225W, F275W, F336W, F438W, F555W, F814W, F547M,
+  F657N, F689M (``HST.WFC3_UVIS1.*``)
+- **HST ACS/WFC:** F435W, F555W, F606W, F814W, F658N (``HST.ACS_WFC.*``)
+- **JWST NIRCam:** F115W, F150W, F187N, F200W, F277W, F300M, F335M,
+  F405N, F444W (``JWST.NIRCam.*``)
+- **JWST MIRI:** F560W, F770W (``JWST.MIRI.*``)
+- **Ionizing photon rates:** ``Q(HI)``, ``Q(HeI)``, ``Q(OII)`` (photons/s
+  above the H, He, and :math:`\mathrm{O}^+` ionization thresholds)
+- **Bolometric luminosity:** ``Lbol``
+
+Note that the JWST NIRCam F200W and redder filters do not include extinction, because they
+are beyond the range tabulated in the Calzetti starburst extinction curve. Similarly, the
+ionizing photon rates do not include extinction.
+
+.. _ssec-cluster-slug-libraries:
+
+Making your own library for cluster_slug
+----------------------------------------
+
+If you prefer to use your own library, you can use most cluster simulations. However, the following
+rules and recommendations apply:
 
 * The output must include both the ``clusters`` and ``cluster_phot`` groups; see :ref:`sec-output`.
 * There can be no more than one output time per cluster, so either set the ``output_times`` keyword in :ref:`sec-parameters` to a PDF (recommended) or a single value.

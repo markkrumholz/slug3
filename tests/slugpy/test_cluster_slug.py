@@ -13,6 +13,7 @@ something, or with nebular photometry, edit a copy of it in tmp_path.
 
 import pathlib
 import shutil
+import sys
 from collections.abc import Callable
 from typing import cast
 
@@ -1021,3 +1022,19 @@ def test_phot_convert_library() -> None:
     x0 = ab.kdes[tuple(filters)].dataset[5, :2]
     post = _one(ab.conditional(x0, errors=[0.1, 0.1] * u.ABmag))
     assert post.names == ["mass", "age", "A_V", "metallicity"]
+
+
+def test_default_library(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """With no filename, cluster_slug reads data/cluster_slug/default.h5 from slug's data search path."""
+    (tmp_path / "data" / "cluster_slug").mkdir(parents=True)
+    (tmp_path / "data" / "cluster_slug" / "default.h5").symlink_to(LIBRARY)
+    monkeypatch.chdir(tmp_path)
+    lib = cluster_slug()
+    assert lib.size == LIBRARY_SIZE
+
+    # Not found anywhere: an error that says how to download it
+    # (slugpy.cluster_slug is the class, re-exported over the module's own name)
+    module = sys.modules[cluster_slug.__module__]
+    monkeypatch.setattr(module, "getFilePath", lambda fileName, prefix="": None)
+    with pytest.raises(FileNotFoundError, match="--subdir cluster_slug"):
+        cluster_slug()

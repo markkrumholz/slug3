@@ -221,6 +221,11 @@ void bindKDTree(py::module_& m);
 void bindKernelDensity(py::module_& m);
 
 /**
+ * @brief Bind utils::getFilePath as the module-level function getFilePath
+ */
+void bindUtils(py::module_& m);
+
+/**
  * @brief Resolve an optional py::object SimControls argument to a real SimControls
  * @param controls The Python-facing controls argument; if py::none(),
  *   fallback is used instead

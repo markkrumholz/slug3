@@ -121,6 +121,7 @@ resolves stars.IMF = "chabrier.toml" via SLUG_DIR + "data/imfs".
 import gc
 import glob
 import math
+import os
 import pathlib
 import tomllib
 
@@ -4795,3 +4796,31 @@ def test_conditional_sample():
         assert np.array_equal(bp, alone_p) and np.array_equal(bw_i, alone_w) and np.array_equal(ba, alone_a)
     with pytest.raises(ValueError):
         kde.conditionalSample(np.full(3, np.nan), bandwidth=bw)
+
+
+def test_get_file_path(tmp_path, monkeypatch):
+    """getFilePath searches the working directory, SLUG_DIR, and SLUG_DATA_PATH, in that order."""
+    # Found relative to the working directory, and with a prefix in the source tree
+    assert slug.getFilePath(__file__) == pathlib.Path(__file__)
+    imf = slug.getFilePath("chabrier.toml", "data/imfs")
+    assert imf is not None and imf.name == "chabrier.toml" and imf.parent.name == "imfs"
+    assert slug.getFilePath("no_such_file_anywhere.h5", "data/cluster_slug") is None
+
+    # SLUG_DIR, then each SLUG_DATA_PATH directory, ahead of the source tree
+    slug_dir = tmp_path / "slug_dir"
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    for d in (slug_dir, first, second):
+        (d / "data" / "imfs").mkdir(parents=True)
+    (second / "data" / "imfs" / "test_only.toml").write_text("x = 1\n")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("SLUG_DIR", str(slug_dir))
+    monkeypatch.setenv("SLUG_DATA_PATH", os.pathsep.join([str(first), str(second)]))
+    assert slug.getFilePath("test_only.toml", "data/imfs") == second / "data" / "imfs" / "test_only.toml"
+    (first / "data" / "imfs" / "test_only.toml").write_text("x = 2\n")
+    assert slug.getFilePath("test_only.toml", "data/imfs") == first / "data" / "imfs" / "test_only.toml"
+    (slug_dir / "data" / "imfs" / "chabrier.toml").write_text("x = 3\n")
+    assert slug.getFilePath("chabrier.toml", "data/imfs") == slug_dir / "data" / "imfs" / "chabrier.toml"
+    # A file in the working directory comes first of all
+    (tmp_path / "chabrier.toml").write_text("x = 4\n")
+    assert slug.getFilePath("chabrier.toml", "data/imfs") == pathlib.Path("chabrier.toml")
