@@ -98,7 +98,7 @@ jobs:
         # cibuildwheel tests above run in a plain venv, with pip's numpy,
         # which loads no libomp, so cannot catch this.
         if: runner.os == 'macOS'
-        uses: mamba-org/setup-micromamba@v2
+        uses: mamba-org/setup-micromamba@v3
         with:
           environment-name: libomp-test
           # slugpy's runtime dependencies (pyproject.toml's [project]
