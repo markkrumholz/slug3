@@ -37,6 +37,30 @@ def _one(result: KDE | list[KDE]) -> KDE:
     return result
 
 
+def equal_to_roundoff(a: np.ndarray, b: np.ndarray) -> bool:
+    """
+    Whether two estimates from separately constructed KDEs agree to roundoff.
+
+    Each constructed KDE normalizes its weights by a sum computed with an
+    OpenMP reduction. The order in which that combines the threads' partial
+    sums is unspecified, so with three or more threads two KDEs built from
+    identical inputs can have weights, and hence densities, that differ at
+    the level of machine epsilon.
+
+    Parameters
+    ----------
+    a, b : numpy.ndarray
+        The two estimates.
+
+    Returns
+    -------
+    bool
+        True if every element of a is within 100 machine epsilon, relative,
+        of the corresponding element of b.
+    """
+    return bool(np.allclose(a, b, rtol=100.0 * np.finfo(float).eps, atol=0.0))
+
+
 def make_points(n: int, ndim: int, seed: int) -> tuple[np.ndarray, np.ndarray]:
     """
     Random points with correlated first two dimensions, and weights.
@@ -368,7 +392,7 @@ def test_dimensions_by_name() -> None:
     marg = kde.marginalize([1, 3])
     for other in [kde.marginalize(["age", "Z"]), kde.marginalize([1, "Z"]), kde.marginalize(range(1, 4, 2))]:
         assert other.names == marg.names == ["mass", "A_V"]
-        assert np.array_equal(np.asarray(other.pdf(y, 0.0, 0.0)), np.asarray(marg.pdf(y, 0.0, 0.0)))
+        assert equal_to_roundoff(np.asarray(other.pdf(y, 0.0, 0.0)), np.asarray(marg.pdf(y, 0.0, 0.0)))
 
     # conditional() and conditional_sample(): marginalDims and errDims, as a tuple or array too
     x0 = np.array([0.4, np.nan, 0.9, 0.0])
@@ -377,7 +401,7 @@ def test_dimensions_by_name() -> None:
     cond_named = _one(kde.conditional(x0, 0.0, marginalDims=["Z"], errDims=["mass", "A_V"], errCov=cov))
     assert cond_named.names == cond.names == ["age"] and cond_named.marginal == cond.marginal
     t = rng.standard_normal((5, 1))
-    assert np.array_equal(np.asarray(cond_named.pdf(t, 0.0, 0.0)), np.asarray(cond.pdf(t, 0.0, 0.0)))
+    assert equal_to_roundoff(np.asarray(cond_named.pdf(t, 0.0, 0.0)), np.asarray(cond.pdf(t, 0.0, 0.0)))
     sample = kde.conditional_sample(x0, 0.0, marginalDims=[3], errDims=[0, 2], errCov=cov)
     sample_named = kde.conditional_sample(x0, 0.0, marginalDims=("Z",),
                                           errDims=np.array(["mass", "A_V"]), errCov=cov)  # pyright: ignore[reportArgumentType]
