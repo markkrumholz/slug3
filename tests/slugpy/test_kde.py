@@ -55,10 +55,10 @@ def equal_to_roundoff(a: np.ndarray, b: np.ndarray) -> bool:
     Returns
     -------
     bool
-        True if every element of a is within 100 machine epsilon, relative,
-        of the corresponding element of b.
+        True if a and b have the same shape and every element of a is within
+        100 machine epsilon, relative, of the corresponding element of b.
     """
-    return bool(np.allclose(a, b, rtol=100.0 * np.finfo(float).eps, atol=0.0))
+    return a.shape == b.shape and bool(np.allclose(a, b, rtol=100.0 * np.finfo(float).eps, atol=0.0))
 
 
 def make_points(n: int, ndim: int, seed: int) -> tuple[np.ndarray, np.ndarray]:
