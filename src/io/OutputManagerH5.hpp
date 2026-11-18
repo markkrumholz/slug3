@@ -499,6 +499,36 @@ namespace io
         void restartSetup();
 
         /**
+         * @brief Record, and warn, that restartSetup() found no checkpoint to resume from
+         * @param scanDir The directory restartSetup() searched
+         * @details
+         * Sets restartFoundNoCheckpointIn_ to scanDir, made absolute
+         * where possible, and prints a warning naming it on the I/O
+         * rank, whatever the verbosity. Starting from trial 0 is the
+         * right response to a restart with nothing to resume (so the
+         * same job script works for a run's first segment and its
+         * later ones), but it is also what happens when the search
+         * itself looked in the wrong place, so it should never pass
+         * silently. Factored out of restartSetup() to keep that
+         * function's own cognitive complexity down.
+         */
+        void noteNoCheckpointFound(const std::filesystem::path& scanDir);
+
+        /**
+         * @brief Explain an "already exists" error in terms of a restart that found nothing
+         * @return An empty string unless restartSetup() found no
+         *   checkpoint to resume from (see restartFoundNoCheckpointIn_);
+         *   otherwise a parenthetical saying so, naming the directory
+         *   searched, for openNewOutputFiles() to append to its error
+         * @details
+         * If --restart found no checkpoint, and the first checkpoint
+         * this run then tries to write already exists, the restart's
+         * search and the writer disagree about where the run's output
+         * lives -- which "already exists" alone does not suggest.
+         */
+        [[nodiscard]] auto restartHint() const -> std::string;
+
+        /**
          * @brief Find the restart_uid this rank should resume from, if any
          * @param maxCheckpoint The highest checkpoint number found on
          *   disk (see findMaxCheckpointNumber())
@@ -904,6 +934,14 @@ namespace io
         // is 0 (see its own comment). Same locking rationale as
         // restartTrialsDone_ (set once, before openNewOutputFiles()).
         unsigned long restartMaxTrial_ = 0;
+
+        // The directory restartSetup() searched, made absolute where
+        // possible, if this OutputManagerH5 was constructed with
+        // restart = true but found no checkpoint there to resume from;
+        // std::nullopt otherwise. Set once, by noteNoCheckpointFound(),
+        // before openNewOutputFiles() is ever called, and read only by
+        // restartHint() -- see its own comment.
+        std::optional<std::filesystem::path> restartFoundNoCheckpointIn_;
 
         // Set by notifyEarlyTermination(), from outside any active
         // parallel region, at most once, strictly before this object

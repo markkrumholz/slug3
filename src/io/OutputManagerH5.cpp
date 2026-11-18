@@ -44,19 +44,34 @@
 // this is the paradigm that HDF5 wants
 // NOLINTBEGIN(misc-include-cleaner)
 
-// Scan outDir for entries -- either modelName_chkNNNNN.h5 files or
+// The directory restartSetup() scans for checkpoints, given
+// SimControls::outDir(). An empty outDir -- its default -- means the
+// current working directory, as it does everywhere output is written,
+// since path("") / name is just name. A path join is the only use where
+// "" behaves that way, though: std::filesystem::exists("") is false, and
+// directory_iterator("") throws, so a scan of outDir itself has to map
+// "" to "." explicitly. Without this, --restart with out_dir unset found
+// no checkpoint, started over from trial 0, and then failed because the
+// first checkpoint it tried to write already existed.
+static auto checkpointScanDir(const std::string& outDir) -> std::filesystem::path
+{
+    return outDir.empty() ? std::filesystem::path(".") : std::filesystem::path(outDir);
+}
+
+// Scan dir for entries -- either modelName_chkNNNNN.h5 files or
 // modelName_chkNNNNN directories (see checkpointModelName()) -- whose
 // name starts with prefix, and return the largest NNNNN found, or no
-// value if outDir does not exist or contains no such entry. Factored
-// out of restartSetup() purely to keep that function's own cognitive
-// complexity down; has no other caller.
-static auto findMaxCheckpointNumber(const std::filesystem::path& outDir,
+// value if dir does not exist or contains no such entry. dir must not
+// be empty (see checkpointScanDir()). Factored out of restartSetup()
+// purely to keep that function's own cognitive complexity down; has no
+// other caller.
+static auto findMaxCheckpointNumber(const std::filesystem::path& dir,
     const std::string& prefix) -> std::optional<unsigned long>
 {
     std::optional<unsigned long> maxCheckpoint;
-    if (!std::filesystem::exists(outDir)) { return maxCheckpoint; }
+    if (!std::filesystem::exists(dir)) { return maxCheckpoint; }
 
-    for (const auto& entry : std::filesystem::directory_iterator(outDir))
+    for (const auto& entry : std::filesystem::directory_iterator(dir))
     {
         std::string suffix;
         if (entry.is_regular_file() && entry.path().extension() == ".h5")
@@ -554,18 +569,30 @@ auto io::OutputManagerH5::findRestartUidForRank( // NOLINT(readability-convert-m
 #endif
 }
 
+// See this method's own header comment
+void io::OutputManagerH5::noteNoCheckpointFound(const std::filesystem::path& scanDir)
+{
+    std::error_code ec;
+    const auto absDir = std::filesystem::absolute(scanDir, ec);
+    const auto searched = ec ? scanDir : absDir;
+    restartFoundNoCheckpointIn_ = searched;
+    if (utils::isIORank())
+    {
+        std::cout << "slug: warning: restart requested, but no checkpoint of model "
+            << simControls_.modelName() << " found in " << searched.string()
+            << " -- starting from trial 0\n";
+    }
+}
+
 void io::OutputManagerH5::restartSetup() // NOLINT(readability-function-cognitive-complexity) -- complexity is 26, one over threshold; the #ifdef SLUG_MPI branch resolving restart_uid separately from trials_completed/max_trial (see this method's own header comment for why they must be) is what pushed it there, and splitting it out further would only add indirection, not clarity, for a single-caller helper this function-specific -- see TrackUtils.cpp's own identical "over-by-one" NOLINT for precedent
 {
     const std::string prefix = simControls_.modelName() + "_chk";
-    const auto maxCheckpoint = findMaxCheckpointNumber(simControls_.outDir(), prefix);
+    const auto scanDir = checkpointScanDir(simControls_.outDir());
+    const auto maxCheckpoint = findMaxCheckpointNumber(scanDir, prefix);
 
     if (!maxCheckpoint.has_value())
     {
-        if (simControls_.verbosity() > 0)
-        {
-            std::cout << "slug: restart requested, but no checkpoint found in "
-                << simControls_.outDir() << " -- starting from trial 0\n";
-        }
+        noteNoCheckpointFound(scanDir);
         return;
     }
 
@@ -732,6 +759,15 @@ auto io::OutputManagerH5::checkpointModelName(const unsigned long checkpointNum)
     return name.str();
 }
 
+// See this method's own header comment
+auto io::OutputManagerH5::restartHint() const -> std::string
+{
+    if (!restartFoundNoCheckpointIn_.has_value()) { return ""; }
+    return " (--restart was requested, but found no checkpoint of model " +
+        simControls_.modelName() + " in " + restartFoundNoCheckpointIn_->string() +
+        "; check that out_dir and model_name match the run being restarted)";
+}
+
 // See this method's own header comment for the full design
 void io::OutputManagerH5::openNewOutputFiles()
 {
@@ -750,7 +786,7 @@ void io::OutputManagerH5::openNewOutputFiles()
     {
         throw std::runtime_error(
             "OutputManagerH5: output " + threadDir.string() + " or " +
-            finalPath.string() + " already exists");
+            finalPath.string() + " already exists" + restartHint());
     }
 #ifdef SLUG_MPI
     // See the comment above for why this barrier must come before
@@ -791,7 +827,8 @@ void io::OutputManagerH5::openNewOutputFiles()
     if (std::filesystem::exists(finalPath))
     {
         throw std::runtime_error(
-            "OutputManagerH5: output file " + finalPath.string() + " already exists");
+            "OutputManagerH5: output file " + finalPath.string() + " already exists" +
+            restartHint());
     }
     openOutputFile(finalPath);
 #endif
