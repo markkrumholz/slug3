@@ -905,6 +905,90 @@ static auto testSpecInfiniteLogRt() -> int
     return result;
 }
 
+// testSpecInfiniteLogRt checks only that an infinite log(R_t) yields
+// *a* spectrum; POWR_WNE_test's identical grid points can't show which
+// one. POWR_WNE_SPARSE_test (see make_powr_test_fixture.py) gives every
+// model its own SED peak wavelength and logl, and at [Fe/H] = -1 leaves
+// its outermost log(R_t) = 1.5 row empty and omits the (log(R_t),
+// log(Teff)) = (1.0, 4.7) point. So for a log(R_t) = +inf star at
+// [Fe/H] = -1, specForce() must skip the empty row, use the log(R_t) =
+// 1.0 row, and pick that row's populated log(Teff) nearest the star's:
+// 4.8 for log(Teff) = 4.72 (4.7 being missing), and 4.6 for 4.62. The
+// result must be that one model's SED, rescaled to the star's own
+// luminosity: a Gaussian of width 500 Angstrom centered on the model's
+// own peak wavelength, whose wl * F peaks at the star's luminosity.
+static auto testSpecForceSelectsNearestPoint() -> int
+{
+    const auto& nlControls = controlsWithWinds<feedback::WRwindModel::nugisLamers00_>();
+    const specsyn::SpecsynLibWR<specsyn::OOBPolicy::raise> lib(
+        "POWR_WNE_SPARSE_test", -3.0, 1.0, registryName, 0.0, 0.0, 0, nlControls);
+
+    // The fixture's own solar luminosity and SED width (see
+    // make_powr_test_fixture.py's SOLAR_LUM and SIGMA)
+    constexpr double fixtureSolarLum = 3.828e33;
+    constexpr double sigma = 500.0;
+    constexpr double starLogL = 5.7;
+    const double starLum = std::pow(10.0, starLogL) * fixtureSolarLum;
+
+    struct Case
+    {
+        double logTeff_;
+        double expectedWl0_; // peak wavelength of the model specForce() should pick
+    };
+    // sparse_model(-1, 1, 2) and sparse_model(-1, 1, 0), respectively
+    const std::array<Case, 2> cases{ { { 4.72, 9500.0 }, { 4.62, 6500.0 } } };
+
+    int result = 0;
+    for (const auto& c : cases)
+    {
+        const auto props = makeWRStarData(20.0, starLogL, c.logTeff_, 0.0);
+        std::vector<double> spectrum;
+        try
+        {
+            spectrum = lib.specForce(props, -1.0);
+        }
+        catch (const std::exception& e)
+        {
+            std::cerr << "testSpecsynLibWR: testSpecForceSelectsNearestPoint (logTeff = "
+                << c.logTeff_ << "): specForce() threw unexpectedly: " << e.what() << "\n";
+            result += 1;
+            continue;
+        }
+        const auto& wl = lib.wl();
+        if (spectrum.size() != wl.size())
+        {
+            std::cerr << "testSpecsynLibWR: testSpecForceSelectsNearestPoint (logTeff = "
+                << c.logTeff_ << "): spectrum has the wrong size\n";
+            result += 1;
+            continue;
+        }
+        const double amplitude = starLum / c.expectedWl0_;
+        double maxErr = 0.0;
+        for (std::size_t i = 0; i < wl.size(); ++i)
+        {
+            const double x = (wl.at(i) - c.expectedWl0_) / sigma;
+            const double expected = amplitude * std::exp(-0.5 * x * x);
+            maxErr = std::max(maxErr, std::abs(spectrum.at(i) - expected));
+        }
+        // The library resamples the fixture's coarse native wavelength
+        // grid (~140 Angstrom spacing near these peaks, against a 500
+        // Angstrom SED width) onto its own, which costs < 0.5% of the
+        // peak. Any other model differs by far more: a neighboring peak
+        // wavelength is 3 sigma away (~100% of the peak), and a wrong
+        // logl rescaling is off by at least 10^0.1 (~26%).
+        constexpr double tol = 0.02;
+        if (maxErr > tol * amplitude)
+        {
+            std::cerr << "testSpecsynLibWR: testSpecForceSelectsNearestPoint (logTeff = "
+                << c.logTeff_ << "): spectrum differs from the expected model's (peak "
+                "wavelength " << c.expectedWl0_ << " Angstrom, rescaled to the star's "
+                "luminosity) by up to " << maxErr / amplitude << " of its peak\n";
+            result += 1;
+        }
+    }
+    return result;
+}
+
 auto testSpecsynLibWR() -> int
 {
     int result = 0;
@@ -926,5 +1010,6 @@ auto testSpecsynLibWR() -> int
     result += testSpecZeroWindSucceeds();
     result += testSpecNegativeZThrows();
     result += testSpecInfiniteLogRt();
+    result += testSpecForceSelectsNearestPoint();
     return result;
 }
